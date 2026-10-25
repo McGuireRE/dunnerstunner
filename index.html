@@ -623,6 +623,7 @@
   .b-row.on .b-control.radio::after { transform: scale(1); }
   .b-row.fixed .b-control { border-color: rgba(255,255,255,0.15); background: rgba(255,255,255,0.06); }
   .b-row.fixed .b-control svg { opacity: 0.6; }
+  .b-row.fixed.on .b-control:disabled { cursor: default; }
 
   .b-stepper {
     display: inline-flex; align-items: center; gap: 0;
@@ -1461,7 +1462,7 @@
       </thead>
       <tbody>
         <tr class="section-row"><td colspan="4">Always Included</td></tr>
-        <tr class="item-row"><td>LIM Report (DCC)</td><td><span class="tick">✓</span></td><td><span class="tick">✓</span></td><td><span class="tick">✓</span></td></tr>
+        <tr class="item-row"><td>LIM Report (DCC), required for every campaign</td><td><span class="tick">✓</span></td><td><span class="tick">✓</span></td><td><span class="tick">✓</span></td></tr>
         <tr class="item-row"><td>ID Verification (AML)</td><td><span class="tick">✓</span></td><td><span class="tick">✓</span></td><td><span class="tick">✓</span></td></tr>
         <tr class="item-row"><td>Title Search (LINZ)</td><td><span class="tick">✓</span></td><td><span class="tick">✓</span></td><td><span class="tick">✓</span></td></tr>
         <tr class="item-row"><td>Agent Photography</td><td><span class="tick">✓</span></td><td><span class="tick">✓</span></td><td><span class="tick">✓</span></td></tr>
@@ -1607,7 +1608,7 @@ const CATALOGUE = [
     { id: 'portals',  name: 'NZ and international portal listings', sup: 'realestate.co.nz, realestate.com.au, realtor.com, housing.com, thinkofliving.com and more', fixed: true },
   ]},
   { sec: 'Essentials', items: [
-    { id: 'lim',       name: 'LIM report', sup: 'Dunedin City Council', price: 405 },
+    { id: 'lim',       name: 'LIM report', desc: 'Required for every campaign', sup: 'Dunedin City Council', price: 425, required: true },
     { id: 'photosign', name: 'Custom photo signage', desc: 'Photo-printed 800×1200mm sign', sup: 'Williams Signs', price: 135 },
     { id: 'brochures', name: 'Premium brochures', desc: '100+ printed brochures', sup: 'Speedprint', price: 100 },
     { id: 'flyers',    name: 'Premium flyers delivered', desc: '500+ flyers to the local area', sup: 'Speedprint', price: 300 },
@@ -1695,11 +1696,11 @@ const tick = '<svg width="12" height="10" viewBox="0 0 10 8" fill="none" aria-hi
 const qtyLabel = (i, q) => q + ' ' + (q === 1 ? i.unit[0] : i.unit[1]);
 
 /* ── Builder state ── */
-let sel = {};
+let sel = { lim: 1 };
 
 function toggle(id) {
   const i = ITEMS[id];
-  if (i.fixed) return;
+  if (i.fixed || i.required) return;
   if (id === 'rc_dx' && !DX_PRICE[rcTier(sel)]) return;
   if (sel[id]) { delete sel[id]; }
   else {
@@ -1719,6 +1720,7 @@ function step(id, d, ev) {
 function loadPackage(key) {
   const band = tmBand();
   sel = key ? { ...PACKAGES[key].items } : {};
+  sel.lim = 1;
   if (sel.TM) { delete sel.TM; sel[band] = 1; }
   renderBuilder();
 }
@@ -1738,7 +1740,7 @@ function renderBuilder() {
     <section class="b-section">
       <h3 class="b-section-title">${s.sec}${s.note ? `<small>${s.note}</small>` : ''}</h3>
       ${s.items.map(i => {
-        const on = i.fixed || !!sel[i.id];
+        const on = i.fixed || i.required || !!sel[i.id];
         const q = sel[i.id] || 0;
         const ctrlType = i.group ? 'radio' : '';
         const label = i.qty ? `${esc(i.name)}: ${q ? qtyLabel(i, q) : 'none'}` : esc(i.name);
@@ -1747,9 +1749,9 @@ function renderBuilder() {
           : i.id === 'rc_dx' ? (sel.rc_plat ? 'Included in Platinum' : dxOff ? 'Pick a tier first' : fmt(priceOf(i, sel)))
           : (i.qty ? fmt(i.price) + ' each' : fmt(i.price));
         return `
-        <div class="b-row ${on ? 'on' : ''} ${i.fixed ? 'fixed' : ''} ${dxOff ? 'fixed off' : ''}" ${i.fixed || i.qty ? '' : `onclick="toggle('${i.id}')"`}>
+        <div class="b-row ${on ? 'on' : ''} ${i.fixed || i.required ? 'fixed' : ''} ${dxOff ? 'fixed off' : ''}" ${i.fixed || i.required || i.qty ? '' : `onclick="toggle('${i.id}')"`}>
           <button type="button" class="b-control ${ctrlType}" ${i.fixed ? 'disabled' : ''}
-            role="${i.group ? 'radio' : 'checkbox'}" aria-checked="${on}" aria-label="${label}"
+            ${i.required ? 'disabled' : ''} role="${i.group ? 'radio' : 'checkbox'}" aria-checked="${on}" aria-label="${label}"
             onclick="event.stopPropagation(); ${i.qty ? `step('${i.id}', ${q ? -q : 1}, event)` : `toggle('${i.id}')`}">${ctrlType ? '' : tick}</button>
           <div>
             <div class="b-name">${esc(i.name)}</div>
