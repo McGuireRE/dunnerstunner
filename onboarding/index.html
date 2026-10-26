@@ -188,6 +188,7 @@ hr.soft { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
 </style>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="../catalogue.js"></script>
 </head>
 <body>
 <style>
@@ -208,6 +209,17 @@ hr.soft { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
 .copybox { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 14px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(90px + env(safe-area-inset-bottom, 0px)); background: var(--ink); color: var(--surface); padding: 10px 16px; border-radius: 8px; font-size: 15px; z-index: 20; max-width: calc(100% - 32px); }
 .toast[hidden] { display: none; }
+.cb-sec { font-weight: 600; font-size: 14.5px; margin: 16px 0 6px; }
+.cb-row { display: grid; grid-template-columns: 34px 1fr auto; gap: 8px; align-items: center; padding: 7px 0; border-bottom: 1px solid var(--line); font-size: 15px; }
+.cb-row.off { opacity: .5; }
+.cb-row input[type=checkbox] { width: 20px; height: 20px; accent-color: var(--accent); }
+.cb-row .cb-qty { width: 52px; padding: 6px; font-size: 15px; }
+.cb-row .cb-price { font-variant-numeric: tabular-nums; font-size: 14.5px; text-align: right; white-space: nowrap; }
+.cb-row .cb-quote { width: 92px; padding: 6px 8px; font-size: 15px; }
+.cb-row input[type=text]:not(.cb-quote) { padding: 6px 8px; font-size: 15px; }
+.se-ev { display: grid; grid-template-columns: 140px 84px 1fr 30px; gap: 6px; margin: 6px 0; align-items: center; }
+.se-ev input { padding: 8px; font-size: 15px; }
+@media (max-width: 520px) { .se-ev { grid-template-columns: 1fr 1fr; } .se-ev input[data-evn] { grid-column: 1 / -1; } }
 .loading { text-align: center; color: var(--muted); padding: 60px 0; }
 @media print {
   .proto, header.top, .actions, .toolbar, .no-print { display: none !important; }
@@ -286,14 +298,169 @@ hr.soft { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
   }
   const limAmt = (cfg = CFG) => cfg.limOn === false ? 0 : (cfg.lim === undefined || cfg.lim === '' ? 425 : num(cfg.lim));
   const adminAmt = (cfg = CFG) => cfg.adminOn === false ? 0 : (cfg.admin === undefined || cfg.admin === '' ? 500 : num(cfg.admin));
-  function pkgOf(cfg) { const [name, amt] = String(cfg.pkg || 'Later|0').split('|'); return { name, amt: name === 'Custom' ? num(cfg.custom) : +amt, label: name === 'Custom' ? 'Custom campaign' : name + ' package' }; }
+  function pkgOf(cfg) { const [name, amt] = String(cfg.pkg || 'Later|0').split('|'); return { name, amt: name === 'Custom' ? num(cfg.custom) : +amt, label: name === 'Campaign' ? ((cfg.campaign && cfg.campaign.snapshot && cfg.campaign.snapshot.title) || 'Marketing campaign') : name === 'Custom' ? 'Custom campaign' : name + ' package' }; }
 
-  async function openPdf(agreementId) {
+  /* ───────── campaign (shared catalogue from ../catalogue.js) ───────── */
+  const HAS_CAT = typeof CATALOGUE !== 'undefined';
+  const LIM_IN_PACKAGE = 425;
+  function bandFor(price) { const p = num(price); return !p ? 'tm_mid' : p <= 400000 ? 'tm_lo' : p <= 1000000 ? 'tm_mid' : 'tm_hi'; }
+  function pkgItems(key, band) { const out = {}; Object.entries(PACKAGES[key].items).forEach(([k, q]) => { if (k === 'lim') return; out[k === 'TM' ? band : k] = q; }); return out; }
+  function sameItems(a, b) { const ka = Object.keys(a).filter(k => k !== 'lim').sort(), kb = Object.keys(b).filter(k => k !== 'lim').sort(); return ka.length === kb.length && ka.every((k, i) => k === kb[i] && a[k] === b[k]); }
+  function rcTierOf(items) { return Object.keys(items).find(k => ITEMS[k] && ITEMS[k].group === 'rc'); }
+  function itemPrice(i, items, camp) { if (i.id === 'rc_dx') return DX_PRICE[rcTierOf(items)] || 0; if (i.poa) return num((camp.quoted || {})[i.id]); return i.price; }
+  function computeCampaign(camp) {
+    if (!HAS_CAT || !camp) return { lines: [], included: [], itemsTotal: 0, total: 0, title: 'Custom campaign', pkgMatch: false };
+    const items = camp.items || {};
+    const order = Object.keys(ITEMS);
+    const lines = Object.entries(items).filter(([id]) => ITEMS[id] && id !== 'lim').sort((x, y) => order.indexOf(x[0]) - order.indexOf(y[0])).map(([id, q]) => {
+      const i = ITEMS[id], unit = itemPrice(i, items, camp);
+      const name = i.group === 'trademe' ? 'Trade Me Platinum listing' : i.name;
+      const detail = i.group === 'trademe' ? i.desc : (i.desc || '');
+      return { id, name: name + (i.qty ? ` × ${q}` : ''), detail, sup: i.sup || '', amount: Math.round(unit * q * 100) / 100, poa: !!i.poa && !num((camp.quoted || {})[id]) };
+    });
+    (camp.extras || []).filter(x => x.name).forEach(x => lines.push({ id: 'x', name: x.name, detail: '', sup: x.sup || '', amount: num(x.price), poa: false }));
+    const itemsTotal = Math.round(lines.reduce((s, l) => s + l.amount, 0) * 100) / 100;
+    const pkgMatch = !!(camp.pkg && PACKAGES[camp.pkg] && !(camp.extras || []).some(x => x.name) && sameItems(items, pkgItems(camp.pkg, camp.band || 'tm_mid')));
+    let saving = 0;
+    if (camp.pkg && PACKAGES[camp.pkg]) {
+      const base = pkgItems(camp.pkg, camp.band || 'tm_mid');
+      const full = Object.entries(base).reduce((s, [id, q]) => s + (ITEMS[id] ? itemPrice(ITEMS[id], base, camp) * q : 0), 0);
+      saving = Math.max(0, Math.round((full - (PACKAGES[camp.pkg].price - LIM_IN_PACKAGE)) * 100) / 100);
+    }
+    const total = num(camp.override) || Math.max(0, Math.round((itemsTotal - saving) * 100) / 100);
+    const included = CATALOGUE[0].items.map(i => i.name);
+    const title = pkgMatch ? PACKAGES[camp.pkg].name + ' package' : (camp.pkg && PACKAGES[camp.pkg] ? PACKAGES[camp.pkg].name + ' package, tailored' : 'Custom campaign');
+    return { lines, included, itemsTotal, saving, total, title, pkgMatch, overridden: !!num(camp.override) };
+  }
+
+  /* ───────── campaign schedule ───────── */
+  const PHASE_TEMPLATE = [
+    ['Pre-listing period', 0, ['Discuss goals and customise the marketing timeline', 'Discuss property history, defects and required disclosures', 'Provide Real Estate Authority guides and disclosure documents', 'Agree the marketing budget, a fair fee and when marketing starts']],
+    ['Pre-marketing period', 1, ['Refine the campaign messaging', 'Order the LIM report and arrange a building inspection if needed', 'Book staging if needed', 'Photography and media', 'You receive and approve all advertising proofs', 'Sale and purchase documents prepared and sent to your lawyer', 'Listing copy written', 'Open homes scheduled and your campaign calendar confirmed', 'Brochures and print advertising booked', 'Sign printed and installed']],
+    ['Marketing period', 9, ['Your property goes live online, and print advertising is published', 'First open home, followed by a report on the first weekend\'s activity', 'Private viewings, inspections and follow-up visits arranged with your consent', 'Further open homes', 'Interested buyers helped to prepare offer paperwork']],
+    ['Offer phase', 29, ['Interested buyers sign their offers', 'Offers stay sealed until presented to you', 'Every attendee contacted to encourage offers', 'Deadline closes or auction takes place', 'All offers presented; you decide to accept, decline or counter']],
+    ['Agreement phase', 43, ['Marketing continues while the buyer meets their conditions', 'Once conditions are met, the property is marked SOLD and the lawyers confirm', 'If the buyer cannot confirm, marketing resumes']],
+  ];
+  const isoDay = d => { const x = new Date(d); return new Date(x.getTime() - x.getTimezoneOffset() * 60000).toISOString().slice(0, 10); };
+  const plusDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+  const nextWeekend = d => { let x = new Date(d); while (x.getDay() !== 6) x = plusDays(x, 1); return x; };
+  function defaultSchedule(startISO) {
+    const s = startISO ? new Date(startISO + 'T12:00:00') : new Date();
+    const phases = PHASE_TEMPLATE.map(([title, off, items]) => ({ title, start: isoDay(plusDays(s, off)), items: items.slice() }));
+    const live = plusDays(s, 9), oh = nextWeekend(live);
+    const events = [
+      { date: isoDay(plusDays(s, 4)), time: '', title: 'Photography and media' },
+      { date: isoDay(live), time: '', title: 'Listing goes live online' },
+      { date: isoDay(oh), time: '11:00am', title: 'First open home' },
+      { date: isoDay(plusDays(oh, 7)), time: '11:00am', title: 'Second open home' },
+      { date: isoDay(plusDays(s, 29)), time: '4:00pm', title: 'Deadline closes' },
+    ];
+    return { phases, events };
+  }
+  const fmtShort = iso => iso ? new Date(iso + 'T12:00:00').toLocaleDateString('en-NZ', { weekday: 'short', day: 'numeric', month: 'short' }) : '';
+  function scheduleHTML(sch) {
+    if (!sch || !(sch.phases || []).length) return '';
+    const ev = (sch.events || []).filter(e => e.title).slice().sort((a, b) => (a.date || '') < (b.date || '') ? -1 : 1);
+    return `${ev.length ? `<div class="card tight"><h3>Key dates</h3><table class="sum">${ev.map(e => `<tr><td style="white-space:nowrap">${esc(fmtShort(e.date))}${e.time ? ', ' + esc(e.time) : ''}</td><td style="white-space:normal;text-align:left">${esc(e.title)}</td></tr>`).join('')}</table></div>` : ''}
+      ${sch.phases.map((p, i) => `<div class="card tight"><div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline;flex-wrap:wrap"><h3 style="margin:0">${i + 1}. ${esc(p.title)}</h3><span class="small">Commencing ${esc(fmtShort(p.start))}</span></div>
+        <ul style="margin:8px 0 0;padding-left:20px">${(p.items || []).filter(Boolean).map(t => `<li class="small" style="color:var(--ink);margin:3px 0">${esc(t)}</li>`).join('')}</ul></div>`).join('')}`;
+  }
+  function campaignHTML(cc) {
+    if (!cc.lines.length) return '';
+    return `<table class="sum">${cc.lines.map(l => `<tr><td style="white-space:normal">${esc(l.name)}${l.detail ? `<br><span class="small">${esc(l.detail)}</span>` : ''}</td><td class="money">${l.poa ? 'On request' : money(l.amount, 2)}</td></tr>`).join('')}
+      ${cc.saving > 0 && !cc.overridden ? `<tr><td>Package saving</td><td class="money">−${money(cc.saving, 2)}</td></tr>` : ''}
+      ${cc.overridden ? `<tr><td class="small">Items at full price</td><td class="money small">${money(cc.itemsTotal, 2)}</td></tr>` : ''}
+      <tr class="total"><td>${cc.overridden ? 'Agreed campaign total' : cc.pkgMatch ? esc(cc.title) + ' price' : 'Campaign total'}, incl GST</td><td class="money">${money(cc.total, 2)}</td></tr></table>
+      <p class="small" style="margin:10px 0 0">Always included at no charge: ${esc(cc.included.join(', '))}.${cc.pkgMatch ? ` Package price shown without the $${LIM_IN_PACKAGE} LIM, which is listed separately.` : ''}</p>`;
+  }
+
+  /* ───────── Tim's campaign builder + schedule editor (inside setup) ───────── */
+  function setBand(camp, band) {
+    camp.band = band;
+    const cur = Object.keys(camp.items || {}).find(k => ITEMS[k] && ITEMS[k].group === 'trademe');
+    if (cur && cur !== band) { delete camp.items[cur]; camp.items[band] = 1; }
+  }
+  function campaignEditor(box, camp, onChange) {
+    if (!HAS_CAT) { box.innerHTML = '<p class="small">The price catalogue could not be loaded. Refresh the page.</p>'; return; }
+    const items = camp.items || (camp.items = {});
+    const cc = computeCampaign(camp);
+    const row = (i) => {
+      if (i.id === 'lim') return '';
+      const on = !!items[i.id], q = items[i.id] || 0;
+      const dxOff = i.id === 'rc_dx' && !DX_PRICE[rcTierOf(items)];
+      const price = i.poa ? 'Quoted' : i.id === 'rc_dx' ? (items.rc_plat ? 'In Platinum' : dxOff ? 'Pick Bronze, Silver or Gold' : money(DX_PRICE[rcTierOf(items)])) : money(i.price) + (i.qty ? ' each' : '');
+      return `<div class="cb-row ${on ? 'on' : ''} ${dxOff ? 'off' : ''}">
+        ${i.qty ? `<input type="number" min="0" max="${i.max}" value="${q}" data-qty="${i.id}" aria-label="${esc(i.name)} quantity" class="cb-qty">`
+          : `<input type="checkbox" data-item="${i.id}" ${on ? 'checked' : ''} ${dxOff ? 'disabled' : ''} aria-label="${esc(i.name)}">`}
+        <div class="cb-name">${esc(i.group === 'trademe' ? 'Trade Me Platinum, ' + i.desc.replace('Expected sale price ', '') : i.name)}${i.desc && i.group !== 'trademe' ? `<span class="small"> · ${esc(i.desc)}</span>` : ''}</div>
+        <div class="cb-price">${i.poa && on ? `<input type="text" inputmode="decimal" placeholder="$" value="${esc((camp.quoted || {})[i.id] || '')}" data-quote="${i.id}" class="cb-quote">` : price}</div></div>`;
+    };
+    box.innerHTML = `
+      <div class="toolbar" style="margin-top:0">${Object.entries(PACKAGES).map(([k, p]) => `<button type="button" class="btn ${camp.pkg === k && cc.pkgMatch ? 'primary' : 'ghost'}" data-pkg="${k}">${esc(p.name)} ${money(p.price)}</button>`).join('')}<button type="button" class="btn ghost" data-pkg="">Clear</button></div>
+      <p class="small">Start from a package, then tick or untick anything. Package prices include the $${LIM_IN_PACKAGE} LIM, which is charged on its own line under "Costs on signing".</p>
+      <details class="acc"><summary>Items in this campaign (${cc.lines.length})</summary><div class="in">
+        ${CATALOGUE.slice(1).map(s => `<div class="cb-sec">${esc(s.sec)}${s.note ? ` <span class="small">${esc(s.note)}</span>` : ''}</div>${s.items.map(row).join('')}`).join('')}
+        <div class="cb-sec">Other items <span class="small">Any supplier or service, at an agreed price</span></div>
+        ${(camp.extras || []).map((x, n) => `<div class="cb-row on"><button type="button" class="btn link" data-rmx="${n}" aria-label="Remove">✕</button><input type="text" placeholder="Item" value="${esc(x.name)}" data-xname="${n}"><input type="text" inputmode="decimal" placeholder="$" value="${esc(x.price)}" data-xprice="${n}" class="cb-quote"></div>`).join('')}
+        <button type="button" class="btn link" id="cbAddX">Add an item</button>
+      </div></details>
+      <div class="card tight" style="margin-top:12px">${campaignHTML(cc) || '<p class="small" style="margin:0">Nothing selected yet.</p>'}</div>
+      <label class="f" for="cbOverride">Agreed campaign total <span class="opt">(optional, overrides the total above)</span></label>
+      <input type="text" id="cbOverride" inputmode="decimal" value="${esc(camp.override || '')}" placeholder="Leave blank to use the total above">`;
+    const redraw = () => { campaignEditor(box, camp, onChange); onChange && onChange(); };
+    $$('[data-pkg]', box).forEach(b => b.addEventListener('click', () => { const k = b.dataset.pkg; camp.pkg = k || null; camp.items = k ? pkgItems(k, camp.band || 'tm_mid') : {}; camp.override = ''; redraw(); }));
+    $$('[data-item]', box).forEach(cb => cb.addEventListener('change', () => {
+      const i = ITEMS[cb.dataset.item];
+      if (cb.checked) { if (i.group) Object.keys(items).forEach(k => { if (ITEMS[k] && ITEMS[k].group === i.group) delete items[k]; }); items[i.id] = 1; if (i.group === 'trademe') camp.band = i.id; }
+      else delete items[i.id];
+      if (!DX_PRICE[rcTierOf(items)]) delete items.rc_dx;
+      const open = box.querySelector('details').open; redraw(); box.querySelector('details').open = open;
+    }));
+    $$('[data-qty]', box).forEach(inp => inp.addEventListener('change', () => { const q = Math.max(0, Math.min(+inp.max, parseInt(inp.value) || 0)); if (q) items[inp.dataset.qty] = q; else delete items[inp.dataset.qty]; const open = box.querySelector('details').open; redraw(); box.querySelector('details').open = open; }));
+    $$('[data-quote]', box).forEach(inp => inp.addEventListener('change', () => { (camp.quoted ||= {})[inp.dataset.quote] = inp.value.trim(); const open = box.querySelector('details').open; redraw(); box.querySelector('details').open = open; }));
+    $$('[data-xname]', box).forEach(inp => inp.addEventListener('change', () => { camp.extras[+inp.dataset.xname].name = inp.value.trim(); const open = box.querySelector('details').open; redraw(); box.querySelector('details').open = open; }));
+    $$('[data-xprice]', box).forEach(inp => inp.addEventListener('change', () => { camp.extras[+inp.dataset.xprice].price = inp.value.trim(); const open = box.querySelector('details').open; redraw(); box.querySelector('details').open = open; }));
+    $$('[data-rmx]', box).forEach(b => b.addEventListener('click', () => { camp.extras.splice(+b.dataset.rmx, 1); redraw(); box.querySelector('details').open = true; }));
+    $('#cbAddX', box).addEventListener('click', () => { (camp.extras ||= []).push({ name: '', price: '' }); redraw(); box.querySelector('details').open = true; });
+    $('#cbOverride', box).addEventListener('change', e => { camp.override = e.target.value.trim(); redraw(); });
+  }
+
+  function scheduleEditor(box, sch, getStart) {
+    const ev = sch.events || (sch.events = []);
+    box.innerHTML = `
+      <div class="toolbar" style="margin-top:0"><button type="button" class="btn ghost" id="seReset">Fill from template</button></div>
+      <p class="small">Dates are worked out from the commencement date (or today). Change anything to suit.</p>
+      <div class="cb-sec">Key dates</div>
+      ${ev.map((e, n) => `<div class="se-ev"><input type="date" value="${esc(e.date || '')}" data-evd="${n}" aria-label="Date"><input type="text" value="${esc(e.time || '')}" data-evt="${n}" placeholder="Time" aria-label="Time"><input type="text" value="${esc(e.title || '')}" data-evn="${n}" placeholder="What happens" aria-label="Event"><button type="button" class="btn link" data-rme="${n}" aria-label="Remove">✕</button></div>`).join('')}
+      <button type="button" class="btn link" id="seAddEv">Add a date</button>
+      <div class="cb-sec">Phases</div>
+      ${(sch.phases || []).map((p, n) => `<div class="card tight"><div class="row2 stack"><div><label class="f" style="margin-top:0">Phase</label><input type="text" value="${esc(p.title)}" data-pt="${n}"></div><div><label class="f" style="margin-top:0">Commencing</label><input type="date" value="${esc(p.start || '')}" data-pd="${n}"></div></div>
+        <label class="f">What happens <span class="opt">(one per line)</span></label><textarea data-pi="${n}" rows="${Math.max(3, (p.items || []).length)}">${esc((p.items || []).join('\n'))}</textarea></div>`).join('')}`;
+    const redraw = () => scheduleEditor(box, sch, getStart);
+    $('#seReset', box).addEventListener('click', () => { const d = defaultSchedule(getStart()); sch.phases = d.phases; sch.events = d.events; redraw(); });
+    $('#seAddEv', box).addEventListener('click', () => { ev.push({ date: '', time: '', title: '' }); redraw(); });
+    $$('[data-rme]', box).forEach(b => b.addEventListener('click', () => { ev.splice(+b.dataset.rme, 1); redraw(); }));
+    $$('[data-evd]', box).forEach(i => i.addEventListener('change', () => { ev[+i.dataset.evd].date = i.value; }));
+    $$('[data-evt]', box).forEach(i => i.addEventListener('input', () => { ev[+i.dataset.evt].time = i.value; }));
+    $$('[data-evn]', box).forEach(i => i.addEventListener('input', () => { ev[+i.dataset.evn].title = i.value; }));
+    $$('[data-pt]', box).forEach(i => i.addEventListener('input', () => { sch.phases[+i.dataset.pt].title = i.value; }));
+    $$('[data-pd]', box).forEach(i => i.addEventListener('change', () => { sch.phases[+i.dataset.pd].start = i.value; }));
+    $$('[data-pi]', box).forEach(i => i.addEventListener('input', () => { sch.phases[+i.dataset.pi].items = i.value.split('\n').map(s => s.trim()).filter(Boolean); }));
+  }
+
+  function campaignFromPending(p) {
+    const items = {}; Object.entries(p.sel || {}).forEach(([k, q]) => { if (k !== 'lim' && ITEMS[k]) items[k] = q; });
+    const band = p.band || Object.keys(items).find(k => ITEMS[k].group === 'trademe') || 'tm_mid';
+    const pkg = Object.keys(PACKAGES).find(k => sameItems(items, pkgItems(k, band))) || null;
+    return { pkg, band, items, extras: [], quoted: {}, override: '' };
+  }
+
+  async function openPdf(agreementId, part) {
     const w = window.open('', '_blank');
     if (w) w.document.write('<p style="font-family:sans-serif;padding:20px">Preparing your agreement…</p>');
     try {
       const { data: { session } } = await sb.auth.getSession();
-      const r = await fetch(`${SB_URL}/functions/v1/agreement-pdf?id=${agreementId}`, { headers: { apikey: SB_KEY, Authorization: 'Bearer ' + (session ? session.access_token : '') } });
+      const r = await fetch(`${SB_URL}/functions/v1/agreement-pdf?id=${agreementId}${part ? '&part=' + part : ''}`, { headers: { apikey: SB_KEY, Authorization: 'Bearer ' + (session ? session.access_token : '') } });
       if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Could not create the PDF');
       const url = URL.createObjectURL(await r.blob());
       if (w) w.location.href = url; else location.href = url;
@@ -377,6 +544,8 @@ hr.soft { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
     $('#signOut').hidden = !SESSION;
     if (!SESSION) return viewLogin();
     IS_AGENT = !!(await must(sb.rpc('is_agent')));
+    let pend = null; try { pend = JSON.parse(localStorage.getItem('pendingCampaign') || 'null'); } catch (_) { }
+    if (IS_AGENT && pend) { try { localStorage.removeItem('pendingCampaign'); } catch (_) { } return viewSetup(null, pend); }
     if (IS_AGENT) return viewAgentList();
     return viewVendorHome();
   }
@@ -389,6 +558,7 @@ hr.soft { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
       <div class="login-card">
         <h1>Your agency agreement</h1>
         <p class="lede">Enter the email address Tim has for you. We'll email you a link to sign in. No password needed.</p>
+        ${(() => { try { return localStorage.getItem('pendingCampaign') ? '<div class="card note tight"><p class="small" style="margin:0">Campaign ready. Sign in as Tim to start a listing with it.</p></div>' : ''; } catch (_) { return ''; } })()}
         <label class="f" for="loginEmail">Email</label>
         <input type="email" id="loginEmail" autocomplete="email" inputmode="email">
         <button class="btn primary" type="button" id="loginBtn" style="width:100%;margin-top:14px">Email me a sign-in link</button>
@@ -648,10 +818,11 @@ hr.soft { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
     <p class="lede">Separate from commission, and paid through List Now.</p>
     <p class="clause">Page 1, section E and clause 6</p>
     ${timLater ? `<div class="card note"><h3>Marketing to be agreed later</h3><p class="small" style="margin:0">Sign now and we'll agree your marketing budget together afterwards. Nothing is booked or spent until you approve it in writing.</p></div>` : `
-      <div class="card"><div class="prefill">Recommended by Tim</div><div class="facts" style="margin-bottom:8px"><div class="fact"><div class="k">Package</div><div class="v">${esc(pk.label)}</div></div><div class="fact"><div class="k">Budget, incl GST</div><div class="v money">${money(pk.amt, 2)}</div></div></div>
-      ${pk.name === 'Custom' ? '' : '<a href="https://packages.dunnerstunner.co.nz" target="_blank" rel="noopener">See exactly what\'s included</a>'}</div>
+      <div class="card"><div class="prefill">Recommended by Tim</div>${CFG.campaign ? `<h3>${esc(pk.label)}</h3>${campaignHTML(CFG.campaign.snapshot || computeCampaign(CFG.campaign))}` : `<div class="facts" style="margin-bottom:8px"><div class="fact"><div class="k">Package</div><div class="v">${esc(pk.label)}</div></div><div class="fact"><div class="k">Budget, incl GST</div><div class="v money">${money(pk.amt, 2)}</div></div></div>`}
+      <p class="small" style="margin:10px 0 0"><a href="https://packages.dunnerstunner.co.nz" target="_blank" rel="noopener">Compare packages and prices</a></p></div>
       <div class="choices">${f.radio('mkt', 'go', 'Go with this', '', 'go')}${f.radio('mkt', 'later', 'Sign now, agree marketing later', 'Nothing is booked or spent until you approve a budget in writing', 'go')}</div>`}
     <div class="card" id="mktTable"></div>
+    ${CFG.schedule && (CFG.schedule.phases || []).length ? `<h2>Your campaign timeline</h2><p class="small">A guide to what happens when. Dates may move a little with bookings and weather.</p>${scheduleHTML(CFG.schedule)}` : ''}
     <div class="card note tight"><h3>Paying through List Now</h3><p class="small" style="margin:0">Invoices are issued through List Now, our payment partner. You choose how to settle with them: up front, in instalments, or deducted at settlement. Their terms and eligibility apply.</p></div>
     <div class="card tight"><h3>Rebates and commissions</h3><p class="small" style="margin:0">McGuire Real Estate doesn't receive any rebates, discounts or commissions from these suppliers. <span class="clause">Clause 7.1.1</span></p></div>
     <div class="err"></div>`;
@@ -896,9 +1067,10 @@ function lawyerForm(id, title, blurb) {
   }
 
   /* setup (new / edit) */
-  async function viewSetup(id) {
+  async function viewSetup(id, preset) {
     let ag = { address: '', config: { appr: 'done', ask: '', flat: '', thr: '250000', pct: '', pkg: 'Premium|6000', aml: 'Manual', approach: 'invited' }, answers: {} }, people = [{ legal_name: '', pref_name: '', email: '', phone: '' }];
     if (id) { ag = await must(sb.from('agreements').select('*').eq('id', id).single()); people = await must(sb.from('agreement_people').select('*').eq('agreement_id', id).order('position')); }
+    if (preset) { if (preset.address) ag.address = preset.address; if (preset.vendor) people[0].legal_name = preset.vendor; }
     const c = ag.config || {}, an = ag.answers || {};
     const sv = (k, d = '') => esc(c[k] ?? d), av = (k, d = '') => esc(an[k] ?? d);
     const sel = (k, opts, d) => opts.map(o => { const [val, lab] = Array.isArray(o) ? o : [o, o]; return `<option value="${esc(val)}" ${(c[k] ?? d) === val ? 'selected' : ''}>${esc(lab)}</option>`; }).join('');
@@ -945,10 +1117,11 @@ function lawyerForm(id, title, blurb) {
       <div><label class="f" for="sMethod">Method of sale</label><select id="sMethod">${sel('method', ['', 'Auction', 'Tender', 'Deadline sale', 'Price by negotiation', 'Fixed price', 'Expressions of interest', 'Timed sale', 'Ballot'], '')}</select></div></div>
       <label class="f" for="sMethodDate">Auction, tender, deadline or ballot date and time <span class="opt">(optional)</span></label><input type="text" id="sMethodDate" value="${sv('methodDate')}" placeholder="For example: Thu 26 Nov 2026, 4pm">
 
-      <h2>Marketing</h2>
-      <label class="f" for="sPkg" style="margin-top:0">Recommended package</label>
-      <select id="sPkg">${sel('pkg', [['Digital|3000', 'Digital, $3,000'], ['Premium|6000', 'Premium, $6,000'], ['Elite|11000', 'Elite, $11,000'], ['Custom|0', 'Custom campaign'], ['Later|0', 'Agree marketing later']], 'Premium|6000')}</select>
-      <div id="customWrap"><label class="f" for="sCustom">Custom campaign total, incl GST</label><input type="text" id="sCustom" inputmode="numeric" value="${sv('custom')}"></div>
+      <h2>Marketing campaign</h2>
+      <div class="choices two">${rad('mktMode', 'build', 'Build the campaign now', '', String(c.pkg || '').startsWith('Later') ? 'later' : 'build')}${rad('mktMode', 'later', 'Agree marketing later', '', String(c.pkg || '').startsWith('Later') ? 'later' : 'build')}</div>
+      <div id="campBox"></div>
+      <h2>Campaign schedule</h2>
+      <div id="schedBox"></div>
 
       <h2>Costs on signing</h2>
       <p class="small">Untick or change either one if you've agreed something different. <span class="clause">Page 1, section E</span></p>
@@ -969,15 +1142,26 @@ function lawyerForm(id, title, blurb) {
       $$('#sPeople [data-rm]').forEach(b => b.addEventListener('click', () => { const p = people[+b.dataset.rm]; if (p.id) (people._del ||= []).push(p.id); people.splice(+b.dataset.rm, 1); drawPeople(); }));
     };
     drawPeople();
+    let CAMP = ag.config && ag.config.campaign ? JSON.parse(JSON.stringify(ag.config.campaign)) : null;
+    if (CAMP) delete CAMP.snapshot;
+    if (!CAMP && HAS_CAT) {
+      if (preset) CAMP = campaignFromPending(preset);
+      else { const [n, amt] = String((ag.config || {}).pkg || 'Premium|6000').split('|'); const key = n.toLowerCase(); const band = bandFor((ag.config || {}).ask); CAMP = { pkg: PACKAGES[key] ? key : 'premium', band, items: pkgItems(PACKAGES[key] ? key : 'premium', band), extras: [], quoted: {}, override: n === 'Custom' ? (ag.config || {}).custom || '' : '' }; }
+    }
+    CAMP ||= { items: {}, extras: [] };
+    const SCH = ag.config && ag.config.schedule ? JSON.parse(JSON.stringify(ag.config.schedule)) : defaultSchedule((ag.config || {}).start || null);
+    campaignEditor($('#campBox'), CAMP, null);
+    scheduleEditor($('#schedBox'), SCH, () => $('#sStart').value || null);
+    $('#sAsk').addEventListener('change', () => { if (!HAS_CAT) return; setBand(CAMP, bandFor($('#sAsk').value)); campaignEditor($('#campBox'), CAMP, null); });
     $('#sAddP').addEventListener('click', () => { people.push({ legal_name: '', pref_name: '', email: '', phone: '' }); drawPeople(); });
-    const upd = () => { $('#askWrap').hidden = ($('input[name="s_appr"]:checked') || {}).value === 'pending'; $('#customWrap').hidden = !$('#sPkg').value.startsWith('Custom'); $('#pctWrap').hidden = $('#sAbove').value !== 'pct'; $('#amtWrap').hidden = $('#sAbove').value !== 'amount'; };
-    $$('input[name="s_appr"]').forEach(r => r.addEventListener('change', upd)); $('#sPkg').addEventListener('change', upd); $('#sAbove').addEventListener('change', upd); upd();
+    const upd = () => { $('#askWrap').hidden = ($('input[name="s_appr"]:checked') || {}).value === 'pending'; $('#campBox').hidden = ($('input[name="s_mktMode"]:checked') || {}).value === 'later'; $('#pctWrap').hidden = $('#sAbove').value !== 'pct'; $('#amtWrap').hidden = $('#sAbove').value !== 'amount'; };
+    $$('input[name="s_appr"]').forEach(r => r.addEventListener('change', upd)); $$('input[name="s_mktMode"]').forEach(r => r.addEventListener('change', upd)); $('#sAbove').addEventListener('change', upd); upd();
 
     const gather = () => {
       const g = k => ($('input[name="s_' + k + '"]:checked') || {}).value;
       return {
         address: $('#sAddr').value.trim(),
-        config: Object.assign({}, c, { owners: $('#sOwners').value.trim(), title: $('#sTitle').value.trim(), approach: g('approach'), appr: g('appr'), ask: $('#sAsk').value.trim(), askBasis: $('#sAskBasis').value, apprUrl: $('#sApprUrl').value.trim(), methodDate: $('#sMethodDate').value.trim(), flat: $('#sFlat').value.trim(), thr: $('#sThr').value.trim(), pct: $('#sPct').value.trim(), aboveType: $('#sAbove').value, aboveAmt: $('#sAboveAmt').value.trim(), start: $('#sStart').value, method: $('#sMethod').value, pkg: $('#sPkg').value, custom: $('#sCustom').value.trim(), aml: $('#sAml').value, sign: 'On screen', limOn: $('#sLimOn').checked, lim: $('#sLim').value.trim(), adminOn: $('#sAdminOn').checked, admin: $('#sAdmin').value.trim() }),
+        config: Object.assign({}, c, { owners: $('#sOwners').value.trim(), title: $('#sTitle').value.trim(), approach: g('approach'), appr: g('appr'), ask: $('#sAsk').value.trim(), askBasis: $('#sAskBasis').value, apprUrl: $('#sApprUrl').value.trim(), methodDate: $('#sMethodDate').value.trim(), flat: $('#sFlat').value.trim(), thr: $('#sThr').value.trim(), pct: $('#sPct').value.trim(), aboveType: $('#sAbove').value, aboveAmt: $('#sAboveAmt').value.trim(), start: $('#sStart').value, method: $('#sMethod').value, mktMode: g('mktMode'), campaign: g('mktMode') === 'later' ? null : Object.assign({}, CAMP, { snapshot: computeCampaign(CAMP) }), schedule: SCH, pkg: g('mktMode') === 'later' ? 'Later|0' : 'Campaign|' + computeCampaign(CAMP).total, custom: '', aml: $('#sAml').value, sign: 'On screen', limOn: $('#sLimOn').checked, lim: $('#sLim').value.trim(), adminOn: $('#sAdminOn').checked, admin: $('#sAdmin').value.trim() }),
         answers: Object.assign({}, an, Object.fromEntries($$('[data-ans]').map(i => [i.dataset.ans, i.value]))),
       };
     };
@@ -1038,6 +1222,7 @@ function lawyerForm(id, title, blurb) {
         ${['draft', 'sent', 'parked'].includes(ag.status) ? '<button class="btn ghost" type="button" id="editAg">Edit setup</button>' : ''}
         ${ag.status === 'signed' ? '<button class="btn primary" type="button" id="counterBtn">Countersign</button>' : ''}
         <button class="btn primary" type="button" data-pdf="1">Full agreement (PDF)</button>
+        ${cfg.campaign || cfg.schedule ? '<button class="btn ghost" type="button" id="campPdf">Campaign PDF</button>' : ''}
         <button class="btn ghost" type="button" id="printBtn">Print this page</button>
         ${['signed', 'countersigned', 'sent', 'parked'].includes(ag.status) ? '<button class="btn ghost" type="button" id="endBtn">End agency</button>' : ''}
       </div>
@@ -1061,6 +1246,8 @@ function lawyerForm(id, title, blurb) {
         <tr><td>Listing came about</td><td>${cfg.approach === 'unsolicited' ? 'You approached them (unsolicited)' : 'They contacted you'}</td></tr>
       </table></div>
 
+      ${cfg.campaign ? `<h2>Marketing campaign</h2><div class="card">${campaignHTML(cfg.campaign.snapshot || computeCampaign(cfg.campaign))}</div>` : ''}
+      ${cfg.schedule && (cfg.schedule.phases || []).length ? `<h2>Campaign schedule</h2>${scheduleHTML(cfg.schedule)}` : ''}
       <h2>Property Description</h2>
       <div class="card"><table class="sum">
         <tr><td>Property</td><td style="white-space:normal">${esc(an.pBed || '?')} bed, ${esc(an.pBath || '?')} bath ${esc((an.pType || '').toLowerCase())}, ${esc(an.pFloor || '?')}m² on ${esc(an.pLand || '?')}m², built ${esc(an.pYear || '?')}</td></tr>
@@ -1094,7 +1281,7 @@ function lawyerForm(id, title, blurb) {
     const cm = $('#copyMsg'); if (cm) cm.addEventListener('click', async () => { try { await navigator.clipboard.writeText(msg); toast('Copied'); } catch { toast('Select the text and copy it'); } });
     const ed = $('#editAg'); if (ed) ed.addEventListener('click', () => viewSetup(id));
     $('#printBtn').addEventListener('click', () => window.print());
-    wirePdf(id);
+    wirePdf(id); const cpb = $('#campPdf'); if (cpb) cpb.addEventListener('click', () => openPdf(id, 'campaign'));
     if ($('#afwd')) { const sender = async (n, fm, e) => { await must(sb.from('lawyer_links').insert({ agreement_id: id, lawyer_name: n, firm: fm, email: e, sent_by: 'Tim McGuire', expires_at: new Date(Date.now() + 90 * 864e5).toISOString() })); await must(sb.from('agreement_events').insert({ agreement_id: id, actor: SESSION.user.email, kind: 'forwarded_to_lawyer', detail: { lawyer: n, email: e } })); }; sender.agId = id; wireLawyerForm('afwd', sender); }
     const callNotify = async (type) => { const { data, error } = await sb.functions.invoke('notify', { body: { type, agreement_id: id } }); if (error || (data && data.ok === false)) toast('Email failed. See the Emails list below.'); else toast('Email sent'); viewAgentDetail(id); };
     $$('[data-sendlaw]').forEach(b => b.addEventListener('click', () => { b.disabled = true; callNotify('lawyer'); }));
@@ -1266,6 +1453,8 @@ function lawyerForm(id, title, blurb) {
         ${c.appr === 'pending' ? row('Condition', 'Takes effect on receipt of a written appraisal. The client may cancel within 2 working days of receiving it, at no cost.') : ''}
         ${row('Cancellation', c.approach === 'unsolicited' ? 'Unsolicited approach: the client may cancel within 5 working days of receiving a copy.' : 'The client may cancel by 5pm on the first working day after receiving a copy (s130 REAA 2008).')}
       </table></div>
+      ${c.campaign ? `<h2>Marketing campaign (Schedule 6)</h2><div class="card">${campaignHTML(c.campaign.snapshot || { lines: [], included: [] })}</div>` : ''}
+      ${c.schedule && (c.schedule.phases || []).length ? `<h2>Campaign schedule (Schedule 7)</h2>${scheduleHTML(c.schedule)}` : ''}
       <h2>Property Description and client answers</h2>
       <div class="card"><table class="sum">
         ${row('Property', `${esc(an.pBed || '?')} bed, ${esc(an.pBath || '?')} bath ${esc((an.pType || '').toLowerCase())}, ${esc(an.pFloor || '?')}m² on ${esc(an.pLand || '?')}m², built ${esc(an.pYear || '?')}`)}
@@ -1288,6 +1477,7 @@ function lawyerForm(id, title, blurb) {
     top();
   }
 
+  try { const cp = new URLSearchParams(location.search).get('campaign'); if (cp) { localStorage.setItem('pendingCampaign', decodeURIComponent(escape(atob(cp)))); history.replaceState(null, '', location.pathname); } } catch (_) { }
   const lawyerToken = new URLSearchParams(location.search).get('lawyer');
   if (lawyerToken) { viewLawyer(lawyerToken); return; }
 
