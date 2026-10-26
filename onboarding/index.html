@@ -247,7 +247,6 @@ hr.soft { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
   const SB_KEY = 'sb_publishable_luFnpeEPhaXWotpQiwVcVw_Yhkii6-1';
   const APP_URL = location.origin + location.pathname;
   const AGREEMENT_VERSION = 'v3.15-26102026';
-  const LIM = 425, ADMIN = 500;
   const sb = window.supabase.createClient(SB_URL, SB_KEY, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
 
   /* ───────── helpers ───────── */
@@ -278,13 +277,15 @@ hr.soft { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
   const callName = p => (p.pref_name || '').trim() || (p.legal_name || '').trim().split(/\s+/)[0] || '';
   const joinNames = a => a.length < 2 ? a.join('') : a.slice(0, -1).join(', ') + ' and ' + a[a.length - 1];
   function commission(cfg, p) { const flat = num(cfg.flat), thr = num(cfg.thr), pct = num(cfg.pct); return p <= thr ? flat : flat + (p - thr) * pct / 100; }
+  const limAmt = (cfg = CFG) => cfg.limOn === false ? 0 : (cfg.lim === undefined || cfg.lim === '' ? 425 : num(cfg.lim));
+  const adminAmt = (cfg = CFG) => cfg.adminOn === false ? 0 : (cfg.admin === undefined || cfg.admin === '' ? 500 : num(cfg.admin));
   function pkgOf(cfg) { const [name, amt] = String(cfg.pkg || 'Later|0').split('|'); return { name, amt: name === 'Custom' ? num(cfg.custom) : +amt, label: name === 'Custom' ? 'Custom campaign' : name + ' package' }; }
 
   /* ───────── content ───────── */
   const GUIDE = [
     ['What you\'re appointing us to do', 'Clause 1 and 2.1', ['McGuire Real Estate becomes your sole and exclusive agent: the only agency working on your sale.', 'We market the property, negotiate for you, prepare the paperwork and do what it takes to bring the sale home.']],
     ['How long it runs, and how it ends', 'Clause 2', ['It starts on the commencement date and keeps going until it\'s cancelled. It doesn\'t expire on its own.', 'For the first 90 days (or your earlier review date) we\'re both committed. After that either of us can end it with 7 days\' written notice.', 'By law you can cancel by 5pm on the working day after you receive your copy, no questions asked.', 'It ends automatically if your property isn\'t actively marketed for more than 20 working days, unless you asked for that.', 'If we market it off-market, you get a written update at least monthly or you\'re free to cancel.', 'We can end it if you ask us to do something unlawful, misrepresent the property, hide a material change, or mislead us about who you are.']],
-    ['What you pay', 'Clauses 5 and 6', ['Commission is set out on the front page and only becomes payable when a sale goes unconditional.', 'Marketing, the LIM and the $500 administration fee are separate, paid through List Now.', 'Unspent marketing is usually refunded if the listing is withdrawn before it\'s spent. The admin fee applies whether or not it sells.']],
+    ['What you pay', 'Clauses 5 and 6', ['Commission is set out on the front page and only becomes payable when a sale goes unconditional.', 'Marketing and any costs on the front page (such as the LIM and administration fee) are separate from commission, paid through List Now.', 'Unspent marketing is usually refunded if the listing is withdrawn before it\'s spent. Any administration fee applies whether or not it sells.']],
     ['Your deposit', 'Clause 8', ['The buyer\'s deposit is held by an independent stakeholder (NZRET or Public Trust), not by us, for at least 10 working days.', 'Our commission and any directly invoiced costs are paid from the deposit or at settlement once it can be released.']],
     ['What you\'re confirming', 'Clauses 9 and 10', ['What you tell us about the property is honest and to the best of your knowledge. It\'s not a guarantee.', 'You\'re not warranting legal, consent, structural or title matters unless you\'ve confirmed them in writing.']],
     ['What we must tell buyers', 'Clause 11', ['We have to disclose known defects to buyers, and tell them about significant risks of hidden defects so they can get expert advice.', 'We can\'t follow an instruction to hide a known defect.']],
@@ -307,7 +308,7 @@ hr.soft { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
         ? ['I understand this agreement only takes effect once I\'ve received a written appraisal', 'Tim will send it to you. You can cancel within 2 working days of receiving it.']
         : ['I received a written appraisal', ''],
       ['I was recommended to get tax and legal advice where it applies', 'For example if you\'ve owned it under five years, it\'s held in a trust or company, it isn\'t your main home, or it\'s being subdivided.'],
-      ['I was advised about the LIM report, and to get advice on its contents', 'Tim orders it for you once you\'ve signed.'],
+      ['I was advised about the LIM report, and to get advice on its contents', limAmt(cfg) ? 'Tim orders it for you once you\'ve signed.' : ''],
     ];
   }
   const CHATTELS = ['Fixed floor coverings', 'Blinds', 'Curtains', 'Light fittings', 'Stove', 'Rangehood', 'Dishwasher', 'Heat pump', 'Extractor fans', 'Smoke alarms', 'Garage door remote', 'Clothesline', 'Fridge', 'Washing machine'];
@@ -560,16 +561,15 @@ hr.soft { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
     <p class="clause">Clause 16.4 and the Third-Party Investigation Policy</p>
     <h2>Every professional must</h2>
     <div class="choices">
-      ${['Give their name and contact details and sign our access form|Before entering, every time', 'Hold current registration or licensing for their trade|', 'Hold current public liability insurance|Evidence available on request', 'Declare why they\'re visiting|An independent assessment, a quote, or a sales assessment', 'Stay independent of any repair work from their own report|When attending as an independent inspector', 'Follow safety directions, bring their own equipment, and keep what they learn confidential|'].map(s => { const [t, d] = s.split('|'); return `<div class="choice locked"><span class="mark"></span><span><span class="ct">${t}</span>${d ? `<span class="cd">${d}</span>` : ''}</span></div>`; }).join('')}
+      ${['Be accompanied by a McGuire representative for the whole visit|Company policy: no buyer, professional or contractor visits without us', 'Give their name and contact details and sign our access form|Before entering, every time', 'Hold current registration or licensing for their trade|', 'Hold current public liability insurance|Evidence available on request', 'Declare why they\'re visiting|An independent assessment, a quote, or a sales assessment', 'Stay independent of any repair work from their own report|When attending as an independent inspector', 'Follow safety directions, bring their own equipment, and keep what they learn confidential|'].map(s => { const [t, d] = s.split('|'); return `<div class="choice locked"><span class="mark"></span><span><span class="ct">${t}</span>${d ? `<span class="cd">${d}</span>` : ''}</span></div>`; }).join('')}
     </div>
     <h2>Your choices</h2>
     <div class="choices">
-      ${f.check('vPresent', 'Tim or a McGuire representative must be there for every visit', 'Recommended. Untick if you\'re happy to be there yourself instead', true)}
       ${f.check('vQuotes', 'Allow visits to give a buyer a quote', 'For example a builder pricing an extension', true)}
       ${f.check('vSales', 'Allow sales assessments', 'Someone assessing the home to sell the buyer a product, such as solar or insulation', false)}
       ${f.check('vNotify', 'Tell me before each visit', 'A text with who is coming, when and why', true)}
     </div>
-    ${f.select('vNotice', 'Minimum notice for a visit', ['24 hours', '48 hours', 'Same day is fine'], '48 hours')}
+    ${f.select('vNotice', 'Minimum notice for a visit', ['Same day is fine', '24 hours', '48 hours'], 'Same day is fine')}
     ${f.text('vNotes', 'Pets, keys, alarm or access notes <span class="opt">(optional)</span>', { ph: 'For example: cat inside, please keep doors closed' })}`;
 
   /* 4 sale */
@@ -596,16 +596,28 @@ hr.soft { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
     <h2>Other agents</h2><p class="small">Have you signed with any other real estate agent for this property? <span class="clause">Clause 3</span></p>
     <div class="choices">${f.radio('prior', 'none', 'No, no other agent', '', 'none')}${f.radio('prior', 'yes', 'Yes, I have or had another agency', '', 'none')}</div>
     <div class="reveal" data-reveal="prior=yes"><div class="card warnc"><h3>Please stop and call Tim before signing</h3><p class="small" style="margin:0">If another agent's sole agency is still running, you could end up owing two commissions. We'll sort out the details together first.</p></div>${f.text('priorDetail', 'Agency name, type and when it ends')}</div>
-    <h2>People you've already been talking to <span class="opt small" style="font-family:var(--body)">(optional)</span></h2>
-    <p class="small">Anyone you were already negotiating with yourself is excluded for 10 working days. <span class="clause">Clause 2.3</span></p>
-    ${f.text('excluded', 'Names', { ph: 'Names, or leave blank' })}
+    <h2>People who have already expressed interest in buying the property <span class="opt small" style="font-family:var(--body)">(optional)</span></h2>
+    <p class="small">Anyone who has already approached you about buying. I can take over and fold them into the campaign, or you can deal with them yourself for the next 10 working days. <span class="clause">Clause 2.3</span></p>
+    <div id="buyers"></div>
+    <button class="btn link" type="button" id="addBuyer">Add someone</button>
     <div class="err"></div>`;
   };
+  function buyerCard(b, i) {
+    return `<div class="card tight buyer"><div style="display:flex;justify-content:space-between;align-items:baseline"><h3 style="margin:0">Interested buyer ${i + 1}</h3><button class="btn link" type="button" data-rmb="${i}">Remove</button></div>
+      <label class="f">Name</label><input type="text" data-b="name" value="${esc(b.name || '')}">
+      <div class="row2 stack"><div><label class="f">Phone <span class="opt">(optional)</span></label><input type="tel" data-b="phone" value="${esc(b.phone || '')}"></div><div><label class="f">Email <span class="opt">(optional)</span></label><input type="email" data-b="email" value="${esc(b.email || '')}"></div></div>
+      <div class="choices" style="margin-top:10px"><label class="choice cb"><input type="checkbox" data-b="exclude" ${b.exclude ? 'checked' : ''}><span class="mark"></span><span><span class="ct">Exclude from the agency for the next 10 working days</span><span class="cd">Leave unticked and Tim will take over negotiations with them as part of your campaign</span></span></label></div></div>`;
+  }
+  function readBuyers() { return $$('#buyers .buyer').map(c => ({ name: $('[data-b=name]', c).value.trim(), phone: $('[data-b=phone]', c).value.trim(), email: $('[data-b=email]', c).value.trim(), exclude: $('[data-b=exclude]', c).checked })); }
   BIND[4] = () => {
+    let buyers = (ANS.interested || []).slice();
+    const draw = () => { $('#buyers').innerHTML = buyers.map(buyerCard).join(''); $$('[data-rmb]').forEach(b => b.addEventListener('click', () => { buyers = readBuyers(); buyers.splice(+b.dataset.rmb, 1); draw(); })); };
+    draw();
+    $('#addBuyer').addEventListener('click', () => { buyers = readBuyers(); buyers.push({ name: '', phone: '', email: '', exclude: false }); draw(); });
     const upd = () => { const p = num($('#cPrice').value); if (!p) { $('#cOut').textContent = '–'; $('#cOutGst').textContent = 'Enter a price'; return; } const c = commission(CFG, p); $('#cOut').textContent = money(r2(c)); $('#cOutGst').textContent = 'plus GST, ' + money(r2(c * 1.15)) + ' in total'; };
     $('#cPrice').addEventListener('input', upd); upd();
   };
-  NEXT[4] = async () => { const a = collect(); if (a.prior === 'yes') { await saveAns(a); return err('Please call Tim before going further. We need to check your other agency first.'); } await saveAns(a); return true; };
+  NEXT[4] = async () => { const a = collect(); a.interested = readBuyers().filter(b => b.name || b.phone || b.email); if (a.interested.some(b => !b.name)) return err('Add a name for each interested buyer, or remove the empty one.'); ANS.interested = a.interested; if (a.prior === 'yes') { await saveAns(a); return err('Please call Tim before going further. We need to check your other agency first.'); } await saveAns(a); return true; };
 
   /* 5 marketing */
   SCREENS[5] = () => {
@@ -634,11 +646,12 @@ hr.soft { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
     const draw = () => {
       collect();
       const later = mktLater(), pk = pkgOf(CFG), amt = later ? 0 : pk.amt;
-      $('#mktTable').innerHTML = `<table class="sum"><tr><td>LIM report <span class="small">(required, ordered by Tim)</span></td><td class="money">${money(LIM, 2)}</td></tr>
-        <tr><td>Administration fee <span class="small">(identity checks and onboarding)</span></td><td class="money">${money(ADMIN, 2)}</td></tr>
+      const L = limAmt(), AD = adminAmt();
+      $('#mktTable').innerHTML = `<table class="sum">${L ? `<tr><td>LIM report <span class="small">(ordered by Tim)</span></td><td class="money">${money(L, 2)}</td></tr>` : ''}
+        ${AD ? `<tr><td>Administration fee <span class="small">(identity checks and onboarding)</span></td><td class="money">${money(AD, 2)}</td></tr>` : ''}
         <tr><td>${later ? 'Marketing' : esc(pk.label)}</td><td class="money">${later ? 'To be agreed' : money(amt, 2)}</td></tr>
-        <tr class="total"><td>${later ? 'Due now, including GST' : 'Total, including GST'}</td><td class="money">${money(LIM + ADMIN + amt, 2)}</td></tr></table>
-        <p class="small" style="margin:12px 0 0">${later ? 'Your marketing will be added once you approve it.' : 'If the property sells or is withdrawn before advertising is booked and paid for, unspent marketing is refunded.'} The administration fee applies whether or not the property sells.</p>`;
+        <tr class="total"><td>${later ? 'Due now, including GST' : 'Total, including GST'}</td><td class="money">${money(L + AD + amt, 2)}</td></tr></table>
+        <p class="small" style="margin:12px 0 0">${later ? 'Your marketing will be added once you approve it.' : 'If the property sells or is withdrawn before advertising is booked and paid for, unspent marketing is refunded.'} ${AD ? 'The administration fee applies whether or not the property sells.' : ''}</p>`;
     };
     $$('[data-a="mkt"]').forEach(r => r.addEventListener('change', draw)); draw();
   };
@@ -690,6 +703,8 @@ hr.soft { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
       if (!n || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)) return err('Add your lawyer\'s name and email.');
       collect(); await saveAns({ acks: ANS.acks || [] });
       await must(sb.rpc('vendor_send_to_lawyer', { a: A.id, l_name: n, l_firm: fm, l_email: e }));
+      const { error: fe } = await sb.functions.invoke('notify', { body: { type: 'lawyer', agreement_id: A.id } });
+      if (fe) console.warn('lawyer email', fe);
       A = await must(sb.from('agreements').select('*').eq('id', A.id).single());
       vendorParked();
     });
@@ -709,7 +724,7 @@ hr.soft { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
     main().innerHTML = `<section class="screen active">
       <h1>Paused while your lawyer takes a look.</h1>
       <p class="lede">${esc(L.lawyer || 'Your lawyer')}${L.firm ? ' at ' + esc(L.firm) : ''} will get a read-only link to your agreement, with everything you've filled in so far.</p>
-      <div class="card"><h3>What happens now</h3><ul style="margin:6px 0 0;padding-left:20px"><li>Nothing is signed and nothing has started.</li><li>Tim has been told you're getting advice.</li><li>Once you've heard back, come back here and carry on. You'll pick up right where you left off.</li></ul></div>
+      <div class="card"><h3>What happens now</h3><ul style="margin:6px 0 0;padding-left:20px"><li>Nothing is signed and nothing has started.</li><li>Your lawyer has been emailed a read-only link, and Tim has a copy.</li><li>Once you've heard back, come back here and carry on. You'll pick up right where you left off.</li></ul></div>
       <div class="card note"><p class="small" style="margin:0">Your lawyer can read the agreement but can't change your answers. If they suggest changes, let Tim know and he'll update it for you.</p></div></section>`;
     actions(true, '', 'I\'ve heard back from my lawyer');
     onNext = async () => { showStep(7); };
@@ -742,7 +757,7 @@ hr.soft { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
       review: pending ? '90 days after commencement' : '90 days after commencement',
       commission: `${money(num(CFG.flat))} for a sale price up to ${money(num(CFG.thr))}, plus ${CFG.pct}% of the portion above, plus GST`,
       example: pending ? 'To be added with the written appraisal' : `At ${money(num(CFG.ask))}: ${money(r2(commission(CFG, num(CFG.ask))))} plus GST`,
-      costs: `LIM $425, administration fee $500, marketing ${later ? 'to be agreed' : money(pk.amt)} (all including GST)`,
+      costs: [limAmt() ? 'LIM ' + money(limAmt()) : '', adminAmt() ? 'administration fee ' + money(adminAmt()) : '', 'marketing ' + (later ? 'to be agreed' : money(pk.amt))].filter(Boolean).join(', ') + ' (including GST)',
       payment: ANS.pay || '',
       condition: pending ? 'Takes effect on receipt of a written appraisal. The client may cancel within 2 working days of receiving it, at no cost.' : '',
       legal: (A.legal || {}).choice === 'have' ? 'Received' : 'Chose to go ahead without it',
@@ -753,7 +768,7 @@ hr.soft { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
     const rows = [['A', 'Client', `${esc(fp.client)}<br><span class="small">GST registered: ${esc(fp.gst)}</span>`], ['B', 'Property', esc(fp.property)], ['C', 'Starts', esc(fp.starts)], ['C', 'Review date', esc(fp.review)],
       ['D', 'Commission', `${esc(fp.commission)}<br><span class="small">${esc(fp.example)}</span>`], ['E', 'Costs', `${esc(fp.costs)}<br><span class="small">Paying: ${esc(fp.payment)}</span>`]];
     if (fp.condition) rows.push(['', 'Condition', esc(fp.condition)]);
-    rows.push(['', 'Property Description', `${esc(ANS.pBed || '?')} bed, ${esc(ANS.pBath || '?')} bath ${esc((ANS.pType || '').toLowerCase())}`], ['', 'Visiting professionals', `${ANS.vPresent === false ? 'Vendor may attend instead' : 'McGuire present at every visit'}, ${esc(ANS.vNotice || '48 hours')} notice`], ['', 'Legal advice', esc(fp.legal)]);
+    rows.push(['', 'Property Description', `${esc(ANS.pBed || '?')} bed, ${esc(ANS.pBath || '?')} bath ${esc((ANS.pType || '').toLowerCase())}`], ['', 'Visiting professionals', `McGuire present at every visit, ${esc((ANS.vNotice || 'Same day is fine').toLowerCase())} notice`], ['', 'Legal advice', esc(fp.legal)]);
     return `
     <h1>Review and sign</h1>
     <p class="lede">Here's your front page, built from your answers.</p>
@@ -790,6 +805,7 @@ hr.soft { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
     await must(sb.storage.from('private').upload(path, blob, { contentType: 'image/png' }));
     const snapshot = { agreement_version: AGREEMENT_VERSION, agreement_ref: A.ref, front_page: frontPage(), config: CFG, answers: ANS, people: P.map(p => ({ legal_name: p.legal_name, email: p.email })), signer: { name: ME.legal_name, email: SESSION.user.email }, signed_at_client: new Date().toISOString() };
     const res = await must(sb.rpc('vendor_sign', { a: A.id, p_image_path: path, p_snapshot: snapshot, p_user_agent: navigator.userAgent }));
+    if (res && res.remaining === 0) { const { error: fe } = await sb.functions.invoke('notify', { body: { type: 'signed', agreement_id: A.id } }); if (fe) console.warn('copy email', fe); }
     A = await must(sb.from('agreements').select('*').eq('id', A.id).single());
     P = await must(sb.from('agreement_people').select('*').eq('agreement_id', A.id).order('position'));
     ME = P.find(p => p.user_id === SESSION.user.id);
@@ -804,7 +820,7 @@ hr.soft { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
     <h1>${waiting.length ? 'Thank you, you\'ve signed.' : 'Thank you, you\'re all signed.'}</h1>
     <p class="lede">${waiting.length ? `Waiting on ${esc(joinNames(waiting.map(p => callName(p) || p.legal_name)))} to sign on their own phone.` : 'I\'m looking forward to selling your home.'}</p>
     ${A.cooling_off_until ? `
-    <div class="card okc"><h3>Your copy</h3><p class="small" style="margin:0">Everyone who signed will be emailed a copy. You can also come back here any time to see it.</p></div>
+    <div class="card okc"><h3>Your copy</h3><p class="small" style="margin:0">Everyone who signed is being emailed a copy. You can also come back here any time to see it.</p></div>
     <div class="card"><h3>Changed your mind?</h3><p style="margin:0">You can cancel this agreement without giving a reason until <strong>${unsol ? 'the end of ' + esc(fmtDate(A.cooling_off_until)) : '5pm, ' + esc(fmtDate(A.cooling_off_until))}</strong>. ${unsol ? 'Just let Tim know. It doesn\'t need to be in writing.' : 'Just email Tim at tim@mcguire.co.nz, or reply to the email with your copy.'}</p>
       <p class="small" style="margin:8px 0 0">This is your legal cooling-off right. <span class="clause">Clause 2.1 and the Real Estate Agents Act 2008</span></p></div>` : ''}
     <h2>What happens next</h2>
@@ -885,6 +901,11 @@ hr.soft { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
       <select id="sPkg">${sel('pkg', [['Digital|3000', 'Digital, $3,000'], ['Premium|6000', 'Premium, $6,000'], ['Elite|11000', 'Elite, $11,000'], ['Custom|0', 'Custom campaign'], ['Later|0', 'Agree marketing later']], 'Premium|6000')}</select>
       <div id="customWrap"><label class="f" for="sCustom">Custom campaign total, incl GST</label><input type="text" id="sCustom" inputmode="numeric" value="${sv('custom')}"></div>
 
+      <h2>Costs on signing</h2>
+      <p class="small">Untick or change either one if you've agreed something different. <span class="clause">Page 1, section E</span></p>
+      <div class="row2"><div><label class="choice cb" style="margin-top:6px"><input type="checkbox" id="sLimOn" ${c.limOn === false ? '' : 'checked'}><span class="mark"></span><span class="ct">LIM report</span></label></div><div><label class="f" for="sLim" style="margin-top:6px">Amount, incl GST</label><input type="text" id="sLim" inputmode="decimal" value="${sv('lim', '425')}"></div></div>
+      <div class="row2"><div><label class="choice cb" style="margin-top:6px"><input type="checkbox" id="sAdminOn" ${c.adminOn === false ? '' : 'checked'}><span class="mark"></span><span class="ct">Administration fee</span></label></div><div><label class="f" for="sAdmin" style="margin-top:6px">Amount, incl GST</label><input type="text" id="sAdmin" inputmode="decimal" value="${sv('admin', '500')}"></div></div>
+
       <h2>Identity checks</h2>
       <label class="f" for="sAml" style="margin-top:0">How vendors are verified</label>
       <select id="sAml">${sel('aml', [['Manual', 'Manual: I check ID myself'], 'Halo', 'APLYiD', 'First AML', 'Cloudcheck', 'Dwellhub'], 'Manual')}</select>
@@ -907,7 +928,7 @@ hr.soft { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
       const g = k => ($('input[name="s_' + k + '"]:checked') || {}).value;
       return {
         address: $('#sAddr').value.trim(),
-        config: Object.assign({}, c, { owners: $('#sOwners').value.trim(), title: $('#sTitle').value.trim(), approach: g('approach'), appr: g('appr'), ask: $('#sAsk').value.trim(), flat: $('#sFlat').value.trim(), thr: $('#sThr').value.trim(), pct: $('#sPct').value.trim(), start: $('#sStart').value, method: $('#sMethod').value, pkg: $('#sPkg').value, custom: $('#sCustom').value.trim(), aml: $('#sAml').value, sign: 'On screen' }),
+        config: Object.assign({}, c, { owners: $('#sOwners').value.trim(), title: $('#sTitle').value.trim(), approach: g('approach'), appr: g('appr'), ask: $('#sAsk').value.trim(), flat: $('#sFlat').value.trim(), thr: $('#sThr').value.trim(), pct: $('#sPct').value.trim(), start: $('#sStart').value, method: $('#sMethod').value, pkg: $('#sPkg').value, custom: $('#sCustom').value.trim(), aml: $('#sAml').value, sign: 'On screen', limOn: $('#sLimOn').checked, lim: $('#sLim').value.trim(), adminOn: $('#sAdminOn').checked, admin: $('#sAdmin').value.trim() }),
         answers: Object.assign({}, an, Object.fromEntries($$('[data-ans]').map(i => [i.dataset.ans, i.value]))),
       };
     };
@@ -952,6 +973,7 @@ hr.soft { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
     const sigs = await must(sb.from('signatures').select('*').eq('agreement_id', id).order('signed_at'));
     const lawyers = await must(sb.from('lawyer_links').select('*').eq('agreement_id', id).order('sent_at', { ascending: false }));
     const amls = await must(sb.from('aml_files').select('id,person_id,locked_at').eq('agreement_id', id));
+    const emails = await must(sb.from('email_log').select('*').eq('agreement_id', id).order('at', { ascending: false }));
     const sigUrls = {};
     for (const s of sigs) if (s.image_path) { const { data } = await sb.storage.from('private').createSignedUrl(s.image_path, 600); if (data) sigUrls[s.id] = data.signedUrl; }
     const names = people.map(p => callName(p)).filter(Boolean);
@@ -982,6 +1004,7 @@ hr.soft { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
       <div class="card"><table class="sum">
         <tr><td>Commission</td><td style="white-space:normal">${money(num(cfg.flat))} up to ${money(num(cfg.thr))}, plus ${esc(cfg.pct)}% above, plus GST</td></tr>
         <tr><td>Appraisal</td><td style="white-space:normal">${cfg.appr === 'pending' ? 'Not yet given: conditional' : 'Given, asking ' + money(num(cfg.ask))}</td></tr>
+        <tr><td>Costs on signing</td><td style="white-space:normal">${[limAmt(cfg) ? 'LIM ' + money(limAmt(cfg)) : 'No LIM', adminAmt(cfg) ? 'admin fee ' + money(adminAmt(cfg)) : 'no admin fee'].join(', ')}</td></tr>
         <tr><td>Marketing</td><td style="white-space:normal">${an.mkt === 'later' || pkgOf(cfg).name === 'Later' ? 'To be agreed' : esc(pkgOf(cfg).label) + ' ' + money(pkgOf(cfg).amt)}${an.pay ? ' · Paying: ' + esc(an.pay) : ''}</td></tr>
         <tr><td>Legal advice</td><td style="white-space:normal">${esc((ag.legal || {}).choice === 'have' ? 'Received' : (ag.legal || {}).choice === 'waive' ? 'Went ahead without' : (ag.legal || {}).status === 'sent' ? 'With lawyer' : 'Not answered yet')}</td></tr>
         <tr><td>Listing came about</td><td>${cfg.approach === 'unsolicited' ? 'You approached them (unsolicited)' : 'They contacted you'}</td></tr>
@@ -998,14 +1021,19 @@ hr.soft { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
         <tr><td>Methamphetamine</td><td style="white-space:normal">${an.meth === 'yes' ? esc(an.methDetail) : an.meth === 'no' ? 'Not known' : ''}</td></tr>
         <tr><td>Defects or notices</td><td style="white-space:normal">${an.def === 'yes' ? esc(an.defDetail) : an.def === 'no' ? 'Not known' : ''}</td></tr>
         <tr><td>Hazards</td><td style="white-space:normal">${esc((an.hazards || []).join(', '))}${an.hazOther ? '. ' + esc(an.hazOther) : ''}</td></tr>
-        <tr><td>Visiting professionals</td><td style="white-space:normal">${an.vPresent === false ? 'Vendor may attend instead' : 'McGuire present at every visit'}; quotes ${an.vQuotes === false ? 'not allowed' : 'allowed'}; sales assessments ${an.vSales ? 'allowed' : 'not allowed'}; ${esc(an.vNotice || '48 hours')} notice${an.vNotes ? '; ' + esc(an.vNotes) : ''}</td></tr>
-        <tr><td>Other agents</td><td style="white-space:normal">${an.prior === 'yes' ? 'YES: ' + esc(an.priorDetail) : 'None'}${an.excluded ? ' · Excluded: ' + esc(an.excluded) : ''}</td></tr>
+        <tr><td>Visiting professionals</td><td style="white-space:normal">McGuire present at every visit; quotes ${an.vQuotes === false ? 'not allowed' : 'allowed'}; sales assessments ${an.vSales ? 'allowed' : 'not allowed'}; ${esc((an.vNotice || 'Same day is fine').toLowerCase())} notice${an.vNotes ? '; ' + esc(an.vNotes) : ''}</td></tr>
+        <tr><td>Other agents</td><td style="white-space:normal">${an.prior === 'yes' ? 'YES: ' + esc(an.priorDetail) : 'None'}</td></tr>
+        <tr><td>Interested buyers</td><td style="white-space:normal">${(an.interested || []).length ? an.interested.map(b => `${esc(b.name)}${b.phone ? ', ' + esc(b.phone) : ''}${b.email ? ', ' + esc(b.email) : ''} <strong>${b.exclude ? '(excluded 10 working days)' : '(Tim to negotiate)'}</strong>`).join('<br>') : (an.excluded ? esc(an.excluded) : 'None')}</td></tr>
         <tr><td>Capacity and GST</td><td style="white-space:normal">${esc(an.capacity || '')}${an.entity ? ' for ' + esc(an.entity) : ''} · GST: ${esc(an.gst === 'yes' ? an.gstNo : 'No')}</td></tr>
       </table></div>
 
       ${sigs.length ? `<h2>Signatures</h2>${sigs.map(s => `<div class="card tight"><div style="font-weight:600">${esc(s.signer_name)} <span class="small">(${s.signer_role === 'agent' ? 'licensee' : 'client'})</span></div><div class="small">${esc(fmtDT(s.signed_at))} · fingerprint ${esc(s.snapshot_sha256.slice(0, 16))}…</div>${sigUrls[s.id] ? `<img class="sigimg" src="${sigUrls[s.id]}" alt="Signature of ${esc(s.signer_name)}">` : ''}</div>`).join('')}` : ''}
 
-      ${lawyers.length ? `<h2>Lawyer links</h2>${lawyers.map(l => `<div class="card tight"><div style="font-weight:600">${esc(l.lawyer_name)}${l.firm ? ', ' + esc(l.firm) : ''}</div><div class="small">${esc(l.email)} · sent ${esc(fmtDT(l.sent_at))} · ${l.first_opened_at ? 'opened ' + esc(fmtDT(l.first_opened_at)) + ` (${l.open_count}×)` : 'not opened yet'}</div></div>`).join('')}` : ''}
+      ${lawyers.length ? `<h2>Lawyer links</h2>${lawyers.map(l => `<div class="card tight"><div style="font-weight:600">${esc(l.lawyer_name)}${l.firm ? ', ' + esc(l.firm) : ''}</div><div class="small">${esc(l.email)} · sent ${esc(fmtDT(l.sent_at))} · ${l.first_opened_at ? 'opened ' + esc(fmtDT(l.first_opened_at)) + ` (${l.open_count}×)` : 'not opened yet'}</div>
+        <div class="small">${l.emailed_at ? 'Emailed ' + esc(fmtDT(l.emailed_at)) : `<strong style="color:var(--accent)">Not emailed${l.email_error ? ': ' + esc(l.email_error) : ''}</strong>`}</div>
+        ${l.emailed_at ? '' : `<button class="btn ghost no-print" type="button" data-sendlaw="1" style="margin-top:8px">Send lawyer email now</button>`}</div>`).join('')}` : ''}
+      ${['signed', 'countersigned'].includes(ag.status) ? `<h2>Signed copy</h2><div class="card tight"><div class="small">${ag.copy_sent_at ? 'Emailed to everyone ' + esc(fmtDT(ag.copy_sent_at)) : `<strong style="color:var(--accent)">Not emailed yet${ag.copy_error ? ': ' + esc(ag.copy_error) : ''}</strong>`}</div>${ag.copy_sent_at || ag.status !== 'signed' ? '' : '<button class="btn ghost no-print" type="button" id="sendCopy" style="margin-top:8px">Email signed copy now</button>'}</div>` : ''}
+      ${emails.length ? `<h2>Emails</h2><div class="card tight">${emails.map(m => `<div class="fact"><div class="k">${esc(fmtDT(m.at))} · ${m.ok ? 'sent' : 'FAILED'}</div><div class="v" style="font-weight:400">${esc(m.subject)} <span class="small">to ${esc(m.recipients)}${m.error ? ' · ' + esc(m.error) : ''}</span></div></div>`).join('')}</div>` : ''}
 
       <h2>Record of events</h2>
       <div class="card tight">${events.map(e => `<div class="fact"><div class="k">${esc(fmtDT(e.at))} · ${esc(e.actor)}</div><div class="v" style="font-weight:400">${esc(e.kind.replace(/_/g, ' '))}${e.detail && Object.keys(e.detail).length ? ' <span class="small">' + esc(Object.values(e.detail).filter(x => typeof x !== 'object').join(', ')) + '</span>' : ''}</div></div>`).join('')}</div>
@@ -1015,6 +1043,9 @@ hr.soft { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
     const cm = $('#copyMsg'); if (cm) cm.addEventListener('click', async () => { try { await navigator.clipboard.writeText(msg); toast('Copied'); } catch { toast('Select the text and copy it'); } });
     const ed = $('#editAg'); if (ed) ed.addEventListener('click', () => viewSetup(id));
     $('#printBtn').addEventListener('click', () => window.print());
+    const callNotify = async (type) => { const { data, error } = await sb.functions.invoke('notify', { body: { type, agreement_id: id } }); if (error || (data && data.ok === false)) toast('Email failed. See the Emails list below.'); else toast('Email sent'); viewAgentDetail(id); };
+    $$('[data-sendlaw]').forEach(b => b.addEventListener('click', () => { b.disabled = true; callNotify('lawyer'); }));
+    const sc = $('#sendCopy'); if (sc) sc.addEventListener('click', () => { sc.disabled = true; callNotify('signed'); });
     $$('[data-aml]').forEach(b => b.addEventListener('click', () => viewAml(id, b.dataset.aml)));
     const cb = $('#counterBtn');
     if (cb) cb.addEventListener('click', () => {
@@ -1154,6 +1185,57 @@ hr.soft { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
     };
     top();
   }
+
+  async function viewLawyer(token) {
+    header('Read-only review', '', 0); actions(false); $('#signOut').hidden = true;
+    let d;
+    try {
+      const r = await fetch(`${SB_URL}/functions/v1/lawyer-view?token=${encodeURIComponent(token)}`, { headers: { apikey: SB_KEY } });
+      d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'This link isn\'t valid.');
+    } catch (e) { main().innerHTML = `<div class="login-card"><h1>Link not available</h1><p class="lede">${esc(e.message)}</p><p class="small">Tim McGuire · 027 562 7207 · tim@mcguire.co.nz</p></div>`; return; }
+    const ag = d.agreement, c = ag.config || {}, an = ag.answers || {}, pk = pkgOf(c), later = pk.name === 'Later' || an.mkt === 'later';
+    const row = (k, v) => `<tr><td>${k}</td><td style="white-space:normal">${v}</td></tr>`;
+    main().innerHTML = `<div class="view-pad">
+      <span class="agent-flag">Read-only · for ${esc(d.lawyer.name)}</span>
+      <h1>${esc(ag.address)}</h1>
+      <p class="lede">Draft Sole and Exclusive Agency Agreement prepared by McGuire Real Estate for ${esc((d.people || []).map(p => p.legal_name).filter(Boolean).join(' and '))}. ${ag.signed_at ? 'Signed ' + esc(fmtDT(ag.signed_at)) + '.' : 'Not yet signed.'}</p>
+      <p class="small">${esc(ag.ref)} · ${esc(ag.agreement_version)}</p>
+      <div class="toolbar no-print"><button class="btn ghost" type="button" onclick="window.print()">Print or save as PDF</button></div>
+      <h2>Appointment of agency (front page)</h2>
+      <div class="card"><table class="sum">
+        ${row('A. Client(s)', esc((d.people || []).map(p => p.legal_name).filter(Boolean).join(' and ')) + (an.capacity && an.capacity !== 'Owners' ? `, as ${esc(an.capacity.toLowerCase())} for ${esc(an.entity || '')}` : '') + `<br><span class="small">GST registered: ${an.gst === 'yes' ? 'Yes' : 'No'}</span>`)}
+        ${row('B. Property', esc(ag.address) + (c.owners ? `<br><span class="small">Registered owners: ${esc(c.owners)}${c.title ? ' · ' + esc(c.title) : ''}</span>` : ''))}
+        ${row('C. Commencement', c.appr === 'pending' ? 'On receipt of written appraisal' : esc(c.start ? fmtDate(c.start) : 'On signing') + '. Review date 90 days after commencement')}
+        ${row('D. Commission', `${money(num(c.flat))} for a sale price up to ${money(num(c.thr))}, plus ${esc(c.pct)}% of the portion above, plus GST` + (c.appr === 'pending' ? '' : `<br><span class="small">At ${money(num(c.ask))}: ${money(r2(commission(c, num(c.ask))))} plus GST</span>`))}
+        ${row('E. Costs on signing', [limAmt(c) ? 'LIM ' + money(limAmt(c)) : '', adminAmt(c) ? 'administration fee ' + money(adminAmt(c)) : '', 'marketing ' + (later ? 'to be agreed' : esc(pk.label) + ' ' + money(pk.amt))].filter(Boolean).join(', ') + ' (including GST)' + (an.pay ? `<br><span class="small">Payment via List Now: ${esc(an.pay)}</span>` : ''))}
+        ${c.method ? row('Method of sale', esc(c.method)) : ''}
+        ${c.appr === 'pending' ? row('Condition', 'Takes effect on receipt of a written appraisal. The client may cancel within 2 working days of receiving it, at no cost.') : ''}
+        ${row('Cancellation', c.approach === 'unsolicited' ? 'Unsolicited approach: the client may cancel within 5 working days of receiving a copy.' : 'The client may cancel by 5pm on the first working day after receiving a copy (s130 REAA 2008).')}
+      </table></div>
+      <h2>Property Description and client answers</h2>
+      <div class="card"><table class="sum">
+        ${row('Property', `${esc(an.pBed || '?')} bed, ${esc(an.pBath || '?')} bath ${esc((an.pType || '').toLowerCase())}, ${esc(an.pFloor || '?')}m² on ${esc(an.pLand || '?')}m², built ${esc(an.pYear || '?')}`)}
+        ${row('Construction', [an.pBuild, an.pPark, an.pHeat].filter(Boolean).map(esc).join(' · '))}
+        ${row('Chattels', esc((an.chattels || []).join(', ')) + (an.chatOther ? '. ' + esc(an.chatOther) : ''))}
+        ${row('Work done', an.work === 'yes' ? esc(an.workDetail) : an.work === 'no' ? 'None known' : 'Not answered yet')}
+        ${row('Weathertightness', an.wt === 'yes' ? esc(an.wtDetail) : an.wt === 'no' ? 'No issues known' : 'Not answered yet')}
+        ${row('Methamphetamine', an.meth === 'yes' ? esc(an.methDetail) : an.meth === 'no' ? 'None known' : 'Not answered yet')}
+        ${row('Defects or notices', an.def === 'yes' ? esc(an.defDetail) : an.def === 'no' ? 'None known' : 'Not answered yet')}
+        ${row('Hazards', esc((an.hazards || []).join(', ')) + (an.hazOther ? '. ' + esc(an.hazOther) : ''))}
+        ${row('Visiting professionals', `McGuire representative present at every visit; quotes ${an.vQuotes === false ? 'not allowed' : 'allowed'}; sales assessments ${an.vSales ? 'allowed' : 'not allowed'}; ${esc((an.vNotice || 'Same day is fine').toLowerCase())} notice`)}
+        ${row('Other agencies', an.prior === 'yes' ? 'Yes: ' + esc(an.priorDetail) : an.prior ? 'None' : 'Not answered yet')}
+        ${row('Interested buyers', (an.interested || []).length ? an.interested.map(b => esc(b.name) + (b.exclude ? ' (excluded for 10 working days)' : ' (to be negotiated by the agent)')).join('<br>') : 'None listed')}
+      </table></div>
+      <h2>Standard terms</h2>
+      <div class="card"><p style="margin:0">The front page is read together with McGuire Real Estate's standard Terms and Conditions (${esc(ag.agreement_version)}). For a full copy, reply to the email you received or contact Tim McGuire on 027 562 7207 or tim@mcguire.co.nz.</p>
+        <p class="small" style="margin:10px 0 0">Real Estate Authority guides: <a href="${REA_AA}" target="_blank" rel="noopener">agency agreements</a> · <a href="${REA_SP}" target="_blank" rel="noopener">sale and purchase agreements</a></p></div>
+    </div>`;
+    top();
+  }
+
+  const lawyerToken = new URLSearchParams(location.search).get('lawyer');
+  if (lawyerToken) { viewLawyer(lawyerToken); return; }
 
   boot().catch(e => { console.error(e); main().innerHTML = `<div class="login-card"><h1>Something went wrong</h1><p class="lede">Please refresh the page. If it keeps happening, call Tim on 027 562 7207.</p></div>`; });
 })();
