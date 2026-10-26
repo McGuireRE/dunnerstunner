@@ -812,6 +812,30 @@ hr.soft { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
     return true;
   };
 
+function lawyerForm(id, title, blurb) {
+    return `<div class="card" id="${id}"><h3>${title}</h3><p class="small">${blurb}</p>
+      <label class="f" for="${id}N">Lawyer's name</label><input type="text" id="${id}N">
+      <label class="f" for="${id}F">Firm <span class="opt">(optional)</span></label><input type="text" id="${id}F">
+      <label class="f" for="${id}E">Email</label><input type="email" id="${id}E">
+      <div class="toolbar"><button class="btn primary" type="button" id="${id}Go">Send to lawyer</button></div>
+      <div class="err" id="${id}Err"></div><div class="card okc tight" id="${id}Ok" hidden><p class="small" style="margin:0"></p></div></div>`;
+  }
+  function wireLawyerForm(id, send) {
+    $('#' + id + 'Go').addEventListener('click', async () => {
+      const n = $('#' + id + 'N').value.trim(), fm = $('#' + id + 'F').value.trim(), e = $('#' + id + 'E').value.trim();
+      const er = $('#' + id + 'Err'); er.textContent = '';
+      if (!n || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)) { er.textContent = 'Add the lawyer\'s name and email.'; return; }
+      const btn = $('#' + id + 'Go'); btn.disabled = true;
+      try {
+        await send(n, fm, e);
+        const { data, error } = await sb.functions.invoke('notify', { body: { type: 'lawyer', agreement_id: A ? A.id : send.agId } });
+        const ok = $('#' + id + 'Ok'); ok.hidden = false;
+        ok.querySelector('p').textContent = (error || (data && data.ok === false)) ? `Saved, but the email didn't go yet. Tim has been told and will make sure ${n} gets it.` : `Sent. ${n} has been emailed a read-only link to the signed agreement, and Tim has a copy.`;
+        ['N', 'F', 'E'].forEach(s => $('#' + id + s).value = '');
+      } catch (_) { /* toast shown */ } finally { btn.disabled = false; }
+    });
+  }
+
   /* 10 done */
   SCREENS[10] = () => {
     const waiting = P.filter(p => p.legal_name && !p.signed_at);
@@ -831,8 +855,10 @@ hr.soft { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
         mktLater() ? ['Tim sends a marketing proposal for you to approve', 'This week'] : null,
         ['We book your photographer and agree a shoot date', CFG.appr === 'pending' ? 'After your appraisal' : 'This week'],
         ['You review the listing before it goes live', 'Before launch']].filter(Boolean).map((s, i) => `<li><span class="n">${i + 1}</span><span>${s[0]}</span><span class="t">${s[1]}</span></li>`).join('')}
-    </ol>`;
+    </ol>
+    ${['signed', 'countersigned', 'ended'].includes(A.status) ? '<h2>Send a copy to your lawyer</h2>' + lawyerForm('fwd', 'Forward the signed agreement', 'Your lawyer gets an email with a read-only link to the signed agreement. Tim gets a copy. You can do this as often as you like.') : ''}`;
   };
+  BIND[10] = () => { if ($('#fwd')) wireLawyerForm('fwd', async (n, fm, e) => { await must(sb.rpc('vendor_forward_to_lawyer', { a: A.id, l_name: n, l_firm: fm, l_email: e })); }); };
 
   /* ═════════════════ AGENT ═════════════════ */
   async function viewAgentList() {
@@ -992,6 +1018,7 @@ hr.soft { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
         ${['signed', 'countersigned', 'sent', 'parked'].includes(ag.status) ? '<button class="btn ghost" type="button" id="endBtn">End agency</button>' : ''}
       </div>
       <div id="counterBox"></div><div id="endBox"></div>
+      ${['signed', 'countersigned', 'ended'].includes(ag.status) ? `<div class="no-print">${lawyerForm('afwd', 'Forward the signed agreement to a lawyer', 'Yours or anyone\'s. They get a read-only link for 90 days, and you get a copy of the email.')}</div>` : ''}
       ${ag.cooling_off_until ? `<div class="card tight"><div class="facts"><div class="fact"><div class="k">All signed</div><div class="v">${esc(fmtDT(ag.signed_at))}</div></div><div class="fact"><div class="k">Cooling-off ends</div><div class="v">${esc(fmtDT(ag.cooling_off_until))}</div></div></div></div>` : ''}
 
       <h2>People</h2>
@@ -1043,6 +1070,7 @@ hr.soft { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
     const cm = $('#copyMsg'); if (cm) cm.addEventListener('click', async () => { try { await navigator.clipboard.writeText(msg); toast('Copied'); } catch { toast('Select the text and copy it'); } });
     const ed = $('#editAg'); if (ed) ed.addEventListener('click', () => viewSetup(id));
     $('#printBtn').addEventListener('click', () => window.print());
+    if ($('#afwd')) { const sender = async (n, fm, e) => { await must(sb.from('lawyer_links').insert({ agreement_id: id, lawyer_name: n, firm: fm, email: e, sent_by: 'Tim McGuire', expires_at: new Date(Date.now() + 90 * 864e5).toISOString() })); await must(sb.from('agreement_events').insert({ agreement_id: id, actor: SESSION.user.email, kind: 'forwarded_to_lawyer', detail: { lawyer: n, email: e } })); }; sender.agId = id; wireLawyerForm('afwd', sender); }
     const callNotify = async (type) => { const { data, error } = await sb.functions.invoke('notify', { body: { type, agreement_id: id } }); if (error || (data && data.ok === false)) toast('Email failed. See the Emails list below.'); else toast('Email sent'); viewAgentDetail(id); };
     $$('[data-sendlaw]').forEach(b => b.addEventListener('click', () => { b.disabled = true; callNotify('lawyer'); }));
     const sc = $('#sendCopy'); if (sc) sc.addEventListener('click', () => { sc.disabled = true; callNotify('signed'); });
@@ -1227,6 +1255,7 @@ hr.soft { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
         ${row('Other agencies', an.prior === 'yes' ? 'Yes: ' + esc(an.priorDetail) : an.prior ? 'None' : 'Not answered yet')}
         ${row('Interested buyers', (an.interested || []).length ? an.interested.map(b => esc(b.name) + (b.exclude ? ' (excluded for 10 working days)' : ' (to be negotiated by the agent)')).join('<br>') : 'None listed')}
       </table></div>
+      ${(d.people || []).some(p => p.signed_at) ? `<h2>Signatures</h2><div class="card"><table class="sum">${d.people.filter(p => p.signed_at).map(p => row(esc(p.legal_name), 'Signed ' + esc(fmtDT(p.signed_at)))).join('')}${ag.countersigned_at ? row('Timothy McGuire REA#20117983', 'Countersigned ' + esc(fmtDT(ag.countersigned_at))) : ''}</table></div>` : ''}
       <h2>Standard terms</h2>
       <div class="card"><p style="margin:0">The front page is read together with McGuire Real Estate's standard Terms and Conditions (${esc(ag.agreement_version)}). For a full copy, reply to the email you received or contact Tim McGuire on 027 562 7207 or tim@mcguire.co.nz.</p>
         <p class="small" style="margin:10px 0 0">Real Estate Authority guides: <a href="${REA_AA}" target="_blank" rel="noopener">agency agreements</a> · <a href="${REA_SP}" target="_blank" rel="noopener">sale and purchase agreements</a></p></div>
