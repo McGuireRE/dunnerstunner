@@ -281,6 +281,20 @@ hr.soft { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
   const adminAmt = (cfg = CFG) => cfg.adminOn === false ? 0 : (cfg.admin === undefined || cfg.admin === '' ? 500 : num(cfg.admin));
   function pkgOf(cfg) { const [name, amt] = String(cfg.pkg || 'Later|0').split('|'); return { name, amt: name === 'Custom' ? num(cfg.custom) : +amt, label: name === 'Custom' ? 'Custom campaign' : name + ' package' }; }
 
+  async function openPdf(agreementId) {
+    const w = window.open('', '_blank');
+    if (w) w.document.write('<p style="font-family:sans-serif;padding:20px">Preparing your agreement…</p>');
+    try {
+      const { data: { session } } = await sb.auth.getSession();
+      const r = await fetch(`${SB_URL}/functions/v1/agreement-pdf?id=${agreementId}`, { headers: { apikey: SB_KEY, Authorization: 'Bearer ' + (session ? session.access_token : '') } });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Could not create the PDF');
+      const url = URL.createObjectURL(await r.blob());
+      if (w) w.location.href = url; else location.href = url;
+    } catch (e) { if (w) w.close(); toast(e.message); }
+  }
+  const pdfBtn = (label = 'Read the full agreement (PDF)') => `<button class="btn ghost" type="button" data-pdf="1">${label}</button>`;
+  function wirePdf(id) { $$('[data-pdf]').forEach(b => b.addEventListener('click', () => openPdf(id))); }
+
   /* ───────── content ───────── */
   const GUIDE = [
     ['What you\'re appointing us to do', 'Clause 1 and 2.1', ['McGuire Real Estate becomes your sole and exclusive agent: the only agency working on your sale.', 'We market the property, negotiate for you, prepare the paperwork and do what it takes to bring the sale home.']],
@@ -663,12 +677,13 @@ hr.soft { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
     return `
     <h1>Your agreement, in plain English</h1>
     <p class="lede">Read each section and tick it once it makes sense. If something doesn't, text Tim before you tick it.</p>
-    <p class="small">The full legal wording is in your copy of the agreement, and if anything here differs, the agreement applies. <strong id="readCount">${ticked.length} of ${GUIDE.length}</strong> ticked.</p>
+    <p class="small">The full legal wording is in the agreement itself, and if anything here differs, the agreement applies. <strong id="readCount">${ticked.length} of ${GUIDE.length}</strong> ticked.</p>
+    <div class="toolbar">${pdfBtn()}</div>
     ${GUIDE.map((g, i) => `<div class="card gcard ${ticked.includes(String(i)) ? 'done' : ''}"><h3>${esc(g[0])}</h3><div class="clause">${esc(g[1])}</div><ul>${g[2].map(x => `<li>${esc(x)}</li>`).join('')}</ul>
       <label class="choice cb"><input type="checkbox" data-multi="guide" value="${i}" ${ticked.includes(String(i)) ? 'checked' : ''}><span class="mark"></span><span class="ct">I understand this</span></label></div>`).join('')}
     <div class="err"></div>`;
   };
-  BIND[6] = () => $$('[data-multi="guide"]').forEach(c => c.addEventListener('change', () => { c.closest('.gcard').classList.toggle('done', c.checked); $('#readCount').textContent = `${$$('[data-multi="guide"]:checked').length} of ${GUIDE.length}`; }));
+  BIND[6] = () => wirePdf(A.id) || $$('[data-multi="guide"]').forEach(c => c.addEventListener('change', () => { c.closest('.gcard').classList.toggle('done', c.checked); $('#readCount').textContent = `${$$('[data-multi="guide"]:checked').length} of ${GUIDE.length}`; }));
   NEXT[6] = async () => { const a = collect(); const left = GUIDE.length - a.guide.length; if (left) return err(`Tick each section once it makes sense. ${left} to go.`); await saveAns(a); return true; };
 
   /* 7 acknowledgements + legal */
@@ -781,6 +796,7 @@ hr.soft { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
       return `<div class="card tight" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><h3 style="margin:0">${esc(p.legal_name)}</h3>${p.signed_at ? `<span class="signed-badge">✓ Signed ${esc(fmtDT(p.signed_at))}</span>` : '<span class="status pending">Signs on their own phone</span>'}</div>`;
     }).join('')}
     <p class="small">By signing you agree to the Sole and Exclusive Agency Agreement ${esc(AGREEMENT_VERSION.split('-')[0])}, including the Terms and Conditions, the Property Description and the Verification of Ownership. Tim countersigns once everyone has signed.</p>
+    <div class="toolbar">${pdfBtn('Read the full agreement before signing (PDF)')}</div>
     <div class="err"></div>`;
   };
   function initPad(id) {
@@ -796,7 +812,7 @@ hr.soft { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
     const end = () => { drawing = false; }; cv.addEventListener('pointerup', end); cv.addEventListener('pointercancel', end);
     return () => { ctx.clearRect(0, 0, cv.width, cv.height); padDrawn = false; const h = cv.parentElement.querySelector('.hint'); if (h) h.hidden = false; };
   }
-  BIND[9] = () => { const clear = initPad('sig0'); const c = $('#clearSig'); if (c && clear) c.addEventListener('click', clear); if (!$('#sig0')) actions(true, 'Back', 'See status'); };
+  BIND[9] = () => { wirePdf(A.id); const clear = initPad('sig0'); const c = $('#clearSig'); if (c && clear) c.addEventListener('click', clear); if (!$('#sig0')) actions(true, 'Back', 'See status'); };
   NEXT[9] = async () => {
     if (!$('#sig0')) return true;
     if (!padDrawn) return err('Please sign in the box.');
@@ -856,9 +872,10 @@ function lawyerForm(id, title, blurb) {
         ['We book your photographer and agree a shoot date', CFG.appr === 'pending' ? 'After your appraisal' : 'This week'],
         ['You review the listing before it goes live', 'Before launch']].filter(Boolean).map((s, i) => `<li><span class="n">${i + 1}</span><span>${s[0]}</span><span class="t">${s[1]}</span></li>`).join('')}
     </ol>
+    <div class="toolbar">${pdfBtn(A.status === 'signed' || A.status === 'countersigned' ? 'Download your signed agreement (PDF)' : 'Read the full agreement (PDF)')}</div>
     ${['signed', 'countersigned', 'ended'].includes(A.status) ? '<h2>Send a copy to your lawyer</h2>' + lawyerForm('fwd', 'Forward the signed agreement', 'Your lawyer gets an email with a read-only link to the signed agreement. Tim gets a copy. You can do this as often as you like.') : ''}`;
   };
-  BIND[10] = () => { if ($('#fwd')) wireLawyerForm('fwd', async (n, fm, e) => { await must(sb.rpc('vendor_forward_to_lawyer', { a: A.id, l_name: n, l_firm: fm, l_email: e })); }); };
+  BIND[10] = () => { wirePdf(A.id); if ($('#fwd')) wireLawyerForm('fwd', async (n, fm, e) => { await must(sb.rpc('vendor_forward_to_lawyer', { a: A.id, l_name: n, l_firm: fm, l_email: e })); }); };
 
   /* ═════════════════ AGENT ═════════════════ */
   async function viewAgentList() {
@@ -912,7 +929,9 @@ function lawyerForm(id, title, blurb) {
 
       <h2>Appraisal</h2>
       <div class="choices">${rad('appr', 'done', 'Written appraisal given', '', 'done')}${rad('appr', 'pending', 'Not yet', 'The agreement becomes conditional on them receiving your written appraisal', 'done')}</div>
-      <div id="askWrap"><label class="f" for="sAsk">Asking price or median appraised value</label><input type="text" id="sAsk" inputmode="numeric" value="${sv('ask')}"></div>
+      <div id="askWrap"><div class="row2 stack"><div><label class="f" for="sAsk">Price for the commission example</label><input type="text" id="sAsk" inputmode="numeric" value="${sv('ask')}"></div>
+        <div><label class="f" for="sAskBasis">Based on</label><select id="sAskBasis">${sel('askBasis', [['asking', 'Client\'s asking price'], ['median', 'Median appraised value']], 'asking')}</select></div></div>
+        <label class="f" for="sApprUrl">Appraisal web address <span class="opt">(clause 23.1, optional)</span></label><input type="url" id="sApprUrl" value="${sv('apprUrl')}" placeholder="Leave blank if given in writing"></div>
 
       <h2>Commission</h2><p class="small">As you agreed with the vendor in conversation. <span class="clause">Page 1, section D</span></p>
       <div class="row2"><div><label class="f" for="sFlat">Flat fee</label><input type="text" id="sFlat" inputmode="numeric" value="${sv('flat')}"></div><div><label class="f" for="sThr">For a sale price up to</label><input type="text" id="sThr" inputmode="numeric" value="${sv('thr', '250000')}"></div></div>
@@ -921,6 +940,7 @@ function lawyerForm(id, title, blurb) {
       <h2>Dates and method</h2>
       <div class="row2 stack"><div><label class="f" for="sStart">Commencement date <span class="opt">(blank = on signing)</span></label><input type="date" id="sStart" value="${sv('start')}"></div>
       <div><label class="f" for="sMethod">Method of sale</label><select id="sMethod">${sel('method', ['', 'Auction', 'Tender', 'Deadline sale', 'Price by negotiation', 'Fixed price', 'Expressions of interest', 'Timed sale', 'Ballot'], '')}</select></div></div>
+      <label class="f" for="sMethodDate">Auction, tender, deadline or ballot date and time <span class="opt">(optional)</span></label><input type="text" id="sMethodDate" value="${sv('methodDate')}" placeholder="For example: Thu 26 Nov 2026, 4pm">
 
       <h2>Marketing</h2>
       <label class="f" for="sPkg" style="margin-top:0">Recommended package</label>
@@ -954,7 +974,7 @@ function lawyerForm(id, title, blurb) {
       const g = k => ($('input[name="s_' + k + '"]:checked') || {}).value;
       return {
         address: $('#sAddr').value.trim(),
-        config: Object.assign({}, c, { owners: $('#sOwners').value.trim(), title: $('#sTitle').value.trim(), approach: g('approach'), appr: g('appr'), ask: $('#sAsk').value.trim(), flat: $('#sFlat').value.trim(), thr: $('#sThr').value.trim(), pct: $('#sPct').value.trim(), start: $('#sStart').value, method: $('#sMethod').value, pkg: $('#sPkg').value, custom: $('#sCustom').value.trim(), aml: $('#sAml').value, sign: 'On screen', limOn: $('#sLimOn').checked, lim: $('#sLim').value.trim(), adminOn: $('#sAdminOn').checked, admin: $('#sAdmin').value.trim() }),
+        config: Object.assign({}, c, { owners: $('#sOwners').value.trim(), title: $('#sTitle').value.trim(), approach: g('approach'), appr: g('appr'), ask: $('#sAsk').value.trim(), askBasis: $('#sAskBasis').value, apprUrl: $('#sApprUrl').value.trim(), methodDate: $('#sMethodDate').value.trim(), flat: $('#sFlat').value.trim(), thr: $('#sThr').value.trim(), pct: $('#sPct').value.trim(), start: $('#sStart').value, method: $('#sMethod').value, pkg: $('#sPkg').value, custom: $('#sCustom').value.trim(), aml: $('#sAml').value, sign: 'On screen', limOn: $('#sLimOn').checked, lim: $('#sLim').value.trim(), adminOn: $('#sAdminOn').checked, admin: $('#sAdmin').value.trim() }),
         answers: Object.assign({}, an, Object.fromEntries($$('[data-ans]').map(i => [i.dataset.ans, i.value]))),
       };
     };
@@ -1014,7 +1034,8 @@ function lawyerForm(id, title, blurb) {
       <div class="toolbar no-print">
         ${['draft', 'sent', 'parked'].includes(ag.status) ? '<button class="btn ghost" type="button" id="editAg">Edit setup</button>' : ''}
         ${ag.status === 'signed' ? '<button class="btn primary" type="button" id="counterBtn">Countersign</button>' : ''}
-        <button class="btn ghost" type="button" id="printBtn">Print or save as PDF</button>
+        <button class="btn primary" type="button" data-pdf="1">Full agreement (PDF)</button>
+        <button class="btn ghost" type="button" id="printBtn">Print this page</button>
         ${['signed', 'countersigned', 'sent', 'parked'].includes(ag.status) ? '<button class="btn ghost" type="button" id="endBtn">End agency</button>' : ''}
       </div>
       <div id="counterBox"></div><div id="endBox"></div>
@@ -1070,6 +1091,7 @@ function lawyerForm(id, title, blurb) {
     const cm = $('#copyMsg'); if (cm) cm.addEventListener('click', async () => { try { await navigator.clipboard.writeText(msg); toast('Copied'); } catch { toast('Select the text and copy it'); } });
     const ed = $('#editAg'); if (ed) ed.addEventListener('click', () => viewSetup(id));
     $('#printBtn').addEventListener('click', () => window.print());
+    wirePdf(id);
     if ($('#afwd')) { const sender = async (n, fm, e) => { await must(sb.from('lawyer_links').insert({ agreement_id: id, lawyer_name: n, firm: fm, email: e, sent_by: 'Tim McGuire', expires_at: new Date(Date.now() + 90 * 864e5).toISOString() })); await must(sb.from('agreement_events').insert({ agreement_id: id, actor: SESSION.user.email, kind: 'forwarded_to_lawyer', detail: { lawyer: n, email: e } })); }; sender.agId = id; wireLawyerForm('afwd', sender); }
     const callNotify = async (type) => { const { data, error } = await sb.functions.invoke('notify', { body: { type, agreement_id: id } }); if (error || (data && data.ok === false)) toast('Email failed. See the Emails list below.'); else toast('Email sent'); viewAgentDetail(id); };
     $$('[data-sendlaw]').forEach(b => b.addEventListener('click', () => { b.disabled = true; callNotify('lawyer'); }));
@@ -1229,7 +1251,7 @@ function lawyerForm(id, title, blurb) {
       <h1>${esc(ag.address)}</h1>
       <p class="lede">Draft Sole and Exclusive Agency Agreement prepared by McGuire Real Estate for ${esc((d.people || []).map(p => p.legal_name).filter(Boolean).join(' and '))}. ${ag.signed_at ? 'Signed ' + esc(fmtDT(ag.signed_at)) + '.' : 'Not yet signed.'}</p>
       <p class="small">${esc(ag.ref)} · ${esc(ag.agreement_version)}</p>
-      <div class="toolbar no-print"><button class="btn ghost" type="button" onclick="window.print()">Print or save as PDF</button></div>
+      <div class="toolbar no-print"><a class="btn primary" href="${SB_URL}/functions/v1/agreement-pdf?token=${encodeURIComponent(token)}" target="_blank" rel="noopener" style="text-decoration:none">Full agreement with all terms (PDF)</a></div>
       <h2>Appointment of agency (front page)</h2>
       <div class="card"><table class="sum">
         ${row('A. Client(s)', esc((d.people || []).map(p => p.legal_name).filter(Boolean).join(' and ')) + (an.capacity && an.capacity !== 'Owners' ? `, as ${esc(an.capacity.toLowerCase())} for ${esc(an.entity || '')}` : '') + `<br><span class="small">GST registered: ${an.gst === 'yes' ? 'Yes' : 'No'}</span>`)}
@@ -1257,7 +1279,7 @@ function lawyerForm(id, title, blurb) {
       </table></div>
       ${(d.people || []).some(p => p.signed_at) ? `<h2>Signatures</h2><div class="card"><table class="sum">${d.people.filter(p => p.signed_at).map(p => row(esc(p.legal_name), 'Signed ' + esc(fmtDT(p.signed_at)))).join('')}${ag.countersigned_at ? row('Timothy McGuire REA#20117983', 'Countersigned ' + esc(fmtDT(ag.countersigned_at))) : ''}</table></div>` : ''}
       <h2>Standard terms</h2>
-      <div class="card"><p style="margin:0">The front page is read together with McGuire Real Estate's standard Terms and Conditions (${esc(ag.agreement_version)}). For a full copy, reply to the email you received or contact Tim McGuire on 027 562 7207 or tim@mcguire.co.nz.</p>
+      <div class="card"><p style="margin:0">The front page is read together with McGuire Real Estate's standard Terms and Conditions (${esc(ag.agreement_version)}). The PDF above contains the complete agreement: the filled front page, every term, the schedules and the signature record.</p>
         <p class="small" style="margin:10px 0 0">Real Estate Authority guides: <a href="${REA_AA}" target="_blank" rel="noopener">agency agreements</a> · <a href="${REA_SP}" target="_blank" rel="noopener">sale and purchase agreements</a></p></div>
     </div>`;
     top();
