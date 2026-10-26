@@ -276,7 +276,14 @@ hr.soft { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
   async function sha256(text) { const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)); return Array.from(new Uint8Array(b)).map(x => x.toString(16).padStart(2, '0')).join(''); }
   const callName = p => (p.pref_name || '').trim() || (p.legal_name || '').trim().split(/\s+/)[0] || '';
   const joinNames = a => a.length < 2 ? a.join('') : a.slice(0, -1).join(', ') + ' and ' + a[a.length - 1];
-  function commission(cfg, p) { const flat = num(cfg.flat), thr = num(cfg.thr), pct = num(cfg.pct); return p <= thr ? flat : flat + (p - thr) * pct / 100; }
+  const aboveType = cfg => cfg.aboveType || 'pct';
+  function commission(cfg, p) { const flat = num(cfg.flat), thr = num(cfg.thr), t = aboveType(cfg); if (t === 'none' || p <= thr) return flat; return t === 'amount' ? flat + num(cfg.aboveAmt) : flat + (p - thr) * num(cfg.pct) / 100; }
+  function commText(cfg) {
+    const t = aboveType(cfg);
+    if (t === 'none') return `${money(num(cfg.flat))} flat fee, whatever the sale price, plus GST`;
+    if (t === 'amount') return `${money(num(cfg.flat))} for a sale price up to ${money(num(cfg.thr))}, plus a further ${money(num(cfg.aboveAmt))} if the sale price is above that, plus GST`;
+    return `${money(num(cfg.flat))} for a sale price up to ${money(num(cfg.thr))}, plus ${cfg.pct}% of the portion above, plus GST`;
+  }
   const limAmt = (cfg = CFG) => cfg.limOn === false ? 0 : (cfg.lim === undefined || cfg.lim === '' ? 425 : num(cfg.lim));
   const adminAmt = (cfg = CFG) => cfg.adminOn === false ? 0 : (cfg.admin === undefined || cfg.admin === '' ? 500 : num(cfg.admin));
   function pkgOf(cfg) { const [name, amt] = String(cfg.pkg || 'Later|0').split('|'); return { name, amt: name === 'Custom' ? num(cfg.custom) : +amt, label: name === 'Custom' ? 'Custom campaign' : name + ' package' }; }
@@ -596,8 +603,8 @@ hr.soft { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
     ${pending ? '<div class="card warnc"><h3>Conditional on your written appraisal</h3><p class="small" style="margin:0">You\'re listing before I\'ve given you a written appraisal. This agreement only takes effect once you\'ve received it, and nothing is marketed or spent before then. If the appraisal changes your mind, you can cancel within 2 working days of receiving it, at no cost.</p></div>' : ''}
     <h2>Commission</h2><p class="clause">Page 1, section D and clause 5</p>
     <div class="card"><div class="prefill">As agreed with Tim, and entered by him</div>
-      <table class="sum"><tr><td>Fee for a sale price up to ${money(num(CFG.thr))}</td><td class="money">${money(num(CFG.flat))}</td></tr>
-      <tr><td>Plus, on the part of the price above ${money(num(CFG.thr))}</td><td class="money">${esc(CFG.pct)}%</td></tr><tr><td>GST</td><td>Added on top</td></tr></table>
+      <table class="sum">${aboveType(CFG) === 'none' ? `<tr><td>Flat fee, whatever the sale price</td><td class="money">${money(num(CFG.flat))}</td></tr>` : `<tr><td>Fee for a sale price up to ${money(num(CFG.thr))}</td><td class="money">${money(num(CFG.flat))}</td></tr>
+      <tr><td>Plus, ${aboveType(CFG) === 'amount' ? 'if the sale price is above ' + money(num(CFG.thr)) : 'on the part of the price above ' + money(num(CFG.thr))}</td><td class="money">${aboveType(CFG) === 'amount' ? money(num(CFG.aboveAmt)) : esc(CFG.pct) + '%'}</td></tr>`}<tr><td>GST</td><td>Added on top</td></tr></table>
       <p class="small" style="margin:14px 0 6px">Try a sale price to see the commission:</p>
       <div class="row2"><div><label class="f" for="cPrice" style="margin-top:0">Sale price</label><input type="text" id="cPrice" inputmode="numeric" value="${pending ? '' : num(CFG.ask).toLocaleString('en-NZ')}"></div>
       <div><div class="small" style="margin-bottom:6px;font-weight:500;color:var(--ink)">Commission</div><div class="big money" id="cOut"></div><div class="small" id="cOutGst"></div></div></div>
@@ -645,13 +652,7 @@ hr.soft { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
       ${pk.name === 'Custom' ? '' : '<a href="https://packages.dunnerstunner.co.nz" target="_blank" rel="noopener">See exactly what\'s included</a>'}</div>
       <div class="choices">${f.radio('mkt', 'go', 'Go with this', '', 'go')}${f.radio('mkt', 'later', 'Sign now, agree marketing later', 'Nothing is booked or spent until you approve a budget in writing', 'go')}</div>`}
     <div class="card" id="mktTable"></div>
-    <h2>How would you like to pay?</h2><p class="small">Through List Now, our payment partner. Their terms and eligibility apply.</p>
-    <div class="choices">
-      ${f.radio('pay', 'Up front', 'Up front', 'Pay in full before your campaign starts', '')}
-      ${f.radio('pay', 'In instalments', 'In instalments', 'Spread the cost over regular payments', '')}
-      ${f.radio('pay', 'Deducted at settlement', 'At settlement', 'Nothing to pay now. Deducted from your sale proceeds when the property settles', '')}
-    </div>
-    <p class="small">List Now will send you a link to complete this after you've signed.</p>
+    <div class="card note tight"><h3>Paying through List Now</h3><p class="small" style="margin:0">Invoices are issued through List Now, our payment partner. You choose how to settle with them: up front, in instalments, or deducted at settlement. Their terms and eligibility apply.</p></div>
     <div class="card tight"><h3>Rebates and commissions</h3><p class="small" style="margin:0">McGuire Real Estate doesn't receive any rebates, discounts or commissions from these suppliers. <span class="clause">Clause 7.1.1</span></p></div>
     <div class="err"></div>`;
   };
@@ -669,7 +670,7 @@ hr.soft { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
     };
     $$('[data-a="mkt"]').forEach(r => r.addEventListener('change', draw)); draw();
   };
-  NEXT[5] = async () => { const a = collect(); if (!a.pay) return err('Choose how you\'d like to pay. You can change it with List Now later.'); await saveAns(a); return true; };
+  NEXT[5] = async () => { const a = collect(); await saveAns(a); return true; };
 
   /* 6 guide */
   SCREENS[6] = () => {
@@ -770,10 +771,9 @@ hr.soft { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
       property: A.address,
       starts: pending ? 'On receipt of written appraisal' : (CFG.start ? fmtDate(CFG.start) : 'On signing'),
       review: pending ? '90 days after commencement' : '90 days after commencement',
-      commission: `${money(num(CFG.flat))} for a sale price up to ${money(num(CFG.thr))}, plus ${CFG.pct}% of the portion above, plus GST`,
+      commission: commText(CFG),
       example: pending ? 'To be added with the written appraisal' : `At ${money(num(CFG.ask))}: ${money(r2(commission(CFG, num(CFG.ask))))} plus GST`,
       costs: [limAmt() ? 'LIM ' + money(limAmt()) : '', adminAmt() ? 'administration fee ' + money(adminAmt()) : '', 'marketing ' + (later ? 'to be agreed' : money(pk.amt))].filter(Boolean).join(', ') + ' (including GST)',
-      payment: ANS.pay || '',
       condition: pending ? 'Takes effect on receipt of a written appraisal. The client may cancel within 2 working days of receiving it, at no cost.' : '',
       legal: (A.legal || {}).choice === 'have' ? 'Received' : 'Chose to go ahead without it',
     };
@@ -781,7 +781,7 @@ hr.soft { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
   SCREENS[9] = () => {
     const fp = frontPage();
     const rows = [['A', 'Client', `${esc(fp.client)}<br><span class="small">GST registered: ${esc(fp.gst)}</span>`], ['B', 'Property', esc(fp.property)], ['C', 'Starts', esc(fp.starts)], ['C', 'Review date', esc(fp.review)],
-      ['D', 'Commission', `${esc(fp.commission)}<br><span class="small">${esc(fp.example)}</span>`], ['E', 'Costs', `${esc(fp.costs)}<br><span class="small">Paying: ${esc(fp.payment)}</span>`]];
+      ['D', 'Commission', `${esc(fp.commission)}<br><span class="small">${esc(fp.example)}</span>`], ['E', 'Costs', `${esc(fp.costs)}<br><span class="small">Invoiced through List Now</span>`]];
     if (fp.condition) rows.push(['', 'Condition', esc(fp.condition)]);
     rows.push(['', 'Property Description', `${esc(ANS.pBed || '?')} bed, ${esc(ANS.pBath || '?')} bath ${esc((ANS.pType || '').toLowerCase())}`], ['', 'Visiting professionals', `McGuire present at every visit, ${esc((ANS.vNotice || 'Same day is fine').toLowerCase())} notice`], ['', 'Legal advice', esc(fp.legal)]);
     return `
@@ -866,7 +866,7 @@ function lawyerForm(id, title, blurb) {
     <h2>What happens next</h2>
     <ol class="steps-list">
       ${[CFG.appr === 'pending' ? ['Tim prepares your written appraisal. Your agreement takes effect when you receive it', 'This week'] : null,
-        ['List Now sends your payment link' + (ANS.pay ? `. You chose: <strong>${esc(ANS.pay.toLowerCase())}</strong>` : ''), 'Soon'],
+        ['List Now sends your invoice, and you choose how to settle it', 'Soon'],
         ['Tim countersigns and orders your LIM', 'Once everyone has signed'],
         mktLater() ? ['Tim sends a marketing proposal for you to approve', 'This week'] : null,
         ['We book your photographer and agree a shoot date', CFG.appr === 'pending' ? 'After your appraisal' : 'This week'],
@@ -935,7 +935,10 @@ function lawyerForm(id, title, blurb) {
 
       <h2>Commission</h2><p class="small">As you agreed with the vendor in conversation. <span class="clause">Page 1, section D</span></p>
       <div class="row2"><div><label class="f" for="sFlat">Flat fee</label><input type="text" id="sFlat" inputmode="numeric" value="${sv('flat')}"></div><div><label class="f" for="sThr">For a sale price up to</label><input type="text" id="sThr" inputmode="numeric" value="${sv('thr', '250000')}"></div></div>
-      <label class="f" for="sPct">Plus this % of the price above that</label><input type="text" id="sPct" inputmode="decimal" value="${sv('pct')}">
+      <label class="f" for="sAbove">Above that price</label>
+      <select id="sAbove">${sel('aboveType', [['pct', 'Plus a percentage of the portion above'], ['amount', 'Plus a fixed dollar amount'], ['none', 'Nothing more: flat fee at any price']], 'pct')}</select>
+      <div id="pctWrap"><label class="f" for="sPct">Percentage</label><input type="text" id="sPct" inputmode="decimal" value="${sv('pct')}"></div>
+      <div id="amtWrap"><label class="f" for="sAboveAmt">Fixed amount, excl GST</label><input type="text" id="sAboveAmt" inputmode="numeric" value="${sv('aboveAmt')}"></div>
 
       <h2>Dates and method</h2>
       <div class="row2 stack"><div><label class="f" for="sStart">Commencement date <span class="opt">(blank = on signing)</span></label><input type="date" id="sStart" value="${sv('start')}"></div>
@@ -967,14 +970,14 @@ function lawyerForm(id, title, blurb) {
     };
     drawPeople();
     $('#sAddP').addEventListener('click', () => { people.push({ legal_name: '', pref_name: '', email: '', phone: '' }); drawPeople(); });
-    const upd = () => { $('#askWrap').hidden = ($('input[name="s_appr"]:checked') || {}).value === 'pending'; $('#customWrap').hidden = !$('#sPkg').value.startsWith('Custom'); };
-    $$('input[name="s_appr"]').forEach(r => r.addEventListener('change', upd)); $('#sPkg').addEventListener('change', upd); upd();
+    const upd = () => { $('#askWrap').hidden = ($('input[name="s_appr"]:checked') || {}).value === 'pending'; $('#customWrap').hidden = !$('#sPkg').value.startsWith('Custom'); $('#pctWrap').hidden = $('#sAbove').value !== 'pct'; $('#amtWrap').hidden = $('#sAbove').value !== 'amount'; };
+    $$('input[name="s_appr"]').forEach(r => r.addEventListener('change', upd)); $('#sPkg').addEventListener('change', upd); $('#sAbove').addEventListener('change', upd); upd();
 
     const gather = () => {
       const g = k => ($('input[name="s_' + k + '"]:checked') || {}).value;
       return {
         address: $('#sAddr').value.trim(),
-        config: Object.assign({}, c, { owners: $('#sOwners').value.trim(), title: $('#sTitle').value.trim(), approach: g('approach'), appr: g('appr'), ask: $('#sAsk').value.trim(), askBasis: $('#sAskBasis').value, apprUrl: $('#sApprUrl').value.trim(), methodDate: $('#sMethodDate').value.trim(), flat: $('#sFlat').value.trim(), thr: $('#sThr').value.trim(), pct: $('#sPct').value.trim(), start: $('#sStart').value, method: $('#sMethod').value, pkg: $('#sPkg').value, custom: $('#sCustom').value.trim(), aml: $('#sAml').value, sign: 'On screen', limOn: $('#sLimOn').checked, lim: $('#sLim').value.trim(), adminOn: $('#sAdminOn').checked, admin: $('#sAdmin').value.trim() }),
+        config: Object.assign({}, c, { owners: $('#sOwners').value.trim(), title: $('#sTitle').value.trim(), approach: g('approach'), appr: g('appr'), ask: $('#sAsk').value.trim(), askBasis: $('#sAskBasis').value, apprUrl: $('#sApprUrl').value.trim(), methodDate: $('#sMethodDate').value.trim(), flat: $('#sFlat').value.trim(), thr: $('#sThr').value.trim(), pct: $('#sPct').value.trim(), aboveType: $('#sAbove').value, aboveAmt: $('#sAboveAmt').value.trim(), start: $('#sStart').value, method: $('#sMethod').value, pkg: $('#sPkg').value, custom: $('#sCustom').value.trim(), aml: $('#sAml').value, sign: 'On screen', limOn: $('#sLimOn').checked, lim: $('#sLim').value.trim(), adminOn: $('#sAdminOn').checked, admin: $('#sAdmin').value.trim() }),
         answers: Object.assign({}, an, Object.fromEntries($$('[data-ans]').map(i => [i.dataset.ans, i.value]))),
       };
     };
@@ -982,7 +985,7 @@ function lawyerForm(id, title, blurb) {
       const g = gather(); const e = msg => { $('.err', main()).textContent = msg; $('.err', main()).scrollIntoView({ block: 'center' }); return false; };
       if (!g.address) return e('Add the property address.');
       if (send) {
-        if (!num(g.config.flat) || !num(g.config.pct) || !num(g.config.thr)) return e('Fill in the commission before sending.');
+        const at = g.config.aboveType; if (!num(g.config.flat) || (at !== 'none' && !num(g.config.thr)) || (at === 'pct' && !num(g.config.pct)) || (at === 'amount' && !num(g.config.aboveAmt))) return e('Fill in the commission before sending.');
         if (g.config.appr !== 'pending' && !num(g.config.ask)) return e('Add the asking price or appraised value, or choose "Not yet" for the appraisal.');
         if (!people.some(p => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(p.email || ''))) return e('Add at least one seller\'s email so they can sign in.');
       }
@@ -1050,7 +1053,7 @@ function lawyerForm(id, title, blurb) {
 
       <h2>Front page</h2>
       <div class="card"><table class="sum">
-        <tr><td>Commission</td><td style="white-space:normal">${money(num(cfg.flat))} up to ${money(num(cfg.thr))}, plus ${esc(cfg.pct)}% above, plus GST</td></tr>
+        <tr><td>Commission</td><td style="white-space:normal">${esc(commText(cfg))}</td></tr>
         <tr><td>Appraisal</td><td style="white-space:normal">${cfg.appr === 'pending' ? 'Not yet given: conditional' : 'Given, asking ' + money(num(cfg.ask))}</td></tr>
         <tr><td>Costs on signing</td><td style="white-space:normal">${[limAmt(cfg) ? 'LIM ' + money(limAmt(cfg)) : 'No LIM', adminAmt(cfg) ? 'admin fee ' + money(adminAmt(cfg)) : 'no admin fee'].join(', ')}</td></tr>
         <tr><td>Marketing</td><td style="white-space:normal">${an.mkt === 'later' || pkgOf(cfg).name === 'Later' ? 'To be agreed' : esc(pkgOf(cfg).label) + ' ' + money(pkgOf(cfg).amt)}${an.pay ? ' · Paying: ' + esc(an.pay) : ''}</td></tr>
@@ -1257,8 +1260,8 @@ function lawyerForm(id, title, blurb) {
         ${row('A. Client(s)', esc((d.people || []).map(p => p.legal_name).filter(Boolean).join(' and ')) + (an.capacity && an.capacity !== 'Owners' ? `, as ${esc(an.capacity.toLowerCase())} for ${esc(an.entity || '')}` : '') + `<br><span class="small">GST registered: ${an.gst === 'yes' ? 'Yes' : 'No'}</span>`)}
         ${row('B. Property', esc(ag.address) + (c.owners ? `<br><span class="small">Registered owners: ${esc(c.owners)}${c.title ? ' · ' + esc(c.title) : ''}</span>` : ''))}
         ${row('C. Commencement', c.appr === 'pending' ? 'On receipt of written appraisal' : esc(c.start ? fmtDate(c.start) : 'On signing') + '. Review date 90 days after commencement')}
-        ${row('D. Commission', `${money(num(c.flat))} for a sale price up to ${money(num(c.thr))}, plus ${esc(c.pct)}% of the portion above, plus GST` + (c.appr === 'pending' ? '' : `<br><span class="small">At ${money(num(c.ask))}: ${money(r2(commission(c, num(c.ask))))} plus GST</span>`))}
-        ${row('E. Costs on signing', [limAmt(c) ? 'LIM ' + money(limAmt(c)) : '', adminAmt(c) ? 'administration fee ' + money(adminAmt(c)) : '', 'marketing ' + (later ? 'to be agreed' : esc(pk.label) + ' ' + money(pk.amt))].filter(Boolean).join(', ') + ' (including GST)' + (an.pay ? `<br><span class="small">Payment via List Now: ${esc(an.pay)}</span>` : ''))}
+        ${row('D. Commission', esc(commText(c)) + (c.appr === 'pending' ? '' : `<br><span class="small">At ${money(num(c.ask))}: ${money(r2(commission(c, num(c.ask))))} plus GST</span>`))}
+        ${row('E. Costs on signing', [limAmt(c) ? 'LIM ' + money(limAmt(c)) : '', adminAmt(c) ? 'administration fee ' + money(adminAmt(c)) : '', 'marketing ' + (later ? 'to be agreed' : esc(pk.label) + ' ' + money(pk.amt))].filter(Boolean).join(', ') + ' (including GST)')}
         ${c.method ? row('Method of sale', esc(c.method)) : ''}
         ${c.appr === 'pending' ? row('Condition', 'Takes effect on receipt of a written appraisal. The client may cancel within 2 working days of receiving it, at no cost.') : ''}
         ${row('Cancellation', c.approach === 'unsolicited' ? 'Unsolicited approach: the client may cancel within 5 working days of receiving a copy.' : 'The client may cancel by 5pm on the first working day after receiving a copy (s130 REAA 2008).')}
