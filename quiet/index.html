@@ -38,7 +38,7 @@ p { margin: 0 0 1em; }
 .top-in { display: flex; align-items: center; gap: 18px; height: 68px; }
 .brand { display: flex; align-items: center; gap: 12px; text-decoration: none; flex-shrink: 0; }
 .brand img { height: 36px; width: auto; }
-.brand .ql { font-family: var(--serif); font-size: 22px; font-weight: 600; border-left: 1px solid var(--line2); padding-left: 12px; white-space: nowrap; }
+.brand .ql { font-family: var(--serif); font-size: 27px; font-weight: 600; white-space: nowrap; color: var(--ink); }
 .nav { display: flex; gap: 4px; align-items: center; flex: 1; }
 .nav a { text-decoration: none; font-weight: 500; font-size: 15.5px; color: var(--ink2); padding: 8px 12px; border-radius: 6px; white-space: nowrap; }
 .nav a:hover, .nav a.on { background: var(--bg); color: var(--ink); }
@@ -51,9 +51,9 @@ p { margin: 0 0 1em; }
   .nav.open { display: flex; }
   .nav a { padding: 12px 8px; font-size: 17px; }
   .nav-right { margin: 8px 0 0; flex-wrap: wrap; }
-  .brand .ql { font-size: 19px; }
+  .brand .ql { font-size: 23px; }
 }
-@media (max-width: 400px) { .brand img { height: 30px; } .brand .ql { font-size: 17px; padding-left: 9px; } }
+@media (max-width: 400px) { .brand .ql { font-size: 21px; } }
 
 /* buttons + forms */
 .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; font: 600 16px var(--sans); padding: 12px 20px; border-radius: 8px; border: 1px solid transparent; cursor: pointer; text-decoration: none; transition: background .15s, border-color .15s; min-height: 46px; }
@@ -256,7 +256,7 @@ fieldset { border: 0; padding: 0; margin: 0; }
 <body>
 <header class="top">
   <div class="wrap top-in">
-    <a class="brand" href="#/"><img src="assets/logo.png" alt="McGuire Real Estate"><span class="ql">Quiet Listings</span></a>
+    <a class="brand" href="#/"><span class="ql">Quiet Listings</span></a>
     <button class="menu-btn" id="menuBtn" type="button" aria-label="Menu" aria-expanded="false">☰</button>
     <nav class="nav" id="nav"></nav>
   </div>
@@ -264,7 +264,7 @@ fieldset { border: 0; padding: 0; margin: 0; }
 <main id="app"><div class="loading">Loading…</div></main>
 <footer class="foot">
   <div class="wrap cols">
-    <div><strong style="color:#fff">McGuire Real Estate Ltd</strong><br>Licensed REAA 2008 · Dunedin<br>027 562 7207 · <a href="mailto:tim@mcguire.co.nz">tim@mcguire.co.nz</a></div>
+    <div><img src="assets/logo-on-dark.png" alt="McGuire Real Estate" style="height:44px;width:auto;margin-bottom:12px"><strong style="color:#fff">McGuire Real Estate Ltd</strong><br>Licensed REAA 2008 · Dunedin<br>027 562 7207 · <a href="mailto:tim@mcguire.co.nz">tim@mcguire.co.nz</a></div>
     <div><a href="#/how">How Quiet Listings works</a><br><a href="#/privacy">Privacy</a><br><a href="https://packages.dunnerstunner.co.nz/">Marketing packages</a></div>
   </div>
 </footer>

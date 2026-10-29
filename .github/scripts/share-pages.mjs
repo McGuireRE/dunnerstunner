@@ -22,8 +22,8 @@ h1{font-family:'Cormorant Garamond',serif;font-weight:500;color:#fff;font-size:3
 .cta{display:block;text-align:center;background:#EB4A33;color:#fff;text-decoration:none;font-weight:600;font-size:18px;padding:15px;border-radius:8px}
 .note{font-size:14.5px;color:#A9A297;margin-top:12px;text-align:center}.foot{font-size:13px;color:#8F887E;margin-top:30px;border-top:1px solid #2c2f37;padding-top:14px}
 .serious{display:inline-block;border:1px solid rgba(176,141,87,.5);color:#E6D3B3;padding:6px 12px;border-radius:999px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;font-size:12px;margin-top:14px}</style></head>
-<body><div class="w"><div class="top"><img src="${SITE}assets/logo-on-dark.png" alt="McGuire Real Estate"><span>Quiet Listings</span></div>${inner}
-<div class="foot">Offered privately by McGuire Real Estate Ltd, Licensed REAA 2008. Tim McGuire, 027 562 7207.</div></div></body></html>`;
+<body><div class="w"><div class="top"><span style="border:0;padding:0;font-size:24px">Quiet Listings</span></div>${inner}
+<div class="foot"><img src="${SITE}assets/logo-on-dark.png" alt="McGuire Real Estate" style="height:34px;display:block;margin-bottom:10px">Offered privately by McGuire Real Estate Ltd, Licensed REAA 2008. Tim McGuire, 027 562 7207.</div></div></body></html>`;
 const live = new Set();
 for (const p of pages) {
   if (!p.slug) continue; live.add(p.slug);

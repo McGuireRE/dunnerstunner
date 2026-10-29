@@ -29,7 +29,7 @@ function buildEmail(l: any, s: any, stage: number, site: string) {
   let subject = "", body = "";
   if (stage <= 1) {
     subject = `Your first week on Quiet Listings: ${nameOf(l)}`;
-    body = `${hi}<p>A quick update on ${where} after its first week as a Quiet Listing.</p>${statsBlock(s)}<p>Every one of these buyers has been personally qualified, with their finance checked, before they could see your home. I'll keep you posted as things develop.</p>${shareTip}<p>${btn(link, "See your listing's activity", false)}</p>`;
+    body = `${hi}<p>A quick update on ${where} after its first week as a Quiet Listing.</p>${statsBlock(s)}<p>Every one of these buyers has been personally vetted before they could see your home. I'll keep you posted as things develop.</p>${shareTip}<p>${btn(link, "See your listing's activity", false)}</p>`;
   } else if (stage === 2) {
     subject = `Three weeks in: ${nameOf(l)}`;
     body = `${hi}<p>Here's where things stand for ${where} after three weeks.</p>${statsBlock(s)}${shareTip}${checkin}`;

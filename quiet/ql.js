@@ -145,7 +145,7 @@
       <div class="grid4">
         <div class="tile"><div class="num">01</div><h3>Discretion</h3><p>Their home, address and price are never published. Neighbours, colleagues and the curious never know.</p></div>
         <div class="tile"><div class="num">02</div><h3>No disruption</h3><p>No open homes and no weekends spent tidying for strangers. Every viewing is private and accompanied.</p></div>
-        <div class="tile"><div class="num">03</div><h3>Qualified buyers</h3><p>Owners meet only people whose finance and intentions have been checked before they ever walk through the door.</p></div>
+        <div class="tile"><div class="num">03</div><h3>Qualified buyers</h3><p>Owners meet only people we've spoken to personally, and who are genuinely in a position to buy.</p></div>
         <div class="tile"><div class="num">04</div><h3>A clean test of the market</h3><p>Owners can learn what a property is worth to serious buyers without a public price history.</p></div>
       </div>
     </div></section>
@@ -178,7 +178,7 @@
           <p>Owners who sell quietly are trusting us to introduce people who are ready. That's why every member is reviewed personally before they see a single home.</p>
           <ol style="padding-left:20px">
             <li style="margin-bottom:10px"><strong>You apply.</strong> Tell us who you are, your experience in the market, your finance, your top ten buying criteria and why you are buying.</li>
-            <li style="margin-bottom:10px"><strong>We verify.</strong> Every application is reviewed personally. We'll sight written evidence of your finance, such as a bank pre-approval or proof of funds, and may call you.</li>
+            <li style="margin-bottom:10px"><strong>We get to know you.</strong> Every application is reviewed personally, and Tim will call you to talk through your plans and your position.</li>
             <li style="margin-bottom:10px"><strong>You see Quiet Listings.</strong> Once approved, you can browse every Quiet Listing, save the ones you like and ask for private viewings. When something comes up that suits what you've told us, we'll let you know.</li>
             <li><strong>You keep us posted.</strong> Pre-approvals expire and plans change. Let us know when yours do, so we can keep helping you well.</li>
           </ol>
@@ -188,7 +188,7 @@
       <div class="eyebrow">What membership asks of you</div>
       <h2>Four commitments.</h2>
       <div class="grid4">
-        <div class="tile"><h3>Verified finance</h3><p>Written evidence of your ability to buy, kept up to date.</p></div>
+        <div class="tile"><h3>Honesty about your position</h3><p>A straight answer about your finance and what you need to do before you can buy.</p></div>
         <div class="tile"><h3>Genuine intent</h3><p>Viewings only for properties you are genuinely prepared to buy, and turning up as arranged.</p></div>
         <div class="tile"><h3>Confidentiality</h3><p>Nothing you see is shared, screenshotted or discussed outside your household and advisers.</p></div>
         <div class="tile"><h3>Respect for owners</h3><p>No direct approaches, drive-bys that disturb the owners, or contact with neighbours. Everything goes through us.</p></div>
@@ -197,12 +197,12 @@
   }
 
   function viewHow() {
-    app.innerHTML = `<section class="hero" style="padding:60px 0 50px"><div class="wrap"><div class="eyebrow">Quiet Listings</div><h1>How it works</h1><p class="lede">Private property for qualified buyers, offered at the owners' request.</p>${S.session ? '' : '<div class="cta"><a class="btn primary" href="#/apply">Apply for membership</a></div>'}</div></section>
+    app.innerHTML = `<section class="hero" style="padding:60px 0 50px"><div class="wrap"><div class="eyebrow">Quiet Listings</div><h1>How it works</h1><p class="lede">Discreet listing for qualified buyers</p>${S.session ? '' : '<div class="cta"><a class="btn primary" href="#/apply">Apply for membership</a></div>'}</div></section>
     ${howSection()}
     <section class="band alt"><div class="narrow prose">
       <h2>Common questions</h2>
       <h3>Does membership cost anything?</h3><p>No. There is no charge to buyers.</p>
-      <h3>How long does approval take?</h3><p>Usually within two working days of receiving a complete application and evidence of finance.</p>
+      <h3>How long does approval take?</h3><p>Usually within two working days. Tim will call you first to talk through your plans.</p>
       <h3>Why do you need my home address and finance details?</h3><p>Owners are trusting us to introduce only genuine buyers. Knowing who you are and confirming your position is how we keep that trust. Your details are kept private and are never given to owners. When you ask to view a property, we tell the owner your name and that you have been qualified.</p>
       <h3>What if my application is declined?</h3><p>Access is deliberately limited, so not every application is approved. We'll still gladly help you with properties on the open market, and you're welcome to update your application if your circumstances change.</p>
       <h3>Why is there no price?</h3><p>Every Quiet Listing is offered by expressions of interest. The homes are off-market, so owners keep their price expectations private. If you're interested, tell us what you'd be prepared to pay and we'll take it to the owner.</p>
@@ -213,8 +213,8 @@
   function viewPrivacy() {
     app.innerHTML = `<div class="narrow prose" style="padding:40px 20px 70px"><div class="eyebrow">Quiet Listings</div><h1 style="font-size:44px">Privacy</h1>
       <p>McGuire Real Estate Ltd collects the information in your application to assess your membership, verify your ability to buy, match you with suitable properties and contact you about them. We handle it in line with the Privacy Act 2020.</p>
-      <h2>What we collect</h2><p>Your name, contact details and home address; your buying experience; details of your finance, including any documents you upload; your buying criteria and reasons for buying; and a record of the listings you view and enquire about.</p>
-      <h2>Who sees it</h2><p>Only McGuire Real Estate. We never give owners your finance details or documents. When you ask to view a property, we tell the owner your name and that you have been qualified. We may confirm your pre-approval with the lender named in your application, with your consent, which you give when you apply.</p>
+      <h2>What we collect</h2><p>Your name, contact details and home address; your buying experience; what you tell us about your finance; your buying criteria and reasons for buying; and a record of the listings you view and enquire about.</p>
+      <h2>Who sees it</h2><p>Only McGuire Real Estate. We never give owners your finance details. When you ask to view a property, we tell the owner your name and that you have been qualified. We may confirm your pre-approval with the lender named in your application, with your consent, which you give when you apply.</p>
       <h2>Where it's kept</h2><p>Securely with our database provider, Supabase, in Sydney, Australia, with access restricted to McGuire Real Estate.</p>
       <h2>How long we keep it</h2><p>While you are a member, and for up to two years after you last use Quiet Listings, unless the law requires us to keep it longer. You can ask us to close your membership and delete your information at any time.</p>
       <h2>Your rights</h2><p>You can ask to see or correct the information we hold about you. Email <a href="mailto:tim@mcguire.co.nz">tim@mcguire.co.nz</a> or call 027 562 7207.</p></div>`;
@@ -264,13 +264,12 @@
   const SUGGEST = ['All-day sun', 'North-facing living', 'Off-street parking', 'Internal-access garage', 'Single level', 'Low maintenance', 'Views', 'Quiet street', 'Flat section', 'School zone', 'Close to the city', 'Warm and dry', 'Heat pump or log burner', 'Modern kitchen', 'Second living area', 'Ensuite', 'Character features', 'Outdoor entertaining', 'Garden', 'Privacy', 'Walk to shops', 'Home office', 'Room for a workshop', 'Easy-care section'];
   const ACKS = [
     ['stringent', 'I understand Quiet Listings are offered privately at the owners\' request, and that membership is for serious buyers only.'],
-    ['logic', 'I understand my membership depends on verified finance, and that owners may set their own terms for a sale.'],
     ['confidential', 'I will keep every listing confidential. I will not share, screenshot, forward or post any details, except with my partner, co-buyers, lawyer, lender or inspector.'],
     ['contact', 'I will not approach owners, visit a property uninvited, or contact neighbours. All contact goes through McGuire Real Estate.'],
     ['genuine', 'I will only ask to view properties I am genuinely prepared to buy, and I will turn up as arranged.'],
     ['current', 'I will tell you promptly if my finance or circumstances change.'],
     ['withdraw', 'I understand membership may be declined, paused or withdrawn at any time, without a reason being given.'],
-    ['true', 'The information in my application is true. I agree McGuire Real Estate may confirm my finance with the lender I\'ve named, and I have read the <a href="#/privacy" target="_blank">privacy statement</a>.'],
+    ['true', 'The information in my application is true. I agree McGuire Real Estate may contact me to talk through my plans and finance, and I have read the <a href="#/privacy" target="_blank">privacy statement</a>.'],
   ];
   let D = null; // draft
   const TOP = ['full_name', 'phone', 'home_address'];
@@ -304,8 +303,8 @@
       ${radios('looking_for', 'How long have you been looking?', OPT.looking_for)}
       ${radios('offers', 'How many offers have you made in the last 12 months?', OPT.offers)}`,
       v: () => ['bought', 'sold', 'owns', 'buying_as', 'looking_for', 'offers'].some(k => !getV(k)) ? 'Please answer every question.' : '' },
-    { t: 'Your finances', r: () => `
-      <div class="card tight" style="background:var(--bg)"><strong>Why we ask</strong><p class="small" style="margin:6px 0 0">Owners selling quietly want to meet buyers who can act. We\'ll sight written evidence of your finance before approving your membership. Your finance details are never shown to owners.</p></div>
+    { t: 'Your position', r: () => `
+      <p class="muted">A rough picture is all we need here. Tim will talk it through with you personally. Nothing you tell us is shown to owners.</p>
       ${fld('budget', 'The most you can spend', { im: 'numeric', ph: '$', hint: 'Your realistic maximum purchase price, including your deposit.' })}
       ${radios('finance_type', 'How are you funding your purchase?', OPT.finance_type)}
       <div id="preBox">${'' }
@@ -313,22 +312,16 @@
       </div>
       ${fld('deposit', 'Deposit or cash available', { im: 'numeric', ph: '$', opt: true })}
       ${radios('need_to_sell', 'Do you need to sell a property before you can buy?', OPT.need_to_sell)}
-      <div id="finWarn"></div>
-      <div class="legend">Evidence of finance <span class="opt">(you can add this later, but it's needed before approval)</span></div>
-      <div class="hint">A pre-approval letter, or proof of funds such as a bank statement. PDF or photo.</div>
-      <ul class="uploads" id="docList">${(getV('docs') || []).map(d => `<li>✓ ${esc(d.name)}</li>`).join('')}</ul>
-      <label class="btn ghost sm" style="cursor:pointer">Upload a document<input type="file" id="docIn" accept=".pdf,image/*" multiple hidden></label>
-      <label class="check" style="margin-top:20px;border-top:1px solid var(--line)"><input type="checkbox" id="ackLogic" ${getV('ack_logic') ? 'checked' : ''}><span>I understand my membership depends on verified finance, and I\'ll let you know if my finance changes or expires.</span></label>`,
+      <div id="finWarn"></div>`,
       after: () => {
         const sync = () => { const ft = ($('[data-f=finance_type]:checked', app) || {}).value || ''; $('#preBox').classList.toggle('hidden', ft.startsWith('Cash') || ft.startsWith('Not yet'));
           const ns = ($('[data-f=need_to_sell]:checked', app) || {}).value || '';
           const tip = ns.startsWith('Yes') ? '<div class="okbox small"><strong>Need to sell first?</strong> List your home quietly with us and become an owner-member: you get 48 hours\' early access to new Quiet Listings, and we can match you with buyers whose homes might suit you. <a href="#/sell" target="_blank">Tell us about your home</a>.</div>' : '';
-          $('#finWarn').innerHTML = tip + (ft.startsWith('Not yet') ? '<div class="note">Applications without finance in place are rarely approved. We recommend speaking to a lender or mortgage adviser first. You can still apply, and we\'ll review it once your pre-approval is through.</div>' : ft.startsWith('Pre-approval applied') ? '<div class="note">We\'ll need to see your pre-approval before we can approve your membership.</div>' : ''); };
+          $('#finWarn').innerHTML = tip; };
         $$('[data-f=need_to_sell]', app).forEach(r => r.addEventListener('change', sync));
         $$('[data-f=finance_type]', app).forEach(r => r.addEventListener('change', sync)); sync();
-        $('#docIn').onchange = async e => { await uploadDocs(e.target.files, $('#docList')); };
       },
-      v: () => !num(getV('budget')) ? 'Please tell us the most you can spend.' : !getV('finance_type') ? 'Please tell us how you are funding your purchase.' : !getV('need_to_sell') ? 'Please tell us whether you need to sell first.' : !getV('ack_logic') ? 'Please tick the box about your finance.' : '' },
+      v: () => !num(getV('budget')) ? 'Please tell us the most you can spend.' : !getV('finance_type') ? 'Please tell us how you are funding your purchase.' : !getV('need_to_sell') ? 'Please tell us whether you need to sell first.' : '' },
     { t: 'What you\'re looking for', r: () => {
       const crit = (getV('criteria') || []).concat(Array(10).fill('')).slice(0, 10);
       return `<p class="muted">This is how we match you with owners. Be specific: the more honest you are about what matters, the better the match.</p>
@@ -414,7 +407,7 @@
     try { await loadListings(); } catch (e) { }
     const m = S.me;
     const msg = {
-      pending: ['Application received', `Thank you, ${esc(first(m.full_name))}. Every application is reviewed personally, usually within two working days. We may call you to talk through your plans, and we'll need to sight written evidence of your finance before you're approved.`],
+      pending: ['Application received', `Thank you, ${esc(first(m.full_name))}. Every application is reviewed personally, usually within two working days. Tim will call you to talk through your plans and your position.`],
       declined: ['Application not approved', 'Thank you for applying. After careful review, we\'re not able to offer Quiet Listings membership at this time. Access is deliberately limited. If your circumstances change, you\'re welcome to send us an update from your account.'],
       suspended: ['Membership paused', 'Your Quiet Listings access is currently paused. If you have questions, please get in touch.'],
     }[m.status];
@@ -424,9 +417,9 @@
       <h1 style="font-size:44px">${msg[0]}</h1><p style="font-size:18px">${msg[1]}</p>
       ${m.decision_message && m.status !== 'pending' ? `<div class="card" style="background:var(--bg)">${esc(m.decision_message)}</div>` : ''}
       ${m.status === 'pending' ? `<div class="card"><h3>What happens next</h3>
-        <ol style="padding-left:20px;margin:0"><li>We review your application${hasDocs ? ' and the documents you sent' : ''}.</li><li>${hasDocs ? 'We may contact your lender to confirm your pre-approval.' : '<strong>Send us evidence of your finance</strong> from your account. We can\'t approve your membership without it.'}</li><li>Once approved, you'll get an email and can sign in to see the Quiet Listings you qualify for.</li></ol></div>` : ''}
+        <ol style="padding-left:20px;margin:0"><li>We review your application.</li><li>Tim calls you to talk through your plans and your position.</li><li>Once approved, you'll get an email and can sign in to see every Quiet Listing.</li></ol></div>` : ''}
       ${(S.listings || []).length ? `<p><a class="btn ghost" href="#/listing/${S.listings[0].id}">See the listing${S.listings.length > 1 ? 's' : ''} you registered for</a></p>` : ''}
-      <a class="btn dark" href="#/account">${m.status === 'pending' && !hasDocs ? 'Upload evidence of finance' : 'My account'}</a>
+      <a class="btn dark" href="#/account">My account</a>
     </div>`;
   }
 
@@ -445,33 +438,22 @@
       <div class="card"><div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center"><h3 style="margin:0">Membership</h3><span class="pill ${m.status}">${{ draft: 'Application not finished', info: 'More information needed', pending: 'Under review', approved: 'Approved member', declined: 'Not approved', suspended: 'Paused' }[m.status]}</span></div>
         ${m.status === 'approved' ? `<p class="small muted" style="margin:10px 0 0">You can see every Quiet Listing. If your finance or plans change, send us an update below.</p>` : ''}
         ${canEdit ? `<p style="margin:12px 0 0"><a class="btn dark sm" href="#/apply">Continue my application</a></p>` : ''}</div>
-      ${m.status !== 'draft' ? `<div class="card"><h3>${m.status === 'pending' ? 'Evidence of finance' : 'Update my finance or circumstances'}</h3>
-        <p class="small muted">${m.status === 'pending' ? 'Upload your pre-approval letter or proof of funds.' : 'New pre-approval, house sold, budget changed? Tell us here and upload any documents.'}</p>
-        <ul class="uploads" id="docList2">${(a.docs || []).map(d => `<li>✓ ${esc(d.name)} <span class="muted small">${fmtDate(d.at)}</span></li>`).join('')}</ul>
-        <label class="btn ghost sm" style="cursor:pointer">Upload a document<input type="file" id="docIn2" accept=".pdf,image/*" multiple hidden></label>
-        ${m.status !== 'pending' ? `<div class="row2"><div><label class="f">New maximum budget <span class="opt">(optional)</span></label><input type="text" id="upBudget" inputmode="numeric" placeholder="$"></div><div><label class="f">Pre-approval expires <span class="opt">(optional)</span></label><input type="date" id="upExp"></div></div>
-          <label class="f">What's changed?</label><textarea id="upNote" placeholder="e.g. Our house has sold unconditionally, settlement 12 December."></textarea>
-          <button class="btn dark" id="upSend" style="margin-top:12px">Send update</button>` : ''}
+      ${!['draft', 'pending'].includes(m.status) ? `<div class="card"><h3>Update my circumstances</h3>
+        <p class="small muted">House sold, budget changed, new plans? Let Tim know here.</p>
+        <label class="f">What's changed?</label><textarea id="upNote" placeholder="e.g. Our house has sold unconditionally, settlement 12 December."></textarea>
+        <button class="btn dark" id="upSend" style="margin-top:12px">Send update</button>
         <div id="upMsg"></div></div>` : ''}
       ${enq.length ? `<div class="card"><h3>My enquiries</h3><table class="kv">${enq.map(e => `<tr><td>${fmtDate(e.created_at)}</td><td><a href="#/listing/${e.listing_id}">${{ viewing: 'Private viewing', question: 'Question', offer: 'Intention to offer' }[e.kind]}</a> <span class="pill">${{ new: 'Sent', contacted: 'We\'ve been in touch', booked: 'Booked', closed: 'Closed' }[e.status]}</span></td></tr>`).join('')}</table></div>` : ''}
       <div class="card"><h3>My details</h3><table class="kv"><tr><td>Email</td><td>${esc(m.email)}</td></tr><tr><td>Phone</td><td>${esc(m.phone || '')}</td></tr><tr><td>Home address</td><td>${esc(m.home_address || '')}</td></tr></table>
         <p class="small muted" style="margin:10px 0 0">To change your details or close your membership, email <a href="mailto:tim@mcguire.co.nz">tim@mcguire.co.nz</a>.</p></div>
       <button class="btn ghost" id="so3">Sign out</button></div>`;
     $('#so3').onclick = signOut;
-    const di = $('#docIn2');
-    if (di) di.onchange = async e => {
-      D = JSON.parse(JSON.stringify(S.me));
-      const docs = await uploadDocs(e.target.files, $('#docList2'));
-      S.me.application = Object.assign({}, S.me.application, { docs });
-      if (!['draft', 'info'].includes(m.status)) { await sb.rpc('ql_request_update', { note: 'New document uploaded: ' + Array.from(e.target.files).map(f => f.name).join(', '), finance: { docs: docs.slice(-e.target.files.length).map(d => d.path) } }); await notify({ type: 'update' }); }
-      toast('Uploaded. Thank you.');
-    };
     const us = $('#upSend');
     if (us) us.onclick = async () => {
       const note = $('#upNote').value.trim(); if (!note) { $('#upMsg').innerHTML = '<div class="err">Please tell us what has changed.</div>'; return; }
       busy(us, true, 'Sending…');
       try {
-        const fin = {}; if ($('#upBudget').value) fin['New budget'] = money($('#upBudget').value); if ($('#upExp').value) fin['Pre-approval expires'] = $('#upExp').value;
+        const fin = {};
         await call(sb.rpc('ql_request_update', { note, finance: fin })); await notify({ type: 'update' });
         $('#upMsg').innerHTML = '<div class="okbox">Thanks. We\'ll review your update and let you know.</div>'; $('#upNote').value = '';
       } catch (x) { $('#upMsg').innerHTML = `<div class="err">${esc(x.message)}</div>`; }
@@ -600,7 +582,7 @@
           <div class="card">
             <div class="agent"><div class="av">TM</div><div><strong>Tim McGuire</strong><br><span class="small muted">McGuire Real Estate</span><br><a class="small" href="tel:0275627207">027 562 7207</a></div></div>
             ${S.agent ? '<p class="small muted">Members see an enquiry form here.</p>' : l.interest_only ? `
-            <div class="note small" style="margin-top:0">You're registered for this listing through its share link. <strong>Viewings are for full members</strong> whose finance we've verified.</div>
+            <div class="note small" style="margin-top:0">You're registered for this listing through its share link. <strong>Viewings are for full members.</strong></div>
             <a class="btn dark block" href="#/apply">Apply for full membership</a>
             <form id="enqForm" style="margin-top:14px"><input type="radio" name="kind" value="question" checked hidden>
               <label class="f" for="eMsg" style="margin-top:0">Or ask Tim a question</label><textarea id="eMsg" style="min-height:80px"></textarea><input type="hidden" id="eTimes" value="">
@@ -959,7 +941,7 @@
 
   function memberTable(rows) {
     if (!rows.length) return '<p class="muted">None.</p>';
-    return `<div class="tblwrap"><table class="tbl"><tr><th>Name</th><th>Status</th><th>Their budget</th><th>Verified</th><th>Finance</th><th>Applied</th></tr>
+    return `<div class="tblwrap"><table class="tbl"><tr><th>Name</th><th>Status</th><th>Their budget</th><th>Matching budget</th><th>Funding</th><th>Applied</th></tr>
       ${rows.map(m => { const a = m.application || {}; const upd = m.update_requested_at && (!m.reviewed_at || m.update_requested_at > m.reviewed_at);
         return `<tr class="click" data-go="#/admin/member/${m.user_id}"><td><strong>${esc(m.full_name || m.email)}</strong><br><span class="small muted">${esc(m.email)}</span></td><td><span class="pill ${m.status}">${STATUS_LABEL[m.status]}</span>${upd ? '<br><span class="pill new" style="margin-top:4px">Update sent</span>' : ''}</td><td>${a.budget ? money(a.budget) : ''}</td><td>${m.qualified_to ? money(m.qualified_to) : '<span class="muted">Not set</span>'}</td><td class="small">${esc(a.finance_type || '')}${(a.docs || []).length ? `<br>${a.docs.length} document${a.docs.length > 1 ? 's' : ''}` : ''}</td><td class="small">${fmtDate(m.submitted_at || m.created_at)}</td></tr>`; }).join('')}</table></div>`;
   }
@@ -1001,10 +983,10 @@
         <h3>Your decision</h3>
         <label class="f" for="rStatus" style="margin-top:6px">Status</label>
         <select id="rStatus">${['pending', 'info', 'approved', 'declined', 'suspended', 'draft'].map(s => `<option value="${s}" ${m.status === s ? 'selected' : ''}>${{ pending: 'To review', info: 'Ask for more information', approved: 'Approve', declined: 'Decline', suspended: 'Pause access', draft: 'Return to incomplete' }[s]}</option>`).join('')}</select>
-        <label class="f" for="rBudget">Verified budget</label><div class="hint">Never shown to them. Used for your matching and new-listing alerts.</div>
+        <label class="f" for="rBudget">Budget for matching <span class="opt">(after you've spoken to them)</span></label><div class="hint">Never shown to them. Used for your matching and new-listing alerts.</div>
         <input type="text" id="rBudget" inputmode="numeric" value="${m.qualified_to ? money(m.qualified_to) : ''}" placeholder="$">
-        <label class="check"><input type="checkbox" id="rCash" ${m.cash_verified ? 'checked' : ''}><span>Cash buyer verified</span></label>
-        <label class="check"><input type="checkbox" id="rSale" ${m.sale_free ? 'checked' : ''}><span>No sale to sell first (verified)</span></label>
+        <label class="check"><input type="checkbox" id="rCash" ${m.cash_verified ? 'checked' : ''}><span>Cash buyer</span></label>
+        <label class="check"><input type="checkbox" id="rSale" ${m.sale_free ? 'checked' : ''}><span>No sale to sell first</span></label>
         <label class="f" for="rMsg">Message to the member <span class="opt">(included in the email)</span></label><textarea id="rMsg" style="min-height:80px">${esc(m.decision_message || '')}</textarea>
         <label class="f" for="rNotes">Private notes <span class="opt">(only you see these)</span></label><textarea id="rNotes" style="min-height:80px">${esc((rv && rv.notes) || '')}</textarea>
         <div style="display:grid;gap:8px;margin-top:14px"><button class="btn primary" id="rSaveEmail">Save and email the member</button><button class="btn ghost" id="rSave">Save without emailing</button></div>
@@ -1015,7 +997,6 @@
     ['#rBudget', '#rCash', '#rSale', '#rStatus'].forEach(s => $(s).addEventListener('input', recount)); recount();
     const doSave = async (email, btn) => {
       const st = $('#rStatus').value;
-      if (st === 'approved' && !num($('#rBudget').value)) { $('#rRes').innerHTML = '<div class="err">Set a verified budget before approving.</div>'; return; }
       busy(btn, true, 'Saving…');
       try {
         await call(sb.from('ql_members').update({ status: st, qualified_to: num($('#rBudget').value) || null, cash_verified: $('#rCash').checked, sale_free: $('#rSale').checked, decision_message: $('#rMsg').value.trim() || null, reviewed_at: new Date().toISOString(), reviewed_by: S.session.user.email, updated_at: new Date().toISOString() }).eq('user_id', id));

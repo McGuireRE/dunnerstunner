@@ -16,7 +16,7 @@ function memberTable(m: any) {
     row("Bought before", a.bought), row("Sold before", a.sold), row("Currently owns", a.owns), row("Buying as", a.buying_as), row("Looking for", a.looking_for),
     row("Budget (their figure)", a.budget ? money(nm(a.budget)) : ""), row("Finance", a.finance_type), row("Lender", a.lender),
     row("Pre-approved amount", a.preapproved ? money(nm(a.preapproved)) : ""), row("Pre-approval expires", a.preapproval_expiry), row("Deposit", a.deposit ? money(nm(a.deposit)) : ""),
-    row("Needs to sell first", a.need_to_sell), row("Finance documents", (a.docs || []).length ? `${a.docs.length} uploaded` : "None yet"),
+    row("Needs to sell first", a.need_to_sell), 
     row("Top 10 criteria", (a.criteria || []).filter(Boolean).map((c: string, i: number) => `${i + 1}. ${c}`).join("  ")),
     row("Suburbs", a.suburbs), row("Property types", a.types), row("Bedrooms (min)", a.min_beds), row("Price range", [a.price_min, a.price_max].filter(Boolean).join(" to ")),
     row("Why buying", a.reason), row("In their words", a.story), row("Timeframe", a.timeframe), row("Decision makers", a.decision_makers),
@@ -42,11 +42,11 @@ Deno.serve(async (req) => {
         await sendMail(db, null, "ql_application", { to: TIM_EMAIL, subject: `Quiet Listings application: ${m.full_name}`, replyTo: m.email,
           html: wrap(`<p>A new Quiet Listings membership application is waiting for your review.</p>${memberTable(m)}${btn(site + "#/admin/member/" + m.user_id, "Review application")}`) });
         await sendMail(db, null, "ql_application_ack", { to: m.email, subject: "Your Quiet Listings application",
-          html: wrap(`<p>Kia ora ${esc(first(m.full_name))},</p><p>Thank you for applying for Quiet Listings membership. Every application is reviewed personally, because the owners who list with us privately are trusting us to introduce only serious, prepared buyers.</p><p>We usually respond within two working days. We may call you to talk through your plans, and we'll ask to see written evidence of your finance before you can view any property.</p>${btn(site, "Check your application")}`) });
+          html: wrap(`<p>Kia ora ${esc(first(m.full_name))},</p><p>Thank you for applying for Quiet Listings membership. Every application is reviewed personally, because the owners who list with us privately are trusting us to introduce only serious, prepared buyers.</p><p>We usually respond within two working days. I'll call you to talk through your plans and your position before your membership is confirmed.</p>${btn(site, "Check your application")}`) });
       } else {
         const u = (m.application?.updates || []).at(-1) || {};
-        await sendMail(db, null, "ql_update", { to: TIM_EMAIL, subject: `Quiet Listings finance update: ${m.full_name}`, replyTo: m.email,
-          html: wrap(`<p>${esc(m.full_name)} has sent an update to their finance or circumstances.</p>${table([row("Note", u.note), ...Object.entries(u.finance || {}).map(([k, v]) => row(k, v))])}<p>Current verified budget: ${m.qualified_to ? money(m.qualified_to) : "not set"}.</p>${btn(site + "#/admin/member/" + m.user_id, "Review member")}`) });
+        await sendMail(db, null, "ql_update", { to: TIM_EMAIL, subject: `Quiet Listings member update: ${m.full_name}`, replyTo: m.email,
+          html: wrap(`<p>${esc(m.full_name)} has sent an update to their circumstances.</p>${table([row("Note", u.note), ...Object.entries(u.finance || {}).map(([k, v]) => row(k, v))])}<p>Current verified budget: ${m.qualified_to ? money(m.qualified_to) : "not set"}.</p>${btn(site + "#/admin/member/" + m.user_id, "Review member")}`) });
       }
       return json({ ok: true });
     }
