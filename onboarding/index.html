@@ -543,6 +543,8 @@ hr.soft { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
     SESSION = data.session;
     $('#signOut').hidden = !SESSION;
     if (!SESSION) return viewLogin();
+    let qlr = null; try { qlr = localStorage.getItem('qlReturn'); localStorage.removeItem('qlReturn'); } catch (_) { }
+    if (qlr) { try { const u = new URL(qlr); if (u.origin === location.origin && u.pathname !== location.pathname) return location.replace(qlr); } catch (_) { } }
     IS_AGENT = !!(await must(sb.rpc('is_agent')));
     let pend = null; try { pend = JSON.parse(localStorage.getItem('pendingCampaign') || 'null'); } catch (_) { }
     if (IS_AGENT && pend) { try { localStorage.removeItem('pendingCampaign'); } catch (_) { } return viewSetup(null, pend); }
