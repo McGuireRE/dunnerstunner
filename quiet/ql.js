@@ -66,7 +66,6 @@
     $('#nav').innerHTML = `
       <a class="${h === '#/' || on('#/listing') ? 'on' : ''}" href="#/">${S.agent || st === 'approved' ? 'Listings' : 'Quiet Listings'}</a>
       <a class="${on('#/how')}" href="#/how">How it works</a>
-      <a class="ext" href="${PACKAGES_URL}">Marketing packages</a>
       <a class="ext" href="${VENDOR_URL}">Vendor portal</a>
       <span class="nav-right">${right}</span>`;
     const so = $('#signOutBtn'); if (so) so.onclick = signOut;
@@ -787,7 +786,7 @@
         <label class="f" for="oCom">Anything else Tim should know? <span class="opt">(optional)</span></label><textarea id="oCom" style="min-height:80px"></textarea>
         <button class="btn primary" type="submit" style="margin-top:16px">Send to Tim</button><div id="ckRes"></div>
       </form>
-      ${o.discretion ? '' : `<div class="card" style="background:var(--ink);color:#E8E1D6;border-color:var(--ink)"><h3 style="color:#fff">Thinking about the open market?</h3><p style="margin:0">Quiet Listings members are a small, carefully chosen group. The open market reaches every buyer, and creates the competition that sets the best price. It can still be discreet: no signboard, private viewings and the street address withheld. <a href="${PACKAGES_URL}" style="color:#F1E6D2">See marketing options</a>.</p></div>`}
+      ${o.discretion ? '' : `<div class="card" style="background:var(--ink);color:#E8E1D6;border-color:var(--ink)"><h3 style="color:#fff">Thinking about the open market?</h3><p style="margin:0">Quiet Listings members are a small, carefully chosen group. The open market reaches every buyer, and creates the competition that sets the best price. It can still be discreet: no signboard, private viewings and the street address withheld.</p></div>`}
       ${dwellCard('owner')}
       <p class="small muted">This page is private to you. Please don't share its address. Your share link above is the one to share.</p></div>`;
     const shc = $('#shCopy'); if (shc) shc.onclick = async () => { try { await navigator.clipboard.writeText(SITE + 'q/' + o.share_slug + '/'); toast('Link copied'); } catch (x) { } };
