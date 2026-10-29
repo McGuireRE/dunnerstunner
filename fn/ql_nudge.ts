@@ -105,6 +105,24 @@ Deno.serve(async (req) => {
       return json({ ok: true });
     }
 
+    if (body.mode === "seller") {
+      const { data: d } = await db.from("ql_seller_leads").select("*").eq("id", String(body.lead_id || "")).is("notified_at", null).gt("created_at", new Date(Date.now() - 15 * 6e4).toISOString()).maybeSingle();
+      if (!d) return json({ ok: true, note: "nothing new" });
+      const M: any = { need: "Needs to sell", like: "Would like to, if the price is right", testing: "Just testing the waters" };
+      const T: any = { yes: "Has a date to be sold by", rough: "Roughly", no: "No deadline" };
+      const P: any = { essential: "Essential: must stay private", preferred: "Preferred for now", open: "Not important" };
+      const mot = d.motivation === "need", tim = d.time === "yes";
+      const rows = [["Name", d.name], ["Email", d.email], ["Phone", d.phone], ["Property", d.address], ["Type", [d.property_type, d.beds ? d.beds + " bedrooms" : ""].filter(Boolean).join(", ")],
+        ["What they think it's worth", d.expected_price], ["Appraised", d.appraised], ["What's prompting the move", d.reason], ["Motivation", M[d.motivation]], ["Timeframe", [T[d.time], d.time_when].filter(Boolean).join(": ")],
+        ["Privacy", P[d.privacy]], ["Also buying", d.also_buying ? "Yes" : "No"], ["Comments", d.comments]].filter((r) => r[1]);
+      await sendMail(db, null, "ql_seller_lead", { to: TIM_EMAIL, replyTo: d.email, subject: `Seller enquiry: ${d.address} (${d.name})`,
+        html: wrap(`<p>A new seller enquiry has come in through Quiet Listings.</p><table style="border-collapse:collapse;width:100%">${rows.map(([k, v]) => `<tr><td style="padding:6px 10px 6px 0;border-bottom:1px solid #E4E0DA;color:#6E6A65;white-space:nowrap;vertical-align:top">${esc(k)}</td><td style="padding:6px 0;border-bottom:1px solid #E4E0DA">${esc(v)}</td></tr>`).join("")}</table><p>On their own answers: motivation ${mot ? "<strong>yes</strong>" : "not yet"}, time ${tim ? "<strong>yes</strong>" : "not yet"}. Price realism is yours to judge at the appraisal.</p><p>${btn(site + "#/admin/lead/" + d.id, "Open the enquiry")}</p>`) });
+      await sendMail(db, null, "ql_seller_ack", { to: d.email, subject: "Thanks for your enquiry: selling quietly",
+        html: wrap(`<p>Kia ora ${esc(first(d.name))},</p><p>Thanks for getting in touch about ${esc(d.address)}. I'll call you shortly to talk through your plans, and arrange a time to see the property and give you a written appraisal.</p><p>There's no obligation, and everything you've told me stays confidential.${d.also_buying ? " As you're buying too, we'll plan both moves together so the timing works for you." : ""}</p>`) });
+      await db.from("ql_seller_leads").update({ notified_at: new Date().toISOString() }).eq("id", d.id);
+      return json({ ok: true });
+    }
+
     // agent-only: preview or send the next update now
     const auth = req.headers.get("Authorization") || "";
     const uc = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!, { global: { headers: { Authorization: auth } } });

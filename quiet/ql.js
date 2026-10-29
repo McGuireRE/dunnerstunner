@@ -55,7 +55,7 @@
     const on = p => h.startsWith(p) ? 'on' : '';
     const st = S.me && S.me.status;
     let right = '';
-    if (!S.session) right = `<a class="btn ghost sm" href="#/signin">Sign in</a><a class="btn primary sm" href="#/apply">Apply for membership</a>`;
+    if (!S.session) right = `<a class="btn ghost sm" href="#/signin">Member sign in</a>`;
     else if (S.agent) right = `<a class="btn dark sm" href="#/admin">Admin</a><button class="btn ghost sm" id="signOutBtn">Sign out</button>`;
     else if (st === 'approved') right = `<a class="${on('#/saved')}" href="#/saved">Saved</a><a class="btn ghost sm" href="#/account">My account</a>`;
     else right = `<a class="btn ghost sm" href="#/account">My account</a>`;
@@ -87,6 +87,7 @@
     window.scrollTo(0, 0);
     try {
       if (p0 === 'owner') return viewOwner(p1);
+      if (p0 === 'sell') return viewSell(p1 === 'both');
       if (p0 === 'how') return viewHow();
       if (p0 === 'privacy') return viewPrivacy();
       if (p0 === 'signin') return viewSignin(false);
@@ -119,7 +120,12 @@
       <div class="eyebrow">Private property · Dunedin</div>
       <h1>Homes that never reach the open market.</h1>
       <p class="lede">Some owners would rather sell discreetly: no signboard, no public advertising, no open homes. Quiet Listings introduces their properties only to buyers we have personally qualified.</p>
-      <div class="cta"><a class="btn primary" href="#/apply">Apply for membership</a><a class="btn light" href="#/signin">Member sign in</a></div>
+      <div class="opts">
+        <a class="opt-tile" href="#/sell"><span class="n">1</span><strong>I'm selling</strong><span>Sell privately, to buyers we've personally qualified. No signboard, no open homes.</span><em>Talk to us about selling →</em></a>
+        <a class="opt-tile" href="#/apply"><span class="n">2</span><strong>I'm buying</strong><span>Apply for access to homes that never reach the open market.</span><em>Apply for membership →</em></a>
+        <a class="opt-tile" href="#/sell/both"><span class="n">3</span><strong>Both</strong><span>Selling one home and buying the next? We'll plan both moves together.</span><em>Start with your sale →</em></a>
+      </div>
+      <p class="small" style="color:#CFC8BE;margin:18px 0 0">Already a member? <a href="#/signin" style="color:#fff">Sign in</a></p>
       ${count > 0 ? `<div class="stat"><strong>${count}</strong>${count === 1 ? 'property is' : 'properties are'} currently offered to members</div>` : ''}
       <div class="serious">For serious and discerning buyers only</div>
     </div></section>
@@ -630,6 +636,7 @@
     app.innerHTML = '<div class="loading">Loading…</div>';
     if (p1 === 'member') return adminMember(p2);
     if (p1 === 'listing') return adminListing(p2);
+    if (p1 === 'lead') return adminLead(p2);
     if (p1 === 'listings') p1 = '';
     const [members, listings, enq] = await Promise.all([
       call(sb.from('ql_members').select('*').order('submitted_at', { ascending: false, nullsFirst: false })),
@@ -638,7 +645,9 @@
     ]);
     const toReview = members.filter(m => m.status === 'pending' || (m.update_requested_at && (!m.reviewed_at || m.update_requested_at > m.reviewed_at)));
     const extra = await sellerData(listings);
-    const counts = { apps: toReview.length, enq: enq.filter(e => e.status === 'new').length, ready: extra.ready.length };
+    let leads = []; try { leads = await call(sb.from('ql_seller_leads').select('*').order('created_at', { ascending: false })); } catch (e) { }
+    const newLeads = leads.filter(d => d.status === 'new').length;
+    const counts = { apps: toReview.length, enq: enq.filter(e => e.status === 'new').length, ready: extra.ready.length + newLeads };
     const mName = id => (members.find(m => m.user_id === id) || {}).full_name || '';
     const lName = id => { const l = listings.find(x => x.id === id); return l ? `${l.ref} ${l.street || l.suburb || ''}` : ''; };
     let body = '';
@@ -654,7 +663,7 @@
       try { ags = await call(sb.from('agreements').select('id,ref,address,status,config').in('status', ['signed', 'countersigned', 'sent', 'parked']).order('created_at', { ascending: false })); } catch (e) { }
       body = `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><h2 style="font-size:30px;margin:0">Listings</h2>
         <div style="display:flex;gap:8px;flex-wrap:wrap">${ags.length ? `<select id="fromAg" style="width:auto"><option value="">Start from an agency agreement…</option>${ags.map(a => `<option value="${a.id}">${esc(a.ref)} ${esc(a.address)}</option>`).join('')}</select>` : ''}<a class="btn dark" href="#/admin/listing/new">New listing</a></div></div>
-        ${sellerBoard(listings, extra)}`;
+        ${leadsBoard(leads)}${sellerBoard(listings, extra)}`;
       setTimeout(() => { const s = $('#fromAg'); if (s) s.onchange = () => { if (s.value) { sessionStorage.setItem('qlFromAg', JSON.stringify(ags.find(a => a.id === s.value))); go('#/admin/listing/new'); } }; });
     } else if (p1 === 'enquiries') {
       body = `<h2 style="font-size:30px">Enquiries</h2><div class="tblwrap"><table class="tbl"><tr><th>When</th><th>Member</th><th>Listing</th><th>Request</th><th>Status</th></tr>
@@ -768,6 +777,90 @@
     };
   }
 
+  /* ───────── seller enquiries ───────── */
+  const LEAD_ST = { new: 'New', contacted: 'Contacted', appraisal: 'Appraisal booked', listed: 'Listed', not_proceeding: 'Not proceeding' };
+  const LM = { need: 'Needs to sell', like: 'Would like to, if the price is right', testing: 'Just testing the waters' };
+  const LT = { yes: 'Has a date to be sold by', rough: 'Roughly', no: 'No deadline' };
+  const LP = { essential: 'Essential: must stay private', preferred: 'Preferred for now', open: 'Not important' };
+  function leadsBoard(leads) {
+    const open = leads.filter(d => !['listed', 'not_proceeding'].includes(d.status));
+    if (!open.length) return '';
+    return `<h3 style="margin:20px 0 10px">Seller enquiries (${open.length})</h3><div class="tblwrap" style="margin-bottom:22px"><table class="tbl"><tr><th>Received</th><th>Owner</th><th>Property</th><th>Motivation · Time</th><th>Privacy</th><th>Status</th></tr>
+      ${open.map(d => `<tr class="click" data-go="#/admin/lead/${d.id}"><td class="small">${fmtDT(d.created_at)}</td><td><strong>${esc(d.name)}</strong>${d.also_buying ? '<br><span class="pill">Also buying</span>' : ''}</td><td>${esc(d.address)}</td><td class="small">${esc(LM[d.motivation] || '')}<br>${esc(LT[d.time] || '')}${d.time_when ? ': ' + esc(d.time_when) : ''}</td><td class="small">${esc(LP[d.privacy] || '')}</td><td><span class="pill ${d.status === 'new' ? 'new' : ''}">${LEAD_ST[d.status]}</span></td></tr>`).join('')}</table></div>`;
+  }
+  function leadToListing(d) {
+    const parts = String(d.address || '').split(',').map(x => x.trim());
+    const map = { 'Lifestyle block': 'Lifestyle' };
+    return { lead_id: d.id, vendor_name: d.name, vendor_email: d.email, vendor_phone: d.phone, street: parts[0] || '', suburb: parts[1] || '', city: parts[2] || 'Dunedin',
+      property_type: map[d.property_type] || d.property_type || null, beds: parseInt(d.beds) || null,
+      m_motivation: { need: 'yes', like: 'partly', testing: 'no' }[d.motivation] || null, m_time: { yes: 'yes', rough: 'partly', no: 'no' }[d.time] || null,
+      discretion: d.privacy === 'essential', m_notes: d.expected_price ? `Owner thinks it's worth ${d.expected_price}` : null };
+  }
+  async function adminLead(id) {
+    const d = await call(sb.from('ql_seller_leads').select('*').eq('id', id).single());
+    const rows = [['Email', `<a href="mailto:${esc(d.email)}">${esc(d.email)}</a>`], ['Phone', `<a href="tel:${esc(d.phone)}">${esc(d.phone)}</a>`], ['Property', esc(d.address)], ['Type', esc([d.property_type, d.beds ? d.beds + ' bedrooms' : ''].filter(Boolean).join(', '))],
+      ['What they think it\'s worth', esc(d.expected_price)], ['Appraised', esc(d.appraised)], ['What\'s prompting the move', esc(d.reason)], ['Need or want', esc(LM[d.motivation])], ['Timeframe', esc([LT[d.time], d.time_when].filter(Boolean).join(': '))],
+      ['Privacy', esc(LP[d.privacy])], ['Also buying', d.also_buying ? 'Yes' : 'No'], ['Comments', esc(d.comments)], ['Received', fmtDT(d.created_at)]].filter(r => r[1]);
+    const pre = { m_price: null, m_motivation: { need: 'yes', like: 'partly', testing: 'no' }[d.motivation], m_time: { yes: 'yes', rough: 'partly', no: 'no' }[d.time] };
+    app.innerHTML = `<div class="wrap" style="padding-bottom:70px"><div class="eyebrow" style="margin-top:28px">Quiet Listings admin</div>${adminTabs('')}
+      <a class="btn link" href="#/admin" style="padding-left:0">← Sellers and listings</a>
+      <h1 style="font-size:38px;margin-top:8px">${esc(d.name)}</h1>
+      <div class="split"><div class="card"><h3>Seller enquiry</h3><table class="kv">${rows.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('')}</table></div>
+      <aside class="side"><div class="card"><h3>On their own answers</h3><div style="text-align:center">${tri(pre, 150)}</div>
+        <p class="small muted">Motivation and time come from what they told us. Price realism is yours to judge at the appraisal.</p>
+        <label class="f" for="ldSt">Status</label><select id="ldSt">${Object.entries(LEAD_ST).map(([k, v]) => `<option value="${k}" ${d.status === k ? 'selected' : ''}>${v}</option>`).join('')}</select>
+        ${d.listing_id ? `<a class="btn ghost block" style="margin-top:14px" href="#/admin/listing/${d.listing_id}">Open their Quiet Listing</a>` : `<button class="btn primary block" style="margin-top:14px" id="ldList">Create a Quiet Listing from this</button>`}
+      </div></aside></div></div>`;
+    $('#ldSt').onchange = async e => { try { await call(sb.from('ql_seller_leads').update({ status: e.target.value }).eq('id', id)); toast('Updated'); } catch (x) { toast(x.message); } };
+    const b = $('#ldList'); if (b) b.onclick = () => { sessionStorage.setItem('qlFromLead', JSON.stringify(d)); go('#/admin/listing/new'); };
+  }
+
+  /* ───────── public: selling enquiry ───────── */
+  function viewSell(both) {
+    const q = (k, label, opts, hint) => `<fieldset><div class="legend">${label}</div>${hint ? `<div class="hint">${hint}</div>` : ''}<div class="choices">${opts.map(([v, t]) => `<label class="choice"><input type="radio" name="s_${k}" value="${esc(v)}"><span>${t}</span></label>`).join('')}</div></fieldset>`;
+    app.innerHTML = `<div class="narrow wz">
+      <div class="eyebrow">${both ? 'Selling and buying' : 'Selling quietly'}</div>
+      <h1>${both ? 'Let\'s start with your sale' : 'Sell privately, to qualified buyers'}</h1>
+      <p class="muted" style="font-size:18px">${both ? 'Tell us about the home you\'re selling. Once that\'s done, you can apply for buyer membership, and we\'ll plan both moves so the timing works.' : 'Tell us a little about your property and your plans. Tim will call you to talk it through and arrange a written appraisal. No obligation, and everything stays confidential.'}</p>
+      <form id="sellForm" novalidate>
+        <div class="row2"><div><label class="f" for="sName">Your name</label><input type="text" id="sName" autocomplete="name"></div><div><label class="f" for="sPhone">Phone</label><input type="tel" id="sPhone" autocomplete="tel"></div></div>
+        <label class="f" for="sEmail">Email</label><input type="email" id="sEmail" autocomplete="email">
+        <label class="f" for="sAddr">Property address</label><div class="hint">Street, suburb, town.</div><input type="text" id="sAddr" placeholder="e.g. 12 Example Street, Maori Hill, Dunedin">
+        <div class="row2"><div><label class="f" for="sType">Property type</label><select id="sType"><option value="">Choose…</option>${['House', 'Townhouse', 'Apartment', 'Character home', 'Lifestyle block', 'Section'].map(t => `<option>${t}</option>`).join('')}</select></div><div><label class="f" for="sBeds">Bedrooms</label><input type="number" id="sBeds" inputmode="numeric"></div></div>
+        <label class="f" for="sPrice">What do you think it's worth? <span class="opt">(optional)</span></label><input type="text" id="sPrice" placeholder="A rough figure is fine">
+        ${q('appraised', 'Has it been appraised in the last six months?', [['Yes, by McGuire Real Estate', 'Yes, by McGuire Real Estate'], ['Yes, by another agent', 'Yes, by another agent'], ['No', 'No']])}
+        ${q('reason', 'What\'s prompting the move?', ['Moving up', 'Downsizing', 'Relocating', 'Change in family circumstances', 'Financial reasons', 'Estate or trust sale', 'Testing the market', 'Other'].map(x => [x, x]))}
+        ${q('motivation', 'Do you need to sell, or would you like to sell?', [['need', 'I need to sell'], ['like', 'I\'d like to, if the price is right'], ['testing', 'I\'m just testing the waters']])}
+        ${q('time', 'Is there a date you need to be sold by?', [['yes', 'Yes'], ['rough', 'Roughly'], ['no', 'No']])}
+        <div id="sWhenBox" class="hidden"><label class="f" for="sWhen">When?</label><input type="text" id="sWhen" placeholder="e.g. before Christmas, by March"></div>
+        ${q('privacy', 'How important is privacy?', [['essential', 'Essential: it must stay private'], ['preferred', 'Preferred, for now'], ['open', 'Not important']])}
+        ${both ? '' : `<label class="check" style="margin-top:14px"><input type="checkbox" id="sBuy"><span>I'm also buying</span></label>`}
+        <label class="f" for="sCom">Anything else? <span class="opt">(optional)</span></label><textarea id="sCom" style="min-height:90px"></textarea>
+        <label class="check"><input type="checkbox" id="sOk"><span>I agree to McGuire Real Estate contacting me about selling, and to the <a href="#/privacy" target="_blank">privacy statement</a>.</span></label>
+        <div id="sErr"></div>
+        <div class="wz-actions"><a class="btn ghost" href="#/">Back</a><button class="btn primary" type="submit">Send to Tim</button></div>
+      </form></div>`;
+    $$('input[name=s_time]').forEach(r => r.onchange = () => $('#sWhenBox').classList.toggle('hidden', !(r.checked && r.value !== 'no')));
+    $('#sellForm').onsubmit = async e => {
+      e.preventDefault();
+      const v = k => ($(`input[name=s_${k}]:checked`) || {}).value || null;
+      const p = { name: $('#sName').value.trim(), phone: $('#sPhone').value.trim(), email: $('#sEmail').value.trim(), address: $('#sAddr').value.trim(), property_type: $('#sType').value || null, beds: $('#sBeds').value || null,
+        expected_price: $('#sPrice').value.trim() || null, appraised: v('appraised'), reason: v('reason'), motivation: v('motivation'), time: v('time'), time_when: $('#sWhen').value.trim() || null, privacy: v('privacy'),
+        also_buying: both || !!($('#sBuy') && $('#sBuy').checked), comments: $('#sCom').value.trim() || null };
+      const err = !p.name || !p.phone || !/^\S+@\S+\.\S+$/.test(p.email) ? 'Please give your name, phone and email.' : p.address.length < 6 ? 'Please give the property address.' : !p.motivation || !p.time || !p.privacy ? 'Please answer the questions about your plans and privacy.' : !$('#sOk').checked ? 'Please tick the box so we can contact you.' : '';
+      if (err) { $('#sErr').innerHTML = `<div class="err">${esc(err)}</div>`; return; }
+      const b = $('#sellForm button[type=submit]'); busy(b, true, 'Sending…');
+      try {
+        const lid = await call(sb.rpc('ql_seller_enquiry', { p }));
+        sb.functions.invoke('ql-nudge', { body: { mode: 'seller', lead_id: lid } }).catch(() => null);
+        window.scrollTo(0, 0);
+        app.innerHTML = `<div class="narrow" style="padding:60px 20px 90px"><div class="eyebrow">Thank you</div><h1 style="font-size:44px">Tim will be in touch shortly</h1>
+          <p style="font-size:18px">We've received your enquiry about ${esc(p.address)}. Tim will call you to talk through your plans and arrange a time to see the property.</p>
+          ${p.also_buying ? `<div class="card" style="margin-top:22px"><h3>Next: your buyer membership</h3><p>To see Quiet Listings as a buyer, apply for membership. Use the same email address, ${esc(p.email)}, and tell us your property is about to be listed when you get to the finance step.</p><a class="btn dark" href="#/apply">Apply for buyer membership</a></div>` : '<a class="btn ghost" href="#/">Back to Quiet Listings</a>'}</div>`;
+      } catch (x) { busy(b, false); $('#sErr').innerHTML = `<div class="err">${esc(x.message)}</div>`; }
+    };
+  }
+
   function memberTable(rows) {
     if (!rows.length) return '<p class="muted">None.</p>';
     return `<div class="tblwrap"><table class="tbl"><tr><th>Name</th><th>Status</th><th>Their budget</th><th>Verified</th><th>Finance</th><th>Applied</th></tr>
@@ -843,6 +936,7 @@
       const ag = JSON.parse(sessionStorage.getItem('qlFromAg') || 'null'); sessionStorage.removeItem('qlFromAg');
       if (ag) { const parts = String(ag.address || '').split(',').map(s => s.trim()); l.street = parts[0] || ''; l.suburb = parts[1] || ''; if (parts[2]) l.city = parts[2]; l.agreement_id = ag.id; const ask = num((ag.config || {}).ask); if (ask) l.qualify_price = ask; }
     } else l = await call(sb.from('ql_listings').select('*').eq('id', id).single());
+    if (!l.id) { const ld = JSON.parse(sessionStorage.getItem('qlFromLead') || 'null'); sessionStorage.removeItem('qlFromLead'); if (ld) Object.assign(l, leadToListing(ld)); }
     if (!l.id && l.agreement_id) await fillOwner(l);
     await signPhotos(l.photos || []);
     let nudges = [], checkins = [], st = null;
@@ -965,7 +1059,7 @@
       const o = gather();
       if (o.status !== 'draft' && !o.qualify_price) throw new Error('Set a qualifying price before making the listing live.');
       if (l.id) l = Object.assign(l, await call(sb.from('ql_listings').update(o).eq('id', l.id).select().single()));
-      else { l = Object.assign(l, await call(sb.from('ql_listings').insert(o).select().single())); history.replaceState(null, '', '#/admin/listing/' + l.id); }
+      else { const lid = l.lead_id; l = Object.assign(l, await call(sb.from('ql_listings').insert(o).select().single())); if (lid) { await sb.from('ql_seller_leads').update({ listing_id: l.id, status: 'listed' }).eq('id', lid); l.lead_id = null; } history.replaceState(null, '', '#/admin/listing/' + l.id); }
       S.listings = null;
     };
     $('#lSave').onclick = async () => { const b = $('#lSave'); busy(b, true, 'Saving…'); try { await persist(); toast('Listing saved'); adminListing(l.id); } catch (x) { busy(b, false); $('#lRes').innerHTML = `<div class="err">${esc(x.message)}</div>`; } };
