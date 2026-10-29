@@ -9,7 +9,8 @@ const nameOf = (l: any) => l.street || l.suburb || l.ref;
 
 function statsBlock(s: any) {
   const cell = (n: number, t: string) => `<td style="padding:12px 8px;text-align:center;border:1px solid #E4E0DA;width:25%"><div style="font-size:26px;font-weight:600;font-family:Georgia,serif">${n}</div><div style="font-size:12.5px;color:#6E6A65">${t}</div></td>`;
-  return `<table style="border-collapse:collapse;width:100%;margin:14px 0"><tr>${cell(s.qualified, "qualified buyers can see it")}${cell(s.viewed, "have looked at it")}${cell(s.saved, "shortlisted it")}${cell(s.viewings + s.offers, s.offers ? "viewing or offer requests" : "viewing requests")}</tr></table>`;
+  const t = `<table style="border-collapse:collapse;width:100%;margin:14px 0"><tr>${cell(s.qualified, "qualified buyers can see it")}${cell(s.viewed, "have looked at it")}${cell(s.saved, "shortlisted it")}${cell(s.viewings + s.offers, s.offers ? "viewing or offer requests" : "viewing requests")}</tr></table>`;
+  return t + (s.share_visits || s.registrations ? `<p style="margin:-4px 0 14px;font-size:14.5px">Your share link: <strong>${s.share_visits}</strong> visit${s.share_visits === 1 ? "" : "s"} and <strong>${s.registrations}</strong> registered buyer${s.registrations === 1 ? "" : "s"}.</p>` : "");
 }
 
 const MARKET = [
@@ -24,13 +25,14 @@ function buildEmail(l: any, s: any, stage: number, site: string) {
   const where = esc(nameOf(l));
   const checkin = `<p>A quick check-in on your plans helps me make sure we're on the right track. It takes under a minute.</p><p>${btn(link, "Answer a few quick questions")}</p>`;
   const quiet = s.days >= 42 && s.viewings + s.offers === 0 ? `<p>With no viewing requests yet, it's likely the right buyer for your home isn't among our members at the moment.</p>` : "";
+  const shareTip = l.share_enabled && l.share_slug && !s.share_visits ? `<p><strong>Tip:</strong> your home has its own share link, ready to post on Facebook or send to friends. Anyone interested has to register with us first, so the tyre kickers are filtered out. ${btn(link, "Get your share link", false)}</p>` : "";
   let subject = "", body = "";
   if (stage <= 1) {
     subject = `Your first week on Quiet Listings: ${nameOf(l)}`;
-    body = `${hi}<p>A quick update on ${where} after its first week as a Quiet Listing.</p>${statsBlock(s)}<p>Every one of these buyers has been personally qualified, with their finance checked, before they could see your home. I'll keep you posted as things develop.</p><p>${btn(link, "See your listing's activity", false)}</p>`;
+    body = `${hi}<p>A quick update on ${where} after its first week as a Quiet Listing.</p>${statsBlock(s)}<p>Every one of these buyers has been personally qualified, with their finance checked, before they could see your home. I'll keep you posted as things develop.</p>${shareTip}<p>${btn(link, "See your listing's activity", false)}</p>`;
   } else if (stage === 2) {
     subject = `Three weeks in: ${nameOf(l)}`;
-    body = `${hi}<p>Here's where things stand for ${where} after three weeks.</p>${statsBlock(s)}${checkin}`;
+    body = `${hi}<p>Here's where things stand for ${where} after three weeks.</p>${statsBlock(s)}${shareTip}${checkin}`;
   } else if (stage === 3) {
     subject = `Six weeks on Quiet Listings: ${nameOf(l)}`;
     body = `${hi}<p>Your home has been a Quiet Listing for six weeks now. Here's the activity so far.</p>${statsBlock(s)}${quiet}` +

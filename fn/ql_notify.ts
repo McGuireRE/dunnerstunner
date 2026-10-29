@@ -91,7 +91,8 @@ Deno.serve(async (req) => {
       if (!isAgent) return json({ error: "Not allowed" }, 403);
       const { data: l } = await db.from("ql_listings").select("*").eq("id", body.listing_id).single();
       if (!l || !["live", "under_offer"].includes(l.status)) return json({ error: "The listing must be live before members can be alerted" }, 400);
-      const { data: members } = await userClient.rpc("ql_qualified_members", { lid: l.id });
+      const { data: members } = await userClient.rpc("ql_alert_targets", { lid: l.id });
+      const { data: allQ } = await userClient.rpc("ql_qualified_members", { lid: l.id });
       const { data: sent } = await db.from("ql_alerts").select("user_id").eq("listing_id", l.id);
       const done = new Set((sent || []).map((s: any) => s.user_id));
       const todo = (members || []).filter((m: any) => !done.has(m.user_id) && (!body.only || body.only.includes(m.user_id)));
@@ -104,7 +105,21 @@ Deno.serve(async (req) => {
           ok++;
         } catch (e: any) { errors.push(`${m.email}: ${e?.message || e}`); }
       }
-      return json({ ok: true, sent: ok, skipped: (members || []).length - todo.length, errors });
+      return json({ ok: true, sent: ok, skipped: (members || []).length - todo.length, waiting: Math.max(0, (allQ || []).length - (members || []).length), errors });
+    }
+    if (body.type === "interest") {
+      const { data: ints } = await db.from("ql_interests").select("*").eq("user_id", user.id).is("notified_at", null);
+      if (!ints?.length) return json({ ok: true, note: "nothing new" });
+      const { data: m } = await db.from("ql_members").select("*").eq("user_id", user.id).single();
+      const q = m.application?.quick || {};
+      for (const i of ints) {
+        const { data: l } = await db.from("ql_listings").select("*").eq("id", i.listing_id).single();
+        if (!l) continue;
+        await sendMail(db, null, "ql_interest", { to: TIM_EMAIL, replyTo: m.email, subject: `Share link registration: ${m.full_name || m.email} for ${l.ref} ${l.street || l.suburb}`,
+          html: wrap(`<p><strong>${esc(m.full_name || m.email)}</strong> registered through the share link for <strong>${esc(l.ref)}, ${esc(l.street || "")} ${esc(l.suburb || "")}</strong>.</p>${table([row("Phone", m.phone), row("Email", m.email), row("Budget (their figure)", q.budget), row("Property to sell", q.need_to_sell), row("Membership", m.status === "approved" ? "Full member" : "Registered only (not yet a full member)")])}${String(q.need_to_sell || "").startsWith("Yes") ? "<p><strong>They have a property to sell.</strong> A possible listing, and a candidate for chain matching.</p>" : ""}${btn(site + "#/admin/member/" + m.user_id, "See them")}`) }).catch(() => null);
+        await db.from("ql_interests").update({ notified_at: new Date().toISOString() }).eq("user_id", user.id).eq("listing_id", i.listing_id);
+      }
+      return json({ ok: true });
     }
     return json({ error: "Unknown type" }, 400);
   } catch (e: any) {
