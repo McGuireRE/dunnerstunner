@@ -97,7 +97,7 @@ Deno.serve(async (req) => {
       const { data: cks } = await db.from("ql_owner_checkins").select("*").eq("listing_id", l.id).is("notified_at", null).gt("at", new Date(Date.now() - 15 * 6e4).toISOString()).order("at", { ascending: false }).limit(1);
       const c = cks?.[0]; if (!c) return json({ ok: true, note: "nothing new" });
       const a = c.answers || {};
-      const L: any = { price: { yes: "Yes, would accept around the guide", consider: "Would consider it", no: "No, wants more" }, motivation: { need: "Needs to sell", like: "Would like to, if the price is right", testing: "Just testing the waters" }, time: { yes: "Has a date to be sold by", rough: "Roughly", no: "No deadline" }, market: { yes: "YES, wants to talk about the open market", notyet: "Not yet" } };
+      const L: any = { price: { same: "View on price unchanged", flexible: "Open to offers below their price", higher: "Now wants more", yes: "Would accept around the guide", consider: "Would consider it", no: "Wants more" }, motivation: { need: "Needs to sell", like: "Would like to, if the price is right", testing: "Just testing the waters" }, time: { yes: "Has a date to be sold by", rough: "Roughly", no: "No deadline" }, market: { yes: "YES, wants to talk about the open market", notyet: "Not yet" } };
       const rows = [["Price", L.price[a.price]], ["Motivation", L.motivation[a.motivation]], ["Timeframe", L.time[a.time] + (a.date ? ` (${a.date})` : "")], ["Open market", L.market[a.market]], ["Comment", a.comment]].filter((r) => r[1]);
       const sc = ["m_price", "m_motivation", "m_time"].filter((k) => l[k] === "yes").length;
       const flag = a.market === "yes" || c.score >= 2;
@@ -115,7 +115,7 @@ Deno.serve(async (req) => {
       const P: any = { essential: "Essential: must stay private", preferred: "Preferred for now", open: "Not important" };
       const mot = d.motivation === "need", tim = d.time === "yes";
       const rows = [["Name", d.name], ["Email", d.email], ["Phone", d.phone], ["Property", d.address], ["Type", [d.property_type, d.beds ? d.beds + " bedrooms" : ""].filter(Boolean).join(", ")],
-        ["What they think it's worth", d.expected_price], ["Appraised", d.appraised], ["What's prompting the move", d.reason], ["Motivation", M[d.motivation]], ["Timeframe", [T[d.time], d.time_when].filter(Boolean).join(": ")],
+        ["Their price band (never shown)", d.price_low ? `${money(d.price_low)} to ${money(d.price_high)}` : d.expected_price], ["Appraised", d.appraised], ["What's prompting the move", d.reason], ["Motivation", M[d.motivation]], ["Timeframe", [T[d.time], d.time_when].filter(Boolean).join(": ")],
         ["Privacy", P[d.privacy]], ["Also buying", d.also_buying ? "Yes" : "No"], ["Comments", d.comments]].filter((r) => r[1]);
       await sendMail(db, null, "ql_seller_lead", { to: TIM_EMAIL, replyTo: d.email, subject: `Seller enquiry: ${d.address} (${d.name})`,
         html: wrap(`<p>A new seller enquiry has come in through Quiet Listings.</p><table style="border-collapse:collapse;width:100%">${rows.map(([k, v]) => `<tr><td style="padding:6px 10px 6px 0;border-bottom:1px solid #E4E0DA;color:#6E6A65;white-space:nowrap;vertical-align:top">${esc(k)}</td><td style="padding:6px 0;border-bottom:1px solid #E4E0DA">${esc(v)}</td></tr>`).join("")}</table><p>On their own answers: motivation ${mot ? "<strong>yes</strong>" : "not yet"}, time ${tim ? "<strong>yes</strong>" : "not yet"}. Price realism is yours to judge at the appraisal.</p><p>${btn(site + "#/admin/lead/" + d.id, "Open the enquiry")}</p>`) });

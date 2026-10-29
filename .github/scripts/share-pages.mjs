@@ -34,7 +34,7 @@ for (const p of pages) {
 <meta property="og:description" content="${esc(desc)}"><meta property="og:url" content="${esc(url)}">${p.image ? `<meta property="og:image" content="${esc(p.image)}"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">` : ''}
 <meta name="twitter:card" content="summary_large_image"><link rel="canonical" href="${esc(url)}">`;
   const inner = `<div class="hero">${p.image ? `<img src="${esc(p.image)}" alt="${esc(p.headline || p.suburb)}">` : ''}<span class="badge">Quiet Listing${p.status === 'under_offer' ? ' · Under offer' : ''}</span></div>
-<h1>${esc(p.headline || (p.type || 'Property') + ' in ' + p.suburb)}</h1><div class="loc">${esc(area(p))}${p.price ? ' · ' + esc(p.price) : ''}</div>
+<h1>${esc(p.headline || (p.type || 'Property') + ' in ' + p.suburb)}</h1><div class="loc">${esc(area(p))} · Expressions of interest</div>
 ${p.summary ? `<p class="sum">${esc(p.summary)}</p>` : ''}<div class="facts">${facts(p).map(f => `<span>${esc(f)}</span>`).join('')}</div>
 <a class="cta" href="${SITE}#/r/${esc(p.slug)}">Register to see the full listing</a>
 <p class="note">This home is offered privately. Full details, photos and viewings are for registered buyers only.</p><div style="text-align:center"><span class="serious">For serious house hunters only</span></div>

@@ -205,6 +205,7 @@
       <h3>How long does approval take?</h3><p>Usually within two working days of receiving a complete application and evidence of finance.</p>
       <h3>Why do you need my home address and finance details?</h3><p>Owners are trusting us to introduce only genuine buyers. Knowing who you are and confirming your position is how we keep that trust. Your details are kept private and are never given to owners. When you ask to view a property, we tell the owner your name and that you have been qualified.</p>
       <h3>What if my application is declined?</h3><p>Access is deliberately limited, so not every application is approved. We'll still gladly help you with properties on the open market, and you're welcome to update your application if your circumstances change.</p>
+      <h3>Why is there no price?</h3><p>Every Quiet Listing is offered by expressions of interest. The homes are off-market, so owners keep their price expectations private. If you're interested, tell us what you'd be prepared to pay and we'll take it to the owner.</p>
       <h3>Can I share a listing with my partner or lawyer?</h3><p>Yes, with the people directly involved in your purchase: your partner, co-buyers, lawyer, lender or building inspector. Nobody else. Anyone else buying with you should apply too.</p>
     </div></section>`;
   }
@@ -503,7 +504,7 @@
         ${ph.length > 1 ? `<button class="arrow l" data-pv aria-label="Previous photo">‹</button><button class="arrow r" data-nx aria-label="Next photo">›</button><span class="count">1 / ${ph.length}</span>` : ''}
       </div>
       <a class="lbody" href="#/listing/${l.id}">
-        <div class="price">${esc(l.price_display || 'Price by negotiation')}</div>
+        <div class="price">Expressions of interest</div>
         <div class="addr">${esc(addrOf(l))}</div>
         ${l.headline ? `<div class="headline">${esc(l.headline)}</div>` : ''}
         <div class="facts">${factsHTML(l)}</div>
@@ -583,7 +584,8 @@
       <div class="detail">
         <div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px"><span class="pill" style="background:var(--ink);color:#F1E6D2">Quiet Listing</span>${l.status === 'under_offer' ? '<span class="pill under_offer">Under offer</span>' : ''}${req.map(r => `<span class="pill">${esc(r)}</span>`).join('')}</div>
-          <div class="price">${esc(l.price_display || 'Price by negotiation')}</div>
+          <div class="price">Expressions of interest</div>
+          <p class="small muted" style="margin:2px 0 0">This home is offered privately, by expressions of interest. To make one, use the form or call Tim.</p>
           <h1>${esc(addrOf(l))}</h1>
           ${l.headline ? `<p class="muted" style="font-size:19px;margin:0">${esc(l.headline)}</p>` : ''}
           <div class="facts">${factsHTML(l)}</div>
@@ -603,13 +605,13 @@
             <form id="enqForm" style="margin-top:14px"><input type="radio" name="kind" value="question" checked hidden>
               <label class="f" for="eMsg" style="margin-top:0">Or ask Tim a question</label><textarea id="eMsg" style="min-height:80px"></textarea><input type="hidden" id="eTimes" value="">
               <button class="btn ghost block" type="submit" style="margin-top:10px">Send question</button><div id="eRes"></div></form>` : `
-            ${enq.length ? `<div class="okbox small">You sent a ${{ viewing: 'viewing request', question: 'question', offer: 'note of intention to offer' }[enq[0].kind]} on ${fmtDT(enq[0].created_at)}. ${enq[0].status === 'booked' ? 'Your viewing is booked.' : 'We\'ll be in touch.'}</div>` : ''}
+            ${enq.length ? `<div class="okbox small">You sent a ${{ viewing: 'viewing request', question: 'question', offer: 'expression of interest' }[enq[0].kind]} on ${fmtDT(enq[0].created_at)}. ${enq[0].status === 'booked' ? 'Your viewing is booked.' : 'We\'ll be in touch.'}</div>` : ''}
             <form id="enqForm">
               <div class="legend" style="margin-top:4px">I'd like to</div>
               <div class="choices" style="grid-template-columns:1fr">
                 <label class="choice"><input type="radio" name="kind" value="viewing" checked><span>Arrange a private viewing</span></label>
                 <label class="choice"><input type="radio" name="kind" value="question"><span>Ask a question</span></label>
-                <label class="choice"><input type="radio" name="kind" value="offer"><span>Talk about making an offer</span></label>
+                <label class="choice"><input type="radio" name="kind" value="offer"><span>Make an expression of interest</span></label>
               </div>
               <label class="f" for="eTimes">Times that suit you <span class="opt">(optional)</span></label><input type="text" id="eTimes" placeholder="e.g. weekday evenings, Saturday morning">
               <label class="f" for="eMsg">Message <span class="opt">(optional)</span></label><textarea id="eMsg" style="min-height:90px"></textarea>
@@ -795,7 +797,7 @@
         <p style="margin:10px 0 0"><button type="button" class="btn dark sm" id="shCopy">Copy link</button> <a class="btn ghost sm" target="_blank" rel="noopener" href="https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(SITE + 'q/' + o.share_slug + '/')}">Share on Facebook</a></p>
         <p class="small" style="margin:12px 0 0"><strong>${s.share_visits || 0}</strong> visits from your link · <strong>${s.registrations || 0}</strong> registered buyers</p></div>` : ''}
       <form class="card" id="ckForm"><h2 style="font-size:30px">A quick check-in</h2><p class="muted" style="margin-top:-4px">Your answers go straight to Tim and help him advise you well. Nobody else sees them.</p>
-        ${q('price', `If a buyer offered a price in line with our guide${o.price_display ? ' (' + esc(o.price_display) + ')' : ''}, would you accept it?`, [['yes', 'Yes'], ['consider', 'I\'d consider it'], ['no', 'No, I\'d want more']])}
+        ${q('price', 'Has your view on price changed since we spoke?', [['same', 'No, it\'s the same'], ['flexible', 'I\'m open to offers below it'], ['higher', 'I\'d now want more']])}
         ${q('motivation', 'Do you need to sell, or would you like to sell?', [['need', 'I need to sell'], ['like', 'I\'d like to, if the price is right'], ['testing', 'I\'m just testing the waters']])}
         ${q('time', 'Is there a date you need to be sold by?', [['yes', 'Yes'], ['rough', 'Roughly'], ['no', 'No']])}
         <div id="dateBox" class="hidden"><label class="f" for="oDate" style="margin-top:-6px">Roughly when?</label><input type="text" id="oDate" placeholder="e.g. before Christmas, by March"></div>
@@ -838,12 +840,12 @@
     return { lead_id: d.id, vendor_name: d.name, vendor_email: d.email, vendor_phone: d.phone, street: parts[0] || '', suburb: parts[1] || '', city: parts[2] || 'Dunedin',
       property_type: map[d.property_type] || d.property_type || null, beds: parseInt(d.beds) || null,
       m_motivation: { need: 'yes', like: 'partly', testing: 'no' }[d.motivation] || null, m_time: { yes: 'yes', rough: 'partly', no: 'no' }[d.time] || null,
-      discretion: d.privacy === 'essential', m_notes: d.expected_price ? `Owner thinks it's worth ${d.expected_price}` : null };
+      discretion: d.privacy === 'essential', seller_price_low: d.price_low || null, seller_price_high: d.price_high || null };
   }
   async function adminLead(id) {
     const d = await call(sb.from('ql_seller_leads').select('*').eq('id', id).single());
     const rows = [['Email', `<a href="mailto:${esc(d.email)}">${esc(d.email)}</a>`], ['Phone', `<a href="tel:${esc(d.phone)}">${esc(d.phone)}</a>`], ['Property', esc(d.address)], ['Type', esc([d.property_type, d.beds ? d.beds + ' bedrooms' : ''].filter(Boolean).join(', '))],
-      ['What they think it\'s worth', esc(d.expected_price)], ['Appraised', esc(d.appraised)], ['What\'s prompting the move', esc(d.reason)], ['Need or want', esc(LM[d.motivation])], ['Timeframe', esc([LT[d.time], d.time_when].filter(Boolean).join(': '))],
+      ['Their price band (never shown)', d.price_low ? `${money(d.price_low)} to ${money(d.price_high)}` : esc(d.expected_price)], ['Appraised', esc(d.appraised)], ['What\'s prompting the move', esc(d.reason)], ['Need or want', esc(LM[d.motivation])], ['Timeframe', esc([LT[d.time], d.time_when].filter(Boolean).join(': '))],
       ['Privacy', esc(LP[d.privacy])], ['Also buying', d.also_buying ? 'Yes' : 'No'], ['Comments', esc(d.comments)], ['Received', fmtDT(d.created_at)]].filter(r => r[1]);
     const pre = { m_price: null, m_motivation: { need: 'yes', like: 'partly', testing: 'no' }[d.motivation], m_time: { yes: 'yes', rough: 'partly', no: 'no' }[d.time] };
     app.innerHTML = `<div class="wrap" style="padding-bottom:70px"><div class="eyebrow" style="margin-top:28px">Quiet Listings admin</div>${adminTabs('')}
@@ -872,7 +874,7 @@
     app.innerHTML = `<div class="narrow" style="padding:30px 20px 80px">
       ${p.image ? `<div class="ph" style="border-radius:12px;aspect-ratio:1.91/1"><img src="${esc(p.image)}" alt=""><span class="badge">Quiet Listing</span></div>` : ''}
       <h1 style="font-size:clamp(28px,4.5vw,40px);margin-top:18px">${esc(p.headline || (p.type || 'Property') + ' in ' + p.suburb)}</h1>
-      <p class="muted" style="margin:0">${esc([p.street, p.suburb, p.city].filter(Boolean).join(', '))}${p.price ? ' · ' + esc(p.price) : ''}${facts.length ? ' · ' + esc(facts.join(' · ')) : ''}</p>
+      <p class="muted" style="margin:0">${esc([p.street, p.suburb, p.city].filter(Boolean).join(', '))} · Expressions of interest${facts.length ? ' · ' + esc(facts.join(' · ')) : ''}</p>
       ${p.summary ? `<p style="font-size:19px;margin:14px 0 0">${esc(p.summary)}</p>` : ''}
       ${S.agent ? '<div class="note">You\'re signed in as the agent. Buyers see a registration form here.</div>' : `
       <form class="card" id="qrForm" style="margin-top:24px" novalidate>
@@ -918,7 +920,9 @@
         <label class="f" for="sEmail">Email</label><input type="email" id="sEmail" autocomplete="email">
         <label class="f" for="sAddr">Property address</label><div class="hint">Street, suburb, town.</div><input type="text" id="sAddr" placeholder="e.g. 12 Example Street, Maori Hill, Dunedin">
         <div class="row2"><div><label class="f" for="sType">Property type</label><select id="sType"><option value="">Choose…</option>${['House', 'Townhouse', 'Apartment', 'Character home', 'Lifestyle block', 'Section'].map(t => `<option>${t}</option>`).join('')}</select></div><div><label class="f" for="sBeds">Bedrooms</label><input type="number" id="sBeds" inputmode="numeric"></div></div>
-        <label class="f" for="sPrice">What do you think it's worth? <span class="opt">(optional)</span></label><input type="text" id="sPrice" placeholder="A rough figure is fine">
+        <div class="legend">What price range would you be comfortable selling for?</div>
+        <div class="hint">This is just for Tim. It's never shown, advertised or searchable: every Quiet Listing is offered by expressions of interest, so your plans and expectations stay private.</div>
+        <div class="row2"><div><label class="f" for="sLow" style="margin-top:0">From</label><input type="text" id="sLow" inputmode="numeric" placeholder="$"></div><div><label class="f" for="sHigh" style="margin-top:0">To</label><input type="text" id="sHigh" inputmode="numeric" placeholder="$"></div></div>
         ${q('appraised', 'Has it been appraised in the last six months?', [['Yes, by McGuire Real Estate', 'Yes, by McGuire Real Estate'], ['Yes, by another agent', 'Yes, by another agent'], ['No', 'No']])}
         ${q('reason', 'What\'s prompting the move?', ['Moving up', 'Downsizing', 'Relocating', 'Change in family circumstances', 'Financial reasons', 'Estate or trust sale', 'Testing the market', 'Other'].map(x => [x, x]))}
         ${q('motivation', 'Do you need to sell, or would you like to sell?', [['need', 'I need to sell'], ['like', 'I\'d like to, if the price is right'], ['testing', 'I\'m just testing the waters']])}
@@ -936,9 +940,9 @@
       e.preventDefault();
       const v = k => ($(`input[name=s_${k}]:checked`) || {}).value || null;
       const p = { name: $('#sName').value.trim(), phone: $('#sPhone').value.trim(), email: $('#sEmail').value.trim(), address: $('#sAddr').value.trim(), property_type: $('#sType').value || null, beds: $('#sBeds').value || null,
-        expected_price: $('#sPrice').value.trim() || null, appraised: v('appraised'), reason: v('reason'), motivation: v('motivation'), time: v('time'), time_when: $('#sWhen').value.trim() || null, privacy: v('privacy'),
+        price_low: num($('#sLow').value) || null, price_high: num($('#sHigh').value) || null, appraised: v('appraised'), reason: v('reason'), motivation: v('motivation'), time: v('time'), time_when: $('#sWhen').value.trim() || null, privacy: v('privacy'),
         also_buying: both || !!($('#sBuy') && $('#sBuy').checked), comments: $('#sCom').value.trim() || null };
-      const err = !p.name || !p.phone || !/^\S+@\S+\.\S+$/.test(p.email) ? 'Please give your name, phone and email.' : p.address.length < 6 ? 'Please give the property address.' : !p.motivation || !p.time || !p.privacy ? 'Please answer the questions about your plans and privacy.' : !$('#sOk').checked ? 'Please tick the box so we can contact you.' : '';
+      const err = !p.name || !p.phone || !/^\S+@\S+\.\S+$/.test(p.email) ? 'Please give your name, phone and email.' : p.address.length < 6 ? 'Please give the property address.' : !p.price_low || !p.price_high || p.price_high < p.price_low ? 'Please give the price range you\'d be comfortable with (from and to).' : !p.motivation || !p.time || !p.privacy ? 'Please answer the questions about your plans and privacy.' : !$('#sOk').checked ? 'Please tick the box so we can contact you.' : '';
       if (err) { $('#sErr').innerHTML = `<div class="err">${esc(err)}</div>`; return; }
       const b = $('#sellForm button[type=submit]'); busy(b, true, 'Sending…');
       try {
@@ -990,7 +994,7 @@
         ${sec('Why they\'re buying', [['Reason', a.reason], ['In their words', a.story], ['Timeframe', a.timeframe], ['Decision makers', a.decision_makers]])}
         ${(a.updates || []).length ? `<div class="card"><h3>Updates from the member</h3>${a.updates.slice().reverse().map(u => `<p style="margin:0 0 10px"><span class="small muted">${fmtDT(u.at)}</span><br>${esc(u.note)}${Object.entries(u.finance || {}).filter(([k]) => k !== 'docs').map(([k, v]) => `<br><span class="small">${esc(k)}: ${esc(v)}</span>`).join('')}</p>`).join('')}</div>` : ''}
         <div class="card"><h3>Stock that suits them</h3>${(() => { const rows = listings.filter(qualifies).map(l => ({ l, sc: matchScore(m, l) })).sort((x, y) => y.sc - x.sc);
-          return rows.length ? `<table class="kv">${rows.map(({ l, sc }) => `<tr><td><a href="#/admin/listing/${l.id}">${esc(l.ref)} ${esc(addrOf(l))}</a><br><span class="small muted">${esc(l.price_display || '')} · ${l.beds || '-'} bed · ${esc(l.property_type || '')}</span></td><td style="width:auto;text-align:right">Match ${sc}/3<br><button class="btn link" data-sendl="${l.id}">Email it to them</button></td></tr>`).join('')}</table>` : `<p class="muted" style="margin:0">${m.status === 'approved' ? 'No live listings within their verified position.' : 'Approve them and set a verified budget to see matching stock.'}</p>`; })()}</div>
+          return rows.length ? `<table class="kv">${rows.map(({ l, sc }) => `<tr><td><a href="#/admin/listing/${l.id}">${esc(l.ref)} ${esc(addrOf(l))}</a><br><span class="small muted">${l.beds || '-'} bed · ${esc(l.property_type || '')}</span></td><td style="width:auto;text-align:right">Match ${sc}/3<br><button class="btn link" data-sendl="${l.id}">Email it to them</button></td></tr>`).join('')}</table>` : `<p class="muted" style="margin:0">${m.status === 'approved' ? 'No live listings within their verified position.' : 'Approve them and set a verified budget to see matching stock.'}</p>`; })()}</div>
         ${enq.length ? `<div class="card"><h3>Enquiries</h3><table class="kv">${enq.map(e => `<tr><td>${fmtDT(e.created_at)}</td><td><a href="#/admin/listing/${e.listing_id}">${esc((listings.find(l => l.id === e.listing_id) || {}).ref || 'Listing')}</a> ${e.kind} <span class="pill">${e.status}</span></td></tr>`).join('')}</table></div>` : ''}
       </div>
       <aside class="side"><div class="card">
@@ -1043,7 +1047,7 @@
       try { st = await call(sb.rpc('ql_stats', { lid: l.id })); } catch (e) { }
     }
     const ownerLink = l.vendor_token ? `${SITE}#/owner/${l.vendor_token}` : '';
-    const CK = { price: { yes: 'would accept around the guide', consider: 'would consider it', no: 'wants more' }, motivation: { need: 'needs to sell', like: 'would like to sell', testing: 'testing the waters' }, time: { yes: 'has a deadline', rough: 'roughly', no: 'no deadline' } };
+    const CK = { price: { same: 'view unchanged', flexible: 'open to offers below it', higher: 'now wants more', yes: 'would accept around the guide', consider: 'would consider it', no: 'wants more' }, motivation: { need: 'needs to sell', like: 'would like to sell', testing: 'testing the waters' }, time: { yes: 'has a deadline', rough: 'roughly', no: 'no deadline' } };
     const timeline = [...nudges.map(n => ({ at: n.at, h: `<strong>Owner update ${n.stage}</strong> ${n.ok ? 'sent' : '<span class="pill declined">failed</span>'}${n.manual ? ' (sent by you)' : ''}<br><span class="small muted">${esc(n.subject || '')}${n.error ? ' · ' + esc(n.error) : ''}</span>` })),
       ...checkins.map(c => ({ at: c.at, h: `<strong>Owner check-in: ${c.score}/3</strong><br><span class="small muted">Price: ${esc((CK.price[c.answers.price]) || '-')} · Motivation: ${esc(CK.motivation[c.answers.motivation] || '-')} · Time: ${esc(CK.time[c.answers.time] || '-')}${c.answers.date ? ' (' + esc(c.answers.date) + ')' : ''}${c.answers.market === 'yes' ? ' · <strong>wants to talk about the open market</strong>' : ''}${c.answers.comment ? '<br>“' + esc(c.answers.comment) + '”' : ''}</span>` }))].sort((a, b) => a.at < b.at ? 1 : -1);
     let qm = [], alerted = [];
@@ -1082,7 +1086,9 @@
       </div>
       <aside class="side"><div class="card">
         <h3>Price and matching</h3>
-        ${inp('price_display', 'Price shown to members', { ph: 'e.g. Offers over $895,000' })}
+        <p class="small" style="margin:0 0 4px">Advertised as <strong>Expressions of interest</strong>. No price is ever shown or searchable.</p>
+        <div class="legend">Seller's price band <span class="opt">(from onboarding, never shown)</span></div>
+        <div class="row2"><div>${inp('seller_price_low', 'From', { im: 'numeric', ph: '$' })}</div><div>${inp('seller_price_high', 'To', { im: 'numeric', ph: '$' })}</div></div>
         ${inp('qualify_price', 'Matching price', { im: 'numeric', ph: '$', hint: 'Never shown. Used to match buyers and for new-listing alerts. All approved members can see the listing.' })}
         <label class="check"><input type="checkbox" data-l="req_cash" ${l.req_cash ? 'checked' : ''}><span>Owner requires a cash buyer <span class="muted">(shown on the listing)</span></span></label>
         <label class="check"><input type="checkbox" data-l="req_no_sale" ${l.req_no_sale ? 'checked' : ''}><span>Owner won't accept a sale-to-sell condition <span class="muted">(shown on the listing)</span></span></label>
@@ -1111,7 +1117,6 @@
         <div class="hint" style="text-align:right" id="shCount"></div>
         <div class="legend">Header photo</div>
         <div class="thumbs" id="shPhotos">${(l.photos || []).length ? l.photos.map(ph => `<button type="button" class="shpick" data-shp="${esc(ph)}" style="padding:0;border:3px solid ${l.share_photo === ph ? 'var(--accent)' : 'transparent'};border-radius:8px;background:none;cursor:pointer"><img src="${S.urls[ph] || ''}" alt="" style="width:92px;height:62px;object-fit:cover;border-radius:5px;display:block"></button>`).join('') : '<p class="small muted" style="margin:0">Add photos to the listing first.</p>'}</div>
-        <label class="check"><input type="checkbox" data-l="share_show_price" ${l.share_show_price ? 'checked' : ''}><span>Show the price on the share page</span></label>
         <label class="check"><input type="checkbox" data-l="share_show_street" ${l.share_show_street ? 'checked' : ''}><span>Show the street address <span class="muted">(otherwise suburb only)</span></span></label>
         <label class="f" for="l_share_slug">Link name</label><input type="text" id="l_share_slug" data-l="share_slug" value="${esc(l.share_slug || '')}" placeholder="worked out when you save">
         ${l.share_enabled && l.share_slug ? `<div class="copybox small" style="margin-top:10px;word-break:break-all">${esc(SITE + 'q/' + l.share_slug + '/')}</div><p style="margin:8px 0 0"><button type="button" class="btn ghost sm" id="shCopyA">Copy link</button></p><p class="small muted" style="margin:6px 0 0">New or changed share pages go live within about 15 minutes of saving.</p>` : ''}
@@ -1167,7 +1172,7 @@
       $$('[data-lr]:checked', app).forEach(el => { o[el.dataset.lr] = el.value; });
       $$('[data-l]', app).forEach(el => { const k = el.dataset.l; if (el.type === 'checkbox') o[k] = el.checked; else o[k] = el.value.trim(); });
       ['beds', 'living', 'parking'].forEach(k => o[k] = o[k] === '' ? null : parseInt(o[k]));
-      ['baths', 'land_m2', 'floor_m2', 'rv', 'qualify_price'].forEach(k => o[k] = o[k] === '' ? null : num(o[k]));
+      ['baths', 'land_m2', 'floor_m2', 'rv', 'qualify_price', 'seller_price_low', 'seller_price_high'].forEach(k => o[k] = o[k] === '' ? null : num(o[k]));
       o.features = (o.features || '').split('\n').map(s => s.trim()).filter(Boolean);
       Object.keys(o).forEach(k => { if (o[k] === '') o[k] = null; });
       o.city = o.city || 'Dunedin'; o.photos = l.photos || []; if (l.agreement_id) o.agreement_id = l.agreement_id;
@@ -1178,6 +1183,8 @@
     const persist = async () => {
       const o = gather();
       if (o.status !== 'draft' && !o.qualify_price) throw new Error('Set a matching price before making the listing live.');
+      if (o.status !== 'draft' && (!o.seller_price_low || !o.seller_price_high)) throw new Error('Enter the seller\'s price band before making the listing live.');
+      o.price_display = null; o.share_show_price = false;
       if (o.share_enabled) {
         if (!o.agreement_held) throw new Error('The share link can only go on once you hold a signed agency agreement.');
         if (!['live', 'under_offer'].includes(o.status)) throw new Error('Set the listing live before turning on the share link.');

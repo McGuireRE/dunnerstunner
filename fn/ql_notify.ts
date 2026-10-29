@@ -100,7 +100,7 @@ Deno.serve(async (req) => {
       for (const m of todo) {
         try {
           await sendMail(db, null, "ql_alert", { to: m.email, subject: `New Quiet Listing: ${l.headline || (l.property_type || "Property") + " in " + l.suburb}`,
-            html: wrap(`<p>Kia ora ${esc(first(m.full_name))},</p><p>A new Quiet Listing has just become available, and you qualify to view it.</p>${table([row("Property", l.headline), row("Location", [l.suburb, l.city].filter(Boolean).join(", ")), row("Type", l.property_type), row("Bedrooms", l.beds), row("Bathrooms", l.baths), row("Price", l.price_display)])}${btn(site + "#/listing/" + l.id, "View the listing")}<p style="color:#6E6A65;font-size:13px">This property is offered privately. Please keep its details confidential.</p>`) });
+            html: wrap(`<p>Kia ora ${esc(first(m.full_name))},</p><p>A new Quiet Listing has just become available, and you qualify to view it.</p>${table([row("Property", l.headline), row("Location", [l.suburb, l.city].filter(Boolean).join(", ")), row("Type", l.property_type), row("Bedrooms", l.beds), row("Bathrooms", l.baths), row("Price", "Expressions of interest")])}${btn(site + "#/listing/" + l.id, "View the listing")}<p style="color:#6E6A65;font-size:13px">This property is offered privately. Please keep its details confidential.</p>`) });
           await db.from("ql_alerts").insert({ listing_id: l.id, user_id: m.user_id });
           ok++;
         } catch (e: any) { errors.push(`${m.email}: ${e?.message || e}`); }
