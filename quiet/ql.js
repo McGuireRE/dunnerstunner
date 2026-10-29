@@ -172,27 +172,16 @@
   function howSection() {
     return `
     <section class="band alt"><div class="wrap">
-      <div class="logic">
-        <div>
-          <div class="eyebrow">How qualifying works</div>
-          <h2>You see what you qualify for. Nothing more.</h2>
-          <p>Qualifying is deliberately stringent. Each step is there to protect the owners and to make sure your time is spent on properties you can actually buy.</p>
+      <div class="narrow" style="padding:0;max-width:820px">
+          <div class="eyebrow">How membership works</div>
+          <h2>Serious buyers, personally verified.</h2>
+          <p>Owners who sell quietly are trusting us to introduce people who are ready. That's why every member is reviewed personally before they see a single home.</p>
           <ol style="padding-left:20px">
             <li style="margin-bottom:10px"><strong>You apply.</strong> Tell us who you are, your experience in the market, your finance, your top ten buying criteria and why you are buying.</li>
-            <li style="margin-bottom:10px"><strong>We verify.</strong> Every application is reviewed personally. We'll sight written evidence of your finance, such as a bank pre-approval or proof of funds, and may call you. We then set your <em>verified budget</em>.</li>
-            <li style="margin-bottom:10px"><strong>Listings are matched to you.</strong> Each Quiet Listing has a qualifying price agreed with the owner. If your verified budget is below it, that property stays hidden from you. Some owners also ask for cash buyers, or buyers who don't need to sell first. You'll only see those if your position meets that requirement.</li>
-            <li><strong>You keep it current.</strong> Pre-approvals expire and circumstances change. Update your finance at any time and your access is reviewed. Membership can be paused or withdrawn if your position changes or the terms aren't kept.</li>
+            <li style="margin-bottom:10px"><strong>We verify.</strong> Every application is reviewed personally. We'll sight written evidence of your finance, such as a bank pre-approval or proof of funds, and may call you.</li>
+            <li style="margin-bottom:10px"><strong>You see Quiet Listings.</strong> Once approved, you can browse every Quiet Listing, save the ones you like and ask for private viewings. When something comes up that suits what you've told us, we'll let you know.</li>
+            <li><strong>You keep us posted.</strong> Pre-approvals expire and plans change. Let us know when yours do, so we can keep helping you well.</li>
           </ol>
-        </div>
-        <div class="meter">
-          <div class="small muted" style="margin-bottom:6px">Example: a member with a verified budget of <strong style="color:var(--ink)">$900,000</strong>, bank pre-approval, and a house still to sell</div>
-          <div class="rowm"><div>Listing qualifying at $850,000</div><div class="yes">Visible</div></div>
-          <div class="rowm"><div>Listing qualifying at $900,000</div><div class="yes">Visible</div></div>
-          <div class="rowm"><div>Listing qualifying at $950,000</div><div class="no">Hidden</div></div>
-          <div class="rowm"><div>Listing at $800,000, owner requires no sale to sell first</div><div class="no">Hidden</div></div>
-          <div class="rowm"><div>Listing at $780,000, cash buyers only</div><div class="no">Hidden</div></div>
-          <p class="small muted" style="margin:12px 0 0">Once their house sells unconditionally and they update us, the fourth listing becomes visible too.</p>
-        </div>
       </div>
     </div></section>
     <section class="band"><div class="wrap">
@@ -273,8 +262,8 @@
   };
   const SUGGEST = ['All-day sun', 'North-facing living', 'Off-street parking', 'Internal-access garage', 'Single level', 'Low maintenance', 'Views', 'Quiet street', 'Flat section', 'School zone', 'Close to the city', 'Warm and dry', 'Heat pump or log burner', 'Modern kitchen', 'Second living area', 'Ensuite', 'Character features', 'Outdoor entertaining', 'Garden', 'Privacy', 'Walk to shops', 'Home office', 'Room for a workshop', 'Easy-care section'];
   const ACKS = [
-    ['stringent', 'I understand Quiet Listings are offered privately at the owners\' request, and that qualifying is stringent.'],
-    ['logic', 'I understand I will only see properties I qualify for, based on my verified budget and position, and that owners may set extra requirements such as cash or no sale to sell first.'],
+    ['stringent', 'I understand Quiet Listings are offered privately at the owners\' request, and that membership is for serious buyers only.'],
+    ['logic', 'I understand my membership depends on verified finance, and that owners may set their own terms for a sale.'],
     ['confidential', 'I will keep every listing confidential. I will not share, screenshot, forward or post any details, except with my partner, co-buyers, lawyer, lender or inspector.'],
     ['contact', 'I will not approach owners, visit a property uninvited, or contact neighbours. All contact goes through McGuire Real Estate.'],
     ['genuine', 'I will only ask to view properties I am genuinely prepared to buy, and I will turn up as arranged.'],
@@ -315,8 +304,7 @@
       ${radios('offers', 'How many offers have you made in the last 12 months?', OPT.offers)}`,
       v: () => ['bought', 'sold', 'owns', 'buying_as', 'looking_for', 'offers'].some(k => !getV(k)) ? 'Please answer every question.' : '' },
     { t: 'Your finances', r: () => `
-      <div class="card tight" style="background:var(--bg)"><strong>Why we ask, and how it's used</strong>
-        <p class="small" style="margin:6px 0 0">Your finance decides what you can see. Once we have sighted written evidence, we set your <strong>verified budget</strong>. Each Quiet Listing has a qualifying price agreed with the owner, and you'll only see listings at or below your verified budget. Some owners also require cash, or a buyer who doesn't need to sell first. Your finance details are never shown to owners.</p></div>
+      <div class="card tight" style="background:var(--bg)"><strong>Why we ask</strong><p class="small" style="margin:6px 0 0">Owners selling quietly want to meet buyers who can act. We\'ll sight written evidence of your finance before approving your membership. Your finance details are never shown to owners.</p></div>
       ${fld('budget', 'The most you can spend', { im: 'numeric', ph: '$', hint: 'Your realistic maximum purchase price, including your deposit.' })}
       ${radios('finance_type', 'How are you funding your purchase?', OPT.finance_type)}
       <div id="preBox">${'' }
@@ -329,7 +317,7 @@
       <div class="hint">A pre-approval letter, or proof of funds such as a bank statement. PDF or photo.</div>
       <ul class="uploads" id="docList">${(getV('docs') || []).map(d => `<li>✓ ${esc(d.name)}</li>`).join('')}</ul>
       <label class="btn ghost sm" style="cursor:pointer">Upload a document<input type="file" id="docIn" accept=".pdf,image/*" multiple hidden></label>
-      <label class="check" style="margin-top:20px;border-top:1px solid var(--line)"><input type="checkbox" id="ackLogic" ${getV('ack_logic') ? 'checked' : ''}><span>I understand that I will only see listings I qualify for, based on my <strong>verified</strong> finance, and that my access may change if my finance changes or expires.</span></label>`,
+      <label class="check" style="margin-top:20px;border-top:1px solid var(--line)"><input type="checkbox" id="ackLogic" ${getV('ack_logic') ? 'checked' : ''}><span>I understand my membership depends on verified finance, and I\'ll let you know if my finance changes or expires.</span></label>`,
       after: () => {
         const sync = () => { const ft = ($('[data-f=finance_type]:checked', app) || {}).value || ''; $('#preBox').classList.toggle('hidden', ft.startsWith('Cash') || ft.startsWith('Not yet'));
           const ns = ($('[data-f=need_to_sell]:checked', app) || {}).value || '';
@@ -339,7 +327,7 @@
         $$('[data-f=finance_type]', app).forEach(r => r.addEventListener('change', sync)); sync();
         $('#docIn').onchange = async e => { await uploadDocs(e.target.files, $('#docList')); };
       },
-      v: () => !num(getV('budget')) ? 'Please tell us the most you can spend.' : !getV('finance_type') ? 'Please tell us how you are funding your purchase.' : !getV('need_to_sell') ? 'Please tell us whether you need to sell first.' : !getV('ack_logic') ? 'Please confirm you understand how qualifying works.' : '' },
+      v: () => !num(getV('budget')) ? 'Please tell us the most you can spend.' : !getV('finance_type') ? 'Please tell us how you are funding your purchase.' : !getV('need_to_sell') ? 'Please tell us whether you need to sell first.' : !getV('ack_logic') ? 'Please tick the box about your finance.' : '' },
     { t: 'What you\'re looking for', r: () => {
       const crit = (getV('criteria') || []).concat(Array(10).fill('')).slice(0, 10);
       return `<p class="muted">This is how we match you with owners. Be specific: the more honest you are about what matters, the better the match.</p>
@@ -454,11 +442,10 @@
     app.innerHTML = `<div class="narrow" style="padding:40px 20px 80px">
       <div class="eyebrow">My account</div><h1 style="font-size:42px">${esc(m.full_name || m.email)}</h1>
       <div class="card"><div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center"><h3 style="margin:0">Membership</h3><span class="pill ${m.status}">${{ draft: 'Application not finished', info: 'More information needed', pending: 'Under review', approved: 'Approved member', declined: 'Not approved', suspended: 'Paused' }[m.status]}</span></div>
-        ${m.status === 'approved' ? `<table class="kv" style="margin-top:10px"><tr><td>Verified budget</td><td><strong>${m.qualified_to ? money(m.qualified_to) : 'Not set'}</strong></td></tr><tr><td>Cash buyer verified</td><td>${m.cash_verified ? 'Yes' : 'No'}</td></tr><tr><td>Free of a sale to sell first</td><td>${m.sale_free || m.cash_verified ? 'Yes' : 'No'}</td></tr></table>
-          <p class="small muted" style="margin:10px 0 0">These decide which Quiet Listings you can see. If your position has improved, send us an update below.</p>` : ''}
+        ${m.status === 'approved' ? `<p class="small muted" style="margin:10px 0 0">You can see every Quiet Listing. If your finance or plans change, send us an update below.</p>` : ''}
         ${canEdit ? `<p style="margin:12px 0 0"><a class="btn dark sm" href="#/apply">Continue my application</a></p>` : ''}</div>
       ${m.status !== 'draft' ? `<div class="card"><h3>${m.status === 'pending' ? 'Evidence of finance' : 'Update my finance or circumstances'}</h3>
-        <p class="small muted">${m.status === 'pending' ? 'Upload your pre-approval letter or proof of funds.' : 'New pre-approval, house sold, budget changed? Tell us here and upload any documents. We\'ll review your access.'}</p>
+        <p class="small muted">${m.status === 'pending' ? 'Upload your pre-approval letter or proof of funds.' : 'New pre-approval, house sold, budget changed? Tell us here and upload any documents.'}</p>
         <ul class="uploads" id="docList2">${(a.docs || []).map(d => `<li>✓ ${esc(d.name)} <span class="muted small">${fmtDate(d.at)}</span></li>`).join('')}</ul>
         <label class="btn ghost sm" style="cursor:pointer">Upload a document<input type="file" id="docIn2" accept=".pdf,image/*" multiple hidden></label>
         ${m.status !== 'pending' ? `<div class="row2"><div><label class="f">New maximum budget <span class="opt">(optional)</span></label><input type="text" id="upBudget" inputmode="numeric" placeholder="$"></div><div><label class="f">Pre-approval expires <span class="opt">(optional)</span></label><input type="date" id="upExp"></div></div>
@@ -558,8 +545,7 @@
       </div></div>`}
       <div class="wrap" style="padding-bottom:70px">
         <div class="results-head"><h1 id="rTitle"></h1>${S.agent ? '<a class="btn ghost sm" href="#/admin/listings">Manage listings</a>' : ''}</div>
-        ${!S.agent && !savedOnly && S.me.status !== 'approved' ? `<div class="hiddenbar"><div><strong>You're registered for ${S.listings.length === 1 ? 'this listing' : 'these listings'}.</strong> ${S.hidden > 0 ? `${S.hidden} more Quiet Listing${S.hidden === 1 ? ' is' : 's are'} open to full members.` : 'Full members see every Quiet Listing they qualify for.'} Full membership also lets you book viewings, and owner-members who list their own home with us get 48 hours' early access.</div><a class="btn light sm" href="#/apply">Apply for full membership</a></div>` : ''}
-        ${!S.agent && !savedOnly && S.me.status === 'approved' && S.hidden > 0 ? `<div class="hiddenbar"><div><strong>${S.hidden} more Quiet Listing${S.hidden === 1 ? ' is' : 's are'}</strong> outside your verified position.${S.me.qualified_to ? ` Your verified budget is ${money(S.me.qualified_to)}.` : ''}</div><a class="btn light sm" href="#/account">Update my finance</a></div>` : ''}
+        ${!S.agent && !savedOnly && S.me.status !== 'approved' ? `<div class="hiddenbar"><div><strong>You're registered for ${S.listings.length === 1 ? 'this listing' : 'these listings'}.</strong> ${S.hidden > 0 ? `${S.hidden} more Quiet Listing${S.hidden === 1 ? ' is' : 's are'} open to full members.` : 'Full members see every Quiet Listing.'} Full membership also lets you book viewings, and owner-members who list their own home with us get 48 hours' early access.</div><a class="btn light sm" href="#/apply">Apply for full membership</a></div>` : ''}
         <div class="cards" id="cards"></div>
       </div>`;
     const draw = () => {
@@ -568,7 +554,7 @@
         && (!F.type || l.property_type === F.type) && (!F.beds || (l.beds || 0) >= +F.beds) && (!F.baths || (l.baths || 0) >= +F.baths));
       const by = { new: (a, b) => (b.published_at || '') > (a.published_at || '') ? 1 : -1, old: (a, b) => (a.published_at || '') > (b.published_at || '') ? 1 : -1, beds: (a, b) => (b.beds || 0) - (a.beds || 0), land: (a, b) => num(b.land_m2) - num(a.land_m2) }[F.sort];
       list = list.slice().sort(by);
-      $('#rTitle').textContent = savedOnly ? `Saved (${list.length})` : `${list.length} Quiet Listing${list.length === 1 ? '' : 's'}${S.agent ? ' live' : S.me.status === 'approved' ? ' you qualify for' : ' you\'re registered for'}`;
+      $('#rTitle').textContent = savedOnly ? `Saved (${list.length})` : `${list.length} Quiet Listing${list.length === 1 ? '' : 's'}${S.agent ? ' live' : S.me.status === 'approved' ? '' : ' you\'re registered for'}`;
       $('#cards').innerHTML = list.length ? list.map(cardHTML).join('') : `<div class="empty" style="grid-column:1/-1"><h2>${savedOnly ? 'Nothing saved yet' : S.listings.length ? 'No matches' : 'No listings to show just yet'}</h2><p>${savedOnly ? 'Tap the heart on any listing to keep it here.' : S.listings.length ? 'Try widening your search.' : 'New Quiet Listings are added regularly. We\'ll email you when one matching your position becomes available.'}</p></div>`;
       wireCards($('#cards'));
     };
@@ -584,7 +570,7 @@
     let l;
     if (S.agent) { l = await call(sb.from('ql_listings').select('*').eq('id', id).maybeSingle()); if (l) await signPhotos(l.photos || []); }
     else { await loadListings(); l = S.listings.find(x => x.id === id); }
-    if (!l) { app.innerHTML = `<div class="narrow empty"><h2>This listing isn't available</h2><p>It may have been withdrawn, or it's outside your verified position.</p><a class="btn dark" href="#/">Back to listings</a></div>`; return; }
+    if (!l) { app.innerHTML = `<div class="narrow empty"><h2>This listing isn't available</h2><p>It may have been withdrawn or sold.</p><a class="btn dark" href="#/">Back to listings</a></div>`; return; }
     const ph = (l.photos || []).filter(p => S.urls[p]);
     let enq = [];
     if (!S.agent) { sb.rpc('ql_log_view', { lid: id }).then(() => null, () => null); try { enq = await call(sb.from('ql_enquiries').select('*').eq('listing_id', id).order('created_at', { ascending: false })); } catch (e) { } }
@@ -745,7 +731,7 @@
       ${sorted.map(l => { const st = x.stats[l.id]; const c = x.ck[l.id];
         return `<tr class="click" data-go="#/admin/listing/${l.id}"><td><strong>${esc(l.ref)}</strong> ${esc(addrOf(l) || 'Untitled')}<br><span class="pill ${l.status}" style="margin-top:4px">${LSTATUS[l.status]}</span> ${flags(l)}</td>
           <td>${tri(l, 64, false)}</td><td class="small">${weeks(l)}</td>
-          <td class="small">${st ? `${st.qualified} qualify · ${st.viewed} viewed<br>${st.saved} saved · ${st.viewings + st.offers} requests${l.share_enabled ? `<br>Share link: ${st.share_visits} visits · ${st.registrations} registered` : ''}` : '<span class="muted">Not live</span>'}</td>
+          <td class="small">${st ? `${st.qualified} match · ${st.viewed} viewed<br>${st.saved} saved · ${st.viewings + st.offers} requests${l.share_enabled ? `<br>Share link: ${st.share_visits} visits · ${st.registrations} registered` : ''}` : '<span class="muted">Not live</span>'}</td>
           <td class="small">${upd(l)}</td><td class="small">${c ? `${c.score}/3 · ${fmtDate(c.at)}${c.answers && c.answers.market === 'yes' ? '<br><strong>Wants to talk</strong>' : ''}` : '<span class="muted">None yet</span>'}</td></tr>`; }).join('') || '<tr><td colspan="6" class="muted">No listings yet.</td></tr>'}</table></div>
       <p class="small muted" style="margin-top:12px">Two out of three is workable. Quiet Listings with fewer than two are on leeway: owner updates report buyer activity and gently encourage the open market, unless the owner needs discretion.</p>`;
   }
@@ -802,8 +788,8 @@
     app.innerHTML = `<div class="narrow" style="padding:40px 20px 80px">
       <div class="eyebrow">Your Quiet Listing</div>
       <h1 style="font-size:clamp(32px,5vw,46px)">${esc([o.street, o.suburb].filter(Boolean).join(', ') || o.ref)}</h1>
-      <p class="muted">${o.status === 'draft' ? 'Not yet live to members.' : `A Quiet Listing for ${wk} week${wk === 1 ? '' : 's'}. Only buyers we've personally qualified can see it.`}</p>
-      <div class="grid4" style="margin:18px 0 26px">${tile(s.qualified || 0, 'qualified buyers can see it')}${tile(s.viewed || 0, 'have looked at it')}${tile(s.saved || 0, 'shortlisted it')}${tile((s.viewings || 0) + (s.offers || 0), 'viewing requests')}</div>
+      <p class="muted">${o.status === 'draft' ? 'Not yet live to members.' : `A Quiet Listing for ${wk} week${wk === 1 ? '' : 's'}. Only buyers we've personally verified can see it.`}</p>
+      <div class="grid4" style="margin:18px 0 26px">${tile(s.members || 0, 'verified buyers can see it')}${tile(s.viewed || 0, 'have looked at it')}${tile(s.saved || 0, 'shortlisted it')}${tile((s.viewings || 0) + (s.offers || 0), 'viewing requests')}</div>
       ${o.share_slug ? `<div class="card"><h3>Your share link</h3><p class="small muted" style="margin-top:0">Share your home on Facebook, in community groups or with friends. People see a photo and a short summary, and must register with us to see more, so the tyre kickers are filtered out for you.</p>
         <div class="copybox" style="word-break:break-all">${esc(SITE + 'q/' + o.share_slug + '/')}</div>
         <p style="margin:10px 0 0"><button type="button" class="btn dark sm" id="shCopy">Copy link</button> <a class="btn ghost sm" target="_blank" rel="noopener" href="https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(SITE + 'q/' + o.share_slug + '/')}">Share on Facebook</a></p>
@@ -1011,7 +997,7 @@
         <h3>Your decision</h3>
         <label class="f" for="rStatus" style="margin-top:6px">Status</label>
         <select id="rStatus">${['pending', 'info', 'approved', 'declined', 'suspended', 'draft'].map(s => `<option value="${s}" ${m.status === s ? 'selected' : ''}>${{ pending: 'To review', info: 'Ask for more information', approved: 'Approve', declined: 'Decline', suspended: 'Pause access', draft: 'Return to incomplete' }[s]}</option>`).join('')}</select>
-        <label class="f" for="rBudget">Verified budget</label><div class="hint">They will see listings qualifying at or below this.</div>
+        <label class="f" for="rBudget">Verified budget</label><div class="hint">Never shown to them. Used for your matching and new-listing alerts.</div>
         <input type="text" id="rBudget" inputmode="numeric" value="${m.qualified_to ? money(m.qualified_to) : ''}" placeholder="$">
         <label class="check"><input type="checkbox" id="rCash" ${m.cash_verified ? 'checked' : ''}><span>Cash buyer verified</span></label>
         <label class="check"><input type="checkbox" id="rSale" ${m.sale_free ? 'checked' : ''}><span>No sale to sell first (verified)</span></label>
@@ -1019,7 +1005,7 @@
         <label class="f" for="rNotes">Private notes <span class="opt">(only you see these)</span></label><textarea id="rNotes" style="min-height:80px">${esc((rv && rv.notes) || '')}</textarea>
         <div style="display:grid;gap:8px;margin-top:14px"><button class="btn primary" id="rSaveEmail">Save and email the member</button><button class="btn ghost" id="rSave">Save without emailing</button></div>
         <div id="rRes"></div>
-        <p class="small muted" style="margin:14px 0 0">With these settings they would see <strong id="rCount">${listings.filter(qualifies).length}</strong> of ${listings.length} live listing${listings.length === 1 ? '' : 's'}.</p>
+        <p class="small muted" style="margin:14px 0 0">With these settings they match <strong id="rCount">${listings.filter(qualifies).length}</strong> of ${listings.length} live listing${listings.length === 1 ? '' : 's'}.</p>
       </div></aside></div></div>`;
     const recount = () => { const t = { qualified_to: num($('#rBudget').value), cash_verified: $('#rCash').checked, sale_free: $('#rSale').checked }; $('#rCount').textContent = $('#rStatus').value === 'approved' ? listings.filter(l => num(t.qualified_to) >= num(l.qualify_price) && (!l.req_cash || t.cash_verified) && (!l.req_no_sale || t.sale_free || t.cash_verified)).length : 0; };
     ['#rBudget', '#rCash', '#rSale', '#rStatus'].forEach(s => $(s).addEventListener('input', recount)); recount();
@@ -1090,16 +1076,16 @@
           <div class="row3"><div>${inp('beds', 'Bedrooms', { type: 'number', im: 'numeric' })}</div><div>${inp('baths', 'Bathrooms', { type: 'number', im: 'decimal' })}</div><div>${inp('living', 'Living areas', { type: 'number', im: 'numeric' })}</div></div>
           <div class="row3"><div>${inp('parking', 'Parking spaces', { type: 'number', im: 'numeric' })}</div><div>${inp('land_m2', 'Land (m²)', { im: 'numeric' })}</div><div>${inp('floor_m2', 'Floor (m²)', { im: 'numeric' })}</div></div>
           <div class="row2"><div>${inp('year_built', 'Year built', { opt: true, ph: 'e.g. 1920s' })}</div><div>${inp('rv', 'Rateable value', { opt: true, im: 'numeric' })}</div></div></div>
-        <div class="card"><h3>Photos</h3><p class="small muted">The first photo is the cover. Photos are private: only members who qualify can see them, watermarked with their name.</p>
+        <div class="card"><h3>Photos</h3><p class="small muted">The first photo is the cover. Photos are private: only approved members can see them, watermarked with their name.</p>
           <div class="thumbs" id="thumbs"></div>
           <label class="btn ghost sm" style="cursor:pointer;margin-top:12px">Add photos<input type="file" id="phIn" accept="image/*" multiple hidden></label><span id="phMsg" class="small muted" style="margin-left:10px"></span></div>
       </div>
       <aside class="side"><div class="card">
-        <h3>Price and qualifying</h3>
+        <h3>Price and matching</h3>
         ${inp('price_display', 'Price shown to members', { ph: 'e.g. Offers over $895,000' })}
-        ${inp('qualify_price', 'Qualifying price', { im: 'numeric', ph: '$', hint: 'Never shown. Members whose verified budget is below this won\'t see the listing.' })}
-        <label class="check"><input type="checkbox" data-l="req_cash" ${l.req_cash ? 'checked' : ''}><span>Owner requires a cash buyer</span></label>
-        <label class="check"><input type="checkbox" data-l="req_no_sale" ${l.req_no_sale ? 'checked' : ''}><span>Owner won't accept a sale-to-sell condition</span></label>
+        ${inp('qualify_price', 'Matching price', { im: 'numeric', ph: '$', hint: 'Never shown. Used to match buyers and for new-listing alerts. All approved members can see the listing.' })}
+        <label class="check"><input type="checkbox" data-l="req_cash" ${l.req_cash ? 'checked' : ''}><span>Owner requires a cash buyer <span class="muted">(shown on the listing)</span></span></label>
+        <label class="check"><input type="checkbox" data-l="req_no_sale" ${l.req_no_sale ? 'checked' : ''}><span>Owner won't accept a sale-to-sell condition <span class="muted">(shown on the listing)</span></span></label>
         <label class="f" for="l_status">Status</label><select id="l_status" data-l="status">${Object.entries(LSTATUS).map(([k, v]) => `<option value="${k}" ${l.status === k ? 'selected' : ''}>${v}${k === 'live' ? ' (members can see it)' : ''}</option>`).join('')}</select>
         <button class="btn primary block" id="lSave" style="margin-top:16px">Save listing</button>
         ${l.id ? `<a class="btn ghost block" href="#/listing/${l.id}" style="margin-top:8px">Preview as a member</a>` : ''}
@@ -1131,12 +1117,12 @@
         ${l.share_enabled && l.share_slug ? `<div class="copybox small" style="margin-top:10px;word-break:break-all">${esc(SITE + 'q/' + l.share_slug + '/')}</div><p style="margin:8px 0 0"><button type="button" class="btn ghost sm" id="shCopyA">Copy link</button></p><p class="small muted" style="margin:6px 0 0">New or changed share pages go live within about 15 minutes of saving.</p>` : ''}
         ${st && (st.share_visits || st.registrations) ? `<p class="small" style="margin:10px 0 0"><strong>${st.share_visits}</strong> visits · <strong>${st.registrations}</strong> registered through the link</p>` : ''}`}
       </div>
-      ${l.id ? `<div class="card"><h3>Qualified members (${qm.length})</h3>
-        ${qm.length ? `<ul style="padding-left:18px;margin:0 0 12px">${qm.map(m => ({ m, sc: matchScore(m, l) })).sort((a, b) => b.sc - a.sc).map(({ m, sc }) => `<li><a href="#/admin/member/${m.user_id}">${esc(m.full_name || m.email)}</a> <span class="small muted">${money(m.qualified_to)} · criteria match ${sc}/3${alerted.includes(m.user_id) ? ' · emailed' : ''}</span></li>`).join('')}</ul>` : '<p class="small muted">No approved members qualify yet.</p>'}
-        ${['live', 'under_offer'].includes(l.status) && pending.length ? `<button class="btn dark block" id="lAlert">Email ${pending.length} qualified member${pending.length > 1 ? 's' : ''} about it</button>` : ''}
-        ${!['live', 'under_offer'].includes(l.status) ? '<p class="small muted" style="margin:0">Set the listing live to see who qualifies and email them.</p>' : ''}
+      ${l.id ? `<div class="card"><h3>Matching buyers (${qm.length})</h3>
+        ${qm.length ? `<ul style="padding-left:18px;margin:0 0 12px">${qm.map(m => ({ m, sc: matchScore(m, l) })).sort((a, b) => b.sc - a.sc).map(({ m, sc }) => `<li><a href="#/admin/member/${m.user_id}">${esc(m.full_name || m.email)}</a> <span class="small muted">${money(m.qualified_to)} · criteria match ${sc}/3${alerted.includes(m.user_id) ? ' · emailed' : ''}</span></li>`).join('')}</ul>` : '<p class="small muted">No approved members match on budget yet. All approved members can still see it.</p>'}
+        ${['live', 'under_offer'].includes(l.status) && pending.length ? `<button class="btn dark block" id="lAlert">Email ${pending.length} matching buyer${pending.length > 1 ? 's' : ''} about it</button>` : ''}
+        ${!['live', 'under_offer'].includes(l.status) ? '<p class="small muted" style="margin:0">Set the listing live to see matching buyers and email them.</p>' : ''}
         <div id="aRes"></div></div>` : ''}
-      ${l.id ? `<div class="card"><h3>Owner activity</h3>${st ? `<p class="small" style="margin-top:0">${st.qualified} qualified · ${st.viewed} viewed · ${st.saved} saved · ${st.viewings + st.offers} requests · ${st.days} days live</p>` : ''}${timeline.length ? timeline.map(t => `<div style="padding:8px 0;border-bottom:1px solid var(--line)"><span class="small muted">${fmtDT(t.at)}</span><br>${t.h}</div>`).join('') : '<p class="small muted" style="margin:0">No owner updates or check-ins yet.</p>'}</div>` : ''}
+      ${l.id ? `<div class="card"><h3>Owner activity</h3>${st ? `<p class="small" style="margin-top:0">${st.members} members can see it · ${st.qualified} match · ${st.viewed} viewed · ${st.saved} saved · ${st.viewings + st.offers} requests · ${st.days} days live</p>` : ''}${timeline.length ? timeline.map(t => `<div style="padding:8px 0;border-bottom:1px solid var(--line)"><span class="small muted">${fmtDT(t.at)}</span><br>${t.h}</div>`).join('') : '<p class="small muted" style="margin:0">No owner updates or check-ins yet.</p>'}</div>` : ''}
       </aside></div></div>`;
     const drawThumbs = () => {
       $('#thumbs').innerHTML = (l.photos || []).map((p, i) => `<div class="thumb">${i === 0 ? '<span class="cov">Cover</span>' : ''}<img src="${S.urls[p] || ''}" alt=""><div class="ctl"><button data-ml="${i}" aria-label="Move left">←</button><button data-rm="${i}" aria-label="Remove">Remove</button><button data-mr="${i}" aria-label="Move right">→</button></div></div>`).join('') || '<p class="small muted" style="margin:0">No photos yet.</p>';
@@ -1191,7 +1177,7 @@
     };
     const persist = async () => {
       const o = gather();
-      if (o.status !== 'draft' && !o.qualify_price) throw new Error('Set a qualifying price before making the listing live.');
+      if (o.status !== 'draft' && !o.qualify_price) throw new Error('Set a matching price before making the listing live.');
       if (o.share_enabled) {
         if (!o.agreement_held) throw new Error('The share link can only go on once you hold a signed agency agreement.');
         if (!['live', 'under_offer'].includes(o.status)) throw new Error('Set the listing live before turning on the share link.');

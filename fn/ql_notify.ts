@@ -42,7 +42,7 @@ Deno.serve(async (req) => {
         await sendMail(db, null, "ql_application", { to: TIM_EMAIL, subject: `Quiet Listings application: ${m.full_name}`, replyTo: m.email,
           html: wrap(`<p>A new Quiet Listings membership application is waiting for your review.</p>${memberTable(m)}${btn(site + "#/admin/member/" + m.user_id, "Review application")}`) });
         await sendMail(db, null, "ql_application_ack", { to: m.email, subject: "Your Quiet Listings application",
-          html: wrap(`<p>Kia ora ${esc(first(m.full_name))},</p><p>Thank you for applying for Quiet Listings membership. Every application is reviewed personally, and qualifying is stringent, because the owners who list with us privately are trusting us to introduce only serious, prepared buyers.</p><p>We usually respond within two working days. We may call you to talk through your plans, and we'll ask to see written evidence of your finance before you can view any property.</p>${btn(site, "Check your application")}`) });
+          html: wrap(`<p>Kia ora ${esc(first(m.full_name))},</p><p>Thank you for applying for Quiet Listings membership. Every application is reviewed personally, because the owners who list with us privately are trusting us to introduce only serious, prepared buyers.</p><p>We usually respond within two working days. We may call you to talk through your plans, and we'll ask to see written evidence of your finance before you can view any property.</p>${btn(site, "Check your application")}`) });
       } else {
         const u = (m.application?.updates || []).at(-1) || {};
         await sendMail(db, null, "ql_update", { to: TIM_EMAIL, subject: `Quiet Listings finance update: ${m.full_name}`, replyTo: m.email,
@@ -59,7 +59,7 @@ Deno.serve(async (req) => {
       let subject = "", html = "";
       if (m.status === "approved") {
         subject = "Welcome to Quiet Listings";
-        html = `<p>Kia ora ${esc(first(m.full_name))},</p><p>Your Quiet Listings membership has been approved. You now have access to private listings that match your verified position.</p>${msg}<p>You'll see every property you currently qualify for. If your finances change, update them from your account and we'll review your access.</p><p>Please remember the terms you agreed to: everything you see is confidential, all contact goes through us, and viewings are for buyers who are ready to act.</p>${btn(site, "View Quiet Listings")}`;
+        html = `<p>Kia ora ${esc(first(m.full_name))},</p><p>Your Quiet Listings membership has been approved. You can now see every Quiet Listing: homes offered privately, away from the open market.</p>${msg}<p>When something comes up that suits what you've told us, we'll let you know. If your finance or plans change, send us an update from your account.</p><p>Please remember the terms you agreed to: everything you see is confidential, all contact goes through us, and viewings are for buyers who are ready to act.</p>${btn(site, "View Quiet Listings")}`;
       } else if (m.status === "info") {
         subject = "Your Quiet Listings application: more information needed";
         html = `<p>Kia ora ${esc(first(m.full_name))},</p><p>Thanks for your application. Before we can make a decision, we need a little more from you.</p>${msg}${btn(site, "Update your application")}`;

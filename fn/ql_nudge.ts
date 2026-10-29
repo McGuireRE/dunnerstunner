@@ -9,12 +9,12 @@ const nameOf = (l: any) => l.street || l.suburb || l.ref;
 
 function statsBlock(s: any) {
   const cell = (n: number, t: string) => `<td style="padding:12px 8px;text-align:center;border:1px solid #E4E0DA;width:25%"><div style="font-size:26px;font-weight:600;font-family:Georgia,serif">${n}</div><div style="font-size:12.5px;color:#6E6A65">${t}</div></td>`;
-  const t = `<table style="border-collapse:collapse;width:100%;margin:14px 0"><tr>${cell(s.qualified, "qualified buyers can see it")}${cell(s.viewed, "have looked at it")}${cell(s.saved, "shortlisted it")}${cell(s.viewings + s.offers, s.offers ? "viewing or offer requests" : "viewing requests")}</tr></table>`;
+  const t = `<table style="border-collapse:collapse;width:100%;margin:14px 0"><tr>${cell(s.members, "verified buyers can see it")}${cell(s.viewed, "have looked at it")}${cell(s.saved, "shortlisted it")}${cell(s.viewings + s.offers, s.offers ? "viewing or offer requests" : "viewing requests")}</tr></table>`;
   return t + (s.share_visits || s.registrations ? `<p style="margin:-4px 0 14px;font-size:14.5px">Your share link: <strong>${s.share_visits}</strong> visit${s.share_visits === 1 ? "" : "s"} and <strong>${s.registrations}</strong> registered buyer${s.registrations === 1 ? "" : "s"}.</p>` : "");
 }
 
 const MARKET = [
-  (s: any) => `<p><strong>Competition sets the price.</strong> When several buyers see a home at the same time, with a clear deadline, they compete with each other rather than with your price. That's hard to create quietly, with ${s.qualified} qualified buyer${s.qualified === 1 ? "" : "s"} able to see your home.</p>`,
+  (s: any) => `<p><strong>Competition sets the price.</strong> When several buyers see a home at the same time, with a clear deadline, they compete with each other rather than with your price. That's hard to create quietly, with ${s.members} verified buyer${s.members === 1 ? "" : "s"} able to see your home.</p>`,
   () => `<p><strong>Where buyers are looking.</strong> Most buyers start their search on Trade Me and realestate.co.nz, and many of them haven't heard of Quiet Listings. A short, well-presented campaign puts your home in front of all of them at once, and our members would still have had first look.</p>`,
   () => `<p><strong>Privacy and reach aren't either-or.</strong> A discreet campaign, with no signboard, private viewings only and the street address withheld, can give you the reach of the open market with much of the privacy you have now.</p>`,
 ];
