@@ -44,7 +44,7 @@ ${p.summary ? `<p class="sum">${esc(p.summary)}</p>` : ''}<div class="facts">${f
 }
 // listings no longer shared: replace with a short "no longer available" page
 for (const d of fs.readdirSync(OUT, { withFileTypes: true })) {
-  if (!d.isDirectory() || live.has(d.name)) continue;
+  if (!d.isDirectory() || live.has(d.name) || d.name === 'example') continue;
   const meta = `<title>Quiet Listings | McGuire Real Estate</title><meta name="robots" content="noindex"><meta property="og:title" content="Quiet Listings by McGuire Real Estate"><meta property="og:description" content="Private property for serious buyers.">`;
   fs.writeFileSync(path.join(OUT, d.name, 'index.html'), shell({}, `<h1>This Quiet Listing is no longer available</h1><p class="sum">But others may be. Quiet Listings are homes offered privately, only to registered buyers.</p><a class="cta" href="${SITE}">See Quiet Listings</a>`, meta));
 }
