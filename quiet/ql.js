@@ -86,6 +86,7 @@
     nav();
     window.scrollTo(0, 0);
     try {
+      if (p0 === 'owner') return viewOwner(p1);
       if (p0 === 'how') return viewHow();
       if (p0 === 'privacy') return viewPrivacy();
       if (p0 === 'signin') return viewSignin(false);
@@ -553,7 +554,7 @@
     if (!l) { app.innerHTML = `<div class="narrow empty"><h2>This listing isn't available</h2><p>It may have been withdrawn, or it's outside your verified position.</p><a class="btn dark" href="#/">Back to listings</a></div>`; return; }
     const ph = (l.photos || []).filter(p => S.urls[p]);
     let enq = [];
-    if (!S.agent) { try { enq = await call(sb.from('ql_enquiries').select('*').eq('listing_id', id).order('created_at', { ascending: false })); } catch (e) { } }
+    if (!S.agent) { sb.rpc('ql_log_view', { lid: id }).then(() => null, () => null); try { enq = await call(sb.from('ql_enquiries').select('*').eq('listing_id', id).order('created_at', { ascending: false })); } catch (e) { } }
     const req = [l.req_cash ? 'Cash buyers only' : '', l.req_no_sale ? 'No sale-to-sell condition' : ''].filter(Boolean);
     const details = [['Property type', l.property_type], ['Bedrooms', l.beds], ['Bathrooms', l.baths ? +l.baths : ''], ['Living areas', l.living], ['Parking', l.parking], ['Land area', l.land_m2 ? (num(l.land_m2) >= 10000 ? (num(l.land_m2) / 10000).toFixed(2) + ' ha' : Math.round(num(l.land_m2)) + ' m²') : ''], ['Floor area', l.floor_m2 ? Math.round(num(l.floor_m2)) + ' m²' : ''], ['Year built', l.year_built], ['Rateable value', l.rv ? money(l.rv) : ''], ['Listing number', l.ref], ['Listed', fmtDate(l.published_at)]].filter(r => r[1]);
     app.innerHTML = `<div class="wrap">
@@ -621,38 +622,39 @@
 
   /* ───────── admin ───────── */
   const STATUS_LABEL = { draft: 'Incomplete', pending: 'To review', info: 'Info requested', approved: 'Approved', declined: 'Declined', suspended: 'Paused' };
-  const LSTATUS = { draft: 'Draft', live: 'Live', under_offer: 'Under offer', sold: 'Sold', withdrawn: 'Withdrawn' };
+  const LSTATUS = { draft: 'Draft', live: 'Live', under_offer: 'Under offer', sold: 'Sold', withdrawn: 'Withdrawn', to_market: 'Gone to open market' };
   function adminTabs(on, counts = {}) {
-    return `<div class="tabs">${[['', 'Applications', counts.apps], ['members', 'Members'], ['listings', 'Listings'], ['enquiries', 'Enquiries', counts.enq]].map(([k, t, c]) => `<a href="#/admin${k ? '/' + k : ''}" class="${on === k ? 'on' : ''}">${t}${c ? ` <span class="pill new">${c}</span>` : ''}</a>`).join('')}<a href="#/" style="margin-left:auto">Member view ↗</a></div>`;
+    return `<div class="tabs">${[['', 'Sellers and listings', counts.ready], ['applications', 'Buyer applications', counts.apps], ['members', 'Members'], ['enquiries', 'Enquiries', counts.enq]].map(([k, t, c]) => `<a href="#/admin${k ? '/' + k : ''}" class="${on === k ? 'on' : ''}">${t}${c ? ` <span class="pill new">${c}</span>` : ''}</a>`).join('')}<a href="#/" style="margin-left:auto">Member view ↗</a></div>`;
   }
   async function viewAdmin(p1, p2) {
     app.innerHTML = '<div class="loading">Loading…</div>';
     if (p1 === 'member') return adminMember(p2);
     if (p1 === 'listing') return adminListing(p2);
+    if (p1 === 'listings') p1 = '';
     const [members, listings, enq] = await Promise.all([
       call(sb.from('ql_members').select('*').order('submitted_at', { ascending: false, nullsFirst: false })),
       call(sb.from('ql_listings').select('*').order('created_at', { ascending: false })),
       call(sb.from('ql_enquiries').select('*').order('created_at', { ascending: false })),
     ]);
     const toReview = members.filter(m => m.status === 'pending' || (m.update_requested_at && (!m.reviewed_at || m.update_requested_at > m.reviewed_at)));
-    const counts = { apps: toReview.length, enq: enq.filter(e => e.status === 'new').length };
+    const extra = await sellerData(listings);
+    const counts = { apps: toReview.length, enq: enq.filter(e => e.status === 'new').length, ready: extra.ready.length };
     const mName = id => (members.find(m => m.user_id === id) || {}).full_name || '';
     const lName = id => { const l = listings.find(x => x.id === id); return l ? `${l.ref} ${l.street || l.suburb || ''}` : ''; };
     let body = '';
-    if (!p1) {
+    if (p1 === 'applications') {
       const rows = members.filter(m => ['pending', 'info'].includes(m.status) || toReview.includes(m));
       body = `<h2 style="font-size:30px">Applications and updates</h2>${rows.length ? memberTable(rows) : '<p class="muted">Nothing waiting for review.</p>'}
         <details style="margin-top:24px"><summary class="small muted" style="cursor:pointer">Incomplete applications (${members.filter(m => m.status === 'draft').length})</summary><div style="margin-top:10px">${memberTable(members.filter(m => m.status === 'draft'))}</div></details>`;
     } else if (p1 === 'members') {
       const rows = members.filter(m => !['draft'].includes(m.status));
       body = `<h2 style="font-size:30px">Members</h2>${memberTable(rows)}`;
-    } else if (p1 === 'listings') {
+    } else if (!p1) {
       let ags = [];
       try { ags = await call(sb.from('agreements').select('id,ref,address,status,config').in('status', ['signed', 'countersigned', 'sent', 'parked']).order('created_at', { ascending: false })); } catch (e) { }
       body = `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><h2 style="font-size:30px;margin:0">Listings</h2>
         <div style="display:flex;gap:8px;flex-wrap:wrap">${ags.length ? `<select id="fromAg" style="width:auto"><option value="">Start from an agency agreement…</option>${ags.map(a => `<option value="${a.id}">${esc(a.ref)} ${esc(a.address)}</option>`).join('')}</select>` : ''}<a class="btn dark" href="#/admin/listing/new">New listing</a></div></div>
-        <div class="tblwrap" style="margin-top:16px"><table class="tbl"><tr><th>Listing</th><th>Status</th><th>Price shown</th><th>Qualifying</th><th>Enquiries</th></tr>
-        ${listings.map(l => `<tr class="click" data-go="#/admin/listing/${l.id}"><td><strong>${esc(l.ref)}</strong> ${esc(addrOf(l) || 'Untitled')}<br><span class="small muted">${esc(l.headline || '')}</span></td><td><span class="pill ${l.status}">${LSTATUS[l.status]}</span></td><td>${esc(l.price_display || '')}</td><td>${l.qualify_price ? money(l.qualify_price) : '<span class="muted">Not set</span>'}${l.req_cash ? '<br><span class="small">Cash only</span>' : ''}${l.req_no_sale ? '<br><span class="small">No sale to sell</span>' : ''}</td><td>${enq.filter(e => e.listing_id === l.id).length}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">No listings yet.</td></tr>'}</table></div>`;
+        ${sellerBoard(listings, extra)}`;
       setTimeout(() => { const s = $('#fromAg'); if (s) s.onchange = () => { if (s.value) { sessionStorage.setItem('qlFromAg', JSON.stringify(ags.find(a => a.id === s.value))); go('#/admin/listing/new'); } }; });
     } else if (p1 === 'enquiries') {
       body = `<h2 style="font-size:30px">Enquiries</h2><div class="tblwrap"><table class="tbl"><tr><th>When</th><th>Member</th><th>Listing</th><th>Request</th><th>Status</th></tr>
@@ -663,6 +665,109 @@
     $$('[data-go]', app).forEach(r => r.onclick = () => go(r.dataset.go));
     $$('[data-enq]', app).forEach(s => s.onchange = async () => { try { await call(sb.from('ql_enquiries').update({ status: s.value }).eq('id', s.dataset.enq)); toast('Updated'); } catch (e) { toast(e.message); } });
   }
+  /* ───────── seller qualification (price, motivation, time) ───────── */
+  const MX = [['m_price', 'Price', 'Realistic about what the property is worth?'], ['m_motivation', 'Motivation', 'A situation that means they must sell, not just want to?'], ['m_time', 'Time', 'A limited timeframe in which it must be sold?']];
+  const mScore = l => MX.filter(([k]) => l[k] === 'yes').length;
+  const todayNZ = () => new Date(Date.now() + 13 * 36e5).toISOString().slice(0, 10);
+  function tri(l, size = 120, labels = true) {
+    const P = { m_price: [60, 14], m_motivation: [14, 96], m_time: [106, 96] };
+    const col = v => v === 'yes' ? 'var(--gold)' : v === 'partly' ? '#E6D7BD' : '#fff';
+    const edge = (a, b) => `<line x1="${P[a][0]}" y1="${P[a][1]}" x2="${P[b][0]}" y2="${P[b][1]}" stroke="${l[a] === 'yes' && l[b] === 'yes' ? 'var(--gold)' : 'var(--line2)'}" stroke-width="${l[a] === 'yes' && l[b] === 'yes' ? 4 : 2}"/>`;
+    const sc = mScore(l);
+    return `<svg viewBox="${labels ? '-30 -8 180 132' : '0 0 120 110'}" width="${size}" height="${size * (labels ? 132 / 180 : 110 / 120)}" role="img" aria-label="${sc} of 3">
+      ${edge('m_price', 'm_motivation')}${edge('m_motivation', 'm_time')}${edge('m_time', 'm_price')}
+      ${Object.entries(P).map(([k, [x, y]]) => `<circle cx="${x}" cy="${y}" r="10" fill="${col(l[k])}" stroke="${l[k] ? 'var(--gold)' : 'var(--line2)'}" stroke-width="2"/>`).join('')}
+      <text x="60" y="72" text-anchor="middle" font-family="Cormorant Garamond, Georgia, serif" font-size="26" fill="${sc >= 2 ? 'var(--ok)' : 'var(--ink)'}">${sc}/3</text>
+      ${labels ? `<text x="60" y="-1" text-anchor="middle" font-size="11" fill="var(--muted)" dy="0">PRICE</text><text x="14" y="120" text-anchor="middle" font-size="11" fill="var(--muted)">MOTIVATION</text><text x="106" y="120" text-anchor="middle" font-size="11" fill="var(--muted)">TIME</text>` : ''}
+    </svg>`;
+  }
+  async function sellerData(listings) {
+    const stats = {}, ck = {}, nd = {};
+    await Promise.all(listings.filter(l => l.status !== 'draft').map(async l => { try { stats[l.id] = await call(sb.rpc('ql_stats', { lid: l.id })); } catch (e) { } }));
+    try { (await call(sb.from('ql_owner_checkins').select('*').order('at', { ascending: false }))).forEach(c => { if (!ck[c.listing_id]) ck[c.listing_id] = c; }); } catch (e) { }
+    try { (await call(sb.from('ql_nudges').select('*').order('at', { ascending: false }))).forEach(n => { if (!nd[n.listing_id]) nd[n.listing_id] = n; }); } catch (e) { }
+    const active = l => ['live', 'under_offer'].includes(l.status);
+    const ready = listings.filter(l => active(l) && (l.market_interest_at || (ck[l.id] && ck[l.id].score >= 2 && ck[l.id].at > (l.updated_at || ''))));
+    const leeway = listings.filter(l => active(l) && l.leeway_review && l.leeway_review <= todayNZ());
+    return { stats, ck, nd, ready, leeway };
+  }
+  function sellerBoard(listings, x) {
+    const active = listings.filter(l => ['live', 'under_offer'].includes(l.status));
+    const conv = listings.filter(l => l.status === 'to_market').length;
+    const tile = (n, t, warn) => `<div class="tile" style="padding:16px"><div style="font-family:var(--serif);font-size:34px;line-height:1;color:${warn && n ? 'var(--accent-dark)' : 'var(--ink)'}">${n}</div><div class="small muted">${t}</div></div>`;
+    const weeks = l => l.published_at ? Math.max(0, Math.floor((Date.now() - new Date(l.published_at)) / 6048e5)) + ' wk' : '';
+    const upd = l => !l.vendor_email ? '<span class="muted">No owner email</span>' : l.nudges === 'paused' ? '<span class="muted">Paused</span>' : (x.nd[l.id] ? `Last ${fmtDate(x.nd[l.id].at)}${x.nd[l.id].ok ? '' : ' <span class="pill declined">failed</span>'}` : 'Automatic') + (l.discretion ? '<br><span class="small">Discretion: reports only</span>' : '');
+    const flags = l => [x.ready.includes(l) ? '<span class="pill new">Ready to talk</span>' : '', x.leeway.includes(l) ? '<span class="pill pending">Leeway review due</span>' : '', l.status === 'to_market' ? '' : MX.some(([k]) => !l[k]) ? '<span class="pill pending">Qualify the seller</span>' : mScore(l) < 2 ? '<span class="pill">On leeway</span>' : '<span class="pill approved">' + mScore(l) + ' of 3</span>'].filter(Boolean).join(' ');
+    const sorted = listings.slice().sort((a, b) => (x.ready.includes(b) - x.ready.includes(a)) || (x.leeway.includes(b) - x.leeway.includes(a)) || ((b.created_at || '') > (a.created_at || '') ? 1 : -1));
+    return `<div class="grid4" style="margin:16px 0 18px">${tile(active.length, 'live Quiet Listings')}${tile(x.ready.length, 'owners ready to talk about the open market', true)}${tile(x.leeway.length, 'leeway reviews due', true)}${tile(conv, 'converted to the open market')}</div>
+      <div class="tblwrap"><table class="tbl"><tr><th>Listing</th><th>Price · Motivation · Time</th><th>Quiet for</th><th>Buyer activity</th><th>Owner updates</th><th>Owner's last check-in</th></tr>
+      ${sorted.map(l => { const st = x.stats[l.id]; const c = x.ck[l.id];
+        return `<tr class="click" data-go="#/admin/listing/${l.id}"><td><strong>${esc(l.ref)}</strong> ${esc(addrOf(l) || 'Untitled')}<br><span class="pill ${l.status}" style="margin-top:4px">${LSTATUS[l.status]}</span> ${flags(l)}</td>
+          <td>${tri(l, 64, false)}</td><td class="small">${weeks(l)}</td>
+          <td class="small">${st ? `${st.qualified} qualify · ${st.viewed} viewed<br>${st.saved} saved · ${st.viewings + st.offers} requests` : '<span class="muted">Not live</span>'}</td>
+          <td class="small">${upd(l)}</td><td class="small">${c ? `${c.score}/3 · ${fmtDate(c.at)}${c.answers && c.answers.market === 'yes' ? '<br><strong>Wants to talk</strong>' : ''}` : '<span class="muted">None yet</span>'}</td></tr>`; }).join('') || '<tr><td colspan="6" class="muted">No listings yet.</td></tr>'}</table></div>
+      <p class="small muted" style="margin-top:12px">Two out of three is workable. Quiet Listings with fewer than two are on leeway: owner updates report buyer activity and gently encourage the open market, unless the owner needs discretion.</p>`;
+  }
+  function matchScore(m, l) {
+    const a = m.application || {}; let s = 0;
+    const subs = String(a.suburbs || '').toLowerCase();
+    if (l.suburb && subs.includes(String(l.suburb).toLowerCase())) s++;
+    if (!a.min_beds || (l.beds || 0) >= +a.min_beds) s++;
+    const tmap = { Lifestyle: 'Lifestyle block', Unit: 'Apartment' };
+    if (!(a.types || []).length || (a.types || []).includes(tmap[l.property_type] || l.property_type)) s++;
+    return s;
+  }
+
+  async function fillOwner(l, force) {
+    try {
+      const ppl = await call(sb.from('agreement_people').select('*').eq('agreement_id', l.agreement_id).order('position'));
+      const named = (ppl || []).filter(p => p.legal_name);
+      if (!named.length) { if (force) toast('No owners found on that agreement.'); return; }
+      const nm = named.map(p => p.pref_name || p.legal_name.split(' ')[0]);
+      if (force || !l.vendor_name) l.vendor_name = nm.length < 2 ? nm[0] : nm.slice(0, -1).join(', ') + ' and ' + nm[nm.length - 1];
+      if (force || !l.vendor_email) l.vendor_email = named.map(p => p.email).filter(Boolean).join(', ');
+      if (force || !l.vendor_phone) l.vendor_phone = (named.find(p => p.phone) || {}).phone || '';
+    } catch (e) { if (force) toast(e.message); }
+  }
+
+  /* ───────── owner's private page (no sign-in, private link) ───────── */
+  async function viewOwner(tok) {
+    app.innerHTML = '<div class="loading">Loading…</div>';
+    let o = null; try { o = await call(sb.rpc('ql_owner_view', { tok })); } catch (e) { }
+    if (!o) { app.innerHTML = `<div class="narrow empty"><h2>This link isn't active</h2><p>If you think it should be, please contact Tim on 027 562 7207.</p></div>`; return; }
+    const s = o.stats || {}; const wk = Math.max(1, Math.round((s.days || 0) / 7));
+    const tile = (n, t) => `<div class="tile" style="text-align:center;padding:18px 10px"><div style="font-family:var(--serif);font-size:40px;line-height:1">${n}</div><div class="small muted" style="margin-top:6px">${t}</div></div>`;
+    const q = (k, label, opts) => `<fieldset style="margin:0 0 18px"><div class="legend" style="margin:0 0 8px">${label}</div><div class="choices">${opts.map(([v, t]) => `<label class="choice"><input type="radio" name="o_${k}" value="${v}"><span>${t}</span></label>`).join('')}</div></fieldset>`;
+    app.innerHTML = `<div class="narrow" style="padding:40px 20px 80px">
+      <div class="eyebrow">Your Quiet Listing</div>
+      <h1 style="font-size:clamp(32px,5vw,46px)">${esc([o.street, o.suburb].filter(Boolean).join(', ') || o.ref)}</h1>
+      <p class="muted">${o.status === 'draft' ? 'Not yet live to members.' : `A Quiet Listing for ${wk} week${wk === 1 ? '' : 's'}. Only buyers we've personally qualified can see it.`}</p>
+      <div class="grid4" style="margin:18px 0 26px">${tile(s.qualified || 0, 'qualified buyers can see it')}${tile(s.viewed || 0, 'have looked at it')}${tile(s.saved || 0, 'shortlisted it')}${tile((s.viewings || 0) + (s.offers || 0), 'viewing requests')}</div>
+      <form class="card" id="ckForm"><h2 style="font-size:30px">A quick check-in</h2><p class="muted" style="margin-top:-4px">Your answers go straight to Tim and help him advise you well. Nobody else sees them.</p>
+        ${q('price', `If a buyer offered a price in line with our guide${o.price_display ? ' (' + esc(o.price_display) + ')' : ''}, would you accept it?`, [['yes', 'Yes'], ['consider', 'I\'d consider it'], ['no', 'No, I\'d want more']])}
+        ${q('motivation', 'Do you need to sell, or would you like to sell?', [['need', 'I need to sell'], ['like', 'I\'d like to, if the price is right'], ['testing', 'I\'m just testing the waters']])}
+        ${q('time', 'Is there a date you need to be sold by?', [['yes', 'Yes'], ['rough', 'Roughly'], ['no', 'No']])}
+        <div id="dateBox" class="hidden"><label class="f" for="oDate" style="margin-top:-6px">Roughly when?</label><input type="text" id="oDate" placeholder="e.g. before Christmas, by March"></div>
+        ${q('market', o.discretion ? 'Would you like to talk about other ways of finding a buyer?' : 'Would you like to talk about taking your home to the open market?', [['yes', 'Yes, let\'s talk'], ['notyet', 'Not yet']])}
+        <label class="f" for="oCom">Anything else Tim should know? <span class="opt">(optional)</span></label><textarea id="oCom" style="min-height:80px"></textarea>
+        <button class="btn primary" type="submit" style="margin-top:16px">Send to Tim</button><div id="ckRes"></div>
+      </form>
+      ${o.discretion ? '' : `<div class="card" style="background:var(--ink);color:#E8E1D6;border-color:var(--ink)"><h3 style="color:#fff">Thinking about the open market?</h3><p style="margin:0">Quiet Listings members are a small, carefully chosen group. The open market reaches every buyer, and creates the competition that sets the best price. It can still be discreet: no signboard, private viewings and the street address withheld. <a href="${PACKAGES_URL}" style="color:#F1E6D2">See marketing options</a>.</p></div>`}
+      <p class="small muted">This page is private to you. Please don't share the link.</p></div>`;
+    $$('input[name=o_time]').forEach(r => r.onchange = () => $('#dateBox').classList.toggle('hidden', r.value === 'no' && r.checked));
+    $('#ckForm').onsubmit = async e => {
+      e.preventDefault();
+      const v = k => ($(`input[name=o_${k}]:checked`) || {}).value;
+      if (!v('price') || !v('motivation') || !v('time') || !v('market')) { $('#ckRes').innerHTML = '<div class="err">Please answer all four questions.</div>'; return; }
+      const b = $('#ckForm button'); busy(b, true, 'Sending…');
+      try {
+        await call(sb.rpc('ql_owner_checkin', { tok, answers: { price: v('price'), motivation: v('motivation'), time: v('time'), date: $('#oDate').value.trim() || null, market: v('market'), comment: $('#oCom').value.trim() || null } }));
+        sb.functions.invoke('ql-nudge', { body: { mode: 'checkin', token: tok } }).catch(() => null);
+        $('#ckForm').innerHTML = `<h2 style="font-size:30px">Thank you</h2><p style="margin:0">Tim has your answers${v('market') === 'yes' ? ' and will be in touch to talk through your options' : ''}.</p>`;
+      } catch (x) { busy(b, false); $('#ckRes').innerHTML = `<div class="err">${esc(x.message)}</div>`; }
+    };
+  }
+
   function memberTable(rows) {
     if (!rows.length) return '<p class="muted">None.</p>';
     return `<div class="tblwrap"><table class="tbl"><tr><th>Name</th><th>Status</th><th>Their budget</th><th>Verified</th><th>Finance</th><th>Applied</th></tr>
@@ -683,7 +788,7 @@
     const qualifies = l => num(m.qualified_to) >= num(l.qualify_price) && (!l.req_cash || m.cash_verified) && (!l.req_no_sale || m.sale_free || m.cash_verified);
     const sec = (t, rows) => `<div class="card"><h3>${t}</h3><table class="kv">${rows.filter(r => r[1] !== undefined && r[1] !== null && r[1] !== '' && !(Array.isArray(r[1]) && !r[1].length)).map(([k, v]) => `<tr><td>${k}</td><td>${Array.isArray(v) ? esc(v.join(', ')) : esc(v)}</td></tr>`).join('')}</table></div>`;
     app.innerHTML = `<div class="wrap" style="padding-bottom:70px"><div class="eyebrow" style="margin-top:28px">Quiet Listings admin</div>${adminTabs('members')}
-      <a class="btn link" href="#/admin" style="padding-left:0">← Applications</a>
+      <a class="btn link" href="#/admin/applications" style="padding-left:0">← Buyer applications</a>
       <h1 style="font-size:40px;margin-top:8px">${esc(m.full_name || m.email)} <span class="pill ${m.status}" style="vertical-align:middle;font-family:var(--sans)">${STATUS_LABEL[m.status]}</span></h1>
       <div class="split"><div>
         ${sec('Contact', [['Email', m.email], ['Phone', m.phone], ['Home address', m.home_address], ['Applied', fmtDT(m.submitted_at)]])}
@@ -694,6 +799,8 @@
           <table class="kv" style="margin-top:12px"><tr><td>Areas</td><td>${esc(a.suburbs || '')}</td></tr><tr><td>Types</td><td>${esc((a.types || []).join(', '))}</td></tr><tr><td>Bedrooms / bathrooms</td><td>${esc(a.min_beds || '-')} / ${esc(a.min_baths || '-')}</td></tr><tr><td>Land</td><td>${esc(a.min_land || '')}</td></tr></table></div>
         ${sec('Why they\'re buying', [['Reason', a.reason], ['In their words', a.story], ['Timeframe', a.timeframe], ['Decision makers', a.decision_makers]])}
         ${(a.updates || []).length ? `<div class="card"><h3>Updates from the member</h3>${a.updates.slice().reverse().map(u => `<p style="margin:0 0 10px"><span class="small muted">${fmtDT(u.at)}</span><br>${esc(u.note)}${Object.entries(u.finance || {}).filter(([k]) => k !== 'docs').map(([k, v]) => `<br><span class="small">${esc(k)}: ${esc(v)}</span>`).join('')}</p>`).join('')}</div>` : ''}
+        <div class="card"><h3>Stock that suits them</h3>${(() => { const rows = listings.filter(qualifies).map(l => ({ l, sc: matchScore(m, l) })).sort((x, y) => y.sc - x.sc);
+          return rows.length ? `<table class="kv">${rows.map(({ l, sc }) => `<tr><td><a href="#/admin/listing/${l.id}">${esc(l.ref)} ${esc(addrOf(l))}</a><br><span class="small muted">${esc(l.price_display || '')} · ${l.beds || '-'} bed · ${esc(l.property_type || '')}</span></td><td style="width:auto;text-align:right">Match ${sc}/3<br><button class="btn link" data-sendl="${l.id}">Email it to them</button></td></tr>`).join('')}</table>` : `<p class="muted" style="margin:0">${m.status === 'approved' ? 'No live listings within their verified position.' : 'Approve them and set a verified budget to see matching stock.'}</p>`; })()}</div>
         ${enq.length ? `<div class="card"><h3>Enquiries</h3><table class="kv">${enq.map(e => `<tr><td>${fmtDT(e.created_at)}</td><td><a href="#/admin/listing/${e.listing_id}">${esc((listings.find(l => l.id === e.listing_id) || {}).ref || 'Listing')}</a> ${e.kind} <span class="pill">${e.status}</span></td></tr>`).join('')}</table></div>` : ''}
       </div>
       <aside class="side"><div class="card">
@@ -724,6 +831,7 @@
       } catch (x) { $('#rRes').innerHTML = `<div class="err">${esc(x.message)}</div>`; }
       busy(btn, false);
     };
+    $$('[data-sendl]', app).forEach(b => b.onclick = async () => { busy(b, true, 'Sending…'); const { data, error } = await sb.functions.invoke('ql-notify', { body: { type: 'alert', listing_id: b.dataset.sendl, only: [id], site: SITE } }); b.disabled = false; b.textContent = error || data.error ? 'Failed: ' + ((data && data.error) || error.message) : data.sent ? 'Emailed' : 'Already emailed'; });
     $('#rSave').onclick = () => doSave(false, $('#rSave'));
     $('#rSaveEmail').onclick = () => doSave(true, $('#rSaveEmail'));
   }
@@ -735,15 +843,34 @@
       const ag = JSON.parse(sessionStorage.getItem('qlFromAg') || 'null'); sessionStorage.removeItem('qlFromAg');
       if (ag) { const parts = String(ag.address || '').split(',').map(s => s.trim()); l.street = parts[0] || ''; l.suburb = parts[1] || ''; if (parts[2]) l.city = parts[2]; l.agreement_id = ag.id; const ask = num((ag.config || {}).ask); if (ask) l.qualify_price = ask; }
     } else l = await call(sb.from('ql_listings').select('*').eq('id', id).single());
+    if (!l.id && l.agreement_id) await fillOwner(l);
     await signPhotos(l.photos || []);
+    let nudges = [], checkins = [], st = null;
+    if (l.id) {
+      try { nudges = await call(sb.from('ql_nudges').select('*').eq('listing_id', l.id).order('at', { ascending: false })); } catch (e) { }
+      try { checkins = await call(sb.from('ql_owner_checkins').select('*').eq('listing_id', l.id).order('at', { ascending: false })); } catch (e) { }
+      try { st = await call(sb.rpc('ql_stats', { lid: l.id })); } catch (e) { }
+    }
+    const ownerLink = l.vendor_token ? `${SITE}#/owner/${l.vendor_token}` : '';
+    const CK = { price: { yes: 'would accept around the guide', consider: 'would consider it', no: 'wants more' }, motivation: { need: 'needs to sell', like: 'would like to sell', testing: 'testing the waters' }, time: { yes: 'has a deadline', rough: 'roughly', no: 'no deadline' } };
+    const timeline = [...nudges.map(n => ({ at: n.at, h: `<strong>Owner update ${n.stage}</strong> ${n.ok ? 'sent' : '<span class="pill declined">failed</span>'}${n.manual ? ' (sent by you)' : ''}<br><span class="small muted">${esc(n.subject || '')}${n.error ? ' · ' + esc(n.error) : ''}</span>` })),
+      ...checkins.map(c => ({ at: c.at, h: `<strong>Owner check-in: ${c.score}/3</strong><br><span class="small muted">Price: ${esc((CK.price[c.answers.price]) || '-')} · Motivation: ${esc(CK.motivation[c.answers.motivation] || '-')} · Time: ${esc(CK.time[c.answers.time] || '-')}${c.answers.date ? ' (' + esc(c.answers.date) + ')' : ''}${c.answers.market === 'yes' ? ' · <strong>wants to talk about the open market</strong>' : ''}${c.answers.comment ? '<br>“' + esc(c.answers.comment) + '”' : ''}</span>` }))].sort((a, b) => a.at < b.at ? 1 : -1);
     let qm = [], alerted = [];
     if (l.id) { try { qm = await call(sb.rpc('ql_qualified_members', { lid: l.id })); alerted = (await call(sb.from('ql_alerts').select('user_id').eq('listing_id', l.id))).map(x => x.user_id); } catch (e) { } }
     const inp = (k, label, o = {}) => `<label class="f" for="l_${k}">${label}${o.opt ? ' <span class="opt">(optional)</span>' : ''}</label>${o.hint ? `<div class="hint">${o.hint}</div>` : ''}${o.area ? `<textarea id="l_${k}" data-l="${k}" rows="${o.rows || 6}">${esc(Array.isArray(l[k]) ? l[k].join('\n') : l[k] ?? '')}</textarea>` : `<input type="${o.type || 'text'}" id="l_${k}" data-l="${k}" value="${esc(l[k] ?? '')}" ${o.im ? `inputmode="${o.im}"` : ''} placeholder="${esc(o.ph || '')}">`}`;
     const pending = qm.filter(m => !alerted.includes(m.user_id));
-    app.innerHTML = `<div class="wrap" style="padding-bottom:70px"><div class="eyebrow" style="margin-top:28px">Quiet Listings admin</div>${adminTabs('listings')}
-      <a class="btn link" href="#/admin/listings" style="padding-left:0">← Listings</a>
+    app.innerHTML = `<div class="wrap" style="padding-bottom:70px"><div class="eyebrow" style="margin-top:28px">Quiet Listings admin</div>${adminTabs('')}
+      <a class="btn link" href="#/admin" style="padding-left:0">← Sellers and listings</a>
       <h1 style="font-size:38px;margin-top:8px">${l.id ? esc(l.ref + ' ' + (addrOf(l) || '')) : 'New listing'}</h1>
+      ${l.market_interest_at && l.status !== 'to_market' ? `<div class="okbox" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><span><strong>${esc(l.vendor_name || 'The owner')} would like to talk about the open market</strong> (said so on ${fmtDate(l.market_interest_at)}).</span><button class="btn ghost sm" id="mDone">Mark as discussed</button></div>` : ''}
       <div class="split"><div>
+        <div class="card"><h3>Seller qualification</h3>
+          <div style="display:grid;grid-template-columns:auto 1fr;gap:20px;align-items:center" class="mxwrap"><div id="mxTri">${tri(l, 170)}</div>
+          <div>${MX.map(([k, t, q]) => `<div style="margin:0 0 12px"><div class="legend" style="margin:0 0 6px">${t} <span class="opt">${q}</span></div><div class="chips">${[['yes', 'Yes'], ['partly', 'Partly'], ['no', 'No']].map(([v, lab]) => `<label class="chip"><input type="radio" name="mx_${k}" data-lr="${k}" value="${v}" ${l[k] === v ? 'checked' : ''}>${lab}</label>`).join('')}</div></div>`).join('')}</div></div>
+          <div id="mxMsg"></div>
+          <div class="row2"><div>${inp('leeway_review', 'Leeway review date', { type: 'date', hint: 'You\'ll get a reminder email on this day.' })}</div><div>${inp('m_notes', 'Notes', { opt: true, ph: 'What would change their position?' })}</div></div>
+          <label class="check" style="border-bottom:0"><input type="checkbox" data-l="discretion" ${l.discretion ? 'checked' : ''}><span><strong>Owner requires discretion.</strong> <span class="muted">This home stays private. Owner updates will report buyer activity but won't encourage the open market.</span></span></label>
+        </div>
         <div class="card"><h3>Location</h3>
           ${inp('street', 'Street address')}
           <label class="check"><input type="checkbox" data-l="show_street" ${l.show_street ? 'checked' : ''}><span>Show the street address to members <span class="muted">(otherwise only the suburb shows until a viewing is booked)</span></span></label>
@@ -773,11 +900,22 @@
         ${l.id ? `<a class="btn ghost block" href="#/listing/${l.id}" style="margin-top:8px">Preview as a member</a>` : ''}
         <div id="lRes"></div>
       </div>
+      <div class="card"><h3>Owner and updates</h3>
+        ${inp('vendor_name', 'Owner name(s)', { ph: 'e.g. Jane and Sam' })}
+        ${inp('vendor_email', 'Owner email', { hint: 'Separate two emails with a comma.' })}
+        ${inp('vendor_phone', 'Owner phone', { opt: true, type: 'tel' })}
+        ${l.agreement_id ? '<button type="button" class="btn link" id="fillOwn">Fill from the agency agreement</button>' : ''}
+        <label class="f" for="l_nudges">Automatic owner updates</label>
+        <select id="l_nudges" data-l="nudges"><option value="auto" ${l.nudges !== 'paused' ? 'selected' : ''}>On</option><option value="paused" ${l.nudges === 'paused' ? 'selected' : ''}>Paused</option></select>
+        <div class="hint" style="margin-top:6px">Sent at 1, 3 and 6 weeks, then every 4 weeks while live: buyer activity, a one-minute check-in on price, motivation and time, and a gentle case for the open market. You're copied in on each one.</div>
+        ${l.id ? `<div style="display:grid;gap:8px;margin-top:10px"><button type="button" class="btn ghost sm" id="nPrev">Preview the next update</button><button type="button" class="btn ghost sm" id="nSend">Send the next update now</button><button type="button" class="btn ghost sm" id="nCopy">Copy the owner's private link</button></div><div id="nRes"></div>` : ''}
+      </div>
       ${l.id ? `<div class="card"><h3>Qualified members (${qm.length})</h3>
-        ${qm.length ? `<ul style="padding-left:18px;margin:0 0 12px">${qm.map(m => `<li><a href="#/admin/member/${m.user_id}">${esc(m.full_name || m.email)}</a> <span class="small muted">${money(m.qualified_to)}${alerted.includes(m.user_id) ? ' · emailed' : ''}</span></li>`).join('')}</ul>` : '<p class="small muted">No approved members qualify yet.</p>'}
+        ${qm.length ? `<ul style="padding-left:18px;margin:0 0 12px">${qm.map(m => ({ m, sc: matchScore(m, l) })).sort((a, b) => b.sc - a.sc).map(({ m, sc }) => `<li><a href="#/admin/member/${m.user_id}">${esc(m.full_name || m.email)}</a> <span class="small muted">${money(m.qualified_to)} · criteria match ${sc}/3${alerted.includes(m.user_id) ? ' · emailed' : ''}</span></li>`).join('')}</ul>` : '<p class="small muted">No approved members qualify yet.</p>'}
         ${['live', 'under_offer'].includes(l.status) && pending.length ? `<button class="btn dark block" id="lAlert">Email ${pending.length} qualified member${pending.length > 1 ? 's' : ''} about it</button>` : ''}
         ${!['live', 'under_offer'].includes(l.status) ? '<p class="small muted" style="margin:0">Set the listing live to see who qualifies and email them.</p>' : ''}
         <div id="aRes"></div></div>` : ''}
+      ${l.id ? `<div class="card"><h3>Owner activity</h3>${st ? `<p class="small" style="margin-top:0">${st.qualified} qualified · ${st.viewed} viewed · ${st.saved} saved · ${st.viewings + st.offers} requests · ${st.days} days live</p>` : ''}${timeline.length ? timeline.map(t => `<div style="padding:8px 0;border-bottom:1px solid var(--line)"><span class="small muted">${fmtDT(t.at)}</span><br>${t.h}</div>`).join('') : '<p class="small muted" style="margin:0">No owner updates or check-ins yet.</p>'}</div>` : ''}
       </aside></div></div>`;
     const drawThumbs = () => {
       $('#thumbs').innerHTML = (l.photos || []).map((p, i) => `<div class="thumb">${i === 0 ? '<span class="cov">Cover</span>' : ''}<img src="${S.urls[p] || ''}" alt=""><div class="ctl"><button data-ml="${i}" aria-label="Move left">←</button><button data-rm="${i}" aria-label="Remove">Remove</button><button data-mr="${i}" aria-label="Move right">→</button></div></div>`).join('') || '<p class="small muted" style="margin:0">No photos yet.</p>';
@@ -786,8 +924,35 @@
       $$('[data-rm]').forEach(b => b.onclick = () => { l.photos.splice(+b.dataset.rm, 1); drawThumbs(); });
     };
     drawThumbs();
+    const mxSync = () => {
+      const cur = {}; MX.forEach(([k]) => { const r = $(`[data-lr=${k}]:checked`, app); cur[k] = r ? r.value : null; });
+      $('#mxTri').innerHTML = tri(cur, 170); const sc = mScore(cur), set = MX.filter(([k]) => cur[k]).length;
+      const lw = $('#l_leeway_review');
+      if (sc < 2 && set === 3 && !lw.value) { const d = new Date(Date.now() + 60 * 864e5); lw.value = d.toISOString().slice(0, 10); }
+      $('#mxMsg').innerHTML = set < 3 ? '<p class="small muted">Answer all three. Two out of three is workable.</p>'
+        : sc >= 2 ? `<div class="okbox"><strong>${sc} of 3: workable.</strong> This owner has what it takes to sell. When they're ready, the open market is the natural next step.</div>`
+        : `<div class="note"><strong>Only ${sc} of 3.</strong> Without two, they're unlikely to sell. As a Quiet Listing this is on leeway while you see whether the missing factors appear. Set a review date.</div>`;
+    };
+    $$('[data-lr]', app).forEach(r => r.addEventListener('change', mxSync)); mxSync();
+    const md = $('#mDone'); if (md) md.onclick = async () => { try { await call(sb.from('ql_listings').update({ market_interest_at: null }).eq('id', l.id)); adminListing(l.id); } catch (x) { toast(x.message); } };
+    const fo = $('#fillOwn'); if (fo) fo.onclick = async () => { await fillOwner(l, true); ['vendor_name', 'vendor_email', 'vendor_phone'].forEach(k => { if (l[k]) $('#l_' + k).value = l[k]; }); };
+    const nres = m => { $('#nRes').innerHTML = m; };
+    const np = $('#nPrev'); if (np) np.onclick = async () => {
+      busy(np, true, 'Loading…'); const { data, error } = await sb.functions.invoke('ql-nudge', { body: { mode: 'preview', listing_id: l.id } }); busy(np, false);
+      if (error || data.error) return nres(`<div class="err">${esc((data && data.error) || error.message)}</div>`);
+      const box = document.createElement('div'); box.className = 'lightbox'; box.style.background = 'rgba(10,11,13,.7)';
+      box.innerHTML = `<div style="background:#fff;border-radius:10px;width:min(720px,94vw);max-height:88vh;overflow:auto;padding:18px"><div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline"><div><div class="small muted">Update ${data.stage} · to ${esc(data.to || 'no email set')}</div><strong>${esc(data.subject)}</strong></div><button class="btn ghost sm" id="pvX">Close</button></div><iframe style="width:100%;height:60vh;border:1px solid var(--line);border-radius:8px;margin-top:12px" sandbox></iframe></div>`;
+      document.body.appendChild(box); $('iframe', box).srcdoc = data.html; $('#pvX').onclick = () => box.remove(); box.onclick = e => { if (e.target === box) box.remove(); };
+    };
+    const ns = $('#nSend'); if (ns) ns.onclick = async () => {
+      if (!l.vendor_email) return nres('<div class="err">Add the owner\'s email and save first.</div>');
+      busy(ns, true, 'Sending…'); const { data, error } = await sb.functions.invoke('ql-nudge', { body: { mode: 'send', listing_id: l.id } }); busy(ns, false);
+      nres(error || data.error || !data.ok ? `<div class="err">${esc((data && data.error) || (error && error.message) || 'Failed')}</div>` : `<div class="okbox">Sent: ${esc(data.subject)}</div>`);
+    };
+    const nc = $('#nCopy'); if (nc) nc.onclick = async () => { try { await navigator.clipboard.writeText(ownerLink); toast('Link copied. Only send it to the owner.'); } catch (x) { nres(`<div class="copybox small" style="word-break:break-all">${esc(ownerLink)}</div>`); } };
     const gather = () => {
       const o = {};
+      $$('[data-lr]:checked', app).forEach(el => { o[el.dataset.lr] = el.value; });
       $$('[data-l]', app).forEach(el => { const k = el.dataset.l; if (el.type === 'checkbox') o[k] = el.checked; else o[k] = el.value.trim(); });
       ['beds', 'living', 'parking'].forEach(k => o[k] = o[k] === '' ? null : parseInt(o[k]));
       ['baths', 'land_m2', 'floor_m2', 'rv', 'qualify_price'].forEach(k => o[k] = o[k] === '' ? null : num(o[k]));
