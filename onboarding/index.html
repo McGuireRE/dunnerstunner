@@ -221,6 +221,13 @@ hr.soft { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
 .se-ev input { padding: 8px; font-size: 15px; }
 @media (max-width: 520px) { .se-ev { grid-template-columns: 1fr 1fr; } .se-ev input[data-evn] { grid-column: 1 / -1; } }
 .loading { text-align: center; color: var(--muted); padding: 60px 0; }
+.ttabs { display: flex; gap: 8px; margin: 8px 0 20px; flex-wrap: wrap; }
+.ttab { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--muted); border-radius: 999px; padding: 8px 14px 8px 8px; font: 600 15px var(--body, inherit); cursor: pointer; }
+.ttab .n { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; background: var(--line); color: var(--ink); font-size: 14px; }
+.ttab.on { border-color: var(--accent); color: var(--ink); }
+.ttab.on .n { background: var(--accent); color: #fff; }
+.tguide summary { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.tguide .in ul { margin: 6px 0 0; padding-left: 20px; }
 @media print {
   .proto, header.top, .actions, .toolbar, .no-print { display: none !important; }
   body { background: #fff; color: #000; font-size: 12pt; }
@@ -547,7 +554,7 @@ hr.soft { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
     if (qlr) { try { const u = new URL(qlr); if (u.origin === location.origin && u.pathname !== location.pathname) return location.replace(qlr); } catch (_) { } }
     IS_AGENT = !!(await must(sb.rpc('is_agent')));
     let pend = null; try { pend = JSON.parse(localStorage.getItem('pendingCampaign') || 'null'); } catch (_) { }
-    if (IS_AGENT && pend) { try { localStorage.removeItem('pendingCampaign'); } catch (_) { } return viewSetup(null, pend); }
+    if (IS_AGENT && pend) { try { localStorage.removeItem('pendingCampaign'); } catch (_) { } return viewTable(null, pend); }
     if (IS_AGENT) return viewAgentList();
     return viewVendorHome();
   }
@@ -1058,145 +1065,390 @@ function lawyerForm(id, title, blurb) {
     main().innerHTML = `<div class="view-pad">
       <span class="agent-flag">Only you see this</span>
       <h1>Agreements</h1>
-      <div class="toolbar"><button class="btn primary" type="button" id="newAg">New agreement</button></div>
+      <div class="toolbar"><button class="btn primary" type="button" id="newAg">New listing appointment</button></div>
       ${rows.length ? `<div class="card tight" style="overflow-x:auto"><table class="tbl"><thead><tr><th>Property</th><th>Sellers</th><th>Status</th><th>Updated</th></tr></thead><tbody>
       ${rows.map(r => `<tr class="click" data-id="${r.id}"><td><strong>${esc(r.address || '(no address yet)')}</strong><br><span class="small">${esc(r.ref)}</span></td><td>${esc(r.agreement_people.map(p => callName(p) || p.legal_name).filter(Boolean).join(', ') || '–')}</td><td><span class="pill ${r.status}">${esc(r.status)}</span></td><td class="small">${esc(fmtDT(r.updated_at))}</td></tr>`).join('')}
       </tbody></table></div>` : '<div class="card note"><p style="margin:0">No agreements yet. Start one after talking with a vendor.</p></div>'}
     </div>`;
-    $('#newAg').addEventListener('click', () => viewSetup(null));
+    $('#newAg').addEventListener('click', () => viewTable(null));
     $$('tr[data-id]').forEach(tr => tr.addEventListener('click', () => viewAgentDetail(tr.dataset.id)));
     top();
   }
 
-  /* setup (new / edit) */
-  async function viewSetup(id, preset) {
-    let ag = { address: '', config: { appr: 'done', ask: '', flat: '', thr: '250000', pct: '', pkg: 'Premium|6000', aml: 'Manual', approach: 'invited' }, answers: {} }, people = [{ legal_name: '', pref_name: '', email: '', phone: '' }];
-    if (id) { ag = await must(sb.from('agreements').select('*').eq('id', id).single()); people = await must(sb.from('agreement_people').select('*').eq('agreement_id', id).order('position')); }
+  /* ═════════ APPOINTMENT: 1 property and people → 2 discussion → 3 signing ═════════ */
+  const TPAGES = ['Property and people', 'Discussion', 'Signing'];
+  let T = null;
+  const tc = (k, d = '') => T.c[k] ?? d, ta = (k, d = '') => T.an[k] ?? d;
+  const tg = (src, k, d) => src === 'c' ? tc(k, d) : ta(k, d);
+  const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+  const TF = {
+    text: (src, k, label, o = {}) => `<div><label class="f" for="t_${k}" ${o.top ? 'style="margin-top:0"' : ''}>${label}${o.opt ? ' <span class="opt">(optional)</span>' : ''}</label><input type="${o.type || 'text'}" id="t_${k}" data-${src}="${k}" value="${esc(tg(src, k, o.d ?? ''))}" ${o.ph ? `placeholder="${esc(o.ph)}"` : ''} ${o.im ? `inputmode="${o.im}"` : ''}></div>`,
+    area: (src, k, label, o = {}) => `<label class="f" for="t_${k}">${label}${o.opt ? ' <span class="opt">(optional)</span>' : ''}</label><textarea id="t_${k}" data-${src}="${k}" ${o.ph ? `placeholder="${esc(o.ph)}"` : ''}>${esc(tg(src, k, ''))}</textarea>`,
+    select: (src, k, label, opts, d) => `<div><label class="f" for="t_${k}">${label}</label><select id="t_${k}" data-${src}="${k}">${opts.map(o => { const [val, lab] = Array.isArray(o) ? o : [o, o]; return `<option value="${esc(val)}" ${tg(src, k, d) === val ? 'selected' : ''}>${esc(lab)}</option>`; }).join('')}</select></div>`,
+    radio: (src, k, val, title, desc, d) => `<label class="choice"><input type="radio" name="t_${src}_${k}" data-${src}="${k}" value="${esc(val)}" ${tg(src, k, d) === val ? 'checked' : ''}><span class="mark"></span><span><span class="ct">${title}</span>${desc ? `<span class="cd">${desc}</span>` : ''}</span></label>`,
+    check: (src, k, title, desc, d = false) => `<label class="choice cb"><input type="checkbox" data-${src}="${k}" ${tg(src, k, d) ? 'checked' : ''}><span class="mark"></span><span><span class="ct">${title}</span>${desc ? `<span class="cd">${desc}</span>` : ''}</span></label>`,
+    chips: (k, list, d) => `<div class="chip-row">${list.map(n => `<label class="chip"><input type="checkbox" data-tmulti="${k}" value="${esc(n)}" ${(ta(k, d) || []).includes(n) ? 'checked' : ''}>${esc(n)}</label>`).join('')}</div>`,
+  };
+
+  async function viewTable(id, preset, page) {
+    let ag = { address: '', status: 'draft', config: { appr: 'done', ask: '', flat: '', thr: '250000', pct: '', aml: 'Manual', approach: 'invited' }, answers: {}, legal: {} };
+    let people = [];
+    if (id) {
+      ag = await must(sb.from('agreements').select('*').eq('id', id).single());
+      if (!['draft', 'sent', 'parked'].includes(ag.status)) return viewAgentDetail(id);
+      people = await must(sb.from('agreement_people').select('*').eq('agreement_id', id).order('position'));
+    }
+    if (!people.length) people = [{ legal_name: '', pref_name: '', email: '', phone: '' }];
     if (preset) { if (preset.address) ag.address = preset.address; if (preset.vendor) people[0].legal_name = preset.vendor; }
-    const c = ag.config || {}, an = ag.answers || {};
-    const sv = (k, d = '') => esc(c[k] ?? d), av = (k, d = '') => esc(an[k] ?? d);
-    const sel = (k, opts, d) => opts.map(o => { const [val, lab] = Array.isArray(o) ? o : [o, o]; return `<option value="${esc(val)}" ${(c[k] ?? d) === val ? 'selected' : ''}>${esc(lab)}</option>`; }).join('');
-    const rad = (k, val, t, d, def) => `<label class="choice"><input type="radio" name="s_${k}" value="${val}" ${(c[k] ?? def) === val ? 'checked' : ''}><span class="mark"></span><span><span class="ct">${t}</span>${d ? `<span class="cd">${d}</span>` : ''}</span></label>`;
-    header(id ? 'Edit agreement' : 'New agreement', '', 0);
-    main().innerHTML = `<div class="view-pad">
-      <span class="agent-flag">Only you see this</span>
-      <h1>${id ? 'Edit this agreement' : 'Set up a new agreement'}</h1>
-      <p class="lede">Fill this in after talking with the vendor. Everything here flows into what they see.</p>
-      <h2>Property</h2>
-      <label class="f" for="sAddr" style="margin-top:0">Address</label><input type="text" id="sAddr" value="${esc(ag.address)}" placeholder="Street, suburb, Dunedin">
-      <div class="row2 stack"><div><label class="f" for="sOwners">Registered owners <span class="opt">(from the title)</span></label><input type="text" id="sOwners" value="${sv('owners')}"></div><div><label class="f" for="sTitle">Title reference</label><input type="text" id="sTitle" value="${sv('title')}"></div></div>
-      <details class="acc" style="margin-top:14px"><summary>Property details <span class="small">(optional, the vendor can complete these)</span></summary><div class="in">
-        <div class="row2 stack"><div><label class="f">Type</label><select data-ans="pType">${['House', 'Townhouse', 'Unit or apartment', 'Lifestyle', 'Section'].map(o => `<option ${an.pType === o ? 'selected' : ''}>${o}</option>`).join('')}</select></div><div><label class="f">Year built</label><input data-ans="pYear" value="${av('pYear')}"></div></div>
-        <div class="row2"><div><label class="f">Bedrooms</label><input type="number" data-ans="pBed" value="${av('pBed')}"></div><div><label class="f">Bathrooms</label><input type="number" data-ans="pBath" value="${av('pBath')}"></div></div>
-        <div class="row2"><div><label class="f">Floor area (m²)</label><input type="number" data-ans="pFloor" value="${av('pFloor')}"></div><div><label class="f">Land area (m²)</label><input type="number" data-ans="pLand" value="${av('pLand')}"></div></div>
-        <div class="row2 stack"><div><label class="f">Construction</label><input data-ans="pBuild" value="${av('pBuild')}"></div><div><label class="f">Parking</label><input data-ans="pPark" value="${av('pPark')}"></div></div>
-        <label class="f">Heating and insulation</label><input data-ans="pHeat" value="${av('pHeat')}">
-      </div></details>
-
-      <h2>Who's selling</h2>
-      <p class="small">Each person signs from their own email. Leave this blank if you don't have names yet. The vendor can add them, but at least one email is needed to send the agreement.</p>
-      <div id="sPeople"></div>
-      <button class="btn link" type="button" id="sAddP">Add a person</button>
-
-      <h2>How this listing came about</h2>
-      <div class="choices">${rad('approach', 'invited', 'The vendor contacted me', 'They can cancel by 5pm on the first working day after getting their copy', 'invited')}${rad('approach', 'unsolicited', 'I approached them first', 'Unsolicited: they get 5 working days after getting their copy, and it needn\'t be in writing', 'invited')}</div>
-
-      <h2>Appraisal</h2>
-      <div class="choices">${rad('appr', 'done', 'Written appraisal given', '', 'done')}${rad('appr', 'pending', 'Not yet', 'The agreement becomes conditional on them receiving your written appraisal', 'done')}</div>
-      <div id="askWrap"><div class="row2 stack"><div><label class="f" for="sAsk">Price for the commission example</label><input type="text" id="sAsk" inputmode="numeric" value="${sv('ask')}"></div>
-        <div><label class="f" for="sAskBasis">Based on</label><select id="sAskBasis">${sel('askBasis', [['asking', 'Client\'s asking price'], ['median', 'Median appraised value']], 'asking')}</select></div></div>
-        <label class="f" for="sApprUrl">Appraisal web address <span class="opt">(clause 23.1, optional)</span></label><input type="url" id="sApprUrl" value="${sv('apprUrl')}" placeholder="Leave blank if given in writing"></div>
-
-      <h2>Commission</h2><p class="small">As you agreed with the vendor in conversation. <span class="clause">Page 1, section D</span></p>
-      <div class="row2"><div><label class="f" for="sFlat">Flat fee</label><input type="text" id="sFlat" inputmode="numeric" value="${sv('flat')}"></div><div><label class="f" for="sThr">For a sale price up to</label><input type="text" id="sThr" inputmode="numeric" value="${sv('thr', '250000')}"></div></div>
-      <label class="f" for="sAbove">Above that price</label>
-      <select id="sAbove">${sel('aboveType', [['pct', 'Plus a percentage of the portion above'], ['amount', 'Plus a fixed dollar amount'], ['none', 'Nothing more: flat fee at any price']], 'pct')}</select>
-      <div id="pctWrap"><label class="f" for="sPct">Percentage</label><input type="text" id="sPct" inputmode="decimal" value="${sv('pct')}"></div>
-      <div id="amtWrap"><label class="f" for="sAboveAmt">Fixed amount, excl GST</label><input type="text" id="sAboveAmt" inputmode="numeric" value="${sv('aboveAmt')}"></div>
-
-      <h2>Dates and method</h2>
-      <div class="row2 stack"><div><label class="f" for="sStart">Commencement date <span class="opt">(blank = on signing)</span></label><input type="date" id="sStart" value="${sv('start')}"></div>
-      <div><label class="f" for="sMethod">Method of sale</label><select id="sMethod">${sel('method', ['', 'Auction', 'Tender', 'Deadline sale', 'Price by negotiation', 'Fixed price', 'Expressions of interest', 'Timed sale', 'Ballot'], '')}</select></div></div>
-      <label class="f" for="sMethodDate">Auction, tender, deadline or ballot date and time <span class="opt">(optional)</span></label><input type="text" id="sMethodDate" value="${sv('methodDate')}" placeholder="For example: Thu 26 Nov 2026, 4pm">
-
-      <h2>Marketing campaign</h2>
-      <div class="choices two">${rad('mktMode', 'build', 'Build the campaign now', '', String(c.pkg || '').startsWith('Later') ? 'later' : 'build')}${rad('mktMode', 'later', 'Agree marketing later', '', String(c.pkg || '').startsWith('Later') ? 'later' : 'build')}</div>
-      <div id="campBox"></div>
-      <h2>Campaign schedule</h2>
-      <div id="schedBox"></div>
-
-      <h2>Costs on signing</h2>
-      <p class="small">Untick or change either one if you've agreed something different. <span class="clause">Page 1, section E</span></p>
-      <div class="row2"><div><label class="choice cb" style="margin-top:6px"><input type="checkbox" id="sLimOn" ${c.limOn === false ? '' : 'checked'}><span class="mark"></span><span class="ct">LIM report</span></label></div><div><label class="f" for="sLim" style="margin-top:6px">Amount, incl GST</label><input type="text" id="sLim" inputmode="decimal" value="${sv('lim', '425')}"></div></div>
-      <div class="row2"><div><label class="choice cb" style="margin-top:6px"><input type="checkbox" id="sAdminOn" ${c.adminOn === false ? '' : 'checked'}><span class="mark"></span><span class="ct">Administration fee</span></label></div><div><label class="f" for="sAdmin" style="margin-top:6px">Amount, incl GST</label><input type="text" id="sAdmin" inputmode="decimal" value="${sv('admin', '500')}"></div></div>
-
-      <h2>Identity checks</h2>
-      <label class="f" for="sAml" style="margin-top:0">How vendors are verified</label>
-      <select id="sAml">${sel('aml', [['Manual', 'Manual: I check ID myself'], 'Halo', 'APLYiD', 'First AML', 'Cloudcheck', 'Dwellhub'], 'Manual')}</select>
-      <div class="err"></div>
-    </div>`;
-    const drawPeople = () => {
-      $('#sPeople').innerHTML = people.map((p, i) => `<div class="card tight" data-i="${i}">
-        <div style="display:flex;justify-content:space-between;align-items:baseline"><h3 style="margin:0">Person ${i + 1}</h3>${p.signed_at ? '<span class="signed-badge">Signed</span>' : `<button class="btn link" type="button" data-rm="${i}">Remove</button>`}</div>
-        <div class="row2 stack"><div><label class="f">Full legal name</label><input data-pk="legal_name" value="${esc(p.legal_name)}"></div><div><label class="f">Goes by <span class="opt">(nickname)</span></label><input data-pk="pref_name" value="${esc(p.pref_name)}"></div></div>
-        <div class="row2 stack"><div><label class="f">Email</label><input type="email" data-pk="email" value="${esc(p.email)}" ${p.user_id ? 'readonly' : ''}></div><div><label class="f">Mobile</label><input type="tel" data-pk="phone" value="${esc(p.phone)}"></div></div></div>`).join('');
-      $$('#sPeople [data-pk]').forEach(inp => inp.addEventListener('input', () => { people[+inp.closest('[data-i]').dataset.i][inp.dataset.pk] = inp.value; }));
-      $$('#sPeople [data-rm]').forEach(b => b.addEventListener('click', () => { const p = people[+b.dataset.rm]; if (p.id) (people._del ||= []).push(p.id); people.splice(+b.dataset.rm, 1); drawPeople(); }));
-    };
-    drawPeople();
-    let CAMP = ag.config && ag.config.campaign ? JSON.parse(JSON.stringify(ag.config.campaign)) : null;
+    const c = Object.assign({}, ag.config || {}), an = Object.assign({}, ag.answers || {});
+    let CAMP = c.campaign ? JSON.parse(JSON.stringify(c.campaign)) : null;
     if (CAMP) delete CAMP.snapshot;
     if (!CAMP && HAS_CAT) {
       if (preset) CAMP = campaignFromPending(preset);
-      else { const [n, amt] = String((ag.config || {}).pkg || 'Premium|6000').split('|'); const key = n.toLowerCase(); const band = bandFor((ag.config || {}).ask); CAMP = { pkg: PACKAGES[key] ? key : 'premium', band, items: pkgItems(PACKAGES[key] ? key : 'premium', band), extras: [], quoted: {}, override: n === 'Custom' ? (ag.config || {}).custom || '' : '' }; }
+      else { const [n] = String(c.pkg || 'Premium|6000').split('|'); const key = n.toLowerCase(); const band = bandFor(c.ask); CAMP = { pkg: PACKAGES[key] ? key : 'premium', band, items: pkgItems(PACKAGES[key] ? key : 'premium', band), extras: [], quoted: {}, override: '' }; }
     }
     CAMP ||= { items: {}, extras: [] };
-    const SCH = ag.config && ag.config.schedule ? JSON.parse(JSON.stringify(ag.config.schedule)) : defaultSchedule((ag.config || {}).start || null);
-    campaignEditor($('#campBox'), CAMP, null);
-    scheduleEditor($('#schedBox'), SCH, () => $('#sStart').value || null);
-    $('#sAsk').addEventListener('change', () => { if (!HAS_CAT) return; setBand(CAMP, bandFor($('#sAsk').value)); campaignEditor($('#campBox'), CAMP, null); });
-    $('#sAddP').addEventListener('click', () => { people.push({ legal_name: '', pref_name: '', email: '', phone: '' }); drawPeople(); });
-    const upd = () => { $('#askWrap').hidden = ($('input[name="s_appr"]:checked') || {}).value === 'pending'; $('#campBox').hidden = ($('input[name="s_mktMode"]:checked') || {}).value === 'later'; $('#pctWrap').hidden = $('#sAbove').value !== 'pct'; $('#amtWrap').hidden = $('#sAbove').value !== 'amount'; };
-    $$('input[name="s_appr"]').forEach(r => r.addEventListener('change', upd)); $$('input[name="s_mktMode"]').forEach(r => r.addEventListener('change', upd)); $('#sAbove').addEventListener('change', upd); upd();
+    if (!c.mktMode) c.mktMode = String(c.pkg || '').startsWith('Later') ? 'later' : 'build';
+    const SCH = c.schedule ? JSON.parse(JSON.stringify(c.schedule)) : defaultSchedule(c.start || null);
+    T = { id, ag, c, an, people, CAMP, SCH, del: [], pads: {} };
+    tShow(page || 0);
+  }
 
-    const gather = () => {
-      const g = k => ($('input[name="s_' + k + '"]:checked') || {}).value;
-      return {
-        address: $('#sAddr').value.trim(),
-        config: Object.assign({}, c, { owners: $('#sOwners').value.trim(), title: $('#sTitle').value.trim(), approach: g('approach'), appr: g('appr'), ask: $('#sAsk').value.trim(), askBasis: $('#sAskBasis').value, apprUrl: $('#sApprUrl').value.trim(), methodDate: $('#sMethodDate').value.trim(), flat: $('#sFlat').value.trim(), thr: $('#sThr').value.trim(), pct: $('#sPct').value.trim(), aboveType: $('#sAbove').value, aboveAmt: $('#sAboveAmt').value.trim(), start: $('#sStart').value, method: $('#sMethod').value, mktMode: g('mktMode'), campaign: g('mktMode') === 'later' ? null : Object.assign({}, CAMP, { snapshot: computeCampaign(CAMP) }), schedule: SCH, pkg: g('mktMode') === 'later' ? 'Later|0' : 'Campaign|' + computeCampaign(CAMP).total, custom: '', aml: $('#sAml').value, sign: 'On screen', limOn: $('#sLimOn').checked, lim: $('#sLim').value.trim(), adminOn: $('#sAdminOn').checked, admin: $('#sAdmin').value.trim() }),
-        answers: Object.assign({}, an, Object.fromEntries($$('[data-ans]').map(i => [i.dataset.ans, i.value]))),
-      };
-    };
-    const save = async (send) => {
-      const g = gather(); const e = msg => { $('.err', main()).textContent = msg; $('.err', main()).scrollIntoView({ block: 'center' }); return false; };
-      if (!g.address) return e('Add the property address.');
-      if (send) {
-        const at = g.config.aboveType; if (!num(g.config.flat) || (at !== 'none' && !num(g.config.thr)) || (at === 'pct' && !num(g.config.pct)) || (at === 'amount' && !num(g.config.aboveAmt))) return e('Fill in the commission before sending.');
-        if (g.config.appr !== 'pending' && !num(g.config.ask)) return e('Add the asking price or appraised value, or choose "Not yet" for the appraisal.');
-        if (!people.some(p => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(p.email || ''))) return e('Add at least one seller\'s email so they can sign in.');
+  function tErr(msg) { const e = $('.err', main()); if (e) { e.textContent = msg || ''; if (msg) e.scrollIntoView({ block: 'center' }); } return false; }
+
+  function tCollect() {
+    const root = main();
+    $$('[data-c],[data-an]', root).forEach(el => {
+      const src = el.hasAttribute('data-c') ? 'c' : 'an', k = el.getAttribute('data-' + src), tgt = src === 'c' ? T.c : T.an;
+      if (el.type === 'radio') { if (el.checked) tgt[k] = el.value; }
+      else if (el.type === 'checkbox') tgt[k] = el.checked;
+      else tgt[k] = el.value.trim();
+    });
+    const multi = {}; let any = false;
+    $$('[data-tmulti]', root).forEach(el => { any = true; (multi[el.dataset.tmulti] ||= []); if (el.checked) multi[el.dataset.tmulti].push(el.value); });
+    if (any) Object.assign(T.an, multi);
+    if ($('#tAddr')) T.ag.address = $('#tAddr').value.trim();
+    if ($('#tBuyers')) T.an.interested = $$('#tBuyers .buyer').map(cd => ({ name: $('[data-b=name]', cd).value.trim(), phone: $('[data-b=phone]', cd).value.trim(), email: $('[data-b=email]', cd).value.trim(), exclude: $('[data-b=exclude]', cd).checked })).filter(b => b.name || b.phone || b.email);
+    const lg = $('input[name="tLegal"]:checked'); if (lg) T.legalPick = lg.value;
+  }
+
+  function tConfig() {
+    const c = T.c, later = c.mktMode === 'later';
+    return Object.assign({}, c, { campaign: later ? null : Object.assign({}, T.CAMP, { snapshot: computeCampaign(T.CAMP) }), schedule: T.SCH, pkg: later ? 'Later|0' : 'Campaign|' + computeCampaign(T.CAMP).total, custom: '', sign: 'On screen' });
+  }
+
+  async function tSave() {
+    if (!T.ag.address) return tErr('Add the property address first.');
+    const row = { address: T.ag.address, config: tConfig(), answers: T.an };
+    try {
+      if (T.id) await must(sb.from('agreements').update(row).eq('id', T.id));
+      else {
+        const r = await must(sb.from('agreements').insert(row).select('*').single());
+        T.id = r.id; T.ag = Object.assign(T.ag, r);
+        await must(sb.from('agreement_events').insert({ agreement_id: T.id, actor: SESSION.user.email, kind: 'created', detail: { via: 'appointment' } }));
       }
-      let agId = id;
-      if (id) await must(sb.from('agreements').update(g).eq('id', id));
-      else agId = (await must(sb.from('agreements').insert(g).select('id').single())).id;
-      for (const d of people._del || []) await must(sb.from('agreement_people').delete().eq('id', d));
+      for (const d of T.del) await must(sb.from('agreement_people').delete().eq('id', d));
+      T.del = [];
       let pos = 1;
-      for (const p of people) {
+      for (const p of T.people) {
+        if (p.signed_at) { pos++; continue; }
         if (!p.legal_name && !p.email) continue;
-        const row = { agreement_id: agId, position: pos++, legal_name: p.legal_name || '', pref_name: p.pref_name || '', email: (p.email || '').trim().toLowerCase(), phone: p.phone || '' };
-        if (p.id) await must(sb.from('agreement_people').update(row).eq('id', p.id)); else await must(sb.from('agreement_people').insert(row));
+        const pr = { agreement_id: T.id, position: pos++, legal_name: p.legal_name || '', pref_name: p.pref_name || '', email: (p.email || '').trim().toLowerCase(), phone: p.phone || '' };
+        if (p.id) await must(sb.from('agreement_people').update(pr).eq('id', p.id)); else await must(sb.from('agreement_people').insert(pr));
       }
-      await must(sb.from('agreement_events').insert({ agreement_id: agId, actor: SESSION.user.email, kind: id ? 'setup_updated' : 'created', detail: {} }));
-      if (send) {
-        await must(sb.from('agreements').update({ status: 'sent', sent_at: new Date().toISOString() }).eq('id', agId).in('status', ['draft', 'sent']));
-        await must(sb.from('agreement_events').insert({ agreement_id: agId, actor: SESSION.user.email, kind: 'sent_to_vendor', detail: {} }));
-      }
-      toast(send ? 'Ready for the vendor' : 'Saved');
-      viewAgentDetail(agId, send);
-    };
-    actions(true, 'Cancel', 'Save and send to vendor');
-    $('#back').textContent = 'Save draft';
-    onBack = () => save(false); onNext = () => save(true);
+      const fresh = await must(sb.from('agreement_people').select('*').eq('agreement_id', T.id).order('position'));
+      T.people = fresh.length ? fresh : [{ legal_name: '', pref_name: '', email: '', phone: '' }];
+      T.ag = Object.assign(T.ag, await must(sb.from('agreements').select('id,ref,status,legal,sent_at').eq('id', T.id).single()));
+      return true;
+    } catch (e) { return false; }
+  }
+
+  function tValidate(p) {
+    const c = T.c, an = T.an, named = T.people.filter(x => (x.legal_name || '').trim());
+    if (p === 0) {
+      if (!T.ag.address) return 'Add the property address.';
+      if (!named.length) return 'Add the full legal name of at least one seller.';
+      if ((an.capacity || 'Owners') !== 'Owners' && !(an.entity || '').trim()) return 'Add the name of the trust, company or person they act for.';
+      if (an.gst === 'yes' && !(an.gstNo || '').trim()) return 'Add their GST number, or choose No.';
+      if (c.appr !== 'pending' && !num(c.ask)) return 'Add the asking price or appraised value, or choose "Not yet" for the appraisal.';
+    }
+    if (p === 1) {
+      const at = aboveType(c);
+      if (!num(c.flat) || (at !== 'none' && !num(c.thr)) || (at === 'pct' && !num(c.pct)) || (at === 'amount' && !num(c.aboveAmt))) return 'Fill in the commission you agreed.';
+      if ((T.an.interested || []).some(b => !b.name)) return 'Add a name for each interested buyer, or remove the empty one.';
+    }
+    return '';
+  }
+  function tReadyToSign() {
+    const an = T.an;
+    for (const p of [0, 1]) { const e = tValidate(p); if (e) return e + ` (page ${p + 1})`; }
+    if (!an.titleOk) return 'Confirm ownership on page 1.';
+    for (const k of ['work', 'wt', 'meth', 'def']) if (!an[k]) return 'Answer the property questions on page 1 (work done, leaks, methamphetamine, defects).';
+    for (const k of ['work', 'wt', 'meth', 'def']) if (an[k] === 'yes' && !String(an[k + 'Detail'] || '').trim()) return 'Add details for anything answered Yes on page 1.';
+    if (an.prior === 'yes') return 'Another agency is involved. Sort that out before signing.';
+    if ((an.guide || []).length < GUIDE.length) return 'Tick each section of the plain-English guide once you\'ve been through it together.';
+    if ((an.acks || []).length < acksList(T.c).length) return 'Tick each item under "Before signing", or stop and fix anything that didn\'t happen.';
+    if (!['have', 'waive'].includes(T.legalPick || (T.ag.legal || {}).choice)) return 'Record the legal advice choice.';
+    return '';
+  }
+
+  function tShow(p) {
+    T.page = p; T.pads = {};
+    header(TPAGES[p], `Page ${p + 1} of 3`, (p + 1) / 3 * 100);
+    const tabs = `<div class="ttabs">${TPAGES.map((t, i) => `<button type="button" class="ttab ${i === p ? 'on' : ''}" data-tp="${i}"><span class="n">${i + 1}</span>${t}</button>`).join('')}</div>`;
+    const flag = ['Fill in before the appointment, then check it together', 'Talk these through together', 'Go through this together, then sign'][p];
+    main().innerHTML = `<div class="view-pad"><span class="agent-flag">${flag}</span>${tabs}${[tPage1, tPage2, tPage3][p]()}<div class="err"></div></div>`;
+    [tBind1, tBind2, tBind3][p]();
+    tReveals();
+    $$('[data-tp]').forEach(b => b.addEventListener('click', async () => { tCollect(); if (!(await tSave())) return; tShow(+b.dataset.tp); }));
+    if (p < 2) {
+      actions(true, p === 0 ? 'Save and close' : 'Back', 'Save and continue');
+      onBack = async () => { tCollect(); if (!(await tSave())) return; if (p === 0) { toast('Saved'); viewAgentDetail(T.id); } else tShow(p - 1); };
+      onNext = async () => { tCollect(); const e = tValidate(p); if (e) return tErr(e); if (!(await tSave())) return; tShow(p + 1); };
+    } else {
+      actions(true, 'Back', 'Save and close');
+      onBack = async () => { tCollect(); if (!(await tSave())) return; tShow(1); };
+      onNext = async () => { tCollect(); if (!(await tSave())) return; toast('Saved'); viewAgentDetail(T.id); };
+    }
     top();
+  }
+  function tReveals() {
+    $$('[data-treveal]').forEach(box => {
+      const [src, k, val] = box.dataset.treveal.split(':');
+      const upd = () => { const ch = $(`[data-${src}="${k}"]:checked`); const sel = $(`select[data-${src}="${k}"]`); const cur = ch ? ch.value : sel ? sel.value : tg(src, k, ''); box.hidden = !(val.split('|').includes(cur)); };
+      $$(`[data-${src}="${k}"]`).forEach(r => r.addEventListener('change', upd)); upd();
+    });
+  }
+
+  /* page 1 */
+  function tPage1() {
+    return `<h1>Property and people</h1>
+      <p class="lede">Fill in what you know before the appointment. At the table, check it together and complete the rest.</p>
+      <h2>Property</h2>
+      <label class="f" for="tAddr" style="margin-top:0">Address</label><input type="text" id="tAddr" value="${esc(T.ag.address)}" placeholder="Street, suburb, Dunedin">
+      <div class="row2 stack">${TF.text('c', 'owners', 'Registered owners <span class="opt">(from the title)</span>')}${TF.text('c', 'title', 'Title reference')}</div>
+      <h2>Who's selling</h2>
+      <p class="small">Everyone on the title signs. An email for each person is needed for their signed copy.</p>
+      <div id="tPeople"></div>
+      <button class="btn link" type="button" id="tAddP">Add a person</button>
+      <div class="choices" style="margin-top:12px">
+        ${TF.radio('an', 'capacity', 'Owners', 'They own it personally', '', 'Owners')}${TF.radio('an', 'capacity', 'Trustee', 'As trustees of a trust', '', 'Owners')}${TF.radio('an', 'capacity', 'Director', 'As directors of a company', '', 'Owners')}${TF.radio('an', 'capacity', 'Authorised signatory, agent or attorney', 'On someone else\'s behalf', '', 'Owners')}
+      </div>
+      <div data-treveal="an:capacity:Trustee|Director|Authorised signatory, agent or attorney">${TF.text('an', 'entity', 'Name of the trust, company or person they act for')}</div>
+      <div class="row2"><div><div class="f">GST registered for this sale?</div><div class="choices two">${TF.radio('an', 'gst', 'no', 'No', '', 'no')}${TF.radio('an', 'gst', 'yes', 'Yes', '', 'no')}</div></div><div data-treveal="an:gst:yes">${TF.text('an', 'gstNo', 'GST number', { im: 'numeric' })}</div></div>
+      <div class="choices" style="margin-top:12px">${TF.check('an', 'titleOk', 'Ownership confirmed', 'They\'re the registered owners or authorised to sell, and no one else has an interest (such as a mortgagee sale, estate or relationship property claim). Clause 9.1.1')}</div>
+      <h2>How this listing came about</h2>
+      <div class="choices">${TF.radio('c', 'approach', 'invited', 'The vendor contacted me', 'Cooling-off ends 5pm on the first working day after they get their copy', 'invited')}${TF.radio('c', 'approach', 'unsolicited', 'I approached them first', 'Unsolicited: 5 working days, and it needn\'t be in writing', 'invited')}</div>
+      <h2>Appraisal</h2>
+      <div class="choices">${TF.radio('c', 'appr', 'done', 'Written appraisal given', '', 'done')}${TF.radio('c', 'appr', 'pending', 'Not yet', 'The agreement becomes conditional on them receiving your written appraisal', 'done')}</div>
+      <div data-treveal="c:appr:done"><div class="row2 stack">${TF.text('c', 'ask', 'Price for the commission example', { im: 'numeric' })}${TF.select('c', 'askBasis', 'Based on', [['asking', 'Client\'s asking price'], ['median', 'Median appraised value']], 'asking')}</div>
+        ${TF.text('c', 'apprUrl', 'Appraisal web address <span class="opt">(clause 23.1, optional)</span>', { type: 'url', ph: 'Leave blank if given in writing' })}</div>
+      <h2>Dates and method</h2>
+      <div class="row2 stack">${TF.text('c', 'start', 'Commencement date <span class="opt">(blank = on signing)</span>', { type: 'date' })}${TF.select('c', 'method', 'Method of sale', ['', 'Auction', 'Tender', 'Deadline sale', 'Price by negotiation', 'Fixed price', 'Expressions of interest', 'Timed sale', 'Ballot'], '')}</div>
+      ${TF.text('c', 'methodDate', 'Auction, tender, deadline or ballot date and time', { opt: true, ph: 'For example: Thu 26 Nov 2026, 4pm' })}
+      <h2>The property</h2>
+      <div class="card">
+        <div class="row2 stack">${TF.select('an', 'pType', 'Type', ['House', 'Townhouse', 'Unit or apartment', 'Lifestyle', 'Section'], 'House')}${TF.text('an', 'pYear', 'Year built <span class="opt">(approx.)</span>', { im: 'numeric' })}</div>
+        <div class="row2">${TF.text('an', 'pBed', 'Bedrooms', { type: 'number' })}${TF.text('an', 'pBath', 'Bathrooms', { type: 'number' })}</div>
+        <div class="row2">${TF.text('an', 'pFloor', 'Floor area (m²)', { type: 'number' })}${TF.text('an', 'pLand', 'Land area (m²)', { type: 'number' })}</div>
+        <div class="row2 stack">${TF.text('an', 'pBuild', 'Construction')}${TF.text('an', 'pPark', 'Parking')}</div>
+        ${TF.text('an', 'pHeat', 'Heating and insulation')}
+        ${TF.area('an', 'pLove', 'What will buyers love?', { opt: true })}
+      </div>
+      <h2>What stays with the house</h2>
+      ${TF.chips('chattels', CHATTELS, CHATTELS_DEFAULT)}
+      ${TF.text('an', 'chatOther', 'Anything else staying or going?', { opt: true })}
+      <h2>Work done and disclosures</h2><p class="small">The vendor answers to the best of their knowledge. <span class="clause">Clauses 9.2 to 9.5</span></p>
+      ${[['work', 'Any renovations, additions or repairs, especially anything needing a building consent?', 'What was done, roughly when, and was it consented?'], ['wt', 'Any leaks or weathertightness issues?', 'Tell us what you know'], ['meth', 'Any methamphetamine use, manufacture or contamination?', 'Tell us what you know'], ['def', 'Any defects, council notices or requirements from anyone?', 'Tell us what you know']].map(([k, q, dl]) => `
+        <div class="card tight"><div class="ct" style="font-weight:600;margin-bottom:8px">${q}</div><div class="choices two">${TF.radio('an', k, 'no', k === 'work' ? 'None known' : 'Not that they know of', '', '')}${TF.radio('an', k, 'yes', 'Yes', '', '')}</div>
+        <div data-treveal="an:${k}:yes">${TF.area('an', k + 'Detail', dl)}</div></div>`).join('')}
+      <h2>Hazards for visitors</h2><p class="small"><span class="clause">Clause 16.2</span></p>
+      ${TF.chips('hazards', HAZ, [])}
+      ${TF.text('an', 'hazOther', 'Anything else visitors should know?', { opt: true })}
+      <h2>Identity checks</h2>
+      ${TF.select('c', 'aml', 'How the sellers are verified', [['Manual', 'Manual: I check ID myself'], 'Halo', 'APLYiD', 'First AML', 'Cloudcheck', 'Dwellhub'], 'Manual')}`;
+  }
+  function tBind1() {
+    const draw = () => {
+      $('#tPeople').innerHTML = T.people.map((p, i) => `<div class="card tight" data-i="${i}">
+        <div style="display:flex;justify-content:space-between;align-items:baseline"><h3 style="margin:0">Person ${i + 1}</h3>${p.signed_at ? '<span class="signed-badge">Signed</span>' : `<button class="btn link" type="button" data-rm="${i}">Remove</button>`}</div>
+        <div class="row2 stack"><div><label class="f">Full legal name</label><input data-pk="legal_name" value="${esc(p.legal_name)}" ${p.signed_at ? 'readonly' : ''}></div><div><label class="f">Goes by <span class="opt">(optional)</span></label><input data-pk="pref_name" value="${esc(p.pref_name)}"></div></div>
+        <div class="row2 stack"><div><label class="f">Email</label><input type="email" data-pk="email" value="${esc(p.email)}" ${p.user_id || p.signed_at ? 'readonly' : ''}></div><div><label class="f">Mobile</label><input type="tel" data-pk="phone" value="${esc(p.phone)}"></div></div></div>`).join('');
+      $$('#tPeople [data-pk]').forEach(inp => inp.addEventListener('input', () => { T.people[+inp.closest('[data-i]').dataset.i][inp.dataset.pk] = inp.value; }));
+      $$('#tPeople [data-rm]').forEach(b => b.addEventListener('click', () => { const p = T.people[+b.dataset.rm]; if (p.id) T.del.push(p.id); T.people.splice(+b.dataset.rm, 1); if (!T.people.length) T.people.push({ legal_name: '', pref_name: '', email: '', phone: '' }); draw(); }));
+    };
+    draw();
+    $('#tAddP').addEventListener('click', () => { T.people.push({ legal_name: '', pref_name: '', email: '', phone: '' }); draw(); });
+    const ask = $('#t_ask'); if (ask) ask.addEventListener('change', () => { if (HAS_CAT) setBand(T.CAMP, bandFor(ask.value)); });
+  }
+
+  /* page 2 */
+  function tPage2() {
+    const pend = T.c.appr === 'pending';
+    return `<h1>Discussion</h1>
+      <p class="lede">The fee, the extras and the marketing. Agree these together, then fill them in.</p>
+      <h2>Commission</h2><p class="small"><span class="clause">Page 1, section D and clause 5</span></p>
+      <div class="row2">${TF.text('c', 'flat', 'Flat fee', { im: 'numeric' })}${TF.text('c', 'thr', 'For a sale price up to', { im: 'numeric', d: '250000' })}</div>
+      ${TF.select('c', 'aboveType', 'Above that price', [['pct', 'Plus a percentage of the portion above'], ['amount', 'Plus a fixed dollar amount'], ['none', 'Nothing more: flat fee at any price']], 'pct')}
+      <div data-treveal="c:aboveType:pct">${TF.text('c', 'pct', 'Percentage', { im: 'decimal' })}</div>
+      <div data-treveal="c:aboveType:amount">${TF.text('c', 'aboveAmt', 'Fixed amount, excl GST', { im: 'numeric' })}</div>
+      <div class="card tight" style="margin-top:14px"><div class="row2"><div><label class="f" for="tCalc" style="margin-top:0">Try a sale price</label><input type="text" id="tCalc" inputmode="numeric" value="${pend ? '' : num(T.c.ask).toLocaleString('en-NZ')}"></div>
+        <div><div class="small" style="margin-bottom:6px;font-weight:500;color:var(--ink)">Commission</div><div class="big money" id="tCalcOut">–</div><div class="small" id="tCalcGst"></div></div></div>
+        <p class="small" style="margin:10px 0 0">Only payable once a sale is unconditional.</p></div>
+      <h2>Costs on signing</h2><p class="small">Untick or change either one if you've agreed something different. <span class="clause">Page 1, section E</span></p>
+      <div class="row2"><div style="padding-top:6px">${TF.check('c', 'limOn', 'LIM report', '', true)}</div>${TF.text('c', 'lim', 'Amount, incl GST', { im: 'decimal', d: '425' })}</div>
+      <div class="row2"><div style="padding-top:6px">${TF.check('c', 'adminOn', 'Administration fee', '', true)}</div>${TF.text('c', 'admin', 'Amount, incl GST', { im: 'decimal', d: '500' })}</div>
+      <h2>Visiting professionals</h2><p class="small">A McGuire representative is present at every visit, and every professional signs the access form. These are the vendor's choices. <span class="clause">Clause 16.4</span></p>
+      <div class="choices">${TF.check('an', 'vQuotes', 'Allow visits to give a buyer a quote', 'For example a builder pricing an extension', true)}${TF.check('an', 'vSales', 'Allow sales assessments', 'Someone assessing the home to sell the buyer a product, such as solar or insulation', false)}${TF.check('an', 'vNotify', 'Tell the vendor before each visit', 'A text with who is coming, when and why', true)}</div>
+      ${TF.select('an', 'vNotice', 'Minimum notice for a visit', ['Same day is fine', '24 hours', '48 hours'], 'Same day is fine')}
+      ${TF.text('an', 'vNotes', 'Pets, keys, alarm or access notes', { opt: true })}
+      <h2>Other agents</h2><p class="small"><span class="clause">Clause 3</span></p>
+      <div class="choices">${TF.radio('an', 'prior', 'none', 'No other agent', '', 'none')}${TF.radio('an', 'prior', 'yes', 'They have or had another agency', 'Check it has ended before signing, or they could owe two commissions', 'none')}</div>
+      <div data-treveal="an:prior:yes">${TF.text('an', 'priorDetail', 'Agency name, type and when it ends')}</div>
+      <h2>People who have already expressed interest in buying <span class="opt small" style="font-family:var(--body)">(optional)</span></h2>
+      <p class="small">Fold them into the campaign, or exclude them for 10 working days. <span class="clause">Clause 2.3</span></p>
+      <div id="tBuyers"></div><button class="btn link" type="button" id="tAddB">Add someone</button>
+      <h2>Marketing</h2><p class="small">Paid through List Now; the vendor chooses how to settle. <span class="clause">Page 1, section E and clause 6</span></p>
+      <div class="choices two">${TF.radio('c', 'mktMode', 'build', 'Agree the campaign now', '', 'build')}${TF.radio('c', 'mktMode', 'later', 'Agree marketing later', 'Nothing is booked or spent until they approve it in writing', 'build')}</div>
+      <div data-treveal="c:mktMode:build"><div id="campBox"></div><h2>Campaign schedule</h2><div id="schedBox"></div></div>`;
+  }
+  function tBind2() {
+    const calc = () => { const cfg = Object.assign({}, T.c); $$('[data-c]').forEach(el => { if (el.type === 'radio') { if (el.checked) cfg[el.dataset.c] = el.value; } else if (el.type !== 'checkbox') cfg[el.dataset.c] = el.value; }); const p = num($('#tCalc').value); if (!p || !num(cfg.flat)) { $('#tCalcOut').textContent = '–'; $('#tCalcGst').textContent = p ? 'Enter the fee' : 'Enter a price'; return; } const cm = commission(cfg, p); $('#tCalcOut').textContent = money(r2(cm)); $('#tCalcGst').textContent = 'plus GST, ' + money(r2(cm * 1.15)) + ' in total'; };
+    ['#tCalc', '#t_flat', '#t_thr', '#t_pct', '#t_aboveAmt', '#t_aboveType'].forEach(s => { const el = $(s); if (el) { el.addEventListener('input', calc); el.addEventListener('change', calc); } }); calc();
+    let buyers = (T.an.interested || []).slice();
+    const readB = () => $$('#tBuyers .buyer').map(cd => ({ name: $('[data-b=name]', cd).value.trim(), phone: $('[data-b=phone]', cd).value.trim(), email: $('[data-b=email]', cd).value.trim(), exclude: $('[data-b=exclude]', cd).checked }));
+    const drawB = () => { $('#tBuyers').innerHTML = buyers.map(buyerCard).join(''); $$('#tBuyers [data-rmb]').forEach(b => b.addEventListener('click', () => { buyers = readB(); buyers.splice(+b.dataset.rmb, 1); drawB(); })); };
+    drawB();
+    $('#tAddB').addEventListener('click', () => { buyers = readB(); buyers.push({ name: '', phone: '', email: '', exclude: false }); drawB(); });
+    campaignEditor($('#campBox'), T.CAMP, null);
+    scheduleEditor($('#schedBox'), T.SCH, () => T.c.start || null);
+  }
+
+  /* page 3 */
+  function tFront() {
+    const c = tConfig(), an = T.an, pk = pkgOf(c), later = c.mktMode === 'later', pend = c.appr === 'pending';
+    const ent = an.capacity && an.capacity !== 'Owners' && an.entity ? `, as ${an.capacity.toLowerCase()} for ${an.entity}` : '';
+    const legal = T.legalPick || (T.ag.legal || {}).choice;
+    return {
+      client: T.people.filter(p => p.legal_name).map(p => p.legal_name).join(' and ') + ent,
+      gst: an.gst === 'yes' ? 'Yes, ' + (an.gstNo || '') : 'No',
+      property: T.ag.address,
+      starts: pend ? 'On receipt of written appraisal' : (c.start ? fmtDate(c.start) : 'On signing'),
+      review: '90 days after commencement',
+      commission: commText(c),
+      example: pend ? 'To be added with the written appraisal' : `At ${money(num(c.ask))}: ${money(r2(commission(c, num(c.ask))))} plus GST`,
+      costs: [limAmt(c) ? 'LIM ' + money(limAmt(c)) : '', adminAmt(c) ? 'administration fee ' + money(adminAmt(c)) : '', 'marketing ' + (later ? 'to be agreed' : money(pk.amt))].filter(Boolean).join(', ') + ' (including GST)',
+      condition: pend ? 'Takes effect on receipt of a written appraisal. The client may cancel within 2 working days of receiving it, at no cost.' : '',
+      legal: legal === 'have' ? 'Received' : legal === 'waive' ? 'Chose to go ahead without it' : 'Not recorded yet',
+    };
+  }
+  function tPage3() {
+    const fp = tFront(), L = T.ag.legal || {}, parked = T.ag.status === 'parked';
+    const guide = ta('guide', []), acks = ta('acks', []), acksL = acksList(T.c);
+    const rows = [['A', 'Client', `${esc(fp.client || '(names to come)')}<br><span class="small">GST registered: ${esc(fp.gst)}</span>`], ['B', 'Property', esc(fp.property)], ['C', 'Starts', esc(fp.starts)], ['C', 'Review date', esc(fp.review)],
+      ['D', 'Commission', `${esc(fp.commission)}<br><span class="small">${esc(fp.example)}</span>`], ['E', 'Costs', `${esc(fp.costs)}<br><span class="small">Invoiced through List Now</span>`]];
+    if (fp.condition) rows.push(['', 'Condition', esc(fp.condition)]);
+    const named = T.people.filter(p => (p.legal_name || '').trim());
+    const manual = (T.c.aml || 'Manual') === 'Manual';
+    return `<h1>Signing</h1>
+      <p class="lede">Go through the agreement together, record what's been explained, then sign here or send it to their phones.</p>
+      ${parked ? `<div class="card warnc"><h3>Paused for legal advice</h3><p class="small" style="margin:0">Sent to ${esc(L.lawyer || 'their lawyer')}${L.firm ? ', ' + esc(L.firm) : ''}. Once they've heard back, record it below and carry on.</p></div>` : ''}
+      <h2>Front page</h2>
+      <div class="card"><table class="sum">${rows.map(r => `<tr><td>${r[0] ? `<span class="clause">${r[0]}</span> ` : ''}${r[1]}</td><td style="white-space:normal">${r[2]}</td></tr>`).join('')}</table></div>
+      <div class="toolbar">${pdfBtn('Open the full agreement (PDF)')}</div>
+      <h2>The agreement in plain English</h2><p class="small">Tick each section once you've been through it together. <strong id="tGuideCount">${guide.length} of ${GUIDE.length}</strong></p>
+      ${GUIDE.map((g, i) => `<details class="acc tguide"><summary><label class="choice cb" style="margin:0;border:0;padding:0;background:none" onclick="event.stopPropagation()"><input type="checkbox" data-tmulti="guide" value="${i}" ${guide.includes(String(i)) ? 'checked' : ''}><span class="mark"></span><span class="ct">${esc(g[0])}</span></label> <span class="clause">${esc(g[1])}</span></summary><div class="in"><ul>${g[2].map(x => `<li>${esc(x)}</li>`).join('')}</ul></div></details>`).join('')}
+      <h2>Before signing</h2><p class="small">Only tick what has actually happened. <span class="clause">Clause 22.1</span></p>
+      <div class="card">${acksL.map((a, i) => `<div class="ack"><input type="checkbox" id="tak${i}" data-tmulti="acks" value="${i}" ${acks.includes(String(i)) ? 'checked' : ''}><label for="tak${i}"><span class="what">${esc(a[0])}</span>${a[1] ? `<div class="how">${a[1]}</div>` : ''}</label></div>`).join('')}</div>
+      <h2>Legal advice</h2><p class="small"><span class="clause">Clause 22.1.1</span></p>
+      <div class="choices">${[['have', 'They\'ve had legal advice', ''], ['waive', 'They\'re happy to go ahead without it', 'They can still talk to a lawyer before cooling-off ends'], ['send', 'Send it to their lawyer first', 'Their lawyer gets a read-only link, and signing pauses']].map(([v, t, d]) => `<label class="choice"><input type="radio" name="tLegal" value="${v}" ${(T.legalPick || L.choice) === v ? 'checked' : ''}><span class="mark"></span><span><span class="ct">${t}</span>${d ? `<span class="cd">${d}</span>` : ''}</span></label>`).join('')}</div>
+      <div id="tLawWrap" hidden><div class="row2 stack"><div><label class="f">Lawyer's name</label><input type="text" id="tLawN"></div><div><label class="f">Firm <span class="opt">(optional)</span></label><input type="text" id="tLawF"></div></div>
+        <label class="f">Lawyer's email</label><input type="email" id="tLawE"><div class="toolbar"><button class="btn primary" type="button" id="tLawGo">Send to lawyer and pause</button></div></div>
+      <h2>Identity</h2>
+      <div class="card tight"><p class="small" style="margin:0">${manual ? 'You verify each seller yourself. Use the AML file for each person on the agreement page.' : `${esc(T.c.aml)} sends each seller a link to verify on their phone.`} They can sign now; you can't act until everyone is verified.</p></div>
+      <h2>Signatures</h2>
+      ${named.length ? named.map(p => p.signed_at ? `<div class="card tight" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><h3 style="margin:0">${esc(p.legal_name)}</h3><span class="signed-badge">✓ Signed ${esc(fmtDT(p.signed_at))}</span></div>`
+        : `<div class="card tight" data-signer="${p.id || ''}"><div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:8px"><h3 style="margin:0">${esc(p.legal_name)}</h3><button class="btn link" type="button" data-clear="${p.id}">Clear</button></div>
+          <div class="sig-wrap"><canvas id="pad_${p.id}" aria-label="Signature pad for ${esc(p.legal_name)}"></canvas><div class="sig-line"></div><span class="hint">${esc(callName(p) || p.legal_name)} signs here</span></div>
+          <div class="toolbar"><button class="btn primary" type="button" data-signnow="${p.id}">Sign on this device</button></div></div>`).join('') : '<p class="small">Add the sellers on page 1 first.</p>'}
+      <p class="small">By signing they agree to the Sole and Exclusive Agency Agreement ${esc(AGREEMENT_VERSION.split('-')[0])}, including the Terms and Conditions, the Property Description and the Verification of Ownership. Each signer is emailed their copy once everyone has signed, which starts the cooling-off period.</p>
+      ${named.some(p => !p.signed_at) ? `<div class="card note"><h3>Or let them sign on their own phones</h3><p class="small">They'll get a link, check what you've filled in together, and sign in their own time. Anyone who's already signed here stays signed.</p><div class="toolbar"><button class="btn ghost" type="button" id="tSendPhones">Send to sign on their phones</button></div></div>` : ''}
+      <div id="tDone"></div>`;
+  }
+  function makePad(cv) {
+    if (!cv) return null;
+    const dpr = window.devicePixelRatio || 1, r = cv.getBoundingClientRect();
+    cv.width = Math.max(1, r.width * dpr); cv.height = 150 * dpr;
+    const ctx = cv.getContext('2d'); ctx.scale(dpr, dpr); ctx.lineWidth = 2.2; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = '#1a1a1a';
+    let drawing = false, last = null, drawn = false;
+    const pos = e => { const b = cv.getBoundingClientRect(); return { x: e.clientX - b.left, y: e.clientY - b.top }; };
+    cv.addEventListener('pointerdown', e => { drawing = true; last = pos(e); cv.setPointerCapture(e.pointerId); });
+    cv.addEventListener('pointermove', e => { if (!drawing) return; const p = pos(e); ctx.beginPath(); ctx.moveTo(last.x, last.y); ctx.lineTo(p.x, p.y); ctx.stroke(); last = p; drawn = true; const h = cv.parentElement.querySelector('.hint'); if (h) h.hidden = true; });
+    const end = () => { drawing = false; }; cv.addEventListener('pointerup', end); cv.addEventListener('pointercancel', end);
+    return { drawn: () => drawn, clear: () => { ctx.clearRect(0, 0, cv.width, cv.height); drawn = false; const h = cv.parentElement.querySelector('.hint'); if (h) h.hidden = false; } };
+  }
+  async function tRecordLegal() {
+    const pick = T.legalPick;
+    if (['have', 'waive'].includes(pick) && (T.ag.legal || {}).choice !== pick) { await must(sb.rpc('agent_set_legal', { a: T.id, choice: pick })); T.ag.legal = Object.assign({}, T.ag.legal, { choice: pick }); }
+  }
+  function tBind3() {
+    if (T.id) wirePdf(T.id); else $$('[data-pdf]').forEach(b => b.addEventListener('click', async () => { tCollect(); if (await tSave()) openPdf(T.id); }));
+    $$('[data-tmulti="guide"]').forEach(cb => cb.addEventListener('change', () => { $('#tGuideCount').textContent = `${$$('[data-tmulti="guide"]:checked').length} of ${GUIDE.length}`; }));
+    const lu = () => { const ch = $('input[name="tLegal"]:checked'); $('#tLawWrap').hidden = !(ch && ch.value === 'send'); };
+    $$('input[name="tLegal"]').forEach(r => r.addEventListener('change', lu)); lu();
+    $('#tLawGo').addEventListener('click', async () => {
+      const n = $('#tLawN').value.trim(), fm = $('#tLawF').value.trim(), e = $('#tLawE').value.trim();
+      if (!n || !EMAIL_RE.test(e)) return tErr('Add the lawyer\'s name and email.');
+      tCollect(); if (!(await tSave())) return;
+      await must(sb.rpc('agent_send_to_lawyer', { a: T.id, l_name: n, l_firm: fm, l_email: e }));
+      const { data, error } = await sb.functions.invoke('notify', { body: { type: 'lawyer', agreement_id: T.id } });
+      toast(error || (data && data.ok === false) ? 'Saved, but the lawyer email didn\'t send. Try again from the agreement page.' : 'Sent to ' + n);
+      viewAgentDetail(T.id);
+    });
+    $$('[data-signer]').forEach(card => { const pid = card.dataset.signer; T.pads[pid] = makePad($('#pad_' + pid)); });
+    $$('[data-clear]').forEach(b => b.addEventListener('click', () => { const pd = T.pads[b.dataset.clear]; if (pd) pd.clear(); }));
+    $$('[data-signnow]').forEach(b => b.addEventListener('click', async () => {
+      const pid = b.dataset.signnow, pad = T.pads[pid];
+      tCollect();
+      const e = tReadyToSign(); if (e) return tErr(e);
+      const person = T.people.find(x => x.id === pid);
+      if (!person || !EMAIL_RE.test(person.email || '')) return tErr(`Add an email for ${person ? person.legal_name : 'this person'} on page 1, so they get their signed copy.`);
+      if (!pad || !pad.drawn()) return tErr('Please sign in the box first.');
+      b.disabled = true;
+      try {
+        const blob = await new Promise(res => $('#pad_' + pid).toBlob(res, 'image/png'));
+        if (!(await tSave())) return;
+        await tRecordLegal();
+        const path = `agreements/${T.id}/signatures/${pid}-${Date.now()}.png`;
+        await must(sb.storage.from('private').upload(path, blob, { contentType: 'image/png' }));
+        const cfg = tConfig();
+        const snapshot = { agreement_version: AGREEMENT_VERSION, agreement_ref: T.ag.ref, front_page: tFront(), config: cfg, answers: T.an, people: T.people.map(p => ({ legal_name: p.legal_name, email: p.email })), signer: { name: person.legal_name, email: person.email }, signed_at_client: new Date().toISOString() };
+        const res = await must(sb.rpc('agent_sign_in_person', { a: T.id, pid, p_image_path: path, p_snapshot: snapshot, p_user_agent: navigator.userAgent }));
+        T.people = await must(sb.from('agreement_people').select('*').eq('agreement_id', T.id).order('position'));
+        T.ag = Object.assign(T.ag, await must(sb.from('agreements').select('id,ref,status,legal,sent_at,cooling_off_until').eq('id', T.id).single()));
+        if (res && res.remaining === 0) {
+          const { error: fe } = await sb.functions.invoke('notify', { body: { type: 'signed', agreement_id: T.id } });
+          toast(fe ? 'All signed. The copy email didn\'t send; resend it from the agreement page.' : 'All signed. Copies are on their way.');
+          return viewAgentDetail(T.id);
+        }
+        toast(person.legal_name + ' has signed'); tShow(2);
+      } catch (x) { b.disabled = false; }
+    }));
+    const sp = $('#tSendPhones');
+    if (sp) sp.addEventListener('click', async () => {
+      tCollect();
+      const unsigned = T.people.filter(p => (p.legal_name || '').trim() && !p.signed_at);
+      for (const p of [0, 1]) { const e = tValidate(p); if (e) return tErr(e + ` (page ${p + 1})`); }
+      if (unsigned.some(p => !EMAIL_RE.test(p.email || ''))) return tErr('Add an email on page 1 for everyone still to sign, so they can sign in.');
+      const guideDone = (T.an.guide || []).length >= GUIDE.length, acksDone = (T.an.acks || []).length >= acksList(T.c).length, legal = ['have', 'waive'].includes(T.legalPick || (T.ag.legal || {}).choice);
+      T.an._step = !guideDone ? 6 : (!acksDone || !legal) ? 7 : 9;
+      if (!(await tSave())) return;
+      if (legal) await tRecordLegal();
+      await must(sb.from('agreements').update({ status: 'sent', sent_at: T.ag.sent_at || new Date().toISOString() }).eq('id', T.id).in('status', ['draft', 'sent']));
+      await must(sb.from('agreement_events').insert({ agreement_id: T.id, actor: SESSION.user.email, kind: 'sent_to_vendor', detail: { from: 'appointment' } }));
+      toast('Ready for them to sign on their phones');
+      viewAgentDetail(T.id, true);
+    });
   }
 
   /* detail */
@@ -1221,7 +1473,7 @@ function lawyerForm(id, title, blurb) {
       <p><span class="pill ${ag.status}">${esc(ag.status)}</span> <span class="small">${esc(ag.ref)} · ${esc(ag.agreement_version)}</span></p>
       ${justSent || ag.status === 'sent' ? `<div class="card note no-print"><h3>Send this to the vendor</h3><p class="small">Text or email them this message. They sign in with the email you entered.</p><div class="copybox" id="msgBox">${esc(msg)}</div><div class="toolbar"><button class="btn ghost" type="button" id="copyMsg">Copy message</button></div></div>` : ''}
       <div class="toolbar no-print">
-        ${['draft', 'sent', 'parked'].includes(ag.status) ? '<button class="btn ghost" type="button" id="editAg">Edit setup</button>' : ''}
+        ${['draft', 'sent', 'parked'].includes(ag.status) ? '<button class="btn primary" type="button" id="editAg">Open appointment flow</button>' : ''}
         ${ag.status === 'signed' ? '<button class="btn primary" type="button" id="counterBtn">Countersign</button>' : ''}
         <button class="btn primary" type="button" data-pdf="1">Full agreement (PDF)</button>
         ${cfg.campaign || cfg.schedule ? '<button class="btn ghost" type="button" id="campPdf">Campaign PDF</button>' : ''}
@@ -1281,7 +1533,7 @@ function lawyerForm(id, title, blurb) {
     actions(false);
     $('#toList').addEventListener('click', viewAgentList);
     const cm = $('#copyMsg'); if (cm) cm.addEventListener('click', async () => { try { await navigator.clipboard.writeText(msg); toast('Copied'); } catch { toast('Select the text and copy it'); } });
-    const ed = $('#editAg'); if (ed) ed.addEventListener('click', () => viewSetup(id));
+    const ed = $('#editAg'); if (ed) ed.addEventListener('click', () => viewTable(id));
     $('#printBtn').addEventListener('click', () => window.print());
     wirePdf(id); const cpb = $('#campPdf'); if (cpb) cpb.addEventListener('click', () => openPdf(id, 'campaign'));
     if ($('#afwd')) { const sender = async (n, fm, e) => { await must(sb.from('lawyer_links').insert({ agreement_id: id, lawyer_name: n, firm: fm, email: e, sent_by: 'Tim McGuire', expires_at: new Date(Date.now() + 90 * 864e5).toISOString() })); await must(sb.from('agreement_events').insert({ agreement_id: id, actor: SESSION.user.email, kind: 'forwarded_to_lawyer', detail: { lawyer: n, email: e } })); }; sender.agId = id; wireLawyerForm('afwd', sender); }
