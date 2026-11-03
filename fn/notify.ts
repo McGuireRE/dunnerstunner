@@ -1,6 +1,6 @@
-import { admin, APP_URL, cors, esc, fmtDT, frontPageTable, json, sendMail, TIM_EMAIL, wrap } from "https://raw.githubusercontent.com/McGuireRE/dunnerstunner/f276281dbf787f69d752347015c57925cbd6ec0f/fn/shared.ts";
+import { admin, APP_URL, cors, esc, fmtDT, frontPageTable, json, sendMail, TIM_EMAIL, wrap } from "https://raw.githubusercontent.com/McGuireRE/dunnerstunner/8fb5a67f283090a64732ba2e0bb4aaaf6d4f0733/fn/shared.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
-import { makeAgreementPdf, makeNoticePdf, makeVariationPdf } from "https://raw.githubusercontent.com/McGuireRE/dunnerstunner/f276281dbf787f69d752347015c57925cbd6ec0f/fn/pdfload.ts";
+import { makeAgreementPdf, makeNoticePdf, makeVariationPdf } from "https://raw.githubusercontent.com/McGuireRE/dunnerstunner/8fb5a67f283090a64732ba2e0bb4aaaf6d4f0733/fn/pdfload.ts";
 
 // Called by the app after a vendor sends to their lawyer, or after signing.
 Deno.serve(async (req) => {

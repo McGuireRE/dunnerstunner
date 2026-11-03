@@ -157,10 +157,22 @@ details.acc .in li { margin: 4px 0; }
 .ack .how { font-size: 14.5px; color: var(--muted); margin-top: 3px; }
 .ack .how a { white-space: nowrap; }
 
-.sig-wrap { border: 1px dashed var(--muted); border-radius: 8px; background: var(--surface); position: relative; touch-action: none; }
+.sig-wrap { border: 1.5px dashed #8A857F; border-radius: 8px; background: #FFFFFF; position: relative; touch-action: none; color-scheme: light; } /* always paper-white with dark ink, in light and dark mode */
+.sig-wrap .unsaved { position: absolute; right: 10px; top: 8px; font-size: 12.5px; font-weight: 600; color: #8A4F00; background: #FFF1D6; border-radius: 999px; padding: 3px 10px; pointer-events: none; }
+.sig-save-note { font-size: 13.5px; color: var(--muted); margin: 8px 0 0; }
+.sig-ok { position: absolute; inset: 0; z-index: 3; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; text-align: center; padding: 10px; background: rgba(232, 243, 236, .97); color: #1F5E3A; border-radius: 8px; font-weight: 700; font-size: 18px; animation: sigok 2.6s ease forwards; }
+.sig-ok .tick { width: 52px; height: 52px; border-radius: 50%; background: #2F7D4F; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 30px; line-height: 1; }
+.sig-ok small { font-weight: 500; font-size: 14px; }
+@keyframes sigok { 0% { opacity: 0; transform: scale(.96); } 8% { opacity: 1; transform: scale(1); } 72% { opacity: 1; } 100% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .sig-ok { animation: sigokr 2.6s linear forwards; } @keyframes sigokr { 0%, 80% { opacity: 1; } 100% { opacity: 0; } } }
+.sigimg { background: #FFFFFF; border-radius: 6px; padding: 4px 8px; max-width: 100%; }
+.lawyer-banner { border-radius: 12px; padding: 14px 16px; margin: 0 0 18px; font-weight: 600; }
+.lawyer-banner.signed { background: var(--ok-soft); color: var(--ok); border: 2px solid var(--ok); }
+.lawyer-banner.draft { background: var(--warn-soft); color: var(--warn); border: 2px dashed var(--warn); }
+.lawyer-banner small { display: block; font-weight: 400; color: var(--ink); margin-top: 4px; font-size: 14.5px; }
 .sig-wrap canvas { display: block; width: 100%; height: 150px; cursor: crosshair; }
-.sig-wrap .hint { position: absolute; left: 14px; bottom: 10px; font-size: 13px; color: var(--muted); pointer-events: none; }
-.sig-line { position: absolute; left: 14px; right: 14px; bottom: 34px; border-bottom: 1px solid var(--line); pointer-events: none; }
+.sig-wrap .hint { position: absolute; left: 14px; bottom: 10px; font-size: 13px; color: #6E6A65; pointer-events: none; }
+.sig-line { position: absolute; left: 14px; right: 14px; bottom: 34px; border-bottom: 1px solid #C9C4BD; pointer-events: none; }
 .signed-badge { display: inline-flex; align-items: center; gap: 6px; color: var(--ok); font-weight: 600; font-size: 15px; }
 
 .status { display: inline-flex; align-items: center; gap: 8px; font-size: 14.5px; font-weight: 600; padding: 5px 10px; border-radius: 999px; }
@@ -279,6 +291,17 @@ hr.soft { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
   const fmtDT = d => new Date(d).toLocaleString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: 'Pacific/Auckland' });
   const main = () => $('#main');
   function toast(msg) { const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(toast._t); toast._t = setTimeout(() => t.hidden = true, 3200); }
+  // signature pads: a "not saved yet" marker after drawing, and a strong confirmation once saved
+  function padUnsaved(cv, on) { const w = cv && cv.closest('.sig-wrap'); if (!w) return; let u = w.querySelector('.unsaved'); if (on && !u) { u = document.createElement('span'); u.className = 'unsaved'; u.textContent = 'Not saved yet'; w.appendChild(u); } if (!on && u) u.remove(); }
+  function sigSaved(cv, title, sub) {
+    const w = cv && cv.closest('.sig-wrap'); if (!w) return Promise.resolve();
+    padUnsaved(cv, false);
+    const o = document.createElement('div'); o.className = 'sig-ok'; o.setAttribute('role', 'status');
+    o.innerHTML = `<span class="tick" aria-hidden="true">✓</span><span>${esc(title || 'Signature saved')}</span>${sub ? `<small>${esc(sub)}</small>` : ''}`;
+    w.appendChild(o);
+    return new Promise(r => setTimeout(r, 2500));
+  }
+  const saveNote = label => `<p class="sig-save-note">When you're happy with it, press <strong>${esc(label)}</strong>. Your signature isn't saved until you do.</p>`;
   function header(name, count, pct) { $('#stepName').textContent = name || ''; $('#stepCount').textContent = count || ''; $('#barFill').style.width = (pct || 0) + '%'; }
   function actions(show, backLabel, nextLabel) {
     $('#actions').hidden = !show;
@@ -658,7 +681,7 @@ hr.soft { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
     main().innerHTML = `<section class="screen active">${r}</section>`;
     wireReveals();
     (BIND[i] || (() => { }))();
-    const labels = { 0: 'Get started', 8: 'Continue to signing', 9: 'Sign agreement' };
+    const labels = { 0: 'Get started', 8: 'Continue to signing', 9: 'Save my signature and sign' };
     actions(i !== LAST, i === 0 ? '' : 'Back', labels[i] || 'Continue');
     onBack = () => showStep(Math.max(0, i - 1));
     onNext = async () => {
@@ -1011,7 +1034,7 @@ hr.soft { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
     ${P.filter(p => p.legal_name).map(p => {
       const mine = ME && p.id === ME.id;
       if (mine && !p.signed_at) return `<div class="card tight">${priorList(ANS).length ? `<label class="choice cb" style="margin:0 0 10px"><input type="checkbox" id="noticeOk"><span class="mark"></span><span><span class="ct">Also sign the notice${priorList(ANS).length > 1 ? 's' : ''} cancelling my agency with ${esc(joinNames(priorList(ANS).map(x => x.agency)))}</span></span></label>` : ''}<div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:8px"><h3 style="margin:0">${esc(p.legal_name)}</h3><button class="btn link" type="button" id="clearSig">Clear</button></div>
-        <div class="sig-wrap"><canvas id="sig0" aria-label="Signature pad"></canvas><div class="sig-line"></div><span class="hint">Sign here with your finger or mouse</span></div></div>`;
+        <div class="sig-wrap"><canvas id="sig0" aria-label="Signature pad"></canvas><div class="sig-line"></div><span class="hint">Sign here with your finger or mouse</span></div>${saveNote('Save my signature and sign')}</div>`;
       return `<div class="card tight" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><h3 style="margin:0">${esc(p.legal_name)}</h3>${p.signed_at ? `<span class="signed-badge">✓ Signed ${esc(fmtDT(p.signed_at))}</span>` : '<span class="status pending">Signs on their own phone</span>'}</div>`;
     }).join('')}
     <p class="small">By signing you agree to the Sole and Exclusive Agency Agreement ${esc(AGREEMENT_VERSION.split('-')[0])}, including the Terms and Conditions, the Property Description and the Verification of Ownership. Tim countersigns once everyone has signed.</p>
@@ -1028,8 +1051,8 @@ hr.soft { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
     const pos = e => { const b = cv.getBoundingClientRect(); return { x: e.clientX - b.left, y: e.clientY - b.top }; };
     cv.addEventListener('pointerdown', e => { drawing = true; last = pos(e); cv.setPointerCapture(e.pointerId); });
     cv.addEventListener('pointermove', e => { if (!drawing) return; const p = pos(e); ctx.beginPath(); ctx.moveTo(last.x, last.y); ctx.lineTo(p.x, p.y); ctx.stroke(); last = p; padDrawn = true; const h = cv.parentElement.querySelector('.hint'); if (h) h.hidden = true; });
-    const end = () => { drawing = false; }; cv.addEventListener('pointerup', end); cv.addEventListener('pointercancel', end);
-    return () => { ctx.clearRect(0, 0, cv.width, cv.height); padDrawn = false; const h = cv.parentElement.querySelector('.hint'); if (h) h.hidden = false; };
+    const end = () => { drawing = false; if (padDrawn) padUnsaved(cv, true); }; cv.addEventListener('pointerup', end); cv.addEventListener('pointercancel', end);
+    return () => { ctx.clearRect(0, 0, cv.width, cv.height); padDrawn = false; padUnsaved(cv, false); const h = cv.parentElement.querySelector('.hint'); if (h) h.hidden = false; };
   }
   BIND[9] = () => { wirePdf(A.id); const clear = initPad('sig0'); const c = $('#clearSig'); if (c && clear) c.addEventListener('click', clear); if (!$('#sig0')) actions(true, 'Back', 'See status'); };
   NEXT[9] = async () => {
@@ -1041,6 +1064,7 @@ hr.soft { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
     await must(sb.storage.from('private').upload(path, blob, { contentType: 'image/png' }));
     const snapshot = { agreement_version: AGREEMENT_VERSION, agreement_ref: A.ref, front_page: frontPage(), config: CFG, answers: ANS, people: P.map(p => ({ legal_name: p.legal_name, email: p.email })), signer: { name: ME.legal_name, email: SESSION.user.email }, notices: noticeSnapshot(A.address, frontPage().client, ANS), signed_at_client: new Date().toISOString() };
     const res = await must(sb.rpc('vendor_sign', { a: A.id, p_image_path: path, p_snapshot: snapshot, p_user_agent: navigator.userAgent }));
+    await sigSaved($('#sig0'), 'Signature saved', 'You\'ve signed the agreement');
     if (res && res.remaining === 0) { const { error: fe } = await sb.functions.invoke('notify', { body: { type: 'signed', agreement_id: A.id } }); if (fe) console.warn('copy email', fe); }
     A = await must(sb.from('agreements').select('*').eq('id', A.id).single());
     P = await must(sb.from('agreement_people').select('*').eq('agreement_id', A.id).order('position'));
@@ -1478,7 +1502,8 @@ function lawyerForm(id, title, blurb) {
         : `<div class="card tight" data-signer="${p.id || ''}"><div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:8px"><h3 style="margin:0">${esc(p.legal_name)}</h3><button class="btn link" type="button" data-clear="${p.id}">Clear</button></div>
           ${priorList(T.an).length ? `<label class="choice cb" style="margin:0 0 10px"><input type="checkbox" data-tnotice="${p.id}"><span class="mark"></span><span><span class="ct">Also sign the notice${priorList(T.an).length > 1 ? 's' : ''} cancelling the agency with ${esc(joinNames(priorList(T.an).map(x => x.agency)))}</span></span></label>` : ''}
           <div class="sig-wrap"><canvas id="pad_${p.id}" aria-label="Signature pad for ${esc(p.legal_name)}"></canvas><div class="sig-line"></div><span class="hint">${esc(callName(p) || p.legal_name)} signs here</span></div>
-          <div class="toolbar"><button class="btn primary" type="button" data-signnow="${p.id}">Sign on this device</button></div></div>`).join('') : '<p class="small">Add the sellers on page 1 first.</p>'}
+          ${saveNote(`Save ${callName(p) || p.legal_name}'s signature`)}
+          <div class="toolbar"><button class="btn primary" type="button" data-signnow="${p.id}">Save ${esc(callName(p) || p.legal_name)}'s signature</button></div></div>`).join('') : '<p class="small">Add the sellers on page 1 first.</p>'}
       <p class="small">By signing they agree to the Sole and Exclusive Agency Agreement ${esc(AGREEMENT_VERSION.split('-')[0])}, including the Terms and Conditions, the Property Description and the Verification of Ownership. Each signer is emailed their copy once everyone has signed, which starts the cooling-off period.</p>
       ${named.some(p => !p.signed_at) ? `<div class="card note"><h3>Or let them sign on their own phones</h3><p class="small">They'll get a link, check what you've filled in together, and sign in their own time. Anyone who's already signed here stays signed.</p><div class="toolbar"><button class="btn ghost" type="button" id="tSendPhones">Send to sign on their phones</button></div></div>` : ''}
       <div id="tDone"></div>`;
@@ -1492,8 +1517,8 @@ function lawyerForm(id, title, blurb) {
     const pos = e => { const b = cv.getBoundingClientRect(); return { x: e.clientX - b.left, y: e.clientY - b.top }; };
     cv.addEventListener('pointerdown', e => { drawing = true; last = pos(e); cv.setPointerCapture(e.pointerId); });
     cv.addEventListener('pointermove', e => { if (!drawing) return; const p = pos(e); ctx.beginPath(); ctx.moveTo(last.x, last.y); ctx.lineTo(p.x, p.y); ctx.stroke(); last = p; drawn = true; const h = cv.parentElement.querySelector('.hint'); if (h) h.hidden = true; });
-    const end = () => { drawing = false; }; cv.addEventListener('pointerup', end); cv.addEventListener('pointercancel', end);
-    return { drawn: () => drawn, clear: () => { ctx.clearRect(0, 0, cv.width, cv.height); drawn = false; const h = cv.parentElement.querySelector('.hint'); if (h) h.hidden = false; } };
+    const end = () => { drawing = false; if (drawn) padUnsaved(cv, true); }; cv.addEventListener('pointerup', end); cv.addEventListener('pointercancel', end);
+    return { drawn: () => drawn, clear: () => { ctx.clearRect(0, 0, cv.width, cv.height); drawn = false; padUnsaved(cv, false); const h = cv.parentElement.querySelector('.hint'); if (h) h.hidden = false; } };
   }
   async function tRecordLegal() {
     const pick = T.legalPick;
@@ -1533,6 +1558,7 @@ function lawyerForm(id, title, blurb) {
         const cfg = tConfig();
         const snapshot = { agreement_version: AGREEMENT_VERSION, agreement_ref: T.ag.ref, front_page: tFront(), config: cfg, answers: T.an, people: T.people.map(p => ({ legal_name: p.legal_name, email: p.email })), signer: { name: person.legal_name, email: person.email }, notices: noticeSnapshot(T.ag.address, tFront().client, T.an), signed_at_client: new Date().toISOString() };
         const res = await must(sb.rpc('agent_sign_in_person', { a: T.id, pid, p_image_path: path, p_snapshot: snapshot, p_user_agent: navigator.userAgent }));
+        await sigSaved($('#pad_' + pid), `${person.legal_name} has signed`, 'Signature saved');
         T.people = await must(sb.from('agreement_people').select('*').eq('agreement_id', T.id).order('position'));
         T.ag = Object.assign(T.ag, await must(sb.from('agreements').select('id,ref,status,legal,sent_at,cooling_off_until').eq('id', T.id).single()));
         if (res && res.remaining === 0) {
@@ -1675,7 +1701,7 @@ function lawyerForm(id, title, blurb) {
     $$('[data-aml]').forEach(b => b.addEventListener('click', () => viewAml(id, b.dataset.aml)));
     const cb = $('#counterBtn');
     if (cb) cb.addEventListener('click', () => {
-      $('#counterBox').innerHTML = `<div class="card"><h3>Countersign as licensee</h3><p class="small">Timothy McGuire REA#20117983 on behalf of McGuire Real Estate Limited.</p><div class="sig-wrap"><canvas id="sigA"></canvas><div class="sig-line"></div><span class="hint">Sign here</span></div><div class="toolbar"><button class="btn primary" type="button" id="doCounter">Countersign now</button></div><div class="err"></div></div>`;
+      $('#counterBox').innerHTML = `<div class="card"><h3>Countersign as licensee</h3><p class="small">Timothy McGuire REA#20117983 on behalf of McGuire Real Estate Limited.</p><div class="sig-wrap"><canvas id="sigA"></canvas><div class="sig-line"></div><span class="hint">Sign here</span></div>${saveNote('Save my signature and countersign')}<div class="toolbar"><button class="btn primary" type="button" id="doCounter">Save my signature and countersign</button></div><div class="err"></div></div>`;
       initPad('sigA');
       $('#doCounter').addEventListener('click', async () => {
         if (!padDrawn) { $('#counterBox .err').textContent = 'Please sign first.'; return; }
@@ -1686,6 +1712,7 @@ function lawyerForm(id, title, blurb) {
         await must(sb.from('signatures').insert({ agreement_id: id, signer_role: 'agent', signer_name: 'Timothy McGuire', image_path: path, snapshot, snapshot_sha256: await sha256(JSON.stringify(snapshot)), user_agent: navigator.userAgent }));
         await must(sb.from('agreements').update({ status: 'countersigned', countersigned_at: new Date().toISOString() }).eq('id', id));
         await must(sb.from('agreement_events').insert({ agreement_id: id, actor: SESSION.user.email, kind: 'countersigned', detail: {} }));
+        await sigSaved($('#sigA'), 'Countersigned', 'Your signature is saved');
         toast('Countersigned'); viewAgentDetail(id);
       });
     });
@@ -1879,20 +1906,21 @@ function lawyerForm(id, title, blurb) {
       </div>
       <h2>Your signature</h2>
       <div class="card tight"><div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:8px"><h3 style="margin:0">Timothy McGuire, for McGuire Real Estate</h3><button class="btn link" type="button" id="vClr">Clear</button></div>
-        <div class="sig-wrap"><canvas id="vSigA" aria-label="Your signature"></canvas><div class="sig-line"></div><span class="hint">Sign here</span></div></div>
+        <div class="sig-wrap"><canvas id="vSigA" aria-label="Your signature"></canvas><div class="sig-line"></div><span class="hint">Sign here</span></div>${saveNote('Save my signature and issue')}</div>
       <div class="err"></div></div>`;
     $('#vSigA').scrollIntoView({ block: 'center' });
     const pad = makePad($('#vSigA'));
     $('#vClr').addEventListener('click', () => pad.clear());
     $('#vPrev').addEventListener('click', () => openVarPdf(vid));
     $('#vBack').addEventListener('click', () => viewVariation(agId, vid));
-    actions(true, 'Back', 'Sign and issue');
+    actions(true, 'Back', 'Save my signature and issue');
     onBack = () => viewVariation(agId, vid);
     onNext = async () => {
       if (!pad.drawn()) return tErr('Please sign first.');
       const mode = $('input[name="vMode"]:checked').value;
       const path = await uploadSig($('#vSigA'), agId, vid + '-agent');
       await must(sb.rpc('agent_issue_variation', { v: vid, p_mode: mode, p_image_path: path, p_snapshot: varSnapshot(ag, vr, { name: 'Timothy McGuire', role: 'licensee', email: SESSION.user.email }), p_user_agent: navigator.userAgent }));
+      await sigSaved($('#vSigA'), 'Signature saved', 'Variation issued');
       if (mode === 'remote') {
         const { data, error } = await sb.functions.invoke('notify', { body: { type: 'variation_sent', agreement_id: agId, variation_id: vid } });
         toast(error || (data && data.ok === false) ? 'Issued, but the email failed. Use "Email it to them to sign".' : 'Issued and emailed to them to sign');
@@ -1919,24 +1947,26 @@ function lawyerForm(id, title, blurb) {
       <div class="toolbar"><button class="btn ghost" type="button" id="vPdf2">Read the variation (PDF)</button></div>
       ${todo.map(p => `<div class="card tight" data-vp="${p.id}"><div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:8px"><h3 style="margin:0">${esc(p.legal_name)}</h3><button class="btn link" type="button" data-vclr="${p.id}">Clear</button></div>
         <label class="choice cb"><input type="checkbox" data-vok="${p.id}"><span class="mark"></span><span><span class="ct">I've read these changes and agree to them</span><span class="cd">I was told I can get legal advice before signing, and given time to do so</span></span></label>
-        <div class="sig-wrap"><canvas data-vcv="${p.id}" aria-label="Signature of ${esc(p.legal_name)}"></canvas><div class="sig-line"></div><span class="hint">Sign here</span></div></div>`).join('') || '<p class="small">Everyone has signed.</p>'}
+        <div class="sig-wrap"><canvas data-vcv="${p.id}" aria-label="Signature of ${esc(p.legal_name)}"></canvas><div class="sig-line"></div><span class="hint">Sign here</span></div>${saveNote('Save signatures')}</div>`).join('') || '<p class="small">Everyone has signed.</p>'}
       <div class="err"></div></div>`;
     const pads = {};
     $$('[data-vcv]').forEach(cv => { pads[cv.dataset.vcv] = makePad(cv); });
     $$('[data-vclr]').forEach(b => b.addEventListener('click', () => pads[b.dataset.vclr].clear()));
     $('#vPdf2').addEventListener('click', () => openVarPdf(vid));
-    actions(true, 'Close', todo.length ? 'Record signatures' : 'Close');
+    actions(true, 'Close', todo.length ? 'Save signatures' : 'Close');
     onBack = () => viewAgentDetail(agId);
     onNext = async () => {
       if (!todo.length) return viewAgentDetail(agId);
       const ready = todo.filter(p => pads[p.id].drawn());
       if (!ready.length) return tErr('Each person ticks the box and signs.');
       for (const p of ready) if (!$(`[data-vok="${p.id}"]`).checked) return tErr(`${p.legal_name} needs to tick the box before signing.`);
-      let res = null;
+      let res = null; const shown = [];
       for (const p of ready) {
         const path = await uploadSig($(`[data-vcv="${p.id}"]`), agId, vid + '-' + p.id);
         res = await must(sb.rpc('agent_sign_variation_in_person', { v: vid, pid: p.id, p_image_path: path, p_snapshot: varSnapshot(ag, vr, { name: p.legal_name, email: p.email, role: 'client' }), p_user_agent: navigator.userAgent }));
+        shown.push(sigSaved($(`[data-vcv="${p.id}"]`), `${p.legal_name} has signed`, 'Signature saved'));
       }
+      await Promise.all(shown);
       if (res && res.remaining === 0) {
         const { data, error } = await sb.functions.invoke('notify', { body: { type: 'variation_signed', agreement_id: agId, variation_id: vid } });
         toast(error || (data && data.ok === false) ? 'Signed. The copy email failed, so send it from the agreement page.' : 'Signed by everyone. Copies emailed.');
@@ -1980,18 +2010,19 @@ function lawyerForm(id, title, blurb) {
       <div class="card tight">
         <label class="choice cb"><input type="checkbox" id="vOk"><span class="mark"></span><span><span class="ct">I've read these changes and agree to them</span><span class="cd">I know I can get legal advice before signing</span></span></label>
         <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin:8px 0"><h3 style="margin:0">${esc(ME.legal_name)}</h3><button class="btn link" type="button" id="vClr">Clear</button></div>
-        <div class="sig-wrap"><canvas id="vSigV" aria-label="Signature pad"></canvas><div class="sig-line"></div><span class="hint">Sign here with your finger or mouse</span></div></div>
+        <div class="sig-wrap"><canvas id="vSigV" aria-label="Signature pad"></canvas><div class="sig-line"></div><span class="hint">Sign here with your finger or mouse</span></div>${saveNote('Save my signature and sign')}</div>
       <div class="err"></div></section>`;
     $$('[data-vpdf]').forEach(b => b.addEventListener('click', () => openVarPdf(b.dataset.vpdf)));
     const pad = makePad($('#vSigV'));
     $('#vClr').addEventListener('click', () => pad.clear());
-    actions(true, 'Not now', 'Sign the changes');
+    actions(true, 'Not now', 'Save my signature and sign');
     onBack = () => showStep(LAST);
     onNext = async () => {
       if (!$('#vOk').checked) return err('Tick the box if you agree to the changes.');
       if (!pad.drawn()) return err('Please sign in the box.');
       const path = await uploadSig($('#vSigV'), A.id, vr.id + '-' + ME.id);
       const res = await must(sb.rpc('vendor_sign_variation', { v: vr.id, p_image_path: path, p_snapshot: varSnapshot(A, vr, { name: ME.legal_name, email: SESSION.user.email, role: 'client' }), p_user_agent: navigator.userAgent }));
+      await sigSaved($('#vSigV'), 'Signature saved', 'You\'ve signed the changes');
       if (res && res.remaining === 0) { const { error: fe } = await sb.functions.invoke('notify', { body: { type: 'variation_signed', agreement_id: A.id, variation_id: vr.id } }); if (fe) console.warn('variation copy', fe); }
       await loadVars();
       toast(res && res.remaining === 0 ? 'Signed. Your copy is on its way by email.' : 'Signed. Waiting on the others.');
@@ -2172,13 +2203,20 @@ function lawyerForm(id, title, blurb) {
       if (!r.ok) throw new Error(d.error || 'This link isn\'t valid.');
     } catch (e) { main().innerHTML = `<div class="login-card"><h1>Link not available</h1><p class="lede">${esc(e.message)}</p><p class="small">Tim McGuire · 027 562 7207 · tim@mcguire.co.nz</p></div>`; return; }
     const ag = d.agreement, c = ag.config || {}, an = ag.answers || {}, pk = pkgOf(c), later = pk.name === 'Later' || an.mkt === 'later';
+    const isSigned = ['signed', 'countersigned', 'ended'].includes(ag.status);
+    const sellers = esc((d.people || []).map(p => p.legal_name).filter(Boolean).join(' and '));
+    const someSigned = (d.people || []).some(p => p.signed_at);
+    header(isSigned ? 'Signed agreement' : 'Draft for review', '', 0);
     const row = (k, v) => `<tr><td>${k}</td><td style="white-space:normal">${v}</td></tr>`;
     main().innerHTML = `<div class="view-pad">
       <span class="agent-flag">Read-only · for ${esc(d.lawyer.name)}</span>
+      ${isSigned
+        ? `<div class="lawyer-banner signed">✓ SIGNED AGREEMENT<small>This is the executed copy, signed by ${sellers}${ag.signed_at ? ' (all signed ' + esc(fmtDT(ag.signed_at)) + ')' : ''}${ag.countersigned_at ? ' and countersigned by Timothy McGuire ' + esc(fmtDT(ag.countersigned_at)) : ''}. It can't be changed here.</small></div>`
+        : `<div class="lawyer-banner draft">DRAFT FOR REVIEW: NOT SIGNED<small>${someSigned ? 'Not everyone has signed yet, so this agreement is not in effect.' : 'Nobody has signed this. Your client is waiting for your advice before signing.'} If you'd like changes, reply to the email or call Tim, and he'll update it.</small></div>`}
       <h1>${esc(ag.address)}</h1>
-      <p class="lede">Draft Sole and Exclusive Agency Agreement prepared by McGuire Real Estate for ${esc((d.people || []).map(p => p.legal_name).filter(Boolean).join(' and '))}. ${ag.signed_at ? 'Signed ' + esc(fmtDT(ag.signed_at)) + '.' : 'Not yet signed.'}</p>
+      <p class="lede">${isSigned ? 'Signed' : 'Draft'} Sole and Exclusive Agency Agreement between McGuire Real Estate and ${sellers}.</p>
       <p class="small">${esc(ag.ref)} · ${esc(ag.agreement_version)}</p>
-      <div class="toolbar no-print"><a class="btn primary" href="${SB_URL}/functions/v1/agreement-pdf?token=${encodeURIComponent(token)}" target="_blank" rel="noopener" style="text-decoration:none">Full agreement with all terms (PDF)</a></div>
+      <div class="toolbar no-print"><a class="btn primary" href="${SB_URL}/functions/v1/agreement-pdf?token=${encodeURIComponent(token)}" target="_blank" rel="noopener" style="text-decoration:none">${isSigned ? 'Signed agreement with all terms and signatures (PDF)' : 'Draft agreement with all terms (PDF)'}</a></div>
       <h2>Appointment of agency (front page)</h2>
       <div class="card"><table class="sum">
         ${row('A. Client(s)', esc((d.people || []).map(p => p.legal_name).filter(Boolean).join(' and ')) + (an.capacity && an.capacity !== 'Owners' ? `, as ${esc(an.capacity.toLowerCase())} for ${esc(an.entity || '')}` : '') + `<br><span class="small">GST registered: ${an.gst === 'yes' ? 'Yes' : 'No'}</span>`)}
