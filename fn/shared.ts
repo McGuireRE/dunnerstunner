@@ -46,16 +46,16 @@ export function frontPageTable(ag: any, people: any[]) {
 }
 
 let transport: any = null;
-export async function sendMail(db: any, agreementId: string | null, kind: string, msg: { to: string | string[]; bcc?: string | string[]; subject: string; html: string; replyTo?: string; attachments?: { filename: string; content: Uint8Array; contentType?: string }[] }) {
+export async function sendMail(db: any, agreementId: string | null, kind: string, msg: { to: string | string[]; cc?: string | string[]; bcc?: string | string[]; subject: string; html: string; replyTo?: string; attachments?: { filename: string; content: Uint8Array; contentType?: string }[] }) {
   const pass = (Deno.env.get("SMTP_PASS") || "").replace(/[\s"']/g, "");
-  const recipients = [msg.to, msg.bcc].flat().filter(Boolean).join(", ");
+  const recipients = [msg.to, msg.cc, msg.bcc].flat().filter(Boolean).join(", ");
   if (!pass) {
     await db.from("email_log").insert({ agreement_id: agreementId, kind, recipients, subject: msg.subject, ok: false, error: "SMTP_PASS secret not set" });
     throw new Error("Email is not set up yet (SMTP_PASS secret missing)");
   }
   transport = nodemailer.createTransport({ host: "smtp.gmail.com", port: 465, secure: true, auth: { user: TIM_EMAIL, pass } });
   try {
-    await transport.sendMail({ from: FROM, replyTo: msg.replyTo || "tim@mcguire.co.nz", to: msg.to, bcc: msg.bcc, subject: msg.subject, html: msg.html, attachments: msg.attachments?.map((x) => ({ ...x, content: Buffer.from(x.content) })) });
+    await transport.sendMail({ from: FROM, replyTo: msg.replyTo || "tim@mcguire.co.nz", to: msg.to, cc: msg.cc, bcc: msg.bcc, subject: msg.subject, html: msg.html, attachments: msg.attachments?.map((x) => ({ ...x, content: Buffer.from(x.content) })) });
     await db.from("email_log").insert({ agreement_id: agreementId, kind, recipients, subject: msg.subject, ok: true });
   } catch (e: any) {
     await db.from("email_log").insert({ agreement_id: agreementId, kind, recipients, subject: msg.subject, ok: false, error: String(e?.message || e) });

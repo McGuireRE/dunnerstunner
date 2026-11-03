@@ -189,7 +189,9 @@ export async function buildAgreementPdf(inp: PdfInput): Promise<Uint8Array> {
   S.page("Schedule 4: Interested Buyers and Prior Agency", "Clauses 2.3 and 3");
   if (buyers.length) buyers.forEach((b, i) => row(`Interested buyer ${i + 1}`, `${b.name}${b.phone ? ", " + b.phone : ""}${b.email ? ", " + b.email : ""}. ${b.exclude ? "Excluded from this agency for 10 working days from signing (clause 2.3)." : "Included: the Agent will negotiate with this person as part of the campaign."}`));
   else row("Interested buyers", "None listed");
-  row("Prior agency", a.prior === "yes" ? a.priorDetail : a.prior ? "None: the Client warrants no other agent has been appointed (clause 3.1)" : "");
+  const priors = a.prior === "yes" ? (a.priorAgencies || []).filter((x: any) => x.agency) : [];
+  if (priors.length) priors.forEach((x: any, i: number) => row(`Prior agency ${i + 1}`, `${x.agency}${x.agent ? " (" + x.agent + ")" : ""}, ${(x.kind || "agency").toLowerCase()}${x.dated ? " dated " + x.dated : ""}. The Client signed a notice cancelling it with this agreement.`));
+  else row("Prior agency", a.prior === "yes" ? a.priorDetail : a.prior ? "None: the Client warrants no other agent has been appointed (clause 3.1)" : "");
 
   S.page("Schedule 5: Client Acknowledgements", "Clause 22.1");
   const L = ag.legal || {};
@@ -403,5 +405,37 @@ export async function buildVariationPdf(inp: PdfInput, vr: any, vsigs: any[], vi
   S.para("Electronic signatures under Part 4 of the Contract and Commercial Law Act 2017. The fingerprint identifies the exact content each person signed.", 8, GREY);
   const n = doc.getPageCount(), gen = nzDT(new Date());
   doc.getPages().forEach((p, i) => p.drawText(`${ag.ref} · Variation ${vr.number} · ${ag.address} · generated ${gen} · page ${i + 1} of ${n}`, { x: 48, y: 10, size: 6.5, font: F, color: GREY }));
+  return await doc.save();
+}
+
+// A previous agency's cancellation notice, signed by the sellers with the agency agreement.
+export async function buildNoticePdf(inp: PdfInput, n: any): Promise<Uint8Array> {
+  const { ag, people } = inp;
+  const doc = await PDFDocument.create();
+  doc.registerFontkit(fontkit);
+  const F = await doc.embedFont(inp.font, { subset: true });
+  const B = await doc.embedFont(inp.bold, { subset: true });
+  doc.setTitle(`Notice of cancellation of agency: ${ag.address}`); doc.setAuthor((people || []).filter((p) => p.legal_name).map((p) => p.legal_name).join(" and "));
+  const signed = inp.sigs.filter((s) => s.signer_role === "client" && (s.snapshot?.notices || []).some((x: any) => x.idx === n.idx)).sort((a, b) => a.signed_at < b.signed_at ? -1 : 1);
+  const entry = signed.length ? (signed[0].snapshot.notices || []).find((x: any) => x.idx === n.idx) : null;
+  const S = new Sched(doc, F, B, ag, ` · ${ag.address}`);
+  S.page("Notice of Cancellation of Agency", `From the owner(s) of ${ag.address}`);
+  const paras: string[] = entry?.text || [`To: ${n.agency}`, `Property: ${ag.address}`, "Notice text not recorded."];
+  paras.forEach((t) => S.para(t, 10));
+  S.gap(8);
+  S.heading2("Signed by the owner(s)");
+  for (const s of signed) {
+    S.need(95);
+    S.heading2(s.signer_name);
+    const bytes = inp.sigImages[s.id];
+    if (bytes) { const im = await doc.embedPng(bytes); const h = 40, w = Math.min(260, im.width * (h / im.height)); S.image(im, w, h); }
+    S.small(`Signed ${nzDT(s.signed_at)}${s.snapshot?.signing_method ? " · " + s.snapshot.signing_method : ""}`);
+    S.small(`Fingerprint (SHA-256) of what was signed: ${s.snapshot_sha256}`);
+    S.gap(6);
+  }
+  if (!signed.length) S.para("Not signed.", 10, RED);
+  S.para("Each owner signed this notice electronically, with a separate confirmation for it, at the same time as signing an agency agreement with McGuire Real Estate Limited. Electronic signatures under Part 4 of the Contract and Commercial Law Act 2017.", 8, GREY);
+  const n2 = doc.getPageCount(), gen = nzDT(new Date());
+  doc.getPages().forEach((p, i) => p.drawText(`Notice of cancellation · ${ag.address} · generated ${gen} · page ${i + 1} of ${n2}`, { x: 48, y: 10, size: 6.5, font: F, color: GREY }));
   return await doc.save();
 }
