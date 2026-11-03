@@ -543,6 +543,39 @@ hr.soft { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
     });
   }
 
+  /* ───────── previous agencies and their cancellation notices ───────── */
+  const PRIOR_KINDS = ['Sole agency', 'General agency', 'Not sure'];
+  function priorCard(x, i) {
+    return `<div class="card tight pa"><div style="display:flex;justify-content:space-between;align-items:baseline"><h3 style="margin:0">Previous agency ${i + 1}</h3><button class="btn link" type="button" data-rmpa="${i}">Remove</button></div>
+      <div class="row2 stack"><div><label class="f">Agency name</label><input type="text" data-pa="agency" value="${esc(x.agency || '')}" placeholder="For example: Smith Realty Ltd"></div><div><label class="f">Salesperson <span class="opt">(optional)</span></label><input type="text" data-pa="agent" value="${esc(x.agent || '')}"></div></div>
+      <div class="row2 stack"><div><label class="f">Type of agency</label><select data-pa="kind">${PRIOR_KINDS.map(k => `<option ${(x.kind || 'Sole agency') === k ? 'selected' : ''}>${k}</option>`).join('')}</select></div><div><label class="f">Date it was signed <span class="opt">(optional)</span></label><input type="text" data-pa="dated" value="${esc(x.dated || '')}" placeholder="For example: 3 August 2026"></div></div>
+      <label class="f">Agency email <span class="opt">(optional, lets Tim send your notice directly)</span></label><input type="email" data-pa="email" value="${esc(x.email || '')}"></div>`;
+  }
+  const readPrior = box => $$('.pa', box).map(c => ({ agency: $('[data-pa=agency]', c).value.trim(), agent: $('[data-pa=agent]', c).value.trim(), kind: $('[data-pa=kind]', c).value, dated: $('[data-pa=dated]', c).value.trim(), email: $('[data-pa=email]', c).value.trim() }));
+  function wirePrior(box, addBtn, start) {
+    let list = (start || []).slice(); if (!list.length) list.push({});
+    const draw = () => { box.innerHTML = list.map(priorCard).join(''); $$('[data-rmpa]', box).forEach(b => b.addEventListener('click', () => { list = readPrior(box); list.splice(+b.dataset.rmpa, 1); if (!list.length) list.push({}); draw(); })); };
+    draw();
+    addBtn.addEventListener('click', () => { list = readPrior(box); list.push({}); draw(); });
+  }
+  const priorCheck = list => { const named = (list || []).filter(x => x.agency); if (!named.length) return 'Add the name of the previous agency.'; if ((list || []).some(x => !x.agency && (x.agent || x.email || x.dated))) return 'Add a name for each previous agency, or remove the empty one.'; if (named.some(x => x.email && !EMAIL_RE.test(x.email))) return 'Check the agency email address.'; return ''; };
+  const priorList = an => an.prior === 'yes' ? (an.priorAgencies || []).filter(x => x.agency) : [];
+  const priorText = an => { const l = priorList(an); return l.length ? l.map(x => `${x.agency}${x.agent ? ' (' + x.agent + ')' : ''}, ${(x.kind || 'agency').toLowerCase()}${x.dated ? ' dated ' + x.dated : ''}`).join('; ') : (an.priorDetail || ''); };
+  function noticeParas(address, sellers, x) {
+    return [
+      `To: ${x.agency}${x.agent ? ', attention ' + x.agent : ''}`,
+      `Property: ${address}`,
+      `We, ${sellers}, give notice that we cancel the ${x.kind && x.kind !== 'Not sure' ? x.kind.toLowerCase() + ' agreement' : 'agency agreement'}${x.dated ? ' dated ' + x.dated : ''} under which you were appointed to sell the property above. This cancellation takes effect on the earliest date that agreement allows.`,
+      'Please:',
+      '1. confirm in writing the date your agency ends;',
+      '2. stop marketing the property from that date, and remove all advertising, signs and online listings for it;',
+      '3. send us, within 5 working days, a list of anyone you introduced to the property during your agency.',
+      'We have appointed McGuire Real Estate Limited. Please reply to us, with a copy to Tim McGuire at tim@mcguire.co.nz.',
+    ];
+  }
+  const noticeHTML = (address, sellers, x) => `<div class="card tight notice"><h3 style="margin:0 0 6px">Notice cancelling your agency with ${esc(x.agency)}</h3>${noticeParas(address, sellers, x).map(p => `<p class="small" style="margin:0 0 6px">${esc(p)}</p>`).join('')}</div>`;
+  const noticeSnapshot = (address, sellers, an) => priorList(an).map((x, i) => ({ idx: (an.priorAgencies || []).indexOf(x), agency: x.agency, agent: x.agent || '', kind: x.kind || '', dated: x.dated || '', text: noticeParas(address, sellers, x) }));
+
   /* ───────── auth ───────── */
   let SESSION = null, IS_AGENT = false;
   async function boot() {
@@ -795,7 +828,7 @@ hr.soft { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
     ${CFG.method ? `<h2>Method of sale</h2><p class="clause">Clause 4</p><div class="card tight"><div class="facts"><div class="fact"><div class="k">Method</div><div class="v">${esc(CFG.method)}</div></div></div></div>` : ''}
     <h2>Other agents</h2><p class="small">Have you signed with any other real estate agent for this property? <span class="clause">Clause 3</span></p>
     <div class="choices">${f.radio('prior', 'none', 'No, no other agent', '', 'none')}${f.radio('prior', 'yes', 'Yes, I have or had another agency', '', 'none')}</div>
-    <div class="reveal" data-reveal="prior=yes"><div class="card warnc"><h3>Please stop and call Tim before signing</h3><p class="small" style="margin:0">If another agent's sole agency is still running, you could end up owing two commissions. We'll sort out the details together first.</p></div>${f.text('priorDetail', 'Agency name, type and when it ends')}</div>
+    <div class="reveal" data-reveal="prior=yes"><div class="card note tight"><p class="small" style="margin:0">When you sign this agreement, you'll also sign a notice cancelling each previous agency. Tim checks it and sends it for you. If a sole agency is still running, talk to Tim first: you could end up owing two commissions.</p></div><div id="priorList"></div><button class="btn link" type="button" id="addPrior">Add another agency</button></div>
     <h2>People who have already expressed interest in buying the property <span class="opt small" style="font-family:var(--body)">(optional)</span></h2>
     <p class="small">Anyone who has already approached you about buying. I can take over and fold them into the campaign, or you can deal with them yourself for the next 10 working days. <span class="clause">Clause 2.3</span></p>
     <div id="buyers"></div>
@@ -810,6 +843,7 @@ hr.soft { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
   }
   function readBuyers() { return $$('#buyers .buyer').map(c => ({ name: $('[data-b=name]', c).value.trim(), phone: $('[data-b=phone]', c).value.trim(), email: $('[data-b=email]', c).value.trim(), exclude: $('[data-b=exclude]', c).checked })); }
   BIND[4] = () => {
+    wirePrior($('#priorList'), $('#addPrior'), ANS.priorAgencies);
     let buyers = (ANS.interested || []).slice();
     const draw = () => { $('#buyers').innerHTML = buyers.map(buyerCard).join(''); $$('[data-rmb]').forEach(b => b.addEventListener('click', () => { buyers = readBuyers(); buyers.splice(+b.dataset.rmb, 1); draw(); })); };
     draw();
@@ -817,7 +851,7 @@ hr.soft { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
     const upd = () => { const p = num($('#cPrice').value); if (!p) { $('#cOut').textContent = '–'; $('#cOutGst').textContent = 'Enter a price'; return; } const c = commission(CFG, p); $('#cOut').textContent = money(r2(c)); $('#cOutGst').textContent = 'plus GST, ' + money(r2(c * 1.15)) + ' in total'; };
     $('#cPrice').addEventListener('input', upd); upd();
   };
-  NEXT[4] = async () => { const a = collect(); a.interested = readBuyers().filter(b => b.name || b.phone || b.email); if (a.interested.some(b => !b.name)) return err('Add a name for each interested buyer, or remove the empty one.'); ANS.interested = a.interested; if (a.prior === 'yes') { await saveAns(a); return err('Please call Tim before going further. We need to check your other agency first.'); } await saveAns(a); return true; };
+  NEXT[4] = async () => { const a = collect(); a.interested = readBuyers().filter(b => b.name || b.phone || b.email); if (a.interested.some(b => !b.name)) return err('Add a name for each interested buyer, or remove the empty one.'); ANS.interested = a.interested; if (a.prior === 'yes') { a.priorAgencies = readPrior($('#priorList')).filter(x => x.agency || x.agent || x.email || x.dated); const pe = priorCheck(a.priorAgencies); if (pe) return err(pe); a.priorAgencies = a.priorAgencies.filter(x => x.agency); ANS.priorAgencies = a.priorAgencies; } await saveAns(a); return true; };
 
   /* 5 marketing */
   SCREENS[5] = () => {
@@ -966,15 +1000,17 @@ hr.soft { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
     const rows = [['A', 'Client', `${esc(fp.client)}<br><span class="small">GST registered: ${esc(fp.gst)}</span>`], ['B', 'Property', esc(fp.property)], ['C', 'Starts', esc(fp.starts)], ['C', 'Review date', esc(fp.review)],
       ['D', 'Commission', `${esc(fp.commission)}<br><span class="small">${esc(fp.example)}</span>`], ['E', 'Costs', `${esc(fp.costs)}<br><span class="small">Invoiced through List Now</span>`]];
     if (fp.condition) rows.push(['', 'Condition', esc(fp.condition)]);
+    if (priorList(ANS).length) rows.push(['', 'Previous agency', esc(priorText(ANS)) + '<br><span class="small">Cancelled by the notice you sign below</span>']);
     rows.push(['', 'Property Description', `${esc(ANS.pBed || '?')} bed, ${esc(ANS.pBath || '?')} bath ${esc((ANS.pType || '').toLowerCase())}`], ['', 'Visiting professionals', `McGuire present at every visit, ${esc((ANS.vNotice || 'Same day is fine').toLowerCase())} notice`], ['', 'Legal advice', esc(fp.legal)]);
     return `
     <h1>Review and sign</h1>
     <p class="lede">Here's your front page, built from your answers.</p>
     <div class="card"><table class="sum">${rows.map(r => `<tr><td>${r[0] ? `<span class="clause">${r[0]}</span> ` : ''}${r[1]}</td><td style="white-space:normal">${r[2]}</td></tr>`).join('')}</table></div>
+    ${priorList(ANS).length ? `<h2>Cancelling your previous agency</h2><p class="small">Signed with the same signature, then checked and sent by Tim.</p>${priorList(ANS).map(x => noticeHTML(A.address, fp.client, x)).join('')}` : ''}
     <h2>Signatures</h2>
     ${P.filter(p => p.legal_name).map(p => {
       const mine = ME && p.id === ME.id;
-      if (mine && !p.signed_at) return `<div class="card tight"><div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:8px"><h3 style="margin:0">${esc(p.legal_name)}</h3><button class="btn link" type="button" id="clearSig">Clear</button></div>
+      if (mine && !p.signed_at) return `<div class="card tight">${priorList(ANS).length ? `<label class="choice cb" style="margin:0 0 10px"><input type="checkbox" id="noticeOk"><span class="mark"></span><span><span class="ct">Also sign the notice${priorList(ANS).length > 1 ? 's' : ''} cancelling my agency with ${esc(joinNames(priorList(ANS).map(x => x.agency)))}</span></span></label>` : ''}<div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:8px"><h3 style="margin:0">${esc(p.legal_name)}</h3><button class="btn link" type="button" id="clearSig">Clear</button></div>
         <div class="sig-wrap"><canvas id="sig0" aria-label="Signature pad"></canvas><div class="sig-line"></div><span class="hint">Sign here with your finger or mouse</span></div></div>`;
       return `<div class="card tight" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><h3 style="margin:0">${esc(p.legal_name)}</h3>${p.signed_at ? `<span class="signed-badge">✓ Signed ${esc(fmtDT(p.signed_at))}</span>` : '<span class="status pending">Signs on their own phone</span>'}</div>`;
     }).join('')}
@@ -999,15 +1035,17 @@ hr.soft { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
   NEXT[9] = async () => {
     if (!$('#sig0')) return true;
     if (!padDrawn) return err('Please sign in the box.');
+    if ($('#noticeOk') && !$('#noticeOk').checked) return err('Tick the box to sign the cancellation notice as well. If you don\'t want to cancel your previous agency, call Tim before signing.');
     const blob = await new Promise(res => $('#sig0').toBlob(res, 'image/png'));
     const path = `agreements/${A.id}/signatures/${ME.id}-${Date.now()}.png`;
     await must(sb.storage.from('private').upload(path, blob, { contentType: 'image/png' }));
-    const snapshot = { agreement_version: AGREEMENT_VERSION, agreement_ref: A.ref, front_page: frontPage(), config: CFG, answers: ANS, people: P.map(p => ({ legal_name: p.legal_name, email: p.email })), signer: { name: ME.legal_name, email: SESSION.user.email }, signed_at_client: new Date().toISOString() };
+    const snapshot = { agreement_version: AGREEMENT_VERSION, agreement_ref: A.ref, front_page: frontPage(), config: CFG, answers: ANS, people: P.map(p => ({ legal_name: p.legal_name, email: p.email })), signer: { name: ME.legal_name, email: SESSION.user.email }, notices: noticeSnapshot(A.address, frontPage().client, ANS), signed_at_client: new Date().toISOString() };
     const res = await must(sb.rpc('vendor_sign', { a: A.id, p_image_path: path, p_snapshot: snapshot, p_user_agent: navigator.userAgent }));
     if (res && res.remaining === 0) { const { error: fe } = await sb.functions.invoke('notify', { body: { type: 'signed', agreement_id: A.id } }); if (fe) console.warn('copy email', fe); }
     A = await must(sb.from('agreements').select('*').eq('id', A.id).single());
     P = await must(sb.from('agreement_people').select('*').eq('agreement_id', A.id).order('position'));
     ME = P.find(p => p.user_id === SESSION.user.id);
+    await loadVars();
     return true;
   };
 
@@ -1186,6 +1224,7 @@ function lawyerForm(id, title, blurb) {
     if ($('#tAddr')) T.ag.address = $('#tAddr').value.trim();
     if ($('#tBuyers')) T.an.interested = $$('#tBuyers .buyer').map(cd => ({ name: $('[data-b=name]', cd).value.trim(), phone: $('[data-b=phone]', cd).value.trim(), email: $('[data-b=email]', cd).value.trim(), exclude: $('[data-b=exclude]', cd).checked })).filter(b => b.name || b.phone || b.email);
     const lg = $('input[name="tLegal"]:checked'); if (lg) T.legalPick = lg.value;
+    if ($('#tPrior')) T.an.priorAgencies = readPrior($('#tPrior')).filter(x => x.agency || x.agent || x.email || x.dated);
   }
 
   function tConfig() {
@@ -1232,6 +1271,7 @@ function lawyerForm(id, title, blurb) {
       const at = aboveType(c);
       if (!num(c.flat) || (at !== 'none' && !num(c.thr)) || (at === 'pct' && !num(c.pct)) || (at === 'amount' && !num(c.aboveAmt))) return 'Fill in the commission you agreed.';
       if ((T.an.interested || []).some(b => !b.name)) return 'Add a name for each interested buyer, or remove the empty one.';
+      if (an.prior === 'yes') { const pe = priorCheck(an.priorAgencies); if (pe) return pe; }
     }
     return '';
   }
@@ -1241,7 +1281,6 @@ function lawyerForm(id, title, blurb) {
     if (!an.titleOk) return 'Confirm ownership on page 1.';
     for (const k of ['work', 'wt', 'meth', 'def']) if (!an[k]) return 'Answer the property questions on page 1 (work done, leaks, methamphetamine, defects).';
     for (const k of ['work', 'wt', 'meth', 'def']) if (an[k] === 'yes' && !String(an[k + 'Detail'] || '').trim()) return 'Add details for anything answered Yes on page 1.';
-    if (an.prior === 'yes') return 'Another agency is involved. Sort that out before signing.';
     if ((an.guide || []).length < GUIDE.length) return 'Tick each section of the plain-English guide once you\'ve been through it together.';
     if ((an.acks || []).length < acksList(T.c).length) return 'Tick each item under "Before signing", or stop and fix anything that didn\'t happen.';
     if (!['have', 'waive'].includes(T.legalPick || (T.ag.legal || {}).choice)) return 'Record the legal advice choice.';
@@ -1369,7 +1408,7 @@ function lawyerForm(id, title, blurb) {
       ${TF.text('an', 'vNotes', 'Pets, keys, alarm or access notes', { opt: true })}
       <h2>Other agents</h2><p class="small"><span class="clause">Clause 3</span></p>
       <div class="choices">${TF.radio('an', 'prior', 'none', 'No other agent', '', 'none')}${TF.radio('an', 'prior', 'yes', 'They have or had another agency', 'Check it has ended before signing, or they could owe two commissions', 'none')}</div>
-      <div data-treveal="an:prior:yes">${TF.text('an', 'priorDetail', 'Agency name, type and when it ends')}</div>
+      <div data-treveal="an:prior:yes"><p class="small">Each previous agency gets a cancellation notice, signed with the agreement. You check and send it afterwards.</p><div id="tPrior"></div><button class="btn link" type="button" id="tAddPA">Add another agency</button></div>
       <h2>People who have already expressed interest in buying <span class="opt small" style="font-family:var(--body)">(optional)</span></h2>
       <p class="small">Fold them into the campaign, or exclude them for 10 working days. <span class="clause">Clause 2.3</span></p>
       <div id="tBuyers"></div><button class="btn link" type="button" id="tAddB">Add someone</button>
@@ -1380,6 +1419,7 @@ function lawyerForm(id, title, blurb) {
   function tBind2() {
     const calc = () => { const cfg = Object.assign({}, T.c); $$('[data-c]').forEach(el => { if (el.type === 'radio') { if (el.checked) cfg[el.dataset.c] = el.value; } else if (el.type !== 'checkbox') cfg[el.dataset.c] = el.value; }); const p = num($('#tCalc').value); if (!p || !num(cfg.flat)) { $('#tCalcOut').textContent = '–'; $('#tCalcGst').textContent = p ? 'Enter the fee' : 'Enter a price'; return; } const cm = commission(cfg, p); $('#tCalcOut').textContent = money(r2(cm)); $('#tCalcGst').textContent = 'plus GST, ' + money(r2(cm * 1.15)) + ' in total'; };
     ['#tCalc', '#t_flat', '#t_thr', '#t_pct', '#t_aboveAmt', '#t_aboveType'].forEach(s => { const el = $(s); if (el) { el.addEventListener('input', calc); el.addEventListener('change', calc); } }); calc();
+    wirePrior($('#tPrior'), $('#tAddPA'), T.an.priorAgencies);
     let buyers = (T.an.interested || []).slice();
     const readB = () => $$('#tBuyers .buyer').map(cd => ({ name: $('[data-b=name]', cd).value.trim(), phone: $('[data-b=phone]', cd).value.trim(), email: $('[data-b=email]', cd).value.trim(), exclude: $('[data-b=exclude]', cd).checked }));
     const drawB = () => { $('#tBuyers').innerHTML = buyers.map(buyerCard).join(''); $$('#tBuyers [data-rmb]').forEach(b => b.addEventListener('click', () => { buyers = readB(); buyers.splice(+b.dataset.rmb, 1); drawB(); })); };
@@ -1432,9 +1472,11 @@ function lawyerForm(id, title, blurb) {
         <label class="f">Lawyer's email</label><input type="email" id="tLawE"><div class="toolbar"><button class="btn primary" type="button" id="tLawGo">Send to lawyer and pause</button></div></div>
       <h2>Identity</h2>
       <div class="card tight"><p class="small" style="margin:0">${manual ? 'You verify each seller yourself. Use the AML file for each person on the agreement page.' : `${esc(T.c.aml)} sends each seller a link to verify on their phone.`} They can sign now; you can't act until everyone is verified.</p></div>
+      ${priorList(T.an).length ? `<h2>Cancelling the previous agency</h2><p class="small">Each seller also signs ${priorList(T.an).length > 1 ? 'these notices' : 'this notice'} with the same signature. You check and send ${priorList(T.an).length > 1 ? 'them' : 'it'} from the agreement page.</p>${priorList(T.an).map(x => noticeHTML(T.ag.address, fp.client || '(names to come)', x)).join('')}` : ''}
       <h2>Signatures</h2>
       ${named.length ? named.map(p => p.signed_at ? `<div class="card tight" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><h3 style="margin:0">${esc(p.legal_name)}</h3><span class="signed-badge">✓ Signed ${esc(fmtDT(p.signed_at))}</span></div>`
         : `<div class="card tight" data-signer="${p.id || ''}"><div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:8px"><h3 style="margin:0">${esc(p.legal_name)}</h3><button class="btn link" type="button" data-clear="${p.id}">Clear</button></div>
+          ${priorList(T.an).length ? `<label class="choice cb" style="margin:0 0 10px"><input type="checkbox" data-tnotice="${p.id}"><span class="mark"></span><span><span class="ct">Also sign the notice${priorList(T.an).length > 1 ? 's' : ''} cancelling the agency with ${esc(joinNames(priorList(T.an).map(x => x.agency)))}</span></span></label>` : ''}
           <div class="sig-wrap"><canvas id="pad_${p.id}" aria-label="Signature pad for ${esc(p.legal_name)}"></canvas><div class="sig-line"></div><span class="hint">${esc(callName(p) || p.legal_name)} signs here</span></div>
           <div class="toolbar"><button class="btn primary" type="button" data-signnow="${p.id}">Sign on this device</button></div></div>`).join('') : '<p class="small">Add the sellers on page 1 first.</p>'}
       <p class="small">By signing they agree to the Sole and Exclusive Agency Agreement ${esc(AGREEMENT_VERSION.split('-')[0])}, including the Terms and Conditions, the Property Description and the Verification of Ownership. Each signer is emailed their copy once everyone has signed, which starts the cooling-off period.</p>
@@ -1480,6 +1522,7 @@ function lawyerForm(id, title, blurb) {
       const person = T.people.find(x => x.id === pid);
       if (!person || !EMAIL_RE.test(person.email || '')) return tErr(`Add an email for ${person ? person.legal_name : 'this person'} on page 1, so they get their signed copy.`);
       if (!pad || !pad.drawn()) return tErr('Please sign in the box first.');
+      const tn = $(`[data-tnotice="${pid}"]`); if (tn && !tn.checked) return tErr('Tick the box to sign the cancellation notice as well, or stop and sort out the previous agency first.');
       b.disabled = true;
       try {
         const blob = await new Promise(res => $('#pad_' + pid).toBlob(res, 'image/png'));
@@ -1488,7 +1531,7 @@ function lawyerForm(id, title, blurb) {
         const path = `agreements/${T.id}/signatures/${pid}-${Date.now()}.png`;
         await must(sb.storage.from('private').upload(path, blob, { contentType: 'image/png' }));
         const cfg = tConfig();
-        const snapshot = { agreement_version: AGREEMENT_VERSION, agreement_ref: T.ag.ref, front_page: tFront(), config: cfg, answers: T.an, people: T.people.map(p => ({ legal_name: p.legal_name, email: p.email })), signer: { name: person.legal_name, email: person.email }, signed_at_client: new Date().toISOString() };
+        const snapshot = { agreement_version: AGREEMENT_VERSION, agreement_ref: T.ag.ref, front_page: tFront(), config: cfg, answers: T.an, people: T.people.map(p => ({ legal_name: p.legal_name, email: p.email })), signer: { name: person.legal_name, email: person.email }, notices: noticeSnapshot(T.ag.address, tFront().client, T.an), signed_at_client: new Date().toISOString() };
         const res = await must(sb.rpc('agent_sign_in_person', { a: T.id, pid, p_image_path: path, p_snapshot: snapshot, p_user_agent: navigator.userAgent }));
         T.people = await must(sb.from('agreement_people').select('*').eq('agreement_id', T.id).order('position'));
         T.ag = Object.assign(T.ag, await must(sb.from('agreements').select('id,ref,status,legal,sent_at,cooling_off_until').eq('id', T.id).single()));
@@ -1530,6 +1573,7 @@ function lawyerForm(id, title, blurb) {
     const creqs = await must(sb.from('cancellation_requests').select('*').eq('agreement_id', id).order('requested_at', { ascending: false }));
     const avars = await must(sb.from('agreement_variations').select('*').eq('agreement_id', id).order('number'));
     const avsigs = await must(sb.from('variation_signatures').select('*').eq('agreement_id', id));
+    const pans = await must(sb.from('prior_agency_notices').select('*').eq('agreement_id', id).order('idx'));
     const sigUrls = {};
     for (const s of sigs) if (s.image_path) { const { data } = await sb.storage.from('private').createSignedUrl(s.image_path, 600); if (data) sigUrls[s.id] = data.signedUrl; }
     const names = people.map(p => callName(p)).filter(Boolean);
@@ -1563,6 +1607,7 @@ function lawyerForm(id, title, blurb) {
         ${people.map(p => `<div class="row2 stack" data-pc="${p.id}"><div><label class="f" style="margin-top:0">${esc(p.legal_name || p.email)}: mobile</label><input type="tel" data-pcphone value="${esc(p.phone || '')}"></div><div><label class="f" style="margin-top:0">Goes by</label><input type="text" data-pcpref value="${esc(p.pref_name || '')}"></div></div>`).join('')}
         <label class="f">Private notes <span class="opt">(only you see these)</span></label><textarea id="agNotes">${esc(cfg.agent_notes || '')}</textarea>
         <div class="toolbar"><button class="btn primary" type="button" id="saveAdj">Save adjustments</button></div></div>` : ''}
+      ${noticePanel(ag, people, pans)}
       ${varPanel(ag, people, avars, avsigs)}
       <h2>People</h2>
       ${people.map(p => { const af = amls.find(x => x.person_id === p.id); return `<div class="card tight" style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
@@ -1594,7 +1639,7 @@ function lawyerForm(id, title, blurb) {
         <tr><td>Defects or notices</td><td style="white-space:normal">${an.def === 'yes' ? esc(an.defDetail) : an.def === 'no' ? 'Not known' : ''}</td></tr>
         <tr><td>Hazards</td><td style="white-space:normal">${esc((an.hazards || []).join(', '))}${an.hazOther ? '. ' + esc(an.hazOther) : ''}</td></tr>
         <tr><td>Visiting professionals</td><td style="white-space:normal">McGuire present at every visit; quotes ${an.vQuotes === false ? 'not allowed' : 'allowed'}; sales assessments ${an.vSales ? 'allowed' : 'not allowed'}; ${esc((an.vNotice || 'Same day is fine').toLowerCase())} notice${an.vNotes ? '; ' + esc(an.vNotes) : ''}</td></tr>
-        <tr><td>Other agents</td><td style="white-space:normal">${an.prior === 'yes' ? 'YES: ' + esc(an.priorDetail) : 'None'}</td></tr>
+        <tr><td>Other agents</td><td style="white-space:normal">${an.prior === 'yes' ? 'YES: ' + esc(priorText(an)) : 'None'}</td></tr>
         <tr><td>Interested buyers</td><td style="white-space:normal">${(an.interested || []).length ? an.interested.map(b => `${esc(b.name)}${b.phone ? ', ' + esc(b.phone) : ''}${b.email ? ', ' + esc(b.email) : ''} <strong>${b.exclude ? '(excluded 10 working days)' : '(Tim to negotiate)'}</strong>`).join('<br>') : (an.excluded ? esc(an.excluded) : 'None')}</td></tr>
         <tr><td>Capacity and GST</td><td style="white-space:normal">${esc(an.capacity || '')}${an.entity ? ' for ' + esc(an.entity) : ''} · GST: ${esc(an.gst === 'yes' ? an.gstNo : 'No')}</td></tr>
       </table></div>
@@ -1620,7 +1665,7 @@ function lawyerForm(id, title, blurb) {
       await must(sb.from('agreement_events').insert({ agreement_id: id, actor: SESSION.user.email, kind: 'adjustments_saved', detail: { fields: 'contact details, private notes' } }));
       toast('Saved'); viewAgentDetail(id);
     });
-    wireVarPanel(id);
+    wireVarPanel(id); wireNoticePanel(id);
     $('#printBtn').addEventListener('click', () => window.print());
     wirePdf(id); const cpb = $('#campPdf'); if (cpb) cpb.addEventListener('click', () => openPdf(id, 'campaign'));
     if ($('#afwd')) { const sender = async (n, fm, e) => { await must(sb.from('lawyer_links').insert({ agreement_id: id, lawyer_name: n, firm: fm, email: e, sent_by: 'Tim McGuire', expires_at: new Date(Date.now() + 90 * 864e5).toISOString() })); await must(sb.from('agreement_events').insert({ agreement_id: id, actor: SESSION.user.email, kind: 'forwarded_to_lawyer', detail: { lawyer: n, email: e } })); }; sender.agId = id; wireLawyerForm('afwd', sender); }
@@ -1902,18 +1947,24 @@ function lawyerForm(id, title, blurb) {
   }
 
   /* vendor: sign a variation on their own phone */
-  let VARS = [], VSIGS = [];
+  let VARS = [], VSIGS = [], PANS = [];
   async function loadVars() {
+    try { PANS = await must(sb.from('prior_agency_notices').select('*').eq('agreement_id', A.id).order('idx')); } catch (_) { PANS = []; }
     try { VARS = await must(sb.from('agreement_variations').select('*').eq('agreement_id', A.id).order('number')); VSIGS = await must(sb.from('variation_signatures').select('*').eq('agreement_id', A.id)); } catch (_) { VARS = []; VSIGS = []; }
   }
   const varToSign = () => ME && VARS.find(v => v.status === 'sent' && !VSIGS.some(s => s.variation_id === v.id && s.person_id === ME.id));
   function varDoneHTML() {
+    const notes = PANS.length ? `<h2>Your previous agency</h2><div class="card tight">${PANS.map(n => `<div class="fact"><div class="k">Notice to ${esc(n.agency)}</div><div class="v" style="font-weight:400">${n.status === 'sent' ? 'Sent ' + esc(fmtDate(n.sent_at)) + (n.sent_to ? ' to ' + esc(n.sent_to) : '') : 'Signed. Tim is checking it and will send it'}</div></div>`).join('')}<div class="toolbar">${PANS.map(n => `<button class="btn ghost" type="button" data-npdfv="${n.id}">Notice to ${esc(n.agency)} (PDF)</button>`).join('')}</div></div>` : '';
+    return notes + varDoneInner();
+  }
+  function varDoneInner() {
     const shown = VARS.filter(v => ['sent', 'signed'].includes(v.status));
     if (!shown.length) return '';
     return `<h2>Changes to your agreement</h2>${shown.map(v => `<div class="card tight"><div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:baseline"><h3 style="margin:0">Variation ${v.number}</h3><span class="status ${v.status === 'signed' ? 'done' : 'pending'}">${v.status === 'signed' ? 'In effect from ' + esc(fmtDate(v.signed_at)) : varToSign() && varToSign().id === v.id ? 'Waiting for your signature' : 'Waiting for others to sign'}</span></div>${varTable(v.summary || [])}
       <div class="toolbar">${varToSign() && varToSign().id === v.id ? `<button class="btn primary" type="button" data-vsign="${v.id}">Read and sign</button>` : ''}<button class="btn ghost" type="button" data-vpdf="${v.id}">Variation (PDF)</button></div></div>`).join('')}`;
   }
   function wireVarDone() {
+    $$('[data-npdfv]').forEach(b => b.addEventListener('click', () => openPartPdf(`part=notice&nid=${b.dataset.npdfv}`)));
     $$('[data-vsign]').forEach(b => b.addEventListener('click', () => viewVendorVariation(VARS.find(v => v.id === b.dataset.vsign))));
     $$('[data-vpdf]').forEach(b => b.addEventListener('click', () => openVarPdf(b.dataset.vpdf)));
   }
@@ -1947,6 +1998,54 @@ function lawyerForm(id, title, blurb) {
       showStep(LAST);
     };
     top();
+  }
+
+  /* agent: notices to previous agencies */
+  function noticePanel(ag, people, pans) {
+    if (!pans.length) return '';
+    const cc = people.filter(p => p.email && p.signed_at).map(p => p.email);
+    return `<h2>Notices to previous agencies</h2>
+      <p class="small">Signed by the sellers with the agreement. Download each one for your file. Check it, then send it.</p>
+      ${pans.map(n => `<div class="card ${n.status === 'sent' ? '' : 'note'}" data-pan="${n.id}"><div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:baseline"><h3 style="margin:0">${esc(n.agency)}${n.agent_name ? ` <span class="small">(${esc(n.agent_name)})</span>` : ''}</h3><span class="status ${n.status === 'sent' ? 'done' : 'pending'}">${n.status === 'sent' ? `Sent ${esc(fmtDT(n.sent_at))}` : 'To check and send'}</span></div>
+        <div class="small">${esc(n.kind || 'Agency')}${n.dated ? ', dated ' + esc(n.dated) : ''}${n.status === 'sent' ? `<br>${esc(n.sent_method || '')}${n.sent_to ? ' to ' + esc(n.sent_to) : ''}` : ''}${n.send_error && n.status !== 'sent' ? `<br><strong style="color:var(--accent)">Last send failed: ${esc(n.send_error)}</strong>` : ''}</div>
+        <div class="toolbar no-print"><button class="btn ghost" type="button" data-npdf="${n.id}">Signed notice (PDF)</button></div>
+        ${n.status === 'sent' ? '' : `<div class="no-print">
+          <label class="f">Agency email</label><input type="email" data-nemail value="${esc(n.email || '')}" placeholder="Add it to send the notice from here">
+          <label class="choice cb" style="margin-top:10px"><input type="checkbox" data-nrev><span class="mark"></span><span><span class="ct">I've read the signed notice and it's correct</span><span class="cd">It goes to the agency with the PDF attached, copied to ${esc(joinNames(cc) || 'the sellers')}, and a copy to you</span></span></label>
+          <div class="toolbar"><button class="btn primary" type="button" data-nsend="${n.id}">Send to the agency</button></div>
+          <details class="acc" style="margin-top:6px"><summary>Sent it another way?</summary><div class="in"><select data-nhow><option>Handed to the agency</option><option>Posted</option><option>Emailed from my own inbox</option><option>Sellers sent it themselves</option></select><div class="toolbar"><button class="btn ghost" type="button" data-nmark="${n.id}">Record as sent</button></div></div></details>
+          <div class="err"></div></div>`}</div>`).join('')}`;
+  }
+  function wireNoticePanel(agId) {
+    $$('[data-npdf]').forEach(b => b.addEventListener('click', () => openPartPdf(`part=notice&nid=${b.dataset.npdf}`)));
+    const card = b => b.closest('[data-pan]'), cerr = (b, m) => { $('.err', card(b)).textContent = m; };
+    $$('[data-nsend]').forEach(b => b.addEventListener('click', async () => {
+      const c = card(b), email = $('[data-nemail]', c).value.trim().toLowerCase();
+      if (!EMAIL_RE.test(email)) return cerr(b, 'Add the agency\'s email address first, or record it as sent another way.');
+      if (!$('[data-nrev]', c).checked) return cerr(b, 'Open the signed notice and tick the box once you\'ve checked it.');
+      b.disabled = true;
+      await must(sb.from('prior_agency_notices').update({ email, reviewed_at: new Date().toISOString() }).eq('id', b.dataset.nsend));
+      const { data, error } = await sb.functions.invoke('notify', { body: { type: 'prior_notice', agreement_id: agId, notice_id: b.dataset.nsend } });
+      toast(error || (data && data.ok === false) ? 'The email didn\'t send. See the notice for why.' : 'Notice sent to ' + email);
+      viewAgentDetail(agId);
+    }));
+    $$('[data-nmark]').forEach(b => b.addEventListener('click', async () => {
+      const c = card(b), how = $('[data-nhow]', c).value, email = $('[data-nemail]', c).value.trim().toLowerCase();
+      await must(sb.from('prior_agency_notices').update({ status: 'sent', sent_at: new Date().toISOString(), sent_method: how, sent_by: SESSION.user.email, email: email || null, reviewed_at: new Date().toISOString() }).eq('id', b.dataset.nmark));
+      await must(sb.from('agreement_events').insert({ agreement_id: agId, actor: SESSION.user.email, kind: 'prior_notice_sent', detail: { method: how } }));
+      toast('Recorded'); viewAgentDetail(agId);
+    }));
+  }
+  async function openPartPdf(qs) {
+    const w = window.open('', '_blank');
+    if (w) w.document.write('<p style="font-family:sans-serif;padding:20px">Preparing the PDF…</p>');
+    try {
+      const { data: { session } } = await sb.auth.getSession();
+      const r = await fetch(`${SB_URL}/functions/v1/agreement-pdf?${qs}`, { headers: { apikey: SB_KEY, Authorization: 'Bearer ' + (session ? session.access_token : '') } });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Could not create the PDF');
+      const url = URL.createObjectURL(await r.blob());
+      if (w) w.location.href = url; else location.href = url;
+    } catch (e) { if (w) w.close(); toast(e.message); }
   }
 
   /* AML file */
@@ -2104,7 +2203,7 @@ function lawyerForm(id, title, blurb) {
         ${row('Defects or notices', an.def === 'yes' ? esc(an.defDetail) : an.def === 'no' ? 'None known' : 'Not answered yet')}
         ${row('Hazards', esc((an.hazards || []).join(', ')) + (an.hazOther ? '. ' + esc(an.hazOther) : ''))}
         ${row('Visiting professionals', `McGuire representative present at every visit; quotes ${an.vQuotes === false ? 'not allowed' : 'allowed'}; sales assessments ${an.vSales ? 'allowed' : 'not allowed'}; ${esc((an.vNotice || 'Same day is fine').toLowerCase())} notice`)}
-        ${row('Other agencies', an.prior === 'yes' ? 'Yes: ' + esc(an.priorDetail) : an.prior ? 'None' : 'Not answered yet')}
+        ${row('Other agencies', an.prior === 'yes' ? 'Yes: ' + esc(priorText(an)) : an.prior ? 'None' : 'Not answered yet')}
         ${row('Interested buyers', (an.interested || []).length ? an.interested.map(b => esc(b.name) + (b.exclude ? ' (excluded for 10 working days)' : ' (to be negotiated by the agent)')).join('<br>') : 'None listed')}
       </table></div>
       ${(d.people || []).some(p => p.signed_at) ? `<h2>Signatures</h2><div class="card"><table class="sum">${d.people.filter(p => p.signed_at).map(p => row(esc(p.legal_name), 'Signed ' + esc(fmtDT(p.signed_at)))).join('')}${ag.countersigned_at ? row('Timothy McGuire REA#20117983', 'Countersigned ' + esc(fmtDT(ag.countersigned_at))) : ''}</table></div>` : ''}
