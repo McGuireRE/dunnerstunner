@@ -324,11 +324,11 @@ function wrap(s: string, f: PDFFont, size: number, maxW: number): string[] {
 }
 
 class Sched {
-  p!: PDFPage; y = 0;
+  p!: PDFPage; y = 0; brand = "McGuire Real Estate";
   constructor(private doc: PDFDocument, private F: PDFFont, private B: PDFFont, private ag: any, private suffix?: string) {}
   page(title: string, sub: string) {
     this.p = this.doc.addPage([W, H]); this.y = H - 60;
-    this.p.drawText("McGuire Real Estate", { x: 50, y: H - 40, size: 8, font: this.B, color: RED });
+    if (this.brand) this.p.drawText(this.brand, { x: 50, y: H - 40, size: 8, font: this.B, color: RED });
     this.p.drawText(title, { x: 50, y: this.y, size: 15, font: this.B, color: BLACK }); this.y -= 16;
     this.p.drawText(`${sub}${this.suffix ?? ` · forms part of Agency Agreement ${this.ag.ref}`}`.slice(0, 140), { x: 50, y: this.y, size: 8.5, font: this.F, color: GREY }); this.y -= 22;
   }
@@ -418,7 +418,8 @@ export async function buildNoticePdf(inp: PdfInput, n: any): Promise<Uint8Array>
   doc.setTitle(`Notice of cancellation of agency: ${ag.address}`); doc.setAuthor((people || []).filter((p) => p.legal_name).map((p) => p.legal_name).join(" and "));
   const signed = inp.sigs.filter((s) => s.signer_role === "client" && (s.snapshot?.notices || []).some((x: any) => x.idx === n.idx)).sort((a, b) => a.signed_at < b.signed_at ? -1 : 1);
   const entry = signed.length ? (signed[0].snapshot.notices || []).find((x: any) => x.idx === n.idx) : null;
-  const S = new Sched(doc, F, B, ag, ` · ${ag.address}`);
+  const S = new Sched(doc, F, B, ag, "");
+  S.brand = "";
   S.page("Notice of Cancellation of Agency", `From the owner(s) of ${ag.address}`);
   const paras: string[] = entry?.text || [`To: ${n.agency}`, `Property: ${ag.address}`, "Notice text not recorded."];
   paras.forEach((t) => S.para(t, 10));
