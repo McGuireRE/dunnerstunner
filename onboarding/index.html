@@ -611,7 +611,7 @@ hr.soft { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
     P = await must(sb.from('agreement_people').select('*').eq('agreement_id', id).order('position'));
     ME = P.find(p => p.user_id === SESSION.user.id) || null;
     CFG = A.config || {}; ANS = Object.assign({}, A.answers || {});
-    if (A.status === 'signed' || A.status === 'countersigned' || (ME && ME.signed_at)) STEP = LAST;
+    if (A.status === 'signed' || A.status === 'countersigned' || (ME && ME.signed_at)) { await loadCancelReq(); STEP = LAST; }
     else if (A.status === 'parked') return vendorParked();
     else STEP = Math.min(+(ANS._step || 0), LAST - 1);
     showStep(STEP);
@@ -859,12 +859,13 @@ hr.soft { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
     <h1>Your agreement, in plain English</h1>
     <p class="lede">Read each section and tick it once it makes sense. If something doesn't, text Tim before you tick it.</p>
     <p class="small">The full legal wording is in the agreement itself, and if anything here differs, the agreement applies. <strong id="readCount">${ticked.length} of ${GUIDE.length}</strong> ticked.</p>
-    <div class="toolbar">${pdfBtn()}</div>
+    <div class="toolbar">${pdfBtn()}<button class="btn ghost" type="button" data-tickall="guide">Tick all: I've read and understood these</button></div>
     ${GUIDE.map((g, i) => `<div class="card gcard ${ticked.includes(String(i)) ? 'done' : ''}"><h3>${esc(g[0])}</h3><div class="clause">${esc(g[1])}</div><ul>${g[2].map(x => `<li>${esc(x)}</li>`).join('')}</ul>
       <label class="choice cb"><input type="checkbox" data-multi="guide" value="${i}" ${ticked.includes(String(i)) ? 'checked' : ''}><span class="mark"></span><span class="ct">I understand this</span></label></div>`).join('')}
     <div class="err"></div>`;
   };
-  BIND[6] = () => wirePdf(A.id) || $$('[data-multi="guide"]').forEach(c => c.addEventListener('change', () => { c.closest('.gcard').classList.toggle('done', c.checked); $('#readCount').textContent = `${$$('[data-multi="guide"]:checked').length} of ${GUIDE.length}`; }));
+  BIND[6] = () => { wirePdf(A.id); $$('[data-multi="guide"]').forEach(c => c.addEventListener('change', () => { c.closest('.gcard').classList.toggle('done', c.checked); $('#readCount').textContent = `${$$('[data-multi="guide"]:checked').length} of ${GUIDE.length}`; })); wireTickAll(); };
+  function wireTickAll() { $$('[data-tickall]').forEach(b => b.addEventListener('click', () => { const k = b.dataset.tickall; $$(`[data-multi="${k}"],[data-tmulti="${k}"]`).forEach(c => { if (!c.checked) { c.checked = true; c.dispatchEvent(new Event('change', { bubbles: true })); } }); })); }
   NEXT[6] = async () => { const a = collect(); const left = GUIDE.length - a.guide.length; if (left) return err(`Tick each section once it makes sense. ${left} to go.`); await saveAns(a); return true; };
 
   /* 7 acknowledgements + legal */
@@ -887,11 +888,13 @@ hr.soft { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
         <p class="small">They'll get a read-only link to your agreement and your answers so far. Everything pauses until you've heard back.</p>
         <button class="btn primary" type="button" id="sendLaw" style="width:100%">Send to my lawyer and pause</button>
       </div></div>
-    <div class="card">${acks.map((a, i) => `<div class="ack"><input type="checkbox" id="ak${i}" data-multi="acks" value="${i}" ${done.includes(String(i)) ? 'checked' : ''}><label for="ak${i}"><span class="what">${esc(a[0])}</span>${a[1] ? `<div class="how">${a[1]}</div>` : ''}</label></div>`).join('')}
-      <p class="small" style="margin:12px 0 0">If anything above didn't happen, don't tick it. Text Tim and we'll fix it first.</p></div>
+    <div class="card"><div class="toolbar" style="margin:0 0 8px"><button class="btn ghost" type="button" data-tickall="acks">Tick all: these all happened</button></div>
+      ${acks.map((a, i) => `<div class="ack"><input type="checkbox" id="ak${i}" data-multi="acks" value="${i}" ${done.includes(String(i)) ? 'checked' : ''}><label for="ak${i}"><span class="what">${esc(a[0])}</span>${a[1] ? `<div class="how">${a[1]}</div>` : ''}</label></div>`).join('')}
+      <p class="small" style="margin:12px 0 0">If anything above didn't happen, untick it. Text Tim and we'll fix it first.</p></div>
     <div class="err"></div>`;
   };
   BIND[7] = () => {
+    wireTickAll();
     const upd = () => { const c = $('input[name="legal"]:checked'); $('#lawWrap').hidden = !(c && c.value === 'send'); };
     $$('input[name="legal"]').forEach(r => r.addEventListener('change', upd)); upd();
     $('#sendLaw').addEventListener('click', async () => {
@@ -1041,8 +1044,7 @@ function lawyerForm(id, title, blurb) {
     <p class="lede">${waiting.length ? `Waiting on ${esc(joinNames(waiting.map(p => callName(p) || p.legal_name)))} to sign on their own phone.` : 'I\'m looking forward to selling your home.'}</p>
     ${A.cooling_off_until ? `
     <div class="card okc"><h3>Your copy</h3><p class="small" style="margin:0">Everyone who signed is being emailed a copy. You can also come back here any time to see it.</p></div>
-    <div class="card"><h3>Changed your mind?</h3><p style="margin:0">You can cancel this agreement without giving a reason until <strong>${unsol ? 'the end of ' + esc(fmtDate(A.cooling_off_until)) : '5pm, ' + esc(fmtDate(A.cooling_off_until))}</strong>. ${unsol ? 'Just let Tim know. It doesn\'t need to be in writing.' : 'Just email Tim at tim@mcguire.co.nz, or reply to the email with your copy.'}</p>
-      <p class="small" style="margin:8px 0 0">This is your legal cooling-off right. <span class="clause">Clause 2.1 and the Real Estate Agents Act 2008</span></p></div>` : ''}
+` : ''}
     <h2>What happens next</h2>
     <ol class="steps-list">
       ${[CFG.appr === 'pending' ? ['Tim prepares your written appraisal. Your agreement takes effect when you receive it', 'This week'] : null,
@@ -1053,9 +1055,62 @@ function lawyerForm(id, title, blurb) {
         ['You review the listing before it goes live', 'Before launch']].filter(Boolean).map((s, i) => `<li><span class="n">${i + 1}</span><span>${s[0]}</span><span class="t">${s[1]}</span></li>`).join('')}
     </ol>
     <div class="toolbar">${pdfBtn(A.status === 'signed' || A.status === 'countersigned' ? 'Download your signed agreement (PDF)' : 'Read the full agreement (PDF)')}</div>
-    ${['signed', 'countersigned', 'ended'].includes(A.status) ? '<h2>Send a copy to your lawyer</h2>' + lawyerForm('fwd', 'Forward the signed agreement', 'Your lawyer gets an email with a read-only link to the signed agreement. Tim gets a copy. You can do this as often as you like.') : ''}`;
+    ${['signed', 'countersigned', 'ended'].includes(A.status) ? '<h2>Send a copy to your lawyer</h2>' + lawyerForm('fwd', 'Forward the signed agreement', 'Your lawyer gets an email with a read-only link to the signed agreement. Tim gets a copy. You can do this as often as you like.') : ''}
+    ${A.cooling_off_until && ['signed', 'countersigned'].includes(A.status) ? `<p class="small" style="margin-top:28px;color:var(--muted)">${CR && CR.status !== 'processed' ? `A request to cancel this agreement is with Tim (sent ${esc(fmtDT(CR.requested_at))}). He'll call you to talk it through.` : `Your cooling-off period ${new Date() <= new Date(A.cooling_off_until) ? 'ends' : 'ended'} ${unsol ? 'at the end of ' : '5pm, '}${esc(fmtDate(A.cooling_off_until))}. If you need to change or cancel this agreement, <a href="#" id="cancelLink">start here</a>.`}</p>` : ''}`;
   };
-  BIND[10] = () => { wirePdf(A.id); if ($('#fwd')) wireLawyerForm('fwd', async (n, fm, e) => { await must(sb.rpc('vendor_forward_to_lawyer', { a: A.id, l_name: n, l_firm: fm, l_email: e })); }); };
+  let CR = null;
+  async function loadCancelReq() { try { const rows = await must(sb.from('cancellation_requests').select('*').eq('agreement_id', A.id).order('requested_at', { ascending: false }).limit(1)); CR = rows[0] || null; } catch (_) { CR = null; } }
+  function viewCancelRequest() {
+    const inCO = A.cooling_off_until && new Date() <= new Date(A.cooling_off_until);
+    header('Changing or cancelling', '', 100); actions(false);
+    main().innerHTML = `<section class="screen active">
+      <h1>Before you ask to cancel</h1>
+      <p class="lede">Selling a home is a big decision, and so is stopping. Just as I made sure you were properly informed when you signed, I'll do the same now. This sends me a request; nothing is cancelled until we've spoken.</p>
+      <div class="card"><h3>What happens</h3><ol class="steps-list">
+        <li><span class="n">1</span><span>You tell me what's changed (optional) and send the request</span></li>
+        <li><span class="n">2</span><span>I call you, usually the same day. If it's a misunderstanding we can often put it right; if you still want to stop, I'll process it</span></li>
+        <li><span class="n">3</span><span>You get written confirmation once it's done</span></li></ol></div>
+      <div class="card ${inCO ? 'note' : ''} tight"><p class="small" style="margin:0">${inCO ? `You're within your cooling-off period, which ends ${esc(fmtDT(A.cooling_off_until))}. Sending this request now records that you asked in time, whatever we decide after talking.` : 'Your cooling-off period has ended, so the agreement\'s own terms apply: after the review date either of us can end it with 7 days\' written notice, and before then by agreement. We\'ll talk through where things stand.'} <span class="clause">Clause 2 and the Real Estate Agents Act 2008</span></p></div>
+      <label class="f" for="crWhy">What's prompted this? <span class="opt">(optional)</span></label>
+      <textarea id="crWhy" placeholder="For example: our plans have changed, I'm not sure about the fee, I'd like to wait until the new year"></textarea>
+      <label class="f" for="crPhone">Best number to call you on</label><input type="tel" id="crPhone" value="${esc(ME ? ME.phone || '' : '')}">
+      <div class="choices" style="margin-top:14px">
+        <label class="choice cb"><input type="checkbox" id="crC1"><span class="mark"></span><span><span class="ct">I understand this is a request, and nothing changes until Tim and I have spoken</span></span></label>
+        <label class="choice cb"><input type="checkbox" id="crC2"><span class="mark"></span><span><span class="ct">I've had time to think about this and I'm not making the decision under pressure</span><span class="cd">If anything about your situation is making this hard, say so and I'll help where I can</span></span></label>
+      </div>
+      <div class="err"></div></section>`;
+    actions(true, 'Back', 'Continue');
+    onBack = () => showStep(LAST);
+    onNext = async () => {
+      if (!$('#crC1').checked || !$('#crC2').checked) return err('Please tick both boxes to continue.');
+      const why = $('#crWhy').value.trim(), phone = $('#crPhone').value.trim();
+      if (num(phone) < 1e6) return err('Add a phone number I can reach you on.');
+      viewCancelConfirm(why, phone);
+    };
+    top();
+  }
+  function viewCancelConfirm(why, phone) {
+    header('Changing or cancelling', '', 100);
+    main().innerHTML = `<section class="screen active">
+      <h1>Send your request to cancel</h1>
+      <p class="lede">Check this is right. When you send it, Tim is told straight away and will call you on ${esc(phone)}.</p>
+      <div class="card"><table class="sum"><tr><td>Agreement</td><td style="white-space:normal">${esc(A.address)} (${esc(A.ref)})</td></tr><tr><td>Requested by</td><td style="white-space:normal">${esc(ME ? ME.legal_name : '')}</td></tr><tr><td>Reasons</td><td style="white-space:normal">${why ? esc(why) : '<span class="small">Not given</span>'}</td></tr><tr><td>Call me on</td><td>${esc(phone)}</td></tr></table></div>
+      <div class="choices"><label class="choice cb"><input type="checkbox" id="crFinal"><span class="mark"></span><span><span class="ct">Send my request to cancel the agency agreement</span><span class="cd">Signed in as ${esc(SESSION.user.email)}, the same way I signed</span></span></label></div>
+      <div class="err"></div></section>`;
+    actions(true, 'Back', 'Send request');
+    onBack = () => viewCancelRequest();
+    onNext = async () => {
+      if (!$('#crFinal').checked) return err('Tick the box to send your request.');
+      await must(sb.rpc('vendor_request_cancellation', { a: A.id, p_reasons: why, p_phone: phone, p_acks: { confirm: true, request_only: true, not_under_pressure: true, signed_in_as: SESSION.user.email }, p_user_agent: navigator.userAgent }));
+      const { error: fe } = await sb.functions.invoke('notify', { body: { type: 'cancel_request', agreement_id: A.id } }); if (fe) console.warn('cancel email', fe);
+      await loadCancelReq();
+      header('Request sent', '', 100); actions(true, '', 'Back to your agreement'); onNext = async () => showStep(LAST);
+      main().innerHTML = `<section class="screen active"><h1>Thanks, your request is with Tim.</h1><p class="lede">He'll call you on ${esc(phone)}, usually the same day, to talk it through. Nothing changes until then, and you'll get written confirmation of whatever is decided.</p><p class="small">If you'd rather not wait, call or text Tim on <strong>027 562 7207</strong>.</p></section>`;
+      top();
+    };
+    top();
+  }
+  BIND[10] = () => { wirePdf(A.id); if ($('#fwd')) wireLawyerForm('fwd', async (n, fm, e) => { await must(sb.rpc('vendor_forward_to_lawyer', { a: A.id, l_name: n, l_firm: fm, l_email: e })); }); const cl = $('#cancelLink'); if (cl) cl.addEventListener('click', e => { e.preventDefault(); viewCancelRequest(); }); };
 
   /* ═════════════════ AGENT ═════════════════ */
   async function viewAgentList() {
@@ -1357,9 +1412,10 @@ function lawyerForm(id, title, blurb) {
       <div class="card"><table class="sum">${rows.map(r => `<tr><td>${r[0] ? `<span class="clause">${r[0]}</span> ` : ''}${r[1]}</td><td style="white-space:normal">${r[2]}</td></tr>`).join('')}</table></div>
       <div class="toolbar">${pdfBtn('Open the full agreement (PDF)')}</div>
       <h2>The agreement in plain English</h2><p class="small">Tick each section once you've been through it together. <strong id="tGuideCount">${guide.length} of ${GUIDE.length}</strong></p>
+      <div class="toolbar" style="margin-top:0"><button class="btn ghost" type="button" data-tickall="guide">Tick all: we've been through these</button></div>
       ${GUIDE.map((g, i) => `<details class="acc tguide"><summary><label class="choice cb" style="margin:0;border:0;padding:0;background:none" onclick="event.stopPropagation()"><input type="checkbox" data-tmulti="guide" value="${i}" ${guide.includes(String(i)) ? 'checked' : ''}><span class="mark"></span><span class="ct">${esc(g[0])}</span></label> <span class="clause">${esc(g[1])}</span></summary><div class="in"><ul>${g[2].map(x => `<li>${esc(x)}</li>`).join('')}</ul></div></details>`).join('')}
       <h2>Before signing</h2><p class="small">Only tick what has actually happened. <span class="clause">Clause 22.1</span></p>
-      <div class="card">${acksL.map((a, i) => `<div class="ack"><input type="checkbox" id="tak${i}" data-tmulti="acks" value="${i}" ${acks.includes(String(i)) ? 'checked' : ''}><label for="tak${i}"><span class="what">${esc(a[0])}</span>${a[1] ? `<div class="how">${a[1]}</div>` : ''}</label></div>`).join('')}</div>
+      <div class="card"><div class="toolbar" style="margin:0 0 8px"><button class="btn ghost" type="button" data-tickall="acks">Tick all: these all happened</button></div>${acksL.map((a, i) => `<div class="ack"><input type="checkbox" id="tak${i}" data-tmulti="acks" value="${i}" ${acks.includes(String(i)) ? 'checked' : ''}><label for="tak${i}"><span class="what">${esc(a[0])}</span>${a[1] ? `<div class="how">${a[1]}</div>` : ''}</label></div>`).join('')}</div>
       <h2>Legal advice</h2><p class="small"><span class="clause">Clause 22.1.1</span></p>
       <div class="choices">${[['have', 'They\'ve had legal advice', ''], ['waive', 'They\'re happy to go ahead without it', 'They can still talk to a lawyer before cooling-off ends'], ['send', 'Send it to their lawyer first', 'Their lawyer gets a read-only link, and signing pauses']].map(([v, t, d]) => `<label class="choice"><input type="radio" name="tLegal" value="${v}" ${(T.legalPick || L.choice) === v ? 'checked' : ''}><span class="mark"></span><span><span class="ct">${t}</span>${d ? `<span class="cd">${d}</span>` : ''}</span></label>`).join('')}</div>
       <div id="tLawWrap" hidden><div class="row2 stack"><div><label class="f">Lawyer's name</label><input type="text" id="tLawN"></div><div><label class="f">Firm <span class="opt">(optional)</span></label><input type="text" id="tLawF"></div></div>
@@ -1393,7 +1449,7 @@ function lawyerForm(id, title, blurb) {
   }
   function tBind3() {
     if (T.id) wirePdf(T.id); else $$('[data-pdf]').forEach(b => b.addEventListener('click', async () => { tCollect(); if (await tSave()) openPdf(T.id); }));
-    $$('[data-tmulti="guide"]').forEach(cb => cb.addEventListener('change', () => { $('#tGuideCount').textContent = `${$$('[data-tmulti="guide"]:checked').length} of ${GUIDE.length}`; }));
+    $$('[data-tmulti="guide"]').forEach(cb => cb.addEventListener('change', () => { $('#tGuideCount').textContent = `${$$('[data-tmulti="guide"]:checked').length} of ${GUIDE.length}`; })); wireTickAll();
     const lu = () => { const ch = $('input[name="tLegal"]:checked'); $('#tLawWrap').hidden = !(ch && ch.value === 'send'); };
     $$('input[name="tLegal"]').forEach(r => r.addEventListener('change', lu)); lu();
     $('#tLawGo').addEventListener('click', async () => {
@@ -1461,6 +1517,7 @@ function lawyerForm(id, title, blurb) {
     const lawyers = await must(sb.from('lawyer_links').select('*').eq('agreement_id', id).order('sent_at', { ascending: false }));
     const amls = await must(sb.from('aml_files').select('id,person_id,locked_at').eq('agreement_id', id));
     const emails = await must(sb.from('email_log').select('*').eq('agreement_id', id).order('at', { ascending: false }));
+    const creqs = await must(sb.from('cancellation_requests').select('*').eq('agreement_id', id).order('requested_at', { ascending: false }));
     const sigUrls = {};
     for (const s of sigs) if (s.image_path) { const { data } = await sb.storage.from('private').createSignedUrl(s.image_path, 600); if (data) sigUrls[s.id] = data.signedUrl; }
     const names = people.map(p => callName(p)).filter(Boolean);
@@ -1481,6 +1538,12 @@ function lawyerForm(id, title, blurb) {
         ${['signed', 'countersigned', 'sent', 'parked'].includes(ag.status) ? '<button class="btn ghost" type="button" id="endBtn">End agency</button>' : ''}
       </div>
       <div id="counterBox"></div><div id="endBox"></div>
+      ${creqs.filter(r => r.status !== 'processed').map(r => `<div class="card warnc no-print" data-cr="${r.id}"><h3>Request to cancel from ${esc(r.requested_by)}</h3>
+        <p class="small">Sent ${esc(fmtDT(r.requested_at))}, ${r.within_cooling_off ? '<strong>within the cooling-off period</strong>' : 'after the cooling-off period'}. Call them on <strong>${esc(r.phone || 'their usual number')}</strong>.${r.reasons ? `<br>Their reasons: “${esc(r.reasons)}”` : '<br>No reasons given.'}</p>
+        <p class="small">Talk it through first. If it was a misunderstanding and they're happy to continue, record that. If they still want to cancel, process it and they'll get written confirmation.</p>
+        <label class="f">Notes from the conversation</label><textarea data-crnotes="${r.id}" placeholder="Who you spoke to, when, what was agreed"></textarea>
+        <div class="toolbar"><button class="btn primary" type="button" data-crdo="cancelled" data-crid="${r.id}">Cancel the agreement</button><button class="btn ghost" type="button" data-crdo="continuing" data-crid="${r.id}">They're continuing</button></div><div class="err"></div></div>`).join('')}
+      ${creqs.filter(r => r.status === 'processed').map(r => `<div class="card tight"><div class="small"><strong>Cancellation request</strong> from ${esc(r.requested_by)}, ${esc(fmtDT(r.requested_at))}${r.within_cooling_off ? ' (within cooling-off)' : ''}: ${r.outcome === 'cancelled' ? 'agreement cancelled' : 'continuing'} ${esc(fmtDT(r.processed_at))}.${r.reasons ? ' Reasons: ' + esc(r.reasons) + '.' : ''}${r.agent_notes ? ' Notes: ' + esc(r.agent_notes) : ''}</div></div>`).join('')}
       ${['signed', 'countersigned', 'ended'].includes(ag.status) ? `<div class="no-print">${lawyerForm('afwd', 'Forward the signed agreement to a lawyer', 'Yours or anyone\'s. They get a read-only link for 90 days, and you get a copy of the email.')}</div>` : ''}
       ${ag.cooling_off_until ? `<div class="card tight"><div class="facts"><div class="fact"><div class="k">All signed</div><div class="v">${esc(fmtDT(ag.signed_at))}</div></div><div class="fact"><div class="k">Cooling-off ends</div><div class="v">${esc(fmtDT(ag.cooling_off_until))}</div></div></div></div>` : ''}
 
@@ -1557,6 +1620,14 @@ function lawyerForm(id, title, blurb) {
         toast('Countersigned'); viewAgentDetail(id);
       });
     });
+    $$('[data-crdo]').forEach(b => b.addEventListener('click', async () => {
+      const rid = b.dataset.crid, notes = ($(`[data-crnotes="${rid}"]`) || {}).value || '';
+      if (!notes.trim()) { $(`[data-cr="${rid}"] .err`).textContent = 'Add a note about the conversation first.'; return; }
+      b.disabled = true;
+      await must(sb.rpc('agent_process_cancellation', { rid, p_outcome: b.dataset.crdo, p_notes: notes.trim() }));
+      const { error: fe } = await sb.functions.invoke('notify', { body: { type: 'cancel_processed', agreement_id: id, request_id: rid } }); if (fe) console.warn('cancel email', fe);
+      toast(b.dataset.crdo === 'cancelled' ? 'Agreement cancelled' : 'Recorded'); viewAgentDetail(id);
+    }));
     const eb = $('#endBtn');
     if (eb) eb.addEventListener('click', () => {
       $('#endBox').innerHTML = `<div class="card warnc"><h3>End this agency</h3><p class="small">Use this when the property has settled, been withdrawn, or the agreement was cancelled. AML records will then be kept for 5 years from today.</p><select id="endReason"><option>Sold and settled</option><option>Withdrawn</option><option>Cancelled by vendor</option><option>Cancelled during cooling-off</option><option>Cancelled by agent</option></select><div class="toolbar"><button class="btn primary" type="button" id="doEnd">End agency</button></div></div>`;
