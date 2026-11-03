@@ -1,6 +1,6 @@
-import { admin, APP_URL, cors, esc, fmtDT, frontPageTable, json, sendMail, TIM_EMAIL, wrap } from "https://raw.githubusercontent.com/McGuireRE/dunnerstunner/98e7e93633298b6e01c57f343675cd5df604e7e1/fn/shared.ts";
+import { admin, APP_URL, cors, esc, fmtDT, frontPageTable, json, sendMail, TIM_EMAIL, wrap } from "https://raw.githubusercontent.com/McGuireRE/dunnerstunner/bc04c126bb8048122377071161e1f5a402fed9d8/fn/shared.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
-import { makeAgreementPdf, makeVariationPdf } from "https://raw.githubusercontent.com/McGuireRE/dunnerstunner/98e7e93633298b6e01c57f343675cd5df604e7e1/fn/pdfload.ts";
+import { makeAgreementPdf, makeNoticePdf, makeVariationPdf } from "https://raw.githubusercontent.com/McGuireRE/dunnerstunner/bc04c126bb8048122377071161e1f5a402fed9d8/fn/pdfload.ts";
 
 // Called by the app after a vendor sends to their lawyer, or after signing.
 Deno.serve(async (req) => {
@@ -127,6 +127,30 @@ Deno.serve(async (req) => {
         return json({ ok: true });
       } catch (e: any) {
         await db.from("agreement_variations").update({ copy_error: String(e?.message || e) }).eq("id", vr.id);
+        return json({ ok: false, error: String(e?.message || e) }, 500);
+      }
+    }
+    if (type === "prior_notice") {
+      const { data: isAgent } = await userClient.rpc("is_agent");
+      if (!isAgent) return json({ error: "Not allowed" }, 403);
+      const { data: n }: any = await db.from("prior_agency_notices").select("*").eq("id", String(body.notice_id || "")).eq("agreement_id", agreement_id).maybeSingle();
+      if (!n || n.status === "sent") return json({ ok: true, note: "nothing to send" });
+      if (!n.email || !n.reviewed_at) return json({ ok: false, error: "Add the agency email and review the notice first" }, 400);
+      const cc = (people || []).filter((p: any) => p.email && p.signed_at).map((p: any) => p.email);
+      const sellers = (people || []).filter((p: any) => p.legal_name && p.signed_at).map((p: any) => p.legal_name);
+      const sellerList = sellers.length < 2 ? sellers.join("") : sellers.slice(0, -1).join(", ") + " and " + sellers.at(-1);
+      try {
+        const pdf = await makeNoticePdf(db, n.id);
+        const html = wrap(`<p>Kia ora${n.agent_name ? " " + esc(n.agent_name.split(" ")[0]) : ""},</p>
+          <p>On behalf of ${esc(sellerList)}, please find attached their signed notice cancelling your agency for <strong>${esc(ag.address)}</strong>.</p>
+          <p>They've asked that you confirm in writing the date your agency ends, stop marketing the property from that date, and send them a list of anyone you introduced to the property during your agency. They're copied in on this email.</p>
+          <p>Please reply to all. Thank you.</p>`);
+        await sendMail(db, agreement_id, "prior_notice", { to: n.email, cc, bcc: TIM_EMAIL, replyTo: "tim@mcguire.co.nz", subject: `Notice of cancellation of agency: ${ag.address}`, html, attachments: [{ filename: pdf.filename, content: pdf.bytes, contentType: "application/pdf" }] });
+        await db.from("prior_agency_notices").update({ status: "sent", sent_at: new Date().toISOString(), sent_to: n.email, sent_method: "Emailed from the onboarding app", sent_by: "Tim McGuire", send_error: null }).eq("id", n.id);
+        await db.from("agreement_events").insert({ agreement_id, actor: "system", kind: "prior_notice_sent", detail: { agency: n.agency, to: n.email } });
+        return json({ ok: true });
+      } catch (e: any) {
+        await db.from("prior_agency_notices").update({ send_error: String(e?.message || e) }).eq("id", n.id);
         return json({ ok: false, error: String(e?.message || e) }, 500);
       }
     }
