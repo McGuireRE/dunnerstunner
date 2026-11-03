@@ -611,7 +611,7 @@ hr.soft { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
     P = await must(sb.from('agreement_people').select('*').eq('agreement_id', id).order('position'));
     ME = P.find(p => p.user_id === SESSION.user.id) || null;
     CFG = A.config || {}; ANS = Object.assign({}, A.answers || {});
-    if (A.status === 'signed' || A.status === 'countersigned' || (ME && ME.signed_at)) { await loadCancelReq(); STEP = LAST; }
+    if (A.status === 'signed' || A.status === 'countersigned' || (ME && ME.signed_at)) { await loadCancelReq(); await loadVars(); STEP = LAST; const vt = varToSign(); if (vt) return viewVendorVariation(vt); }
     else if (A.status === 'parked') return vendorParked();
     else STEP = Math.min(+(ANS._step || 0), LAST - 1);
     showStep(STEP);
@@ -1056,6 +1056,7 @@ function lawyerForm(id, title, blurb) {
     </ol>
     <div class="toolbar">${pdfBtn(A.status === 'signed' || A.status === 'countersigned' ? 'Download your signed agreement (PDF)' : 'Read the full agreement (PDF)')}</div>
     ${['signed', 'countersigned', 'ended'].includes(A.status) ? '<h2>Send a copy to your lawyer</h2>' + lawyerForm('fwd', 'Forward the signed agreement', 'Your lawyer gets an email with a read-only link to the signed agreement. Tim gets a copy. You can do this as often as you like.') : ''}
+    ${varDoneHTML()}
     ${A.cooling_off_until && ['signed', 'countersigned'].includes(A.status) ? `<p class="small" style="margin-top:28px;color:var(--muted)">${CR && CR.status !== 'processed' ? `A request to cancel this agreement is with Tim (sent ${esc(fmtDT(CR.requested_at))}). He'll call you to talk it through.` : `Your cooling-off period ${new Date() <= new Date(A.cooling_off_until) ? 'ends' : 'ended'} ${unsol ? 'at the end of ' : '5pm, '}${esc(fmtDate(A.cooling_off_until))}. If you need to change or cancel this agreement, <a href="#" id="cancelLink">start here</a>.`}</p>` : ''}`;
   };
   let CR = null;
@@ -1110,7 +1111,7 @@ function lawyerForm(id, title, blurb) {
     };
     top();
   }
-  BIND[10] = () => { wirePdf(A.id); if ($('#fwd')) wireLawyerForm('fwd', async (n, fm, e) => { await must(sb.rpc('vendor_forward_to_lawyer', { a: A.id, l_name: n, l_firm: fm, l_email: e })); }); const cl = $('#cancelLink'); if (cl) cl.addEventListener('click', e => { e.preventDefault(); viewCancelRequest(); }); };
+  BIND[10] = () => { wirePdf(A.id); if ($('#fwd')) wireLawyerForm('fwd', async (n, fm, e) => { await must(sb.rpc('vendor_forward_to_lawyer', { a: A.id, l_name: n, l_firm: fm, l_email: e })); }); const cl = $('#cancelLink'); if (cl) cl.addEventListener('click', e => { e.preventDefault(); viewCancelRequest(); }); wireVarDone(); };
 
   /* ═════════════════ AGENT ═════════════════ */
   async function viewAgentList() {
@@ -1527,6 +1528,8 @@ function lawyerForm(id, title, blurb) {
     const amls = await must(sb.from('aml_files').select('id,person_id,locked_at').eq('agreement_id', id));
     const emails = await must(sb.from('email_log').select('*').eq('agreement_id', id).order('at', { ascending: false }));
     const creqs = await must(sb.from('cancellation_requests').select('*').eq('agreement_id', id).order('requested_at', { ascending: false }));
+    const avars = await must(sb.from('agreement_variations').select('*').eq('agreement_id', id).order('number'));
+    const avsigs = await must(sb.from('variation_signatures').select('*').eq('agreement_id', id));
     const sigUrls = {};
     for (const s of sigs) if (s.image_path) { const { data } = await sb.storage.from('private').createSignedUrl(s.image_path, 600); if (data) sigUrls[s.id] = data.signedUrl; }
     const names = people.map(p => callName(p)).filter(Boolean);
@@ -1560,6 +1563,7 @@ function lawyerForm(id, title, blurb) {
         ${people.map(p => `<div class="row2 stack" data-pc="${p.id}"><div><label class="f" style="margin-top:0">${esc(p.legal_name || p.email)}: mobile</label><input type="tel" data-pcphone value="${esc(p.phone || '')}"></div><div><label class="f" style="margin-top:0">Goes by</label><input type="text" data-pcpref value="${esc(p.pref_name || '')}"></div></div>`).join('')}
         <label class="f">Private notes <span class="opt">(only you see these)</span></label><textarea id="agNotes">${esc(cfg.agent_notes || '')}</textarea>
         <div class="toolbar"><button class="btn primary" type="button" id="saveAdj">Save adjustments</button></div></div>` : ''}
+      ${varPanel(ag, people, avars, avsigs)}
       <h2>People</h2>
       ${people.map(p => { const af = amls.find(x => x.person_id === p.id); return `<div class="card tight" style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
         <div style="min-width:0"><div style="font-weight:600">${esc(p.legal_name || '(name to come)')}${p.pref_name ? ` <span class="small">(${esc(p.pref_name)})</span>` : ''}</div><div class="small">${esc(p.email)} ${p.phone ? '· ' + esc(p.phone) : ''}</div>
@@ -1616,6 +1620,7 @@ function lawyerForm(id, title, blurb) {
       await must(sb.from('agreement_events').insert({ agreement_id: id, actor: SESSION.user.email, kind: 'adjustments_saved', detail: { fields: 'contact details, private notes' } }));
       toast('Saved'); viewAgentDetail(id);
     });
+    wireVarPanel(id);
     $('#printBtn').addEventListener('click', () => window.print());
     wirePdf(id); const cpb = $('#campPdf'); if (cpb) cpb.addEventListener('click', () => openPdf(id, 'campaign'));
     if ($('#afwd')) { const sender = async (n, fm, e) => { await must(sb.from('lawyer_links').insert({ agreement_id: id, lawyer_name: n, firm: fm, email: e, sent_by: 'Tim McGuire', expires_at: new Date(Date.now() + 90 * 864e5).toISOString() })); await must(sb.from('agreement_events').insert({ agreement_id: id, actor: SESSION.user.email, kind: 'forwarded_to_lawyer', detail: { lawyer: n, email: e } })); }; sender.agId = id; wireLawyerForm('afwd', sender); }
@@ -1652,6 +1657,295 @@ function lawyerForm(id, title, blurb) {
       $('#endBox').innerHTML = `<div class="card warnc"><h3>End this agency</h3><p class="small">Use this when the property has settled, been withdrawn, or the agreement was cancelled. AML records will then be kept for 5 years from today.</p><select id="endReason"><option>Sold and settled</option><option>Withdrawn</option><option>Cancelled by vendor</option><option>Cancelled during cooling-off</option><option>Cancelled by agent</option></select><div class="toolbar"><button class="btn primary" type="button" id="doEnd">End agency</button></div></div>`;
       $('#doEnd').addEventListener('click', async () => { await must(sb.rpc('agent_end_agency', { a: id, reason: $('#endReason').value })); toast('Agency ended'); viewAgentDetail(id); });
     });
+    top();
+  }
+
+  /* ═════════════════ VARIATIONS AND EXTENSIONS ═════════════════ */
+  const addDays = (iso, n) => { const d = new Date(iso + 'T12:00:00'); d.setDate(d.getDate() + n); return isoDay(d); };
+  const dayText = iso => iso ? fmtDate(iso + 'T12:00:00') : 'Not set';
+  // the terms in force: the signed agreement, then each fully signed variation in order
+  function currentTerms(ag, vars) {
+    const c = ag.config || {};
+    const t = { aboveType: aboveType(c), flat: c.flat, thr: c.thr, pct: c.pct, aboveAmt: c.aboveAmt, ask: c.ask, method: c.method || '', methodDate: c.methodDate || '', reviewUntil: (c.start || ag.signed_at) ? addDays(c.start || isoDay(ag.signed_at), 90) : '', marketing: [], other: [] };
+    (vars || []).filter(v => v.status === 'signed').sort((a, b) => a.number - b.number).forEach(v => {
+      const ch = v.changes || {};
+      if (ch.reviewUntil) t.reviewUntil = ch.reviewUntil;
+      if (ch.commission) Object.assign(t, ch.commission);
+      if (ch.ask) t.ask = ch.ask;
+      if (ch.method !== undefined) { t.method = ch.method; t.methodDate = ch.methodDate || ''; }
+      if (ch.marketing) t.marketing.push(ch.marketing);
+      if (ch.other) t.other.push(ch.other);
+    });
+    return t;
+  }
+  const methodText = t => (t.method || 'Not set') + (t.methodDate ? ', ' + t.methodDate : '');
+  function varSummary(cur, ch) {
+    const rows = [];
+    if (ch.reviewUntil) rows.push({ label: 'Review date', from: dayText(cur.reviewUntil), to: dayText(ch.reviewUntil) + ', the new end of the fixed period. The agreement otherwise continues on its terms, as in clause 2' });
+    if (ch.commission) rows.push({ label: 'Commission', from: commText(cur), to: commText(Object.assign({}, cur, ch.commission)) });
+    if (ch.ask) rows.push({ label: 'Price for the commission example', from: num(cur.ask) ? money(num(cur.ask)) : 'Not set', to: `${money(num(ch.ask))} (commission at this price: ${money(r2(commission(Object.assign({}, cur, ch.commission || {}), num(ch.ask))))} plus GST)` });
+    if (ch.method !== undefined) rows.push({ label: 'Method of sale', from: methodText(cur), to: methodText(ch) });
+    if (ch.marketing) rows.push({ label: 'Additional marketing', from: '', to: `${ch.marketing.desc}: ${money(num(ch.marketing.amount))} including GST, invoiced through List Now` });
+    if (ch.other) rows.push({ label: 'Other change', from: '', to: ch.other });
+    return rows;
+  }
+  const varTable = rows => `<table class="sum">${rows.map(r => `<tr><td>${esc(r.label)}</td><td style="white-space:normal">${esc(r.to)}${r.from ? `<br><span class="small">Was: ${esc(r.from)}</span>` : ''}</td></tr>`).join('')}</table>`;
+  const VSTATUS = { draft: 'Draft, not issued', sent: 'Waiting for signatures', signed: 'Signed by everyone, in effect', withdrawn: 'Withdrawn' };
+  async function openVarPdf(vid) {
+    const w = window.open('', '_blank');
+    if (w) w.document.write('<p style="font-family:sans-serif;padding:20px">Preparing the variation…</p>');
+    try {
+      const { data: { session } } = await sb.auth.getSession();
+      const r = await fetch(`${SB_URL}/functions/v1/agreement-pdf?part=variation&vid=${vid}`, { headers: { apikey: SB_KEY, Authorization: 'Bearer ' + (session ? session.access_token : '') } });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Could not create the PDF');
+      const url = URL.createObjectURL(await r.blob());
+      if (w) w.location.href = url; else location.href = url;
+    } catch (e) { if (w) w.close(); toast(e.message); }
+  }
+  async function uploadSig(cv, agId, tag) {
+    const blob = await new Promise(res => cv.toBlob(res, 'image/png'));
+    const path = `agreements/${agId}/signatures/var-${tag}-${Date.now()}.png`;
+    await must(sb.storage.from('private').upload(path, blob, { contentType: 'image/png' }));
+    return path;
+  }
+  const varSnapshot = (ag, vr, signer) => ({ document: `Variation ${vr.number} to Agency Agreement ${ag.ref}`, agreement_ref: ag.ref, agreement_version: ag.agreement_version, property: ag.address, variation_number: vr.number, changes: vr.changes, summary: vr.summary, reason: vr.reason || '', signer, signed_at_client: new Date().toISOString() });
+
+  /* agent: the variations panel on the agreement page */
+  function varPanel(ag, people, vars, vsigs) {
+    const live = ['signed', 'countersigned'].includes(ag.status);
+    if (!live && !vars.length) return '';
+    const signers = people.filter(p => p.legal_name && p.signed_at);
+    const cur = currentTerms(ag, vars), anySigned = vars.some(v => v.status === 'signed');
+    return `<h2>Variations and extensions</h2>
+      <p class="small">Change or extend a signed agreement. The vendors sign each variation the way they signed the agreement, and the original stays as it was.</p>
+      ${live && !vars.some(v => ['draft', 'sent'].includes(v.status)) ? '<div class="toolbar no-print"><button class="btn primary" type="button" id="newVar">Vary or extend this agreement</button></div>' : ''}
+      ${vars.slice().reverse().map(v => {
+        const mine = vsigs.filter(s => s.variation_id === v.id);
+        return `<div class="card ${v.status === 'sent' ? 'note' : ''}" data-var="${v.id}"><div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:baseline"><h3 style="margin:0">Variation ${v.number}</h3><span class="status ${v.status === 'signed' ? 'done' : 'pending'}">${esc(VSTATUS[v.status])}${v.signed_at ? ' ' + esc(fmtDT(v.signed_at)) : ''}</span></div>
+          ${(v.summary || []).length ? varTable(v.summary) : '<p class="small">No changes chosen yet.</p>'}
+          ${v.status === 'sent' ? `<div class="small" style="margin-top:8px">${signers.map(p => `${esc(p.legal_name)}: ${mine.some(s => s.person_id === p.id) ? '✓ signed' : 'not signed yet'}`).join('<br>')}<br>Issued ${esc(fmtDT(v.sent_at))} ${v.signing_mode === 'remote' ? '(sent to sign on their phones)' : '(to sign together)'}</div>` : ''}
+          ${v.status === 'signed' ? `<div class="small" style="margin-top:8px">${v.copy_sent_at ? 'Signed copy emailed ' + esc(fmtDT(v.copy_sent_at)) : `<strong style="color:var(--accent)">Signed copy not emailed yet${v.copy_error ? ': ' + esc(v.copy_error) : ''}</strong>`}</div>` : ''}
+          <div class="toolbar no-print">
+            ${v.status === 'draft' ? `<button class="btn primary" type="button" data-vedit="${v.id}">Continue</button>` : ''}
+            ${v.status === 'sent' ? `<button class="btn primary" type="button" data-vtogether="${v.id}">Sign together now</button><button class="btn ghost" type="button" data-vsend="${v.id}">Email it to them to sign</button>` : ''}
+            ${v.status !== 'draft' ? `<button class="btn ghost" type="button" data-vpdf="${v.id}">Variation (PDF)</button>` : ''}
+            ${v.status === 'signed' && !v.copy_sent_at ? `<button class="btn ghost" type="button" data-vcopy="${v.id}">Email signed copy now</button>` : ''}
+            ${['draft', 'sent'].includes(v.status) ? `<button class="btn link" type="button" data-vwd="${v.id}">${v.status === 'draft' ? 'Discard draft' : 'Withdraw'}</button>` : ''}
+          </div></div>`;
+      }).join('')}
+      ${anySigned ? `<div class="card tight"><h3>Terms now in force, as varied</h3><table class="sum">
+        <tr><td>Review date</td><td style="white-space:normal">${esc(dayText(cur.reviewUntil))}</td></tr>
+        <tr><td>Commission</td><td style="white-space:normal">${esc(commText(cur))}</td></tr>
+        <tr><td>Price for example</td><td>${num(cur.ask) ? money(num(cur.ask)) : 'Not set'}</td></tr>
+        <tr><td>Method of sale</td><td style="white-space:normal">${esc(methodText(cur))}</td></tr>
+        ${cur.marketing.map(m => `<tr><td>Added marketing</td><td style="white-space:normal">${esc(m.desc)}: ${money(num(m.amount))}</td></tr>`).join('')}
+        ${cur.other.map(o => `<tr><td>Other change</td><td style="white-space:normal">${esc(o)}</td></tr>`).join('')}
+      </table></div>` : ''}`;
+  }
+  function wireVarPanel(agId) {
+    const nv = $('#newVar'); if (nv) nv.addEventListener('click', async () => { nv.disabled = true; try { const vid = await must(sb.rpc('agent_new_variation', { a: agId })); viewVariation(agId, vid); } catch (_) { nv.disabled = false; } });
+    $$('[data-vedit]').forEach(b => b.addEventListener('click', () => viewVariation(agId, b.dataset.vedit)));
+    $$('[data-vtogether]').forEach(b => b.addEventListener('click', () => viewVarTogether(agId, b.dataset.vtogether)));
+    $$('[data-vpdf]').forEach(b => b.addEventListener('click', () => openVarPdf(b.dataset.vpdf)));
+    $$('[data-vsend]').forEach(b => b.addEventListener('click', async () => { b.disabled = true; const { data, error } = await sb.functions.invoke('notify', { body: { type: 'variation_sent', agreement_id: agId, variation_id: b.dataset.vsend } }); toast(error || (data && data.ok === false) ? 'Email failed. See the Emails list below.' : 'Emailed to them to sign'); viewAgentDetail(agId); }));
+    $$('[data-vcopy]').forEach(b => b.addEventListener('click', async () => { b.disabled = true; const { data, error } = await sb.functions.invoke('notify', { body: { type: 'variation_signed', agreement_id: agId, variation_id: b.dataset.vcopy } }); toast(error || (data && data.ok === false) ? 'Email failed. See the Emails list below.' : 'Signed copy emailed'); viewAgentDetail(agId); }));
+    $$('[data-vwd]').forEach(b => b.addEventListener('click', async () => {
+      if (b.dataset.sure !== '1') { b.dataset.sure = '1'; b.textContent = 'Tap again to confirm'; return; }
+      await must(sb.rpc('agent_withdraw_variation', { v: b.dataset.vwd })); toast('Done'); viewAgentDetail(agId);
+    }));
+  }
+
+  /* agent: build the variation */
+  async function viewVariation(agId, vid) {
+    header('Vary or extend', '', 50); actions(false);
+    const ag = await must(sb.from('agreements').select('*').eq('id', agId).single());
+    const vars = await must(sb.from('agreement_variations').select('*').eq('agreement_id', agId).order('number'));
+    const vr = vars.find(v => v.id === vid);
+    if (!vr || vr.status !== 'draft') return viewAgentDetail(agId);
+    const cur = currentTerms(ag, vars), ch = vr.changes || {}, com = Object.assign({}, cur, ch.commission || {});
+    const on = k => k === 'method' ? ch.method !== undefined : !!ch[k];
+    const sec = (k, title, desc, body) => `<div class="card"><label class="choice cb" style="margin:0"><input type="checkbox" data-vk="${k}" ${on(k) ? 'checked' : ''}><span class="mark"></span><span><span class="ct">${title}</span><span class="cd">${desc}</span></span></label><div data-vbody="${k}" ${on(k) ? '' : 'hidden'} style="margin-top:10px">${body}</div></div>`;
+    const methods = ['', 'Auction', 'Tender', 'Deadline sale', 'Price by negotiation', 'Fixed price', 'Expressions of interest', 'Timed sale', 'Ballot'];
+    main().innerHTML = `<div class="view-pad"><span class="agent-flag">Only you see this until you issue it</span>
+      <h1>Variation ${vr.number}: ${esc(ag.address)}</h1>
+      <p class="lede">Tick what's changing. Everything you don't tick stays as signed.</p>
+      ${sec('reviewUntil', 'Extend the agreement', `Move the review date (end of the fixed period). Now: ${esc(dayText(cur.reviewUntil))}`, `
+        <div class="toolbar" style="margin:0 0 6px">${[30, 60, 90].map(n => `<button class="btn ghost" type="button" data-vext="${n}">Add ${n} days</button>`).join('')}</div>
+        <label class="f" for="vReview">New review date</label><input type="date" id="vReview" value="${esc(ch.reviewUntil || '')}">`)}
+      ${sec('commission', 'Change the commission', `Now: ${esc(commText(cur))}`, `
+        <div class="choices">${[['pct', 'Flat fee, plus a percentage above a threshold'], ['amount', 'Flat fee, plus a set amount above a threshold'], ['none', 'Flat fee only']].map(([val, t]) => `<label class="choice"><input type="radio" name="vAbove" value="${val}" ${aboveType(com) === val ? 'checked' : ''}><span class="mark"></span><span><span class="ct">${t}</span></span></label>`).join('')}</div>
+        <div class="row2 stack"><div><label class="f" for="vFlat">Flat fee (plus GST)</label><input type="text" id="vFlat" inputmode="numeric" value="${esc(com.flat || '')}"></div><div data-vab="pct amount"><label class="f" for="vThr">Threshold</label><input type="text" id="vThr" inputmode="numeric" value="${esc(com.thr || '')}"></div></div>
+        <div class="row2 stack"><div data-vab="pct"><label class="f" for="vPct">Percentage above the threshold</label><input type="text" id="vPct" inputmode="decimal" value="${esc(com.pct || '')}"></div><div data-vab="amount"><label class="f" for="vAboveAmt">Set amount above the threshold</label><input type="text" id="vAboveAmt" inputmode="numeric" value="${esc(com.aboveAmt || '')}"></div></div>`)}
+      ${sec('ask', 'Change the price', `The asking price or appraised value used for the commission example. Now: ${num(cur.ask) ? money(num(cur.ask)) : 'not set'}`, `
+        <label class="f" for="vAsk">New price</label><input type="text" id="vAsk" inputmode="numeric" value="${esc(ch.ask || '')}">`)}
+      ${sec('method', 'Change the method of sale', `Now: ${esc(methodText(cur))}`, `
+        <label class="f" for="vMethod">Method</label><select id="vMethod">${methods.map(m => `<option ${(ch.method ?? cur.method) === m ? 'selected' : ''}>${esc(m)}</option>`).join('')}</select>
+        <label class="f" for="vMethodDate">Date and time <span class="opt">(optional)</span></label><input type="text" id="vMethodDate" value="${esc(ch.methodDate ?? cur.methodDate ?? '')}" placeholder="For example: Thu 26 Nov 2026, 4pm">`)}
+      ${sec('marketing', 'Add marketing', 'Extra marketing on top of the agreed campaign, invoiced through List Now', `
+        <label class="f" for="vMktDesc">What it is</label><input type="text" id="vMktDesc" value="${esc((ch.marketing || {}).desc || '')}" placeholder="For example: a further two weeks of social media advertising">
+        <label class="f" for="vMktAmt">Cost, including GST</label><input type="text" id="vMktAmt" inputmode="numeric" value="${esc((ch.marketing || {}).amount || '')}">`)}
+      ${sec('other', 'Something else', 'Any other change, in plain words', `<textarea id="vOther" placeholder="Exactly what changes">${esc(ch.other || '')}</textarea>`)}
+      <label class="f" for="vReason">Reason <span class="opt">(optional, shown on the variation)</span></label><input type="text" id="vReason" value="${esc(vr.reason || '')}" placeholder="For example: more time to reach the right buyer">
+      <div class="err"></div></div>`;
+    $$('[data-vk]').forEach(cb => cb.addEventListener('change', () => { $(`[data-vbody="${cb.dataset.vk}"]`).hidden = !cb.checked; }));
+    const abUpd = () => { const t = ($('input[name="vAbove"]:checked') || {}).value || 'pct'; $$('[data-vab]').forEach(el => el.hidden = !el.dataset.vab.split(' ').includes(t)); };
+    $$('input[name="vAbove"]').forEach(r => r.addEventListener('change', abUpd)); abUpd();
+    $$('[data-vext]').forEach(b => b.addEventListener('click', () => { if (cur.reviewUntil) $('#vReview').value = addDays(cur.reviewUntil, +b.dataset.vext); }));
+    const read = () => {
+      const c2 = {}, picked = k => $(`[data-vk="${k}"]`).checked;
+      if (picked('reviewUntil')) { const d = $('#vReview').value; if (!d) return 'Choose the new review date.'; if (cur.reviewUntil && d <= cur.reviewUntil) return 'The new review date needs to be after the current one.'; c2.reviewUntil = d; }
+      if (picked('commission')) {
+        const t = ($('input[name="vAbove"]:checked') || {}).value || 'pct', cm = { aboveType: t, flat: $('#vFlat').value.trim(), thr: t === 'none' ? '' : $('#vThr').value.trim(), pct: t === 'pct' ? $('#vPct').value.trim() : '', aboveAmt: t === 'amount' ? $('#vAboveAmt').value.trim() : '' };
+        if (!num(cm.flat) || (t !== 'none' && !num(cm.thr)) || (t === 'pct' && !num(cm.pct)) || (t === 'amount' && !num(cm.aboveAmt))) return 'Fill in the new commission.';
+        if (commText(cm) === commText(cur)) return 'The new commission is the same as now. Untick it, or change it.';
+        c2.commission = cm;
+      }
+      if (picked('ask')) { if (!num($('#vAsk').value)) return 'Add the new price.'; c2.ask = $('#vAsk').value.trim(); }
+      if (picked('method')) { c2.method = $('#vMethod').value; c2.methodDate = $('#vMethodDate').value.trim(); if (!c2.method) return 'Choose the method of sale.'; }
+      if (picked('marketing')) { const d = $('#vMktDesc').value.trim(), a = $('#vMktAmt').value.trim(); if (!d || !num(a)) return 'Describe the extra marketing and its cost.'; c2.marketing = { desc: d, amount: a }; }
+      if (picked('other')) { const o = $('#vOther').value.trim(); if (!o) return 'Describe the other change.'; c2.other = o; }
+      return c2;
+    };
+    const save = async () => { const c2 = read(); if (typeof c2 === 'string') { tErr(c2); return null; } const summary = varSummary(cur, c2); await must(sb.from('agreement_variations').update({ changes: c2, summary, reason: $('#vReason').value.trim() || null }).eq('id', vid)); return summary; };
+    actions(true, 'Save and close', 'Next: sign and issue');
+    onBack = async () => { if (await save()) { toast('Saved'); viewAgentDetail(agId); } };
+    onNext = async () => { const s = await save(); if (!s) return; if (!s.length) return tErr('Tick at least one change.'); viewVarIssue(agId, vid); };
+    top();
+  }
+
+  /* agent: check, sign, issue */
+  async function viewVarIssue(agId, vid) {
+    header('Sign and issue', '', 80);
+    const ag = await must(sb.from('agreements').select('*').eq('id', agId).single());
+    const people = await must(sb.from('agreement_people').select('*').eq('agreement_id', agId).order('position'));
+    const vr = await must(sb.from('agreement_variations').select('*').eq('id', vid).single());
+    if (vr.status !== 'draft') return viewAgentDetail(agId);
+    const signers = people.filter(p => p.legal_name && p.signed_at);
+    main().innerHTML = `<div class="view-pad"><span class="agent-flag">Check it, then sign as licensee</span>
+      <h1>Variation ${vr.number}</h1>
+      <p class="lede">To the agency agreement for ${esc(ag.address)} (${esc(ag.ref)}), between McGuire Real Estate and ${esc(joinNames(signers.map(p => p.legal_name)))}.</p>
+      <div class="card">${varTable(vr.summary)}${vr.reason ? `<p class="small" style="margin:10px 0 0">Reason: ${esc(vr.reason)}</p>` : ''}</div>
+      <p class="small">All other terms stay exactly as signed. It takes effect once everyone has signed.</p>
+      <div class="toolbar"><button class="btn ghost" type="button" id="vPrev">Preview the PDF</button><button class="btn link" type="button" id="vBack">Change something</button></div>
+      <h2>How will they sign?</h2>
+      <div class="choices">
+        <label class="choice"><input type="radio" name="vMode" value="in_person" checked><span class="mark"></span><span><span class="ct">Together now, on this device</span><span class="cd">Each person signs here after you've talked it through</span></span></label>
+        <label class="choice"><input type="radio" name="vMode" value="remote"><span class="mark"></span><span><span class="ct">On their own phones</span><span class="cd">They're emailed, then sign in with their email, the same way they signed the agreement</span></span></label>
+      </div>
+      <h2>Your signature</h2>
+      <div class="card tight"><div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:8px"><h3 style="margin:0">Timothy McGuire, for McGuire Real Estate</h3><button class="btn link" type="button" id="vClr">Clear</button></div>
+        <div class="sig-wrap"><canvas id="vSigA" aria-label="Your signature"></canvas><div class="sig-line"></div><span class="hint">Sign here</span></div></div>
+      <div class="err"></div></div>`;
+    $('#vSigA').scrollIntoView({ block: 'center' });
+    const pad = makePad($('#vSigA'));
+    $('#vClr').addEventListener('click', () => pad.clear());
+    $('#vPrev').addEventListener('click', () => openVarPdf(vid));
+    $('#vBack').addEventListener('click', () => viewVariation(agId, vid));
+    actions(true, 'Back', 'Sign and issue');
+    onBack = () => viewVariation(agId, vid);
+    onNext = async () => {
+      if (!pad.drawn()) return tErr('Please sign first.');
+      const mode = $('input[name="vMode"]:checked').value;
+      const path = await uploadSig($('#vSigA'), agId, vid + '-agent');
+      await must(sb.rpc('agent_issue_variation', { v: vid, p_mode: mode, p_image_path: path, p_snapshot: varSnapshot(ag, vr, { name: 'Timothy McGuire', role: 'licensee', email: SESSION.user.email }), p_user_agent: navigator.userAgent }));
+      if (mode === 'remote') {
+        const { data, error } = await sb.functions.invoke('notify', { body: { type: 'variation_sent', agreement_id: agId, variation_id: vid } });
+        toast(error || (data && data.ok === false) ? 'Issued, but the email failed. Use "Email it to them to sign".' : 'Issued and emailed to them to sign');
+        return viewAgentDetail(agId);
+      }
+      viewVarTogether(agId, vid);
+    };
+    top();
+  }
+
+  /* agent: vendors sign on Tim's device */
+  async function viewVarTogether(agId, vid) {
+    header('Sign together', '', 90);
+    const ag = await must(sb.from('agreements').select('*').eq('id', agId).single());
+    const people = await must(sb.from('agreement_people').select('*').eq('agreement_id', agId).order('position'));
+    const vr = await must(sb.from('agreement_variations').select('*').eq('id', vid).single());
+    const vsigs = await must(sb.from('variation_signatures').select('*').eq('variation_id', vid));
+    if (vr.status !== 'sent') return viewAgentDetail(agId);
+    const todo = people.filter(p => p.legal_name && p.signed_at && !vsigs.some(s => s.person_id === p.id));
+    main().innerHTML = `<div class="view-pad"><span class="agent-flag">Hand the device over to each person in turn</span>
+      <h1>Changes to your agency agreement</h1>
+      <p class="lede">Variation ${vr.number} to the agreement for ${esc(ag.address)}. Everything not listed here stays the same.</p>
+      <div class="card">${varTable(vr.summary)}${vr.reason ? `<p class="small" style="margin:10px 0 0">Reason: ${esc(vr.reason)}</p>` : ''}</div>
+      <div class="toolbar"><button class="btn ghost" type="button" id="vPdf2">Read the variation (PDF)</button></div>
+      ${todo.map(p => `<div class="card tight" data-vp="${p.id}"><div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:8px"><h3 style="margin:0">${esc(p.legal_name)}</h3><button class="btn link" type="button" data-vclr="${p.id}">Clear</button></div>
+        <label class="choice cb"><input type="checkbox" data-vok="${p.id}"><span class="mark"></span><span><span class="ct">I've read these changes and agree to them</span><span class="cd">I was told I can get legal advice before signing, and given time to do so</span></span></label>
+        <div class="sig-wrap"><canvas data-vcv="${p.id}" aria-label="Signature of ${esc(p.legal_name)}"></canvas><div class="sig-line"></div><span class="hint">Sign here</span></div></div>`).join('') || '<p class="small">Everyone has signed.</p>'}
+      <div class="err"></div></div>`;
+    const pads = {};
+    $$('[data-vcv]').forEach(cv => { pads[cv.dataset.vcv] = makePad(cv); });
+    $$('[data-vclr]').forEach(b => b.addEventListener('click', () => pads[b.dataset.vclr].clear()));
+    $('#vPdf2').addEventListener('click', () => openVarPdf(vid));
+    actions(true, 'Close', todo.length ? 'Record signatures' : 'Close');
+    onBack = () => viewAgentDetail(agId);
+    onNext = async () => {
+      if (!todo.length) return viewAgentDetail(agId);
+      const ready = todo.filter(p => pads[p.id].drawn());
+      if (!ready.length) return tErr('Each person ticks the box and signs.');
+      for (const p of ready) if (!$(`[data-vok="${p.id}"]`).checked) return tErr(`${p.legal_name} needs to tick the box before signing.`);
+      let res = null;
+      for (const p of ready) {
+        const path = await uploadSig($(`[data-vcv="${p.id}"]`), agId, vid + '-' + p.id);
+        res = await must(sb.rpc('agent_sign_variation_in_person', { v: vid, pid: p.id, p_image_path: path, p_snapshot: varSnapshot(ag, vr, { name: p.legal_name, email: p.email, role: 'client' }), p_user_agent: navigator.userAgent }));
+      }
+      if (res && res.remaining === 0) {
+        const { data, error } = await sb.functions.invoke('notify', { body: { type: 'variation_signed', agreement_id: agId, variation_id: vid } });
+        toast(error || (data && data.ok === false) ? 'Signed. The copy email failed, so send it from the agreement page.' : 'Signed by everyone. Copies emailed.');
+      } else toast('Saved. Others still to sign.');
+      viewAgentDetail(agId);
+    };
+    top();
+  }
+
+  /* vendor: sign a variation on their own phone */
+  let VARS = [], VSIGS = [];
+  async function loadVars() {
+    try { VARS = await must(sb.from('agreement_variations').select('*').eq('agreement_id', A.id).order('number')); VSIGS = await must(sb.from('variation_signatures').select('*').eq('agreement_id', A.id)); } catch (_) { VARS = []; VSIGS = []; }
+  }
+  const varToSign = () => ME && VARS.find(v => v.status === 'sent' && !VSIGS.some(s => s.variation_id === v.id && s.person_id === ME.id));
+  function varDoneHTML() {
+    const shown = VARS.filter(v => ['sent', 'signed'].includes(v.status));
+    if (!shown.length) return '';
+    return `<h2>Changes to your agreement</h2>${shown.map(v => `<div class="card tight"><div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:baseline"><h3 style="margin:0">Variation ${v.number}</h3><span class="status ${v.status === 'signed' ? 'done' : 'pending'}">${v.status === 'signed' ? 'In effect from ' + esc(fmtDate(v.signed_at)) : varToSign() && varToSign().id === v.id ? 'Waiting for your signature' : 'Waiting for others to sign'}</span></div>${varTable(v.summary || [])}
+      <div class="toolbar">${varToSign() && varToSign().id === v.id ? `<button class="btn primary" type="button" data-vsign="${v.id}">Read and sign</button>` : ''}<button class="btn ghost" type="button" data-vpdf="${v.id}">Variation (PDF)</button></div></div>`).join('')}`;
+  }
+  function wireVarDone() {
+    $$('[data-vsign]').forEach(b => b.addEventListener('click', () => viewVendorVariation(VARS.find(v => v.id === b.dataset.vsign))));
+    $$('[data-vpdf]').forEach(b => b.addEventListener('click', () => openVarPdf(b.dataset.vpdf)));
+  }
+  function viewVendorVariation(vr) {
+    header('Changes to your agreement', '', 100);
+    main().innerHTML = `<section class="screen active">
+      <h1>Changes to your agency agreement</h1>
+      <p class="lede">As we discussed, here's what changes in your agreement for ${esc(A.address)}. Everything else stays exactly as you signed it.</p>
+      <div class="card"><h3>Variation ${vr.number}</h3>${varTable(vr.summary || [])}${vr.reason ? `<p class="small" style="margin:10px 0 0">Reason: ${esc(vr.reason)}</p>` : ''}</div>
+      <div class="toolbar"><button class="btn ghost" type="button" data-vpdf="${vr.id}">Read the variation (PDF)</button></div>
+      <div class="card note tight"><p class="small" style="margin:0">You're welcome to get legal advice before signing, and to take your time. If anything here isn't what we agreed, don't sign. Call or text Tim on 027 562 7207 and he'll fix it.</p></div>
+      <h2>Sign</h2>
+      <div class="card tight">
+        <label class="choice cb"><input type="checkbox" id="vOk"><span class="mark"></span><span><span class="ct">I've read these changes and agree to them</span><span class="cd">I know I can get legal advice before signing</span></span></label>
+        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin:8px 0"><h3 style="margin:0">${esc(ME.legal_name)}</h3><button class="btn link" type="button" id="vClr">Clear</button></div>
+        <div class="sig-wrap"><canvas id="vSigV" aria-label="Signature pad"></canvas><div class="sig-line"></div><span class="hint">Sign here with your finger or mouse</span></div></div>
+      <div class="err"></div></section>`;
+    $$('[data-vpdf]').forEach(b => b.addEventListener('click', () => openVarPdf(b.dataset.vpdf)));
+    const pad = makePad($('#vSigV'));
+    $('#vClr').addEventListener('click', () => pad.clear());
+    actions(true, 'Not now', 'Sign the changes');
+    onBack = () => showStep(LAST);
+    onNext = async () => {
+      if (!$('#vOk').checked) return err('Tick the box if you agree to the changes.');
+      if (!pad.drawn()) return err('Please sign in the box.');
+      const path = await uploadSig($('#vSigV'), A.id, vr.id + '-' + ME.id);
+      const res = await must(sb.rpc('vendor_sign_variation', { v: vr.id, p_image_path: path, p_snapshot: varSnapshot(A, vr, { name: ME.legal_name, email: SESSION.user.email, role: 'client' }), p_user_agent: navigator.userAgent }));
+      if (res && res.remaining === 0) { const { error: fe } = await sb.functions.invoke('notify', { body: { type: 'variation_signed', agreement_id: A.id, variation_id: vr.id } }); if (fe) console.warn('variation copy', fe); }
+      await loadVars();
+      toast(res && res.remaining === 0 ? 'Signed. Your copy is on its way by email.' : 'Signed. Waiting on the others.');
+      showStep(LAST);
+    };
     top();
   }
 
