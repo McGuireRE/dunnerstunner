@@ -13,6 +13,7 @@ const nzDT = (d: string | Date) => new Date(d).toLocaleString("en-NZ", { day: "n
 export interface PdfInput {
   template: Uint8Array; font: Uint8Array; bold: Uint8Array;
   ag: any; people: any[]; sigs: any[]; sigImages: Record<string, Uint8Array>;
+  variations?: any[];
 }
 
 export async function buildAgreementPdf(inp: PdfInput): Promise<Uint8Array> {
@@ -222,6 +223,17 @@ export async function buildAgreementPdf(inp: PdfInput): Promise<Uint8Array> {
   if (!agentSig) S.para("Not yet countersigned by the Licensee.", 9, GREY);
   S.para("Each client signed electronically after signing in with their own email address. The fingerprint identifies the exact content each person signed. Electronic signatures under Part 4 of the Contract and Commercial Law Act 2017.", 8, GREY);
 
+  const vars = (inp.variations || []).filter((v) => v.status === "signed").sort((x, y) => x.number - y.number);
+  if (vars.length) {
+    S.page("Variations", "Signed changes to this agreement, in order. Each is a separate signed document");
+    for (const v of vars) {
+      S.need(40); S.heading2(`Variation ${v.number}, signed by everyone ${nzDT(v.signed_at)}`);
+      for (const r of v.summary || []) row(r.label, `${r.to}${r.from ? `  (was: ${r.from})` : ""}`);
+      S.gap(6);
+    }
+    S.para("All other terms of the agreement stay as signed.", 8.5, GREY);
+  }
+
   // Vendor guide last
   const [guide] = await doc.copyPages(src, [0]); doc.addPage(guide); guide.pushOperators(setCharacterSpacing(0), setWordSpacing(0), setCharacterSqueeze(100), setTextRise(0)); white(guide, 50, 18, 160, 38);
 
@@ -345,4 +357,51 @@ class Sched {
   image(im: any, w: number, h: number) { this.p.drawImage(im, { x: 50, y: this.y - h + 6, width: w, height: h }); this.y -= h + 4; }
   small(s: string) { wrap(s, this.F, 7.5, W - 100).forEach((l) => { this.p.drawText(l, { x: 50, y: this.y, size: 7.5, font: this.F, color: GREY }); this.y -= 10; }); }
   gap(n: number) { this.y -= n; }
+}
+
+// A variation (or extension) of a signed agreement: its own short signed document.
+export async function buildVariationPdf(inp: PdfInput, vr: any, vsigs: any[], vimg: Record<string, Uint8Array>): Promise<Uint8Array> {
+  const { ag, people } = inp;
+  const doc = await PDFDocument.create();
+  doc.registerFontkit(fontkit);
+  const F = await doc.embedFont(inp.font, { subset: true });
+  const B = await doc.embedFont(inp.bold, { subset: true });
+  doc.setTitle(`Variation ${vr.number} to Agency Agreement ${ag.ref}`); doc.setAuthor("McGuire Real Estate Limited");
+  const S = new Sched(doc, F, B, ag);
+  const row = (k: string, v: unknown) => S.kv(k, String(v ?? "") || "Not given");
+  const signers = people.filter((p) => p.legal_name && p.signed_at);
+  S.page(`Variation ${vr.number} to the Agency Agreement`, `Varies Sole and Exclusive Agency Agreement ${ag.ref} (${ag.agreement_version})`);
+  row("Agreement", `${ag.ref}, signed ${ag.signed_at ? nzDT(ag.signed_at) : ""}`);
+  row("Property", ag.address);
+  row("Client(s)", signers.map((p) => p.legal_name).join(" and "));
+  row("Agent", "McGuire Real Estate Limited, Licensed REAA 2008");
+  S.gap(6);
+  S.heading2("The parties agree to these changes");
+  for (const r of vr.summary || []) row(r.label, `${r.to}${r.from ? `\nWas: ${r.from}` : ""}`);
+  if (vr.reason) row("Reason", vr.reason);
+  S.gap(4);
+  S.para("All other terms of the agreement, including the Terms and Conditions and schedules, stay exactly as signed. If anything in this variation conflicts with the agreement, this variation applies from the date it is signed by everyone.", 9);
+  S.para("The Client was told they may get legal advice before signing this variation, and given time to do so.", 9);
+  S.gap(6);
+  S.heading2("Signatures");
+  const sorted = [...vsigs].sort((a, b) => a.signed_at < b.signed_at ? -1 : 1);
+  for (const s of sorted) {
+    const p = people.find((x) => x.id === s.person_id);
+    S.need(100);
+    S.heading2(`${s.signer_name}${s.signer_role === "agent" ? " (Licensee, REA#20117983, for McGuire Real Estate Limited)" : " (Client)"}`);
+    const bytes = vimg[s.id];
+    if (bytes) { const im = await doc.embedPng(bytes); const h = 40, w = Math.min(260, im.width * (h / im.height)); S.image(im, w, h); }
+    S.small(`Signed ${nzDT(s.signed_at)}${s.snapshot?.signing_method ? " · " + s.snapshot.signing_method : p?.email ? " · signed in as " + p.email : ""}`);
+    S.small(`Document fingerprint (SHA-256): ${s.snapshot_sha256}`);
+    S.gap(6);
+  }
+  const unsigned = signers.filter((p) => !vsigs.some((s) => s.person_id === p.id));
+  if (vr.status === "draft") S.para("DRAFT for checking. Not yet issued or signed.", 10, RED);
+  else if (vr.status === "withdrawn") S.para(`WITHDRAWN ${vr.withdrawn_at ? nzDT(vr.withdrawn_at) : ""}. This variation never took effect.`, 10, RED);
+  else if (unsigned.length) S.para(`Not yet signed by: ${unsigned.map((p) => p.legal_name).join(", ")}. This variation takes effect once everyone has signed.`, 9, RED);
+  else S.para(`Signed by everyone ${vr.signed_at ? nzDT(vr.signed_at) : ""}, and in effect from then.`, 9);
+  S.para("Electronic signatures under Part 4 of the Contract and Commercial Law Act 2017. The fingerprint identifies the exact content each person signed.", 8, GREY);
+  const n = doc.getPageCount(), gen = nzDT(new Date());
+  doc.getPages().forEach((p, i) => p.drawText(`${ag.ref} · Variation ${vr.number} · ${ag.address} · generated ${gen} · page ${i + 1} of ${n}`, { x: 48, y: 10, size: 6.5, font: F, color: GREY }));
+  return await doc.save();
 }

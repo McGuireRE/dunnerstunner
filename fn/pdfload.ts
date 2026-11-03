@@ -1,4 +1,4 @@
-import { buildAgreementPdf, buildCampaignPdf } from "./pdf.ts";
+import { buildAgreementPdf, buildCampaignPdf, buildVariationPdf } from "./pdf.ts";
 
 const RAW = "https://raw.githubusercontent.com/McGuireRE/dunnerstunner/main/onboarding/assets/";
 let cache: { template: Uint8Array; font: Uint8Array; bold: Uint8Array } | null = null;
@@ -22,8 +22,25 @@ export async function makeAgreementPdf(db: any, agreementId: string, part?: stri
     const { data } = await db.storage.from("private").download(s.image_path);
     if (data) sigImages[s.id] = new Uint8Array(await data.arrayBuffer());
   }
-  const input = { ...(await assets()), ag, people: people || [], sigs: sigs || [], sigImages };
+  const { data: variations } = await db.from("agreement_variations").select("*").eq("agreement_id", agreementId).order("number");
+  const input = { ...(await assets()), ag, people: people || [], sigs: sigs || [], sigImages, variations: variations || [] };
   const safe = String(ag.address || "agreement").replace(/[^A-Za-z0-9]+/g, "-").replace(/^-|-$/g, "");
   if (part === "campaign") return { bytes: await buildCampaignPdf(input), filename: `McGuire-Campaign-${safe}.pdf`, ag };
   return { bytes: await buildAgreementPdf(input), filename: `McGuire-Agency-Agreement-${ag.ref}-${safe}.pdf`, ag };
+}
+
+export async function makeVariationPdf(db: any, variationId: string) {
+  const { data: vr }: any = await db.from("agreement_variations").select("*").eq("id", variationId).single();
+  const { data: ag }: any = await db.from("agreements").select("*").eq("id", vr.agreement_id).single();
+  const { data: people } = await db.from("agreement_people").select("*").eq("agreement_id", vr.agreement_id).order("position");
+  const { data: vsigs } = await db.from("variation_signatures").select("*").eq("variation_id", variationId).order("signed_at");
+  const vimg: Record<string, Uint8Array> = {};
+  for (const s of vsigs || []) {
+    if (!s.image_path) continue;
+    const { data } = await db.storage.from("private").download(s.image_path);
+    if (data) vimg[s.id] = new Uint8Array(await data.arrayBuffer());
+  }
+  const input = { ...(await assets()), ag, people: people || [], sigs: [], sigImages: {} };
+  const safe = String(ag.address || "agreement").replace(/[^A-Za-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  return { bytes: await buildVariationPdf(input, vr, vsigs || [], vimg), filename: `McGuire-Variation-${vr.number}-${ag.ref}-${safe}.pdf`, ag, vr };
 }
