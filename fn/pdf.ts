@@ -241,7 +241,12 @@ export async function buildAgreementPdf(inp: PdfInput): Promise<Uint8Array> {
 
   // footer
   const n = doc.getPageCount(), gen = nzDT(new Date());
-  doc.getPages().forEach((p, i) => p.drawText(`${ag.ref} · ${ag.address} · copy generated ${gen} · page ${i + 1} of ${n}`, { x: 48, y: 10, size: 6.5, font: F, color: GREY }));
+  const isDraft = !["signed", "countersigned", "ended"].includes(ag.status);
+  const STAMP = rgb(0.75, 0.2, 0.1);
+  doc.getPages().forEach((p, i) => {
+    p.drawText(`${isDraft ? "DRAFT FOR REVIEW, NOT SIGNED · " : "SIGNED COPY · "}${ag.ref} · ${ag.address} · copy generated ${gen} · page ${i + 1} of ${n}`, { x: 48, y: 10, size: 6.5, font: isDraft ? B : F, color: isDraft ? STAMP : GREY });
+    if (isDraft) { const t = "DRAFT FOR REVIEW: NOT SIGNED", w = B.widthOfTextAtSize(t, 10); p.drawRectangle({ x: 42, y: H - 30, width: w + 12, height: 18, borderColor: STAMP, borderWidth: 1.2, color: rgb(1, 1, 1) }); p.drawText(t, { x: 48, y: H - 25, size: 10, font: B, color: STAMP }); }
+  });
   return await doc.save();
 }
 
