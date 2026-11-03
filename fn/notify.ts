@@ -1,6 +1,6 @@
-import { admin, APP_URL, cors, esc, fmtDT, frontPageTable, json, sendMail, TIM_EMAIL, wrap } from "https://raw.githubusercontent.com/McGuireRE/dunnerstunner/16307f754d2b5e1017614ffb90ebb8b579879556/fn/shared.ts";
+import { admin, APP_URL, cors, esc, fmtDT, frontPageTable, json, sendMail, TIM_EMAIL, wrap } from "https://raw.githubusercontent.com/McGuireRE/dunnerstunner/98e7e93633298b6e01c57f343675cd5df604e7e1/fn/shared.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
-import { makeAgreementPdf } from "https://raw.githubusercontent.com/McGuireRE/dunnerstunner/16307f754d2b5e1017614ffb90ebb8b579879556/fn/pdfload.ts";
+import { makeAgreementPdf, makeVariationPdf } from "https://raw.githubusercontent.com/McGuireRE/dunnerstunner/98e7e93633298b6e01c57f343675cd5df604e7e1/fn/pdfload.ts";
 
 // Called by the app after a vendor sends to their lawyer, or after signing.
 Deno.serve(async (req) => {
@@ -95,6 +95,40 @@ Deno.serve(async (req) => {
         : wrap(`<p>Kia ora ${esc(nameList)},</p><p>Thanks for talking things through today. As we agreed, your agency agreement for <strong>${esc(ag.address)}</strong> (${esc(ag.ref)}) continues as it is, and your request to cancel has been withdrawn.</p><p>If anything else comes up, call or text me any time.</p>`);
       await sendMail(db, agreement_id, "cancel_processed", { to, bcc: TIM_EMAIL, subject: r.outcome === "cancelled" ? `Confirmation: agency agreement cancelled, ${ag.address}` : `Your agency agreement continues: ${ag.address}`, html });
       return json({ ok: true });
+    }
+    if (type === "variation_sent" || type === "variation_signed") {
+      const { data: vr }: any = await db.from("agreement_variations").select("*").eq("id", String(body.variation_id || "")).eq("agreement_id", agreement_id).maybeSingle();
+      if (!vr) return json({ ok: true, note: "nothing to send" });
+      const rows = (vr.summary || []).map((r: any) => `<tr><td style="padding:8px 10px 8px 0;border-bottom:1px solid #E4E0DA;color:#6E6A65;vertical-align:top">${esc(r.label)}</td><td style="padding:8px 0;border-bottom:1px solid #E4E0DA">${esc(r.to)}${r.from ? `<br><span style="color:#6E6A65;font-size:13px">Was: ${esc(r.from)}</span>` : ""}</td></tr>`).join("");
+      const table = `<table style="border-collapse:collapse;width:100%">${rows}</table>`;
+      const to = (people || []).filter((p: any) => p.email && p.signed_at).map((p: any) => p.email);
+      if (type === "variation_sent") {
+        if (vr.status !== "sent") return json({ ok: true, note: "not open" });
+        const html = wrap(`<p>Kia ora ${esc(nameList)},</p>
+          <p>As we discussed, here are the changes to your agency agreement for <strong>${esc(ag.address)}</strong> (${esc(ag.ref)}), set out as Variation ${vr.number}. Everything else in your agreement stays the same.</p>
+          ${table}
+          <p>To read and sign it, open the link below and sign in with your email, the same way you signed your agreement. You're welcome to get legal advice first.</p>
+          <p><a href="${APP_URL}" style="display:inline-block;background:#D9432C;color:#fff;padding:11px 18px;border-radius:6px;text-decoration:none;font-weight:600">Read and sign</a></p>
+          <p>Nothing changes until everyone has signed. Any questions, just call or text me.</p>`);
+        await sendMail(db, agreement_id, "variation_sent", { to, bcc: TIM_EMAIL, subject: `Changes to your agency agreement to sign: ${ag.address}`, html });
+        return json({ ok: true });
+      }
+      if (vr.status !== "signed") return json({ ok: true, note: "not signed yet" });
+      if (vr.copy_sent_at) return json({ ok: true, note: "already sent" });
+      try {
+        const pdf = await makeVariationPdf(db, vr.id);
+        const html = wrap(`<p>Kia ora ${esc(nameList)},</p>
+          <p>Thank you. Everyone has signed Variation ${vr.number} to your agency agreement for <strong>${esc(ag.address)}</strong> (${esc(ag.ref)}), and it applies from ${esc(fmtDT(vr.signed_at))}. Your signed copy is attached.</p>
+          ${table}
+          <p>Everything else in your agreement stays the same. You can see your agreement and its variations at any time here: <a href="${APP_URL}">${APP_URL}</a></p>`);
+        await sendMail(db, agreement_id, "variation_copy", { to, bcc: TIM_EMAIL, subject: `Signed: Variation ${vr.number} to your agency agreement, ${ag.address}`, html, attachments: [{ filename: pdf.filename, content: pdf.bytes, contentType: "application/pdf" }] });
+        await db.from("agreement_variations").update({ copy_sent_at: new Date().toISOString(), copy_error: null }).eq("id", vr.id);
+        await db.from("agreement_events").insert({ agreement_id, actor: "system", kind: "variation_copy_emailed", detail: { number: vr.number, to: to.join(", ") } });
+        return json({ ok: true });
+      } catch (e: any) {
+        await db.from("agreement_variations").update({ copy_error: String(e?.message || e) }).eq("id", vr.id);
+        return json({ ok: false, error: String(e?.message || e) }, 500);
+      }
     }
     return json({ error: "Unknown type" }, 400);
   } catch (e: any) {
