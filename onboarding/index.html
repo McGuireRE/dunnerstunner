@@ -165,6 +165,11 @@ details.acc .in li { margin: 4px 0; }
 .sig-ok small { font-weight: 500; font-size: 14px; }
 @keyframes sigok { 0% { opacity: 0; transform: scale(.96); } 8% { opacity: 1; transform: scale(1); } 72% { opacity: 1; } 100% { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .sig-ok { animation: sigokr 2.6s linear forwards; } @keyframes sigokr { 0%, 80% { opacity: 1; } 100% { opacity: 0; } } }
+.rate { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin-top: 8px; }
+.rate label { position: relative; display: flex; align-items: center; justify-content: center; min-height: 44px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); font-weight: 600; cursor: pointer; }
+.rate input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+.rate label:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.rate label:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
 .sigimg { background: #FFFFFF; border-radius: 6px; padding: 4px 8px; max-width: 100%; }
 .lawyer-banner { border-radius: 12px; padding: 14px 16px; margin: 0 0 18px; font-weight: 600; }
 .lawyer-banner.signed { background: var(--ok-soft); color: var(--ok); border: 2px solid var(--ok); }
@@ -649,7 +654,16 @@ hr.soft { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
 
   async function viewVendorHome() {
     header('', '', 0); actions(false);
-    const ids = await must(sb.rpc('claim_my_agreements'));
+    const ids = (await must(sb.rpc('claim_my_agreements'))) || [];
+    let pls = []; try { pls = (await must(sb.from('prelistings').select('id,address,status,agreement_id').order('created_at', { ascending: false }))).filter(p => p.status !== 'closed' && !(p.status === 'accepted' && ids.includes(p.agreement_id))); } catch (_) { }
+    if (pls.length && !ids.length && pls.length === 1) return viewPrelisting(pls[0].id);
+    if (pls.length && ids.length + pls.length > 1) {
+      const rows = ids.length ? await must(sb.from('agreements').select('id,ref,address,status').in('id', ids)) : [];
+      main().innerHTML = `<h1>Your properties</h1>${pls.map(r => `<div class="card tight" style="display:flex;justify-content:space-between;align-items:center;gap:12px"><div><div style="font-weight:600">${esc(r.address)}</div><span class="small">Your appraisal and plan</span></div><button class="btn ghost" data-openpl="${r.id}">Open</button></div>`).join('')}${rows.map(r => `<div class="card tight" style="display:flex;justify-content:space-between;align-items:center;gap:12px"><div><div style="font-weight:600">${esc(r.address || r.ref)}</div><span class="small">Agency agreement</span></div><button class="btn ghost" data-open="${r.id}">Open</button></div>`).join('')}`;
+      $$('[data-openpl]').forEach(b => b.addEventListener('click', () => viewPrelisting(b.dataset.openpl)));
+      $$('[data-open]').forEach(b => b.addEventListener('click', () => loadVendor(b.dataset.open)));
+      return;
+    }
     if (!ids || !ids.length) {
       main().innerHTML = `<div class="login-card"><h1>Nothing to sign yet</h1><p class="lede">There's no agreement waiting for ${esc(SESSION.user.email)}. If Tim has sent you a link, check he has the right email address for you.</p><p class="small">Call or text Tim on <strong>027 562 7207</strong>.</p></div>`;
       return;
@@ -722,6 +736,7 @@ hr.soft { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
   SCREENS[1] = () => `
     <h1>About you</h1>
     <p class="lede">Everyone on the title signs, each from their own phone, using their own email.</p>
+    ${ANS._from_prelisting ? '<div class="card note tight"><p class="small" style="margin:0"><strong>Please check each full name matches the title exactly.</strong> We\'ve filled these in from your earlier answers, and you can change anything here.</p></div>' : ''}
     <div id="people">${P.map((p, i) => personCard(p, i)).join('')}</div>
     <button class="btn link" type="button" id="addPerson">Add another person</button>
     <h2>Who is selling?</h2>
@@ -1180,15 +1195,20 @@ function lawyerForm(id, title, blurb) {
     header('Your agreements', '', 0); actions(false);
     main().innerHTML = '<div class="loading">Loading...</div>';
     const rows = await must(sb.from('agreements').select('id,ref,address,status,updated_at,agreement_people(legal_name,pref_name,signed_at,id_verified_at)').order('updated_at', { ascending: false }));
+    let pls = []; try { pls = (await must(sb.from('prelistings').select('id,address,contact_name,contact_email,status,proceeded_at,updated_at').order('updated_at', { ascending: false }))).filter(p => p.status !== 'closed'); } catch (_) { }
     main().innerHTML = `<div class="view-pad">
       <span class="agent-flag">Only you see this</span>
       <h1>Agreements</h1>
+      ${plListHTML(pls)}
+      <h2>Agency agreements</h2>
       <div class="toolbar"><button class="btn primary" type="button" id="newAg">New listing appointment</button></div>
       ${rows.length ? `<div class="card tight" style="overflow-x:auto"><table class="tbl"><thead><tr><th>Property</th><th>Sellers</th><th>Status</th><th>Updated</th></tr></thead><tbody>
       ${rows.map(r => `<tr class="click" data-id="${r.id}"><td><strong>${esc(r.address || '(no address yet)')}</strong><br><span class="small">${esc(r.ref)}</span></td><td>${esc(r.agreement_people.map(p => callName(p) || p.legal_name).filter(Boolean).join(', ') || '–')}</td><td><span class="pill ${r.status}">${esc(r.status)}</span></td><td class="small">${esc(fmtDT(r.updated_at))}</td></tr>`).join('')}
       </tbody></table></div>` : '<div class="card note"><p style="margin:0">No agreements yet. Start one after talking with a vendor.</p></div>'}
     </div>`;
     $('#newAg').addEventListener('click', () => viewTable(null));
+    $('#newPl').addEventListener('click', () => viewPrelistingAgent(null));
+    $$('tr[data-pl]').forEach(tr => tr.addEventListener('click', () => viewPrelistingAgent(tr.dataset.pl)));
     $$('tr[data-id]').forEach(tr => tr.addEventListener('click', () => viewAgentDetail(tr.dataset.id)));
     top();
   }
@@ -1616,6 +1636,7 @@ function lawyerForm(id, title, blurb) {
         ${ag.status === 'signed' ? '<button class="btn primary" type="button" id="counterBtn">Countersign</button>' : ''}
         <button class="btn primary" type="button" data-pdf="1">Full agreement (PDF)</button>
         ${cfg.campaign || cfg.schedule ? '<button class="btn ghost" type="button" id="campPdf">Campaign PDF</button>' : ''}
+        ${cfg.prelisting_id ? '<button class="btn ghost" type="button" id="plAns">Pre-listing answers</button>' : ''}
         <button class="btn ghost" type="button" id="printBtn">Print this page</button>
         ${['signed', 'countersigned', 'sent', 'parked'].includes(ag.status) ? '<button class="btn ghost" type="button" id="endBtn">End agency</button>' : ''}
       </div>
@@ -1693,6 +1714,7 @@ function lawyerForm(id, title, blurb) {
     });
     wireVarPanel(id); wireNoticePanel(id);
     $('#printBtn').addEventListener('click', () => window.print());
+    const pla = $('#plAns'); if (pla) pla.addEventListener('click', () => viewPrelistingAgent(cfg.prelisting_id));
     wirePdf(id); const cpb = $('#campPdf'); if (cpb) cpb.addEventListener('click', () => openPdf(id, 'campaign'));
     if ($('#afwd')) { const sender = async (n, fm, e) => { await must(sb.from('lawyer_links').insert({ agreement_id: id, lawyer_name: n, firm: fm, email: e, sent_by: 'Tim McGuire', expires_at: new Date(Date.now() + 90 * 864e5).toISOString() })); await must(sb.from('agreement_events').insert({ agreement_id: id, actor: SESSION.user.email, kind: 'forwarded_to_lawyer', detail: { lawyer: n, email: e } })); }; sender.agId = id; wireLawyerForm('afwd', sender); }
     const callNotify = async (type) => { const { data, error } = await sb.functions.invoke('notify', { body: { type, agreement_id: id } }); if (error || (data && data.ok === false)) toast('Email failed. See the Emails list below.'); else toast('Email sent'); viewAgentDetail(id); };
@@ -2077,6 +2099,270 @@ function lawyerForm(id, title, blurb) {
       const url = URL.createObjectURL(await r.blob());
       if (w) w.location.href = url; else location.href = url;
     } catch (e) { if (w) w.close(); toast(e.message); }
+  }
+
+  /* ═════════════════ PRE-LISTING: appraisal → questionnaire → updated plan → signing ═════════════════ */
+  const PL_PLAN_ITEMS = [['method', 'Sale method'], ['price', 'Indicative price'], ['start', 'Start date'], ['marketing', 'Marketing']];
+  const PL_MEET = ['Weekday mornings', 'Weekday afternoons', 'Weekday evenings', 'Weekends'];
+  const PL_STEPS = ['Who you\'ve spoken with', 'The real choice', 'Your ideas', 'Your plan from me', 'Let\'s clear the way', 'Owners and meeting'];
+  const plNotify = (type, id, extra) => sb.functions.invoke('notify', { body: Object.assign({ type, prelisting_id: id }, extra || {}) }).then(r => r, () => ({ error: true }));
+  const plFacts = ap => `<div class="facts">${PL_PLAN_ITEMS.map(([k, l]) => `<div class="fact"><div class="k">${l}</div><div class="v">${esc(ap[k] || 'To discuss')}</div></div>`).join('')}</div>`;
+  const plFirst = pl => { const o = ((pl.answers || {}).owners || [])[0]; return (o && (o.pref || (o.name || '').split(/\s+/)[0])) || (pl.contact_name || '').split(/\s+/)[0] || ''; };
+  let PL = null, PLA = {};
+
+  async function viewPrelisting(id) {
+    PL = await must(sb.from('prelistings').select('*').eq('id', id).single());
+    PLA = Object.assign({}, PL.answers || {});
+    if (PL.status === 'appraisal') return PLA._step ? plStep(+PLA._step) : plAppraisal();
+    if (PL.status === 'submitted') return plThanks();
+    if (PL.status === 'plan') return plPlan();
+    if (PL.status === 'question') return plQuestionSent();
+    if (PL.status === 'accepted') return plOnward();
+  }
+
+  function plAppraisal() {
+    const ap = PL.appraisal || {};
+    header('Your appraisal', '', 0);
+    main().innerHTML = `<section class="screen active">
+      <h1>Your appraisal</h1>
+      <p class="lede">${PL.contact_name ? `Hi ${esc(PL.contact_name.split(/\s+/)[0])}, here's` : 'Here\'s'} my plan for selling ${esc(PL.address)}.</p>
+      <div class="card">${plFacts(ap)}${ap.note ? `<p style="margin:14px 0 0">${esc(ap.note).replace(/\n/g, '<br>')}</p>` : ''}</div>
+      ${ap.link ? `<div class="toolbar"><a class="btn ghost" href="${esc(ap.link)}" target="_blank" rel="noopener" style="text-decoration:none">Read the full appraisal</a></div>` : ''}
+      <p class="small">Questions at any stage? Call or text Tim on <strong>027 562 7207</strong>.</p></section>`;
+    actions(true, '', 'I\'d like to proceed');
+    onNext = async () => plStep(1);
+    top();
+  }
+
+  const plArea = (k, label, helper) => `<label class="f" for="pl_${k}">${label}</label>${helper ? `<p class="small" style="margin:0 0 6px">${helper}</p>` : ''}<textarea id="pl_${k}" data-pl="${k}" rows="4">${esc(PLA[k] || '')}</textarea>`;
+  function plOwnerCard(o, i) {
+    return `<div class="card tight plo"><div style="display:flex;justify-content:space-between;align-items:baseline"><h3 style="margin:0">Owner ${i + 1}</h3>${i ? `<button class="btn link" type="button" data-rmo="${i}">Remove</button>` : ''}</div>
+      <label class="f">Full name (as on the title)</label><input type="text" data-o="name" value="${esc(o.name || '')}" autocomplete="name">
+      <label class="f">What do you like to be called?</label><input type="text" data-o="pref" value="${esc(o.pref || '')}">
+      <div class="row2 stack"><div><label class="f">Email</label><input type="email" data-o="email" value="${esc(o.email || '')}" autocomplete="email" inputmode="email"></div><div><label class="f">Mobile</label><input type="tel" data-o="mobile" value="${esc(o.mobile || '')}" autocomplete="tel"></div></div></div>`;
+  }
+  const plReadOwners = () => $$('.plo').map(c => ({ name: $('[data-o=name]', c).value.trim(), pref: $('[data-o=pref]', c).value.trim(), email: $('[data-o=email]', c).value.trim(), mobile: $('[data-o=mobile]', c).value.trim() }));
+  function plCollect() {
+    $$('[data-pl]').forEach(el => { PLA[el.dataset.pl] = el.value.trim(); });
+    if ($('[data-rate]')) { PLA.conf = Object.assign({}, PLA.conf); PL_PLAN_ITEMS.forEach(([k]) => { const c = $(`input[name="rate_${k}"]:checked`); if (c) PLA.conf[k] = +c.value; }); }
+    if ($('#plOwners')) PLA.owners = plReadOwners().filter(o => o.name || o.pref || o.email || o.mobile);
+    if ($('[data-meet]')) PLA.meet = $$('[data-meet]:checked').map(c => c.value);
+  }
+  function plStep(n) {
+    const ap = PL.appraisal || {};
+    header('Let\'s make this the right fit', `Step ${n} of 6`, n / 6 * 100);
+    const body = {
+      1: () => `${plArea('spoke', 'Have you spoken with anyone else about selling?')}${plArea('spokeFeel', 'Was there anything you liked, anything that put you off, or anything that left you wondering?')}`,
+      2: () => `${plArea('choose', 'If every agent charged exactly the same, who would you choose?')}${plArea('chooseWhy', 'What\'s behind that choice?')}`,
+      3: () => plArea('ideas', 'Are there any other ideas you\'d like built into our plan?'),
+      4: () => `<p class="small" style="margin-top:0">1 = not confident, 5 = very confident</p>${PL_PLAN_ITEMS.map(([k, l]) => `<div class="card tight" data-rate="${k}"><div class="facts" style="grid-template-columns:1fr"><div class="fact" style="border:0;padding-top:0"><div class="k">${l}</div><div class="v">${esc(ap[k] || 'To discuss')}</div></div></div>
+          <div class="rate" role="radiogroup" aria-label="${l}">${[1, 2, 3, 4, 5].map(v => `<label><input type="radio" name="rate_${k}" value="${v}" ${(PLA.conf || {})[k] === v ? 'checked' : ''}><span>${v}</span></label>`).join('')}</div></div>`).join('')}
+        ${plArea('likeMost', 'What do you like most about the plan so far?')}`,
+      5: () => plArea('easyYes', 'What would need to be true for working together to be an easy yes?', 'Nothing is too small. If it\'s on your mind, it\'s worth sorting before we start.'),
+      6: () => `<p>Please list everyone named on the title, so we can all sit down together.</p><div id="plOwners"></div><button class="btn link" type="button" id="plAddO">+ Add another owner</button>
+        <h2>Meeting preference</h2><div class="chip-row">${PL_MEET.map(m => `<label class="chip"><input type="checkbox" data-meet value="${esc(m)}" ${(PLA.meet || []).includes(m) ? 'checked' : ''}>${esc(m)}</label>`).join('')}</div>`,
+    }[n]();
+    main().innerHTML = `<section class="screen active">
+      ${n === 1 ? `<h1>Let's make this the right fit</h1><p class="lede">Before we meet, a few quick questions so I can adjust the plan around what matters most to you. Your answers are just between us.</p><h2>${PL_STEPS[0]}</h2>` : `<h1>${PL_STEPS[n - 1]}</h1>`}
+      ${body}<div class="err"></div></section>`;
+    if (n === 6) {
+      let owners = (PLA.owners || []).slice();
+      if (!owners.length) owners.push({ name: '', pref: '', email: PL.contact_email || '', mobile: '' });
+      const draw = () => { $('#plOwners').innerHTML = owners.map(plOwnerCard).join(''); $$('[data-rmo]').forEach(b => b.addEventListener('click', () => { owners = plReadOwners(); owners.splice(+b.dataset.rmo, 1); draw(); })); };
+      draw();
+      $('#plAddO').addEventListener('click', () => { owners = plReadOwners(); owners.push({}); draw(); const l = $$('.plo').pop(); if (l) $('[data-o=name]', l).focus(); });
+    }
+    actions(true, 'Back', n === 6 ? 'Send to Tim' : 'Next');
+    onBack = async () => { plCollect(); await plSave(n); n === 1 ? plAppraisal() : plStep(n - 1); };
+    onNext = async () => {
+      plCollect();
+      if (n < 6) { await plSave(n + 1); return plStep(n + 1); }
+      const os = PLA.owners || [];
+      if (!os.length) return err('Add at least one owner.');
+      if (os.some(o => !o.name)) return err('Add the full name of each owner, as it appears on the title.');
+      if (os.some(o => !EMAIL_RE.test(o.email))) return err('Add an email address for each owner. Everyone signs from their own.');
+      PLA._step = 6;
+      await must(sb.rpc('pl_submit', { p: PL.id, patch: PLA }));
+      plNotify('pl_submitted', PL.id);
+      PL.status = 'submitted';
+      plThanks();
+    };
+    top();
+  }
+  async function plSave(step) { PLA._step = step; try { await sb.rpc('pl_save', { p: PL.id, patch: PLA }); } catch (_) { } }
+
+  function plThanks() {
+    header('Thank you', '', 100); actions(false);
+    main().innerHTML = `<section class="screen active">
+      <h1>Thank you, that's everything I need</h1>
+      <p class="lede">I'll read your answers carefully and adjust the plan around what matters most to you. Nothing to sign yet.</p>
+      <h2>What happens next</h2>
+      <ol class="steps-list">
+        <li><span class="n">1</span><span>I read your answers and rework the plan</span><span class="t">Within a day or two</span></li>
+        <li><span class="n">2</span><span>You get your updated plan, showing what you said and what I've changed</span><span class="t">By email</span></li>
+        <li><span class="n">3</span><span>We meet to talk it through and agree the details</span><span class="t">At a time that suits</span></li>
+        <li><span class="n">4</span><span>You sign your agency agreement here, when you're ready</span><span class="t">After we meet</span></li>
+      </ol>
+      <p class="small" style="margin-top:20px">Questions in the meantime? Call or text Tim on <strong>027 562 7207</strong>.</p></section>`;
+    top();
+  }
+
+  function plPairs() {
+    const pairs = ((PL.plan || {}).pairs || []).filter(x => x.said || x.changed);
+    return pairs.length ? `<div class="card">${pairs.map((x, i) => `<div class="pair" ${i ? 'style="border-top:1px solid var(--line);padding-top:12px;margin-top:12px"' : ''}><div class="k small" style="font-weight:600;color:var(--muted)">You said</div><p style="margin:2px 0 8px">${esc(x.said).replace(/\n/g, '<br>')}</p><div class="k small" style="font-weight:600;color:var(--ok)">I've changed</div><p style="margin:2px 0 0">${esc(x.changed).replace(/\n/g, '<br>')}</p></div>`).join('')}</div>` : '';
+  }
+  function plPlan() {
+    const name = plFirst(PL);
+    header('Your updated plan', '', 100);
+    main().innerHTML = `<section class="screen active">
+      <h1>Your updated plan</h1>
+      <p class="lede">${name ? `Thanks, ${esc(name)}. ` : ''}${(PL.plan || {}).intro ? esc(PL.plan.intro).replace(/\n/g, '<br>') : 'Here\'s how I\'ve adjusted the plan around what you told me.'}</p>
+      ${plPairs()}
+      <h2>The plan</h2><div class="card">${plFacts(PL.appraisal || {})}</div>
+      <div class="card tight">
+        <label class="choice cb" style="margin:0"><input type="checkbox" id="plOk"><span class="mark"></span><span><span class="ct">This plan addresses my concerns</span></span></label>
+        <div class="toolbar" style="margin-bottom:0"><button class="btn link" type="button" id="plAsk">I still have a question</button></div>
+        <div id="plAskBox" hidden><label class="f" for="plQ">Your question</label><textarea id="plQ" rows="3"></textarea><div class="toolbar"><button class="btn primary" type="button" id="plQGo">Send to Tim</button></div></div>
+      </div>
+      <div class="err"></div></section>`;
+    actions(true, '', 'Continue to signing');
+    const nx = $('#next'), sync = () => { nx.disabled = !$('#plOk').checked; };
+    $('#plOk').addEventListener('change', sync); sync();
+    $('#plAsk').addEventListener('click', () => { $('#plAskBox').hidden = !$('#plAskBox').hidden; if (!$('#plAskBox').hidden) $('#plQ').focus(); });
+    $('#plQGo').addEventListener('click', async () => {
+      const q = $('#plQ').value.trim(); if (!q) return err('Type your question first.');
+      $('#plQGo').disabled = true;
+      try { await must(sb.rpc('pl_question', { p: PL.id, q })); plNotify('pl_question', PL.id); PL.status = 'question'; PL.question = q; nx.disabled = false; plQuestionSent(); } catch (_) { $('#plQGo').disabled = false; }
+    });
+    onNext = async () => {
+      if (!$('#plOk').checked) { sync(); return err('Tick "This plan addresses my concerns" to continue, or send Tim your question.'); }
+      const aid = await must(sb.rpc('pl_accept', { p: PL.id }));
+      plNotify('pl_accepted', PL.id);
+      PL.status = 'accepted'; PL.agreement_id = aid;
+      nx.disabled = false;
+      plOnward();
+    };
+    top();
+  }
+  function plQuestionSent() {
+    header('Your question', '', 100); actions(false);
+    main().innerHTML = `<section class="screen active">
+      <h1>Your question is with Tim</h1>
+      <div class="card tight"><p style="margin:0">“${esc(PL.question || '')}”</p></div>
+      <p class="lede">He'll get back to you, and update your plan if it needs it. You'll get an email when it's ready to look at again.</p>
+      <p class="small">Or call or text Tim on <strong>027 562 7207</strong>.</p></section>`;
+    top();
+  }
+  async function plOnward() {
+    let ready = false; try { ready = !!(await must(sb.rpc('pl_signing_ready', { p: PL.id }))); } catch (_) { }
+    if (ready && PL.agreement_id) { await must(sb.rpc('claim_my_agreements')); return loadVendor(PL.agreement_id); }
+    const name = plFirst(PL);
+    header('Next: signing', '', 100); actions(false);
+    main().innerHTML = `<section class="screen active">
+      <h1>Thank you${name ? ', ' + esc(name) : ''}</h1>
+      <p class="lede">Your agency agreement is being prepared, with everyone's names and details already filled in from your answers.</p>
+      <div class="card"><h3>What happens now</h3><ol class="steps-list">
+        <li><span class="n">1</span><span>We meet to agree the details, including my fee</span></li>
+        <li><span class="n">2</span><span>I add those to your agreement</span></li>
+        <li><span class="n">3</span><span>Everyone on the title signs here, each from their own email</span></li>
+      </ol></div>
+      <p class="small">Come back to this page any time. When it's ready to sign, it'll open here. Call or text Tim on <strong>027 562 7207</strong>.</p></section>`;
+    top();
+  }
+
+  /* ───────── agent side ───────── */
+  const PL_STATUS = { appraisal: 'Appraisal sent', submitted: 'Answers in: review', plan: 'Plan sent', question: 'Has a question', accepted: 'Ready: add the fee', closed: 'Closed' };
+  const plStatusText = pl => pl.status === 'appraisal' && pl.proceeded_at ? 'Answering now' : PL_STATUS[pl.status];
+  function plAnswersHTML(pl) {
+    const a = pl.answers || {}, ap = pl.appraisal || {};
+    const q = (label, k) => `<tr><td style="white-space:normal">${label}</td><td style="white-space:normal">${a[k] ? esc(a[k]).replace(/\n/g, '<br>') : '<span class="small">No answer</span>'}</td></tr>`;
+    return `<table class="sum">
+      ${q('Have you spoken with anyone else about selling?', 'spoke')}
+      ${q('Anything you liked, anything that put you off, or anything that left you wondering?', 'spokeFeel')}
+      ${q('If every agent charged exactly the same, who would you choose?', 'choose')}
+      ${q('What\'s behind that choice?', 'chooseWhy')}
+      ${q('Any other ideas you\'d like built into our plan?', 'ideas')}
+      ${PL_PLAN_ITEMS.map(([k, l]) => `<tr><td>Confidence: ${l}</td><td><strong>${(a.conf || {})[k] ? a.conf[k] + ' of 5' : 'Not rated'}</strong> <span class="small">(${esc(ap[k] || 'not set')})</span></td></tr>`).join('')}
+      ${q('What do you like most about the plan so far?', 'likeMost')}
+      ${q('What would need to be true for working together to be an easy yes?', 'easyYes')}
+      <tr><td>Owners</td><td style="white-space:normal">${(a.owners || []).map(o => `${esc(o.name)}${o.pref ? ` (“${esc(o.pref)}”)` : ''}<br><span class="small">${esc(o.email)}${o.mobile ? ' · ' + esc(o.mobile) : ''}</span>`).join('<br>') || 'None yet'}</td></tr>
+      <tr><td>Meeting preference</td><td>${esc((a.meet || []).join(', ') || 'None given')}</td></tr>
+    </table>`;
+  }
+  async function viewPrelistingAgent(id) {
+    header('Pre-listing', '', 0); actions(false);
+    let pl = id ? await must(sb.from('prelistings').select('*').eq('id', id).single()) : { address: '', contact_name: '', contact_email: '', status: 'appraisal', appraisal: {}, answers: {}, plan: {} };
+    const ap = pl.appraisal || {}, plan = pl.plan || {};
+    const editable = ['appraisal', 'submitted', 'plan', 'question'].includes(pl.status);
+    const msg = `Hi ${(pl.contact_name || '').split(/\s+/)[0] || 'there'},\n\nThanks for having me through ${pl.address}. Your appraisal is ready here. Sign in with this email address and you'll get a sign-in link, no password needed:\n\n${APP_URL}\n\nTim`;
+    const methods = ['', 'Auction', 'Tender', 'Deadline sale', 'Price by negotiation', 'Fixed price', 'Expressions of interest', 'Timed sale', 'Ballot'];
+    let pairs = (plan.pairs || []).slice(); if (!pairs.length) pairs.push({ said: '', changed: '' });
+    main().innerHTML = `<div class="view-pad">
+      <div class="toolbar no-print"><button class="btn ghost" type="button" id="plBack">All agreements</button></div>
+      <span class="agent-flag">Only you see this</span>
+      <h1>${esc(pl.address || 'New appraisal page')}</h1>
+      ${id ? `<p><span class="pill">${esc(plStatusText(pl))}</span> <span class="small">${pl.submitted_at ? 'Answers in ' + esc(fmtDT(pl.submitted_at)) : pl.invited_at ? 'Invited ' + esc(fmtDT(pl.invited_at)) : ''}</span></p>` : '<p class="lede">The vendor sees this after your appraisal, with an "I\'d like to proceed" button that opens the questionnaire.</p>'}
+      ${pl.status === 'question' ? `<div class="card warnc"><h3>Their question</h3><p style="margin:0">“${esc(pl.question)}”</p><p class="small" style="margin:8px 0 0">Asked ${esc(fmtDT(pl.question_at))}. Reply by phone or email, update the plan below if needed, then publish it again.</p></div>` : ''}
+      ${pl.status === 'accepted' ? `<div class="card okc"><h3>They're happy with the plan</h3><p class="small">Accepted ${esc(fmtDT(pl.accepted_at))}. Their agency agreement is ready as a draft, with every owner's name, preferred name, email and mobile filled in. After you meet, add your fee and send it to sign.</p><div class="toolbar"><button class="btn primary" type="button" id="plOpenAg">Open the agreement</button></div></div>` : ''}
+      ${['submitted', 'plan', 'question', 'accepted'].includes(pl.status) ? `<h2>Their answers</h2><div class="card">${plAnswersHTML(pl)}</div>` : ''}
+      ${['submitted', 'plan', 'question'].includes(pl.status) ? `<h2>Your updated plan for them</h2>
+        <p class="small">Write each one as a pair: what they said, and what you've changed. They'll tick that it addresses their concerns before they can go on to sign.</p>
+        <label class="f" for="plIntro">Opening line <span class="opt">(optional)</span></label><textarea id="plIntro" rows="2" placeholder="Here's how I've adjusted the plan around what you told me.">${esc(plan.intro || '')}</textarea>
+        <div id="plPairs"></div><button class="btn link" type="button" id="plAddPair">+ Add another</button>
+        <div class="toolbar"><button class="btn primary" type="button" id="plPublish">${pl.status === 'submitted' ? 'Publish the plan to them' : 'Publish the updated plan again'}</button></div>` : ''}
+      <h2>Appraisal page</h2>
+      <div class="card">
+        <label class="f" for="plAddr" style="margin-top:0">Property address</label><input type="text" id="plAddr" value="${esc(pl.address)}" ${editable ? '' : 'disabled'}>
+        <div class="row2 stack"><div><label class="f" for="plCName">Vendor's name</label><input type="text" id="plCName" value="${esc(pl.contact_name || '')}" ${editable ? '' : 'disabled'}></div><div><label class="f" for="plCEmail">Vendor's email</label><input type="email" id="plCEmail" value="${esc(pl.contact_email || '')}" ${pl.status === 'appraisal' ? '' : 'disabled'}></div></div>
+        <div class="row2 stack"><div><label class="f" for="plMethod">Sale method</label><select id="plMethod" ${editable ? '' : 'disabled'}>${methods.map(m => `<option ${ap.method === m ? 'selected' : ''}>${esc(m)}</option>`).join('')}</select></div><div><label class="f" for="plPrice">Indicative price</label><input type="text" id="plPrice" value="${esc(ap.price || '')}" placeholder="For example: $850,000 to $900,000" ${editable ? '' : 'disabled'}></div></div>
+        <div class="row2 stack"><div><label class="f" for="plStart">Start date</label><input type="text" id="plStart" value="${esc(ap.start || '')}" placeholder="For example: early February" ${editable ? '' : 'disabled'}></div><div><label class="f" for="plMkt">Marketing</label><input type="text" id="plMkt" value="${esc(ap.marketing || '')}" placeholder="For example: Premium package, $5,800" ${editable ? '' : 'disabled'}></div></div>
+        <label class="f" for="plNote">A note to them <span class="opt">(optional)</span></label><textarea id="plNote" rows="3" ${editable ? '' : 'disabled'}>${esc(ap.note || '')}</textarea>
+        <label class="f" for="plLink">Link to your full appraisal <span class="opt">(optional)</span></label><input type="url" id="plLink" value="${esc(ap.link || '')}" placeholder="https://" ${editable ? '' : 'disabled'}>
+        ${editable ? `<div class="toolbar"><button class="btn ${id ? 'ghost' : 'primary'}" type="button" id="plSaveAp">${id ? 'Save changes' : 'Create the appraisal page'}</button></div>` : ''}
+        <div class="err" id="plApErr"></div>
+      </div>
+      ${id && pl.status === 'appraisal' ? `<div class="card note no-print"><h3>Send it to them</h3><div class="copybox" id="plMsg">${esc(msg)}</div><div class="toolbar"><button class="btn primary" type="button" id="plEmail">Email it to them</button><button class="btn ghost" type="button" id="plCopy">Copy message</button></div></div>` : ''}
+      ${id && pl.status !== 'accepted' ? `<div class="toolbar no-print"><button class="btn link" type="button" id="plClose">${pl.status === 'closed' ? 'Closed' : 'Close this pre-listing'}</button></div>` : ''}
+      <div class="err" id="plErr"></div>
+    </div>`;
+    $('#plBack').addEventListener('click', viewAgentList);
+    const readAp = () => ({ address: $('#plAddr').value.trim(), contact_name: $('#plCName').value.trim(), contact_email: $('#plCEmail').value.trim().toLowerCase(), appraisal: { method: $('#plMethod').value, price: $('#plPrice').value.trim(), start: $('#plStart').value.trim(), marketing: $('#plMkt').value.trim(), note: $('#plNote').value.trim(), link: $('#plLink').value.trim() } });
+    const sa = $('#plSaveAp'); if (sa) sa.addEventListener('click', async () => {
+      const row = readAp(), e = $('#plApErr');
+      if (!row.address) return e.textContent = 'Add the property address.';
+      if (!EMAIL_RE.test(row.contact_email)) return e.textContent = 'Add the vendor\'s email. They sign in with it.';
+      if (row.appraisal.link && !/^https:\/\//.test(row.appraisal.link)) return e.textContent = 'The appraisal link needs to start with https://';
+      if (pl.status !== 'appraisal') delete row.contact_email;
+      if (id) { await must(sb.from('prelistings').update(row).eq('id', id)); toast('Saved'); viewPrelistingAgent(id); }
+      else { const r = await must(sb.from('prelistings').insert(row).select('id').single()); toast('Appraisal page ready'); viewPrelistingAgent(r.id); }
+    });
+    const drawPairs = () => { const box = $('#plPairs'); if (!box) return; box.innerHTML = pairs.map((x, i) => `<div class="card tight plp"><div style="display:flex;justify-content:space-between;align-items:baseline"><h3 style="margin:0">${i + 1}</h3>${pairs.length > 1 ? `<button class="btn link" type="button" data-rmp="${i}">Remove</button>` : ''}</div><label class="f">You said</label><textarea rows="2" data-p="said">${esc(x.said || '')}</textarea><label class="f">I've changed</label><textarea rows="2" data-p="changed">${esc(x.changed || '')}</textarea></div>`).join(''); $$('[data-rmp]').forEach(b => b.addEventListener('click', () => { pairs = readPairs(); pairs.splice(+b.dataset.rmp, 1); drawPairs(); })); };
+    const readPairs = () => $$('.plp').map(c => ({ said: $('[data-p=said]', c).value.trim(), changed: $('[data-p=changed]', c).value.trim() }));
+    drawPairs();
+    const ap2 = $('#plAddPair'); if (ap2) ap2.addEventListener('click', () => { pairs = readPairs(); pairs.push({ said: '', changed: '' }); drawPairs(); });
+    const pub = $('#plPublish'); if (pub) pub.addEventListener('click', async () => {
+      const ps = readPairs().filter(x => x.said || x.changed);
+      if (!ps.length) return $('#plErr').textContent = 'Add at least one "You said / I\'ve changed" pair.';
+      if (ps.some(x => !x.said || !x.changed)) return $('#plErr').textContent = 'Fill in both sides of each pair, or remove the empty one.';
+      pub.disabled = true;
+      const row = readAp(); delete row.contact_email; if (row.appraisal.link && !/^https:\/\//.test(row.appraisal.link)) delete row.appraisal.link;
+      await must(sb.from('prelistings').update(Object.assign(row, { status: 'plan', plan: { intro: $('#plIntro').value.trim(), pairs: ps }, plan_published_at: new Date().toISOString(), question: null })).eq('id', id));
+      const { data, error } = await plNotify('pl_plan', id);
+      toast(error || (data && data.ok === false) ? 'Published. The email didn\'t send, so let them know it\'s ready.' : 'Published and emailed to them');
+      viewPrelistingAgent(id);
+    });
+    const em = $('#plEmail'); if (em) em.addEventListener('click', async () => { em.disabled = true; const { data, error } = await plNotify('pl_invite', id); if (error || (data && data.ok === false)) toast('The email didn\'t send. Copy the message instead.'); else { toast('Emailed'); viewPrelistingAgent(id); } em.disabled = false; });
+    const cp = $('#plCopy'); if (cp) cp.addEventListener('click', async () => { try { await navigator.clipboard.writeText(msg); toast('Copied'); } catch { toast('Select the text and copy it'); } });
+    const oa = $('#plOpenAg'); if (oa) oa.addEventListener('click', () => viewTable(pl.agreement_id));
+    const cl = $('#plClose'); if (cl && pl.status !== 'closed') cl.addEventListener('click', async () => { if (cl.dataset.sure !== '1') { cl.dataset.sure = '1'; cl.textContent = 'Tap again to close it'; return; } await must(sb.from('prelistings').update({ status: 'closed' }).eq('id', id)); toast('Closed'); viewAgentList(); });
+    top();
+  }
+  function plListHTML(pls) {
+    return `<h2>Pre-listings</h2>
+      <div class="toolbar"><button class="btn ghost" type="button" id="newPl">New appraisal page</button></div>
+      ${pls.length ? `<div class="card tight" style="overflow-x:auto"><table class="tbl"><thead><tr><th>Property</th><th>Vendor</th><th>Status</th><th>Updated</th></tr></thead><tbody>
+      ${pls.map(r => `<tr class="click" data-pl="${r.id}"><td><strong>${esc(r.address)}</strong></td><td>${esc(r.contact_name || r.contact_email)}</td><td><span class="pill ${['submitted', 'question', 'accepted'].includes(r.status) ? 'sent' : ''}">${esc(plStatusText(r))}</span></td><td class="small">${esc(fmtDT(r.updated_at))}</td></tr>`).join('')}
+      </tbody></table></div>` : ''}`;
   }
 
   /* AML file */

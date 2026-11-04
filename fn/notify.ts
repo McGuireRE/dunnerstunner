@@ -8,6 +8,7 @@ Deno.serve(async (req) => {
   try {
     const body = await req.json();
     const { type, agreement_id } = body;
+    if (String(type || "").startsWith("pl_")) return await prelistingMail(req, body);
     // Check the caller is a party to this agreement, or the agent
     const userClient = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!, { global: { headers: { Authorization: req.headers.get("Authorization") || "" } } });
     const { data: visible } = await userClient.from("agreements").select("id").eq("id", agreement_id).maybeSingle();
@@ -159,3 +160,74 @@ Deno.serve(async (req) => {
     return json({ error: String(e?.message || e) }, 500);
   }
 });
+
+// Pre-listing (appraisal → questionnaire → updated plan) emails.
+const PL_ITEMS: [string, string][] = [["method", "Sale method"], ["price", "Indicative price"], ["start", "Start date"], ["marketing", "Marketing"]];
+async function prelistingMail(req: Request, body: any) {
+  const userClient = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!, { global: { headers: { Authorization: req.headers.get("Authorization") || "" } } });
+  const id = String(body.prelisting_id || "");
+  const { data: visible } = await userClient.from("prelistings").select("id").eq("id", id).maybeSingle();
+  if (!visible) return json({ error: "Not allowed" }, 403);
+  const db = admin();
+  const { data: pl }: any = await db.from("prelistings").select("*").eq("id", id).single();
+  const a = pl.answers || {}, ap = pl.appraisal || {};
+  const first = (pl.contact_name || "").split(/\s+/)[0];
+  const btn = (label: string) => `<p><a href="${APP_URL}" style="display:inline-block;background:#D9432C;color:#fff;padding:11px 18px;border-radius:6px;text-decoration:none;font-weight:600">${label}</a></p>`;
+  const td = "padding:8px 10px 8px 0;border-bottom:1px solid #E4E0DA;vertical-align:top";
+  const tr = (k: string, v: string) => `<tr><td style="${td};color:#6E6A65;width:42%">${k}</td><td style="${td}">${v}</td></tr>`;
+  const ans = (k: string) => a[k] ? esc(a[k]).replace(/\n/g, "<br>") : `<span style="color:#9A958F">No answer</span>`;
+  const isAgent = async () => !!(await userClient.rpc("is_agent")).data;
+  const owners = (a.owners || []).map((o: any) => `${esc(o.name)}${o.pref ? ` (“${esc(o.pref)}”)` : ""}<br><span style="color:#6E6A65">${esc(o.email)}${o.mobile ? " · " + esc(o.mobile) : ""}</span>`).join("<br>");
+  const vendorTo = [pl.contact_email];
+
+  if (body.type === "pl_invite") {
+    if (!(await isAgent())) return json({ error: "Not allowed" }, 403);
+    await sendMail(db, null, "pl_invite", { to: vendorTo, bcc: TIM_EMAIL, subject: `Your appraisal: ${pl.address}`, html: wrap(`<p>Kia ora${first ? " " + esc(first) : ""},</p>
+      <p>Thanks for having me through ${esc(pl.address)}. Your appraisal and my plan for selling it are ready to look at.</p>
+      <table style="border-collapse:collapse;width:100%">${PL_ITEMS.map(([k, l]) => tr(l, esc(ap[k] || "To discuss"))).join("")}</table>
+      <p>Open the link below and sign in with this email address. You'll get a sign-in link, no password needed.</p>${btn("See your appraisal")}`) });
+    await db.from("prelistings").update({ invited_at: new Date().toISOString() }).eq("id", id);
+    return json({ ok: true });
+  }
+  if (body.type === "pl_plan") {
+    if (!(await isAgent())) return json({ error: "Not allowed" }, 403);
+    if (pl.status !== "plan") return json({ ok: true, note: "not published" });
+    const name = ((a.owners || [])[0]?.pref) || first;
+    await sendMail(db, null, "pl_plan", { to: vendorTo, bcc: TIM_EMAIL, subject: `Your updated plan: ${pl.address}`, html: wrap(`<p>Kia ora${name ? " " + esc(name) : ""},</p>
+      <p>Thank you for your answers. I've updated the plan for ${esc(pl.address)} around what you told me. You'll see what you said, and what I've changed.</p>${btn("See your updated plan")}
+      <p>If it addresses your concerns, you can tick to say so and we'll arrange to meet. If you still have a question, there's a place to ask it.</p>`) });
+    return json({ ok: true });
+  }
+  if (body.type === "pl_submitted") {
+    if (pl.status !== "submitted") return json({ ok: true, note: "not submitted" });
+    await sendMail(db, null, "pl_submitted", { to: TIM_EMAIL, subject: `Questionnaire answers: ${pl.address}`, html: wrap(`<p><strong>${esc(pl.contact_name || pl.contact_email)}</strong> has answered the pre-listing questions for <strong>${esc(pl.address)}</strong>.</p>
+      <table style="border-collapse:collapse;width:100%">
+      ${tr("Have you spoken with anyone else about selling?", ans("spoke"))}
+      ${tr("Anything you liked, anything that put you off, or anything that left you wondering?", ans("spokeFeel"))}
+      ${tr("If every agent charged exactly the same, who would you choose?", ans("choose"))}
+      ${tr("What's behind that choice?", ans("chooseWhy"))}
+      ${tr("Any other ideas you'd like built into our plan?", ans("ideas"))}
+      ${PL_ITEMS.map(([k, l]) => tr(`Confidence: ${l} (${esc(ap[k] || "not set")})`, (a.conf || {})[k] ? `<strong>${a.conf[k]} of 5</strong>` : "Not rated")).join("")}
+      ${tr("What do you like most about the plan so far?", ans("likeMost"))}
+      ${tr("What would need to be true for working together to be an easy yes?", ans("easyYes"))}
+      ${tr("Owners", owners || "None")}
+      ${tr("Meeting preference", esc((a.meet || []).join(", ") || "None given"))}
+      </table><p>Next: write their updated plan ("You said / I've changed") and publish it.</p>${btn("Open the pre-listing")}`) });
+    return json({ ok: true });
+  }
+  if (body.type === "pl_question") {
+    if (pl.status !== "question") return json({ ok: true, note: "no question" });
+    await sendMail(db, null, "pl_question", { to: TIM_EMAIL, replyTo: pl.contact_email, subject: `A question about the plan: ${pl.address}`, html: wrap(`<p><strong>${esc(pl.contact_name || pl.contact_email)}</strong> has a question about the updated plan for <strong>${esc(pl.address)}</strong>:</p>
+      <p style="padding:10px 14px;background:#FFF4E0;border-radius:6px">“${esc(pl.question)}”</p><p>Reply to this email to answer them directly, then publish the plan again if anything changes.</p>${btn("Open the pre-listing")}`) });
+    return json({ ok: true });
+  }
+  if (body.type === "pl_accepted") {
+    if (pl.status !== "accepted") return json({ ok: true, note: "not accepted" });
+    await sendMail(db, pl.agreement_id, "pl_accepted", { to: TIM_EMAIL, subject: `Ready to list: ${pl.address}`, html: wrap(`<p><strong>${esc(pl.contact_name || pl.contact_email)}</strong> has confirmed the updated plan for <strong>${esc(pl.address)}</strong> addresses their concerns.</p>
+      <p>Their agency agreement is ready as a draft with every owner filled in:</p><p>${owners}</p>
+      <p>Meeting preference: ${esc((a.meet || []).join(", ") || "none given")}.</p>
+      <p>After you meet, add your fee in the appointment flow, then send it to sign.</p>${btn("Open the agreement")}`) });
+    return json({ ok: true });
+  }
+  return json({ error: "Unknown type" }, 400);
+}
