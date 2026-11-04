@@ -198,6 +198,16 @@ details.acc .in li { margin: 4px 0; }
 .rate input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
 .rate label:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
 .rate label:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+.dropzone { position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px; text-align: center; border: 1.5px dashed var(--muted); border-radius: 12px; padding: 18px 14px; margin-top: 10px; background: var(--surface); cursor: pointer; }
+.dropzone input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; }
+.dropzone.over, .dropzone:focus-within { border-color: var(--accent); background: var(--accent-soft); }
+.imp-sec { font-weight: 600; font-size: 14.5px; margin: 14px 0 4px; }
+.imp-row { display: grid; grid-template-columns: 26px 1fr; gap: 8px; align-items: start; padding: 9px 0; border-bottom: 1px solid var(--line); cursor: pointer; }
+.imp-row input { width: 20px; height: 20px; margin-top: 2px; accent-color: var(--accent); }
+.imp-row .k { display: block; font-size: 13.5px; color: var(--muted); }
+.imp-row .v { display: block; font-weight: 500; overflow-wrap: anywhere; }
+.imp-row .now { display: block; font-size: 13.5px; color: var(--warn); margin-top: 2px; }
+.src-badge { display: inline-block; font-size: 12px; font-weight: 500; color: var(--ok); background: var(--ok-soft); border-radius: 999px; padding: 1px 8px; margin-top: 3px; white-space: normal; }
 .sigimg { background: #FFFFFF; border-radius: 6px; padding: 4px 8px; max-width: 100%; }
 .lawyer-banner { border-radius: 12px; padding: 14px 16px; margin: 0 0 18px; font-weight: 600; }
 .lawyer-banner.signed { background: var(--ok-soft); color: var(--ok); border: 2px solid var(--ok); }
@@ -1349,6 +1359,7 @@ function lawyerForm(id, title, blurb) {
     CAMP ||= { items: {}, extras: [] };
     if (!c.mktMode) c.mktMode = String(c.pkg || '').startsWith('Later') ? 'later' : 'build';
     const SCH = c.schedule ? JSON.parse(JSON.stringify(c.schedule)) : defaultSchedule(c.start || null);
+    IMP = null;
     T = { id, ag, c, an, people, CAMP, SCH, del: [], pads: {}, locked: !!id && !['draft', 'sent', 'parked'].includes(ag.status) || people.some(p => p.signed_at) };
     tShow(page || 0);
   }
@@ -1439,7 +1450,7 @@ function lawyerForm(id, title, blurb) {
     const flag = T.locked ? `Review only: ${T.ag.status === 'signed' || T.ag.status === 'countersigned' ? 'signed, so the terms can\'t change here' : T.people.some(x => x.signed_at) ? 'someone has signed, so the terms can\'t change here' : 'this agreement has ended'}. Your own notes and the owner's contact details can still be updated on the agreement page.` : ['Fill in before the appointment, then check it together', 'Talk these through together', 'Go through this together, then sign'][p];
     main().innerHTML = `<div class="view-pad"><span class="agent-flag">${flag}</span>${tabs}${[tPage1, tPage2, tPage3][p]()}<div class="err"></div></div>`;
     [tBind1, tBind2, tBind3][p]();
-    tReveals();
+    tReveals(); impBadges();
     if (T.locked) {
       $$('input, select, textarea, button', main()).forEach(el => { if (el.closest('.ttabs') || el.hasAttribute('data-pdf') || el.hasAttribute('data-tp')) return; if (el.tagName === 'BUTTON') el.hidden = true; else el.disabled = true; });
       $$('.ttab', main()).forEach(b => b.disabled = false);
@@ -1469,10 +1480,127 @@ function lawyerForm(id, title, blurb) {
     });
   }
 
+  /* ───────── appointment page 1: read their documents and suggest what to fill in ───────── */
+  const IMP_LABELS = { address: 'Address', owners: 'Registered owners', title: 'Title reference', capacity: 'Selling as', entity: 'Trust, company or person they act for', pType: 'Type', pYear: 'Year built', pBed: 'Bedrooms', pBath: 'Bathrooms', pFloor: 'Floor area (m²)', pLand: 'Land area (m²)', pBuild: 'Construction', pPark: 'Parking', pHeat: 'Heating and insulation', work: 'Work done or consents', workDetail: 'Work done: details', wt: 'Weathertightness issues', wtDetail: 'Weathertightness: details', meth: 'Methamphetamine', methDetail: 'Methamphetamine: details', def: 'Defects or notices', defDetail: 'Defects or notices: details' };
+  const IMP_YESNO = ['work', 'wt', 'meth', 'def'];
+  const impGet = k => k === 'address' ? T.ag.address : ['owners', 'title'].includes(k) ? T.c[k] : T.an[k];
+  const impSet = (k, v) => { if (k === 'address') T.ag.address = v; else if (['owners', 'title'].includes(k)) T.c[k] = v; else T.an[k] = v; };
+  const impShow = (k, v) => IMP_YESNO.includes(k) ? (String(v).toLowerCase() === 'yes' ? 'Yes' : 'No') : String(v ?? '');
+  const impNorm = (k, v) => IMP_YESNO.includes(k) ? (String(v).toLowerCase() === 'yes' ? 'yes' : 'no') : String(v ?? '').trim();
+  let IMP = null; // the latest suggestions waiting for review
+
+  function importCardHTML() {
+    if (T.locked) return '';
+    const done = ((T.c.import || {}).files || []);
+    return `<div class="card note no-print" id="impCard"><h3>Drop in their documents</h3>
+      <p class="small">Title, LIM, property summary, a contact export from your CRM, an old appraisal, or a photo of a document. I'll read them and suggest what to fill in, with where each came from. Nothing is used until you tick it.</p>
+      <label class="dropzone" id="impDrop"><input type="file" id="impFiles" multiple accept=".pdf,.docx,.xlsx,.xls,.ods,.csv,.tsv,.txt,.vcf,.jpg,.jpeg,.png,.webp,.gif"><strong>Choose files, or drag them here</strong><span class="small">PDF, Word (.docx), Excel, CSV or photos</span></label>
+      <div id="impPicked"></div><div id="impOut"></div>
+      ${done.length ? `<p class="small" style="margin:10px 0 0">Already read: ${esc(done.map(f => f.name).join(', '))}</p>` : ''}</div>`;
+  }
+  function wireImport() {
+    const inp = $('#impFiles'); if (!inp) return;
+    let picked = [];
+    const showPicked = () => {
+      $('#impPicked').innerHTML = picked.length ? `<ul class="small" style="margin:10px 0 0;padding-left:20px">${picked.map(f => `<li>${esc(f.name)} <span style="color:var(--muted)">(${Math.max(1, Math.round(f.size / 1024))} KB)</span></li>`).join('')}</ul><div class="toolbar"><button class="btn primary" type="button" id="impGo">Read ${picked.length === 1 ? 'it' : 'them'}</button><button class="btn link" type="button" id="impClear">Clear</button></div>` : '';
+      const go = $('#impGo'); if (go) go.addEventListener('click', () => impRead(picked));
+      const cl = $('#impClear'); if (cl) cl.addEventListener('click', () => { picked = []; inp.value = ''; showPicked(); });
+    };
+    const add = list => { for (const f of list) if (!picked.some(p => p.name === f.name && p.size === f.size)) picked.push(f); picked = picked.slice(0, 12); showPicked(); };
+    inp.addEventListener('change', () => add(inp.files));
+    const dz = $('#impDrop');
+    ['dragenter', 'dragover'].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.add('over'); }));
+    ['dragleave', 'drop'].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.remove('over'); }));
+    dz.addEventListener('drop', e => add(e.dataTransfer.files));
+    if (IMP) impReview();
+  }
+  async function impRead(picked) {
+    const out = $('#impOut'), go = $('#impGo');
+    if (picked.reduce((n, f) => n + f.size, 0) > 40 * 1024 * 1024) { out.innerHTML = '<p class="err">That\'s more than 40 MB all together. Leave out the largest file, or read them in two goes.</p>'; return; }
+    if (go) go.disabled = true;
+    out.innerHTML = `<p class="small" style="margin:10px 0 0"><strong>Reading ${picked.length} document${picked.length > 1 ? 's' : ''}…</strong> A long LIM can take up to a minute.</p>`;
+    tCollect();
+    const batch = crypto.randomUUID(), files = [];
+    try {
+      for (const [i, f] of picked.entries()) {
+        const path = `imports/${batch}/${i + 1}-${f.name.replace(/[^A-Za-z0-9._-]+/g, '-').slice(-80)}`;
+        await must(sb.storage.from('private').upload(path, f, { contentType: f.type || 'application/octet-stream' }));
+        files.push({ path, name: f.name });
+      }
+      const current = { address: T.ag.address, owners: T.c.owners, title: T.c.title, people: T.people.map(p => ({ legal_name: p.legal_name, email: p.email, phone: p.phone })) };
+      const { data, error } = await sb.functions.invoke('doc-prefill', { body: { files, current, agreement_id: T.id || null } });
+      let res = data;
+      if (error) { try { res = await error.context.json(); } catch (_) { res = { error: error.message }; } }
+      if (!res || !res.ok) {
+        out.innerHTML = res && res.error === 'not_set_up'
+          ? '<div class="card warnc tight"><p class="small" style="margin:0"><strong>Document reading isn\'t switched on yet.</strong> It needs the one-off setup with an Anthropic account. Your files are saved, so read them again once it\'s done.</p></div>'
+          : `<p class="err">${esc((res && res.error) || 'Something went wrong reading the documents.')}${res && res.skipped && res.skipped.length ? ' ' + esc(res.skipped.join('; ')) : ''}</p>`;
+        if (go) go.disabled = false; return;
+      }
+      IMP = Object.assign({ files, skipped: res.skipped || [] }, res.result);
+      impReview();
+    } catch (e) { out.innerHTML = `<p class="err">${esc(e.message || 'Upload failed')}</p>`; if (go) go.disabled = false; }
+  }
+  function impMatch(p) {
+    const em = (p.email || '').toLowerCase(), nm = (p.legal_name || '').toLowerCase().replace(/\s+/g, ' ').trim();
+    return T.people.findIndex(x => (em && (x.email || '').toLowerCase() === em) || (nm && (x.legal_name || '').toLowerCase().replace(/\s+/g, ' ').trim() === nm));
+  }
+  function impReview() {
+    const out = $('#impOut'); if (!out || !IMP) return;
+    const fields = (IMP.fields || []).filter(f => IMP_LABELS[f.key]);
+    const people = (IMP.people || []).filter(p => p.legal_name || p.email || p.phone);
+    const frow = (f, i) => {
+      const cur = String(impGet(f.key) ?? '').trim(), nv = impNorm(f.key, f.value), same = cur.toLowerCase() === nv.toLowerCase();
+      return `<label class="imp-row"><input type="checkbox" data-impf="${i}" ${!cur || same ? 'checked' : ''}><span><span class="k">${esc(IMP_LABELS[f.key])}</span><span class="v">${esc(impShow(f.key, f.value))}</span><span class="src-badge">From ${esc(f.source)}</span>${cur && !same ? `<span class="now">Now: ${esc(impShow(f.key, cur))}. Tick to replace it.</span>` : ''}</span></label>`;
+    };
+    const prow = (p, i) => {
+      const m = impMatch(p), ex = m >= 0 ? T.people[m] : null;
+      return `<label class="imp-row"><input type="checkbox" data-impp="${i}" ${ex && ex.signed_at ? 'disabled' : 'checked'}><span><span class="k">${ex ? `Person ${m + 1}` : 'New person'}</span><span class="v">${esc([p.legal_name, p.pref_name ? `goes by ${p.pref_name}` : '', p.email, p.phone].filter(Boolean).join(' · '))}</span><span class="src-badge">From ${esc(p.source || 'the documents')}</span>${ex ? `<span class="now">${ex.signed_at ? 'Already signed, so it won\'t change.' : 'Fills in anything blank, and updates what\'s ticked.'}</span>` : ''}</span></label>`;
+    };
+    out.innerHTML = `<div class="imp-review"><h3 style="margin-top:14px">What I found</h3>
+      ${(IMP.documents || []).length ? `<p class="small" style="margin:0 0 8px">${IMP.documents.map(d => `${esc(d.file)}: ${esc(d.kind)}`).join('<br>')}</p>` : ''}
+      ${IMP.skipped && IMP.skipped.length ? `<p class="small err" style="margin:0 0 8px">Couldn't read: ${esc(IMP.skipped.join('; '))}</p>` : ''}
+      ${people.length ? `<div class="imp-sec">People</div>${people.map(prow).join('')}` : ''}
+      ${fields.length ? `<div class="imp-sec">Property and title</div>${fields.map(frow).join('')}` : ''}
+      ${!people.length && !fields.length ? '<p class="small">Nothing I could use for the form.</p>' : ''}
+      ${(IMP.flags || []).length ? `<div class="imp-sec">To talk through before signing</div><ul class="small" style="margin:4px 0 0;padding-left:20px">${IMP.flags.map(f => `<li>${esc(f.text)} <span class="src-badge">From ${esc(f.source)}</span></li>`).join('')}</ul><p class="small" style="margin:6px 0 0">These also show on the Discussion page.</p>` : ''}
+      <div class="toolbar"><button class="btn primary" type="button" id="impApply">Fill in the ticked ones</button><button class="btn link" type="button" id="impDrop2">Discard</button></div></div>`;
+    $('#impDrop2').addEventListener('click', () => { IMP = null; out.innerHTML = ''; });
+    $('#impApply').addEventListener('click', async () => {
+      tCollect();
+      const imp = Object.assign({ files: [], sources: {}, flags: [] }, T.c.import || {});
+      $$('[data-impf]:checked').forEach(cb => { const f = fields[+cb.dataset.impf]; impSet(f.key, impNorm(f.key, f.value)); imp.sources[f.key] = f.source; });
+      $$('[data-impp]:checked').forEach(cb => {
+        const p = people[+cb.dataset.impp], m = impMatch(p);
+        if (m >= 0) { const x = T.people[m]; if (x.signed_at) return; ['legal_name', 'pref_name', 'phone'].forEach(k => { if (p[k]) x[k] = p[k]; }); if (p.email && !x.user_id) x.email = p.email.toLowerCase(); }
+        else { const blank = T.people.findIndex(x => !x.id && !(x.legal_name || '').trim() && !(x.email || '').trim()); const np = { legal_name: p.legal_name || '', pref_name: p.pref_name || '', email: (p.email || '').toLowerCase(), phone: p.phone || '' }; if (blank >= 0) T.people[blank] = np; else T.people.push(np); }
+      });
+      imp.files = imp.files.concat(IMP.files);
+      const seen = new Set(imp.flags.map(f => f.text)); (IMP.flags || []).forEach(f => { if (!seen.has(f.text)) imp.flags.push(f); });
+      imp.at = new Date().toISOString();
+      T.c.import = imp; IMP = null;
+      if (T.ag.address && await tSave()) toast('Filled in and saved. Check each one.'); else toast('Filled in. Check each one, then save.');
+      tShow(0);
+    });
+  }
+  function impBadges() {
+    const src = ((T && T.c.import) || {}).sources || {};
+    Object.entries(src).forEach(([k, s]) => {
+      const el = k === 'address' ? $('#tAddr') : $(`[data-c="${k}"]:not([type=radio]),[data-an="${k}"]:not([type=radio])`);
+      const lab = el && el.id ? $(`label[for="${el.id}"]`) : null;
+      if (lab && !lab.querySelector('.src-badge')) lab.insertAdjacentHTML('beforeend', ` <span class="src-badge">From ${esc(s)}</span>`);
+    });
+  }
+  function impFlagsHTML() {
+    const fl = ((T.c.import || {}).flags || []);
+    return fl.length ? `<div class="card warnc"><h3>From their documents: talk these through</h3><ul class="small" style="margin:6px 0 0;padding-left:20px">${fl.map(f => `<li>${esc(f.text)} <span class="src-badge">From ${esc(f.source)}</span></li>`).join('')}</ul></div>` : '';
+  }
+
   /* page 1 */
   function tPage1() {
     return `<h1>Property and people</h1>
       <p class="lede">Fill in what you know before the appointment. At the table, check it together and complete the rest.</p>
+      ${importCardHTML()}
       <h2>Property</h2>
       <label class="f" for="tAddr" style="margin-top:0">Address</label><input type="text" id="tAddr" value="${esc(T.ag.address)}" placeholder="Street, suburb, Dunedin">
       <div class="row2 stack">${TF.text('c', 'owners', 'Registered owners <span class="opt">(from the title)</span>')}${TF.text('c', 'title', 'Title reference')}</div>
@@ -1529,12 +1657,13 @@ function lawyerForm(id, title, blurb) {
     draw();
     $('#tAddP').addEventListener('click', () => { T.people.push({ legal_name: '', pref_name: '', email: '', phone: '' }); draw(); });
     const ask = $('#t_ask'); if (ask) ask.addEventListener('change', () => { if (HAS_CAT) setBand(T.CAMP, bandFor(ask.value)); });
+    wireImport();
   }
 
   /* page 2 */
   function tPage2() {
     const pend = T.c.appr === 'pending';
-    return `<h1>Discussion</h1>
+    return `<h1>Discussion</h1>${impFlagsHTML()}
       <p class="lede">The fee, the extras and the marketing. Agree these together, then fill them in.</p>
       <h2>Commission</h2><p class="small"><span class="clause">Page 1, section D and clause 5</span></p>
       <div class="row2">${TF.text('c', 'flat', 'Flat fee', { im: 'numeric' })}${TF.text('c', 'thr', 'For a sale price up to', { im: 'numeric', d: '250000' })}</div>
@@ -1755,6 +1884,7 @@ function lawyerForm(id, title, blurb) {
         ${people.map(p => `<div class="row2 stack" data-pc="${p.id}"><div><label class="f" style="margin-top:0">${esc(p.legal_name || p.email)}: mobile</label><input type="tel" data-pcphone value="${esc(p.phone || '')}"></div><div><label class="f" style="margin-top:0">Goes by</label><input type="text" data-pcpref value="${esc(p.pref_name || '')}"></div></div>`).join('')}
         <label class="f">Private notes <span class="opt">(only you see these)</span></label><textarea id="agNotes">${esc(cfg.agent_notes || '')}</textarea>
         <div class="toolbar"><button class="btn primary" type="button" id="saveAdj">Save adjustments</button></div></div>` : ''}
+      ${((cfg.import || {}).files || []).length ? `<h2>Documents you dropped in</h2><div class="card tight">${cfg.import.files.map((f, i) => `<div class="fact"><div class="v" style="font-weight:400;display:flex;justify-content:space-between;gap:10px;align-items:center"><span>${esc(f.name)}</span><button class="btn link no-print" type="button" data-impdoc="${i}">Open</button></div></div>`).join('')}${(cfg.import.flags || []).length ? `<p class="small" style="margin:10px 0 0"><strong>Raised from them:</strong> ${esc(cfg.import.flags.map(f => f.text).join(' '))}</p>` : ''}</div>` : ''}
       ${noticePanel(ag, people, pans)}
       ${varPanel(ag, people, avars, avsigs)}
       <h2>People</h2>
@@ -1814,6 +1944,7 @@ function lawyerForm(id, title, blurb) {
       toast('Saved'); viewAgentDetail(id);
     });
     wireVarPanel(id); wireNoticePanel(id);
+    $$('[data-impdoc]').forEach(b => b.addEventListener('click', async () => { const f = cfg.import.files[+b.dataset.impdoc]; const w = window.open('', '_blank'); const { data } = await sb.storage.from('private').createSignedUrl(f.path, 600); if (data && w) w.location.href = data.signedUrl; else if (w) w.close(); }));
     $('#printBtn').addEventListener('click', () => window.print());
     const pla = $('#plAns'); if (pla) pla.addEventListener('click', () => viewPrelistingAgent(cfg.prelisting_id));
     wirePdf(id); const cpb = $('#campPdf'); if (cpb) cpb.addEventListener('click', () => openPdf(id, 'campaign'));
