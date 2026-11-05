@@ -65,6 +65,14 @@ signature and PDF is unchanged.
 
 Goal: the remaining paperwork comes from the property file, signed on screen, filed with the agreement.
 
+Status: built 6 November 2026 (migration 005, not yet applied), waiting for review. Unit title disclosure not built
+(Tim to decide scope). The REA guides are built but switched off until Tim adds the official files: put each PDF in
+`onboarding/assets/guides/` under a name that includes its version (old files must stay, so older agreements still
+print with the guide they were given), and list them in `onboarding/assets/guides/guides.json`:
+`{"agency": {"file": "...pdf", "version": "...", "title": "...", "earlier": [{"file": "...pdf", "version": "..."}]},
+"sale_purchase": {"file": "...pdf", "version": "..."}}`. When a guide is replaced, move the old one into "earlier".
+An entry without a version is ignored. The Vendor Declaration is countersigned by Tim after the vendors sign.
+
 - Vendor Declaration (Tim's Word form): a vendor step after signing. Questions already answered in the file
   are shown for confirmation; only the new ones are asked (boundary pegs, items not paid for, history,
   chattels not working, planned repairs, 1995 to 2004 build, Dux Qest and cladding, asbestos, pipes,

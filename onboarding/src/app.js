@@ -238,14 +238,68 @@
     ['Identity, privacy, photos and safety', 'Clauses 12 to 16', ['We must verify your identity before acting for you, as the law requires.', 'The agreement\'s terms stay between us, except where the law requires disclosure.', 'We can use the marketing material we create. You keep the right to use what you\'ve paid for.', 'We\'ll work together to flag hazards, and every visiting professional signs our access form.']],
     ['Buyers we meet, and if we ever want to buy', 'Clauses 19 to 21', ['We owe buyers privacy too. If a buyer we meet through your listing later hires us for something unrelated, you have no claim to that fee.', 'We (or anyone related to us) can only buy your property with your written consent and an independent valuation we pay for. If we don\'t follow this, you can cancel and we lose our commission.', 'Talk to us first if something goes wrong. You can always go to the Real Estate Authority on 0800 367 7322.']],
   ];
+  /* REA guides: switched on only when Tim adds the official files to onboarding/assets/guides, listed in
+     guides.json with the version of each ({"agency": {"file", "version", "title"}, "sale_purchase": {...}}).
+     Until then nothing about them is shown or asked for, and the agreement keeps its links to the REA website. */
+  let GUIDES = {};
+  async function loadGuides() {
+    const found = {};
+    try {
+      const base = new URL('assets/guides/', location.href);
+      const r = await fetch(new URL('guides.json', base), { cache: 'no-store' });
+      if (!r.ok) { GUIDES = {}; return; }
+      const j = await r.json();
+      for (const k of ['agency', 'sale_purchase']) {
+        const g = j && j[k];
+        if (!g || typeof g.file !== 'string' || !/^[A-Za-z0-9._-]+\.pdf$/.test(g.file) || typeof g.version !== 'string' || !g.version.trim()) continue;
+        const url = new URL(g.file, base).href;
+        const h = await fetch(url, { cache: 'no-store' });
+        if (!h.ok || !/pdf/i.test(h.headers.get('content-type') || '')) continue;
+        const digest = await crypto.subtle.digest('SHA-256', await h.arrayBuffer());
+        found[k] = { file: g.file, version: g.version.trim(), url, sha256: Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join(''), title: typeof g.title === 'string' && g.title.trim() ? g.title.trim() : (k === 'agency' ? 'Real Estate Authority guide to agency agreements' : 'Real Estate Authority guide to sale and purchase agreements') };
+      }
+    } catch (_) { }
+    GUIDES = found;
+  }
+  // The Complaints procedure, as appended to the agreement PDF (fn/pdf.ts COMPLAINTS; a test keeps them the same)
+  const COMPLAINTS = {
+    id: 'CDR-2026-11',
+    title: 'Complaints and Dispute Resolution Procedures',
+    intro: [
+      'Pursuant to Rule 12 of the Real Estate Agents Act (Professional Conduct and Client Care Rules) 2012, all licensed Real Estate Agents are required to have a written in-house complaints and dispute resolution procedure. That procedure is set out below.',
+      'You do not have to use our complaints and resolution procedure. You may make a complaint directly to the Real Estate Agents Authority at any time. You can make a complaint to the Real Estate Agents Authority even if you choose to also use our procedures.',
+      'Our complaints and dispute resolution procedures are designed to provide a simple and personalised process for resolving any complaint you might have about the service you have received from our agency.',
+    ],
+    steps: [
+      ['Step 1: Contact the Manager', ['Timothy McGuire', 'Phone: 027 562 7207', 'Email: tim@mcguire.co.nz', 'Tell the manager who you are complaining about and what your concerns are. Let the manager know what you would like done about your complaint.']],
+      ['Step 2', ['The manager may ask you to put your complaint in writing so that he or she can investigate it. The manager will need a brief period to talk to the team members involved. We promise to come back to you within 10 working days with a response to your complaint. That response may be in writing. As part of the response, we might ask you to meet with members of our team to discuss the complaint and try and agree a resolution.']],
+      ['Step 3', ['If we are unable to come to an agreed resolution after a meeting, or if you don\'t wish to meet with us, then we will provide you with a written proposal to resolve your complaint.']],
+      ['Step 4', ['If you do not accept our proposal, please advise us in writing within five working days. You can of course suggest another way of resolving your complaint.']],
+      ['Step 5', ['If we accept your preferred resolution, we will attempt to implement that resolution as soon as possible. If we decline your preferred resolution, we may invite you to mediate the dispute.']],
+      ['Step 6', ['If we agree to mediate the complaint but do not settle the complaint at mediation, or we do not agree to mediate the dispute, then that will be the end of our process.']],
+    ],
+    close: 'Remember, you can still make a complaint to the Real Estate Agents Authority in the first instance, and even if you use these procedures, you can still make a complaint to the Real Estate Agents Authority at any time. The Real Estate Authority, C/O P.O. Box 25-371, Wellington 6146, New Zealand, 0800 367 7322 or 04 471 8930.',
+  };
+  const APPENDIX_SET = 'P2-2026-11', VENDOR_GUIDE_ID = 'VG-2026-11';
+  const complaintsHTML = () => `<details class="inline-doc"><summary>Read our complaints procedure</summary><h4>${esc(COMPLAINTS.title)}</h4>${COMPLAINTS.intro.map(t => `<p>${esc(t)}</p>`).join('')}${COMPLAINTS.steps.map(([h, ls]) => `<p><strong>${esc(h)}</strong><br>${ls.map(esc).join('<br>')}</p>`).join('')}<p>${esc(COMPLAINTS.close)}</p></details>`;
+  // What goes into each client signature from phase 2: which documents are appended to the agreement, and the
+  // REA guide receipt. An agreement someone signed before phase 2 stays on the old format for everyone.
+  async function signExtras(agId, an) {
+    let old = false;
+    try { const { data } = await sb.from('signatures').select('snapshot,signer_role,signed_at').eq('agreement_id', agId); const cs = (data || []).filter(x => x.signer_role === 'client').sort((x, y) => x.signed_at < y.signed_at ? -1 : 1); old = cs.length > 0 && !(cs[0].snapshot || {}).appendices; } catch (_) { }
+    const g = GUIDES.agency, out = {};
+    if (g && (an.acks || []).includes('1')) out.rea_guides = [{ guide: 'agency', title: g.title, version: g.version, file: g.file, sha256: g.sha256, shown: 'On screen before signing', acknowledged_at: an._reaAgencyAt || new Date().toISOString() }];
+    if (!old) out.appendices = { set: APPENDIX_SET, vendor_guide: VENDOR_GUIDE_ID, complaints: COMPLAINTS.id, rea_agency_guide: g ? { version: g.version, file: g.file, title: g.title, sha256: g.sha256 } : null };
+    return out;
+  }
   const REA_AA = 'https://www.rea.govt.nz/assets/Uploads/Resources/Guides/Agency-agreement-guide.pdf';
   const REA_SP = 'https://www.rea.govt.nz/assets/Uploads/Resources/Guides/Sale-and-purchase-agreement-guide.pdf';
   function acksList(cfg) {
     return [
       ['I was told I may need technical or other advice, and given time to get it', ''],
-      ['I received the Real Estate Authority guide to agency agreements', `<a href="${REA_AA}" target="_blank" rel="noopener">Open the agency agreement guide</a>`],
+      GUIDES.agency ? ['I received the Real Estate Authority guide to agency agreements', 'Here it is. Read it before you tick.', guideViewer(GUIDES.agency)] : ['I received the Real Estate Authority guide to agency agreements', `<a href="${REA_AA}" target="_blank" rel="noopener">Open the agency agreement guide</a>`],
       ['I received the Real Estate Authority guide to sale and purchase agreements', `<a href="${REA_SP}" target="_blank" rel="noopener">Open the sale and purchase guide</a>`],
-      ['I know about McGuire\'s complaints process, and that I can go straight to the Real Estate Authority', 'Talk to Tim first if you can. The REA is on 0800 367 7322, whether or not you\'ve used our process.'],
+      ['I know about McGuire\'s complaints process, and that I can go straight to the Real Estate Authority', 'Talk to Tim first if you can. The REA is on 0800 367 7322, whether or not you\'ve used our process.', complaintsHTML()],
       ['It was explained when I could end up paying two commissions', 'Mainly if another agent\'s sole agency is still running.'],
       ['I was told when this agreement ends', 'See "How long it runs, and how it ends".'],
       ['Sale methods were explained, including how the method can affect what licensees earn', ''],
@@ -338,6 +392,7 @@
     let qlr = null; try { qlr = localStorage.getItem('qlReturn'); localStorage.removeItem('qlReturn'); } catch (_) { }
     if (qlr) { try { const u = new URL(qlr); if (u.origin === location.origin && u.pathname !== location.pathname) return location.replace(qlr); } catch (_) { } }
     IS_AGENT = !!(await must(sb.rpc('is_agent')));
+    await loadGuides();
     let pend = null; try { pend = JSON.parse(localStorage.getItem('pendingCampaign') || 'null'); } catch (_) { }
     if (IS_AGENT && pend) { try { localStorage.removeItem('pendingCampaign'); } catch (_) { } return viewTable(null, pend); }
     setAgentNav();
@@ -406,7 +461,7 @@
     P = await must(sb.from('agreement_people').select('*').eq('agreement_id', id).order('position'));
     ME = P.find(p => p.user_id === SESSION.user.id) || null;
     CFG = A.config || {}; ANS = Object.assign({}, A.answers || {});
-    if (A.status === 'signed' || A.status === 'countersigned' || (ME && ME.signed_at)) { await loadCancelReq(); await loadVars(); STEP = LAST; const vt = varToSign(); if (vt) return viewVendorVariation(vt); }
+    if (A.status === 'signed' || A.status === 'countersigned' || (ME && ME.signed_at)) { await loadCancelReq(); await loadVars(); await loadForms(); STEP = LAST; const vt = varToSign(); if (vt) return viewVendorVariation(vt); }
     else if (A.status === 'parked') return vendorParked();
     else STEP = Math.min(+(ANS._step || 0), LAST - 1);
     showStep(STEP);
@@ -470,7 +525,7 @@
       ${f.radio('capacity', 'Owners', 'We own it personally', 'The names on the title are ours', 'Owners')}
       ${f.radio('capacity', 'Trustee', 'As trustees of a trust', '', 'Owners')}
       ${f.radio('capacity', 'Director', 'As directors of a company', '', 'Owners')}
-      ${f.radio('capacity', 'Authorised signatory, agent or attorney', 'On someone else\'s behalf', 'Authorised signatory, agent or attorney', 'Owners')}
+      ${f.radio('capacity', 'Authorised signatory, agent or attorney', 'On someone else\'s behalf', 'For example as attorney, executor or authorised signatory', 'Owners')}
     </div>
     <div class="reveal" id="entityWrap">${f.text('entity', 'Name of the trust, company or person you act for')}</div>
     <h2>Ownership</h2>
@@ -686,11 +741,12 @@
         <button class="btn primary" type="button" id="sendLaw" style="width:100%">Send to my lawyer and pause</button>
       </div></div>
     <div class="card"><div class="toolbar" style="margin:0 0 8px"><button class="btn ghost" type="button" data-tickall="acks">Tick all: these all happened</button></div>
-      ${acks.map((a, i) => `<div class="ack"><input type="checkbox" id="ak${i}" data-multi="acks" value="${i}" ${done.includes(String(i)) ? 'checked' : ''}><label for="ak${i}"><span class="what">${esc(a[0])}</span>${a[1] ? `<div class="how">${a[1]}</div>` : ''}</label></div>`).join('')}
+      ${acks.map((a, i) => `<div class="ack"><input type="checkbox" id="ak${i}" data-multi="acks" value="${i}" ${done.includes(String(i)) ? 'checked' : ''}><label for="ak${i}"><span class="what">${esc(a[0])}</span>${a[1] ? `<div class="how">${a[1]}</div>` : ''}</label>${a[2] ? `<div class="ack-more">${a[2]}</div>` : ''}</div>`).join('')}
       <p class="small" style="margin:12px 0 0">If anything above didn't happen, untick it. Text Tim and we'll fix it first.</p></div>
     <div class="err"></div>`;
   };
   BIND[7] = () => {
+    const ak = $('#ak1'); if (ak && GUIDES.agency) ak.addEventListener('change', () => { if (ak.checked) ANS._reaAgencyAt = new Date().toISOString(); });
     wireTickAll();
     const upd = () => { const c = $('input[name="legal"]:checked'); $('#lawWrap').hidden = !(c && c.value === 'send'); };
     $$('input[name="legal"]').forEach(r => r.addEventListener('change', upd)); upd();
@@ -710,6 +766,7 @@
     if (!c) return err('Let us know about legal advice first.');
     if (c.value === 'send') return err('Use the button above to send it to your lawyer, or choose another option.');
     if (a.acks.length < acksList(CFG).length) return err('Tick each item, or text Tim about anything that didn\'t happen.');
+    if (GUIDES.agency) a._reaAgencyAt = ANS._reaAgencyAt || new Date().toISOString();
     await saveAns(a);
     if ((A.legal || {}).choice !== c.value) { await must(sb.rpc('vendor_set_legal', { a: A.id, choice: c.value })); A.legal = Object.assign({}, A.legal, { choice: c.value }); }
     return true;
@@ -803,6 +860,7 @@
     const path = `agreements/${A.id}/signatures/${ME.id}-${Date.now()}.png`;
     await must(sb.storage.from('private').upload(path, blob, { contentType: 'image/png' }));
     const snapshot = { agreement_version: AGREEMENT_VERSION, agreement_ref: A.ref, front_page: frontPage(), config: CFG, answers: ANS, people: P.map(p => ({ legal_name: p.legal_name, email: p.email })), signer: { name: ME.legal_name, email: SESSION.user.email }, notices: noticeSnapshot(A.address, frontPage().client, ANS), signed_at_client: new Date().toISOString() };
+    Object.assign(snapshot, await signExtras(A.id, ANS));
     const res = await must(sb.rpc('vendor_sign', { a: A.id, p_image_path: path, p_snapshot: snapshot, p_user_agent: navigator.userAgent }));
     await sigSaved($('#sig0'), 'Signature saved', 'You\'ve signed the agreement');
     if (res && res.remaining === 0) { const { error: fe } = await sb.functions.invoke('notify', { body: { type: 'signed', agreement_id: A.id } }); if (fe) console.warn('copy email', fe); }
@@ -858,6 +916,7 @@ function lawyerForm(id, title, blurb) {
     </ol>
     <div class="toolbar">${pdfBtn(A.status === 'signed' || A.status === 'countersigned' ? 'Download your signed agreement (PDF)' : 'Read the full agreement (PDF)')}</div>
     ${['signed', 'countersigned', 'ended'].includes(A.status) ? '<h2>Send a copy to your lawyer</h2>' + lawyerForm('fwd', 'Forward the signed agreement', 'Your lawyer gets an email with a read-only link to the signed agreement. Tim gets a copy. You can do this as often as you like.') : ''}
+    ${paperworkHTML()}
     ${varDoneHTML()}
     ${A.cooling_off_until && ['signed', 'countersigned'].includes(A.status) ? `<p class="small" style="margin-top:28px;color:var(--muted)">${CR && CR.status !== 'processed' ? `A request to cancel this agreement is with Tim (sent ${esc(fmtDT(CR.requested_at))}). He'll call you to talk it through.` : `Your cooling-off period ${new Date() <= new Date(A.cooling_off_until) ? 'ends' : 'ended'} ${unsol ? 'at the end of ' : '5pm, '}${esc(fmtDate(A.cooling_off_until))}. If you need to change or cancel this agreement, <a href="#" id="cancelLink">start here</a>.`}</p>` : ''}`;
   };
@@ -913,7 +972,7 @@ function lawyerForm(id, title, blurb) {
     };
     top();
   }
-  BIND[10] = () => { wirePdf(A.id); if ($('#fwd')) wireLawyerForm('fwd', async (n, fm, e) => { await must(sb.rpc('vendor_forward_to_lawyer', { a: A.id, l_name: n, l_firm: fm, l_email: e })); }); const cl = $('#cancelLink'); if (cl) cl.addEventListener('click', e => { e.preventDefault(); viewCancelRequest(); }); wireVarDone(); };
+  BIND[10] = () => { wirePdf(A.id); if ($('#fwd')) wireLawyerForm('fwd', async (n, fm, e) => { await must(sb.rpc('vendor_forward_to_lawyer', { a: A.id, l_name: n, l_firm: fm, l_email: e })); }); const cl = $('#cancelLink'); if (cl) cl.addEventListener('click', e => { e.preventDefault(); viewCancelRequest(); }); wireVarDone(); wirePaperwork(); };
 
   /* ═════════════════ AGENT ═════════════════ */
   /* ═════════ PROPERTY FILE: one record of the property and its owners, read and written by every page ═════════ */
@@ -975,6 +1034,7 @@ function lawyerForm(id, title, blurb) {
     ]);
     p.ownership ||= {}; p.description ||= {}; p.disclosures ||= {};
     const live = ags.find(a => !['ended', 'cancelled'].includes(a.status)) || null;
+    let pforms = []; if (live) { try { const { data, error } = await sb.from('property_forms').select('*').eq('agreement_id', live.id); if (!error) pforms = data || []; } catch (_) { } }
     const pl = pls.find(x => x.status !== 'closed' && (!p.cycle_at || x.created_at >= p.cycle_at)) || null;   // only this round's pre-listing
     const byRole = r => people.filter(x => (x.role || 'owner') === r).map(x => Object.assign({ _orig_name: x.legal_name }, x));
     PF = { p, people: byRole('owner'), contacts: byRole('contact'), formers: byRole('former'), docs, pls, ags, liveAgreement: live, removed: [] };
@@ -1009,6 +1069,7 @@ function lawyerForm(id, title, blurb) {
           ${ags.map(a => { const ppl = a.agreement_people || [], ver = ppl.filter(x => x.id_verified_at).length; return `<div class="fact"><div class="k">Agreement ${esc(a.ref)}</div><div class="v" style="font-weight:400;display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><span><span class="pill ${a.status}">${esc(a.status)}</span> <span class="small">ID checks ${ver} of ${ppl.length}</span></span><button class="btn link" type="button" data-agopen="${a.id}">Open</button></div></div>`; }).join('')}
           ${!pls.length && !ags.length ? '<p class="small" style="margin:0">No appraisal page or agreement yet.</p>' : ''}
         </div>
+        ${formsTileHTML(pforms, live)}
       </div>
       <h2>Owners</h2>
       ${locked ? `<div class="card tight">${PF.people.map(person).join('') || '<p class="small" style="margin:0">No owners yet.</p>'}<p class="small" style="margin:10px 0 0">The agreement is under way, so change owners there. Changes flow back here.</p></div>`
@@ -1037,6 +1098,7 @@ function lawyerForm(id, title, blurb) {
     $('#pfBack').addEventListener('click', viewAgentDashboard);
     $$('[data-agopen]').forEach(b => b.addEventListener('click', () => viewAgentDetail(b.dataset.agopen)));
     $$('[data-plopen]').forEach(b => b.addEventListener('click', () => viewPrelistingAgent(b.dataset.plopen)));
+    $$('[data-fopen]').forEach(b => b.addEventListener('click', () => viewFormAgent(b.dataset.fopen)));
     const bg = $('#pfBegin'); if (bg) bg.addEventListener('click', () => viewPrelistingAgent(null, id));
     const ag = $('#pfAgree'); if (ag) ag.addEventListener('click', () => viewTable(null, null, 0, PF));
     $$('[data-pfreopen]').forEach(b => b.addEventListener('click', async () => { await must(sb.rpc('agent_reopen_property', { pid: id, new_owners: b.dataset.pfreopen === 'new' })); toast(b.dataset.pfreopen === 'new' ? 'Started again for new owners' : 'Started again'); viewProperty(id); }));
@@ -1103,12 +1165,14 @@ function lawyerForm(id, title, blurb) {
       safe(sb.from('prior_agency_notices').select('id,agreement_id,agency,status').eq('status', 'to_send')),
       safe(sb.from('agreement_variations').select('id,agreement_id,number,status').eq('status', 'draft')),
     ]);
+    const forms = await safe(sb.from('property_forms').select('id,agreement_id,kind,status,document_id,countersigned_at'));
     const addr = id => (rows.find(r => r.id === id) || {}).address || 'Agreement';
     const needs = [];
     crs.forEach(r => needs.push({ what: 'Call them about cancelling', where: addr(r.agreement_id), sub: 'Request from ' + r.requested_by, go: () => viewAgentDetail(r.agreement_id), hot: true }));
     pls.forEach(p => { if (p.status === 'submitted') needs.push({ what: 'Write their updated plan', where: p.address, sub: 'Questionnaire answers are in', go: () => viewPrelistingAgent(p.id) }); if (p.status === 'question') needs.push({ what: 'Answer their question', where: p.address, sub: 'About the updated plan', go: () => viewPrelistingAgent(p.id), hot: true }); if (p.status === 'accepted') { const a = rows.find(r => r.id === p.agreement_id); if (!a || a.status === 'draft') needs.push({ what: 'Add your fee and send the agreement', where: p.address, sub: 'They\'ve accepted the plan', go: () => viewPrelistingAgent(p.id) }); } });
     rows.forEach(r => { if (r.status === 'signed') needs.push({ what: 'Countersign', where: r.address, sub: 'Everyone has signed', go: () => viewAgentDetail(r.id) }); });
     pans.forEach(n => needs.push({ what: 'Send the notice to ' + n.agency, where: addr(n.agreement_id), sub: 'Previous agency', go: () => viewAgentDetail(n.agreement_id) }));
+    forms.forEach(fm => { if (fm.kind === 'healthy_homes' && fm.status === 'draft') needs.push({ what: 'Do the Healthy Homes measurements', where: addr(fm.agreement_id), sub: 'They asked for the checklist', go: () => viewFormAgent(fm.id) }); if (fm.kind === 'vendor_declaration' && fm.status === 'signed' && !fm.countersigned_at) needs.push({ what: 'Countersign the Vendor Declaration', where: addr(fm.agreement_id), sub: 'Every vendor has signed', go: () => viewFormAgent(fm.id) }); else if (fm.status === 'signed' && !fm.document_id) needs.push({ what: `File the signed ${FORM_LABEL[fm.kind]}`, where: addr(fm.agreement_id), sub: 'The PDF isn\'t on the property yet', go: () => viewFormAgent(fm.id) }); });
     vars.forEach(v => needs.push({ what: `Finish variation ${v.number}`, where: addr(v.agreement_id), sub: 'Draft, not issued', go: () => viewAgentDetail(v.agreement_id) }));
     return { props, rows, pls: pls.filter(p => p.status !== 'closed'), needs };
   }
@@ -1471,7 +1535,7 @@ function lawyerForm(id, title, blurb) {
       <div id="tPeople"></div>
       <button class="btn link" type="button" id="tAddP">Add a person</button>
       <div class="choices" style="margin-top:12px">
-        ${TF.radio('an', 'capacity', 'Owners', 'They own it personally', '', 'Owners')}${TF.radio('an', 'capacity', 'Trustee', 'As trustees of a trust', '', 'Owners')}${TF.radio('an', 'capacity', 'Director', 'As directors of a company', '', 'Owners')}${TF.radio('an', 'capacity', 'Authorised signatory, agent or attorney', 'On someone else\'s behalf', '', 'Owners')}
+        ${TF.radio('an', 'capacity', 'Owners', 'They own it personally', '', 'Owners')}${TF.radio('an', 'capacity', 'Trustee', 'As trustees of a trust', '', 'Owners')}${TF.radio('an', 'capacity', 'Director', 'As directors of a company', '', 'Owners')}${TF.radio('an', 'capacity', 'Authorised signatory, agent or attorney', 'On someone else\'s behalf', 'For example as attorney, executor or authorised signatory', 'Owners')}
       </div>
       <div data-treveal="an:capacity:Trustee|Director|Authorised signatory, agent or attorney">${TF.text('an', 'entity', 'Name of the trust, company or person they act for')}</div>
       <div class="row2"><div><div class="f">GST registered for this sale?</div><div class="choices two">${TF.radio('an', 'gst', 'no', 'No', '', 'no')}${TF.radio('an', 'gst', 'yes', 'Yes', '', 'no')}</div></div><div data-treveal="an:gst:yes">${TF.text('an', 'gstNo', 'GST number', { im: 'numeric' })}</div></div>
@@ -1601,7 +1665,7 @@ function lawyerForm(id, title, blurb) {
       <div class="toolbar" style="margin-top:0"><button class="btn ghost" type="button" data-tickall="guide">Tick all: we've been through these</button></div>
       ${GUIDE.map((g, i) => `<details class="acc tguide"><summary><label class="choice cb" style="margin:0;border:0;padding:0;background:none" onclick="event.stopPropagation()"><input type="checkbox" data-tmulti="guide" value="${i}" ${guide.includes(String(i)) ? 'checked' : ''}><span class="mark"></span><span class="ct">${esc(g[0])}</span></label> <span class="clause">${esc(g[1])}</span></summary><div class="in"><ul>${g[2].map(x => `<li>${esc(x)}</li>`).join('')}</ul></div></details>`).join('')}
       <h2>Before signing</h2><p class="small">Only tick what has actually happened. <span class="clause">Clause 22.1</span></p>
-      <div class="card"><div class="toolbar" style="margin:0 0 8px"><button class="btn ghost" type="button" data-tickall="acks">Tick all: these all happened</button></div>${acksL.map((a, i) => `<div class="ack"><input type="checkbox" id="tak${i}" data-tmulti="acks" value="${i}" ${acks.includes(String(i)) ? 'checked' : ''}><label for="tak${i}"><span class="what">${esc(a[0])}</span>${a[1] ? `<div class="how">${a[1]}</div>` : ''}</label></div>`).join('')}</div>
+      <div class="card"><div class="toolbar" style="margin:0 0 8px"><button class="btn ghost" type="button" data-tickall="acks">Tick all: these all happened</button></div>${acksL.map((a, i) => `<div class="ack"><input type="checkbox" id="tak${i}" data-tmulti="acks" value="${i}" ${acks.includes(String(i)) ? 'checked' : ''}><label for="tak${i}"><span class="what">${esc(a[0])}</span>${a[1] ? `<div class="how">${a[1]}</div>` : ''}</label>${a[2] ? `<div class="ack-more">${a[2]}</div>` : ''}</div>`).join('')}</div>
       <h2>Legal advice</h2><p class="small"><span class="clause">Clause 22.1.1</span></p>
       <div class="choices">${[['have', 'They\'ve had legal advice', ''], ['waive', 'They\'re happy to go ahead without it', 'They can still talk to a lawyer before cooling-off ends'], ['send', 'Send it to their lawyer first', 'Their lawyer gets a read-only link, and signing pauses']].map(([v, t, d]) => `<label class="choice"><input type="radio" name="tLegal" value="${v}" ${(T.legalPick || L.choice) === v ? 'checked' : ''}><span class="mark"></span><span><span class="ct">${t}</span>${d ? `<span class="cd">${d}</span>` : ''}</span></label>`).join('')}</div>
       <div id="tLawWrap" hidden><div class="row2 stack"><div><label class="f">Lawyer's name</label><input type="text" id="tLawN"></div><div><label class="f">Firm <span class="opt">(optional)</span></label><input type="text" id="tLawF"></div></div>
@@ -1638,6 +1702,7 @@ function lawyerForm(id, title, blurb) {
   }
   function tBind3() {
     if (T.id) wirePdf(T.id); else $$('[data-pdf]').forEach(b => b.addEventListener('click', async () => { tCollect(); if (await tSave()) openPdf(T.id); }));
+    const tak = $('#tak1'); if (tak && GUIDES.agency) tak.addEventListener('change', () => { if (tak.checked) T.an._reaAgencyAt = new Date().toISOString(); });
     $$('[data-tmulti="guide"]').forEach(cb => cb.addEventListener('change', () => { $('#tGuideCount').textContent = `${$$('[data-tmulti="guide"]:checked').length} of ${GUIDE.length}`; })); wireTickAll();
     const lu = () => { const ch = $('input[name="tLegal"]:checked'); $('#tLawWrap').hidden = !(ch && ch.value === 'send'); };
     $$('input[name="tLegal"]').forEach(r => r.addEventListener('change', lu)); lu();
@@ -1669,6 +1734,7 @@ function lawyerForm(id, title, blurb) {
         await must(sb.storage.from('private').upload(path, blob, { contentType: 'image/png' }));
         const cfg = tConfig();
         const snapshot = { agreement_version: AGREEMENT_VERSION, agreement_ref: T.ag.ref, front_page: tFront(), config: cfg, answers: T.an, people: T.people.map(p => ({ legal_name: p.legal_name, email: p.email })), signer: { name: person.legal_name, email: person.email }, notices: noticeSnapshot(T.ag.address, tFront().client, T.an), signed_at_client: new Date().toISOString() };
+        Object.assign(snapshot, await signExtras(T.id, T.an));
         const res = await must(sb.rpc('agent_sign_in_person', { a: T.id, pid, p_image_path: path, p_snapshot: snapshot, p_user_agent: navigator.userAgent }));
         await sigSaved($('#pad_' + pid), `${person.legal_name} has signed`, 'Signature saved');
         T.people = await must(sb.from('agreement_people').select('*').eq('agreement_id', T.id).order('position'));
@@ -1712,6 +1778,8 @@ function lawyerForm(id, title, blurb) {
     const avars = await must(sb.from('agreement_variations').select('*').eq('agreement_id', id).order('number'));
     const avsigs = await must(sb.from('variation_signatures').select('*').eq('agreement_id', id));
     const pans = await must(sb.from('prior_agency_notices').select('*').eq('agreement_id', id).order('idx'));
+    const softly = async q => { try { const { data, error } = await q; return error ? [] : data || []; } catch (_) { return []; } };
+    const aforms = await softly(sb.from('property_forms').select('*').eq('agreement_id', id)), arc = await softly(sb.from('guide_receipts').select('*').eq('agreement_id', id));
     const sigUrls = {};
     for (const s of sigs) if (s.image_path) { const { data } = await sb.storage.from('private').createSignedUrl(s.image_path, 600); if (data) sigUrls[s.id] = data.signedUrl; }
     const names = people.map(p => callName(p)).filter(Boolean);
@@ -1749,6 +1817,7 @@ function lawyerForm(id, title, blurb) {
       ${((cfg.import || {}).files || []).length ? `<h2>Documents you dropped in</h2><div class="card tight">${cfg.import.files.map((f, i) => `<div class="fact"><div class="v" style="font-weight:400;display:flex;justify-content:space-between;gap:10px;align-items:center"><span>${esc(f.name)}</span><button class="btn link no-print" type="button" data-impdoc="${i}">Open</button></div></div>`).join('')}${(cfg.import.flags || []).length ? `<p class="small" style="margin:10px 0 0"><strong>Raised from them:</strong> ${esc(cfg.import.flags.map(f => f.text).join(' '))}</p>` : ''}</div>` : ''}
       ${noticePanel(ag, people, pans)}
       ${varPanel(ag, people, avars, avsigs)}
+      ${aforms.length || arc.length ? `<h2>After signing</h2><div class="card tight">${aforms.map(fm => `<div class="fact"><div class="k">${esc(FORM_LABEL[fm.kind])}</div><div class="v" style="font-weight:400;display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><span>${fm.status === 'signed' && fm.kind === 'vendor_declaration' && !fm.countersigned_at ? 'Vendors signed, to countersign' : fm.status === 'signed' ? 'Signed ' + esc(fmtDT(fm.countersigned_at || fm.signed_at)) : fm.status === 'ready' ? 'Ready to sign' : 'In progress'}</span><button class="btn link no-print" type="button" data-fopen="${fm.id}">Open</button></div></div>`).join('')}${arc.map(r => { const p = people.find(x => x.id === r.person_id); return `<div class="fact"><div class="k">Sale and purchase guide received</div><div class="v" style="font-weight:400">${esc(p ? p.legal_name : '')}, ${esc(fmtDT(r.received_at))} <span class="small">(version ${esc(r.version)})</span></div></div>`; }).join('')}</div>` : ''}
       <h2>People</h2>
       ${people.map(p => { const af = amls.find(x => x.person_id === p.id); return `<div class="card tight" style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
         <div style="min-width:0"><div style="font-weight:600">${esc(p.legal_name || '(name to come)')}${p.pref_name ? ` <span class="small">(${esc(p.pref_name)})</span>` : ''}</div><div class="small">${esc(p.email)} ${p.phone ? '· ' + esc(p.phone) : ''}</div>
@@ -1807,6 +1876,7 @@ function lawyerForm(id, title, blurb) {
       toast('Saved'); viewAgentDetail(id);
     });
     wireVarPanel(id); wireNoticePanel(id);
+    $$('[data-fopen]').forEach(b => b.addEventListener('click', () => viewFormAgent(b.dataset.fopen)));
     $$('[data-impdoc]').forEach(b => b.addEventListener('click', async () => { const f = cfg.import.files[+b.dataset.impdoc]; const w = window.open('', '_blank'); const { data } = await sb.storage.from('private').createSignedUrl(f.path, 600); if (data && w) w.location.href = data.signedUrl; else if (w) w.close(); }));
     $('#printBtn').addEventListener('click', () => window.print());
     const pla = $('#plAns'); if (pla) pla.addEventListener('click', () => viewPrelistingAgent(cfg.prelisting_id));
@@ -1846,6 +1916,415 @@ function lawyerForm(id, title, blurb) {
       $('#endBox').innerHTML = `<div class="card warnc"><h3>End this agency</h3><p class="small">Use this when the property has settled, been withdrawn, or the agreement was cancelled. AML records will then be kept for 5 years from today.</p><select id="endReason"><option>Sold and settled</option><option>Withdrawn</option><option>Cancelled by vendor</option><option>Cancelled during cooling-off</option><option>Cancelled by agent</option></select><div class="toolbar"><button class="btn primary" type="button" id="doEnd">End agency</button></div></div>`;
       $('#doEnd').addEventListener('click', async () => { await must(sb.rpc('agent_end_agency', { a: id, reason: $('#endReason').value })); toast('Agency ended'); viewAgentDetail(id); });
     });
+    top();
+  }
+
+  /* ═════════ AFTER SIGNING: Vendor Declaration, Healthy Homes, Before you sell ═════════ */
+  // Tim's Word forms, carried over word for word (NZ English, no em dashes). fn/pdf.ts holds the same text, keyed
+  // by form_version, and prints the PDF from the stored answers with it (a test keeps the two the same). Change
+  // both, with a new form_version, if the wording changes. In VD_SECTIONS, why: details needed when the answer
+  // is Yes. text: a description rather than Yes / No / Unknown. from: filled from the property file.
+  const FORM_TEXT = {
+    VD_LEAD: 'This form provides information for prospective purchasers, based on the Vendor\'s own knowledge of the property.',
+    VD_INTRO: [
+    'These details are correct as at the date of the Vendor\'s signature(s) below. Any known changes and/or subsequent information becoming known will be advised in writing. These changes may be made and noted by the Licensee, who has also signed below.',
+    'Where any work requiring Code Compliance has had Certificate(s) correctly issued and signed off, and they are available to the Agent or prospective purchaser to view, they will be attached to this document (or are known to appear in the LIM). If those certificates are not available, we strongly recommend your further investigation.',
+    'Please note that the Vendor may not disclose all property defects. It is incumbent on the purchaser to make enquiries or seek professional assistance to satisfy themselves as to the condition of the property.',
+    'The information collected in this form is held by McGuire Real Estate Limited for the purpose of this sale and is disclosed to prospective purchasers and their professional advisers as part of the marketing and sale of the property.',
+  ],
+    VD_SECTIONS: [
+    ['Property Condition and Known Issues', [
+      { k: 'pegs', q: 'Can the Vendor identify the location of ALL boundary pegs?' },
+      { k: 'unpaid', why: 1, q: 'Is there any item on or about the property that is not fully paid for and/or will not be cleared on settlement? (e.g. renovations, outbuildings, insulation; include anything that may be added to rates)' },
+      { k: 'history', why: 1, q: 'Is there anything in the property\'s history or recent past that would be of interest or concern to a purchaser? (e.g. death on the property, nearby developments)' },
+      { k: 'meth', why: 1, from: 'meth', q: 'Is the Vendor aware of any known or suspected methamphetamine contamination, or has the property been tested?' },
+      { k: 'chattels', why: 1, q: 'Are there any chattels not working? (Check with tenants if rented and unsure)' },
+      { k: 'repairs', why: 1, q: 'Are there any repairs and/or maintenance the Vendor intends to complete after listing and before settlement?' },
+      { k: 'faults', text: 1, from: 'def', q: 'Describe any known or suspected faults or issues on or about the property, including any indication of subsidence or water damage.' },
+      { k: 'era', from: 'year', q: 'Was any part of the building or additions constructed in the 1995 to 2004 period? (noted for potential weathertightness issues)' },
+      { k: 'wt', why: 1, from: 'wt', q: 'Is the Vendor aware of any weathertightness issues (water leaks, past or present, damage)?' },
+      { k: 'dux', why: 1, q: 'Is the Vendor aware of any Dux Qest plumbing, Weatherside cladding, or Monolithic cladding?' },
+      { k: 'asbestos', why: 1, q: 'Is the Vendor aware, or does the Vendor suspect, the presence of asbestos-containing materials anywhere on the property?' },
+      { k: 'pipes', why: 1, q: 'Has there been any evidence or experience of blocked or troublesome underground pipes?' },
+      { k: 'reno', text: 1, from: 'work', q: 'Describe any renovation work done, regardless of whether it required Permits, Consents, or Code Compliance Certificates (e.g. shower alterations).' },
+      { k: 'consents', q: 'To your knowledge, have Permits / Consents / Certificates required for any part of the property been issued and signed off by the Local Authority where required by law?' },
+      { k: 'lim', why: 1, q: 'Has a LIM been obtained for this property? If so, when, and is it available for review?' },
+      { k: 'claims', why: 1, q: 'Has the property been the subject of any insurance claim (e.g. weathertightness, fire, flood, subsidence, or other)?' },
+      { k: 'reports', why: 1, q: 'Has any previous prospective purchaser\'s investigation (including any report from an inspector, valuer, or other professional) identified an issue with the property? If so, has a copy of that report been provided to the Agent?' },
+      { k: 'hazard', why: 1, from: 'haz', q: 'Is the Vendor aware of any safety hazard at the property that a visitor or attending professional should be made aware of (e.g. uneven surfaces, animals on site, pool or spa, loose fittings, steep or restricted access)?' },
+    ]],
+    ['Services and Features', [
+      { k: 'water', q: 'Is the property on town water supply?' },
+      { k: 'sewer', q: 'Is the property on town sewerage?' },
+      { k: 'storm', q: 'Is the property on town stormwater?' },
+      { k: 'power', q: 'Is the property on the national electrical network?' },
+      { k: 'internet', text: 1, q: 'Describe the connection to internet at the property:' },
+      { k: 'insulation', text: 1, from: 'heat', q: 'Where is insulation present in the primary dwelling?' },
+      { k: 'glazing', text: 1, q: 'Describe the glazing present:' },
+    ]],
+    ['Registrations and Fire Appliances', [
+      { k: 'hai', why: 1, q: 'Is the property registered with the Territorial Authority as a home and income (e.g. a registered B&B)? If \'Yes\', does a Code Compliance Certificate exist?' },
+      { k: 'burner', why: 1, q: 'Is there a wood burner or similar fire appliance? If \'Yes\', does it have a Code Compliance Certificate, and is that certificate available?' },
+    ]],
+  ],
+    VD_STATEMENT: [
+    'We hereby declare that any information about any issue concerning any aspect of the property and its neighbourhood arising at any time that is known to us, and that may be of concern or interest to a purchaser, has been noted above, or if discovered subsequently, will be immediately advised in writing to the Agent (Tim McGuire, McGuire Real Estate Limited).',
+    'We declare that:',
+    'i. We have not given consents for proposed work to any neighbour; and',
+    'ii. We do not know of any council requisitions affecting this property; and',
+    'iii. We have not withheld any known material information about the property; and',
+    'iv. There is no debt owing on any part of the property that will not be cleared on settlement date; and',
+    'v. We are not aware of any defects above or below ground that would affect its weathertightness, durability, or habitability; and',
+    'vi. We will promptly notify the Agent in writing of any change to the information provided in this declaration, including any report or notice received from a prospective purchaser or their professional adviser during the marketing of the property; and',
+    'vii. We have provided the Agent with all information known to us relevant to the property\'s current Health and Safety Notice.',
+  ],
+    HH_INTRO: 'Vendor site assessment: mark each item, add notes for any non-compliant areas. Deadline: 1 Jul 2025 (or within 120 days of a new/renewed tenancy). Penalties up to $7,200 per breach.',
+    HH_CHECK: [
+    ['Heating', [['heat1', 'Fixed heater in main living room (heat pump, wood burner, or electric) capable of 18°C'], ['heat2', 'Heater capacity confirmed via Tenancy Services Heating Assessment Tool (see page 2)'], ['heat3', 'Heater in good working order and maintained']]],
+    ['Insulation', [['ins1', 'Ceiling insulation meets regional R-value (R2.9 North Island / R3.3 South Island & Central North Island)'], ['ins2', 'Existing ceiling insulation ≥120mm thick and in reasonable condition (if pre-2008 Code)'], ['ins3', 'Underfloor insulation ≥R1.3 nationwide'], ['ins4', 'Installed per NZS 4246:2016; code compliance certificate/CoA on file if applicable']]],
+    ['Ventilation', [['ven1', 'Openable windows in living room, dining room, kitchen, and bedrooms'], ['ven2', 'Kitchen extractor/rangehood ≥150mm diameter or 50 L/s (if installed post 1 Jul 2019)'], ['ven3', 'Bathroom extractor fan ≥120mm diameter or 25 L/s (if installed post 1 Jul 2019)'], ['ven4', 'Continuous mechanical ventilation (if used, approved post 1 Nov 2019) exhausts to outdoors']]],
+    ['Moisture & Drainage', [['moi1', 'Gutters, downpipes, and drains in good condition and free of blockages'], ['moi2', 'Ground moisture barrier installed in enclosed subfloor (or exemption confirmed)'], ['moi3', 'No visible signs of moisture ingress (leaks, damp spots)']]],
+    ['Draught Stopping', [['dra1', 'Unused fireplaces/chimneys sealed'], ['dra2', 'Gaps or holes larger than a $2 coin sealed (walls, ceilings, windows, floors, doors)'], ['dra3', 'Draught-stopping measures (weather stripping, door sweeps) in place and effective']]],
+    ['Documentation', [['doc1', 'Healthy Homes Compliance Statement completed (see page 3)'], ['doc2', 'Supporting records/certificates/invoices on file'], ['doc3', 'Professional assessment completed, if applicable ($300 to $500)']]],
+  ],
+    HH_WS_INTRO: 'Record these measurements on site. Required heating capacity must then be calculated using the official Tenancy Services Heating Assessment Tool (tenancy.govt.nz/heating-tool) or the Schedule 2 formula in the Residential Tenancies (Healthy Homes Standards) Regulations 2019. Do not estimate: compliance is measured against the tool/formula result, not a guess.',
+    HH_WS: [['dims', 'Main living room: length (m) × width (m) × stud height (m)'], ['area', 'Main living room floor area (m²)'], ['glaz', 'Total window/glazing area in main living room (m²)'], ['gtype', 'Glazing type: single or double glazed'], ['ceil', 'Ceiling insulation R-value (or thickness if R-value unknown)'], ['under', 'Underfloor insulation R-value (write N/A if slab-on-ground)'], ['wall', 'Wall insulation R-value, if known'], ['ta', 'Territorial authority / region the property is in (sets climate zone)'], ['heater', 'Existing fixed heater(s): type and rated capacity (kW)'], ['exempt', 'Modern dwelling / relevant apartment exemption applies? (reg 3)', 'yn']],
+    HH_ST_INTRO: 'Use this page to record findings for the landlord\'s official Healthy Homes Compliance Statement (tenancy.govt.nz/healthy-homes/compliance-statement). This is a data-capture summary for the vendor/landlord; it is not a substitute for the legal statement, which the landlord must complete, sign, and attach to the tenancy agreement.',
+    HH_ST: [
+    ['Heating', [['h1', 'Required heating capacity (kW), from page 2'], ['h2', 'Installed qualifying heater(s): type & capacity (kW)'], ['h3', 'Tolerance / top-up allowance applies? (Y/N + details)'], ['h4', 'Modern dwelling / relevant apartment exemption? (Y/N)']]],
+    ['Insulation: Ceiling', [['c1', 'R-value when installed (or thickness if unknown)'], ['c2', 'Date installed / date last inspected'], ['c3', 'Type of insulation (segments, loose-fill, blanket, etc.)'], ['c4', 'Condition reasonable: no mould, damage, gaps? (Y/N)'], ['c5', 'Any exempt areas & reason (not reasonably practicable)']]],
+    ['Insulation: Underfloor', [['u1', 'R-value when installed'], ['u2', 'Date installed / date last inspected'], ['u3', 'Type of insulation'], ['u4', 'Condition reasonable? (Y/N)'], ['u5', 'Partial exemption for pre-existing compliant insulation? (Y/N)']]],
+    ['Insulation: Wall', [['w1', 'Wall insulation present? Type/condition if known (not compulsory)']]],
+    ['Ventilation', [['v1', 'Openable windows in all habitable rooms? (Y/N, list exceptions)'], ['v2', 'Kitchen extractor fan: diameter/capacity & install date'], ['v3', 'Bathroom extractor fan: diameter/capacity & install date'], ['v4', 'Continuous mechanical ventilation? (Y/N + exhaust capacity L/s)']]],
+    ['Moisture & Drainage', [['m1', 'Gutters/downpipes drain efficiently to appropriate outfall? (Y/N)'], ['m2', 'Enclosed subfloor present? (Y/N)'], ['m3', 'Ground moisture barrier installed if enclosed subfloor? (Y/N + reason if not)']]],
+    ['Draught Stopping', [['d1', 'Open fireplaces present? (Y/N + blocked off or written tenant agreement)'], ['d2', 'Free from unreasonable gaps/draughts? (Y/N + explanation if not)']]],
+  ],
+  };
+  const { VD_LEAD, VD_INTRO, VD_SECTIONS, VD_STATEMENT, HH_INTRO, HH_CHECK, HH_WS_INTRO, HH_WS, HH_ST_INTRO, HH_ST } = FORM_TEXT;
+  const YNU = [['yes', 'Yes'], ['no', 'No'], ['unknown', 'Unknown']];
+  const ynuText = a => (YNU.find(x => x[0] === a) || ['', ''])[1];
+  const VD_QS = VD_SECTIONS.flatMap(s => s[1]);
+
+  const YNNA = ['Y', 'N', 'N/A'];
+  const FORM_LABEL = { vendor_declaration: 'Vendor Declaration', healthy_homes: 'Healthy Homes checklist and statement' };
+
+  // what the property file already knows, offered for confirmation and used to fill matching questions
+  function vdFromFile(prop, an) {
+    const d = Object.assign({}, an || {}, (prop || {}).description || {}, (prop || {}).disclosures || {});
+    const yn = (k, det) => d[k] === 'yes' ? { a: 'yes', d: d[det] || '' } : d[k] === 'no' ? { a: 'no', d: '' } : null;
+    const yr = parseInt(d.pYear, 10);
+    const haz = (d.hazards || []).join(', ') + (d.hazOther ? ((d.hazards || []).length ? '. ' : '') + d.hazOther : '');
+    return {
+      fill: {
+        meth: yn('meth', 'methDetail'), wt: yn('wt', 'wtDetail'),
+        faults: d.def === 'yes' ? { d: d.defDetail || '' } : d.def === 'no' ? { d: 'None known' } : null,
+        reno: d.work === 'yes' ? { d: d.workDetail || '' } : d.work === 'no' ? { d: 'None known' } : null,
+        era: yr >= 1995 && yr <= 2004 ? { a: 'yes', d: `Built about ${yr}` } : null,
+        hazard: haz ? { a: 'yes', d: haz } : null,
+        insulation: d.pHeat ? { d: d.pHeat } : null,
+      },
+      facts: [['Type', d.pType], ['Year built', d.pYear], ['Bedrooms / bathrooms', d.pBed || d.pBath ? `${d.pBed || '?'} / ${d.pBath || '?'}` : ''], ['Floor / land area', d.pFloor || d.pLand ? `${d.pFloor || '?'} m² / ${d.pLand || '?'} m²` : ''], ['Construction', d.pBuild], ['Parking', d.pPark], ['Heating and insulation', d.pHeat],
+        ['Chattels included', (d.chattels || []).join(', ') + (d.chatOther ? '. ' + d.chatOther : '')],
+        ['Work done and consents', d.work === 'yes' ? d.workDetail : d.work === 'no' ? 'None known' : ''], ['Weathertightness', d.wt === 'yes' ? d.wtDetail : d.wt === 'no' ? 'No issues known' : ''],
+        ['Methamphetamine', d.meth === 'yes' ? d.methDetail : d.meth === 'no' ? 'None known' : ''], ['Defects, notices or requisitions', d.def === 'yes' ? d.defDetail : d.def === 'no' ? 'None known' : ''], ['Hazards for visitors', haz]].filter(x => x[1]),
+    };
+  }
+  function vdDoc(data, address, names, when) {
+    const ans = data.answers || {};
+    return {
+      title: 'Vendor Declaration',
+      head: [['Client / Vendor(s):', names], ['Property Address:', address], ['Date:', fmtDate(when)]],
+      pages: [{
+        title: 'Vendor Declaration', sub: address, intro: [VD_LEAD].concat(VD_INTRO),
+        sections: [{ title: 'From the property file', rows: (data.facts || []).map(([k, v]) => [k, v, '']).concat([['The Vendor confirmed these details', data.fileOk ? 'Still correct' : 'Something has changed', data.fileOk ? '' : data.fileChanges || '']]) }]
+          .concat(VD_SECTIONS.map(([t, qs]) => ({ title: t, rows: qs.map(x => { const v = ans[x.k] || {}; return [x.q, x.text ? '' : ynuText(v.a), v.d || '']; }) })))
+          .concat([{ title: 'Additional Notes', rows: [['Additional Notes:', '', data.notes || 'None']] }]),
+        after: ['Vendor Statement'].concat(VD_STATEMENT),
+      }],
+      sign_title: 'Signed by',
+    };
+  }
+  function hhDoc(ad, address, names) {
+    ad = ad || {}; const c = ad.c || {}, ws = ad.ws || {}, res = ad.res || {}, st = ad.st || {};
+    return {
+      title: 'Healthy Homes Compliance Checklist and Statement',
+      head: [['Property address:', address], ['Landlord name(s):', names]],
+      pages: [
+        { title: 'Healthy Homes Compliance Checklist', sub: 'Page 1', intro: [HH_INTRO], sections: HH_CHECK.map(([t, items]) => ({ title: t, rows: items.map(([k, q]) => [q, (c[k] || {}).a ? 'Compliant: ' + c[k].a : '', (c[k] || {}).n || '']) })).concat([{ title: 'Assessment', rows: [['Assessed by:', ad.assessedBy || '', ''], ['Date:', ad.assessedOn ? fmtDate(ad.assessedOn + 'T12:00:00') : '', ''], ['Property address:', address, '']] }]) },
+        { title: 'Heating Assessment Worksheet', sub: 'Page 2', intro: [HH_WS_INTRO], sections: [{ title: 'On-site measurement / input', rows: HH_WS.map(([k, q]) => [q, ws[k] || '', '']) }, { title: 'Result (from official tool/formula)', rows: [['Heating capacity (kW)', res.req ? 'Required: ' + res.req : '', res.inst ? 'Installed: ' + res.inst : ''], ['Tolerance / top-up allowance applies?', res.tol || '', ''], ['Compliant', res.comp || '', '']] }], after: ['Tool link: tenancy.govt.nz/heating-tool'] },
+        { title: 'Compliance Statement: Data Capture', sub: 'Page 3', intro: [HH_ST_INTRO], sections: HH_ST.map(([t, items]) => ({ title: t, rows: items.map(([k, q]) => [q, st[k] || '', '']) })) },
+      ],
+      sign_title: 'Landlord name(s)',
+    };
+  }
+  // the same document on screen, as tiles
+  function docHTML(doc) {
+    return `${(doc.head || []).length ? `<div class="card tight"><div class="facts">${doc.head.map(([k, v]) => `<div class="fact"><div class="k">${esc(k.replace(/:$/, ''))}</div><div class="v">${esc(v || '')}</div></div>`).join('')}</div></div>` : ''}
+      ${doc.pages.map(pg => `<h2>${esc(pg.title)}${pg.sub && /^Page/.test(pg.sub) ? ` <span class="opt small">${esc(pg.sub)}</span>` : ''}</h2>${(pg.intro || []).map(t => `<p class="small">${esc(t)}</p>`).join('')}
+        ${(pg.sections || []).map(s => `<div class="card tight"><h3>${esc(s.title)}</h3>${s.rows.map(r => `<div class="fact"><div class="k">${esc(r[0])}</div><div class="v" style="font-weight:400">${esc([r[1], r[2]].filter(Boolean).join('. ') || 'Not answered')}</div></div>`).join('')}</div>`).join('')}
+        ${(pg.after || []).map((t, i) => i === 0 && t === 'Vendor Statement' ? `<h2>${esc(t)}</h2>` : `<p class="small">${esc(t)}</p>`).join('')}`).join('')}`;
+  }
+  const signersOf = people => people.filter(p => p.legal_name && p.signed_at);
+
+  /* vendor: the paperwork tiles on the "all done" page */
+  let FORMS = [], FSIGS = [], RECEIPTS = [];
+  async function loadForms() {
+    FORMS = []; FSIGS = []; RECEIPTS = [];
+    if (!A || !['signed', 'countersigned'].includes(A.status)) return;
+    try { const { data, error } = await sb.from('property_forms').select('*').eq('agreement_id', A.id); if (!error) FORMS = data || []; } catch (_) { }
+    try { const { data, error } = await sb.from('form_signatures').select('*').eq('agreement_id', A.id); if (!error) FSIGS = data || []; } catch (_) { }
+    try { const { data, error } = await sb.from('guide_receipts').select('*').eq('agreement_id', A.id); if (!error) RECEIPTS = data || []; } catch (_) { }
+  }
+  const formOf = k => FORMS.find(x => x.kind === k) || null;
+  const iSigned = fm => !!(ME && FSIGS.some(s => s.form_id === fm.id && s.person_id === ME.id));
+  function paperworkHTML() {
+    if (!A || !['signed', 'countersigned'].includes(A.status) || !ME) return '';
+    const vd = formOf('vendor_declaration'), hh = formOf('healthy_homes'), sp = GUIDES.sale_purchase;
+    const myRc = sp && RECEIPTS.find(r => r.person_id === ME.id && r.guide === 'sale_purchase' && r.version === sp.version);
+    const others = fm => signersOf(P).filter(p => !FSIGS.some(s => s.form_id === fm.id && s.person_id === p.id)).map(p => callName(p) || p.legal_name);
+    const tile = (title, body, btn) => `<div class="card ptile"><h3>${title}</h3>${body}${btn ? `<div class="toolbar">${btn}</div>` : ''}</div>`;
+    const vdTile = !vd ? tile('Vendor Declaration', '<p class="small">What buyers should know about the property, from what you know. We\'ve filled in what your agreement already says, so it\'s mostly checking. About 10 minutes.</p>', '<button class="btn primary" type="button" data-form="vendor_declaration">Start</button>')
+      : vd.status === 'signed' ? tile('Vendor Declaration', `<span class="status done">Signed by ${signersOf(P).length > 1 ? 'all of you' : 'you'} ${esc(fmtDate(vd.signed_at))}</span><p class="small" style="margin:8px 0 0">${vd.countersigned_at ? 'Tim has signed it too, as licensee, and filed it with your property.' : 'Tim signs it next, as licensee, and files it with your property.'}</p>`)
+      : iSigned(vd) ? tile('Vendor Declaration', `<span class="status pending">You've signed. Waiting on ${esc(joinNames(others(vd)))}</span>`)
+      : FSIGS.some(s => s.form_id === vd.id) ? tile('Vendor Declaration', `<span class="status pending">Ready for your signature</span>`, `<button class="btn primary" type="button" data-form="vendor_declaration">Check and sign</button>`)
+      : tile('Vendor Declaration', `<span class="status pending">Started</span>`, '<button class="btn primary" type="button" data-form="vendor_declaration">Carry on</button>');
+    const hhTile = !hh ? '' : hh.status === 'signed' ? tile('Healthy Homes', `<span class="status done">Signed ${esc(fmtDate(hh.signed_at))}</span>`)
+      : hh.status === 'draft' ? tile('Healthy Homes', '<p class="small" style="margin:0">Tim will take the measurements on site and fill in the checklist. Once he has, you\'ll sign it here as landlord.</p>')
+      : iSigned(hh) ? tile('Healthy Homes', `<span class="status pending">You've signed. Waiting on ${esc(joinNames(others(hh)))}</span>`)
+      : tile('Healthy Homes', '<span class="status pending">Tim has filled in the checklist. Please check it and sign as landlord.</span>', '<button class="btn primary" type="button" data-form="healthy_homes">Check and sign</button>');
+    const spTile = !sp ? '' : myRc ? tile('Before you sell', `<span class="status done">Guide received ${esc(fmtDate(myRc.received_at))}</span><p class="small" style="margin:8px 0 0">${esc(sp.title)}, version ${esc(sp.version)}. <a href="${esc(sp.url)}" target="_blank" rel="noopener">Read it again</a></p>`)
+      : tile('Before you sell', `<p class="small">Before anyone makes an offer, please read the Real Estate Authority's guide to sale and purchase agreements. It explains the agreement a buyer will sign.</p>`, '<button class="btn primary" type="button" id="spOpen">Read the guide</button>');
+    return `<h2>Paperwork still to do</h2><div class="ptiles">${spTile}${vdTile}${hhTile}</div>`;
+  }
+  function wirePaperwork() {
+    $$('[data-form]').forEach(b => b.addEventListener('click', () => viewVendorForm(b.dataset.form)));
+    const sp = $('#spOpen'); if (sp) sp.addEventListener('click', viewBeforeYouSell);
+  }
+
+  /* vendor: "Before you sell", the REA sale and purchase guide with its own dated receipt */
+  function guideViewer(g) {
+    return `<div class="guide-inline"><iframe src="${esc(g.url)}" title="${esc(g.title)}"></iframe><p class="small" style="margin:6px 0 0">${esc(g.title)}, version ${esc(g.version)}. <a href="${esc(g.url)}" target="_blank" rel="noopener">Open it in a new tab</a></p></div>`;
+  }
+  function viewBeforeYouSell() {
+    const g = GUIDES.sale_purchase; if (!g) return showStep(LAST);
+    header('Before you sell', '', 100);
+    main().innerHTML = `<section class="screen active">
+      <h1>Before you sell</h1>
+      <p class="lede">When a buyer makes an offer, you'll both sign a sale and purchase agreement. The Real Estate Authority's guide explains what's in it. Please read it now, so nothing is new to you when an offer comes in.</p>
+      ${guideViewer(g)}
+      <div class="card tight"><label class="choice cb" style="margin:0"><input type="checkbox" id="spOk"><span class="mark"></span><span><span class="ct">I've received the Real Estate Authority guide to sale and purchase agreements</span><span class="cd">This is recorded with today's date</span></span></label></div>
+      <div class="err"></div></section>`;
+    actions(true, 'Not now', 'Confirm I\'ve received it');
+    onBack = () => showStep(LAST);
+    onNext = async () => {
+      if (!$('#spOk').checked) return err('Tick the box once you\'ve received the guide.');
+      await must(sb.rpc('vendor_guide_receipt', { a: A.id, p_guide: 'sale_purchase', p_version: g.version, p_file: g.file, p_sha256: g.sha256 || null, p_user_agent: navigator.userAgent }));
+      await loadForms(); toast('Thanks. Your receipt is recorded.'); showStep(LAST);
+    };
+    top();
+  }
+
+  /* vendor: the Vendor Declaration (four short steps), or check and sign a form someone has started */
+  let VF = null;
+  async function viewVendorForm(kind) {
+    let fm = formOf(kind);
+    if (!fm) { const id = await must(sb.rpc('vendor_form_start', { a: A.id, p_kind: kind })); await loadForms(); fm = FORMS.find(x => x.id === id); }
+    if (!fm) return showStep(LAST);
+    let prop = null; if (A.property_id) { try { const { data } = await sb.from('properties').select('*').eq('id', A.property_id).single(); prop = data; } catch (_) { } }
+    const W = JSON.parse(JSON.stringify(fm.data || {})); W.answers ||= {}; W.pre ||= {};
+    const ff = vdFromFile(prop, A.answers);
+    if (!W.facts) { W.facts = ff.facts; Object.entries(ff.fill).forEach(([k, v]) => { if (v && !W.answers[k]) { W.answers[k] = v; W.pre[k] = true; } }); }
+    const locked = FSIGS.some(s => s.form_id === fm.id) || fm.kind === 'healthy_homes';
+    VF = { fm, W, locked };
+    vfStep(locked ? 3 : Math.min(+(W._step || 0), 3));
+  }
+  const VF_STEPS = ['Your property file', 'Condition and known issues', 'Services, registrations and tenancy', 'Statement and signing'];
+  const ynuRow = (x, v, pre) => `<div class="card tight vdq" data-q="${x.k}"><h3 style="font-size:16px">${esc(x.q)}</h3>${pre ? '<span class="src-badge">From your property file. Please check</span>' : ''}
+    ${x.text ? '' : `<div class="choices three">${YNU.map(([val, l]) => `<label class="choice"><input type="radio" name="vq_${x.k}" value="${val}" ${v.a === val ? 'checked' : ''}><span class="mark"></span><span class="ct">${l}</span></label>`).join('')}</div>`}
+    <label class="f" for="vqd_${x.k}">${x.text ? 'Your answer' : 'Details'} ${x.text ? '' : '<span class="opt">(' + (x.why ? 'needed if Yes' : 'optional') + ')</span>'}</label><textarea id="vqd_${x.k}" data-qd="${x.k}">${esc(v.d || '')}</textarea></div>`;
+  function vfRead() {
+    const W = VF.W;
+    $$('.vdq').forEach(c => { const k = c.dataset.q, r = $(`input[name="vq_${k}"]:checked`, c), d = $('[data-qd]', c).value.trim(); W.answers[k] = Object.assign({}, W.answers[k], r ? { a: r.value } : {}, { d }); });
+    const fo = $('input[name="vfFile"]:checked'); if (fo) W.fileOk = fo.value === 'ok';
+    if ($('#vfChanges')) W.fileChanges = $('#vfChanges').value.trim();
+    if ($('#vfNotes')) W.notes = $('#vfNotes').value.trim();
+    const tn = $('input[name="vfTen"]:checked'); if (tn) W.tenanted = tn.value;
+    const hh = $('input[name="vfHH"]:checked'); if (hh) W.hh = hh.value;
+  }
+  function vfCheck(i) {
+    const W = VF.W;
+    if (i === 0) { if (W.fileOk === undefined) return 'Let us know if these details are still correct.'; if (!W.fileOk && !W.fileChanges) return 'Tell us what has changed.'; }
+    const qs = i === 1 ? VD_SECTIONS[0][1] : i === 2 ? VD_SECTIONS[1][1].concat(VD_SECTIONS[2][1]) : [];
+    for (const x of qs) { const v = W.answers[x.k] || {}; if (x.text ? !v.d : !v.a) return 'Please answer each question. Choose Unknown if you\'re not sure.'; if (x.why && v.a === 'yes' && !v.d) return 'Add a few details for anything you answered Yes to.'; }
+    if (i === 2) { if (!W.tenanted) return 'Let us know whether the property is tenanted.'; if (W.tenanted !== 'no' && !W.hh) return 'Let us know about the Healthy Homes checklist.'; }
+    return '';
+  }
+  function vfStep(i) {
+    const { fm, W, locked } = VF, isHH = fm.kind === 'healthy_homes';
+    const names = signersOf(P).map(p => p.legal_name).join(' and ');
+    header(FORM_LABEL[fm.kind], locked ? '' : `Step ${i + 1} of 4`, locked ? 100 : (i + 1) / 4 * 100);
+    let h = '';
+    if (i === 0) h = `<h1>Vendor Declaration</h1><p class="lede">${esc(VD_LEAD)} Your agreement already tells us a lot, so you'll mostly be checking. Your answers save as you go.</p>
+      ${VD_INTRO.map(t => `<p class="small">${esc(t)}</p>`).join('')}
+      <h2>What your property file says</h2>
+      <div class="card tight">${(W.facts || []).length ? W.facts.map(([k, v]) => `<div class="fact"><div class="k">${esc(k)}</div><div class="v" style="font-weight:400">${esc(v)}</div></div>`).join('') : '<p class="small" style="margin:0">Nothing recorded yet.</p>'}</div>
+      <div class="choices"><label class="choice"><input type="radio" name="vfFile" value="ok" ${W.fileOk === true ? 'checked' : ''}><span class="mark"></span><span class="ct">These are still correct</span></label><label class="choice"><input type="radio" name="vfFile" value="changed" ${W.fileOk === false ? 'checked' : ''}><span class="mark"></span><span class="ct">Something has changed</span></label></div>
+      <div id="vfChWrap" ${W.fileOk === false ? '' : 'hidden'}><label class="f" for="vfChanges">What has changed?</label><textarea id="vfChanges">${esc(W.fileChanges || '')}</textarea></div>`;
+    if (i === 1) h = `<h1>${esc(VD_SECTIONS[0][0])}</h1><p class="lede">Answer from your own knowledge. If you're not sure, choose Unknown.</p>${VD_SECTIONS[0][1].map(x => ynuRow(x, W.answers[x.k] || {}, W.pre[x.k])).join('')}`;
+    if (i === 2) h = `<h1>${esc(VD_SECTIONS[1][0])}</h1>${VD_SECTIONS[1][1].map(x => ynuRow(x, W.answers[x.k] || {}, W.pre[x.k])).join('')}
+      <h2>${esc(VD_SECTIONS[2][0])}</h2>${VD_SECTIONS[2][1].map(x => ynuRow(x, W.answers[x.k] || {}, W.pre[x.k])).join('')}
+      <label class="f" for="vfNotes">Additional Notes: <span class="opt">(optional)</span></label><textarea id="vfNotes">${esc(W.notes || '')}</textarea>
+      <h2>Tenants</h2><p class="small">Is the property tenanted, or will it be before settlement?</p>
+      <div class="choices">${[['now', 'Yes, it\'s tenanted now'], ['will', 'It will be tenanted'], ['no', 'No']].map(([v, l]) => `<label class="choice"><input type="radio" name="vfTen" value="${v}" ${W.tenanted === v ? 'checked' : ''}><span class="mark"></span><span class="ct">${l}</span></label>`).join('')}</div>
+      <div id="vfHHWrap" ${W.tenanted && W.tenanted !== 'no' ? '' : 'hidden'}><div class="card note tight"><h3>Healthy Homes checklist and statement</h3><p class="small" style="margin:0">As it's rented, I can complete a Healthy Homes checklist with you. I take the measurements on site and fill it in on my phone, and you sign it as landlord. It helps you with your compliance statement, and buyers often ask for it.</p></div>
+        <div class="choices">${[['yes', 'Yes please'], ['no', 'Not needed for now']].map(([v, l]) => `<label class="choice"><input type="radio" name="vfHH" value="${v}" ${W.hh === v ? 'checked' : ''}><span class="mark"></span><span class="ct">${l}</span></label>`).join('')}</div></div>`;
+    if (i === 3) {
+      const doc = isHH ? hhDoc(fm.agent_data, A.address, names) : vdDoc(W, A.address, names, new Date());
+      const mine = iSigned(fm);
+      h = `<h1>${isHH ? 'Check and sign your Healthy Homes checklist' : locked ? 'Check and sign the Vendor Declaration' : 'Vendor Statement and signing'}</h1>
+        <p class="lede">${locked && !isHH ? 'These answers are already signed by someone else on the agreement, so they can\'t change here. If anything is wrong, call Tim before signing.' : isHH ? 'Tim filled this in on site. Check it, and call him on 027 562 7207 if anything is wrong before you sign.' : 'Here\'s your declaration. Check it, then sign below. Everyone on the agreement signs it, each on their own phone.'}</p>
+        ${locked || isHH ? docHTML(doc) : `${docHTML({ pages: [{ title: 'Vendor Statement', after: VD_STATEMENT }] })}<details class="card tight"><summary class="small">See all your answers</summary>${docHTML(doc)}</details>`}
+        ${mine ? '<div class="card okc tight"><p class="small" style="margin:0">You\'ve signed this.</p></div>' : `<h2>Sign</h2><div class="card tight">
+          <label class="choice cb"><input type="checkbox" id="vfOk"><span class="mark"></span><span><span class="ct">${isHH ? 'I\'ve checked this checklist and statement' : 'I declare the Vendor Statement is true, and my answers are correct to the best of my knowledge'}</span></span></label>
+          <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin:8px 0"><h3 style="margin:0">${esc(ME.legal_name)}</h3><button class="btn link" type="button" id="vfClr">Clear</button></div>
+          <div class="sig-wrap"><canvas id="vfSig" aria-label="Signature pad"></canvas><div class="sig-line"></div><span class="hint">Sign here with your finger or mouse</span></div>${saveNote('Save my signature and sign')}</div>`}`;
+    }
+    main().innerHTML = `<section class="screen active">${h}<div class="err"></div></section>`;
+    const fu = () => { const c = $('input[name="vfFile"]:checked'); if ($('#vfChWrap')) $('#vfChWrap').hidden = !(c && c.value === 'changed'); };
+    $$('input[name="vfFile"]').forEach(r => r.addEventListener('change', fu));
+    const tu = () => { const c = $('input[name="vfTen"]:checked'); if ($('#vfHHWrap')) $('#vfHHWrap').hidden = !(c && c.value !== 'no'); };
+    $$('input[name="vfTen"]').forEach(r => r.addEventListener('change', tu));
+    let pad = null; if ($('#vfSig')) { pad = makePad($('#vfSig')); $('#vfClr').addEventListener('click', () => pad.clear()); }
+    const signing = i === 3 && !iSigned(fm);
+    actions(true, i === 0 || locked ? 'Not now' : 'Back', signing ? 'Save my signature and sign' : i === 3 ? 'Done' : 'Continue');
+    onBack = () => { if (i === 0 || locked) return showStep(LAST); vfRead(); vfStep(i - 1); };
+    onNext = async () => {
+      if (i < 3) {
+        vfRead(); const e = vfCheck(i); if (e) return err(e);
+        W._step = i + 1; if (i === 2) W.complete = true;
+        await must(sb.rpc('vendor_form_save', { f: fm.id, patch: W }));
+        if (i === 2 && W.tenanted !== 'no' && W.hh === 'yes' && !formOf('healthy_homes')) { await must(sb.rpc('vendor_form_start', { a: A.id, p_kind: 'healthy_homes' })); await loadForms(); }
+        return vfStep(i + 1);
+      }
+      if (!signing) return showStep(LAST);
+      if (!locked) { const bad = [0, 1, 2].map(vfCheck).find(Boolean); if (bad) return err(bad); }
+      if (!$('#vfOk').checked) return err(isHH ? 'Tick the box once you\'ve checked it.' : 'Tick the box to make the declaration, or call Tim if something isn\'t right.');
+      if (!pad || !pad.drawn()) return err('Please sign in the box.');
+      if (!locked) await must(sb.rpc('vendor_form_save', { f: fm.id, patch: W }));
+      const path = await uploadSig($('#vfSig'), A.id, 'form-' + fm.id + '-' + ME.id);
+      const doc = isHH ? hhDoc(fm.agent_data, A.address, names) : vdDoc(W, A.address, names, new Date());
+      const res = await must(sb.rpc('vendor_form_sign', { f: fm.id, p_image_path: path, p_snapshot: { document: doc.title, doc, property: A.address, agreement_ref: A.ref, signer: { name: ME.legal_name, email: SESSION.user.email }, signed_at_client: new Date().toISOString() }, p_user_agent: navigator.userAgent }));
+      await sigSaved($('#vfSig'), 'Signature saved', `You've signed the ${FORM_LABEL[fm.kind]}`);
+      if (res && res.remaining === 0 && isHH) { const { error: fe } = await sb.functions.invoke('notify', { body: { type: 'form_signed', agreement_id: A.id, form_id: fm.id } }); if (fe) console.warn('form pdf', fe); }
+      await loadForms();
+      toast(res && res.remaining === 0 ? (isHH ? 'Signed. Tim has a copy.' : 'Signed. Tim signs it next, as licensee.') : 'Signed. Waiting on the others.');
+      showStep(LAST);
+    };
+    top();
+  }
+
+  /* agent: the documents tile on the property page, Tim's Healthy Homes checklist, and signing in person */
+  function formsTileHTML(forms, ag) {
+    if (!ag || !['signed', 'countersigned'].includes(ag.status)) return '';
+    const st = fm => fm.status === 'signed' && fm.kind === 'vendor_declaration' && !fm.countersigned_at ? '<span class="status pending">Vendors signed. Your countersignature next</span>' : fm.status === 'signed' ? `<span class="status done">Signed ${esc(fmtDate(fm.countersigned_at || fm.signed_at))}</span>${fm.document_id ? '' : ` <span class="status pending">PDF not filed yet</span>`}` : fm.status === 'ready' ? '<span class="status pending">Ready to sign</span>' : fm.kind === 'healthy_homes' ? '<span class="status pending">Measurements to do</span>' : (fm.data || {}).complete ? '<span class="status pending">Answered, to sign</span>' : '<span class="status pending">Vendor filling in</span>';
+    return `<div class="card ptile"><h3>Documents after signing</h3>
+      ${forms.length ? forms.map(fm => `<div class="fact"><div class="k">${esc(FORM_LABEL[fm.kind])}</div><div class="v" style="font-weight:400;display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><span>${st(fm)}</span><button class="btn link" type="button" data-fopen="${fm.id}">Open</button></div></div>`).join('')
+        : '<p class="small" style="margin:0">The vendor fills in the Vendor Declaration from their agreement page. If they say it\'s tenanted and want one, a Healthy Homes checklist appears here for you.</p>'}
+    </div>`;
+  }
+  async function viewFormAgent(fid) {
+    header('Document', '', 0); actions(false);
+    const fm = await must(sb.from('property_forms').select('*').eq('id', fid).single());
+    const ag = await must(sb.from('agreements').select('*').eq('id', fm.agreement_id).single());
+    const people = await must(sb.from('agreement_people').select('*').eq('agreement_id', fm.agreement_id).order('position'));
+    const fs = await must(sb.from('form_signatures').select('*').eq('form_id', fid));
+    const signers = signersOf(people), names = signers.map(p => p.legal_name).join(' and ');
+    const isHH = fm.kind === 'healthy_homes', editable = isHH && !fs.length;
+    const ad = JSON.parse(JSON.stringify(fm.agent_data || {})); ad.c ||= {}; ad.ws ||= {}; ad.res ||= {}; ad.st ||= {};
+    if (isHH && !ad.assessedBy) ad.assessedBy = 'Tim McGuire, McGuire Real Estate';
+    const pick = (name, val, opts) => `<div class="chip-row">${opts.map(o => `<label class="chip"><input type="radio" name="${name}" value="${esc(o)}" ${val === o ? 'checked' : ''}>${esc(o)}</label>`).join('')}</div>`;
+    const doc = isHH ? hhDoc(ad, ag.address, names) : vdDoc(fm.data || {}, ag.address, names, fs[0] ? fs[0].signed_at : new Date());
+    const canSign = fm.status !== 'signed' && (isHH ? fm.status === 'ready' : (fm.data || {}).complete);
+    const needsCounter = !isHH && fm.status === 'signed' && !fm.countersigned_at;
+    const toSign = signers.filter(p => !fs.some(s => s.person_id === p.id));
+    main().innerHTML = `<div class="view-pad">
+      <div class="toolbar no-print"><button class="btn ghost" type="button" id="fBack">Property file</button></div>
+      <span class="agent-flag">Only you see this</span>
+      <h1>${esc(FORM_LABEL[fm.kind])}</h1>
+      <p class="small">${esc(ag.address)} · ${esc(ag.ref)} · ${esc(fm.form_version)}</p>
+      ${needsCounter ? `<div class="card"><h3>Countersign as licensee</h3><p class="small">Every vendor has signed. The declaration says it is noted "by the Licensee, who has also signed below": sign here as Timothy McGuire REA#20117983 on behalf of McGuire Real Estate Limited. It's then filed on the property and emailed to you.</p><div class="sig-wrap"><canvas id="fSigA" aria-label="Your signature pad"></canvas><div class="sig-line"></div><span class="hint">Sign here</span></div>${saveNote('Save my signature and countersign')}<div class="toolbar"><button class="btn primary" type="button" id="fCounter">Save my signature and countersign</button></div><div class="err" id="fCErr"></div></div>` : ''}
+      ${fm.status === 'signed' && !needsCounter ? `<div class="card okc tight"><p class="small" style="margin:0">Signed by everyone ${esc(fmtDT(fm.countersigned_at || fm.signed_at))}. ${fm.document_id ? 'The PDF is filed in the property\'s documents.' : 'The PDF hasn\'t been filed yet.'}${fm.pdf_error ? ' ' + esc(fm.pdf_error) : ''}</p>${fm.document_id ? '' : '<div class="toolbar"><button class="btn primary" type="button" id="fFile">Make the PDF and file it</button></div>'}</div>` : ''}
+      ${editable ? `<h2>Healthy Homes Compliance Checklist <span class="opt small">Page 1</span></h2><p class="small">${esc(HH_INTRO)}</p>
+        ${HH_CHECK.map(([t, items]) => `<div class="card tight"><h3>${esc(t)}</h3>${items.map(([k, q]) => `<div class="hhq" data-hk="${k}"><p class="small" style="margin:8px 0 4px;color:var(--ink)">${esc(q)}</p>${pick('hc_' + k, (ad.c[k] || {}).a, YNNA)}<input type="text" data-hn placeholder="Notes" value="${esc((ad.c[k] || {}).n || '')}" aria-label="Notes"></div>`).join('')}</div>`).join('')}
+        <div class="row2 stack"><div><label class="f" for="hAss">Assessed by</label><input type="text" id="hAss" value="${esc(ad.assessedBy || '')}"></div><div><label class="f" for="hDate">Date</label><input type="date" id="hDate" value="${esc(ad.assessedOn || isoDay(new Date()))}"></div></div>
+        <h2>Heating Assessment Worksheet <span class="opt small">Page 2</span></h2><p class="small">${esc(HH_WS_INTRO)}</p>
+        <div class="card tight">${HH_WS.map(([k, q, t]) => t === 'yn' ? `<p class="small" style="margin:8px 0 4px;color:var(--ink)">${esc(q)}</p>${pick('hw_' + k, ad.ws[k], YNNA)}` : `<label class="f">${esc(q)}</label><input type="text" data-hw="${k}" value="${esc(ad.ws[k] || '')}">`).join('')}</div>
+        <div class="card tight"><h3>Result (from official tool/formula)</h3><div class="row2"><div><label class="f" for="hReq">Heating capacity (kW): required</label><input type="text" id="hReq" inputmode="decimal" value="${esc(ad.res.req || '')}"></div><div><label class="f" for="hInst">Installed</label><input type="text" id="hInst" inputmode="decimal" value="${esc(ad.res.inst || '')}"></div></div>
+          <p class="small" style="margin:8px 0 4px;color:var(--ink)">Tolerance / top-up allowance applies?</p>${pick('hr_tol', ad.res.tol, YNNA)}<p class="small" style="margin:8px 0 4px;color:var(--ink)">Compliant</p>${pick('hr_comp', ad.res.comp, YNNA)}
+          <p class="small" style="margin:10px 0 0">Tool link: <a href="https://www.tenancy.govt.nz/heating-tool/" target="_blank" rel="noopener">tenancy.govt.nz/heating-tool</a></p></div>
+        <h2>Compliance Statement: Data Capture <span class="opt small">Page 3</span></h2><p class="small">${esc(HH_ST_INTRO)}</p>
+        ${HH_ST.map(([t, items]) => `<div class="card tight"><h3>${esc(t)}</h3>${items.map(([k, q]) => `<label class="f">${esc(q)}</label><input type="text" data-hs="${k}" value="${esc(ad.st[k] || '')}">`).join('')}</div>`).join('')}
+        <div class="toolbar"><button class="btn ghost" type="button" id="hSave">Save</button><button class="btn primary" type="button" id="hReady">${fm.status === 'ready' ? 'Save, still ready to sign' : 'Ready for the landlord to sign'}</button></div><div class="err" id="hErr"></div>`
+        : docHTML(doc)}
+      ${canSign && toSign.length ? `<h2>Sign in person</h2><p class="small">${isHH ? 'The landlord' : 'Each vendor'} can sign here on your phone, witnessed by you, or on their own phone from their agreement page.</p>
+        ${toSign.map(p => `<div class="card tight" data-fsigner="${p.id}"><label class="choice cb" style="margin:0 0 8px"><input type="checkbox" data-fok="${p.id}"><span class="mark"></span><span><span class="ct">${esc(p.legal_name)} has checked it${isHH ? '' : ' and makes the Vendor Statement'}</span></span></label>
+          <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:8px"><h3 style="margin:0">${esc(p.legal_name)}</h3><button class="btn link" type="button" data-fclr="${p.id}">Clear</button></div>
+          <div class="sig-wrap"><canvas id="fpad_${p.id}" aria-label="Signature pad for ${esc(p.legal_name)}"></canvas><div class="sig-line"></div><span class="hint">${esc(callName(p) || p.legal_name)} signs here</span></div>${saveNote(`Save ${callName(p) || p.legal_name}'s signature`)}
+          <div class="toolbar"><button class="btn primary" type="button" data-fsign="${p.id}">Save ${esc(callName(p) || p.legal_name)}'s signature</button></div></div>`).join('')}<div class="err" id="fErr"></div>` : ''}
+      ${fs.length ? `<h2>Signatures</h2>${fs.map(s => `<div class="card tight"><div style="font-weight:600">${esc(s.signer_name)}${s.signer_role === 'agent' ? ' <span class="small">(licensee)</span>' : ''}</div><div class="small">${esc(fmtDT(s.signed_at))} · fingerprint ${esc(String(s.snapshot_sha256).slice(0, 16))}…${s.snapshot && s.snapshot.witnessed_by ? ' · witnessed by you' : ''}</div></div>`).join('')}` : ''}
+    </div>`;
+    $('#fBack').addEventListener('click', () => ag.property_id ? viewProperty(ag.property_id) : viewAgentDetail(ag.id));
+    const fc = $('#fCounter');
+    if (fc) { const pad = makePad($('#fSigA')); fc.addEventListener('click', async () => {
+      if (!pad.drawn()) { $('#fCErr').textContent = 'Please sign first.'; return; }
+      fc.disabled = true;
+      try {
+        const path = await uploadSig($('#fSigA'), ag.id, 'form-' + fid + '-agent');
+        await must(sb.rpc('agent_form_countersign', { f: fid, p_image_path: path, p_snapshot: { document: doc.title, doc, property: ag.address, agreement_ref: ag.ref, signer: { name: 'Timothy McGuire', role: 'licensee' }, signed_at_client: new Date().toISOString() }, p_user_agent: navigator.userAgent }));
+        await sigSaved($('#fSigA'), 'Countersigned', 'Your signature is saved');
+        const { data, error } = await sb.functions.invoke('notify', { body: { type: 'form_signed', agreement_id: ag.id, form_id: fid } });
+        toast(error || (data && data.ok === false) ? 'Countersigned. The PDF didn\'t file; try again below.' : 'Countersigned. Filed, and emailed to you.');
+        viewFormAgent(fid);
+      } catch (_) { fc.disabled = false; }
+    }); }
+    const ff = $('#fFile'); if (ff) ff.addEventListener('click', async () => { ff.disabled = true; const { data, error } = await sb.functions.invoke('notify', { body: { type: 'form_signed', agreement_id: ag.id, form_id: fm.id } }); toast(error || (data && data.ok === false) ? 'That didn\'t work. Try again shortly.' : 'Filed, and emailed to you'); viewFormAgent(fid); });
+    if (editable) {
+      const read = () => {
+        $$('.hhq').forEach(q => { const k = q.dataset.hk, r = $(`input[name="hc_${k}"]:checked`, q); ad.c[k] = { a: r ? r.value : '', n: $('[data-hn]', q).value.trim() }; });
+        $$('[data-hw]').forEach(i => { ad.ws[i.dataset.hw] = i.value.trim(); }); const ex = $('input[name="hw_exempt"]:checked'); ad.ws.exempt = ex ? ex.value : '';
+        $$('[data-hs]').forEach(i => { ad.st[i.dataset.hs] = i.value.trim(); });
+        ad.res = { req: $('#hReq').value.trim(), inst: $('#hInst').value.trim(), tol: ($('input[name="hr_tol"]:checked') || {}).value || '', comp: ($('input[name="hr_comp"]:checked') || {}).value || '' };
+        ad.assessedBy = $('#hAss').value.trim(); ad.assessedOn = $('#hDate').value;
+      };
+      $('#hSave').addEventListener('click', async () => { read(); await must(sb.from('property_forms').update({ agent_data: ad }).eq('id', fid)); toast('Saved'); });
+      $('#hReady').addEventListener('click', async () => {
+        read();
+        const missing = HH_CHECK.flatMap(x => x[1]).filter(([k]) => !(ad.c[k] || {}).a).length;
+        if (missing) { $('#hErr').textContent = `Mark each item on the checklist (Y, N or N/A). ${missing} to go.`; return; }
+        if (!ad.assessedBy || !ad.assessedOn) { $('#hErr').textContent = 'Add who assessed it and the date.'; return; }
+        await must(sb.from('property_forms').update({ agent_data: ad, status: 'ready', ready_at: fm.ready_at || new Date().toISOString() }).eq('id', fid));
+        await must(sb.from('agreement_events').insert({ agreement_id: ag.id, actor: SESSION.user.email, kind: 'form_ready', detail: { form: fm.kind } }));
+        toast('Ready for the landlord to sign'); viewFormAgent(fid);
+      });
+    }
+    const pads = {};
+    $$('[data-fsigner]').forEach(c => { pads[c.dataset.fsigner] = makePad($('#fpad_' + c.dataset.fsigner)); });
+    $$('[data-fclr]').forEach(b => b.addEventListener('click', () => pads[b.dataset.fclr].clear()));
+    $$('[data-fsign]').forEach(b => b.addEventListener('click', async () => {
+      const pid = b.dataset.fsign, p = signers.find(x => x.id === pid), er = $('#fErr');
+      if (!$(`[data-fok="${pid}"]`).checked) { er.textContent = `Tick the box once ${callName(p) || p.legal_name} has checked it.`; return; }
+      if (!pads[pid].drawn()) { er.textContent = 'Please sign in the box first.'; return; }
+      b.disabled = true;
+      try {
+        const path = await uploadSig($('#fpad_' + pid), ag.id, 'form-' + fid + '-' + pid);
+        const d = isHH ? hhDoc(fm.agent_data, ag.address, names) : vdDoc(fm.data || {}, ag.address, names, new Date());
+        const res = await must(sb.rpc('agent_form_sign_in_person', { f: fid, pid, p_image_path: path, p_snapshot: { document: d.title, doc: d, property: ag.address, agreement_ref: ag.ref, signer: { name: p.legal_name, email: p.email }, signed_at_client: new Date().toISOString() }, p_user_agent: navigator.userAgent }));
+        await sigSaved($('#fpad_' + pid), `${p.legal_name} has signed`, 'Signature saved');
+        if (res && res.remaining === 0 && isHH) { const { error: fe } = await sb.functions.invoke('notify', { body: { type: 'form_signed', agreement_id: ag.id, form_id: fid } }); toast(fe ? 'All signed. The PDF didn\'t file; try again below.' : 'All signed. Filed, and emailed to you.'); }
+        else if (res && res.remaining === 0) toast('All the vendors have signed. Countersign it below.');
+        viewFormAgent(fid);
+      } catch (_) { b.disabled = false; }
+    }));
     top();
   }
 
@@ -2485,6 +2964,7 @@ function lawyerForm(id, title, blurb) {
       await must(sb.from('aml_events').insert({ aml_file_id: file.id, actor: SESSION.user.email, message: 'File opened' }));
     }
     const r = Object.assign({ up: {} }, file.data);
+    if (!file.locked_at && (ag.answers || {}).capacity && ag.answers.capacity !== 'Owners') r.cdd = 'Enhanced';   // Tim's rule: anyone not selling as plain owners
     const log = async m => { await must(sb.from('aml_events').insert({ aml_file_id: file.id, actor: SESSION.user.email, message: m })); };
     const persist = async () => { await must(sb.from('aml_files').update({ data: r }).eq('id', file.id)); };
     const L = !!file.locked_at, provider = (ag.config.aml || 'Manual') !== 'Manual' ? ag.config.aml : '';
@@ -2514,8 +2994,8 @@ function lawyerForm(id, title, blurb) {
       ${L ? `<div class="card okc tight"><h3>Complete and locked</h3><p class="small" style="margin:0">Signed off by ${esc(file.locked_by)}, ${esc(fmtDT(file.locked_at))}. Changes from here are added as dated notes.${file.retain_until ? ' Keep until ' + esc(fmtDate(file.retain_until)) + '.' : ''}</p></div>` : ''}
       <fieldset ${L ? 'disabled' : ''}>
       <h2>1. Level of checks</h2>
-      ${entity ? '<div class="card warnc tight"><p class="small" style="margin:0">This client is selling through a trust, company or on someone else\'s behalf. Enhanced checks are likely needed.</p></div>' : ''}
-      <div class="choices">${R('cdd', 'Standard', 'Standard', 'Most private sellers')}${R('cdd', 'Enhanced', 'Enhanced', 'Trusts, companies, overseas sellers, politically exposed people, or anything unusual')}${R('cdd', 'Simplified', 'Simplified', 'Only for listed entities like government departments')}</div>
+      ${entity ? '<div class="card warnc tight"><p class="small" style="margin:0">This client isn\'t selling as a plain owner (they\'re a trustee, director, attorney, executor or other representative), so enhanced checks apply. That\'s your rule for everyone selling this way.</p></div>' : ''}
+      <div class="choices">${entity ? R('cdd', 'Enhanced', 'Enhanced', 'Required: they\'re selling other than as plain owners') : R('cdd', 'Standard', 'Standard', 'Most private sellers') + R('cdd', 'Enhanced', 'Enhanced', 'Trusts, companies, attorneys, executors, overseas sellers, politically exposed people, or anything unusual') + R('cdd', 'Simplified', 'Simplified', 'Only for listed entities like government departments')}</div>
       <h2>2. Identity</h2>
       <div class="choices">${R('method', 'f2f', 'In person, original ID', 'You meet them and sight the document')}${R('method', 'cert', 'Certified copy', 'Only when meeting in person genuinely isn\'t possible')}${R('method', 'electronic', 'Electronic, through ' + esc(provider || 'a provider'), '')}</div>
       ${idBlock}

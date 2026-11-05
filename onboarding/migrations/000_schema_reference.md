@@ -62,3 +62,25 @@ agreements/<agreement id>/signatures/... (vendors may upload their own signature
   agreement and from pre-listings; agreements are made from the owners only. Signed records are untouched.
 - `agent_reopen_property(pid, new_owners)`: start a withdrawn or settled property again.
 - Still to do with Tim's OK: drop the unused `is_prelisting_party(prelistings)`.
+
+## Added in phase 2 (migration 005, written and tested in rollback blocks; to be applied with Tim's OK)
+- `property_forms`: one per agreement and kind (`vendor_declaration`, `healthy_homes`), with `form_version`, `status`
+  (draft, ready, signed), `data` (the vendors' answers), `agent_data` (Tim's Healthy Homes measurements),
+  `countersigned_at` (the licensee signed the declaration), `filing_at` (the PDF is being made, claimed by one call),
+  `document_id` (the filed PDF in `property_documents`, source 'generated') and `pdf_error`. Agent all; parties read.
+- `form_signatures`: like `signatures`, can't be updated or deleted; `signer_role` client or agent (the licensee).
+  The server adds the form's stored data to each snapshot before fingerprinting it.
+- `guard_form`: once anyone has signed, the form's data can't change and it can't be removed. A direct write by a
+  signed-in user can never set signed, countersigned, filed or being filed: only the functions below (and the edge
+  function's service role, for filing) can.
+- `guide_receipts`: the dated "Before you sell" receipt for the REA sale and purchase guide, with its version, file
+  name (checked) and SHA-256. Permanent.
+- Functions: `vendor_form_start(a, p_kind)`, `vendor_form_save(f, patch)` (declaration only, while unsigned),
+  `vendor_form_sign(f, ...)`, `agent_form_sign_in_person(f, pid, ...)` (witnessed), `agent_form_countersign(f, ...)`
+  (the licensee, after every vendor, declaration only), `vendor_guide_receipt(a, guide, version, file, sha256, ua)`.
+  Signing needs the agreement still signed or countersigned, and a signature image uploaded for that form and signer.
+- Form PDFs are printed from the stored form with the wording for its `form_version` (fn/pdf.ts FORM_TEXT).
+- Agreement signatures from phase 2 carry `appendices` (Vendor Guide, Complaints, REA guide version and SHA-256) and,
+  when the guide was shown, `rea_guides` (the receipt). No database change: they are part of the snapshot. Agreements
+  whose first signature has no `appendices` print exactly as before. The server appends a guide only if it is
+  listed in guides.json with that version and, when recorded, the same SHA-256.

@@ -1,6 +1,7 @@
 import { admin, APP_URL, cors, esc, fmtDT, frontPageTable, json, sendMail, TIM_EMAIL, wrap } from "https://raw.githubusercontent.com/McGuireRE/dunnerstunner/d77c670defc8d952995d8e0d63ab234d7988893b/fn/shared.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
-import { makeAgreementPdf, makeNoticePdf, makeVariationPdf } from "https://raw.githubusercontent.com/McGuireRE/dunnerstunner/d77c670defc8d952995d8e0d63ab234d7988893b/fn/pdfload.ts";
+// Phase 2 adds makeFormPdf: repin both imports to the commit that contains it before deploying.
+import { makeAgreementPdf, makeFormPdf, makeNoticePdf, makeVariationPdf } from "https://raw.githubusercontent.com/McGuireRE/dunnerstunner/d77c670defc8d952995d8e0d63ab234d7988893b/fn/pdfload.ts";
 
 // Called by the app after a vendor sends to their lawyer, or after signing.
 Deno.serve(async (req) => {
@@ -70,6 +71,36 @@ Deno.serve(async (req) => {
         return json({ ok: true });
       } catch (e: any) {
         await db.from("agreements").update({ copy_error: String(e?.message || e) }).eq("id", agreement_id);
+        return json({ ok: false, error: String(e?.message || e) }, 500);
+      }
+    }
+    // A document signed after the agreement (Vendor Declaration, Healthy Homes): make the PDF, file it on the
+    // property, and email it to Tim only. Vendors are never emailed from here.
+    if (type === "form_signed") {
+      const { data: form }: any = await db.from("property_forms").select("*").eq("id", body.form_id).single();
+      if (!form || form.agreement_id !== agreement_id) return json({ error: "Not allowed" }, 403);
+      if (form.status !== "signed") return json({ ok: true, note: "not signed by everyone yet" });
+      if (form.kind === "vendor_declaration" && !form.countersigned_at) return json({ ok: true, note: "waiting for the licensee to countersign" });
+      if (form.document_id) return json({ ok: true, note: "already filed" });
+      // claim the filing in one update, so two calls can't both file it (a claim older than 10 minutes has failed)
+      const stale = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+      const { data: claim } = await db.from("property_forms").update({ filing_at: new Date().toISOString() }).eq("id", form.id).is("document_id", null).or(`filing_at.is.null,filing_at.lt.${stale}`).select("id");
+      if (!claim || !claim.length) return json({ ok: true, note: "already being filed" });
+      const label = form.kind === "healthy_homes" ? "Healthy Homes checklist and statement" : "Vendor Declaration";
+      try {
+        const pdf = await makeFormPdf(db, form.id);
+        const path = `properties/${form.property_id}/generated/${form.id}-${pdf.filename}`;
+        const up = await db.storage.from("private").upload(path, pdf.bytes, { contentType: "application/pdf", upsert: true });
+        if (up.error) throw new Error(up.error.message);
+        const { data: doc, error: de }: any = await db.from("property_documents").insert({ property_id: form.property_id, kind: label, name: pdf.filename, path, source: "generated", created_by: "system" }).select("id").single();
+        if (de) throw new Error(de.message);
+        await db.from("property_forms").update({ document_id: doc.id, pdf_error: null, filing_at: null }).eq("id", form.id);
+        await db.from("agreement_events").insert({ agreement_id, actor: "system", kind: "form_filed", detail: { form: form.kind, file: pdf.filename } });
+        try { await sendMail(db, agreement_id, "form_signed", { to: TIM_EMAIL, subject: `${label} signed: ${ag.address}`, html: wrap(`<p>Hi Tim,</p><p>${esc(nameList || "The vendors")} signed the ${esc(label)} for <strong>${esc(ag.address)}</strong> (${esc(ag.ref)}). The PDF is attached and filed on the property's documents.</p>`), attachments: [{ filename: pdf.filename, content: pdf.bytes, contentType: "application/pdf" }] }); }
+        catch (e: any) { await db.from("property_forms").update({ pdf_error: "Filed on the property, but the email to Tim failed: " + String(e?.message || e) }).eq("id", form.id); return json({ ok: false, filed: true, error: String(e?.message || e) }, 500); }
+        return json({ ok: true });
+      } catch (e: any) {
+        await db.from("property_forms").update({ pdf_error: String(e?.message || e), filing_at: null }).eq("id", form.id);
         return json({ ok: false, error: String(e?.message || e) }, 500);
       }
     }

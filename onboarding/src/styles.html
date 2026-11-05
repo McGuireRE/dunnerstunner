@@ -240,4 +240,19 @@ details.acc .in li { margin: 4px 0; }
 hr.soft { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
 @media (max-width: 420px) { .facts { grid-template-columns: 1fr; } .choices.two { grid-template-columns: 1fr; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+/* phase 2: inline documents, the REA guide viewer, and the declaration's Yes / No / Unknown rows */
+.ack-more { grid-column: 2; min-width: 0; }
+.inline-doc { font-size: 14.5px; color: var(--muted); margin-top: 6px; }
+.inline-doc summary { cursor: pointer; color: var(--accent); font-weight: 500; }
+.inline-doc h4 { margin: 10px 0 6px; color: var(--ink); font-size: 15.5px; }
+.inline-doc p { margin: 0 0 8px; }
+.guide-inline { margin: 8px 0 14px; min-width: 0; }
+.guide-inline iframe { display: block; width: 100%; height: min(70vh, 640px); border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+.choices.three { grid-template-columns: 1fr 1fr 1fr; }
+@media (max-width: 360px) { .choices.three { grid-template-columns: 1fr; } }
+.choices.three .choice { padding: 10px 12px; }
+.vdq h3 { overflow-wrap: anywhere; }
+.hhq { border-bottom: 1px solid var(--line); padding-bottom: 10px; }
+.hhq:last-child { border-bottom: none; }
+.hhq input[type=text] { margin-top: 8px; }
 </style>

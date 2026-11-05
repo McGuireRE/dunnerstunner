@@ -14,7 +14,71 @@ export interface PdfInput {
   template: Uint8Array; font: Uint8Array; bold: Uint8Array;
   ag: any; people: any[]; sigs: any[]; sigImages: Record<string, Uint8Array>;
   variations?: any[];
+  // Set only for agreements on the phase 2 format (signed after it went live, or not yet signed). Without it
+  // the agreement PDF is built exactly as before, so agreements signed earlier come out the same.
+  appendix?: Appendix;
 }
+export interface Appendix {
+  set: string;
+  // Set only for a guide the server has checked: listed in guides.json with this version (and, when the receipt
+  // recorded one, the same SHA-256). received: the client was shown it before signing (a signed agreement).
+  // bytes: the file itself, attached unaltered; missing if it couldn't be fetched.
+  reaGuide?: { version: string; file: string; title?: string; sha256?: string; received?: boolean; bytes?: Uint8Array } | null;
+}
+
+// Appended to the agreement (phase 2 format). Tim's wording, tidied for typos only. The app shows the same
+// Complaints procedure on the "Before you sign" page (a test checks the two copies match); the Vendor Guide is
+// only in the PDF. Change the id whenever the wording changes.
+export const APPENDIX_SET = "P2-2026-11";
+export const VENDOR_GUIDE = {
+  id: "VG-2026-11",
+  title: "A Simple Guide to Your Sole and Exclusive Agency Agreement",
+  intro: "Your Agency Agreement is written in the formal language of a legal document. Here's what it actually means for you, in plain English.",
+  sections: [
+    ["What you're appointing us to do", ["You're appointing McGuire Real Estate as your sole and exclusive agent to market and sell your property: the only agency working on the sale, backed to negotiate, handle the paperwork, and do what it takes to bring it home."], []],
+    ["How long it runs", [], [
+      "Starts and keeps going: the agreement kicks off on the Date of Commencement and runs until it's cancelled; it doesn't expire on its own.",
+      "First 90 days: we're both fully committed, giving the campaign a genuine run (or your shorter Review Date, if we've agreed one).",
+      "From there: either of us can step away at any time, with 7 days' written notice.",
+      "Cooling-off: by law, you can also cancel by 5pm the working day after you receive your copy of the agreement, no questions asked."]],
+    ["Other ways this can wrap up", [], [
+      "Off-Market Listing: you'll get a written update at least once a month, guaranteed, or you're free to cancel.",
+      "Keeping things honest: we'll end it immediately if you ask us to do something unlawful or unethical, misrepresent the property, hide a material change to it, or mislead us about your identity or who you're acting for.",
+      "Mutual agreement: both of us can agree in writing to end it at any time; neither of us can do this alone."]],
+    ["What you're agreeing to", [], [
+      "Warranties: what you tell us (condition, defects, meth history, weathertightness) is honest and to the best of your knowledge, not a guarantee.",
+      "Access: we'll collaborate to flag hazards, and visiting professionals sign our access form.",
+      "Marketing material: we can use what we create; you keep the rights to anything you've paid for.",
+      "Identity checks: we must verify your identity before acting for you, as the law requires.",
+      "Confidentiality: the agreement's terms stay between us, except where the law requires disclosure."]],
+    ["Buyers we meet through your listing", [], [
+      "Their privacy: we owe buyers confidentiality too, so we won't confirm or deny dealing with them elsewhere, and our silence isn't evidence of anything.",
+      "No claim on other deals: if a buyer we meet through your listing later engages us for something unrelated, that's between us and them; you have no claim to any fee from it."]],
+    ["If we ever want to buy your property", [], [
+      "We, or anyone related to us, can only do this with your written consent and an independent valuation (which we pay for) given to you first. If we don't follow this, you can cancel and we lose our commission."]],
+    ["What you pay, and your deposit", ["Your commission is whatever's recorded on the front page (Appointment of Agency D); that governs, not any figure quoted elsewhere. It's tiered: below a set sale price, it's a flat fee rather than a percentage, because a straight percentage doesn't cover the fixed cost of marketing a lower-value home; above that price, the flat fee stays, plus a percentage of the amount above it. Separately (Appointment of Agency E), you also pay marketing costs and a $575 administration fee (including GST); the administration fee covers our AML/CFT identity checks and other onboarding work, is payable on signing, and applies whether or not the property sells. Marketing costs are usually refunded if the listing is withdrawn before they're spent. Any deposit is held by an independent stakeholder (NZRET or Public Trust), not us, for at least 10 working days; our commission and expenses are paid from settlement or the deposit once it can be released."], []],
+    ["We're here to help", ["Talk to us first, we want to sort it out: contact Tim McGuire, 027 562 7207, tim@mcguire.co.nz. You're never required to use our in-house process, and you can contact the Real Estate Authority (0800 367 7322) at any time, whether or not you've raised it with us."], []],
+  ] as [string, string[], string[]][],
+  note: "This guide is a plain-language summary for convenience only. It does not replace, override, or form part of your Agency Agreement; if anything here differs from the Agreement, the Agreement applies. Licensed REA 2008.",
+};
+export const COMPLAINTS = {
+  id: "CDR-2026-11",
+  title: "Complaints and Dispute Resolution Procedures",
+  intro: [
+    "Pursuant to Rule 12 of the Real Estate Agents Act (Professional Conduct and Client Care Rules) 2012, all licensed Real Estate Agents are required to have a written in-house complaints and dispute resolution procedure. That procedure is set out below.",
+    "You do not have to use our complaints and resolution procedure. You may make a complaint directly to the Real Estate Agents Authority at any time. You can make a complaint to the Real Estate Agents Authority even if you choose to also use our procedures.",
+    "Our complaints and dispute resolution procedures are designed to provide a simple and personalised process for resolving any complaint you might have about the service you have received from our agency.",
+  ],
+  steps: [
+    ["Step 1: Contact the Manager", ["Timothy McGuire", "Phone: 027 562 7207", "Email: tim@mcguire.co.nz", "Tell the manager who you are complaining about and what your concerns are. Let the manager know what you would like done about your complaint."]],
+    ["Step 2", ["The manager may ask you to put your complaint in writing so that he or she can investigate it. The manager will need a brief period to talk to the team members involved. We promise to come back to you within 10 working days with a response to your complaint. That response may be in writing. As part of the response, we might ask you to meet with members of our team to discuss the complaint and try and agree a resolution."]],
+    ["Step 3", ["If we are unable to come to an agreed resolution after a meeting, or if you don't wish to meet with us, then we will provide you with a written proposal to resolve your complaint."]],
+    ["Step 4", ["If you do not accept our proposal, please advise us in writing within five working days. You can of course suggest another way of resolving your complaint."]],
+    ["Step 5", ["If we accept your preferred resolution, we will attempt to implement that resolution as soon as possible. If we decline your preferred resolution, we may invite you to mediate the dispute."]],
+    ["Step 6", ["If we agree to mediate the complaint but do not settle the complaint at mediation, or we do not agree to mediate the dispute, then that will be the end of our process."]],
+  ] as [string, string[]][],
+  close: "Remember, you can still make a complaint to the Real Estate Agents Authority in the first instance, and even if you use these procedures, you can still make a complaint to the Real Estate Agents Authority at any time. The Real Estate Authority, C/O P.O. Box 25-371, Wellington 6146, New Zealand, 0800 367 7322 or 04 471 8930.",
+};
 
 export async function buildAgreementPdf(inp: PdfInput): Promise<Uint8Array> {
   const { ag, people } = inp;
@@ -218,6 +282,9 @@ export async function buildAgreementPdf(inp: PdfInput): Promise<Uint8Array> {
     S.small(`Signed ${nzDT(s.signed_at)}${p?.email ? " · signed in as " + p.email : ""}`);
     S.small(`Document fingerprint (SHA-256): ${s.snapshot_sha256}`);
     if (s.user_agent) S.small(`Device: ${String(s.user_agent).slice(0, 120)}`);
+    const ok = inp.appendix?.reaGuide;
+    const rg = ok && ok.received ? (s.snapshot?.rea_guides || []).find((g: any) => g.guide === "agency" && g.version === ok.version && g.file === ok.file) : null;
+    if (rg) S.small(`Received the Real Estate Authority guide to agency agreements (version ${rg.version}), shown on screen before signing. Receipt confirmed ${nzDT(rg.acknowledged_at || s.signed_at)}, and recorded in what was signed.`);
     S.gap(8);
   }
   const unsigned = signers.filter((p) => !clientSigs.some((s) => s.person_id === p.id));
@@ -236,14 +303,30 @@ export async function buildAgreementPdf(inp: PdfInput): Promise<Uint8Array> {
     S.para("All other terms of the agreement stay as signed.", 8.5, GREY);
   }
 
-  // Vendor guide last
-  const [guide] = await doc.copyPages(src, [0]); doc.addPage(guide); guide.pushOperators(setCharacterSpacing(0), setWordSpacing(0), setCharacterSqueeze(100), setTextRise(0)); white(guide, 50, 18, 160, 38);
+  const untouched = new Set<number>(); // pages appended exactly as published: no footer or stamp on them
+  if (!inp.appendix) {
+    // Vendor guide last (agreements signed before phase 2 keep the template's own page)
+    const [guide] = await doc.copyPages(src, [0]); doc.addPage(guide); guide.pushOperators(setCharacterSpacing(0), setWordSpacing(0), setCharacterSqueeze(100), setTextRise(0)); white(guide, 50, 18, 160, 38);
+  } else {
+    appendixPages(S, ag.ref, c);
+    S.suffix = undefined;
+    const rg = inp.appendix.reaGuide;
+    if (rg && rg.bytes) {
+      const gd = await PDFDocument.load(rg.bytes);
+      const pages = await doc.copyPages(gd, gd.getPageIndices());
+      pages.forEach((p) => { untouched.add(doc.getPageCount()); doc.addPage(p); });
+    } else if (rg && rg.received) {
+      S.page(rg.title || "Real Estate Authority guide to agency agreements", `Version ${rg.version}`);
+      S.para(`The Client received version ${rg.version} of the Real Estate Authority's guide to agency agreements on screen before signing. The guide could not be attached to this copy; ask McGuire Real Estate for it.`, 9);
+    }
+  }
 
   // footer
   const n = doc.getPageCount(), gen = nzDT(new Date());
   const isDraft = !["signed", "countersigned", "ended"].includes(ag.status);
   const STAMP = rgb(0.75, 0.2, 0.1);
   doc.getPages().forEach((p, i) => {
+    if (untouched.has(i)) return;
     p.drawText(`${isDraft ? "DRAFT FOR REVIEW, NOT SIGNED · " : "SIGNED COPY · "}${ag.ref} · ${ag.address} · copy generated ${gen} · page ${i + 1} of ${n}`, { x: 48, y: 10, size: 6.5, font: isDraft ? B : F, color: isDraft ? STAMP : GREY });
     if (isDraft) { const t = "DRAFT FOR REVIEW: NOT SIGNED", w = B.widthOfTextAtSize(t, 10); p.drawRectangle({ x: 42, y: H - 30, width: w + 12, height: 18, borderColor: STAMP, borderWidth: 1.2, color: rgb(1, 1, 1) }); p.drawText(t, { x: 48, y: H - 25, size: 10, font: B, color: STAMP }); }
   });
@@ -330,7 +413,7 @@ function wrap(s: string, f: PDFFont, size: number, maxW: number): string[] {
 
 class Sched {
   p!: PDFPage; y = 0; brand = "McGuire Real Estate";
-  constructor(private doc: PDFDocument, private F: PDFFont, private B: PDFFont, private ag: any, private suffix?: string) {}
+  constructor(private doc: PDFDocument, private F: PDFFont, private B: PDFFont, private ag: any, public suffix?: string) {}
   page(title: string, sub: string) {
     this.p = this.doc.addPage([W, H]); this.y = H - 60;
     if (this.brand) this.p.drawText(this.brand, { x: 50, y: H - 40, size: 8, font: this.B, color: RED });
@@ -359,6 +442,14 @@ class Sched {
     this.y -= 3;
     if (!bold) this.p.drawLine({ start: { x: 50, y: this.y + 1 }, end: { x: W - 50, y: this.y + 1 }, thickness: 0.4, color: rgb(0.88, 0.86, 0.83) });
     this.y -= 9;
+  }
+  qa(q: string, a: string) {
+    const ql = wrap(q, this.B, 8.5, W - 100), al = wrap(a, this.F, 9, W - 110);
+    this.need(ql.length * 11 + al.length * 12 + 10);
+    ql.forEach((l) => { this.p.drawText(l, { x: 50, y: this.y, size: 8.5, font: this.B, color: GREY }); this.y -= 11; });
+    al.forEach((l) => { this.p.drawText(l, { x: 60, y: this.y, size: 9, font: this.F, color: BLACK }); this.y -= 12; });
+    this.y -= 2;
+    this.p.drawLine({ start: { x: 50, y: this.y + 1 }, end: { x: W - 50, y: this.y + 1 }, thickness: 0.4, color: rgb(0.88, 0.86, 0.83) }); this.y -= 8;
   }
   heading2(s: string) { this.p.drawText(s, { x: 50, y: this.y, size: 10, font: this.B, color: BLACK }); this.y -= 14; }
   image(im: any, w: number, h: number) { this.p.drawImage(im, { x: 50, y: this.y - h + 6, width: w, height: h }); this.y -= h + 4; }
@@ -443,5 +534,197 @@ export async function buildNoticePdf(inp: PdfInput, n: any): Promise<Uint8Array>
   S.para("Each owner signed this notice electronically, with a separate confirmation for it, at the same time as signing an agency agreement with McGuire Real Estate Limited. Electronic signatures under Part 4 of the Contract and Commercial Law Act 2017.", 8, GREY);
   const n2 = doc.getPageCount(), gen = nzDT(new Date());
   doc.getPages().forEach((p, i) => p.drawText(`Notice of cancellation · ${ag.address} · generated ${gen} · page ${i + 1} of ${n2}`, { x: 48, y: 10, size: 6.5, font: F, color: GREY }));
+  return await doc.save();
+}
+
+// The Vendor Guide and the Complaints procedure, appended to agreements on the phase 2 format.
+// The Vendor Guide states the administration fee: the agreement's own figure (default $575 including GST)
+function guideFee(t: string, c: any) {
+  const adm = c.adminOn === false ? 0 : (c.admin === undefined || c.admin === "" ? 575 : num(c.admin));
+  if (adm) return t.replace("a $575 administration fee", `a ${money(adm)} administration fee`);
+  return t.replace(" and a $575 administration fee (including GST); the administration fee covers our AML/CFT identity checks and other onboarding work, is payable on signing, and applies whether or not the property sells.", "; no administration fee applies to your agreement.");
+}
+function appendixPages(S: Sched, ref: string, c: any) {
+  S.suffix = ` · given with Agency Agreement ${ref}, not part of it`;
+  S.page(VENDOR_GUIDE.title, "A plain-English summary");
+  S.para(VENDOR_GUIDE.intro, 9, GREY);
+  for (const [h, paras, bullets] of VENDOR_GUIDE.sections) {
+    S.need(40); S.heading2(h);
+    paras.forEach((t) => S.para(guideFee(t, c), 9));
+    bullets.forEach((t) => S.bullet(t));
+    S.gap(4);
+  }
+  S.para(VENDOR_GUIDE.note, 7.5, GREY);
+  S.suffix = ` · given with Agency Agreement ${ref}`;
+  S.page(COMPLAINTS.title, "Rule 12, Real Estate Agents Act (Professional Conduct and Client Care Rules) 2012");
+  COMPLAINTS.intro.forEach((t) => S.para(t, 9));
+  for (const [h, lines] of COMPLAINTS.steps) { S.need(40); S.heading2(h); lines.forEach((t) => S.para(t, 9)); }
+  S.gap(4);
+  S.para(COMPLAINTS.close, 9);
+}
+
+// The wording of the documents signed after the agreement, word for word from Tim's forms. The app holds the same
+// text (onboarding/src/app.js FORM_TEXT; a test keeps the two the same). Each form records the version it was
+// started on, and its PDF is printed from the form's stored answers with that version's wording.
+// deno-lint-ignore no-explicit-any
+export const FORM_TEXT: any = {
+    VD_LEAD: 'This form provides information for prospective purchasers, based on the Vendor\'s own knowledge of the property.',
+    VD_INTRO: [
+    'These details are correct as at the date of the Vendor\'s signature(s) below. Any known changes and/or subsequent information becoming known will be advised in writing. These changes may be made and noted by the Licensee, who has also signed below.',
+    'Where any work requiring Code Compliance has had Certificate(s) correctly issued and signed off, and they are available to the Agent or prospective purchaser to view, they will be attached to this document (or are known to appear in the LIM). If those certificates are not available, we strongly recommend your further investigation.',
+    'Please note that the Vendor may not disclose all property defects. It is incumbent on the purchaser to make enquiries or seek professional assistance to satisfy themselves as to the condition of the property.',
+    'The information collected in this form is held by McGuire Real Estate Limited for the purpose of this sale and is disclosed to prospective purchasers and their professional advisers as part of the marketing and sale of the property.',
+  ],
+    VD_SECTIONS: [
+    ['Property Condition and Known Issues', [
+      { k: 'pegs', q: 'Can the Vendor identify the location of ALL boundary pegs?' },
+      { k: 'unpaid', why: 1, q: 'Is there any item on or about the property that is not fully paid for and/or will not be cleared on settlement? (e.g. renovations, outbuildings, insulation; include anything that may be added to rates)' },
+      { k: 'history', why: 1, q: 'Is there anything in the property\'s history or recent past that would be of interest or concern to a purchaser? (e.g. death on the property, nearby developments)' },
+      { k: 'meth', why: 1, from: 'meth', q: 'Is the Vendor aware of any known or suspected methamphetamine contamination, or has the property been tested?' },
+      { k: 'chattels', why: 1, q: 'Are there any chattels not working? (Check with tenants if rented and unsure)' },
+      { k: 'repairs', why: 1, q: 'Are there any repairs and/or maintenance the Vendor intends to complete after listing and before settlement?' },
+      { k: 'faults', text: 1, from: 'def', q: 'Describe any known or suspected faults or issues on or about the property, including any indication of subsidence or water damage.' },
+      { k: 'era', from: 'year', q: 'Was any part of the building or additions constructed in the 1995 to 2004 period? (noted for potential weathertightness issues)' },
+      { k: 'wt', why: 1, from: 'wt', q: 'Is the Vendor aware of any weathertightness issues (water leaks, past or present, damage)?' },
+      { k: 'dux', why: 1, q: 'Is the Vendor aware of any Dux Qest plumbing, Weatherside cladding, or Monolithic cladding?' },
+      { k: 'asbestos', why: 1, q: 'Is the Vendor aware, or does the Vendor suspect, the presence of asbestos-containing materials anywhere on the property?' },
+      { k: 'pipes', why: 1, q: 'Has there been any evidence or experience of blocked or troublesome underground pipes?' },
+      { k: 'reno', text: 1, from: 'work', q: 'Describe any renovation work done, regardless of whether it required Permits, Consents, or Code Compliance Certificates (e.g. shower alterations).' },
+      { k: 'consents', q: 'To your knowledge, have Permits / Consents / Certificates required for any part of the property been issued and signed off by the Local Authority where required by law?' },
+      { k: 'lim', why: 1, q: 'Has a LIM been obtained for this property? If so, when, and is it available for review?' },
+      { k: 'claims', why: 1, q: 'Has the property been the subject of any insurance claim (e.g. weathertightness, fire, flood, subsidence, or other)?' },
+      { k: 'reports', why: 1, q: 'Has any previous prospective purchaser\'s investigation (including any report from an inspector, valuer, or other professional) identified an issue with the property? If so, has a copy of that report been provided to the Agent?' },
+      { k: 'hazard', why: 1, from: 'haz', q: 'Is the Vendor aware of any safety hazard at the property that a visitor or attending professional should be made aware of (e.g. uneven surfaces, animals on site, pool or spa, loose fittings, steep or restricted access)?' },
+    ]],
+    ['Services and Features', [
+      { k: 'water', q: 'Is the property on town water supply?' },
+      { k: 'sewer', q: 'Is the property on town sewerage?' },
+      { k: 'storm', q: 'Is the property on town stormwater?' },
+      { k: 'power', q: 'Is the property on the national electrical network?' },
+      { k: 'internet', text: 1, q: 'Describe the connection to internet at the property:' },
+      { k: 'insulation', text: 1, from: 'heat', q: 'Where is insulation present in the primary dwelling?' },
+      { k: 'glazing', text: 1, q: 'Describe the glazing present:' },
+    ]],
+    ['Registrations and Fire Appliances', [
+      { k: 'hai', why: 1, q: 'Is the property registered with the Territorial Authority as a home and income (e.g. a registered B&B)? If \'Yes\', does a Code Compliance Certificate exist?' },
+      { k: 'burner', why: 1, q: 'Is there a wood burner or similar fire appliance? If \'Yes\', does it have a Code Compliance Certificate, and is that certificate available?' },
+    ]],
+  ],
+    VD_STATEMENT: [
+    'We hereby declare that any information about any issue concerning any aspect of the property and its neighbourhood arising at any time that is known to us, and that may be of concern or interest to a purchaser, has been noted above, or if discovered subsequently, will be immediately advised in writing to the Agent (Tim McGuire, McGuire Real Estate Limited).',
+    'We declare that:',
+    'i. We have not given consents for proposed work to any neighbour; and',
+    'ii. We do not know of any council requisitions affecting this property; and',
+    'iii. We have not withheld any known material information about the property; and',
+    'iv. There is no debt owing on any part of the property that will not be cleared on settlement date; and',
+    'v. We are not aware of any defects above or below ground that would affect its weathertightness, durability, or habitability; and',
+    'vi. We will promptly notify the Agent in writing of any change to the information provided in this declaration, including any report or notice received from a prospective purchaser or their professional adviser during the marketing of the property; and',
+    'vii. We have provided the Agent with all information known to us relevant to the property\'s current Health and Safety Notice.',
+  ],
+    HH_INTRO: 'Vendor site assessment: mark each item, add notes for any non-compliant areas. Deadline: 1 Jul 2025 (or within 120 days of a new/renewed tenancy). Penalties up to $7,200 per breach.',
+    HH_CHECK: [
+    ['Heating', [['heat1', 'Fixed heater in main living room (heat pump, wood burner, or electric) capable of 18°C'], ['heat2', 'Heater capacity confirmed via Tenancy Services Heating Assessment Tool (see page 2)'], ['heat3', 'Heater in good working order and maintained']]],
+    ['Insulation', [['ins1', 'Ceiling insulation meets regional R-value (R2.9 North Island / R3.3 South Island & Central North Island)'], ['ins2', 'Existing ceiling insulation ≥120mm thick and in reasonable condition (if pre-2008 Code)'], ['ins3', 'Underfloor insulation ≥R1.3 nationwide'], ['ins4', 'Installed per NZS 4246:2016; code compliance certificate/CoA on file if applicable']]],
+    ['Ventilation', [['ven1', 'Openable windows in living room, dining room, kitchen, and bedrooms'], ['ven2', 'Kitchen extractor/rangehood ≥150mm diameter or 50 L/s (if installed post 1 Jul 2019)'], ['ven3', 'Bathroom extractor fan ≥120mm diameter or 25 L/s (if installed post 1 Jul 2019)'], ['ven4', 'Continuous mechanical ventilation (if used, approved post 1 Nov 2019) exhausts to outdoors']]],
+    ['Moisture & Drainage', [['moi1', 'Gutters, downpipes, and drains in good condition and free of blockages'], ['moi2', 'Ground moisture barrier installed in enclosed subfloor (or exemption confirmed)'], ['moi3', 'No visible signs of moisture ingress (leaks, damp spots)']]],
+    ['Draught Stopping', [['dra1', 'Unused fireplaces/chimneys sealed'], ['dra2', 'Gaps or holes larger than a $2 coin sealed (walls, ceilings, windows, floors, doors)'], ['dra3', 'Draught-stopping measures (weather stripping, door sweeps) in place and effective']]],
+    ['Documentation', [['doc1', 'Healthy Homes Compliance Statement completed (see page 3)'], ['doc2', 'Supporting records/certificates/invoices on file'], ['doc3', 'Professional assessment completed, if applicable ($300 to $500)']]],
+  ],
+    HH_WS_INTRO: 'Record these measurements on site. Required heating capacity must then be calculated using the official Tenancy Services Heating Assessment Tool (tenancy.govt.nz/heating-tool) or the Schedule 2 formula in the Residential Tenancies (Healthy Homes Standards) Regulations 2019. Do not estimate: compliance is measured against the tool/formula result, not a guess.',
+    HH_WS: [['dims', 'Main living room: length (m) × width (m) × stud height (m)'], ['area', 'Main living room floor area (m²)'], ['glaz', 'Total window/glazing area in main living room (m²)'], ['gtype', 'Glazing type: single or double glazed'], ['ceil', 'Ceiling insulation R-value (or thickness if R-value unknown)'], ['under', 'Underfloor insulation R-value (write N/A if slab-on-ground)'], ['wall', 'Wall insulation R-value, if known'], ['ta', 'Territorial authority / region the property is in (sets climate zone)'], ['heater', 'Existing fixed heater(s): type and rated capacity (kW)'], ['exempt', 'Modern dwelling / relevant apartment exemption applies? (reg 3)', 'yn']],
+    HH_ST_INTRO: 'Use this page to record findings for the landlord\'s official Healthy Homes Compliance Statement (tenancy.govt.nz/healthy-homes/compliance-statement). This is a data-capture summary for the vendor/landlord; it is not a substitute for the legal statement, which the landlord must complete, sign, and attach to the tenancy agreement.',
+    HH_ST: [
+    ['Heating', [['h1', 'Required heating capacity (kW), from page 2'], ['h2', 'Installed qualifying heater(s): type & capacity (kW)'], ['h3', 'Tolerance / top-up allowance applies? (Y/N + details)'], ['h4', 'Modern dwelling / relevant apartment exemption? (Y/N)']]],
+    ['Insulation: Ceiling', [['c1', 'R-value when installed (or thickness if unknown)'], ['c2', 'Date installed / date last inspected'], ['c3', 'Type of insulation (segments, loose-fill, blanket, etc.)'], ['c4', 'Condition reasonable: no mould, damage, gaps? (Y/N)'], ['c5', 'Any exempt areas & reason (not reasonably practicable)']]],
+    ['Insulation: Underfloor', [['u1', 'R-value when installed'], ['u2', 'Date installed / date last inspected'], ['u3', 'Type of insulation'], ['u4', 'Condition reasonable? (Y/N)'], ['u5', 'Partial exemption for pre-existing compliant insulation? (Y/N)']]],
+    ['Insulation: Wall', [['w1', 'Wall insulation present? Type/condition if known (not compulsory)']]],
+    ['Ventilation', [['v1', 'Openable windows in all habitable rooms? (Y/N, list exceptions)'], ['v2', 'Kitchen extractor fan: diameter/capacity & install date'], ['v3', 'Bathroom extractor fan: diameter/capacity & install date'], ['v4', 'Continuous mechanical ventilation? (Y/N + exhaust capacity L/s)']]],
+    ['Moisture & Drainage', [['m1', 'Gutters/downpipes drain efficiently to appropriate outfall? (Y/N)'], ['m2', 'Enclosed subfloor present? (Y/N)'], ['m3', 'Ground moisture barrier installed if enclosed subfloor? (Y/N + reason if not)']]],
+    ['Draught Stopping', [['d1', 'Open fireplaces present? (Y/N + blocked off or written tenant agreement)'], ['d2', 'Free from unreasonable gaps/draughts? (Y/N + explanation if not)']]],
+  ],
+  };
+const FORM_WORDING: Record<string, any> = { "VD-2026-11": FORM_TEXT, "HH-2026-11": FORM_TEXT };
+const YNU: Record<string, string> = { yes: "Yes", no: "No", unknown: "Unknown" };
+const nzLong = (d: string | Date) => new Date(d).toLocaleDateString("en-NZ", { weekday: "short", day: "numeric", month: "long", year: "numeric", timeZone: "Pacific/Auckland" });
+
+// The document as signed, from the stored record (the same layout the app shows on screen)
+export function formDoc(form: any, address: string, names: string, when: string | Date) {
+  const T = FORM_WORDING[form.form_version];
+  if (!T) throw new Error(`Unknown form version ${form.form_version}`);
+  if (form.kind === "vendor_declaration") {
+    const data = form.data || {}, ans = data.answers || {};
+    return {
+      title: "Vendor Declaration",
+      head: [["Client / Vendor(s):", names], ["Property Address:", address], ["Date:", nzLong(when)]],
+      pages: [{
+        title: "Vendor Declaration", sub: address, intro: [T.VD_LEAD].concat(T.VD_INTRO),
+        sections: [{ title: "From the property file", rows: (data.facts || []).map(([k, v]: string[]) => [k, v, ""]).concat([["The Vendor confirmed these details", data.fileOk ? "Still correct" : "Something has changed", data.fileOk ? "" : data.fileChanges || ""]]) }]
+          .concat(T.VD_SECTIONS.map(([t, qs]: [string, any[]]) => ({ title: t, rows: qs.map((x) => { const v = ans[x.k] || {}; return [x.q, x.text ? "" : (YNU[v.a] || ""), v.d || ""]; }) })))
+          .concat([{ title: "Additional Notes", rows: [["Additional Notes:", "", data.notes || "None"]] }]),
+        after: ["Vendor Statement"].concat(T.VD_STATEMENT),
+      }],
+      sign_title: "Signed by",
+    };
+  }
+  const ad = form.agent_data || {}, c = ad.c || {}, ws = ad.ws || {}, res = ad.res || {}, st = ad.st || {};
+  return {
+    title: "Healthy Homes Compliance Checklist and Statement",
+    head: [["Property address:", address], ["Landlord name(s):", names]],
+    pages: [
+      { title: "Healthy Homes Compliance Checklist", sub: "Page 1", intro: [T.HH_INTRO], sections: T.HH_CHECK.map(([t, items]: [string, string[][]]) => ({ title: t, rows: items.map(([k, q]) => [q, (c[k] || {}).a ? "Compliant: " + c[k].a : "", (c[k] || {}).n || ""]) })).concat([{ title: "Assessment", rows: [["Assessed by:", ad.assessedBy || "", ""], ["Date:", ad.assessedOn ? nzLong(ad.assessedOn + "T12:00:00") : "", ""], ["Property address:", address, ""]] }]) },
+      { title: "Heating Assessment Worksheet", sub: "Page 2", intro: [T.HH_WS_INTRO], sections: [{ title: "On-site measurement / input", rows: T.HH_WS.map(([k, q]: string[]) => [q, ws[k] || "", ""]) }, { title: "Result (from official tool/formula)", rows: [["Heating capacity (kW)", res.req ? "Required: " + res.req : "", res.inst ? "Installed: " + res.inst : ""], ["Tolerance / top-up allowance applies?", res.tol || "", ""], ["Compliant", res.comp || "", ""]] }], after: ["Tool link: tenancy.govt.nz/heating-tool"] },
+      { title: "Compliance Statement: Data Capture", sub: "Page 3", intro: [T.HH_ST_INTRO], sections: T.HH_ST.map(([t, items]: [string, string[][]]) => ({ title: t, rows: items.map(([k, q]) => [q, st[k] || "", ""]) })) },
+    ],
+    sign_title: "Landlord name(s)",
+  };
+}
+
+// A document signed after the agreement (the Vendor Declaration, the Healthy Homes checklist and statement).
+// Printed from the form as stored (locked once anyone signed, and covered by each fingerprint), never from the
+// copy the page sent. The licensee's countersignature follows the vendors' on the declaration.
+export async function buildFormPdf(inp: { font: Uint8Array; bold: Uint8Array; ag: any; people: any[]; form: any; fsigs: any[]; images: Record<string, Uint8Array> }): Promise<Uint8Array> {
+  const { ag, form } = inp;
+  const doc = await PDFDocument.create();
+  doc.registerFontkit(fontkit);
+  const F = await doc.embedFont(inp.font, { subset: true });
+  const B = await doc.embedFont(inp.bold, { subset: true });
+  const sigs = [...inp.fsigs].sort((a, b) => a.signed_at < b.signed_at ? -1 : 1);
+  const vendors = sigs.filter((s) => s.signer_role !== "agent"), licensee = sigs.find((s) => s.signer_role === "agent");
+  const names = (inp.people || []).filter((p) => p.legal_name && p.signed_at).map((p) => p.legal_name).join(" and ");
+  const d = formDoc(form, ag.address, names, vendors[0]?.signed_at || new Date());
+  doc.setTitle(`${d.title}: ${ag.address}`); doc.setAuthor("McGuire Real Estate Limited"); doc.setSubject(`${d.title} ${form.form_version}`);
+  const S = new Sched(doc, F, B, ag, ` · ${form.form_version} · relates to Agency Agreement ${ag.ref}`);
+  d.pages.forEach((pg: any, i: number) => {
+    S.page(pg.title || d.title, pg.sub || ag.address);
+    if (i === 0) for (const [k, v] of d.head || []) S.kv(k, v);
+    (pg.intro || []).forEach((t: string) => S.para(t, 8.5, GREY));
+    for (const sec of pg.sections || []) {
+      S.need(40); S.heading2(sec.title);
+      for (const r of sec.rows || []) S.qa(r[0], [r[1], r[2]].filter(Boolean).join(r[1] && r[2] ? ". " : "") || "Not answered");
+      S.gap(4);
+    }
+    (pg.after || []).forEach((t: string) => S.para(t, 9));
+  });
+  const block = async (s: any, heading: string) => {
+    S.need(95);
+    S.heading2(heading);
+    const bytes = inp.images[s.id];
+    if (bytes) { const im = await doc.embedPng(bytes); const h = 40, w = Math.min(260, im.width * (h / im.height)); S.image(im, w, h); }
+    S.small(`Signed ${nzDT(s.signed_at)}${s.snapshot?.signing_method ? " · " + s.snapshot.signing_method : s.snapshot?.signer?.email ? " · signed in as " + s.snapshot.signer.email : ""}`);
+    if (s.snapshot?.witnessed_by) S.small(`Witnessed by: ${s.snapshot.witnessed_by} (Licensee), ${nzDT(s.signed_at)}`);
+    S.small(`Fingerprint (SHA-256) of what was signed: ${s.snapshot_sha256}`);
+    S.gap(6);
+  };
+  S.gap(6);
+  S.need(60); S.heading2(d.sign_title || "Signed by");
+  for (const s of vendors) await block(s, s.signer_name);
+  if (form.status !== "signed") S.para("Not yet signed by everyone.", 9, RED);
+  if (form.kind === "vendor_declaration") {
+    if (licensee) await block(licensee, "Timothy McGuire (Licensee, REA#20117983, for McGuire Real Estate Limited)");
+    else S.para("Not yet signed by the Licensee.", 9, GREY);
+  }
+  S.para("Signed electronically, each signer with their own confirmation. Electronic signatures under Part 4 of the Contract and Commercial Law Act 2017. The fingerprint identifies the exact content each person signed.", 8, GREY);
+  const n = doc.getPageCount(), gen = nzDT(new Date());
+  doc.getPages().forEach((p, i) => p.drawText(`${d.title} · ${ag.address} · generated ${gen} · page ${i + 1} of ${n}`.slice(0, 150), { x: 48, y: 10, size: 6.5, font: F, color: GREY }));
   return await doc.save();
 }
