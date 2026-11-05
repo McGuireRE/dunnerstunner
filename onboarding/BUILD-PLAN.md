@@ -63,6 +63,9 @@ signature and PDF is unchanged.
 
 ## Phase 2: generated documents
 
+Status: done 6 November 2026 (migration 005). Reviewed independently twice; all findings fixed. The REA guide
+steps stay off until the official PDFs are added. Unit title disclosure waits for Tim's decision on scope.
+
 Goal: the remaining paperwork comes from the property file, signed on screen, filed with the agreement.
 
 Status: built 6 November 2026 (migration 005, not yet applied), waiting for review. Unit title disclosure not built
