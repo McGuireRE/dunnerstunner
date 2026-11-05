@@ -88,7 +88,7 @@ export async function buildAgreementPdf(inp: PdfInput): Promise<Uint8Array> {
   } else if (pending) txt(p1, "Example to follow with the written appraisal", 300, 440, 7.5, F, GREY);
   // E. costs
   const limOn = c.limOn !== false, lim = c.lim === undefined || c.lim === "" ? 425 : num(c.lim);
-  const admOn = c.adminOn !== false, adm = c.admin === undefined || c.admin === "" ? 500 : num(c.admin);
+  const admOn = c.adminOn !== false, adm = c.admin === undefined || c.admin === "" ? 575 : num(c.admin);
   if (!limOn || lim === 0) { strike(p1, 72, 393, 537.5); txt(p1, "Not applicable (agreed)", 410, 540, 8, B, RED); }
   else if (lim !== 425) { strike(p1, 295, 332, 537.5); txt(p1, `Amended: ${money(lim)}`, 410, 540, 8, B, RED); }
   const [pk, pkAmt] = String(c.pkg || "Later|0").split("|");

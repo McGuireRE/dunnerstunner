@@ -33,7 +33,7 @@ export function frontPageTable(ag: any, people: any[]) {
   const pkAmt = pk === "Custom" ? num(c.custom) : +amt;
   const later = pk === "Later" || a.mkt === "later";
   const lim = c.limOn === false ? 0 : (c.lim === undefined || c.lim === "" ? 425 : num(c.lim));
-  const adm = c.adminOn === false ? 0 : (c.admin === undefined || c.admin === "" ? 500 : num(c.admin));
+  const adm = c.adminOn === false ? 0 : (c.admin === undefined || c.admin === "" ? 575 : num(c.admin));
   const costs = [lim ? `LIM ${money(lim)}` : "", adm ? `administration fee ${money(adm)}` : "", `marketing ${later ? "to be agreed" : money(pkAmt)}`].filter(Boolean).join(", ");
   const rows: [string, string][] = [
     ["Client(s)", people.filter((p) => p.legal_name).map((p) => esc(p.legal_name)).join(" and ") + (a.capacity && a.capacity !== "Owners" && a.entity ? `, as ${esc(a.capacity.toLowerCase())} for ${esc(a.entity)}` : "")],

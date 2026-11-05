@@ -371,7 +371,7 @@ hr.soft { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
     return `${money(num(cfg.flat))} for a sale price up to ${money(num(cfg.thr))}, plus ${cfg.pct}% of the portion above, plus GST`;
   }
   const limAmt = (cfg = CFG) => cfg.limOn === false ? 0 : (cfg.lim === undefined || cfg.lim === '' ? 425 : num(cfg.lim));
-  const adminAmt = (cfg = CFG) => cfg.adminOn === false ? 0 : (cfg.admin === undefined || cfg.admin === '' ? 500 : num(cfg.admin));
+  const adminAmt = (cfg = CFG) => cfg.adminOn === false ? 0 : (cfg.admin === undefined || cfg.admin === '' ? 575 : num(cfg.admin));
   function pkgOf(cfg) { const [name, amt] = String(cfg.pkg || 'Later|0').split('|'); return { name, amt: name === 'Custom' ? num(cfg.custom) : +amt, label: name === 'Campaign' ? ((cfg.campaign && cfg.campaign.snapshot && cfg.campaign.snapshot.title) || 'Marketing campaign') : name === 'Custom' ? 'Custom campaign' : name + ' package' }; }
 
   /* ───────── campaign (shared catalogue from ../catalogue.js) ───────── */
@@ -1675,7 +1675,7 @@ function lawyerForm(id, title, blurb) {
         <p class="small" style="margin:10px 0 0">Only payable once a sale is unconditional.</p></div>
       <h2>Costs on signing</h2><p class="small">Untick or change either one if you've agreed something different. <span class="clause">Page 1, section E</span></p>
       <div class="row2"><div style="padding-top:6px">${TF.check('c', 'limOn', 'LIM report', '', true)}</div>${TF.text('c', 'lim', 'Amount, incl GST', { im: 'decimal', d: '425' })}</div>
-      <div class="row2"><div style="padding-top:6px">${TF.check('c', 'adminOn', 'Administration fee', '', true)}</div>${TF.text('c', 'admin', 'Amount, incl GST', { im: 'decimal', d: '500' })}</div>
+      <div class="row2"><div style="padding-top:6px">${TF.check('c', 'adminOn', 'Administration fee', '', true)}</div>${TF.text('c', 'admin', 'Amount, incl GST <span class="opt">($500 plus GST is $575)</span>', { im: 'decimal', d: '575' })}</div>
       <h2>Visiting professionals</h2><p class="small">A McGuire representative is present at every visit, and every professional signs the access form. These are the vendor's choices. <span class="clause">Clause 16.4</span></p>
       <div class="choices">${TF.check('an', 'vQuotes', 'Allow visits to give a buyer a quote', 'For example a builder pricing an extension', true)}${TF.check('an', 'vSales', 'Allow sales assessments', 'Someone assessing the home to sell the buyer a product, such as solar or insulation', false)}${TF.check('an', 'vNotify', 'Tell the vendor before each visit', 'A text with who is coming, when and why', true)}</div>
       ${TF.select('an', 'vNotice', 'Minimum notice for a visit', ['Same day is fine', '24 hours', '48 hours'], 'Same day is fine')}
