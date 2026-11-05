@@ -1,0 +1,66 @@
+<style>
+.view-pad { padding-bottom: 40px; }
+.login-card { max-width: 440px; margin: 8vh auto 0; }
+.tbl { width: 100%; border-collapse: collapse; font-size: 15.5px; }
+.tbl td, .tbl th { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.tbl th { font-size: 13px; color: var(--muted); font-weight: 500; }
+.tbl tr.click { cursor: pointer; }
+.tbl tr.click:hover td { background: var(--accent-soft); }
+.pill { display: inline-block; font-size: 13px; font-weight: 600; border-radius: 999px; padding: 3px 10px; background: var(--line); color: var(--ink); white-space: nowrap; }
+.pill.sent, .pill.parked { background: var(--warn-soft); color: var(--warn); }
+.pill.signed, .pill.countersigned { background: var(--ok-soft); color: var(--ok); }
+.pill.cancelled, .pill.ended { background: var(--line); color: var(--muted); }
+.toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin: 10px 0 6px; }
+.toolbar .btn { padding: 10px 16px; font-size: 15.5px; }
+.sigimg { max-width: 100%; height: 90px; object-fit: contain; background: #fff; border: 1px solid var(--line); border-radius: 6px; }
+.copybox { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 14px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(90px + env(safe-area-inset-bottom, 0px)); background: var(--ink); color: var(--surface); padding: 10px 16px; border-radius: 8px; font-size: 15px; z-index: 20; max-width: calc(100% - 32px); }
+.toast[hidden] { display: none; }
+.cb-sec { font-weight: 600; font-size: 14.5px; margin: 16px 0 6px; }
+.cb-row { display: grid; grid-template-columns: 34px 1fr auto; gap: 8px; align-items: center; padding: 7px 0; border-bottom: 1px solid var(--line); font-size: 15px; }
+.cb-row.off { opacity: .5; }
+.cb-row input[type=checkbox] { width: 20px; height: 20px; accent-color: var(--accent); }
+.cb-row .cb-qty { width: 52px; padding: 6px; font-size: 15px; }
+.cb-row .cb-price { font-variant-numeric: tabular-nums; font-size: 14.5px; text-align: right; white-space: nowrap; }
+.cb-row .cb-quote { width: 92px; padding: 6px 8px; font-size: 15px; }
+.cb-row input[type=text]:not(.cb-quote) { padding: 6px 8px; font-size: 15px; }
+.se-ev { display: grid; grid-template-columns: 140px 84px 1fr 30px; gap: 6px; margin: 6px 0; align-items: center; }
+.se-ev input { padding: 8px; font-size: 15px; }
+@media (max-width: 520px) { .se-ev { grid-template-columns: 1fr 1fr; } .se-ev input[data-evn] { grid-column: 1 / -1; } }
+.loading { text-align: center; color: var(--muted); padding: 60px 0; }
+.ttabs { display: flex; gap: 8px; margin: 8px 0 20px; flex-wrap: wrap; }
+.ttab { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--muted); border-radius: 999px; padding: 8px 14px 8px 8px; font: 600 15px var(--body, inherit); cursor: pointer; }
+.ttab .n { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; background: var(--line); color: var(--ink); font-size: 14px; }
+.ttab.on { border-color: var(--accent); color: var(--ink); }
+.ttab.on .n { background: var(--accent); color: #fff; }
+.tguide summary { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.tguide .in ul { margin: 6px 0 0; padding-left: 20px; }
+@media print {
+  .proto, header.top, .actions, .toolbar, .no-print { display: none !important; }
+  body { background: #fff; color: #000; font-size: 12pt; }
+  main { padding: 0 !important; max-width: none; }
+  .card { border: 1px solid #bbb; break-inside: avoid; }
+}
+</style>
+
+<header class="top">
+  <div class="top-inner">
+    <div class="brand">
+      <img class="logo-light" src="__LOGO_LIGHT__" alt="McGuire Real Estate">
+      <img class="logo-dark" src="__LOGO_DARK__" alt="McGuire Real Estate">
+      <span class="brand-right"><span class="step-count" id="stepCount"></span><nav class="agent-nav" id="agentNav" aria-label="Main" hidden><button class="mode-btn" type="button" id="navHome">Home</button><button class="mode-btn" type="button" id="navDash">Dashboard</button></nav><button class="mode-btn" type="button" id="signOut" hidden>Sign out</button></span>
+    </div>
+    <div class="bar" aria-hidden="true"><span id="barFill"></span></div>
+    <div class="step-name" id="stepName"></div>
+  </div>
+</header>
+
+<main id="main"><div class="loading">Loading...</div></main>
+
+<div class="actions" id="actions" hidden>
+  <div class="actions-in">
+    <button class="btn ghost" type="button" id="back">Back</button>
+    <button class="btn primary" type="button" id="next">Continue</button>
+  </div>
+</div>
+<div class="toast" id="toast" role="status" hidden></div>

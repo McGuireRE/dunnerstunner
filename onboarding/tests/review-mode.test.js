@@ -1,0 +1,25 @@
+const {chromium}=require('playwright');const fs=require('fs');
+const html=fs.readFileSync(require('path').join(__dirname,'..','index.html'),'utf8');
+const cat=fs.readFileSync(require('path').join(__dirname,'..','..','catalogue.js'),'utf8');
+const mock=fs.readFileSync(require('path').join(__dirname,'mock.js'),'utf8');
+(async()=>{
+const b=await chromium.launch();const ctx=await b.newContext({viewport:{width:1024,height:900}});
+await ctx.route('https://cdn.jsdelivr.net/**',r=>r.fulfill({contentType:'application/javascript',body:mock}));
+await ctx.route('https://fonts.googleapis.com/**',r=>r.fulfill({contentType:'text/css',body:''}));
+await ctx.route('https://packages.dunnerstunner.co.nz/catalogue.js',r=>r.fulfill({contentType:'application/javascript',body:cat}));
+await ctx.route('https://packages.dunnerstunner.co.nz/onboarding/**',r=>r.fulfill({contentType:'text/html',body:html}));
+const p=await ctx.newPage(); const errs=[]; p.on('pageerror',e=>errs.push(e.message)); p.on('console',m=>{if(m.type()==='error')errs.push(m.text())});
+const go=async()=>{await p.goto('https://packages.dunnerstunner.co.nz/onboarding/');await p.waitForTimeout(500);};
+await go(); await p.evaluate(()=>{localStorage.clear();localStorage.setItem('mocksession',JSON.stringify({user:{id:'agent-1',email:'hello@timmcguire.co.nz'}}));
+ const db={agreements:[{id:'A1',ref:'MRE-2026-1001',address:'14 Highgate, Maori Hill',status:'countersigned',config:{approach:'invited',flat:'10000',thr:'250000',pct:'3.5',ask:'1150000',appr:'done',mktMode:'build',aml:'Manual'},answers:{pBed:'5',pBath:'2',work:'no',wt:'no',meth:'no',def:'no',guide:['0','1','2','3','4','5','6','7'],acks:['0','1','2','3','4','5','6','7','8','9','10'],titleOk:true},legal:{choice:'have'},signed_at:new Date().toISOString(),cooling_off_until:new Date(Date.now()+864e5).toISOString(),agreement_version:'v3.15-26102026'}],agreement_people:[{id:'P1',agreement_id:'A1',position:1,legal_name:'Jane Smith',pref_name:'Jane',email:'jane@example.com',phone:'021 555 1234',user_id:'v-jane',signed_at:new Date().toISOString()}],agreement_events:[],signatures:[],lawyer_links:[],aml_files:[],aml_events:[],email_log:[],cancellation_requests:[]};localStorage.setItem('mockdb',JSON.stringify(db));});
+await go(); await p.click('#navDash'); await p.waitForTimeout(500); await p.click('tr[data-id="A1"]'); await p.waitForTimeout(400);
+const btn=await p.textContent('#editAg'); const hasAdj=!!(await p.$('#saveAdj'));
+await p.fill('[data-pcphone]','021 999 0000'); await p.fill('#agNotes','Owner prefers texts.'); await p.click('#saveAdj'); await p.waitForTimeout(400);
+const db1=await p.evaluate(()=>JSON.parse(localStorage.getItem('mockdb'))); 
+await p.click('#editAg'); await p.waitForTimeout(400);
+const flag=await p.textContent('.agent-flag'); const disabled=await p.$$eval('input:not([disabled]), textarea:not([disabled]), select:not([disabled])',e=>e.length); const vis=await p.$$eval('button',e=>e.filter(b=>!b.hidden&&b.offsetParent).map(b=>b.textContent.trim()).slice(0,12));
+await p.screenshot({path:require('path').join(__dirname,'out','r1.png'),fullPage:true});
+await p.click('[data-tp="2"]'); await p.waitForTimeout(300); const h3=await p.textContent('h1'); const canvas=!!(await p.$('canvas'));
+await p.screenshot({path:require('path').join(__dirname,'out','r3.png'),fullPage:true});
+await p.click('#next'); await p.waitForTimeout(300); const back=await p.textContent('h1');
+console.log(JSON.stringify({btn,hasAdj,phone:db1.agreement_people[0].phone,notes:db1.agreements[0].config.agent_notes,flag,enabledFields:disabled,vis,h3,canvas,back,errs},null,1)); await b.close();})();

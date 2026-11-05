@@ -1,0 +1,51 @@
+const {chromium}=require('playwright');const fs=require('fs');
+const html=fs.readFileSync(require('path').join(__dirname,'..','index.html'),'utf8');
+const cat=fs.readFileSync(require('path').join(__dirname,'..','..','catalogue.js'),'utf8');
+const mock=fs.readFileSync(require('path').join(__dirname,'mock.js'),'utf8');
+(async()=>{
+const b=await chromium.launch();const ctx=await b.newContext({viewport:{width:1024,height:900}});
+await ctx.route('https://cdn.jsdelivr.net/**',r=>r.fulfill({contentType:'application/javascript',body:mock}));
+await ctx.route('https://fonts.googleapis.com/**',r=>r.fulfill({contentType:'text/css',body:''}));
+await ctx.route('https://packages.dunnerstunner.co.nz/catalogue.js',r=>r.fulfill({contentType:'application/javascript',body:cat}));
+await ctx.route('https://packages.dunnerstunner.co.nz/onboarding/**',r=>r.fulfill({contentType:'text/html',body:html}));
+const p=await ctx.newPage(); const errs=[]; p.on('pageerror',e=>errs.push(e.message)); p.on('console',m=>{if(m.type()==='error')errs.push(m.text())});
+const tick=async(sel)=>p.$$eval(sel,els=>els.forEach(el=>{el.checked=true;el.dispatchEvent(new Event('change',{bubbles:true}));}));
+const go=async()=>{await p.goto('https://packages.dunnerstunner.co.nz/onboarding/');await p.waitForTimeout(500);};
+await go(); await p.evaluate(()=>{localStorage.clear();localStorage.setItem('mocksession',JSON.stringify({user:{id:'agent-1',email:'hello@timmcguire.co.nz'}}));}); await go();
+await p.click('#navDash'); await p.waitForTimeout(500); await p.click('#newAg'); await p.waitForTimeout(300);
+await p.click('#next'); await p.waitForTimeout(200); const e0=await p.textContent('.err');
+await p.fill('#tAddr','14 Highgate, Maori Hill, Dunedin'); await p.fill('#t_owners','Margaret Anne Smith, Peter Smith');
+await p.fill('#tPeople [data-pk=legal_name]','Margaret Anne Smith'); await p.fill('#tPeople [data-pk=pref_name]','Maggie'); await p.fill('#tPeople [data-pk=email]','maggie@example.com');
+await p.click('#tAddP'); await p.fill('#tPeople [data-i="1"] [data-pk=legal_name]','Peter Smith'); await p.fill('#tPeople [data-i="1"] [data-pk=email]','peter@example.com');
+await tick('[data-an=titleOk]'); await p.fill('#t_ask','1150000'); await p.fill('#t_pBed','5'); await p.fill('#t_pBath','2');
+for(const k of ['work','wt','meth','def']) await tick(`input[name=t_an_${k}][value=no]`);
+await p.screenshot({path:require('path').join(__dirname,'out','t1.png'),fullPage:true});
+await p.click('#next'); await p.waitForTimeout(400);
+const h2=await p.textContent('h1');
+await p.fill('#t_flat','10000'); await p.fill('#t_pct','3.5'); await p.waitForTimeout(100); const calc=await p.textContent('#tCalcOut');
+await p.click('#tAddB'); await p.fill('#tBuyers [data-b=name]','Neighbour Ned'); await tick('#tBuyers [data-b=exclude]');
+await p.screenshot({path:require('path').join(__dirname,'out','t2.png'),fullPage:true});
+await p.click('#next'); await p.waitForTimeout(400);
+const h3=await p.textContent('h1');
+// try sign without ticks
+const b1=await p.$('[data-signnow]'); 
+const cv=await p.$('canvas'); await cv.evaluate(el=>el.scrollIntoView({block:'center'})); await p.waitForTimeout(100); const bb=await cv.boundingBox(); await p.mouse.move(bb.x+20,bb.y+60); await p.mouse.down(); await p.mouse.move(bb.x+200,bb.y+80,{steps:8}); await p.mouse.up();
+await b1.click(); await p.waitForTimeout(200); const e3=await p.textContent('.err');
+await tick('[data-tmulti=guide]');
+await tick('[data-tmulti=acks]');
+await tick('input[name=tLegal][value=have]');
+await p.screenshot({path:require('path').join(__dirname,'out','t3.png'),fullPage:true});
+await b1.click(); await p.waitForTimeout(3200);
+const e4=await p.textContent('.err'); console.log('E4',e4); const after=(await p.textContent('main')).replace(/\s+/g,' ').slice(0,300);
+const db1=await p.evaluate(()=>JSON.parse(localStorage.getItem('mockdb')));
+const ag=db1.agreements[0];
+// send remaining to phones
+await p.click('#tSendPhones'); await p.waitForTimeout(3200);
+const db2=await p.evaluate(()=>JSON.parse(localStorage.getItem('mockdb')));
+const det=(await p.textContent('main')).replace(/\s+/g,' ').slice(0,200);
+await p.screenshot({path:require('path').join(__dirname,'out','t4_detail.png'),fullPage:true});
+// Peter on his phone
+await p.evaluate(()=>localStorage.setItem('mocksession',JSON.stringify({user:{id:'v-peter',email:'peter@example.com'}}))); await go();
+const ph1=await p.textContent('h1'); await p.screenshot({path:require('path').join(__dirname,'out','t5_peter.png')});
+console.log(JSON.stringify({e0,h2,calc,h3,e3,after,status1:ag.status,signed1:db1.agreement_people.map(x=>[x.legal_name,!!x.signed_at]),legal:ag.legal,status2:db2.agreements[0].status,step:db2.agreements[0].answers._step,interested:db2.agreements[0].answers.interested,det,ph1,errs},null,1));
+await b.close();})();
