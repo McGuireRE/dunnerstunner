@@ -242,11 +242,16 @@
      guides.json with the version of each ({"agency": {"file", "version", "title"}, "sale_purchase": {...}}).
      Until then nothing about them is shown or asked for, and the agreement keeps its links to the REA website. */
   let GUIDES = {};
+  // every guide request gives up after a few seconds, so a slow or stuck connection can never hold up the page
+  async function fetchT(url, opts, ms) {
+    const c = new AbortController(); const t = setTimeout(() => c.abort(), ms || 5000);
+    try { return await fetch(url, Object.assign({}, opts, { signal: c.signal })); } finally { clearTimeout(t); }
+  }
   async function loadGuides() {
     const found = {};
     try {
       const base = new URL('assets/guides/', location.href);
-      const r = await fetch(new URL('guides.json', base), { cache: 'no-store' });
+      const r = await fetchT(new URL('guides.json', base), { cache: 'no-store' });
       if (!r.ok) { GUIDES = {}; return; }
       const j = await r.json();
       for (const k of ['agency', 'sale_purchase']) {
@@ -254,7 +259,7 @@
         if (!g || typeof g.file !== 'string' || !/^[A-Za-z0-9._-]+\.pdf$/.test(g.file) || typeof g.version !== 'string' || !g.version.trim()) continue;
         if (typeof g.sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(g.sha256)) continue;   // the fingerprint comes from the list; the server checks the real file against it
         const url = new URL(g.file, base).href;
-        const h = await fetch(url, { method: 'HEAD' });   // only check it's there: no download on every visit
+        const h = await fetchT(url, { method: 'HEAD' });   // only check it's there: no download on every visit
         if (!h.ok || !/pdf/i.test(h.headers.get('content-type') || '')) continue;
         found[k] = { file: g.file, version: g.version.trim(), url, sha256: g.sha256, title: typeof g.title === 'string' && g.title.trim() ? g.title.trim() : (k === 'agency' ? 'Real Estate Authority guide to agency agreements' : 'Real Estate Authority guide to sale and purchase agreements') };
       }
@@ -395,7 +400,7 @@
     let qlr = null; try { qlr = localStorage.getItem('qlReturn'); localStorage.removeItem('qlReturn'); } catch (_) { }
     if (qlr) { try { const u = new URL(qlr); if (u.origin === location.origin && u.pathname !== location.pathname) return location.replace(qlr); } catch (_) { } }
     IS_AGENT = !!(await must(sb.rpc('is_agent')));
-    await loadGuides();
+    await Promise.race([loadGuides(), new Promise(r => setTimeout(r, 4000))]);   // never wait more than a few seconds
     let pend = null; try { pend = JSON.parse(localStorage.getItem('pendingCampaign') || 'null'); } catch (_) { }
     if (IS_AGENT && pend) { try { localStorage.removeItem('pendingCampaign'); } catch (_) { } return viewTable(null, pend); }
     setAgentNav();

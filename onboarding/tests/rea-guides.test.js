@@ -87,6 +87,20 @@ const G={agency:{file:'test-agency-guide.pdf',version:'TEST-1',sha256:SHA},sale_
   expect(out.agentRc,'Tim sees the dated receipt on the agreement');
   await ctx.close(); }
 
+// D. A guide request that never answers (a stuck phone connection) can't hold up the page
+{ const ctx=await b.newContext({viewport:{width:390,height:844}});
+  await ctx.route('https://cdn.jsdelivr.net/**',r=>r.fulfill({contentType:'application/javascript',body:mock}));
+  await ctx.route('https://fonts.googleapis.com/**',r=>r.fulfill({contentType:'text/css',body:''}));
+  await ctx.route('https://packages.dunnerstunner.co.nz/catalogue.js',r=>r.fulfill({contentType:'application/javascript',body:cat}));
+  await ctx.route('https://packages.dunnerstunner.co.nz/onboarding/**',r=>{ if(r.request().url().includes('/assets/guides/')) return; return r.fulfill({contentType:'text/html',body:html}); });
+  const p=await ctx.newPage();
+  await p.goto('https://packages.dunnerstunner.co.nz/onboarding/'); await seed(p,{agreements:[ag('A5')],agreement_people:[person('P5','A5','Kim Lee','kim@example.com','v-kim')]});
+  await p.evaluate(()=>localStorage.setItem('mocksession',JSON.stringify({user:{id:'v-kim',email:'kim@example.com'}})));
+  await p.goto('https://packages.dunnerstunner.co.nz/onboarding/'); await p.waitForTimeout(5500);
+  out.dLoaded=await p.evaluate(()=>!/^\s*Loading/.test(document.querySelector('main').textContent)&&document.querySelector('main').textContent.length>50);
+  expect(out.dLoaded,'the agreement still opens within a few seconds when the guide check gets no answer');
+  await ctx.close(); }
+
 // C. A guide list without a version is ignored: never a made-up version
 { const {ctx,p}=await setup({agency:{file:'test-agency-guide.pdf'},sale_purchase:{file:'x.pdf',version:''}});
   await p.goto('https://packages.dunnerstunner.co.nz/onboarding/'); await seed(p,{agreements:[ag('A3')],agreement_people:[person('P3','A3','Kim Lee','kim@example.com','v-kim')]});
