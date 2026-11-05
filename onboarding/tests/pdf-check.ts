@@ -63,7 +63,7 @@ expect(t2.includes(NEW.VENDOR_GUIDE.title) && t2.includes("$575 administration f
 expect(t2.includes("given with Agency Agreement MRE-2026-1001, not part of it"), "the guide pages say they are not part of the agreement");
 expect(!/\$500 administration fee \(including GST\); the/.test(t2), "the template's old guide page ($500) is not used");
 expect(t2.includes("Step 6") && t2.includes("0800 367 7322 or 04 471 8930") && t2.includes("personalised process"), "Complaints procedure appended, tidied");
-expect(t2.includes("version TEST-1") && /shown on screen before signing/.test(t2), "the guide receipt and version are in the execution record");
+expect(t2.includes("version TEST-1") && /given on screen before signing/.test(t2), "the guide receipt and version are in the execution record");
 const p2doc = await PDFDocument.load(p2), n2 = p2doc.getPageCount();
 const lastTwo = (await text(p2.slice(), "phase2-check")).split("\f").slice(n2 - 2, n2).map((x) => x.trim());
 expect(lastTwo[0] === "TEST FIXTURE GUIDE PAGE 1" && lastTwo[1] === "TEST FIXTURE GUIDE PAGE 2", "the REA guide pages are appended last, unaltered (no footer or stamp): " + JSON.stringify(lastTwo));

@@ -286,10 +286,10 @@ export async function buildAgreementPdf(inp: PdfInput): Promise<Uint8Array> {
     if (s.user_agent) S.small(`Device: ${String(s.user_agent).slice(0, 120)}`);
     const ok = inp.appendix?.reaGuide;
     const rg = ok && ok.received ? (s.snapshot?.rea_guides || []).find((g: any) => g.guide === "agency" && g.version === ok.version && g.file === ok.file) : null;
-    if (rg) S.small(`Received the Real Estate Authority guide to agency agreements (version ${rg.version}), shown on screen before signing. Receipt confirmed ${nzDT(rg.acknowledged_at || s.signed_at)}, and recorded in what was signed.`);
+    if (rg) S.small(`Received the Real Estate Authority guide to agency agreements (version ${rg.version}), given on screen before signing (shown or opened from the signing page). Receipt confirmed ${nzDT(rg.acknowledged_at || s.signed_at)}, and recorded in what was signed.`);
     const sl = inp.appendix?.saleListed || [];
     const rs = (s.snapshot?.rea_guides || []).find((g: any) => g.guide === "sale_purchase" && sl.some((x) => x.file === g.file && x.version === g.version));
-    if (rs) S.small(`Received the Real Estate Authority guide to sale and purchase agreements (version ${rs.version}), shown on screen before signing. Receipt confirmed ${nzDT(rs.acknowledged_at || s.signed_at)}, and recorded in what was signed.`);
+    if (rs) S.small(`Received the Real Estate Authority guide to sale and purchase agreements (version ${rs.version}), given on screen before signing (shown or opened from the signing page). Receipt confirmed ${nzDT(rs.acknowledged_at || s.signed_at)}, and recorded in what was signed.`);
     S.gap(8);
   }
   const unsigned = signers.filter((p) => !clientSigs.some((s) => s.person_id === p.id));

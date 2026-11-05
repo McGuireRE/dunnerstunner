@@ -44,13 +44,16 @@ async function signThrough(p){ await tickAll(p); await p.click('#next'); await p
   await ctx.close(); }
 
 // B. Guide files present: shown before signing, receipt in what's signed; "Before you sell" with its own dated receipt
-const G={agency:{file:'test-agency-guide.pdf',version:'TEST-1'},sale_purchase:{file:'test-sale-guide.pdf',version:'TEST-2'}};
+const SHA=require('crypto').createHash('sha256').update(PDF).digest('hex');
+const G={agency:{file:'test-agency-guide.pdf',version:'TEST-1',sha256:SHA},sale_purchase:{file:'test-sale-guide.pdf',version:'TEST-2',sha256:SHA}};
 { const {ctx,p}=await setup(G);
   await p.goto('https://packages.dunnerstunner.co.nz/onboarding/'); await seed(p,{agreements:[ag('A2')],agreement_people:[person('P2','A2','Rob Brown','rob@example.com','v-rob')]});
   await login(p,'v-rob','rob@example.com');
   out.bIframe=await p.$eval('.ack-more .guide-inline iframe',e=>e.getAttribute('src')).catch(()=>null);
   expect(/assets\/guides\/test-agency-guide\.pdf$/.test(out.bIframe||''),'the agency agreement guide is shown on the page before signing');
   out.bVersion=await p.$eval('.ack-more .guide-inline',e=>e.textContent.includes('version TEST-1')); expect(out.bVersion,'its version is shown');
+  out.bPhone=await p.evaluate(()=>{ const g=document.querySelector('.ack-more .guide-inline'); const b=g.querySelector('a.guide-open'); return !!b&&b.offsetHeight>0&&/test-agency-guide\.pdf$/.test(b.href)&&getComputedStyle(g.querySelector('iframe')).display==='none'; });
+  expect(out.bPhone,'on a phone the guide opens from a Read the guide button (phones can\'t show a PDF inside the page)');
   out.bSide=await p.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth); expect(!out.bSide,'the guide fits a phone');
   await p.screenshot({path:path.join(__dirname,'out','rea1_before_sign.png'),fullPage:true});
   await signThrough(p);

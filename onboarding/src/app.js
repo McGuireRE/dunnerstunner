@@ -252,11 +252,11 @@
       for (const k of ['agency', 'sale_purchase']) {
         const g = j && j[k];
         if (!g || typeof g.file !== 'string' || !/^[A-Za-z0-9._-]+\.pdf$/.test(g.file) || typeof g.version !== 'string' || !g.version.trim()) continue;
+        if (typeof g.sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(g.sha256)) continue;   // the fingerprint comes from the list; the server checks the real file against it
         const url = new URL(g.file, base).href;
-        const h = await fetch(url, { cache: 'no-store' });
+        const h = await fetch(url, { method: 'HEAD' });   // only check it's there: no download on every visit
         if (!h.ok || !/pdf/i.test(h.headers.get('content-type') || '')) continue;
-        const digest = await crypto.subtle.digest('SHA-256', await h.arrayBuffer());
-        found[k] = { file: g.file, version: g.version.trim(), url, sha256: Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join(''), title: typeof g.title === 'string' && g.title.trim() ? g.title.trim() : (k === 'agency' ? 'Real Estate Authority guide to agency agreements' : 'Real Estate Authority guide to sale and purchase agreements') };
+        found[k] = { file: g.file, version: g.version.trim(), url, sha256: g.sha256, title: typeof g.title === 'string' && g.title.trim() ? g.title.trim() : (k === 'agency' ? 'Real Estate Authority guide to agency agreements' : 'Real Estate Authority guide to sale and purchase agreements') };
       }
     } catch (_) { }
     GUIDES = found;
@@ -289,8 +289,8 @@
     try { const { data } = await sb.from('signatures').select('snapshot,signer_role,signed_at').eq('agreement_id', agId); const cs = (data || []).filter(x => x.signer_role === 'client').sort((x, y) => x.signed_at < y.signed_at ? -1 : 1); old = cs.length > 0 && !(cs[0].snapshot || {}).appendices; } catch (_) { }
     const g = GUIDES.agency, out = {};
     const g2 = GUIDES.sale_purchase, rg = [];
-    if (g && (an.acks || []).includes('1')) rg.push({ guide: 'agency', title: g.title, version: g.version, file: g.file, sha256: g.sha256, shown: 'On screen before signing', acknowledged_at: an._reaAgencyAt || new Date().toISOString() });
-    if (g2 && (an.acks || []).includes('2')) rg.push({ guide: 'sale_purchase', title: g2.title, version: g2.version, file: g2.file, sha256: g2.sha256, shown: 'On screen before signing', acknowledged_at: an._reaSaleAt || new Date().toISOString() });
+    if (g && (an.acks || []).includes('1')) rg.push({ guide: 'agency', title: g.title, version: g.version, file: g.file, sha256: g.sha256, shown: 'Given on screen before signing (shown or opened from the signing page)', acknowledged_at: an._reaAgencyAt || new Date().toISOString() });
+    if (g2 && (an.acks || []).includes('2')) rg.push({ guide: 'sale_purchase', title: g2.title, version: g2.version, file: g2.file, sha256: g2.sha256, shown: 'Given on screen before signing (shown or opened from the signing page)', acknowledged_at: an._reaSaleAt || new Date().toISOString() });
     if (rg.length) out.rea_guides = rg;
     if (!old) out.appendices = { set: APPENDIX_SET, vendor_guide: VENDOR_GUIDE_ID, complaints: COMPLAINTS.id, rea_agency_guide: g ? { version: g.version, file: g.file, title: g.title, sha256: g.sha256 } : null };
     return out;
@@ -2112,7 +2112,8 @@ function lawyerForm(id, title, blurb) {
 
   /* vendor: "Before you sell", the REA sale and purchase guide with its own dated receipt */
   function guideViewer(g) {
-    return `<div class="guide-inline"><iframe src="${esc(g.url)}" title="${esc(g.title)}"></iframe><p class="small" style="margin:6px 0 0">${esc(g.title)}, version ${esc(g.version)}. <a href="${esc(g.url)}" target="_blank" rel="noopener">Open it in a new tab</a></p></div>`;
+    // phones don't show a PDF inside a page, so the main action is opening it; wider screens also show it here
+    return `<div class="guide-inline"><a class="btn primary guide-open" href="${esc(g.url)}" target="_blank" rel="noopener">Read the guide</a><iframe src="${esc(g.url)}" title="${esc(g.title)}" loading="lazy"></iframe><p class="small" style="margin:6px 0 0">${esc(g.title)}, version ${esc(g.version)}. It opens in a new tab; come back here when you've read it.</p></div>`;
   }
   function viewBeforeYouSell() {
     const g = GUIDES.sale_purchase; if (!g) return showStep(LAST);

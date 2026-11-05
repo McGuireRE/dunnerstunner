@@ -1,5 +1,5 @@
 {
-  "_note": "Official REA guides, unaltered. English is the one given and receipted; translations are the REA's own, offered alongside (phase 4). When the REA issues a new version, add the new file, set file and version here, and move the old pair into \"earlier\".",
+  "_note": "Official REA guides, unaltered. English is the one given and receipted; translations are the REA's own, offered alongside (phase 4). When the REA issues a new version, add the new file, set file and version here, and move the old pair into \"earlier\". sha256 is the English file's fingerprint (the page records it; the server checks the real file against it).",
   "agency": {
     "file": "rea-agency-agreement-guide-2022-en.pdf",
     "version": "August 2022",
@@ -29,7 +29,8 @@
         "file": "rea-agency-agreement-guide-2022-zh.pdf",
         "language": "Simplified Chinese"
       }
-    }
+    },
+    "sha256": "cce4300670495d4b3cff5532831e3ed3ed35e292844725b78a2037b4e68e7932"
   },
   "sale_purchase": {
     "file": "rea-sale-purchase-guide-2022-en.pdf",
@@ -60,6 +61,7 @@
         "file": "rea-sale-purchase-guide-2022-zh.pdf",
         "language": "Simplified Chinese"
       }
-    }
+    },
+    "sha256": "295ce13bd4b70c442df98505b234062f631545cc42580666482a4e4c9318a6da"
   }
 }
