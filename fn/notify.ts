@@ -1,7 +1,7 @@
-import { admin, APP_URL, cors, esc, fmtDT, frontPageTable, json, sendMail, TIM_EMAIL, wrap } from "https://raw.githubusercontent.com/McGuireRE/dunnerstunner/0aef03d14160c5038fb0502df551d6ac6b81e7c0/fn/shared.ts";
+import { admin, APP_URL, cors, esc, fmtDT, frontPageTable, json, sendMail, TIM_EMAIL, wrap } from "https://raw.githubusercontent.com/McGuireRE/dunnerstunner/ab72b404d63d5b815ec4a166eb7fe31fda8a42b1/fn/shared.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
 // Phase 2 adds makeFormPdf: repin both imports to the commit that contains it before deploying.
-import { makeAgreementPdf, makeFormPdf, makeNoticePdf, makeVariationPdf } from "https://raw.githubusercontent.com/McGuireRE/dunnerstunner/0aef03d14160c5038fb0502df551d6ac6b81e7c0/fn/pdfload.ts";
+import { makeAgreementPdf, makeFormPdf, makeNoticePdf, makeVariationPdf } from "https://raw.githubusercontent.com/McGuireRE/dunnerstunner/ab72b404d63d5b815ec4a166eb7fe31fda8a42b1/fn/pdfload.ts";
 
 // Called by the app after a vendor sends to their lawyer, or after signing.
 Deno.serve(async (req) => {
