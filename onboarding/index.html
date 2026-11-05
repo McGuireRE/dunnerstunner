@@ -257,7 +257,7 @@ hr.soft { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
 .inline-doc p { margin: 0 0 8px; }
 .guide-inline { margin: 8px 0 14px; min-width: 0; }
 .guide-inline iframe { display: block; width: 100%; height: min(70vh, 640px); border: 1px solid var(--line); border-radius: 8px; background: #fff; margin-top: 10px; }
-.guide-inline .guide-open { display: inline-flex; }
+.guide-inline .guide-open { display: inline-flex; text-decoration: none; }
 @media (max-width: 700px) { .guide-inline iframe { display: none; } }
 .choices.three { grid-template-columns: 1fr 1fr 1fr; }
 @media (max-width: 360px) { .choices.three { grid-template-columns: 1fr; } }
@@ -2454,7 +2454,7 @@ function lawyerForm(id, title, blurb) {
   /* vendor: "Before you sell", the REA sale and purchase guide with its own dated receipt */
   function guideViewer(g) {
     // phones don't show a PDF inside a page, so the main action is opening it; wider screens also show it here
-    return `<div class="guide-inline"><a class="btn primary guide-open" href="${esc(g.url)}" target="_blank" rel="noopener">Read the guide</a><iframe src="${esc(g.url)}" title="${esc(g.title)}" loading="lazy"></iframe><p class="small" style="margin:6px 0 0">${esc(g.title)}, version ${esc(g.version)}. It opens in a new tab; come back here when you've read it.</p></div>`;
+    return `<div class="guide-inline"><a class="btn primary guide-open" href="${esc(g.url)}" target="_blank" rel="noopener">Read the guide</a>${matchMedia('(min-width: 701px)').matches ? `<iframe src="${esc(g.url)}" title="${esc(g.title)}" loading="lazy"></iframe>` : ''}<p class="small" style="margin:6px 0 0">${esc(g.title)}, version ${esc(g.version)}. It opens in a new tab; come back here when you've read it.</p></div>`;
   }
   function viewBeforeYouSell() {
     const g = GUIDES.sale_purchase; if (!g) return showStep(LAST);

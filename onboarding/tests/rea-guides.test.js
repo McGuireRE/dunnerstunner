@@ -49,10 +49,10 @@ const G={agency:{file:'test-agency-guide.pdf',version:'TEST-1',sha256:SHA},sale_
 { const {ctx,p}=await setup(G);
   await p.goto('https://packages.dunnerstunner.co.nz/onboarding/'); await seed(p,{agreements:[ag('A2')],agreement_people:[person('P2','A2','Rob Brown','rob@example.com','v-rob')]});
   await login(p,'v-rob','rob@example.com');
-  out.bIframe=await p.$eval('.ack-more .guide-inline iframe',e=>e.getAttribute('src')).catch(()=>null);
+  out.bIframe=await p.$eval('.ack-more .guide-inline a.guide-open',e=>e.getAttribute('href')).catch(()=>null);
   expect(/assets\/guides\/test-agency-guide\.pdf$/.test(out.bIframe||''),'the agency agreement guide is shown on the page before signing');
   out.bVersion=await p.$eval('.ack-more .guide-inline',e=>e.textContent.includes('version TEST-1')); expect(out.bVersion,'its version is shown');
-  out.bPhone=await p.evaluate(()=>{ const g=document.querySelector('.ack-more .guide-inline'); const b=g.querySelector('a.guide-open'); return !!b&&b.offsetHeight>0&&/test-agency-guide\.pdf$/.test(b.href)&&getComputedStyle(g.querySelector('iframe')).display==='none'; });
+  out.bPhone=await p.evaluate(()=>{ const g=document.querySelector('.ack-more .guide-inline'); const b=g.querySelector('a.guide-open'); return !!b&&b.offsetHeight>0&&/test-agency-guide\.pdf$/.test(b.href)&&!g.querySelector('iframe'); });
   expect(out.bPhone,'on a phone the guide opens from a Read the guide button (phones can\'t show a PDF inside the page)');
   out.bSide=await p.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth); expect(!out.bSide,'the guide fits a phone');
   await p.screenshot({path:path.join(__dirname,'out','rea1_before_sign.png'),fullPage:true});
@@ -72,7 +72,7 @@ const G={agency:{file:'test-agency-guide.pdf',version:'TEST-1',sha256:SHA},sale_
   await p.reload(); await p.waitForTimeout(900);
   await p.click('#spOpen'); await p.waitForTimeout(400);
   out.spH1=await p.textContent('main h1'); expect(out.spH1==='Before you sell','the Before you sell step');
-  out.spIframe=await p.$eval('.guide-inline iframe',e=>e.getAttribute('src')); expect(/test-sale-guide\.pdf$/.test(out.spIframe),'the sale and purchase guide is shown inline');
+  out.spIframe=await p.$eval('.guide-inline a.guide-open',e=>e.getAttribute('href')); expect(/test-sale-guide\.pdf$/.test(out.spIframe),'the sale and purchase guide is shown inline');
   await p.click('#next'); await p.waitForTimeout(200); out.spErr=await p.textContent('.err'); expect(/Tick the box/.test(out.spErr),'the receipt must be ticked');
   await p.$eval('#spOk',e=>{e.checked=true;}); await p.click('#next'); await p.waitForTimeout(600);
   d=await db(p); expect((d.guide_receipts||[]).length===1&&d.guide_receipts[0].version==='TEST-2'&&d.guide_receipts[0].received_at&&d.guide_receipts[0].sha256===require('crypto').createHash('sha256').update(PDF).digest('hex'),'its own dated receipt, with the version and the file\'s SHA-256');

@@ -2113,7 +2113,7 @@ function lawyerForm(id, title, blurb) {
   /* vendor: "Before you sell", the REA sale and purchase guide with its own dated receipt */
   function guideViewer(g) {
     // phones don't show a PDF inside a page, so the main action is opening it; wider screens also show it here
-    return `<div class="guide-inline"><a class="btn primary guide-open" href="${esc(g.url)}" target="_blank" rel="noopener">Read the guide</a><iframe src="${esc(g.url)}" title="${esc(g.title)}" loading="lazy"></iframe><p class="small" style="margin:6px 0 0">${esc(g.title)}, version ${esc(g.version)}. It opens in a new tab; come back here when you've read it.</p></div>`;
+    return `<div class="guide-inline"><a class="btn primary guide-open" href="${esc(g.url)}" target="_blank" rel="noopener">Read the guide</a>${matchMedia('(min-width: 701px)').matches ? `<iframe src="${esc(g.url)}" title="${esc(g.title)}" loading="lazy"></iframe>` : ''}<p class="small" style="margin:6px 0 0">${esc(g.title)}, version ${esc(g.version)}. It opens in a new tab; come back here when you've read it.</p></div>`;
   }
   function viewBeforeYouSell() {
     const g = GUIDES.sale_purchase; if (!g) return showStep(LAST);
