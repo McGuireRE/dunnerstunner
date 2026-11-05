@@ -41,7 +41,7 @@ await next(600); out.thanks=await p.textContent('h1'); await p.screenshot({path:
 // back & resume check: reload shows thanks
 await go(); out.reload=await p.textContent('h1');
 // 3 agent publishes plan
-await as('agent-1','hello@timmcguire.co.nz'); await p.click('#navDash'); await p.waitForTimeout(500); out.listStatus=await p.textContent('tr[data-pl] .pill'); await p.click('#navDash'); await p.waitForTimeout(500); await p.click('tr[data-pl]'); await p.waitForTimeout(400);
+await as('agent-1','hello@timmcguire.co.nz'); await p.click('#navDash'); await p.waitForTimeout(500); out.listStatus=await p.textContent('tr[data-plrow] .pill'); await p.click('#navDash'); await p.waitForTimeout(500); await p.click('tr[data-plrow]'); await p.waitForTimeout(500); await p.click('[data-plopen]'); await p.waitForTimeout(400);
 out.answersShown=(await p.textContent('.view-pad')).includes('Twilight photos');
 await p.click('#plPublish'); await p.waitForTimeout(200); out.pubErr=await p.textContent('#plErr');
 await p.fill('.plp [data-p=said]','You wondered about the price another agent quoted.'); await p.fill('.plp [data-p=changed]','I\'ve added recent sales so you can see where the range comes from.');
@@ -52,11 +52,11 @@ await p.click('#plPublish'); await p.waitForTimeout(500);
 await as('v-bill','bill@example.com'); out.planH1=await p.textContent('h1'); out.nextDisabled=await p.$eval('#next',b=>b.disabled); await p.screenshot({path:require('path').join(__dirname,'out','q7_plan.png'),fullPage:true});
 await p.click('#plAsk'); await p.fill('#plQ','Will there be open homes on Sundays?'); await p.click('#plQGo'); await p.waitForTimeout(400); out.qH1=await p.textContent('h1');
 // 5 agent republishes
-await as('agent-1','hello@timmcguire.co.nz'); await p.click('#navDash'); await p.waitForTimeout(500); await p.click('tr[data-pl]'); await p.waitForTimeout(400); out.agentQ=await p.textContent('.warnc'); await p.click('#plPublish'); await p.waitForTimeout(500);
+await as('agent-1','hello@timmcguire.co.nz'); await p.click('#navDash'); await p.waitForTimeout(500); await p.click('tr[data-plrow]'); await p.waitForTimeout(500); await p.click('[data-plopen]'); await p.waitForTimeout(400); out.agentQ=await p.textContent('.warnc'); await p.click('#plPublish'); await p.waitForTimeout(500);
 // 6 vendor accepts
 await as('v-bill','bill@example.com'); await tick('#plOk'); out.enabled=!(await p.$eval('#next',b=>b.disabled)); await next(600); out.onward=await p.textContent('h1'); await p.screenshot({path:require('path').join(__dirname,'out','q8_onward.png'),fullPage:true});
 // 7 agent opens the agreement
-await as('agent-1','hello@timmcguire.co.nz'); await p.click('#navDash'); await p.waitForTimeout(500); await p.click('tr[data-pl]'); await p.waitForTimeout(400); await p.click('#plOpenAg'); await p.waitForTimeout(500);
+await as('agent-1','hello@timmcguire.co.nz'); await p.click('#navDash'); await p.waitForTimeout(500); await p.click('tr[data-plrow]'); await p.waitForTimeout(500); await p.click('[data-plopen]'); await p.waitForTimeout(400); await p.click('#plOpenAg'); await p.waitForTimeout(500);
 out.tPeople=await p.$$eval('#tPeople [data-pk=legal_name]',e=>e.map(x=>x.value)); out.tPref=await p.$$eval('#tPeople [data-pk=pref_name]',e=>e.map(x=>x.value)); out.tAddr=await p.inputValue('#tAddr');
 const db=await p.evaluate(()=>JSON.parse(localStorage.getItem('mockdb'))); const ag=db.agreements[0];
 out.agCfg={method:ag.config.method,ask:ag.config.ask,pl:!!ag.config.prelisting_id};

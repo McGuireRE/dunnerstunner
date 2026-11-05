@@ -916,6 +916,149 @@ function lawyerForm(id, title, blurb) {
   BIND[10] = () => { wirePdf(A.id); if ($('#fwd')) wireLawyerForm('fwd', async (n, fm, e) => { await must(sb.rpc('vendor_forward_to_lawyer', { a: A.id, l_name: n, l_firm: fm, l_email: e })); }); const cl = $('#cancelLink'); if (cl) cl.addEventListener('click', e => { e.preventDefault(); viewCancelRequest(); }); wireVarDone(); };
 
   /* ═════════════════ AGENT ═════════════════ */
+  /* ═════════ PROPERTY FILE: one record of the property and its owners, read and written by every page ═════════ */
+  const STAGES = [['appraisal', 'Appraisal'], ['questionnaire', 'Questionnaire'], ['plan', 'Updated plan'], ['accepted', 'Plan accepted'], ['agreement', 'Agreement'], ['signed', 'Signed'], ['live', 'On the market'], ['under_offer', 'Under offer'], ['sold', 'Sold'], ['settled', 'Settled'], ['withdrawn', 'Withdrawn']];
+  const stageName = s => (STAGES.find(x => x[0] === s) || [s, s])[1];
+  const STAGE_GROUPS = [['all', 'All', () => true], ['before', 'Before signing', p => ['appraisal', 'questionnaire', 'plan', 'accepted', 'agreement'].includes(p.stage)], ['signed', 'Signed', p => ['signed', 'live', 'under_offer', 'sold'].includes(p.stage)], ['done', 'Finished', p => ['settled', 'withdrawn'].includes(p.stage)]];
+  const stagePill = s => `<span class="pill ${['signed', 'live', 'under_offer', 'sold', 'settled'].includes(s) ? 'signed' : s === 'withdrawn' ? 'ended' : 'sent'}">${esc(stageName(s))}</span>`;
+  const DESC_FIELDS = [['pType', 'Type'], ['pBed', 'Bedrooms'], ['pBath', 'Bathrooms'], ['pFloor', 'Floor area (m²)'], ['pLand', 'Land area (m²)'], ['pYear', 'Year built'], ['pBuild', 'Construction'], ['pPark', 'Parking'], ['pHeat', 'Heating and insulation']];
+  let PF = null;
+
+  // documents read by the AI are kept on the property, so later steps can use them again
+  async function saveReadDocs(pid, read) {
+    if (!pid || !read || !(read.files || []).length) return;
+    const kindOf = name => ((read.documents || []).find(d => d.file === name) || {}).kind || null;
+    const rr = { flags: read.flags || [], documents: read.documents || [], at: new Date().toISOString() };
+    try { await must(sb.from('property_documents').insert(read.files.map(f => ({ property_id: pid, name: f.name, path: f.path, kind: kindOf(f.name), source: 'dropped', read_result: rr, created_by: SESSION.user.email })))); } catch (e) { toast("The documents couldn't be filed on the property. Try dropping them in again."); console.warn('file docs', e); }
+  }
+  const propFlags = docs => { const seen = new Set(), out = []; docs.forEach(d => ((d.read_result || {}).flags || []).forEach(f => { if (!seen.has(f.text)) { seen.add(f.text); out.push(f); } })); return out; };
+
+  async function propApplyImport(fields, people) {
+    $$('[data-impf]:checked').forEach(cb => { const f = fields[+cb.dataset.impf]; impSet(f.key, impNorm(f.key, f.value)); });
+    $$('[data-impp]:checked').forEach(cb => {
+      const p = people[+cb.dataset.impp], m = impMatch(p);
+      if (m >= 0) { const x = PF.people[m]; ['legal_name', 'pref_name', 'phone'].forEach(k => { if (p[k]) x[k] = p[k]; }); if (p.email && !x.user_id) x.email = p.email.toLowerCase(); x._dirty = true; if (!x.source) x.source = 'title'; if (p.legal_name && /title/i.test(p.source || '')) x._name_from = 'title'; }
+      else PF.people.push({ legal_name: p.legal_name || '', pref_name: p.pref_name || '', email: (p.email || '').toLowerCase(), phone: p.phone || '', source: /title/i.test(p.source || '') ? 'title' : 'agent', _dirty: true });
+    });
+    const read = IMP; IMP = null;
+    await propSave();
+    await saveReadDocs(PF.p.id, read);
+    toast('Added to the property file. Check each one.');
+    viewProperty(PF.p.id);
+  }
+  async function propSave() {
+    const p = PF.p;
+    await must(sb.from('properties').update({ address: p.address, title_ref: p.title_ref || null, owners_on_title: p.owners_on_title || null, ownership: p.ownership, description: p.description, disclosures: p.disclosures }).eq('id', p.id));
+    let pos = 1;
+    for (const x of PF.people) {
+      if (!(x.legal_name || '').trim() && !(x.email || '').trim()) { pos++; continue; }
+      const row = { legal_name: (x.legal_name || '').trim(), pref_name: (x.pref_name || '').trim(), email: (x.email || '').trim().toLowerCase(), phone: (x.phone || '').trim(), position: pos++ };
+      if (x.id) {
+        if (x._dirty) { if (row.legal_name !== (x._orig_name || '')) row.name_from = x._name_from || (x.source === 'title' ? 'title' : 'agent'); await must(sb.from('property_people').update(Object.assign(row, { role: 'owner' })).eq('id', x.id)); }
+        else if (x.position !== row.position) await must(sb.from('property_people').update({ position: row.position }).eq('id', x.id));
+      }
+      else await must(sb.from('property_people').insert(Object.assign(row, { property_id: p.id, source: x.source || 'agent', name_from: x.source === 'title' ? 'title' : 'agent', role: 'owner' })));
+    }
+    // a removed owner is set aside, not deleted, so the history stays and they lose access
+    for (const id of PF.removed || []) await must(sb.from('property_people').update({ role: 'former' }).eq('id', id));
+  }
+
+  async function viewProperty(id) {
+    header('Property file', '', 0); actions(false);
+    main().innerHTML = '<div class="loading">Loading...</div>';
+    const p = await must(sb.from('properties').select('*').eq('id', id).single());
+    const [people, docs, pls, ags] = await Promise.all([
+      must(sb.from('property_people').select('*').eq('property_id', id).order('position')),
+      must(sb.from('property_documents').select('*').eq('property_id', id).order('created_at', { ascending: false })),
+      must(sb.from('prelistings').select('*').eq('property_id', id).order('created_at', { ascending: false })),
+      must(sb.from('agreements').select('id,ref,status,created_at,signed_at,countersigned_at,agreement_people(id,legal_name,pref_name,signed_at,id_verified_at)').eq('property_id', id).order('created_at', { ascending: false })),
+    ]);
+    p.ownership ||= {}; p.description ||= {}; p.disclosures ||= {};
+    const live = ags.find(a => !['ended', 'cancelled'].includes(a.status)) || null;
+    const pl = pls.find(x => x.status !== 'closed' && (!p.cycle_at || x.created_at >= p.cycle_at)) || null;   // only this round's pre-listing
+    const byRole = r => people.filter(x => (x.role || 'owner') === r).map(x => Object.assign({ _orig_name: x.legal_name }, x));
+    PF = { p, people: byRole('owner'), contacts: byRole('contact'), formers: byRole('former'), docs, pls, ags, liveAgreement: live, removed: [] };
+    const locked = !!live;
+    const flags = propFlags(docs);
+    const at = STAGES.findIndex(s => s[0] === p.stage);
+    const strip = STAGES.filter(s => s[0] !== 'withdrawn').map(([k, l], i) => `<span class="stg ${k === p.stage ? 'on' : i < at ? 'past' : ''}">${i < at && p.stage !== 'withdrawn' ? '✓ ' : ''}${esc(l)}</span>`).join('');
+    const meet = pl && (pl.answers || {}).meet && pl.answers.meet.length ? pl.answers.meet.join(', ') : '';
+    const person = (x, i) => locked
+      ? `<div class="fact"><div class="k">Owner ${i + 1}${x.source ? ` <span class="src-badge">From the ${esc(x.source === 'agent' ? 'file' : x.source)}</span>` : ''}</div><div class="v">${esc(x.legal_name || '(name to come)')}${x.pref_name ? ` <span class="small">(${esc(x.pref_name)})</span>` : ''}<br><span class="small">${esc([x.email, x.phone].filter(Boolean).join(' · ') || 'No contact details yet')}</span></div></div>`
+      : `<div class="card tight pfp" data-i="${i}"><div style="display:flex;justify-content:space-between;align-items:baseline"><h3 style="margin:0">Owner ${i + 1}${x.source ? ` <span class="src-badge">From the ${esc(x.source === 'agent' ? 'file' : x.source)}</span>` : ''}</h3><button class="btn link" type="button" data-pfrm="${i}">Remove</button></div>
+        <div class="row2 stack"><div><label class="f">Full legal name</label><input type="text" data-pf="legal_name" value="${esc(x.legal_name)}"></div><div><label class="f">Goes by</label><input type="text" data-pf="pref_name" value="${esc(x.pref_name)}"></div></div>
+        <div class="row2 stack"><div><label class="f">Email</label><input type="email" data-pf="email" value="${esc(x.email)}" ${x.user_id ? 'readonly' : ''}></div><div><label class="f">Mobile</label><input type="tel" data-pf="phone" value="${esc(x.phone)}"></div></div></div>`;
+    const dval = k => esc(p.description[k] || '');
+    main().innerHTML = `<div class="view-pad">
+      <div class="toolbar no-print"><button class="btn ghost" type="button" id="pfBack">Dashboard</button></div>
+      <span class="agent-flag">Only you see this</span>
+      <h1>${esc(p.address || 'Address to come')}</h1>
+      <p>${stagePill(p.stage)} <span class="small">since ${esc(fmtDT(p.stage_at))}</span></p>
+      <div class="stg-strip" aria-label="Where it's up to">${strip}</div>
+      ${p.stage === 'withdrawn' || p.stage === 'settled' ? `<div class="card note tight"><p class="small" style="margin:0">${p.stage === 'withdrawn' ? 'Withdrawn.' : 'Settled.'} Start again from an appraisal:</p><div class="toolbar" style="margin-top:6px"><button class="btn ghost" type="button" data-pfreopen="same">Same owners</button><button class="btn ghost" type="button" data-pfreopen="new">New owners</button></div><p class="small" style="margin:6px 0 0">New owners: the current owners are set aside and can no longer see this property.</p></div>` : ''}
+      <div class="ptiles">
+        <div class="card ptile"><h3>Next step</h3>
+          ${live ? `<p class="small">Agreement ${esc(live.ref)}: <span class="pill ${live.status}">${esc(live.status)}</span></p><div class="toolbar"><button class="btn primary" type="button" data-agopen="${live.id}">Open the agreement</button></div>`
+            : pl && pl.status !== 'accepted' ? `<p class="small">Pre-listing: ${esc(plStatusText(pl))}</p><div class="toolbar"><button class="btn primary" type="button" data-plopen="${pl.id}">Open the pre-listing</button></div>`
+            : ['withdrawn', 'settled'].includes(p.stage) ? `<p class="small">Choose same or new owners above to start again.</p>`
+            : `<p class="small">Nothing under way.</p><div class="toolbar"><button class="btn ghost" type="button" id="pfBegin">Let's begin: appraisal page</button><button class="btn primary" type="button" id="pfAgree">Let's agree: agreement</button></div>`}
+          ${meet ? `<p class="small" style="margin:8px 0 0"><strong>Best times to meet:</strong> ${esc(meet)}</p>` : ''}
+        </div>
+        <div class="card ptile"><h3>History</h3>
+          ${pls.map(x => `<div class="fact"><div class="k">Pre-listing</div><div class="v" style="font-weight:400;display:flex;justify-content:space-between;gap:8px"><span>${esc(plStatusText(x))}, ${esc(fmtDate(x.created_at))}</span><button class="btn link" type="button" data-plopen="${x.id}">Open</button></div></div>`).join('')}
+          ${ags.map(a => { const ppl = a.agreement_people || [], ver = ppl.filter(x => x.id_verified_at).length; return `<div class="fact"><div class="k">Agreement ${esc(a.ref)}</div><div class="v" style="font-weight:400;display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><span><span class="pill ${a.status}">${esc(a.status)}</span> <span class="small">ID checks ${ver} of ${ppl.length}</span></span><button class="btn link" type="button" data-agopen="${a.id}">Open</button></div></div>`; }).join('')}
+          ${!pls.length && !ags.length ? '<p class="small" style="margin:0">No appraisal page or agreement yet.</p>' : ''}
+        </div>
+      </div>
+      <h2>Owners</h2>
+      ${locked ? `<div class="card tight">${PF.people.map(person).join('') || '<p class="small" style="margin:0">No owners yet.</p>'}<p class="small" style="margin:10px 0 0">The agreement is under way, so change owners there. Changes flow back here.</p></div>`
+        : `<div id="pfPeople">${PF.people.map(person).join('')}</div><button class="btn link" type="button" id="pfAddP">Add an owner</button>`}
+      ${PF.contacts.length ? `<div class="card tight"><h3 style="margin:0 0 4px">Also in touch <span class="opt">(not owners, so not signers)</span></h3>${PF.contacts.map((x, i) => `<div class="fact"><div class="v" style="font-weight:400;display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><span>${esc(x.legal_name || x.email)}<br><span class="small">${esc([x.email, x.phone].filter(Boolean).join(' · '))}</span></span>${locked ? '' : `<button class="btn link" type="button" data-pfown="${i}">Make an owner</button>`}</div></div>`).join('')}</div>` : ''}
+      ${PF.formers.length ? `<details class="card tight"><summary class="small">Earlier owners and people set aside (${PF.formers.length})</summary>${PF.formers.map(x => `<div class="fact"><div class="v" style="font-weight:400">${esc(x.legal_name || x.email)} <span class="small">${esc(x.email || '')}</span></div></div>`).join('')}</details>` : ''}
+      <h2>The property</h2>
+      <div class="card">
+        ${locked ? `<table class="sum">
+          <tr><td>Title</td><td style="white-space:normal">${esc(p.title_ref || 'Not recorded')}${p.owners_on_title ? '<br><span class="small">' + esc(p.owners_on_title) + '</span>' : ''}</td></tr>
+          ${DESC_FIELDS.filter(([k]) => p.description[k]).map(([k, l]) => `<tr><td>${l}</td><td style="white-space:normal">${esc(p.description[k])}</td></tr>`).join('')}
+          ${['work', 'wt', 'meth', 'def'].filter(k => p.disclosures[k] === 'yes').map(k => `<tr><td>${esc(IMP_LABELS[k])}</td><td style="white-space:normal">${esc(p.disclosures[k + 'Detail'] || 'Yes')}</td></tr>`).join('')}
+        </table>`
+        : `<label class="f" for="pfAddr" style="margin-top:0">Address</label><input type="text" id="pfAddr" value="${esc(p.address)}">
+          <div class="row2 stack"><div><label class="f" for="pfTitle">Title reference</label><input type="text" id="pfTitle" value="${esc(p.title_ref || '')}"></div><div><label class="f" for="pfOwners">Registered owners <span class="opt">(from the title)</span></label><input type="text" id="pfOwners" value="${esc(p.owners_on_title || '')}"></div></div>
+          <div class="row2">${DESC_FIELDS.slice(0, 6).map(([k, l]) => `<div><label class="f" for="pfd_${k}">${l}</label><input type="text" id="pfd_${k}" data-pfd="${k}" value="${dval(k)}"></div>`).join('')}</div>
+          <div class="row2 stack">${DESC_FIELDS.slice(6).map(([k, l]) => `<div><label class="f" for="pfd_${k}">${l}</label><input type="text" id="pfd_${k}" data-pfd="${k}" value="${dval(k)}"></div>`).join('')}</div>`}
+      </div>
+      ${locked ? '' : '<div class="toolbar"><button class="btn primary" type="button" id="pfSave">Save the property file</button></div><div class="err" id="pfErr"></div>'}
+      ${flags.length ? `<div class="card warnc"><h3>From the documents: talk these through</h3><ul class="small" style="margin:6px 0 0;padding-left:20px">${flags.map(f => `<li>${esc(f.text)} <span class="src-badge">From ${esc(f.source)}</span></li>`).join('')}</ul></div>` : ''}
+      <h2>Documents</h2>
+      ${docs.length ? `<div class="card tight">${docs.map((d, i) => `<div class="fact"><div class="k">${esc(d.kind || 'Document')} · ${esc(fmtDate(d.created_at))}</div><div class="v" style="font-weight:400;display:flex;justify-content:space-between;gap:10px;align-items:center"><span style="overflow-wrap:anywhere">${esc(d.name)}</span><button class="btn link no-print" type="button" data-pfdoc="${i}">Open</button></div></div>`).join('')}</div>` : ''}
+      ${importCardHTML(PROP_TARGET)}
+    </div>`;
+    if (IMPT === PROP_TARGET) wireImport();
+    $('#pfBack').addEventListener('click', viewAgentDashboard);
+    $$('[data-agopen]').forEach(b => b.addEventListener('click', () => viewAgentDetail(b.dataset.agopen)));
+    $$('[data-plopen]').forEach(b => b.addEventListener('click', () => viewPrelistingAgent(b.dataset.plopen)));
+    const bg = $('#pfBegin'); if (bg) bg.addEventListener('click', () => viewPrelistingAgent(null, id));
+    const ag = $('#pfAgree'); if (ag) ag.addEventListener('click', () => viewTable(null, null, 0, PF));
+    $$('[data-pfreopen]').forEach(b => b.addEventListener('click', async () => { await must(sb.rpc('agent_reopen_property', { pid: id, new_owners: b.dataset.pfreopen === 'new' })); toast(b.dataset.pfreopen === 'new' ? 'Started again for new owners' : 'Started again'); viewProperty(id); }));
+    $$('[data-pfown]').forEach(b => b.addEventListener('click', async () => { const x = PF.contacts[+b.dataset.pfown]; await must(sb.from('property_people').update({ role: 'owner', position: PF.people.length + 1 }).eq('id', x.id)); viewProperty(id); }));
+    $$('[data-pfdoc]').forEach(b => b.addEventListener('click', async () => { const d = docs[+b.dataset.pfdoc]; const w = window.open('', '_blank'); const { data } = await sb.storage.from('private').createSignedUrl(d.path, 600); if (data && w) w.location.href = data.signedUrl; else if (w) w.close(); }));
+    if (!locked) {
+      const readPeople = () => $$('.pfp').forEach(c => { const x = PF.people[+c.dataset.i]; $$('[data-pf]', c).forEach(inp => { if (x[inp.dataset.pf] !== inp.value) { x[inp.dataset.pf] = inp.value; x._dirty = true; } }); });
+      const readProp = () => { p.address = $('#pfAddr').value.trim(); p.title_ref = $('#pfTitle').value.trim(); p.owners_on_title = $('#pfOwners').value.trim(); $$('[data-pfd]').forEach(i => { const v = i.value.trim(); if (v) p.description[i.dataset.pfd] = v; else delete p.description[i.dataset.pfd]; }); };
+      const redraw = () => { $('#pfPeople').innerHTML = PF.people.map(person).join(''); wirePeople(); };
+      const wirePeople = () => $$('[data-pfrm]').forEach(b => b.addEventListener('click', () => { readPeople(); const [x] = PF.people.splice(+b.dataset.pfrm, 1); if (x.id) PF.removed.push(x.id); redraw(); }));
+      wirePeople();
+      $('#pfAddP').addEventListener('click', () => { readPeople(); PF.people.push({ legal_name: '', pref_name: '', email: '', phone: '', source: 'agent' }); redraw(); });
+      $('#pfSave').addEventListener('click', async () => {
+        readPeople(); readProp();
+        if (!p.address) return $('#pfErr').textContent = 'Add the address.';
+        if (PF.people.some(x => x.email && !EMAIL_RE.test(x.email.trim()))) return $('#pfErr').textContent = 'Check the email addresses.';
+        await propSave(); toast('Saved'); viewProperty(id);
+      });
+    }
+    top();
+  }
+
   /* ═════════ AGENT HOME (Let's begin / Let's agree) and DASHBOARD ═════════ */
   function setAgentNav(cur) {
     const nav = $('#agentNav'); if (!nav) return;
@@ -952,7 +1095,8 @@ function lawyerForm(id, title, blurb) {
 
   async function dashData() {
     const safe = async q => { try { return await must(q); } catch (_) { return []; } };
-    const [rows, pls, crs, pans, vars] = await Promise.all([
+    const [props, rows, pls, crs, pans, vars] = await Promise.all([
+      safe(sb.from('properties').select('id,address,stage,stage_at,updated_at,property_people(legal_name,pref_name,position,role),agreements(id,ref,status,created_at),prelistings(id,status)').order('updated_at', { ascending: false })),
       safe(sb.from('agreements').select('id,ref,address,status,updated_at,agreement_people(legal_name,pref_name,signed_at,id_verified_at)').order('updated_at', { ascending: false })),
       safe(sb.from('prelistings').select('id,address,contact_name,contact_email,status,proceeded_at,updated_at').order('updated_at', { ascending: false })),
       safe(sb.from('cancellation_requests').select('id,agreement_id,requested_by,status').neq('status', 'processed')),
@@ -966,44 +1110,43 @@ function lawyerForm(id, title, blurb) {
     rows.forEach(r => { if (r.status === 'signed') needs.push({ what: 'Countersign', where: r.address, sub: 'Everyone has signed', go: () => viewAgentDetail(r.id) }); });
     pans.forEach(n => needs.push({ what: 'Send the notice to ' + n.agency, where: addr(n.agreement_id), sub: 'Previous agency', go: () => viewAgentDetail(n.agreement_id) }));
     vars.forEach(v => needs.push({ what: `Finish variation ${v.number}`, where: addr(v.agreement_id), sub: 'Draft, not issued', go: () => viewAgentDetail(v.agreement_id) }));
-    return { rows, pls: pls.filter(p => p.status !== 'closed'), needs };
+    return { props, rows, pls: pls.filter(p => p.status !== 'closed'), needs };
   }
 
-  const DASH_GROUPS = [['all', 'All', () => true], ['draft', 'Drafts', r => r.status === 'draft'], ['out', 'Waiting to sign', r => ['sent', 'parked'].includes(r.status)], ['live', 'Signed', r => ['signed', 'countersigned'].includes(r.status)], ['ended', 'Ended', r => ['ended', 'cancelled'].includes(r.status)]];
   let DASH_FILTER = 'all';
   async function viewAgentDashboard() {
     header('Dashboard', '', 0); actions(false); setAgentNav('dash');
     main().innerHTML = '<div class="loading">Loading...</div>';
-    const { rows, pls, needs } = await dashData();
-    const plOpen = pls.filter(p => p.status !== 'accepted').length;
-    const count = k => rows.filter(DASH_GROUPS.find(g => g[0] === k)[2]).length;
-    const shown = rows.filter(DASH_GROUPS.find(g => g[0] === DASH_FILTER)[2]);
+    const { props, needs } = await dashData();
+    const grp = k => STAGE_GROUPS.find(g => g[0] === k) || STAGE_GROUPS[0];
+    const count = k => props.filter(grp(k)[2]).length;
+    const shown = props.filter(grp(DASH_FILTER)[2]);
+    const latestAg = p => (p.agreements || []).slice().sort((a, b) => a.created_at < b.created_at ? 1 : -1)[0];
+    const owners = p => (p.property_people || []).filter(x => (x.role || 'owner') === 'owner').slice().sort((a, b) => a.position - b.position).map(x => callName(x) || x.legal_name).filter(Boolean).join(', ');
     main().innerHTML = `<div class="view-pad">
       <span class="agent-flag">Only you see this</span>
       <h1>Dashboard</h1>
       <div class="stats">
         <button class="stat ${needs.length ? 'hot' : ''}" type="button" data-jump="needs"><div class="n">${needs.length}</div><div class="l">Need you</div></button>
-        <button class="stat" type="button" data-jump="pls"><div class="n">${plOpen}</div><div class="l">Pre-listings in progress</div></button>
-        <button class="stat" type="button" data-filter="out"><div class="n">${count('out')}</div><div class="l">Waiting to sign</div></button>
-        <button class="stat" type="button" data-filter="live"><div class="n">${count('live')}</div><div class="l">Signed</div></button>
+        <button class="stat" type="button" data-filter="before"><div class="n">${count('before')}</div><div class="l">Before signing</div></button>
+        <button class="stat" type="button" data-filter="signed"><div class="n">${count('signed')}</div><div class="l">Signed</div></button>
+        <button class="stat" type="button" data-filter="done"><div class="n">${count('done')}</div><div class="l">Finished</div></button>
       </div>
       <h2 id="d-needs">Needs you</h2>
       ${needs.length ? `<div class="card tight"><ul class="needs">${needs.map((n, i) => `<li><div class="what"><strong>${esc(n.what)}</strong><span class="small">${esc(n.where)} · ${esc(n.sub)}</span></div><button class="btn ${n.hot ? 'primary' : 'ghost'}" type="button" data-need="${i}">Open</button></li>`).join('')}</ul></div>` : '<div class="card okc tight"><p class="small" style="margin:0">Nothing waiting on you.</p></div>'}
-      <div id="d-pls">${plListHTML(pls)}</div>
-      <h2>Agency agreements</h2>
-      <div class="chip-row" role="tablist">${DASH_GROUPS.map(([k, l]) => `<button class="chip" type="button" role="tab" aria-selected="${DASH_FILTER === k}" data-filter="${k}" style="${DASH_FILTER === k ? 'border-color:var(--accent);background:var(--accent-soft)' : ''}">${l} <span class="small">${count(k)}</span></button>`).join('')}</div>
-      ${shown.length ? `<div class="card tight" style="overflow-x:auto;margin-top:10px"><table class="tbl"><thead><tr><th>Property</th><th>Sellers</th><th>Status</th><th class="hide-sm">Updated</th></tr></thead><tbody>
-      ${shown.map(r => `<tr class="click" data-id="${r.id}"><td><strong>${esc(r.address || '(no address yet)')}</strong><br><span class="small">${esc(r.ref)}</span></td><td>${esc(r.agreement_people.map(p => callName(p) || p.legal_name).filter(Boolean).join(', ') || '–')}</td><td><span class="pill ${r.status}">${esc(r.status)}</span></td><td class="small hide-sm">${esc(fmtDT(r.updated_at))}</td></tr>`).join('')}
-      </tbody></table></div>` : `<div class="card note tight" style="margin-top:10px"><p class="small" style="margin:0">${rows.length ? 'None here.' : 'No agreements yet. Start one with Let\'s agree.'}</p></div>`}
-      <div class="toolbar"><button class="btn primary" type="button" id="newAg">Let's agree: new agreement</button></div>
+      <h2 id="d-props">Properties</h2>
+      <div class="chip-row" role="tablist">${STAGE_GROUPS.map(([k, l]) => `<button class="chip" type="button" role="tab" aria-selected="${DASH_FILTER === k}" data-filter="${k}" style="${DASH_FILTER === k ? 'border-color:var(--accent);background:var(--accent-soft)' : ''}">${l} <span class="small">${count(k)}</span></button>`).join('')}</div>
+      ${shown.length ? `<div class="card tight" style="overflow-x:auto;margin-top:10px"><table class="tbl"><thead><tr><th>Property</th><th>Owners</th><th>Where it's up to</th><th class="hide-sm">Updated</th></tr></thead><tbody>
+      ${shown.map(r => { const la = latestAg(r); return `<tr class="click" data-prop="${r.id}" ${la ? `data-ag="${la.id}"` : ''} ${(r.prelistings || [])[0] ? `data-plrow="${r.prelistings[0].id}"` : ''}><td><strong>${esc(r.address || '(no address yet)')}</strong>${la ? `<br><span class="small">${esc(la.ref)}</span>` : ''}</td><td>${esc(owners(r) || '–')}</td><td>${stagePill(r.stage)}</td><td class="small hide-sm">${esc(fmtDT(r.updated_at))}</td></tr>`; }).join('')}
+      </tbody></table></div>` : `<div class="card note tight" style="margin-top:10px"><p class="small" style="margin:0">${props.length ? 'None here.' : 'No properties yet. Start with Let\'s begin or Let\'s agree.'}</p></div>`}
+      <div class="toolbar"><button class="btn ghost" type="button" id="newPl">Let's begin: new appraisal page</button><button class="btn primary" type="button" id="newAg">Let's agree: new agreement</button></div>
     </div>`;
     $$('[data-need]').forEach(b => b.addEventListener('click', () => needs[+b.dataset.need].go()));
     $$('[data-filter]').forEach(b => b.addEventListener('click', () => { DASH_FILTER = b.dataset.filter; viewAgentDashboard(); }));
     $$('[data-jump]').forEach(b => b.addEventListener('click', () => { const t = $('#d-' + b.dataset.jump); if (t) t.scrollIntoView({ behavior: 'smooth', block: 'start' }); }));
     $('#newAg').addEventListener('click', () => viewTable(null));
     $('#newPl').addEventListener('click', () => viewPrelistingAgent(null));
-    $$('tr[data-pl]').forEach(tr => tr.addEventListener('click', () => viewPrelistingAgent(tr.dataset.pl)));
-    $$('tr[data-id]').forEach(tr => tr.addEventListener('click', () => viewAgentDetail(tr.dataset.id)));
+    $$('tr[data-prop]').forEach(tr => tr.addEventListener('click', () => viewProperty(tr.dataset.prop)));
     top();
   }
   const viewAgentList = viewAgentDashboard;
@@ -1023,7 +1166,7 @@ function lawyerForm(id, title, blurb) {
     chips: (k, list, d) => `<div class="chip-row">${list.map(n => `<label class="chip"><input type="checkbox" data-tmulti="${k}" value="${esc(n)}" ${(ta(k, d) || []).includes(n) ? 'checked' : ''}>${esc(n)}</label>`).join('')}</div>`,
   };
 
-  async function viewTable(id, preset, page) {
+  async function viewTable(id, preset, page, fromProp) {
     let ag = { address: '', status: 'draft', config: { appr: 'done', ask: '', flat: '', thr: '250000', pct: '', aml: 'Manual', approach: 'invited' }, answers: {}, legal: {} };
     let people = [];
     if (id) {
@@ -1033,6 +1176,15 @@ function lawyerForm(id, title, blurb) {
     }
     if (!people.length) people = [{ legal_name: '', pref_name: '', email: '', phone: '' }];
     if (preset) { if (preset.address) ag.address = preset.address; if (preset.vendor) people[0].legal_name = preset.vendor; }
+    if (!id && fromProp) {
+      const fp = fromProp.p;
+      ag.address = fp.address || ''; ag.property_id = fp.id;
+      Object.assign(ag.config, { title: fp.title_ref || '', owners: fp.owners_on_title || '' });
+      ag.answers = Object.assign({}, fp.description || {}, fp.disclosures || {}, fp.ownership || {});
+      const fl = propFlags(fromProp.docs || []); if (fl.length) ag.config.import = { files: (fromProp.docs || []).map(d => ({ name: d.name, path: d.path })), sources: {}, flags: fl };
+      const pp = (fromProp.people || []).filter(x => x.legal_name || x.email);
+      if (pp.length) people = pp.map(x => ({ legal_name: x.legal_name, pref_name: x.pref_name, email: x.email, phone: x.phone }));
+    }
     const c = Object.assign({}, ag.config || {}), an = Object.assign({}, ag.answers || {});
     let CAMP = c.campaign ? JSON.parse(JSON.stringify(c.campaign)) : null;
     if (CAMP) delete CAMP.snapshot;
@@ -1075,6 +1227,7 @@ function lawyerForm(id, title, blurb) {
   async function tSave() {
     if (!T.ag.address) return tErr('Add the property address first.');
     const row = { address: T.ag.address, config: tConfig(), answers: T.an };
+    if (!T.id && T.ag.property_id) row.property_id = T.ag.property_id;
     try {
       if (T.id) await must(sb.from('agreements').update(row).eq('id', T.id));
       else {
@@ -1093,7 +1246,7 @@ function lawyerForm(id, title, blurb) {
       }
       const fresh = await must(sb.from('agreement_people').select('*').eq('agreement_id', T.id).order('position'));
       T.people = fresh.length ? fresh : [{ legal_name: '', pref_name: '', email: '', phone: '' }];
-      T.ag = Object.assign(T.ag, await must(sb.from('agreements').select('id,ref,status,legal,sent_at').eq('id', T.id).single()));
+      T.ag = Object.assign(T.ag, await must(sb.from('agreements').select('id,ref,status,legal,sent_at,property_id').eq('id', T.id).single()));
       return true;
     } catch (e) { return false; }
   }
@@ -1167,15 +1320,35 @@ function lawyerForm(id, title, blurb) {
   /* ───────── appointment page 1: read their documents and suggest what to fill in ───────── */
   const IMP_LABELS = { address: 'Address', owners: 'Registered owners', title: 'Title reference', capacity: 'Selling as', entity: 'Trust, company or person they act for', pType: 'Type', pYear: 'Year built', pBed: 'Bedrooms', pBath: 'Bathrooms', pFloor: 'Floor area (m²)', pLand: 'Land area (m²)', pBuild: 'Construction', pPark: 'Parking', pHeat: 'Heating and insulation', work: 'Work done or consents', workDetail: 'Work done: details', wt: 'Weathertightness issues', wtDetail: 'Weathertightness: details', meth: 'Methamphetamine', methDetail: 'Methamphetamine: details', def: 'Defects or notices', defDetail: 'Defects or notices: details' };
   const IMP_YESNO = ['work', 'wt', 'meth', 'def'];
-  const impGet = k => k === 'address' ? T.ag.address : ['owners', 'title'].includes(k) ? T.c[k] : T.an[k];
-  const impSet = (k, v) => { if (k === 'address') T.ag.address = v; else if (['owners', 'title'].includes(k)) T.c[k] = v; else T.an[k] = v; };
+  // where suggestions land: the appointment flow (T) or a property file (PF). IMPT is set by whichever page shows the drop-in card.
+  const IMP_DESC = ['pType', 'pYear', 'pBed', 'pBath', 'pFloor', 'pLand', 'pBuild', 'pPark', 'pHeat'];
+  const APPT_TARGET = {
+    kind: 'agreement', locked: () => T.locked, done: () => ((T.c.import || {}).files || []),
+    get: k => k === 'address' ? T.ag.address : ['owners', 'title'].includes(k) ? T.c[k] : T.an[k],
+    set: (k, v) => { if (k === 'address') T.ag.address = v; else if (['owners', 'title'].includes(k)) T.c[k] = v; else T.an[k] = v; },
+    people: () => T.people, collect: () => tCollect(),
+    current: () => ({ address: T.ag.address, owners: T.c.owners, title: T.c.title, people: T.people.map(p => ({ legal_name: p.legal_name, email: p.email, phone: p.phone })) }),
+    agreementId: () => T.id || null,
+  };
+  const PROP_TARGET = {
+    kind: 'property', locked: () => !!PF.liveAgreement, done: () => PF.docs.map(d => ({ name: d.name })),
+    get: k => k === 'address' ? PF.p.address : k === 'owners' ? PF.p.owners_on_title : k === 'title' ? PF.p.title_ref : ['capacity', 'entity'].includes(k) ? PF.p.ownership[k] : IMP_DESC.includes(k) ? PF.p.description[k] : PF.p.disclosures[k],
+    set: (k, v) => { if (k === 'address') PF.p.address = v; else if (k === 'owners') PF.p.owners_on_title = v; else if (k === 'title') PF.p.title_ref = v; else if (['capacity', 'entity'].includes(k)) PF.p.ownership[k] = v; else if (IMP_DESC.includes(k)) PF.p.description[k] = v; else PF.p.disclosures[k] = v; },
+    people: () => PF.people, collect: () => { },
+    current: () => ({ address: PF.p.address, owners: PF.p.owners_on_title, title: PF.p.title_ref, people: PF.people.map(p => ({ legal_name: p.legal_name, email: p.email, phone: p.phone })) }),
+    agreementId: () => null,
+  };
+  let IMPT = APPT_TARGET;
+  const impGet = k => IMPT.get(k), impSet = (k, v) => IMPT.set(k, v);
   const impShow = (k, v) => IMP_YESNO.includes(k) ? (String(v).toLowerCase() === 'yes' ? 'Yes' : 'No') : String(v ?? '');
   const impNorm = (k, v) => IMP_YESNO.includes(k) ? (String(v).toLowerCase() === 'yes' ? 'yes' : 'no') : String(v ?? '').trim();
   let IMP = null; // the latest suggestions waiting for review
 
-  function importCardHTML() {
-    if (T.locked) return '';
-    const done = ((T.c.import || {}).files || []);
+  function importCardHTML(target) {
+    if (IMPT !== (target || APPT_TARGET)) IMP = null;
+    IMPT = target || APPT_TARGET;
+    if (IMPT.locked()) return '';
+    const done = IMPT.done();
     return `<div class="card note no-print" id="impCard"><h3>Drop in their documents</h3>
       <p class="small">Title, LIM, property summary, a contact export from your CRM, an old appraisal, or a photo of a document. I'll read them and suggest what to fill in, with where each came from. Nothing is used until you tick it.</p>
       <label class="dropzone" id="impDrop"><input type="file" id="impFiles" multiple accept=".pdf,.docx,.xlsx,.xls,.ods,.csv,.tsv,.txt,.vcf,.jpg,.jpeg,.png,.webp,.gif"><strong>Choose files, or drag them here</strong><span class="small">PDF, Word (.docx), Excel, CSV or photos</span></label>
@@ -1203,7 +1376,7 @@ function lawyerForm(id, title, blurb) {
     if (picked.reduce((n, f) => n + f.size, 0) > 40 * 1024 * 1024) { out.innerHTML = '<p class="err">That\'s more than 40 MB all together. Leave out the largest file, or read them in two goes.</p>'; return; }
     if (go) go.disabled = true;
     out.innerHTML = `<p class="small" style="margin:10px 0 0"><strong>Reading ${picked.length} document${picked.length > 1 ? 's' : ''}…</strong> A long LIM can take up to a minute.</p>`;
-    tCollect();
+    IMPT.collect();
     const batch = crypto.randomUUID(), files = [];
     try {
       for (const [i, f] of picked.entries()) {
@@ -1211,8 +1384,7 @@ function lawyerForm(id, title, blurb) {
         await must(sb.storage.from('private').upload(path, f, { contentType: f.type || 'application/octet-stream' }));
         files.push({ path, name: f.name });
       }
-      const current = { address: T.ag.address, owners: T.c.owners, title: T.c.title, people: T.people.map(p => ({ legal_name: p.legal_name, email: p.email, phone: p.phone })) };
-      const { data, error } = await sb.functions.invoke('doc-prefill', { body: { files, current, agreement_id: T.id || null } });
+      const { data, error } = await sb.functions.invoke('doc-prefill', { body: { files, current: IMPT.current(), agreement_id: IMPT.agreementId() } });
       let res = data;
       if (error) { try { res = await error.context.json(); } catch (_) { res = { error: error.message }; } }
       if (!res || !res.ok) {
@@ -1227,7 +1399,12 @@ function lawyerForm(id, title, blurb) {
   }
   function impMatch(p) {
     const em = (p.email || '').toLowerCase(), nm = (p.legal_name || '').toLowerCase().replace(/\s+/g, ' ').trim();
-    return T.people.findIndex(x => (em && (x.email || '').toLowerCase() === em) || (nm && (x.legal_name || '').toLowerCase().replace(/\s+/g, ' ').trim() === nm));
+    const list = IMPT.people(), exact = list.findIndex(x => (em && (x.email || '').toLowerCase() === em) || (nm && (x.legal_name || '').toLowerCase().replace(/\s+/g, ' ').trim() === nm));
+    if (exact >= 0 || !nm) return exact;
+    // same first and last name ("William Jones" on the appraisal, "William Robert Jones" on the title): one person, shown for Tim to confirm
+    const ends = n => { const w = n.toLowerCase().replace(/[^a-z\u00c0-\u024f' -]/g, '').split(/\s+/).filter(Boolean); return w.length >= 2 ? w[0] + ' ' + w.at(-1) : ''; };
+    const key = ends(nm), hits = key ? list.map((x, i) => ends(x.legal_name || '') === key ? i : -1).filter(i => i >= 0) : [];
+    return hits.length === 1 ? hits[0] : -1;
   }
   function impReview() {
     const out = $('#impOut'); if (!out || !IMP) return;
@@ -1238,7 +1415,7 @@ function lawyerForm(id, title, blurb) {
       return `<label class="imp-row"><input type="checkbox" data-impf="${i}" ${!cur || same ? 'checked' : ''}><span><span class="k">${esc(IMP_LABELS[f.key])}</span><span class="v">${esc(impShow(f.key, f.value))}</span><span class="src-badge">From ${esc(f.source)}</span>${cur && !same ? `<span class="now">Now: ${esc(impShow(f.key, cur))}. Tick to replace it.</span>` : ''}</span></label>`;
     };
     const prow = (p, i) => {
-      const m = impMatch(p), ex = m >= 0 ? T.people[m] : null;
+      const m = impMatch(p), ex = m >= 0 ? IMPT.people()[m] : null;
       return `<label class="imp-row"><input type="checkbox" data-impp="${i}" ${ex && ex.signed_at ? 'disabled' : 'checked'}><span><span class="k">${ex ? `Person ${m + 1}` : 'New person'}</span><span class="v">${esc([p.legal_name, p.pref_name ? `goes by ${p.pref_name}` : '', p.email, p.phone].filter(Boolean).join(' · '))}</span><span class="src-badge">From ${esc(p.source || 'the documents')}</span>${ex ? `<span class="now">${ex.signed_at ? 'Already signed, so it won\'t change.' : 'Fills in anything blank, and updates what\'s ticked.'}</span>` : ''}</span></label>`;
     };
     out.innerHTML = `<div class="imp-review"><h3 style="margin-top:14px">What I found</h3>
@@ -1247,10 +1424,11 @@ function lawyerForm(id, title, blurb) {
       ${people.length ? `<div class="imp-sec">People</div>${people.map(prow).join('')}` : ''}
       ${fields.length ? `<div class="imp-sec">Property and title</div>${fields.map(frow).join('')}` : ''}
       ${!people.length && !fields.length ? '<p class="small">Nothing I could use for the form.</p>' : ''}
-      ${(IMP.flags || []).length ? `<div class="imp-sec">To talk through before signing</div><ul class="small" style="margin:4px 0 0;padding-left:20px">${IMP.flags.map(f => `<li>${esc(f.text)} <span class="src-badge">From ${esc(f.source)}</span></li>`).join('')}</ul><p class="small" style="margin:6px 0 0">These also show on the Discussion page.</p>` : ''}
+      ${(IMP.flags || []).length ? `<div class="imp-sec">To talk through before signing</div><ul class="small" style="margin:4px 0 0;padding-left:20px">${IMP.flags.map(f => `<li>${esc(f.text)} <span class="src-badge">From ${esc(f.source)}</span></li>`).join('')}</ul><p class="small" style="margin:6px 0 0">These also show on ${IMPT.kind === 'property' ? 'the property file, and on the agreement\'s Discussion page' : 'the Discussion page'}.</p>` : ''}
       <div class="toolbar"><button class="btn primary" type="button" id="impApply">Fill in the ticked ones</button><button class="btn link" type="button" id="impDrop2">Discard</button></div></div>`;
     $('#impDrop2').addEventListener('click', () => { IMP = null; out.innerHTML = ''; });
     $('#impApply').addEventListener('click', async () => {
+      if (IMPT.kind === 'property') return propApplyImport(fields, people);
       tCollect();
       const imp = Object.assign({ files: [], sources: {}, flags: [] }, T.c.import || {});
       $$('[data-impf]:checked').forEach(cb => { const f = fields[+cb.dataset.impf]; impSet(f.key, impNorm(f.key, f.value)); imp.sources[f.key] = f.source; });
@@ -1262,8 +1440,8 @@ function lawyerForm(id, title, blurb) {
       imp.files = imp.files.concat(IMP.files);
       const seen = new Set(imp.flags.map(f => f.text)); (IMP.flags || []).forEach(f => { if (!seen.has(f.text)) imp.flags.push(f); });
       imp.at = new Date().toISOString();
-      T.c.import = imp; IMP = null;
-      if (T.ag.address && await tSave()) toast('Filled in and saved. Check each one.'); else toast('Filled in. Check each one, then save.');
+      T.c.import = imp; const read = IMP; IMP = null;
+      if (T.ag.address && await tSave()) { await saveReadDocs(T.ag.property_id, read); toast('Filled in and saved. Check each one.'); } else toast('Filled in. Check each one, then save.');
       tShow(0);
     });
   }
@@ -1540,7 +1718,7 @@ function lawyerForm(id, title, blurb) {
     const msg = `Hi ${joinNames(names) || 'there'},\n\nYour agency agreement for ${ag.address} is ready. Open this link and sign in with your email address. You'll get a sign-in link by email, no password needed:\n\n${APP_URL}\n\nIt takes about 15 minutes. Any questions, just call or text me on 027 562 7207.\n\nTim`;
     const cfg = ag.config || {}, an = ag.answers || {};
     main().innerHTML = `<div class="view-pad">
-      <div class="toolbar no-print"><button class="btn ghost" type="button" id="toList">Dashboard</button></div>
+      <div class="toolbar no-print"><button class="btn ghost" type="button" id="toList">Dashboard</button>${ag.property_id ? '<button class="btn ghost" type="button" id="toProp">Property file</button>' : ''}</div>
       <span class="agent-flag no-print">Only you see this</span>
       <h1>${esc(ag.address || 'Untitled')}</h1>
       <p><span class="pill ${ag.status}">${esc(ag.status)}</span> <span class="small">${esc(ag.ref)} · ${esc(ag.agreement_version)}</span></p>
@@ -1619,6 +1797,7 @@ function lawyerForm(id, title, blurb) {
     </div>`;
     actions(false);
     $('#toList').addEventListener('click', viewAgentList);
+    const tpb = $('#toProp'); if (tpb) tpb.addEventListener('click', () => viewProperty(ag.property_id));
     const cm = $('#copyMsg'); if (cm) cm.addEventListener('click', async () => { try { await navigator.clipboard.writeText(msg); toast('Copied'); } catch { toast('Select the text and copy it'); } });
     const ed = $('#editAg'); if (ed) ed.addEventListener('click', () => viewTable(id));
     const sa = $('#saveAdj'); if (sa) sa.addEventListener('click', async () => {
@@ -2029,6 +2208,8 @@ function lawyerForm(id, title, blurb) {
   async function viewPrelisting(id) {
     PL = await must(sb.from('prelistings').select('*').eq('id', id).single());
     PLA = Object.assign({}, PL.answers || {});
+    PL.knownOwners = [];
+    if (PL.property_id && PL.status === 'appraisal') { try { PL.knownOwners = await must(sb.from('property_people').select('legal_name,pref_name,email,phone').eq('property_id', PL.property_id).eq('role', 'owner').order('position')); } catch (_) { } }
     if (PL.status === 'appraisal') return PLA._step ? plStep(+PLA._step) : plAppraisal();
     if (PL.status === 'submitted') return plThanks();
     if (PL.status === 'plan') return plPlan();
@@ -2083,6 +2264,7 @@ function lawyerForm(id, title, blurb) {
       ${body}<div class="err"></div></section>`;
     if (n === 6) {
       let owners = (PLA.owners || []).slice();
+      if (!owners.length) owners = (PL.knownOwners || []).filter(o => o.legal_name || o.email).map(o => ({ name: o.legal_name || '', pref: o.pref_name || '', email: o.email || '', mobile: o.phone || '' }));
       if (!owners.length) owners.push({ name: '', pref: '', email: PL.contact_email || '', mobile: '' });
       const draw = () => { $('#plOwners').innerHTML = owners.map(plOwnerCard).join(''); $$('[data-rmo]').forEach(b => b.addEventListener('click', () => { owners = plReadOwners(); owners.splice(+b.dataset.rmo, 1); draw(); })); };
       draw();
@@ -2205,16 +2387,21 @@ function lawyerForm(id, title, blurb) {
       <tr><td>Meeting preference</td><td>${esc((a.meet || []).join(', ') || 'None given')}</td></tr>
     </table>`;
   }
-  async function viewPrelistingAgent(id) {
+  async function viewPrelistingAgent(id, propId) {
     header('Pre-listing', '', 0); actions(false);
-    let pl = id ? await must(sb.from('prelistings').select('*').eq('id', id).single()) : { address: '', contact_name: '', contact_email: '', status: 'appraisal', appraisal: {}, answers: {}, plan: {} };
+    let pl = id ? await must(sb.from('prelistings').select('*').eq('id', id).single()) : { address: '', contact_name: '', contact_email: '', status: 'appraisal', appraisal: {}, answers: {}, plan: {}, property_id: propId || null };
+    if (!id && propId) {
+      const pr = await must(sb.from('properties').select('address').eq('id', propId).single());
+      const o1 = (await must(sb.from('property_people').select('*').eq('property_id', propId).neq('role', 'former').order('position')))[0];
+      pl.address = pr.address || ''; if (o1) { pl.contact_name = o1.legal_name || ''; pl.contact_email = o1.email || ''; }
+    }
     const ap = pl.appraisal || {}, plan = pl.plan || {};
     const editable = ['appraisal', 'submitted', 'plan', 'question'].includes(pl.status);
     const msg = `Hi ${(pl.contact_name || '').split(/\s+/)[0] || 'there'},\n\nThanks for having me through ${pl.address}. Your appraisal is ready here. Sign in with this email address and you'll get a sign-in link, no password needed:\n\n${APP_URL}\n\nTim`;
     const methods = ['', 'Auction', 'Tender', 'Deadline sale', 'Price by negotiation', 'Fixed price', 'Expressions of interest', 'Timed sale', 'Ballot'];
     let pairs = (plan.pairs || []).slice(); if (!pairs.length) pairs.push({ said: '', changed: '' });
     main().innerHTML = `<div class="view-pad">
-      <div class="toolbar no-print"><button class="btn ghost" type="button" id="plBack">Dashboard</button></div>
+      <div class="toolbar no-print"><button class="btn ghost" type="button" id="plBack">Dashboard</button>${pl.property_id ? '<button class="btn ghost" type="button" id="plProp">Property file</button>' : ''}</div>
       <span class="agent-flag">Only you see this</span>
       <h1>${esc(pl.address || 'New appraisal page')}</h1>
       ${id ? `<p><span class="pill">${esc(plStatusText(pl))}</span> <span class="small">${pl.submitted_at ? 'Answers in ' + esc(fmtDT(pl.submitted_at)) : pl.invited_at ? 'Invited ' + esc(fmtDT(pl.invited_at)) : ''}</span></p>` : '<p class="lede">The vendor sees this after your appraisal, with an "I\'d like to proceed" button that opens the questionnaire.</p>'}
@@ -2242,6 +2429,7 @@ function lawyerForm(id, title, blurb) {
       <div class="err" id="plErr"></div>
     </div>`;
     $('#plBack').addEventListener('click', viewAgentList);
+    const ppb = $('#plProp'); if (ppb) ppb.addEventListener('click', () => viewProperty(pl.property_id));
     const readAp = () => ({ address: $('#plAddr').value.trim(), contact_name: $('#plCName').value.trim(), contact_email: $('#plCEmail').value.trim().toLowerCase(), appraisal: { method: $('#plMethod').value, price: $('#plPrice').value.trim(), start: $('#plStart').value.trim(), marketing: $('#plMkt').value.trim(), note: $('#plNote').value.trim(), link: $('#plLink').value.trim() } });
     const sa = $('#plSaveAp'); if (sa) sa.addEventListener('click', async () => {
       const row = readAp(), e = $('#plApErr');
@@ -2250,7 +2438,7 @@ function lawyerForm(id, title, blurb) {
       if (row.appraisal.link && !/^https:\/\//.test(row.appraisal.link)) return e.textContent = 'The appraisal link needs to start with https://';
       if (pl.status !== 'appraisal') delete row.contact_email;
       if (id) { await must(sb.from('prelistings').update(row).eq('id', id)); toast('Saved'); viewPrelistingAgent(id); }
-      else { const r = await must(sb.from('prelistings').insert(row).select('id').single()); toast('Appraisal page ready'); viewPrelistingAgent(r.id); }
+      else { if (pl.property_id) row.property_id = pl.property_id; const r = await must(sb.from('prelistings').insert(row).select('id').single()); toast('Appraisal page ready'); viewPrelistingAgent(r.id); }
     });
     const drawPairs = () => { const box = $('#plPairs'); if (!box) return; box.innerHTML = pairs.map((x, i) => `<div class="card tight plp"><div style="display:flex;justify-content:space-between;align-items:baseline"><h3 style="margin:0">${i + 1}</h3>${pairs.length > 1 ? `<button class="btn link" type="button" data-rmp="${i}">Remove</button>` : ''}</div><label class="f">You said</label><textarea rows="2" data-p="said">${esc(x.said || '')}</textarea><label class="f">I've changed</label><textarea rows="2" data-p="changed">${esc(x.changed || '')}</textarea></div>`).join(''); $$('[data-rmp]').forEach(b => b.addEventListener('click', () => { pairs = readPairs(); pairs.splice(+b.dataset.rmp, 1); drawPairs(); })); };
     const readPairs = () => $$('.plp').map(c => ({ said: $('[data-p=said]', c).value.trim(), changed: $('[data-p=changed]', c).value.trim() }));
@@ -2290,7 +2478,10 @@ function lawyerForm(id, title, blurb) {
     const person = await must(sb.from('agreement_people').select('*').eq('id', personId).single());
     let file = (await must(sb.from('aml_files').select('*').eq('person_id', personId))).at(0);
     if (!file) {
-      file = await must(sb.from('aml_files').insert({ agreement_id: agId, person_id: personId, data: { method: (ag.config.aml || 'Manual') === 'Manual' ? 'f2f' : 'electronic', country: 'New Zealand', f2fDate: new Date().toISOString().slice(0, 10), up: {} } }).select('*').single());
+      const ent = (ag.answers || {}).capacity && ag.answers.capacity !== 'Owners';
+      const seed = { method: (ag.config.aml || 'Manual') === 'Manual' ? 'f2f' : 'electronic', country: 'New Zealand', f2fDate: new Date().toISOString().slice(0, 10), up: {}, cdd: ent ? 'Enhanced' : 'Standard' };
+      if (ent) seed.bo = [`Selling as ${String(ag.answers.capacity).toLowerCase()} for ${ag.answers.entity || '(name to come)'}.`, ag.config.owners ? `Registered owners on the title${ag.config.title ? ' (' + ag.config.title + ')' : ''}: ${ag.config.owners}.` : ''].filter(Boolean).join(' ');
+      file = await must(sb.from('aml_files').insert({ agreement_id: agId, person_id: personId, data: seed }).select('*').single());
       await must(sb.from('aml_events').insert({ aml_file_id: file.id, actor: SESSION.user.email, message: 'File opened' }));
     }
     const r = Object.assign({ up: {} }, file.data);

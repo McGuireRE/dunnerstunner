@@ -57,7 +57,7 @@ await tick('#noticeOk'); await p.click('#next'); await p.waitForTimeout(3200); c
 const db3=await p.evaluate(()=>JSON.parse(localStorage.getItem('mockdb')));
 // agent panel
 await p.evaluate(()=>localStorage.setItem('mocksession',JSON.stringify({user:{id:'agent-1',email:'hello@timmcguire.co.nz'}}))); await go();
-await p.click('#navDash'); await p.waitForTimeout(500); await p.click('tr[data-id]'); await p.waitForTimeout(500);
+await p.click('#navDash'); await p.waitForTimeout(500); await p.click('tr[data-ag]'); await p.waitForTimeout(500); await p.click('[data-agopen]'); await p.waitForTimeout(500);
 await p.screenshot({path:require('path').join(__dirname,'out','p6_panel.png'),fullPage:true});
 const panel=await p.$$eval('[data-pan]',e=>e.map(x=>x.querySelector('h3').textContent+' | '+x.querySelector('.status').textContent));
 const c1='[data-pan]:nth-of-type(1)';

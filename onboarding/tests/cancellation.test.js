@@ -33,7 +33,7 @@ await p.click('#next'); await p.waitForTimeout(100); const e2=await p.textConten
 await tick('#crFinal'); await p.click('#next'); await p.waitForTimeout(400); const c3=await p.textContent('h1'); await p.screenshot({path:require('path').join(__dirname,'out','c4_sent.png')});
 await p.click('#next'); await p.waitForTimeout(300); const doneAfter=(await p.textContent('main')).replace(/\s+/g,' ').slice(-220);
 // Tim processes
-await as({id:'agent-1',email:'hello@timmcguire.co.nz'}); await p.setViewportSize({width:1024,height:900}); await go(); await p.click('#navDash'); await p.waitForTimeout(500); await p.click('tr[data-id="A1"]'); await p.waitForTimeout(400);
+await as({id:'agent-1',email:'hello@timmcguire.co.nz'}); await p.setViewportSize({width:1024,height:900}); await go(); await p.click('#navDash'); await p.waitForTimeout(500); await p.click('tr[data-ag="A1"]'); await p.waitForTimeout(500); await p.click('[data-agopen="A1"]'); await p.waitForTimeout(400);
 await p.screenshot({path:require('path').join(__dirname,'out','c5_agent.png'),fullPage:true});
 await p.click('[data-crdo=cancelled]'); await p.waitForTimeout(100); const e3=await p.textContent('[data-cr] .err');
 await p.fill('[data-crnotes]','Spoke to Jane 3pm. Plans changed, moving in the new year. Agreed to cancel.'); await p.click('[data-crdo=cancelled]'); await p.waitForTimeout(500);

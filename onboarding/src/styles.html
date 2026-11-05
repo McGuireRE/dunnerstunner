@@ -199,6 +199,14 @@ details.acc .in li { margin: 4px 0; }
 .imp-row .v { display: block; font-weight: 500; overflow-wrap: anywhere; }
 .imp-row .now { display: block; font-size: 13.5px; color: var(--warn); margin-top: 2px; }
 .src-badge { display: inline-block; font-size: 12px; font-weight: 500; color: var(--ok); background: var(--ok-soft); border-radius: 999px; padding: 1px 8px; margin-top: 3px; white-space: normal; }
+.stg-strip { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 16px; }
+.stg { font-size: 12.5px; border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; color: var(--muted); background: var(--surface); }
+.stg.past { color: var(--ok); border-color: var(--ok); }
+.stg.on { color: #fff; background: var(--accent); border-color: var(--accent); font-weight: 600; }
+.ptiles { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.ptiles .card { margin: 0; }
+.ptile .btn.link { white-space: nowrap; }
+@media (max-width: 600px) { .ptiles { grid-template-columns: 1fr; } }
 .sigimg { background: #FFFFFF; border-radius: 6px; padding: 4px 8px; max-width: 100%; }
 .lawyer-banner { border-radius: 12px; padding: 14px 16px; margin: 0 0 18px; font-weight: 600; }
 .lawyer-banner.signed { background: var(--ok-soft); color: var(--ok); border: 2px solid var(--ok); }

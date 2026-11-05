@@ -15,7 +15,7 @@ const tick=async sel=>p.$$eval(sel,els=>els.forEach(e=>{e.checked=true;e.dispatc
 const out={};
 await go(); await p.evaluate(()=>{localStorage.clear();localStorage.setItem('mocksession',JSON.stringify({user:{id:'agent-1',email:'hello@timmcguire.co.nz'}}));
  const db={agreements:[{id:'A1',ref:'MRE-2026-1001',address:'14 Highgate, Maori Hill',status:'countersigned',config:{approach:'invited',flat:'10000',thr:'250000',pct:'3.95',ask:'1150000',appr:'done',mktMode:'build',aml:'Manual',start:'2026-10-20',method:'Price by negotiation'},answers:{pBed:'5'},legal:{choice:'have'},signed_at:'2026-10-20T02:00:00Z',cooling_off_until:'2026-10-21T04:00:00Z',agreement_version:'v3.15-26102026'}],agreement_people:[{id:'P1',agreement_id:'A1',position:1,legal_name:'Jane Smith',pref_name:'Jane',email:'jane@example.com',phone:'021 555 1234',user_id:'v-jane',signed_at:'2026-10-20T02:00:00Z'},{id:'P2',agreement_id:'A1',position:2,legal_name:'Rob Smith',pref_name:'',email:'rob@example.com',phone:'',user_id:'v-rob',signed_at:'2026-10-20T02:05:00Z'}],agreement_events:[],signatures:[],lawyer_links:[],aml_files:[],aml_events:[],email_log:[],cancellation_requests:[]};localStorage.setItem('mockdb',JSON.stringify(db));});
-await go(); await p.click('#navDash'); await p.waitForTimeout(500); await p.click('tr[data-id="A1"]'); await p.waitForTimeout(400);
+await go(); await p.click('#navDash'); await p.waitForTimeout(500); await p.click('tr[data-ag="A1"]'); await p.waitForTimeout(500); await p.click('[data-agopen="A1"]'); await p.waitForTimeout(400);
 await p.click('#newVar'); await p.waitForTimeout(400);
 out.h1=await p.textContent('h1');
 await tick('[data-vk="reviewUntil"]'); await p.click('[data-vext="90"]'); out.review=await p.inputValue('#vReview');

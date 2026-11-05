@@ -22,12 +22,12 @@ await p.screenshot({path:require('path').join(__dirname,'out',`h_home_${k}.png`)
 await p.click('#navDash'); await p.waitForTimeout(500);
 out[k].dash=await p.textContent('h1'); out[k].stats=await p.$$eval('.stat',e=>e.map(x=>x.textContent.replace(/\s+/g,' ').trim())); out[k].needsList=await p.$$eval('.needs strong',e=>e.map(x=>x.textContent)); out[k].current=await p.getAttribute('#navDash','aria-current');
 await p.screenshot({path:require('path').join(__dirname,'out',`h_dash_${k}.png`),fullPage:true});
-await p.click('[data-filter="live"]'); await p.waitForTimeout(300); out[k].liveRows=await p.$$eval('tr[data-id]',e=>e.map(x=>x.dataset.id));
-await p.click('tr[data-id="A1"]'); await p.waitForTimeout(400); out[k].detailBtn=await p.textContent('#toList');
+await p.click('[data-filter="signed"]'); await p.waitForTimeout(300); out[k].signedRows=await p.$$eval('tr[data-ag]',e=>e.map(x=>x.dataset.ag)); await p.click('[data-filter="all"]'); await p.waitForTimeout(300);
+await p.click('tr[data-ag="A1"]'); await p.waitForTimeout(500); await p.click('[data-agopen="A1"]'); await p.waitForTimeout(400); out[k].detailBtn=await p.textContent('#toList');
 await p.click('#navHome'); await p.waitForTimeout(300); out[k].backHome=await p.textContent('h1');
 // appointment flow, nav from inside keeps typed address
 await p.click('#homeAgree'); await p.waitForTimeout(300); await p.fill('#tAddr','77 Test Street'); await p.click('#navDash'); await p.waitForTimeout(600);
-out[k].savedDraft=await p.$$eval('tr[data-id] strong',e=>e.map(x=>x.textContent).includes('77 Test Street')) || (await p.evaluate(()=>JSON.parse(localStorage.getItem('mockdb')).agreements.some(a=>a.address==='77 Test Street')));
+out[k].savedDraft=await p.$$eval('tr[data-prop] strong',e=>e.map(x=>x.textContent).includes('77 Test Street')) || (await p.evaluate(()=>JSON.parse(localStorage.getItem('mockdb')).agreements.some(a=>a.address==='77 Test Street')));
 out[k].sideDash=await p.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth);
 await p.click('#signOut'); await p.waitForTimeout(500); out[k].navAfterSignout=await p.isVisible('#agentNav');
 await ctx.close();

@@ -48,3 +48,17 @@ signatures, agreement_events, aml_events: can't be updated or deleted. aml_files
 STORAGE (bucket "private")
 agreements/<agreement id>/signatures/... (vendors may upload their own signatures here) · imports/<batch uuid>/... (dropped-in documents, agent only)
 ```
+
+## Added in phase 1 (migrations 001 to 003)
+- `properties`: one record per property: address, title, owners on title, ownership, description, disclosures,
+  `stage` (moves forward on its own; withdrawn when the last agreement ends or is cancelled), `cycle_at` (set when
+  it starts again with new owners).
+- `property_people`: the people on a property. `role` is owner (signs), contact (in touch, not a signer) or former
+  (set aside: never deleted, never visible to vendors). `name_from` records where the legal name came from; a
+  checked name (title, agreement, Tim) is never replaced by an informal one. Two people with different emails are
+  never merged.
+- `property_documents`: documents Tim drops in. Agent only.
+- `prelistings.property_id`, `agreements.property_id`. Triggers keep the property current from the newest live
+  agreement and from pre-listings; agreements are made from the owners only. Signed records are untouched.
+- `agent_reopen_property(pid, new_owners)`: start a withdrawn or settled property again.
+- Still to do with Tim's OK: drop the unused `is_prelisting_party(prelistings)`.

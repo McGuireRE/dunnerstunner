@@ -25,6 +25,9 @@ How each phase runs:
 
 ## Phase 1: one property file
 
+Status: done 5 November 2026 (migrations 001 to 003). Reviewed independently twice; all findings fixed.
+Owners, contacts and earlier owners are kept apart; starting again asks same or new owners.
+
 Goal: enter the address, the owners and the property facts once. Every page reads and writes one record.
 
 Database (additive, existing records keep working):
