@@ -24,6 +24,8 @@ export interface Appendix {
   // recorded one, the same SHA-256). received: the client was shown it before signing (a signed agreement).
   // bytes: the file itself, attached unaltered; missing if it couldn't be fetched.
   reaGuide?: { version: string; file: string; title?: string; sha256?: string; received?: boolean; bytes?: Uint8Array } | null;
+  // the sale and purchase guide versions listed in guides.json (a signed agreement): a receipt prints only for one of these
+  saleListed?: { version: string; file: string }[];
 }
 
 // Appended to the agreement (phase 2 format). Tim's wording, tidied for typos only. The app shows the same
@@ -66,7 +68,7 @@ export const COMPLAINTS = {
   title: "Complaints and Dispute Resolution Procedures",
   intro: [
     "Pursuant to Rule 12 of the Real Estate Agents Act (Professional Conduct and Client Care Rules) 2012, all licensed Real Estate Agents are required to have a written in-house complaints and dispute resolution procedure. That procedure is set out below.",
-    "You do not have to use our complaints and resolution procedure. You may make a complaint directly to the Real Estate Agents Authority at any time. You can make a complaint to the Real Estate Agents Authority even if you choose to also use our procedures.",
+    "You do not have to use our complaints and resolution procedure. You may make a complaint directly to the Real Estate Authority at any time. You can make a complaint to the Real Estate Authority even if you choose to also use our procedures.",
     "Our complaints and dispute resolution procedures are designed to provide a simple and personalised process for resolving any complaint you might have about the service you have received from our agency.",
   ],
   steps: [
@@ -77,7 +79,7 @@ export const COMPLAINTS = {
     ["Step 5", ["If we accept your preferred resolution, we will attempt to implement that resolution as soon as possible. If we decline your preferred resolution, we may invite you to mediate the dispute."]],
     ["Step 6", ["If we agree to mediate the complaint but do not settle the complaint at mediation, or we do not agree to mediate the dispute, then that will be the end of our process."]],
   ] as [string, string[]][],
-  close: "Remember, you can still make a complaint to the Real Estate Agents Authority in the first instance, and even if you use these procedures, you can still make a complaint to the Real Estate Agents Authority at any time. The Real Estate Authority, C/O P.O. Box 25-371, Wellington 6146, New Zealand, 0800 367 7322 or 04 471 8930.",
+  close: "Remember, you can still make a complaint to the Real Estate Authority in the first instance, and even if you use these procedures, you can still make a complaint to the Real Estate Authority at any time. The Real Estate Authority, C/O P.O. Box 25-371, Wellington 6146, New Zealand, 0800 367 7322 or 04 471 8930.",
 };
 
 export async function buildAgreementPdf(inp: PdfInput): Promise<Uint8Array> {
@@ -285,6 +287,9 @@ export async function buildAgreementPdf(inp: PdfInput): Promise<Uint8Array> {
     const ok = inp.appendix?.reaGuide;
     const rg = ok && ok.received ? (s.snapshot?.rea_guides || []).find((g: any) => g.guide === "agency" && g.version === ok.version && g.file === ok.file) : null;
     if (rg) S.small(`Received the Real Estate Authority guide to agency agreements (version ${rg.version}), shown on screen before signing. Receipt confirmed ${nzDT(rg.acknowledged_at || s.signed_at)}, and recorded in what was signed.`);
+    const sl = inp.appendix?.saleListed || [];
+    const rs = (s.snapshot?.rea_guides || []).find((g: any) => g.guide === "sale_purchase" && sl.some((x) => x.file === g.file && x.version === g.version));
+    if (rs) S.small(`Received the Real Estate Authority guide to sale and purchase agreements (version ${rs.version}), shown on screen before signing. Receipt confirmed ${nzDT(rs.acknowledged_at || s.signed_at)}, and recorded in what was signed.`);
     S.gap(8);
   }
   const unsigned = signers.filter((p) => !clientSigs.some((s) => s.person_id === p.id));
@@ -621,7 +626,7 @@ export const FORM_TEXT: any = {
     'vi. We will promptly notify the Agent in writing of any change to the information provided in this declaration, including any report or notice received from a prospective purchaser or their professional adviser during the marketing of the property; and',
     'vii. We have provided the Agent with all information known to us relevant to the property\'s current Health and Safety Notice.',
   ],
-    HH_INTRO: 'Vendor site assessment: mark each item, add notes for any non-compliant areas. Deadline: 1 Jul 2025 (or within 120 days of a new/renewed tenancy). Penalties up to $7,200 per breach.',
+    HH_INTRO: 'Vendor site assessment: mark each item, add notes for any non-compliant areas. All private rentals must meet the healthy homes standards (from 1 July 2025). Penalties up to $7,200 per breach.',
     HH_CHECK: [
     ['Heating', [['heat1', 'Fixed heater in main living room (heat pump, wood burner, or electric) capable of 18°C'], ['heat2', 'Heater capacity confirmed via Tenancy Services Heating Assessment Tool (see page 2)'], ['heat3', 'Heater in good working order and maintained']]],
     ['Insulation', [['ins1', 'Ceiling insulation meets regional R-value (R2.9 North Island / R3.3 South Island & Central North Island)'], ['ins2', 'Existing ceiling insulation ≥120mm thick and in reasonable condition (if pre-2008 Code)'], ['ins3', 'Underfloor insulation ≥R1.3 nationwide'], ['ins4', 'Installed per NZS 4246:2016; code compliance certificate/CoA on file if applicable']]],

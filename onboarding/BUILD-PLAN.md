@@ -63,8 +63,8 @@ signature and PDF is unchanged.
 
 ## Phase 2: generated documents
 
-Status: done 6 November 2026 (migration 005). Reviewed independently twice; all findings fixed. The REA guide
-steps stay off until the official PDFs are added. Unit title disclosure waits for Tim's decision on scope.
+Status: done 6 November 2026 (migration 005). Reviewed independently twice; all findings fixed. The REA guides
+(August 2022) are live. Unit title disclosure left out.
 
 Goal: the remaining paperwork comes from the property file, signed on screen, filed with the agreement.
 
@@ -83,13 +83,17 @@ An entry without a version is ignored. The Vendor Declaration is countersigned b
   wood burner). Signed with the same pad and confirmation, PDF generated and filed, Tim emailed.
 - Healthy Homes checklist and statement: offered only when the vendor says the property is or will be
   tenanted. Tim fills the measurements on site on his phone; the landlord signs. PDF filed.
-- Unit title disclosure: build only after Tim's decision on scope (all vendors, unit titles only, or none).
+- Unit title disclosure: left out (Tim, 6 November 2026). The body corporate manager or the vendor's lawyer
+  prepares it.
 - Complaints procedure and the Vendor Guide appended to the agreement PDF. Tidy the procedure's typos.
 - REA Agency Agreement Guide: appended to the agreement PDF unaltered (keep a copy in assets with its
   version), shown inline before signing, receipt stored with the signature snapshot and printed in the
   execution record.
 - REA Sale and Purchase Agreement Guide: a "Before you sell" step after signing, shown inline, with its own
   dated receipt.
+  Also shown before the agency agreement is signed, with the receipt in what is signed (Tim, 6 November 2026);
+  "Before you sell" then shows it as received. The official guides (August 2022) and the REA's translations are
+  in `onboarding/assets/guides/`.
 
 Tests: one per document, and a check that the agreement PDF includes the appended guides.
 

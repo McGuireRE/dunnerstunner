@@ -1,0 +1,65 @@
+{
+  "_note": "Official REA guides, unaltered. English is the one given and receipted; translations are the REA's own, offered alongside (phase 4). When the REA issues a new version, add the new file, set file and version here, and move the old pair into \"earlier\".",
+  "agency": {
+    "file": "rea-agency-agreement-guide-2022-en.pdf",
+    "version": "August 2022",
+    "title": "Real Estate Authority guide to agency agreements",
+    "translations": {
+      "mi": {
+        "file": "rea-agency-agreement-guide-2022-mi.pdf",
+        "language": "te reo Māori"
+      },
+      "sm": {
+        "file": "rea-agency-agreement-guide-2022-sm.pdf",
+        "language": "Samoan"
+      },
+      "to": {
+        "file": "rea-agency-agreement-guide-2022-to.pdf",
+        "language": "Tongan"
+      },
+      "hi": {
+        "file": "rea-agency-agreement-guide-2022-hi.pdf",
+        "language": "Hindi"
+      },
+      "ko": {
+        "file": "rea-agency-agreement-guide-2022-ko.pdf",
+        "language": "Korean"
+      },
+      "zh": {
+        "file": "rea-agency-agreement-guide-2022-zh.pdf",
+        "language": "Simplified Chinese"
+      }
+    }
+  },
+  "sale_purchase": {
+    "file": "rea-sale-purchase-guide-2022-en.pdf",
+    "version": "August 2022",
+    "title": "Real Estate Authority guide to sale and purchase agreements",
+    "translations": {
+      "mi": {
+        "file": "rea-sale-purchase-guide-2022-mi.pdf",
+        "language": "te reo Māori"
+      },
+      "sm": {
+        "file": "rea-sale-purchase-guide-2022-sm.pdf",
+        "language": "Samoan"
+      },
+      "to": {
+        "file": "rea-sale-purchase-guide-2022-to.pdf",
+        "language": "Tongan"
+      },
+      "hi": {
+        "file": "rea-sale-purchase-guide-2022-hi.pdf",
+        "language": "Hindi"
+      },
+      "ko": {
+        "file": "rea-sale-purchase-guide-2022-ko.pdf",
+        "language": "Korean"
+      },
+      "zh": {
+        "file": "rea-sale-purchase-guide-2022-zh.pdf",
+        "language": "Simplified Chinese"
+      }
+    }
+  }
+}

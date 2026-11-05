@@ -59,7 +59,14 @@ const G={agency:{file:'test-agency-guide.pdf',version:'TEST-1'},sale_purchase:{f
   expect(s.appendices&&s.appendices.rea_agency_guide&&s.appendices.rea_agency_guide.version==='TEST-1','the agreement records which guide version to append');
   const pdfSha=require('crypto').createHash('sha256').update(PDF).digest('hex');
   expect(s.rea_guides[0].sha256===pdfSha&&s.appendices.rea_agency_guide.sha256===pdfSha,'the guide file\'s SHA-256 is recorded with the receipt');
+  const sp0=(s.rea_guides||[]).find(x=>x.guide==='sale_purchase');
+  expect(sp0&&sp0.version==='TEST-2'&&sp0.sha256===pdfSha&&sp0.acknowledged_at,'the sale and purchase guide is shown before signing too, and its receipt is in what was signed');
   out.bTiles=await p.$$eval('.ptile h3',e=>e.map(x=>x.textContent)); expect(out.bTiles.includes('Before you sell'),'"Before you sell" appears after signing');
+  out.spTile0=await p.evaluate(()=>[...document.querySelectorAll('.ptile')].map(t=>t.textContent.replace(/\s+/g,' ')).find(t=>t.includes('Before you sell')));
+  expect(/Guide received .*before you signed/.test(out.spTile0||''),'received before signing, so nothing more to do');
+  // an agreement signed before the guide was shown before signing: "Before you sell" asks for it
+  await p.evaluate(()=>{ const d=JSON.parse(localStorage.getItem('mockdb')); d.signatures.forEach(x=>{ x.snapshot.rea_guides=(x.snapshot.rea_guides||[]).filter(g=>g.guide!=='sale_purchase'); }); localStorage.setItem('mockdb',JSON.stringify(d)); });
+  await p.reload(); await p.waitForTimeout(900);
   await p.click('#spOpen'); await p.waitForTimeout(400);
   out.spH1=await p.textContent('main h1'); expect(out.spH1==='Before you sell','the Before you sell step');
   out.spIframe=await p.$eval('.guide-inline iframe',e=>e.getAttribute('src')); expect(/test-sale-guide\.pdf$/.test(out.spIframe),'the sale and purchase guide is shown inline');

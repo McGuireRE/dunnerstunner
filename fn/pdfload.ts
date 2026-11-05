@@ -48,13 +48,14 @@ export async function appendixFor(sigs: any[]): Promise<Appendix | undefined> {
     const bytes = g ? await guideBytes(g.file) : undefined;
     return { set, reaGuide: g && bytes ? { ...g, bytes, sha256: await sha256Hex(bytes) } : null };
   }
+  const saleListed = await guideListed("sale_purchase");   // receipts for the sale and purchase guide print only for a listed version
   const claimed = first.snapshot.appendices.rea_agency_guide;
-  if (!claimed || typeof claimed.file !== "string" || !GUIDE_FILE.test(claimed.file) || typeof claimed.version !== "string") return { set, reaGuide: null };
+  if (!claimed || typeof claimed.file !== "string" || !GUIDE_FILE.test(claimed.file) || typeof claimed.version !== "string") return { set, reaGuide: null, saleListed };
   const listed = (await guideListed("agency")).find((g) => g.file === claimed.file && g.version === claimed.version);
-  if (!listed) return { set, reaGuide: null };
+  if (!listed) return { set, reaGuide: null, saleListed };
   let bytes = await guideBytes(listed.file);
   if (bytes && claimed.sha256 && (await sha256Hex(bytes)) !== claimed.sha256) bytes = undefined;   // not the file they were shown
-  return { set, reaGuide: { ...listed, sha256: claimed.sha256, received: true, bytes } };
+  return { set, reaGuide: { ...listed, sha256: claimed.sha256, received: true, bytes }, saleListed };
 }
 
 export async function makeAgreementPdf(db: any, agreementId: string, part?: string) {

@@ -267,7 +267,7 @@
     title: 'Complaints and Dispute Resolution Procedures',
     intro: [
       'Pursuant to Rule 12 of the Real Estate Agents Act (Professional Conduct and Client Care Rules) 2012, all licensed Real Estate Agents are required to have a written in-house complaints and dispute resolution procedure. That procedure is set out below.',
-      'You do not have to use our complaints and resolution procedure. You may make a complaint directly to the Real Estate Agents Authority at any time. You can make a complaint to the Real Estate Agents Authority even if you choose to also use our procedures.',
+      'You do not have to use our complaints and resolution procedure. You may make a complaint directly to the Real Estate Authority at any time. You can make a complaint to the Real Estate Authority even if you choose to also use our procedures.',
       'Our complaints and dispute resolution procedures are designed to provide a simple and personalised process for resolving any complaint you might have about the service you have received from our agency.',
     ],
     steps: [
@@ -278,7 +278,7 @@
       ['Step 5', ['If we accept your preferred resolution, we will attempt to implement that resolution as soon as possible. If we decline your preferred resolution, we may invite you to mediate the dispute.']],
       ['Step 6', ['If we agree to mediate the complaint but do not settle the complaint at mediation, or we do not agree to mediate the dispute, then that will be the end of our process.']],
     ],
-    close: 'Remember, you can still make a complaint to the Real Estate Agents Authority in the first instance, and even if you use these procedures, you can still make a complaint to the Real Estate Agents Authority at any time. The Real Estate Authority, C/O P.O. Box 25-371, Wellington 6146, New Zealand, 0800 367 7322 or 04 471 8930.',
+    close: 'Remember, you can still make a complaint to the Real Estate Authority in the first instance, and even if you use these procedures, you can still make a complaint to the Real Estate Authority at any time. The Real Estate Authority, C/O P.O. Box 25-371, Wellington 6146, New Zealand, 0800 367 7322 or 04 471 8930.',
   };
   const APPENDIX_SET = 'P2-2026-11', VENDOR_GUIDE_ID = 'VG-2026-11';
   const complaintsHTML = () => `<details class="inline-doc"><summary>Read our complaints procedure</summary><h4>${esc(COMPLAINTS.title)}</h4>${COMPLAINTS.intro.map(t => `<p>${esc(t)}</p>`).join('')}${COMPLAINTS.steps.map(([h, ls]) => `<p><strong>${esc(h)}</strong><br>${ls.map(esc).join('<br>')}</p>`).join('')}<p>${esc(COMPLAINTS.close)}</p></details>`;
@@ -288,7 +288,10 @@
     let old = false;
     try { const { data } = await sb.from('signatures').select('snapshot,signer_role,signed_at').eq('agreement_id', agId); const cs = (data || []).filter(x => x.signer_role === 'client').sort((x, y) => x.signed_at < y.signed_at ? -1 : 1); old = cs.length > 0 && !(cs[0].snapshot || {}).appendices; } catch (_) { }
     const g = GUIDES.agency, out = {};
-    if (g && (an.acks || []).includes('1')) out.rea_guides = [{ guide: 'agency', title: g.title, version: g.version, file: g.file, sha256: g.sha256, shown: 'On screen before signing', acknowledged_at: an._reaAgencyAt || new Date().toISOString() }];
+    const g2 = GUIDES.sale_purchase, rg = [];
+    if (g && (an.acks || []).includes('1')) rg.push({ guide: 'agency', title: g.title, version: g.version, file: g.file, sha256: g.sha256, shown: 'On screen before signing', acknowledged_at: an._reaAgencyAt || new Date().toISOString() });
+    if (g2 && (an.acks || []).includes('2')) rg.push({ guide: 'sale_purchase', title: g2.title, version: g2.version, file: g2.file, sha256: g2.sha256, shown: 'On screen before signing', acknowledged_at: an._reaSaleAt || new Date().toISOString() });
+    if (rg.length) out.rea_guides = rg;
     if (!old) out.appendices = { set: APPENDIX_SET, vendor_guide: VENDOR_GUIDE_ID, complaints: COMPLAINTS.id, rea_agency_guide: g ? { version: g.version, file: g.file, title: g.title, sha256: g.sha256 } : null };
     return out;
   }
@@ -298,7 +301,7 @@
     return [
       ['I was told I may need technical or other advice, and given time to get it', ''],
       GUIDES.agency ? ['I received the Real Estate Authority guide to agency agreements', 'Here it is. Read it before you tick.', guideViewer(GUIDES.agency)] : ['I received the Real Estate Authority guide to agency agreements', `<a href="${REA_AA}" target="_blank" rel="noopener">Open the agency agreement guide</a>`],
-      ['I received the Real Estate Authority guide to sale and purchase agreements', `<a href="${REA_SP}" target="_blank" rel="noopener">Open the sale and purchase guide</a>`],
+      GUIDES.sale_purchase ? ['I received the Real Estate Authority guide to sale and purchase agreements', 'Here it is. It explains the agreement a buyer will sign. Read it before you tick.', guideViewer(GUIDES.sale_purchase)] : ['I received the Real Estate Authority guide to sale and purchase agreements', `<a href="${REA_SP}" target="_blank" rel="noopener">Open the sale and purchase guide</a>`],
       ['I know about McGuire\'s complaints process, and that I can go straight to the Real Estate Authority', 'Talk to Tim first if you can. The REA is on 0800 367 7322, whether or not you\'ve used our process.', complaintsHTML()],
       ['It was explained when I could end up paying two commissions', 'Mainly if another agent\'s sole agency is still running.'],
       ['I was told when this agreement ends', 'See "How long it runs, and how it ends".'],
@@ -747,6 +750,7 @@
   };
   BIND[7] = () => {
     const ak = $('#ak1'); if (ak && GUIDES.agency) ak.addEventListener('change', () => { if (ak.checked) ANS._reaAgencyAt = new Date().toISOString(); });
+    const ak2 = $('#ak2'); if (ak2 && GUIDES.sale_purchase) ak2.addEventListener('change', () => { if (ak2.checked) ANS._reaSaleAt = new Date().toISOString(); });
     wireTickAll();
     const upd = () => { const c = $('input[name="legal"]:checked'); $('#lawWrap').hidden = !(c && c.value === 'send'); };
     $$('input[name="legal"]').forEach(r => r.addEventListener('change', upd)); upd();
@@ -767,6 +771,7 @@
     if (c.value === 'send') return err('Use the button above to send it to your lawyer, or choose another option.');
     if (a.acks.length < acksList(CFG).length) return err('Tick each item, or text Tim about anything that didn\'t happen.');
     if (GUIDES.agency) a._reaAgencyAt = ANS._reaAgencyAt || new Date().toISOString();
+    if (GUIDES.sale_purchase) a._reaSaleAt = ANS._reaSaleAt || new Date().toISOString();
     await saveAns(a);
     if ((A.legal || {}).choice !== c.value) { await must(sb.rpc('vendor_set_legal', { a: A.id, choice: c.value })); A.legal = Object.assign({}, A.legal, { choice: c.value }); }
     return true;
@@ -867,7 +872,7 @@
     A = await must(sb.from('agreements').select('*').eq('id', A.id).single());
     P = await must(sb.from('agreement_people').select('*').eq('agreement_id', A.id).order('position'));
     ME = P.find(p => p.user_id === SESSION.user.id);
-    await loadVars();
+    await loadVars(); await loadForms();
     return true;
   };
 
@@ -1703,6 +1708,7 @@ function lawyerForm(id, title, blurb) {
   function tBind3() {
     if (T.id) wirePdf(T.id); else $$('[data-pdf]').forEach(b => b.addEventListener('click', async () => { tCollect(); if (await tSave()) openPdf(T.id); }));
     const tak = $('#tak1'); if (tak && GUIDES.agency) tak.addEventListener('change', () => { if (tak.checked) T.an._reaAgencyAt = new Date().toISOString(); });
+    const tak2 = $('#tak2'); if (tak2 && GUIDES.sale_purchase) tak2.addEventListener('change', () => { if (tak2.checked) T.an._reaSaleAt = new Date().toISOString(); });
     $$('[data-tmulti="guide"]').forEach(cb => cb.addEventListener('change', () => { $('#tGuideCount').textContent = `${$$('[data-tmulti="guide"]:checked').length} of ${GUIDE.length}`; })); wireTickAll();
     const lu = () => { const ch = $('input[name="tLegal"]:checked'); $('#tLawWrap').hidden = !(ch && ch.value === 'send'); };
     $$('input[name="tLegal"]').forEach(r => r.addEventListener('change', lu)); lu();
@@ -1978,7 +1984,7 @@ function lawyerForm(id, title, blurb) {
     'vi. We will promptly notify the Agent in writing of any change to the information provided in this declaration, including any report or notice received from a prospective purchaser or their professional adviser during the marketing of the property; and',
     'vii. We have provided the Agent with all information known to us relevant to the property\'s current Health and Safety Notice.',
   ],
-    HH_INTRO: 'Vendor site assessment: mark each item, add notes for any non-compliant areas. Deadline: 1 Jul 2025 (or within 120 days of a new/renewed tenancy). Penalties up to $7,200 per breach.',
+    HH_INTRO: 'Vendor site assessment: mark each item, add notes for any non-compliant areas. All private rentals must meet the healthy homes standards (from 1 July 2025). Penalties up to $7,200 per breach.',
     HH_CHECK: [
     ['Heating', [['heat1', 'Fixed heater in main living room (heat pump, wood burner, or electric) capable of 18°C'], ['heat2', 'Heater capacity confirmed via Tenancy Services Heating Assessment Tool (see page 2)'], ['heat3', 'Heater in good working order and maintained']]],
     ['Insulation', [['ins1', 'Ceiling insulation meets regional R-value (R2.9 North Island / R3.3 South Island & Central North Island)'], ['ins2', 'Existing ceiling insulation ≥120mm thick and in reasonable condition (if pre-2008 Code)'], ['ins3', 'Underfloor insulation ≥R1.3 nationwide'], ['ins4', 'Installed per NZS 4246:2016; code compliance certificate/CoA on file if applicable']]],
@@ -2074,6 +2080,9 @@ function lawyerForm(id, title, blurb) {
     try { const { data, error } = await sb.from('property_forms').select('*').eq('agreement_id', A.id); if (!error) FORMS = data || []; } catch (_) { }
     try { const { data, error } = await sb.from('form_signatures').select('*').eq('agreement_id', A.id); if (!error) FSIGS = data || []; } catch (_) { }
     try { const { data, error } = await sb.from('guide_receipts').select('*').eq('agreement_id', A.id); if (!error) RECEIPTS = data || []; } catch (_) { }
+    // the sale and purchase guide received before signing the agreement, recorded in what they signed
+    try { const { data, error } = await sb.from('signatures').select('person_id,signed_at,snapshot').eq('agreement_id', A.id).eq('signer_role', 'client');
+      if (!error) (data || []).forEach(s => ((s.snapshot || {}).rea_guides || []).filter(x => x.guide === 'sale_purchase').forEach(x => RECEIPTS.push({ person_id: s.person_id, guide: 'sale_purchase', version: x.version, received_at: x.acknowledged_at || s.signed_at, before_signing: true }))); } catch (_) { }
   }
   const formOf = k => FORMS.find(x => x.kind === k) || null;
   const iSigned = fm => !!(ME && FSIGS.some(s => s.form_id === fm.id && s.person_id === ME.id));
@@ -2092,7 +2101,7 @@ function lawyerForm(id, title, blurb) {
       : hh.status === 'draft' ? tile('Healthy Homes', '<p class="small" style="margin:0">Tim will take the measurements on site and fill in the checklist. Once he has, you\'ll sign it here as landlord.</p>')
       : iSigned(hh) ? tile('Healthy Homes', `<span class="status pending">You've signed. Waiting on ${esc(joinNames(others(hh)))}</span>`)
       : tile('Healthy Homes', '<span class="status pending">Tim has filled in the checklist. Please check it and sign as landlord.</span>', '<button class="btn primary" type="button" data-form="healthy_homes">Check and sign</button>');
-    const spTile = !sp ? '' : myRc ? tile('Before you sell', `<span class="status done">Guide received ${esc(fmtDate(myRc.received_at))}</span><p class="small" style="margin:8px 0 0">${esc(sp.title)}, version ${esc(sp.version)}. <a href="${esc(sp.url)}" target="_blank" rel="noopener">Read it again</a></p>`)
+    const spTile = !sp ? '' : myRc ? tile('Before you sell', `<span class="status done">Guide received ${esc(fmtDate(myRc.received_at))}${myRc.before_signing ? ', before you signed' : ''}</span><p class="small" style="margin:8px 0 0">${esc(sp.title)}, version ${esc(sp.version)}. <a href="${esc(sp.url)}" target="_blank" rel="noopener">Read it again</a></p>`)
       : tile('Before you sell', `<p class="small">Before anyone makes an offer, please read the Real Estate Authority's guide to sale and purchase agreements. It explains the agreement a buyer will sign.</p>`, '<button class="btn primary" type="button" id="spOpen">Read the guide</button>');
     return `<h2>Paperwork still to do</h2><div class="ptiles">${spTile}${vdTile}${hhTile}</div>`;
   }
