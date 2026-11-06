@@ -1110,6 +1110,50 @@ function lawyerForm(id, title, blurb) {
     for (const id of PF.removed || []) await must(sb.from('property_people').update({ role: 'former' }).eq('id', id));
   }
 
+  /* AFTER SIGNING: Tim moves a countersigned property on the market, under offer, sold, settled or withdrawn. The database checks
+     every move (agent_set_stage); this tile only offers the moves that are allowed from where it is now. */
+  const STAGE_NEXT = { signed: [['live', 'Put it on the market']], live: [['under_offer', 'Under offer'], ['sold', 'Sold']], under_offer: [['sold', 'Sold']], sold: [['settled', 'Settled']] };
+  const STAGE_BACK = { under_offer: [['live', 'Back to on the market']], sold: [['under_offer', 'Back to under offer'], ['live', 'Back to on the market']] };
+  const STAGE_SAYS = {
+    live: 'The vendors will see On the market on their journey map.',
+    under_offer: 'The vendors will see Under offer on their journey map. Nothing about the offer itself is shown to them.',
+    sold: 'The vendors will see Sold on their journey map.',
+    settled: 'This ends the agency. The identity records are kept for 5 years from today, and the vendors see settlement as done.',
+    withdrawn: 'This ends the agency. The identity records are kept for 5 years from today. You can start the property again from an appraisal later.',
+  };
+  function stageTileHTML(p, live, events) {
+    const finished = ['settled', 'withdrawn'].includes(p.stage), active = ['signed', 'live', 'under_offer', 'sold'].includes(p.stage);
+    if (!active && !events.length) return '';
+    const counter = live && live.status === 'countersigned';
+    const btn = (k, l, cls) => `<button class="btn ${cls}" type="button" data-stg="${k}">${esc(l)}</button>`;
+    const moves = !active ? '' : !counter ? `<p class="small">Countersign the agreement before you move it on.${live ? ` <button class="btn link" type="button" data-agopen="${live.id}">Open the agreement</button>` : ''}</p>`
+      : `<div class="toolbar">${(STAGE_NEXT[p.stage] || []).map(([k, l], i) => btn(k, l, i ? 'ghost' : 'primary')).join('')}</div>
+         <div class="toolbar">${(STAGE_BACK[p.stage] || []).map(([k, l]) => btn(k, l, 'ghost')).join('')}${btn('withdrawn', 'Withdraw it', 'ghost')}</div>`;
+    return `<div class="card ptile stgtile no-print" id="stgTile"><h3>On the market and after</h3>
+      <p class="small" style="margin:0 0 8px">${active ? `Now: <strong>${esc(stageName(p.stage))}</strong>. Each move asks you to confirm, and is logged.` : finished ? `This property is ${esc(stageName(p.stage).toLowerCase())}.` : ''}</p>
+      ${moves}<div id="stgBox"></div>
+      ${events.length ? `<details class="stg-log"${active ? '' : ' open'}><summary class="small">Stage history (${events.length})</summary>${events.map(e => { const d = e.detail || {}; return `<div class="fact"><div class="k">${esc(fmtDT(e.at))} · ${esc(e.actor)}</div><div class="v" style="font-weight:400">${e.kind === 'stage_back' ? 'Went back: ' : ''}${esc(stageName(d.from))} to ${esc(stageName(d.to))}${d.reason ? `<br><span class="small">Reason: ${esc(d.reason)}</span>` : ''}</div></div>`; }).join('')}</details>` : ''}
+    </div>`;
+  }
+  function wireStageTile(pid, p) {
+    $$('[data-stg]').forEach(b => b.addEventListener('click', () => {
+      const to = b.dataset.stg, back = (STAGE_BACK[p.stage] || []).some(x => x[0] === to), ends = ['settled', 'withdrawn'].includes(to), box = $('#stgBox');
+      box.innerHTML = `<div class="card ${ends ? 'warnc' : 'note'} tight" id="stgConfirm"><h4 style="margin:0 0 6px">Move to ${esc(stageName(to))}?</h4>
+        <p class="small" style="margin:0 0 6px">${back ? 'This takes it back a step. ' : ''}${esc(STAGE_SAYS[to] || '')}</p>
+        ${back || to === 'withdrawn' ? `<label class="f" for="stgReason" style="margin-top:0">${back ? 'Why are you going back?' : 'Note'} <span class="opt">${back ? '(needed, and kept in the record)' : '(optional, kept in the record)'}</span></label><textarea id="stgReason" rows="2"></textarea>` : ''}
+        <div class="toolbar"><button class="btn primary" type="button" id="stgYes">Yes, move it</button><button class="btn ghost" type="button" id="stgNo">Not now</button></div><div class="err" id="stgErr" role="alert"></div></div>`;
+      $('#stgNo').addEventListener('click', () => { box.innerHTML = ''; });
+      $('#stgYes').addEventListener('click', async () => {
+        const why = ($('#stgReason') || {}).value || '';
+        if (back && why.trim().length < 3) return $('#stgErr').textContent = 'Say why you are going back.';
+        $('#stgYes').disabled = true;
+        try { await must(sb.rpc('agent_set_stage', { pid, p_stage: to, p_reason: why.trim() || null, p_confirmed: true })); toast('Moved to ' + stageName(to)); viewProperty(pid); }
+        catch (_) { $('#stgYes').disabled = false; }
+      });
+      box.scrollIntoView({ block: 'nearest' });
+    }));
+  }
+
   async function viewProperty(id) {
     header('Property file', '', 0); actions(false);
     main().innerHTML = '<div class="loading">Loading...</div>';
@@ -1123,6 +1167,7 @@ function lawyerForm(id, title, blurb) {
     p.ownership ||= {}; p.description ||= {}; p.disclosures ||= {};
     const live = ags.find(a => !['ended', 'cancelled'].includes(a.status)) || null;
     let pforms = []; if (live) { try { const { data, error } = await sb.from('property_forms').select('*').eq('agreement_id', live.id); if (!error) pforms = data || []; } catch (_) { } }
+    let pevents = []; try { const { data, error } = await sb.from('property_events').select('at,actor,kind,detail').eq('property_id', id).order('at', { ascending: false }); if (!error) pevents = data || []; } catch (_) { }
     const pl = pls.find(x => x.status !== 'closed' && (!p.cycle_at || x.created_at >= p.cycle_at)) || null;   // only this round's pre-listing
     const byRole = r => people.filter(x => (x.role || 'owner') === r).map(x => Object.assign({ _orig_name: x.legal_name }, x));
     PF = { p, people: byRole('owner'), contacts: byRole('contact'), formers: byRole('former'), docs, pls, ags, liveAgreement: live, removed: [] };
@@ -1158,6 +1203,7 @@ function lawyerForm(id, title, blurb) {
           ${!pls.length && !ags.length ? '<p class="small" style="margin:0">No appraisal page or agreement yet.</p>' : ''}
         </div>
         ${formsTileHTML(pforms, live)}
+        ${stageTileHTML(p, live, pevents)}
         ${jTileHTML(p, live, pforms, pl)}
       </div>
       <h2>Owners</h2>
@@ -1187,6 +1233,7 @@ function lawyerForm(id, title, blurb) {
     $('#pfBack').addEventListener('click', viewAgentDashboard);
     const jt = $('#jToggle'); if (jt) jt.addEventListener('click', () => { const l = $('#jListA'); const on = !l.classList.contains('open'); l.classList.toggle('open', on); const tl = $('#jTile'); if (tl) tl.classList.toggle('jopen', on); jt.setAttribute('aria-expanded', on); jt.textContent = on ? 'Show the current stop only' : 'Show every stop'; });
     $$('[data-agopen]').forEach(b => b.addEventListener('click', () => viewAgentDetail(b.dataset.agopen)));
+    wireStageTile(id, p);
     $$('[data-plopen]').forEach(b => b.addEventListener('click', () => viewPrelistingAgent(b.dataset.plopen)));
     $$('[data-fopen]').forEach(b => b.addEventListener('click', () => viewFormAgent(b.dataset.fopen)));
     const bg = $('#pfBegin'); if (bg) bg.addEventListener('click', () => viewPrelistingAgent(null, id));
@@ -1488,21 +1535,38 @@ function lawyerForm(id, title, blurb) {
     const safe = async q => { try { return await must(q); } catch (_) { return []; } };
     const [props, rows, pls, crs, pans, vars] = await Promise.all([
       safe(sb.from('properties').select('id,address,stage,stage_at,updated_at,property_people(legal_name,pref_name,position,role),agreements(id,ref,status,created_at),prelistings(id,status)').order('updated_at', { ascending: false })),
-      safe(sb.from('agreements').select('id,ref,address,status,updated_at,agreement_people(legal_name,pref_name,signed_at,id_verified_at)').order('updated_at', { ascending: false })),
+      safe(sb.from('agreements').select('id,ref,address,status,updated_at,property_id,config,signed_at,agreement_people(legal_name,pref_name,signed_at,id_verified_at)').order('updated_at', { ascending: false })),
       safe(sb.from('prelistings').select('id,address,contact_name,contact_email,status,proceeded_at,updated_at').order('updated_at', { ascending: false })),
       safe(sb.from('cancellation_requests').select('id,agreement_id,requested_by,status').neq('status', 'processed')),
       safe(sb.from('prior_agency_notices').select('id,agreement_id,agency,status').eq('status', 'to_send')),
-      safe(sb.from('agreement_variations').select('id,agreement_id,number,status').eq('status', 'draft')),
+      safe(sb.from('agreement_variations').select('id,agreement_id,number,status,changes').neq('status', 'withdrawn')),
     ]);
     const forms = await safe(sb.from('property_forms').select('id,agreement_id,kind,status,document_id,countersigned_at'));
+    const seen = await safe(sb.from('agreement_events').select('agreement_id,detail').eq('kind', 'review_checked'));
     const addr = id => (rows.find(r => r.id === id) || {}).address || 'Agreement';
     const needs = [];
     crs.forEach(r => needs.push({ what: 'Call them about cancelling', where: addr(r.agreement_id), sub: 'Request from ' + r.requested_by, go: () => viewAgentDetail(r.agreement_id), hot: true }));
     pls.forEach(p => { if (p.status === 'submitted') needs.push({ what: 'Write their updated plan', where: p.address, sub: 'Questionnaire answers are in', go: () => viewPrelistingAgent(p.id) }); if (p.status === 'question') needs.push({ what: 'Answer their question', where: p.address, sub: 'About the updated plan', go: () => viewPrelistingAgent(p.id), hot: true }); if (p.status === 'accepted') { const a = rows.find(r => r.id === p.agreement_id); if (!a || a.status === 'draft') needs.push({ what: 'Add your fee and send the agreement', where: p.address, sub: 'They\'ve accepted the plan', go: () => viewPrelistingAgent(p.id) }); } });
     rows.forEach(r => { if (r.status === 'signed') needs.push({ what: 'Countersign', where: r.address, sub: 'Everyone has signed', go: () => viewAgentDetail(r.id) }); });
-    pans.forEach(n => needs.push({ what: 'Send the notice to ' + n.agency, where: addr(n.agreement_id), sub: 'Previous agency', go: () => viewAgentDetail(n.agreement_id) }));
+    // notices to previous agencies not yet sent (only while the agreement is still in force)
+    pans.forEach(n => { const g = rows.find(r => r.id === n.agreement_id); if (g && !['signed', 'countersigned'].includes(g.status)) return; needs.push({ what: 'Send the notice to ' + n.agency, where: addr(n.agreement_id), sub: 'Previous agency, not sent yet', go: () => viewAgentDetail(n.agreement_id, false, 'noticePanel') }); });
     forms.forEach(fm => { if (fm.kind === 'healthy_homes' && fm.status === 'draft') needs.push({ what: 'Do the Healthy Homes measurements', where: addr(fm.agreement_id), sub: 'They asked for the checklist', go: () => viewFormAgent(fm.id) }); if (fm.kind === 'vendor_declaration' && fm.status === 'signed' && !fm.countersigned_at) needs.push({ what: 'Countersign the Vendor Declaration', where: addr(fm.agreement_id), sub: 'Every vendor has signed', go: () => viewFormAgent(fm.id) }); else if (fm.status === 'signed' && !fm.document_id) needs.push({ what: `File the signed ${FORM_LABEL[fm.kind]}`, where: addr(fm.agreement_id), sub: 'The PDF isn\'t on the property yet', go: () => viewFormAgent(fm.id) }); });
-    vars.forEach(v => needs.push({ what: `Finish variation ${v.number}`, where: addr(v.agreement_id), sub: 'Draft, not issued', go: () => viewAgentDetail(v.agreement_id) }));
+    vars.filter(v => v.status === 'draft').forEach(v => needs.push({ what: `Finish variation ${v.number}`, where: addr(v.agreement_id), sub: 'Draft, not issued', go: () => viewAgentDetail(v.agreement_id, false, 'varPanel') }));
+    // the review date (the end of the fixed period) 7 days ahead, or the end of a variation's extended period; gone once
+    // Tim ticks it off, the date moves (a variation is signed), or the agreement ends or the property is sold
+    const nzToday = new Date().toLocaleDateString('en-CA', { timeZone: 'Pacific/Auckland' }), dayN = iso => Math.round(Date.parse(iso + 'T00:00:00Z') / 864e5);
+    rows.forEach(r => {
+      if (!['signed', 'countersigned'].includes(r.status)) return;
+      const c = r.config || {}; if (c.appr === 'pending' && !c.start) return;   // it hasn't started, so there is no review date yet
+      const pr = props.find(p => p.id === r.property_id); if (pr && pr.stage === 'sold') return;
+      const mine = vars.filter(v => v.agreement_id === r.id), t = currentTerms(r, mine); if (!t.reviewUntil) return;
+      const left = dayN(t.reviewUntil) - dayN(nzToday); if (left > 7) return;
+      if (seen.some(e => e.agreement_id === r.id && (e.detail || {}).date === t.reviewUntil)) return;
+      const ext = mine.some(v => v.status === 'signed' && (v.changes || {}).reviewUntil), when = left > 1 ? `in ${left} days` : left === 1 ? 'tomorrow' : left === 0 ? 'today' : '';
+      needs.push({ what: left < 0 ? (ext ? 'The extended period has ended' : 'The review date has passed') : (ext ? 'The extended period ends ' : 'Review date ') + when, where: r.address, sub: `${ext ? 'Extended to' : 'Fixed period ends'} ${dayText(t.reviewUntil)}`, review: true, hot: left <= 0,
+        go: () => viewAgentDetail(r.id, false, 'varPanel'),
+        done: async () => { await must(sb.from('agreement_events').insert({ agreement_id: r.id, actor: SESSION.user.email, kind: 'review_checked', detail: { date: t.reviewUntil } })); } });
+    });
     return { props, rows, pls: pls.filter(p => p.status !== 'closed'), needs };
   }
 
@@ -1526,7 +1590,7 @@ function lawyerForm(id, title, blurb) {
         <button class="stat" type="button" data-filter="done"><div class="n">${count('done')}</div><div class="l">Finished</div></button>
       </div>
       <h2 id="d-needs">Needs you</h2>
-      ${needs.length ? `<div class="card tight"><ul class="needs">${needs.map((n, i) => `<li><div class="what"><strong>${esc(n.what)}</strong><span class="small">${esc(n.where)} · ${esc(n.sub)}</span></div><button class="btn ${n.hot ? 'primary' : 'ghost'}" type="button" data-need="${i}">Open</button></li>`).join('')}</ul></div>` : '<div class="card okc tight"><p class="small" style="margin:0">Nothing waiting on you.</p></div>'}
+      ${needs.length ? `<div class="card tight"><ul class="needs">${needs.map((n, i) => `<li><div class="what"><strong>${esc(n.what)}</strong><span class="small">${esc(n.where)} · ${esc(n.sub)}</span></div><span class="needbtns"><button class="btn ${n.hot ? 'primary' : 'ghost'}" type="button" data-need="${i}">Open</button>${n.done ? `<button class="btn ghost" type="button" data-needdone="${i}">Done</button>` : ''}</span></li>`).join('')}</ul></div>` : '<div class="card okc tight"><p class="small" style="margin:0">Nothing waiting on you.</p></div>'}
       <h2 id="d-props">Properties</h2>
       <div class="chip-row" role="tablist">${STAGE_GROUPS.map(([k, l]) => `<button class="chip" type="button" role="tab" aria-selected="${DASH_FILTER === k}" data-filter="${k}" style="${DASH_FILTER === k ? 'border-color:var(--accent);background:var(--accent-soft)' : ''}">${l} <span class="small">${count(k)}</span></button>`).join('')}</div>
       ${shown.length ? `<div class="card tight" style="overflow-x:auto;margin-top:10px"><table class="tbl"><thead><tr><th>Property</th><th>Owners</th><th>Where it's up to</th><th class="hide-sm">Updated</th></tr></thead><tbody>
@@ -1535,6 +1599,7 @@ function lawyerForm(id, title, blurb) {
       <div class="toolbar"><button class="btn ghost" type="button" id="newPl">Let's begin: new appraisal page</button><button class="btn primary" type="button" id="newAg">Let's agree: new agreement</button></div>
     </div>`;
     $$('[data-need]').forEach(b => b.addEventListener('click', () => needs[+b.dataset.need].go()));
+    $$('[data-needdone]').forEach(b => b.addEventListener('click', async () => { b.disabled = true; try { await needs[+b.dataset.needdone].done(); toast('Ticked off'); viewAgentDashboard(); } catch (_) { b.disabled = false; } }));
     $$('[data-filter]').forEach(b => b.addEventListener('click', () => { DASH_FILTER = b.dataset.filter; viewAgentDashboard(); }));
     $$('[data-jump]').forEach(b => b.addEventListener('click', () => { const t = $('#d-' + b.dataset.jump); if (t) t.scrollIntoView({ behavior: 'smooth', block: 'start' }); }));
     $('#newAg').addEventListener('click', () => viewTable(null));
@@ -2095,7 +2160,7 @@ function lawyerForm(id, title, blurb) {
   }
 
   /* detail */
-  async function viewAgentDetail(id, justSent) {
+  async function viewAgentDetail(id, justSent, focus) {
     header('Agreement', '', 0);
     const ag = await must(sb.from('agreements').select('*').eq('id', id).single());
     const people = await must(sb.from('agreement_people').select('*').eq('agreement_id', id).order('position'));
@@ -2247,6 +2312,7 @@ function lawyerForm(id, title, blurb) {
       $('#doEnd').addEventListener('click', async () => { await must(sb.rpc('agent_end_agency', { a: id, reason: $('#endReason').value })); toast('Agency ended'); viewAgentDetail(id); });
     });
     top();
+    if (focus) { const t = $('#' + focus); if (t) t.scrollIntoView({ block: 'start' }); }   // a reminder lands on the part it is about
   }
 
   /* ═════════ AFTER SIGNING: Vendor Declaration, Healthy Homes, Before you sell ═════════ */
@@ -2727,7 +2793,7 @@ function lawyerForm(id, title, blurb) {
     if (!live && !vars.length) return '';
     const signers = people.filter(p => p.legal_name && p.signed_at);
     const cur = currentTerms(ag, vars), anySigned = vars.some(v => v.status === 'signed');
-    return `<h2>Variations and extensions</h2>
+    return `<h2 id="varPanel">Variations and extensions</h2>
       <p class="small">Change or extend a signed agreement. The vendors sign each variation the way they signed the agreement, and the original stays as it was.</p>
       ${live && !vars.some(v => ['draft', 'sent'].includes(v.status)) ? '<div class="toolbar no-print"><button class="btn primary" type="button" id="newVar">Vary or extend this agreement</button></div>' : ''}
       ${vars.slice().reverse().map(v => {
@@ -2978,7 +3044,7 @@ function lawyerForm(id, title, blurb) {
   function noticePanel(ag, people, pans) {
     if (!pans.length) return '';
     const cc = people.filter(p => p.email && p.signed_at).map(p => p.email);
-    return `<h2>Notices to previous agencies</h2>
+    return `<h2 id="noticePanel">Notices to previous agencies</h2>
       <p class="small">Signed by the sellers with the agreement. Download each one for your file. Check it, then send it.</p>
       ${pans.map(n => `<div class="card ${n.status === 'sent' ? '' : 'note'}" data-pan="${n.id}"><div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:baseline"><h3 style="margin:0">${esc(n.agency)}${n.agent_name ? ` <span class="small">(${esc(n.agent_name)})</span>` : ''}</h3><span class="status ${n.status === 'sent' ? 'done' : 'pending'}">${n.status === 'sent' ? `Sent ${esc(fmtDT(n.sent_at))}` : 'To check and send'}</span></div>
         <div class="small">${esc(n.kind || 'Agency')}${n.dated ? ', dated ' + esc(n.dated) : ''}${n.status === 'sent' ? `<br>${esc(n.sent_method || '')}${n.sent_to ? ' to ' + esc(n.sent_to) : ''}` : ''}${n.send_error && n.status !== 'sent' ? `<br><strong style="color:var(--accent)">Last send failed: ${esc(n.send_error)}</strong>` : ''}</div>
@@ -3555,6 +3621,11 @@ function lawyerForm(id, title, blurb) {
     if (k === 4 && f.agStatus) return f.agStatus === 'parked' ? 'Paused while the lawyer takes a look.' : ['signed', 'countersigned'].includes(f.agStatus) ? (f.agStatus === 'countersigned' ? 'Signed by everyone, and by Tim.' : 'Signed by everyone.') : f.signedTotal ? `${f.signedN} of ${f.signedTotal} have signed.` : '';
     if (k === 5 && f.idTotal) return f.idAll ? 'Everyone has been checked.' : `${f.idDone} of ${f.idTotal} checked so far.`;
     if (k === 6 && f.paper) return `Paperwork: ${f.paper.done} of ${f.paper.total} done.`;
+    // stops 7 to 9 say only what the stage is, in plain words: nothing about an offer, its size or what may happen next
+    if (k === 7 && f.stage === 'live') return 'Your property is on the market.';
+    if (k === 8 && f.stage === 'under_offer') return 'Your property is under offer.';
+    if (k === 9 && f.stage === 'sold') return 'Your property has sold. Settlement is next.';
+    if (k === 9 && f.stage === 'settled') return 'Settlement is done.';
     return '';
   }
   function jCardsHTML(st, f, o) {

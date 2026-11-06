@@ -84,3 +84,16 @@ agreements/<agreement id>/signatures/... (vendors may upload their own signature
   when the guide was shown, `rea_guides` (the receipt). No database change: they are part of the snapshot. Agreements
   whose first signature has no `appendices` print exactly as before. The server appends a guide only if it is
   listed in guides.json with that version and, when recorded, the same SHA-256.
+
+## Added in phase 5 (migrations 009 and 010, written and tested in rollback blocks; to be applied with Tim's OK)
+- `property_events`: a permanent record of stage changes on a property (`at`, `actor`, `kind` stage_changed or stage_back,
+  `detail` with from, to and the reason). Agent reads; nobody writes directly; rows can't be changed or removed.
+- `agent_set_stage(pid, p_stage, p_reason, p_confirmed)`: agent only. Needs `p_confirmed` true and an agreement that is
+  countersigned. Moves signed to live, under_offer or sold; going back (sold to under_offer or live, under_offer to live) needs
+  a reason; settled (from sold) and withdrawn end the agency by calling `agent_end_agency` on every agreement in force.
+  Settled and withdrawn properties don't move (use `agent_reopen_property`). Logs to `property_events` and to the agreement's events.
+- `campaign_stats`, `buyer_feedback`, `property_offers`: groundwork for the vendor reporting portal. Agent can read, add and
+  correct; no vendor policy at all, so vendors see nothing; no delete. No screens use them yet.
+- The review date is not stored as a field. It is worked out as the commencement (`config.start`, else the signing date) plus
+  90 days, moved by any signed variation that changes `reviewUntil` (see `currentTerms` in app.js). Tim ticking a reminder off is an
+  agreement event of kind `review_checked` with the date.

@@ -66,6 +66,10 @@ function q(table){
   };
   function run(){
     const T=(DB[table]||=[]);
+    // after signing (migrations 009 and 010): these tables are for the agent only. A vendor sees and writes nothing; nobody writes the
+    // stage record directly (agent_set_stage does) or removes a row from any of them.
+    if(AGENT_ONLY.includes(table)){ const vendor=S&&S.user&&!AGENTS.includes(S.user.email); if(vendor){ if(op==='select') return {data:single?undefined:[],error:single?{message:'not found'}:null}; throw new Error('new row violates row-level security policy for table "'+table+'"'); }
+      if(op==='delete'||(table==='property_events'&&op!=='select')) throw new Error('permission denied for table '+table); }
     if((op==='insert'||op==='update'||op==='delete')&&['translations','translation_log','user_language'].includes(table)) throw new Error('new row violates row-level security policy for table "'+table+'"');
     if(op==='insert'){ const arr=(Array.isArray(payload)?payload:[payload]).map(p=>{const r=Object.assign({id:uid(),created_at:now(),updated_at:now()},p); if(table==='agreements'){r.ref=r.ref||'MRE-2026-'+(1001+T.length); r.status=r.status||'draft'; r.config=r.config||{}; r.answers=r.answers||{}; r.legal=r.legal||{}; r.agreement_version='v3.15-26102026';} if(table.endsWith('events')) r.at=now(); if(table==='signatures') r.signed_at=now(); if(table==='agreement_variations'){r.status='draft';} if(table==='prelistings'){r.status=r.status||'appraisal';r.answers=r.answers||{};r.plan=r.plan||{}; if(!r.property_id){ const p=newProp(r.address); r.property_id=p.id; } mergePerson(r.property_id,r.contact_name,'',r.contact_email,'',null,'appraisal'); }
       if(table==='agreements'&&!r.property_id){ const p=newProp(r.address); p.title_ref=(r.config||{}).title||null; p.owners_on_title=(r.config||{}).owners||null; r.property_id=p.id; }
@@ -85,6 +89,7 @@ function q(table){
   return b;
 }
 const AGENTS=['hello@timmcguire.co.nz'];
+const AGENT_ONLY=['property_events','campaign_stats','buyer_feedback','property_offers'];
 function mkNotices(ag){ if((ag.answers||{}).prior!=='yes') return; (DB.prior_agency_notices||=[]); (ag.answers.priorAgencies||[]).forEach((x,i)=>{ if(x.agency&&!DB.prior_agency_notices.some(n=>n.agreement_id===ag.id&&n.idx===i)) DB.prior_agency_notices.push({id:uid(),agreement_id:ag.id,idx:i,agency:x.agency,agent_name:x.agent||null,email:x.email||null,kind:x.kind,dated:x.dated||null,status:'to_send',created_at:now()}); }); }
 const ok=d=>Promise.resolve({data:d,error:null}); const bad=m=>Promise.resolve({data:null,error:{message:m}});
 function rpc(name,a){ if(localStorage.getItem('trHang')==='1'&&['get_translations','set_my_language'].includes(name)) return new Promise(()=>{}); const before=new Map((DB.agreements||[]).map(x=>[x.id,JSON.parse(JSON.stringify(x))])); const res=rpcInner(name,a); (DB.agreements||[]).forEach(x=>{ const o=before.get(x.id); if(o&&JSON.stringify(o)!==JSON.stringify(x)) syncAgreement(x,o); }); save(); return res; }
@@ -134,6 +139,19 @@ function rpcInner(name,a){
     if(name==='agent_approve_translations'){ if(!String(a.p_name||'').trim()) return bad('Type the name of the person who checked it'); if(!Array.isArray(a.p_items)||!a.p_items.length) return bad('Nothing was shown to approve'); let n=0; a.p_items.forEach(it=>{ const x=TR().find(t=>t.id===it.id&&sameSet(t,a.p_scope,a.p_ref,a.p_lang)&&t.status==='awaiting_check'&&t.text===it.text); if(x){ x.status='approved'; x.approved_by=a.p_name.trim(); x.approved_at=now(); n++; } }); if(!n) return bad('Nothing is waiting to be checked, or it changed after you read it'); TL().push({id:TL().length+1,at:now(),kind:'approved',scope:a.p_scope,ref:a.p_ref||null,lang:a.p_lang,by_name:a.p_name.trim(),by_email:me.email,strings:n}); save(); return ok(n); }
     if(name==='agent_withdraw_translations'){ const rows=TR().filter(x=>sameSet(x,a.p_scope,a.p_ref,a.p_lang)&&x.status==='approved'); rows.forEach(x=>{ x.status='awaiting_check'; }); TL().push({id:TL().length+1,at:now(),kind:'withdrawn',scope:a.p_scope,ref:a.p_ref||null,lang:a.p_lang,by_email:me.email,strings:rows.length}); save(); return ok(rows.length); }
   }
+  // agent_set_stage (migration 009): the same rules as the database function
+  if(name==='agent_set_stage'){ if(!me||!AGENTS.includes(me.email)) return bad('Agent only'); if(a.p_confirmed!==true) return bad('Please confirm the change first');
+    if(!['live','under_offer','sold','settled','withdrawn'].includes(a.p_stage)) return bad('That is not a stage you can set here');
+    const p=PT().find(x=>x.id===a.pid); if(!p) return bad('Property not found'); if(['settled','withdrawn'].includes(p.stage)) return bad('This property has finished. Start it again from an appraisal first');
+    const RK=['signed','live','under_offer','sold']; if(!RK.includes(p.stage)) return bad('The agreement has to be signed and countersigned first'); if(p.stage===a.p_stage) return bad('It is already at that stage');
+    const lv=(DB.agreements||[]).filter(g=>g.property_id===p.id&&live(g)).sort((x,y)=>(x.created_at||'')<(y.created_at||'')?-1:1); if(!lv.length) return bad('There is no agreement in force on this property'); if(!lv.some(g=>g.status==='countersigned')) return bad('Countersign the agreement first');
+    const why=String(a.p_reason||'').trim()||null, newest=lv[lv.length-1], from=p.stage; let back=false;
+    if(['live','under_offer','sold'].includes(a.p_stage)){ if(RK.indexOf(a.p_stage)<RK.indexOf(from)){ back=true; if(!why||why.length<3) return bad('Say why you are going back'); } else if(from==='signed'&&a.p_stage!=='live') return bad('Put it on the market first'); p.stage=a.p_stage; p.stage_at=now(); }
+    else { if(a.p_stage==='settled'&&from!=='sold') return bad('Mark it sold before it is settled'); const reason=a.p_stage==='settled'?'Sold and settled':'Withdrawn';
+      lv.forEach(g=>{ g.status='ended'; g.ended_at=g.ended_at||now(); DB.agreement_events.push({id:uid(),agreement_id:g.id,at:now(),actor:me.email,kind:'agency_ended',detail:{reason}}); }); p.stage=a.p_stage; p.stage_at=now(); }
+    const kind=back?'stage_back':'stage_changed', detail=Object.assign({from,to:a.p_stage},why?{reason:why}:{});
+    (DB.property_events||=[]).push({id:DB.property_events.length+1,property_id:p.id,agreement_id:newest.id,at:now(),actor:me.email,kind,detail});
+    DB.agreement_events.push({id:uid(),agreement_id:newest.id,at:now(),actor:me.email,kind,detail}); save(); return ok({from,to:a.p_stage,agreement_id:newest.id}); }
   if(name==='agent_reopen_property'){ const p=PT().find(x=>x.id===a.pid); if(!p||!['withdrawn','settled'].includes(p.stage)) return bad('Only a withdrawn or settled property can start again'); if(a.new_owners){ active(p.id).forEach(x=>x.role='former'); p.owners_on_title=null; p.ownership={}; p.disclosures={}; p.cycle_at=now(); } p.stage='appraisal'; p.stage_at=now(); save(); return ok(null); }
   if(name==='is_agent') return ok(AGENTS.includes(me.email));
   if(name==='claim_my_agreements'){ DB.agreement_people.forEach(p=>{ if(p.email.toLowerCase()===me.email&&!p.user_id) p.user_id=me.id;}); save(); return ok([...new Set(DB.agreement_people.filter(p=>p.user_id===me.id).map(p=>p.agreement_id))].filter(id=>DB.agreements.find(x=>x.id===id).status!=='draft')); }

@@ -86,7 +86,11 @@ window.I18N_STRINGS = {
     "Paperwork: {n} of {m} done.",
     "Open your paperwork",
     "This property is not on the selling road at the moment. Here is the whole road, in case it helps. If you would like to talk it through, call or text Tim on 027 562 7207.",
-    "You have been through every stop. Thank you for choosing McGuire Real Estate."
+    "You have been through every stop. Thank you for choosing McGuire Real Estate.",
+    "Your property is on the market.",
+    "Your property is under offer.",
+    "Your property has sold. Settlement is next.",
+    "Settlement is done."
    ]
   ],
   [

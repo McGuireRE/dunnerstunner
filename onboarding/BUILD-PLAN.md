@@ -135,6 +135,8 @@ Tests: switching language, fallback to English, the English link, and the signin
 
 ## Phase 5: after signing
 
+Status: built 7 November 2026 (migrations 009 and 010, not yet applied), waiting for review.
+
 Goal: the property keeps moving after countersigning, and the dashboard and journey map follow it.
 
 - Stages: live, under offer, sold, settled, withdrawn, set by Tim from the property page.
