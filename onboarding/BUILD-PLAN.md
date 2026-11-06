@@ -68,13 +68,10 @@ Status: done 6 November 2026 (migration 005). Reviewed independently twice; all 
 
 Goal: the remaining paperwork comes from the property file, signed on screen, filed with the agreement.
 
-Status: built 6 November 2026 (migration 005, not yet applied), waiting for review. Unit title disclosure not built
-(Tim to decide scope). The REA guides are built but switched off until Tim adds the official files: put each PDF in
-`onboarding/assets/guides/` under a name that includes its version (old files must stay, so older agreements still
-print with the guide they were given), and list them in `onboarding/assets/guides/guides.json`:
-`{"agency": {"file": "...pdf", "version": "...", "title": "...", "earlier": [{"file": "...pdf", "version": "..."}]},
-"sale_purchase": {"file": "...pdf", "version": "..."}}`. When a guide is replaced, move the old one into "earlier".
-An entry without a version is ignored. The Vendor Declaration is countersigned by Tim after the vendors sign.
+Updating the REA guides: put each PDF in `onboarding/assets/guides/` under a name that includes its version (old
+files must stay, so older agreements still print with the guide they were given), and list it in `guides.json` with
+its version and sha256. When a guide is replaced, move the old one into "earlier". An entry without a version or
+fingerprint is ignored. The Vendor Declaration is countersigned by Tim after the vendors sign.
 
 - Vendor Declaration (Tim's Word form): a vendor step after signing. Questions already answered in the file
   are shown for confirmation; only the new ones are asked (boundary pegs, items not paid for, history,
@@ -135,7 +132,8 @@ Tests: switching language, fallback to English, the English link, and the signin
 
 ## Phase 5: after signing
 
-Status: built 7 November 2026 (migrations 009 and 010, not yet applied), waiting for review.
+Status: done 7 November 2026 (migrations 009 and 010). Reviewed independently twice; all findings fixed. A property
+goes on the market once its agreement is countersigned; the newest countersigned agreement in force governs.
 
 Goal: the property keeps moving after countersigning, and the dashboard and journey map follow it.
 
