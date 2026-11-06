@@ -29,7 +29,9 @@ revoke insert, update, delete, truncate on public.property_events from authentic
 --   back:     under_offer -> live, sold -> under_offer or live   (for example an offer falls through): needs a reason
 --   ending:   withdrawn from signed, live, under_offer or sold; settled from sold. Both end the agency.
 --   finished: settled and withdrawn properties don't move; they start again with agent_reopen_property.
--- Everything needs the agreement countersigned, and p_confirmed = true (the screen asks Tim first).
+-- Everything needs p_confirmed = true (the screen asks Tim first) and a governing agreement: the newest agreement in force
+-- on the property that is countersigned. Stage events are logged against it. A newer agreement that is only signed doesn't
+-- count. Settled and withdrawn finish the property, so they end every agreement in force on it, not only the governing one.
 create or replace function public.agent_set_stage(pid uuid, p_stage text, p_reason text default null, p_confirmed boolean default false) returns jsonb
 language plpgsql security definer set search_path = public as $$
 declare
@@ -47,10 +49,11 @@ begin
   if pr.stage in ('settled','withdrawn') then raise exception 'This property has finished. Start it again from an appraisal first'; end if;
   if pr.stage <> all (rk) then raise exception 'The agreement has to be signed and countersigned first'; end if;
   if pr.stage = p_stage then raise exception 'It is already at that stage'; end if;
-  select array_agg(id order by created_at), (array_agg(id order by created_at desc))[1] into live_ids, newest
+  select array_agg(id order by created_at) into live_ids
     from public.agreements where property_id = pid and status not in ('ended','cancelled');
   if live_ids is null then raise exception 'There is no agreement in force on this property'; end if;
-  if not exists (select 1 from public.agreements where id = any (live_ids) and status = 'countersigned') then raise exception 'Countersign the agreement first'; end if;
+  select id into newest from public.agreements where id = any (live_ids) and status = 'countersigned' order by created_at desc, id limit 1;
+  if newest is null then raise exception 'Countersign the agreement first'; end if;
   cur := array_position(rk, pr.stage);
 
   if p_stage in ('live','under_offer','sold') then

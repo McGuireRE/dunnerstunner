@@ -2,6 +2,9 @@
 -- entry forms come later. Three new tables (campaign statistics, buyer feedback, offers), each with row level security
 -- that lets only the agent read, add and correct rows. There is no policy for vendors, so they see nothing, and none
 -- for deleting, so a row can be corrected but not removed. Nothing existing is changed.
+-- Still to do before Tim's entry screens are built: a history of corrections (who changed what, and when), so a corrected
+-- figure or comment keeps what it said before. It is not built here.
+-- A row's agreement, when it names one, has to be an agreement of the same property (checked below).
 
 create table public.campaign_stats (
   id uuid primary key default gen_random_uuid(),
@@ -69,3 +72,16 @@ create trigger touch_property_offers before update on public.property_offers for
 
 revoke all on public.campaign_stats, public.buyer_feedback, public.property_offers from anon;
 revoke delete, truncate on public.campaign_stats, public.buyer_feedback, public.property_offers from authenticated;
+
+-- an agreement named on a row must belong to the row's property
+create or replace function public.check_report_agreement() returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if new.agreement_id is not null and not exists (select 1 from public.agreements a where a.id = new.agreement_id and a.property_id = new.property_id) then
+    raise exception 'That agreement belongs to a different property';
+  end if;
+  return new;
+end $$;
+revoke execute on function public.check_report_agreement() from public, anon, authenticated;
+create trigger campaign_stats_agreement before insert or update on public.campaign_stats for each row execute function public.check_report_agreement();
+create trigger buyer_feedback_agreement before insert or update on public.buyer_feedback for each row execute function public.check_report_agreement();
+create trigger property_offers_agreement before insert or update on public.property_offers for each row execute function public.check_report_agreement();

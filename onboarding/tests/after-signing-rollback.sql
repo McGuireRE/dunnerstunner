@@ -2,9 +2,10 @@
 -- walks agent_set_stage through every rule, checks vendors and anon are shut out, then raises an exception so nothing is kept.
 -- The output is the exception message: every line should read as a refusal ("noconfirm:", "skip:" ...), never in CAPITALS
 -- (capitals mean something that should have been refused was allowed).
--- Last run: 7 November 2026, on a scratch PostgreSQL 16 holding copies of the tables and the phase 1 functions it touches.
+-- Cases include two agreements in force on one property, editing the agent's notes on a live agreement, and a reporting row
+-- naming another property's agreement. Last run: 7 November 2026, on a scratch PostgreSQL 16 holding copies of the tables and the phase 1 functions it touches.
 do $t$
-declare out text := ''; p1 uuid; p2 uuid; p3 uuid; a1 uuid; a2 uuid; a3 uuid; r jsonb; n int; st text; ast text; vendor text := '{"email":"vendor@example.com","sub":"11111111-1111-1111-1111-111111111111"}';
+declare out text := ''; p1 uuid; p2 uuid; p3 uuid; p4 uuid; p5 uuid; a1 uuid; a2 uuid; a3 uuid; a4a uuid; a4b uuid; a5a uuid; a5b uuid; ev uuid; r jsonb; n int; st text; ast text; vendor text := '{"email":"vendor@example.com","sub":"11111111-1111-1111-1111-111111111111"}';
   agent text := '{"email":"hello@timmcguire.co.nz","sub":"22222222-2222-2222-2222-222222222222"}';
 begin
   perform set_config('request.jwt.claims', agent, true);
@@ -18,6 +19,9 @@ begin
   r := agent_set_stage(p1,'live',null,true); out := out || 'live:' || r::text || '; ';
   begin perform agent_set_stage(p1,'live',null,true); out := out || 'SAME-ALLOWED; '; exception when others then out := out || 'same:' || sqlerrm || '; '; end;
   begin perform agent_set_stage(p1,'settled','x',true); out := out || 'SETTLE-FROM-LIVE-ALLOWED; '; exception when others then out := out || 'settlelive:' || sqlerrm || '; '; end;
+  -- editing the agent's private notes on a live agreement doesn't disturb the stage
+  update agreements set config = coalesce(config,'{}'::jsonb) || '{"agent_notes":"Call after 5"}'::jsonb where id=a1;
+  select stage into st from properties where id=p1; out := out || 'after notes=' || st || '; ';
   perform agent_set_stage(p1,'under_offer',null,true);
   begin perform agent_set_stage(p1,'live',null,true); out := out || 'BACK-NOREASON-ALLOWED; '; exception when others then out := out || 'backnoreason:' || sqlerrm || '; '; end;
   begin perform agent_set_stage(p1,'live','  ',true); out := out || 'BACK-BLANK-ALLOWED; '; exception when others then out := out || 'backblank:' || sqlerrm || '; '; end;
@@ -41,9 +45,27 @@ begin
   insert into agreements(address, property_id, status) values ('RB Test 3', p3, 'draft') returning id into a3;
   update agreements set status='signed' where id=a3;
   begin perform agent_set_stage(p3,'live',null,true); out := out || 'UNCOUNTERSIGNED-ALLOWED; '; exception when others then out := out || 'notcounter:' || sqlerrm || '; '; end;
+  -- two agreements in force: the governing one is the newest that is countersigned (an older one, with a newer one only signed)
+  insert into properties(address) values ('RB Test 4') returning id into p4;
+  insert into agreements(address, property_id, status, created_at) values ('RB Test 4', p4, 'draft', '2026-11-01') returning id into a4a;
+  insert into agreements(address, property_id, status, created_at) values ('RB Test 4', p4, 'draft', '2026-11-02') returning id into a4b;
+  update agreements set status='countersigned' where id=a4a; update agreements set status='signed' where id=a4b;
+  r := agent_set_stage(p4,'live',null,true); out := out || 'two-in-force governing is older countersigned=' || ((r->>'agreement_id')::uuid = a4a) || '; ';
+  select agreement_id into ev from property_events where property_id=p4; out := out || 'event on governing=' || (ev = a4a) || '; ';
+  perform agent_set_stage(p4,'under_offer',null,true); perform agent_set_stage(p4,'sold',null,true); perform agent_set_stage(p4,'settled',null,true);
+  select count(*) into n from agreements where id in (a4a,a4b) and status='ended'; out := out || 'settled ended both=' || n || '; ';
+  select stage into st from properties where id=p4; out := out || 'two-agreement settled stage=' || st || '; ';
+  -- and with two countersigned, the newer governs
+  insert into properties(address) values ('RB Test 5') returning id into p5;
+  insert into agreements(address, property_id, status, created_at) values ('RB Test 5', p5, 'draft', '2026-11-01') returning id into a5a;
+  insert into agreements(address, property_id, status, created_at) values ('RB Test 5', p5, 'draft', '2026-11-02') returning id into a5b;
+  update agreements set status='countersigned' where id in (a5a,a5b);
+  r := agent_set_stage(p5,'live',null,true); out := out || 'newer countersigned governs=' || ((r->>'agreement_id')::uuid = a5b) || '; ';
+  perform agent_set_stage(p5,'withdrawn','Changed their minds',true);
+  select count(*) into n from agreements where id in (a5a,a5b) and status='ended'; out := out || 'withdrawn ended both=' || n || '; ';
   -- events can't be changed
   begin update property_events set actor='x' where property_id=p1; out := out || 'EVENT-UPDATE-ALLOWED; '; exception when others then out := out || 'immutable:' || sqlerrm || '; '; end;
-  -- reporting tables: agent can add and fix, not delete
+  -- reporting tables: agent can add and fix, not remove rows
   set local role authenticated;
   perform set_config('request.jwt.claims', agent, true);
   insert into campaign_stats(property_id, period_start, period_end, metrics) values (p1, '2026-11-01','2026-11-07','{"views":10}');
@@ -51,7 +73,12 @@ begin
   insert into property_offers(property_id, amount) values (p1, 900000);
   update property_offers set status='declined' where property_id=p1;
   select count(*) into n from property_offers; out := out || 'agent sees offers=' || n || '; ';
-  begin delete from property_offers where property_id=p1; out := out || 'DELETE-ALLOWED; '; exception when others then out := out || 'nodelete:' || sqlerrm || '; '; end;
+  select string_agg(table_name || ':' || privilege_type, ' ' order by table_name, privilege_type) into st from information_schema.role_table_grants where grantee='authenticated' and table_schema='public' and table_name in ('property_offers','campaign_stats','buyer_feedback','property_events'); out := out || 'agent grants: ' || st || '; ';
+  -- a reporting row's agreement has to be one of the same property
+  begin insert into property_offers(property_id, agreement_id, amount) values (p1, a4a, 1); out := out || 'OTHER-PROPERTY-AGREEMENT-ALLOWED; '; exception when others then out := out || 'wrong agreement:' || sqlerrm || '; '; end;
+  begin insert into buyer_feedback(property_id, agreement_id, feedback) values (p1, a4a, 'x'); out := out || 'OTHER-PROPERTY-AGREEMENT-ALLOWED; '; exception when others then out := out || 'wrong agreement:' || sqlerrm || '; '; end;
+  begin insert into campaign_stats(property_id, agreement_id, period_start, period_end) values (p1, a4a, '2026-11-01','2026-11-02'); out := out || 'OTHER-PROPERTY-AGREEMENT-ALLOWED; '; exception when others then out := out || 'wrong agreement:' || sqlerrm || '; '; end;
+  insert into property_offers(property_id, agreement_id, amount) values (p1, a1, 2); out := out || 'own agreement ok; ';
   select count(*) into n from property_events where property_id=p1; out := out || 'agent sees events=' || n || '; ';
   begin insert into property_events(property_id, actor, kind) values (p1,'x','y'); out := out || 'DIRECT-EVENT-INSERT-ALLOWED; '; exception when others then out := out || 'noinsert:' || sqlerrm || '; '; end;
   -- a vendor

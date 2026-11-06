@@ -89,7 +89,7 @@ window.I18N_STRINGS = {
     "You have been through every stop. Thank you for choosing McGuire Real Estate.",
     "Your property is on the market.",
     "Your property is under offer.",
-    "Your property has sold. Settlement is next.",
+    "Your property has sold.",
     "Settlement is done."
    ]
   ],

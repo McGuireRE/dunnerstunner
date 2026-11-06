@@ -93,7 +93,8 @@ const world=()=>({
   await p.click('[data-stg="sold"]'); await p.click('#stgYes'); await p.waitForTimeout(500);
   expect((await pill(p))==='Sold'&&(await stgBtns(p)).join()==='settled,under_offer,live,withdrawn','C: live to sold is allowed and offers settled, or back (got '+(await stgBtns(p))+')');
   await p.click('[data-stg="settled"]'); await p.waitForSelector('#stgConfirm');
-  expect(/ends the agency/.test(await p.textContent('#stgConfirm')),'D: settling warns that it ends the agency');
+  expect(/ends the agency/.test(await p.textContent('#stgConfirm'))&&/at least 5 years/.test(await p.textContent('#stgConfirm'))&&!/from today/.test(await p.textContent('#stgConfirm')),'D: settling warns that it ends the agency, and keeps identity records for at least 5 years');
+  expect(/MRE-2026-A1/.test(await p.textContent('#stgConfirm')),'D: and names the agreement it will end');
   await p.click('#stgYes'); await p.waitForTimeout(600);
   d=await db(p);
   expect(d.properties[0].stage==='settled'&&d.agreements[0].status==='ended'&&d.agreements[0].ended_at,'D: settled ends the agency');
@@ -120,6 +121,18 @@ const world=()=>({
   await p.click('#navDash'); await p.waitForTimeout(400); await p.click('tr[data-prop="P3"]'); await p.waitForTimeout(500);
   expect((await stgBtns(p)).length===0&&/Countersign the agreement/.test(await p.textContent('#stgTile')),'F: a signed but not countersigned agreement has no stage buttons, and says why');
   r=await rpc(p,'agent_set_stage',{pid:'P3',p_stage:'live',p_confirmed:true}); expect(r.error&&/Countersign/.test(r.error.message),'F: the database refuses it too');
+  // two agreements in force: the governing one is the newest that is countersigned (here the older; the newer is only signed)
+  await edit(p,`d.properties.push({id:'P4',address:'12 Twin St',title_ref:null,owners_on_title:null,ownership:{},description:{},disclosures:{},stage:'signed',stage_at:'${T0}',created_at:'${T0}',updated_at:'${T0}'});
+    d.agreements.push({id:'A4a',ref:'MRE-2026-1003',address:'12 Twin St',property_id:'P4',status:'countersigned',config:{start:'${nzDay(-5)}'},answers:{},legal:{},created_at:'2026-11-01T00:00:00Z'});
+    d.agreements.push({id:'A4b',ref:'MRE-2026-1004',address:'12 Twin St',property_id:'P4',status:'signed',config:{start:'${nzDay(-5)}'},answers:{},legal:{},created_at:'2026-11-02T00:00:00Z'});`);
+  await p.reload(); await p.waitForTimeout(600); await p.click('#navDash'); await p.waitForTimeout(400); await p.click('tr[data-prop="P4"]'); await p.waitForTimeout(500);
+  expect((await stgBtns(p)).join()==='live,withdrawn','T: with a newer agreement only signed, the older countersigned one governs, so the tile offers moves (got '+(await stgBtns(p))+')');
+  await p.click('[data-stg="live"]'); await p.click('#stgYes'); await p.waitForTimeout(500);
+  d=await db(p); expect(d.properties.find(x=>x.id==='P4').stage==='live'&&d.property_events.find(e=>e.property_id==='P4').agreement_id==='A4a','T: the move is logged against the governing agreement (MRE-2026-1003), not the newer one');
+  await p.click('[data-stg="withdrawn"]'); await p.waitForSelector('#stgConfirm');
+  const cf=await p.textContent('#stgConfirm'); expect(/MRE-2026-1003/.test(cf)&&/MRE-2026-1004/.test(cf),'T: withdrawing lists every agreement it will end by reference: '+cf.slice(0,200));
+  await p.click('#stgYes'); await p.waitForTimeout(600); d=await db(p);
+  expect(d.agreements.filter(x=>x.property_id==='P4').every(x=>x.status==='ended'),'T: and ends both');
   // stage tile at 390, light and dark
   await p.setViewportSize({width:390,height:844}); await p.click('#navDash'); await p.waitForTimeout(300); await p.click('tr[data-prop="P3"]'); await p.waitForTimeout(500);
   expect(!(await sideways(p)),'F: the property page with the stage tile fits 390');
@@ -135,7 +148,7 @@ const world=()=>({
     await p.evaluate(()=>localStorage.setItem('mocksession',JSON.stringify({user:{id:'v-jane',email:'jane@example.com'}}))); await p.setViewportSize({width:390,height:844}); await p.goto(URL); await p.waitForTimeout(700);
     await openJ(p); const i=await jinfo(p); await closeJ(p); return i; };
   const timAt=async()=>{ await p.evaluate(()=>localStorage.setItem('mocksession',JSON.stringify({user:{id:'agent-1',email:'hello@timmcguire.co.nz'}}))); await p.setViewportSize({width:1024,height:900}); await p.goto(URL); await p.waitForTimeout(600); await openProp(p,P1); return tile(p); };
-  const steps=[['signed',[6],null,null],['live',[7],[1,2,3,4,5,6],'Your property is on the market.'],['under_offer',[8],[1,2,3,4,5,6,7],'Your property is under offer.'],['sold',[9],[1,2,3,4,5,6,7,8],'Your property has sold. Settlement is next.'],['settled',[],[1,2,3,4,5,6,7,8,9],'Settlement is done.']];
+  const steps=[['signed',[6],null,null],['live',[7],[1,2,3,4,5,6],'Your property is on the market.'],['under_offer',[8],[1,2,3,4,5,6,7],'Your property is under offer.'],['sold',[9],[1,2,3,4,5,6,7,8],'Your property has sold.'],['settled',[],[1,2,3,4,5,6,7,8,9],'Settlement is done.']];
   for (const [stage,here,done,say] of steps) {
     const i=await vendorAt(stage); out['vendor_'+stage]={here:i.here,done:i.done};
     if (stage!=='signed') {
@@ -189,29 +202,38 @@ const world=()=>({
 { const {ctx,p}=await setup(1024);
   await p.goto(URL);
   const mk=(n,reviewOff,extra)=>({prop:prop('RP'+n,'Reminder House '+n,'live'),pp:pperson('RPP'+n,'RP'+n,'Owner '+n,'o'+n+'@example.com'),ag:ag('RA'+n,'RP'+n,'countersigned',Object.assign({address:'Reminder House '+n,config:{appr:'done',ask:'800000',flat:'10000',thr:'250000',pct:'3',aml:'Manual',approach:'invited',start:startFor(reviewOff)}},extra||{}))});
-  const rows=[mk(1,7),mk(2,8),mk(3,-3),mk(4,0),mk(5,30),mk(6,6)];   // 7 ahead (shown), 8 (not yet), passed, today, far off, 6 ahead; 6 becomes a sold property
+  const rows=[mk(1,7),mk(2,8),mk(3,-3),mk(4,0),mk(5,30),mk(6,6)];
+  const pend=mk(8,0,{config:{appr:'pending',ask:'',flat:'10000',thr:'250000',pct:'3',aml:'Manual',approach:'invited',start:nzDay(-200)}});   // appraisal still to come; a stale start date must be ignored
+  rows.push(pend);
+  const cfg=off=>({appr:'done',ask:'800000',flat:'10000',thr:'250000',pct:'3',aml:'Manual',approach:'invited',start:startFor(off)});
+  const twins={properties:[prop('RP9','Reminder House 9','live'),prop('RP11','Reminder House 11','live')],
+    agreements:[ag('RA9a','RP9','countersigned',{address:'Reminder House 9',config:cfg(6),created_at:'2026-11-01T00:00:00Z'}),ag('RA9b','RP9','countersigned',{address:'Reminder House 9',config:cfg(3),created_at:'2026-11-02T00:00:00Z'}),
+      ag('RA11a','RP11','countersigned',{address:'Reminder House 11',config:cfg(6),created_at:'2026-11-01T00:00:00Z'}),ag('RA11b','RP11','signed',{address:'Reminder House 11',config:cfg(2),created_at:'2026-11-02T00:00:00Z'})]};   // 7 ahead (shown), 8 (not yet), passed, today, far off, 6 ahead; 6 becomes a sold property
   const variationSigned=(id,agId,number,reviewUntil)=>({id,agreement_id:agId,number,status:'signed',changes:{reviewUntil},summary:[{label:'Review date'}],created_at:T0});
-  await seed(p,{properties:rows.map(r=>r.prop),property_people:rows.map(r=>r.pp),agreements:rows.map(r=>r.ag),
+  await seed(p,{properties:rows.map(r=>r.prop).concat(twins.properties),property_people:rows.map(r=>r.pp),agreements:rows.map(r=>r.ag).concat(twins.agreements),
     agreement_variations:[variationSigned('V5','RA5',1,nzDay(5))]});   // RA5's review date was extended; the extension ends in 5 days
   await edit(p,`d.properties.find(x=>x.id==='RP6').stage='sold'`);
   await login(p,...TIM); await p.click('#navDash'); await p.waitForTimeout(600);
   const needs=()=>p.$$eval('.needs li',e=>e.map(x=>x.querySelector('.what').innerText.replace(/\s+/g,' ')));
   let n=await needs(); out.needs=n;
   const has=(re)=>n.some(x=>re.test(x));
-  expect(has(/Review date in 7 days.*Reminder House 1/),'I: the review date 7 days ahead appears');
+  expect(has(/Review date in 7 days.*Reminder House 1\b/),'I: the review date 7 days ahead appears');
   expect(!has(/Reminder House 2/),'I: 8 days ahead does not appear yet');
   expect(has(/The review date has passed.*Reminder House 3/),'I: a review date that has passed still appears until it is dealt with');
   expect(has(/Review date today.*Reminder House 4/),'I: a review date today appears');
   expect(!has(/Reminder House 6/),'I: a property that has sold has no review reminder');
   expect(has(/The extended period ends in 5 days.*Reminder House 5/),'I: the end of a variation\'s period appears, worded as the extension');
   expect(has(/Review date in 7 days.*Fixed period ends/),'I: it says when the fixed period ends');
+  expect(n.filter(x=>/Review date.*Reminder House 9/.test(x)).length===1&&has(/Review date in 3 days.*Reminder House 9/),'I: two countersigned agreements on one property give one reminder, from the newer: '+n.filter(x=>/House 9/.test(x)));
+  expect(n.filter(x=>/Review date.*Reminder House 11/.test(x)).length===1&&has(/Review date in 6 days.*Reminder House 11/),'I: a newer agreement that is only signed doesn\'t govern: one reminder, from the older countersigned one: '+n.filter(x=>/House 11/.test(x)));
+  expect(has(/Review date unknown: give the written appraisal.*Reminder House 8/)&&!has(/(in \d+ days|today|passed).*Reminder House 8/),'I: an agreement waiting for its written appraisal says the review date is unknown, whatever its stale start date');
   expect(!has(/Reminder House 5.*Review date in 30/),'I: the original review date of an extended agreement is not reminded');
   const stat=await p.$eval('.stat.hot .n,.stat .n',e=>+e.textContent); expect(stat===n.length,'I: the Need you count includes them ('+stat+' vs '+n.length+')');
   expect(!(await sideways(p)),'I: dashboard fits at 1024');
   // opening one lands on the agreement, at the variations part, with the right property
-  const idx=n.findIndex(x=>/Reminder House 1/.test(x));
+  const idx=n.findIndex(x=>/Reminder House 1\b/.test(x));
   await p.click(`[data-need="${idx}"]`); await p.waitForTimeout(600);
-  expect(/Reminder House 1/.test(await p.textContent('h1')),'I: the reminder opens that property\'s agreement');
+  expect(/Reminder House 1\b/.test(await p.textContent('h1')),'I: the reminder opens that property\'s agreement');
   const vis=await p.evaluate(()=>{ const e=document.querySelector('#varPanel'); if(!e) return null; const r=e.getBoundingClientRect(); return r.top>=-2&&r.top<window.innerHeight; });
   expect(vis===true,'I: and scrolls to the part about the review date and extending');
   // Done ticks it off, and it stays gone
@@ -224,17 +246,28 @@ const world=()=>({
   // a signed variation that extends the date makes the reminder go
   await edit(p,`d.agreement_variations.push({id:'V1',agreement_id:'RA1',number:1,status:'signed',changes:{reviewUntil:'${nzDay(60)}'},summary:[{label:'Review date'}],created_at:'${T0}'});`);
   await p.reload(); await p.waitForTimeout(700); await p.click('#navDash'); await p.waitForTimeout(500); n=await needs();
-  expect(!has(/Reminder House 1/),'I: extending the review date by a signed variation clears the reminder');
+  expect(!has(/Reminder House 1\b/),'I: extending the review date by a signed variation clears the reminder');
   // an unsigned (sent) variation does not
   await edit(p,`d.agreement_variations.find(x=>x.id==='V1').status='sent'`);
   await p.reload(); await p.waitForTimeout(700); await p.click('#navDash'); await p.waitForTimeout(500); n=await needs();
-  expect(has(/Review date in 7 days.*Reminder House 1/),'I: a variation still waiting for signatures doesn\'t move the date');
+  expect(has(/Review date in 7 days.*Reminder House 1\b/),'I: a variation still waiting for signatures doesn\'t move the date');
   // the agreement ending clears it
   await edit(p,`d.agreements.find(x=>x.id==='RA4').status='ended'`);
   await p.reload(); await p.waitForTimeout(700); await p.click('#navDash'); await p.waitForTimeout(500); n=await needs(); expect(!has(/Reminder House 4/),'I: an ended agreement has no reminder');
-  // not started (appraisal pending) has no review date
-  await edit(p,`d.agreements.find(x=>x.id==='RA1').config={appr:'pending'}; d.agreements.find(x=>x.id==='RA1').signed_at='${nzDay(-83)}T00:00:00Z'`);
-  await p.reload(); await p.waitForTimeout(700); await p.click('#navDash'); await p.waitForTimeout(500); n=await needs(); expect(!has(/Reminder House 1/),'I: an agreement still waiting for its appraisal has no review date');
+  // a pending appraisal: no review date until Tim records the day the written appraisal was given
+  await edit(p,`d.agreements.find(x=>x.id==='RA1').config={appr:'pending',start:'${nzDay(-83)}'}; d.agreement_variations=d.agreement_variations.filter(x=>x.id!=='V1');`);
+  await p.reload(); await p.waitForTimeout(700); await p.click('#navDash'); await p.waitForTimeout(500); n=await needs();
+  expect(has(/Review date unknown: give the written appraisal.*Reminder House 1\b/)&&!has(/(in \d+ days|today|passed).*Reminder House 1\b/),'I: a stale start date is ignored while the appraisal is pending');
+  const gi=n.findIndex(x=>/unknown.*Reminder House 1\b/.test(x));
+  expect(await p.$eval(`[data-needdate="${gi}"]`,e=>e.value)===nzDay(0),'I: the date defaults to today');
+  await p.fill(`[data-needdate="${gi}"]`,nzDay(1)); await p.click(`[data-needgive="${gi}"]`); await p.waitForTimeout(300);
+  expect(!(await db(p)).agreement_events.some(e=>e.kind==='appraisal_given'),'I: a future day is refused');
+  await p.fill(`[data-needdate="${gi}"]`,nzDay(-83)); await p.click(`[data-needgive="${gi}"]`); await p.waitForTimeout(600);
+  d=await db(p); const ev=d.agreement_events.find(e=>e.kind==='appraisal_given'&&e.agreement_id==='RA1');
+  expect(ev&&ev.detail.date===nzDay(-83)&&ev.actor===TIM[1],'I: the day is recorded as an appraisal_given event with who');
+  expect(JSON.stringify(d.agreements.find(x=>x.id==='RA1').config)===JSON.stringify({appr:'pending',start:nzDay(-83)}),'I: the agreement\'s own config is not touched');
+  n=await needs(); expect(!has(/unknown.*Reminder House 1\b/)&&has(/Review date in 7 days.*Reminder House 1\b/),'I: that day plus 90 days is the review date, and the normal reminder takes over: '+n.filter(x=>/House 1\b/.test(x)));
+  await p.reload(); await p.waitForTimeout(700); await p.click('#navDash'); await p.waitForTimeout(500); n=await needs(); expect(has(/Review date in 7 days.*Reminder House 1\b/)&&!has(/unknown.*Reminder House 1\b/),'I: and it stays that way after a reload');
   await p.screenshot({path:path.join(__dirname,'out','as_needs_1024.png'),fullPage:true});
   // phone, light and dark
   await p.setViewportSize({width:390,height:844}); await p.waitForTimeout(150);
