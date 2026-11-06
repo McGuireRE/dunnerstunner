@@ -30,7 +30,7 @@
   }
   const saveNote = label => `<p class="sig-save-note">When you're happy with it, press <strong>${esc(label)}</strong>. Your signature isn't saved until you do.</p>`;
   function header(name, count, pct) {
-    if (IS_AGENT) setAgentNav(); $('#stepName').textContent = name || ''; $('#stepCount').textContent = count || ''; $('#barFill').style.width = (pct || 0) + '%'; }
+    if (IS_AGENT) setAgentNav(); $('#stepName').textContent = name || ''; JDIRTY = false; $('#stepName').dataset.count = count || ''; $('#stepCount').textContent = count || ''; $('#barFill').style.width = (pct || 0) + '%'; }
   function actions(show, backLabel, nextLabel) {
     $('#actions').hidden = !show;
     if (!show) return;
@@ -395,11 +395,12 @@
     const { data } = await sb.auth.getSession();
     SESSION = data.session;
     $('#signOut').hidden = !SESSION;
+    closeJourney(); JCTX.pid = null; JREADY = false;
     IS_AGENT = false; setAgentNav();
-    if (!SESSION) return viewLogin();
+    if (!SESSION) { JREADY = true; setAgentNav(); return viewLogin(); }
     let qlr = null; try { qlr = localStorage.getItem('qlReturn'); localStorage.removeItem('qlReturn'); } catch (_) { }
     if (qlr) { try { const u = new URL(qlr); if (u.origin === location.origin && u.pathname !== location.pathname) return location.replace(qlr); } catch (_) { } }
-    IS_AGENT = !!(await must(sb.rpc('is_agent')));
+    IS_AGENT = !!(await must(sb.rpc('is_agent'))); JREADY = true; setAgentNav();
     await Promise.race([loadGuides(), new Promise(r => setTimeout(r, 4000))]);   // never wait more than a few seconds
     let pend = null; try { pend = JSON.parse(localStorage.getItem('pendingCampaign') || 'null'); } catch (_) { }
     if (IS_AGENT && pend) { try { localStorage.removeItem('pendingCampaign'); } catch (_) { } return viewTable(null, pend); }
@@ -441,6 +442,7 @@
   const LAST = STEPS.length - 1;
 
   async function viewVendorHome() {
+    JCTX.pid = null; JVIEW = {};
     header('', '', 0); actions(false);
     const ids = (await must(sb.rpc('claim_my_agreements'))) || [];
     let pls = []; try { pls = (await must(sb.from('prelistings').select('id,address,status,agreement_id').order('created_at', { ascending: false }))).filter(p => p.status !== 'closed' && !(p.status === 'accepted' && ids.includes(p.agreement_id))); } catch (_) { }
@@ -465,7 +467,7 @@
     return loadVendor(ids[0]);
   }
   async function loadVendor(id) {
-    A = await must(sb.from('agreements').select('*').eq('id', id).single());
+    A = await must(sb.from('agreements').select('*').eq('id', id).single()); JCTX.pid = A.property_id || null; JVIEW = { ag: id };
     P = await must(sb.from('agreement_people').select('*').eq('agreement_id', id).order('position'));
     ME = P.find(p => p.user_id === SESSION.user.id) || null;
     CFG = A.config || {}; ANS = Object.assign({}, A.answers || {});
@@ -1080,6 +1082,7 @@ function lawyerForm(id, title, blurb) {
           ${!pls.length && !ags.length ? '<p class="small" style="margin:0">No appraisal page or agreement yet.</p>' : ''}
         </div>
         ${formsTileHTML(pforms, live)}
+        ${jTileHTML(p, live, pforms, pl)}
       </div>
       <h2>Owners</h2>
       ${locked ? `<div class="card tight">${PF.people.map(person).join('') || '<p class="small" style="margin:0">No owners yet.</p>'}<p class="small" style="margin:10px 0 0">The agreement is under way, so change owners there. Changes flow back here.</p></div>`
@@ -1106,6 +1109,7 @@ function lawyerForm(id, title, blurb) {
     </div>`;
     if (IMPT === PROP_TARGET) wireImport();
     $('#pfBack').addEventListener('click', viewAgentDashboard);
+    const jt = $('#jToggle'); if (jt) jt.addEventListener('click', () => { const l = $('#jListA'); const on = !l.classList.contains('open'); l.classList.toggle('open', on); const tl = $('#jTile'); if (tl) tl.classList.toggle('jopen', on); jt.setAttribute('aria-expanded', on); jt.textContent = on ? 'Show the current stop only' : 'Show every stop'; });
     $$('[data-agopen]').forEach(b => b.addEventListener('click', () => viewAgentDetail(b.dataset.agopen)));
     $$('[data-plopen]').forEach(b => b.addEventListener('click', () => viewPrelistingAgent(b.dataset.plopen)));
     $$('[data-fopen]').forEach(b => b.addEventListener('click', () => viewFormAgent(b.dataset.fopen)));
@@ -1135,6 +1139,7 @@ function lawyerForm(id, title, blurb) {
   function setAgentNav(cur) {
     const nav = $('#agentNav'); if (!nav) return;
     nav.hidden = !IS_AGENT; document.body.classList.toggle('is-agent', !!IS_AGENT);
+    const jb = $('#journeyBtn'); if (jb) jb.hidden = !!IS_AGENT || !JREADY;   // the Journey button is for vendors, and for anyone not signed in
     $('#navHome').toggleAttribute('aria-current', cur === 'home'); if (cur === 'home') $('#navHome').setAttribute('aria-current', 'page');
     $('#navDash').toggleAttribute('aria-current', cur === 'dash'); if (cur === 'dash') $('#navDash').setAttribute('aria-current', 'page');
   }
@@ -2700,7 +2705,7 @@ function lawyerForm(id, title, blurb) {
   let PL = null, PLA = {};
 
   async function viewPrelisting(id) {
-    PL = await must(sb.from('prelistings').select('*').eq('id', id).single());
+    PL = await must(sb.from('prelistings').select('*').eq('id', id).single()); JCTX.pid = PL.property_id || null; JVIEW = { pl: id };
     PLA = Object.assign({}, PL.answers || {});
     PL.knownOwners = [];
     if (PL.property_id && PL.status === 'appraisal') { try { PL.knownOwners = await must(sb.from('property_people').select('legal_name,pref_name,email,phone').eq('property_id', PL.property_id).eq('role', 'owner').order('position')); } catch (_) { } }
@@ -3138,6 +3143,234 @@ function lawyerForm(id, title, blurb) {
         <p class="small" style="margin:10px 0 0">Real Estate Authority guides: <a href="${REA_AA}" target="_blank" rel="noopener">agency agreements</a> · <a href="${REA_SP}" target="_blank" rel="noopener">sale and purchase agreements</a></p></div>
     </div>`;
     top();
+  }
+
+  /* ═════════ JOURNEY MAP (phase 3): the nine-stop selling pathway. Vendors open it from the top bar (a panel over whatever they were doing, so nothing typed is lost); Tim sees it as a tile on each property ═════════ */
+  let JREADY = false, JOPENER = null, JVIEW = {}, JDIRTY = false;   // JVIEW: the vendor's current screen; JDIRTY: something typed on it since it was drawn
+  const JCTX = { pid: null };   // the property the vendor is looking at right now, if a screen has said so
+  const JSTOPS = [
+    { t: 'Thinking of selling', say: 'This is where it starts: Tim gives you an appraisal of your property, and you tell him what matters to you about selling. Nothing is signed at this stage.' },
+    { t: 'Your updated plan', say: 'Tim reads your answers and sends you an updated plan, showing what you said and what he has changed. You can tick that it works for you, or ask him a question.' },
+    { t: 'Meeting Tim', say: 'You and Tim sit down, in person or by video, to talk the plan through and agree the details, including his fee.' },
+    { t: 'Your agreement', say: 'You read your agency agreement in plain English, ask your lawyer first if you would like to, and then everyone on the title signs, each from their own phone.' },
+    { t: 'Identity check', say: 'The law asks Tim to confirm who each seller is before he acts for you. Each person shows a driver\'s licence or passport, and something with their address.' },
+    { t: 'Getting ready', say: 'After you sign, there is some paperwork so buyers have what they need: the Vendor Declaration, a Healthy Homes statement if your property is tenanted, and the Real Estate Authority\'s guide to sale and purchase agreements, under Before you sell. Tim also gets your marketing ready with you.' },
+    { t: 'On the market', say: 'Your property is shown to buyers through the marketing set out in your agreement. There is no page for this stop yet. If you would like to know anything, call or text Tim on 027 562 7207.' },
+    { t: 'An offer', say: 'When a buyer makes an offer, Tim brings it to you and talks it through. The decision is always yours. There is no page for this stop yet.' },
+    { t: 'Sold and settling', say: 'Once there is a signed sale and purchase agreement with its conditions met, the lawyers arrange settlement, when payment is made and the keys change hands. There is no page for this stop yet.' },
+  ];
+  // small line drawings, centred on 0,0 and about 26 wide: bulb, plan, speech bubbles, agreement with a signature, ID card, paint roller, for-sale sign, envelope, house
+  const JICONS = [
+    '<path d="M0 -12a8 8 0 0 1 4.6 14.5V7h-9.2V2.5A8 8 0 0 1 0 -12Z"/><path d="M-3.4 11h6.8"/>',
+    '<rect x="-9" y="-12" width="18" height="24" rx="2.5"/><path d="M-4.5 -5h9M-4.5 0h9M-4.5 5h5"/>',
+    '<path d="M-13 -9a2.5 2.5 0 0 1 2.5 -2.5h10a2.5 2.5 0 0 1 2.5 2.5v6a2.5 2.5 0 0 1 -2.5 2.5h-6l-4 3.5v-3.5a2.5 2.5 0 0 1 -2.5 -2.5Z"/><path d="M5 1.5h8v7h-1.5v3l-4-3H5Z"/>',
+    '<rect x="-10" y="-12" width="20" height="24" rx="2.5"/><path d="M-5 -6h10M-5 -1.5h6"/><path d="M-6 6c2-6 3-6 4-2s2 3 4 0 2-2 4 0"/>',
+    '<rect x="-13" y="-9" width="26" height="18" rx="3"/><circle cx="-6" cy="-1.5" r="3"/><path d="M-10.5 6c.8-2.4 2.6-3.5 4.5-3.5s3.7 1.1 4.5 3.5M2 -3h7M2 2h5"/>',
+    '<rect x="-12" y="-12" width="19" height="8" rx="2"/><path d="M7 -8h4v7h-12v4"/><rect x="-4.5" y="3" width="5" height="9" rx="1.5"/>',
+    '<path d="M-9 13V-12"/><path d="M-9 -11h20v12h-20"/><path d="M-4 -5h10M-4 -0.5h6"/>',
+    '<rect x="-13" y="-9" width="26" height="18" rx="2.5"/><path d="M-12 -7.5L0 2l12 -9.5"/>',
+    '<path d="M-13 1L0 -11l13 12"/><path d="M-9.5 -2V12h19V-2"/><path d="M-3 12V5h6v7"/>',
+  ];
+  const J_AT = { appraisal: 1, questionnaire: 1, plan: 2, accepted: 3, agreement: 4, live: 7, under_offer: 8, sold: 9 };
+  // where the marker sits (1 to 9; 10 once settled; 0 when there is nothing to show), from the property's stage and whether everyone's identity is checked
+  function jState(f) {
+    const s = f && f.stage;
+    const cur = s === 'signed' ? (f.idAll ? 6 : 5) : s === 'settled' ? 10 : s === 'questionnaire' && f.plSent ? 2 : (J_AT[s] || 0);   // the questionnaire counts as sent once it is with Tim
+    return { cur, withdrawn: s === 'withdrawn' };
+  }
+  // done = passed, or (identity check only) already finished even though the marker is earlier
+  const jStateOf = (st, f, k) => !st.cur ? 'plain' : (k < st.cur || st.cur === 10 || (k === 5 && f && f.idAll)) ? 'done' : k === st.cur ? 'here' : 'ahead';
+  const J_STATE_TEXT = { done: 'Done', here: 'You are here', ahead: 'Still ahead', plain: '' };
+  let JSEQ = 0;
+  function jMapSVG(st, f, o) {
+    const GAP = 104, TOP = 96, X = i => i % 2 ? 268 : 92, Y = i => TOP + i * GAP, id = ++JSEQ, links = o.links || {};
+    const here = o.agent ? 'Here now' : 'You are here';
+    let road = `M${X(0)} 40L${X(0)} ${Y(0)}`;
+    for (let i = 0; i < 8; i++) road += `C${X(i)} ${Y(i) + 52} ${X(i + 1)} ${Y(i + 1) - 52} ${X(i + 1)} ${Y(i + 1)}`;
+    road += `L${X(8)} ${Y(8) + 56}`;
+    let dots = `<path class="road-d ${st.cur >= 1 ? 'done' : 'ahead'}" d="M${X(0)} 40L${X(0)} ${Y(0)}"/>`;
+    for (let i = 0; i < 8; i++) dots += `<path class="road-d ${st.cur >= i + 2 ? 'done' : 'ahead'}" d="M${X(i)} ${Y(i)}C${X(i)} ${Y(i) + 52} ${X(i + 1)} ${Y(i + 1) - 52} ${X(i + 1)} ${Y(i + 1)}"/>`;
+    dots += `<path class="road-d ${st.cur === 10 ? 'done' : 'ahead'}" d="M${X(8)} ${Y(8)}L${X(8)} ${Y(8) + 56}"/>`;
+    const trees = Array.from({ length: 8 }, (_, i) => `<g transform="translate(${i % 2 ? 330 : 30} ${Y(i) + 52})"><path class="tree-t" d="M0 6V17"/><circle class="tree-c" cx="0" cy="-3" r="11"/></g>`).join('');
+    let stops = '';
+    for (let i = 0; i < 9; i++) {
+      const k = i + 1, x = X(i), y = Y(i), left = i % 2 === 0, s = jStateOf(st, f, k), tx = left ? x + 42 : x - 42, anc = left ? 'start' : 'end';
+      const link = !!links[k], act = !o.agent;
+      const label = `${k} of 9: ${JSTOPS[i].t}.${J_STATE_TEXT[s] ? ' ' + (s === 'here' ? here : J_STATE_TEXT[s]) + '.' : ''}${act ? (link ? ' Opens this page.' : ' Shows what happens at this stop.') : ''}`;
+      const pillX = left ? tx : tx - 108;
+      stops += `<g class="jstop ${s}${act ? (link ? ' link' : ' read') : ''}" data-j="${k}" ${act ? `tabindex="0" role="${link ? 'link' : 'button'}" aria-label="${esc(label)}"` : ''}>
+        <rect class="jhit" x="${left ? x - 36 : 6}" y="${y - 36}" width="298" height="72" rx="14"/>
+        ${s === 'here' ? `<circle class="pulse" cx="${x}" cy="${y}" r="30"/>` : ''}
+        <circle class="node" cx="${x}" cy="${y}" r="${s === 'here' ? 30 : 26}"/>
+        <g class="jic" transform="translate(${x} ${y}) scale(.95)">${JICONS[i]}</g>
+        ${s === 'done' ? `<g transform="translate(${x + 20} ${y - 20})"><circle class="tick-b" r="10.5"/><path class="tick-m" d="M-4.5 .5l3 3 6-6.5"/></g>` : ''}
+        <text class="jt" x="${tx}" y="${s === 'plain' ? y + 6 : y - 5}" text-anchor="${anc}">${k}. ${esc(JSTOPS[i].t)}</text>
+        ${s === 'here' ? `<rect class="pill-b" x="${pillX}" y="${y + 3}" width="108" height="25" rx="12.5"/><text class="pill-t" x="${pillX + 54}" y="${y + 20.5}" text-anchor="middle">${here}</text>` : s === 'plain' ? '' : `<text class="js" x="${tx}" y="${y + 19}" text-anchor="${anc}">${J_STATE_TEXT[s]}</text>`}
+      </g>`;
+    }
+    const sum = o.agent ? (st.cur === 10 ? 'All nine stops are done.' : st.cur ? `At stop ${st.cur} of 9, ${JSTOPS[st.cur - 1].t}.` : 'No stop to show.') : '';
+    return `<svg class="jmap" viewBox="0 0 360 1040" xmlns="http://www.w3.org/2000/svg" role="${o.agent ? 'img' : 'group'}" aria-labelledby="jmt${id}" preserveAspectRatio="xMidYMin meet" style="overflow:hidden">
+      <title id="jmt${id}">The selling pathway in nine stops, from thinking of selling to sold and settling.${sum ? ' ' + esc(sum) : ''}</title>
+      <path class="hill" d="M0 1040V1002Q70 978 150 1002T300 998 360 988V1040Z"/>
+      <g aria-hidden="true"><circle class="sun" cx="318" cy="38" r="15"/><path class="cloud" d="M196 52a7 7 0 0 1 2-13.6 10 10 0 0 1 19 2 6.5 6.5 0 0 1 1 11.6Z"/><path class="cloud" d="M120 30a5 5 0 0 1 1.5-9.6 7 7 0 0 1 13.5 1.4 4.6 4.6 0 0 1 .7 8.2Z"/>${trees}</g>
+      <path class="road-e" d="${road}"/><path class="road-f" d="${road}"/>${dots}
+      <g class="flag ${st.cur === 10 ? 'done' : ''}" aria-hidden="true"><path class="flag-p" d="M${X(8)} 1008V966"/><path class="flag-c" d="M${X(8)} 968h26l-6 8 6 8h-26z"/></g>
+      ${stops}
+    </svg>`;
+  }
+  function jDetail(k, f) {
+    if (!f) return '';
+    if (k === 4 && f.agStatus) return f.agStatus === 'parked' ? 'Paused while the lawyer takes a look.' : ['signed', 'countersigned'].includes(f.agStatus) ? (f.agStatus === 'countersigned' ? 'Signed by everyone, and by Tim.' : 'Signed by everyone.') : f.signedTotal ? `${f.signedN} of ${f.signedTotal} have signed.` : '';
+    if (k === 5 && f.idTotal) return f.idAll ? 'Everyone has been checked.' : `${f.idDone} of ${f.idTotal} checked so far.`;
+    if (k === 6 && f.paper) return `Paperwork: ${f.paper.done} of ${f.paper.total} done.`;
+    return '';
+  }
+  function jCardsHTML(st, f, o) {
+    const links = o.links || {}, here = o.agent ? 'Here now' : 'You are here';
+    return `<ol class="jlist"${o.id ? ` id="${o.id}"` : ''} aria-label="The nine stops">${JSTOPS.map((s, i) => {
+      const k = i + 1, c = jStateOf(st, f, k), tag = c === 'here' ? here : J_STATE_TEXT[c], det = jDetail(k, f);
+      return `<li class="jcard ${c}" id="jc${o.uid}-${k}" data-jc="${k}" tabindex="-1" ${c === 'here' ? 'aria-current="step"' : ''}>
+        <div class="jc-h"><span class="jc-n" aria-hidden="true">${c === 'done' ? '✓' : k}</span><h3>${esc(s.t)}</h3>${tag ? `<span class="jc-st">${esc(tag)}</span>` : ''}</div>
+        ${o.agent ? '' : `<p>${esc(s.say).replace(' There is no page for this stop yet.', '<span class="nopage"> There is no page for this stop yet.</span>')}</p>`}${det ? `<p class="jdetail">${esc(det)}</p>` : ''}
+        ${links[k] ? `<div class="toolbar"><button class="btn ghost jgo" type="button" data-jgo="${k}">${esc(links[k].label)}</button></div>` : ''}
+      </li>`;
+    }).join('')}</ol>`;
+  }
+
+  /* vendor: what this vendor can see of the property, through the same rules as everything else (a person set aside sees nothing) */
+  const jOne = async p => { try { const { data, error } = await p; return error ? null : data; } catch (_) { return null; } };
+  async function jLoadVendor(pid) {
+    const pr = await jOne(sb.from('properties').select('id,address,stage,cycle_at').eq('id', pid).single());
+    if (!pr) return null;
+    const f = { pid, address: pr.address || '', stage: pr.stage, agId: null, agStatus: null, plId: null, idDone: 0, idTotal: 0, idAll: false, signedN: 0, signedTotal: 0, meSigned: false, paper: null, plSent: false, step: 0 };
+    const ags = (await jOne(sb.from('agreements').select('id,status,created_at,answers').eq('property_id', pid).order('created_at', { ascending: false }))) || [];
+    const ag = ags.find(a => !['ended', 'cancelled'].includes(a.status)) || null;
+    const pls = (await jOne(sb.from('prelistings').select('id,status,created_at').eq('property_id', pid).order('created_at', { ascending: false }))) || [];
+    const pl = pls.find(x => x.status !== 'closed' && (!pr.cycle_at || x.created_at >= pr.cycle_at)) || null;
+    if (pl) { f.plId = pl.id; f.plSent = pl.status === 'submitted'; }
+    if (ag) {
+      f.agId = ag.id; f.agStatus = ag.status; f.step = +((ag.answers || {})._step || 0);
+      const ppl = ((await jOne(sb.from('agreement_people').select('id,legal_name,user_id,signed_at,id_verified_at').eq('agreement_id', ag.id))) || []).filter(x => x.legal_name);
+      f.idTotal = ppl.length; f.idDone = ppl.filter(x => x.id_verified_at).length; f.idAll = f.idTotal > 0 && f.idDone === f.idTotal;
+      f.signedTotal = ppl.length; f.signedN = ppl.filter(x => x.signed_at).length;
+      const me = ppl.find(x => SESSION && x.user_id === SESSION.user.id) || null;
+      f.meSigned = !!(me && me.signed_at);
+      if (['signed', 'countersigned'].includes(ag.status)) {
+        const forms = (await jOne(sb.from('property_forms').select('kind,status').eq('agreement_id', ag.id))) || [];
+        const g = GUIDES.sale_purchase;
+        let total = 1, done = forms.some(x => x.kind === 'vendor_declaration' && x.status === 'signed') ? 1 : 0;
+        if (forms.some(x => x.kind === 'healthy_homes')) { total++; if (forms.some(x => x.kind === 'healthy_homes' && x.status === 'signed')) done++; }
+        if (g && me) {
+          total++;
+          const rc = (await jOne(sb.from('guide_receipts').select('person_id,guide,version').eq('agreement_id', ag.id))) || [];
+          const sg = (await jOne(sb.from('signatures').select('person_id,snapshot').eq('agreement_id', ag.id).eq('signer_role', 'client'))) || [];
+          if (rc.some(r => r.person_id === me.id && r.guide === 'sale_purchase' && r.version === g.version) || sg.some(s => s.person_id === me.id && ((s.snapshot || {}).rea_guides || []).some(x => x.guide === 'sale_purchase' && x.version === g.version))) done++;
+        }
+        f.paper = { done, total };
+      }
+    }
+    return f;
+  }
+  // a stop links only to a page this vendor can really open right now
+  function jVendorLinks(f) {
+    const L = {};
+    if (!f) return L;
+    const onAg = () => JVIEW.ag === f.agId;
+    if (f.plId) [1, 2, 3].forEach(k => { L[k] = { label: 'Open your appraisal and plan', same: () => JVIEW.pl === f.plId, go: () => viewPrelisting(f.plId) }; });
+    if (f.agId && f.agStatus !== 'draft') L[4] = { label: 'Open your agreement', same: onAg, go: () => loadVendor(f.agId) };
+    // the identity step only for someone who has already reached it: a link never moves a vendor's saved step forward, or past a page they haven't done
+    const unsigned = () => A && A.id === f.agId && A.status === 'sent' && !(ME && ME.signed_at);
+    if (f.agId && f.agStatus === 'sent' && !f.meSigned && f.step >= 8) L[5] = { label: 'Open the identity check', same: () => onAg() && unsigned() && STEP === 8,
+      go: async () => { if (onAg() && unsigned()) return showStep(8); await loadVendor(f.agId); if (unsigned() && STEP >= 8) showStep(8); } };
+    if (f.agId && ['signed', 'countersigned'].includes(f.agStatus)) L[6] = { label: 'Open your paperwork', same: onAg, go: () => loadVendor(f.agId) };
+    return L;
+  }
+
+  let JLINKS = {};
+  function jInert(on) { ['header.top', '#main', '#actions', '#toast'].forEach(s => { const el = $(s); if (el) el.inert = !!on; }); }
+  function closeJourney() {
+    const ov = $('#journey'); if (!ov || ov.hidden) return;
+    ov.hidden = true; ov.innerHTML = ''; document.body.classList.remove('journey-open'); jInert(false);
+    const o = JOPENER; JOPENER = null; if (o && o.focus && document.contains(o)) o.focus({ preventScroll: true });
+  }
+  async function openJourney() {
+    if (IS_AGENT) return;
+    const ov = $('#journey');
+    if (ov.hidden) JOPENER = document.activeElement;
+    ov.hidden = false; document.body.classList.add('journey-open'); jInert(true);
+    ov.innerHTML = '<div class="jov-in"><div class="loading">Loading...</div></div>';
+    let pid = JCTX.pid, choose = null;
+    if (SESSION && !pid) {
+      const rows = (await jOne(sb.from('properties').select('id,address,stage').order('created_at', { ascending: false }))) || [];
+      if (rows.length === 1) pid = rows[0].id; else if (rows.length > 1) choose = rows;
+    }
+    const f = SESSION && pid ? await jLoadVendor(pid) : null;
+    if (ov.hidden) return;
+    jRender(f, choose);
+  }
+  function jRender(f, choose) {
+    const ov = $('#journey'), signedIn = !!SESSION, st = jState(f), links = jVendorLinks(f);
+    JLINKS = links;
+    const logo = ($('.logo-light') || {}).src || '';
+    const lede = f && st.cur === 10 ? 'You have been through every stop. Thank you for choosing McGuire Real Estate.'
+      : f && st.cur ? 'This is the road from thinking about selling to settlement. The marker shows the stop you are at with Tim right now. Tap a stop to read what happens there, or to open its page.'
+      : f && st.withdrawn ? 'This property is not on the selling road at the moment. Here is the whole road, in case it helps. If you would like to talk it through, call or text Tim on 027 562 7207.'
+      : 'This is the road from thinking about selling to settlement, one stop at a time. Tap a stop to read what happens there.';
+    ov.innerHTML = `<div class="jov-in">
+      <div class="jbar"><button class="btn ghost" type="button" id="jClose">Close</button><button class="btn ghost" type="button" id="jPrint">Print this page</button></div>
+      <div class="print-only jhead"><img src="${esc(logo)}" alt="McGuire Real Estate"><span>Tim McGuire<br>027 562 7207</span></div>
+      <h1 id="jTitle" tabindex="-1">Your selling journey</h1>
+      ${f && f.address ? `<p class="jaddr">${esc(f.address)}</p>` : ''}
+      <p class="lede">${esc(lede)}</p>
+      ${choose ? `<div class="card tight no-print" id="jChoose"><h3>Which property?</h3><p class="small" style="margin:0 0 8px">You have more than one. Choose the one you would like to see.</p><div class="toolbar" style="margin:0">${choose.map(r => `<button class="btn ghost" type="button" data-jpick="${esc(r.id)}">${esc(r.address || 'Address to come')}</button>`).join('')}</div></div>` : ''}
+      ${signedIn && !f && !choose ? '<div class="card note tight no-print"><p class="small" style="margin:0">Once Tim has your property set up, the marker will show where you are. Until then, here is the whole road.</p></div>' : ''}
+      <div class="jwrap"><div class="jmapcol">${jMapSVG(st, f, { links })}</div><div>${jCardsHTML(st, f, { links, uid: 'v' })}<p class="small jnote">Questions at any stage? Call or text Tim on <strong>027 562 7207</strong>.</p></div></div>
+    </div>`;
+    ov.scrollTop = 0;
+    const h = $('#jTitle'); if (h) h.focus({ preventScroll: true });
+  }
+  async function jGo(k) {
+    const l = JLINKS[k]; if (!l) return;
+    if (l.same && l.same()) return closeJourney();   // already on that page: leave it exactly as it is
+    if (JDIRTY && !confirm('You have typed something on this page that is not saved yet. If you go to another page it will be lost. Go anyway?')) return;
+    closeJourney();
+    try { await l.go(); } catch (e) { console.error(e); }
+  }
+  function jReveal(k) {
+    const c = $('#jcv-' + k); if (!c) return;
+    c.scrollIntoView({ block: 'center', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+    c.classList.remove('flash'); void c.offsetWidth; c.classList.add('flash'); c.focus({ preventScroll: true });
+  }
+  const jActivate = k => JLINKS[k] ? jGo(k) : jReveal(k);
+  document.addEventListener('input', e => { if (e.target.closest && e.target.closest('#main')) JDIRTY = true; });
+  $('#journeyBtn').addEventListener('click', openJourney);
+  $('#journey').addEventListener('click', async e => {
+    if (e.target.closest('#jClose')) return closeJourney();
+    if (e.target.closest('#jPrint')) return window.print();
+    const pk = e.target.closest('[data-jpick]');
+    if (pk) { JCTX.pid = null; const f = await jLoadVendor(pk.dataset.jpick); return jRender(f, null); }
+    const go = e.target.closest('[data-jgo]'); if (go) return jGo(+go.dataset.jgo);
+    const st = e.target.closest('.jstop[data-j]'); if (st) jActivate(+st.dataset.j);
+  });
+  $('#journey').addEventListener('keydown', e => {
+    if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('.jstop[data-j]')) { e.preventDefault(); jActivate(+e.target.dataset.j); }
+  });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeJourney(); });
+
+  /* Tim: the "Where are they" tile on a property page */
+  function jTileHTML(p, live, pforms, pl) {
+    const ppl = ((live && live.agreement_people) || []).filter(x => x.legal_name);
+    const f = { stage: p.stage, idTotal: ppl.length, idDone: ppl.filter(x => x.id_verified_at).length, signedTotal: ppl.length, signedN: ppl.filter(x => x.signed_at).length, agStatus: live ? live.status : null, paper: null, plSent: !!(pl && pl.status === 'submitted') };
+    f.idAll = f.idTotal > 0 && f.idDone === f.idTotal;
+    if (live && ['signed', 'countersigned'].includes(live.status)) {
+      const hh = pforms.find(x => x.kind === 'healthy_homes');
+      f.paper = { done: (pforms.some(x => x.kind === 'vendor_declaration' && x.status === 'signed') ? 1 : 0) + (hh && hh.status === 'signed' ? 1 : 0), total: 1 + (hh ? 1 : 0) };
+    }
+    const st = jState(f);
+    const where = st.cur === 10 ? 'All nine stops are done' : st.cur ? `Stop ${st.cur} of 9: ${JSTOPS[st.cur - 1].t}` : st.withdrawn ? 'Withdrawn, so not on the road' : 'No stage to show yet';
+    return `<div class="card ptile jtile no-print" id="jTile"><h3>Where are they</h3>
+      <p class="small" style="margin:0 0 8px">${esc(where)}. This is the same map the vendors see.</p>
+      <div class="jtile-grid"><div class="jtile-map">${jMapSVG(st, f, { agent: true })}</div><div><button class="btn ghost jtoggle" type="button" id="jToggle" aria-expanded="false" aria-controls="jListA">Show every stop</button>${jCardsHTML(st, f, { agent: true, uid: 'a', id: 'jListA' })}</div></div></div>`;
   }
 
   try { const cp = new URLSearchParams(location.search).get('campaign'); if (cp) { localStorage.setItem('pendingCampaign', decodeURIComponent(escape(atob(cp)))); history.replaceState(null, '', location.pathname); } } catch (_) { }

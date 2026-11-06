@@ -14,6 +14,10 @@
   --warn-soft: #FFF4E0;
   --banner: #2B2A28;
   --banner-ink: #F7F5F2;
+  --on-accent: #FFFFFF;   /* text and ticks drawn on --accent-fill or --ok fills */
+  --accent-fill: #C23A25; /* the accent as a solid fill under white text (AA) */
+  --on-ok: #FFFFFF;
+  --ok-text: #25683F;     /* the confirmed green as text on its soft tint (AA) */
   --display: 'Cormorant Garamond', Georgia, 'Times New Roman', serif;
   --body: 'Barlow', 'Helvetica Neue', Arial, sans-serif;
 }
@@ -22,6 +26,7 @@
     --bg: #181716; --surface: #222120; --ink: #F2EEE9; --muted: #A8A29B; --line: #3A3835;
     --accent: #F0644C; --accent-soft: #3A2420; --ok: #6CC490; --ok-soft: #1E3326;
     --warn: #F0B45A; --warn-soft: #3A2E1A; --banner: #0F0E0D; --banner-ink: #F2EEE9;
+    --on-accent: #181716; --on-ok: #181716; --accent-fill: #F0644C; --ok-text: #6CC490;
     color-scheme: dark;
   }
 }
@@ -29,6 +34,7 @@
   --bg: #181716; --surface: #222120; --ink: #F2EEE9; --muted: #A8A29B; --line: #3A3835;
   --accent: #F0644C; --accent-soft: #3A2420; --ok: #6CC490; --ok-soft: #1E3326;
   --warn: #F0B45A; --warn-soft: #3A2E1A; --banner: #0F0E0D; --banner-ink: #F2EEE9;
+  --on-accent: #181716; --on-ok: #181716; --accent-fill: #F0644C; --ok-text: #6CC490;
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
@@ -257,4 +263,116 @@ hr.soft { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
 .hhq { border-bottom: 1px solid var(--line); padding-bottom: 10px; }
 .hhq:last-child { border-bottom: none; }
 .hhq input[type=text] { margin-top: 8px; }
+/* phase 3: the journey map. A full-screen panel over whatever the vendor was doing (so nothing typed is lost), or a tile on Tim's property page */
+.jbtn { display: inline-flex; align-items: center; gap: 6px; }
+.jbtn[hidden] { display: none; }
+.jbtn svg { width: 16px; height: 16px; flex: none; }
+@media (max-width: 440px) { body:not(.is-agent) .step-count { display: none; } body:not(.is-agent) #stepName[data-count]:not([data-count=""])::after { content: " \00B7  " attr(data-count); } body:not(.is-agent) .brand-right { gap: 6px; } body:not(.is-agent) .brand-right .mode-btn { padding: 5px 10px; } }
+.jov { position: fixed; inset: 0; z-index: 30; background: var(--bg); color: var(--ink); overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+.jov[hidden] { display: none; }
+.jov-in { max-width: 920px; margin: 0 auto; padding-block: 18px 48px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.jbar { display: flex; gap: 10px; flex-wrap: wrap; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.jbar .btn { padding: 9px 16px; font-size: 15.5px; }
+.jov h1:focus, .jtile h2:focus { outline: none; }
+.jaddr { font-weight: 600; margin: 0 0 6px; overflow-wrap: anywhere; }
+.jwrap { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; margin-top: 14px; align-items: start; }
+@media (min-width: 800px) { .jwrap { grid-template-columns: 360px minmax(0, 1fr); gap: 28px; } .jwrap .jmapcol { position: sticky; top: 12px; } }
+.jmapcol { min-width: 0; }
+svg.jmap { display: block; width: 100%; max-width: 360px; height: auto; margin: 0 auto; overflow: visible; font-family: var(--body); }
+.jmap text { font-family: var(--body); fill: var(--ink); }
+.jmap .sky { fill: var(--accent-soft); }
+.jmap .hill { fill: var(--ok-soft); }
+.jmap .sun { fill: var(--warn-soft); stroke: var(--warn); stroke-width: 2; }
+.jmap .cloud { fill: var(--surface); stroke: var(--line); stroke-width: 2; }
+.jmap .tree-t { fill: none; stroke: var(--muted); stroke-width: 2.4; stroke-linecap: round; }
+.jmap .tree-c { fill: var(--ok-soft); stroke: var(--ok); stroke-width: 2.2; }
+.jmap .road-e { fill: none; stroke: var(--line); stroke-width: 32; stroke-linecap: round; }
+.jmap .road-f { fill: none; stroke: var(--surface); stroke-width: 27; stroke-linecap: round; }
+.jmap .road-d { fill: none; stroke-width: 3.4; stroke-linecap: round; stroke-dasharray: 2 9; }
+.jmap .road-d.done { stroke: var(--ok); }
+.jmap .road-d.ahead { stroke: var(--muted); }
+.jmap .node { fill: var(--surface); stroke-width: 3; }
+.jmap .jic { fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+.jmap .jstop { cursor: default; color: var(--muted); outline: none; }
+.jmap .jstop.link, .jmap .jstop.read { cursor: pointer; }
+.jmap .jstop.done { color: var(--ok); }
+.jmap .jstop.here { color: var(--accent); }
+.jmap .jstop .node { stroke: currentColor; }
+.jmap .jstop.ahead .node { stroke-dasharray: 5 5; stroke-width: 2.4; }
+.jmap .jstop.here .node { fill: var(--accent-soft); stroke-width: 4; }
+.jmap .jhit { fill: transparent; stroke: transparent; stroke-width: 3; }
+.jmap .jstop:focus-visible .jhit { stroke: var(--accent); }
+.jmap .jstop:hover .jhit { fill: var(--accent-soft); fill-opacity: .6; }
+.jmap .jt { font-size: 17px; font-weight: 600; fill: var(--ink); }
+.jmap .jstop.ahead .jt { font-weight: 500; fill: var(--muted); }
+.jmap .js { font-size: 14.5px; fill: var(--muted); }
+.jmap .jstop.done .js { fill: var(--ok-text); font-weight: 600; }
+.jmap .tick-b { fill: var(--ok); }
+.jmap .tick-m { fill: none; stroke: var(--on-ok); stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; }
+.jmap .pill-b { fill: var(--accent-fill); }
+.jmap .pill-t { font-size: 14px; font-weight: 700; fill: var(--on-accent); }
+.jmap .pulse { fill: none; stroke: var(--accent); stroke-width: 3; transform-box: fill-box; transform-origin: center; animation: jpulse 2.4s ease-out infinite; }
+@keyframes jpulse { 0% { transform: scale(1); opacity: .7; } 100% { transform: scale(1.5); opacity: 0; } }
+.jmap .flag-p { fill: none; stroke: var(--muted); stroke-width: 3; stroke-linecap: round; }
+.jmap .flag-c { fill: var(--surface); stroke: var(--muted); stroke-width: 2.4; stroke-linejoin: round; }
+.jmap .flag.done .flag-c { fill: var(--ok); stroke: var(--ok); }
+.jmap .flag.done .flag-p { stroke: var(--ok); }
+.jlist { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.jcard { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; scroll-margin-top: 14px; }
+.jcard.here { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.jcard.done { border-color: var(--ok); }
+.jcard.ahead { background: var(--bg); }
+.jcard.flash { animation: jflash 1.4s ease; }
+@keyframes jflash { 0% { background: var(--accent-soft); } 100% { background: var(--surface); } }
+.jc-h { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.jc-n { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; font-size: 14.5px; background: var(--line); color: var(--ink); flex: none; }
+.jcard.done .jc-n { background: var(--ok); color: var(--on-ok); }
+.jcard.here .jc-n { background: var(--accent-fill); color: var(--on-accent); }
+.jc-h h3 { margin: 0; font-size: 18px; flex: 1 1 140px; min-width: 0; }
+.jcard.ahead .jc-h h3 { color: var(--muted); }
+.jc-st { font-size: 13.5px; font-weight: 600; border-radius: 999px; padding: 2px 10px; background: var(--line); color: var(--ink); white-space: nowrap; }
+.jcard.done .jc-st { background: var(--ok-soft); color: var(--ok-text); }
+.jcard.here .jc-st { background: var(--accent-fill); color: var(--on-accent); }
+.jcard.ahead .jc-st { background: transparent; border: 1px solid var(--line); color: var(--muted); }
+.jcard p { margin: 8px 0 0; font-size: 15.5px; }
+.jcard .jdetail { color: var(--ink); font-weight: 500; }
+.jcard .toolbar { margin: 10px 0 0; }
+.jcard .toolbar .btn { padding: 9px 16px; font-size: 15.5px; }
+.jnote { margin-top: 14px; }
+.jtile-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
+@media (min-width: 760px) { .jtile-grid { grid-template-columns: 360px minmax(0, 1fr); } }
+.ptiles .jtile { grid-column: 1 / -1; }
+.jtile summary { cursor: pointer; font-weight: 600; }
+.jtoggle { display: none; margin-bottom: 8px; }
+@media (max-width: 759px) { .jtile .jtoggle { display: inline-block; } .jtile .jlist:not(.open) .jcard:not(.here) { display: none; } .jtile:not(.jopen) .jtile-map { display: none; } }
+.print-only { display: none; }
+@page journey { size: A4; margin: 12mm; }
+@media print {
+  .jov { page: journey; }
+  body.journey-open header.top, body.journey-open main, body.journey-open .actions, body.journey-open .toast, body.journey-open::before { display: none !important; }
+  :root, :root:not([data-theme="light"]), :root[data-theme="dark"] { --bg: #FFFFFF; --surface: #FFFFFF; --ink: #1E1D1B; --muted: #55514C; --line: #D5D0C9; --accent: #C23A25; --accent-soft: #FBEDEA; --ok: #276B43; --ok-soft: #E8F3EC; --warn: #8A5000; --warn-soft: #FFF4E0; --on-accent: #FFFFFF; --on-ok: #FFFFFF; --accent-fill: #C23A25; --ok-text: #25683F; color-scheme: light; }
+  body.journey-open { background: #fff; font-size: 10pt; line-height: 1.3; }
+  body.journey-open .jov { position: static; inset: auto; overflow: visible; height: auto; background: #fff; }
+  .jov-in { max-width: none; padding: 0; }
+  .jbar, .jcard .toolbar, .no-print, .nopage { display: none !important; }
+  .print-only { display: block; }
+  .jov .print-only.jhead { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 2px solid var(--accent); padding-bottom: 6px; margin-bottom: 8px; }
+  .jhead img { height: 11mm; width: auto; }
+  .jhead span { font-size: 10pt; text-align: right; }
+  .jov h1 { font-size: 21pt; margin: 0 0 2px; }
+  .jov .lede { display: none; }
+  .jaddr { font-size: 10.5pt; margin: 0 0 2px; }
+  .jwrap { grid-template-columns: 74mm minmax(0, 1fr); gap: 7mm; margin-top: 3mm; }
+  .jwrap .jmapcol { position: static; }
+  svg.jmap { max-width: 74mm; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .jlist { gap: 1.7mm; }
+  .jcard { padding: 1.6mm 2.6mm; break-inside: avoid; border-radius: 3mm; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .jcard p { font-size: 8.6pt; margin-top: .6mm; }
+  .jc-h h3 { font-size: 10.5pt; }
+  .jc-n { width: 6mm; height: 6mm; font-size: 8.5pt; }
+  .jc-st { font-size: 8pt; padding: 0 2.4mm; }
+  .jnote { margin-top: 2mm; font-size: 9pt; }
+  .jc-st, .jc-n { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .jmap .pulse { animation: none; opacity: 0; }
+}
 </style>
