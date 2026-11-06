@@ -99,6 +99,10 @@ Tests: one per document, and a check that the agreement PDF includes the appende
 
 ## Phase 3: journey map
 
+Status: done 6 November 2026. Reviewed independently twice; all findings fixed. Stops 7 to 9 move once phase 5
+lets Tim set those stages. Migration 006 (from this review): a vendor's signature needs every guide section read
+and every acknowledgement ticked. Still open: signing in person on Tim's device isn't held to that check yet.
+
 Goal: an illustrated selling pathway, reached from every vendor screen, showing where this vendor is.
 
 - Nine stops: thinking of selling, your updated plan, meeting Tim, your agreement, identity check, getting
