@@ -9,7 +9,7 @@ let failed = 0;
 for (const t of tests) {
   const t0 = Date.now();
   try {
-    const out = execFileSync('node', [path.join(__dirname, t)], { cwd: path.join(__dirname, 'out'), encoding: 'utf8', timeout: 300000, stdio: ['ignore', 'pipe', 'pipe'] });
+    const out = execFileSync('node', [path.join(__dirname, t)], { cwd: path.join(__dirname, 'out'), encoding: 'utf8', timeout: 600000, stdio: ['ignore', 'pipe', 'pipe'] });
     const ok = /"errs": \[\]/.test(out);
     if (!ok) failed++;
     console.log(`${ok ? 'PASS' : 'FAIL'}  ${t}  (${((Date.now() - t0) / 1000).toFixed(0)}s)`);

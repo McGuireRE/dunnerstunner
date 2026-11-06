@@ -36,7 +36,7 @@
 .tguide summary { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .tguide .in ul { margin: 6px 0 0; padding-left: 20px; }
 @media print {
-  .proto, header.top, .actions, .toolbar, .no-print { display: none !important; }
+  .proto, header.top, .actions, .toolbar, .no-print, .tr-note, .tr-aid { display: none !important; }
   body { background: #fff; color: #000; font-size: 12pt; }
   main { padding: 0 !important; max-width: none; }
   .card { border: 1px solid #bbb; break-inside: avoid; }
@@ -48,12 +48,13 @@
     <div class="brand">
       <img class="logo-light" src="__LOGO_LIGHT__" alt="McGuire Real Estate">
       <img class="logo-dark" src="__LOGO_DARK__" alt="McGuire Real Estate">
-      <span class="brand-right"><span class="step-count" id="stepCount"></span><button class="mode-btn jbtn" type="button" id="journeyBtn" aria-haspopup="dialog" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="19" r="2.4"/><circle cx="18" cy="5" r="2.4"/><path d="M8.4 19H14a4 4 0 0 0 0-8h-4a4 4 0 0 1 0-8h5.6"/></svg><span>Journey</span></button><nav class="agent-nav" id="agentNav" aria-label="Main" hidden><button class="mode-btn" type="button" id="navHome">Home</button><button class="mode-btn" type="button" id="navDash">Dashboard</button></nav><button class="mode-btn" type="button" id="signOut" hidden>Sign out</button></span>
+      <span class="brand-right"><span class="step-count" id="stepCount"></span><button class="mode-btn jbtn" type="button" id="journeyBtn" aria-haspopup="dialog" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="19" r="2.4"/><circle cx="18" cy="5" r="2.4"/><path d="M8.4 19H14a4 4 0 0 0 0-8h-4a4 4 0 0 1 0-8h5.6"/></svg><span>Journey</span></button><nav class="agent-nav" id="agentNav" aria-label="Main" data-no-tr hidden><button class="mode-btn" type="button" id="navHome">Home</button><button class="mode-btn" type="button" id="navDash">Dashboard</button><button class="mode-btn" type="button" id="navTr">Translations</button></nav><button class="mode-btn" type="button" id="signOut" hidden>Sign out</button></span>
     </div>
     <div class="bar" aria-hidden="true"><span id="barFill"></span></div>
-    <div class="step-name" id="stepName"></div>
+    <div class="sub-row"><div class="step-name" id="stepName"></div><span class="lang-wrap" id="langWrap"><select class="lang-sel" id="langSel" aria-label="Language" data-no-tr></select></span></div>
   </div>
 </header>
+<div class="tr-note" id="trNote" role="note" hidden></div>
 
 <main id="main"><div class="loading">Loading...</div></main>
 

@@ -116,6 +116,9 @@ Tests: the map renders at 390 px without sideways scroll, the marker follows the
 
 ## Phase 4: translation
 
+Status: done 6 November 2026 (migration 008). Reviewed independently twice; all findings fixed. Nothing reaches vendors
+until a speaker approves it on Tim's Translations screen; notices stay English.
+
 Goal: vendors can read every screen and the plain-English guide in their own language.
 
 - Languages to start: English, te reo Māori, Samoan, Tongan, Hindi, Korean, Simplified Chinese.

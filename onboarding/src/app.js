@@ -17,6 +17,7 @@
   const fmtDate = d => new Date(d).toLocaleDateString('en-NZ', { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Pacific/Auckland' });
   const fmtDT = d => new Date(d).toLocaleString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: 'Pacific/Auckland' });
   const main = () => $('#main');
+  const trs = (s, v) => I18N.tr(s, v);   // wording built in pieces (for example a spoken label) goes through the same approved translations
   function toast(msg) { const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(toast._t); toast._t = setTimeout(() => t.hidden = true, 3200); }
   // signature pads: a "not saved yet" marker after drawing, and a strong confirmation once saved
   function padUnsaved(cv, on) { const w = cv && cv.closest('.sig-wrap'); if (!w) return; let u = w.querySelector('.unsaved'); if (on && !u) { u = document.createElement('span'); u.className = 'unsaved'; u.textContent = 'Not saved yet'; w.appendChild(u); } if (!on && u) u.remove(); }
@@ -247,6 +248,31 @@
     const c = new AbortController(); const t = setTimeout(() => c.abort(), ms || 5000);
     try { return await fetch(url, Object.assign({}, opts, { signal: c.signal })); } finally { clearTimeout(t); }
   }
+  // The REA's own translations of a guide, listed beside the English. We never translate these ourselves, and the receipt
+  // is for the English guide. Start-up only reads the list; whether each file is really there is checked when a guide is
+  // opened (reaFill), so opening the site never waits on twelve more requests.
+  function reaTranslations(g, base) {
+    const src = g && g.translations && typeof g.translations === 'object' ? g.translations : {}, out = [];
+    ['mi', 'sm', 'to', 'hi', 'ko', 'zh'].forEach(code => {
+      const t = src[code]; if (!t || typeof t.file !== 'string' || !/^[A-Za-z0-9._-]+\.pdf$/.test(t.file) || typeof t.language !== 'string' || !t.language.trim()) return;
+      out.push({ code, language: t.language.trim().slice(0, 40), url: new URL(t.file, base).href });
+    });
+    return out;
+  }
+  const REA_CHECKED = {};
+  function reaCheck(g) {   // which of a guide's translation files really exist: asked once, when the guide is first opened
+    if (!REA_CHECKED[g.file]) REA_CHECKED[g.file] = Promise.all((g.translations || []).map(async t => { try { const h = await fetchT(t.url, { method: 'HEAD' }); return h.ok && /pdf/i.test(h.headers.get('content-type') || '') ? t : null; } catch (_) { return null; } })).then(l => l.filter(Boolean));
+    return REA_CHECKED[g.file];
+  }
+  function reaFill() {
+    $$('.rea-tr[data-rea-guide]:not([data-filled])').forEach(async box => {
+      box.setAttribute('data-filled', '1');
+      const g = GUIDES[box.dataset.reaGuide]; if (!g) return;
+      const ts = (await reaCheck(g)).slice().sort((x, y) => (x.code === I18N.lang ? -1 : 0) - (y.code === I18N.lang ? -1 : 0));
+      if (!box.isConnected || !ts.length) { box.remove(); return; }
+      box.innerHTML = `<p class="small" style="margin:10px 0 4px">The Real Estate Authority also has this guide in other languages. They are the Authority's own translations, not ours. What you tick below is for the English guide.</p><p class="rea-tr-links" data-no-tr style="margin:0">${ts.map(t => `<a class="btn ghost" href="${esc(t.url)}" target="_blank" rel="noopener" data-rea-lang="${t.code}">${esc(t.language)} (PDF)</a>`).join(' ')}</p>`;
+    });
+  }
   async function loadGuides() {
     const found = {};
     try {
@@ -261,7 +287,7 @@
         const url = new URL(g.file, base).href;
         const h = await fetchT(url, { method: 'HEAD' });   // only check it's there: no download on every visit
         if (!h.ok || !/pdf/i.test(h.headers.get('content-type') || '')) continue;
-        found[k] = { file: g.file, version: g.version.trim(), url, sha256: g.sha256, title: typeof g.title === 'string' && g.title.trim() ? g.title.trim() : (k === 'agency' ? 'Real Estate Authority guide to agency agreements' : 'Real Estate Authority guide to sale and purchase agreements') };
+        found[k] = { file: g.file, version: g.version.trim(), url, sha256: g.sha256, title: typeof g.title === 'string' && g.title.trim() ? g.title.trim() : (k === 'agency' ? 'Real Estate Authority guide to agency agreements' : 'Real Estate Authority guide to sale and purchase agreements'), translations: reaTranslations(g, base) };
       }
     } catch (_) { }
     GUIDES = found;
@@ -286,7 +312,7 @@
     close: 'Remember, you can still make a complaint to the Real Estate Authority in the first instance, and even if you use these procedures, you can still make a complaint to the Real Estate Authority at any time. The Real Estate Authority, C/O P.O. Box 25-371, Wellington 6146, New Zealand, 0800 367 7322 or 04 471 8930.',
   };
   const APPENDIX_SET = 'P2-2026-11', VENDOR_GUIDE_ID = 'VG-2026-11';
-  const complaintsHTML = () => `<details class="inline-doc"><summary>Read our complaints procedure</summary><h4>${esc(COMPLAINTS.title)}</h4>${COMPLAINTS.intro.map(t => `<p>${esc(t)}</p>`).join('')}${COMPLAINTS.steps.map(([h, ls]) => `<p><strong>${esc(h)}</strong><br>${ls.map(esc).join('<br>')}</p>`).join('')}<p>${esc(COMPLAINTS.close)}</p></details>`;
+  const complaintsHTML = () => `<details class="inline-doc" data-signed><summary>Read our complaints procedure</summary><h4>${esc(COMPLAINTS.title)}</h4>${COMPLAINTS.intro.map(t => `<p>${esc(t)}</p>`).join('')}${COMPLAINTS.steps.map(([h, ls]) => `<p><strong>${esc(h)}</strong><br>${ls.map(esc).join('<br>')}</p>`).join('')}<p>${esc(COMPLAINTS.close)}</p></details>`;
   // What goes into each client signature from phase 2: which documents are appended to the agreement, and the
   // REA guide receipt. An agreement someone signed before phase 2 stays on the old format for everyone.
   async function signExtras(agId, an) {
@@ -329,7 +355,7 @@
   const f = {
     text: (k, label, opt = {}) => `<div><label class="f" for="a_${k}" ${opt.top ? 'style="margin-top:0"' : ''}>${label}${opt.optional ? ' <span class="opt">(optional)</span>' : ''}</label><input type="${opt.type || 'text'}" id="a_${k}" data-a="${k}" value="${esc(v(k, opt.d ?? ''))}" ${opt.ph ? `placeholder="${esc(opt.ph)}"` : ''} ${opt.im ? `inputmode="${opt.im}"` : ''}></div>`,
     area: (k, label, opt = {}) => `<label class="f" for="a_${k}">${label}${opt.optional ? ' <span class="opt">(optional)</span>' : ''}</label><textarea id="a_${k}" data-a="${k}" ${opt.ph ? `placeholder="${esc(opt.ph)}"` : ''}>${esc(v(k, opt.d ?? ''))}</textarea>`,
-    select: (k, label, opts, d) => `<div><label class="f" for="a_${k}">${label}</label><select id="a_${k}" data-a="${k}">${opts.map(o => `<option ${v(k, d) === o ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select></div>`,
+    select: (k, label, opts, d) => `<div><label class="f" for="a_${k}">${label}</label><select id="a_${k}" data-a="${k}">${opts.map(o => `<option value="${esc(o)}" ${v(k, d) === o ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select></div>`,
     radio: (k, val, title, desc, d) => `<label class="choice"><input type="radio" name="r_${k}" data-a="${k}" value="${esc(val)}" ${v(k, d) === val ? 'checked' : ''}><span class="mark"></span><span><span class="ct">${title}</span>${desc ? `<span class="cd">${desc}</span>` : ''}</span></label>`,
     check: (k, title, desc, d = false) => `<label class="choice cb"><input type="checkbox" data-a="${k}" ${v(k, d) ? 'checked' : ''}><span class="mark"></span><span><span class="ct">${title}</span>${desc ? `<span class="cd">${desc}</span>` : ''}</span></label>`,
     chips: (k, list, d) => `<div class="chip-row">${list.map(n => `<label class="chip"><input type="checkbox" data-multi="${k}" value="${esc(n)}" ${(v(k, d) || []).includes(n) ? 'checked' : ''}>${esc(n)}</label>`).join('')}</div>`,
@@ -361,7 +387,7 @@
   function priorCard(x, i) {
     return `<div class="card tight pa"><div style="display:flex;justify-content:space-between;align-items:baseline"><h3 style="margin:0">Previous agency ${i + 1}</h3><button class="btn link" type="button" data-rmpa="${i}">Remove</button></div>
       <div class="row2 stack"><div><label class="f">Agency name</label><input type="text" data-pa="agency" value="${esc(x.agency || '')}" placeholder="For example: Smith Realty Ltd"></div><div><label class="f">Salesperson <span class="opt">(optional)</span></label><input type="text" data-pa="agent" value="${esc(x.agent || '')}"></div></div>
-      <div class="row2 stack"><div><label class="f">Type of agency</label><select data-pa="kind">${PRIOR_KINDS.map(k => `<option ${(x.kind || 'Sole agency') === k ? 'selected' : ''}>${k}</option>`).join('')}</select></div><div><label class="f">Date it was signed <span class="opt">(optional)</span></label><input type="text" data-pa="dated" value="${esc(x.dated || '')}" placeholder="For example: 3 August 2026"></div></div>
+      <div class="row2 stack"><div><label class="f">Type of agency</label><select data-pa="kind">${PRIOR_KINDS.map(k => `<option value="${esc(k)}" ${(x.kind || 'Sole agency') === k ? 'selected' : ''}>${k}</option>`).join('')}</select></div><div><label class="f">Date it was signed <span class="opt">(optional)</span></label><input type="text" data-pa="dated" value="${esc(x.dated || '')}" placeholder="For example: 3 August 2026"></div></div>
       <label class="f">Agency email <span class="opt">(optional, lets Tim send your notice directly)</span></label><input type="email" data-pa="email" value="${esc(x.email || '')}"></div>`;
   }
   const readPrior = box => $$('.pa', box).map(c => ({ agency: $('[data-pa=agency]', c).value.trim(), agent: $('[data-pa=agent]', c).value.trim(), kind: $('[data-pa=kind]', c).value, dated: $('[data-pa=dated]', c).value.trim(), email: $('[data-pa=email]', c).value.trim() }));
@@ -391,6 +417,55 @@
 
   /* ───────── auth ───────── */
   let SESSION = null, IS_AGENT = false;
+
+  /* ───────── language (phase 4) ─────────
+     The choice is remembered in this browser, and on the person's own record once they are signed in. Tim's screens
+     stay English. Only text a speaker has approved is ever shown; everything else stays English. */
+  const LANG_KEY = 'mcLang';
+  const readLocalLang = () => { try { const c = localStorage.getItem(LANG_KEY); return I18N.byCode(c) ? c : null; } catch (_) { return null; } };
+  const saveLocalLang = c => { try { localStorage.setItem(LANG_KEY, c); } catch (_) { } };
+  let LAYERS = {}, LANG_SEQ = 0, LANG_TOUCHED = false;
+  const CONTENT = { plan: null, variation: [] };   // the plan and variations on the screen: their approved translations load with the language
+  // Translations never hold a page up: every request gives up after a few seconds and the page stays in English.
+  const within = (p, ms, dflt) => Promise.race([p, new Promise(r => setTimeout(() => r(dflt), ms))]);
+  const getTr = async (scope, ref) => { try { const { data, error } = await within(sb.rpc('get_translations', { p_lang: I18N.lang, p_scope: scope, p_ref: ref || null }), 8000, { data: null, error: true }); return error || !data || typeof data !== 'object' ? {} : data; } catch (_) { return {}; } };
+  async function loadLangDicts(code) {
+    if (code === 'en') return;
+    const mine = ++LANG_SEQ;
+    const [a, b] = await Promise.all([getTr('screens'), getTr('guide')]);
+    const content = {};
+    if (CONTENT.plan) content['plan:' + CONTENT.plan] = await getTr('plan', CONTENT.plan);
+    for (const id of CONTENT.variation) content['variation:' + id] = await getTr('variation', id);
+    if (mine !== LANG_SEQ || I18N.lang !== code) return;   // the choice changed while this was loading
+    LAYERS = Object.assign({ screens: a, guide: b }, content);
+    I18N.setLayers(LAYERS);
+  }
+  // a plan or variation has come on screen: bring its approved translation in
+  async function loadContentTr(scope, ref) {
+    if (scope === 'plan') CONTENT.plan = ref; else if (!CONTENT.variation.includes(ref)) CONTENT.variation.push(ref);
+    if (I18N.lang === 'en') return;
+    const m = await getTr(scope, ref); if (I18N.lang === 'en') return;
+    LAYERS = Object.assign({}, LAYERS, { [scope + ':' + ref]: m });
+    I18N.setLayers(LAYERS);
+  }
+  async function chooseLang(code, opt) {
+    opt = opt || {};
+    if (IS_AGENT) code = 'en';
+    LAYERS = {}; I18N.setLang(code); saveLocalLang(code);
+    if (!opt.fromRecord) LANG_TOUCHED = true;
+    if (SESSION && !IS_AGENT && !opt.fromRecord) { try { await within(sb.rpc('set_my_language', { p_lang: code }), 5000); } catch (_) { } }
+    await loadLangDicts(code);
+    const jo = $('#journey'); if (jo && !jo.hidden) openJourney();   // an open journey panel is drawn again in the new language
+  }
+  // after sign-in: this person's saved choice (unless they just chose again on this device)
+  async function syncLangRecord() {
+    if (!SESSION || IS_AGENT) return;
+    let rec = null;
+    try { const { data } = await sb.from('user_language').select('lang').eq('user_id', SESSION.user.id).limit(1); rec = data && data[0] && data[0].lang; } catch (_) { }
+    if (LANG_TOUCHED || !rec) { const cur = I18N.lang; if (cur !== 'en' || rec) { try { await sb.rpc('set_my_language', { p_lang: cur }); } catch (_) { } } return; }
+    if (rec !== I18N.lang) await chooseLang(rec, { fromRecord: true });
+  }
+  function agentEnglish() { if (I18N.lang !== 'en') { LAYERS = {}; I18N.setLang('en'); } const w = $('#langWrap'); if (w) w.hidden = true; }
   async function boot() {
     const { data } = await sb.auth.getSession();
     SESSION = data.session;
@@ -401,6 +476,7 @@
     let qlr = null; try { qlr = localStorage.getItem('qlReturn'); localStorage.removeItem('qlReturn'); } catch (_) { }
     if (qlr) { try { const u = new URL(qlr); if (u.origin === location.origin && u.pathname !== location.pathname) return location.replace(qlr); } catch (_) { } }
     IS_AGENT = !!(await must(sb.rpc('is_agent'))); JREADY = true; setAgentNav();
+    if (IS_AGENT) agentEnglish(); else await within(syncLangRecord(), 3000);   // never wait on the language: English first, the translation arrives when it does
     await Promise.race([loadGuides(), new Promise(r => setTimeout(r, 4000))]);   // never wait more than a few seconds
     let pend = null; try { pend = JSON.parse(localStorage.getItem('pendingCampaign') || 'null'); } catch (_) { }
     if (IS_AGENT && pend) { try { localStorage.removeItem('pendingCampaign'); } catch (_) { } return viewTable(null, pend); }
@@ -482,7 +558,7 @@
     STEP = i;
     header(STEPS[i], i === 0 || i === LAST ? '' : `Step ${i} of ${LAST - 1}`, i / LAST * 100);
     const r = SCREENS[i]();
-    main().innerHTML = `<section class="screen active">${r}</section>`;
+    main().innerHTML = `<section class="screen active"${i === 9 ? ' data-signed data-signing' : ''}>${r}</section>`;
     wireReveals();
     (BIND[i] || (() => { }))();
     const labels = { 0: 'Get started', 8: 'Continue to signing', 9: 'Save my signature and sign' };
@@ -1135,12 +1211,249 @@ function lawyerForm(id, title, blurb) {
     top();
   }
 
+  /* ═════════ TRANSLATIONS (Tim only): translate, read English beside the translation, correct, approve ═════════ */
+  const TR_JOBS = new Map(), TR_FAIL = new Map();
+  const TR_SETS = [['screens', 'Screens', 'The wording of every vendor page.'], ['guide', 'Vendor Guide and acknowledgements', 'Also the reading aids beside signed documents. Needs a check by a professional translator.']];
+  const TR_LANGS = () => I18N.LANGS.filter(l => l.code !== 'en');
+  const trCatalogue = scope => { const seen = new Set(), out = []; ((window.I18N_STRINGS || {})[scope] || []).forEach(([, list]) => list.forEach(s => { if (!seen.has(s)) { seen.add(s); out.push(s); } })); return out; };
+  const trFmt = d => d ? new Date(d).toLocaleString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: 'Pacific/Auckland' }) : '';
+  const trChecker = { get() { try { return localStorage.getItem('tr_checker') || ''; } catch (_) { return ''; } }, set(v) { try { localStorage.setItem('tr_checker', v); } catch (_) { } } };
+
+  // The same checks the translator's answers get (fn/prefill_shared.ts checkTranslation, and translation_problem in the
+  // database), applied to a correction before it is saved: placeholders, tags, every number and amount, names, no dashes.
+  const TR_NAMES = ['McGuire Real Estate', 'Timothy McGuire', 'Tim McGuire', 'McGuire', 'Tim', 'List Now', 'NZRET', 'Public Trust', 'LIM', 'GST', 'REA', 'AML/CFT', 'Real Estate Authority', 'Real Estate Agents Act'];
+  function trCheck(source, text) {
+    const t = String(text == null ? '' : text).trim(), PH = /\{[A-Za-z][A-Za-z0-9_]*\}/g, TG = /<br\/>|<\/?\d+>/g, NM = /\$?\d+(?:[,.:/]\d+)*%?/g;
+    if (!t) return 'empty';
+    if (/[\u2014\u2013]/.test(t)) return 'dash';
+    const bag = (s, re) => (s.match(re) || []).slice().sort().join('\u0001');
+    if (bag(source, PH) !== bag(t, PH)) return 'placeholders changed';
+    if (bag(source, TG) !== bag(t, TG)) return 'tags changed';
+    const st = []; for (const x of t.match(TG) || []) { if (x === '<br/>') continue; if (x[1] !== '/') st.push(x.slice(1, -1)); else if (st.pop() !== x.slice(2, -1)) return 'tags changed'; }
+    if (st.length) return 'tags changed';
+    const strip = s => s.replace(PH, ' ').replace(TG, ' ');
+    if (bag(strip(source), NM) !== bag(strip(t), NM)) return 'number changed';
+    for (const k of TR_NAMES) { const re = new RegExp('(^|[^A-Za-z])' + k.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&') + '($|[^A-Za-z])'); if (re.test(source) && !re.test(t)) return 'name changed: ' + k; }
+    return '';
+  }
+  const trWhy = c => /^placeholders/.test(c) ? 'A word in curly brackets, such as {name}, has to stay exactly as it is.' : /^tags/.test(c) ? 'The marks like <1> and </1> and line breaks have to stay, around the same words.' : /^number/.test(c) ? 'Every number, amount and percentage has to stay exactly as in the English, and none can be added.' : /^name/.test(c) ? 'Names like Tim, GST, LIM and REA have to stay as they are (' + c.replace('name changed: ', '') + ').' : c === 'dash' ? 'Please do not use a long dash.' : 'The translation cannot be empty.';
+  // batch sizes per language (the same limits fn/prefill_shared.ts enforces): Hindi, Korean and Chinese run longer
+  const TR_LIMITS = { mi: { items: 40, chars: 12000 }, sm: { items: 40, chars: 12000 }, to: { items: 40, chars: 12000 }, hi: { items: 15, chars: 3500 }, ko: { items: 20, chars: 4500 }, zh: { items: 30, chars: 6000 } };
+  let TR_RUN = 0;   // translation runs going on now: nothing is approved while one is
+  const TR_SEEN = {};   // per set: the strings (id and text) Tim has had on screen, which is all he can approve
+  const trBusy = () => TR_RUN > 0 || TR_JOBS.size > 0;
+  async function trRows(scope, lang, ref) { const q = sb.from('translations').select('id,source,text,status,model,approved_by,approved_at,edited_by').eq('scope', scope).eq('lang', lang); return (await must((ref ? q.eq('ref', ref) : q.is('ref', null)).order('created_at'))) || []; }
+  // what is stored for this set, compared with the English the screens use today
+  function trState(scope, rows, own) {
+    const cat = own || trCatalogue(scope), bySrc = new Map(rows.map(r => [r.source, r]));
+    const have = cat.filter(s => bySrc.has(s)), missing = cat.filter(s => !bySrc.has(s));
+    const approved = have.filter(s => bySrc.get(s).status === 'approved'), waiting = have.filter(s => bySrc.get(s).status !== 'approved');
+    const last = rows.filter(r => r.approved_at).sort((a, b) => a.approved_at < b.approved_at ? 1 : -1)[0];
+    return { cat, bySrc, have, missing, approved, waiting, last };
+  }
+
+  async function viewTranslations() {
+    header('Translations', '', 0); actions(false); setAgentNav('tr');
+    main().innerHTML = '<div class="loading">Loading...</div>';
+    const cards = [];
+    for (const l of TR_LANGS()) for (const [scope, name, note] of TR_SETS) {
+      const st = trState(scope, await trRows(scope, l.code).catch(() => []));
+      cards.push({ l, scope, name, note, st });
+    }
+    main().innerHTML = `<div class="view-pad">
+      <span class="agent-flag">Only you see this</span>
+      <h1>Translations</h1>
+      <p class="small">Vendors can read their pages in six languages besides English. The app translates each page once, and a speaker of that language checks it here. Until you approve a language, vendors see English for it. The English agreement is always the one that applies, and nothing signed is ever translated.</p>
+      <div class="ptiles">${cards.map((c, i) => {
+        const n = c.st.cat.length, pct = n ? Math.round(100 * c.st.approved.length / n) : 0;
+        return `<div class="card tight" data-tr-card="${c.l.code}-${c.scope}">
+          <strong>${esc(c.l.name)}</strong> <span class="small">${esc(c.name)}</span>
+          <p class="small" style="margin:6px 0">${c.st.have.length} of ${n} translated. ${c.st.approved.length} approved (${pct}%). ${c.st.waiting.length ? `<strong>${c.st.waiting.length} awaiting check.</strong>` : ''}</p>
+          <p class="small" style="margin:0 0 8px">${c.st.last ? `Last approved by ${esc(c.st.last.approved_by)}, ${esc(trFmt(c.st.last.approved_at))}.` : 'Not approved yet, so vendors see English.'}</p>
+          <button class="btn ${c.st.waiting.length || c.st.missing.length ? 'primary' : 'ghost'}" type="button" data-tr-open="${i}">Open</button></div>`;
+      }).join('')}</div>
+      <p class="small">Plans and variations are translated when you publish them, and you check them on that page. Notices stay English.</p>
+    </div>`;
+    $$('[data-tr-open]').forEach(b => b.addEventListener('click', () => { const c = cards[+b.dataset.trOpen]; viewTranslationSet(c.scope, c.l.code, { fresh: true }); }));
+    top();
+  }
+
+  async function viewTranslationSet(scope, lang, opts) {
+    opts = opts || {};
+    const l = I18N.byCode(lang), set = TR_SETS.find(s => s[0] === scope);
+    header('Translations', '', 0); actions(false); setAgentNav('tr');
+    main().innerHTML = '<div class="loading">Loading...</div>';
+    const rows = await trRows(scope, lang), st = trState(scope, rows);
+    const skey = scope + '|' + lang; if (opts.fresh || !TR_SEEN[skey]) TR_SEEN[skey] = new Map();
+    const seen = TR_SEEN[skey], srcOf = new Map(rows.map(r => [r.id, r.source]));
+    seen.forEach((txt, id) => { const r = rows.find(x => x.id === id); if (!r || r.status === 'approved' || r.text !== txt) seen.delete(id); });   // what changed since is not "read"
+    const PAGE = 25, filter = opts.filter || (st.waiting.length ? 'waiting' : 'all'), page = opts.page || 0;
+    const list = (filter === 'waiting' ? st.cat.filter(s => st.bySrc.has(s) && st.bySrc.get(s).status !== 'approved') : filter === 'missing' ? st.missing : st.cat);
+    const shown = list.slice(page * PAGE, page * PAGE + PAGE);
+    shown.forEach(s => { const r = st.bySrc.get(s); if (r && r.status !== 'approved') seen.set(r.id, r.text); });
+    const readIds = st.waiting.map(s => st.bySrc.get(s)).filter(r => seen.has(r.id)), unread = st.waiting.length - readIds.length;
+    main().innerHTML = `<div class="view-pad">
+      <span class="agent-flag">Only you see this</span>
+      <p><a href="#" id="trBack">Translations</a></p>
+      <h1>${esc(l.name)}: ${esc(set[1])}</h1>
+      <p class="small">${esc(set[2])}</p>
+      <div class="card tight" id="trSummary">
+        <p style="margin:0 0 8px"><strong>${st.have.length} of ${st.cat.length}</strong> translated, <strong>${st.approved.length}</strong> approved, <strong>${st.waiting.length}</strong> awaiting check. ${st.last ? `Last approved by ${esc(st.last.approved_by)}, ${esc(trFmt(st.last.approved_at))}.` : ''}</p>
+        <div class="toolbar" style="margin:0">
+          <button class="btn primary" type="button" id="trGo" ${st.missing.length ? '' : 'disabled'}>Translate ${st.missing.length} ${st.missing.length === 1 ? 'string' : 'strings'}</button>
+          ${st.approved.length ? '<button class="btn ghost" type="button" id="trWithdraw">Show English to vendors again</button>' : ''}
+        </div>
+        <p class="small" id="trMsg" role="status" style="margin:8px 0 0"></p>
+      </div>
+      ${st.waiting.length ? `<div class="card tight">
+        <label class="fld"><span>Name of the person who checked this ${scope === 'guide' ? '(a professional translator)' : '(a speaker)'}</span>
+        <input type="text" id="trWho" autocomplete="off" value="${esc(trChecker.get())}" placeholder="Their full name"></label>
+        <div class="toolbar" style="margin:8px 0 0"><button class="btn primary" type="button" id="trApprove" ${readIds.length && !trBusy() ? '' : 'disabled'}>Approve ${readIds.length} you have read</button></div>
+        <p class="small" style="margin:8px 0 0">${unread ? `${unread} more ${unread === 1 ? 'string is' : 'strings are'} still to read. Use Later to read ${unread === 1 ? 'it' : 'them'}; only strings you have had on screen can be approved.` : 'You have read all of them.'}${trBusy() ? ' Approving waits until the translation has finished.' : ''}</p>
+        <p class="small" id="trAppErr" role="alert" style="margin:8px 0 0"></p></div>` : ''}
+      <div class="chip-row" role="tablist">${[['waiting', 'Awaiting check', st.waiting.length], ['missing', 'Not translated', st.missing.length], ['all', 'All', st.cat.length]].map(([k, t, n]) => `<button class="chip" type="button" role="tab" aria-selected="${filter === k}" data-trf="${k}" style="${filter === k ? 'border-color:var(--accent);background:var(--accent-soft)' : ''}">${t} (${n})</button>`).join('')}</div>
+      <div id="trList">${shown.length ? shown.map((s, i) => { const r = st.bySrc.get(s); return `<div class="card tight tr-row" data-tr-row="${r ? r.id : ''}">
+        <p class="small" style="margin:0 0 4px">English</p><p lang="en" style="margin:0 0 10px;white-space:pre-wrap">${esc(s)}</p>
+        ${r ? `<p class="small" style="margin:0 0 4px">${esc(l.name)} ${r.status === 'approved' ? '(approved)' : '(awaiting check)'}</p>
+        <textarea class="tr-edit" rows="3" lang="${esc(l.html)}" data-tr-id="${r.id}" aria-label="${esc(l.name)} translation">${esc(r.text)}</textarea>
+        <div class="toolbar" style="margin:6px 0 0"><button class="btn ghost" type="button" data-tr-save="${r.id}">Save correction</button></div><p class="small" data-tr-err="${r.id}" role="alert" style="margin:4px 0 0"></p>` : '<p class="small" style="margin:0">Not translated yet.</p>'}
+      </div>`; }).join('') : '<div class="card note tight"><p class="small" style="margin:0">Nothing here.</p></div>'}</div>
+      ${list.length > PAGE ? `<div class="toolbar"><button class="btn ghost" type="button" id="trPrev" ${page ? '' : 'disabled'}>Earlier</button><span class="small">${page * PAGE + 1} to ${Math.min(list.length, page * PAGE + PAGE)} of ${list.length}</span><button class="btn ghost" type="button" id="trNext" ${(page + 1) * PAGE < list.length ? '' : 'disabled'}>Later</button></div>` : ''}
+    </div>`;
+    const again = o => viewTranslationSet(scope, lang, Object.assign({ filter, page }, o));
+    if (opts.msg) $('#trMsg').textContent = opts.msg;
+    $('#trBack').addEventListener('click', e => { e.preventDefault(); viewTranslations(); });
+    $$('[data-trf]').forEach(b => b.addEventListener('click', () => again({ filter: b.dataset.trf, page: 0 })));
+    if ($('#trPrev')) $('#trPrev').addEventListener('click', () => again({ page: page - 1 }));
+    if ($('#trNext')) $('#trNext').addEventListener('click', () => again({ page: page + 1 }));
+    $$('[data-tr-save]').forEach(b => b.addEventListener('click', async () => {
+      const id = b.dataset.trSave, ta = $(`[data-tr-id="${id}"]`), who = trChecker.get(), why = trCheck(srcOf.get(id), ta.value);
+      if (why) { $(`[data-tr-err="${id}"]`).textContent = 'Not saved. ' + trWhy(why); return; }
+      b.disabled = true;
+      try { await must(sb.rpc('agent_edit_translation', { p_id: id, p_text: ta.value, p_by: who || null })); toast('Saved. It needs approving again.'); again({}); } catch (_) { b.disabled = false; }
+    }));
+    if ($('#trApprove')) $('#trApprove').addEventListener('click', async () => {
+      const who = $('#trWho').value.trim(); trChecker.set(who);
+      if (!who) { $('#trAppErr').textContent = 'Type the name of the person who checked it.'; return; }
+      if (trBusy()) { $('#trAppErr').textContent = 'A translation is still running. Approve once it has finished.'; return; }
+      $('#trApprove').disabled = true;
+      const items = readIds.map(r => ({ id: r.id, text: r.text }));
+      try { const n = await must(sb.rpc('agent_approve_translations', { p_scope: scope, p_ref: null, p_lang: lang, p_name: who, p_items: items })); toast(`${n} approved. Vendors can now read this in ${l.name}.`); again({}); } catch (_) { $('#trApprove').disabled = false; }
+    });
+    if ($('#trWithdraw')) $('#trWithdraw').addEventListener('click', async () => {
+      if (!confirm(`Show English instead of ${l.name} to vendors? The translations are kept, and need approving again.`)) return;
+      try { await must(sb.rpc('agent_withdraw_translations', { p_scope: scope, p_ref: null, p_lang: lang })); toast('Vendors see English again.'); again({}); } catch (_) { }
+    });
+    $('#trGo').addEventListener('click', async () => {
+      const go = $('#trGo'), msg = $('#trMsg'); go.disabled = true; if ($('#trApprove')) $('#trApprove').disabled = true;
+      const r = await trTranslate(scope, null, lang, st.missing, t => { msg.textContent = t; });
+      msg.textContent = r.message;
+      if (r.saved) again({ filter: 'waiting', page: 0, msg: r.message }); else { go.disabled = false; if ($('#trApprove') && readIds.length) $('#trApprove').disabled = false; }
+    });
+    top();
+  }
+
+  // Sends the strings to the app's translator in batches (the doc-prefill function, translate mode), then stores what comes
+  // back as "awaiting check". Returns { saved, rejected, cut, failed, message }. Used for the screens, the guide, plans and
+  // variations. Batches are smaller for Hindi, Korean and Chinese; a reply that ran out of room is split and sent again.
+  async function trTranslate(scope, ref, lang, sources, progress) {
+    TR_RUN++;
+    try { return await trTranslateRun(scope, ref, lang, sources, progress); } finally { TR_RUN--; }
+  }
+  async function trTranslateRun(scope, ref, lang, sources, progress) {
+    const lim = TR_LIMITS[lang] || TR_LIMITS.mi, queue = []; let cur = [], chars = 0;
+    sources.forEach(s => { if (cur.length >= lim.items || (cur.length && chars + s.length > lim.chars)) { queue.push(cur); cur = []; chars = 0; } cur.push(s); chars += s.length; });
+    if (cur.length) queue.push(cur);
+    let saved = 0, rejected = 0, cut = 0, done = 0; const total = queue.length;
+    while (queue.length) {
+      const batch = queue.shift();
+      progress && progress(`Translating, part ${Math.min(++done, Math.max(total, done))} of ${Math.max(total, done + queue.length)}...`);
+      const { data, error } = await sb.functions.invoke('doc-prefill', { body: { mode: 'translate', kind: scope, lang, sources: batch } });
+      if (error || !data || data.ok === false) {
+        return { saved, rejected, cut, failed: true, message: saved ? `Stopped part way: ${saved} translated and stored. Try again for the rest.` : 'The translator could not be reached, or is not switched on yet. Nothing was changed.' };
+      }
+      const rej = data.rejected || [];
+      rejected += rej.filter(x => x.reason !== 'cut off').length;
+      if ((data.translations || []).length) {
+        const { error: se } = await sb.rpc('agent_save_translations', { p_scope: scope, p_ref: ref || null, p_lang: lang, p_rows: data.translations, p_model: data.model || null });
+        if (se) return { saved, rejected, cut, failed: true, message: 'The translations could not be stored: ' + (se.message || 'try again') };
+        saved += data.translations.length;
+      }
+      const left = rej.filter(x => x.reason === 'cut off').map(x => x.source);
+      if (left.length > 1) { const h = Math.ceil(left.length / 2); queue.unshift(left.slice(0, h), left.slice(h)); }   // too long for one reply: try in smaller parts
+      else if (left.length === 1) cut++;
+    }
+    return { saved, rejected, cut, failed: false, message: `${saved} translated and stored, awaiting your check.${rejected ? ` ${rejected} could not be used (a number, name or placeholder changed), so they stay in English.` : ''}${cut ? ` ${cut} ${cut === 1 ? 'was' : 'were'} too long for the translator to finish, so ${cut === 1 ? 'it stays' : 'they stay'} in English.` : ''}${rejected || cut ? ' Press Translate again to retry.' : ''}` };
+  }
+
+  /* Tim's plans and variations: translated by Haiku when he publishes them, and he reads the result before any vendor does. */
+  const trLines = s => String(s || '').replace(/\r/g, '').split('\n').map(x => x.trim()).join('<br/>').replace(/ +/g, ' ').trim();   // the same text the vendor's page shows as one unit
+  const trPlanSources = plan => { const out = []; const add = s => { const t = trLines(s); if (t && !out.includes(t)) out.push(t); }; plan = plan || {}; add(plan.intro); (plan.pairs || []).forEach(x => { add(x.said); add(x.changed); }); return out; };
+  const trVarSources = v => { const out = []; const add = s => { const t = trLines(s); if (t && !out.includes(t)) out.push(t); }; ((v && v.summary) || []).forEach(r => { add(r.to); add(r.from); }); add(v && v.reason); return out; };
+  const TRVARS = {};
+  // translate every language that is missing some of these strings; runs on its own, and redraws the panel when it ends
+  function trAuto(scope, ref, sources, again) {
+    const key = scope + ':' + ref;
+    if (TR_JOBS.has(key) || !sources.length) return TR_JOBS.get(key);
+    TR_FAIL.delete(key);
+    const job = (async () => {
+      for (const l of TR_LANGS()) {
+        const have = new Set((await trRows(scope, l.code, ref)).map(r => r.source));
+        const missing = sources.filter(s => !have.has(s));
+        if (missing.length) { const r = await trTranslate(scope, ref, l.code, missing); if (r.failed && !r.saved) { TR_FAIL.set(key, r.message); break; } }
+      }
+    })().catch(e => console.warn('translate', e)).then(() => { TR_JOBS.delete(key); if (again) again(); });
+    TR_JOBS.set(key, job); return job;
+  }
+  async function trPanelDraw(box, scope, ref, sources) {
+    if (!box) return;
+    const key = scope + ':' + ref; box.setAttribute('data-trc', key);
+    if (!sources.length) { box.innerHTML = '<p class="small">Nothing to translate yet.</p>'; return; }
+    const busy = TR_JOBS.has(key), failed = TR_FAIL.get(key);
+    const per = [];
+    for (const l of TR_LANGS()) per.push({ l, st: trState(scope, await trRows(scope, l.code, ref).catch(() => []), sources) });
+    if (!box.isConnected) return;
+    box.innerHTML = `<div class="card tight">
+      <p class="small" style="margin:0 0 8px">${busy ? 'Translating for the vendors now. This takes a minute.' : 'Vendors see English until a speaker has checked a language and you approve it here. Read each one against the English first.'}</p>
+      ${failed && !busy ? `<p class="small" role="status">${esc(failed)}</p>` : ''}
+      ${per.map(({ l, st }) => `<details class="tr-lang" data-trl="${l.code}"><summary><strong>${esc(l.name)}</strong> <span class="small">${st.have.length} of ${st.cat.length} translated, ${st.approved.length} approved${st.waiting.length ? `, <strong>${st.waiting.length} awaiting check</strong>` : ''}</span></summary>
+        ${st.cat.map(s => { const r = st.bySrc.get(s); return `<div class="tr-row" style="margin:10px 0"><p class="small" style="margin:0">English</p><p lang="en" style="margin:0 0 6px;white-space:pre-wrap">${esc(s.replace(/<br\/>/g, '\n'))}</p>${r ? `<textarea class="tr-edit" rows="3" lang="${esc(l.html)}" data-tr-id="${r.id}" aria-label="${esc(l.name)} translation">${esc(r.text.replace(/<br\/>/g, '\n'))}</textarea><div class="toolbar" style="margin:4px 0 0"><button class="btn ghost" type="button" data-trc-save="${r.id}">Save correction</button></div><p class="small" data-trc-err="${r.id}" role="alert" style="margin:4px 0 0"></p>` : '<p class="small" style="margin:0">Not translated yet.</p>'}</div>`; }).join('')}
+        <div class="toolbar" style="margin:8px 0 0">${st.missing.length ? `<button class="btn ghost" type="button" data-trc-go="${l.code}" ${busy ? 'disabled' : ''}>Translate ${st.missing.length} ${st.missing.length === 1 ? 'string' : 'strings'}</button>` : ''}
+        ${st.waiting.length ? `<input type="text" data-trc-who="${l.code}" autocomplete="off" aria-label="Name of the person who checked it" placeholder="Name of the person who checked it" value="${esc(trChecker.get())}" style="max-width:260px"><button class="btn primary" type="button" data-trc-ok="${l.code}" ${busy || trBusy() ? 'disabled' : ''}>Approve ${st.waiting.length}</button>` : ''}
+        ${st.approved.length ? `<button class="btn ghost" type="button" data-trc-off="${l.code}">Show English instead</button>` : ''}</div>
+        <p class="small" data-trc-msg="${l.code}" role="alert" style="margin:6px 0 0"></p></details>`).join('')}
+    </div>`;
+    const open = (box._open || []); open.forEach(c => { const d = $(`[data-trl="${c}"]`, box); if (d) d.open = true; });
+    $$('details.tr-lang', box).forEach(d => d.addEventListener('toggle', () => { box._open = $$('details.tr-lang', box).filter(x => x.open).map(x => x.dataset.trl); }));
+    const redraw = () => trPanelDraw(box, scope, ref, sources);
+    const srcById = new Map(); per.forEach(({ st }) => st.bySrc.forEach((r, s) => srcById.set(r.id, s)));
+    $$('[data-trc-save]', box).forEach(b => b.addEventListener('click', async () => {
+      const id = b.dataset.trcSave, val = $(`[data-tr-id="${id}"]`, box).value.replace(/\n/g, '<br/>'), why = trCheck(srcById.get(id), val);
+      if (why) { $(`[data-trc-err="${id}"]`, box).textContent = 'Not saved. ' + trWhy(why); return; }
+      b.disabled = true; try { await must(sb.rpc('agent_edit_translation', { p_id: id, p_text: val, p_by: trChecker.get() || null })); toast('Saved. It needs approving again.'); redraw(); } catch (_) { b.disabled = false; }
+    }));
+    $$('[data-trc-go]', box).forEach(b => b.addEventListener('click', async () => {
+      b.disabled = true; const code = b.dataset.trcGo, have = new Set((await trRows(scope, code, ref)).map(r => r.source));
+      const r = await trTranslate(scope, ref, code, sources.filter(s => !have.has(s))); toast(r.message); redraw();
+    }));
+    $$('[data-trc-ok]', box).forEach(b => b.addEventListener('click', async () => {
+      const code = b.dataset.trcOk, who = $(`[data-trc-who="${code}"]`, box).value.trim(); trChecker.set(who);
+      if (!who) { $(`[data-trc-msg="${code}"]`, box).textContent = 'Type the name of the person who checked it.'; return; }
+      if (trBusy()) { $(`[data-trc-msg="${code}"]`, box).textContent = 'A translation is still running. Approve once it has finished.'; return; }
+      const st = per.find(x => x.l.code === code).st, items = st.waiting.map(s => ({ id: st.bySrc.get(s).id, text: st.bySrc.get(s).text }));   // exactly the strings drawn on this panel
+      b.disabled = true; try { const n = await must(sb.rpc('agent_approve_translations', { p_scope: scope, p_ref: ref, p_lang: code, p_name: who, p_items: items })); toast(`${n} approved. Vendors can read this in ${I18N.byCode(code).name}.`); redraw(); } catch (_) { b.disabled = false; }
+    }));
+    $$('[data-trc-off]', box).forEach(b => b.addEventListener('click', async () => { try { await must(sb.rpc('agent_withdraw_translations', { p_scope: scope, p_ref: ref, p_lang: b.dataset.trcOff })); toast('Vendors see English again.'); redraw(); } catch (_) { } }));
+  }
+
   /* ═════════ AGENT HOME (Let's begin / Let's agree) and DASHBOARD ═════════ */
   function setAgentNav(cur) {
     const nav = $('#agentNav'); if (!nav) return;
     nav.hidden = !IS_AGENT; document.body.classList.toggle('is-agent', !!IS_AGENT);
+    const lw = $('#langWrap'); if (lw) lw.hidden = !!IS_AGENT;
     const jb = $('#journeyBtn'); if (jb) jb.hidden = !!IS_AGENT || !JREADY;   // the Journey button is for vendors, and for anyone not signed in
     $('#navHome').toggleAttribute('aria-current', cur === 'home'); if (cur === 'home') $('#navHome').setAttribute('aria-current', 'page');
+    if ($('#navTr')) { $('#navTr').removeAttribute('aria-current'); if (cur === 'tr') $('#navTr').setAttribute('aria-current', 'page'); }
     $('#navDash').toggleAttribute('aria-current', cur === 'dash'); if (cur === 'dash') $('#navDash').setAttribute('aria-current', 'page');
   }
   // leaving the appointment flow from the top bar keeps what's been typed
@@ -1150,6 +1463,7 @@ function lawyerForm(id, title, blurb) {
   }
   $('#navHome').addEventListener('click', () => navGo(viewAgentHome));
   $('#navDash').addEventListener('click', () => navGo(viewAgentDashboard));
+  $('#navTr').addEventListener('click', () => navGo(viewTranslations));
   $$('.brand img').forEach(i => i.addEventListener('click', () => { if (IS_AGENT) navGo(viewAgentHome); }));
 
   function viewAgentHome() {
@@ -2121,9 +2435,16 @@ function lawyerForm(id, title, blurb) {
   }
 
   /* vendor: "Before you sell", the REA sale and purchase guide with its own dated receipt */
+  // the Authority's own translations, offered beside the English guide; the one you tick for is the English
+  function reaLinksHTML(g) {
+    if (!(g.translations || []).length) return '';
+    const key = Object.keys(GUIDES).find(k => GUIDES[k] === g); if (!key) return '';
+    setTimeout(reaFill, 0);   // once the page is on screen, check which files exist and list them
+    return `<div class="rea-tr" data-rea-guide="${key}"></div>`;
+  }
   function guideViewer(g) {
     // phones don't show a PDF inside a page, so the main action is opening it; wider screens also show it here
-    return `<div class="guide-inline"><a class="btn primary guide-open" href="${esc(g.url)}" target="_blank" rel="noopener">Read the guide</a>${matchMedia('(min-width: 701px)').matches ? `<iframe src="${esc(g.url)}" title="${esc(g.title)}" loading="lazy"></iframe>` : ''}<p class="small" style="margin:6px 0 0">${esc(g.title)}, version ${esc(g.version)}. It opens in a new tab; come back here when you've read it.</p></div>`;
+    return `<div class="guide-inline"><a class="btn primary guide-open" href="${esc(g.url)}" target="_blank" rel="noopener">Read the guide</a>${matchMedia('(min-width: 701px)').matches ? `<iframe src="${esc(g.url)}" title="${esc(g.title)}" loading="lazy"></iframe>` : ''}<p class="small" style="margin:6px 0 0">${esc(g.title)}, version ${esc(g.version)}. It opens in a new tab; come back here when you've read it.</p>${reaLinksHTML(g)}</div>`;
   }
   function viewBeforeYouSell() {
     const g = GUIDES.sale_purchase; if (!g) return showStep(LAST);
@@ -2209,7 +2530,7 @@ function lawyerForm(id, title, blurb) {
           <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin:8px 0"><h3 style="margin:0">${esc(ME.legal_name)}</h3><button class="btn link" type="button" id="vfClr">Clear</button></div>
           <div class="sig-wrap"><canvas id="vfSig" aria-label="Signature pad"></canvas><div class="sig-line"></div><span class="hint">Sign here with your finger or mouse</span></div>${saveNote('Save my signature and sign')}</div>`}`;
     }
-    main().innerHTML = `<section class="screen active">${h}<div class="err"></div></section>`;
+    main().innerHTML = `<section class="screen active" data-signed${i === 3 && !iSigned(fm) ? ' data-signing' : ''}>${h}<div class="err"></div></section>`;
     const fu = () => { const c = $('input[name="vfFile"]:checked'); if ($('#vfChWrap')) $('#vfChWrap').hidden = !(c && c.value === 'changed'); };
     $$('input[name="vfFile"]').forEach(r => r.addEventListener('change', fu));
     const tu = () => { const c = $('input[name="vfTen"]:checked'); if ($('#vfHHWrap')) $('#vfHHWrap').hidden = !(c && c.value !== 'no'); };
@@ -2377,7 +2698,8 @@ function lawyerForm(id, title, blurb) {
     if (ch.other) rows.push({ label: 'Other change', from: '', to: ch.other });
     return rows;
   }
-  const varTable = rows => `<table class="sum">${rows.map(r => `<tr><td>${esc(r.label)}</td><td style="white-space:normal">${esc(r.to)}${r.from ? `<br><span class="small">Was: ${esc(r.from)}</span>` : ''}</td></tr>`).join('')}</table>`;
+  const nlEsc = s => esc(s).replace(/\r?\n/g, '<br>');   // a line break in what Tim wrote is a line break on the page, and in the translation key
+  const varTable = rows => `<table class="sum" data-signed>${rows.map(r => `<tr><td>${esc(r.label)}</td><td style="white-space:normal"><span data-tr-block>${nlEsc(r.to)}</span>${r.from ? `<br><span class="small" data-tr-block>Was: <span data-tr-block>${nlEsc(r.from)}</span></span>` : ''}</td></tr>`).join('')}</table>`;
   const VSTATUS = { draft: 'Draft, not issued', sent: 'Waiting for signatures', signed: 'Signed by everyone, in effect', withdrawn: 'Withdrawn' };
   async function openVarPdf(vid) {
     const w = window.open('', '_blank');
@@ -2401,6 +2723,7 @@ function lawyerForm(id, title, blurb) {
   /* agent: the variations panel on the agreement page */
   function varPanel(ag, people, vars, vsigs) {
     const live = ['signed', 'countersigned'].includes(ag.status);
+    vars.forEach(v => { TRVARS[v.id] = v; });
     if (!live && !vars.length) return '';
     const signers = people.filter(p => p.legal_name && p.signed_at);
     const cur = currentTerms(ag, vars), anySigned = vars.some(v => v.status === 'signed');
@@ -2411,6 +2734,7 @@ function lawyerForm(id, title, blurb) {
         const mine = vsigs.filter(s => s.variation_id === v.id);
         return `<div class="card ${v.status === 'sent' ? 'note' : ''}" data-var="${v.id}"><div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:baseline"><h3 style="margin:0">Variation ${v.number}</h3><span class="status ${v.status === 'signed' ? 'done' : 'pending'}">${esc(VSTATUS[v.status])}${v.signed_at ? ' ' + esc(fmtDT(v.signed_at)) : ''}</span></div>
           ${(v.summary || []).length ? varTable(v.summary) : '<p class="small">No changes chosen yet.</p>'}
+          ${['sent', 'signed'].includes(v.status) ? `<details style="margin-top:8px"><summary class="small">Other languages for the vendors</summary><div data-trvar="${v.id}"></div></details>` : ''}
           ${v.status === 'sent' ? `<div class="small" style="margin-top:8px">${signers.map(p => `${esc(p.legal_name)}: ${mine.some(s => s.person_id === p.id) ? '✓ signed' : 'not signed yet'}`).join('<br>')}<br>Issued ${esc(fmtDT(v.sent_at))} ${v.signing_mode === 'remote' ? '(sent to sign on their phones)' : '(to sign together)'}</div>` : ''}
           ${v.status === 'signed' ? `<div class="small" style="margin-top:8px">${v.copy_sent_at ? 'Signed copy emailed ' + esc(fmtDT(v.copy_sent_at)) : `<strong style="color:var(--accent)">Signed copy not emailed yet${v.copy_error ? ': ' + esc(v.copy_error) : ''}</strong>`}</div>` : ''}
           <div class="toolbar no-print">
@@ -2431,6 +2755,7 @@ function lawyerForm(id, title, blurb) {
       </table></div>` : ''}`;
   }
   function wireVarPanel(agId) {
+    $$('[data-trvar]').forEach(box => { const v = TRVARS[box.dataset.trvar]; if (v) trPanelDraw(box, 'variation', v.id, trVarSources(v)); });
     const nv = $('#newVar'); if (nv) nv.addEventListener('click', async () => { nv.disabled = true; try { const vid = await must(sb.rpc('agent_new_variation', { a: agId })); viewVariation(agId, vid); } catch (_) { nv.disabled = false; } });
     $$('[data-vedit]').forEach(b => b.addEventListener('click', () => viewVariation(agId, b.dataset.vedit)));
     $$('[data-vtogether]').forEach(b => b.addEventListener('click', () => viewVarTogether(agId, b.dataset.vtogether)));
@@ -2512,7 +2837,7 @@ function lawyerForm(id, title, blurb) {
     main().innerHTML = `<div class="view-pad"><span class="agent-flag">Check it, then sign as licensee</span>
       <h1>Variation ${vr.number}</h1>
       <p class="lede">To the agency agreement for ${esc(ag.address)} (${esc(ag.ref)}), between McGuire Real Estate and ${esc(joinNames(signers.map(p => p.legal_name)))}.</p>
-      <div class="card">${varTable(vr.summary)}${vr.reason ? `<p class="small" style="margin:10px 0 0">Reason: ${esc(vr.reason)}</p>` : ''}</div>
+      <div class="card" data-signed>${varTable(vr.summary)}${vr.reason ? `<p class="small" style="margin:10px 0 0">Reason: <span data-tr-block>${nlEsc(vr.reason)}</span></p>` : ''}</div>
       <p class="small">All other terms stay exactly as signed. It takes effect once everyone has signed.</p>
       <div class="toolbar"><button class="btn ghost" type="button" id="vPrev">Preview the PDF</button><button class="btn link" type="button" id="vBack">Change something</button></div>
       <h2>How will they sign?</h2>
@@ -2537,6 +2862,7 @@ function lawyerForm(id, title, blurb) {
       const path = await uploadSig($('#vSigA'), agId, vid + '-agent');
       await must(sb.rpc('agent_issue_variation', { v: vid, p_mode: mode, p_image_path: path, p_snapshot: varSnapshot(ag, vr, { name: 'Timothy McGuire', role: 'licensee', email: SESSION.user.email }), p_user_agent: navigator.userAgent }));
       await sigSaved($('#vSigA'), 'Signature saved', 'Variation issued');
+      try { trAuto('variation', vid, trVarSources(await must(sb.from('agreement_variations').select('summary,reason').eq('id', vid).single()))); } catch (_) { }
       if (mode === 'remote') {
         const { data, error } = await sb.functions.invoke('notify', { body: { type: 'variation_sent', agreement_id: agId, variation_id: vid } });
         toast(error || (data && data.ok === false) ? 'Issued, but the email failed. Use "Email it to them to sign".' : 'Issued and emailed to them to sign');
@@ -2559,7 +2885,7 @@ function lawyerForm(id, title, blurb) {
     main().innerHTML = `<div class="view-pad"><span class="agent-flag">Hand the device over to each person in turn</span>
       <h1>Changes to your agency agreement</h1>
       <p class="lede">Variation ${vr.number} to the agreement for ${esc(ag.address)}. Everything not listed here stays the same.</p>
-      <div class="card">${varTable(vr.summary)}${vr.reason ? `<p class="small" style="margin:10px 0 0">Reason: ${esc(vr.reason)}</p>` : ''}</div>
+      <div class="card" data-signed>${varTable(vr.summary)}${vr.reason ? `<p class="small" style="margin:10px 0 0">Reason: <span data-tr-block>${nlEsc(vr.reason)}</span></p>` : ''}</div>
       <div class="toolbar"><button class="btn ghost" type="button" id="vPdf2">Read the variation (PDF)</button></div>
       ${todo.map(p => `<div class="card tight" data-vp="${p.id}"><div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:8px"><h3 style="margin:0">${esc(p.legal_name)}</h3><button class="btn link" type="button" data-vclr="${p.id}">Clear</button></div>
         <label class="choice cb"><input type="checkbox" data-vok="${p.id}"><span class="mark"></span><span><span class="ct">I've read these changes and agree to them</span><span class="cd">I was told I can get legal advice before signing, and given time to do so</span></span></label>
@@ -2597,6 +2923,7 @@ function lawyerForm(id, title, blurb) {
   async function loadVars() {
     try { PANS = await must(sb.from('prior_agency_notices').select('*').eq('agreement_id', A.id).order('idx')); } catch (_) { PANS = []; }
     try { VARS = await must(sb.from('agreement_variations').select('*').eq('agreement_id', A.id).order('number')); VSIGS = await must(sb.from('variation_signatures').select('*').eq('agreement_id', A.id)); } catch (_) { VARS = []; VSIGS = []; }
+    for (const v of VARS) if (['sent', 'signed'].includes(v.status)) loadContentTr('variation', v.id);
   }
   const varToSign = () => ME && VARS.find(v => v.status === 'sent' && !VSIGS.some(s => s.variation_id === v.id && s.person_id === ME.id));
   function varDoneHTML() {
@@ -2616,10 +2943,10 @@ function lawyerForm(id, title, blurb) {
   }
   function viewVendorVariation(vr) {
     header('Changes to your agreement', '', 100);
-    main().innerHTML = `<section class="screen active">
+    main().innerHTML = `<section class="screen active" data-signed data-signing>
       <h1>Changes to your agency agreement</h1>
       <p class="lede">As we discussed, here's what changes in your agreement for ${esc(A.address)}. Everything else stays exactly as you signed it.</p>
-      <div class="card"><h3>Variation ${vr.number}</h3>${varTable(vr.summary || [])}${vr.reason ? `<p class="small" style="margin:10px 0 0">Reason: ${esc(vr.reason)}</p>` : ''}</div>
+      <div class="card" data-signed><h3>Variation ${vr.number}</h3>${varTable(vr.summary || [])}${vr.reason ? `<p class="small" style="margin:10px 0 0">Reason: <span data-tr-block>${nlEsc(vr.reason)}</span></p>` : ''}</div>
       <div class="toolbar"><button class="btn ghost" type="button" data-vpdf="${vr.id}">Read the variation (PDF)</button></div>
       <div class="card note tight"><p class="small" style="margin:0">You're welcome to get legal advice before signing, and to take your time. If anything here isn't what we agreed, don't sign. Call or text Tim on 027 562 7207 and he'll fix it.</p></div>
       <h2>Sign</h2>
@@ -2707,6 +3034,7 @@ function lawyerForm(id, title, blurb) {
   async function viewPrelisting(id) {
     PL = await must(sb.from('prelistings').select('*').eq('id', id).single()); JCTX.pid = PL.property_id || null; JVIEW = { pl: id };
     PLA = Object.assign({}, PL.answers || {});
+    loadContentTr('plan', PL.id);
     PL.knownOwners = [];
     if (PL.property_id && PL.status === 'appraisal') { try { PL.knownOwners = await must(sb.from('property_people').select('legal_name,pref_name,email,phone').eq('property_id', PL.property_id).eq('role', 'owner').order('position')); } catch (_) { } }
     if (PL.status === 'appraisal') return PLA._step ? plStep(+PLA._step) : plAppraisal();
@@ -2813,7 +3141,7 @@ function lawyerForm(id, title, blurb) {
     header('Your updated plan', '', 100);
     main().innerHTML = `<section class="screen active">
       <h1>Your updated plan</h1>
-      <p class="lede">${name ? `Thanks, ${esc(name)}. ` : ''}${(PL.plan || {}).intro ? esc(PL.plan.intro).replace(/\n/g, '<br>') : 'Here\'s how I\'ve adjusted the plan around what you told me.'}</p>
+      <p class="lede">${name ? `Thanks, ${esc(name)}. ` : ''}${(PL.plan || {}).intro ? `<span data-tr-block>${esc(PL.plan.intro).replace(/\n/g, '<br>')}</span>` : 'Here\'s how I\'ve adjusted the plan around what you told me.'}</p>
       ${plPairs()}
       <h2>The plan</h2><div class="card">${plFacts(PL.appraisal || {})}</div>
       <div class="card tight">
@@ -2912,6 +3240,7 @@ function lawyerForm(id, title, blurb) {
         <label class="f" for="plIntro">Opening line <span class="opt">(optional)</span></label><textarea id="plIntro" rows="2" placeholder="Here's how I've adjusted the plan around what you told me.">${esc(plan.intro || '')}</textarea>
         <div id="plPairs"></div><button class="btn link" type="button" id="plAddPair">+ Add another</button>
         <div class="toolbar"><button class="btn primary" type="button" id="plPublish">${pl.status === 'submitted' ? 'Publish the plan to them' : 'Publish the updated plan again'}</button></div>` : ''}
+      ${['plan', 'question', 'accepted'].includes(pl.status) ? '<h2>Your plan in other languages</h2><div id="trPlan"></div>' : ''}
       <h2>Appraisal page</h2>
       <div class="card">
         <label class="f" for="plAddr" style="margin-top:0">Property address</label><input type="text" id="plAddr" value="${esc(pl.address)}" ${editable ? '' : 'disabled'}>
@@ -2943,6 +3272,7 @@ function lawyerForm(id, title, blurb) {
     const readPairs = () => $$('.plp').map(c => ({ said: $('[data-p=said]', c).value.trim(), changed: $('[data-p=changed]', c).value.trim() }));
     drawPairs();
     const ap2 = $('#plAddPair'); if (ap2) ap2.addEventListener('click', () => { pairs = readPairs(); pairs.push({ said: '', changed: '' }); drawPairs(); });
+    if ($('#trPlan')) trPanelDraw($('#trPlan'), 'plan', id, trPlanSources(pl.plan));
     const pub = $('#plPublish'); if (pub) pub.addEventListener('click', async () => {
       const ps = readPairs().filter(x => x.said || x.changed);
       if (!ps.length) return $('#plErr').textContent = 'Add at least one "You said / I\'ve changed" pair.';
@@ -2952,6 +3282,8 @@ function lawyerForm(id, title, blurb) {
       await must(sb.from('prelistings').update(Object.assign(row, { status: 'plan', plan: { intro: $('#plIntro').value.trim(), pairs: ps }, plan_published_at: new Date().toISOString(), question: null })).eq('id', id));
       const { data, error } = await plNotify('pl_plan', id);
       toast(error || (data && data.ok === false) ? 'Published. The email didn\'t send, so let them know it\'s ready.' : 'Published and emailed to them');
+      const planNow = { intro: $('#plIntro').value.trim(), pairs: ps };
+      trAuto('plan', id, trPlanSources(planNow), () => { if ($('#trPlan')) trPanelDraw($('#trPlan'), 'plan', id, trPlanSources(planNow)); });
       viewPrelistingAgent(id);
     });
     const em = $('#plEmail'); if (em) em.addEventListener('click', async () => { em.disabled = true; const { data, error } = await plNotify('pl_invite', id); if (error || (data && data.ok === false)) toast('The email didn\'t send. Copy the message instead.'); else { toast('Emailed'); viewPrelistingAgent(id); } em.disabled = false; });
@@ -3196,7 +3528,7 @@ function lawyerForm(id, title, blurb) {
     for (let i = 0; i < 9; i++) {
       const k = i + 1, x = X(i), y = Y(i), left = i % 2 === 0, s = jStateOf(st, f, k), tx = left ? x + 42 : x - 42, anc = left ? 'start' : 'end';
       const link = !!links[k], act = !o.agent;
-      const label = `${k} of 9: ${JSTOPS[i].t}.${J_STATE_TEXT[s] ? ' ' + (s === 'here' ? here : J_STATE_TEXT[s]) + '.' : ''}${act ? (link ? ' Opens this page.' : ' Shows what happens at this stop.') : ''}`;
+      const label = `${trs('{n} of 9: {stop}.', { n: k, stop: trs(JSTOPS[i].t) })}${J_STATE_TEXT[s] ? ' ' + trs(s === 'here' ? here : J_STATE_TEXT[s]) + '.' : ''}${act ? ' ' + trs(link ? 'Opens this page.' : 'Shows what happens at this stop.') : ''}`;
       const pillX = left ? tx : tx - 108;
       stops += `<g class="jstop ${s}${act ? (link ? ' link' : ' read') : ''}" data-j="${k}" ${act ? `tabindex="0" role="${link ? 'link' : 'button'}" aria-label="${esc(label)}"` : ''}>
         <rect class="jhit" x="${left ? x - 36 : 6}" y="${y - 36}" width="298" height="72" rx="14"/>
@@ -3317,8 +3649,8 @@ function lawyerForm(id, title, blurb) {
       : f && st.withdrawn ? 'This property is not on the selling road at the moment. Here is the whole road, in case it helps. If you would like to talk it through, call or text Tim on 027 562 7207.'
       : 'This is the road from thinking about selling to settlement, one stop at a time. Tap a stop to read what happens there.';
     ov.innerHTML = `<div class="jov-in">
-      <div class="jbar"><button class="btn ghost" type="button" id="jClose">Close</button><button class="btn ghost" type="button" id="jPrint">Print this page</button></div>
-      <div class="print-only jhead"><img src="${esc(logo)}" alt="McGuire Real Estate"><span>Tim McGuire<br>027 562 7207</span></div>
+      <div class="jbar"><button class="btn ghost" type="button" id="jClose">Close</button>${I18N.selectHTML()}<button class="btn ghost" type="button" id="jPrint">Print this page</button></div>
+      <div class="print-only jhead"><img src="${esc(logo)}" alt="McGuire Real Estate"><span data-no-tr>Tim McGuire<br>027 562 7207</span></div>
       <h1 id="jTitle" tabindex="-1">Your selling journey</h1>
       ${f && f.address ? `<p class="jaddr">${esc(f.address)}</p>` : ''}
       <p class="lede">${esc(lede)}</p>
@@ -3326,13 +3658,13 @@ function lawyerForm(id, title, blurb) {
       ${signedIn && !f && !choose ? '<div class="card note tight no-print"><p class="small" style="margin:0">Once Tim has your property set up, the marker will show where you are. Until then, here is the whole road.</p></div>' : ''}
       <div class="jwrap"><div class="jmapcol">${jMapSVG(st, f, { links })}</div><div>${jCardsHTML(st, f, { links, uid: 'v' })}<p class="small jnote">Questions at any stage? Call or text Tim on <strong>027 562 7207</strong>.</p></div></div>
     </div>`;
-    ov.scrollTop = 0;
+    ov.scrollTop = 0; I18N.syncSelects();
     const h = $('#jTitle'); if (h) h.focus({ preventScroll: true });
   }
   async function jGo(k) {
     const l = JLINKS[k]; if (!l) return;
     if (l.same && l.same()) return closeJourney();   // already on that page: leave it exactly as it is
-    if (JDIRTY && !confirm('You have typed something on this page that is not saved yet. If you go to another page it will be lost. Go anyway?')) return;
+    if (JDIRTY && !confirm(trs('You have typed something on this page that is not saved yet. If you go to another page it will be lost. Go anyway?'))) return;
     closeJourney();
     try { await l.go(); } catch (e) { console.error(e); }
   }
@@ -3375,7 +3707,9 @@ function lawyerForm(id, title, blurb) {
 
   try { const cp = new URLSearchParams(location.search).get('campaign'); if (cp) { localStorage.setItem('pendingCampaign', decodeURIComponent(escape(atob(cp)))); history.replaceState(null, '', location.pathname); } } catch (_) { }
   const lawyerToken = new URLSearchParams(location.search).get('lawyer');
-  if (lawyerToken) { viewLawyer(lawyerToken); return; }
+  if (lawyerToken) { const w = $('#langWrap'); if (w) w.hidden = true; viewLawyer(lawyerToken); return; }
+  I18N.init(); I18N.setHooks({ pick: c => chooseLang(c) });
+  { const l0 = readLocalLang(); if (l0 && l0 !== 'en') chooseLang(l0, { fromRecord: true }); }
 
   boot().catch(e => { console.error(e); main().innerHTML = `<div class="login-card"><h1>Something went wrong</h1><p class="lede">Please refresh the page. If it keeps happening, call Tim on 027 562 7207.</p></div>`; });
 })();

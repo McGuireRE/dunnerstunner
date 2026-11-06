@@ -6,7 +6,7 @@ import { createClient } from "npm:@supabase/supabase-js@2.45.4";
 import { unzipSync, strFromU8 } from "npm:fflate@0.8.2";
 import * as XLSX from "npm:xlsx@0.18.5";
 
-import { FIELD_KEYS, MAX_TOTAL, MODEL, SYSTEM, TOOL } from "./prefill_shared.ts";
+import { FIELD_KEYS, MAX_TOTAL, MODEL, SYSTEM, TOOL, TRANSLATE_KINDS, buildTranslateRequest, readTranslateResult } from "./prefill_shared.ts";
 
 function b64(bytes: Uint8Array) { let s = ""; for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000)); return btoa(s); }
 export function docxText(bytes: Uint8Array) {
@@ -28,6 +28,30 @@ Deno.serve(async (req) => {
     if (!key) return json({ error: "not_set_up", message: "Document reading isn't switched on yet." }, 503);
 
     const body = await req.json();
+
+    // Translation mode (phase 4): same agent-only check, same key, same ai_calls log. The strings are data.
+    if (body.mode === "translate") {
+      const kind = String(body.kind || ""), lang = String(body.lang || "");
+      const sources: string[] = Array.isArray(body.sources) ? body.sources : [];
+      let request;
+      try { request = buildTranslateRequest(kind, lang, sources); } catch (e: any) { return json({ error: String(e?.message || e) }, 400); }
+      const purpose = TRANSLATE_KINDS[kind].purpose;
+      const r = await fetch("https://api.anthropic.com/v1/messages", { method: "POST", headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" }, body: JSON.stringify(request) });
+      const out = await r.json();
+      const dbT = admin();
+      if (!r.ok) {
+        const msg = String(out?.error?.message || r.status);
+        await dbT.from("ai_calls").insert({ purpose, model: request.model, ok: false, error: msg, files: 0, agent: "agent" });
+        return json({ error: r.status === 401 ? "The AI key isn't valid. Check the key in Supabase." : /credit|billing/i.test(msg) ? "The AI account is out of credit. Top it up in the Anthropic console." : msg }, 502);
+      }
+      const usage = out.usage || {};
+      const cutOff = out.stop_reason === "max_tokens";   // the reply ran out of room part way
+      await dbT.from("ai_calls").insert({ purpose, model: request.model, ok: true, error: cutOff ? "max_tokens" : null, input_tokens: usage.input_tokens || 0, output_tokens: usage.output_tokens || 0, files: 0, agent: "agent" });
+      const res = readTranslateResult(sources, out);
+      if (cutOff) res.rejected = res.rejected.map((x) => (x.reason === "missing" ? { source: x.source, reason: "cut off" } : x));
+      return json({ ok: true, model: request.model, cut_off: cutOff, translations: res.ok, rejected: res.rejected, usage: { input: usage.input_tokens, output: usage.output_tokens } });
+    }
+
     const files: { path: string; name: string }[] = (body.files || []).slice(0, 12);
     if (!files.length) return json({ error: "No documents" }, 400);
     if (files.some((f) => !/^imports\/[0-9a-f-]{36}\/[^/]+$/.test(f.path))) return json({ error: "Bad file" }, 400);
