@@ -61,7 +61,7 @@ const OTHERS=/\b(Ray White|Harcourts|Barfoot|Bayleys|Century 21|Mike Pero|Quinov
   expect(!/\b(award|testimonial|days on market|best in)\b/i.test(all),'A: no awards, testimonials or days-on-market claims');
   expect(!/commission/i.test(all),'A: no commission figures or talk of commission');
   const wording=[]; (function w(v,k){ if(k==='slug'||k==='k') return; if(typeof v==='string') wording.push(v); else if(Array.isArray(v)) v.forEach(x=>w(x)); else if(v&&typeof v==='object') Object.keys(v).forEach(x=>w(v[x],x)); })(P);
-  const fee=wording.filter(t=>/\bfee\b/i.test(t)); const okFee=t=>/only talk about my fee once you have decided who the best agent is for you|administration fee covers identity checks|administration fee in your agreement covers identity checks|When do we talk about your fee|A word about my fee/.test(t);
+  const fee=wording.filter(t=>/\bfee\b/i.test(t)); const okFee=t=>/only talk about my fee once you have decided who the best agent is for you|administration fee covers identity checks|administration fee in your agreement covers identity checks|When do we talk about your fee|A word about my fee|conversation about my fee until you have decided who the best agent is for you/.test(t);
   expect(fee.length>=4&&fee.every(okFee),'A: every mention of a fee is Tim\'s rule or the administration fee, never a figure: '+fee.filter(t=>!okFee(t)).slice(0,2));
   expect(/agreed with all of the owners, in writing/.test(P.fee)&&/only talk about my fee once you have decided who the best agent is for you/.test(P.fee),'A: the fee wording is exactly Tim\'s rule');
   // the catalogue lists every piece of the wording once, with the checks the strings test makes
@@ -154,12 +154,13 @@ for(const dark of [false,true]){
     expect(!(await sideways(p)),`C${lab}: stop ${k} has no sideways scroll at 390 px`);
     expect(dark?/^rgb\((2|1)\d?, ?\d+, ?\d+\)$/.test(d.bg)&&parseInt(d.bg.match(/\d+/)[0])<60:parseInt(d.bg.match(/\d+/)[0])>200,`C${lab}: stop ${k} follows ${lab} mode (${d.bg})`);
     const tight=await p.evaluate(()=>[...document.querySelectorAll('#main .card, #main .jcard')].filter(e=>e.scrollWidth>e.clientWidth+1).length); expect(tight===0,`C${lab}: stop ${k}: nothing is wider than its card`);
-    if(k===3||k===4) await p.screenshot({path:path.join(__dirname,'out','pitch_stop'+k+'_'+lab+'_390.png'),fullPage:true});
+    if(k===1||k===3||k===4) await p.screenshot({path:path.join(__dirname,'out','pitch_stop'+k+'_'+lab+'_390.png'),fullPage:true});
     // facts: the content has what Tim asked for
-    if(k===1) expect(/best price/.test(T)&&/price/.test(T)&&/reasons for moving/.test(T)&&/timing/.test(T)&&/defects/.test(T),'C: stop 1 covers price, reasons, timing and defects');
+    if(k===1) expect(/best price/.test(T)&&/reasons for moving/.test(T)&&/timing/.test(T)&&/defects/.test(T)&&/in person/.test(T)&&/opinion of value/.test(T)&&/reasoning/.test(T)&&/go ahead to a short questionnaire/.test(T),'C: stop 1 covers the visit, the opinion of value, price, reasons, timing and defects, and going on to the questionnaire');
+    if(k===1) expect(!/only takes effect when you receive/.test(T),'C: the listing-before-appraisal rule is not on stop 1');
     if(k===1) expect(!/two of (the )?three/i.test(T),'C: stop 1 does not state the internal two of three rule');
     if(k===2) expect(/short questionnaire/.test(T)&&/updated plan/.test(T)&&/before any agreement/.test(T)&&/no pressure/.test(T),'C: stop 2 covers the questionnaire, the plan and no pressure');
-    if(k===3) expect(/opinion of value/.test(T)&&/only takes effect when you receive the appraisal/.test(T)&&/cancel within 2 working days of receiving it, at no cost/.test(T),'C: stop 3 covers the appraisal and the 2 working days');
+    if(k===3) expect(/in person or by video/.test(T)&&/talk the plan through/.test(T)&&/only talk about my fee once you have decided who the best agent is for you/.test(T)&&/agreed with all of the owners and confirmed in writing/.test(T)&&/only takes effect when you receive the appraisal/.test(T)&&/cancel within 2 working days of receiving it, at no cost/.test(T)&&!/opinion of value/.test(T),'C: stop 3 covers the sit-down, the fee rule and the 2 working days, and the appraisal visit has moved to stop 1');
     if(k===4){ expect(/sole agency agreement/.test(T)&&/legal advice/.test(T)&&/review link to your lawyer/.test(T)&&/cooling-off period applies to residential agency agreements/.test(T)&&/cancellation notice/.test(T)&&/complaints and dispute resolution/i.test(T)&&/List Now/.test(T)&&/up front, in instalments, or have it taken at settlement/.test(T)&&/administration fee covers identity checks and other statutory onboarding costs/.test(T),'C: stop 4 covers the agreement facts');
       const g=await p.$$eval('#main .p-rea a',a=>a.map(x=>x.href)); expect(g.some(h=>/rea\.govt\.nz.*Agency-agreement-guide/.test(h))&&g.some(h=>/rea\.govt\.nz.*Sale-and-purchase/.test(h)),'C: stop 4 links the REA guides: '+g);
       const tr=await p.$$eval('#main .p-rea [data-rea-lang]',a=>a.map(x=>x.getAttribute('href')));
