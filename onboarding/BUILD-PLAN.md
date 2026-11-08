@@ -111,6 +111,14 @@ Goal: an illustrated selling pathway, reached from every vendor screen, showing 
 
 Tests: the map renders at 390 px without sideways scroll, the marker follows the stage, every stop links.
 
+Added 9 November 2026 (Tim: the journey doubles as a pitch page): a public, shareable page at `#journey` (no sign-in, no data
+read) and a page for each stop at `#journey/<slug>` (thinking-of-selling, your-updated-plan, meeting-tim, your-agreement,
+identity-check, getting-ready, on-the-market, an-offer, sold-and-settling). Wording lives in `window.JOURNEY_PITCH` in
+`src/strings.js`, in Tim's voice, with no fee, price, statistic or timeframe (Tim discusses his fee only once a seller has
+chosen the best agent, then it is agreed with all owners in writing). Signed-in vendors see "You are here" and a "Go to this
+step" button under the same link rules as the panel; the panel gains "Read more" on every stop. No database or edge function
+change. Test: `journey-pitch.test.js`.
+
 ## Phase 4: translation
 
 Status: done 6 November 2026 (migration 008). Changed 8 November 2026 (migration 011, Tim's decision): machine

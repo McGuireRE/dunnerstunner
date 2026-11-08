@@ -19,6 +19,8 @@
   const fmtDate = d => new Date(d).toLocaleDateString('en-NZ', { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Pacific/Auckland' });
   const fmtDT = d => new Date(d).toLocaleString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: 'Pacific/Auckland' });
   const main = () => $('#main');
+  let PITCH_ON = false;   // the public journey page (#journey) is on screen
+  const DEFAULT_TITLE = document.title;
   // The app's own AI translation is switched off (Tim, 9 November 2026): vendors use their browser's built-in page translation.
   // Everything for it is kept, and one switch brings it back: no language picker, no translation or language requests, no
   // Translations screen, and no automatic translating of plans and variations while this is false.
@@ -37,7 +39,8 @@
   }
   const saveNote = label => `<p class="sig-save-note">When you're happy with it, press <strong>${esc(label)}</strong>. Your signature isn't saved until you do.</p>`;
   function header(name, count, pct) {
-    if (IS_AGENT) setAgentNav(); $('#stepName').textContent = name || ''; JDIRTY = false; $('#stepName').dataset.count = count || ''; $('#stepCount').textContent = count || ''; $('#barFill').style.width = (pct || 0) + '%'; }
+    const wasPitch = PITCH_ON; PITCH_ON = false; document.title = DEFAULT_TITLE;   // every other screen leaves the journey page and its title behind
+    if (IS_AGENT || wasPitch) setAgentNav(); $('#stepName').textContent = name || ''; JDIRTY = false; $('#stepName').dataset.count = count || ''; $('#stepCount').textContent = count || ''; $('#barFill').style.width = (pct || 0) + '%'; }
   function actions(show, backLabel, nextLabel) {
     $('#actions').hidden = !show;
     if (!show) return;
@@ -480,7 +483,7 @@
     $('#signOut').hidden = !SESSION;
     closeJourney(); JCTX.pid = null; JREADY = false;
     IS_AGENT = false; setAgentNav();
-    if (!SESSION) { JREADY = true; setAgentNav(); return viewLogin(); }
+    if (!SESSION) { JREADY = true; setAgentNav(); return pitchRoute() ? viewPitch() : viewLogin(); }   // the journey pages are public: no sign-in, and no data read
     let qlr = null; try { qlr = localStorage.getItem('qlReturn'); localStorage.removeItem('qlReturn'); } catch (_) { }
     if (qlr) { try { const u = new URL(qlr); if (u.origin === location.origin && u.pathname !== location.pathname) return location.replace(qlr); } catch (_) { } }
     IS_AGENT = !!(await must(sb.rpc('is_agent'))); JREADY = true; setAgentNav();
@@ -489,6 +492,7 @@
     let pend = null; try { pend = JSON.parse(localStorage.getItem('pendingCampaign') || 'null'); } catch (_) { }
     if (IS_AGENT && pend) { try { localStorage.removeItem('pendingCampaign'); } catch (_) { } return viewTable(null, pend); }
     setAgentNav();
+    if (pitchRoute()) return viewPitch();
     if (IS_AGENT) return viewAgentHome();
     return viewVendorHome();
   }
@@ -1556,7 +1560,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const nav = $('#agentNav'); if (!nav) return;
     nav.hidden = !IS_AGENT; document.body.classList.toggle('is-agent', !!IS_AGENT);
     const lw = $('#langWrap'); if (lw) lw.hidden = !!IS_AGENT || !APP_TRANSLATION;
-    const jb = $('#journeyBtn'); if (jb) jb.hidden = !!IS_AGENT || !JREADY;   // the Journey button is for vendors, and for anyone not signed in
+    const jb = $('#journeyBtn'); if (jb) jb.hidden = !!IS_AGENT || !JREADY || PITCH_ON;   // the Journey button is for vendors, and for anyone not signed in; the journey page is itself the journey
     $('#navHome').toggleAttribute('aria-current', cur === 'home'); if (cur === 'home') $('#navHome').setAttribute('aria-current', 'page');
     if ($('#navTr')) { $('#navTr').hidden = !APP_TRANSLATION; $('#navTr').removeAttribute('aria-current'); if (cur === 'tr') $('#navTr').setAttribute('aria-current', 'page'); }
     $('#navDash').toggleAttribute('aria-current', cur === 'dash'); if (cur === 'dash') $('#navDash').setAttribute('aria-current', 'page');
@@ -3622,7 +3626,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   const JSTOPS = [
     { t: 'Thinking of selling', say: 'This is where it starts: Tim gives you an appraisal of your property, and you tell him what matters to you about selling. Nothing is signed at this stage.' },
     { t: 'Your updated plan', say: 'Tim reads your answers and sends you an updated plan, showing what you said and what he has changed. You can tick that it works for you, or ask him a question.' },
-    { t: 'Meeting Tim', say: 'You and Tim sit down, in person or by video, to talk the plan through and agree the details, including his fee.' },
+    { t: 'Meeting Tim', say: 'You and Tim sit down, in person or by video, to talk the plan through and agree the details.' },
     { t: 'Your agreement', say: 'You read your agency agreement in plain English, ask your lawyer first if you would like to, and then everyone on the title signs, each from their own phone.' },
     { t: 'Identity check', say: 'The law asks Tim to confirm who each seller is before he acts for you. Each person shows a driver\'s licence or passport, and something with their address.' },
     { t: 'Getting ready', say: 'After you sign, there is some paperwork so buyers have what they need: the Vendor Declaration, a Healthy Homes statement if your property is tenanted, and the Real Estate Authority\'s guide to sale and purchase agreements, under Before you sell. Tim also gets your marketing ready with you.' },
@@ -3708,7 +3712,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       return `<li class="jcard ${c}" id="jc${o.uid}-${k}" data-jc="${k}" tabindex="-1" ${c === 'here' ? 'aria-current="step"' : ''}>
         <div class="jc-h"><span class="jc-n" aria-hidden="true">${c === 'done' ? '✓' : k}</span><h3>${esc(s.t)}</h3>${tag ? `<span class="jc-st">${esc(tag)}</span>` : ''}</div>
         ${o.agent ? '' : `<p>${esc(s.say).replace(' There is no page for this stop yet.', '<span class="nopage"> There is no page for this stop yet.</span>')}</p>`}${det ? `<p class="jdetail">${esc(det)}</p>` : ''}
-        ${links[k] ? `<div class="toolbar"><button class="btn ghost jgo" type="button" data-jgo="${k}">${esc(links[k].label)}</button></div>` : ''}
+        ${links[k] || !o.agent ? `<div class="toolbar">${links[k] ? `<button class="btn ghost jgo" type="button" data-jgo="${k}">${esc(links[k].label)}</button>` : ''}${o.agent ? '' : `<a class="btn ghost" href="${pHref(i)}" data-jmore="${k}" aria-label="${esc(PJ().labels.readMore + ': ' + s.t)}">${esc(PJ().labels.readMore)}</a>`}</div>` : ''}
       </li>`;
     }).join('')}</ol>`;
   }
@@ -3827,6 +3831,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     if (e.target.closest('#jPrint')) return window.print();
     const pk = e.target.closest('[data-jpick]');
     if (pk) { JCTX.pid = null; const f = await jLoadVendor(pk.dataset.jpick); return jRender(f, null); }
+    const more = e.target.closest('[data-jmore]'); if (more) { e.preventDefault(); return jMore(+more.dataset.jmore - 1); }
     const go = e.target.closest('[data-jgo]'); if (go) return jGo(+go.dataset.jgo);
     const st = e.target.closest('.jstop[data-j]'); if (st) jActivate(+st.dataset.j);
   });
@@ -3834,6 +3839,141 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('.jstop[data-j]')) { e.preventDefault(); jActivate(+e.target.dataset.j); }
   });
   document.addEventListener('keydown', e => { if (e.key === 'Escape') closeJourney(); });
+
+  /* ═════════ THE JOURNEY AS A PITCH PAGE (Tim, 9 November 2026): public pages for the map (#journey) and each stop (#journey/<slug>) ═════════
+     No sign-in needed and nothing read when signed out. A signed-in vendor sees the same pages with "You are here", read through exactly
+     what the journey panel reads. All the wording is in strings.js (window.JOURNEY_PITCH). Nothing here states a fee: Tim talks about his
+     fee only once a seller has decided who the best agent is, and it is then agreed with all owners in writing. */
+  const PJ = () => window.JOURNEY_PITCH;
+  const pHref = i => '#journey/' + PJ().stops[i].slug;
+  const T_TEL = '0275627207', T_EMAIL = 'tim@mcguire.co.nz', PACKAGES_URL = 'https://packages.dunnerstunner.co.nz/';
+  function pitchRoute() {
+    const m = /^#journey(?:\/([a-z0-9-]+))?\/?$/i.exec(location.hash || ''); if (!m) return null;
+    const slug = (m[1] || '').toLowerCase(), i = slug ? PJ().stops.findIndex(s => s.slug === slug) : -1;
+    return { slug, i, bad: !!slug && i < 0 };
+  }
+  // wording to paragraph HTML: the phone number, Tim's email and the packages site become links
+  const pText = t => esc(t)
+    .replace(/027 562 7207/g, `<a href="tel:${T_TEL}">027 562 7207</a>`)
+    .replace(/tim@mcguire\.co\.nz/g, `<a href="mailto:${T_EMAIL}">${T_EMAIL}</a>`)
+    .replace(/packages\.dunnerstunner\.co\.nz/g, `<a href="${PACKAGES_URL}" target="_blank" rel="noopener">packages.dunnerstunner.co.nz</a>`);
+  const pCta = () => { const c = PJ().cta; return `<section class="card note pitch-cta"><h2>${esc(c.heading)}</h2><p>${pText(c.text)}</p>
+    <div class="toolbar no-print"><a class="btn primary" href="tel:${T_TEL}">${esc(c.call)}</a><a class="btn ghost" href="sms:${T_TEL}">${esc(c.sms)}</a><a class="btn ghost" href="mailto:${T_EMAIL}">${esc(c.email)}</a></div></section>`; };
+  const pHead = () => { const logo = ($('.logo-light') || {}).src || ''; return `<div class="print-only phead"><img src="${esc(logo)}" alt="McGuire Real Estate"><span translate="no">Tim McGuire<br>027 562 7207<br>${T_EMAIL}</span></div>`; };
+  const pFoot = () => `<p class="small pitch-foot">${esc(PJ().footer)}</p>`;
+  const pTop = f => `<div class="p-top no-print">${SESSION && !IS_AGENT ? `<button class="btn ghost" type="button" data-psign>${esc(PJ().labels.yourPage)}</button>` : !SESSION ? `<button class="btn ghost" type="button" data-psign>${esc(PJ().labels.signIn)}</button>` : '<span></span>'}<button class="btn ghost" type="button" id="pPrint">${esc(PJ().labels.print)}</button></div>`;
+  const pStatus = (st, f, k) => { const c = jStateOf(st, f, k); return { c, tag: c === 'here' ? J_STATE_TEXT.here : J_STATE_TEXT[c], det: jDetail(k, f) }; };
+
+  function pMapHTML(f, choose, rows, st, links) {
+    const P = PJ(), L = P.labels, signedIn = !!f;
+    const cards = JSTOPS.map((s, i) => {
+      const k = i + 1, { c, tag, det } = pStatus(st, f, k);
+      return `<li class="jcard ${c}" ${c === 'here' ? 'aria-current="step"' : ''}>
+        <div class="jc-h"><span class="jc-n" aria-hidden="true">${c === 'done' ? '✓' : k}</span><h3>${esc(s.t)}</h3>${tag ? `<span class="jc-st">${esc(tag)}</span>` : ''}</div>
+        <p>${esc(P.stops[i].short)}</p>${det ? `<p class="jdetail">${esc(det)}</p>` : ''}
+        <div class="toolbar"><a class="btn ghost" href="${pHref(i)}" aria-label="${esc(L.readMore + ': ' + s.t)}">${esc(L.readMore)}</a>${links[k] ? `<button class="btn primary" type="button" data-pgo="${k}">${esc(L.goStep)}</button>` : ''}</div>
+      </li>`;
+    }).join('');
+    const all = {}; for (let k = 1; k <= 9; k++) all[k] = true;
+    return `<div class="pitch pitch-map">${pTop(f)}${pHead()}
+      <p class="p-kick">${esc(P.eyebrow)}</p>
+      <h1 id="pTitle" tabindex="-1">${esc(P.docTitle)}</h1>
+      ${f && f.address ? `<p class="jaddr">${nt(f.address)}</p>` : ''}
+      <p class="lede">${esc(P.intro[0])}</p><p class="lede">${esc(P.intro[1])}</p>
+      ${signedIn && st.cur ? `<p class="small">${esc(P.signedInIntro)}</p>` : ''}
+      ${choose ? `<div class="card tight no-print" id="pChoose"><h3>${esc(L.which)}</h3><p class="small" style="margin:0 0 8px">${esc(L.whichText)}</p><div class="toolbar" style="margin:0">${choose.map(r => `<button class="btn ghost" type="button" data-ppick="${esc(r.id)}">${esc(r.address || 'Address to come')}</button>`).join('')}</div></div>` : ''}
+      ${rows && rows.length > 1 && f ? `<div class="toolbar no-print" style="margin:0 0 6px"><button class="btn ghost" type="button" data-ppick="">${esc(L.change)}</button></div>` : ''}
+      <div class="jwrap"><div class="jmapcol">${jMapSVG(st, f, { links: all })}</div><div><ol class="jlist" aria-label="The nine stops">${cards}</ol></div></div>
+      <section class="card pitch-fee"><h2>${esc(P.feeHeading)}</h2><p>${esc(P.fee)}</p></section>
+      ${pCta()}${pFoot()}</div>`;
+  }
+
+  function pStopHTML(i, f, st, links) {
+    const P = PJ(), L = P.labels, S = P.stops[i], k = i + 1, title = JSTOPS[i].t, { c, tag, det } = pStatus(st, f, k);
+    const guideBox = key => `<div class="p-rea" data-guide="${key}"><a href="${key === 'agency' ? REA_AA : REA_SP}" target="_blank" rel="noopener">${esc(L.guideEn)}</a></div>`;
+    const docs = S.docs.map(d => typeof d === 'string' ? `<li>${pText(d)}</li>` : `<li>${pText(d.t)}${d.k === 'rea_agency' ? guideBox('agency') : d.k === 'rea_sp' ? guideBox('sale_purchase') : ''}</li>`).join('');
+    const dots = JSTOPS.map((s, j) => `<li><a href="${pHref(j)}" ${j === i ? 'aria-current="page"' : ''} aria-label="${esc(trs('{n} of 9: {stop}.', { n: j + 1, stop: trs(s.t) }))}">${j + 1}</a></li>`).join('');
+    const prev = i > 0 ? `<a class="btn ghost" href="${pHref(i - 1)}">${esc(L.prev)}: ${esc(JSTOPS[i - 1].t)}</a>` : '';
+    const next = i < 8 ? `<a class="btn primary" href="${pHref(i + 1)}">${esc(L.next)}: ${esc(JSTOPS[i + 1].t)}</a>` : `<a class="btn primary" href="${pHref(0)}">${esc(L.start)}</a>`;
+    return `<article class="pitch pitch-stop">
+      <nav class="p-crumb no-print" aria-label="Breadcrumb"><a href="#journey">${esc(L.mapLink)}</a></nav>${pHead()}
+      <p class="p-kick">${esc(L.stopOf.replace('{n}', k))}</p>
+      <h1 id="pTitle" tabindex="-1">${esc(title)}</h1>
+      ${f && f.address ? `<p class="jaddr">${nt(f.address)}</p>` : ''}
+      ${tag ? `<p class="p-state"><span class="jc-st ${c}">${esc(tag)}</span>${det ? ` <span class="jdetail">${esc(det)}</span>` : ''}</p>` : ''}
+      <p class="lede p-open">${pText(S.opening)}</p>
+      ${links[k] ? `<div class="toolbar no-print"><button class="btn primary" type="button" data-pgo="${k}">${esc(L.goStep)}</button></div>` : ''}
+      <nav class="no-print" aria-label="All stops"><ol class="p-dots">${dots}</ol></nav>
+      <section class="card"><h2>${esc(L.happens)}</h2>${S.happens.map(t => `<p>${pText(t)}</p>`).join('')}</section>
+      <section class="card"><h2>${esc(L.you)}</h2><ul>${S.you.map(t => `<li>${pText(t)}</li>`).join('')}</ul></section>
+      <section class="card"><h2>${esc(L.tim)}</h2><ul>${S.tim.map(t => `<li>${pText(t)}</li>`).join('')}</ul></section>
+      <section class="card"><h2>${esc(L.docs)}</h2><ul>${docs}</ul></section>
+      <section class="card p-faq"><h2>${esc(L.faq)}</h2>${S.faq.map(([q, a]) => `<div class="p-qa"><h3>${esc(q)}</h3><p>${pText(a)}</p></div>`).join('')}</section>
+      <section class="card p-next"><h2>${esc(L.nextHeading)}</h2>${i < 8 ? `<p><strong>${esc(JSTOPS[i + 1].t)}.</strong> ${esc(P.stops[i + 1].short)}</p>` : `<p>${esc(L.nextEnd)}</p>`}
+        <div class="toolbar no-print">${next}${prev}<a class="btn ghost" href="#journey">${esc(L.mapLink)}</a></div></section>
+      ${pCta()}${pFoot()}</article>`;
+  }
+
+  // The Authority's own translations of a guide, beside the English link. guides.json is a public file; it is read once, and only when a page shows a guide.
+  let GUIDES_TRIED = false;
+  async function pFillGuides() {
+    const boxes = $$('.p-rea[data-guide]:not([data-filled])'); if (!boxes.length) return;
+    if (!Object.keys(GUIDES).length && !GUIDES_TRIED) { GUIDES_TRIED = true; await loadGuides(); }
+    boxes.forEach(async box => {
+      box.setAttribute('data-filled', '1');
+      const g = GUIDES[box.dataset.guide]; if (!g) return;
+      const ts = await reaCheck(g);
+      if (!box.isConnected || !ts.length) return;
+      box.insertAdjacentHTML('beforeend', `<p class="small" style="margin:8px 0 4px">${esc(PJ().labels.ownerLine)}</p><p class="rea-tr-links" data-no-tr style="margin:0">${ts.map(t => `<a class="btn ghost" href="${esc(t.url)}" target="_blank" rel="noopener" data-rea-lang="${t.code}">${esc(t.language)} (PDF)</a>`).join(' ')}</p>`);
+    });
+  }
+
+  let PITCH_SEQ = 0, PITCH_PID = null, PITCH_CACHE = null, PITCH_LINKS = {};
+  async function pLoad() {
+    const rows = (await jOne(sb.from('properties').select('id,address,stage').order('created_at', { ascending: false }))) || [];
+    let pid = PITCH_PID && rows.some(x => x.id === PITCH_PID) ? PITCH_PID : null;
+    if (!pid && rows.length === 1) pid = rows[0].id;
+    return { rows, choose: !pid && rows.length > 1 ? rows : null, f: pid ? await jLoadVendor(pid) : null };
+  }
+  async function viewPitch() {
+    const seq = ++PITCH_SEQ, keep = PITCH_ON, r = pitchRoute() || { slug: '', i: -1 };
+    closeJourney(); JVIEW = {};
+    header('', '', 0); actions(false); PITCH_ON = true; setAgentNav();
+    if (!keep) PITCH_CACHE = null;
+    if (SESSION && !IS_AGENT && !PITCH_CACHE) {   // a signed-in vendor: only what the journey panel reads
+      main().innerHTML = '<div class="loading">Loading...</div>';
+      const c = await pLoad(); if (seq !== PITCH_SEQ || !PITCH_ON) return; PITCH_CACHE = c;
+    }
+    const c = SESSION && !IS_AGENT ? PITCH_CACHE : { rows: [], choose: null, f: null };
+    const f = c.f, st = jState(f), links = jVendorLinks(f); PITCH_LINKS = links;
+    const P = PJ(), base = P.docTitle + ' · McGuire Real Estate';
+    document.title = r.i >= 0 ? JSTOPS[r.i].t + ' · ' + base : base;
+    main().innerHTML = (r.bad ? `<div class="card note tight"><p class="small" style="margin:0">${esc(P.labels.notFound)}</p></div>` : '') + (r.i >= 0 ? pStopHTML(r.i, f, st, links) : pMapHTML(f, c.choose, c.rows, st, links));
+    window.scrollTo(0, 0); const h = $('#pTitle'); if (h) h.focus({ preventScroll: true });
+    pFillGuides(); btSync();
+  }
+  const pNav = i => { const h = pHref(i); if (location.hash === h) viewPitch(); else location.hash = h; };
+  async function pGo(k) {
+    const l = PITCH_LINKS[k]; if (!l) return;
+    try { history.replaceState(null, '', location.pathname + location.search); } catch (_) { }   // the page leaves the journey: its address goes with it
+    try { await l.go(); } catch (e) { console.error(e); }
+  }
+  function jMore(i) {   // "Read more" in the vendor's panel
+    if (JDIRTY && !confirm(trs('You have typed something on this page that is not saved yet. If you go to another page it will be lost. Go anyway?'))) return;
+    closeJourney(); pNav(i);
+  }
+  $('#main').addEventListener('click', async e => {
+    if (!PITCH_ON) return;
+    const st = e.target.closest('.jstop[data-j]'); if (st) return pNav(+st.dataset.j - 1);
+    const go = e.target.closest('[data-pgo]'); if (go) return pGo(+go.dataset.pgo);
+    const pk = e.target.closest('[data-ppick]'); if (pk) { PITCH_PID = pk.dataset.ppick || null; PITCH_CACHE = null; PITCH_ON = true; return viewPitch(); }
+    if (e.target.closest('#pPrint')) return window.print();
+    if (e.target.closest('[data-psign]')) { try { history.replaceState(null, '', location.pathname + location.search); } catch (_) { } return boot().catch(console.error); }
+  });
+  $('#main').addEventListener('keydown', e => {
+    if (!PITCH_ON || (e.key !== 'Enter' && e.key !== ' ')) return;
+    const st = e.target.matches && e.target.matches('.jstop[data-j]') ? e.target : null; if (st) { e.preventDefault(); pNav(+st.dataset.j - 1); }
+  });
 
   /* Tim: the "Where are they" tile on a property page */
   function jTileHTML(p, live, pforms, pl) {
@@ -3907,6 +4047,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
 
   const lawyerToken = new URLSearchParams(location.search).get('lawyer');
   if (lawyerToken) { const w = $('#langWrap'); if (w) w.hidden = true; viewLawyer(lawyerToken); return; }
+  window.addEventListener('hashchange', () => { if (pitchRoute()) viewPitch(); else if (PITCH_ON) boot().catch(console.error); });
   I18N.init(); I18N.setHooks({ pick: c => chooseLang(c) });
   if (APP_TRANSLATION) { const l0 = readLocalLang(); if (l0 && l0 !== 'en') chooseLang(l0, { fromRecord: true }); }
 

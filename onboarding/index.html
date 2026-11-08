@@ -358,6 +358,47 @@ svg.jmap { display: block; width: 100%; max-width: 360px; height: auto; margin: 
 .jtile summary { cursor: pointer; font-weight: 600; }
 .jtoggle { display: none; margin-bottom: 8px; }
 @media (max-width: 759px) { .jtile .jtoggle { display: inline-block; } .jtile .jlist:not(.open) .jcard:not(.here) { display: none; } .jtile:not(.jopen) .jtile-map { display: none; } }
+/* the journey as a pitch page (Tim, 9 November 2026): public pages for the map and each stop, in the same tile and card look */
+main:has(> .pitch-map) { max-width: 920px; }
+.pitch { padding-bottom: 28px; }
+.pitch h1:focus { outline: none; }
+.pitch .p-kick { margin: 0 0 6px; font-size: 13px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.pitch .p-top { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+.pitch .p-top .btn, .pitch .p-crumb a { font-size: 15.5px; padding: 9px 16px; }
+.pitch .p-crumb { margin-bottom: 14px; }
+.pitch .p-crumb a { display: inline-block; font-weight: 600; text-decoration: none; padding: 9px 0; }
+.pitch a.btn { display: inline-block; text-decoration: none; text-align: center; max-width: 100%; }
+.pitch .btn.primary { background: var(--accent-fill); border-color: var(--accent-fill); color: var(--on-accent); }   /* white on the AA accent in light, dark ink on the lighter accent at night */
+.pitch .lede { margin: 0 0 12px; }
+.pitch .p-open { color: var(--ink); font-size: 19px; }
+.pitch .card h2 { margin: 0 0 8px; font-size: 25px; }
+.pitch .card p { margin: 0 0 10px; }
+.pitch .card ul { margin: 4px 0 0; padding-left: 20px; }
+.pitch .card li { margin: 6px 0; }
+.pitch .card > :last-child { margin-bottom: 0; }
+.pitch .p-qa { padding: 12px 0; border-top: 1px solid var(--line); }
+.pitch .p-qa:first-of-type { border-top: 0; padding-top: 4px; }
+.pitch .p-qa h3 { margin: 0 0 4px; }
+.pitch .p-qa p { margin: 0; }
+.pitch .p-state { margin: 0 0 10px; }
+.pitch .p-state .jc-st.done { background: var(--ok-soft); color: var(--ok-text); }
+.pitch .p-state .jc-st.here { background: var(--accent-fill); color: var(--on-accent); }
+.pitch .p-state .jc-st.ahead { background: transparent; border: 1px solid var(--line); color: var(--muted); }
+.pitch .p-state .jdetail { font-weight: 500; }
+.pitch .p-dots { list-style: none; display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 6px; padding: 0; }
+.pitch .p-dots a { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--line); background: var(--surface); color: var(--ink); font-weight: 600; text-decoration: none; }
+.pitch .p-dots a[aria-current="page"] { background: var(--accent-fill); border-color: var(--accent-fill); color: var(--on-accent); }
+.pitch .p-dots a:focus-visible, .pitch .p-crumb a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.pitch .p-rea { margin-top: 6px; overflow-wrap: anywhere; }
+.pitch .p-rea .rea-tr-links { display: flex; flex-wrap: wrap; gap: 8px; }
+.pitch .p-rea .btn { padding: 8px 14px; font-size: 15px; }
+.pitch .pitch-cta { margin-top: 22px; }
+.pitch .pitch-cta .toolbar .btn { flex: 1 1 140px; }
+.pitch .p-next .toolbar .btn { flex: 1 1 100%; }
+.pitch .pitch-foot { margin-top: 18px; }
+.pitch .jwrap .jmapcol { top: 100px; }
+.pitch .jcard .jc-st.here { white-space: nowrap; }
+.pitch .jcard .toolbar .btn { flex: 0 1 auto; }
 .print-only { display: none; }
 @page journey { size: A4; margin: 12mm; }
 .sub-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 6px; }
@@ -417,6 +458,21 @@ body.is-agent .tr-help { display: none; }
   .jnote { margin-top: 2mm; font-size: 9pt; }
   .jc-st, .jc-n { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .jmap .pulse { animation: none; opacity: 0; }
+  /* the journey pages on paper: a clean leaflet with the map, the stops and Tim's contact details in plain text */
+  main:has(> .pitch) { max-width: none; padding: 0 !important; }
+  .pitch .print-only.phead { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 2px solid var(--accent); padding-bottom: 6px; margin-bottom: 8px; }
+  .pitch .phead img { height: 11mm; width: auto; }
+  .pitch .phead span { font-size: 10pt; text-align: right; }
+  .pitch h1 { font-size: 24pt; }
+  .pitch .p-open, .pitch .lede { font-size: 11.5pt; color: #000; }
+  .pitch .card { padding: 3mm 4mm; margin: 3mm 0; break-inside: auto; }
+  .pitch .card h2 { font-size: 15pt; break-after: avoid; }
+  .pitch .p-qa, .pitch .jcard { break-inside: avoid; }
+  .pitch .jwrap { grid-template-columns: 74mm minmax(0, 1fr); gap: 7mm; }
+  .pitch .jwrap .jmapcol { position: static; }
+  .pitch .jcard p { font-size: 9.5pt; }
+  .pitch a { color: #000; text-decoration: none; }
+  .pitch-map .jc-h h3 { font-size: 11pt; }
 }
 </style>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
@@ -577,7 +633,7 @@ window.I18N_STRINGS = {
     "Your updated plan",
     "Tim reads your answers and sends you an updated plan, showing what you said and what he has changed. You can tick that it works for you, or ask him a question.",
     "Meeting Tim",
-    "You and Tim sit down, in person or by video, to talk the plan through and agree the details, including his fee.",
+    "You and Tim sit down, in person or by video, to talk the plan through and agree the details.",
     "Your agreement",
     "You read your agency agreement in plain English, ask your lawyer first if you would like to, and then everyone on the title signs, each from their own phone.",
     "Identity check",
@@ -1556,6 +1612,372 @@ window.I18N_STRINGS = {
  ]
 };
 
+// The journey as a pitch page (Tim, 9 November 2026). Public, shareable pages: #journey for the map and #journey/<slug> for each stop.
+// All the wording is here, in Tim's voice ("I"). Nothing on these pages states a fee, a price, a statistic, a result or a timeframe.
+// Fees: Tim talks about his fee only once a seller has decided who the best agent is, and it is then agreed with all owners in writing.
+// Items in "docs" are plain text, or { t: text, k: guide } where k is 'rea_agency' or 'rea_sp' (the Authority's own guide, and its own translations).
+// The wording is also added to the translation catalogue (screens, group "pitch") at the end of this file, so there is one source.
+window.JOURNEY_PITCH = {
+ eyebrow: "McGuire Real Estate",
+ docTitle: "Your selling journey",
+ intro: [
+  "Selling a property is a big decision, and it helps to know the road before you set out. This is how I work with sellers, from the first conversation through to settlement, in nine stops.",
+  "My aim is the best price for you, not just a fast sale. Tap any stop to read what happens there, what I will ask of you, and what I will do for you."
+ ],
+ signedInIntro: "The marker shows the stop you are at with me right now. Tap any stop to read about it, or to go to its page.",
+ feeHeading: "A word about my fee",
+ fee: "I only talk about my fee once you have decided who the best agent is for you. It is then agreed with all of the owners, in writing. Until then, my job is to show you how I would work for you and why it matters.",
+ cta: {
+  heading: "Book an appraisal with me",
+  text: "The first step is a conversation. Call or text me on 027 562 7207, or email tim@mcguire.co.nz, and we can arrange a time for me to come and see your property.",
+  call: "Call Tim",
+  sms: "Text Tim",
+  email: "Email Tim"
+ },
+ footer: "Tim McGuire, McGuire Real Estate Ltd, Licensed REAA 2008. This page is a general guide to how I work. Your agency agreement is what sets out the terms between us.",
+ labels: {
+  readMore: "Read more",
+  goStep: "Go to this step",
+  mapLink: "Back to the map",
+  prev: "Previous stop",
+  next: "Next stop",
+  start: "Back to the first stop",
+  stopOf: "Stop {n} of 9",
+  nextHeading: "What is next",
+  nextEnd: "This is the last stop on the road. If you would like to start at the beginning, or talk to me about your own property, I would love to hear from you.",
+  happens: "What happens at this stop",
+  you: "What you do",
+  tim: "What I do for you, and why it matters",
+  docs: "Documents and checks",
+  faq: "Common questions",
+  print: "Print this page",
+  signIn: "Already working with me? Sign in",
+  yourPage: "Go to your page",
+  change: "Choose another property",
+  which: "Which property?",
+  whichText: "You have more than one. Choose the one you would like to see.",
+  ownerLine: "The Real Estate Authority also publishes this guide in other languages. These are the Authority's own translations, not mine.",
+  guideEn: "Read the guide (English, from the Real Estate Authority)",
+  notFound: "That page was not found, so here is the whole road.",
+  printed: "Printed from packages.dunnerstunner.co.nz/onboarding"
+ },
+ stops: [
+  {
+   slug: "thinking-of-selling",
+   short: "We have an honest talk about price, your reasons for moving, and your timing. Nothing is signed.",
+   opening: "This is where it starts, often with a question rather than a decision. You do not need to have the answers yet. What I want is the best price for you, not just a fast sale, and the best way to get there is an honest conversation at the very beginning.",
+   happens: [
+    "We talk it through. Before I take on any listing I like to talk honestly with sellers about three things: price, which means being realistic about what the property is worth; your reasons for moving; and your timing. Being honest about these early saves you time and money, because the plan we make is built on what is real for you.",
+    "I also want to know about the property itself, including every issue. I would much rather raise those with you in person than have you work through forms on your own. Sellers often tell me they are amazed how far I go to point out defects, and I do it because it protects you later in the sale.",
+    "Nothing is signed at this stage."
+   ],
+   you: [
+    "Tell me what you would like to achieve, and the price you have in mind.",
+    "Share your reasons for moving, and any dates that matter to you.",
+    "Tell me about anything you know of that is wrong or worrying with the property, big or small.",
+    "Ask me anything. There is no pressure to decide anything."
+   ],
+   tim: [
+    "I am working for the best price, not just a quick sale. A fast result is not always the best one for you.",
+    "I will be realistic about what your property is worth, and explain why, so there are fewer surprises later.",
+    "I will point out defects and issues early, in person. Knowing about them now protects you later in the sale, when it matters most.",
+    "I will listen to your reasons and your timing, and shape everything else around them."
+   ],
+   docs: [
+    "Nothing to sign at this stop.",
+    "If you have the title, reports or council paperwork for the property, they are useful to look at together. You do not need to gather anything first."
+   ],
+   faq: [
+    ["Do I have to sign anything to get started?", "No. Nothing is signed at this stage. It is a conversation."],
+    ["Why do you ask about my reasons for moving and my timing?", "Together with price, they shape the whole plan. Being honest about all three early saves you time and money, because we avoid building a plan on something that does not fit."],
+    ["What if I think my property is worth more than you do?", "I will tell you honestly what I think and why, and I will listen to your view. It is far better to talk about it at the start than to find the gap later."],
+    ["Why do you want to hear about every defect?", "Because it protects you. If I know about an issue early, we can deal with it properly, and it does not come as a surprise to you or to a buyer later in the sale. I prefer to raise these in person rather than on forms."],
+    ["Is this only about selling quickly?", "No. I want the best price for you. For some sellers that means moving quickly and for others it means taking the time to get it right, which is why I ask about your timing."]
+   ]
+  },
+  {
+   slug: "your-updated-plan",
+   short: "You answer a short questionnaire, and I send you an updated plan that addresses your concerns.",
+   opening: "After we have met and I have given you my appraisal, I do not want to hand you a plan that could be for anyone. I would like to hear what matters to you first. So I ask you a few short, open questions, and then I send you an updated plan that speaks to your concerns, before you are asked to agree to anything.",
+   happens: [
+    "After we have met, you answer a short questionnaire about what matters to you, any concerns you have, and anything else you have been offered. The questions are open, so you can answer in your own words, and there is no pressure.",
+    "I read your answers and send you an updated plan. It shows what you told me and what I have changed in response. You can tick that it works for you, or ask me a question. This all happens before any agreement."
+   ],
+   you: [
+    "Answer the short questionnaire in your own words. You can do it on your phone.",
+    "Tell me what matters most to you about selling, and what worries you.",
+    "Tell me about anything else you have been offered, so the plan answers your real questions.",
+    "Read the updated plan, then tick that it works for you or ask me a question."
+   ],
+   tim: [
+    "I read every answer myself, and I shape the plan around what you have said, not around a template.",
+    "I address your concerns directly in the updated plan, so you can see what I have done about each of them.",
+    "I keep it low pressure. The questions are open and the plan comes before any agreement, so you have room to think."
+   ],
+   docs: [
+    "The short questionnaire about what matters to you.",
+    "Your updated plan, showing what you said and what I have changed.",
+    "Nothing here is an agreement. The plan comes before any agreement."
+   ],
+   faq: [
+    ["Is the questionnaire long?", "It is short, and the questions are open, so you answer in your own words."],
+    ["What if I have been offered something by someone else?", "Tell me about it. I would rather know what you have been offered, so the plan answers your real questions."],
+    ["Does answering the questionnaire commit me to anything?", "No. The plan comes before any agreement, and nothing is signed at this stage."],
+    ["Do I have to accept the plan?", "No. You can tick that it works for you, or ask me a question. It is your decision."],
+    ["What if I am not sure how to put a concern into words?", "Say it however it comes. The questions are open, and if something is unclear I will follow it up with you."]
+   ]
+  },
+  {
+   slug: "meeting-tim",
+   short: "I visit, look at your property in person, and give you my opinion of value with my reasoning.",
+   opening: "This is where I come to see your property. I want to look at it in person, because a photo or a database cannot tell me what walking through it does. Then I give you my opinion of what it is worth, along with the reasoning behind it, so you can see exactly how I got there.",
+   happens: [
+    "I visit and look at the property in person. Afterwards I give you my opinion of value and explain my reasoning. Being realistic about what a property is worth is the first step to getting the best price for it.",
+    "If you are ready to go ahead before my written appraisal reaches you, an agreement can be signed in that order. In that case it only takes effect when you receive the appraisal, and you can cancel within 2 working days of receiving it, at no cost."
+   ],
+   you: [
+    "Show me around, and tell me what you have done to the property and what you love about it.",
+    "Point out anything that worries you about it. I want to know every issue.",
+    "Ask me about my reasoning, as many times as you like.",
+    "Read the written appraisal when it arrives, and take the time you need."
+   ],
+   tim: [
+    "I look at your property in person, and I give you my honest opinion of its value with the reasons behind it.",
+    "I will be straight with you about price, because a realistic starting point is what gets the best result.",
+    "I give you the appraisal in writing, so you can read it again, share it with your lawyer or family, and decide in your own time."
+   ],
+   docs: [
+    "My written appraisal: my opinion of value, with the reasoning behind it.",
+    "If an agreement is signed before the written appraisal arrives: it takes effect only when you receive the appraisal, and you can cancel within 2 working days of receiving it, at no cost."
+   ],
+   faq: [
+    ["Is the appraisal a guarantee of what a buyer will pay?", "No. It is my opinion of value, with my reasoning. It helps us set a realistic starting point, but it is not a promise about what a buyer will pay."],
+    ["Can I sign an agreement before I receive the written appraisal?", "Yes. In that case the agreement only takes effect when you receive the appraisal."],
+    ["What if I change my mind after I read the appraisal?", "If you signed before receiving it, you can cancel within 2 working days of receiving it, at no cost."],
+    ["When do we talk about your fee?", "Only once you have decided who the best agent is for you. It is then agreed with all of the owners, in writing."],
+    ["Should everyone who owns the property be at the meeting?", "It helps, because everyone on the title will need to agree on the way forward. If someone cannot be there, tell me and we will work out how to include them."]
+   ]
+  },
+  {
+   slug: "your-agreement",
+   short: "A sole agency agreement, signed on screen, with a plain-English guide to every section.",
+   opening: "When you have decided I am the right agent for you, the agreement is how we make it official. It is a sole agency agreement, and I have set it up so you can read it, understand it and sign it on screen, in your own time, with a plain-English guide to every section.",
+   happens: [
+    "You read your agency agreement in plain English and tick through the guide to each section. Everyone on the title signs, each from their own phone.",
+    "With the agreement come the Real Estate Authority's approved guides: their guide to agency agreements, and their guide to sale and purchase agreements. They are written by the Authority, not by me.",
+    "I encourage you to get legal advice before you sign. You can send a review link to your lawyer so they can read exactly what you will be signing. A cooling-off period applies to residential agency agreements, and your agreement tells you how it works.",
+    "If you had an agency before, you sign a cancellation notice for it, and I send it once I have reviewed it. Complaints and dispute resolution procedures are included with the agreement. If your plans change later, variations and extensions can be done on screen too."
+   ],
+   you: [
+    "Read the plain-English guide to each section, and tick each one when you are happy with it.",
+    "Read the Real Estate Authority's guides, and ask your lawyer first if you would like to.",
+    "Tell me if you had an agency before, and sign the cancellation notice for it.",
+    "Choose how you would like to pay for your marketing.",
+    "Sign on screen. Every owner signs, each from their own phone."
+   ],
+   tim: [
+    "I explain every section in plain English, so you know what you are agreeing to before you sign.",
+    "I only talk about my fee once you have decided who the best agent is for you, and it is agreed with all of the owners in writing.",
+    "I review any cancellation notice for a previous agency, and then send it.",
+    "I keep your agreement clear and simple to change. Variations and extensions are done on screen, so nothing is lost in a pile of emailed paper.",
+    "Once everyone has signed, I countersign it."
+   ],
+   docs: [
+    "Your sole agency agreement, signed on screen.",
+    "The plain-English guide to every section, which you tick through.",
+    { t: "The Real Estate Authority's guide to agency agreements.", k: "rea_agency" },
+    { t: "The Real Estate Authority's guide to sale and purchase agreements.", k: "rea_sp" },
+    "A cancellation notice for any previous agency, which I send after I have reviewed it.",
+    "Complaints and dispute resolution procedures. You can also go straight to the Real Estate Authority at any time.",
+    "Variations and extensions, if you need them later, done on screen."
+   ],
+   faq: [
+    ["Should I get legal advice before I sign?", "I encourage it. You do not have to, but it is a good idea, and you can send your lawyer a review link so they can read the agreement before you sign."],
+    ["Can I change my mind after I sign?", "A cooling-off period applies to residential agency agreements. Your agreement sets out how it works for you, so please read that section, and ask me or your lawyer if anything is unclear."],
+    ["What if I already had an agency?", "You sign a cancellation notice for it. I review it, and then I send it."],
+    ["What if things change after we start?", "Variations and extensions can be done on screen, so you do not have to print or post anything."],
+    ["What will I pay, and how?", "I only talk about my fee once you have decided who the best agent is for you, and it is then agreed with all of the owners in writing. Marketing is paid through List Now: you can pay up front, in instalments, or have it taken at settlement. The administration fee covers identity checks and other statutory onboarding costs."],
+    ["What if I am unhappy with something?", "Please talk to me first. The agreement includes our complaints and dispute resolution procedures, and you can go straight to the Real Estate Authority at any time."]
+   ]
+  },
+  {
+   slug: "identity-check",
+   short: "The law asks me to confirm who each seller is. I do it in person, or with an approved provider.",
+   opening: "New Zealand law requires real estate agents to confirm who their sellers are before they act for them. It is part of doing the job properly, and I know it can feel like a formality. I do it myself, in person, wherever I can.",
+   happens: [
+    "The law behind this is the anti-money laundering and countering financing of terrorism law, known as AML/CFT. It asks me to verify the identity of every seller.",
+    "I do this myself, in person. For sellers who are not local, I use an approved provider so you can do it from wherever you are. If you are selling through a trust or a company, I need a bit more detail about it, and about who owns or controls it.",
+    "Your records are kept securely, as the law requires."
+   ],
+   you: [
+    "Each person selling shows me a driver's licence or passport, and something with their address.",
+    "If you are not local, complete the check with the approved provider.",
+    "If you are selling through a trust or a company, have its details ready, such as the trust deed or company information, and who owns or controls it."
+   ],
+   tim: [
+    "I do the check myself and in person, so it is handled by the person you are dealing with, not a stranger.",
+    "I explain what I need and why, and I look after your records securely, as the law requires.",
+    "I make sure trusts and companies are covered properly, so there is nothing to unpick later."
+   ],
+   docs: [
+    "Photo ID for each seller: a driver's licence or passport.",
+    "Something that shows each seller's address.",
+    "For a trust or a company: more detail, such as the trust deed or company information, and who owns or controls it.",
+    "A secure record of the check, kept as the law requires."
+   ],
+   faq: [
+    ["Why do you need to check my identity?", "New Zealand law (AML/CFT) requires real estate agents to verify the identity of their sellers. I have no choice about it, and it applies to every seller."],
+    ["What do I need to show?", "A driver's licence or passport, and something with your address on it."],
+    ["Does everyone selling need to be checked?", "Yes. Each person selling is checked."],
+    ["I do not live nearby. Can I still do this?", "Yes. For sellers who are not local, I use an approved provider."],
+    ["We are selling through a trust or a company. What changes?", "I need more detail, including who owns or controls it. Have the trust deed or company information ready."],
+    ["Is there a cost for the check?", "The administration fee in your agreement covers identity checks and other statutory onboarding costs."]
+   ]
+  },
+  {
+   slug: "getting-ready",
+   short: "Your Vendor Declaration, a Healthy Homes statement if it is tenanted, and getting the property ready.",
+   opening: "Once your agreement is signed, we get ready for the market. Some of this is paperwork and some of it is the property itself. The paperwork matters because it protects you later, and it gives buyers and their lawyers what they need.",
+   happens: [
+    "You complete the Vendor Declaration on screen. It confirms what you know about the property, which protects you later, and I countersign it. If the property is or will be tenanted, there is also a Healthy Homes statement.",
+    "You read the Real Estate Authority's guide to sale and purchase agreements, under Before you sell. A LIM report is part of every campaign, and I order it.",
+    "Alongside the paperwork, we talk about preparing and presenting the property, so it shows at its best when buyers see it."
+   ],
+   you: [
+    "Complete the Vendor Declaration, and be honest about what you know.",
+    "Tell me if the property is or will be tenanted, so we can do the Healthy Homes statement.",
+    "Read the Real Estate Authority's guide to sale and purchase agreements.",
+    "Get the property ready to be presented, with my help."
+   ],
+   tim: [
+    "I countersign your Vendor Declaration once you have signed it.",
+    "For a tenanted property, I take the Healthy Homes measurements on site, and the landlord signs the statement.",
+    "I order the LIM report, because it is part of every campaign.",
+    "I give you practical advice on preparing and presenting the property. First impressions matter, and this is where we get them right."
+   ],
+   docs: [
+    "The Vendor Declaration, signed on screen by you and countersigned by me.",
+    "A Healthy Homes statement, if the property is or will be tenanted.",
+    { t: "The Real Estate Authority's guide to sale and purchase agreements, under Before you sell.", k: "rea_sp" },
+    "A LIM report, which is part of every campaign."
+   ],
+   faq: [
+    ["Why do I need to sign a Vendor Declaration?", "It confirms what you know about the property. That protects you later, because what you knew is on record, and it gives buyers a clear picture."],
+    ["What if I am not sure about one of the answers?", "Tell me. The declaration is about what you know, so there is no need to guess. We can talk it through."],
+    ["Do I need a Healthy Homes statement?", "Only if the property is or will be tenanted."],
+    ["What is a LIM report?", "A Land Information Memorandum, which is a report from the council with the information it holds about the property. One is part of every campaign."],
+    ["What is the Before you sell guide?", "It is the Real Estate Authority's guide to sale and purchase agreements, which explains the agreement a buyer will sign."],
+    ["How should I prepare the property?", "It depends on the property and the buyer we are aiming for, so we talk about it together. I will give you practical advice on preparing and presenting it."]
+   ]
+  },
+  {
+   slug: "on-the-market",
+   short: "Your property goes in front of buyers, with marketing written around the buyer most likely to love it.",
+   opening: "Now your property goes in front of buyers. Everything I do at this stop is aimed at reaching the right buyer, the one most likely to love your property, because that is how we get the best price rather than just the quickest result.",
+   happens: [
+    "Your property is shown to buyers through the marketing set out in your agreement. The packages are Digital, Premium and Elite, or you can build your own campaign. You can see them at packages.dunnerstunner.co.nz.",
+    "I write the listing copy around the buyer most likely to love the property, and what life looks like for them there. I use trusted suppliers for photography and marketing, booked to suit you.",
+    "After open homes, I gather buyer feedback so we can see how buyers are responding."
+   ],
+   you: [
+    "Choose the marketing that suits your property, or build your own campaign with me.",
+    "Be available for photography and open homes at times we have booked to suit you.",
+    "Listen to the buyer feedback, and talk it through with me.",
+    "Tell me about anything that changes."
+   ],
+   tim: [
+    "I write the listing around the buyer most likely to love your property, so it speaks to the right person.",
+    "I book trusted suppliers for photography and marketing, at times that suit you.",
+    "I gather buyer feedback after open homes, and I share it with you honestly."
+   ],
+   docs: [
+    { t: "The marketing packages, Digital, Premium and Elite, plus a build-your-own campaign, at packages.dunnerstunner.co.nz.", k: "packages" },
+    "The marketing set out in your agreement.",
+    "A LIM report, which is part of every campaign."
+   ],
+   faq: [
+    ["Which marketing package should I choose?", "The packages are Digital, Premium and Elite, and you can also build your own campaign. We choose together, based on your property and the buyer we are aiming for."],
+    ["Who takes the photographs?", "I use trusted suppliers for photography and marketing, booked to suit you."],
+    ["How will you describe my property?", "I write the listing copy around the buyer most likely to love it, and how life looks for them there."],
+    ["Will I hear what buyers think?", "Yes. I gather feedback from buyers after open homes."],
+    ["How do I pay for the marketing?", "Marketing is paid through List Now. You can pay up front, in instalments, or have it taken at settlement."]
+   ]
+  },
+  {
+   slug: "an-offer",
+   short: "I bring every offer to you, negotiate for the best price and terms, and work to your timing.",
+   opening: "When a buyer makes an offer, I bring it to you and we talk it through. The decision is always yours. My job is to negotiate the best price and terms I can, and to do it around what matters to you, including your timing.",
+   happens: [
+    "I negotiate for the best price and the best terms. Your timing matters here on two separate measures: how soon you want a firm, unconditional deal, and when you want settlement and possession. I work to both.",
+    "The buyer receives the Real Estate Authority's guide to sale and purchase agreements, and lawyers are involved on both sides."
+   ],
+   you: [
+    "Tell me both of your timing wishes: how soon you would like a firm deal, and when you would like settlement and possession.",
+    "Go through each offer with me.",
+    "Talk to your lawyer about the agreement.",
+    "Make the decision. It is always yours."
+   ],
+   tim: [
+    "I negotiate for the best price and terms, not just the first thing on the table.",
+    "I work to both of your timing measures, so a good price does not come at the cost of the dates that matter to you.",
+    "I make sure the buyer receives the Real Estate Authority's guide to sale and purchase agreements.",
+    "I work with the lawyers, so you are not left to work it out alone."
+   ],
+   docs: [
+    "The offer, and the sale and purchase agreement.",
+    { t: "The Real Estate Authority's guide to sale and purchase agreements, which the buyer receives.", k: "rea_sp" },
+    "Advice from your lawyer, who is involved from here."
+   ],
+   faq: [
+    ["Do I have to accept an offer?", "No. I bring it to you and talk it through, but the decision is always yours."],
+    ["What do you mean by two kinds of timing?", "One is how soon you want a firm, unconditional deal. The other is when you want settlement and possession. They are different, and I work to both."],
+    ["What are the terms of an offer?", "Everything beyond the price: the conditions the buyer wants, and the dates. I negotiate for the best terms as well as the best price."],
+    ["Does the buyer get any guidance?", "Yes. The buyer receives the Real Estate Authority's guide to sale and purchase agreements."],
+    ["Where do lawyers come in?", "Lawyers are involved on both sides. I work with them so the agreement and the dates come together properly."]
+   ]
+  },
+  {
+   slug: "sold-and-settling",
+   short: "Conditions are met, the sale goes unconditional, and I stay with you through settlement and the keys.",
+   opening: "A signed agreement is not quite the end. Conditions have to be satisfied, the sale goes unconditional, and then comes settlement. I stay with you through all of it, right up to settlement and the keys.",
+   happens: [
+    "The conditions in the agreement are satisfied, and the sale goes unconditional, which means it is firm. Then comes settlement, when payment is made and the keys change hands, and the lawyers arrange it.",
+    "I keep both lawyers and you informed along the way, and I am there through to settlement and the keys."
+   ],
+   you: [
+    "Respond to your lawyer when they ask you for something.",
+    "Tell me about any questions or worries as they come up.",
+    "Get ready to hand over the keys at settlement."
+   ],
+   tim: [
+    "I keep both lawyers and you informed, so you always know where things stand.",
+    "I follow the conditions through until they are satisfied and the sale goes unconditional.",
+    "I am there through to settlement and the keys, not just until the offer is signed."
+   ],
+   docs: [
+    "Your signed sale and purchase agreement, and the conditions in it.",
+    "Settlement, which your lawyer arranges."
+   ],
+   faq: [
+    ["What does unconditional mean?", "It means the conditions in the agreement have been satisfied, so the sale is firm."],
+    ["What are conditions?", "They are things that need to happen before the sale becomes firm. The sale and purchase agreement lists them."],
+    ["Who arranges settlement?", "The lawyers arrange it. I keep both lawyers and you informed."],
+    ["What happens at settlement?", "Payment is made and the keys change hands."],
+    ["Will I still hear from you after the offer is signed?", "Yes. I am there through to settlement and the keys, and I keep you informed along the way."]
+   ]
+  }
+ ]
+};
+// one source for the wording: it is also listed in the translation catalogue, once each, so the catalogue test and the engine see it
+(function () {
+  const P = window.JOURNEY_PITCH, C = window.I18N_STRINGS, seen = new Set(), add = [];
+  C.screens.forEach(([, list]) => list.forEach(s => seen.add(s)));
+  const take = s => { if (typeof s === 'string' && s && !seen.has(s)) { seen.add(s); add.push(s); } };
+  const walk = (v, key) => { if (key === 'slug' || key === 'k') return; if (typeof v === 'string') take(v); else if (Array.isArray(v)) v.forEach(x => walk(x)); else if (v && typeof v === 'object') Object.keys(v).forEach(k => walk(v[k], k)); };
+  walk(P);
+  C.screens.push(['pitch', add]);
+})();
+
 </script>
 <script>
 /* ───────── Translation engine (phase 4) ─────────
@@ -1903,6 +2325,8 @@ window.I18N_STRINGS = {
   const fmtDate = d => new Date(d).toLocaleDateString('en-NZ', { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Pacific/Auckland' });
   const fmtDT = d => new Date(d).toLocaleString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: 'Pacific/Auckland' });
   const main = () => $('#main');
+  let PITCH_ON = false;   // the public journey page (#journey) is on screen
+  const DEFAULT_TITLE = document.title;
   // The app's own AI translation is switched off (Tim, 9 November 2026): vendors use their browser's built-in page translation.
   // Everything for it is kept, and one switch brings it back: no language picker, no translation or language requests, no
   // Translations screen, and no automatic translating of plans and variations while this is false.
@@ -1921,7 +2345,8 @@ window.I18N_STRINGS = {
   }
   const saveNote = label => `<p class="sig-save-note">When you're happy with it, press <strong>${esc(label)}</strong>. Your signature isn't saved until you do.</p>`;
   function header(name, count, pct) {
-    if (IS_AGENT) setAgentNav(); $('#stepName').textContent = name || ''; JDIRTY = false; $('#stepName').dataset.count = count || ''; $('#stepCount').textContent = count || ''; $('#barFill').style.width = (pct || 0) + '%'; }
+    const wasPitch = PITCH_ON; PITCH_ON = false; document.title = DEFAULT_TITLE;   // every other screen leaves the journey page and its title behind
+    if (IS_AGENT || wasPitch) setAgentNav(); $('#stepName').textContent = name || ''; JDIRTY = false; $('#stepName').dataset.count = count || ''; $('#stepCount').textContent = count || ''; $('#barFill').style.width = (pct || 0) + '%'; }
   function actions(show, backLabel, nextLabel) {
     $('#actions').hidden = !show;
     if (!show) return;
@@ -2364,7 +2789,7 @@ window.I18N_STRINGS = {
     $('#signOut').hidden = !SESSION;
     closeJourney(); JCTX.pid = null; JREADY = false;
     IS_AGENT = false; setAgentNav();
-    if (!SESSION) { JREADY = true; setAgentNav(); return viewLogin(); }
+    if (!SESSION) { JREADY = true; setAgentNav(); return pitchRoute() ? viewPitch() : viewLogin(); }   // the journey pages are public: no sign-in, and no data read
     let qlr = null; try { qlr = localStorage.getItem('qlReturn'); localStorage.removeItem('qlReturn'); } catch (_) { }
     if (qlr) { try { const u = new URL(qlr); if (u.origin === location.origin && u.pathname !== location.pathname) return location.replace(qlr); } catch (_) { } }
     IS_AGENT = !!(await must(sb.rpc('is_agent'))); JREADY = true; setAgentNav();
@@ -2373,6 +2798,7 @@ window.I18N_STRINGS = {
     let pend = null; try { pend = JSON.parse(localStorage.getItem('pendingCampaign') || 'null'); } catch (_) { }
     if (IS_AGENT && pend) { try { localStorage.removeItem('pendingCampaign'); } catch (_) { } return viewTable(null, pend); }
     setAgentNav();
+    if (pitchRoute()) return viewPitch();
     if (IS_AGENT) return viewAgentHome();
     return viewVendorHome();
   }
@@ -3440,7 +3866,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const nav = $('#agentNav'); if (!nav) return;
     nav.hidden = !IS_AGENT; document.body.classList.toggle('is-agent', !!IS_AGENT);
     const lw = $('#langWrap'); if (lw) lw.hidden = !!IS_AGENT || !APP_TRANSLATION;
-    const jb = $('#journeyBtn'); if (jb) jb.hidden = !!IS_AGENT || !JREADY;   // the Journey button is for vendors, and for anyone not signed in
+    const jb = $('#journeyBtn'); if (jb) jb.hidden = !!IS_AGENT || !JREADY || PITCH_ON;   // the Journey button is for vendors, and for anyone not signed in; the journey page is itself the journey
     $('#navHome').toggleAttribute('aria-current', cur === 'home'); if (cur === 'home') $('#navHome').setAttribute('aria-current', 'page');
     if ($('#navTr')) { $('#navTr').hidden = !APP_TRANSLATION; $('#navTr').removeAttribute('aria-current'); if (cur === 'tr') $('#navTr').setAttribute('aria-current', 'page'); }
     $('#navDash').toggleAttribute('aria-current', cur === 'dash'); if (cur === 'dash') $('#navDash').setAttribute('aria-current', 'page');
@@ -5506,7 +5932,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   const JSTOPS = [
     { t: 'Thinking of selling', say: 'This is where it starts: Tim gives you an appraisal of your property, and you tell him what matters to you about selling. Nothing is signed at this stage.' },
     { t: 'Your updated plan', say: 'Tim reads your answers and sends you an updated plan, showing what you said and what he has changed. You can tick that it works for you, or ask him a question.' },
-    { t: 'Meeting Tim', say: 'You and Tim sit down, in person or by video, to talk the plan through and agree the details, including his fee.' },
+    { t: 'Meeting Tim', say: 'You and Tim sit down, in person or by video, to talk the plan through and agree the details.' },
     { t: 'Your agreement', say: 'You read your agency agreement in plain English, ask your lawyer first if you would like to, and then everyone on the title signs, each from their own phone.' },
     { t: 'Identity check', say: 'The law asks Tim to confirm who each seller is before he acts for you. Each person shows a driver\'s licence or passport, and something with their address.' },
     { t: 'Getting ready', say: 'After you sign, there is some paperwork so buyers have what they need: the Vendor Declaration, a Healthy Homes statement if your property is tenanted, and the Real Estate Authority\'s guide to sale and purchase agreements, under Before you sell. Tim also gets your marketing ready with you.' },
@@ -5592,7 +6018,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       return `<li class="jcard ${c}" id="jc${o.uid}-${k}" data-jc="${k}" tabindex="-1" ${c === 'here' ? 'aria-current="step"' : ''}>
         <div class="jc-h"><span class="jc-n" aria-hidden="true">${c === 'done' ? '✓' : k}</span><h3>${esc(s.t)}</h3>${tag ? `<span class="jc-st">${esc(tag)}</span>` : ''}</div>
         ${o.agent ? '' : `<p>${esc(s.say).replace(' There is no page for this stop yet.', '<span class="nopage"> There is no page for this stop yet.</span>')}</p>`}${det ? `<p class="jdetail">${esc(det)}</p>` : ''}
-        ${links[k] ? `<div class="toolbar"><button class="btn ghost jgo" type="button" data-jgo="${k}">${esc(links[k].label)}</button></div>` : ''}
+        ${links[k] || !o.agent ? `<div class="toolbar">${links[k] ? `<button class="btn ghost jgo" type="button" data-jgo="${k}">${esc(links[k].label)}</button>` : ''}${o.agent ? '' : `<a class="btn ghost" href="${pHref(i)}" data-jmore="${k}" aria-label="${esc(PJ().labels.readMore + ': ' + s.t)}">${esc(PJ().labels.readMore)}</a>`}</div>` : ''}
       </li>`;
     }).join('')}</ol>`;
   }
@@ -5711,6 +6137,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     if (e.target.closest('#jPrint')) return window.print();
     const pk = e.target.closest('[data-jpick]');
     if (pk) { JCTX.pid = null; const f = await jLoadVendor(pk.dataset.jpick); return jRender(f, null); }
+    const more = e.target.closest('[data-jmore]'); if (more) { e.preventDefault(); return jMore(+more.dataset.jmore - 1); }
     const go = e.target.closest('[data-jgo]'); if (go) return jGo(+go.dataset.jgo);
     const st = e.target.closest('.jstop[data-j]'); if (st) jActivate(+st.dataset.j);
   });
@@ -5718,6 +6145,141 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('.jstop[data-j]')) { e.preventDefault(); jActivate(+e.target.dataset.j); }
   });
   document.addEventListener('keydown', e => { if (e.key === 'Escape') closeJourney(); });
+
+  /* ═════════ THE JOURNEY AS A PITCH PAGE (Tim, 9 November 2026): public pages for the map (#journey) and each stop (#journey/<slug>) ═════════
+     No sign-in needed and nothing read when signed out. A signed-in vendor sees the same pages with "You are here", read through exactly
+     what the journey panel reads. All the wording is in strings.js (window.JOURNEY_PITCH). Nothing here states a fee: Tim talks about his
+     fee only once a seller has decided who the best agent is, and it is then agreed with all owners in writing. */
+  const PJ = () => window.JOURNEY_PITCH;
+  const pHref = i => '#journey/' + PJ().stops[i].slug;
+  const T_TEL = '0275627207', T_EMAIL = 'tim@mcguire.co.nz', PACKAGES_URL = 'https://packages.dunnerstunner.co.nz/';
+  function pitchRoute() {
+    const m = /^#journey(?:\/([a-z0-9-]+))?\/?$/i.exec(location.hash || ''); if (!m) return null;
+    const slug = (m[1] || '').toLowerCase(), i = slug ? PJ().stops.findIndex(s => s.slug === slug) : -1;
+    return { slug, i, bad: !!slug && i < 0 };
+  }
+  // wording to paragraph HTML: the phone number, Tim's email and the packages site become links
+  const pText = t => esc(t)
+    .replace(/027 562 7207/g, `<a href="tel:${T_TEL}">027 562 7207</a>`)
+    .replace(/tim@mcguire\.co\.nz/g, `<a href="mailto:${T_EMAIL}">${T_EMAIL}</a>`)
+    .replace(/packages\.dunnerstunner\.co\.nz/g, `<a href="${PACKAGES_URL}" target="_blank" rel="noopener">packages.dunnerstunner.co.nz</a>`);
+  const pCta = () => { const c = PJ().cta; return `<section class="card note pitch-cta"><h2>${esc(c.heading)}</h2><p>${pText(c.text)}</p>
+    <div class="toolbar no-print"><a class="btn primary" href="tel:${T_TEL}">${esc(c.call)}</a><a class="btn ghost" href="sms:${T_TEL}">${esc(c.sms)}</a><a class="btn ghost" href="mailto:${T_EMAIL}">${esc(c.email)}</a></div></section>`; };
+  const pHead = () => { const logo = ($('.logo-light') || {}).src || ''; return `<div class="print-only phead"><img src="${esc(logo)}" alt="McGuire Real Estate"><span translate="no">Tim McGuire<br>027 562 7207<br>${T_EMAIL}</span></div>`; };
+  const pFoot = () => `<p class="small pitch-foot">${esc(PJ().footer)}</p>`;
+  const pTop = f => `<div class="p-top no-print">${SESSION && !IS_AGENT ? `<button class="btn ghost" type="button" data-psign>${esc(PJ().labels.yourPage)}</button>` : !SESSION ? `<button class="btn ghost" type="button" data-psign>${esc(PJ().labels.signIn)}</button>` : '<span></span>'}<button class="btn ghost" type="button" id="pPrint">${esc(PJ().labels.print)}</button></div>`;
+  const pStatus = (st, f, k) => { const c = jStateOf(st, f, k); return { c, tag: c === 'here' ? J_STATE_TEXT.here : J_STATE_TEXT[c], det: jDetail(k, f) }; };
+
+  function pMapHTML(f, choose, rows, st, links) {
+    const P = PJ(), L = P.labels, signedIn = !!f;
+    const cards = JSTOPS.map((s, i) => {
+      const k = i + 1, { c, tag, det } = pStatus(st, f, k);
+      return `<li class="jcard ${c}" ${c === 'here' ? 'aria-current="step"' : ''}>
+        <div class="jc-h"><span class="jc-n" aria-hidden="true">${c === 'done' ? '✓' : k}</span><h3>${esc(s.t)}</h3>${tag ? `<span class="jc-st">${esc(tag)}</span>` : ''}</div>
+        <p>${esc(P.stops[i].short)}</p>${det ? `<p class="jdetail">${esc(det)}</p>` : ''}
+        <div class="toolbar"><a class="btn ghost" href="${pHref(i)}" aria-label="${esc(L.readMore + ': ' + s.t)}">${esc(L.readMore)}</a>${links[k] ? `<button class="btn primary" type="button" data-pgo="${k}">${esc(L.goStep)}</button>` : ''}</div>
+      </li>`;
+    }).join('');
+    const all = {}; for (let k = 1; k <= 9; k++) all[k] = true;
+    return `<div class="pitch pitch-map">${pTop(f)}${pHead()}
+      <p class="p-kick">${esc(P.eyebrow)}</p>
+      <h1 id="pTitle" tabindex="-1">${esc(P.docTitle)}</h1>
+      ${f && f.address ? `<p class="jaddr">${nt(f.address)}</p>` : ''}
+      <p class="lede">${esc(P.intro[0])}</p><p class="lede">${esc(P.intro[1])}</p>
+      ${signedIn && st.cur ? `<p class="small">${esc(P.signedInIntro)}</p>` : ''}
+      ${choose ? `<div class="card tight no-print" id="pChoose"><h3>${esc(L.which)}</h3><p class="small" style="margin:0 0 8px">${esc(L.whichText)}</p><div class="toolbar" style="margin:0">${choose.map(r => `<button class="btn ghost" type="button" data-ppick="${esc(r.id)}">${esc(r.address || 'Address to come')}</button>`).join('')}</div></div>` : ''}
+      ${rows && rows.length > 1 && f ? `<div class="toolbar no-print" style="margin:0 0 6px"><button class="btn ghost" type="button" data-ppick="">${esc(L.change)}</button></div>` : ''}
+      <div class="jwrap"><div class="jmapcol">${jMapSVG(st, f, { links: all })}</div><div><ol class="jlist" aria-label="The nine stops">${cards}</ol></div></div>
+      <section class="card pitch-fee"><h2>${esc(P.feeHeading)}</h2><p>${esc(P.fee)}</p></section>
+      ${pCta()}${pFoot()}</div>`;
+  }
+
+  function pStopHTML(i, f, st, links) {
+    const P = PJ(), L = P.labels, S = P.stops[i], k = i + 1, title = JSTOPS[i].t, { c, tag, det } = pStatus(st, f, k);
+    const guideBox = key => `<div class="p-rea" data-guide="${key}"><a href="${key === 'agency' ? REA_AA : REA_SP}" target="_blank" rel="noopener">${esc(L.guideEn)}</a></div>`;
+    const docs = S.docs.map(d => typeof d === 'string' ? `<li>${pText(d)}</li>` : `<li>${pText(d.t)}${d.k === 'rea_agency' ? guideBox('agency') : d.k === 'rea_sp' ? guideBox('sale_purchase') : ''}</li>`).join('');
+    const dots = JSTOPS.map((s, j) => `<li><a href="${pHref(j)}" ${j === i ? 'aria-current="page"' : ''} aria-label="${esc(trs('{n} of 9: {stop}.', { n: j + 1, stop: trs(s.t) }))}">${j + 1}</a></li>`).join('');
+    const prev = i > 0 ? `<a class="btn ghost" href="${pHref(i - 1)}">${esc(L.prev)}: ${esc(JSTOPS[i - 1].t)}</a>` : '';
+    const next = i < 8 ? `<a class="btn primary" href="${pHref(i + 1)}">${esc(L.next)}: ${esc(JSTOPS[i + 1].t)}</a>` : `<a class="btn primary" href="${pHref(0)}">${esc(L.start)}</a>`;
+    return `<article class="pitch pitch-stop">
+      <nav class="p-crumb no-print" aria-label="Breadcrumb"><a href="#journey">${esc(L.mapLink)}</a></nav>${pHead()}
+      <p class="p-kick">${esc(L.stopOf.replace('{n}', k))}</p>
+      <h1 id="pTitle" tabindex="-1">${esc(title)}</h1>
+      ${f && f.address ? `<p class="jaddr">${nt(f.address)}</p>` : ''}
+      ${tag ? `<p class="p-state"><span class="jc-st ${c}">${esc(tag)}</span>${det ? ` <span class="jdetail">${esc(det)}</span>` : ''}</p>` : ''}
+      <p class="lede p-open">${pText(S.opening)}</p>
+      ${links[k] ? `<div class="toolbar no-print"><button class="btn primary" type="button" data-pgo="${k}">${esc(L.goStep)}</button></div>` : ''}
+      <nav class="no-print" aria-label="All stops"><ol class="p-dots">${dots}</ol></nav>
+      <section class="card"><h2>${esc(L.happens)}</h2>${S.happens.map(t => `<p>${pText(t)}</p>`).join('')}</section>
+      <section class="card"><h2>${esc(L.you)}</h2><ul>${S.you.map(t => `<li>${pText(t)}</li>`).join('')}</ul></section>
+      <section class="card"><h2>${esc(L.tim)}</h2><ul>${S.tim.map(t => `<li>${pText(t)}</li>`).join('')}</ul></section>
+      <section class="card"><h2>${esc(L.docs)}</h2><ul>${docs}</ul></section>
+      <section class="card p-faq"><h2>${esc(L.faq)}</h2>${S.faq.map(([q, a]) => `<div class="p-qa"><h3>${esc(q)}</h3><p>${pText(a)}</p></div>`).join('')}</section>
+      <section class="card p-next"><h2>${esc(L.nextHeading)}</h2>${i < 8 ? `<p><strong>${esc(JSTOPS[i + 1].t)}.</strong> ${esc(P.stops[i + 1].short)}</p>` : `<p>${esc(L.nextEnd)}</p>`}
+        <div class="toolbar no-print">${next}${prev}<a class="btn ghost" href="#journey">${esc(L.mapLink)}</a></div></section>
+      ${pCta()}${pFoot()}</article>`;
+  }
+
+  // The Authority's own translations of a guide, beside the English link. guides.json is a public file; it is read once, and only when a page shows a guide.
+  let GUIDES_TRIED = false;
+  async function pFillGuides() {
+    const boxes = $$('.p-rea[data-guide]:not([data-filled])'); if (!boxes.length) return;
+    if (!Object.keys(GUIDES).length && !GUIDES_TRIED) { GUIDES_TRIED = true; await loadGuides(); }
+    boxes.forEach(async box => {
+      box.setAttribute('data-filled', '1');
+      const g = GUIDES[box.dataset.guide]; if (!g) return;
+      const ts = await reaCheck(g);
+      if (!box.isConnected || !ts.length) return;
+      box.insertAdjacentHTML('beforeend', `<p class="small" style="margin:8px 0 4px">${esc(PJ().labels.ownerLine)}</p><p class="rea-tr-links" data-no-tr style="margin:0">${ts.map(t => `<a class="btn ghost" href="${esc(t.url)}" target="_blank" rel="noopener" data-rea-lang="${t.code}">${esc(t.language)} (PDF)</a>`).join(' ')}</p>`);
+    });
+  }
+
+  let PITCH_SEQ = 0, PITCH_PID = null, PITCH_CACHE = null, PITCH_LINKS = {};
+  async function pLoad() {
+    const rows = (await jOne(sb.from('properties').select('id,address,stage').order('created_at', { ascending: false }))) || [];
+    let pid = PITCH_PID && rows.some(x => x.id === PITCH_PID) ? PITCH_PID : null;
+    if (!pid && rows.length === 1) pid = rows[0].id;
+    return { rows, choose: !pid && rows.length > 1 ? rows : null, f: pid ? await jLoadVendor(pid) : null };
+  }
+  async function viewPitch() {
+    const seq = ++PITCH_SEQ, keep = PITCH_ON, r = pitchRoute() || { slug: '', i: -1 };
+    closeJourney(); JVIEW = {};
+    header('', '', 0); actions(false); PITCH_ON = true; setAgentNav();
+    if (!keep) PITCH_CACHE = null;
+    if (SESSION && !IS_AGENT && !PITCH_CACHE) {   // a signed-in vendor: only what the journey panel reads
+      main().innerHTML = '<div class="loading">Loading...</div>';
+      const c = await pLoad(); if (seq !== PITCH_SEQ || !PITCH_ON) return; PITCH_CACHE = c;
+    }
+    const c = SESSION && !IS_AGENT ? PITCH_CACHE : { rows: [], choose: null, f: null };
+    const f = c.f, st = jState(f), links = jVendorLinks(f); PITCH_LINKS = links;
+    const P = PJ(), base = P.docTitle + ' · McGuire Real Estate';
+    document.title = r.i >= 0 ? JSTOPS[r.i].t + ' · ' + base : base;
+    main().innerHTML = (r.bad ? `<div class="card note tight"><p class="small" style="margin:0">${esc(P.labels.notFound)}</p></div>` : '') + (r.i >= 0 ? pStopHTML(r.i, f, st, links) : pMapHTML(f, c.choose, c.rows, st, links));
+    window.scrollTo(0, 0); const h = $('#pTitle'); if (h) h.focus({ preventScroll: true });
+    pFillGuides(); btSync();
+  }
+  const pNav = i => { const h = pHref(i); if (location.hash === h) viewPitch(); else location.hash = h; };
+  async function pGo(k) {
+    const l = PITCH_LINKS[k]; if (!l) return;
+    try { history.replaceState(null, '', location.pathname + location.search); } catch (_) { }   // the page leaves the journey: its address goes with it
+    try { await l.go(); } catch (e) { console.error(e); }
+  }
+  function jMore(i) {   // "Read more" in the vendor's panel
+    if (JDIRTY && !confirm(trs('You have typed something on this page that is not saved yet. If you go to another page it will be lost. Go anyway?'))) return;
+    closeJourney(); pNav(i);
+  }
+  $('#main').addEventListener('click', async e => {
+    if (!PITCH_ON) return;
+    const st = e.target.closest('.jstop[data-j]'); if (st) return pNav(+st.dataset.j - 1);
+    const go = e.target.closest('[data-pgo]'); if (go) return pGo(+go.dataset.pgo);
+    const pk = e.target.closest('[data-ppick]'); if (pk) { PITCH_PID = pk.dataset.ppick || null; PITCH_CACHE = null; PITCH_ON = true; return viewPitch(); }
+    if (e.target.closest('#pPrint')) return window.print();
+    if (e.target.closest('[data-psign]')) { try { history.replaceState(null, '', location.pathname + location.search); } catch (_) { } return boot().catch(console.error); }
+  });
+  $('#main').addEventListener('keydown', e => {
+    if (!PITCH_ON || (e.key !== 'Enter' && e.key !== ' ')) return;
+    const st = e.target.matches && e.target.matches('.jstop[data-j]') ? e.target : null; if (st) { e.preventDefault(); pNav(+st.dataset.j - 1); }
+  });
 
   /* Tim: the "Where are they" tile on a property page */
   function jTileHTML(p, live, pforms, pl) {
@@ -5791,6 +6353,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
 
   const lawyerToken = new URLSearchParams(location.search).get('lawyer');
   if (lawyerToken) { const w = $('#langWrap'); if (w) w.hidden = true; viewLawyer(lawyerToken); return; }
+  window.addEventListener('hashchange', () => { if (pitchRoute()) viewPitch(); else if (PITCH_ON) boot().catch(console.error); });
   I18N.init(); I18N.setHooks({ pick: c => chooseLang(c) });
   if (APP_TRANSLATION) { const l0 = readLocalLang(); if (l0 && l0 !== 'en') chooseLang(l0, { fromRecord: true }); }
 

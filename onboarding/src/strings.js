@@ -63,7 +63,7 @@ window.I18N_STRINGS = {
     "Your updated plan",
     "Tim reads your answers and sends you an updated plan, showing what you said and what he has changed. You can tick that it works for you, or ask him a question.",
     "Meeting Tim",
-    "You and Tim sit down, in person or by video, to talk the plan through and agree the details, including his fee.",
+    "You and Tim sit down, in person or by video, to talk the plan through and agree the details.",
     "Your agreement",
     "You read your agency agreement in plain English, ask your lawyer first if you would like to, and then everyone on the title signs, each from their own phone.",
     "Identity check",
@@ -1041,3 +1041,369 @@ window.I18N_STRINGS = {
   ]
  ]
 };
+
+// The journey as a pitch page (Tim, 9 November 2026). Public, shareable pages: #journey for the map and #journey/<slug> for each stop.
+// All the wording is here, in Tim's voice ("I"). Nothing on these pages states a fee, a price, a statistic, a result or a timeframe.
+// Fees: Tim talks about his fee only once a seller has decided who the best agent is, and it is then agreed with all owners in writing.
+// Items in "docs" are plain text, or { t: text, k: guide } where k is 'rea_agency' or 'rea_sp' (the Authority's own guide, and its own translations).
+// The wording is also added to the translation catalogue (screens, group "pitch") at the end of this file, so there is one source.
+window.JOURNEY_PITCH = {
+ eyebrow: "McGuire Real Estate",
+ docTitle: "Your selling journey",
+ intro: [
+  "Selling a property is a big decision, and it helps to know the road before you set out. This is how I work with sellers, from the first conversation through to settlement, in nine stops.",
+  "My aim is the best price for you, not just a fast sale. Tap any stop to read what happens there, what I will ask of you, and what I will do for you."
+ ],
+ signedInIntro: "The marker shows the stop you are at with me right now. Tap any stop to read about it, or to go to its page.",
+ feeHeading: "A word about my fee",
+ fee: "I only talk about my fee once you have decided who the best agent is for you. It is then agreed with all of the owners, in writing. Until then, my job is to show you how I would work for you and why it matters.",
+ cta: {
+  heading: "Book an appraisal with me",
+  text: "The first step is a conversation. Call or text me on 027 562 7207, or email tim@mcguire.co.nz, and we can arrange a time for me to come and see your property.",
+  call: "Call Tim",
+  sms: "Text Tim",
+  email: "Email Tim"
+ },
+ footer: "Tim McGuire, McGuire Real Estate Ltd, Licensed REAA 2008. This page is a general guide to how I work. Your agency agreement is what sets out the terms between us.",
+ labels: {
+  readMore: "Read more",
+  goStep: "Go to this step",
+  mapLink: "Back to the map",
+  prev: "Previous stop",
+  next: "Next stop",
+  start: "Back to the first stop",
+  stopOf: "Stop {n} of 9",
+  nextHeading: "What is next",
+  nextEnd: "This is the last stop on the road. If you would like to start at the beginning, or talk to me about your own property, I would love to hear from you.",
+  happens: "What happens at this stop",
+  you: "What you do",
+  tim: "What I do for you, and why it matters",
+  docs: "Documents and checks",
+  faq: "Common questions",
+  print: "Print this page",
+  signIn: "Already working with me? Sign in",
+  yourPage: "Go to your page",
+  change: "Choose another property",
+  which: "Which property?",
+  whichText: "You have more than one. Choose the one you would like to see.",
+  ownerLine: "The Real Estate Authority also publishes this guide in other languages. These are the Authority's own translations, not mine.",
+  guideEn: "Read the guide (English, from the Real Estate Authority)",
+  notFound: "That page was not found, so here is the whole road.",
+  printed: "Printed from packages.dunnerstunner.co.nz/onboarding"
+ },
+ stops: [
+  {
+   slug: "thinking-of-selling",
+   short: "We have an honest talk about price, your reasons for moving, and your timing. Nothing is signed.",
+   opening: "This is where it starts, often with a question rather than a decision. You do not need to have the answers yet. What I want is the best price for you, not just a fast sale, and the best way to get there is an honest conversation at the very beginning.",
+   happens: [
+    "We talk it through. Before I take on any listing I like to talk honestly with sellers about three things: price, which means being realistic about what the property is worth; your reasons for moving; and your timing. Being honest about these early saves you time and money, because the plan we make is built on what is real for you.",
+    "I also want to know about the property itself, including every issue. I would much rather raise those with you in person than have you work through forms on your own. Sellers often tell me they are amazed how far I go to point out defects, and I do it because it protects you later in the sale.",
+    "Nothing is signed at this stage."
+   ],
+   you: [
+    "Tell me what you would like to achieve, and the price you have in mind.",
+    "Share your reasons for moving, and any dates that matter to you.",
+    "Tell me about anything you know of that is wrong or worrying with the property, big or small.",
+    "Ask me anything. There is no pressure to decide anything."
+   ],
+   tim: [
+    "I am working for the best price, not just a quick sale. A fast result is not always the best one for you.",
+    "I will be realistic about what your property is worth, and explain why, so there are fewer surprises later.",
+    "I will point out defects and issues early, in person. Knowing about them now protects you later in the sale, when it matters most.",
+    "I will listen to your reasons and your timing, and shape everything else around them."
+   ],
+   docs: [
+    "Nothing to sign at this stop.",
+    "If you have the title, reports or council paperwork for the property, they are useful to look at together. You do not need to gather anything first."
+   ],
+   faq: [
+    ["Do I have to sign anything to get started?", "No. Nothing is signed at this stage. It is a conversation."],
+    ["Why do you ask about my reasons for moving and my timing?", "Together with price, they shape the whole plan. Being honest about all three early saves you time and money, because we avoid building a plan on something that does not fit."],
+    ["What if I think my property is worth more than you do?", "I will tell you honestly what I think and why, and I will listen to your view. It is far better to talk about it at the start than to find the gap later."],
+    ["Why do you want to hear about every defect?", "Because it protects you. If I know about an issue early, we can deal with it properly, and it does not come as a surprise to you or to a buyer later in the sale. I prefer to raise these in person rather than on forms."],
+    ["Is this only about selling quickly?", "No. I want the best price for you. For some sellers that means moving quickly and for others it means taking the time to get it right, which is why I ask about your timing."]
+   ]
+  },
+  {
+   slug: "your-updated-plan",
+   short: "You answer a short questionnaire, and I send you an updated plan that addresses your concerns.",
+   opening: "After we have met and I have given you my appraisal, I do not want to hand you a plan that could be for anyone. I would like to hear what matters to you first. So I ask you a few short, open questions, and then I send you an updated plan that speaks to your concerns, before you are asked to agree to anything.",
+   happens: [
+    "After we have met, you answer a short questionnaire about what matters to you, any concerns you have, and anything else you have been offered. The questions are open, so you can answer in your own words, and there is no pressure.",
+    "I read your answers and send you an updated plan. It shows what you told me and what I have changed in response. You can tick that it works for you, or ask me a question. This all happens before any agreement."
+   ],
+   you: [
+    "Answer the short questionnaire in your own words. You can do it on your phone.",
+    "Tell me what matters most to you about selling, and what worries you.",
+    "Tell me about anything else you have been offered, so the plan answers your real questions.",
+    "Read the updated plan, then tick that it works for you or ask me a question."
+   ],
+   tim: [
+    "I read every answer myself, and I shape the plan around what you have said, not around a template.",
+    "I address your concerns directly in the updated plan, so you can see what I have done about each of them.",
+    "I keep it low pressure. The questions are open and the plan comes before any agreement, so you have room to think."
+   ],
+   docs: [
+    "The short questionnaire about what matters to you.",
+    "Your updated plan, showing what you said and what I have changed.",
+    "Nothing here is an agreement. The plan comes before any agreement."
+   ],
+   faq: [
+    ["Is the questionnaire long?", "It is short, and the questions are open, so you answer in your own words."],
+    ["What if I have been offered something by someone else?", "Tell me about it. I would rather know what you have been offered, so the plan answers your real questions."],
+    ["Does answering the questionnaire commit me to anything?", "No. The plan comes before any agreement, and nothing is signed at this stage."],
+    ["Do I have to accept the plan?", "No. You can tick that it works for you, or ask me a question. It is your decision."],
+    ["What if I am not sure how to put a concern into words?", "Say it however it comes. The questions are open, and if something is unclear I will follow it up with you."]
+   ]
+  },
+  {
+   slug: "meeting-tim",
+   short: "I visit, look at your property in person, and give you my opinion of value with my reasoning.",
+   opening: "This is where I come to see your property. I want to look at it in person, because a photo or a database cannot tell me what walking through it does. Then I give you my opinion of what it is worth, along with the reasoning behind it, so you can see exactly how I got there.",
+   happens: [
+    "I visit and look at the property in person. Afterwards I give you my opinion of value and explain my reasoning. Being realistic about what a property is worth is the first step to getting the best price for it.",
+    "If you are ready to go ahead before my written appraisal reaches you, an agreement can be signed in that order. In that case it only takes effect when you receive the appraisal, and you can cancel within 2 working days of receiving it, at no cost."
+   ],
+   you: [
+    "Show me around, and tell me what you have done to the property and what you love about it.",
+    "Point out anything that worries you about it. I want to know every issue.",
+    "Ask me about my reasoning, as many times as you like.",
+    "Read the written appraisal when it arrives, and take the time you need."
+   ],
+   tim: [
+    "I look at your property in person, and I give you my honest opinion of its value with the reasons behind it.",
+    "I will be straight with you about price, because a realistic starting point is what gets the best result.",
+    "I give you the appraisal in writing, so you can read it again, share it with your lawyer or family, and decide in your own time."
+   ],
+   docs: [
+    "My written appraisal: my opinion of value, with the reasoning behind it.",
+    "If an agreement is signed before the written appraisal arrives: it takes effect only when you receive the appraisal, and you can cancel within 2 working days of receiving it, at no cost."
+   ],
+   faq: [
+    ["Is the appraisal a guarantee of what a buyer will pay?", "No. It is my opinion of value, with my reasoning. It helps us set a realistic starting point, but it is not a promise about what a buyer will pay."],
+    ["Can I sign an agreement before I receive the written appraisal?", "Yes. In that case the agreement only takes effect when you receive the appraisal."],
+    ["What if I change my mind after I read the appraisal?", "If you signed before receiving it, you can cancel within 2 working days of receiving it, at no cost."],
+    ["When do we talk about your fee?", "Only once you have decided who the best agent is for you. It is then agreed with all of the owners, in writing."],
+    ["Should everyone who owns the property be at the meeting?", "It helps, because everyone on the title will need to agree on the way forward. If someone cannot be there, tell me and we will work out how to include them."]
+   ]
+  },
+  {
+   slug: "your-agreement",
+   short: "A sole agency agreement, signed on screen, with a plain-English guide to every section.",
+   opening: "When you have decided I am the right agent for you, the agreement is how we make it official. It is a sole agency agreement, and I have set it up so you can read it, understand it and sign it on screen, in your own time, with a plain-English guide to every section.",
+   happens: [
+    "You read your agency agreement in plain English and tick through the guide to each section. Everyone on the title signs, each from their own phone.",
+    "With the agreement come the Real Estate Authority's approved guides: their guide to agency agreements, and their guide to sale and purchase agreements. They are written by the Authority, not by me.",
+    "I encourage you to get legal advice before you sign. You can send a review link to your lawyer so they can read exactly what you will be signing. A cooling-off period applies to residential agency agreements, and your agreement tells you how it works.",
+    "If you had an agency before, you sign a cancellation notice for it, and I send it once I have reviewed it. Complaints and dispute resolution procedures are included with the agreement. If your plans change later, variations and extensions can be done on screen too."
+   ],
+   you: [
+    "Read the plain-English guide to each section, and tick each one when you are happy with it.",
+    "Read the Real Estate Authority's guides, and ask your lawyer first if you would like to.",
+    "Tell me if you had an agency before, and sign the cancellation notice for it.",
+    "Choose how you would like to pay for your marketing.",
+    "Sign on screen. Every owner signs, each from their own phone."
+   ],
+   tim: [
+    "I explain every section in plain English, so you know what you are agreeing to before you sign.",
+    "I only talk about my fee once you have decided who the best agent is for you, and it is agreed with all of the owners in writing.",
+    "I review any cancellation notice for a previous agency, and then send it.",
+    "I keep your agreement clear and simple to change. Variations and extensions are done on screen, so nothing is lost in a pile of emailed paper.",
+    "Once everyone has signed, I countersign it."
+   ],
+   docs: [
+    "Your sole agency agreement, signed on screen.",
+    "The plain-English guide to every section, which you tick through.",
+    { t: "The Real Estate Authority's guide to agency agreements.", k: "rea_agency" },
+    { t: "The Real Estate Authority's guide to sale and purchase agreements.", k: "rea_sp" },
+    "A cancellation notice for any previous agency, which I send after I have reviewed it.",
+    "Complaints and dispute resolution procedures. You can also go straight to the Real Estate Authority at any time.",
+    "Variations and extensions, if you need them later, done on screen."
+   ],
+   faq: [
+    ["Should I get legal advice before I sign?", "I encourage it. You do not have to, but it is a good idea, and you can send your lawyer a review link so they can read the agreement before you sign."],
+    ["Can I change my mind after I sign?", "A cooling-off period applies to residential agency agreements. Your agreement sets out how it works for you, so please read that section, and ask me or your lawyer if anything is unclear."],
+    ["What if I already had an agency?", "You sign a cancellation notice for it. I review it, and then I send it."],
+    ["What if things change after we start?", "Variations and extensions can be done on screen, so you do not have to print or post anything."],
+    ["What will I pay, and how?", "I only talk about my fee once you have decided who the best agent is for you, and it is then agreed with all of the owners in writing. Marketing is paid through List Now: you can pay up front, in instalments, or have it taken at settlement. The administration fee covers identity checks and other statutory onboarding costs."],
+    ["What if I am unhappy with something?", "Please talk to me first. The agreement includes our complaints and dispute resolution procedures, and you can go straight to the Real Estate Authority at any time."]
+   ]
+  },
+  {
+   slug: "identity-check",
+   short: "The law asks me to confirm who each seller is. I do it in person, or with an approved provider.",
+   opening: "New Zealand law requires real estate agents to confirm who their sellers are before they act for them. It is part of doing the job properly, and I know it can feel like a formality. I do it myself, in person, wherever I can.",
+   happens: [
+    "The law behind this is the anti-money laundering and countering financing of terrorism law, known as AML/CFT. It asks me to verify the identity of every seller.",
+    "I do this myself, in person. For sellers who are not local, I use an approved provider so you can do it from wherever you are. If you are selling through a trust or a company, I need a bit more detail about it, and about who owns or controls it.",
+    "Your records are kept securely, as the law requires."
+   ],
+   you: [
+    "Each person selling shows me a driver's licence or passport, and something with their address.",
+    "If you are not local, complete the check with the approved provider.",
+    "If you are selling through a trust or a company, have its details ready, such as the trust deed or company information, and who owns or controls it."
+   ],
+   tim: [
+    "I do the check myself and in person, so it is handled by the person you are dealing with, not a stranger.",
+    "I explain what I need and why, and I look after your records securely, as the law requires.",
+    "I make sure trusts and companies are covered properly, so there is nothing to unpick later."
+   ],
+   docs: [
+    "Photo ID for each seller: a driver's licence or passport.",
+    "Something that shows each seller's address.",
+    "For a trust or a company: more detail, such as the trust deed or company information, and who owns or controls it.",
+    "A secure record of the check, kept as the law requires."
+   ],
+   faq: [
+    ["Why do you need to check my identity?", "New Zealand law (AML/CFT) requires real estate agents to verify the identity of their sellers. I have no choice about it, and it applies to every seller."],
+    ["What do I need to show?", "A driver's licence or passport, and something with your address on it."],
+    ["Does everyone selling need to be checked?", "Yes. Each person selling is checked."],
+    ["I do not live nearby. Can I still do this?", "Yes. For sellers who are not local, I use an approved provider."],
+    ["We are selling through a trust or a company. What changes?", "I need more detail, including who owns or controls it. Have the trust deed or company information ready."],
+    ["Is there a cost for the check?", "The administration fee in your agreement covers identity checks and other statutory onboarding costs."]
+   ]
+  },
+  {
+   slug: "getting-ready",
+   short: "Your Vendor Declaration, a Healthy Homes statement if it is tenanted, and getting the property ready.",
+   opening: "Once your agreement is signed, we get ready for the market. Some of this is paperwork and some of it is the property itself. The paperwork matters because it protects you later, and it gives buyers and their lawyers what they need.",
+   happens: [
+    "You complete the Vendor Declaration on screen. It confirms what you know about the property, which protects you later, and I countersign it. If the property is or will be tenanted, there is also a Healthy Homes statement.",
+    "You read the Real Estate Authority's guide to sale and purchase agreements, under Before you sell. A LIM report is part of every campaign, and I order it.",
+    "Alongside the paperwork, we talk about preparing and presenting the property, so it shows at its best when buyers see it."
+   ],
+   you: [
+    "Complete the Vendor Declaration, and be honest about what you know.",
+    "Tell me if the property is or will be tenanted, so we can do the Healthy Homes statement.",
+    "Read the Real Estate Authority's guide to sale and purchase agreements.",
+    "Get the property ready to be presented, with my help."
+   ],
+   tim: [
+    "I countersign your Vendor Declaration once you have signed it.",
+    "For a tenanted property, I take the Healthy Homes measurements on site, and the landlord signs the statement.",
+    "I order the LIM report, because it is part of every campaign.",
+    "I give you practical advice on preparing and presenting the property. First impressions matter, and this is where we get them right."
+   ],
+   docs: [
+    "The Vendor Declaration, signed on screen by you and countersigned by me.",
+    "A Healthy Homes statement, if the property is or will be tenanted.",
+    { t: "The Real Estate Authority's guide to sale and purchase agreements, under Before you sell.", k: "rea_sp" },
+    "A LIM report, which is part of every campaign."
+   ],
+   faq: [
+    ["Why do I need to sign a Vendor Declaration?", "It confirms what you know about the property. That protects you later, because what you knew is on record, and it gives buyers a clear picture."],
+    ["What if I am not sure about one of the answers?", "Tell me. The declaration is about what you know, so there is no need to guess. We can talk it through."],
+    ["Do I need a Healthy Homes statement?", "Only if the property is or will be tenanted."],
+    ["What is a LIM report?", "A Land Information Memorandum, which is a report from the council with the information it holds about the property. One is part of every campaign."],
+    ["What is the Before you sell guide?", "It is the Real Estate Authority's guide to sale and purchase agreements, which explains the agreement a buyer will sign."],
+    ["How should I prepare the property?", "It depends on the property and the buyer we are aiming for, so we talk about it together. I will give you practical advice on preparing and presenting it."]
+   ]
+  },
+  {
+   slug: "on-the-market",
+   short: "Your property goes in front of buyers, with marketing written around the buyer most likely to love it.",
+   opening: "Now your property goes in front of buyers. Everything I do at this stop is aimed at reaching the right buyer, the one most likely to love your property, because that is how we get the best price rather than just the quickest result.",
+   happens: [
+    "Your property is shown to buyers through the marketing set out in your agreement. The packages are Digital, Premium and Elite, or you can build your own campaign. You can see them at packages.dunnerstunner.co.nz.",
+    "I write the listing copy around the buyer most likely to love the property, and what life looks like for them there. I use trusted suppliers for photography and marketing, booked to suit you.",
+    "After open homes, I gather buyer feedback so we can see how buyers are responding."
+   ],
+   you: [
+    "Choose the marketing that suits your property, or build your own campaign with me.",
+    "Be available for photography and open homes at times we have booked to suit you.",
+    "Listen to the buyer feedback, and talk it through with me.",
+    "Tell me about anything that changes."
+   ],
+   tim: [
+    "I write the listing around the buyer most likely to love your property, so it speaks to the right person.",
+    "I book trusted suppliers for photography and marketing, at times that suit you.",
+    "I gather buyer feedback after open homes, and I share it with you honestly."
+   ],
+   docs: [
+    { t: "The marketing packages, Digital, Premium and Elite, plus a build-your-own campaign, at packages.dunnerstunner.co.nz.", k: "packages" },
+    "The marketing set out in your agreement.",
+    "A LIM report, which is part of every campaign."
+   ],
+   faq: [
+    ["Which marketing package should I choose?", "The packages are Digital, Premium and Elite, and you can also build your own campaign. We choose together, based on your property and the buyer we are aiming for."],
+    ["Who takes the photographs?", "I use trusted suppliers for photography and marketing, booked to suit you."],
+    ["How will you describe my property?", "I write the listing copy around the buyer most likely to love it, and how life looks for them there."],
+    ["Will I hear what buyers think?", "Yes. I gather feedback from buyers after open homes."],
+    ["How do I pay for the marketing?", "Marketing is paid through List Now. You can pay up front, in instalments, or have it taken at settlement."]
+   ]
+  },
+  {
+   slug: "an-offer",
+   short: "I bring every offer to you, negotiate for the best price and terms, and work to your timing.",
+   opening: "When a buyer makes an offer, I bring it to you and we talk it through. The decision is always yours. My job is to negotiate the best price and terms I can, and to do it around what matters to you, including your timing.",
+   happens: [
+    "I negotiate for the best price and the best terms. Your timing matters here on two separate measures: how soon you want a firm, unconditional deal, and when you want settlement and possession. I work to both.",
+    "The buyer receives the Real Estate Authority's guide to sale and purchase agreements, and lawyers are involved on both sides."
+   ],
+   you: [
+    "Tell me both of your timing wishes: how soon you would like a firm deal, and when you would like settlement and possession.",
+    "Go through each offer with me.",
+    "Talk to your lawyer about the agreement.",
+    "Make the decision. It is always yours."
+   ],
+   tim: [
+    "I negotiate for the best price and terms, not just the first thing on the table.",
+    "I work to both of your timing measures, so a good price does not come at the cost of the dates that matter to you.",
+    "I make sure the buyer receives the Real Estate Authority's guide to sale and purchase agreements.",
+    "I work with the lawyers, so you are not left to work it out alone."
+   ],
+   docs: [
+    "The offer, and the sale and purchase agreement.",
+    { t: "The Real Estate Authority's guide to sale and purchase agreements, which the buyer receives.", k: "rea_sp" },
+    "Advice from your lawyer, who is involved from here."
+   ],
+   faq: [
+    ["Do I have to accept an offer?", "No. I bring it to you and talk it through, but the decision is always yours."],
+    ["What do you mean by two kinds of timing?", "One is how soon you want a firm, unconditional deal. The other is when you want settlement and possession. They are different, and I work to both."],
+    ["What are the terms of an offer?", "Everything beyond the price: the conditions the buyer wants, and the dates. I negotiate for the best terms as well as the best price."],
+    ["Does the buyer get any guidance?", "Yes. The buyer receives the Real Estate Authority's guide to sale and purchase agreements."],
+    ["Where do lawyers come in?", "Lawyers are involved on both sides. I work with them so the agreement and the dates come together properly."]
+   ]
+  },
+  {
+   slug: "sold-and-settling",
+   short: "Conditions are met, the sale goes unconditional, and I stay with you through settlement and the keys.",
+   opening: "A signed agreement is not quite the end. Conditions have to be satisfied, the sale goes unconditional, and then comes settlement. I stay with you through all of it, right up to settlement and the keys.",
+   happens: [
+    "The conditions in the agreement are satisfied, and the sale goes unconditional, which means it is firm. Then comes settlement, when payment is made and the keys change hands, and the lawyers arrange it.",
+    "I keep both lawyers and you informed along the way, and I am there through to settlement and the keys."
+   ],
+   you: [
+    "Respond to your lawyer when they ask you for something.",
+    "Tell me about any questions or worries as they come up.",
+    "Get ready to hand over the keys at settlement."
+   ],
+   tim: [
+    "I keep both lawyers and you informed, so you always know where things stand.",
+    "I follow the conditions through until they are satisfied and the sale goes unconditional.",
+    "I am there through to settlement and the keys, not just until the offer is signed."
+   ],
+   docs: [
+    "Your signed sale and purchase agreement, and the conditions in it.",
+    "Settlement, which your lawyer arranges."
+   ],
+   faq: [
+    ["What does unconditional mean?", "It means the conditions in the agreement have been satisfied, so the sale is firm."],
+    ["What are conditions?", "They are things that need to happen before the sale becomes firm. The sale and purchase agreement lists them."],
+    ["Who arranges settlement?", "The lawyers arrange it. I keep both lawyers and you informed."],
+    ["What happens at settlement?", "Payment is made and the keys change hands."],
+    ["Will I still hear from you after the offer is signed?", "Yes. I am there through to settlement and the keys, and I keep you informed along the way."]
+   ]
+  }
+ ]
+};
+// one source for the wording: it is also listed in the translation catalogue, once each, so the catalogue test and the engine see it
+(function () {
+  const P = window.JOURNEY_PITCH, C = window.I18N_STRINGS, seen = new Set(), add = [];
+  C.screens.forEach(([, list]) => list.forEach(s => seen.add(s)));
+  const take = s => { if (typeof s === 'string' && s && !seen.has(s)) { seen.add(s); add.push(s); } };
+  const walk = (v, key) => { if (key === 'slug' || key === 'k') return; if (typeof v === 'string') take(v); else if (Array.isArray(v)) v.forEach(x => walk(x)); else if (v && typeof v === 'object') Object.keys(v).forEach(k => walk(v[k], k)); };
+  walk(P);
+  C.screens.push(['pitch', add]);
+})();

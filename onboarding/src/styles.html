@@ -349,6 +349,47 @@ svg.jmap { display: block; width: 100%; max-width: 360px; height: auto; margin: 
 .jtile summary { cursor: pointer; font-weight: 600; }
 .jtoggle { display: none; margin-bottom: 8px; }
 @media (max-width: 759px) { .jtile .jtoggle { display: inline-block; } .jtile .jlist:not(.open) .jcard:not(.here) { display: none; } .jtile:not(.jopen) .jtile-map { display: none; } }
+/* the journey as a pitch page (Tim, 9 November 2026): public pages for the map and each stop, in the same tile and card look */
+main:has(> .pitch-map) { max-width: 920px; }
+.pitch { padding-bottom: 28px; }
+.pitch h1:focus { outline: none; }
+.pitch .p-kick { margin: 0 0 6px; font-size: 13px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.pitch .p-top { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+.pitch .p-top .btn, .pitch .p-crumb a { font-size: 15.5px; padding: 9px 16px; }
+.pitch .p-crumb { margin-bottom: 14px; }
+.pitch .p-crumb a { display: inline-block; font-weight: 600; text-decoration: none; padding: 9px 0; }
+.pitch a.btn { display: inline-block; text-decoration: none; text-align: center; max-width: 100%; }
+.pitch .btn.primary { background: var(--accent-fill); border-color: var(--accent-fill); color: var(--on-accent); }   /* white on the AA accent in light, dark ink on the lighter accent at night */
+.pitch .lede { margin: 0 0 12px; }
+.pitch .p-open { color: var(--ink); font-size: 19px; }
+.pitch .card h2 { margin: 0 0 8px; font-size: 25px; }
+.pitch .card p { margin: 0 0 10px; }
+.pitch .card ul { margin: 4px 0 0; padding-left: 20px; }
+.pitch .card li { margin: 6px 0; }
+.pitch .card > :last-child { margin-bottom: 0; }
+.pitch .p-qa { padding: 12px 0; border-top: 1px solid var(--line); }
+.pitch .p-qa:first-of-type { border-top: 0; padding-top: 4px; }
+.pitch .p-qa h3 { margin: 0 0 4px; }
+.pitch .p-qa p { margin: 0; }
+.pitch .p-state { margin: 0 0 10px; }
+.pitch .p-state .jc-st.done { background: var(--ok-soft); color: var(--ok-text); }
+.pitch .p-state .jc-st.here { background: var(--accent-fill); color: var(--on-accent); }
+.pitch .p-state .jc-st.ahead { background: transparent; border: 1px solid var(--line); color: var(--muted); }
+.pitch .p-state .jdetail { font-weight: 500; }
+.pitch .p-dots { list-style: none; display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 6px; padding: 0; }
+.pitch .p-dots a { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--line); background: var(--surface); color: var(--ink); font-weight: 600; text-decoration: none; }
+.pitch .p-dots a[aria-current="page"] { background: var(--accent-fill); border-color: var(--accent-fill); color: var(--on-accent); }
+.pitch .p-dots a:focus-visible, .pitch .p-crumb a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.pitch .p-rea { margin-top: 6px; overflow-wrap: anywhere; }
+.pitch .p-rea .rea-tr-links { display: flex; flex-wrap: wrap; gap: 8px; }
+.pitch .p-rea .btn { padding: 8px 14px; font-size: 15px; }
+.pitch .pitch-cta { margin-top: 22px; }
+.pitch .pitch-cta .toolbar .btn { flex: 1 1 140px; }
+.pitch .p-next .toolbar .btn { flex: 1 1 100%; }
+.pitch .pitch-foot { margin-top: 18px; }
+.pitch .jwrap .jmapcol { top: 100px; }
+.pitch .jcard .jc-st.here { white-space: nowrap; }
+.pitch .jcard .toolbar .btn { flex: 0 1 auto; }
 .print-only { display: none; }
 @page journey { size: A4; margin: 12mm; }
 .sub-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 6px; }
@@ -408,5 +449,20 @@ body.is-agent .tr-help { display: none; }
   .jnote { margin-top: 2mm; font-size: 9pt; }
   .jc-st, .jc-n { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .jmap .pulse { animation: none; opacity: 0; }
+  /* the journey pages on paper: a clean leaflet with the map, the stops and Tim's contact details in plain text */
+  main:has(> .pitch) { max-width: none; padding: 0 !important; }
+  .pitch .print-only.phead { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 2px solid var(--accent); padding-bottom: 6px; margin-bottom: 8px; }
+  .pitch .phead img { height: 11mm; width: auto; }
+  .pitch .phead span { font-size: 10pt; text-align: right; }
+  .pitch h1 { font-size: 24pt; }
+  .pitch .p-open, .pitch .lede { font-size: 11.5pt; color: #000; }
+  .pitch .card { padding: 3mm 4mm; margin: 3mm 0; break-inside: auto; }
+  .pitch .card h2 { font-size: 15pt; break-after: avoid; }
+  .pitch .p-qa, .pitch .jcard { break-inside: avoid; }
+  .pitch .jwrap { grid-template-columns: 74mm minmax(0, 1fr); gap: 7mm; }
+  .pitch .jwrap .jmapcol { position: static; }
+  .pitch .jcard p { font-size: 9.5pt; }
+  .pitch a { color: #000; text-decoration: none; }
+  .pitch-map .jc-h h3 { font-size: 11pt; }
 }
 </style>
