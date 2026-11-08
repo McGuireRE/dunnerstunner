@@ -210,7 +210,6 @@
     S.busy = true;
     try {
       restoreAll(); removeAids();
-      document.documentElement.setAttribute('lang', 'en-NZ');
       if (active()) { watch(true); translateTree(document.body); ensureAids(document.body); }
       else watch(false);
     } finally { S.busy = false; if (S.observer) S.observer.takeRecords(); }

@@ -5,6 +5,9 @@
 // Runs against the mock database (mock.js). The "translation" the mock returns is the English with [code] in front, so a
 // test can see exactly which words came through the translation and which stayed English.
 const { chromium } = require('playwright'); const fs = require('fs'), path = require('path');
+// The app's own AI translation is switched off (APP_TRANSLATION is false in src/app.js): vendors use their browser's page translation.
+// These checks are for the switched-off path and run again if the switch is turned back on and the page rebuilt.
+if (/const APP_TRANSLATION = false;/.test(fs.readFileSync(path.join(__dirname, '..', 'src', 'app.js'), 'utf8'))) { console.log(JSON.stringify({ skipped: 'app translation is switched off; see browser-translation.test.js', errs: [] }, null, 1)); process.exit(0); }
 const { setup, helpers, ag, people, prop, cfg, answers, T0, GA, AK, URL, GUIDES } = require('./tr-scenarios.js');
 const STR = new Function('window', fs.readFileSync(path.join(__dirname, '..', 'src', 'strings.js'), 'utf8') + '; return window.I18N_STRINGS;')({});
 const flat = scope => { const seen = new Set(), out = []; STR[scope].forEach(([, l]) => l.forEach(s => { if (!seen.has(s)) { seen.add(s); out.push(s); } })); return out; };

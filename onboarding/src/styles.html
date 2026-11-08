@@ -358,6 +358,15 @@ svg.jmap { display: block; width: 100%; max-width: 360px; height: auto; margin: 
 .lang-sel:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .tr-note { max-width: 640px; margin: 10px auto 0; padding: 10px max(16px, env(safe-area-inset-left, 0px)); }
 .tr-note[hidden] { display: none; }
+/* browser translation: a quiet note under the header (Tim, 9 November 2026). The English copy of the disclaimer shows only once the page has been translated. */
+.tr-help { max-width: 640px; margin: 8px auto 0; padding: 0 max(16px, env(safe-area-inset-left, 0px)); color: var(--muted); font-size: 13px; line-height: 1.45; width: calc(100% - 32px); box-sizing: content-box; }
+.tr-help p { margin: 0 0 4px; font-size: 13px; }
+.tr-help .bt-en { border-top: 1px dashed var(--line); padding-top: 4px; }
+.tr-help .bt-en[hidden] { display: none; }
+.tr-help .bt-lbl { font-weight: 600; }
+.tr-help.in-panel { margin: 4px 0 10px; max-width: none; width: auto; padding: 0; }
+body.is-agent .tr-help { display: none; }
+
 .tr-print { display: none; }
 .jov .jtrnote { margin: 4px 0 10px; width: 100%; max-width: none; }
 .tr-note { background: var(--accent-soft); border-radius: 10px; border: 1px solid var(--line); width: calc(100% - 32px); }

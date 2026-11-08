@@ -2,6 +2,9 @@
 // states that change the wording (mistakes, branches, signed pages), and fails if any wording on screen is missing from the
 // catalogue, which is how a new sentence would slip through untranslated. Also checks the catalogue itself.
 const { chromium } = require('playwright'); const fs = require('fs'), path = require('path');
+// The app's own AI translation is switched off (APP_TRANSLATION is false in src/app.js): vendors use their browser's page translation.
+// These checks are for the switched-off path and run again if the switch is turned back on and the page rebuilt.
+if (/const APP_TRANSLATION = false;/.test(fs.readFileSync(path.join(__dirname, '..', 'src', 'app.js'), 'utf8'))) { console.log(JSON.stringify({ skipped: 'app translation is switched off; see browser-translation.test.js', errs: [] }, null, 1)); process.exit(0); }
 const { walkVendor, DATA } = require('./tr-scenarios.js');
 const STR = new Function('window', fs.readFileSync(path.join(__dirname, '..', 'src', 'strings.js'), 'utf8') + '; return window.I18N_STRINGS;')({});
 const fail = [], out = {}; const expect = (ok, msg) => { if (!ok) fail.push(msg); };

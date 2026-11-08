@@ -11,12 +11,18 @@
   const $ = (s, el = document) => el.querySelector(s);
   const $$ = (s, el = document) => Array.from(el.querySelectorAll(s));
   const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  // a name, address or reference the browser's page translation must leave alone
+  const nt = s => '<span translate="no">' + esc(s) + '</span>';
   const num = s => parseFloat(String(s ?? '').replace(/[^0-9.]/g, '')) || 0;
   const r2 = n => Math.round(n * 100) / 100;
   const money = (n, dp) => '$' + Number(n || 0).toLocaleString('en-NZ', { minimumFractionDigits: dp ?? (n % 1 ? 2 : 0), maximumFractionDigits: 2 });
   const fmtDate = d => new Date(d).toLocaleDateString('en-NZ', { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Pacific/Auckland' });
   const fmtDT = d => new Date(d).toLocaleString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: 'Pacific/Auckland' });
   const main = () => $('#main');
+  // The app's own AI translation is switched off (Tim, 9 November 2026): vendors use their browser's built-in page translation.
+  // Everything for it is kept, and one switch brings it back: no language picker, no translation or language requests, no
+  // Translations screen, and no automatic translating of plans and variations while this is false.
+  const APP_TRANSLATION = false;
   const trs = (s, v) => I18N.tr(s, v);   // wording built in pieces (for example a spoken label) goes through the same approved translations
   function toast(msg) { const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(toast._t); toast._t = setTimeout(() => t.hidden = true, 3200); }
   // signature pads: a "not saved yet" marker after drawing, and a strong confirmation once saved
@@ -428,9 +434,9 @@
   const CONTENT = { plan: null, variation: [] };   // the plan and variations on the screen: their approved translations load with the language
   // Translations never hold a page up: every request gives up after a few seconds and the page stays in English.
   const within = (p, ms, dflt) => Promise.race([p, new Promise(r => setTimeout(() => r(dflt), ms))]);
-  const getTr = async (scope, ref) => { try { const { data, error } = await within(sb.rpc('get_translations', { p_lang: I18N.lang, p_scope: scope, p_ref: ref || null }), 8000, { data: null, error: true }); return error || !data || typeof data !== 'object' ? {} : data; } catch (_) { return {}; } };
+  const getTr = async (scope, ref) => { if (!APP_TRANSLATION) return {}; try { const { data, error } = await within(sb.rpc('get_translations', { p_lang: I18N.lang, p_scope: scope, p_ref: ref || null }), 8000, { data: null, error: true }); return error || !data || typeof data !== 'object' ? {} : data; } catch (_) { return {}; } };
   async function loadLangDicts(code) {
-    if (code === 'en') return;
+    if (!APP_TRANSLATION || code === 'en') return;
     const mine = ++LANG_SEQ;
     const [a, b] = await Promise.all([getTr('screens'), getTr('guide')]);
     const content = {};
@@ -442,6 +448,7 @@
   }
   // a plan or variation has come on screen: bring its approved translation in
   async function loadContentTr(scope, ref) {
+    if (!APP_TRANSLATION) return;
     if (scope === 'plan') CONTENT.plan = ref; else if (!CONTENT.variation.includes(ref)) CONTENT.variation.push(ref);
     if (I18N.lang === 'en') return;
     const m = await getTr(scope, ref); if (I18N.lang === 'en') return;
@@ -449,6 +456,7 @@
     I18N.setLayers(LAYERS);
   }
   async function chooseLang(code, opt) {
+    if (!APP_TRANSLATION) return;
     opt = opt || {};
     if (IS_AGENT) code = 'en';
     LAYERS = {}; I18N.setLang(code); saveLocalLang(code);
@@ -459,7 +467,7 @@
   }
   // after sign-in: this person's saved choice (unless they just chose again on this device)
   async function syncLangRecord() {
-    if (!SESSION || IS_AGENT) return;
+    if (!APP_TRANSLATION || !SESSION || IS_AGENT) return;
     let rec = null;
     try { const { data } = await sb.from('user_language').select('lang').eq('user_id', SESSION.user.id).limit(1); rec = data && data[0] && data[0].lang; } catch (_) { }
     if (LANG_TOUCHED || !rec) { const cur = I18N.lang; if (cur !== 'en' || rec) { try { await sb.rpc('set_my_language', { p_lang: cur }); } catch (_) { } } return; }
@@ -525,7 +533,7 @@
     if (pls.length && !ids.length && pls.length === 1) return viewPrelisting(pls[0].id);
     if (pls.length && ids.length + pls.length > 1) {
       const rows = ids.length ? await must(sb.from('agreements').select('id,ref,address,status').in('id', ids)) : [];
-      main().innerHTML = `<h1>Your properties</h1>${pls.map(r => `<div class="card tight" style="display:flex;justify-content:space-between;align-items:center;gap:12px"><div><div style="font-weight:600">${esc(r.address)}</div><span class="small">Your appraisal and plan</span></div><button class="btn ghost" data-openpl="${r.id}">Open</button></div>`).join('')}${rows.map(r => `<div class="card tight" style="display:flex;justify-content:space-between;align-items:center;gap:12px"><div><div style="font-weight:600">${esc(r.address || r.ref)}</div><span class="small">Agency agreement</span></div><button class="btn ghost" data-open="${r.id}">Open</button></div>`).join('')}`;
+      main().innerHTML = `<h1>Your properties</h1>${pls.map(r => `<div class="card tight" style="display:flex;justify-content:space-between;align-items:center;gap:12px"><div><div style="font-weight:600">${nt(r.address)}</div><span class="small">Your appraisal and plan</span></div><button class="btn ghost" data-openpl="${r.id}">Open</button></div>`).join('')}${rows.map(r => `<div class="card tight" style="display:flex;justify-content:space-between;align-items:center;gap:12px"><div><div style="font-weight:600">${esc(r.address || r.ref)}</div><span class="small">Agency agreement</span></div><button class="btn ghost" data-open="${r.id}">Open</button></div>`).join('')}`;
       $$('[data-openpl]').forEach(b => b.addEventListener('click', () => viewPrelisting(b.dataset.openpl)));
       $$('[data-open]').forEach(b => b.addEventListener('click', () => loadVendor(b.dataset.open)));
       return;
@@ -580,10 +588,10 @@
   SCREENS[0] = () => {
     const names = P.map(callName).filter(Boolean);
     return `
-    <h1>${names.length ? `Hello ${esc(joinNames(names))}, let's get your sale underway.` : 'Welcome. Let\'s get your sale underway.'}</h1>
+    <h1>${names.length ? `Hello ${nt(joinNames(names))}, let's get your sale underway.` : 'Welcome. Let\'s get your sale underway.'}</h1>
     <p class="lede">This takes about 15 minutes. I've already filled in what we discussed, so mostly you'll be checking it's right. Your answers save as you go.</p>
     <div class="card tight"><div class="prefill">Prepared by Tim McGuire ${CFG.appr === 'pending' ? 'after our conversation' : 'after your appraisal'}</div>
-      <div class="facts"><div class="fact"><div class="k">Property</div><div class="v">${esc(A.address)}</div></div><div class="fact"><div class="k">Agreement</div><div class="v">Sole and Exclusive Agency, ${esc(AGREEMENT_VERSION.split('-')[0])}</div></div></div></div>
+      <div class="facts"><div class="fact"><div class="k">Property</div><div class="v">${nt(A.address)}</div></div><div class="fact"><div class="k">Agreement</div><div class="v">Sole and Exclusive Agency, ${esc(AGREEMENT_VERSION.split('-')[0])}</div></div></div></div>
     <h2>What we'll do together</h2>
     <ol class="steps-list">
       <li><span class="n">1</span><span>Confirm who you are and who owns the property</span><span class="t">2 min</span></li>
@@ -879,7 +887,7 @@
     <h1>Verify your identity</h1>
     <p class="lede">Anti-money laundering law requires me to verify everyone selling before I can act for you. ${manual ? 'I\'ll do this with you myself, in person or on a video call.' : `It's done securely by ${esc(CFG.aml)}, and your documents go to them, not to us.`}</p>
     <p class="clause">Clause 12 and the AML/CFT Act 2009</p>
-    ${P.filter(p => p.legal_name).map(p => `<div class="card tight"><div style="font-weight:600">${esc(p.legal_name)}</div><span class="status ${p.id_verified_at ? 'done' : 'pending'}">${p.id_verified_at ? 'Verified' : manual ? 'To check with Tim' : `${esc(CFG.aml)} will send a link`}</span></div>`).join('')}
+    ${P.filter(p => p.legal_name).map(p => `<div class="card tight"><div style="font-weight:600">${nt(p.legal_name)}</div><span class="status ${p.id_verified_at ? 'done' : 'pending'}">${p.id_verified_at ? 'Verified' : manual ? 'To check with Tim' : `${esc(CFG.aml)} will send a link`}</span></div>`).join('')}
     <p class="small">${manual ? 'Have your driver\'s licence or passport ready, plus something showing your address, such as a recent bank statement or rates notice. Tim will be in touch to arrange a time.' : 'Each person verifies on their own phone using their driver\'s licence or passport. It takes about two minutes.'}</p>
     <div class="card note tight"><p class="small" style="margin:0">You can sign now. Tim can't start acting for you until everyone's identity is verified.</p></div>`;
   };
@@ -918,9 +926,9 @@
     <h2>Signatures</h2>
     ${P.filter(p => p.legal_name).map(p => {
       const mine = ME && p.id === ME.id;
-      if (mine && !p.signed_at) return `<div class="card tight">${priorList(ANS).length ? `<label class="choice cb" style="margin:0 0 10px"><input type="checkbox" id="noticeOk"><span class="mark"></span><span><span class="ct">Also sign the notice${priorList(ANS).length > 1 ? 's' : ''} cancelling my agency with ${esc(joinNames(priorList(ANS).map(x => x.agency)))}</span></span></label>` : ''}<div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:8px"><h3 style="margin:0">${esc(p.legal_name)}</h3><button class="btn link" type="button" id="clearSig">Clear</button></div>
+      if (mine && !p.signed_at) return `<div class="card tight">${priorList(ANS).length ? `<label class="choice cb" style="margin:0 0 10px"><input type="checkbox" id="noticeOk"><span class="mark"></span><span><span class="ct">Also sign the notice${priorList(ANS).length > 1 ? 's' : ''} cancelling my agency with ${esc(joinNames(priorList(ANS).map(x => x.agency)))}</span></span></label>` : ''}<div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:8px"><h3 style="margin:0">${nt(p.legal_name)}</h3><button class="btn link" type="button" id="clearSig">Clear</button></div>
         <div class="sig-wrap"><canvas id="sig0" aria-label="Signature pad"></canvas><div class="sig-line"></div><span class="hint">Sign here with your finger or mouse</span></div>${saveNote('Save my signature and sign')}</div>`;
-      return `<div class="card tight" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><h3 style="margin:0">${esc(p.legal_name)}</h3>${p.signed_at ? `<span class="signed-badge">✓ Signed ${esc(fmtDT(p.signed_at))}</span>` : '<span class="status pending">Signs on their own phone</span>'}</div>`;
+      return `<div class="card tight" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><h3 style="margin:0">${nt(p.legal_name)}</h3>${p.signed_at ? `<span class="signed-badge">✓ Signed ${esc(fmtDT(p.signed_at))}</span>` : '<span class="status pending">Signs on their own phone</span>'}</div>`;
     }).join('')}
     <p class="small">By signing you agree to the Sole and Exclusive Agency Agreement ${esc(AGREEMENT_VERSION.split('-')[0])}, including the Terms and Conditions, the Property Description and the Verification of Ownership. Tim countersigns once everyone has signed.</p>
     <div class="toolbar">${pdfBtn('Read the full agreement before signing (PDF)')}</div>
@@ -1044,7 +1052,7 @@ function lawyerForm(id, title, blurb) {
     main().innerHTML = `<section class="screen active">
       <h1>Send your request to cancel</h1>
       <p class="lede">Check this is right. When you send it, Tim is told straight away and will call you on ${esc(phone)}.</p>
-      <div class="card"><table class="sum"><tr><td>Agreement</td><td style="white-space:normal">${esc(A.address)} (${esc(A.ref)})</td></tr><tr><td>Requested by</td><td style="white-space:normal">${esc(ME ? ME.legal_name : '')}</td></tr><tr><td>Reasons</td><td style="white-space:normal">${why ? esc(why) : '<span class="small">Not given</span>'}</td></tr><tr><td>Call me on</td><td>${esc(phone)}</td></tr></table></div>
+      <div class="card"><table class="sum"><tr><td>Agreement</td><td style="white-space:normal">${nt(A.address)} (${nt(A.ref)})</td></tr><tr><td>Requested by</td><td style="white-space:normal">${esc(ME ? ME.legal_name : '')}</td></tr><tr><td>Reasons</td><td style="white-space:normal">${why ? esc(why) : '<span class="small">Not given</span>'}</td></tr><tr><td>Call me on</td><td>${esc(phone)}</td></tr></table></div>
       <div class="choices"><label class="choice cb"><input type="checkbox" id="crFinal"><span class="mark"></span><span><span class="ct">Send my request to cancel the agency agreement</span><span class="cd">Signed in as ${esc(SESSION.user.email)}, the same way I signed</span></span></label></div>
       <div class="err"></div></section>`;
     actions(true, 'Back', 'Send request');
@@ -1310,6 +1318,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   }
 
   async function viewTranslations() {
+    if (!APP_TRANSLATION) return viewAgentHome();
     header('Translations', '', 0); actions(false); setAgentNav('tr');
     main().innerHTML = '<div class="loading">Loading...</div>';
     const cards = [];
@@ -1490,6 +1499,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   const TRVARS = {};
   // translate every language that is missing some of these strings; runs on its own, and redraws the panel when it ends
   function trAuto(scope, ref, sources, again) {
+    if (!APP_TRANSLATION) return null;
     const key = scope + ':' + ref;
     if (TR_JOBS.has(key) || !sources.length) return TR_JOBS.get(key);
     TR_FAIL.delete(key);
@@ -1545,10 +1555,10 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   function setAgentNav(cur) {
     const nav = $('#agentNav'); if (!nav) return;
     nav.hidden = !IS_AGENT; document.body.classList.toggle('is-agent', !!IS_AGENT);
-    const lw = $('#langWrap'); if (lw) lw.hidden = !!IS_AGENT;
+    const lw = $('#langWrap'); if (lw) lw.hidden = !!IS_AGENT || !APP_TRANSLATION;
     const jb = $('#journeyBtn'); if (jb) jb.hidden = !!IS_AGENT || !JREADY;   // the Journey button is for vendors, and for anyone not signed in
     $('#navHome').toggleAttribute('aria-current', cur === 'home'); if (cur === 'home') $('#navHome').setAttribute('aria-current', 'page');
-    if ($('#navTr')) { $('#navTr').removeAttribute('aria-current'); if (cur === 'tr') $('#navTr').setAttribute('aria-current', 'page'); }
+    if ($('#navTr')) { $('#navTr').hidden = !APP_TRANSLATION; $('#navTr').removeAttribute('aria-current'); if (cur === 'tr') $('#navTr').setAttribute('aria-current', 'page'); }
     $('#navDash').toggleAttribute('aria-current', cur === 'dash'); if (cur === 'dash') $('#navDash').setAttribute('aria-current', 'page');
   }
   // leaving the appointment flow from the top bar keeps what's been typed
@@ -1558,7 +1568,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   }
   $('#navHome').addEventListener('click', () => navGo(viewAgentHome));
   $('#navDash').addEventListener('click', () => navGo(viewAgentDashboard));
-  $('#navTr').addEventListener('click', () => navGo(viewTranslations));
+  $('#navTr').addEventListener('click', () => { if (APP_TRANSLATION) navGo(viewTranslations); });
   $$('.brand img').forEach(i => i.addEventListener('click', () => { if (IS_AGENT) navGo(viewAgentHome); }));
 
   function viewAgentHome() {
@@ -2127,8 +2137,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <div class="card tight"><p class="small" style="margin:0">${manual ? 'You verify each seller yourself. Use the AML file for each person on the agreement page.' : `${esc(T.c.aml)} sends each seller a link to verify on their phone.`} They can sign now; you can't act until everyone is verified.</p></div>
       ${priorList(T.an).length ? `<h2>Cancelling the previous agency</h2><p class="small">Each seller also signs ${priorList(T.an).length > 1 ? 'these notices' : 'this notice'} with the same signature. You check and send ${priorList(T.an).length > 1 ? 'them' : 'it'} from the agreement page.</p>${priorList(T.an).map(x => noticeHTML(T.ag.address, fp.client || '(names to come)', x)).join('')}` : ''}
       <h2>Signatures</h2>
-      ${named.length ? named.map(p => p.signed_at ? `<div class="card tight" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><h3 style="margin:0">${esc(p.legal_name)}</h3><span class="signed-badge">✓ Signed ${esc(fmtDT(p.signed_at))}</span></div>`
-        : `<div class="card tight" data-signer="${p.id || ''}"><div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:8px"><h3 style="margin:0">${esc(p.legal_name)}</h3><button class="btn link" type="button" data-clear="${p.id}">Clear</button></div>
+      ${named.length ? named.map(p => p.signed_at ? `<div class="card tight" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><h3 style="margin:0">${nt(p.legal_name)}</h3><span class="signed-badge">✓ Signed ${esc(fmtDT(p.signed_at))}</span></div>`
+        : `<div class="card tight" data-signer="${p.id || ''}"><div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:8px"><h3 style="margin:0">${nt(p.legal_name)}</h3><button class="btn link" type="button" data-clear="${p.id}">Clear</button></div>
           ${priorList(T.an).length ? `<label class="choice cb" style="margin:0 0 10px"><input type="checkbox" data-tnotice="${p.id}"><span class="mark"></span><span><span class="ct">Also sign the notice${priorList(T.an).length > 1 ? 's' : ''} cancelling the agency with ${esc(joinNames(priorList(T.an).map(x => x.agency)))}</span></span></label>` : ''}
           <div class="sig-wrap"><canvas id="pad_${p.id}" aria-label="Signature pad for ${esc(p.legal_name)}"></canvas><div class="sig-line"></div><span class="hint">${esc(callName(p) || p.legal_name)} signs here</span></div>
           ${saveNote(`Save ${callName(p) || p.legal_name}'s signature`)}
@@ -2243,7 +2253,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <div class="toolbar no-print"><button class="btn ghost" type="button" id="toList">Dashboard</button>${ag.property_id ? '<button class="btn ghost" type="button" id="toProp">Property file</button>' : ''}</div>
       <span class="agent-flag no-print">Only you see this</span>
       <h1>${esc(ag.address || 'Untitled')}</h1>
-      <p><span class="pill ${ag.status}">${esc(ag.status)}</span> <span class="small">${esc(ag.ref)} · ${esc(ag.agreement_version)}</span></p>
+      <p><span class="pill ${ag.status}">${esc(ag.status)}</span> <span class="small">${nt(ag.ref)} · ${esc(ag.agreement_version)}</span></p>
       ${justSent || ag.status === 'sent' ? `<div class="card note no-print"><h3>Send this to the vendor</h3><p class="small">Text or email them this message. They sign in with the email you entered.</p><div class="copybox" id="msgBox">${esc(msg)}</div><div class="toolbar"><button class="btn ghost" type="button" id="copyMsg">Copy message</button></div></div>` : ''}
       <div class="toolbar no-print">
         <button class="btn ${['draft', 'sent', 'parked'].includes(ag.status) ? 'primary' : 'ghost'}" type="button" id="editAg">${['draft', 'sent', 'parked'].includes(ag.status) ? 'Open appointment flow' : 'Review the three pages'}</button>
@@ -2307,7 +2317,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         <tr><td>Capacity and GST</td><td style="white-space:normal">${esc(an.capacity || '')}${an.entity ? ' for ' + esc(an.entity) : ''} · GST: ${esc(an.gst === 'yes' ? an.gstNo : 'No')}</td></tr>
       </table></div>
 
-      ${sigs.length ? `<h2>Signatures</h2>${sigs.map(s => `<div class="card tight"><div style="font-weight:600">${esc(s.signer_name)} <span class="small">(${s.signer_role === 'agent' ? 'licensee' : 'client'})</span></div><div class="small">${esc(fmtDT(s.signed_at))} · fingerprint ${esc(s.snapshot_sha256.slice(0, 16))}…</div>${sigUrls[s.id] ? `<img class="sigimg" src="${sigUrls[s.id]}" alt="Signature of ${esc(s.signer_name)}">` : ''}</div>`).join('')}` : ''}
+      ${sigs.length ? `<h2>Signatures</h2>${sigs.map(s => `<div class="card tight"><div style="font-weight:600">${nt(s.signer_name)} <span class="small">(${s.signer_role === 'agent' ? 'licensee' : 'client'})</span></div><div class="small">${esc(fmtDT(s.signed_at))} · fingerprint ${esc(s.snapshot_sha256.slice(0, 16))}…</div>${sigUrls[s.id] ? `<img class="sigimg" src="${sigUrls[s.id]}" alt="Signature of ${esc(s.signer_name)}">` : ''}</div>`).join('')}` : ''}
 
       ${lawyers.length ? `<h2>Lawyer links</h2>${lawyers.map(l => `<div class="card tight"><div style="font-weight:600">${esc(l.lawyer_name)}${l.firm ? ', ' + esc(l.firm) : ''}</div><div class="small">${esc(l.email)} · sent ${esc(fmtDT(l.sent_at))} · ${l.first_opened_at ? 'opened ' + esc(fmtDT(l.first_opened_at)) + ` (${l.open_count}×)` : 'not opened yet'}</div>
         <div class="small">${l.emailed_at ? 'Emailed ' + esc(fmtDT(l.emailed_at)) : `<strong style="color:var(--accent)">Not emailed${l.email_error ? ': ' + esc(l.email_error) : ''}</strong>`}</div>
@@ -2342,7 +2352,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     $$('[data-aml]').forEach(b => b.addEventListener('click', () => viewAml(id, b.dataset.aml)));
     const cb = $('#counterBtn');
     if (cb) cb.addEventListener('click', () => {
-      $('#counterBox').innerHTML = `<div class="card"><h3>Countersign as licensee</h3><p class="small">Timothy McGuire REA#20117983 on behalf of McGuire Real Estate Limited.</p><div class="sig-wrap"><canvas id="sigA"></canvas><div class="sig-line"></div><span class="hint">Sign here</span></div>${saveNote('Save my signature and countersign')}<div class="toolbar"><button class="btn primary" type="button" id="doCounter">Save my signature and countersign</button></div><div class="err"></div></div>`;
+      $('#counterBox').innerHTML = `<div class="card"><h3>Countersign as licensee</h3><p class="small"><span translate="no">Timothy McGuire REA#20117983</span> on behalf of <span translate="no">McGuire Real Estate Limited</span>.</p><div class="sig-wrap"><canvas id="sigA"></canvas><div class="sig-line"></div><span class="hint">Sign here</span></div>${saveNote('Save my signature and countersign')}<div class="toolbar"><button class="btn primary" type="button" id="doCounter">Save my signature and countersign</button></div><div class="err"></div></div>`;
       initPad('sigA');
       $('#doCounter').addEventListener('click', async () => {
         if (!padDrawn) { $('#counterBox .err').textContent = 'Please sign first.'; return; }
@@ -2717,7 +2727,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <div class="toolbar no-print"><button class="btn ghost" type="button" id="fBack">Property file</button></div>
       <span class="agent-flag">Only you see this</span>
       <h1>${esc(FORM_LABEL[fm.kind])}</h1>
-      <p class="small">${esc(ag.address)} · ${esc(ag.ref)} · ${esc(fm.form_version)}</p>
+      <p class="small">${nt(ag.address)} · ${nt(ag.ref)} · ${esc(fm.form_version)}</p>
       ${needsCounter ? `<div class="card"><h3>Countersign as licensee</h3><p class="small">Every vendor has signed. The declaration says it is noted "by the Licensee, who has also signed below": sign here as Timothy McGuire REA#20117983 on behalf of McGuire Real Estate Limited. It's then filed on the property and emailed to you.</p><div class="sig-wrap"><canvas id="fSigA" aria-label="Your signature pad"></canvas><div class="sig-line"></div><span class="hint">Sign here</span></div>${saveNote('Save my signature and countersign')}<div class="toolbar"><button class="btn primary" type="button" id="fCounter">Save my signature and countersign</button></div><div class="err" id="fCErr"></div></div>` : ''}
       ${fm.status === 'signed' && !needsCounter ? `<div class="card okc tight"><p class="small" style="margin:0">Signed by everyone ${esc(fmtDT(fm.countersigned_at || fm.signed_at))}. ${fm.document_id ? 'The PDF is filed in the property\'s documents.' : 'The PDF hasn\'t been filed yet.'}${fm.pdf_error ? ' ' + esc(fm.pdf_error) : ''}</p>${fm.document_id ? '' : '<div class="toolbar"><button class="btn primary" type="button" id="fFile">Make the PDF and file it</button></div>'}</div>` : ''}
       ${editable ? `<h2>Healthy Homes Compliance Checklist <span class="opt small">Page 1</span></h2><p class="small">${esc(HH_INTRO)}</p>
@@ -2733,11 +2743,11 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         <div class="toolbar"><button class="btn ghost" type="button" id="hSave">Save</button><button class="btn primary" type="button" id="hReady">${fm.status === 'ready' ? 'Save, still ready to sign' : 'Ready for the landlord to sign'}</button></div><div class="err" id="hErr"></div>`
         : docHTML(doc)}
       ${canSign && toSign.length ? `<h2>Sign in person</h2><p class="small">${isHH ? 'The landlord' : 'Each vendor'} can sign here on your phone, witnessed by you, or on their own phone from their agreement page.</p>
-        ${toSign.map(p => `<div class="card tight" data-fsigner="${p.id}"><label class="choice cb" style="margin:0 0 8px"><input type="checkbox" data-fok="${p.id}"><span class="mark"></span><span><span class="ct">${esc(p.legal_name)} has checked it${isHH ? '' : ' and makes the Vendor Statement'}</span></span></label>
-          <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:8px"><h3 style="margin:0">${esc(p.legal_name)}</h3><button class="btn link" type="button" data-fclr="${p.id}">Clear</button></div>
+        ${toSign.map(p => `<div class="card tight" data-fsigner="${p.id}"><label class="choice cb" style="margin:0 0 8px"><input type="checkbox" data-fok="${p.id}"><span class="mark"></span><span><span class="ct">${nt(p.legal_name)} has checked it${isHH ? '' : ' and makes the Vendor Statement'}</span></span></label>
+          <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:8px"><h3 style="margin:0">${nt(p.legal_name)}</h3><button class="btn link" type="button" data-fclr="${p.id}">Clear</button></div>
           <div class="sig-wrap"><canvas id="fpad_${p.id}" aria-label="Signature pad for ${esc(p.legal_name)}"></canvas><div class="sig-line"></div><span class="hint">${esc(callName(p) || p.legal_name)} signs here</span></div>${saveNote(`Save ${callName(p) || p.legal_name}'s signature`)}
           <div class="toolbar"><button class="btn primary" type="button" data-fsign="${p.id}">Save ${esc(callName(p) || p.legal_name)}'s signature</button></div></div>`).join('')}<div class="err" id="fErr"></div>` : ''}
-      ${fs.length ? `<h2>Signatures</h2>${fs.map(s => `<div class="card tight"><div style="font-weight:600">${esc(s.signer_name)}${s.signer_role === 'agent' ? ' <span class="small">(licensee)</span>' : ''}</div><div class="small">${esc(fmtDT(s.signed_at))} · fingerprint ${esc(String(s.snapshot_sha256).slice(0, 16))}…${s.snapshot && s.snapshot.witnessed_by ? ' · witnessed by you' : ''}</div></div>`).join('')}` : ''}
+      ${fs.length ? `<h2>Signatures</h2>${fs.map(s => `<div class="card tight"><div style="font-weight:600">${nt(s.signer_name)}${s.signer_role === 'agent' ? ' <span class="small">(licensee)</span>' : ''}</div><div class="small">${esc(fmtDT(s.signed_at))} · fingerprint ${esc(String(s.snapshot_sha256).slice(0, 16))}…${s.snapshot && s.snapshot.witnessed_by ? ' · witnessed by you' : ''}</div></div>`).join('')}` : ''}
     </div>`;
     $('#fBack').addEventListener('click', () => ag.property_id ? viewProperty(ag.property_id) : viewAgentDetail(ag.id));
     const fc = $('#fCounter');
@@ -2862,8 +2872,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         const mine = vsigs.filter(s => s.variation_id === v.id);
         return `<div class="card ${v.status === 'sent' ? 'note' : ''}" data-var="${v.id}"><div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:baseline"><h3 style="margin:0">Variation ${v.number}</h3><span class="status ${v.status === 'signed' ? 'done' : 'pending'}">${esc(VSTATUS[v.status])}${v.signed_at ? ' ' + esc(fmtDT(v.signed_at)) : ''}</span></div>
           ${(v.summary || []).length ? varTable(v.summary) : '<p class="small">No changes chosen yet.</p>'}
-          ${['sent', 'signed'].includes(v.status) ? `<details style="margin-top:8px"><summary class="small">Other languages for the vendors</summary><div data-trvar="${v.id}"></div></details>` : ''}
-          ${v.status === 'sent' ? `<div class="small" style="margin-top:8px">${signers.map(p => `${esc(p.legal_name)}: ${mine.some(s => s.person_id === p.id) ? '✓ signed' : 'not signed yet'}`).join('<br>')}<br>Issued ${esc(fmtDT(v.sent_at))} ${v.signing_mode === 'remote' ? '(sent to sign on their phones)' : '(to sign together)'}</div>` : ''}
+          ${APP_TRANSLATION && ['sent', 'signed'].includes(v.status) ? `<details style="margin-top:8px"><summary class="small">Other languages for the vendors</summary><div data-trvar="${v.id}"></div></details>` : ''}
+          ${v.status === 'sent' ? `<div class="small" style="margin-top:8px">${signers.map(p => `${nt(p.legal_name)}: ${mine.some(s => s.person_id === p.id) ? '✓ signed' : 'not signed yet'}`).join('<br>')}<br>Issued ${esc(fmtDT(v.sent_at))} ${v.signing_mode === 'remote' ? '(sent to sign on their phones)' : '(to sign together)'}</div>` : ''}
           ${v.status === 'signed' ? `<div class="small" style="margin-top:8px">${v.copy_sent_at ? 'Signed copy emailed ' + esc(fmtDT(v.copy_sent_at)) : `<strong style="color:var(--accent)">Signed copy not emailed yet${v.copy_error ? ': ' + esc(v.copy_error) : ''}</strong>`}</div>` : ''}
           <div class="toolbar no-print">
             ${v.status === 'draft' ? `<button class="btn primary" type="button" data-vedit="${v.id}">Continue</button>` : ''}
@@ -2909,7 +2919,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const sec = (k, title, desc, body) => `<div class="card"><label class="choice cb" style="margin:0"><input type="checkbox" data-vk="${k}" ${on(k) ? 'checked' : ''}><span class="mark"></span><span><span class="ct">${title}</span><span class="cd">${desc}</span></span></label><div data-vbody="${k}" ${on(k) ? '' : 'hidden'} style="margin-top:10px">${body}</div></div>`;
     const methods = ['', 'Auction', 'Tender', 'Deadline sale', 'Price by negotiation', 'Fixed price', 'Expressions of interest', 'Timed sale', 'Ballot'];
     main().innerHTML = `<div class="view-pad"><span class="agent-flag">Only you see this until you issue it</span>
-      <h1>Variation ${vr.number}: ${esc(ag.address)}</h1>
+      <h1>Variation ${vr.number}: ${nt(ag.address)}</h1>
       <p class="lede">Tick what's changing. Everything you don't tick stays as signed.</p>
       ${sec('reviewUntil', 'Extend the agreement', `Move the review date (end of the fixed period). Now: ${esc(dayText(cur.reviewUntil))}`, `
         <div class="toolbar" style="margin:0 0 6px">${[30, 60, 90].map(n => `<button class="btn ghost" type="button" data-vext="${n}">Add ${n} days</button>`).join('')}</div>
@@ -2965,7 +2975,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const signers = people.filter(p => p.legal_name && p.signed_at);
     main().innerHTML = `<div class="view-pad"><span class="agent-flag">Check it, then sign as licensee</span>
       <h1>Variation ${vr.number}</h1>
-      <p class="lede">To the agency agreement for ${esc(ag.address)} (${esc(ag.ref)}), between McGuire Real Estate and ${esc(joinNames(signers.map(p => p.legal_name)))}.</p>
+      <p class="lede">To the agency agreement for ${nt(ag.address)} (${nt(ag.ref)}), between McGuire Real Estate and ${nt(joinNames(signers.map(p => p.legal_name)))}.</p>
       <div class="card" data-signed>${varTable(vr.summary)}${vr.reason ? `<p class="small" style="margin:10px 0 0">Reason: <span data-tr-block>${nlEsc(vr.reason)}</span></p>` : ''}</div>
       <p class="small">All other terms stay exactly as signed. It takes effect once everyone has signed.</p>
       <div class="toolbar"><button class="btn ghost" type="button" id="vPrev">Preview the PDF</button><button class="btn link" type="button" id="vBack">Change something</button></div>
@@ -3013,10 +3023,10 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const todo = people.filter(p => p.legal_name && p.signed_at && !vsigs.some(s => s.person_id === p.id));
     main().innerHTML = `<div class="view-pad"><span class="agent-flag">Hand the device over to each person in turn</span>
       <h1>Changes to your agency agreement</h1>
-      <p class="lede">Variation ${vr.number} to the agreement for ${esc(ag.address)}. Everything not listed here stays the same.</p>
+      <p class="lede">Variation ${vr.number} to the agreement for ${nt(ag.address)}. Everything not listed here stays the same.</p>
       <div class="card" data-signed>${varTable(vr.summary)}${vr.reason ? `<p class="small" style="margin:10px 0 0">Reason: <span data-tr-block>${nlEsc(vr.reason)}</span></p>` : ''}</div>
       <div class="toolbar"><button class="btn ghost" type="button" id="vPdf2">Read the variation (PDF)</button></div>
-      ${todo.map(p => `<div class="card tight" data-vp="${p.id}"><div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:8px"><h3 style="margin:0">${esc(p.legal_name)}</h3><button class="btn link" type="button" data-vclr="${p.id}">Clear</button></div>
+      ${todo.map(p => `<div class="card tight" data-vp="${p.id}"><div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:8px"><h3 style="margin:0">${nt(p.legal_name)}</h3><button class="btn link" type="button" data-vclr="${p.id}">Clear</button></div>
         <label class="choice cb"><input type="checkbox" data-vok="${p.id}"><span class="mark"></span><span><span class="ct">I've read these changes and agree to them</span><span class="cd">I was told I can get legal advice before signing, and given time to do so</span></span></label>
         <div class="sig-wrap"><canvas data-vcv="${p.id}" aria-label="Signature of ${esc(p.legal_name)}"></canvas><div class="sig-line"></div><span class="hint">Sign here</span></div>${saveNote('Save signatures')}</div>`).join('') || '<p class="small">Everyone has signed.</p>'}
       <div class="err"></div></div>`;
@@ -3074,7 +3084,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     header('Changes to your agreement', '', 100);
     main().innerHTML = `<section class="screen active" data-signed data-signing>
       <h1>Changes to your agency agreement</h1>
-      <p class="lede">As we discussed, here's what changes in your agreement for ${esc(A.address)}. Everything else stays exactly as you signed it.</p>
+      <p class="lede">As we discussed, here's what changes in your agreement for ${nt(A.address)}. Everything else stays exactly as you signed it.</p>
       <div class="card" data-signed><h3>Variation ${vr.number}</h3>${varTable(vr.summary || [])}${vr.reason ? `<p class="small" style="margin:10px 0 0">Reason: <span data-tr-block>${nlEsc(vr.reason)}</span></p>` : ''}</div>
       <div class="toolbar"><button class="btn ghost" type="button" data-vpdf="${vr.id}">Read the variation (PDF)</button></div>
       <div class="card note tight"><p class="small" style="margin:0">You're welcome to get legal advice before signing, and to take your time. If anything here isn't what we agreed, don't sign. Call or text Tim on 027 562 7207 and he'll fix it.</p></div>
@@ -3178,7 +3188,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     header('Your appraisal', '', 0);
     main().innerHTML = `<section class="screen active">
       <h1>Your appraisal</h1>
-      <p class="lede">${PL.contact_name ? `Hi ${esc(PL.contact_name.split(/\s+/)[0])}, here's` : 'Here\'s'} my plan for selling ${esc(PL.address)}.</p>
+      <p class="lede">${PL.contact_name ? `Hi ${esc(PL.contact_name.split(/\s+/)[0])}, here's` : 'Here\'s'} my plan for selling ${nt(PL.address)}.</p>
       <div class="card">${plFacts(ap)}${ap.note ? `<p style="margin:14px 0 0">${esc(ap.note).replace(/\n/g, '<br>')}</p>` : ''}</div>
       ${ap.link ? `<div class="toolbar"><a class="btn ghost" href="${esc(ap.link)}" target="_blank" rel="noopener" style="text-decoration:none">Read the full appraisal</a></div>` : ''}
       <p class="small">Questions at any stage? Call or text Tim on <strong>027 562 7207</strong>.</p></section>`;
@@ -3369,7 +3379,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         <label class="f" for="plIntro">Opening line <span class="opt">(optional)</span></label><textarea id="plIntro" rows="2" placeholder="Here's how I've adjusted the plan around what you told me.">${esc(plan.intro || '')}</textarea>
         <div id="plPairs"></div><button class="btn link" type="button" id="plAddPair">+ Add another</button>
         <div class="toolbar"><button class="btn primary" type="button" id="plPublish">${pl.status === 'submitted' ? 'Publish the plan to them' : 'Publish the updated plan again'}</button></div>` : ''}
-      ${['plan', 'question', 'accepted'].includes(pl.status) ? '<h2>Your plan in other languages</h2><div id="trPlan"></div>' : ''}
+      ${APP_TRANSLATION && ['plan', 'question', 'accepted'].includes(pl.status) ? '<h2>Your plan in other languages</h2><div id="trPlan"></div>' : ''}
       <h2>Appraisal page</h2>
       <div class="card">
         <label class="f" for="plAddr" style="margin-top:0">Property address</label><input type="text" id="plAddr" value="${esc(pl.address)}" ${editable ? '' : 'disabled'}>
@@ -3425,7 +3435,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     return `<h2>Pre-listings</h2>
       <div class="toolbar"><button class="btn ghost" type="button" id="newPl">Let's begin: new appraisal page</button></div>
       ${pls.length ? `<div class="card tight" style="overflow-x:auto"><table class="tbl"><thead><tr><th>Property</th><th>Vendor</th><th>Status</th><th class="hide-sm">Updated</th></tr></thead><tbody>
-      ${pls.map(r => `<tr class="click" data-pl="${r.id}"><td><strong>${esc(r.address)}</strong></td><td>${esc(r.contact_name || r.contact_email)}</td><td><span class="pill ${['submitted', 'question', 'accepted'].includes(r.status) ? 'sent' : ''}">${esc(plStatusText(r))}</span></td><td class="small hide-sm">${esc(fmtDT(r.updated_at))}</td></tr>`).join('')}
+      ${pls.map(r => `<tr class="click" data-pl="${r.id}"><td><strong>${nt(r.address)}</strong></td><td>${esc(r.contact_name || r.contact_email)}</td><td><span class="pill ${['submitted', 'question', 'accepted'].includes(r.status) ? 'sent' : ''}">${esc(plStatusText(r))}</span></td><td class="small hide-sm">${esc(fmtDT(r.updated_at))}</td></tr>`).join('')}
       </tbody></table></div>` : ''}`;
   }
 
@@ -3455,8 +3465,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const events = await must(sb.from('aml_events').select('*').eq('aml_file_id', file.id).order('at', { ascending: false }));
     const T = (k, label, type = 'text', ph = '') => `<div><label class="f" for="m_${k}">${label}</label><input type="${type}" id="m_${k}" data-m="${k}" value="${esc(r[k] || '')}" placeholder="${esc(ph)}"></div>`;
     const S = (k, label, opts) => `<div><label class="f" for="m_${k}">${label}</label><select id="m_${k}" data-m="${k}"><option value="">Choose...</option>${opts.map(o => `<option ${r[k] === o ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select></div>`;
-    const R = (k, val, t, d) => `<label class="choice"><input type="radio" name="m_${k}" data-m="${k}" value="${esc(val)}" ${r[k] === val ? 'checked' : ''}><span class="mark"></span><span><span class="ct">${t}</span>${d ? `<span class="cd">${d}</span>` : ''}</span></label>`;
-    const U = (k, label) => `<div class="card tight upl"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><span style="font-weight:500">${label}</span>${L ? '' : `<label class="btn ghost" style="padding:8px 14px;font-size:15px">${r.up[k] ? 'Replace' : 'Take photo or upload'}<input type="file" accept="image/*,application/pdf" data-up="${k}" hidden></label>`}</div>
+    const R = (k, val, t, d) => `<label class="choice"><input type="radio" name="m_${k}" data-m="${k}" data-label="${esc(String(t).replace(/<[^>]*>/g, ''))}" value="${esc(val)}" ${r[k] === val ? 'checked' : ''}><span class="mark"></span><span><span class="ct">${t}</span>${d ? `<span class="cd">${d}</span>` : ''}</span></label>`;
+    const U = (k, label) => `<div class="card tight upl" data-label="${esc(String(label).replace(/<[^>]*>/g, ''))}"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><span style="font-weight:500">${label}</span>${L ? '' : `<label class="btn ghost" style="padding:8px 14px;font-size:15px">${r.up[k] ? 'Replace' : 'Take photo or upload'}<input type="file" accept="image/*,application/pdf" data-up="${k}" hidden></label>`}</div>
       ${r.up[k] ? (r.up[k].img && urls[k] ? `<img src="${urls[k]}" alt="${esc(label)}">` : `<p class="small" style="margin:8px 0 0">${urls[k] ? `<a href="${urls[k]}" target="_blank" rel="noopener">${esc(r.up[k].name)}</a>` : esc(r.up[k].name)}</p>`) : '<p class="small" style="margin:6px 0 0">Nothing attached yet</p>'}</div>`;
     const needSecond = r.idType === 'NZ driver licence' || r.idType === 'Kiwi Access Card';
     let idBlock;
@@ -3471,7 +3481,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     main().innerHTML = `<div class="view-pad">
       <span class="agent-flag">Only you see this</span>
       <h1>AML file</h1>
-      <div class="card tight"><div class="facts"><div class="fact"><div class="k">Client</div><div class="v">${esc(person.legal_name)}</div></div><div class="fact"><div class="k">Property</div><div class="v">${esc(ag.address)}</div></div><div class="fact"><div class="k">Agreement</div><div class="v">${esc(ag.ref)}</div></div><div class="fact"><div class="k">Status</div><div class="v">${L ? 'Complete' : 'In progress'}</div></div></div></div>
+      <div class="card tight"><div class="facts"><div class="fact"><div class="k">Client</div><div class="v">${nt(person.legal_name)}</div></div><div class="fact"><div class="k">Property</div><div class="v">${nt(ag.address)}</div></div><div class="fact"><div class="k">Agreement</div><div class="v">${nt(ag.ref)}</div></div><div class="fact"><div class="k">Status</div><div class="v">${L ? 'Complete' : 'In progress'}</div></div></div></div>
       ${L ? `<div class="card okc tight"><h3>Complete and locked</h3><p class="small" style="margin:0">Signed off by ${esc(file.locked_by)}, ${esc(fmtDT(file.locked_at))}. Changes from here are added as dated notes.${file.retain_until ? ' Keep until ' + esc(fmtDate(file.retain_until)) + '.' : ''}</p></div>` : ''}
       <fieldset ${L ? 'disabled' : ''}>
       <h2>1. Level of checks</h2>
@@ -3502,7 +3512,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     $$('[data-m]').forEach(el => {
       const k = el.dataset.m, ev = (el.type === 'radio' || el.type === 'checkbox' || el.tagName === 'SELECT') ? 'change' : 'change';
       el.addEventListener(ev, async () => {
-        if (el.type === 'radio') { if (!el.checked) return; r[k] = el.value; await log(k === 'risk' ? 'Risk rated ' + el.value : k === 'method' ? 'Verification method: ' + el.closest('label').querySelector('.ct').textContent : 'Level of checks: ' + el.value); }
+        if (el.type === 'radio') { if (!el.checked) return; r[k] = el.value; await log(k === 'risk' ? 'Risk rated ' + el.value : k === 'method' ? 'Verification method: ' + (el.dataset.label || el.value) : 'Level of checks: ' + el.value); }
         else if (el.type === 'checkbox') { r[k] = el.checked; if (el.checked && k === 'f2f') await log('Original ID sighted in person, likeness confirmed'); }
         else r[k] = el.value;
         await persist();
@@ -3515,7 +3525,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       const path = `aml/${file.id}/${inp.dataset.up}-${Date.now()}.${ext}`;
       await must(sb.storage.from('private').upload(path, fl, { contentType: fl.type || 'application/octet-stream' }));
       r.up[inp.dataset.up] = { path, name: fl.name, img: (fl.type || '').startsWith('image/') };
-      await persist(); await log('Attached: ' + inp.closest('.upl').querySelector('span').textContent);
+      await persist(); await log('Attached: ' + inp.closest('.upl').dataset.label);
       viewAml(agId, personId);
     }));
     const an = $('#addNote'); if (an) an.addEventListener('click', async () => { const t = $('#amlNote').value.trim(); if (t) { await log('Note: ' + t); viewAml(agId, personId); } });
@@ -3567,9 +3577,9 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       ${isSigned
         ? `<div class="lawyer-banner signed">✓ SIGNED AGREEMENT<small>This is the executed copy, signed by ${sellers}${ag.signed_at ? ' (all signed ' + esc(fmtDT(ag.signed_at)) + ')' : ''}${ag.countersigned_at ? ' and countersigned by Timothy McGuire ' + esc(fmtDT(ag.countersigned_at)) : ''}. It can't be changed here.</small></div>`
         : `<div class="lawyer-banner draft">DRAFT FOR REVIEW: NOT SIGNED<small>${someSigned ? 'Not everyone has signed yet, so this agreement is not in effect.' : 'Nobody has signed this. Your client is waiting for your advice before signing.'} If you'd like changes, reply to the email or call Tim, and he'll update it.</small></div>`}
-      <h1>${esc(ag.address)}</h1>
+      <h1>${nt(ag.address)}</h1>
       <p class="lede">${isSigned ? 'Signed' : 'Draft'} Sole and Exclusive Agency Agreement between McGuire Real Estate and ${sellers}.</p>
-      <p class="small">${esc(ag.ref)} · ${esc(ag.agreement_version)}</p>
+      <p class="small">${nt(ag.ref)} · ${esc(ag.agreement_version)}</p>
       <div class="toolbar no-print"><a class="btn primary" href="${SB_URL}/functions/v1/agreement-pdf?token=${encodeURIComponent(token)}" target="_blank" rel="noopener" style="text-decoration:none">${isSigned ? 'Signed agreement with all terms and signatures (PDF)' : 'Draft agreement with all terms (PDF)'}</a></div>
       <h2>Appointment of agency (front page)</h2>
       <div class="card"><table class="sum">
@@ -3783,17 +3793,18 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       : f && st.withdrawn ? 'This property is not on the selling road at the moment. Here is the whole road, in case it helps. If you would like to talk it through, call or text Tim on 027 562 7207.'
       : 'This is the road from thinking about selling to settlement, one stop at a time. Tap a stop to read what happens there.';
     ov.innerHTML = `<div class="jov-in">
-      <div class="jbar"><button class="btn ghost" type="button" id="jClose">Close</button>${I18N.selectHTML()}<button class="btn ghost" type="button" id="jPrint">Print this page</button></div>
+      <div class="jbar"><button class="btn ghost" type="button" id="jClose">Close</button>${APP_TRANSLATION ? I18N.selectHTML() : ''}<button class="btn ghost" type="button" id="jPrint">Print this page</button></div>
       <div class="tr-note jtrnote" data-trnote role="note" hidden></div>
+      <div class="tr-help in-panel" data-help role="note"></div>
       <div class="print-only jhead"><img src="${esc(logo)}" alt="McGuire Real Estate"><span data-no-tr>Tim McGuire<br>027 562 7207</span></div>
       <h1 id="jTitle" tabindex="-1">Your selling journey</h1>
-      ${f && f.address ? `<p class="jaddr">${esc(f.address)}</p>` : ''}
+      ${f && f.address ? `<p class="jaddr">${nt(f.address)}</p>` : ''}
       <p class="lede">${esc(lede)}</p>
       ${choose ? `<div class="card tight no-print" id="jChoose"><h3>Which property?</h3><p class="small" style="margin:0 0 8px">You have more than one. Choose the one you would like to see.</p><div class="toolbar" style="margin:0">${choose.map(r => `<button class="btn ghost" type="button" data-jpick="${esc(r.id)}">${esc(r.address || 'Address to come')}</button>`).join('')}</div></div>` : ''}
       ${signedIn && !f && !choose ? '<div class="card note tight no-print"><p class="small" style="margin:0">Once Tim has your property set up, the marker will show where you are. Until then, here is the whole road.</p></div>' : ''}
       <div class="jwrap"><div class="jmapcol">${jMapSVG(st, f, { links })}</div><div>${jCardsHTML(st, f, { links, uid: 'v' })}<p class="small jnote">Questions at any stage? Call or text Tim on <strong>027 562 7207</strong>.</p></div></div>
     </div>`;
-    ov.scrollTop = 0; I18N.syncSelects(); I18N.renderNote();
+    ov.scrollTop = 0; I18N.syncSelects(); I18N.renderNote(); btSync();
     const h = $('#jTitle'); if (h) h.focus({ preventScroll: true });
   }
   async function jGo(k) {
@@ -3841,10 +3852,63 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   }
 
   try { const cp = new URLSearchParams(location.search).get('campaign'); if (cp) { localStorage.setItem('pendingCampaign', decodeURIComponent(escape(atob(cp)))); history.replaceState(null, '', location.pathname); } } catch (_) { }
+
+  /* ───────── browser translation (Tim, 9 November 2026) ─────────
+     Vendors use their browser's own page translation (Chrome, Edge, Safari). The page is plain English, marked lang="en", and
+     names, addresses, amounts, dates, references, emails and phone numbers are marked translate="no" so the browser leaves them
+     alone. Nothing in the app reads wording back from the page: signing, snapshots, fingerprints and PDFs are built from saved data. */
+  const BT_GUIDE = 'Need this in another language? Your browser can translate this page: in Chrome, tap the menu then Translate; on an iPhone, tap aA then Translate.';
+  const BT_DISC = 'Translations are made automatically by your browser and have not been checked by a person. They are a guide only: the English version is the one that applies. If anything is unclear, or you have concerns, please seek legal or other expert advice.';
+  // the note: the guidance line, the disclaimer (which the browser translates), and an English copy of the disclaimer (which it never does)
+  const btHelpHTML = () => `<p class="bt-guide">${BT_GUIDE}</p><p class="bt-disc" data-bt="disc">${BT_DISC}</p><p class="bt-en" translate="no" lang="en" hidden><span class="bt-lbl">In English:</span> ${BT_DISC}</p>`;
+  const btFill = el => { if (el && !el.dataset.filled) { el.innerHTML = btHelpHTML(); el.dataset.filled = '1'; } };
+  // Has the page been translated? Chrome and Edge change the page language and add a class to the root; Safari rewrites the text.
+  // Either way the disclaimer's own text stops matching, so that is the sign the English copy waits for.
+  const btTranslated = () => {
+    const root = document.documentElement, lang = (root.getAttribute('lang') || 'en').toLowerCase();
+    if (/(^|\s)translated-(ltr|rtl)(\s|$)/.test(root.className) || !/^en(\b|-|$)/.test(lang)) return true;
+    return $$('.tr-help [data-bt="disc"]').some(p => p.textContent.replace(/\s+/g, ' ').trim() !== BT_DISC);
+  };
+  let BT_QUEUED = false;
+  const btSync = () => {
+    BT_QUEUED = false;
+    $$('.tr-help').forEach(btFill);
+    const t = btTranslated();
+    $$('.tr-help .bt-en').forEach(e => { e.hidden = !t; });
+  };
+  const btQueue = () => { if (!BT_QUEUED) { BT_QUEUED = true; (window.requestAnimationFrame || setTimeout)(btSync); } };
+  // Mark what a translator should not touch: emails, phone numbers, dollar amounts, percentages, references (MRE-2026-1003),
+  // dates written out, licence numbers, and the names Tim McGuire and McGuire Real Estate. Done to text on screen after each
+  // draw, never to anything a person is typing into, and never once the browser has taken the page over.
+  const NT_RE = /([\w.+-]+@[\w-]+(?:\.[\w-]+)+)|(\$\s?\d[\d,]*(?:\.\d+)?)|(\b\d[\d,]*(?:\.\d+)?\s?%)|(\bMRE-\d{4}-\d+\b)|(\bREA#?\s?\d{6,}\b)|(\+64[\d\s-]{7,}\d|\b0\d{1,2}[\s-]?\d{3}[\s-]?\d{3,4}\b)|(\b\d{1,2}(?:st|nd|rd|th)?\s(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)(?:\s\d{4})?\b)|(\bTimothy McGuire\b|\bTim McGuire\b|\bMcGuire Real Estate(?: Limited)?\b)/g;
+  const NT_SKIP = 'SCRIPT,STYLE,TEXTAREA,INPUT,SELECT,OPTION,CANVAS,NOSCRIPT';
+  function ntProtect(root) {
+    if (!root || btTranslated()) return;
+    const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, { acceptNode: n => {
+      if (!n.nodeValue || n.nodeValue.length < 3) return NodeFilter.FILTER_REJECT;
+      const p = n.parentElement; if (!p || p.closest(NT_SKIP + ',[translate="no"],.tr-help,[contenteditable]')) return NodeFilter.FILTER_REJECT;
+      NT_RE.lastIndex = 0; return NT_RE.test(n.nodeValue) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT; } });
+    const hits = []; while (w.nextNode()) hits.push(w.currentNode);
+    hits.forEach(n => {
+      const txt = n.nodeValue, frag = document.createDocumentFragment(); let last = 0, m; NT_RE.lastIndex = 0;
+      while ((m = NT_RE.exec(txt))) { if (m.index > last) frag.appendChild(document.createTextNode(txt.slice(last, m.index))); const sp = document.createElement('span'); sp.setAttribute('translate', 'no'); sp.textContent = m[0]; frag.appendChild(sp); last = m.index + m[0].length; if (m[0] === '') NT_RE.lastIndex++; }
+      if (last < txt.length) frag.appendChild(document.createTextNode(txt.slice(last)));
+      n.parentNode.replaceChild(frag, n);
+    });
+  }
+  { // watch the page: protect new text, and keep the English copy of the disclaimer in step
+    let ntQueued = false;
+    const run = () => { ntQueued = false; ob.disconnect(); try { ntProtect($('#main')); ntProtect($('#journey')); } finally { observe(); } btSync(); };
+    const ob = new MutationObserver(() => { if (!ntQueued) { ntQueued = true; (window.requestAnimationFrame || setTimeout)(run); } });
+    const observe = () => { ob.observe(document.body, { childList: true, subtree: true, characterData: true }); };
+    new MutationObserver(btQueue).observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'lang'] });
+    observe(); btSync(); setTimeout(run, 0);
+  }
+
   const lawyerToken = new URLSearchParams(location.search).get('lawyer');
   if (lawyerToken) { const w = $('#langWrap'); if (w) w.hidden = true; viewLawyer(lawyerToken); return; }
   I18N.init(); I18N.setHooks({ pick: c => chooseLang(c) });
-  { const l0 = readLocalLang(); if (l0 && l0 !== 'en') chooseLang(l0, { fromRecord: true }); }
+  if (APP_TRANSLATION) { const l0 = readLocalLang(); if (l0 && l0 !== 'en') chooseLang(l0, { fromRecord: true }); }
 
   boot().catch(e => { console.error(e); main().innerHTML = `<div class="login-card"><h1>Something went wrong</h1><p class="lede">Please refresh the page. If it keeps happening, call Tim on 027 562 7207.</p></div>`; });
 })();

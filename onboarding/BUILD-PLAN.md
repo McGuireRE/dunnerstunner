@@ -118,6 +118,14 @@ translations go straight to vendors, unchecked by a person, after the machine ch
 Every translated page, the journey panel and print carry Tim's disclaimer in the language with the English underneath;
 the English always applies. Tim can pull a language back to English. Notices stay English. Reviewed twice.
 
+Switched off 9 November 2026 (Tim's decision): vendors use their browser's own page translation (Chrome, Edge, Safari)
+instead. The app's translation is kept but off behind one switch, `APP_TRANSLATION` in `src/app.js`: no picker, no
+translation or language requests, no Translations screen, no automatic translating of plans or variations. Vendor pages
+show a quiet guidance line and a disclaimer (with an English copy that shows once the page is translated, and in print).
+Names, addresses, amounts, dates, references, emails and phone numbers are marked `translate="no"`. No database change.
+Tests for the switched-off path (`translation.test.js`, `translation-strings.test.js`) skip themselves until the switch
+is turned back on; `browser-translation.test.js` covers the new behaviour.
+
 Goal: vendors can read every screen and the plain-English guide in their own language.
 
 - Languages to start: English, te reo Māori, Samoan, Tongan, Hindi, Korean, Simplified Chinese.

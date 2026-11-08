@@ -7,7 +7,7 @@ strings, i18n = read('strings.js'), read('i18n.js')
 for k, f in [('__LOGO_LIGHT__', 'logo-light.png'), ('__LOGO_DARK__', 'logo-dark.png')]:
     body = body.replace(k, 'data:image/png;base64,' + base64.b64encode(open(os.path.join(here, f), 'rb').read()).decode())
 html = f'''<!doctype html>
-<html lang="en-NZ">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">

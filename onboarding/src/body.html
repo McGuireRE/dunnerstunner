@@ -41,6 +41,19 @@
   .tr-print p { margin: 0 0 1mm; font-size: 9pt; }
   .tr-print p.tr-en { color: #333; }
   .jtrnote { display: none !important; }
+  .tr-help { display: block !important; margin: 0 0 4mm; padding: 2mm 3mm; width: auto; max-width: none; border: 1px solid #888; color: #000; font-size: 9pt; }
+  body.is-agent .tr-help { display: none !important; }
+  .tr-help p { font-size: 9pt; margin: 0 0 1mm; }
+  .tr-help .bt-guide { display: none !important; }
+  body:not(.journey-open) .tr-help.in-panel { display: none !important; }
+  body.journey-open #trHelp { display: none !important; }   /* the leaflet is its own page: its own copy prints inside it, at the top */
+  .tr-help.in-panel { display: block !important; width: auto; }
+  body.journey-open .tr-help { margin: 0 0 1.5mm; padding: 0.8mm 2mm; font-size: 7pt; line-height: 1.25; }
+  body.journey-open .tr-help p { font-size: 7pt; margin: 0 0 0.5mm; }
+  body.journey-open .jlist { gap: 1mm; }
+  body.journey-open .jov .print-only.jhead { margin-bottom: 4px; padding-bottom: 4px; }
+  body.journey-open .jwrap { margin-top: 2mm; }
+  body.journey-open .jnote { margin-top: 1mm; }
   body { background: #fff; color: #000; font-size: 12pt; }
   main { padding: 0 !important; max-width: none; }
   .card { border: 1px solid #bbb; break-inside: avoid; }
@@ -49,15 +62,16 @@
 
 <header class="top">
   <div class="top-inner">
-    <div class="brand">
+    <div class="brand" translate="no">
       <img class="logo-light" src="__LOGO_LIGHT__" alt="McGuire Real Estate">
       <img class="logo-dark" src="__LOGO_DARK__" alt="McGuire Real Estate">
-      <span class="brand-right"><span class="step-count" id="stepCount"></span><button class="mode-btn jbtn" type="button" id="journeyBtn" aria-haspopup="dialog" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="19" r="2.4"/><circle cx="18" cy="5" r="2.4"/><path d="M8.4 19H14a4 4 0 0 0 0-8h-4a4 4 0 0 1 0-8h5.6"/></svg><span>Journey</span></button><nav class="agent-nav" id="agentNav" aria-label="Main" data-no-tr hidden><button class="mode-btn" type="button" id="navHome">Home</button><button class="mode-btn" type="button" id="navDash">Dashboard</button><button class="mode-btn" type="button" id="navTr">Translations</button></nav><button class="mode-btn" type="button" id="signOut" hidden>Sign out</button></span>
+      <span class="brand-right"><span class="step-count" id="stepCount"></span><button class="mode-btn jbtn" type="button" id="journeyBtn" aria-haspopup="dialog" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="19" r="2.4"/><circle cx="18" cy="5" r="2.4"/><path d="M8.4 19H14a4 4 0 0 0 0-8h-4a4 4 0 0 1 0-8h5.6"/></svg><span>Journey</span></button><nav class="agent-nav" id="agentNav" aria-label="Main" data-no-tr hidden><button class="mode-btn" type="button" id="navHome">Home</button><button class="mode-btn" type="button" id="navDash">Dashboard</button><button class="mode-btn" type="button" id="navTr" hidden>Translations</button></nav><button class="mode-btn" type="button" id="signOut" hidden>Sign out</button></span>
     </div>
     <div class="bar" aria-hidden="true"><span id="barFill"></span></div>
-    <div class="sub-row"><div class="step-name" id="stepName"></div><span class="lang-wrap" id="langWrap"><select class="lang-sel" id="langSel" aria-label="Language" data-no-tr></select></span></div>
+    <div class="sub-row"><div class="step-name" id="stepName"></div><span class="lang-wrap" id="langWrap" hidden><select class="lang-sel" id="langSel" aria-label="Language" data-no-tr></select></span></div>
   </div>
 </header>
+<div class="tr-help" id="trHelp" data-help role="note"></div>
 <div class="tr-print" id="trPrintNote" data-trprint role="note" hidden></div>
 <div class="tr-note" id="trNote" data-trnote role="note" hidden></div>
 

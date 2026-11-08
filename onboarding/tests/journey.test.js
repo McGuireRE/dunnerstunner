@@ -350,7 +350,7 @@ const savedStep=async p=>(await db(p)).agreements[0].answers._step;
   await seed(p,w3); await login(p,'v-pat','pat@example.com'); await openJ(p);
   let i=await info(p);
   expect(i.here[0]===5&&JSON.stringify(i.done)==='[1,2,3,4]','J3: a contact sees stop 5 (the marker without the agreement facts), got '+i.here+' '+i.done);
-  expect(!/Jane|Smith|Rob|jane@|rob@|Pat|checked|have signed|Signed by|Paperwork:/.test(i.text),'J3: no names, counts or details');
+  expect(!/Jane|Smith|Rob|jane@|rob@|Pat|checked|have signed|Signed by|Paperwork:/.test(i.text.replace(/Translations are made automatically[\s\S]*?expert advice\./,'')),'J3: no names, counts or details (the browser translation disclaimer says "checked" and is not a detail)');
   expect(!(await p.$('#journey [data-jgo]')),'J3: and no links');
   const rows=await p.evaluate(async()=>{const c=window.supabase.createClient(); const o={}; for(const t of ['agreements','agreement_people','signatures','property_forms','guide_receipts','prelistings']){ const r=await c.from(t).select('*'); o[t]=(r.data||[]).length; } return o;});
   expect(Object.values(rows).every(n=>n===0),'J3: the mock gives a non-party nothing from agreements, people, signatures, forms, receipts or pre-listings: '+JSON.stringify(rows));
