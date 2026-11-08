@@ -113,8 +113,10 @@ Tests: the map renders at 390 px without sideways scroll, the marker follows the
 
 ## Phase 4: translation
 
-Status: done 6 November 2026 (migration 008). Reviewed independently twice; all findings fixed. Nothing reaches vendors
-until a speaker approves it on Tim's Translations screen; notices stay English.
+Status: done 6 November 2026 (migration 008). Changed 8 November 2026 (migration 011, Tim's decision): machine
+translations go straight to vendors, unchecked by a person, after the machine checks (numbers, names, placeholders).
+Every translated page, the journey panel and print carry Tim's disclaimer in the language with the English underneath;
+the English always applies. Tim can pull a language back to English. Notices stay English. Reviewed twice.
 
 Goal: vendors can read every screen and the plain-English guide in their own language.
 
