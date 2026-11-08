@@ -3627,7 +3627,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     { t: 'Thinking of selling', say: 'This is where it starts: Tim gives you an appraisal of your property, and you tell him what matters to you about selling. Nothing is signed at this stage.' },
     { t: 'Your updated plan', say: 'Tim reads your answers and sends you an updated plan, showing what you said and what he has changed. You can tick that it works for you, or ask him a question.' },
     { t: 'Meeting Tim', say: 'You and Tim sit down, in person or by video, to talk the plan through and agree the details.' },
-    { t: 'Your agreement', say: 'You read your agency agreement in plain English, ask your lawyer first if you would like to, and then everyone on the title signs, each from their own phone.' },
+    { t: 'Your agreement', say: 'You read your agency agreement in plain English, ask your lawyer first if you would like to, and then everyone on the title signs, each from their own phone, or in person with Tim.' },
     { t: 'Identity check', say: 'The law asks Tim to confirm who each seller is before he acts for you. Each person shows a driver\'s licence or passport, and something with their address.' },
     { t: 'Getting ready', say: 'After you sign, there is some paperwork so buyers have what they need: the Vendor Declaration, a Healthy Homes statement if your property is tenanted, and the Real Estate Authority\'s guide to sale and purchase agreements, under Before you sell. Tim also gets your marketing ready with you.' },
     { t: 'On the market', say: 'Your property is shown to buyers through the marketing set out in your agreement. There is no page for this stop yet. If you would like to know anything, call or text Tim on 027 562 7207.' },
@@ -4047,7 +4047,13 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
 
   const lawyerToken = new URLSearchParams(location.search).get('lawyer');
   if (lawyerToken) { const w = $('#langWrap'); if (w) w.hidden = true; viewLawyer(lawyerToken); return; }
-  window.addEventListener('hashchange', () => { if (pitchRoute()) viewPitch(); else if (PITCH_ON) boot().catch(console.error); });
+  window.addEventListener('hashchange', e => {
+    if (pitchRoute()) {
+      // the Back button into the journey page must not throw away what a vendor has typed: ask first, as Read more does, and if they say no stay put
+      if (!PITCH_ON && JDIRTY && !confirm(trs('You have typed something on this page that is not saved yet. If you go to another page it will be lost. Go anyway?'))) { try { history.replaceState(null, '', e.oldURL || (location.pathname + location.search)); } catch (_) { } return; }
+      viewPitch();
+    } else if (PITCH_ON) boot().catch(console.error);
+  });
   I18N.init(); I18N.setHooks({ pick: c => chooseLang(c) });
   if (APP_TRANSLATION) { const l0 = readLocalLang(); if (l0 && l0 !== 'en') chooseLang(l0, { fromRecord: true }); }
 

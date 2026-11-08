@@ -65,7 +65,7 @@ window.I18N_STRINGS = {
     "Meeting Tim",
     "You and Tim sit down, in person or by video, to talk the plan through and agree the details.",
     "Your agreement",
-    "You read your agency agreement in plain English, ask your lawyer first if you would like to, and then everyone on the title signs, each from their own phone.",
+    "You read your agency agreement in plain English, ask your lawyer first if you would like to, and then everyone on the title signs, each from their own phone, or in person with Tim.",
     "Identity check",
     "The law asks Tim to confirm who each seller is before he acts for you. Each person shows a driver's licence or passport, and something with their address.",
     "Getting ready",
@@ -1164,35 +1164,35 @@ window.JOURNEY_PITCH = {
   {
    slug: "meeting-tim",
    short: "We sit down, in person or by video, to talk the plan through and agree the details.",
-   opening: "By now you have my appraisal and my updated plan, and this is where we sit down together, in person or by video, to talk it through. It is your chance to ask me anything, and to decide who the best agent is for you. If you decide it is me, we agree the details together and put everything in writing.",
+   opening: "This is where we sit down together, in person or by video, to talk your updated plan through. It is your chance to ask me anything, and to decide who the best agent is for you. If you decide it is me, we agree the details together and put everything in writing.",
    happens: [
     "We talk the plan through and agree the details. You can ask me anything, and I will explain my thinking on each part.",
     "I only talk about my fee once you have decided who the best agent is for you. It is then agreed with all of the owners and confirmed in writing.",
-    "If you would like to list before my written appraisal reaches you, you can. In that case the agreement only takes effect when you receive the appraisal, and you can cancel within 2 working days of receiving it, at no cost."
+    "Sometimes people want to get started before my written appraisal arrives. If that is you, the agreement only takes effect once you receive it, and you can cancel within 2 working days of receiving it, at no cost."
    ],
    you: [
     "Bring your questions, and tell me anything the plan has not covered.",
     "Have everyone who owns the property part of the conversation, in person or by video.",
     "Take the time you need to decide who the best agent is for you.",
-    "If you would like to list before the written appraisal arrives, tell me, and I will explain how that works."
+    "If you would like to get started before the written appraisal arrives, tell me, and I will explain how that works."
    ],
    tim: [
     "I talk your updated plan through with you, and I agree the details around what matters to you.",
     "I keep the conversation about my fee until you have decided who the best agent is for you, so you are choosing on value, not on cost.",
     "I agree everything with all of the owners and confirm it in writing, so there is no doubt about what has been agreed.",
-    "I make sure you understand the rule about listing before the written appraisal, so you know exactly where you stand."
+    "I make sure you understand what happens if you get started before the written appraisal arrives, so you know exactly where you stand."
    ],
    docs: [
     "Your updated plan, which we talk through together.",
     "The details we agree, confirmed in writing with all of the owners.",
-    "If you list before the written appraisal arrives: the agreement takes effect only when you receive the appraisal, and you can cancel within 2 working days of receiving it, at no cost."
+    "If you get started before the written appraisal arrives: the agreement takes effect only once you receive it, and you can cancel within 2 working days of receiving it, at no cost."
    ],
    faq: [
     ["When do we talk about your fee?", "Only once you have decided who the best agent is for you. It is then agreed with all of the owners, and confirmed in writing."],
     ["Should everyone who owns the property be at the meeting?", "It helps, because everyone on the title will need to agree on the way forward. If someone cannot be there, tell me and we will work out how to include them, including by video."],
     ["Can we meet by video instead of in person?", "Yes. We can sit down in person or by video, whichever suits you."],
-    ["Can I list before I receive the written appraisal?", "Yes. In that case the agreement only takes effect when you receive the appraisal."],
-    ["What if I change my mind after I read the appraisal?", "If you listed before receiving it, you can cancel within 2 working days of receiving it, at no cost."],
+    ["Can I get started before I receive the written appraisal?", "Yes. In that case the agreement only takes effect once you receive the appraisal."],
+    ["What if I change my mind after I read the appraisal?", "If you got started before receiving it, you can cancel within 2 working days of receiving it, at no cost."],
     ["Do I have to decide at the meeting?", "No. It is your decision, and there is no pressure. Take the time you need."]
    ]
   },
@@ -1201,7 +1201,7 @@ window.JOURNEY_PITCH = {
    short: "A sole agency agreement, signed on screen, with a plain-English guide to every section.",
    opening: "When you have decided I am the right agent for you, the agreement is how we make it official. It is a sole agency agreement, and I have set it up so you can read it, understand it and sign it on screen, in your own time, with a plain-English guide to every section.",
    happens: [
-    "You read your agency agreement in plain English and tick through the guide to each section. Everyone on the title signs, each from their own phone.",
+    "You read your agency agreement in plain English and tick through the guide to each section. Everyone on the title signs, each from their own phone, or in person with me.",
     "With the agreement come the Real Estate Authority's approved guides: their guide to agency agreements, and their guide to sale and purchase agreements. They are written by the Authority, not by me.",
     "I encourage you to get legal advice before you sign. You can send a review link to your lawyer so they can read exactly what you will be signing. A cooling-off period applies to residential agency agreements, and your agreement tells you how it works.",
     "If you had an agency before, you sign a cancellation notice for it, and I send it once I have reviewed it. Complaints and dispute resolution procedures are included with the agreement. If your plans change later, variations and extensions can be done on screen too."
@@ -1211,7 +1211,7 @@ window.JOURNEY_PITCH = {
     "Read the Real Estate Authority's guides, and ask your lawyer first if you would like to.",
     "Tell me if you had an agency before, and sign the cancellation notice for it.",
     "Choose how you would like to pay for your marketing.",
-    "Sign on screen. Every owner signs, each from their own phone."
+    "Sign on screen. Every owner signs, each from their own phone, or in person with me."
    ],
    tim: [
     "I explain every section in plain English, so you know what you are agreeing to before you sign.",
@@ -1234,22 +1234,22 @@ window.JOURNEY_PITCH = {
     ["Can I change my mind after I sign?", "A cooling-off period applies to residential agency agreements. Your agreement sets out how it works for you, so please read that section, and ask me or your lawyer if anything is unclear."],
     ["What if I already had an agency?", "You sign a cancellation notice for it. I review it, and then I send it."],
     ["What if things change after we start?", "Variations and extensions can be done on screen, so you do not have to print or post anything."],
-    ["What will I pay, and how?", "I only talk about my fee once you have decided who the best agent is for you, and it is then agreed with all of the owners in writing. Marketing is paid through List Now: you can pay up front, in instalments, or have it taken at settlement. The administration fee covers identity checks and other statutory onboarding costs."],
+    ["What will I pay, and how?", "I only talk about my fee once you have decided who the best agent is for you, and it is then agreed with all of the owners in writing. Marketing is paid through List Now: you can pay up front, in instalments, or have it taken at settlement. Any administration fee is set out in your agreement and covers identity checks and onboarding."],
     ["What if I am unhappy with something?", "Please talk to me first. The agreement includes our complaints and dispute resolution procedures, and you can go straight to the Real Estate Authority at any time."]
    ]
   },
   {
    slug: "identity-check",
-   short: "The law asks me to confirm who each seller is. I do it in person, or with an approved provider.",
+   short: "The law asks me to confirm who each seller is. I do it in person, or with a verification provider.",
    opening: "New Zealand law requires real estate agents to confirm who their sellers are before they act for them. It is part of doing the job properly, and I know it can feel like a formality. I do it myself, in person, wherever I can.",
    happens: [
     "The law behind this is the anti-money laundering and countering financing of terrorism law, known as AML/CFT. It asks me to verify the identity of every seller.",
-    "I do this myself, in person. For sellers who are not local, I use an approved provider so you can do it from wherever you are. If you are selling through a trust or a company, I need a bit more detail about it, and about who owns or controls it.",
+    "I do this myself, in person. For sellers who are not local, I use a verification provider so you can do it from wherever you are. If you are selling through a trust or a company, I need a bit more detail about it, and about who owns or controls it.",
     "Your records are kept securely, as the law requires."
    ],
    you: [
     "Each person selling shows me a driver's licence or passport, and something with their address.",
-    "If you are not local, complete the check with the approved provider.",
+    "If you are not local, complete the check with the verification provider.",
     "If you are selling through a trust or a company, have its details ready, such as the trust deed or company information, and who owns or controls it."
    ],
    tim: [
@@ -1267,9 +1267,9 @@ window.JOURNEY_PITCH = {
     ["Why do you need to check my identity?", "New Zealand law (AML/CFT) requires real estate agents to verify the identity of their sellers. I have no choice about it, and it applies to every seller."],
     ["What do I need to show?", "A driver's licence or passport, and something with your address on it."],
     ["Does everyone selling need to be checked?", "Yes. Each person selling is checked."],
-    ["I do not live nearby. Can I still do this?", "Yes. For sellers who are not local, I use an approved provider."],
+    ["I do not live nearby. Can I still do this?", "Yes. For sellers who are not local, I use a verification provider."],
     ["We are selling through a trust or a company. What changes?", "I need more detail, including who owns or controls it. Have the trust deed or company information ready."],
-    ["Is there a cost for the check?", "The administration fee in your agreement covers identity checks and other statutory onboarding costs."]
+    ["Is there a cost for the check?", "Any administration fee is set out in your agreement and covers identity checks and onboarding."]
    ]
   },
   {
@@ -1278,7 +1278,7 @@ window.JOURNEY_PITCH = {
    opening: "Once your agreement is signed, we get ready for the market. Some of this is paperwork and some of it is the property itself. The paperwork matters because it protects you later, and it gives buyers and their lawyers what they need.",
    happens: [
     "You complete the Vendor Declaration on screen. It confirms what you know about the property, which protects you later, and I countersign it. If the property is or will be tenanted, there is also a Healthy Homes statement.",
-    "You read the Real Estate Authority's guide to sale and purchase agreements, under Before you sell. A LIM report is part of every campaign, and I order it.",
+    "You read the Real Estate Authority's guide to sale and purchase agreements, in the Before you sell section of this app. A LIM report is part of every campaign, and I order it.",
     "Alongside the paperwork, we talk about preparing and presenting the property, so it shows at its best when buyers see it."
    ],
    you: [
@@ -1296,7 +1296,7 @@ window.JOURNEY_PITCH = {
    docs: [
     "The Vendor Declaration, signed on screen by you and countersigned by me.",
     "A Healthy Homes statement, if the property is or will be tenanted.",
-    { t: "The Real Estate Authority's guide to sale and purchase agreements, under Before you sell.", k: "rea_sp" },
+    { t: "The Real Estate Authority's guide to sale and purchase agreements, in the Before you sell section of this app.", k: "rea_sp" },
     "A LIM report, which is part of every campaign."
    ],
    faq: [
@@ -1304,7 +1304,7 @@ window.JOURNEY_PITCH = {
     ["What if I am not sure about one of the answers?", "Tell me. The declaration is about what you know, so there is no need to guess. We can talk it through."],
     ["Do I need a Healthy Homes statement?", "Only if the property is or will be tenanted."],
     ["What is a LIM report?", "A Land Information Memorandum, which is a report from the council with the information it holds about the property. One is part of every campaign."],
-    ["What is the Before you sell guide?", "It is the Real Estate Authority's guide to sale and purchase agreements, which explains the agreement a buyer will sign."],
+    ["What is Before you sell?", "It is a section in this app that holds the Real Estate Authority's guide to sale and purchase agreements, which explains the agreement a buyer will sign."],
     ["How should I prepare the property?", "It depends on the property and the buyer we are aiming for, so we talk about it together. I will give you practical advice on preparing and presenting it."]
    ]
   },

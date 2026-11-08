@@ -61,7 +61,7 @@ const OTHERS=/\b(Ray White|Harcourts|Barfoot|Bayleys|Century 21|Mike Pero|Quinov
   expect(!/\b(award|testimonial|days on market|best in)\b/i.test(all),'A: no awards, testimonials or days-on-market claims');
   expect(!/commission/i.test(all),'A: no commission figures or talk of commission');
   const wording=[]; (function w(v,k){ if(k==='slug'||k==='k') return; if(typeof v==='string') wording.push(v); else if(Array.isArray(v)) v.forEach(x=>w(x)); else if(v&&typeof v==='object') Object.keys(v).forEach(x=>w(v[x],x)); })(P);
-  const fee=wording.filter(t=>/\bfee\b/i.test(t)); const okFee=t=>/only talk about my fee once you have decided who the best agent is for you|administration fee covers identity checks|administration fee in your agreement covers identity checks|When do we talk about your fee|A word about my fee|conversation about my fee until you have decided who the best agent is for you/.test(t);
+  const fee=wording.filter(t=>/\bfee\b/i.test(t)); const okFee=t=>/only talk about my fee once you have decided who the best agent is for you|administration fee is set out in your agreement and covers identity checks and onboarding|When do we talk about your fee|A word about my fee|conversation about my fee until you have decided who the best agent is for you/.test(t);
   expect(fee.length>=4&&fee.every(okFee),'A: every mention of a fee is Tim\'s rule or the administration fee, never a figure: '+fee.filter(t=>!okFee(t)).slice(0,2));
   expect(/agreed with all of the owners, in writing/.test(P.fee)&&/only talk about my fee once you have decided who the best agent is for you/.test(P.fee),'A: the fee wording is exactly Tim\'s rule');
   // the catalogue lists every piece of the wording once, with the checks the strings test makes
@@ -157,17 +157,17 @@ for(const dark of [false,true]){
     if(k===1||k===3||k===4) await p.screenshot({path:path.join(__dirname,'out','pitch_stop'+k+'_'+lab+'_390.png'),fullPage:true});
     // facts: the content has what Tim asked for
     if(k===1) expect(/best price/.test(T)&&/reasons for moving/.test(T)&&/timing/.test(T)&&/defects/.test(T)&&/in person/.test(T)&&/opinion of value/.test(T)&&/reasoning/.test(T)&&/go ahead to a short questionnaire/.test(T),'C: stop 1 covers the visit, the opinion of value, price, reasons, timing and defects, and going on to the questionnaire');
-    if(k===1) expect(!/only takes effect when you receive/.test(T),'C: the listing-before-appraisal rule is not on stop 1');
+    if(k===1) expect(!/only takes effect/.test(T),'C: the listing-before-appraisal rule is not on stop 1');
     if(k===1) expect(!/two of (the )?three/i.test(T),'C: stop 1 does not state the internal two of three rule');
     if(k===2) expect(/short questionnaire/.test(T)&&/updated plan/.test(T)&&/before any agreement/.test(T)&&/no pressure/.test(T),'C: stop 2 covers the questionnaire, the plan and no pressure');
-    if(k===3) expect(/in person or by video/.test(T)&&/talk the plan through/.test(T)&&/only talk about my fee once you have decided who the best agent is for you/.test(T)&&/agreed with all of the owners and confirmed in writing/.test(T)&&/only takes effect when you receive the appraisal/.test(T)&&/cancel within 2 working days of receiving it, at no cost/.test(T)&&!/opinion of value/.test(T),'C: stop 3 covers the sit-down, the fee rule and the 2 working days, and the appraisal visit has moved to stop 1');
-    if(k===4){ expect(/sole agency agreement/.test(T)&&/legal advice/.test(T)&&/review link to your lawyer/.test(T)&&/cooling-off period applies to residential agency agreements/.test(T)&&/cancellation notice/.test(T)&&/complaints and dispute resolution/i.test(T)&&/List Now/.test(T)&&/up front, in instalments, or have it taken at settlement/.test(T)&&/administration fee covers identity checks and other statutory onboarding costs/.test(T),'C: stop 4 covers the agreement facts');
+    if(k===3) expect(/in person or by video/.test(T)&&/talk the plan through/.test(T)&&/only talk about my fee once you have decided who the best agent is for you/.test(T)&&/agreed with all of the owners and confirmed in writing/.test(T)&&/Sometimes people want to get started before my written appraisal arrives/.test(T)&&/only takes effect once you receive it/.test(T)&&/cancel within 2 working days of receiving it, at no cost/.test(T)&&!/By now you have my appraisal/.test(T)&&!/opinion of value/.test(T),'C: stop 3 covers the sit-down, the fee rule and the 2 working days, and the appraisal visit has moved to stop 1');
+    if(k===4){ expect(/sole agency agreement/.test(T)&&/legal advice/.test(T)&&/review link to your lawyer/.test(T)&&/cooling-off period applies to residential agency agreements/.test(T)&&/cancellation notice/.test(T)&&/complaints and dispute resolution/i.test(T)&&/List Now/.test(T)&&/up front, in instalments, or have it taken at settlement/.test(T)&&/Any administration fee is set out in your agreement and covers identity checks and onboarding/.test(T)&&/or in person with me/.test(T),'C: stop 4 covers the agreement facts');
       const g=await p.$$eval('#main .p-rea a',a=>a.map(x=>x.href)); expect(g.some(h=>/rea\.govt\.nz.*Agency-agreement-guide/.test(h))&&g.some(h=>/rea\.govt\.nz.*Sale-and-purchase/.test(h)),'C: stop 4 links the REA guides: '+g);
       const tr=await p.$$eval('#main .p-rea [data-rea-lang]',a=>a.map(x=>x.getAttribute('href')));
       expect(tr.some(h=>/rea-agency-agreement-guide-2022-mi\.pdf$/.test(h))&&tr.some(h=>/rea-agency-agreement-guide-2022-ko\.pdf$/.test(h))&&tr.some(h=>/rea-sale-purchase-guide-2022-zh\.pdf$/.test(h)),'C: stop 4 links the REA\'s own translations from guides.json: '+tr);
       expect(/not ours|not mine/.test(T),'C: the translations are said to be the Authority\'s own'); }
-    if(k===5) expect(/AML\/CFT/.test(T)&&/in person/.test(T)&&/approved provider/.test(T)&&/trust or a company/.test(T)&&/kept securely, as the law requires/.test(T),'C: stop 5 covers the identity check');
-    if(k===6) expect(/Vendor Declaration/.test(T)&&/countersign/.test(T)&&/Healthy Homes/.test(T)&&/Before you sell/.test(T)&&/LIM report is part of every campaign/.test(T)&&/preparing and presenting/.test(T),'C: stop 6 covers getting ready');
+    if(k===5) expect(/AML\/CFT/.test(T)&&/in person/.test(T)&&/verification provider/.test(T)&&!/approved provider/.test(T)&&/trust or a company/.test(T)&&/kept securely, as the law requires/.test(T),'C: stop 5 covers the identity check');
+    if(k===6) expect(/Vendor Declaration/.test(T)&&/countersign/.test(T)&&/Healthy Homes/.test(T)&&/Before you sell section of this app/.test(T)&&/LIM report is part of every campaign/.test(T)&&/preparing and presenting/.test(T),'C: stop 6 covers getting ready');
     if(k===7){ expect(/Digital, Premium and Elite/.test(T)&&/build your own/.test(T)&&/trusted suppliers/.test(T)&&/feedback after open homes/.test(T)&&/most likely to love/.test(T),'C: stop 7 covers the marketing');
       const pk=await p.$$eval('#main a',a=>a.map(x=>x.href)); expect(pk.includes('https://packages.dunnerstunner.co.nz/'),'C: stop 7 links to the packages site'); }
     if(k===8) expect(/firm, unconditional deal/.test(T)&&/settlement and possession/.test(T)&&/best price and (the best )?terms/.test(T)&&/guide to sale and purchase agreements/.test(T)&&/lawyers/.test(T),'C: stop 8 covers the offer and the two kinds of timing');
@@ -282,6 +282,24 @@ const world=(stage,o)=>{ o=o||{}; const ver=o.verified?'2026-11-02T00:00:00Z':nu
 // ---------- H. no translation files on the server: the page still works ----------
 { const {ctx,p}=await setup({guides:false}); await p.goto(URL); await seed(p,{}); await openAt(p,'#journey/your-agreement');
   expect(await p.$$eval('#main .p-rea a',a=>a.length)===2&&(await p.$$('#main .p-rea [data-rea-lang]')).length===0&&await p.textContent('#pTitle')==='Your agreement','H: with no guides list, the two REA guide links still work and nothing breaks');
+  await ctx.close(); }
+
+// ---------- I. the Back button must not throw away typing; the wording fixes ----------
+{ const {ctx,p}=await setup({guides:true}); await p.goto(URL);
+  const toStop4=async()=>{ await seed(p,world('agreement')); await openAt(p,'#journey',JANE); await p.click('#main .jcard a[href="#journey/your-agreement"]'); await p.waitForTimeout(300); await p.click('[data-pgo="4"]'); await p.waitForTimeout(800); };
+  const type=()=>p.evaluate(()=>document.querySelector('#main').dispatchEvent(new Event('input',{bubbles:true})));
+  // typed something, Back, say no: stay where they are, the address is restored, and no history is added
+  await toStop4(); const len0=await p.evaluate(()=>history.length); await type();
+  let asked=0, yes=false; p.on('dialog',d=>{asked++; yes?d.accept():d.dismiss();}); await p.goBack(); await p.waitForTimeout(500);
+  expect(asked===1,'I: Back into the journey page with unsaved typing asks first');
+  expect(!(await p.$('#pTitle'))&&await p.evaluate(()=>location.hash)===''&&await p.isVisible('#journeyBtn'),'I: saying no keeps the vendor on their page with the address restored: '+await p.evaluate(()=>location.hash));
+  expect(await p.evaluate(()=>history.length)<=len0,'I: no history was added by saying no');
+  // nothing typed: Back goes straight to the journey page with no question
+  await toStop4(); asked=0; await p.goBack(); await p.waitForTimeout(500);
+  expect(asked===0&&await p.textContent('#pTitle')==='Your selling journey','I: with nothing typed, Back returns to the journey page without a question');
+  // typed something, Back, say yes: the journey page shows
+  await toStop4(); await type(); asked=0; yes=true; await p.goBack(); await p.waitForTimeout(600);
+  expect(asked===1&&await p.textContent('#pTitle')==='Your selling journey','I: saying yes goes on to the journey page');
   await ctx.close(); }
 
 await b.close();
