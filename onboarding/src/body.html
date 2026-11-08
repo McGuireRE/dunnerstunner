@@ -37,6 +37,10 @@
 .tguide .in ul { margin: 6px 0 0; padding-left: 20px; }
 @media print {
   .proto, header.top, .actions, .toolbar, .no-print, .tr-note, .tr-aid { display: none !important; }
+  .tr-print:not([hidden]) { display: block !important; border: 1px solid #888; padding: 2mm 3mm; margin: 0 0 4mm; font-size: 9pt; color: #000; background: #fff; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .tr-print p { margin: 0 0 1mm; font-size: 9pt; }
+  .tr-print p.tr-en { color: #333; }
+  .jtrnote { display: none !important; }
   body { background: #fff; color: #000; font-size: 12pt; }
   main { padding: 0 !important; max-width: none; }
   .card { border: 1px solid #bbb; break-inside: avoid; }
@@ -54,7 +58,8 @@
     <div class="sub-row"><div class="step-name" id="stepName"></div><span class="lang-wrap" id="langWrap"><select class="lang-sel" id="langSel" aria-label="Language" data-no-tr></select></span></div>
   </div>
 </header>
-<div class="tr-note" id="trNote" role="note" hidden></div>
+<div class="tr-print" id="trPrintNote" data-trprint role="note" hidden></div>
+<div class="tr-note" id="trNote" data-trnote role="note" hidden></div>
 
 <main id="main"><div class="loading">Loading...</div></main>
 

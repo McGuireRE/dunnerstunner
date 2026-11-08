@@ -152,5 +152,17 @@ expect(/function public\.translation_problem/.test(mig) && /why := public\.trans
 expect(/kind in \('approved','withdrawn','edited'\)/.test(mig) && /values \('edited'/.test(mig), 'corrections are logged');
 expect(/agent_approve_translations\(p_scope text, p_ref uuid, p_lang text, p_name text, p_items jsonb\)/.test(mig) && /text = r->>'text'/.test(mig) && /status = 'awaiting_check'/.test(mig), 'approval is for the strings that were shown, and only if unchanged');
 expect(!/agent_approve_translations\(text, uuid, text, text\)\b/.test(mig), 'there is no approve-everything signature');
+// migration 011: translations are shown at once, but only if they pass the database check; additive only
+const m11 = fs.readFileSync(path.join(root, 'onboarding', 'migrations', '011_translations_automatic.sql'), 'utf8'), m11c = m11.replace(/--[^\n]*/g, '');
+expect(!/\bdrop\b|\bdelete\b|\btruncate\b/i.test(m11c), '011 has no DROP, DELETE or TRUNCATE');
+expect(/function public\.agent_store_translations\(p_scope text, p_ref uuid, p_lang text, p_rows jsonb, p_model text\) returns jsonb/.test(m11) && /translation_problem\(r->>'source', r->>'text'\)/.test(m11) && /skipped := skipped \+ 1/.test(m11), '011 checks every row and skips the ones that fail');
+expect(/'Automatic \(not checked by a person\)'/.test(m11) && /edited_by is null/.test(m11), '011 marks rows as automatic and never overwrites a correction');
+expect(/function public\.agent_save_translations\(.*returns integer/.test(m11) && /function public\.agent_edit_translation\(.*returns void/.test(m11) && /status = 'approved'/.test(m11), '011 keeps the older signatures and a correction stays visible');
+expect(/function public\.agent_publish_translations/.test(m11) && /translation_problem\(t\.source, t\.text\) <> ''/.test(m11), '011 can show a withdrawn language again, only strings that pass the check');
+expect(/revoke execute on function public\.agent_store_translations.*from public, anon/.test(m11) && /revoke execute on function public\.agent_publish_translations.*from public, anon/.test(m11) && /revoke execute on function public\.agent_translation_usage.*from public, anon/.test(m11), '011 functions are not open to the public');
+expect(!/signatures|snapshot|fingerprint|trigger/i.test(m11c), '011 does not touch signed records');
+expect(/translation_sets/.test(m11) && /alter table public\.translation_sets enable row level security/.test(m11) && !/create policy[^;]*translation_sets[^;]*for (insert|update|delete|all)/i.test(m11c), '011 records withdrawals in a table nobody can write to directly');
+expect(/function public\.agent_withdraw_translations\(p_scope text, p_ref uuid, p_lang text\) returns integer/.test(m11) && /withdrawn, changed_by\) values \(p_scope, p_ref, p_lang, true/.test(m11) && /st := case when pulled then 'awaiting_check' else 'approved' end/.test(m11), '011 keeps a withdrawn language withdrawn when new rows arrive');
+expect(/revoke execute on function public\.agent_approve_translations\(text, uuid, text, text, jsonb\) from public, anon, authenticated/.test(m11) && !/agent_approve_translations/.test(appSrc), 'the old approve function is switched off and the app no longer calls it');
 out.checked = { fails: fail.length };
 console.log(JSON.stringify({ out, fail, errs: fail.map(x => 'FAILED: ' + x) }, null, 1));

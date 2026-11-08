@@ -21,7 +21,7 @@
   const ATTRS = ['placeholder', 'aria-label', 'title', 'alt', 'data-count'];
   const PHRASING = new Set(['a', 'abbr', 'b', 'em', 'i', 'small', 'span', 'strong', 'sub', 'sup', 'u', 'mark', 'code', 'time', 's', 'tspan']);
   const SKIP_TAGS = new Set(['SCRIPT', 'STYLE', 'TEXTAREA', 'CANVAS', 'NOSCRIPT', 'IFRAME', 'INPUT']);
-  const NOTE_EN = 'The English agreement is the one that applies.';
+  const NOTE_EN = 'This translation was made automatically by a computer and has not been checked by a person. It is a guide only: the English version is the one that applies. If anything is unclear, or you have concerns, please seek legal or other expert advice.';
 
   const S = {
     lang: 'en', tempEnglish: false, layers: {}, dict: new Map(), pats: [], memo: new Map(), observer: null,
@@ -235,7 +235,8 @@
   function fillAid(d, src) {
     const body = d.querySelector('.tr-aid-in'); body.innerHTML = '';
     const l = byCode(S.lang);
-    body.appendChild(textLine('This part is in English because it is what you sign. The translation below is only to help you read it. ' + NOTE_EN, l, false));
+    body.appendChild(textLine('This part is in English because it is what you sign. The translation below is only to help you read it.', l, false));
+    body.appendChild(textLine(NOTE_EN, l, false));
     const clone = src.cloneNode(true);
     clone.querySelectorAll('script,style,canvas,input,textarea,select,button,iframe,.sig-wrap,.toolbar,[data-no-aid]').forEach(x => x.remove());
     [clone].concat(Array.from(clone.querySelectorAll('*'))).forEach(x => { ['id', 'for', 'name', 'tabindex', 'data-signed', 'data-signing', 'aria-labelledby'].forEach(a => x.removeAttribute(a)); });
@@ -258,22 +259,30 @@
 
   /* ── the note at the top of every page, and the language choice ── */
   function renderNote() {
-    const el = document.getElementById('trNote'); if (!el) return;
-    const l = byCode(S.lang);
-    el.innerHTML = '';
-    if (S.lang === 'en') { el.hidden = true; return; }
-    el.hidden = false; el.setAttribute('data-no-tr', '');
-    if (S.tempEnglish) {
-      el.appendChild(btn('Show this page in {language} again', l, () => { S.tempEnglish = false; apply(); }));
-      return;
-    }
-    if (!hasWords()) {
-      const p = document.createElement('p'); p.setAttribute('lang', 'en');
-      p.textContent = 'The ' + l.name + ' translation is still being checked by a speaker, so you are seeing English for now.';
-      el.appendChild(p); return;
-    }
-    el.appendChild(textLine(NOTE_EN, l, false));
-    el.appendChild(btn('Read this page in English', l, () => { S.tempEnglish = true; apply(); }, true));
+    const l = byCode(S.lang), show = S.lang !== 'en' && !S.tempEnglish && hasWords();
+    // on screen: the top of the page, and inside the journey panel (which covers the page)
+    document.querySelectorAll('[data-trnote]').forEach(el => {
+      el.innerHTML = '';
+      if (S.lang === 'en') { el.hidden = true; return; }
+      el.hidden = false; el.setAttribute('data-no-tr', '');
+      if (S.tempEnglish) {
+        el.appendChild(btn('Show this page in {language} again', l, () => { S.tempEnglish = false; apply(); }));
+        return;
+      }
+      if (!hasWords()) {
+        const p = document.createElement('p'); p.setAttribute('lang', 'en');
+        p.textContent = 'The ' + l.name + ' translation is not ready yet, so you are seeing English for now.';
+        el.appendChild(p); return;
+      }
+      el.appendChild(textLine(NOTE_EN, l, false));
+      el.appendChild(btn('Read this page in English', l, () => { S.tempEnglish = true; apply(); }, true));
+    });
+    // on paper: always at the top of whatever is printed, in the chosen language with the English underneath
+    document.querySelectorAll('[data-trprint]').forEach(el => {
+      el.innerHTML = ''; el.setAttribute('data-no-tr', '');
+      if (!show) { el.hidden = true; return; }
+      el.hidden = false; el.appendChild(textLine(NOTE_EN, l, false));
+    });
   }
   function btn(en, l, fn, withEnglish) {
     const b = document.createElement('button'); b.type = 'button'; b.className = 'tr-btn';
@@ -306,7 +315,7 @@
     dropLayers() { S.layers = {}; rebuild(); apply(); },
     refresh() { apply(); },
     layerSize() { return S.dict.size; },
-    syncSelects,
+    syncSelects, renderNote,
     setLayers(obj) { S.layers = Object.assign({}, obj); rebuild(); apply(); },
     init() { loadCatalogue(); document.querySelectorAll('.lang-sel').forEach(s => { if (!s.options.length) s.innerHTML = LANGS.map(l => '<option value="' + l.code + '" lang="' + l.html + '">' + l.native + '</option>').join(''); }); syncSelects(); renderNote(); },
   };

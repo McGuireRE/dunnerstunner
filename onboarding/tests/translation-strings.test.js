@@ -30,7 +30,7 @@ const esc = x => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   out.timOnlyFound = timOnly.filter(t => strs.includes(t));
   expect(!out.timOnlyFound.length, 'Tim\'s screens are not in the catalogue: ' + out.timOnlyFound);
   // wording the engine builds in pieces
-  ['{n} of 9: {stop}.', 'Done', 'You are here', 'Still ahead', 'Opens this page.', 'Shows what happens at this stop.', 'Read this page in English', 'Show this page in {language} again', 'The English agreement is the one that applies.', 'Read this part in {language}, to help you understand it'].forEach(k => expect(strs.includes(k), 'engine wording is listed: ' + k));
+  ['{n} of 9: {stop}.', 'Done', 'You are here', 'Still ahead', 'Opens this page.', 'Shows what happens at this stop.', 'Read this page in English', 'Show this page in {language} again', 'This translation was made automatically by a computer and has not been checked by a person. It is a guide only: the English version is the one that applies. If anything is unclear, or you have concerns, please seek legal or other expert advice.', 'Read this part in {language}, to help you understand it'].forEach(k => expect(strs.includes(k), 'engine wording is listed: ' + k));
   const app = fs.readFileSync(path.join(__dirname, '..', 'src', 'app.js'), 'utf8');
   const pieces = [...app.matchAll(/\btrs\('((?:[^'\\]|\\.)*)'/g)].map(m => m[1].replace(/\\'/g, '\''));
   pieces.forEach(k => expect(strs.includes(k), 'wording built in pieces is listed: ' + k.slice(0, 60)));

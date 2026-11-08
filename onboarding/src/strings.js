@@ -1,15 +1,15 @@
 // The English wording of every vendor screen, grouped by where it appears. {name} marks something the screen fills in
 // (a name, address, date or amount), which translation leaves alone. Generated once from the screens, then edited by hand.
-// 'screens' is translated by the app (Sonnet) and checked by a speaker. 'guide' (the Vendor Guide, the acknowledgements and
-// the wording of signed documents, shown only as a reading aid) also needs a professional check.
+// 'screens' and 'guide' are translated automatically by the app (Sonnet) and shown to vendors with a notice that they are not
+// checked by a person. 'guide' is the Vendor Guide, the acknowledgements and the wording of signed documents (a reading aid only).
 window.I18N_STRINGS = {
  "screens": [
   [
    "language",
    [
     "Read this part in {language}, to help you understand it",
-    "This part is in English because it is what you sign. The translation below is only to help you read it. The English agreement is the one that applies.",
-    "The English agreement is the one that applies.",
+    "This part is in English because it is what you sign. The translation below is only to help you read it.",
+    "This translation was made automatically by a computer and has not been checked by a person. It is a guide only: the English version is the one that applies. If anything is unclear, or you have concerns, please seek legal or other expert advice.",
     "Show this page in {language} again",
     "Read this page in English",
     "{n} of 9: {stop}.",

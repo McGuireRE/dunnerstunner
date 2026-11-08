@@ -420,7 +420,7 @@
 
   /* ───────── language (phase 4) ─────────
      The choice is remembered in this browser, and on the person's own record once they are signed in. Tim's screens
-     stay English. Only text a speaker has approved is ever shown; everything else stays English. */
+     stay English. Only translations that passed the automatic checks are shown, with a notice that no person has checked them; everything else stays English. */
   const LANG_KEY = 'mcLang';
   const readLocalLang = () => { try { const c = localStorage.getItem(LANG_KEY); return I18N.byCode(c) ? c : null; } catch (_) { return null; } };
   const saveLocalLang = c => { try { localStorage.setItem(LANG_KEY, c); } catch (_) { } };
@@ -1259,13 +1259,22 @@ function lawyerForm(id, title, blurb) {
     top();
   }
 
-  /* ═════════ TRANSLATIONS (Tim only): translate, read English beside the translation, correct, approve ═════════ */
+  /* ═════════ TRANSLATIONS (Tim only): translate everything, read English beside the translation, correct, show English again ═════════ */
   const TR_JOBS = new Map(), TR_FAIL = new Map();
-  const TR_SETS = [['screens', 'Screens', 'The wording of every vendor page.'], ['guide', 'Vendor Guide and acknowledgements', 'Also the reading aids beside signed documents. Needs a check by a professional translator.']];
+  const TR_SETS = [['screens', 'Screens', 'The wording of every vendor page.'], ['guide', 'Vendor Guide and acknowledgements', 'Also the reading aids beside signed documents.']];
   const TR_LANGS = () => I18N.LANGS.filter(l => l.code !== 'en');
   const trCatalogue = scope => { const seen = new Set(), out = []; ((window.I18N_STRINGS || {})[scope] || []).forEach(([, list]) => list.forEach(s => { if (!seen.has(s)) { seen.add(s); out.push(s); } })); return out; };
   const trFmt = d => d ? new Date(d).toLocaleString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: 'Pacific/Auckland' }) : '';
-  const trChecker = { get() { try { return localStorage.getItem('tr_checker') || ''; } catch (_) { return ''; } }, set(v) { try { localStorage.setItem('tr_checker', v); } catch (_) { } } };
+  const TR_AUTO = 'Shown to vendors automatically. Not checked by a person.';
+// Strings that failed the checks in a language (the translator's answer was unusable, or the database refused it) are
+// remembered on this device, keyed by language, set and a hash of the English, so "Translate everything" does not pay for
+// them again. A changed English string has a new hash, so it is tried afresh.
+const trHash = str => { let h = 5381; for (let i = 0; i < str.length; i++) h = ((h * 33) ^ str.charCodeAt(i)) >>> 0; return h.toString(36) + '.' + str.length; };
+const trFailKey = (lang, scope) => 'trFailed:' + lang + ':' + scope;
+const trFailed = (lang, scope) => { try { return new Set(JSON.parse(localStorage.getItem(trFailKey(lang, scope)) || '[]')); } catch (_) { return new Set(); } };
+const trFailAdd = (lang, scope, sources) => { if (!sources.length) return; try { const f = trFailed(lang, scope); sources.forEach(x => f.add(trHash(x))); localStorage.setItem(trFailKey(lang, scope), JSON.stringify([...f])); } catch (_) { } };
+const trFailClear = (lang, scope) => { try { localStorage.removeItem(trFailKey(lang, scope)); } catch (_) { } };
+const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everything": one run at a time, stoppable, and started again it skips what is done
 
   // The same checks the translator's answers get (fn/prefill_shared.ts checkTranslation, and translation_problem in the
   // database), applied to a correction before it is saved: placeholders, tags, every number and amount, names, no dashes.
@@ -1287,17 +1296,17 @@ function lawyerForm(id, title, blurb) {
   const trWhy = c => /^placeholders/.test(c) ? 'A word in curly brackets, such as {name}, has to stay exactly as it is.' : /^tags/.test(c) ? 'The marks like <1> and </1> and line breaks have to stay, around the same words.' : /^number/.test(c) ? 'Every number, amount and percentage has to stay exactly as in the English, and none can be added.' : /^name/.test(c) ? 'Names like Tim, GST, LIM and REA have to stay as they are (' + c.replace('name changed: ', '') + ').' : c === 'dash' ? 'Please do not use a long dash.' : 'The translation cannot be empty.';
   // batch sizes per language (the same limits fn/prefill_shared.ts enforces): Hindi, Korean and Chinese run longer
   const TR_LIMITS = { mi: { items: 40, chars: 12000 }, sm: { items: 40, chars: 12000 }, to: { items: 40, chars: 12000 }, hi: { items: 15, chars: 3500 }, ko: { items: 20, chars: 4500 }, zh: { items: 30, chars: 6000 } };
-  let TR_RUN = 0;   // translation runs going on now: nothing is approved while one is
-  const TR_SEEN = {};   // per set: the strings (id and text) Tim has had on screen, which is all he can approve
+  let TR_RUN = 0;   // translation runs going on now
   const trBusy = () => TR_RUN > 0 || TR_JOBS.size > 0;
   async function trRows(scope, lang, ref) { const q = sb.from('translations').select('id,source,text,status,model,approved_by,approved_at,edited_by').eq('scope', scope).eq('lang', lang); return (await must((ref ? q.eq('ref', ref) : q.is('ref', null)).order('created_at'))) || []; }
   // what is stored for this set, compared with the English the screens use today
-  function trState(scope, rows, own) {
-    const cat = own || trCatalogue(scope), bySrc = new Map(rows.map(r => [r.source, r]));
-    const have = cat.filter(s => bySrc.has(s)), missing = cat.filter(s => !bySrc.has(s));
-    const approved = have.filter(s => bySrc.get(s).status === 'approved'), waiting = have.filter(s => bySrc.get(s).status !== 'approved');
+  function trState(scope, rows, own, lang) {
+    const cat = own || trCatalogue(scope), bySrc = new Map(rows.map(r => [r.source, r])), bad = lang ? trFailed(lang, scope) : new Set();
+    const have = cat.filter(s => bySrc.has(s)), notYet = cat.filter(s => !bySrc.has(s));
+    const kept = notYet.filter(s => bad.has(trHash(s))), missing = notYet.filter(s => !bad.has(trHash(s)));   // kept: tried and failed the checks, left in English
+    const approved = have.filter(s => bySrc.get(s).status === 'approved'), waiting = have.filter(s => bySrc.get(s).status !== 'approved');   // waiting: pulled back to English by Tim
     const last = rows.filter(r => r.approved_at).sort((a, b) => a.approved_at < b.approved_at ? 1 : -1)[0];
-    return { cat, bySrc, have, missing, approved, waiting, last };
+    return { cat, bySrc, have, missing, kept, approved, waiting, last };
   }
 
   async function viewTranslations() {
@@ -1305,25 +1314,72 @@ function lawyerForm(id, title, blurb) {
     main().innerHTML = '<div class="loading">Loading...</div>';
     const cards = [];
     for (const l of TR_LANGS()) for (const [scope, name, note] of TR_SETS) {
-      const st = trState(scope, await trRows(scope, l.code).catch(() => []));
+      const st = trState(scope, await trRows(scope, l.code).catch(() => []), null, l.code);
       cards.push({ l, scope, name, note, st });
     }
+    const todo = cards.reduce((n, c) => n + c.st.missing.length, 0), keptAll = cards.reduce((n, c) => n + c.st.kept.length, 0);
     main().innerHTML = `<div class="view-pad">
       <span class="agent-flag">Only you see this</span>
       <h1>Translations</h1>
-      <p class="small">Vendors can read their pages in six languages besides English. The app translates each page once, and a speaker of that language checks it here. Until you approve a language, vendors see English for it. The English agreement is always the one that applies, and nothing signed is ever translated.</p>
+      <p class="small">Vendors can read their pages in six languages besides English. The app translates each page once and shows it to vendors straight away. ${esc(TR_AUTO)} Every page says so, and the English is always the one that applies. Nothing signed is ever translated.</p>
+      <div class="card tight" id="trAll">
+        <p style="margin:0 0 8px"><strong>${todo}</strong> ${todo === 1 ? 'string is' : 'strings are'} still to translate across all languages.${keptAll ? ` ${keptAll} ${keptAll === 1 ? 'is' : 'are'} kept in English because ${keptAll === 1 ? 'it' : 'they'} could not be translated safely.` : ''}</p>
+        <div class="toolbar" style="margin:0">
+          <button class="btn primary" type="button" id="trAllGo" ${TR_ALL.running || !todo ? 'disabled' : ''}>Translate everything</button>
+          <button class="btn ghost" type="button" id="trAllStop" ${TR_ALL.running ? '' : 'hidden'}>Stop</button>
+        </div>
+        <p class="small" id="trAllMsg" role="status" style="margin:8px 0 0">${esc(TR_ALL.text)}</p>
+        <p class="small" id="trCost" style="margin:6px 0 0"></p>
+        <p class="small" style="margin:6px 0 0">Keep this page open on your phone while it runs. If you stop, or it is interrupted, press the button again and it carries on with what is left.</p>
+      </div>
       <div class="ptiles">${cards.map((c, i) => {
         const n = c.st.cat.length, pct = n ? Math.round(100 * c.st.approved.length / n) : 0;
         return `<div class="card tight" data-tr-card="${c.l.code}-${c.scope}">
           <strong>${esc(c.l.name)}</strong> <span class="small">${esc(c.name)}</span>
-          <p class="small" style="margin:6px 0">${c.st.have.length} of ${n} translated. ${c.st.approved.length} approved (${pct}%). ${c.st.waiting.length ? `<strong>${c.st.waiting.length} awaiting check.</strong>` : ''}</p>
-          <p class="small" style="margin:0 0 8px">${c.st.last ? `Last approved by ${esc(c.st.last.approved_by)}, ${esc(trFmt(c.st.last.approved_at))}.` : 'Not approved yet, so vendors see English.'}</p>
-          <button class="btn ${c.st.waiting.length || c.st.missing.length ? 'primary' : 'ghost'}" type="button" data-tr-open="${i}">Open</button></div>`;
+          <p class="small" style="margin:6px 0">${c.st.have.length} of ${n} translated. ${c.st.approved.length} shown to vendors (${pct}%). ${c.st.waiting.length ? `<strong>${c.st.waiting.length} held back, so vendors see English.</strong>` : ''} ${c.st.kept.length ? `${c.st.kept.length} kept in English (couldn't be translated safely).` : ''}</p>
+          <p class="small" style="margin:0 0 8px">${c.st.approved.length ? esc(TR_AUTO) : 'Not translated yet, so vendors see English.'}</p>
+          <button class="btn ${c.st.missing.length || c.st.waiting.length ? 'primary' : 'ghost'}" type="button" data-tr-open="${i}">Open</button></div>`;
       }).join('')}</div>
-      <p class="small">Plans and variations are translated when you publish them, and you check them on that page. Notices stay English.</p>
+      <p class="small">Plans and variations are translated when you publish them and are shown to vendors in the same way. Notices stay English.</p>
     </div>`;
     $$('[data-tr-open]').forEach(b => b.addEventListener('click', () => { const c = cards[+b.dataset.trOpen]; viewTranslationSet(c.scope, c.l.code, { fresh: true }); }));
+    $('#trAllGo').addEventListener('click', () => trEverything());
+    $('#trAllStop').addEventListener('click', () => { TR_ALL.stop = true; TR_ALL.text = 'Stopping after this part...'; const m = $('#trAllMsg'); if (m) m.textContent = TR_ALL.text; });
+    trCostLine().then(t => { const el = $('#trCost'); if (el) el.textContent = t; });
     top();
+  }
+  // what translating has used so far, from the log of AI calls (the call count when tokens are not available)
+  async function trCostLine() {
+    try {
+      const { data, error } = await sb.rpc('agent_translation_usage'); if (error || !data) return '';
+      const n = data.calls || 0; if (!n) return 'No translating done yet.';
+      const tok = (data.input_tokens || 0) + (data.output_tokens || 0);
+      return `Used so far: ${n} ${n === 1 ? 'call' : 'calls'} to the translator${tok ? `, about ${tok.toLocaleString('en-NZ')} tokens` : ''}.`;
+    } catch (_) { return ''; }
+  }
+  // every language and set in turn; stoppable; strings that already have a translation are skipped, so pressing it again resumes
+  async function trEverything() {
+    if (TR_ALL.running) return;
+    TR_ALL.running = true; TR_ALL.stop = false; TR_ALL.text = 'Starting...';
+    const say = t => { TR_ALL.text = t; const m = document.getElementById('trAllMsg'); if (m) m.textContent = t; };
+    const paint = () => { const g = document.getElementById('trAllGo'), st = document.getElementById('trAllStop'); if (g) g.disabled = TR_ALL.running; if (st) st.hidden = !TR_ALL.running; };
+    paint();
+    let saved = 0, skipped = 0, held = 0, failed = '', stopped = false;
+    try {
+      outer: for (const l of TR_LANGS()) for (const [scope, name] of TR_SETS) {
+        if (TR_ALL.stop) { stopped = true; break outer; }
+        const rows = await trRows(scope, l.code).catch(() => []), st = trState(scope, rows, null, l.code);
+        if (!st.missing.length) continue;
+        const r = await trTranslate(scope, null, l.code, st.missing, t => say(`${l.name}, ${name.toLowerCase()}: ${t}`), () => TR_ALL.stop);
+        saved += r.saved; skipped += r.skipped; held += r.held || 0;
+        if (r.stopped) { stopped = true; break outer; }
+        if (r.failed && !r.saved) { failed = r.message; break outer; }
+      }
+    } catch (e) { failed = 'Something went wrong. Press the button to carry on.'; }
+    TR_ALL.running = false; TR_ALL.stop = false;
+    say(failed ? `${failed} ${saved} translated before it stopped.` : stopped ? `Stopped. ${saved} translated. Press the button to carry on.` : `Finished. ${saved - held} translated and shown to vendors.${held ? ` ${held} held back, because English is chosen for that language.` : ''}${skipped ? ` ${skipped} could not be used (a number, name or placeholder changed), so they stay in English and are not tried again.` : ''}`);
+    paint();
+    if (document.getElementById('trAll') && !TR_ALL.running) { const done = TR_ALL.text; await viewTranslations(); TR_ALL.text = done; const m = document.getElementById('trAllMsg'); if (m) m.textContent = done; }
   }
 
   async function viewTranslationSet(scope, lang, opts) {
@@ -1331,40 +1387,31 @@ function lawyerForm(id, title, blurb) {
     const l = I18N.byCode(lang), set = TR_SETS.find(s => s[0] === scope);
     header('Translations', '', 0); actions(false); setAgentNav('tr');
     main().innerHTML = '<div class="loading">Loading...</div>';
-    const rows = await trRows(scope, lang), st = trState(scope, rows);
-    const skey = scope + '|' + lang; if (opts.fresh || !TR_SEEN[skey]) TR_SEEN[skey] = new Map();
-    const seen = TR_SEEN[skey], srcOf = new Map(rows.map(r => [r.id, r.source]));
-    seen.forEach((txt, id) => { const r = rows.find(x => x.id === id); if (!r || r.status === 'approved' || r.text !== txt) seen.delete(id); });   // what changed since is not "read"
-    const PAGE = 25, filter = opts.filter || (st.waiting.length ? 'waiting' : 'all'), page = opts.page || 0;
-    const list = (filter === 'waiting' ? st.cat.filter(s => st.bySrc.has(s) && st.bySrc.get(s).status !== 'approved') : filter === 'missing' ? st.missing : st.cat);
+    const rows = await trRows(scope, lang), st = trState(scope, rows, null, lang), srcOf = new Map(rows.map(r => [r.id, r.source]));
+    const PAGE = 25, filter = opts.filter || 'all', page = opts.page || 0;
+    const list = (filter === 'waiting' ? st.cat.filter(s => st.bySrc.has(s) && st.bySrc.get(s).status !== 'approved') : filter === 'missing' ? st.missing.concat(st.kept) : st.cat);
     const shown = list.slice(page * PAGE, page * PAGE + PAGE);
-    shown.forEach(s => { const r = st.bySrc.get(s); if (r && r.status !== 'approved') seen.set(r.id, r.text); });
-    const readIds = st.waiting.map(s => st.bySrc.get(s)).filter(r => seen.has(r.id)), unread = st.waiting.length - readIds.length;
     main().innerHTML = `<div class="view-pad">
       <span class="agent-flag">Only you see this</span>
       <p><a href="#" id="trBack">Translations</a></p>
       <h1>${esc(l.name)}: ${esc(set[1])}</h1>
       <p class="small">${esc(set[2])}</p>
       <div class="card tight" id="trSummary">
-        <p style="margin:0 0 8px"><strong>${st.have.length} of ${st.cat.length}</strong> translated, <strong>${st.approved.length}</strong> approved, <strong>${st.waiting.length}</strong> awaiting check. ${st.last ? `Last approved by ${esc(st.last.approved_by)}, ${esc(trFmt(st.last.approved_at))}.` : ''}</p>
+        <p style="margin:0 0 8px"><strong>${st.have.length} of ${st.cat.length}</strong> translated, <strong>${st.approved.length}</strong> shown to vendors${st.waiting.length ? `, <strong>${st.waiting.length}</strong> held back` : ''}. ${esc(TR_AUTO)}</p>
         <div class="toolbar" style="margin:0">
-          <button class="btn primary" type="button" id="trGo" ${st.missing.length ? '' : 'disabled'}>Translate ${st.missing.length} ${st.missing.length === 1 ? 'string' : 'strings'}</button>
+          <button class="btn primary" type="button" id="trGo" ${st.missing.length && !TR_ALL.running ? '' : 'disabled'}>Translate ${st.missing.length} ${st.missing.length === 1 ? 'string' : 'strings'}</button>
+          ${st.kept.length ? `<button class="btn ghost" type="button" id="trRetry" ${TR_ALL.running ? 'disabled' : ''}>Try the ${st.kept.length} kept in English again</button>` : ''}
+          ${st.waiting.length ? '<button class="btn ghost" type="button" id="trShow">Show to vendors again</button>' : ''}
           ${st.approved.length ? '<button class="btn ghost" type="button" id="trWithdraw">Show English to vendors again</button>' : ''}
         </div>
-        <p class="small" id="trMsg" role="status" style="margin:8px 0 0"></p>
+        <p class="small" id="trMsg" role="status" style="margin:8px 0 0">${TR_ALL.running ? 'Translate everything is running, so this is switched off until it finishes.' : ''}${st.kept.length ? ` ${st.kept.length} kept in English (couldn't be translated safely).` : ''}</p>
       </div>
-      ${st.waiting.length ? `<div class="card tight">
-        <label class="fld"><span>Name of the person who checked this ${scope === 'guide' ? '(a professional translator)' : '(a speaker)'}</span>
-        <input type="text" id="trWho" autocomplete="off" value="${esc(trChecker.get())}" placeholder="Their full name"></label>
-        <div class="toolbar" style="margin:8px 0 0"><button class="btn primary" type="button" id="trApprove" ${readIds.length && !trBusy() ? '' : 'disabled'}>Approve ${readIds.length} you have read</button></div>
-        <p class="small" style="margin:8px 0 0">${unread ? `${unread} more ${unread === 1 ? 'string is' : 'strings are'} still to read. Use Later to read ${unread === 1 ? 'it' : 'them'}; only strings you have had on screen can be approved.` : 'You have read all of them.'}${trBusy() ? ' Approving waits until the translation has finished.' : ''}</p>
-        <p class="small" id="trAppErr" role="alert" style="margin:8px 0 0"></p></div>` : ''}
-      <div class="chip-row" role="tablist">${[['waiting', 'Awaiting check', st.waiting.length], ['missing', 'Not translated', st.missing.length], ['all', 'All', st.cat.length]].map(([k, t, n]) => `<button class="chip" type="button" role="tab" aria-selected="${filter === k}" data-trf="${k}" style="${filter === k ? 'border-color:var(--accent);background:var(--accent-soft)' : ''}">${t} (${n})</button>`).join('')}</div>
+      <div class="chip-row" role="tablist">${[['waiting', 'Held back', st.waiting.length], ['missing', 'Not translated', st.missing.length + st.kept.length], ['all', 'All', st.cat.length]].map(([k, t, n]) => `<button class="chip" type="button" role="tab" aria-selected="${filter === k}" data-trf="${k}" style="${filter === k ? 'border-color:var(--accent);background:var(--accent-soft)' : ''}">${t} (${n})</button>`).join('')}</div>
       <div id="trList">${shown.length ? shown.map((s, i) => { const r = st.bySrc.get(s); return `<div class="card tight tr-row" data-tr-row="${r ? r.id : ''}">
         <p class="small" style="margin:0 0 4px">English</p><p lang="en" style="margin:0 0 10px;white-space:pre-wrap">${esc(s)}</p>
-        ${r ? `<p class="small" style="margin:0 0 4px">${esc(l.name)} ${r.status === 'approved' ? '(approved)' : '(awaiting check)'}</p>
+        ${r ? `<p class="small" style="margin:0 0 4px">${esc(l.name)} ${r.status !== 'approved' ? '(held back)' : r.edited_by ? '(corrected)' : '(automatic)'}</p>
         <textarea class="tr-edit" rows="3" lang="${esc(l.html)}" data-tr-id="${r.id}" aria-label="${esc(l.name)} translation">${esc(r.text)}</textarea>
-        <div class="toolbar" style="margin:6px 0 0"><button class="btn ghost" type="button" data-tr-save="${r.id}">Save correction</button></div><p class="small" data-tr-err="${r.id}" role="alert" style="margin:4px 0 0"></p>` : '<p class="small" style="margin:0">Not translated yet.</p>'}
+        <div class="toolbar" style="margin:6px 0 0"><button class="btn ghost" type="button" data-tr-save="${r.id}">Save correction</button></div><p class="small" data-tr-err="${r.id}" role="alert" style="margin:4px 0 0"></p>` : `<p class="small" style="margin:0">${st.kept.includes(s) ? 'Kept in English (couldn\'t be translated safely).' : 'Not translated yet.'}</p>`}
       </div>`; }).join('') : '<div class="card note tight"><p class="small" style="margin:0">Nothing here.</p></div>'}</div>
       ${list.length > PAGE ? `<div class="toolbar"><button class="btn ghost" type="button" id="trPrev" ${page ? '' : 'disabled'}>Earlier</button><span class="small">${page * PAGE + 1} to ${Math.min(list.length, page * PAGE + PAGE)} of ${list.length}</span><button class="btn ghost" type="button" id="trNext" ${(page + 1) * PAGE < list.length ? '' : 'disabled'}>Later</button></div>` : ''}
     </div>`;
@@ -1375,66 +1422,68 @@ function lawyerForm(id, title, blurb) {
     if ($('#trPrev')) $('#trPrev').addEventListener('click', () => again({ page: page - 1 }));
     if ($('#trNext')) $('#trNext').addEventListener('click', () => again({ page: page + 1 }));
     $$('[data-tr-save]').forEach(b => b.addEventListener('click', async () => {
-      const id = b.dataset.trSave, ta = $(`[data-tr-id="${id}"]`), who = trChecker.get(), why = trCheck(srcOf.get(id), ta.value);
+      const id = b.dataset.trSave, ta = $(`[data-tr-id="${id}"]`), why = trCheck(srcOf.get(id), ta.value);
       if (why) { $(`[data-tr-err="${id}"]`).textContent = 'Not saved. ' + trWhy(why); return; }
       b.disabled = true;
-      try { await must(sb.rpc('agent_edit_translation', { p_id: id, p_text: ta.value, p_by: who || null })); toast('Saved. It needs approving again.'); again({}); } catch (_) { b.disabled = false; }
+      try { await must(sb.rpc('agent_edit_translation', { p_id: id, p_text: ta.value, p_by: 'Tim' })); toast('Saved. Vendors now see your correction.'); again({}); } catch (_) { b.disabled = false; }
     }));
-    if ($('#trApprove')) $('#trApprove').addEventListener('click', async () => {
-      const who = $('#trWho').value.trim(); trChecker.set(who);
-      if (!who) { $('#trAppErr').textContent = 'Type the name of the person who checked it.'; return; }
-      if (trBusy()) { $('#trAppErr').textContent = 'A translation is still running. Approve once it has finished.'; return; }
-      $('#trApprove').disabled = true;
-      const items = readIds.map(r => ({ id: r.id, text: r.text }));
-      try { const n = await must(sb.rpc('agent_approve_translations', { p_scope: scope, p_ref: null, p_lang: lang, p_name: who, p_items: items })); toast(`${n} approved. Vendors can now read this in ${l.name}.`); again({}); } catch (_) { $('#trApprove').disabled = false; }
-    });
     if ($('#trWithdraw')) $('#trWithdraw').addEventListener('click', async () => {
-      if (!confirm(`Show English instead of ${l.name} to vendors? The translations are kept, and need approving again.`)) return;
+      if (!confirm(`Show English instead of ${l.name} to vendors? The translations are kept, and you can show them again.`)) return;
       try { await must(sb.rpc('agent_withdraw_translations', { p_scope: scope, p_ref: null, p_lang: lang })); toast('Vendors see English again.'); again({}); } catch (_) { }
     });
+    if ($('#trShow')) $('#trShow').addEventListener('click', async () => {
+      try { const n = await must(sb.rpc('agent_publish_translations', { p_scope: scope, p_ref: null, p_lang: lang })); toast(`${n} shown to vendors in ${l.name}.`); again({ filter: 'all', page: 0 }); } catch (_) { }
+    });
+    if ($('#trRetry')) $('#trRetry').addEventListener('click', () => { trFailClear(lang, scope); again({ filter: 'all', page: 0 }); });
     $('#trGo').addEventListener('click', async () => {
-      const go = $('#trGo'), msg = $('#trMsg'); go.disabled = true; if ($('#trApprove')) $('#trApprove').disabled = true;
+      if (TR_ALL.running) return;
+      const go = $('#trGo'), msg = $('#trMsg'); go.disabled = true;
       const r = await trTranslate(scope, null, lang, st.missing, t => { msg.textContent = t; });
       msg.textContent = r.message;
-      if (r.saved) again({ filter: 'waiting', page: 0, msg: r.message }); else { go.disabled = false; if ($('#trApprove') && readIds.length) $('#trApprove').disabled = false; }
+      if (r.saved) again({ filter: 'all', page: 0, msg: r.message }); else go.disabled = false;
     });
     top();
   }
 
   // Sends the strings to the app's translator in batches (the doc-prefill function, translate mode), then stores what comes
-  // back as "awaiting check". Returns { saved, rejected, cut, failed, message }. Used for the screens, the guide, plans and
+  // back; the database checks every string again and shows what passes to vendors at once. Returns { saved, skipped, rejected, cut, failed, stopped, message }. Used for the screens, the guide, plans and
   // variations. Batches are smaller for Hindi, Korean and Chinese; a reply that ran out of room is split and sent again.
-  async function trTranslate(scope, ref, lang, sources, progress) {
+  async function trTranslate(scope, ref, lang, sources, progress, shouldStop) {
     TR_RUN++;
-    try { return await trTranslateRun(scope, ref, lang, sources, progress); } finally { TR_RUN--; }
+    try { return await trTranslateRun(scope, ref, lang, sources, progress, shouldStop); } finally { TR_RUN--; }
   }
-  async function trTranslateRun(scope, ref, lang, sources, progress) {
+  async function trTranslateRun(scope, ref, lang, sources, progress, shouldStop) {
     const lim = TR_LIMITS[lang] || TR_LIMITS.mi, queue = []; let cur = [], chars = 0;
     sources.forEach(s => { if (cur.length >= lim.items || (cur.length && chars + s.length > lim.chars)) { queue.push(cur); cur = []; chars = 0; } cur.push(s); chars += s.length; });
     if (cur.length) queue.push(cur);
-    let saved = 0, rejected = 0, cut = 0, done = 0; const total = queue.length;
+    let saved = 0, skipped = 0, held = 0, rejected = 0, cut = 0, done = 0; const total = queue.length;
     while (queue.length) {
+      if (shouldStop && shouldStop()) return { saved, skipped, rejected, cut, failed: false, stopped: true, message: `Stopped. ${saved} translated and shown to vendors.` };
       const batch = queue.shift();
       progress && progress(`Translating, part ${Math.min(++done, Math.max(total, done))} of ${Math.max(total, done + queue.length)}...`);
       const { data, error } = await sb.functions.invoke('doc-prefill', { body: { mode: 'translate', kind: scope, lang, sources: batch } });
       if (error || !data || data.ok === false) {
-        return { saved, rejected, cut, failed: true, message: saved ? `Stopped part way: ${saved} translated and stored. Try again for the rest.` : 'The translator could not be reached, or is not switched on yet. Nothing was changed.' };
+        return { saved, skipped, rejected, cut, failed: true, message: saved ? `Stopped part way: ${saved} translated and stored. Try again for the rest.` : 'The translator could not be reached, or is not switched on yet. Nothing was changed.' };
       }
       const rej = data.rejected || [];
       rejected += rej.filter(x => x.reason !== 'cut off').length;
+      trFailAdd(lang, scope, rej.filter(x => x.reason !== 'cut off').map(x => x.source));
       if ((data.translations || []).length) {
-        const { error: se } = await sb.rpc('agent_save_translations', { p_scope: scope, p_ref: ref || null, p_lang: lang, p_rows: data.translations, p_model: data.model || null });
-        if (se) return { saved, rejected, cut, failed: true, message: 'The translations could not be stored: ' + (se.message || 'try again') };
-        saved += data.translations.length;
+        const { data: out, error: se } = await sb.rpc('agent_store_translations', { p_scope: scope, p_ref: ref || null, p_lang: lang, p_rows: data.translations, p_model: data.model || null });
+        if (se) return { saved, skipped, rejected, cut, failed: true, message: 'The translations could not be stored: ' + (se.message || 'try again') };
+        saved += (out && out.saved) || 0; skipped += (out && out.skipped) || 0; held += (out && out.held) || 0;
+        trFailAdd(lang, scope, ((out && out.problems) || []).map(x => x.source));
       }
       const left = rej.filter(x => x.reason === 'cut off').map(x => x.source);
       if (left.length > 1) { const h = Math.ceil(left.length / 2); queue.unshift(left.slice(0, h), left.slice(h)); }   // too long for one reply: try in smaller parts
-      else if (left.length === 1) cut++;
+      else if (left.length === 1) { cut++; trFailAdd(lang, scope, left); }
     }
-    return { saved, rejected, cut, failed: false, message: `${saved} translated and stored, awaiting your check.${rejected ? ` ${rejected} could not be used (a number, name or placeholder changed), so they stay in English.` : ''}${cut ? ` ${cut} ${cut === 1 ? 'was' : 'were'} too long for the translator to finish, so ${cut === 1 ? 'it stays' : 'they stay'} in English.` : ''}${rejected || cut ? ' Press Translate again to retry.' : ''}` };
+    rejected += skipped;
+    const front = held ? `${held} translated and held back, because you chose to show English for this language. Press Show to vendors again when you want them shown.` : `${saved} translated and shown to vendors. ${TR_AUTO}`;
+    return { saved: saved + held, held, skipped, rejected, cut, failed: false, message: `${front}${rejected ? ` ${rejected} could not be used (a number, name or placeholder changed), so they stay in English.` : ''}${cut ? ` ${cut} ${cut === 1 ? 'was' : 'were'} too long for the translator to finish, so ${cut === 1 ? 'it stays' : 'they stay'} in English.` : ''}${rejected || cut ? ' They are kept in English and not tried again unless you ask.' : ''}` };
   }
 
-  /* Tim's plans and variations: translated by Haiku when he publishes them, and he reads the result before any vendor does. */
+  /* Tim's plans and variations: translated by Haiku when he publishes them, and shown to the vendor straight away like the rest. */
   const trLines = s => String(s || '').replace(/\r/g, '').split('\n').map(x => x.trim()).join('<br/>').replace(/ +/g, ' ').trim();   // the same text the vendor's page shows as one unit
   const trPlanSources = plan => { const out = []; const add = s => { const t = trLines(s); if (t && !out.includes(t)) out.push(t); }; plan = plan || {}; add(plan.intro); (plan.pairs || []).forEach(x => { add(x.said); add(x.changed); }); return out; };
   const trVarSources = v => { const out = []; const add = s => { const t = trLines(s); if (t && !out.includes(t)) out.push(t); }; ((v && v.summary) || []).forEach(r => { add(r.to); add(r.from); }); add(v && v.reason); return out; };
@@ -1446,8 +1495,8 @@ function lawyerForm(id, title, blurb) {
     TR_FAIL.delete(key);
     const job = (async () => {
       for (const l of TR_LANGS()) {
-        const have = new Set((await trRows(scope, l.code, ref)).map(r => r.source));
-        const missing = sources.filter(s => !have.has(s));
+        const have = new Set((await trRows(scope, l.code, ref)).map(r => r.source)), bad = trFailed(l.code, scope);
+        const missing = sources.filter(s => !have.has(s) && !bad.has(trHash(s)));
         if (missing.length) { const r = await trTranslate(scope, ref, l.code, missing); if (r.failed && !r.saved) { TR_FAIL.set(key, r.message); break; } }
       }
     })().catch(e => console.warn('translate', e)).then(() => { TR_JOBS.delete(key); if (again) again(); });
@@ -1459,15 +1508,15 @@ function lawyerForm(id, title, blurb) {
     if (!sources.length) { box.innerHTML = '<p class="small">Nothing to translate yet.</p>'; return; }
     const busy = TR_JOBS.has(key), failed = TR_FAIL.get(key);
     const per = [];
-    for (const l of TR_LANGS()) per.push({ l, st: trState(scope, await trRows(scope, l.code, ref).catch(() => []), sources) });
+    for (const l of TR_LANGS()) per.push({ l, st: trState(scope, await trRows(scope, l.code, ref).catch(() => []), sources, l.code) });
     if (!box.isConnected) return;
     box.innerHTML = `<div class="card tight">
-      <p class="small" style="margin:0 0 8px">${busy ? 'Translating for the vendors now. This takes a minute.' : 'Vendors see English until a speaker has checked a language and you approve it here. Read each one against the English first.'}</p>
+      <p class="small" style="margin:0 0 8px">${busy ? 'Translating for the vendors now. This takes a minute.' : esc(TR_AUTO) + ' You can read each one against the English and correct it.'}</p>
       ${failed && !busy ? `<p class="small" role="status">${esc(failed)}</p>` : ''}
-      ${per.map(({ l, st }) => `<details class="tr-lang" data-trl="${l.code}"><summary><strong>${esc(l.name)}</strong> <span class="small">${st.have.length} of ${st.cat.length} translated, ${st.approved.length} approved${st.waiting.length ? `, <strong>${st.waiting.length} awaiting check</strong>` : ''}</span></summary>
+      ${per.map(({ l, st }) => `<details class="tr-lang" data-trl="${l.code}"><summary><strong>${esc(l.name)}</strong> <span class="small">${st.have.length} of ${st.cat.length} translated, ${st.approved.length} shown${st.waiting.length ? `, <strong>${st.waiting.length} held back</strong>` : ''}</span></summary>
         ${st.cat.map(s => { const r = st.bySrc.get(s); return `<div class="tr-row" style="margin:10px 0"><p class="small" style="margin:0">English</p><p lang="en" style="margin:0 0 6px;white-space:pre-wrap">${esc(s.replace(/<br\/>/g, '\n'))}</p>${r ? `<textarea class="tr-edit" rows="3" lang="${esc(l.html)}" data-tr-id="${r.id}" aria-label="${esc(l.name)} translation">${esc(r.text.replace(/<br\/>/g, '\n'))}</textarea><div class="toolbar" style="margin:4px 0 0"><button class="btn ghost" type="button" data-trc-save="${r.id}">Save correction</button></div><p class="small" data-trc-err="${r.id}" role="alert" style="margin:4px 0 0"></p>` : '<p class="small" style="margin:0">Not translated yet.</p>'}</div>`; }).join('')}
-        <div class="toolbar" style="margin:8px 0 0">${st.missing.length ? `<button class="btn ghost" type="button" data-trc-go="${l.code}" ${busy ? 'disabled' : ''}>Translate ${st.missing.length} ${st.missing.length === 1 ? 'string' : 'strings'}</button>` : ''}
-        ${st.waiting.length ? `<input type="text" data-trc-who="${l.code}" autocomplete="off" aria-label="Name of the person who checked it" placeholder="Name of the person who checked it" value="${esc(trChecker.get())}" style="max-width:260px"><button class="btn primary" type="button" data-trc-ok="${l.code}" ${busy || trBusy() ? 'disabled' : ''}>Approve ${st.waiting.length}</button>` : ''}
+        <div class="toolbar" style="margin:8px 0 0">${st.missing.length ? `<button class="btn ghost" type="button" data-trc-go="${l.code}" ${busy || TR_ALL.running ? 'disabled' : ''}>Translate ${st.missing.length} ${st.missing.length === 1 ? 'string' : 'strings'}</button>` : ''}
+        ${st.waiting.length ? `<button class="btn ghost" type="button" data-trc-ok="${l.code}" ${busy || trBusy() ? 'disabled' : ''}>Show to vendors again</button>` : ''}
         ${st.approved.length ? `<button class="btn ghost" type="button" data-trc-off="${l.code}">Show English instead</button>` : ''}</div>
         <p class="small" data-trc-msg="${l.code}" role="alert" style="margin:6px 0 0"></p></details>`).join('')}
     </div>`;
@@ -1478,18 +1527,16 @@ function lawyerForm(id, title, blurb) {
     $$('[data-trc-save]', box).forEach(b => b.addEventListener('click', async () => {
       const id = b.dataset.trcSave, val = $(`[data-tr-id="${id}"]`, box).value.replace(/\n/g, '<br/>'), why = trCheck(srcById.get(id), val);
       if (why) { $(`[data-trc-err="${id}"]`, box).textContent = 'Not saved. ' + trWhy(why); return; }
-      b.disabled = true; try { await must(sb.rpc('agent_edit_translation', { p_id: id, p_text: val, p_by: trChecker.get() || null })); toast('Saved. It needs approving again.'); redraw(); } catch (_) { b.disabled = false; }
+      b.disabled = true; try { await must(sb.rpc('agent_edit_translation', { p_id: id, p_text: val, p_by: 'Tim' })); toast('Saved. Vendors now see your correction.'); redraw(); } catch (_) { b.disabled = false; }
     }));
     $$('[data-trc-go]', box).forEach(b => b.addEventListener('click', async () => {
-      b.disabled = true; const code = b.dataset.trcGo, have = new Set((await trRows(scope, code, ref)).map(r => r.source));
-      const r = await trTranslate(scope, ref, code, sources.filter(s => !have.has(s))); toast(r.message); redraw();
+      b.disabled = true; const code = b.dataset.trcGo, have = new Set((await trRows(scope, code, ref)).map(r => r.source)), bad = trFailed(code, scope);
+      if (TR_ALL.running) { toast('Translate everything is running. Wait for it to finish or stop it first.'); b.disabled = false; return; }
+      const r = await trTranslate(scope, ref, code, sources.filter(s => !have.has(s) && !bad.has(trHash(s)))); toast(r.message); redraw();
     }));
     $$('[data-trc-ok]', box).forEach(b => b.addEventListener('click', async () => {
-      const code = b.dataset.trcOk, who = $(`[data-trc-who="${code}"]`, box).value.trim(); trChecker.set(who);
-      if (!who) { $(`[data-trc-msg="${code}"]`, box).textContent = 'Type the name of the person who checked it.'; return; }
-      if (trBusy()) { $(`[data-trc-msg="${code}"]`, box).textContent = 'A translation is still running. Approve once it has finished.'; return; }
-      const st = per.find(x => x.l.code === code).st, items = st.waiting.map(s => ({ id: st.bySrc.get(s).id, text: st.bySrc.get(s).text }));   // exactly the strings drawn on this panel
-      b.disabled = true; try { const n = await must(sb.rpc('agent_approve_translations', { p_scope: scope, p_ref: ref, p_lang: code, p_name: who, p_items: items })); toast(`${n} approved. Vendors can read this in ${I18N.byCode(code).name}.`); redraw(); } catch (_) { b.disabled = false; }
+      const code = b.dataset.trcOk; b.disabled = true;
+      try { const n = await must(sb.rpc('agent_publish_translations', { p_scope: scope, p_ref: ref, p_lang: code })); toast(`${n} shown to vendors in ${I18N.byCode(code).name}.`); redraw(); } catch (_) { b.disabled = false; }
     }));
     $$('[data-trc-off]', box).forEach(b => b.addEventListener('click', async () => { try { await must(sb.rpc('agent_withdraw_translations', { p_scope: scope, p_ref: ref, p_lang: b.dataset.trcOff })); toast('Vendors see English again.'); redraw(); } catch (_) { } }));
   }
@@ -3737,6 +3784,7 @@ function lawyerForm(id, title, blurb) {
       : 'This is the road from thinking about selling to settlement, one stop at a time. Tap a stop to read what happens there.';
     ov.innerHTML = `<div class="jov-in">
       <div class="jbar"><button class="btn ghost" type="button" id="jClose">Close</button>${I18N.selectHTML()}<button class="btn ghost" type="button" id="jPrint">Print this page</button></div>
+      <div class="tr-note jtrnote" data-trnote role="note" hidden></div>
       <div class="print-only jhead"><img src="${esc(logo)}" alt="McGuire Real Estate"><span data-no-tr>Tim McGuire<br>027 562 7207</span></div>
       <h1 id="jTitle" tabindex="-1">Your selling journey</h1>
       ${f && f.address ? `<p class="jaddr">${esc(f.address)}</p>` : ''}
@@ -3745,7 +3793,7 @@ function lawyerForm(id, title, blurb) {
       ${signedIn && !f && !choose ? '<div class="card note tight no-print"><p class="small" style="margin:0">Once Tim has your property set up, the marker will show where you are. Until then, here is the whole road.</p></div>' : ''}
       <div class="jwrap"><div class="jmapcol">${jMapSVG(st, f, { links })}</div><div>${jCardsHTML(st, f, { links, uid: 'v' })}<p class="small jnote">Questions at any stage? Call or text Tim on <strong>027 562 7207</strong>.</p></div></div>
     </div>`;
-    ov.scrollTop = 0; I18N.syncSelects();
+    ov.scrollTop = 0; I18N.syncSelects(); I18N.renderNote();
     const h = $('#jTitle'); if (h) h.focus({ preventScroll: true });
   }
   async function jGo(k) {
