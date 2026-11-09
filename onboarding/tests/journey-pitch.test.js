@@ -9,6 +9,7 @@ const mock=fs.readFileSync(path.join(__dirname,'mock.js'),'utf8');
 const URL='https://packages.dunnerstunner.co.nz/onboarding/';
 const W={}; new Function('window',fs.readFileSync(path.join(__dirname,'..','src','strings.js'),'utf8'))(W);
 const P=W.JOURNEY_PITCH, SLUGS=P.stops.map(s=>s.slug);
+const FACTS=JSON.parse(fs.readFileSync(path.join(__dirname,'files','journey-pitch-facts.json'),'utf8'));
 const TITLES=['Thinking of selling','Your updated plan','Meeting Tim','Your agreement','Identity check','Getting ready','On the market','An offer','Sold and settling'];
 (async()=>{
 const b=await chromium.launch(); const errs=[], fail=[]; const expect=(ok,msg)=>{ if(!ok) fail.push(msg); }; const out={};
@@ -51,7 +52,7 @@ const OTHERS=/\b(Ray White|Harcourts|Barfoot|Bayleys|Century 21|Mike Pero|Quinov
 { const all=JSON.stringify(P);
   expect(P.stops.length===9&&new Set(SLUGS).size===9&&SLUGS.every(s=>/^[a-z-]+$/.test(s)),'A: nine stops with their own links');
   expect(P.stops.every(s=>s.faq.length>=4&&s.faq.length<=6),'A: every stop has 4 to 6 questions: '+P.stops.map(s=>s.faq.length));
-  expect(P.stops.every(s=>s.opening&&s.short&&s.happens.length&&s.you.length&&s.tim.length&&s.docs.length),'A: every stop has an opening, what happens, what you do, what I do and the documents');
+  expect(P.stops.every(s=>s.lead&&s.short&&s.sum&&s.happens.length&&s.you.length&&s.tim.length&&s.docs.length),'A: every stop has a one-line opening, a summary for each heading, what happens, what you do, what I do and the documents');
   expect(!/[—–]/.test(all),'A: no dashes in the wording');
   expect(!/\$/.test(all)&&!/\d\s?%/.test(all)&&!/\bGST\b/.test(all),'A: no prices, percentages or GST in the wording');
   expect(!OTHERS.test(all),'A: no other agencies named');
@@ -60,19 +61,30 @@ const OTHERS=/\b(Ray White|Harcourts|Barfoot|Bayleys|Century 21|Mike Pero|Quinov
   expect(!/your home\b/i.test(all),'A: "your property", not "your home"');
   expect(!/\b(award|testimonial|days on market|best in)\b/i.test(all),'A: no awards, testimonials or days-on-market claims');
   expect(!/commission/i.test(all),'A: no commission figures or talk of commission');
-  const wording=[]; (function w(v,k){ if(k==='slug'||k==='k') return; if(typeof v==='string') wording.push(v); else if(Array.isArray(v)) v.forEach(x=>w(x)); else if(v&&typeof v==='object') Object.keys(v).forEach(x=>w(v[x],x)); })(P);
-  const fee=wording.filter(t=>/\bfee\b/i.test(t)); const okFee=t=>/only talk about my fee once you have decided who the best agent is for you|administration fee is set out in your agreement and covers identity checks and onboarding|When do we talk about your fee|A word about my fee|conversation about my fee until you have decided who the best agent is for you/.test(t);
+  const wording=[]; (function w(v,k){ if(k==='slug'||k==='k'||k==='g') return; if(typeof v==='string') wording.push(v); else if(Array.isArray(v)) v.forEach(x=>w(x)); else if(v&&typeof v==='object') Object.keys(v).forEach(x=>w(v[x],x)); })(P);
+  const fee=wording.filter(t=>/\bfee\b/i.test(t)); const okFee=t=>/only talk about my fee once you have decided who the best agent is for you|administration fee is set out in your agreement and covers identity checks and onboarding|When do we talk about your fee|A word about my fee|conversation about my fee until you have decided who the best agent is for you|^My fee$|^Fee agreed in writing$|the fee comes last/.test(t);
   expect(fee.length>=4&&fee.every(okFee),'A: every mention of a fee is Tim\'s rule or the administration fee, never a figure: '+fee.filter(t=>!okFee(t)).slice(0,2));
   expect(/agreed with all of the owners, in writing/.test(P.fee)&&/only talk about my fee once you have decided who the best agent is for you/.test(P.fee),'A: the fee wording is exactly Tim\'s rule');
   // the catalogue lists every piece of the wording once, with the checks the strings test makes
   const strs=[]; W.I18N_STRINGS.screens.forEach(([g,l])=>l.forEach(s=>strs.push(s)));
   expect(new Set(strs).size===strs.length,'A: no string is listed twice in the catalogue');
   const grp=W.I18N_STRINGS.screens.find(x=>x[0]==='pitch'); expect(grp&&grp[1].length>200,'A: the journey pages have their own group in the catalogue ('+(grp&&grp[1].length)+')');
-  const walk=(v,k,acc)=>{ if(k==='slug'||k==='k') return; if(typeof v==='string') acc.push(v); else if(Array.isArray(v)) v.forEach(x=>walk(x,null,acc)); else if(v&&typeof v==='object') Object.keys(v).forEach(x=>walk(v[x],x,acc)); };
+  const walk=(v,k,acc)=>{ if(k==='slug'||k==='k'||k==='g') return; if(typeof v==='string') acc.push(v); else if(Array.isArray(v)) v.forEach(x=>walk(x,null,acc)); else if(v&&typeof v==='object') Object.keys(v).forEach(x=>walk(v[x],x,acc)); };
   const mine=[]; walk(P,null,mine); expect(mine.every(s=>strs.includes(s)),'A: every journey page string is in the catalogue: '+mine.filter(s=>!strs.includes(s)).slice(0,2));
   const phs=strs.flatMap(s=>s.match(/\{[^}]*\}/g)||[]); expect(phs.every(x=>/^\{[a-z][a-z0-9]*\}$/.test(x)),'A: placeholders are plain names');
   expect(!strs.some(s=>!s.trim()||s!==s.trim()||/\s{2,}/.test(s)),'A: no blank or padded strings');
   expect(!strs.some(s=>/including his fee/.test(s)),'A: the panel no longer mentions his fee');
+  // progressive structure: short points, none longer than about three sentences, one-sentence leads, unique keys, media slots for every point
+  const sent=t=>(t.match(/[^.!?]+[.!?]+(\s|$)/g)||[t]).length;
+  const longOnes=[]; P.stops.forEach(S=>{ if(sent(S.lead)!==1) longOnes.push(S.slug+' lead'); ['happens','you','tim','docs'].forEach(sec=>S[sec].forEach(pt=>{ if(sent(pt.d)>3) longOnes.push(S.slug+' '+pt.k); if(!pt.t||pt.t.split(' ').length>7) longOnes.push(S.slug+' title '+pt.t); })); S.faq.forEach(f=>{ if(sent(f[1])>3) longOnes.push(S.slug+' faq'); }); });
+  expect(!longOnes.length,'A: every lead is one sentence, no point is longer than three sentences, and titles are a few words: '+longOnes.slice(0,3));
+  expect(P.stops.every(S=>['happens','you','tim','docs'].every(sec=>new Set(S[sec].map(x=>x.k)).size===S[sec].length)),'A: point keys are unique in each section');
+  const M=W.JOURNEY_MEDIA, MH=W.JOURNEY_MEDIA_HINTS;
+  expect(P.stops.every(S=>M[S.slug]&&M[S.slug].hero===null&&['happens','you','tim','docs'].every(sec=>S[sec].every(pt=>(sec+'.'+pt.k) in M[S.slug].points&&M[S.slug].points[sec+'.'+pt.k]===null))),'A: the media config has a hero slot and a slot for every point, all empty');
+  expect(Object.values(M).every(m=>m.hero===null&&Object.values(m.points).every(v=>v===null)),'A: every media slot is empty (no media has been added)');
+  expect(P.stops.every(S=>MH.slots[S.slug]&&['hero','happens','you','tim','docs','faq'].every(k=>MH.slots[S.slug][k]&&MH.slots[S.slug][k].length>15))&&!/[—–]|\$/.test(JSON.stringify(MH)),'A: every slot has a suggestion for what would suit it');
+  expect(fs.existsSync(path.join(__dirname,'..','assets','journey','README.md')),'A: the media README is in assets/journey');
+  const rd=fs.readFileSync(path.join(__dirname,'..','assets','journey','README.md'),'utf8'); expect(!/[—–]/.test(rd)&&/alt text/i.test(rd)&&/1600/.test(rd)&&/300 ?KB/i.test(rd)&&/rights/i.test(rd)&&/YouTube/.test(rd)&&/Vimeo/.test(rd),'A: the README covers file names, size, alt text, rights and videos, with no dashes');
   out.catalogue={pitch:grp&&grp[1].length,faq:P.stops.map(s=>s.faq.length)};
 }
 
@@ -92,7 +104,7 @@ const OTHERS=/\b(Ray White|Harcourts|Barfoot|Bayleys|Century 21|Mike Pero|Quinov
   expect(i.links&&i.h1===1,'B: every stop on the map is a labelled, keyboard reachable link, and there is one heading');
   expect(i.svgW>=330&&i.svgW<=362,'B: the map uses the phone width ('+i.svgW+')');
   expect(!(await sideways(p)),'B: no sideways scroll at 390 px');
-  const t=await body(p);
+  const t=await p.evaluate(()=>document.querySelector('#main').textContent);
   expect(/Book an appraisal with me/.test(t)&&t.includes('027 562 7207')&&t.includes('tim@mcguire.co.nz'),'B: the call to action and Tim\'s contact details are on the page');
   const cta=await p.evaluate(()=>[...document.querySelectorAll('#main .pitch-cta a')].map(a=>a.getAttribute('href')));
   expect(cta.includes('tel:0275627207')&&cta.includes('sms:0275627207')&&cta.includes('mailto:tim@mcguire.co.nz'),'B: call, text and email buttons use the numbers the app already shows: '+cta);
@@ -129,17 +141,24 @@ for(const dark of [false,true]){
   const lab=dark?'dark':'light'; let shot=0;
   for(let k=1;k<=9;k++){
     await openAt(p,'#journey/'+SLUGS[k-1]);
-    const d=await p.evaluate(()=>({h1:[...document.querySelectorAll('#main h1')].map(e=>e.textContent),h2:[...document.querySelectorAll('#main h2')].map(e=>e.textContent),qa:document.querySelectorAll('#main .p-qa').length,kick:(document.querySelector('.p-kick')||{}).textContent,
+    const d=await p.evaluate(()=>({h1:[...document.querySelectorAll('#main h1')].map(e=>e.textContent),h2:[...document.querySelectorAll('#main .pt-sec > .pt-h .pt-t, #main .p-next h2')].map(e=>e.textContent),qa:document.querySelectorAll('#main .pt-faq').length,open0:document.querySelectorAll('#main .pt-b[aria-expanded="true"]').length,hid0:[...document.querySelectorAll('#main .pt-panel')].every(e=>getComputedStyle(e).visibility==='hidden'),secs:document.querySelectorAll('#main .pt-sec').length,kick:(document.querySelector('.p-kick')||{}).textContent,
       lede:(document.querySelector('.p-open')||{}).textContent||'',links:[...document.querySelectorAll('#main .p-next a, #main .p-crumb a')].map(a=>a.getAttribute('href')+'|'+a.textContent),cta:!!document.querySelector('#main .pitch-cta a[href^="tel:"]'),
       bg:getComputedStyle(document.body).backgroundColor,focus:document.activeElement&&document.activeElement.id,dots:[...document.querySelectorAll('#main .p-dots a')].map(a=>a.getAttribute('href')),cur:(document.querySelector('.p-dots a[aria-current]')||{}).textContent}));
-    const T=await body(p);
+    const Tvis=await body(p);
+    const SS=P.stops[k-1], flat=t=>t.replace(/\s+/g,' ').trim();
+    expect(d.open0===0&&d.hid0&&d.secs===5,`C${lab}: stop ${k} starts collapsed: ${d.open0} open, five headings`);
+    const fv=flat(Tvis); expect(fv.includes(TITLES[k-1])&&fv.includes(flat(SS.lead))&&['happens','you','tim','docs','faq'].every(x=>fv.includes(SS.sum[x]))&&/Book an appraisal with me/.test(fv),`C${lab}: stop ${k} first shows the title, one line, the five summaries and the call to action`);
+    expect(![SS.happens[0].d,SS.tim[0].d,SS.faq[0][1]].some(x=>fv.includes(flat(x))),`C${lab}: stop ${k} keeps the detail and the answers folded away`);
+    await p.click('[data-ptall]'); await p.waitForTimeout(350);
+    const T=await p.evaluate(()=>document.querySelector('#main').innerText);
     expect(d.h1.length===1&&d.h1[0]===TITLES[k-1],`C${lab}: stop ${k} heading ${d.h1}`);
     expect(await p.title()===TITLES[k-1]+' · Your selling journey · McGuire Real Estate',`C${lab}: stop ${k} has its own document title: `+await p.title());
     expect(d.kick==='Stop '+k+' of 9',`C${lab}: stop ${k} says where it sits: ${d.kick}`);
     expect(d.focus==='pTitle',`C${lab}: stop ${k} moves focus to its heading`);
     expect(['What happens at this stop','What you do','What I do for you, and why it matters','Documents and checks','Common questions','What is next'].every(h=>d.h2.includes(h)),`C${lab}: stop ${k} has every section: ${d.h2}`);
     expect(d.qa>=4&&d.qa<=6,`C${lab}: stop ${k} has ${d.qa} questions`);
-    expect(d.lede.length>150,`C${lab}: stop ${k} has an opening paragraph`);
+    expect(d.lede.length>40&&d.lede.length<=200&&(d.lede.match(/[.!?]/g)||[]).length===1,`C${lab}: stop ${k} opens with one warm sentence: ${d.lede.length}`);
+    { const old=FACTS[SLUGS[k-1]], nt=flat(T), miss=old.items.flatMap(x=>x.split(/(?<=[.?!])\s+/)).filter(x=>!nt.includes(flat(x))); expect(!miss.length,`C${lab}: stop ${k} still has every fact from before: `+miss.slice(0,2)); }
     expect(d.cta&&/Book an appraisal with me/.test(T)&&T.includes('027 562 7207'),`C${lab}: stop ${k} ends with the call to action`);
     expect(d.links.some(l=>l.startsWith('#journey|')),`C${lab}: stop ${k} links back to the map`);
     if(k<9) expect(d.links.some(l=>l.startsWith('#journey/'+SLUGS[k]+'|Next stop: '+TITLES[k])),`C${lab}: stop ${k} links on to stop ${k+1}: ${d.links}`); else expect(d.links.some(l=>l.startsWith('#journey/'+SLUGS[0]+'|')),`C${lab}: the last stop links back to the first`);
@@ -192,8 +211,9 @@ for(const dark of [false,true]){
 { const {ctx,p}=await setup({guides:true}); await p.goto(URL); await seed(p,{});
   for(const [hash,name,maxPages] of [['#journey','map',4],['#journey/your-agreement','stop4',8]]){
     await openAt(p,hash); await p.emulateMedia({media:'print'});
-    const pr=await p.evaluate(()=>{ const vis=s=>{const e=document.querySelector(s);return !!e&&getComputedStyle(e).display!=='none'&&e.getBoundingClientRect().height>0;}; return {header:vis('header.top'),actions:vis('#actions'),buttons:[...document.querySelectorAll('#main .toolbar, #main .p-top, #main .p-dots, #main .p-crumb')].filter(e=>e.getBoundingClientRect().height>0).length,phead:vis('#main .phead'),h1:vis('#pTitle'),text:document.querySelector('#main').innerText,sc:document.documentElement.scrollWidth,iw:window.innerWidth}; });
+    const pr=await p.evaluate(()=>{ const vis=s=>{const e=document.querySelector(s);return !!e&&getComputedStyle(e).display!=='none'&&e.getBoundingClientRect().height>0;}; return {header:vis('header.top'),actions:vis('#actions'),buttons:[...document.querySelectorAll('#main .toolbar, #main .p-top, #main .p-dots, #main .p-crumb')].filter(e=>e.getBoundingClientRect().height>0).length,phead:vis('#main .phead'),h1:vis('#pTitle'),closed:[...document.querySelectorAll('.pt-panel')].filter(e=>!(getComputedStyle(e).visibility==='visible'&&e.getBoundingClientRect().height>0)).length,panels:document.querySelectorAll('.pt-panel').length,text:document.querySelector('#main').innerText,sc:document.documentElement.scrollWidth,iw:window.innerWidth}; });
     expect(!pr.header&&!pr.actions&&pr.buttons===0,'D: '+name+': print hides the app chrome and the buttons');
+    expect(pr.panels>=2&&pr.closed===0,'D: '+name+': print opens every section and point ('+pr.closed+' of '+pr.panels+' still closed)');
     expect(pr.phead&&pr.h1,'D: '+name+': print shows the McGuire heading and the page');
     expect(pr.text.includes('027 562 7207')&&pr.text.includes('tim@mcguire.co.nz')&&/Book an appraisal with me/.test(pr.text),'D: '+name+': Tim\'s details and the call to action print as plain text');
     expect(!/Queens Drive|Jane|@example/.test(pr.text),'D: '+name+': nothing personal in print');
@@ -300,6 +320,125 @@ const world=(stage,o)=>{ o=o||{}; const ver=o.verified?'2026-11-02T00:00:00Z':nu
   // typed something, Back, say yes: the journey page shows
   await toStop4(); await type(); asked=0; yes=true; await p.goBack(); await p.waitForTimeout(600);
   expect(asked===1&&await p.textContent('#pTitle')==='Your selling journey','I: saying yes goes on to the journey page');
+  await ctx.close(); }
+
+// ---------- J. progressive disclosure, and room for photos and videos ----------
+{ const {ctx,p,reqs}=await setup({guides:true});
+  await ctx.route(/https:\/\/(www\.youtube-nocookie\.com|player\.vimeo\.com)\/.*/,r=>r.fulfill({contentType:'text/html',body:'<!doctype html><title>player</title>'}));
+  const PNG=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==','base64');
+  await ctx.route('https://packages.dunnerstunner.co.nz/onboarding/assets/journey/**',r=>r.fulfill({contentType:'image/png',body:PNG}));
+  await p.goto(URL); await seed(p,{});
+  const vis=sel=>p.locator(sel).first().isVisible();
+  const exp=async sel=>p.getAttribute(sel,'aria-expanded');
+  // 1. a section opens and closes, a point inside opens and closes
+  await openAt(p,'#journey/meeting-tim');
+  const sec1='.pt-sec:nth-of-type(1) > .pt-h > .pt-b';
+  expect(await exp('.pt-sec >> nth=0 >> .pt-b >> nth=0')==='false','J: a section starts closed');
+  await p.click('.pt-sec >> nth=0 >> .pt-b >> nth=0'); await p.waitForTimeout(350);
+  expect(await exp('.pt-sec >> nth=0 >> .pt-b >> nth=0')==='true'&&await vis('.pt-sec >> nth=0 >> .pt-point >> nth=0 >> .pt-b'),'J: tapping a section opens it and shows its points');
+  expect(!(await vis('.pt-sec >> nth=0 >> .pt-point >> nth=0 >> .pt-body')),'J: the points inside are still folded');
+  await p.click('.pt-sec >> nth=0 >> .pt-point >> nth=0 >> .pt-b'); await p.waitForTimeout(350);
+  expect(await vis('.pt-sec >> nth=0 >> .pt-point >> nth=0 >> .pt-body p'),'J: tapping a point opens its detail');
+  await p.click('.pt-sec >> nth=0 >> .pt-point >> nth=0 >> .pt-b'); await p.waitForTimeout(350);
+  expect(!(await vis('.pt-sec >> nth=0 >> .pt-point >> nth=0 >> .pt-body p')),'J: tapping it again folds it away');
+  // closing the section takes an open point out of reach too
+  await p.click('.pt-sec >> nth=0 >> .pt-point >> nth=1 >> .pt-b'); await p.waitForTimeout(300); await p.click('.pt-sec >> nth=0 >> .pt-b >> nth=0'); await p.waitForTimeout(350);
+  expect(!(await vis('.pt-sec >> nth=0 >> .pt-point >> nth=1 >> .pt-b')),'J: closing a section hides its points, open or not, from sight and the keyboard');
+  // 2. Open all and Close all
+  expect(/^Open all$/.test(await p.textContent('[data-ptall]')),'J: the page offers Open all');
+  await p.click('[data-ptall]'); await p.waitForTimeout(350);
+  expect(await p.evaluate(()=>[...document.querySelectorAll('#main .pt-b')].every(b=>b.getAttribute('aria-expanded')==='true'))&&/^Close all$/.test(await p.textContent('[data-ptall]')),'J: Open all opens every section and point, and becomes Close all');
+  await p.click('[data-ptall]'); await p.waitForTimeout(350);
+  expect(await p.evaluate(()=>[...document.querySelectorAll('#main .pt-b')].every(b=>b.getAttribute('aria-expanded')==='false'))&&/^Open all$/.test(await p.textContent('[data-ptall]')),'J: Close all folds everything away');
+  // opening the last one by hand flips the label
+  await p.click('[data-ptall]'); await p.waitForTimeout(250); await p.click('.pt-sec >> nth=4 >> .pt-b >> nth=0'); await p.waitForTimeout(250);
+  expect(/^Open all$/.test(await p.textContent('[data-ptall]')),'J: the link follows what is open'); await p.click('[data-ptall]'); await p.waitForTimeout(250);
+  // 3. the same on the map page
+  await openAt(p,'#journey');
+  const mp=await p.evaluate(()=>({pts:document.querySelectorAll('#main .pt-b').length,open:document.querySelectorAll('#main .pt-b[aria-expanded="true"]').length,hint:[...document.querySelectorAll('#main .pt-t')].map(e=>e.textContent),lede:document.querySelector('#main .p-open').textContent}));
+  expect(mp.pts===2&&mp.open===0&&/A word about my fee/.test(mp.hint)&&mp.lede.length<200,'J: the map page is the map, one line, the call to action and two folded points: '+JSON.stringify(mp));
+  expect(!(await vis('#main .pt-point, #main .pt-sec >> nth=1 >> .pt-body p')),'J: the fee note is folded until opened');
+  await p.click('.pt-sec >> nth=1 >> .pt-b'); await p.waitForTimeout(350);
+  expect(/only talk about my fee once you have decided who the best agent is for you/.test(await p.evaluate(()=>document.querySelector('#main .pt-sec:nth-of-type(2) .pt-body').innerText)),'J: opening the fee note shows Tim\'s fee rule');
+  // 4. the keyboard
+  await openAt(p,'#journey/your-agreement');
+  await p.focus('.pt-sec >> nth=0 >> .pt-b >> nth=0'); await p.keyboard.press('Enter'); await p.waitForTimeout(350);
+  expect(await exp('.pt-sec >> nth=0 >> .pt-b >> nth=0')==='true','J: Enter opens a section from the keyboard');
+  await p.keyboard.press('Tab'); await p.keyboard.press('Space'); await p.waitForTimeout(350);
+  expect(await p.evaluate(()=>document.activeElement.classList.contains('pt-b')&&document.activeElement.closest('.pt-point')!==null&&document.activeElement.getAttribute('aria-expanded')==='true'),'J: Tab moves to the first point and Space opens it');
+  await p.keyboard.press('Space'); await p.focus('.pt-sec >> nth=0 >> .pt-b >> nth=0'); await p.keyboard.press('Space'); await p.waitForTimeout(350); await p.focus('.pt-sec >> nth=0 >> .pt-b >> nth=0'); await p.keyboard.press('Tab');
+  expect(await p.evaluate(()=>document.activeElement.classList.contains('pt-b')&&document.activeElement.closest('.pt-sec')===document.querySelectorAll('.pt-sec')[1]),'J: with a section closed, Tab skips its folded points');
+  const aria=await p.evaluate(()=>[...document.querySelectorAll('#main .pt-b')].every(b=>b.getAttribute('aria-controls')&&document.getElementById(b.getAttribute('aria-controls'))&&b.closest('h2,h3')));
+  expect(aria,'J: every button sits in a heading, says what it controls and says whether it is open');
+  // 5. reduced motion
+  await p.emulateMedia({reducedMotion:'reduce'}); expect(await p.evaluate(()=>parseFloat(getComputedStyle(document.querySelector('.pt-panel')).transitionDuration)===0),'J: with reduced motion the panels do not animate');
+  await p.emulateMedia({reducedMotion:'no-preference'}); expect(await p.evaluate(()=>parseFloat(getComputedStyle(document.querySelector('.pt-panel')).transitionDuration)>0&&parseFloat(getComputedStyle(document.querySelector('.pt-panel')).transitionDuration)<=.3),'J: otherwise they open quickly and smoothly');
+
+  // 6. photos and videos: empty slots are invisible, preview shows them
+  await openAt(p,'#journey/meeting-tim'); await p.click('[data-ptall]'); await p.waitForTimeout(350);
+  expect(await p.evaluate(()=>document.querySelectorAll('#main .p-media, #main .p-slot').length)===0,'J: with no media added, a page has no empty boxes and no gaps');
+  await openAt(p,'#journey/meeting-tim?media=preview');
+  const nPts=P.stops[2].happens.length+P.stops[2].you.length+P.stops[2].tim.length+P.stops[2].docs.length;
+  let pv=await p.evaluate(()=>({slots:document.querySelectorAll('#main .p-slot').length,hero:(document.querySelector('#main h1 ~ .p-slot')||{}).textContent,note:!!document.querySelector('#main .card.note')&&/Preview mode/.test(document.querySelector('#main').textContent),next:document.querySelector('.p-next a.btn.primary').getAttribute('href')}));
+  expect(pv.hero&&/^Photo or video here: e\.g\. /.test(pv.hero),'J: preview shows the hero slot as a labelled box with a suggestion: '+pv.hero);
+  expect(pv.note&&pv.next==='#journey/an-offer?media=preview'.replace('an-offer','your-agreement'),'J: preview explains itself and carries on to the next page: '+pv.next);
+  await p.click('[data-ptall]'); await p.waitForTimeout(350);
+  pv=await p.evaluate(()=>({slots:[...document.querySelectorAll('#main .p-slot')].map(e=>e.textContent),printHidden:getComputedStyle(document.querySelector('.p-slot')).display}));
+  expect(pv.slots.length===nPts+1&&pv.slots.every(t=>/^Photo or video here: e\.g\. .{15,}/.test(t)),'J: opened in preview, every point has a labelled slot with a suggestion ('+pv.slots.length+' of '+(nPts+1)+')');
+  expect(await p.evaluate(()=>[...document.querySelectorAll('#main .pt-point .p-slot')].every(e=>e.closest('.pt-panel')&&e.closest('.pt-body'))),'J: a point\'s slot sits inside the point');
+  await p.emulateMedia({media:'print'}); expect(await p.evaluate(()=>[...document.querySelectorAll('#main .p-slot')].every(e=>getComputedStyle(e).display==='none')),'J: preview boxes never print'); await p.emulateMedia({media:'screen'});
+  await openAt(p,'#journey?media=preview'); expect(await p.evaluate(()=>document.querySelectorAll('#main .p-slot').length)>=1,'J: the map page has a preview slot too');
+  await openAt(p,'#journey/meeting-tim'); expect(await p.evaluate(()=>document.querySelectorAll('#main .p-slot').length)===0,'J: and without the flag nothing shows');
+
+  // 7. a video slot: a still with a play button, and no third-party request until it is tapped
+  await openAt(p,'#journey/meeting-tim');
+  await p.evaluate(()=>{ const m=window.JOURNEY_MEDIA['meeting-tim']; m.hero={type:'video',src:'https://www.youtube.com/watch?v=dQw4w9WgXcQ',title:'Meet Tim',credit:'Video: Tim McGuire'}; m.points['happens.my-fee']={type:'video',src:'https://vimeo.com/76979871',title:'About fees',credit:''}; });
+  reqs.length=0; await p.evaluate(()=>{ location.hash='#journey/identity-check'; }); await p.waitForTimeout(300); await p.evaluate(()=>{ location.hash='#journey/meeting-tim'; }); await p.waitForTimeout(500);
+  expect(await p.evaluate(()=>!!document.querySelector('#main h1 ~ .p-video .p-vid .p-play')&&document.querySelector('.p-vid').getAttribute('aria-label')==='Play video: Meet Tim'),'J: a video slot shows a still with a play button and its title');
+  expect(!reqs.some(u=>/youtube|vimeo|ytimg/i.test(u)),'J: no request to YouTube or Vimeo before the visitor taps: '+reqs.filter(u=>/youtube|vimeo|ytimg/i.test(u)));
+  expect(!(await p.$('#main iframe')),'J: and no player is on the page');
+  await p.emulateMedia({media:'print'}); expect(await p.evaluate(()=>!document.querySelector('.p-vid').offsetParent&&/Meet Tim: https:\/\/www\.youtube\.com\/watch\?v=dQw4w9WgXcQ/.test(document.querySelector('#main').innerText)),'J: on paper a video is its title and link, not a player'); await p.emulateMedia({media:'screen'});
+  await p.click('.p-vid >> nth=0'); await p.waitForTimeout(500);
+  const fr=await p.$eval('#main iframe',f=>({src:f.src,title:f.title,allow:f.getAttribute('allow')}));
+  expect(/^https:\/\/www\.youtube-nocookie\.com\/embed\/dQw4w9WgXcQ\?/.test(fr.src)&&/cc_load_policy=1/.test(fr.src)&&fr.title==='Meet Tim','J: tapping play loads the youtube-nocookie player with captions on, titled: '+fr.src);
+  expect(reqs.some(u=>/youtube-nocookie\.com\/embed/.test(u))&&!reqs.some(u=>/www\.youtube\.com|ytimg|googlevideo/.test(u)),'J: only after the tap is the privacy player requested');
+  await p.click('[data-ptall]'); await p.waitForTimeout(400); reqs.length=0;
+  await p.click('.pt-point:has-text("My fee") .p-vid'); await p.waitForTimeout(500);
+  expect(reqs.some(u=>/player\.vimeo\.com\/video\/76979871\?dnt=1/.test(u)),'J: a Vimeo video loads with dnt=1 only on tap: '+reqs.filter(u=>/vimeo/.test(u)));
+  // a video from anywhere else, or without a title, is refused
+  await p.evaluate(()=>{ const m=window.JOURNEY_MEDIA['meeting-tim']; m.hero={type:'video',src:'https://evil.example/watch?v=dQw4w9WgXcQ',title:'Nope'}; m.points['happens.my-fee']={type:'video',src:'https://www.youtube.com/watch?v=dQw4w9WgXcQ',title:''}; });
+  await p.evaluate(()=>{ location.hash='#journey/identity-check'; }); await p.waitForTimeout(250); await p.evaluate(()=>{ location.hash='#journey/meeting-tim'; }); await p.waitForTimeout(400);
+  expect(await p.evaluate(()=>document.querySelectorAll('#main .p-video, #main .p-vid').length)===0,'J: a video that is not YouTube or Vimeo, or has no title, is not shown');
+
+  // 8. an image slot: lazy, sized, with alt text and a credit; refused without alt text or a credit, or from outside the folder
+  const setImg=cfg=>p.evaluate(c=>{ const m=window.JOURNEY_MEDIA['meeting-tim']; m.hero=c; m.points['happens.my-fee']=null; },cfg);
+  const showMeeting=async()=>{ await p.evaluate(()=>{ location.hash='#journey/identity-check'; }); await p.waitForTimeout(250); await p.evaluate(()=>{ location.hash='#journey/meeting-tim'; }); await p.waitForTimeout(400); };
+  await setImg({type:'image',src:'tim-visit.jpg',alt:'Tim at the front door of a property',credit:'Photo: Tim McGuire'}); await showMeeting();
+  const im=await p.evaluate(()=>{ const i=document.querySelector('#main h1 ~ .p-img img'); return i?{src:i.getAttribute('src'),alt:i.alt,lazy:i.loading,w:i.getAttribute('width'),h:i.getAttribute('height'),cap:document.querySelector('.p-img figcaption').textContent}:null; });
+  expect(im&&im.src==='assets/journey/tim-visit.jpg'&&im.alt==='Tim at the front door of a property'&&im.lazy==='lazy'&&+im.w>0&&+im.h>0&&im.cap==='Photo: Tim McGuire','J: an image slot shows the picture from assets/journey, lazy, with its size, alt text and credit: '+JSON.stringify(im));
+  expect(await p.evaluate(()=>{ const i=document.querySelector('#main .p-img img'); return +i.getAttribute('width')>0&&+i.getAttribute('height')>0&&i.getBoundingClientRect().width<=document.documentElement.clientWidth; }),'J: the image has its width and height set and never grows past the page');
+  expect(!(await sideways(p)),'J: a hero photo fits 390 px');
+  for(const [why,cfg] of [['no alt text',{type:'image',src:'tim-visit.jpg',credit:'Photo: Tim McGuire'}],['blank alt text',{type:'image',src:'tim-visit.jpg',alt:'   ',credit:'Photo: Tim McGuire'}],['no credit',{type:'image',src:'tim-visit.jpg',alt:'Tim at a door'}],['a file from outside the folder',{type:'image',src:'../secret.jpg',alt:'x',credit:'y'}],['a picture from another site',{type:'image',src:'https://example.com/a.jpg',alt:'x',credit:'y'}]]){
+    await setImg(cfg); reqs.length=0; await showMeeting();
+    expect(await p.evaluate(()=>document.querySelectorAll('#main .p-img, #main .p-media img').length)===0&&!reqs.some(u=>/secret|example\.com/.test(u)),'J: an image with '+why+' is refused and not requested'); }
+  await setImg({type:'image',src:'tim-visit.jpg',alt:'',credit:'Photo: Tim McGuire'}); await p.evaluate(()=>{ location.hash='#journey/meeting-tim?media=preview'; }); await p.waitForTimeout(500);
+  expect(/Not shown: this image needs a file from assets\/journey, alt text and a credit/.test(await p.evaluate(()=>document.querySelector('#main h1 ~ .p-slot.bad').textContent)),'J: in preview, a refused image says why');
+  // an image inside a point shows only when the point is open
+  await p.evaluate(()=>{ const m=window.JOURNEY_MEDIA['meeting-tim']; m.hero=null; m.points['happens.my-fee']={type:'image',src:'fee.png',alt:'A handshake',credit:'Photo: Tim McGuire'}; }); await showMeeting();
+  await p.click('.pt-sec >> nth=0 >> .pt-b >> nth=0'); await p.waitForTimeout(300);
+  expect(!(await vis('#main .p-img img')),'J: a point\'s photo stays out of sight until that point is open');
+  await p.click('.pt-point:has-text("My fee") .pt-b'); await p.waitForTimeout(350); expect(await vis('#main .p-img img'),'J: and shows when it opens');
+
+  // 9. screenshots for Tim: a collapsed page, and the same page in preview with a section and a point open
+  await p.evaluate(()=>{ const m=window.JOURNEY_MEDIA['meeting-tim']; m.hero=null; m.points['happens.my-fee']=null; });
+  await openAt(p,'#journey/meeting-tim'); await p.addStyleTag({content:'header,.topbar,#hdr{position:static !important}'}); await p.screenshot({path:path.join(__dirname,'out','pitch_collapsed_390.png'),fullPage:true});
+  await openAt(p,'#journey/meeting-tim?media=preview'); await p.click('.pt-sec >> nth=0 >> .pt-b >> nth=0'); await p.waitForTimeout(350); await p.click('.pt-sec >> nth=0 >> .pt-point >> nth=0 >> .pt-b'); await p.waitForTimeout(350);
+  await p.addStyleTag({content:'header,.topbar,#hdr{position:static !important}'}); await p.evaluate(()=>window.scrollTo(0,0)); await p.screenshot({path:path.join(__dirname,'out','pitch_expanded_preview_390.png'),fullPage:true});
+  expect(!(await sideways(p)),'J: the preview page fits 390 px');
+  // 10. translation: the browser translates the page text; the protected items keep translate="no"
+  await openAt(p,'#journey/meeting-tim'); await p.click('[data-ptall]'); await p.waitForTimeout(400);
+  const tr=await p.evaluate(()=>({nt:[...document.querySelectorAll('#main .pitch-cta [translate="no"], #main .pt-body [translate="no"]')].map(e=>e.textContent),lang:document.documentElement.lang}));
+  expect(tr.nt.some(t=>/027 562 7207/.test(t))&&tr.nt.some(t=>/tim@mcguire\.co\.nz/.test(t))&&tr.lang==='en','J: the phone number and email stay marked translate="no" and the page is marked English, so browser translation works on the rest: '+JSON.stringify(tr));
   await ctx.close(); }
 
 await b.close();

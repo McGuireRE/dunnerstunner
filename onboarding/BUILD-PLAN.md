@@ -119,6 +119,11 @@ chosen the best agent, then it is agreed with all owners in writing). Signed-in 
 step" button under the same link rules as the panel; the panel gains "Read more" on every stop. No database or edge function
 change. Test: `journey-pitch.test.js`.
 
+Added 9 November 2026 (Tim: expand step by step, leave room for pictures): every pitch page now opens folded. A one-line lead, five
+section headings with a summary each, and the call to action; sections open to points, points open to two or three sentences, with
+Open all / Close all. Photos and videos go in `window.JOURNEY_MEDIA` (strings.js), keyed `section.pointkey`, all empty for now. Add
+`?media=preview` to any pitch link to see where they would go. See `assets/journey/README.md`. YouTube and Vimeo load only on tap.
+
 ## Phase 4: translation
 
 Status: done 6 November 2026 (migration 008). Changed 8 November 2026 (migration 011, Tim's decision): machine

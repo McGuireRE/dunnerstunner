@@ -3845,12 +3845,14 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
      what the journey panel reads. All the wording is in strings.js (window.JOURNEY_PITCH). Nothing here states a fee: Tim talks about his
      fee only once a seller has decided who the best agent is, and it is then agreed with all owners in writing. */
   const PJ = () => window.JOURNEY_PITCH;
-  const pHref = i => '#journey/' + PJ().stops[i].slug;
+  let PITCH_PREVIEW = false;   // ?media=preview on the end of a journey address: empty photo and video slots show as dashed boxes (for Tim, never needed by visitors)
+  const pHref = i => '#journey/' + PJ().stops[i].slug + (PITCH_ON && PITCH_PREVIEW ? '?media=preview' : '');
   const T_TEL = '0275627207', T_EMAIL = 'tim@mcguire.co.nz', PACKAGES_URL = 'https://packages.dunnerstunner.co.nz/';
   function pitchRoute() {
-    const m = /^#journey(?:\/([a-z0-9-]+))?\/?$/i.exec(location.hash || ''); if (!m) return null;
+    const m = /^#journey(?:\/([a-z0-9-]+))?\/?(?:\?(.*))?$/i.exec(location.hash || ''); if (!m) return null;
     const slug = (m[1] || '').toLowerCase(), i = slug ? PJ().stops.findIndex(s => s.slug === slug) : -1;
-    return { slug, i, bad: !!slug && i < 0 };
+    let preview = false; try { preview = new URLSearchParams(m[2] || '').get('media') === 'preview' || new URLSearchParams(location.search).get('media') === 'preview'; } catch (_) { }
+    return { slug, i, bad: !!slug && i < 0, preview };
   }
   // wording to paragraph HTML: the phone number, Tim's email and the packages site become links
   const pText = t => esc(t)
@@ -3864,6 +3866,59 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   const pTop = f => `<div class="p-top no-print">${SESSION && !IS_AGENT ? `<button class="btn ghost" type="button" data-psign>${esc(PJ().labels.yourPage)}</button>` : !SESSION ? `<button class="btn ghost" type="button" data-psign>${esc(PJ().labels.signIn)}</button>` : '<span></span>'}<button class="btn ghost" type="button" id="pPrint">${esc(PJ().labels.print)}</button></div>`;
   const pStatus = (st, f, k) => { const c = jStateOf(st, f, k); return { c, tag: c === 'here' ? J_STATE_TEXT.here : J_STATE_TEXT[c], det: jDetail(k, f) }; };
 
+  /* ── progressive disclosure: a section or a point is a button (aria-expanded) that opens a panel. Sections hold points; a point is a short
+        title that opens to two or three sentences. Closed panels are out of the tab order and the accessibility tree; print opens them all. ── */
+  let PT_SEQ = 0;
+  const ptItem = (level, title, sum, body, cls) => { const id = 'pt' + (++PT_SEQ);
+    return `<div class="pt ${cls || ''}"><h${level} class="pt-h"><button type="button" class="pt-b" id="${id}b" aria-expanded="false" aria-controls="${id}p"><span class="pt-txt"><span class="pt-t">${title}</span>${sum ? `<span class="pt-s">${sum}</span>` : ''}</span><span class="pt-ic" aria-hidden="true"></span></button></h${level}>
+      <div class="pt-panel" id="${id}p" role="region" aria-labelledby="${id}b" data-open="false"><div class="pt-in"><div class="pt-body">${body}</div></div></div></div>`; };
+
+  /* ── photos and videos (strings.js JOURNEY_MEDIA): a slot is empty, an image from assets/journey, or a YouTube or Vimeo link whose player loads only on a tap ── */
+  const pMediaHints = () => window.JOURNEY_MEDIA_HINTS || { labels: {}, slots: {} };
+  const pSlotCfg = (slug, key) => { const m = (window.JOURNEY_MEDIA || {})[slug]; if (!m) return null; return key == null ? m.hero || null : (m.points || {})[key] || null; };
+  function pVideoId(src) {
+    const u = (() => { try { return new URL(String(src)); } catch (_) { return null; } })(); if (!u || u.protocol !== 'https:') return null;
+    const h = u.hostname.replace(/^www\./, '');
+    if (h === 'youtube.com' || h === 'm.youtube.com' || h === 'youtube-nocookie.com') { const m = u.pathname.match(/^\/embed\/([A-Za-z0-9_-]{11})$/); const v = m ? m[1] : u.searchParams.get('v'); return v && /^[A-Za-z0-9_-]{11}$/.test(v) ? { site: 'youtube', id: v } : null; }
+    if (h === 'youtu.be') { const v = u.pathname.slice(1); return /^[A-Za-z0-9_-]{11}$/.test(v) ? { site: 'youtube', id: v } : null; }
+    if (h === 'vimeo.com' || h === 'player.vimeo.com') { const m = u.pathname.match(/\/(\d{5,12})(?:\/|$)/); return m ? { site: 'vimeo', id: m[1] } : null; }
+    return null;
+  }
+  const pLocalImg = f => { f = String(f || ''); if (/^[A-Za-z0-9._-]+\.(jpe?g|png|webp|avif)$/i.test(f)) return 'assets/journey/' + f; if (/^assets\/journey\/[A-Za-z0-9._-]+\.(jpe?g|png|webp|avif)$/i.test(f)) return f; return null; };
+  function pSlot(slug, key, section) {   // key null = the hero under the title
+    const H = pMediaHints(), lab = H.labels || {}, cfg = pSlotCfg(slug, key), hint = ((H.slots || {})[slug] || {})[key == null ? 'hero' : section];
+    const placeholder = (msg, bad) => `<div class="p-media p-slot${bad ? ' bad' : ''} no-print" data-slot="${esc(slug + (key ? ':' + key : ':hero'))}"><span>${esc(msg)}</span></div>`;
+    if (!cfg) return PITCH_PREVIEW ? placeholder((lab.here || 'Photo or video here: e.g. ') + (hint || 'a photo or video that helps explain this')) : '';
+    if (cfg.type === 'image') {
+      const src = pLocalImg(cfg.src), ok = src && String(cfg.alt || '').trim() && String(cfg.credit || '').trim();
+      if (!ok) { try { console.warn('Journey image not shown (needs a file in assets/journey, alt text and a credit):', slug, key); } catch (_) { } return PITCH_PREVIEW ? placeholder(lab.refusedImage || 'Not shown', true) : ''; }
+      const w = +cfg.width > 0 ? +cfg.width : 1600, h = +cfg.height > 0 ? +cfg.height : 1067;
+      return `<figure class="p-media p-img"><img src="${esc(src)}" alt="${esc(cfg.alt)}" width="${w}" height="${h}" loading="lazy" decoding="async"><figcaption class="small">${esc(cfg.credit)}</figcaption></figure>`;
+    }
+    if (cfg.type === 'video') {
+      const v = pVideoId(cfg.src), ok = v && String(cfg.title || '').trim();
+      if (!ok) { try { console.warn('Journey video not shown (needs a YouTube or Vimeo link and a title):', slug, key); } catch (_) { } return PITCH_PREVIEW ? placeholder(lab.refusedVideo || 'Not shown', true) : ''; }
+      const poster = pLocalImg(cfg.poster), link = v.site === 'youtube' ? 'https://www.youtube.com/watch?v=' + v.id : 'https://vimeo.com/' + v.id;
+      return `<figure class="p-media p-video"><button type="button" class="p-vid no-print" data-pvid="${v.site}:${v.id}" aria-label="${esc(PJ().labels.play + ': ' + cfg.title)}">${poster ? `<img src="${esc(poster)}" alt="" loading="lazy" decoding="async">` : ''}<span class="p-play" aria-hidden="true"></span><span class="p-vtitle">${esc(cfg.title)}</span></button>
+        <p class="print-only p-vprint">${esc(cfg.title)}: ${esc(link)}</p>${cfg.credit ? `<figcaption class="small">${esc(cfg.credit)}</figcaption>` : ''}</figure>`;
+    }
+    return '';
+  }
+  function pPlay(btn) {   // the only moment a third party is contacted: when the visitor taps play. Privacy-friendly players, no cookies.
+    const [site, id] = String(btn.dataset.pvid).split(':'); if (!/^[A-Za-z0-9_-]{5,12}$/.test(id) || (site !== 'youtube' && site !== 'vimeo')) return;
+    const url = site === 'youtube' ? `https://www.youtube-nocookie.com/embed/${id}?autoplay=1&rel=0&cc_load_policy=1` : `https://player.vimeo.com/video/${id}?dnt=1&autoplay=1`;
+    const fr = document.createElement('iframe'); fr.className = 'p-player'; fr.src = url; fr.title = (btn.getAttribute('aria-label') || '').replace(/^[^:]*: /, '') || 'Video'; fr.loading = 'lazy'; fr.allowFullscreen = true;
+    fr.setAttribute('allow', 'autoplay; encrypted-media; picture-in-picture; fullscreen'); fr.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
+    btn.replaceWith(fr); fr.focus();
+  }
+  // a point: its detail, any guide links, and its photo or video if it has one
+  function pPoint(slug, section, pt) {
+    const guide = pt.g === 'rea_agency' ? 'agency' : pt.g === 'rea_sp' ? 'sale_purchase' : '';
+    const g = guide ? `<div class="p-rea" data-guide="${guide}"><a href="${guide === 'agency' ? REA_AA : REA_SP}" target="_blank" rel="noopener">${esc(PJ().labels.guideEn)}</a></div>` : '';
+    return ptItem(3, esc(pt.t), '', `<p>${pText(pt.d)}</p>${g}${pSlot(slug, section + '.' + pt.k, section)}`, 'pt-point');
+  }
+  const pAllTool = () => `<div class="p-tools no-print"><button type="button" class="btn link" data-ptall aria-live="polite">${esc(PJ().labels.openAll)}</button></div>`;
+
   function pMapHTML(f, choose, rows, st, links) {
     const P = PJ(), L = P.labels, signedIn = !!f;
     const cards = JSTOPS.map((s, i) => {
@@ -3875,42 +3930,43 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       </li>`;
     }).join('');
     const all = {}; for (let k = 1; k <= 9; k++) all[k] = true;
-    return `<div class="pitch pitch-map">${pTop(f)}${pHead()}
+    const pts = [{ k: 'how', t: P.how.t, d: P.how.d }, { k: 'fee', t: P.feeHeading, d: P.fee }];
+    return `<div class="pitch pitch-map">${pTop(f)}${pHead()}${pPreviewNote()}
       <p class="p-kick">${esc(P.eyebrow)}</p>
       <h1 id="pTitle" tabindex="-1">${esc(P.docTitle)}</h1>
       ${f && f.address ? `<p class="jaddr">${nt(f.address)}</p>` : ''}
-      <p class="lede">${esc(P.intro[0])}</p><p class="lede">${esc(P.intro[1])}</p>
+      <p class="lede p-open">${esc(P.lead)}</p>
       ${signedIn && st.cur ? `<p class="small">${esc(P.signedInIntro)}</p>` : ''}
+      ${pSlot('journey', null)}
       ${choose ? `<div class="card tight no-print" id="pChoose"><h3>${esc(L.which)}</h3><p class="small" style="margin:0 0 8px">${esc(L.whichText)}</p><div class="toolbar" style="margin:0">${choose.map(r => `<button class="btn ghost" type="button" data-ppick="${esc(r.id)}">${esc(r.address || 'Address to come')}</button>`).join('')}</div></div>` : ''}
       ${rows && rows.length > 1 && f ? `<div class="toolbar no-print" style="margin:0 0 6px"><button class="btn ghost" type="button" data-ppick="">${esc(L.change)}</button></div>` : ''}
       <div class="jwrap"><div class="jmapcol">${jMapSVG(st, f, { links: all })}</div><div><ol class="jlist" aria-label="The nine stops">${cards}</ol></div></div>
-      <section class="card pitch-fee"><h2>${esc(P.feeHeading)}</h2><p>${esc(P.fee)}</p></section>
+      ${pAllTool()}<div class="p-secs">${pts.map(pt => ptItem(2, esc(pt.t), '', `<p>${pText(pt.d)}</p>${pSlot('journey', pt.k, 'happens')}`, 'pt-sec')).join('')}</div>
       ${pCta()}${pFoot()}</div>`;
   }
+  const pPreviewNote = () => PITCH_PREVIEW ? `<div class="card note tight no-print"><p class="small" style="margin:0">${esc(pMediaHints().labels.preview || '')}</p></div>` : '';
 
   function pStopHTML(i, f, st, links) {
-    const P = PJ(), L = P.labels, S = P.stops[i], k = i + 1, title = JSTOPS[i].t, { c, tag, det } = pStatus(st, f, k);
-    const guideBox = key => `<div class="p-rea" data-guide="${key}"><a href="${key === 'agency' ? REA_AA : REA_SP}" target="_blank" rel="noopener">${esc(L.guideEn)}</a></div>`;
-    const docs = S.docs.map(d => typeof d === 'string' ? `<li>${pText(d)}</li>` : `<li>${pText(d.t)}${d.k === 'rea_agency' ? guideBox('agency') : d.k === 'rea_sp' ? guideBox('sale_purchase') : ''}</li>`).join('');
+    const P = PJ(), L = P.labels, S = P.stops[i], k = i + 1, title = JSTOPS[i].t, { c, tag, det } = pStatus(st, f, k), slug = S.slug;
     const dots = JSTOPS.map((s, j) => `<li><a href="${pHref(j)}" ${j === i ? 'aria-current="page"' : ''} aria-label="${esc(trs('{n} of 9: {stop}.', { n: j + 1, stop: trs(s.t) }))}">${j + 1}</a></li>`).join('');
     const prev = i > 0 ? `<a class="btn ghost" href="${pHref(i - 1)}">${esc(L.prev)}: ${esc(JSTOPS[i - 1].t)}</a>` : '';
     const next = i < 8 ? `<a class="btn primary" href="${pHref(i + 1)}">${esc(L.next)}: ${esc(JSTOPS[i + 1].t)}</a>` : `<a class="btn primary" href="${pHref(0)}">${esc(L.start)}</a>`;
+    const sec = (key, label) => ptItem(2, esc(label), esc(S.sum[key]), S[key].map(pt => pPoint(slug, key, pt)).join(''), 'pt-sec');
+    const faq = ptItem(2, esc(L.faq), esc(S.sum.faq), S.faq.map(([q, a]) => ptItem(3, esc(q), '', `<p>${pText(a)}</p>`, 'pt-point pt-faq')).join(''), 'pt-sec');
     return `<article class="pitch pitch-stop">
-      <nav class="p-crumb no-print" aria-label="Breadcrumb"><a href="#journey">${esc(L.mapLink)}</a></nav>${pHead()}
+      <nav class="p-crumb no-print" aria-label="Breadcrumb"><a href="${'#journey' + (PITCH_PREVIEW ? '?media=preview' : '')}">${esc(L.mapLink)}</a></nav>${pHead()}${pPreviewNote()}
       <p class="p-kick">${esc(L.stopOf.replace('{n}', k))}</p>
       <h1 id="pTitle" tabindex="-1">${esc(title)}</h1>
       ${f && f.address ? `<p class="jaddr">${nt(f.address)}</p>` : ''}
       ${tag ? `<p class="p-state"><span class="jc-st ${c}">${esc(tag)}</span>${det ? ` <span class="jdetail">${esc(det)}</span>` : ''}</p>` : ''}
-      <p class="lede p-open">${pText(S.opening)}</p>
+      ${pSlot(slug, null)}
+      <p class="lede p-open">${pText(S.lead)}</p>
       ${links[k] ? `<div class="toolbar no-print"><button class="btn primary" type="button" data-pgo="${k}">${esc(L.goStep)}</button></div>` : ''}
       <nav class="no-print" aria-label="All stops"><ol class="p-dots">${dots}</ol></nav>
-      <section class="card"><h2>${esc(L.happens)}</h2>${S.happens.map(t => `<p>${pText(t)}</p>`).join('')}</section>
-      <section class="card"><h2>${esc(L.you)}</h2><ul>${S.you.map(t => `<li>${pText(t)}</li>`).join('')}</ul></section>
-      <section class="card"><h2>${esc(L.tim)}</h2><ul>${S.tim.map(t => `<li>${pText(t)}</li>`).join('')}</ul></section>
-      <section class="card"><h2>${esc(L.docs)}</h2><ul>${docs}</ul></section>
-      <section class="card p-faq"><h2>${esc(L.faq)}</h2>${S.faq.map(([q, a]) => `<div class="p-qa"><h3>${esc(q)}</h3><p>${pText(a)}</p></div>`).join('')}</section>
+      ${pAllTool()}
+      <div class="p-secs">${sec('happens', L.happens)}${sec('you', L.you)}${sec('tim', L.tim)}${sec('docs', L.docs)}${faq}</div>
       <section class="card p-next"><h2>${esc(L.nextHeading)}</h2>${i < 8 ? `<p><strong>${esc(JSTOPS[i + 1].t)}.</strong> ${esc(P.stops[i + 1].short)}</p>` : `<p>${esc(L.nextEnd)}</p>`}
-        <div class="toolbar no-print">${next}${prev}<a class="btn ghost" href="#journey">${esc(L.mapLink)}</a></div></section>
+        <div class="toolbar no-print">${next}${prev}<a class="btn ghost" href="${'#journey' + (PITCH_PREVIEW ? '?media=preview' : '')}">${esc(L.mapLink)}</a></div></section>
       ${pCta()}${pFoot()}</article>`;
   }
 
@@ -3937,8 +3993,9 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   }
   async function viewPitch() {
     const seq = ++PITCH_SEQ, keep = PITCH_ON, r = pitchRoute() || { slug: '', i: -1 };
+    PT_SEQ = 0;
     closeJourney(); JVIEW = {};
-    header('', '', 0); actions(false); PITCH_ON = true; setAgentNav();
+    header('', '', 0); actions(false); PITCH_ON = true; PITCH_PREVIEW = !!r.preview; setAgentNav();
     if (!keep) PITCH_CACHE = null;
     if (SESSION && !IS_AGENT && !PITCH_CACHE) {   // a signed-in vendor: only what the journey panel reads
       main().innerHTML = '<div class="loading">Loading...</div>';
@@ -3950,8 +4007,13 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     document.title = r.i >= 0 ? JSTOPS[r.i].t + ' · ' + base : base;
     main().innerHTML = (r.bad ? `<div class="card note tight"><p class="small" style="margin:0">${esc(P.labels.notFound)}</p></div>` : '') + (r.i >= 0 ? pStopHTML(r.i, f, st, links) : pMapHTML(f, c.choose, c.rows, st, links));
     window.scrollTo(0, 0); const h = $('#pTitle'); if (h) h.focus({ preventScroll: true });
-    pFillGuides(); btSync();
+    ptSync(); pFillGuides(); btSync();
   }
+  // open or close one section or point; the "Open all" link follows what is open
+  function ptSync() { const bs = $$('#main .pt-b'), tool = $('#main [data-ptall]'); if (!tool) return; const allOpen = bs.length > 0 && bs.every(b => b.getAttribute('aria-expanded') === 'true'); tool.textContent = allOpen ? PJ().labels.closeAll : PJ().labels.openAll; }
+  function ptSet(b, open) { b.setAttribute('aria-expanded', open ? 'true' : 'false'); const pn = document.getElementById(b.getAttribute('aria-controls')); if (pn) pn.dataset.open = open ? 'true' : 'false'; }
+  function ptToggle(b) { ptSet(b, b.getAttribute('aria-expanded') !== 'true'); ptSync(); }
+  function ptAll() { const bs = $$('#main .pt-b'), open = !bs.every(b => b.getAttribute('aria-expanded') === 'true'); bs.forEach(b => ptSet(b, open)); ptSync(); }
   const pNav = i => { const h = pHref(i); if (location.hash === h) viewPitch(); else location.hash = h; };
   async function pGo(k) {
     const l = PITCH_LINKS[k]; if (!l) return;
@@ -3964,6 +4026,9 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   }
   $('#main').addEventListener('click', async e => {
     if (!PITCH_ON) return;
+    const pb = e.target.closest('.pt-b'); if (pb) return ptToggle(pb);
+    const all = e.target.closest('[data-ptall]'); if (all) return ptAll(all);
+    const vid = e.target.closest('[data-pvid]'); if (vid) return pPlay(vid);
     const st = e.target.closest('.jstop[data-j]'); if (st) return pNav(+st.dataset.j - 1);
     const go = e.target.closest('[data-pgo]'); if (go) return pGo(+go.dataset.pgo);
     const pk = e.target.closest('[data-ppick]'); if (pk) { PITCH_PID = pk.dataset.ppick || null; PITCH_CACHE = null; PITCH_ON = true; return viewPitch(); }

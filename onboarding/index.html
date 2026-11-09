@@ -399,6 +399,44 @@ main:has(> .pitch-map) { max-width: 920px; }
 .pitch .jwrap .jmapcol { top: 100px; }
 .pitch .jcard .jc-st.here { white-space: nowrap; }
 .pitch .jcard .toolbar .btn { flex: 0 1 auto; }
+/* progressive disclosure (Tim, 10 November 2026): sections and points open on a tap */
+.pitch .p-tools { display: flex; justify-content: flex-end; margin: 6px 0 -4px; }
+.pitch .p-tools .btn.link { padding: 8px 0; font-size: 15.5px; }
+.pitch .p-secs { margin: 6px 0 14px; }
+.pitch .pt { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; margin: 10px 0; }
+.pitch .pt .pt { background: transparent; border: 0; border-top: 1px solid var(--line); border-radius: 0; margin: 0; }
+.pitch .pt-h { margin: 0; font: inherit; }
+.pitch .pt-b { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 52px; padding: 12px 16px; text-align: left; font: inherit; color: var(--ink); background: transparent; border: 0; border-radius: 10px; cursor: pointer; }
+.pitch .pt-b:hover { background: var(--accent-soft); }
+.pitch .pt-b:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.pitch .pt-txt { flex: 1 1 auto; min-width: 0; }
+.pitch .pt-t { display: block; font-weight: 600; overflow-wrap: anywhere; }
+.pitch .pt-sec > .pt-h > .pt-b .pt-t { font-family: var(--display); font-weight: 500; font-size: 24px; line-height: 1.15; }
+.pitch .pt-s { display: block; margin-top: 2px; font-size: 15px; font-weight: 400; color: var(--muted); }
+.pitch .pt-ic { flex: none; width: 10px; height: 10px; margin: 0 4px 3px 0; border-right: 2px solid var(--accent); border-bottom: 2px solid var(--accent); transform: rotate(45deg); transition: transform .2s ease; }
+.pitch .pt-b[aria-expanded="true"] > .pt-ic { transform: rotate(-135deg); margin-bottom: -3px; }
+.pitch .pt-panel { display: grid; grid-template-rows: 0fr; visibility: hidden; transition: grid-template-rows .22s ease, visibility 0s linear .22s; }
+.pitch .pt-panel[data-open="true"] { grid-template-rows: 1fr; visibility: inherit; transition: grid-template-rows .22s ease, visibility 0s; }
+.pitch .pt-in { overflow: hidden; min-height: 0; }
+.pitch .pt-body { padding: 0 16px 14px; }
+.pitch .pt-body > p { margin: 0 0 10px; }
+.pitch .pt-body > :last-child { margin-bottom: 0; }
+.pitch .pt-sec > .pt-panel > .pt-in > .pt-body { padding: 0 0 4px; }
+.pitch .pt-sec .pt-point:first-child { border-top: 1px solid var(--line); }
+@media (prefers-reduced-motion: reduce) { .pitch .pt-panel, .pitch .pt-panel[data-open="true"], .pitch .pt-ic { transition: none; } }
+/* photo and video slots */
+.pitch .p-media { margin: 12px 0; }
+.pitch .p-media img { display: block; width: 100%; height: auto; border-radius: 10px; }
+.pitch .p-media figcaption { margin-top: 4px; }
+.pitch .p-slot { display: grid; place-items: center; min-height: 110px; padding: 16px; text-align: center; border: 2px dashed var(--muted); border-radius: 10px; color: var(--muted); font-size: 15px; }
+.pitch .p-slot.bad { border-color: var(--warn); color: var(--warn); }
+.pitch .p-vid { position: relative; display: grid; place-items: center; width: 100%; aspect-ratio: 16 / 9; padding: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: var(--accent-soft); color: var(--ink); font: inherit; cursor: pointer; }
+.pitch .p-vid img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; border-radius: 0; }
+.pitch .p-vid:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.pitch .p-play { position: relative; z-index: 1; width: 64px; height: 64px; border-radius: 50%; background: var(--accent-fill); }
+.pitch .p-play::after { content: ""; position: absolute; left: 25px; top: 19px; border-left: 20px solid var(--on-accent); border-top: 13px solid transparent; border-bottom: 13px solid transparent; }
+.pitch .p-vtitle { position: absolute; left: 10px; right: 10px; bottom: 8px; z-index: 1; padding: 4px 10px; border-radius: 8px; background: var(--surface); color: var(--ink); font-size: 14.5px; font-weight: 600; text-align: left; }
+.pitch .p-player { display: block; width: 100%; aspect-ratio: 16 / 9; border: 0; border-radius: 10px; }
 .print-only { display: none; }
 @page journey { size: A4; margin: 12mm; }
 .sub-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 6px; }
@@ -473,6 +511,15 @@ body.is-agent .tr-help { display: none; }
   .pitch .jcard p { font-size: 9.5pt; }
   .pitch a { color: #000; text-decoration: none; }
   .pitch-map .jc-h h3 { font-size: 11pt; }
+  .pitch .pt-panel { grid-template-rows: 1fr !important; visibility: visible !important; transition: none !important; }
+  .pitch .pt-in { overflow: visible !important; }
+  .pitch .pt-ic, .pitch .p-tools, .pitch .p-vid { display: none !important; }
+  .pitch .pt { break-inside: auto; background: #fff; }
+  .pitch .pt .pt { break-inside: avoid; }
+  .pitch .pt-b { padding: 2mm 3mm; min-height: 0; }
+  .pitch .pt-sec > .pt-h > .pt-b .pt-t { font-size: 15pt; }
+  .pitch .pt-body { padding: 0 3mm 2mm; }
+  .pitch .p-vprint { margin: 0; font-size: 9.5pt; }
 }
 </style>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
@@ -1615,16 +1662,20 @@ window.I18N_STRINGS = {
 // The journey as a pitch page (Tim, 9 November 2026). Public, shareable pages: #journey for the map and #journey/<slug> for each stop.
 // All the wording is here, in Tim's voice ("I"). Nothing on these pages states a fee, a price, a statistic, a result or a timeframe.
 // Fees: Tim talks about his fee only once a seller has decided who the best agent is, and it is then agreed with all owners in writing.
-// Items in "docs" are plain text, or { t: text, k: guide } where k is 'rea_agency' or 'rea_sp' (the Authority's own guide, and its own translations).
+// Every stop page opens as a title, one warm line, and five headings with a one-line summary each. Each heading opens to short points
+// (a few words as the title; two or three sentences when it opens). A point is { k: key, t: title, d: detail, g: guide }, where g is
+// 'rea_agency' or 'rea_sp' (the Authority's own guide, and its own translations). FAQ items are [question, answer].
+// Photos and videos are not here: see JOURNEY_MEDIA below (every slot starts empty) and onboarding/assets/journey/README.md.
 // The wording is also added to the translation catalogue (screens, group "pitch") at the end of this file, so there is one source.
 window.JOURNEY_PITCH = {
  eyebrow: "McGuire Real Estate",
  docTitle: "Your selling journey",
- intro: [
-  "Selling a property is a big decision, and it helps to know the road before you set out. This is how I work with sellers, from the first conversation through to settlement, in nine stops.",
-  "My aim is the best price for you, not just a fast sale. Tap any stop to read what happens there, what I will ask of you, and what I will do for you."
- ],
- signedInIntro: "The marker shows the stop you are at with me right now. Tap any stop to read about it, or to go to its page.",
+ lead: "Selling is a big decision, and it helps to know the road first, so here it is in nine stops: tap any stop to read about it.",
+ how: {
+  t: "How I work with sellers",
+  d: "This is how I work with sellers, from the first conversation through to settlement. My aim is the best price for you, not just a fast sale."
+ },
+ signedInIntro: "The marker shows the stop you are at with me right now.",
  feeHeading: "A word about my fee",
  fee: "I only talk about my fee once you have decided who the best agent is for you. It is then agreed with all of the owners, in writing. Until then, my job is to show you how I would work for you and why it matters.",
  cta: {
@@ -1637,6 +1688,9 @@ window.JOURNEY_PITCH = {
  footer: "Tim McGuire, McGuire Real Estate Ltd, Licensed REAA 2008. This page is a general guide to how I work. Your agency agreement is what sets out the terms between us.",
  labels: {
   readMore: "Read more",
+  openAll: "Open all",
+  closeAll: "Close all",
+  play: "Play video",
   goStep: "Go to this step",
   mapLink: "Back to the map",
   prev: "Previous stop",
@@ -1663,325 +1717,1386 @@ window.JOURNEY_PITCH = {
  },
  stops: [
   {
-   slug: "thinking-of-selling",
-   short: "I visit, see your property in person, and give you my opinion of value. We talk honestly about price, your reasons and your timing.",
-   opening: "This is where it starts, often with a question rather than a decision. You do not need to have the answers yet. I come and see your property in person, give you my opinion of what it is worth and the reasoning behind it, and we have an honest conversation about price, your reasons for moving and your timing. What I want is the best price for you, not just a fast sale.",
-   happens: [
-    "I visit and look at the property in person, then give you my opinion of value and explain my reasoning. Being realistic about what a property is worth is the first step to getting the best price for it. When you have read my appraisal, you can go ahead to a short questionnaire, which is the next stop.",
-    "Before I take on any listing I like to talk honestly with sellers about three things: price, which means being realistic about what the property is worth; your reasons for moving; and your timing. Being honest about these early saves you time and money, because the plan we make is built on what is real for you.",
-    "I also want to know about the property itself, including every issue. I would much rather raise those with you in person than have you work through forms on your own. Sellers often tell me they are amazed how far I go to point out defects, and I do it because it protects you later in the sale.",
-    "Nothing is signed at this stage."
+   "slug": "thinking-of-selling",
+   "short": "I visit, see your property in person, and give you my opinion of value. We talk honestly about price, your reasons and your timing.",
+   "lead": "This is where it starts, often with a question rather than a decision, and you do not need to have the answers yet.",
+   "sum": {
+    "happens": "The visit, my opinion of value, and an honest talk.",
+    "you": "Show me around, and tell me what matters to you.",
+    "tim": "I see it in person and tell you the truth.",
+    "docs": "My written appraisal. Nothing to sign.",
+    "faq": "Signing, guarantees, price and timing."
+   },
+   "happens": [
+    {
+     "k": "big-picture",
+     "t": "The big picture",
+     "d": "I come and see your property in person, give you my opinion of what it is worth and the reasoning behind it, and we have an honest conversation about price, your reasons for moving and your timing. What I want is the best price for you, not just a fast sale."
+    },
+    {
+     "k": "visit-and-opinion-of-value",
+     "t": "Visit and opinion of value",
+     "d": "I visit and look at the property in person, then give you my opinion of value and explain my reasoning. Being realistic about what a property is worth is the first step to getting the best price for it. When you have read my appraisal, you can go ahead to a short questionnaire, which is the next stop."
+    },
+    {
+     "k": "three-honest-conversations",
+     "t": "Three honest conversations",
+     "d": "Before I take on any listing I like to talk honestly with sellers about three things: price, which means being realistic about what the property is worth; your reasons for moving; and your timing. Being honest about these early saves you time and money, because the plan we make is built on what is real for you."
+    },
+    {
+     "k": "every-issue-early",
+     "t": "Every issue, early",
+     "d": "I also want to know about the property itself, including every issue. I would much rather raise those with you in person than have you work through forms on your own. Sellers often tell me they are amazed how far I go to point out defects, and I do it because it protects you later in the sale."
+    },
+    {
+     "k": "nothing-signed-yet",
+     "t": "Nothing signed yet",
+     "d": "Nothing is signed at this stage."
+    }
    ],
-   you: [
-    "Show me around, and tell me what you have done to the property and what you love about it.",
-    "Tell me what you would like to achieve, the price you have in mind, your reasons for moving, and any dates that matter to you.",
-    "Tell me about anything you know of that is wrong or worrying with the property, big or small.",
-    "Ask me about my reasoning as many times as you like, and go ahead to the questionnaire when you are ready."
+   "you": [
+    {
+     "k": "show-me-around",
+     "t": "Show me around",
+     "d": "Show me around, and tell me what you have done to the property and what you love about it."
+    },
+    {
+     "k": "price-reasons-and-timing",
+     "t": "Price, reasons and timing",
+     "d": "Tell me what you would like to achieve, the price you have in mind, your reasons for moving, and any dates that matter to you."
+    },
+    {
+     "k": "tell-me-about-any-issues",
+     "t": "Tell me about any issues",
+     "d": "Tell me about anything you know of that is wrong or worrying with the property, big or small."
+    },
+    {
+     "k": "ask-then-go-ahead",
+     "t": "Ask, then go ahead",
+     "d": "Ask me about my reasoning as many times as you like, and go ahead to the questionnaire when you are ready."
+    }
    ],
-   tim: [
-    "I look at your property in person, and I give you my honest opinion of its value with the reasons behind it.",
-    "I am working for the best price, not just a quick sale. A fast result is not always the best one for you.",
-    "I will be realistic about what your property is worth, and explain why, so there are fewer surprises later.",
-    "I will point out defects and issues early, in person. Knowing about them now protects you later in the sale, when it matters most.",
-    "I give you the appraisal in writing, so you can read it again, share it with your lawyer or family, and decide in your own time."
+   "tim": [
+    {
+     "k": "i-see-it-in-person",
+     "t": "I see it in person",
+     "d": "I look at your property in person, and I give you my honest opinion of its value with the reasons behind it."
+    },
+    {
+     "k": "best-price-not-just-fast",
+     "t": "Best price, not just fast",
+     "d": "I am working for the best price, not just a quick sale. A fast result is not always the best one for you."
+    },
+    {
+     "k": "realistic-about-worth",
+     "t": "Realistic about worth",
+     "d": "I will be realistic about what your property is worth, and explain why, so there are fewer surprises later."
+    },
+    {
+     "k": "defects-raised-early",
+     "t": "Defects raised early",
+     "d": "I will point out defects and issues early, in person. Knowing about them now protects you later in the sale, when it matters most."
+    },
+    {
+     "k": "appraisal-in-writing",
+     "t": "Appraisal in writing",
+     "d": "I give you the appraisal in writing, so you can read it again, share it with your lawyer or family, and decide in your own time."
+    }
    ],
-   docs: [
-    "My written appraisal: my opinion of value, with the reasoning behind it.",
-    "Nothing to sign at this stop.",
-    "If you have the title, reports or council paperwork for the property, they are useful to look at together. You do not need to gather anything first."
+   "docs": [
+    {
+     "k": "my-written-appraisal",
+     "t": "My written appraisal",
+     "d": "My written appraisal: my opinion of value, with the reasoning behind it."
+    },
+    {
+     "k": "nothing-to-sign",
+     "t": "Nothing to sign",
+     "d": "Nothing to sign at this stop."
+    },
+    {
+     "k": "paperwork-that-helps",
+     "t": "Paperwork that helps",
+     "d": "If you have the title, reports or council paperwork for the property, they are useful to look at together. You do not need to gather anything first."
+    }
    ],
-   faq: [
-    ["Do I have to sign anything to get started?", "No. Nothing is signed at this stage. It is a visit and a conversation."],
-    ["Is the appraisal a guarantee of what a buyer will pay?", "No. It is my opinion of value, with my reasoning. It helps us set a realistic starting point, but it is not a promise about what a buyer will pay."],
-    ["What if I think my property is worth more than you do?", "I will tell you honestly what I think and why, and I will listen to your view. It is far better to talk about it at the start than to find the gap later."],
-    ["Why do you ask about my reasons for moving and my timing?", "Together with price, they shape the whole plan. Being honest about all three early saves you time and money, because we avoid building a plan on something that does not fit."],
-    ["Why do you want to hear about every defect?", "Because it protects you. If I know about an issue early, we can deal with it properly, and it does not come as a surprise to you or to a buyer later in the sale. I prefer to raise these in person rather than on forms."],
-    ["Is this only about selling quickly?", "No. I want the best price for you. For some sellers that means moving quickly and for others it means taking the time to get it right, which is why I ask about your timing."]
+   "faq": [
+    [
+     "Do I have to sign anything to get started?",
+     "No. Nothing is signed at this stage. It is a visit and a conversation."
+    ],
+    [
+     "Is the appraisal a guarantee of what a buyer will pay?",
+     "No. It is my opinion of value, with my reasoning. It helps us set a realistic starting point, but it is not a promise about what a buyer will pay."
+    ],
+    [
+     "What if I think my property is worth more than you do?",
+     "I will tell you honestly what I think and why, and I will listen to your view. It is far better to talk about it at the start than to find the gap later."
+    ],
+    [
+     "Why do you ask about my reasons for moving and my timing?",
+     "Together with price, they shape the whole plan. Being honest about all three early saves you time and money, because we avoid building a plan on something that does not fit."
+    ],
+    [
+     "Why do you want to hear about every defect?",
+     "Because it protects you. If I know about an issue early, we can deal with it properly, and it does not come as a surprise to you or to a buyer later in the sale. I prefer to raise these in person rather than on forms."
+    ],
+    [
+     "Is this only about selling quickly?",
+     "No. I want the best price for you. For some sellers that means moving quickly and for others it means taking the time to get it right, which is why I ask about your timing."
+    ]
    ]
   },
   {
-   slug: "your-updated-plan",
-   short: "You answer a short questionnaire, and I send you an updated plan that addresses your concerns.",
-   opening: "After I have given you my appraisal, I do not want to hand you a plan that could be for anyone. I would like to hear what matters to you first. So I ask you a few short, open questions, and then I send you an updated plan that speaks to your concerns, before you are asked to agree to anything.",
-   happens: [
-    "After your appraisal, you answer a short questionnaire about what matters to you, any concerns you have, and anything else you have been offered. The questions are open, so you can answer in your own words, and there is no pressure.",
-    "I read your answers and send you an updated plan. It shows what you told me and what I have changed in response. You can tick that it works for you, or ask me a question. This all happens before any agreement."
+   "slug": "your-updated-plan",
+   "short": "You answer a short questionnaire, and I send you an updated plan that addresses your concerns.",
+   "lead": "I do not want to hand you a plan that could be for anyone, so I would like to hear what matters to you first.",
+   "sum": {
+    "happens": "A short questionnaire, then your updated plan.",
+    "you": "Answer in your own words, then read the plan.",
+    "tim": "A plan shaped around what you tell me.",
+    "docs": "The questionnaire and your plan. Not an agreement.",
+    "faq": "Length, other offers and commitment."
+   },
+   "happens": [
+    {
+     "k": "big-picture",
+     "t": "The big picture",
+     "d": "After I have given you my appraisal, I ask you a few short, open questions. Then I send you an updated plan that speaks to your concerns, before you are asked to agree to anything."
+    },
+    {
+     "k": "the-short-questionnaire",
+     "t": "The short questionnaire",
+     "d": "After your appraisal, you answer a short questionnaire about what matters to you, any concerns you have, and anything else you have been offered. The questions are open, so you can answer in your own words, and there is no pressure."
+    },
+    {
+     "k": "your-updated-plan",
+     "t": "Your updated plan",
+     "d": "I read your answers and send you an updated plan. It shows what you told me and what I have changed in response."
+    },
+    {
+     "k": "ticking-it-off",
+     "t": "Ticking it off",
+     "d": "You can tick that it works for you, or ask me a question. This all happens before any agreement."
+    }
    ],
-   you: [
-    "Answer the short questionnaire in your own words. You can do it on your phone.",
-    "Tell me what matters most to you about selling, and what worries you.",
-    "Tell me about anything else you have been offered, so the plan answers your real questions.",
-    "Read the updated plan, then tick that it works for you or ask me a question."
+   "you": [
+    {
+     "k": "answer-in-your-own-words",
+     "t": "Answer in your own words",
+     "d": "Answer the short questionnaire in your own words. You can do it on your phone."
+    },
+    {
+     "k": "what-matters-and-what-worries-you",
+     "t": "What matters and what worries you",
+     "d": "Tell me what matters most to you about selling, and what worries you."
+    },
+    {
+     "k": "anything-else-you-have-been-offered",
+     "t": "Anything else you have been offered",
+     "d": "Tell me about anything else you have been offered, so the plan answers your real questions."
+    },
+    {
+     "k": "read-the-plan",
+     "t": "Read the plan",
+     "d": "Read the updated plan, then tick that it works for you or ask me a question."
+    }
    ],
-   tim: [
-    "I read every answer myself, and I shape the plan around what you have said, not around a template.",
-    "I address your concerns directly in the updated plan, so you can see what I have done about each of them.",
-    "I keep it low pressure. The questions are open and the plan comes before any agreement, so you have room to think."
+   "tim": [
+    {
+     "k": "i-read-every-answer",
+     "t": "I read every answer",
+     "d": "I read every answer myself, and I shape the plan around what you have said, not around a template."
+    },
+    {
+     "k": "your-concerns-answered",
+     "t": "Your concerns, answered",
+     "d": "I address your concerns directly in the updated plan, so you can see what I have done about each of them."
+    },
+    {
+     "k": "low-pressure",
+     "t": "Low pressure",
+     "d": "I keep it low pressure. The questions are open and the plan comes before any agreement, so you have room to think."
+    }
    ],
-   docs: [
-    "The short questionnaire about what matters to you.",
-    "Your updated plan, showing what you said and what I have changed.",
-    "Nothing here is an agreement. The plan comes before any agreement."
+   "docs": [
+    {
+     "k": "the-questionnaire",
+     "t": "The questionnaire",
+     "d": "The short questionnaire about what matters to you."
+    },
+    {
+     "k": "your-updated-plan",
+     "t": "Your updated plan",
+     "d": "Your updated plan, showing what you said and what I have changed."
+    },
+    {
+     "k": "not-an-agreement",
+     "t": "Not an agreement",
+     "d": "Nothing here is an agreement. The plan comes before any agreement."
+    }
    ],
-   faq: [
-    ["Is the questionnaire long?", "It is short, and the questions are open, so you answer in your own words."],
-    ["What if I have been offered something by someone else?", "Tell me about it. I would rather know what you have been offered, so the plan answers your real questions."],
-    ["Does answering the questionnaire commit me to anything?", "No. The plan comes before any agreement, and nothing is signed at this stage."],
-    ["Do I have to accept the plan?", "No. You can tick that it works for you, or ask me a question. It is your decision."],
-    ["What if I am not sure how to put a concern into words?", "Say it however it comes. The questions are open, and if something is unclear I will follow it up with you."]
+   "faq": [
+    [
+     "Is the questionnaire long?",
+     "It is short, and the questions are open, so you answer in your own words."
+    ],
+    [
+     "What if I have been offered something by someone else?",
+     "Tell me about it. I would rather know what you have been offered, so the plan answers your real questions."
+    ],
+    [
+     "Does answering the questionnaire commit me to anything?",
+     "No. The plan comes before any agreement, and nothing is signed at this stage."
+    ],
+    [
+     "Do I have to accept the plan?",
+     "No. You can tick that it works for you, or ask me a question. It is your decision."
+    ],
+    [
+     "What if I am not sure how to put a concern into words?",
+     "Say it however it comes. The questions are open, and if something is unclear I will follow it up with you."
+    ]
    ]
   },
   {
-   slug: "meeting-tim",
-   short: "We sit down, in person or by video, to talk the plan through and agree the details.",
-   opening: "This is where we sit down together, in person or by video, to talk your updated plan through. It is your chance to ask me anything, and to decide who the best agent is for you. If you decide it is me, we agree the details together and put everything in writing.",
-   happens: [
-    "We talk the plan through and agree the details. You can ask me anything, and I will explain my thinking on each part.",
-    "I only talk about my fee once you have decided who the best agent is for you. It is then agreed with all of the owners and confirmed in writing.",
-    "Sometimes people want to get started before my written appraisal arrives. If that is you, the agreement only takes effect once you receive it, and you can cancel within 2 working days of receiving it, at no cost."
+   "slug": "meeting-tim",
+   "short": "We sit down, in person or by video, to talk the plan through and agree the details.",
+   "lead": "This is where we sit down together, in person or by video, to talk your updated plan through.",
+   "sum": {
+    "happens": "We talk it through, and the fee comes last.",
+    "you": "Bring questions, everyone who owns it, and time.",
+    "tim": "Value before cost, agreed in writing.",
+    "docs": "Your plan, and what we agree in writing.",
+    "faq": "Fees, video meetings and getting started early."
+   },
+   "happens": [
+    {
+     "k": "big-picture",
+     "t": "The big picture",
+     "d": "It is your chance to ask me anything, and to decide who the best agent is for you. If you decide it is me, we agree the details together and put everything in writing."
+    },
+    {
+     "k": "talking-the-plan-through",
+     "t": "Talking the plan through",
+     "d": "We talk the plan through and agree the details. You can ask me anything, and I will explain my thinking on each part."
+    },
+    {
+     "k": "my-fee",
+     "t": "My fee",
+     "d": "I only talk about my fee once you have decided who the best agent is for you. It is then agreed with all of the owners and confirmed in writing."
+    },
+    {
+     "k": "starting-before-the-written-appraisal",
+     "t": "Starting before the written appraisal",
+     "d": "Sometimes people want to get started before my written appraisal arrives. If that is you, the agreement only takes effect once you receive it, and you can cancel within 2 working days of receiving it, at no cost."
+    }
    ],
-   you: [
-    "Bring your questions, and tell me anything the plan has not covered.",
-    "Have everyone who owns the property part of the conversation, in person or by video.",
-    "Take the time you need to decide who the best agent is for you.",
-    "If you would like to get started before the written appraisal arrives, tell me, and I will explain how that works."
+   "you": [
+    {
+     "k": "bring-your-questions",
+     "t": "Bring your questions",
+     "d": "Bring your questions, and tell me anything the plan has not covered."
+    },
+    {
+     "k": "everyone-who-owns-it",
+     "t": "Everyone who owns it",
+     "d": "Have everyone who owns the property part of the conversation, in person or by video."
+    },
+    {
+     "k": "take-your-time",
+     "t": "Take your time",
+     "d": "Take the time you need to decide who the best agent is for you."
+    },
+    {
+     "k": "starting-early",
+     "t": "Starting early",
+     "d": "If you would like to get started before the written appraisal arrives, tell me, and I will explain how that works."
+    }
    ],
-   tim: [
-    "I talk your updated plan through with you, and I agree the details around what matters to you.",
-    "I keep the conversation about my fee until you have decided who the best agent is for you, so you are choosing on value, not on cost.",
-    "I agree everything with all of the owners and confirm it in writing, so there is no doubt about what has been agreed.",
-    "I make sure you understand what happens if you get started before the written appraisal arrives, so you know exactly where you stand."
+   "tim": [
+    {
+     "k": "talking-it-through",
+     "t": "Talking it through",
+     "d": "I talk your updated plan through with you, and I agree the details around what matters to you."
+    },
+    {
+     "k": "value-before-cost",
+     "t": "Value before cost",
+     "d": "I keep the conversation about my fee until you have decided who the best agent is for you, so you are choosing on value, not on cost."
+    },
+    {
+     "k": "agreed-in-writing",
+     "t": "Agreed in writing",
+     "d": "I agree everything with all of the owners and confirm it in writing, so there is no doubt about what has been agreed."
+    },
+    {
+     "k": "starting-before-the-appraisal",
+     "t": "Starting before the appraisal",
+     "d": "I make sure you understand what happens if you get started before the written appraisal arrives, so you know exactly where you stand."
+    }
    ],
-   docs: [
-    "Your updated plan, which we talk through together.",
-    "The details we agree, confirmed in writing with all of the owners.",
-    "If you get started before the written appraisal arrives: the agreement takes effect only once you receive it, and you can cancel within 2 working days of receiving it, at no cost."
+   "docs": [
+    {
+     "k": "your-updated-plan",
+     "t": "Your updated plan",
+     "d": "Your updated plan, which we talk through together."
+    },
+    {
+     "k": "details-agreed-in-writing",
+     "t": "Details agreed in writing",
+     "d": "The details we agree, confirmed in writing with all of the owners."
+    },
+    {
+     "k": "starting-before-the-appraisal",
+     "t": "Starting before the appraisal",
+     "d": "If you get started before the written appraisal arrives: the agreement takes effect only once you receive it, and you can cancel within 2 working days of receiving it, at no cost."
+    }
    ],
-   faq: [
-    ["When do we talk about your fee?", "Only once you have decided who the best agent is for you. It is then agreed with all of the owners, and confirmed in writing."],
-    ["Should everyone who owns the property be at the meeting?", "It helps, because everyone on the title will need to agree on the way forward. If someone cannot be there, tell me and we will work out how to include them, including by video."],
-    ["Can we meet by video instead of in person?", "Yes. We can sit down in person or by video, whichever suits you."],
-    ["Can I get started before I receive the written appraisal?", "Yes. In that case the agreement only takes effect once you receive the appraisal."],
-    ["What if I change my mind after I read the appraisal?", "If you got started before receiving it, you can cancel within 2 working days of receiving it, at no cost."],
-    ["Do I have to decide at the meeting?", "No. It is your decision, and there is no pressure. Take the time you need."]
+   "faq": [
+    [
+     "When do we talk about your fee?",
+     "Only once you have decided who the best agent is for you. It is then agreed with all of the owners, and confirmed in writing."
+    ],
+    [
+     "Should everyone who owns the property be at the meeting?",
+     "It helps, because everyone on the title will need to agree on the way forward. If someone cannot be there, tell me and we will work out how to include them, including by video."
+    ],
+    [
+     "Can we meet by video instead of in person?",
+     "Yes. We can sit down in person or by video, whichever suits you."
+    ],
+    [
+     "Can I get started before I receive the written appraisal?",
+     "Yes. In that case the agreement only takes effect once you receive the appraisal."
+    ],
+    [
+     "What if I change my mind after I read the appraisal?",
+     "If you got started before receiving it, you can cancel within 2 working days of receiving it, at no cost."
+    ],
+    [
+     "Do I have to decide at the meeting?",
+     "No. It is your decision, and there is no pressure. Take the time you need."
+    ]
    ]
   },
   {
-   slug: "your-agreement",
-   short: "A sole agency agreement, signed on screen, with a plain-English guide to every section.",
-   opening: "When you have decided I am the right agent for you, the agreement is how we make it official. It is a sole agency agreement, and I have set it up so you can read it, understand it and sign it on screen, in your own time, with a plain-English guide to every section.",
-   happens: [
-    "You read your agency agreement in plain English and tick through the guide to each section. Everyone on the title signs, each from their own phone, or in person with me.",
-    "With the agreement come the Real Estate Authority's approved guides: their guide to agency agreements, and their guide to sale and purchase agreements. They are written by the Authority, not by me.",
-    "I encourage you to get legal advice before you sign. You can send a review link to your lawyer so they can read exactly what you will be signing. A cooling-off period applies to residential agency agreements, and your agreement tells you how it works.",
-    "If you had an agency before, you sign a cancellation notice for it, and I send it once I have reviewed it. Complaints and dispute resolution procedures are included with the agreement. If your plans change later, variations and extensions can be done on screen too."
+   "slug": "your-agreement",
+   "short": "A sole agency agreement, signed on screen, with a plain-English guide to every section.",
+   "lead": "When you have decided I am the right agent for you, the agreement is how we make it official.",
+   "sum": {
+    "happens": "Reading, signing, and the guides that come with it.",
+    "you": "Read, tick, choose how to pay, and sign.",
+    "tim": "Plain English, agreed in writing, easy to change.",
+    "docs": "The agreement, the guides and the notices.",
+    "faq": "Legal advice, cooling-off, costs and complaints."
+   },
+   "happens": [
+    {
+     "k": "big-picture",
+     "t": "The big picture",
+     "d": "It is a sole agency agreement, and I have set it up so you can read it, understand it and sign it on screen, in your own time, with a plain-English guide to every section."
+    },
+    {
+     "k": "reading-and-signing",
+     "t": "Reading and signing",
+     "d": "You read your agency agreement in plain English and tick through the guide to each section. Everyone on the title signs, each from their own phone, or in person with me."
+    },
+    {
+     "k": "the-rea-guides",
+     "t": "The REA guides",
+     "d": "With the agreement come the Real Estate Authority's approved guides: their guide to agency agreements, and their guide to sale and purchase agreements. They are written by the Authority, not by me."
+    },
+    {
+     "k": "legal-advice-and-cooling-off",
+     "t": "Legal advice and cooling-off",
+     "d": "I encourage you to get legal advice before you sign. You can send a review link to your lawyer so they can read exactly what you will be signing. A cooling-off period applies to residential agency agreements, and your agreement tells you how it works."
+    },
+    {
+     "k": "previous-agency-and-later-changes",
+     "t": "Previous agency and later changes",
+     "d": "If you had an agency before, you sign a cancellation notice for it, and I send it once I have reviewed it. Complaints and dispute resolution procedures are included with the agreement. If your plans change later, variations and extensions can be done on screen too."
+    }
    ],
-   you: [
-    "Read the plain-English guide to each section, and tick each one when you are happy with it.",
-    "Read the Real Estate Authority's guides, and ask your lawyer first if you would like to.",
-    "Tell me if you had an agency before, and sign the cancellation notice for it.",
-    "Choose how you would like to pay for your marketing.",
-    "Sign on screen. Every owner signs, each from their own phone, or in person with me."
+   "you": [
+    {
+     "k": "read-and-tick-each-section",
+     "t": "Read and tick each section",
+     "d": "Read the plain-English guide to each section, and tick each one when you are happy with it."
+    },
+    {
+     "k": "read-the-rea-guides",
+     "t": "Read the REA guides",
+     "d": "Read the Real Estate Authority's guides, and ask your lawyer first if you would like to."
+    },
+    {
+     "k": "previous-agency",
+     "t": "Previous agency",
+     "d": "Tell me if you had an agency before, and sign the cancellation notice for it."
+    },
+    {
+     "k": "choose-how-to-pay-for-marketing",
+     "t": "Choose how to pay for marketing",
+     "d": "Choose how you would like to pay for your marketing."
+    },
+    {
+     "k": "sign-on-screen",
+     "t": "Sign on screen",
+     "d": "Sign on screen. Every owner signs, each from their own phone, or in person with me."
+    }
    ],
-   tim: [
-    "I explain every section in plain English, so you know what you are agreeing to before you sign.",
-    "I only talk about my fee once you have decided who the best agent is for you, and it is agreed with all of the owners in writing.",
-    "I review any cancellation notice for a previous agency, and then send it.",
-    "I keep your agreement clear and simple to change. Variations and extensions are done on screen, so nothing is lost in a pile of emailed paper.",
-    "Once everyone has signed, I countersign it."
+   "tim": [
+    {
+     "k": "plain-english-explanations",
+     "t": "Plain-English explanations",
+     "d": "I explain every section in plain English, so you know what you are agreeing to before you sign."
+    },
+    {
+     "k": "fee-agreed-in-writing",
+     "t": "Fee agreed in writing",
+     "d": "I only talk about my fee once you have decided who the best agent is for you, and it is agreed with all of the owners in writing."
+    },
+    {
+     "k": "previous-agency-notice",
+     "t": "Previous agency notice",
+     "d": "I review any cancellation notice for a previous agency, and then send it."
+    },
+    {
+     "k": "easy-changes-later",
+     "t": "Easy changes later",
+     "d": "I keep your agreement clear and simple to change. Variations and extensions are done on screen, so nothing is lost in a pile of emailed paper."
+    },
+    {
+     "k": "i-countersign",
+     "t": "I countersign",
+     "d": "Once everyone has signed, I countersign it."
+    }
    ],
-   docs: [
-    "Your sole agency agreement, signed on screen.",
-    "The plain-English guide to every section, which you tick through.",
-    { t: "The Real Estate Authority's guide to agency agreements.", k: "rea_agency" },
-    { t: "The Real Estate Authority's guide to sale and purchase agreements.", k: "rea_sp" },
-    "A cancellation notice for any previous agency, which I send after I have reviewed it.",
-    "Complaints and dispute resolution procedures. You can also go straight to the Real Estate Authority at any time.",
-    "Variations and extensions, if you need them later, done on screen."
+   "docs": [
+    {
+     "k": "your-sole-agency-agreement",
+     "t": "Your sole agency agreement",
+     "d": "Your sole agency agreement, signed on screen."
+    },
+    {
+     "k": "plain-english-guide",
+     "t": "Plain-English guide",
+     "d": "The plain-English guide to every section, which you tick through."
+    },
+    {
+     "k": "rea-guide-agency-agreements",
+     "t": "REA guide: agency agreements",
+     "d": "The Real Estate Authority's guide to agency agreements.",
+     "g": "rea_agency"
+    },
+    {
+     "k": "rea-guide-sale-and-purchase",
+     "t": "REA guide: sale and purchase",
+     "d": "The Real Estate Authority's guide to sale and purchase agreements.",
+     "g": "rea_sp"
+    },
+    {
+     "k": "previous-agency-notice",
+     "t": "Previous agency notice",
+     "d": "A cancellation notice for any previous agency, which I send after I have reviewed it."
+    },
+    {
+     "k": "complaints-and-disputes",
+     "t": "Complaints and disputes",
+     "d": "Complaints and dispute resolution procedures. You can also go straight to the Real Estate Authority at any time."
+    },
+    {
+     "k": "variations-and-extensions",
+     "t": "Variations and extensions",
+     "d": "Variations and extensions, if you need them later, done on screen."
+    }
    ],
-   faq: [
-    ["Should I get legal advice before I sign?", "I encourage it. You do not have to, but it is a good idea, and you can send your lawyer a review link so they can read the agreement before you sign."],
-    ["Can I change my mind after I sign?", "A cooling-off period applies to residential agency agreements. Your agreement sets out how it works for you, so please read that section, and ask me or your lawyer if anything is unclear."],
-    ["What if I already had an agency?", "You sign a cancellation notice for it. I review it, and then I send it."],
-    ["What if things change after we start?", "Variations and extensions can be done on screen, so you do not have to print or post anything."],
-    ["What will I pay, and how?", "I only talk about my fee once you have decided who the best agent is for you, and it is then agreed with all of the owners in writing. Marketing is paid through List Now: you can pay up front, in instalments, or have it taken at settlement. Any administration fee is set out in your agreement and covers identity checks and onboarding."],
-    ["What if I am unhappy with something?", "Please talk to me first. The agreement includes our complaints and dispute resolution procedures, and you can go straight to the Real Estate Authority at any time."]
+   "faq": [
+    [
+     "Should I get legal advice before I sign?",
+     "I encourage it. You do not have to, but it is a good idea, and you can send your lawyer a review link so they can read the agreement before you sign."
+    ],
+    [
+     "Can I change my mind after I sign?",
+     "A cooling-off period applies to residential agency agreements. Your agreement sets out how it works for you, so please read that section, and ask me or your lawyer if anything is unclear."
+    ],
+    [
+     "What if I already had an agency?",
+     "You sign a cancellation notice for it. I review it, and then I send it."
+    ],
+    [
+     "What if things change after we start?",
+     "Variations and extensions can be done on screen, so you do not have to print or post anything."
+    ],
+    [
+     "What will I pay, and how?",
+     "I only talk about my fee once you have decided who the best agent is for you, and it is then agreed with all of the owners in writing. Marketing is paid through List Now: you can pay up front, in instalments, or have it taken at settlement. Any administration fee is set out in your agreement and covers identity checks and onboarding."
+    ],
+    [
+     "What if I am unhappy with something?",
+     "Please talk to me first. The agreement includes our complaints and dispute resolution procedures, and you can go straight to the Real Estate Authority at any time."
+    ]
    ]
   },
   {
-   slug: "identity-check",
-   short: "The law asks me to confirm who each seller is. I do it in person, or with a verification provider.",
-   opening: "New Zealand law requires real estate agents to confirm who their sellers are before they act for them. It is part of doing the job properly, and I know it can feel like a formality. I do it myself, in person, wherever I can.",
-   happens: [
-    "The law behind this is the anti-money laundering and countering financing of terrorism law, known as AML/CFT. It asks me to verify the identity of every seller.",
-    "I do this myself, in person. For sellers who are not local, I use a verification provider so you can do it from wherever you are. If you are selling through a trust or a company, I need a bit more detail about it, and about who owns or controls it.",
-    "Your records are kept securely, as the law requires."
+   "slug": "identity-check",
+   "short": "The law asks me to confirm who each seller is. I do it in person, or with a verification provider.",
+   "lead": "New Zealand law requires real estate agents to confirm who their sellers are before they act for them.",
+   "sum": {
+    "happens": "The law, how I check, and how records are kept.",
+    "you": "Photo ID, proof of address and any trust details.",
+    "tim": "In person, secure and thorough.",
+    "docs": "ID, address and a secure record.",
+    "faq": "Why, what to show, and what it costs."
+   },
+   "happens": [
+    {
+     "k": "big-picture",
+     "t": "The big picture",
+     "d": "It is part of doing the job properly, and I know it can feel like a formality. I do it myself, in person, wherever I can."
+    },
+    {
+     "k": "the-law-behind-it",
+     "t": "The law behind it",
+     "d": "The law behind this is the anti-money laundering and countering financing of terrorism law, known as AML/CFT. It asks me to verify the identity of every seller."
+    },
+    {
+     "k": "doing-it-in-person",
+     "t": "Doing it in person",
+     "d": "I do this myself, in person. For sellers who are not local, I use a verification provider so you can do it from wherever you are. If you are selling through a trust or a company, I need a bit more detail about it, and about who owns or controls it."
+    },
+    {
+     "k": "records-kept-securely",
+     "t": "Records kept securely",
+     "d": "Your records are kept securely, as the law requires."
+    }
    ],
-   you: [
-    "Each person selling shows me a driver's licence or passport, and something with their address.",
-    "If you are not local, complete the check with the verification provider.",
-    "If you are selling through a trust or a company, have its details ready, such as the trust deed or company information, and who owns or controls it."
+   "you": [
+    {
+     "k": "photo-id-and-proof-of-address",
+     "t": "Photo ID and proof of address",
+     "d": "Each person selling shows me a driver's licence or passport, and something with their address."
+    },
+    {
+     "k": "if-you-are-not-local",
+     "t": "If you are not local",
+     "d": "If you are not local, complete the check with the verification provider."
+    },
+    {
+     "k": "trusts-and-companies",
+     "t": "Trusts and companies",
+     "d": "If you are selling through a trust or a company, have its details ready, such as the trust deed or company information, and who owns or controls it."
+    }
    ],
-   tim: [
-    "I do the check myself and in person, so it is handled by the person you are dealing with, not a stranger.",
-    "I explain what I need and why, and I look after your records securely, as the law requires.",
-    "I make sure trusts and companies are covered properly, so there is nothing to unpick later."
+   "tim": [
+    {
+     "k": "in-person-by-me",
+     "t": "In person, by me",
+     "d": "I do the check myself and in person, so it is handled by the person you are dealing with, not a stranger."
+    },
+    {
+     "k": "clear-and-secure",
+     "t": "Clear and secure",
+     "d": "I explain what I need and why, and I look after your records securely, as the law requires."
+    },
+    {
+     "k": "trusts-and-companies-covered",
+     "t": "Trusts and companies covered",
+     "d": "I make sure trusts and companies are covered properly, so there is nothing to unpick later."
+    }
    ],
-   docs: [
-    "Photo ID for each seller: a driver's licence or passport.",
-    "Something that shows each seller's address.",
-    "For a trust or a company: more detail, such as the trust deed or company information, and who owns or controls it.",
-    "A secure record of the check, kept as the law requires."
+   "docs": [
+    {
+     "k": "photo-id",
+     "t": "Photo ID",
+     "d": "Photo ID for each seller: a driver's licence or passport."
+    },
+    {
+     "k": "proof-of-address",
+     "t": "Proof of address",
+     "d": "Something that shows each seller's address."
+    },
+    {
+     "k": "trusts-and-companies",
+     "t": "Trusts and companies",
+     "d": "For a trust or a company: more detail, such as the trust deed or company information, and who owns or controls it."
+    },
+    {
+     "k": "a-secure-record",
+     "t": "A secure record",
+     "d": "A secure record of the check, kept as the law requires."
+    }
    ],
-   faq: [
-    ["Why do you need to check my identity?", "New Zealand law (AML/CFT) requires real estate agents to verify the identity of their sellers. I have no choice about it, and it applies to every seller."],
-    ["What do I need to show?", "A driver's licence or passport, and something with your address on it."],
-    ["Does everyone selling need to be checked?", "Yes. Each person selling is checked."],
-    ["I do not live nearby. Can I still do this?", "Yes. For sellers who are not local, I use a verification provider."],
-    ["We are selling through a trust or a company. What changes?", "I need more detail, including who owns or controls it. Have the trust deed or company information ready."],
-    ["Is there a cost for the check?", "Any administration fee is set out in your agreement and covers identity checks and onboarding."]
+   "faq": [
+    [
+     "Why do you need to check my identity?",
+     "New Zealand law (AML/CFT) requires real estate agents to verify the identity of their sellers. I have no choice about it, and it applies to every seller."
+    ],
+    [
+     "What do I need to show?",
+     "A driver's licence or passport, and something with your address on it."
+    ],
+    [
+     "Does everyone selling need to be checked?",
+     "Yes. Each person selling is checked."
+    ],
+    [
+     "I do not live nearby. Can I still do this?",
+     "Yes. For sellers who are not local, I use a verification provider."
+    ],
+    [
+     "We are selling through a trust or a company. What changes?",
+     "I need more detail, including who owns or controls it. Have the trust deed or company information ready."
+    ],
+    [
+     "Is there a cost for the check?",
+     "Any administration fee is set out in your agreement and covers identity checks and onboarding."
+    ]
    ]
   },
   {
-   slug: "getting-ready",
-   short: "Your Vendor Declaration, a Healthy Homes statement if it is tenanted, and getting the property ready.",
-   opening: "Once your agreement is signed, we get ready for the market. Some of this is paperwork and some of it is the property itself. The paperwork matters because it protects you later, and it gives buyers and their lawyers what they need.",
-   happens: [
-    "You complete the Vendor Declaration on screen. It confirms what you know about the property, which protects you later, and I countersign it. If the property is or will be tenanted, there is also a Healthy Homes statement.",
-    "You read the Real Estate Authority's guide to sale and purchase agreements, in the Before you sell section of your online paperwork. A LIM report is part of every campaign, and I order it.",
-    "Alongside the paperwork, we talk about preparing and presenting the property, so it shows at its best when buyers see it."
+   "slug": "getting-ready",
+   "short": "Your Vendor Declaration, a Healthy Homes statement if it is tenanted, and getting the property ready.",
+   "lead": "Once your agreement is signed, we get ready for the market.",
+   "sum": {
+    "happens": "Your declaration, the guide, the LIM and the property.",
+    "you": "Declare, tell me about tenants, read and prepare.",
+    "tim": "I countersign, measure, order the LIM and advise.",
+    "docs": "Declaration, Healthy Homes, the guide and the LIM.",
+    "faq": "The declaration, the LIM, Healthy Homes and preparing."
+   },
+   "happens": [
+    {
+     "k": "big-picture",
+     "t": "The big picture",
+     "d": "Some of this is paperwork and some of it is the property itself. The paperwork matters because it protects you later, and it gives buyers and their lawyers what they need."
+    },
+    {
+     "k": "your-vendor-declaration",
+     "t": "Your Vendor Declaration",
+     "d": "You complete the Vendor Declaration on screen. It confirms what you know about the property, which protects you later, and I countersign it. If the property is or will be tenanted, there is also a Healthy Homes statement."
+    },
+    {
+     "k": "before-you-sell-and-the-lim",
+     "t": "Before you sell and the LIM",
+     "d": "You read the Real Estate Authority's guide to sale and purchase agreements, in the Before you sell section of your online paperwork. A LIM report is part of every campaign, and I order it."
+    },
+    {
+     "k": "preparing-and-presenting",
+     "t": "Preparing and presenting",
+     "d": "Alongside the paperwork, we talk about preparing and presenting the property, so it shows at its best when buyers see it."
+    }
    ],
-   you: [
-    "Complete the Vendor Declaration, and be honest about what you know.",
-    "Tell me if the property is or will be tenanted, so we can do the Healthy Homes statement.",
-    "Read the Real Estate Authority's guide to sale and purchase agreements.",
-    "Get the property ready to be presented, with my help."
+   "you": [
+    {
+     "k": "vendor-declaration",
+     "t": "Vendor Declaration",
+     "d": "Complete the Vendor Declaration, and be honest about what you know."
+    },
+    {
+     "k": "healthy-homes",
+     "t": "Healthy Homes",
+     "d": "Tell me if the property is or will be tenanted, so we can do the Healthy Homes statement."
+    },
+    {
+     "k": "read-the-rea-guide",
+     "t": "Read the REA guide",
+     "d": "Read the Real Estate Authority's guide to sale and purchase agreements."
+    },
+    {
+     "k": "get-the-property-ready",
+     "t": "Get the property ready",
+     "d": "Get the property ready to be presented, with my help."
+    }
    ],
-   tim: [
-    "I countersign your Vendor Declaration once you have signed it.",
-    "For a tenanted property, I take the Healthy Homes measurements on site, and the landlord signs the statement.",
-    "I order the LIM report, because it is part of every campaign.",
-    "I give you practical advice on preparing and presenting the property. First impressions matter, and this is where we get them right."
+   "tim": [
+    {
+     "k": "i-countersign",
+     "t": "I countersign",
+     "d": "I countersign your Vendor Declaration once you have signed it."
+    },
+    {
+     "k": "healthy-homes-measurements",
+     "t": "Healthy Homes measurements",
+     "d": "For a tenanted property, I take the Healthy Homes measurements on site, and the landlord signs the statement."
+    },
+    {
+     "k": "i-order-the-lim",
+     "t": "I order the LIM",
+     "d": "I order the LIM report, because it is part of every campaign."
+    },
+    {
+     "k": "preparing-and-presenting",
+     "t": "Preparing and presenting",
+     "d": "I give you practical advice on preparing and presenting the property. First impressions matter, and this is where we get them right."
+    }
    ],
-   docs: [
-    "The Vendor Declaration, signed on screen by you and countersigned by me.",
-    "A Healthy Homes statement, if the property is or will be tenanted.",
-    { t: "The Real Estate Authority's guide to sale and purchase agreements, in the Before you sell section of your online paperwork.", k: "rea_sp" },
-    "A LIM report, which is part of every campaign."
+   "docs": [
+    {
+     "k": "vendor-declaration",
+     "t": "Vendor Declaration",
+     "d": "The Vendor Declaration, signed on screen by you and countersigned by me."
+    },
+    {
+     "k": "healthy-homes-statement",
+     "t": "Healthy Homes statement",
+     "d": "A Healthy Homes statement, if the property is or will be tenanted."
+    },
+    {
+     "k": "rea-guide-sale-and-purchase",
+     "t": "REA guide: sale and purchase",
+     "d": "The Real Estate Authority's guide to sale and purchase agreements, in the Before you sell section of your online paperwork.",
+     "g": "rea_sp"
+    },
+    {
+     "k": "lim-report",
+     "t": "LIM report",
+     "d": "A LIM report, which is part of every campaign."
+    }
    ],
-   faq: [
-    ["Why do I need to sign a Vendor Declaration?", "It confirms what you know about the property. That protects you later, because what you knew is on record, and it gives buyers a clear picture."],
-    ["What if I am not sure about one of the answers?", "Tell me. The declaration is about what you know, so there is no need to guess. We can talk it through."],
-    ["Do I need a Healthy Homes statement?", "Only if the property is or will be tenanted."],
-    ["What is a LIM report?", "A Land Information Memorandum, which is a report from the council with the information it holds about the property. One is part of every campaign."],
-    ["What is Before you sell?", "It is a section of your online paperwork, once you have signed, that holds the Real Estate Authority's guide to sale and purchase agreements, which explains the agreement a buyer will sign."],
-    ["How should I prepare the property?", "It depends on the property and the buyer we are aiming for, so we talk about it together. I will give you practical advice on preparing and presenting it."]
+   "faq": [
+    [
+     "Why do I need to sign a Vendor Declaration?",
+     "It confirms what you know about the property. That protects you later, because what you knew is on record, and it gives buyers a clear picture."
+    ],
+    [
+     "What if I am not sure about one of the answers?",
+     "Tell me. The declaration is about what you know, so there is no need to guess. We can talk it through."
+    ],
+    [
+     "Do I need a Healthy Homes statement?",
+     "Only if the property is or will be tenanted."
+    ],
+    [
+     "What is a LIM report?",
+     "A Land Information Memorandum, which is a report from the council with the information it holds about the property. One is part of every campaign."
+    ],
+    [
+     "What is Before you sell?",
+     "It is a section of your online paperwork, once you have signed, that holds the Real Estate Authority's guide to sale and purchase agreements, which explains the agreement a buyer will sign."
+    ],
+    [
+     "How should I prepare the property?",
+     "It depends on the property and the buyer we are aiming for, so we talk about it together. I will give you practical advice on preparing and presenting it."
+    ]
    ]
   },
   {
-   slug: "on-the-market",
-   short: "Your property goes in front of buyers, with marketing written around the buyer most likely to love it.",
-   opening: "Now your property goes in front of buyers. Everything I do at this stop is aimed at reaching the right buyer, the one most likely to love your property, because that is how we get the best price rather than just the quickest result.",
-   happens: [
-    "Your property is shown to buyers through the marketing set out in your agreement. The packages are Digital, Premium and Elite, or you can build your own campaign. You can see them at packages.dunnerstunner.co.nz.",
-    "I write the listing copy around the buyer most likely to love the property, and what life looks like for them there. I use trusted suppliers for photography and marketing, booked to suit you.",
-    "After open homes, I gather buyer feedback so we can see how buyers are responding."
+   "slug": "on-the-market",
+   "short": "Your property goes in front of buyers, with marketing written around the buyer most likely to love it.",
+   "lead": "Now your property goes in front of buyers, and everything I do at this stop is aimed at reaching the right one.",
+   "sum": {
+    "happens": "Your marketing, your listing and buyer feedback.",
+    "you": "Choose, be available, listen, and tell me.",
+    "tim": "Written for the right buyer, honestly reported.",
+    "docs": "The packages, your agreement and the LIM.",
+    "faq": "Packages, photos, copy, feedback and payment."
+   },
+   "happens": [
+    {
+     "k": "big-picture",
+     "t": "The big picture",
+     "d": "The right buyer is the one most likely to love your property, because that is how we get the best price rather than just the quickest result."
+    },
+    {
+     "k": "the-marketing-packages",
+     "t": "The marketing packages",
+     "d": "Your property is shown to buyers through the marketing set out in your agreement. The packages are Digital, Premium and Elite, or you can build your own campaign. You can see them at packages.dunnerstunner.co.nz."
+    },
+    {
+     "k": "listing-copy-and-suppliers",
+     "t": "Listing copy and suppliers",
+     "d": "I write the listing copy around the buyer most likely to love the property, and what life looks like for them there. I use trusted suppliers for photography and marketing, booked to suit you."
+    },
+    {
+     "k": "buyer-feedback",
+     "t": "Buyer feedback",
+     "d": "After open homes, I gather buyer feedback so we can see how buyers are responding."
+    }
    ],
-   you: [
-    "Choose the marketing that suits your property, or build your own campaign with me.",
-    "Be available for photography and open homes at times we have booked to suit you.",
-    "Listen to the buyer feedback, and talk it through with me.",
-    "Tell me about anything that changes."
+   "you": [
+    {
+     "k": "choose-your-marketing",
+     "t": "Choose your marketing",
+     "d": "Choose the marketing that suits your property, or build your own campaign with me."
+    },
+    {
+     "k": "photography-and-open-homes",
+     "t": "Photography and open homes",
+     "d": "Be available for photography and open homes at times we have booked to suit you."
+    },
+    {
+     "k": "buyer-feedback",
+     "t": "Buyer feedback",
+     "d": "Listen to the buyer feedback, and talk it through with me."
+    },
+    {
+     "k": "tell-me-what-changes",
+     "t": "Tell me what changes",
+     "d": "Tell me about anything that changes."
+    }
    ],
-   tim: [
-    "I write the listing around the buyer most likely to love your property, so it speaks to the right person.",
-    "I book trusted suppliers for photography and marketing, at times that suit you.",
-    "I gather buyer feedback after open homes, and I share it with you honestly."
+   "tim": [
+    {
+     "k": "written-for-the-right-buyer",
+     "t": "Written for the right buyer",
+     "d": "I write the listing around the buyer most likely to love your property, so it speaks to the right person."
+    },
+    {
+     "k": "trusted-suppliers",
+     "t": "Trusted suppliers",
+     "d": "I book trusted suppliers for photography and marketing, at times that suit you."
+    },
+    {
+     "k": "honest-feedback",
+     "t": "Honest feedback",
+     "d": "I gather buyer feedback after open homes, and I share it with you honestly."
+    }
    ],
-   docs: [
-    { t: "The marketing packages, Digital, Premium and Elite, plus a build-your-own campaign, at packages.dunnerstunner.co.nz.", k: "packages" },
-    "The marketing set out in your agreement.",
-    "A LIM report, which is part of every campaign."
+   "docs": [
+    {
+     "k": "the-packages",
+     "t": "The packages",
+     "d": "The marketing packages, Digital, Premium and Elite, plus a build-your-own campaign, at packages.dunnerstunner.co.nz."
+    },
+    {
+     "k": "marketing-in-your-agreement",
+     "t": "Marketing in your agreement",
+     "d": "The marketing set out in your agreement."
+    },
+    {
+     "k": "lim-report",
+     "t": "LIM report",
+     "d": "A LIM report, which is part of every campaign."
+    }
    ],
-   faq: [
-    ["Which marketing package should I choose?", "The packages are Digital, Premium and Elite, and you can also build your own campaign. We choose together, based on your property and the buyer we are aiming for."],
-    ["Who takes the photographs?", "I use trusted suppliers for photography and marketing, booked to suit you."],
-    ["How will you describe my property?", "I write the listing copy around the buyer most likely to love it, and how life looks for them there."],
-    ["Will I hear what buyers think?", "Yes. I gather feedback from buyers after open homes."],
-    ["How do I pay for the marketing?", "Marketing is paid through List Now. You can pay up front, in instalments, or have it taken at settlement."]
+   "faq": [
+    [
+     "Which marketing package should I choose?",
+     "The packages are Digital, Premium and Elite, and you can also build your own campaign. We choose together, based on your property and the buyer we are aiming for."
+    ],
+    [
+     "Who takes the photographs?",
+     "I use trusted suppliers for photography and marketing, booked to suit you."
+    ],
+    [
+     "How will you describe my property?",
+     "I write the listing copy around the buyer most likely to love it, and how life looks for them there."
+    ],
+    [
+     "Will I hear what buyers think?",
+     "Yes. I gather feedback from buyers after open homes."
+    ],
+    [
+     "How do I pay for the marketing?",
+     "Marketing is paid through List Now. You can pay up front, in instalments, or have it taken at settlement."
+    ]
    ]
   },
   {
-   slug: "an-offer",
-   short: "I bring every offer to you, negotiate for the best price and terms, and work to your timing.",
-   opening: "When a buyer makes an offer, I bring it to you and we talk it through. The decision is always yours. My job is to negotiate the best price and terms I can, and to do it around what matters to you, including your timing.",
-   happens: [
-    "I negotiate for the best price and the best terms. Your timing matters here on two separate measures: how soon you want a firm, unconditional deal, and when you want settlement and possession. I work to both.",
-    "The buyer receives the Real Estate Authority's guide to sale and purchase agreements, and lawyers are involved on both sides."
+   "slug": "an-offer",
+   "short": "I bring every offer to you, negotiate for the best price and terms, and work to your timing.",
+   "lead": "When a buyer makes an offer, I bring it to you and we talk it through, and the decision is always yours.",
+   "sum": {
+    "happens": "Negotiating price and terms around your timing.",
+    "you": "Your timing, each offer, your lawyer and the decision.",
+    "tim": "Best price, both timing measures, and the lawyers.",
+    "docs": "The offer, the agreement and the buyer's guide.",
+    "faq": "Deciding, timing, terms and lawyers."
+   },
+   "happens": [
+    {
+     "k": "big-picture",
+     "t": "The big picture",
+     "d": "My job is to negotiate the best price and terms I can, and to do it around what matters to you, including your timing."
+    },
+    {
+     "k": "price-terms-and-two-kinds-of-timing",
+     "t": "Price, terms and two kinds of timing",
+     "d": "I negotiate for the best price and the best terms. Your timing matters here on two separate measures: how soon you want a firm, unconditional deal, and when you want settlement and possession. I work to both."
+    },
+    {
+     "k": "the-buyer-s-guide-and-lawyers",
+     "t": "The buyer's guide and lawyers",
+     "d": "The buyer receives the Real Estate Authority's guide to sale and purchase agreements, and lawyers are involved on both sides."
+    }
    ],
-   you: [
-    "Tell me both of your timing wishes: how soon you would like a firm deal, and when you would like settlement and possession.",
-    "Go through each offer with me.",
-    "Talk to your lawyer about the agreement.",
-    "Make the decision. It is always yours."
+   "you": [
+    {
+     "k": "your-two-timing-wishes",
+     "t": "Your two timing wishes",
+     "d": "Tell me both of your timing wishes: how soon you would like a firm deal, and when you would like settlement and possession."
+    },
+    {
+     "k": "go-through-each-offer",
+     "t": "Go through each offer",
+     "d": "Go through each offer with me."
+    },
+    {
+     "k": "talk-to-your-lawyer",
+     "t": "Talk to your lawyer",
+     "d": "Talk to your lawyer about the agreement."
+    },
+    {
+     "k": "the-decision-is-yours",
+     "t": "The decision is yours",
+     "d": "Make the decision. It is always yours."
+    }
    ],
-   tim: [
-    "I negotiate for the best price and terms, not just the first thing on the table.",
-    "I work to both of your timing measures, so a good price does not come at the cost of the dates that matter to you.",
-    "I make sure the buyer receives the Real Estate Authority's guide to sale and purchase agreements.",
-    "I work with the lawyers, so you are not left to work it out alone."
+   "tim": [
+    {
+     "k": "best-price-and-terms",
+     "t": "Best price and terms",
+     "d": "I negotiate for the best price and terms, not just the first thing on the table."
+    },
+    {
+     "k": "both-timing-measures",
+     "t": "Both timing measures",
+     "d": "I work to both of your timing measures, so a good price does not come at the cost of the dates that matter to you."
+    },
+    {
+     "k": "the-buyer-gets-the-guide",
+     "t": "The buyer gets the guide",
+     "d": "I make sure the buyer receives the Real Estate Authority's guide to sale and purchase agreements."
+    },
+    {
+     "k": "working-with-lawyers",
+     "t": "Working with lawyers",
+     "d": "I work with the lawyers, so you are not left to work it out alone."
+    }
    ],
-   docs: [
-    "The offer, and the sale and purchase agreement.",
-    { t: "The Real Estate Authority's guide to sale and purchase agreements, which the buyer receives.", k: "rea_sp" },
-    "Advice from your lawyer, who is involved from here."
+   "docs": [
+    {
+     "k": "the-offer-and-agreement",
+     "t": "The offer and agreement",
+     "d": "The offer, and the sale and purchase agreement."
+    },
+    {
+     "k": "the-guide-the-buyer-receives",
+     "t": "The guide the buyer receives",
+     "d": "The Real Estate Authority's guide to sale and purchase agreements, which the buyer receives.",
+     "g": "rea_sp"
+    },
+    {
+     "k": "your-lawyer-s-advice",
+     "t": "Your lawyer's advice",
+     "d": "Advice from your lawyer, who is involved from here."
+    }
    ],
-   faq: [
-    ["Do I have to accept an offer?", "No. I bring it to you and talk it through, but the decision is always yours."],
-    ["What do you mean by two kinds of timing?", "One is how soon you want a firm, unconditional deal. The other is when you want settlement and possession. They are different, and I work to both."],
-    ["What are the terms of an offer?", "Everything beyond the price: the conditions the buyer wants, and the dates. I negotiate for the best terms as well as the best price."],
-    ["Does the buyer get any guidance?", "Yes. The buyer receives the Real Estate Authority's guide to sale and purchase agreements."],
-    ["Where do lawyers come in?", "Lawyers are involved on both sides. I work with them so the agreement and the dates come together properly."]
+   "faq": [
+    [
+     "Do I have to accept an offer?",
+     "No. I bring it to you and talk it through, but the decision is always yours."
+    ],
+    [
+     "What do you mean by two kinds of timing?",
+     "One is how soon you want a firm, unconditional deal. The other is when you want settlement and possession. They are different, and I work to both."
+    ],
+    [
+     "What are the terms of an offer?",
+     "Everything beyond the price: the conditions the buyer wants, and the dates. I negotiate for the best terms as well as the best price."
+    ],
+    [
+     "Does the buyer get any guidance?",
+     "Yes. The buyer receives the Real Estate Authority's guide to sale and purchase agreements."
+    ],
+    [
+     "Where do lawyers come in?",
+     "Lawyers are involved on both sides. I work with them so the agreement and the dates come together properly."
+    ]
    ]
   },
   {
-   slug: "sold-and-settling",
-   short: "Conditions are met, the sale goes unconditional, and I stay with you through settlement and the keys.",
-   opening: "A signed agreement is not quite the end. Conditions have to be satisfied, the sale goes unconditional, and then comes settlement. I stay with you through all of it, right up to settlement and the keys.",
-   happens: [
-    "The conditions in the agreement are satisfied, and the sale goes unconditional, which means it is firm. Then comes settlement, when payment is made and the keys change hands, and the lawyers arrange it.",
-    "I keep both lawyers and you informed along the way, and I am there through to settlement and the keys."
+   "slug": "sold-and-settling",
+   "short": "Conditions are met, the sale goes unconditional, and I stay with you through settlement and the keys.",
+   "lead": "A signed agreement is not quite the end, and I stay with you right up to settlement and the keys.",
+   "sum": {
+    "happens": "Conditions, unconditional, settlement and the keys.",
+    "you": "Respond to your lawyer, ask me, and get ready.",
+    "tim": "Informed throughout, right to the keys.",
+    "docs": "Your agreement and settlement.",
+    "faq": "What the terms mean, and what happens next."
+   },
+   "happens": [
+    {
+     "k": "big-picture",
+     "t": "The big picture",
+     "d": "Conditions have to be satisfied, the sale goes unconditional, and then comes settlement. I stay with you through all of it."
+    },
+    {
+     "k": "conditions-and-settlement",
+     "t": "Conditions and settlement",
+     "d": "The conditions in the agreement are satisfied, and the sale goes unconditional, which means it is firm. Then comes settlement, when payment is made and the keys change hands, and the lawyers arrange it."
+    },
+    {
+     "k": "kept-informed-to-the-keys",
+     "t": "Kept informed to the keys",
+     "d": "I keep both lawyers and you informed along the way, and I am there through to settlement and the keys."
+    }
    ],
-   you: [
-    "Respond to your lawyer when they ask you for something.",
-    "Tell me about any questions or worries as they come up.",
-    "Get ready to hand over the keys at settlement."
+   "you": [
+    {
+     "k": "respond-to-your-lawyer",
+     "t": "Respond to your lawyer",
+     "d": "Respond to your lawyer when they ask you for something."
+    },
+    {
+     "k": "tell-me-your-questions",
+     "t": "Tell me your questions",
+     "d": "Tell me about any questions or worries as they come up."
+    },
+    {
+     "k": "ready-for-the-keys",
+     "t": "Ready for the keys",
+     "d": "Get ready to hand over the keys at settlement."
+    }
    ],
-   tim: [
-    "I keep both lawyers and you informed, so you always know where things stand.",
-    "I follow the conditions through until they are satisfied and the sale goes unconditional.",
-    "I am there through to settlement and the keys, not just until the offer is signed."
+   "tim": [
+    {
+     "k": "both-lawyers-and-you-informed",
+     "t": "Both lawyers and you informed",
+     "d": "I keep both lawyers and you informed, so you always know where things stand."
+    },
+    {
+     "k": "following-the-conditions",
+     "t": "Following the conditions",
+     "d": "I follow the conditions through until they are satisfied and the sale goes unconditional."
+    },
+    {
+     "k": "through-to-the-keys",
+     "t": "Through to the keys",
+     "d": "I am there through to settlement and the keys, not just until the offer is signed."
+    }
    ],
-   docs: [
-    "Your signed sale and purchase agreement, and the conditions in it.",
-    "Settlement, which your lawyer arranges."
+   "docs": [
+    {
+     "k": "your-agreement-and-its-conditions",
+     "t": "Your agreement and its conditions",
+     "d": "Your signed sale and purchase agreement, and the conditions in it."
+    },
+    {
+     "k": "settlement",
+     "t": "Settlement",
+     "d": "Settlement, which your lawyer arranges."
+    }
    ],
-   faq: [
-    ["What does unconditional mean?", "It means the conditions in the agreement have been satisfied, so the sale is firm."],
-    ["What are conditions?", "They are things that need to happen before the sale becomes firm. The sale and purchase agreement lists them."],
-    ["Who arranges settlement?", "The lawyers arrange it. I keep both lawyers and you informed."],
-    ["What happens at settlement?", "Payment is made and the keys change hands."],
-    ["Will I still hear from you after the offer is signed?", "Yes. I am there through to settlement and the keys, and I keep you informed along the way."]
+   "faq": [
+    [
+     "What does unconditional mean?",
+     "It means the conditions in the agreement have been satisfied, so the sale is firm."
+    ],
+    [
+     "What are conditions?",
+     "They are things that need to happen before the sale becomes firm. The sale and purchase agreement lists them."
+    ],
+    [
+     "Who arranges settlement?",
+     "The lawyers arrange it. I keep both lawyers and you informed."
+    ],
+    [
+     "What happens at settlement?",
+     "Payment is made and the keys change hands."
+    ],
+    [
+     "Will I still hear from you after the offer is signed?",
+     "Yes. I am there through to settlement and the keys, and I keep you informed along the way."
+    ]
    ]
   }
  ]
+};
+// Photos and videos for the journey pages. Every slot starts empty (null) and an empty slot is invisible to visitors.
+// A slot is null, or { type: 'image', src, alt, credit } (src is a file in onboarding/assets/journey/, for example 'tim-visit.jpg';
+// alt text and a credit are required, or the image is not shown), or { type: 'video', src, title, credit } where src is a YouTube
+// or Vimeo link (the player only loads when a visitor taps play; poster is an optional still from assets/journey/).
+// "hero" sits under the page title; each key under "points" is section.point (for example "happens.visit-and-opinion-of-value")
+// and shows inside that point when it is open. See onboarding/assets/journey/README.md. To see where media could go, open any
+// journey page with ?media=preview on the end, for example #journey/meeting-tim?media=preview
+window.JOURNEY_MEDIA = {
+ "thinking-of-selling": {
+  "hero": null,
+  "points": {
+   "happens.big-picture": null,
+   "happens.visit-and-opinion-of-value": null,
+   "happens.three-honest-conversations": null,
+   "happens.every-issue-early": null,
+   "happens.nothing-signed-yet": null,
+   "you.show-me-around": null,
+   "you.price-reasons-and-timing": null,
+   "you.tell-me-about-any-issues": null,
+   "you.ask-then-go-ahead": null,
+   "tim.i-see-it-in-person": null,
+   "tim.best-price-not-just-fast": null,
+   "tim.realistic-about-worth": null,
+   "tim.defects-raised-early": null,
+   "tim.appraisal-in-writing": null,
+   "docs.my-written-appraisal": null,
+   "docs.nothing-to-sign": null,
+   "docs.paperwork-that-helps": null
+  }
+ },
+ "your-updated-plan": {
+  "hero": null,
+  "points": {
+   "happens.big-picture": null,
+   "happens.the-short-questionnaire": null,
+   "happens.your-updated-plan": null,
+   "happens.ticking-it-off": null,
+   "you.answer-in-your-own-words": null,
+   "you.what-matters-and-what-worries-you": null,
+   "you.anything-else-you-have-been-offered": null,
+   "you.read-the-plan": null,
+   "tim.i-read-every-answer": null,
+   "tim.your-concerns-answered": null,
+   "tim.low-pressure": null,
+   "docs.the-questionnaire": null,
+   "docs.your-updated-plan": null,
+   "docs.not-an-agreement": null
+  }
+ },
+ "meeting-tim": {
+  "hero": null,
+  "points": {
+   "happens.big-picture": null,
+   "happens.talking-the-plan-through": null,
+   "happens.my-fee": null,
+   "happens.starting-before-the-written-appraisal": null,
+   "you.bring-your-questions": null,
+   "you.everyone-who-owns-it": null,
+   "you.take-your-time": null,
+   "you.starting-early": null,
+   "tim.talking-it-through": null,
+   "tim.value-before-cost": null,
+   "tim.agreed-in-writing": null,
+   "tim.starting-before-the-appraisal": null,
+   "docs.your-updated-plan": null,
+   "docs.details-agreed-in-writing": null,
+   "docs.starting-before-the-appraisal": null
+  }
+ },
+ "your-agreement": {
+  "hero": null,
+  "points": {
+   "happens.big-picture": null,
+   "happens.reading-and-signing": null,
+   "happens.the-rea-guides": null,
+   "happens.legal-advice-and-cooling-off": null,
+   "happens.previous-agency-and-later-changes": null,
+   "you.read-and-tick-each-section": null,
+   "you.read-the-rea-guides": null,
+   "you.previous-agency": null,
+   "you.choose-how-to-pay-for-marketing": null,
+   "you.sign-on-screen": null,
+   "tim.plain-english-explanations": null,
+   "tim.fee-agreed-in-writing": null,
+   "tim.previous-agency-notice": null,
+   "tim.easy-changes-later": null,
+   "tim.i-countersign": null,
+   "docs.your-sole-agency-agreement": null,
+   "docs.plain-english-guide": null,
+   "docs.rea-guide-agency-agreements": null,
+   "docs.rea-guide-sale-and-purchase": null,
+   "docs.previous-agency-notice": null,
+   "docs.complaints-and-disputes": null,
+   "docs.variations-and-extensions": null
+  }
+ },
+ "identity-check": {
+  "hero": null,
+  "points": {
+   "happens.big-picture": null,
+   "happens.the-law-behind-it": null,
+   "happens.doing-it-in-person": null,
+   "happens.records-kept-securely": null,
+   "you.photo-id-and-proof-of-address": null,
+   "you.if-you-are-not-local": null,
+   "you.trusts-and-companies": null,
+   "tim.in-person-by-me": null,
+   "tim.clear-and-secure": null,
+   "tim.trusts-and-companies-covered": null,
+   "docs.photo-id": null,
+   "docs.proof-of-address": null,
+   "docs.trusts-and-companies": null,
+   "docs.a-secure-record": null
+  }
+ },
+ "getting-ready": {
+  "hero": null,
+  "points": {
+   "happens.big-picture": null,
+   "happens.your-vendor-declaration": null,
+   "happens.before-you-sell-and-the-lim": null,
+   "happens.preparing-and-presenting": null,
+   "you.vendor-declaration": null,
+   "you.healthy-homes": null,
+   "you.read-the-rea-guide": null,
+   "you.get-the-property-ready": null,
+   "tim.i-countersign": null,
+   "tim.healthy-homes-measurements": null,
+   "tim.i-order-the-lim": null,
+   "tim.preparing-and-presenting": null,
+   "docs.vendor-declaration": null,
+   "docs.healthy-homes-statement": null,
+   "docs.rea-guide-sale-and-purchase": null,
+   "docs.lim-report": null
+  }
+ },
+ "on-the-market": {
+  "hero": null,
+  "points": {
+   "happens.big-picture": null,
+   "happens.the-marketing-packages": null,
+   "happens.listing-copy-and-suppliers": null,
+   "happens.buyer-feedback": null,
+   "you.choose-your-marketing": null,
+   "you.photography-and-open-homes": null,
+   "you.buyer-feedback": null,
+   "you.tell-me-what-changes": null,
+   "tim.written-for-the-right-buyer": null,
+   "tim.trusted-suppliers": null,
+   "tim.honest-feedback": null,
+   "docs.the-packages": null,
+   "docs.marketing-in-your-agreement": null,
+   "docs.lim-report": null
+  }
+ },
+ "an-offer": {
+  "hero": null,
+  "points": {
+   "happens.big-picture": null,
+   "happens.price-terms-and-two-kinds-of-timing": null,
+   "happens.the-buyer-s-guide-and-lawyers": null,
+   "you.your-two-timing-wishes": null,
+   "you.go-through-each-offer": null,
+   "you.talk-to-your-lawyer": null,
+   "you.the-decision-is-yours": null,
+   "tim.best-price-and-terms": null,
+   "tim.both-timing-measures": null,
+   "tim.the-buyer-gets-the-guide": null,
+   "tim.working-with-lawyers": null,
+   "docs.the-offer-and-agreement": null,
+   "docs.the-guide-the-buyer-receives": null,
+   "docs.your-lawyer-s-advice": null
+  }
+ },
+ "sold-and-settling": {
+  "hero": null,
+  "points": {
+   "happens.big-picture": null,
+   "happens.conditions-and-settlement": null,
+   "happens.kept-informed-to-the-keys": null,
+   "you.respond-to-your-lawyer": null,
+   "you.tell-me-your-questions": null,
+   "you.ready-for-the-keys": null,
+   "tim.both-lawyers-and-you-informed": null,
+   "tim.following-the-conditions": null,
+   "tim.through-to-the-keys": null,
+   "docs.your-agreement-and-its-conditions": null,
+   "docs.settlement": null
+  }
+ },
+ "journey": {
+  "hero": null,
+  "points": {
+   "how": null,
+   "fee": null
+  }
+ }
+};
+// Suggestions for what suits each slot, shown only in preview mode (Tim's view, never visitors')
+window.JOURNEY_MEDIA_HINTS = {
+ "labels": {
+  "here": "Photo or video here: e.g. ",
+  "preview": "Preview mode. Dashed boxes show where a photo or video could go, and what might suit it. Visitors do not see them.",
+  "refusedImage": "Not shown: this image needs a file from assets/journey, alt text and a credit.",
+  "refusedVideo": "Not shown: this video needs a YouTube or Vimeo link and a title."
+ },
+ "slots": {
+  "thinking-of-selling": {
+   "hero": "Tim at the front door of a property, or walking through it with a seller",
+   "happens": "Tim looking over a living area, or taking notes during a visit",
+   "you": "A seller showing Tim around the garden",
+   "tim": "Tim explaining his reasoning at a kitchen bench",
+   "docs": "A tidy folder of property paperwork",
+   "faq": "A short video of Tim answering a common question"
+  },
+  "your-updated-plan": {
+   "hero": "A seller on a phone or tablet, answering the questionnaire at home",
+   "happens": "A screen showing an updated plan",
+   "you": "A seller at a kitchen table, thinking it over",
+   "tim": "Tim at his desk, reading through the answers",
+   "docs": "A printed plan with handwritten notes",
+   "faq": "A short video of Tim explaining the questionnaire"
+  },
+  "meeting-tim": {
+   "hero": "Tim and sellers around a table, or on a video call",
+   "happens": "Tim talking a plan through with a couple",
+   "you": "A couple with a list of questions",
+   "tim": "Tim writing up what has been agreed",
+   "docs": "A document being signed or checked together",
+   "faq": "A short video of Tim explaining how the meeting works"
+  },
+  "your-agreement": {
+   "hero": "A seller signing on a phone, or Tim and a seller with the agreement open",
+   "happens": "A phone showing the plain-English guide",
+   "you": "A seller reading the agreement on a tablet",
+   "tim": "Tim explaining a section of the agreement",
+   "docs": "The REA guides laid out together",
+   "faq": "A short video on how the cooling-off period works"
+  },
+  "identity-check": {
+   "hero": "Tim checking a driver's licence with a seller",
+   "happens": "A driver's licence and passport on a table",
+   "you": "A seller holding up their ID",
+   "tim": "Tim at a desk with a secure filing system",
+   "docs": "Examples of acceptable proof of address",
+   "faq": "A short video explaining why the law asks for this"
+  },
+  "getting-ready": {
+   "hero": "A freshly presented living room, ready for buyers",
+   "happens": "A seller completing the Vendor Declaration on a phone",
+   "you": "A seller tidying and staging a room",
+   "tim": "Tim taking measurements in a tenanted property",
+   "docs": "The set of documents laid out together",
+   "faq": "A short video of Tim on preparing a property"
+  },
+  "on-the-market": {
+   "hero": "A beautifully photographed exterior at dusk",
+   "happens": "A phone showing the marketing packages",
+   "you": "A seller with the photographer on shoot day",
+   "tim": "Tim at an open home, greeting buyers",
+   "docs": "A printed marketing package",
+   "faq": "A short video of Tim on writing for the right buyer"
+  },
+  "an-offer": {
+   "hero": "Tim on the phone, talking an offer through with a seller",
+   "happens": "A pen over a sale and purchase agreement",
+   "you": "A couple reading an offer together",
+   "tim": "Tim in conversation with a lawyer",
+   "docs": "The REA guide on a desk",
+   "faq": "A short video of Tim explaining the two kinds of timing"
+  },
+  "sold-and-settling": {
+   "hero": "Keys being handed over at the door",
+   "happens": "A completed sale and purchase agreement",
+   "you": "A seller packing up, ready to hand over",
+   "tim": "Tim handing over the keys",
+   "docs": "A settlement statement on a desk",
+   "faq": "A short video on what happens at settlement"
+  },
+  "journey": {
+   "hero": "Tim with a seller outside a property, or a view of a Dunedin street",
+   "how": "Tim at work, meeting a seller",
+   "fee": "A handshake, or a signed agreement"
+  }
+ }
 };
 // one source for the wording: it is also listed in the translation catalogue, once each, so the catalogue test and the engine see it
 (function () {
   const P = window.JOURNEY_PITCH, C = window.I18N_STRINGS, seen = new Set(), add = [];
   C.screens.forEach(([, list]) => list.forEach(s => seen.add(s)));
   const take = s => { if (typeof s === 'string' && s && !seen.has(s)) { seen.add(s); add.push(s); } };
-  const walk = (v, key) => { if (key === 'slug' || key === 'k') return; if (typeof v === 'string') take(v); else if (Array.isArray(v)) v.forEach(x => walk(x)); else if (v && typeof v === 'object') Object.keys(v).forEach(k => walk(v[k], k)); };
+  const walk = (v, key) => { if (key === 'slug' || key === 'k' || key === 'g') return; if (typeof v === 'string') take(v); else if (Array.isArray(v)) v.forEach(x => walk(x)); else if (v && typeof v === 'object') Object.keys(v).forEach(k => walk(v[k], k)); };
   walk(P);
   C.screens.push(['pitch', add]);
 })();
@@ -6159,12 +7274,14 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
      what the journey panel reads. All the wording is in strings.js (window.JOURNEY_PITCH). Nothing here states a fee: Tim talks about his
      fee only once a seller has decided who the best agent is, and it is then agreed with all owners in writing. */
   const PJ = () => window.JOURNEY_PITCH;
-  const pHref = i => '#journey/' + PJ().stops[i].slug;
+  let PITCH_PREVIEW = false;   // ?media=preview on the end of a journey address: empty photo and video slots show as dashed boxes (for Tim, never needed by visitors)
+  const pHref = i => '#journey/' + PJ().stops[i].slug + (PITCH_ON && PITCH_PREVIEW ? '?media=preview' : '');
   const T_TEL = '0275627207', T_EMAIL = 'tim@mcguire.co.nz', PACKAGES_URL = 'https://packages.dunnerstunner.co.nz/';
   function pitchRoute() {
-    const m = /^#journey(?:\/([a-z0-9-]+))?\/?$/i.exec(location.hash || ''); if (!m) return null;
+    const m = /^#journey(?:\/([a-z0-9-]+))?\/?(?:\?(.*))?$/i.exec(location.hash || ''); if (!m) return null;
     const slug = (m[1] || '').toLowerCase(), i = slug ? PJ().stops.findIndex(s => s.slug === slug) : -1;
-    return { slug, i, bad: !!slug && i < 0 };
+    let preview = false; try { preview = new URLSearchParams(m[2] || '').get('media') === 'preview' || new URLSearchParams(location.search).get('media') === 'preview'; } catch (_) { }
+    return { slug, i, bad: !!slug && i < 0, preview };
   }
   // wording to paragraph HTML: the phone number, Tim's email and the packages site become links
   const pText = t => esc(t)
@@ -6178,6 +7295,59 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   const pTop = f => `<div class="p-top no-print">${SESSION && !IS_AGENT ? `<button class="btn ghost" type="button" data-psign>${esc(PJ().labels.yourPage)}</button>` : !SESSION ? `<button class="btn ghost" type="button" data-psign>${esc(PJ().labels.signIn)}</button>` : '<span></span>'}<button class="btn ghost" type="button" id="pPrint">${esc(PJ().labels.print)}</button></div>`;
   const pStatus = (st, f, k) => { const c = jStateOf(st, f, k); return { c, tag: c === 'here' ? J_STATE_TEXT.here : J_STATE_TEXT[c], det: jDetail(k, f) }; };
 
+  /* ── progressive disclosure: a section or a point is a button (aria-expanded) that opens a panel. Sections hold points; a point is a short
+        title that opens to two or three sentences. Closed panels are out of the tab order and the accessibility tree; print opens them all. ── */
+  let PT_SEQ = 0;
+  const ptItem = (level, title, sum, body, cls) => { const id = 'pt' + (++PT_SEQ);
+    return `<div class="pt ${cls || ''}"><h${level} class="pt-h"><button type="button" class="pt-b" id="${id}b" aria-expanded="false" aria-controls="${id}p"><span class="pt-txt"><span class="pt-t">${title}</span>${sum ? `<span class="pt-s">${sum}</span>` : ''}</span><span class="pt-ic" aria-hidden="true"></span></button></h${level}>
+      <div class="pt-panel" id="${id}p" role="region" aria-labelledby="${id}b" data-open="false"><div class="pt-in"><div class="pt-body">${body}</div></div></div></div>`; };
+
+  /* ── photos and videos (strings.js JOURNEY_MEDIA): a slot is empty, an image from assets/journey, or a YouTube or Vimeo link whose player loads only on a tap ── */
+  const pMediaHints = () => window.JOURNEY_MEDIA_HINTS || { labels: {}, slots: {} };
+  const pSlotCfg = (slug, key) => { const m = (window.JOURNEY_MEDIA || {})[slug]; if (!m) return null; return key == null ? m.hero || null : (m.points || {})[key] || null; };
+  function pVideoId(src) {
+    const u = (() => { try { return new URL(String(src)); } catch (_) { return null; } })(); if (!u || u.protocol !== 'https:') return null;
+    const h = u.hostname.replace(/^www\./, '');
+    if (h === 'youtube.com' || h === 'm.youtube.com' || h === 'youtube-nocookie.com') { const m = u.pathname.match(/^\/embed\/([A-Za-z0-9_-]{11})$/); const v = m ? m[1] : u.searchParams.get('v'); return v && /^[A-Za-z0-9_-]{11}$/.test(v) ? { site: 'youtube', id: v } : null; }
+    if (h === 'youtu.be') { const v = u.pathname.slice(1); return /^[A-Za-z0-9_-]{11}$/.test(v) ? { site: 'youtube', id: v } : null; }
+    if (h === 'vimeo.com' || h === 'player.vimeo.com') { const m = u.pathname.match(/\/(\d{5,12})(?:\/|$)/); return m ? { site: 'vimeo', id: m[1] } : null; }
+    return null;
+  }
+  const pLocalImg = f => { f = String(f || ''); if (/^[A-Za-z0-9._-]+\.(jpe?g|png|webp|avif)$/i.test(f)) return 'assets/journey/' + f; if (/^assets\/journey\/[A-Za-z0-9._-]+\.(jpe?g|png|webp|avif)$/i.test(f)) return f; return null; };
+  function pSlot(slug, key, section) {   // key null = the hero under the title
+    const H = pMediaHints(), lab = H.labels || {}, cfg = pSlotCfg(slug, key), hint = ((H.slots || {})[slug] || {})[key == null ? 'hero' : section];
+    const placeholder = (msg, bad) => `<div class="p-media p-slot${bad ? ' bad' : ''} no-print" data-slot="${esc(slug + (key ? ':' + key : ':hero'))}"><span>${esc(msg)}</span></div>`;
+    if (!cfg) return PITCH_PREVIEW ? placeholder((lab.here || 'Photo or video here: e.g. ') + (hint || 'a photo or video that helps explain this')) : '';
+    if (cfg.type === 'image') {
+      const src = pLocalImg(cfg.src), ok = src && String(cfg.alt || '').trim() && String(cfg.credit || '').trim();
+      if (!ok) { try { console.warn('Journey image not shown (needs a file in assets/journey, alt text and a credit):', slug, key); } catch (_) { } return PITCH_PREVIEW ? placeholder(lab.refusedImage || 'Not shown', true) : ''; }
+      const w = +cfg.width > 0 ? +cfg.width : 1600, h = +cfg.height > 0 ? +cfg.height : 1067;
+      return `<figure class="p-media p-img"><img src="${esc(src)}" alt="${esc(cfg.alt)}" width="${w}" height="${h}" loading="lazy" decoding="async"><figcaption class="small">${esc(cfg.credit)}</figcaption></figure>`;
+    }
+    if (cfg.type === 'video') {
+      const v = pVideoId(cfg.src), ok = v && String(cfg.title || '').trim();
+      if (!ok) { try { console.warn('Journey video not shown (needs a YouTube or Vimeo link and a title):', slug, key); } catch (_) { } return PITCH_PREVIEW ? placeholder(lab.refusedVideo || 'Not shown', true) : ''; }
+      const poster = pLocalImg(cfg.poster), link = v.site === 'youtube' ? 'https://www.youtube.com/watch?v=' + v.id : 'https://vimeo.com/' + v.id;
+      return `<figure class="p-media p-video"><button type="button" class="p-vid no-print" data-pvid="${v.site}:${v.id}" aria-label="${esc(PJ().labels.play + ': ' + cfg.title)}">${poster ? `<img src="${esc(poster)}" alt="" loading="lazy" decoding="async">` : ''}<span class="p-play" aria-hidden="true"></span><span class="p-vtitle">${esc(cfg.title)}</span></button>
+        <p class="print-only p-vprint">${esc(cfg.title)}: ${esc(link)}</p>${cfg.credit ? `<figcaption class="small">${esc(cfg.credit)}</figcaption>` : ''}</figure>`;
+    }
+    return '';
+  }
+  function pPlay(btn) {   // the only moment a third party is contacted: when the visitor taps play. Privacy-friendly players, no cookies.
+    const [site, id] = String(btn.dataset.pvid).split(':'); if (!/^[A-Za-z0-9_-]{5,12}$/.test(id) || (site !== 'youtube' && site !== 'vimeo')) return;
+    const url = site === 'youtube' ? `https://www.youtube-nocookie.com/embed/${id}?autoplay=1&rel=0&cc_load_policy=1` : `https://player.vimeo.com/video/${id}?dnt=1&autoplay=1`;
+    const fr = document.createElement('iframe'); fr.className = 'p-player'; fr.src = url; fr.title = (btn.getAttribute('aria-label') || '').replace(/^[^:]*: /, '') || 'Video'; fr.loading = 'lazy'; fr.allowFullscreen = true;
+    fr.setAttribute('allow', 'autoplay; encrypted-media; picture-in-picture; fullscreen'); fr.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
+    btn.replaceWith(fr); fr.focus();
+  }
+  // a point: its detail, any guide links, and its photo or video if it has one
+  function pPoint(slug, section, pt) {
+    const guide = pt.g === 'rea_agency' ? 'agency' : pt.g === 'rea_sp' ? 'sale_purchase' : '';
+    const g = guide ? `<div class="p-rea" data-guide="${guide}"><a href="${guide === 'agency' ? REA_AA : REA_SP}" target="_blank" rel="noopener">${esc(PJ().labels.guideEn)}</a></div>` : '';
+    return ptItem(3, esc(pt.t), '', `<p>${pText(pt.d)}</p>${g}${pSlot(slug, section + '.' + pt.k, section)}`, 'pt-point');
+  }
+  const pAllTool = () => `<div class="p-tools no-print"><button type="button" class="btn link" data-ptall aria-live="polite">${esc(PJ().labels.openAll)}</button></div>`;
+
   function pMapHTML(f, choose, rows, st, links) {
     const P = PJ(), L = P.labels, signedIn = !!f;
     const cards = JSTOPS.map((s, i) => {
@@ -6189,42 +7359,43 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       </li>`;
     }).join('');
     const all = {}; for (let k = 1; k <= 9; k++) all[k] = true;
-    return `<div class="pitch pitch-map">${pTop(f)}${pHead()}
+    const pts = [{ k: 'how', t: P.how.t, d: P.how.d }, { k: 'fee', t: P.feeHeading, d: P.fee }];
+    return `<div class="pitch pitch-map">${pTop(f)}${pHead()}${pPreviewNote()}
       <p class="p-kick">${esc(P.eyebrow)}</p>
       <h1 id="pTitle" tabindex="-1">${esc(P.docTitle)}</h1>
       ${f && f.address ? `<p class="jaddr">${nt(f.address)}</p>` : ''}
-      <p class="lede">${esc(P.intro[0])}</p><p class="lede">${esc(P.intro[1])}</p>
+      <p class="lede p-open">${esc(P.lead)}</p>
       ${signedIn && st.cur ? `<p class="small">${esc(P.signedInIntro)}</p>` : ''}
+      ${pSlot('journey', null)}
       ${choose ? `<div class="card tight no-print" id="pChoose"><h3>${esc(L.which)}</h3><p class="small" style="margin:0 0 8px">${esc(L.whichText)}</p><div class="toolbar" style="margin:0">${choose.map(r => `<button class="btn ghost" type="button" data-ppick="${esc(r.id)}">${esc(r.address || 'Address to come')}</button>`).join('')}</div></div>` : ''}
       ${rows && rows.length > 1 && f ? `<div class="toolbar no-print" style="margin:0 0 6px"><button class="btn ghost" type="button" data-ppick="">${esc(L.change)}</button></div>` : ''}
       <div class="jwrap"><div class="jmapcol">${jMapSVG(st, f, { links: all })}</div><div><ol class="jlist" aria-label="The nine stops">${cards}</ol></div></div>
-      <section class="card pitch-fee"><h2>${esc(P.feeHeading)}</h2><p>${esc(P.fee)}</p></section>
+      ${pAllTool()}<div class="p-secs">${pts.map(pt => ptItem(2, esc(pt.t), '', `<p>${pText(pt.d)}</p>${pSlot('journey', pt.k, 'happens')}`, 'pt-sec')).join('')}</div>
       ${pCta()}${pFoot()}</div>`;
   }
+  const pPreviewNote = () => PITCH_PREVIEW ? `<div class="card note tight no-print"><p class="small" style="margin:0">${esc(pMediaHints().labels.preview || '')}</p></div>` : '';
 
   function pStopHTML(i, f, st, links) {
-    const P = PJ(), L = P.labels, S = P.stops[i], k = i + 1, title = JSTOPS[i].t, { c, tag, det } = pStatus(st, f, k);
-    const guideBox = key => `<div class="p-rea" data-guide="${key}"><a href="${key === 'agency' ? REA_AA : REA_SP}" target="_blank" rel="noopener">${esc(L.guideEn)}</a></div>`;
-    const docs = S.docs.map(d => typeof d === 'string' ? `<li>${pText(d)}</li>` : `<li>${pText(d.t)}${d.k === 'rea_agency' ? guideBox('agency') : d.k === 'rea_sp' ? guideBox('sale_purchase') : ''}</li>`).join('');
+    const P = PJ(), L = P.labels, S = P.stops[i], k = i + 1, title = JSTOPS[i].t, { c, tag, det } = pStatus(st, f, k), slug = S.slug;
     const dots = JSTOPS.map((s, j) => `<li><a href="${pHref(j)}" ${j === i ? 'aria-current="page"' : ''} aria-label="${esc(trs('{n} of 9: {stop}.', { n: j + 1, stop: trs(s.t) }))}">${j + 1}</a></li>`).join('');
     const prev = i > 0 ? `<a class="btn ghost" href="${pHref(i - 1)}">${esc(L.prev)}: ${esc(JSTOPS[i - 1].t)}</a>` : '';
     const next = i < 8 ? `<a class="btn primary" href="${pHref(i + 1)}">${esc(L.next)}: ${esc(JSTOPS[i + 1].t)}</a>` : `<a class="btn primary" href="${pHref(0)}">${esc(L.start)}</a>`;
+    const sec = (key, label) => ptItem(2, esc(label), esc(S.sum[key]), S[key].map(pt => pPoint(slug, key, pt)).join(''), 'pt-sec');
+    const faq = ptItem(2, esc(L.faq), esc(S.sum.faq), S.faq.map(([q, a]) => ptItem(3, esc(q), '', `<p>${pText(a)}</p>`, 'pt-point pt-faq')).join(''), 'pt-sec');
     return `<article class="pitch pitch-stop">
-      <nav class="p-crumb no-print" aria-label="Breadcrumb"><a href="#journey">${esc(L.mapLink)}</a></nav>${pHead()}
+      <nav class="p-crumb no-print" aria-label="Breadcrumb"><a href="${'#journey' + (PITCH_PREVIEW ? '?media=preview' : '')}">${esc(L.mapLink)}</a></nav>${pHead()}${pPreviewNote()}
       <p class="p-kick">${esc(L.stopOf.replace('{n}', k))}</p>
       <h1 id="pTitle" tabindex="-1">${esc(title)}</h1>
       ${f && f.address ? `<p class="jaddr">${nt(f.address)}</p>` : ''}
       ${tag ? `<p class="p-state"><span class="jc-st ${c}">${esc(tag)}</span>${det ? ` <span class="jdetail">${esc(det)}</span>` : ''}</p>` : ''}
-      <p class="lede p-open">${pText(S.opening)}</p>
+      ${pSlot(slug, null)}
+      <p class="lede p-open">${pText(S.lead)}</p>
       ${links[k] ? `<div class="toolbar no-print"><button class="btn primary" type="button" data-pgo="${k}">${esc(L.goStep)}</button></div>` : ''}
       <nav class="no-print" aria-label="All stops"><ol class="p-dots">${dots}</ol></nav>
-      <section class="card"><h2>${esc(L.happens)}</h2>${S.happens.map(t => `<p>${pText(t)}</p>`).join('')}</section>
-      <section class="card"><h2>${esc(L.you)}</h2><ul>${S.you.map(t => `<li>${pText(t)}</li>`).join('')}</ul></section>
-      <section class="card"><h2>${esc(L.tim)}</h2><ul>${S.tim.map(t => `<li>${pText(t)}</li>`).join('')}</ul></section>
-      <section class="card"><h2>${esc(L.docs)}</h2><ul>${docs}</ul></section>
-      <section class="card p-faq"><h2>${esc(L.faq)}</h2>${S.faq.map(([q, a]) => `<div class="p-qa"><h3>${esc(q)}</h3><p>${pText(a)}</p></div>`).join('')}</section>
+      ${pAllTool()}
+      <div class="p-secs">${sec('happens', L.happens)}${sec('you', L.you)}${sec('tim', L.tim)}${sec('docs', L.docs)}${faq}</div>
       <section class="card p-next"><h2>${esc(L.nextHeading)}</h2>${i < 8 ? `<p><strong>${esc(JSTOPS[i + 1].t)}.</strong> ${esc(P.stops[i + 1].short)}</p>` : `<p>${esc(L.nextEnd)}</p>`}
-        <div class="toolbar no-print">${next}${prev}<a class="btn ghost" href="#journey">${esc(L.mapLink)}</a></div></section>
+        <div class="toolbar no-print">${next}${prev}<a class="btn ghost" href="${'#journey' + (PITCH_PREVIEW ? '?media=preview' : '')}">${esc(L.mapLink)}</a></div></section>
       ${pCta()}${pFoot()}</article>`;
   }
 
@@ -6251,8 +7422,9 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   }
   async function viewPitch() {
     const seq = ++PITCH_SEQ, keep = PITCH_ON, r = pitchRoute() || { slug: '', i: -1 };
+    PT_SEQ = 0;
     closeJourney(); JVIEW = {};
-    header('', '', 0); actions(false); PITCH_ON = true; setAgentNav();
+    header('', '', 0); actions(false); PITCH_ON = true; PITCH_PREVIEW = !!r.preview; setAgentNav();
     if (!keep) PITCH_CACHE = null;
     if (SESSION && !IS_AGENT && !PITCH_CACHE) {   // a signed-in vendor: only what the journey panel reads
       main().innerHTML = '<div class="loading">Loading...</div>';
@@ -6264,8 +7436,13 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     document.title = r.i >= 0 ? JSTOPS[r.i].t + ' · ' + base : base;
     main().innerHTML = (r.bad ? `<div class="card note tight"><p class="small" style="margin:0">${esc(P.labels.notFound)}</p></div>` : '') + (r.i >= 0 ? pStopHTML(r.i, f, st, links) : pMapHTML(f, c.choose, c.rows, st, links));
     window.scrollTo(0, 0); const h = $('#pTitle'); if (h) h.focus({ preventScroll: true });
-    pFillGuides(); btSync();
+    ptSync(); pFillGuides(); btSync();
   }
+  // open or close one section or point; the "Open all" link follows what is open
+  function ptSync() { const bs = $$('#main .pt-b'), tool = $('#main [data-ptall]'); if (!tool) return; const allOpen = bs.length > 0 && bs.every(b => b.getAttribute('aria-expanded') === 'true'); tool.textContent = allOpen ? PJ().labels.closeAll : PJ().labels.openAll; }
+  function ptSet(b, open) { b.setAttribute('aria-expanded', open ? 'true' : 'false'); const pn = document.getElementById(b.getAttribute('aria-controls')); if (pn) pn.dataset.open = open ? 'true' : 'false'; }
+  function ptToggle(b) { ptSet(b, b.getAttribute('aria-expanded') !== 'true'); ptSync(); }
+  function ptAll() { const bs = $$('#main .pt-b'), open = !bs.every(b => b.getAttribute('aria-expanded') === 'true'); bs.forEach(b => ptSet(b, open)); ptSync(); }
   const pNav = i => { const h = pHref(i); if (location.hash === h) viewPitch(); else location.hash = h; };
   async function pGo(k) {
     const l = PITCH_LINKS[k]; if (!l) return;
@@ -6278,6 +7455,9 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   }
   $('#main').addEventListener('click', async e => {
     if (!PITCH_ON) return;
+    const pb = e.target.closest('.pt-b'); if (pb) return ptToggle(pb);
+    const all = e.target.closest('[data-ptall]'); if (all) return ptAll(all);
+    const vid = e.target.closest('[data-pvid]'); if (vid) return pPlay(vid);
     const st = e.target.closest('.jstop[data-j]'); if (st) return pNav(+st.dataset.j - 1);
     const go = e.target.closest('[data-pgo]'); if (go) return pGo(+go.dataset.pgo);
     const pk = e.target.closest('[data-ppick]'); if (pk) { PITCH_PID = pk.dataset.ppick || null; PITCH_CACHE = null; PITCH_ON = true; return viewPitch(); }
