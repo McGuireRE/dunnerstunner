@@ -3,7 +3,7 @@
 The journey pages have empty slots where a photo or a video can go. Nothing shows until you fill a slot, and an empty slot is
 invisible to sellers. To see where media could go, open any journey page with `?media=preview` on the end, for example
 `https://packages.dunnerstunner.co.nz/onboarding/#journey/meeting-tim?media=preview`. Every empty slot then shows as a dashed box
-with a suggestion for what would suit it. Only you will see that; sellers never do.
+with a suggestion for what would suit it. Sellers only see those boxes if they add that to the address, and nothing private shows.
 
 ## Photos
 
