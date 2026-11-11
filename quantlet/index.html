@@ -1,0 +1,556 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Quantlet Control</title>
+<style>
+/* Layout: one narrow column. Status band on top, protocol list, then the run panel. */
+:root{
+  --bg:#f3f2f7; --panel:#ffffff; --ink:#1c1a26; --muted:#6a667a; --line:#dcd9e6;
+  --accent:#5b3fa8; --accent-ink:#ffffff; --good:#1f7a4d; --warn:#9a5b00; --bad:#b3261e;
+  --uv:#7b3fe4; --bl:#2f6fed; --gr:#2a9d57; --re:#d23b2f; --ir:#7a1f1f;
+  --font:"Segoe UI",system-ui,-apple-system,Roboto,Helvetica,Arial,sans-serif;
+  --mono:ui-monospace,"Cascadia Mono",Consolas,Menlo,monospace;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --bg:#14121c; --panel:#1e1b29; --ink:#eceaf4; --muted:#a09bb3; --line:#353047;
+    --accent:#a48bf0; --accent-ink:#17122a; --good:#5fd39a; --warn:#f0b65a; --bad:#ff8a80;
+    --uv:#a57bff; --bl:#6f9dff; --gr:#5fd08a; --re:#ff7468; --ir:#c26a6a;
+    color-scheme:dark;
+  }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 var(--font)}
+main{max-width:720px;margin:0 auto;padding:24px 16px 56px;display:flex;flex-direction:column;gap:16px}
+h1{font-size:22px;margin:0;letter-spacing:-.01em}
+h2{font-size:13px;margin:0 0 10px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600}
+p{margin:0}
+.sub{color:var(--muted);font-size:13px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px}
+.row{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.spread{justify-content:space-between}
+button{font:inherit;border-radius:9px;border:1px solid var(--line);background:var(--panel);color:var(--ink);padding:9px 14px;cursor:pointer}
+button:hover:not(:disabled){border-color:var(--accent)}
+button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+button:disabled{opacity:.5;cursor:not-allowed}
+button.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:600}
+button.stop{background:var(--bad);color:#fff;border-color:var(--bad);font-weight:600}
+button.link{border:0;background:none;padding:0;color:var(--accent);text-decoration:underline}
+.pill{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:3px 10px;font-size:12px;font-weight:600;border:1px solid var(--line);color:var(--muted)}
+.pill::before{content:"";width:8px;height:8px;border-radius:50%;background:currentColor}
+.pill.on{color:var(--good);border-color:var(--good)}
+.pill.busy{color:var(--warn);border-color:var(--warn)}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-top:14px}
+.stat{border:1px solid var(--line);border-radius:9px;padding:8px 10px;min-width:0}
+.stat b{display:block;font-size:17px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.stat span{font-size:12px;color:var(--muted)}
+.notice{border-left:3px solid var(--warn);padding:8px 12px;background:var(--bg);border-radius:0 8px 8px 0;font-size:13px}
+.notice.bad{border-color:var(--bad)}
+.plist{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+.pbtn{text-align:left;padding:10px 12px;display:flex;flex-direction:column;gap:2px;min-width:0}
+.pbtn b{font-weight:600;overflow-wrap:anywhere}
+.pbtn span{font-size:12px;color:var(--muted)}
+.pbtn[aria-pressed="true"]{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+.leds{display:grid;gap:6px;margin:12px 0}
+.led{display:grid;grid-template-columns:76px 1fr 96px;gap:10px;align-items:center;font-size:13px}
+.bar{height:8px;border-radius:4px;background:var(--line);overflow:hidden}
+.bar i{display:block;height:100%;border-radius:4px}
+.led em{font-style:normal;color:var(--muted);text-align:right;font-variant-numeric:tabular-nums}
+.kv{display:flex;flex-wrap:wrap;gap:6px 18px;font-size:13px;color:var(--muted)}
+.kv b{color:var(--ink);font-weight:600}
+.edit{display:grid;gap:10px;margin-top:12px}
+.edit label{display:grid;grid-template-columns:76px 1fr;gap:10px;align-items:center;font-size:13px}
+.edit .ledrow{display:grid;grid-template-columns:76px 1fr 44px 92px;gap:10px;align-items:center;font-size:13px}
+input[type=text],input[type=number],select{font:inherit;padding:6px 8px;border-radius:7px;border:1px solid var(--line);background:var(--bg);color:var(--ink);min-width:0;width:100%}
+input[type=range]{width:100%;accent-color:var(--accent)}
+.timer{font-size:44px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-.02em;line-height:1.1}
+pre{margin:10px 0 0;font:12px/1.45 var(--mono);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px;max-height:240px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere}
+details summary{cursor:pointer;color:var(--muted);font-size:13px}
+[hidden]{display:none!important}
+@media (max-width:460px){.edit .ledrow{grid-template-columns:60px 1fr 40px 84px}.led{grid-template-columns:60px 1fr 88px}.timer{font-size:36px}}
+</style>
+</head>
+<body>
+<main>
+  <header class="row spread">
+    <div>
+      <h1>Quantlet Control</h1>
+      <p class="sub">Runs the original app's protocols over Bluetooth from Chrome.</p>
+    </div>
+    <span id="connPill" class="pill">Not connected</span>
+  </header>
+
+  <div id="unsupported" class="notice bad" hidden>
+    This browser can't use Bluetooth from a web page. Open this page in <b>Google Chrome</b> (or Microsoft Edge on a PC), with Bluetooth switched on.
+  </div>
+
+  <section class="panel" aria-labelledby="h-conn">
+    <h2 id="h-conn">Device</h2>
+    <div class="row">
+      <button id="btnConnect" class="primary">Connect to Quantlet</button>
+      <button id="btnDisconnect" hidden>Disconnect</button>
+      <span id="connMsg" class="sub">Press the power button on the Quantlet so its light flashes blue, then press Connect.</span>
+    </div>
+    <p class="sub" style="margin-top:8px">Not in the list? <button id="btnConnectAll" class="link">Show every Bluetooth device nearby</button> (the Quantlet's name starts with "IMB").</p>
+    <div class="stats" id="stats" hidden>
+      <div class="stat"><b id="sBatt">–</b><span>Battery</span></div>
+      <div class="stat"><b id="sVolt">–</b><span>Battery volts</span></div>
+      <div class="stat"><b id="sFw">–</b><span>Firmware</span></div>
+      <div class="stat"><b id="sName">–</b><span>Device name</span></div>
+    </div>
+    <div id="silent" class="notice" style="margin-top:12px" hidden>
+      Connected, but the Quantlet hasn't answered any questions yet. Open "Connection log" below, press Copy, and send it to Claude.
+    </div>
+  </section>
+
+  <section class="panel" id="runPanel" aria-labelledby="h-run" hidden>
+    <h2 id="h-run">Running now</h2>
+    <div class="row spread">
+      <div>
+        <div class="timer" id="tRemain">--:--</div>
+        <p class="sub"><span id="tName">–</span> · <span id="tElapsed">0:00</span> elapsed</p>
+      </div>
+      <div class="row">
+        <button id="btnStop" class="stop">Stop protocol</button>
+      </div>
+    </div>
+    <p id="passiveNote" class="notice" style="margin-top:12px" hidden></p>
+    <div class="stats">
+      <div class="stat"><b id="sSkin">–</b><span>Skin sensor (device reading)</span></div>
+      <div class="stat"><b id="sTec">–</b><span>Cooling plate sensor (device reading)</span></div>
+    </div>
+  </section>
+
+  <section class="panel" aria-labelledby="h-prot">
+    <h2 id="h-prot">Protocols</h2>
+    <div class="plist" id="plist"></div>
+  </section>
+
+  <section class="panel" aria-labelledby="h-sel">
+    <h2 id="h-sel">Selected protocol</h2>
+    <div class="row spread">
+      <b id="selName" style="font-size:18px">–</b>
+      <button id="btnStart" class="primary" disabled>Start on Quantlet</button>
+    </div>
+    <div id="viewBox">
+      <div class="leds" id="leds"></div>
+      <div class="kv" id="kv"></div>
+    </div>
+    <div id="editBox" class="edit" hidden>
+      <label>Name <input type="text" id="eName" maxlength="16"></label>
+      <label>Minutes <input type="number" id="eMin" min="1" max="240" step="1"></label>
+      <label>Duty cycle <span class="row" style="flex-wrap:nowrap"><input type="range" id="eDuty" min="10" max="100" step="10"><em id="eDutyV" style="font-style:normal;width:44px;text-align:right">50%</em></span></label>
+      <label>Cooling <select id="eTec"><option value="100">On</option><option value="0">Off</option></select></label>
+      <div id="eLeds" style="display:grid;gap:8px"></div>
+      <div class="row"><button id="btnSave">Save custom protocol</button><button id="btnReset">Reset to original</button><span id="saveMsg" class="sub"></span></div>
+    </div>
+    <label class="row" style="font-size:13px;margin-top:12px;gap:8px"><input type="checkbox" id="optPassive"> Passive mode: disconnect Bluetooth 15 seconds after the protocol starts</label>
+    <p id="startMsg" class="sub" style="margin-top:10px">Connect first, then choose a protocol and press Start.</p>
+  </section>
+
+  <p class="sub">The manual says to use the Quantlet once per day, and the performance protocols in the daytime only. The settings here are the same ones the original app sent. This page is unofficial and hasn't been tested by the makers.</p>
+
+  <section class="panel">
+    <details id="logBox">
+      <summary>Connection log (for troubleshooting)</summary>
+      <div class="row" style="margin-top:10px"><button id="btnCopy">Copy log</button><span id="copyMsg" class="sub"></span></div>
+      <pre id="log" tabindex="0"></pre>
+    </details>
+  </section>
+</main>
+
+<script>
+"use strict";
+// Protocol recovered from The Quantlet Android app v1.0.6 (com.quantumdynamics.quantlet):
+// u-blox serial port service; plain text lines "name=value\r", written 20 bytes at a time.
+const SVC  = "2456e1b9-26e2-8f83-e744-f34f01e9d701";
+const FIFO = "2456e1b9-26e2-8f83-e744-f34f01e9d703";
+const REPLY_TIMEOUT = 2000;
+
+const LEDS = [
+  {key:"uv", cmd:"ledUV", label:"Violet",   css:"--uv"},
+  {key:"gr", cmd:"ledGR", label:"Green",    css:"--gr"},
+  {key:"bl", cmd:"ledBL", label:"Blue",     css:"--bl"},
+  {key:"re", cmd:"ledDR", label:"Red",      css:"--re"},
+  {key:"ir", cmd:"ledIR", label:"Infrared", css:"--ir"}
+];
+const HZ = [[1,"1 Hz"],[5,"5 Hz"],[10,"10 Hz"],[100,"100 Hz"],[-1,"Continuous"]];
+// name, minutes, duty, tec, powers [uv,gr,bl,re,ir], hz (same for all five in the built-ins)
+function P(id,name,min,duty,tec,pw,hz,custom){
+  return {id,name,min,duty,tec,custom:!!custom,
+    uv:{p:pw[0],hz}, gr:{p:pw[1],hz}, bl:{p:pw[2],hz}, re:{p:pw[3],hz}, ir:{p:pw[4],hz}};
+}
+const BUILTIN = [
+  P("p30","Performance 30",30,100,100,[100,100,100,100,100],-1),
+  P("p60","Performance 60",60,100,100,[100,100,100,100,100],-1),
+  P("p90","Performance 90",90,80,-66,[80,80,80,80,80],100),
+  P("p120","Performance 120",120,60,-75,[60,60,60,60,60],100),
+  P("well","Wellness",30,50,0,[0,100,0,100,100],10),
+  P("sleep","Sleep / Relax",30,10,0,[0,0,0,20,100],10),
+  P("jet","Jetlag",30,50,0,[100,100,0,100,100],100),
+  P("muscle","Muscle Activation",15,50,0,[0,0,0,100,100],-1),
+  P("spot","Spot Treatment",15,50,0,[0,0,100,100,100],-1)
+];
+const CUSTOM_DEFAULTS = [
+  P("c1","Custom 1",20,50,100,[20,20,20,60,60],10,true),
+  P("c2","Custom 2",30,50,100,[20,20,20,60,60],10,true),
+  P("c3","Custom 3",60,50,100,[20,20,20,60,60],10,true)
+];
+const clone = o => JSON.parse(JSON.stringify(o));
+let customs = clone(CUSTOM_DEFAULTS);
+try{
+  const saved = JSON.parse(localStorage.getItem("quantlet.customs")||"null");
+  if(Array.isArray(saved) && saved.length===3) customs = saved.map((s,i)=>sanitise(s,CUSTOM_DEFAULTS[i]));
+}catch(e){}
+
+function clampInt(v,lo,hi,dflt){ v=parseInt(v,10); if(!Number.isFinite(v)) return dflt; return Math.min(hi,Math.max(lo,v)); }
+function cleanName(s,dflt){ s=String(s==null?"":s).replace(/[^A-Za-z0-9 \/\-]/g,"").trim().slice(0,16); return s||dflt; }
+function sanitise(s,d){
+  const o = clone(d);
+  if(!s || typeof s!=="object") return o;
+  o.name = cleanName(s.name,d.name);
+  o.min  = clampInt(s.min,1,240,d.min);
+  o.duty = clampInt(s.duty,10,100,d.duty);
+  o.tec  = (parseInt(s.tec,10)===0)?0:100;
+  for(const L of LEDS){
+    const src = s[L.key]||{};
+    o[L.key].p  = clampInt(src.p,0,100,d[L.key].p);
+    const hz = parseInt(src.hz,10);
+    o[L.key].hz = HZ.some(h=>h[0]===hz)?hz:d[L.key].hz;
+  }
+  return o;
+}
+
+const $ = id => document.getElementById(id);
+const st = {device:null, ch:null, connected:false, running:false, replies:0,
+            remain:0, elapsed:0, selected:"p30", chain:Promise.resolve(), waiter:null,
+            rx:"", unit:"C", skinK:NaN, tecK:NaN, passiveT:null, dropped:false, pollT:null, tickT:null, battT:null, lastPoll:0};
+
+/* ---------- log ---------- */
+const logLines=[];
+function log(tag,msg){
+  const t=new Date().toLocaleTimeString("en-NZ",{hour12:false});
+  logLines.push(t+" "+tag+" "+msg);
+  if(logLines.length>400) logLines.shift();
+  const el=$("log"); el.textContent=logLines.join("\n"); el.scrollTop=el.scrollHeight;
+}
+
+/* ---------- bluetooth ---------- */
+async function connect(showAll){
+  if(!navigator.bluetooth){ $("unsupported").hidden=false; return; }
+  setPill("busy","Connecting");
+  $("connMsg").textContent="Choose the Quantlet (name starts with IMB) in the browser's list.";
+  try{
+    const opts = showAll ? {acceptAllDevices:true, optionalServices:[SVC]}
+                         : {filters:[{namePrefix:"IMB"}], optionalServices:[SVC]};
+    const device = await navigator.bluetooth.requestDevice(opts);
+    st.device = device;
+    log("--","Chosen device: "+(device.name||"(no name)"));
+    device.addEventListener("gattserverdisconnected", onDisconnected);
+    $("connMsg").textContent="Connecting to "+(device.name||"device")+"...";
+    const server = await device.gatt.connect();
+    const svc = await server.getPrimaryService(SVC);
+    const ch = await svc.getCharacteristic(FIFO);
+    const pr = ch.properties;
+    log("--","Serial channel found. write="+pr.write+" writeNoResp="+pr.writeWithoutResponse+" notify="+pr.notify+" indicate="+pr.indicate);
+    ch.addEventListener("characteristicvaluechanged", onData);
+    await ch.startNotifications();
+    st.ch = ch; st.connected = true; st.replies = 0; st.rx = "";
+    st.dropped = false; clearInterval(st.tickT);
+    $("runPanel").hidden = true; $("btnStop").hidden = false; $("passiveNote").hidden = true;
+    setPill("on","Connected");
+    $("connMsg").textContent="Connected. Reading the device...";
+    $("btnConnect").hidden=true; $("btnDisconnect").hidden=false; $("stats").hidden=false;
+    $("sName").textContent = device.name||"–";
+    refreshStart();
+    await readEverything();
+    if(st.replies===0){ $("silent").hidden=false; $("connMsg").textContent="Connected, but no replies yet."; $("logBox").open=true; }
+    else $("connMsg").textContent = st.running ? "Connected. A protocol is already running." : "Connected and ready.";
+    st.battT = setInterval(()=>{ if(st.connected){ ask("deviceVolts"); ask("chargePercent"); ask("protocolRunning"); } }, 30000);
+  }catch(e){
+    log("!!", (e&&e.name?e.name+": ":"")+(e&&e.message?e.message:String(e)));
+    if(e && e.name==="NotFoundError"){
+      setPill("", "Not connected");
+      $("connMsg").textContent="No device was chosen. Make sure the Quantlet's light is flashing blue, then try again.";
+    }else{
+      setPill("", "Not connected");
+      $("connMsg").textContent="Couldn't connect: "+(e&&e.message?e.message:e)+" Turn the Quantlet off and on, then try again.";
+      $("logBox").open=true;
+      try{ if(st.device && st.device.gatt.connected) st.device.gatt.disconnect(); }catch(_){}
+    }
+  }
+}
+function onDisconnected(){
+  log("--","Disconnected");
+  st.connected=false; st.ch=null; st.running=false;
+  clearInterval(st.pollT); clearInterval(st.tickT); clearInterval(st.battT);
+  if(st.waiter){ const w=st.waiter; st.waiter=null; clearTimeout(w.timer); w.resolve(null); }
+  setPill("", "Not connected");
+  $("btnConnect").hidden=false; $("btnDisconnect").hidden=true; $("runPanel").hidden=true;
+  $("connMsg").textContent="Disconnected. A protocol that was started keeps running on the Quantlet. Press Connect to reconnect.";
+  clearTimeout(st.passiveT);
+  if(st.dropped && remainingNow()>0){
+    // Passive mode: we hung up on purpose. Keep an estimated countdown on screen.
+    $("runPanel").hidden=false; $("btnStop").hidden=true;
+    $("passiveNote").hidden=false;
+    $("passiveNote").textContent="Passive mode: Bluetooth is disconnected and the protocol carries on by itself. The countdown is this page's estimate. To stop early, press Connect and then Stop.";
+    $("connMsg").textContent="Disconnected on purpose (passive mode). Press Connect if you want to check in or stop the protocol.";
+    st.tickT=setInterval(()=>{ drawTimer(); if(remainingNow()<=0) endPassive(); },1000);
+  }else endPassive();
+  refreshStart();
+}
+function remainingNow(){ return st.remain - (st.lastPoll ? (Date.now()-st.lastPoll)/1000 : 0); }
+function endPassive(){
+  st.dropped=false; clearTimeout(st.passiveT);
+  $("passiveNote").hidden=true; $("btnStop").hidden=false;
+  if(!st.connected){ clearInterval(st.tickT); $("runPanel").hidden=true; }
+}
+function passiveDrop(){
+  if(!st.connected || !st.running) return;
+  log("--","Passive mode: disconnecting Bluetooth");
+  st.dropped=true;
+  try{ st.device.gatt.disconnect(); }catch(e){ st.dropped=false; log("!!","disconnect failed: "+(e.message||e)); }
+}
+function onData(ev){
+  const dv = ev.target.value;
+  let s=""; for(let i=0;i<dv.byteLength;i++) s+=String.fromCharCode(dv.getUint8(i));
+  st.rx += s;
+  if(st.rx.indexOf("AT*")>=0){ log("RX",JSON.stringify(st.rx)+" (radio message, ignored)"); st.rx=""; return; }
+  let i;
+  while((i=st.rx.indexOf("\r"))>=0){
+    const line = st.rx.slice(0,i).replace(/\n/g,"").trim();
+    st.rx = st.rx.slice(i+1);
+    if(line) handleLine(line);
+  }
+  if(st.rx.length>600) st.rx="";
+}
+async function writeRaw(text){
+  const ch = st.ch; if(!ch) throw new Error("Not connected");
+  const bytes = new TextEncoder().encode(text);
+  for(let o=0;o<bytes.length;o+=20){
+    const part = bytes.slice(o,o+20);
+    if(ch.properties.write && ch.writeValueWithResponse) await ch.writeValueWithResponse(part);
+    else if(ch.writeValueWithoutResponse) await ch.writeValueWithoutResponse(part);
+    else await ch.writeValue(part);
+  }
+}
+// Send one line and wait for the device's reply (or a timeout) before the next one goes out.
+function send(name,value,isSet){
+  const job = async ()=>{
+    if(!st.connected) return null;
+    const text = name+"="+(value==null?"":value);
+    const reply = new Promise(resolve=>{
+      const w={name:name.toLowerCase(), any:!!isSet, resolve};
+      w.timer=setTimeout(()=>{ if(st.waiter===w){ st.waiter=null; log("..","no reply to "+name); resolve(null); } }, REPLY_TIMEOUT);
+      st.waiter=w;
+    });
+    log("TX",text);
+    try{ await writeRaw(text+"\r"); }
+    catch(e){ log("!!","write failed: "+(e.message||e)); if(st.waiter){ clearTimeout(st.waiter.timer); st.waiter=null; } return null; }
+    return reply;
+  };
+  st.chain = st.chain.then(job, job);
+  return st.chain;
+}
+const ask = name => send(name,"",false);
+const set = (name,value) => send(name,value,true);
+
+function handleLine(line){
+  log("RX",line);
+  st.replies++; $("silent").hidden=true;
+  const eq=line.indexOf("=");
+  const key = eq<0 ? line : line.slice(0,eq);
+  const val = eq<0 ? "" : line.slice(eq+1).trim();
+  const w=st.waiter;
+  if(w && (w.any || w.name===key.toLowerCase())){ st.waiter=null; clearTimeout(w.timer); w.resolve(val); }
+  if(eq<0 || val==="No Data") return;
+  const n=parseInt(val,10);
+  switch(key){
+    case "version": $("sFw").textContent=val||"–"; break;
+    case "deviceVolts": if(Number.isFinite(n)) $("sVolt").textContent=(n/1000).toFixed(2)+" V"; break;
+    case "chargePercent": if(Number.isFinite(n)) $("sBatt").textContent=n+"%"; break;
+    case "protocolName": if(val) $("tName").textContent=val; break;
+    case "protocolRunning": if(Number.isFinite(n)) setRunning(n>0); break;
+    case "startProtocol": setRunning(true); break;
+    case "stopProtocol": setRunning(false); break;
+    case "getData": {
+      const f=val.split(",");
+      if(f.length===4){
+        const el=parseInt(f[0],10), rem=parseInt(f[1],10);
+        if(Number.isFinite(el)) st.elapsed=el;
+        if(Number.isFinite(rem)) st.remain=rem;
+        st.lastPoll=Date.now();
+        st.skinK=parseFloat(f[2]); st.tecK=parseFloat(f[3]); drawTemps();
+        drawTimer();
+      }
+      break; }
+  }
+}
+// Firmware 1.0.2.2 sends plain numbers (e.g. 10.2 and -2.3), not the kelvin values the old app
+// expected, and the unit is unconfirmed. Show them exactly as sent.
+function fmtTemp(v){ return Number.isFinite(v) ? v.toFixed(1) : "–"; }
+function drawTemps(){ $("sSkin").textContent=fmtTemp(st.skinK); $("sTec").textContent=fmtTemp(st.tecK); }
+function fmtTime(s){ s=Math.max(0,Math.round(s)); const h=Math.floor(s/3600), m=Math.floor(s%3600/60), x=s%60;
+  return (h?h+":"+String(m).padStart(2,"0"):m)+":"+String(x).padStart(2,"0"); }
+function drawTimer(){
+  const drift = st.lastPoll ? (Date.now()-st.lastPoll)/1000 : 0;
+  $("tRemain").textContent=fmtTime(st.remain-drift);
+  $("tElapsed").textContent=fmtTime(st.elapsed+drift);
+}
+function setRunning(on){
+  if(on===st.running) return;
+  st.running=on;
+  $("runPanel").hidden=!on;
+  clearInterval(st.pollT); clearInterval(st.tickT);
+  if(on){
+    st.pollT=setInterval(()=>{ if(st.connected){ ask("protocolRunning"); ask("getData"); } },5000);
+    st.tickT=setInterval(drawTimer,1000);
+    ask("getData");
+  }else if(st.connected){
+    clearTimeout(st.passiveT); $("passiveNote").hidden=true;
+    $("startMsg").textContent="Protocol finished or stopped.";
+  }
+  refreshStart();
+}
+async function readEverything(){
+  for(const c of ["version","deviceVolts","chargePercent","protocolName","protocolRunning"]) await ask(c);
+}
+
+/* ---------- start / stop ---------- */
+async function startProtocol(){
+  const p = getProtocol(st.selected); if(!p || !st.connected || st.running) return;
+  $("btnStart").disabled=true;
+  $("startMsg").textContent="Sending "+p.name+" to the Quantlet...";
+  const before = st.replies;
+  // Same commands, in the same order, as the original app.
+  await set("protocolDuration", p.min*60);
+  await set("protocolName", p.name);
+  await set("dutyCycle", p.duty);
+  await set("tecEnabled", p.tec);
+  for(const L of LEDS) await set(L.cmd, p[L.key].p+","+p[L.key].hz);
+  await ask("protocolName");
+  st.remain=p.min*60; st.elapsed=0; st.lastPoll=Date.now();
+  $("tName").textContent=p.name; st.skinK=NaN; st.tecK=NaN; drawTemps();
+  await ask("startProtocol");
+  await ask("protocolRunning");
+  if(st.running){
+    $("startMsg").textContent=p.name+" is running."; drawTimer();
+    if($("optPassive").checked){
+      clearTimeout(st.passiveT); st.passiveT=setTimeout(passiveDrop,15000);
+      $("passiveNote").hidden=false; $("passiveNote").textContent="Passive mode is on. Bluetooth will disconnect in 15 seconds.";
+    }
+  }
+  else if(st.replies===before){ $("startMsg").textContent="The Quantlet didn't answer, so the protocol may not have started. Check the device's lights, then open the connection log below and send it to Claude."; $("logBox").open=true; }
+  else { $("startMsg").textContent="Settings were sent, but the Quantlet doesn't report a protocol running. Check the device, then send Claude the connection log below."; $("logBox").open=true; }
+  refreshStart();
+}
+async function stopProtocol(){
+  $("btnStop").disabled=true;
+  await ask("stopProtocol");
+  await ask("protocolRunning");
+  $("btnStop").disabled=false;
+}
+
+/* ---------- UI ---------- */
+function setPill(cls,text){ const p=$("connPill"); p.className="pill"+(cls?" "+cls:""); p.textContent=text; }
+function allProtocols(){ return BUILTIN.concat(customs); }
+function getProtocol(id){ return allProtocols().find(p=>p.id===id); }
+function coolingText(t){ return t===0 ? "Off" : t===100 ? "On" : "On, preset level "+t; }
+function hzText(h){ const f=HZ.find(x=>x[0]===h); return f?f[1]:h+" Hz"; }
+function refreshStart(){
+  const b=$("btnStart");
+  b.disabled = !st.connected || st.running;
+  if(!st.connected) $("startMsg").textContent="Connect first, then choose a protocol and press Start.";
+  else if(st.running) $("startMsg").textContent="A protocol is running. Stop it before starting another.";
+  else if(/^Connect first|^A protocol is running/.test($("startMsg").textContent)) $("startMsg").textContent="Ready. Press Start to send this protocol to the Quantlet.";
+}
+function renderList(){
+  const box=$("plist"); box.textContent="";
+  for(const p of allProtocols()){
+    const b=document.createElement("button"); b.className="pbtn"; b.type="button";
+    b.setAttribute("aria-pressed", String(p.id===st.selected));
+    const n=document.createElement("b"); n.textContent=p.name;
+    const s=document.createElement("span"); s.textContent=p.min+" min"+(p.custom?" · custom":"");
+    b.append(n,s); b.addEventListener("click",()=>{ st.selected=p.id; renderList(); renderSelected(); });
+    box.append(b);
+  }
+}
+function renderSelected(){
+  const p=getProtocol(st.selected); if(!p) return;
+  $("selName").textContent=p.name;
+  $("viewBox").hidden=p.custom; $("editBox").hidden=!p.custom; $("saveMsg").textContent="";
+  if(!p.custom){
+    const leds=$("leds"); leds.textContent="";
+    for(const L of LEDS){
+      const row=document.createElement("div"); row.className="led";
+      const a=document.createElement("span"); a.textContent=L.label;
+      const bar=document.createElement("div"); bar.className="bar";
+      const i=document.createElement("i"); i.style.width=p[L.key].p+"%"; i.style.background="var("+L.css+")"; bar.append(i);
+      const e=document.createElement("em"); e.textContent=p[L.key].p ? p[L.key].p+"% · "+hzText(p[L.key].hz) : "Off";
+      row.append(a,bar,e); leds.append(row);
+    }
+    const kv=$("kv"); kv.textContent="";
+    for(const [k,v] of [["Time",p.min+" min"],["Duty cycle",p.duty+"%"],["Cooling",coolingText(p.tec)]]){
+      const s=document.createElement("span"); const b=document.createElement("b"); b.textContent=v; s.append(k+" ",b); kv.append(s);
+    }
+  }else{
+    $("eName").value=p.name; $("eMin").value=p.min; $("eDuty").value=p.duty; $("eDutyV").textContent=p.duty+"%"; $("eTec").value=String(p.tec===0?0:100);
+    for(const L of LEDS){ $("eP_"+L.key).value=p[L.key].p; $("eV_"+L.key).textContent=p[L.key].p+"%"; $("eH_"+L.key).value=String(p[L.key].hz); }
+  }
+}
+function buildEditor(){
+  const box=$("eLeds");
+  for(const L of LEDS){
+    const row=document.createElement("div"); row.className="ledrow";
+    const a=document.createElement("span"); a.textContent=L.label;
+    const r=document.createElement("input"); r.type="range"; r.min=0; r.max=100; r.step=10; r.id="eP_"+L.key; r.setAttribute("aria-label",L.label+" power"); r.style.accentColor="var("+L.css+")";
+    const v=document.createElement("span"); v.id="eV_"+L.key; v.style.textAlign="right";
+    const h=document.createElement("select"); h.id="eH_"+L.key; h.setAttribute("aria-label",L.label+" pulse rate");
+    for(const [val,txt] of HZ){ const o=document.createElement("option"); o.value=String(val); o.textContent=txt; h.append(o); }
+    r.addEventListener("input",()=>{ v.textContent=r.value+"%"; readEditor(); });
+    h.addEventListener("change",readEditor);
+    row.append(a,r,v,h); box.append(row);
+  }
+  $("eDuty").addEventListener("input",()=>{ $("eDutyV").textContent=$("eDuty").value+"%"; readEditor(); });
+  for(const id of ["eName","eMin","eTec"]) $(id).addEventListener("change",readEditor);
+}
+// Keep the in-memory custom protocol in step with the form, so Start uses what is on screen.
+function readEditor(){
+  const idx=customs.findIndex(c=>c.id===st.selected); if(idx<0) return;
+  const raw={name:$("eName").value, min:$("eMin").value, duty:$("eDuty").value, tec:$("eTec").value};
+  for(const L of LEDS) raw[L.key]={p:$("eP_"+L.key).value, hz:$("eH_"+L.key).value};
+  customs[idx]=sanitise(raw,CUSTOM_DEFAULTS[idx]);
+  $("selName").textContent=customs[idx].name; $("saveMsg").textContent="Not saved yet";
+}
+function saveCustoms(){
+  readEditor();
+  let msg="Saved in this browser";
+  try{ localStorage.setItem("quantlet.customs",JSON.stringify(customs)); }
+  catch(e){ msg="Couldn't save here, but it will work until you close the page"; }
+  renderList(); renderSelected(); $("saveMsg").textContent=msg;
+}
+
+$("btnConnect").addEventListener("click",()=>connect(false));
+$("btnConnectAll").addEventListener("click",()=>connect(true));
+$("btnDisconnect").addEventListener("click",()=>{ try{ st.device.gatt.disconnect(); }catch(e){} });
+$("btnStart").addEventListener("click",startProtocol);
+$("btnStop").addEventListener("click",stopProtocol);
+drawTemps();
+$("btnSave").addEventListener("click",saveCustoms);
+try{ $("optPassive").checked = localStorage.getItem("quantlet.passive")==="1"; }catch(e){}
+$("optPassive").addEventListener("change",()=>{ try{ localStorage.setItem("quantlet.passive",$("optPassive").checked?"1":"0"); }catch(e){} });
+$("btnReset").addEventListener("click",()=>{ const i=customs.findIndex(c=>c.id===st.selected); if(i>=0){ customs[i]=clone(CUSTOM_DEFAULTS[i]); renderList(); renderSelected(); $("saveMsg").textContent="Reset. Press Save to keep it."; } });
+$("btnCopy").addEventListener("click",async()=>{
+  try{ await navigator.clipboard.writeText(logLines.join("\n")); $("copyMsg").textContent="Copied"; }
+  catch(e){ const r=document.createRange(); r.selectNodeContents($("log")); const s=getSelection(); s.removeAllRanges(); s.addRange(r); $("copyMsg").textContent="Selected. Press Ctrl+C to copy."; }
+});
+
+buildEditor(); renderList(); renderSelected();
+if(!navigator.bluetooth){ $("unsupported").hidden=false; $("btnConnect").disabled=true; $("btnConnectAll").disabled=true; }
+log("--","Page loaded. Bluetooth available: "+(!!navigator.bluetooth)+". Secure context: "+window.isSecureContext);
+</script>
+</body>
+</html>
