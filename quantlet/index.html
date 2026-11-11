@@ -28,6 +28,7 @@ main{max-width:720px;margin:0 auto;padding:24px 16px 56px;display:flex;flex-dire
 h1{font-size:22px;margin:0;letter-spacing:-.01em}
 h2{font-size:13px;margin:0 0 10px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600}
 p{margin:0}
+a{color:var(--accent)}
 .sub{color:var(--muted);font-size:13px}
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px}
 .row{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
@@ -152,6 +153,14 @@ details summary{cursor:pointer;color:var(--muted);font-size:13px}
   </section>
 
   <p class="sub">The manual says to use the Quantlet once per day, and the performance protocols in the daytime only. The settings here are the same ones the original app sent. This page is unofficial and hasn't been tested by the makers.</p>
+
+  <section class="panel" id="offlinePanel" hidden>
+    <h2>Offline use</h2>
+    <p id="offlineMsg" class="sub">Checking whether this page is saved for offline use...</p>
+    <p class="sub" style="margin-top:8px">On a phone or tablet, open Chrome's menu and choose "Add to Home screen" to get an icon that opens this page with no internet. Bluetooth still needs to be on, including in flight mode.</p>
+    <p style="margin-top:12px"><a id="dlLink" href="./index.html" download="Quantlet-Control.html">Download a copy for a Windows PC or Mac</a></p>
+    <p class="sub" style="margin-top:4px">The downloaded file opens in Chrome or Edge on a computer and needs no internet. It is the same page, so you can pass it on.</p>
+  </section>
 
   <section class="panel">
     <details id="logBox">
@@ -548,6 +557,16 @@ $("btnCopy").addEventListener("click",async()=>{
   catch(e){ const r=document.createRange(); r.selectNodeContents($("log")); const s=getSelection(); s.removeAllRanges(); s.addRange(r); $("copyMsg").textContent="Selected. Press Ctrl+C to copy."; }
 });
 
+// On the website: keep a copy for offline use and offer the download. A saved local copy skips this.
+if(location.protocol==="https:" || location.hostname==="localhost"){
+  $("offlinePanel").hidden=false;
+  const l=document.createElement("link"); l.rel="manifest"; l.href="manifest.webmanifest"; document.head.append(l);
+  if("serviceWorker" in navigator){
+    navigator.serviceWorker.register("sw.js").then(()=>navigator.serviceWorker.ready).then(()=>{
+      $("offlineMsg").textContent="This page is saved on this device and will open without internet.";
+    }).catch(()=>{ $("offlineMsg").textContent="This browser couldn't save the page for offline use. It will need internet to open."; });
+  }else $("offlineMsg").textContent="This browser can't save the page for offline use. It will need internet to open.";
+}
 buildEditor(); renderList(); renderSelected();
 if(!navigator.bluetooth){ $("unsupported").hidden=false; $("btnConnect").disabled=true; $("btnConnectAll").disabled=true; }
 log("--","Page loaded. Bluetooth available: "+(!!navigator.bluetooth)+". Secure context: "+window.isSecureContext);
