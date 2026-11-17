@@ -97,3 +97,24 @@ agreements/<agreement id>/signatures/... (vendors may upload their own signature
 - The review date is not stored as a field. It is worked out as the commencement (`config.start`, else the signing date) plus
   90 days, moved by any signed variation that changes `reviewUntil` (see `currentTerms` in app.js). Tim ticking a reminder off is an
   agreement event of kind `review_checked` with the date.
+
+## Property inspection (migration 012, written and tested in a rollback block on the live project; to be applied with Tim's OK)
+- `property_inspections`: Tim's walk-round of a property, before or after listing. `facts` (description and disclosure keys, as on
+  the property file), `declaration` (Vendor Declaration keys to `{a, d}`, and `tenanted` to `{a}`), `notes` (one per section:
+  outside, structure, inside, services, history, tenancy), `photos` (an empty list kept for later; nothing writes it yet),
+  `applied` (what it wrote to the property file and what was there before), `conflicts` (facts an agreement in force holds
+  differently, not written until Tim chooses), `resolved`, `sent_form_id` and `sent_at`, `status` (in_progress, finished),
+  `created_by`, `started_at`, `finished_at`. Agent reads only; nobody writes directly; vendors have no policy, so they see nothing.
+- Functions (agent only, revoked from public and anon): `agent_inspection_start(p_property, p_address)` (a new property at
+  Appraisal from an address alone, refusing an address already on file, or an existing property; carries on an unfinished one),
+  `agent_inspection_save(iid, p_facts, p_decl, p_notes)` (patches; a blank value clears; facts go to `properties` unless the newest
+  agreement in force holds a different value), `agent_inspection_resolve(iid, p_key, p_use)` (inspection or agreement; an unsigned
+  agreement is updated too, a signed one never), `agent_inspection_finish(iid)`, `agent_inspection_send(iid)` (after listing:
+  starts or adds to the unsigned Vendor Declaration on the newest signed agreement; never replaces a vendor's answer, and returns
+  those it kept so Tim sees the difference; refused once anyone has signed).
+- Tim's notes in a declaration: `data.pre[k] = 'inspection'`, `data.insp = {id, on, by}`; the vendor's confirmation is
+  `data.checked[k] = true` (ticked "This is right", or changed the answer).
+- New triggers (additive; `guard_form` and the signature triggers are unchanged): `inspection_prefill_form` (a new Vendor
+  Declaration, including one the vendors start with `vendor_form_start`, opens with the latest inspection of this round of owners),
+  `guard_form_checks` (a direct write by a signed-in user, Tim included, can't change `pre`, `checked` or `insp`), and
+  `form_sign_needs_checks` on `form_signatures` (a vendor signature is refused while any of Tim's notes is unconfirmed).

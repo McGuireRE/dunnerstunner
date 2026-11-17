@@ -248,6 +248,36 @@ details.acc .in li { margin: 4px 0; }
 .chip input { accent-color: var(--accent); }
 .reveal[hidden] { display: none !important; }
 hr.soft { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
+
+/* property inspection (Tim's walk-round): big one-handed tap targets, a saved / waiting status in the top bar */
+.insp-st { display: inline-block; font-size: 13px; font-weight: 600; border-radius: 999px; padding: 3px 10px; white-space: normal; text-align: right; }
+.insp-st.ok { background: var(--ok-soft); color: var(--ok); }
+.insp-st.busy { background: var(--line); color: var(--ink); }
+.insp-st.wait { background: var(--warn-soft); color: var(--warn); }
+.insp-addr { margin: 0 0 10px; }
+.insp-sub { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.insp-sub .t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.insp-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 4px; }
+.insp-tab { font: inherit; font-size: 13.5px; font-weight: 600; border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 999px; padding: 6px 10px; min-height: 36px; cursor: pointer; }
+.insp-tab .n { font-weight: 500; color: var(--muted); font-variant-numeric: tabular-nums; }
+.insp-tab.on { border-color: var(--accent); background: var(--accent-soft); }
+.insp .iq h3 { font-size: 16.5px; margin: 0 0 8px; }
+.insp .ivd { display: inline-block; font-size: 11.5px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); margin-bottom: 4px; }
+.ipick { display: flex; flex-wrap: wrap; gap: 8px; }
+.ipick.two .ichip, .ipick.three .ichip { flex: 1 1 0; }
+.ichip { position: relative; display: inline-flex; flex: 0 1 auto; min-width: 56px; min-height: 48px; cursor: pointer; }
+.ichip input { position: absolute; opacity: 0; pointer-events: none; }
+.ichip span { display: flex; align-items: center; justify-content: center; text-align: center; width: 100%; border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 10px; padding: 10px 14px; font-weight: 500; line-height: 1.25; }
+.ichip input:checked + span { border-color: var(--accent); background: var(--accent-soft); box-shadow: 0 0 0 1px var(--accent) inset; }
+.ichip input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+.insp .iclr { font-size: 14px; padding: 8px 0 0; }
+.insp .iuse { width: 100%; margin: 0 0 8px; font-size: 15px; text-align: left; white-space: normal; }
+.insp input[type=text], .insp textarea { font-size: 17px; }
+.iconf { color: var(--warn); margin: 8px 0 0; }
+.insp-match { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+.insp-match > div { min-width: 0; overflow-wrap: anywhere; }
+.iconfirm { margin-top: 10px; }
+.insp-badge { color: var(--warn); background: var(--warn-soft); }
 @media (max-width: 420px) { .facts { grid-template-columns: 1fr; } .choices.two { grid-template-columns: 1fr; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
 /* phase 2: inline documents, the REA guide viewer, and the declaration's Yes / No / Unknown rows */

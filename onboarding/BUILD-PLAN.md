@@ -166,6 +166,19 @@ Goal: the property keeps moving after countersigning, and the dashboard and jour
 
 Tests: stage changes, reminders appearing on the dashboard, the journey marker moving.
 
+## Added 18 November 2026: property inspection (Tim: "go around and prefill all the property info and the vendor declaration")
+
+Migration 012 (ready to apply, not applied). Tim starts an inspection from Home, the Dashboard or any property's Inspection tile,
+with only an address: a property file at Appraisal, no vendor, pre-listing or agreement, nothing sent. Six short sections (Outside,
+Structure and cladding, Inside, Services, Consents and history, Tenancy) hold page 1's property facts and every Vendor Declaration
+question in Tim's wording, each optional, with a progress count and a note per section. Answers save as tapped; with no signal
+they wait in the browser and sync when it returns, and a reload goes back to the same section. Facts go to the property file (a
+value an agreement in force holds differently waits for Tim to choose). Declaration answers stay on the inspection, agent only,
+and reach the vendors as marked answers ("Noted by Tim at the inspection on ...") that they confirm or change before they can
+sign, either when they start the declaration themselves or when Tim sends them after listing. No edge function changes; no email
+is sent for "Send to the vendors". Photos are left for later (an empty `photos` list on the inspection). Test: `inspection.test.js`;
+database: `inspection-rollback.sql` (via `inspection-rollback.py`).
+
 ---
 
 ## Housekeeping to fold into phase 1
