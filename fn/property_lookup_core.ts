@@ -237,7 +237,7 @@ export async function lookup(input: { address: string; magicKey?: string }, deps
           if (r.ok) answered++;
           if (rows.length) { any = true; const s = summarise(rows[0]); const shown = s || l.name || label; values.push(mk(`hazard_orc_${svc.toLowerCase().replace(/[^a-z0-9]+/g, "_").slice(0, 30)}_${l.id}`, "Plan and hazards", `${label} (ORC)`, shown, `The regional council's map shows: ${shown}.`, "hazard", null, `orc_hz_${svc}`, `Otago Regional Council, ${label.toLowerCase()} map`, u, null, null, r.at, LIM_NOTE)); }
         }));
-        if (!any && answered === want.length && want.length) hazNone.push(label.toLowerCase());
+        if (!any && answered === want.length && want.length) hazNone.push(label.charAt(0).toLowerCase() + label.slice(1));
       })());
     }
   }
