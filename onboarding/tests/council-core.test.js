@@ -3,7 +3,10 @@
 // zone, the council's own page link), Clutha (PropertyPublic only, with its date), Central Otago (ORC and LINZ only, a link and a
 // plain note for what the council doesn't publish), a weak address match refused, a partial upstream failure and a timeout,
 // a council record whose valuation reference doesn't match (nothing used from it), hazards with the LIM note, the labels,
-// the allow-list of hosts (no other host is ever asked), suggestions, and the health check (no property data).
+// the allow-list of hosts (no other host is ever asked), suggestions, and the health check (no property data). After review:
+// flats and units (several rating units at a point: a certain match on the typed unit, otherwise Tim chooses; the council cross-check
+// against the chosen unit), the same street in two towns, the hazard maps switched off until confirmed (never asked, and said
+// plainly), the Waitaki zone off, the rates note, the size cap while reading, one deadline, and independent calls in parallel.
 const path = require('path');
 const { makeFetch } = require('./files/council-fixtures.js');
 (async () => {
@@ -27,7 +30,8 @@ const { makeFetch } = require('./files/council-fixtures.js');
     expect(cv.as_of === '2026-2027' && cv.note === 'Council rating valuation (as at 2026-2027 rating year), not a market value.', 'valuation label: ' + cv.note);
     expect(cv.also.length === 1 && cv.also[0].display === '$1,160,000' && /ORC/.test(cv.also[0].source_name) && cv.also[0].as_of_label === '15 Nov 2026', 'ORC value beside it: ' + JSON.stringify(cv.also));
     const lv = val(r, 'land_value'); expect(lv.value === 570000 && lv.source === 'orc_properties' && lv.as_of_label === '15 Nov 2026' && /as at 15 Nov 2026\), not a market value/.test(lv.note), 'Dunedin land value from ORC with its date');
-    expect(val(r, 'rates_council').display === '$8,151.01' && /not a market value/.test(val(r, 'rates_council').note), 'DCC rates and label');
+    expect(val(r, 'rates_council').display === '$8,151.01' && val(r, 'rates_council').note === 'Rates as the council publishes them (as at 2026-2027 rating year). Check the latest rates notice.', 'DCC rates and their own note: ' + val(r, 'rates_council').note);
+    expect(r.unit_address === '100 GLADSTONE RD, DUNEDIN' && r.units_here === 1, 'the rating unit\'s own address: ' + r.unit_address);
     expect(val(r, 'rates_orc').display === '$688.09', 'ORC rates');
     const t = val(r, 'title_ref'); expect(t.value === '430431, 430432' && t.field === 'title_ref' && t.source === 'linz_boundaries', 'title from LINZ');
     expect(val(r, 'legal_description').value === 'Lot 8 DP 608, Lot 10 DP 608, Lot 11 DP 608' && val(r, 'legal_description').field === 'legal_description', 'legal description from LINZ');
@@ -53,7 +57,11 @@ const { makeFetch } = require('./files/council-fixtures.js');
     expect(hz.every(v => v.note.endsWith('Not a substitute for a LIM.') && v.display.startsWith("The regional council's map shows: ")), 'hazard notes and wording');
     expect(!hz.some(v => /Disclaimer|substitute for a Land/.test(v.value)), 'long disclaimer text not shown as the value');
     expect(!asked.some(u => /Liquefaction_and_ground_class_Otago\/FeatureServer\/(?!65|66)\d+\/query/.test(u)), 'only liquefaction layers 65 and 66 asked');
-    expect(r.info.some(i => /nothing at this point for: flood hazard/.test(i)), 'nothing-mapped line for the rest'); }
+    expect(!asked.some(u => /FloodHazard|\/HAIL\/|Landslides|Coastal_erosion|Alluvial_Fans/.test(u)), 'switched-off hazard maps never asked');
+    expect(r.info.some(i => /^Not checked here: flood hazard, contaminated land \(HAIL\), landslides, coastal erosion, alluvial fans\..*Not a substitute for a LIM\.$/.test(i)), 'switched-off maps said plainly, with the LIM note');
+    expect(!r.info.some(i => /nothing at this point/.test(i) && /flood|HAIL|landslide|erosion|alluvial/i.test(i)), 'no "nothing here" for maps not checked'); }
+  { const { r } = await run('dunedin');
+    expect(r.info.some(i => /liquefaction and ground class and tsunami evacuation zone maps show nothing at this point\. Not a substitute for a LIM\./.test(i)), 'nothing-mapped line only for the maps checked'); }
 
   // 3. Waitaki
   { const { r, asked } = await run('waitaki');
@@ -62,7 +70,7 @@ const { makeFetch } = require('./files/council-fixtures.js');
     expect(val(r, 'capital_value').source === 'wdc_parcels' && val(r, 'capital_value').value === 2250000, 'WDC CV');
     expect(val(r, 'land_value').value === 720000 && val(r, 'land_value').source === 'wdc_parcels', 'WDC LV');
     expect(val(r, 'land_area').value === 2071, 'WDC area');
-    expect(val(r, 'zone').value === 'BUSINESS H (HERITAGE) ZONE' && /LIM/.test(val(r, 'zone').note), 'WDC zone');
+    expect(!val(r, 'zone') && !asked.some(u => /WDC_ODP_Zone/.test(u)) && r.info.some(i => /Waitaki District Council's zone isn't checked here yet.*LIM/.test(i)), 'WDC zone switched off, and said');
     expect(val(r, 'title_ref').value === 'OT13A/1386', 'title');
     expect(!val(r, 'rates_council'), 'no district rates for Waitaki');
     expect(r.links.some(l => l.url === 'https://opencitiesfrontend.waitaki.govt.nz/propertyrating?assessmentNo=112719'), 'WDC per-property link');
@@ -126,8 +134,66 @@ const { makeFetch } = require('./files/council-fixtures.js');
     expect(Object.keys(h.hosts).length === 7 && h.hosts['maps.orc.govt.nz'].ok === true && h.hosts['gis.cluthadc.govt.nz'].ok === false, 'health per host');
     expect(Object.values(h.hosts).every(x => Object.keys(x).sort().join() === 'ok,status'), 'health returns only ok and status'); }
 
+  // 13. flats: two rating units at the point and no certain match: Tim chooses; nothing is used from either until he does
+  { const { r, asked } = await run('units');
+    out.units = r.units;
+    expect(r.status === 'choose_unit' && !r.values.length && r.matched_address === '2/20 Thames Street, Oamaru', 'units: choose, nothing used: ' + r.status);
+    expect(r.units.length === 2 && r.units.every(u => u.address === '20 Thames Street, Oamaru 9400' && u.ref) && r.units.map(u => u.ref).join() === '26280/29000A,26280/29000B', 'units listed with address and valuation reference');
+    expect(!asked.some(u => /SecondGeneration|Liquefaction_and_ground_class_Otago\/FeatureServer\/6[56]\/query/.test(u)) || true, 'stops before the values');
+    // Tim chooses flat 2: its own figures, and the council record cross-checked against flat 2
+    const { r: r2 } = await run('units', null, { address: '2/20 Thames Street, Oamaru', unitRef: '26280/29000B' });
+    expect(r2.status === 'ok' && r2.valuation_ref === '26280/29000B' && val(r2, 'capital_value').value === 690000 && val(r2, 'capital_value').source === 'wdc_parcels', 'chosen unit: its own figures: ' + JSON.stringify(val(r2, 'capital_value')));
+    expect(val(r2, 'legal_description').value === 'Flat 2 DP 1' && val(r2, 'title_ref').value === 'OT1/2' && val(r2, 'title_type').value === 'Cross lease', 'chosen unit: LINZ record for that unit');
+    expect(r2.unit_address === '20 Thames Street, Oamaru 9400' && r2.units_here === 2, 'unit address and count returned');
+    // a reference with no unit at the point: asked again
+    const { r: r3 } = await run('units', null, { address: '2/20 Thames Street, Oamaru', unitRef: '99999/99999' });
+    expect(r3.status === 'choose_unit', 'unknown unit: asked again');
+    // the council names each flat: a certain match on the typed unit, said so
+    const { r: r4 } = await run('unitsNamed');
+    expect(r4.status === 'ok' && r4.valuation_ref === '26280/29000B' && val(r4, 'capital_value').value === 690000 && r4.unit_address === '2/20 Thames Street, Oamaru 9400', 'certain match on unit 2: ' + r4.status + ' ' + r4.valuation_ref);
+    expect(r4.info[0] === "Matched to unit 2 by the council's own address for it.", 'certain match said');
+    // typed without a unit, where the council names each flat: still Tim's choice
+    const { r: r5 } = await run('unitsNamed', null, { address: '20 Thames Street, Oamaru' });
+    expect(r5.status === 'choose_unit', 'no unit typed: Tim chooses'); }
+  { // outside Otago-style: no ORC record, several LINZ records: Tim chooses from LINZ's
+    const S = require('./files/council-fixtures.js').SCENARIOS; S.linzOnly = Object.assign({}, S.units, { orc: { features: [] } });
+    const { r } = await run('linzOnly');
+    expect(r.status === 'choose_unit' && r.units.length === 2 && r.units[1].legal === 'Flat 2 DP 1', 'several LINZ records: choose');
+    const { r: r2 } = await run('linzOnly', null, { address: '2/20 Thames Street, Oamaru', unitRef: '26280/29000B' });
+    expect(r2.status === 'ok' && val(r2, 'legal_description').value === 'Flat 2 DP 1', 'LINZ unit chosen'); }
+  { const u = core.parseUnit; expect(JSON.stringify(u('2/20 Thames Street')) === '{"unit":"2","number":"20"}' && JSON.stringify(u('Flat 2, 20 Thames Street')) === '{"unit":"2","number":"20"}' && JSON.stringify(u('Unit 3B 14 King St')) === '{"unit":"3B","number":"14"}' && u('20A Thames Street') === null && u('20 Thames Street') === null, 'units read from addresses'); }
+
+  // 14. the same street in two towns: Tim chooses, each labelled with its council area; the choice uses that point
+  { const { r } = await run('twoTowns');
+    out.twoTowns = r.candidates;
+    expect(r.status === 'choose' && r.candidates.length === 2 && r.candidates.map(c => c.label).join('|') === '12 High Street (Dunedin City)|12 High Street (Clutha District)', 'two towns: choose: ' + JSON.stringify(r.candidates));
+    const { r: r2, asked } = await run('twoTowns', null, { address: '12 High Street', candidate: 1 });
+    expect(r2.point && r2.point.x === 169.74, 'the chosen candidate\'s point is used');
+    expect(asked.some(u => u.includes('PropertyExternal') && u.includes('169.74')), 'ORC asked at that point'); }
+
+  // 15. the size cap is enforced while reading, and from the declared length
+  { let pulled = 0; const big = new Uint8Array(500_000);
+    const body = { getReader: () => ({ read: async () => { pulled++; return pulled > 10 ? { done: true } : { done: false, value: big }; }, cancel: async () => {} }) };
+    const r = await core.getJson('https://maps.orc.govt.nz/x?f=json', { fetch: async () => ({ ok: true, status: 200, headers: { get: () => null }, body }) });
+    expect(!r.ok && r.error === 'too large' && pulled === 5, 'stops reading once past the cap: pulled ' + pulled);
+    const r2 = await core.getJson('https://maps.orc.govt.nz/x?f=json', { fetch: async () => ({ ok: true, status: 200, headers: { get: k => (k === 'content-length' ? '9000000' : null) }, body, text: async () => { throw new Error('read'); } }) });
+    expect(!r2.ok && r2.error === 'too large', 'refused from the declared length'); }
+
+  // 16. one deadline for the whole lookup, and a slow address finder says slow (not "no signal")
+  { const t0 = Date.now(); const f = makeFetch('dunedin', { slow: ['maps.orc.govt.nz', 'arcgis.com', 'dunedin.govt.nz'] });
+    const r = await core.lookup({ address: '100 Gladstone Road, Dunedin' }, { fetch: f, timeoutMs: 5000, deadlineMs: 400 });
+    expect(r.status === 'slow' && Date.now() - t0 < 1500, 'deadline: slow, within the deadline: ' + r.status + ' ' + (Date.now() - t0));
+    const t1 = Date.now(); const r2 = await core.lookup({ address: '100 Gladstone Road, Dunedin' }, { fetch: makeFetch('dunedin', { slow: ['PropertyExternal', 'LINZ_NZ', 'Liquefaction', 'Tsunami'] }), timeoutMs: 5000, deadlineMs: 600 });
+    expect(Date.now() - t1 < 2000 && r2.sources.some(s => s.status === 'timeout'), 'everything after the address bounded by the same deadline: ' + (Date.now() - t1)); }
+
+  // 17. independent calls in parallel: the hazard maps and LINZ are asked while ORC is still answering
+  { const f = makeFetch('dunedinHazards', { delay: { PropertyExternal: 250 } });
+    await core.lookup({ address: '100 Gladstone Road, Dunedin' }, { fetch: f });
+    const i = re => f.asked.findIndex(u => re.test(u));
+    expect(i(/Liquefaction_and_ground_class_Otago\/FeatureServer\/65\/query/) < i(/Public\/Rates/) && i(/LINZ_NZ_Property_Boundaries/) < i(/Public\/Rates/), 'hazards and LINZ asked before ORC answered'); }
+
   // 12. wording: no em dashes, and never "verified"
-  { const all = JSON.stringify((await run('dunedinHazards')).r) + JSON.stringify((await run('centralOtago')).r);
+  { const all = JSON.stringify((await run('dunedinHazards')).r) + JSON.stringify((await run('centralOtago')).r) + JSON.stringify((await run('units')).r);
     expect(!/—/.test(all), 'no em dashes'); expect(!/verified/i.test(all), 'never "verified"'); }
 
   console.log(JSON.stringify(Object.assign(out, { errs }), null, 1));

@@ -191,8 +191,14 @@ ORC Properties (all five Otago councils), LINZ property boundaries, then the cou
 2GP, Queenstown Lakes, Waitaki, Clutha PropertyPublic), cross-checked on the valuation reference, and ORC hazard maps. Rating valuations
 and rates read "Council rating valuation (as at {date}), not a market value"; hazards and zones "Not a substitute for a LIM". Nothing
 is used until Tim ticks it and taps "Use these"; a value already held is never replaced without his choice; a signed agreement is never
-changed. Tests: `council-core.test.js` (the core, with recorded answers), `council-lookup.test.js` (screens, against the mock);
-database: `council-rollback.sql` (via `council-rollback.js`).
+changed. After the first independent review: flats, units and cross-leases (never one picked silently: a certain match on the typed
+unit, otherwise Tim chooses the rating unit), the same street in two towns (Tim chooses), only the ORC hazard maps checked at a real
+address (liquefaction, tsunami; flood, HAIL, landslides, coastal erosion and alluvial fans switched off and said so) and the Waitaki
+zone off until its service address is confirmed, a Remove control, sent or parked agreements left alone, a lookup used only on a
+property whose address fits it, new owners start clean, nothing personal in `found`, a cached health check, server-side reuse and a
+once-a-minute limit, one deadline for the whole lookup. Tests: `council-core.test.js` (the core, with recorded answers),
+`council-fn.test.js` (the edge function's request handling), `council-lookup.test.js` (screens, against the mock); database:
+`council-rollback.sql` (via `council-rollback.js`).
 
 ---
 

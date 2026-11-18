@@ -6,6 +6,10 @@
 // upstream failure, Inspect a property in another district (Waitaki) with "Start the inspection and use these", the lookup never
 // holding up starting an inspection, the offline card, a signed agreement never changed, Let's agree page 1 filled, vendors
 // unable to read lookups or use them, a direct write of found refused, and 390 px without sideways scroll in light and dark.
+// After review: flats (Tim chooses the rating unit; the card shows the unit's own address), the same street in two towns, a
+// lookup refused on a property whose address it doesn't fit, a sent agreement left alone, Remove, the slow message, the
+// switched-off hazard maps said plainly, rates' own note, nothing personal in found, and a failed accept on Inspect a property
+// retried without a second property file.
 // Screenshots: out/council_card.png (light) and out/council_card_dark.png.
 const { chromium } = require('playwright'); const fs = require('fs'), path = require('path');
 const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
@@ -20,6 +24,9 @@ const norm = t => String(t || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim
   // the lookup's answers, from the real core
   const core = await import(path.join(__dirname, '..', '..', 'fn', 'property_lookup_core.ts'));
   const look = (name, address, opts) => core.lookup({ address }, { fetch: makeFetch(name, opts), timeoutMs: (opts && opts.timeoutMs) || 400 });
+  { const S = require('./files/council-fixtures.js').SCENARIOS;   // a Balclutha property with an agreement already with the vendors
+    S.sent = Object.assign({}, S.clutha, { asked: '9 Sent Street, Balclutha', locator: { spatialReference: { wkid: 4326 }, candidates: [{ address: '9 Sent Street, Balclutha', location: { x: 169.7385, y: -46.2386 }, score: 100 }] },
+      cdc: { features: [{ attributes: Object.assign({}, S.clutha.cdc.features[0].attributes, { Address: '9 SENT STREET' }) }] } }); }
   const RESULTS = {
     [norm('100 Gladstone Road, Dunedin')]: await look('dunedinHazards', '100 Gladstone Road, Dunedin'),
     [norm('100 Gladstone Rd, Dunedin')]: await look('dunedin', '100 Gladstone Rd, Dunedin', { fail: ['apps.dunedin.govt.nz'], slow: ['LINZ_NZ_Property_Boundaries'], timeoutMs: 200 }),
@@ -27,6 +34,12 @@ const norm = t => String(t || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim
     [norm('15 Clyde Street, Balclutha')]: await look('weak', '15 Clyde Street, Balclutha'),
     [norm('15 High Street, Balclutha')]: await look('clutha', '15 High Street, Balclutha'),
     [norm('24 Tarbert Street, Alexandra')]: await look('centralOtago', '24 Tarbert Street, Alexandra'),
+    [norm('2/20 Thames Street, Oamaru')]: await look('units', '2/20 Thames Street, Oamaru'),
+    [norm('2/20 Thames Street, Oamaru') + '|26280/29000B']: await core.lookup({ address: '2/20 Thames Street, Oamaru', unitRef: '26280/29000B' }, { fetch: makeFetch('units'), timeoutMs: 400 }),
+    [norm('12 High Street')]: await look('twoTowns', '12 High Street'),
+    [norm('12 High Street') + '#1']: await core.lookup({ address: '12 High Street', candidate: 1 }, { fetch: makeFetch('twoTowns'), timeoutMs: 400 }),
+    [norm('9 Sent Street, Balclutha')]: await look('sent', '9 Sent Street, Balclutha'),
+    [norm('8 Slow Street, Dunedin')]: { status: 'slow', asked: '8 Slow Street, Dunedin', values: [], sources: [], links: [], info: [] },
   };
   const b = await chromium.launch();
   const page = async scheme => {
@@ -59,9 +72,11 @@ const norm = t => String(t || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim
       properties: [
         // the title document gave one of the two titles
         { id: 'PR1', address: '100 Gladstone Road, Dunedin', title_ref: '430432', ownership: {}, description: {}, disclosures: {}, found: {}, provenance: {}, stage: 'appraisal', stage_at: now, created_at: now, updated_at: now },
-        { id: 'PR3', address: '24 Tarbert Street, Alexandra', title_ref: '', ownership: {}, description: { pLand: '2000' }, disclosures: {}, found: {}, provenance: {}, stage: 'signed', stage_at: now, created_at: now, updated_at: now }],
+        { id: 'PR3', address: '24 Tarbert Street, Alexandra', title_ref: '', ownership: {}, description: { pLand: '2000' }, disclosures: {}, found: {}, provenance: {}, stage: 'signed', stage_at: now, created_at: now, updated_at: now },
+        { id: 'PR5', address: '2/20 Thames Street, Oamaru', title_ref: '', ownership: {}, description: {}, disclosures: {}, found: {}, provenance: {}, stage: 'appraisal', stage_at: now, created_at: now, updated_at: now },
+        { id: 'PR6', address: '9 Sent Street, Balclutha', title_ref: '', ownership: {}, description: { pLand: '900' }, disclosures: {}, found: {}, provenance: {}, stage: 'agreement', stage_at: now, created_at: now, updated_at: now }],
       property_people: [{ id: 'PP3', property_id: 'PR3', position: 1, legal_name: 'Sam Lee', pref_name: 'Sam', email: 'sam@example.com', phone: '', user_id: 'v-sam', role: 'owner', source: 'agreement', name_from: 'agreement' }],
-      agreements: [{ id: 'A3', ref: 'MRE-2026-1003', address: '24 Tarbert Street, Alexandra', property_id: 'PR3', status: 'signed', config: { title: '' }, answers: { pLand: '2000' }, legal: { choice: 'have' }, signed_at: now, agreement_version: 'v3.15-26102026', created_at: now }],
+      agreements: [{ id: 'A6', ref: 'MRE-2026-1006', address: '9 Sent Street, Balclutha', property_id: 'PR6', status: 'sent', config: {}, answers: { pLand: '900' }, legal: {}, sent_at: now, agreement_version: 'v3.15-26102026', created_at: now }, { id: 'A3', ref: 'MRE-2026-1003', address: '24 Tarbert Street, Alexandra', property_id: 'PR3', status: 'signed', config: { title: '' }, answers: { pLand: '2000' }, legal: { choice: 'have' }, signed_at: now, agreement_version: 'v3.15-26102026', created_at: now }],
       agreement_people: [{ id: 'S1', agreement_id: 'A3', position: 1, legal_name: 'Sam Lee', pref_name: 'Sam', email: 'sam@example.com', phone: '', user_id: 'v-sam', signed_at: now }],
       agreement_events: [], signatures: [], lawyer_links: [], aml_files: [], aml_events: [], email_log: [], cancellation_requests: [] })); }, RESULTS);
 
@@ -73,14 +88,15 @@ const norm = t => String(t || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim
   await p.click('#crStart'); await p.waitForTimeout(500);
   out.card1 = (await card()).replace(/\s+/g, ' ').slice(0, 400);
   expect(/Found on public records/.test(out.card1), 'card title');
-  expect((await p.textContent('.cr-match strong')) === '100 Gladstone Road, Dalmore, Dunedin', 'matched address shown prominently');
+  expect((await p.textContent('.cr-match strong')) === '100 GLADSTONE RD, DUNEDIN' && /The address finder matched 100 Gladstone Road, Dalmore, Dunedin/.test(await p.textContent('.cr-match')), 'the rating unit\'s own address shown prominently, and the address finder\'s match');
   expect(await p.isVisible('[data-cr-wrong]:has-text("Not the right property?")'), 'Not the right property?');
   expect(await calls() === 1, 'one lookup');
   const row = async k => (await p.textContent(`[data-cr-key="${k}"]`)).replace(/\s+/g, ' ');
   out.cv = await row('capital_value');
   expect(/\$1,110,000/.test(out.cv) && /Council rating valuation \(as at 2026-2027 rating year\), not a market value\./.test(out.cv) && /From Dunedin City Council rates, as at 2026-2027 rating year\. Found 18 Nov 2026|From Dunedin City Council rates, as at 2026-2027 rating year\. Found \d+ \w+ 2026\. Not checked\./.test(out.cv), 'capital value label, source and date: ' + out.cv);
   expect(/Otago Regional Council, ORC Properties has \$1,160,000 \(as at 15 Nov 2026\)/.test(out.cv), 'ORC value beside it');
-  expect(/Council rating valuation .*not a market value/.test(await row('rates_council')), 'rates labelled');
+  expect(/Rates as the council publishes them \(as at 2026-2027 rating year\)\. Check the latest rates notice\./.test(await row('rates_council')) && !/not a market value/.test(await row('rates_council')), 'rates have their own note');
+  expect(/Not checked here: flood hazard, contaminated land \(HAIL\), landslides, coastal erosion, alluvial fans\..*Not a substitute for a LIM\./.test(await card()), 'switched-off hazard maps said plainly');
   expect(/Not a substitute for a LIM\./.test(await row('zone')), 'zone LIM note');
   const hz = await p.$$eval('[data-cr-key^="hazard_orc_"]', e => e.map(x => x.textContent.replace(/\s+/g, ' ')));
   out.hazards = hz.map(x => x.slice(0, 120));
@@ -110,14 +126,16 @@ const norm = t => String(t || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim
   expect(pr.title_ref === '430432' && pr.found.title_ref.written === false && pr.found.title_ref.value === '430431, 430432', 'title kept, the public record stored beside it');
   expect(pr.description.pLand === '3647' && pr.provenance.pLand.from === 'public_records' && pr.provenance.pLand.source === 'dcc_rates' && pr.provenance.pLand.as_of === '2026-2027', 'land area used, with provenance');
   expect(pr.legal_description === 'Lot 8 DP 608, Lot 10 DP 608, Lot 11 DP 608' && pr.provenance.legal_description.source === 'linz_boundaries', 'legal description used, with provenance');
-  expect(/not a market value/.test(pr.found.capital_value.note) && pr.found.capital_value.value === 1110000 && pr.found.capital_value.as_of === '2026-2027' && pr.found.capital_value.used_by === TIM[1], 'capital value stored in found with its label, date and who');
+  expect(/not a market value/.test(pr.found.capital_value.note) && pr.found.capital_value.value === 1110000 && pr.found.capital_value.as_of === '2026-2027' && pr.found.capital_value.used_at, 'capital value stored in found with its label and dates');
+  expect(!/used_by|lookup_id|hello@/.test(JSON.stringify(pr.found) + JSON.stringify(pr.provenance)), 'nothing personal and no lookup id in found or provenance');
+  expect((d.council_use_log || []).some(x => x.property_id === 'PR1' && x.kind === 'used' && x.actor === TIM[1] && x.lookup_id === d.council_lookups[0].id), 'who used it, from which lookup, in the agent-only log');
   expect(/Not a substitute for a LIM\./.test(pr.found.zone.note), 'zone stored with LIM note');
   expect(d.council_lookups[0].property_id === 'PR1', 'the lookup is tied to the property');
   // back on the property page: the tile lists what was used, with sources; the quiet line under the land area
   const tile = (await p.textContent('#crTile')).replace(/\s+/g, ' ');
   expect(/You kept your own/.test(tile) && /On the file: 430432/.test(tile) && /Public record: 430431, 430432/.test(tile) && !/@/.test(tile) && /Capital value/.test(tile) && /not a market value/.test(tile) && /Not checked/.test(tile), 'tile lists found values: ' + tile.slice(0, 200));
   expect((await p.textContent('#crStart')).trim() === 'Look again', 'tile button: Look again');
-  expect(/From Dunedin City Council rates, 2026-2027\. Not checked/.test(await p.textContent('label[for="pfd_pLand"]')), 'quiet line under the land area');
+  expect(/From Dunedin City Council rates, as at 2026-2027 rating year\. Not checked/.test(await p.textContent('label[for="pfd_pLand"]')), 'quiet line under the land area, with the date label');
   expect(!/From/.test(await p.textContent('label[for="pfTitle"]')), 'no line under the title (Tim kept his own)');
   // Tim edits the land area: the line goes, the public record stays on the tile
   await p.fill('#pfd_pLand', '3650'); await p.click('#pfSave'); await p.waitForTimeout(600);
@@ -137,13 +155,13 @@ const norm = t => String(t || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim
   out.weak = (await card()).replace(/\s+/g, ' ');
   expect(/No clear match for 15 Clyde Street, Balclutha/.test(out.weak) && !(await p.$('[data-cr-tick]')) && !(await p.$(useBtn)), 'weak match refused, nothing to tick');
   await p.click('[data-cr-cand="0"]'); await p.waitForTimeout(500);
-  expect((await p.textContent('.cr-match strong')) === '15 High Street, Balclutha' && /Clutha District Council/.test(await card()), 'the suggestion chosen');
+  expect((await p.textContent('.cr-match strong')) === '15 HIGH STREET, BALCLUTHA' && /Clutha District Council/.test(await card()), 'the suggestion chosen');
   expect(/as at 14 Aug 2025/.test(await row('rates_council')), 'Clutha rates with their date');
 
   // 4. a partial upstream failure: what answered is shown, and what didn't is named
   await p.click('[data-cr-wrong]'); await p.fill('[data-cr-addr]', '100 Gladstone Rd, Dunedin'); await p.click('[data-cr-other-go]'); await p.waitForTimeout(500);
   out.partial = await p.textContent('.cr-down');
-  expect(/Didn't answer this time: .*Dunedin City Council rates.*LINZ NZ Property Boundaries/.test(out.partial), 'failures named: ' + out.partial);
+  expect(/^Didn't answer this time: /.test(out.partial) && /Dunedin City Council rates/.test(out.partial) && /LINZ NZ Property Boundaries/.test(out.partial), 'failures named: ' + out.partial);
   expect(/\$1,160,000/.test(await row('capital_value')) && /ORC Properties/.test(await row('capital_value')), 'falls back to ORC');
   expect(!(await p.$('[data-cr-key="title_ref"]')), 'no title without LINZ');
 
@@ -165,15 +183,20 @@ const norm = t => String(t || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim
   await p.evaluate(() => localStorage.removeItem('councilMode'));
   // another district (Waitaki): start and use the ticked values in one go
   await p.fill('#insAddr', '20 Thames Street, Oamaru'); await p.press('#insAddr', 'Tab'); await p.waitForTimeout(600);
-  expect((await p.textContent('.cr-match strong')) === '20 Thames Street, Oamaru' && /Waitaki District Council/.test(await card()), 'Waitaki card');
-  expect(/BUSINESS H \(HERITAGE\) ZONE/.test(await row('zone')) && /Not a substitute for a LIM/.test(await row('zone')), 'Waitaki zone with LIM note');
+  expect((await p.textContent('.cr-match strong')) === '20 Thames Street, Oamaru 9400' && /Waitaki District Council/.test(await card()), 'Waitaki card');
+  expect(!(await p.$('[data-cr-key="zone"]')) && /Waitaki District Council's zone isn't checked here yet/.test(await card()), 'Waitaki zone switched off, and said');
   expect(await p.isVisible('a[href="https://opencitiesfrontend.waitaki.govt.nz/propertyrating?assessmentNo=112719"]'), 'link to the council\'s own page');
-  for (const k of ['title_ref', 'land_area', 'capital_value', 'zone']) await p.check(`[data-cr-tick="${k}"]`);
+  for (const k of ['title_ref', 'land_area', 'capital_value']) await p.check(`[data-cr-tick="${k}"]`);
   expect((await p.textContent(useBtn)).trim() === 'Start the inspection and use these', 'start-and-use button');
+  // the first try fails after the property file was started (no signal): the retry uses the same file, never a second
+  await p.evaluate(() => localStorage.setItem('councilAcceptFail', '1'));
+  await p.click(useBtn); await p.waitForTimeout(600);
+  expect(/No signal/.test(await p.textContent('[data-cr-err]')) && (await db()).properties.filter(x => x.address === '20 Thames Street, Oamaru').length === 1, 'failed accept: one property file');
   await p.click(useBtn); await p.waitForTimeout(800);
+  expect((await db()).properties.filter(x => x.address === '20 Thames Street, Oamaru').length === 1, 'retry: still one property file');
   expect((await p.textContent('main h1')) === 'Outside', 'inspection opened');
   d = await db(); pr = d.properties.find(x => x.address === '20 Thames Street, Oamaru');
-  expect(pr && pr.title_ref === 'OT13A/1386' && pr.description.pLand === '2071' && pr.found.capital_value.source === 'wdc_parcels' && pr.found.zone, 'Waitaki values on the new property file');
+  expect(pr && pr.title_ref === 'OT13A/1386' && pr.description.pLand === '2071' && pr.found.capital_value.source === 'wdc_parcels', 'Waitaki values on the new property file');
   expect((d.property_inspections || []).some(i => i.property_id === pr.id), 'and an inspection on it');
 
   // 6. a signed agreement is never changed
@@ -201,6 +224,51 @@ const norm = t => String(t || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim
   d = await db(); const ag = d.agreements.find(x => x.address === '15 High Street, Balclutha'); const pb = ag && d.properties.find(x => x.id === ag.property_id);
   expect(ag && ag.answers.pLand === '726' && pb.legal_description === 'LOT 1 DP 11505' && pb.provenance.pLand.source === 'cdc_property', 'agreement and property file filled with provenance');
   expect(!(await sideways()), 'page 1 at 390 px');
+
+  // 7b. flats: two rating units at the address; nothing to tick until Tim chooses; then the unit's own figures and address
+  await openProp('2/20 Thames Street, Oamaru');
+  await p.click('#crStart'); await p.waitForTimeout(500);
+  out.units = (await card()).replace(/\s+/g, ' ').slice(0, 300);
+  expect(/more than one rating unit at 2\/20 Thames Street, Oamaru/.test(out.units) && !(await p.$('[data-cr-tick]')) && !(await p.$(useBtn)), 'units: Tim chooses, nothing to tick yet');
+  expect((await p.$$eval('[data-cr-unit]', e => e.map(x => x.textContent.replace(/\s+/g, ' ')))).join('|') === '20 Thames Street, Oamaru 9400Valuation 26280/29000A · FLAT 1 DP 1|20 Thames Street, Oamaru 9400Valuation 26280/29000B · FLAT 2 DP 1', 'each unit with its address, valuation and legal description');
+  await p.click('[data-cr-unit="1"]'); await p.waitForTimeout(500);
+  expect(/one of 2 rating units here/.test(await p.textContent('.cr-match')) && /26280\/29000B/.test(await p.textContent('.cr-match')) && /\$690,000/.test(await row('capital_value')), 'flat 2 chosen: its own figures');
+  await p.check('[data-cr-tick="capital_value"]'); await p.click(useBtn); await p.waitForTimeout(700);
+  d = await db(); expect(d.properties.find(x => x.id === 'PR5').found.capital_value.value === 690000 && d.properties.find(x => x.id === 'PR5').found.capital_value.unit_address === '20 Thames Street, Oamaru 9400', 'flat 2\'s value used');
+
+  // 7c. the same street in two towns: labelled by council area; a lookup that doesn't fit the property's address is refused
+  await openProp('100 Gladstone Road, Dunedin');
+  await p.click('#crStart'); await p.waitForTimeout(500);
+  await p.click('[data-cr-wrong]'); await p.fill('[data-cr-addr]', '12 High Street'); await p.click('[data-cr-other-go]'); await p.waitForTimeout(500);
+  expect((await p.$$eval('[data-cr-cand]', e => e.map(x => x.textContent))).join('|') === '12 High Street (Dunedin City)|12 High Street (Clutha District)', 'two towns labelled');
+  await p.click('[data-cr-cand="1"]'); await p.waitForTimeout(500);
+  expect(/Found on public records/.test(await card()), 'second place chosen');
+  await p.check('[data-cr-tick="capital_value"]'); await p.click(useBtn); await p.waitForTimeout(500);
+  expect(/That lookup is for .* but the property file says 100 Gladstone Road, Dunedin/.test(await p.textContent('[data-cr-err]')), 'refused: the lookup doesn\'t fit the property\'s address');
+
+  // 7d. Remove: a used value comes back out; the field gets back what it held (blank here)
+  await openProp('100 Gladstone Road, Dunedin');
+  await p.click('[data-cr-rm="legal_description"]'); expect((await p.textContent('[data-cr-rm="legal_description"]')) === 'Tap again to remove', 'remove asks twice');
+  await p.click('[data-cr-rm="legal_description"]'); await p.waitForTimeout(600);
+  d = await db(); let p1 = d.properties.find(x => x.id === 'PR1');
+  expect(!p1.found.legal_description && !p1.provenance.legal_description && !p1.legal_description, 'legal description removed and the field back to blank');
+  await p.click('[data-cr-rm="capital_value"]'); await p.click('[data-cr-rm="capital_value"]'); await p.waitForTimeout(600);
+  d = await db(); p1 = d.properties.find(x => x.id === 'PR1');
+  expect(!p1.found.capital_value && (d.council_use_log || []).filter(x => x.property_id === 'PR1' && x.kind === 'removed').length === 2, 'capital value removed; both removals logged');
+
+  // 7e. an agreement with the vendors: left alone; Tim's choice goes on the property file
+  await openProp('9 Sent Street, Balclutha');
+  await p.click('#crStart'); await p.waitForTimeout(500);
+  await p.check('[data-cr-tick="land_area"]'); await p.check('input[data-cr-ch="land_area"][value="replace"]'); await p.click(useBtn); await p.waitForTimeout(700);
+  d = await db();
+  expect(d.agreements.find(x => x.id === 'A6').answers.pLand === '900' && d.properties.find(x => x.id === 'PR6').description.pLand === '726', 'sent agreement left alone; the file takes the choice');
+  expect(d.council_use_log.some(x => x.property_id === 'PR6' && (x.detail.agreement_left || []).some(y => y.ref === 'MRE-2026-1006')), 'the agreement left alone is logged');
+
+  // 7f. the lookup ran out of time: "taking longer than usual", not "no signal"
+  await openProp('100 Gladstone Road, Dunedin');
+  await p.click('#crStart'); await p.waitForTimeout(500);
+  await p.click('[data-cr-wrong]'); await p.fill('[data-cr-addr]', '8 Slow Street, Dunedin'); await p.click('[data-cr-other-go]'); await p.waitForTimeout(500);
+  expect(/taking longer than usual\. Try again in a moment/.test(await card()) && !/signal/.test(await card()), 'slow: says so, not no signal');
 
   // 8. a direct write of found is refused, even for Tim
   const direct = await p.evaluate(async () => { const c = window.supabase.createClient(); const r = await c.from('properties').update({ found: { x: { value: 1 } } }).eq('id', 'PR1'); return r.error && r.error.message; });

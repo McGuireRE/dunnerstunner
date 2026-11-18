@@ -76,7 +76,7 @@ function q(table){ logCall('from:'+table);
     // property inspections (migration 012): Tim reads them; nobody writes them directly (the agent_inspection_* functions do); vendors see none.
     // With localStorage mockOffline = '1' the inspection calls fail as they would with no signal.
     if(table==='property_inspections'){ if(offline()) throw new Error('Failed to fetch'); if(op!=='select') throw new Error('permission denied for table property_inspections'); if(!(S&&S.user&&AGENTS.includes(S.user.email))) return {data:single?undefined:[],error:single?{message:'not found'}:null}; }
-    if(table==='council_lookups') { const r0=councilTable(op); if(r0) return r0; }
+    if(table==='council_lookups'||table==='council_use_log') { const r0=councilTable(op); if(r0) return r0; }
     if(table==='properties'&&op==='insert'&&(Array.isArray(payload)?payload:[payload]).some(x=>x&&(!jblank(x.found)||!jblank(x.provenance)))) throw new Error('Public record values are only saved with Use these');
     // guard_form_checks (after guard_form, as triggers fire in name order): a direct write can't add a declaration with answers, change what one says, change a form to or from one, or remove one
     if(table==='property_forms'&&op==='insert'){ (Array.isArray(payload)?payload:[payload]).forEach(x=>{ if(x&&x.kind==='vendor_declaration'&&!jblank(x.data)) throw new Error('Only the vendors fill in their declaration'); }); }
@@ -278,7 +278,7 @@ function rpcInner(name,a){
       i.sent_form_id=fm.id; i.sent_at=now(); DB.agreement_events.push({id:uid(),agreement_id:g.id,at:now(),actor:me.email,kind:'inspection_sent',detail:{added:m.added,updated:m.updated,kept:m.kept.length}}); save();
       return ok({form_id:fm.id,agreement_id:g.id,created:made,added:m.added,updated:m.updated,kept:m.kept}); }
   }
-  if(name==='agent_reopen_property'){ const p=PT().find(x=>x.id===a.pid); if(!p||!['withdrawn','settled'].includes(p.stage)) return bad('Only a withdrawn or settled property can start again'); if(a.new_owners){ active(p.id).forEach(x=>x.role='former'); p.owners_on_title=null; p.ownership={}; p.disclosures={}; p.cycle_at=now(); } p.stage='appraisal'; p.stage_at=now(); save(); return ok(null); }
+  if(name==='agent_reopen_property'){ const p=PT().find(x=>x.id===a.pid); if(!p||!['withdrawn','settled'].includes(p.stage)) return bad('Only a withdrawn or settled property can start again'); if(a.new_owners){ active(p.id).forEach(x=>x.role='former'); p.owners_on_title=null; p.ownership={}; p.disclosures={}; p.cycle_at=now(); if(Object.keys(p.found||{}).length){ p.found={}; p.provenance={}; (DB.council_use_log||=[]).push({id:DB.council_use_log.length+1,property_id:p.id,kind:'cleared',detail:{reason:'new owners'},actor:me.email,at:now()}); } } p.stage='appraisal'; p.stage_at=now(); save(); return ok(null); }
   if(name==='is_agent') return ok(AGENTS.includes(me.email));
   if(name==='claim_my_agreements'){ DB.agreement_people.forEach(p=>{ if(p.email.toLowerCase()===me.email&&!p.user_id) p.user_id=me.id;}); save(); return ok([...new Set(DB.agreement_people.filter(p=>p.user_id===me.id).map(p=>p.agreement_id))].filter(id=>DB.agreements.find(x=>x.id===id).status!=='draft')); }
   if(name==='vendor_forward_to_lawyer'){ if(!mine()) return bad('Not your agreement'); if(!['signed','countersigned'].includes(ag.status)) return bad('not signed'); DB.lawyer_links.push({id:uid(),agreement_id:a.a,lawyer_name:a.l_name,firm:a.l_firm,email:a.l_email,sent_by:mine().legal_name,sent_at:now(),open_count:0}); save(); return ok(null);}
@@ -297,35 +297,46 @@ function rpcInner(name,a){
   return bad('unknown rpc '+name);
 }
 // ── public council records (mirrors migrations/013_council_lookup.sql and fn/property_lookup.ts) ──
-// localStorage councilResults = { "<normalised address>": <result from fn/property_lookup_core.ts> } (the test computes them with the
-// real core and recorded answers); councilMode = 'offline' (the function can't be reached) or 'hang' (it never answers).
-const CL=()=>(DB.council_lookups||=[]);
+// localStorage councilResults = { "<normalised address>[|unit ref][#candidate]": <result from fn/property_lookup_core.ts> } (the test
+// computes them with the real core and recorded answers); councilMode = 'offline' (the function can't be reached) or 'hang' (it
+// never answers); councilDelay = ms (the function answers late).
+const CL=()=>(DB.council_lookups||=[]), CUL=()=>(DB.council_use_log||=[]);
 const cNorm=t=>String(t||'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
 const isAgentMe=()=>!!(S&&S.user&&AGENTS.includes(S.user.email));
-function councilTable(op){ if(offline()) throw new Error('Failed to fetch'); if(op!=='select') throw new Error('permission denied for table council_lookups'); if(!isAgentMe()) return {data:[],error:null}; return null; }
+function councilTable(op){ if(offline()) throw new Error('Failed to fetch'); if(op!=='select') throw new Error('permission denied for this table'); if(!isAgentMe()) return {data:[],error:null}; return null; }
 function councilInvoke(o){ const mode=localStorage.getItem('councilMode');
   if(mode==='offline'||offline()) return Promise.resolve({data:null,error:{name:'FunctionsFetchError',message:'Failed to send a request to the Edge Function'}});
   if(mode==='hang') return new Promise(()=>{});
   if(!isAgentMe()) return Promise.resolve({data:null,error:{name:'FunctionsHttpError',message:'Edge Function returned a non-2xx status code'}});
   const b=(o&&o.body)||{}; if(b.mode!=='lookup') return ok({ok:true,suggestions:[]});
   const all=JSON.parse(localStorage.getItem('councilResults')||'{}'); const asked=String(b.address||'').replace(/\s+/g,' ').trim();
-  const result=all[cNorm(asked)]||{status:'not_found',asked,values:[],sources:[],links:[],info:[]};
+  const key=cNorm(asked)+(b.unit_ref?'|'+b.unit_ref:'')+(b.candidate!=null?'#'+b.candidate:'');
+  const result=all[key]||{status:'not_found',asked,values:[],sources:[],links:[],info:[]};
   const row={id:uid(),property_id:b.property_id||null,asked,asked_norm:cNorm(asked),matched_address:result.matched_address||null,council:result.council||null,status:result.status,result:JSON.parse(JSON.stringify(result)),created_by:S.user.email,created_at:now()};
-  CL().push(row); save(); return ok({ok:true,saved:true,lookup_id:row.id,created_at:row.created_at,result}); }
+  CL().push(row); save(); const resp={ok:true,saved:true,lookup_id:row.id,created_at:row.created_at,result};
+  const dl=+localStorage.getItem('councilDelay')||0; return dl?new Promise(r=>setTimeout(()=>r({data:resp,error:null}),dl)):ok(resp); }
 const cSame=(f,a,b)=>{ const n=x=>String(x??'').trim(); if(f==='pLand'&&/^\d+(\.\d+)?$/.test(n(a))&&/^\d+(\.\d+)?$/.test(n(b))) return Math.round(+n(a))===Math.round(+n(b)); return n(a).toLowerCase().replace(/[^a-z0-9]/g,'')===n(b).toLowerCase().replace(/[^a-z0-9]/g,''); };
+// council_addr_key() and council_addr_fits()
+function cAddrKey(t){ const v=String(t||'').toLowerCase().replace(/^\s*(flat|unit|apartment|apt)\.?\s*([0-9]+[a-z]?|[a-z])\s*,?\s+/,'$2/').replace(/[^a-z0-9/ ]+/g,' '); const m=v.match(/^\s*(?:([0-9]+[a-z]?|[a-z])\s*\/\s*)?([0-9]+[a-z]?)\s+([a-z]+)/); return m?{unit:m[1]||null,number:m[2],street:m[3]}:null; }
+function cFits(prop,look){ const a=cAddrKey(prop), b=cAddrKey(look); if(!a||!b) return cNorm(prop).length>=3&&cNorm(prop)===cNorm(look); return a.number===b.number&&a.street===b.street&&(!a.unit||!b.unit||a.unit===b.unit); }
+const lookFits=(prop,l)=>cFits(prop,l.asked)||cFits(prop,l.matched_address)||cFits(prop,(l.result||{}).unit_address);
 const DAY30=30*864e5;
 function councilRpc(name,a,me){ if(offline()) return bad('Failed to fetch'); if(!me||!AGENTS.includes(me.email)) return bad('Agent only');
-  if(name==='agent_council_cached'){ const n=cNorm(a.p_asked), pid=a.p_property||null;
-    const L=CL().filter(l=>l.status==='ok'&&Date.now()-Date.parse(l.created_at)<DAY30&&((pid&&l.property_id===pid)||(n.length>=3&&(!l.property_id||l.property_id===pid)&&(l.asked_norm===n||cNorm(l.matched_address)===n))))
+  if(name==='agent_council_cached'){ const n=cNorm(a.p_asked), pid=a.p_property||null, addr=pid?(PT().find(x=>x.id===pid)||{}).address:null;
+    const L=CL().filter(l=>l.status==='ok'&&Date.now()-Date.parse(l.created_at)<DAY30&&((pid&&l.property_id===pid&&lookFits(addr,l)&&lookFits(a.p_asked,l))||(n.length>=3&&(!l.property_id||l.property_id===pid)&&(l.asked_norm===n||cNorm(l.matched_address)===n)&&(!pid||lookFits(addr,l)))))
       .sort((x,y)=>((pid&&y.property_id===pid)-(pid&&x.property_id===pid))||(x.created_at<y.created_at?1:-1));
-    const r=L[0]; return ok(r?{id:r.id,property_id:r.property_id,asked:r.asked,matched_address:r.matched_address,council:r.council,status:r.status,result:r.result,created_at:r.created_at,created_by:r.created_by}:null); }
+    const r=L[0]; return ok(r?{id:r.id,property_id:r.property_id,asked:r.asked,matched_address:r.matched_address,council:r.council,status:r.status,result:r.result,created_at:r.created_at}:null); }
+  // councilAcceptFail = '1': the next accept fails as with no signal (for the retry test)
+  if(name==='agent_council_accept'&&localStorage.getItem('councilAcceptFail')==='1'){ localStorage.removeItem('councilAcceptFail'); return bad('Failed to fetch'); }
   if(name==='agent_council_accept'){ const l=CL().find(x=>x.id===a.p_lookup); if(!l) return bad('Lookup not found'); if(l.property_id&&l.property_id!==a.p_property) return bad('That lookup is for another property');
     if(l.status!=='ok') return bad('Nothing usable was found in that lookup'); if(Date.now()-Date.parse(l.created_at)>=DAY30) return bad('That lookup is more than 30 days old. Look again first');
-    const p=PT().find(x=>x.id===a.p_property); if(!p) return bad('Property not found'); const keys=[...new Set(a.p_keys||[])].sort(); if(!keys.length) return bad('Tick at least one'); if(keys.length>80) return bad('Too many at once');
+    const p=PT().find(x=>x.id===a.p_property); if(!p) return bad('Property not found');
+    if(!lookFits(p.address,l)) return bad(`That lookup is for ${(l.result||{}).unit_address||l.matched_address||l.asked}, but the property file says ${p.address}. Look up the file's address, or correct the address first`);
+    const keys=[...new Set(a.p_keys||[])].sort(); if(!keys.length) return bad('Tick at least one'); if(keys.length>80) return bad('Too many at once');
     const rep=a.p_replace||[], keep=a.p_keep||[], who=me.email;
     const ag=(DB.agreements||[]).filter(g=>g.property_id===p.id&&live(g)).sort((x,y)=>(x.created_at||'')<(y.created_at||'')?1:-1)[0];
-    const agSigned=!!ag&&(['signed','countersigned'].includes(ag.status)||DB.agreement_people.some(x=>x.agreement_id===ag.id&&x.signed_at));
-    const agC=ag?Object.assign({},ag.config):{}, agA=ag?Object.assign({},ag.answers):{}; const agKeys=[];
+    const agSigned=!!ag&&(['signed','countersigned'].includes(ag.status)||DB.agreement_people.some(x=>x.agreement_id===ag.id&&x.signed_at)), agDraft=!!ag&&!agSigned&&ag.status==='draft';
+    const agC=ag?Object.assign({},ag.config):{}, agA=ag?Object.assign({},ag.answers):{}; const agKeys=[], left=[];
     const f=Object.assign({},p.found), pv=Object.assign({},p.provenance), desc=Object.assign({},p.description); let title=p.title_ref, legal=p.legal_description;
     const out={written:[],stored:[],kept:[],conflicts:[],skipped:[]};
     for(const k of keys){ if(!/^[a-z0-9_]{1,60}$/.test(k)){ out.skipped.push(k); continue; } let it=((l.result||{}).values||[]).find(x=>x.key===k);
@@ -336,17 +347,31 @@ function councilRpc(name,a,me){ if(offline()) return bad('Failed to fetch'); if(
       if(field){ const cur=field==='title_ref'?title:field==='legal_description'?legal:desc.pLand; const held=!ag?null:field==='title_ref'?agC.title:field==='pLand'?agA.pLand:null;
         const dF=String(cur??'').trim()!==''&&!cSame(field,cur,v), dA=String(held??'').trim()!==''&&!cSame(field,held,v);
         if(agSigned&&dA){ if(keep.includes(k)) out.kept.push(k); else { out.conflicts.push({key:k,label:it.label,found:v,current:held,where:'signed_agreement',ref:ag.ref}); continue; } }
-        else if(dF||dA){ if(rep.includes(k)) doWrite=true; else if(keep.includes(k)) out.kept.push(k); else { out.conflicts.push({key:k,label:it.label,found:v,current:dA?held:cur,where:dA?'agreement':'file',ref:dA?ag.ref:null}); continue; } }
+        else if(dF||dA){ if(rep.includes(k)) doWrite=true; else if(keep.includes(k)) out.kept.push(k); else { out.conflicts.push({key:k,label:it.label,found:v,current:dA?held:cur,where:dA?(agDraft?'agreement':'agreement_sent'):'file',ref:dA?ag.ref:null}); continue; } }
         else doWrite=true;
-        if(doWrite){ if(field==='title_ref') title=v; else if(field==='legal_description') legal=v; else desc.pLand=v;
-          if(ag&&!agSigned&&['title_ref','pLand'].includes(field)&&!cSame(field,held,v)){ if(field==='title_ref') agC.title=v; else agA.pLand=v; agKeys.push(k); }
-          out.written.push(k); pv[field]={from:'public_records',key:k,value:v,source:it.source,source_name:it.source_name,source_url:it.source_url,as_of:it.as_of,fetched_at:it.fetched_at,lookup_id:l.id,by:who,at:now()}; } }
+        if(doWrite){ const prev=pv[field]; const was=prev&&prev.from==='public_records'&&cSame(field,cur,prev.value)?prev.was:(String(cur??'').trim()||null);
+          pv[field]={from:'public_records',key:k,value:v,source:it.source,source_name:it.source_name,source_url:it.source_url,as_of:it.as_of,as_of_label:it.as_of_label,fetched_at:it.fetched_at,at:now(),was};
+          if(field==='title_ref') title=v; else if(field==='legal_description') legal=v; else desc.pLand=v;
+          if(ag&&['title_ref','pLand'].includes(field)&&!cSame(field,held,v)){ if(agDraft){ if(field==='title_ref') agC.title=v; else agA.pLand=v; agKeys.push(k); } else if(!agSigned) left.push({key:k,ref:ag.ref,status:ag.status,says:held}); }
+          out.written.push(k); } }
       const LIM='Not a substitute for a LIM.'; if(['hazard','zone'].includes(it.kind)&&!(it.note||'').includes(LIM)) it.note=((it.note||'')+' '+LIM).trim();
-      else if(['valuation','rates'].includes(it.kind)&&!(it.note||'').includes('not a market value')) it.note=('Council rating valuation (as at '+(it.as_of_label||'date not given')+'), not a market value. '+(it.note||'')).trim();
-      f[k]=Object.assign(it,{value:field==='pLand'?+v:it.value,field,written:doWrite,matched_address:l.matched_address,council:l.council,lookup_id:l.id,used_by:who,used_at:now()}); out.stored.push(k); }
+      else if(it.kind==='valuation'&&!(it.note||'').includes('not a market value')) it.note=('Council rating valuation (as at '+(it.as_of_label||'date not given')+'), not a market value. '+(it.note||'')).trim();
+      else if(it.kind==='rates'&&!(it.note||'').includes('rates notice')) it.note=('Rates as the council publishes them (as at '+(it.as_of_label||'date not given')+'). Check the latest rates notice. '+(it.note||'')).trim();
+      delete it.lookup_id; delete it.used_by;
+      f[k]=Object.assign(it,{value:field==='pLand'?+v:it.value,field,written:doWrite,matched_address:l.matched_address,unit_address:(l.result||{}).unit_address||null,council:l.council,used_at:now()}); out.stored.push(k); }
     Object.assign(p,{found:f,provenance:pv,title_ref:title,legal_description:legal,description:desc,updated_at:now()});
-    if(agKeys.length){ const old=JSON.parse(JSON.stringify(ag)); ag.config=agC; ag.answers=agA; syncAgreement(ag,old); DB.agreement_events.push({id:uid(),agreement_id:ag.id,at:now(),actor:who,kind:'public_records_applied',detail:{keys:agKeys,lookup_id:l.id}}); }
-    if(!l.property_id) l.property_id=p.id; save(); return ok(Object.assign(out,{agreement_updated:agKeys.length>0,ref:ag?ag.ref:null})); }
+    if(agKeys.length){ const old=JSON.parse(JSON.stringify(ag)); ag.config=agC; ag.answers=agA; syncAgreement(ag,old); DB.agreement_events.push({id:uid(),agreement_id:ag.id,at:now(),actor:who,kind:'public_records_applied',detail:{keys:agKeys}}); }
+    if(!l.property_id) l.property_id=p.id;
+    if(out.stored.length) CUL().push({id:CUL().length+1,property_id:p.id,lookup_id:l.id,kind:'used',keys:out.stored,detail:{written:out.written,kept:out.kept,agreement_updated:agKeys,agreement_left:left},actor:who,at:now()});
+    save(); return ok(Object.assign(out,{agreement_updated:agKeys.length>0,agreement_left:left,ref:ag?ag.ref:null})); }
+  if(name==='agent_council_remove'){ const p=PT().find(x=>x.id===a.p_property); if(!p) return bad('Property not found'); const e=(p.found||{})[a.p_key]; if(!e) return bad("That value isn't on the property file");
+    const field=e.field||null, pv=Object.assign({},p.provenance), desc=Object.assign({},p.description); let restored=false, keptBy=null;
+    if(field&&pv[field]&&pv[field].key===a.p_key){ const pr=pv[field]; delete pv[field]; const cur=field==='title_ref'?p.title_ref:field==='legal_description'?p.legal_description:desc.pLand;
+      if(cSame(field,cur,pr.value)){ const ag=(DB.agreements||[]).filter(g=>g.property_id===p.id&&live(g)).sort((x,y)=>(x.created_at||'')<(y.created_at||'')?1:-1)[0]; const held=!ag?null:field==='title_ref'?(ag.config||{}).title:field==='pLand'?(ag.answers||{}).pLand:null;
+        if(String(held??'').trim()&&cSame(field,held,pr.value)) keptBy=ag.ref; else { if(field==='title_ref') p.title_ref=pr.was??null; else if(field==='legal_description') p.legal_description=pr.was??null; else if(pr.was==null) delete desc.pLand; else desc.pLand=pr.was; restored=true; } } }
+    const f=Object.assign({},p.found); delete f[a.p_key]; Object.assign(p,{found:f,provenance:pv,description:desc,updated_at:now()});
+    CUL().push({id:CUL().length+1,property_id:p.id,lookup_id:null,kind:'removed',keys:[a.p_key],detail:{value:e.value,field,restored,agreement_holds:keptBy},actor:me.email,at:now()}); save();
+    return ok({removed:a.p_key,field,restored,agreement_holds:keptBy}); }
   return bad('unknown rpc '+name); }
 window.supabase={createClient(){ return {
   from:q, rpc, functions:{invoke:(n,o)=>{ logCall('fn:'+n+(o&&o.body&&o.body.mode?':'+o.body.mode:'')); if(n==='property-lookup') return councilInvoke(o); if(n==='doc-prefill'&&o.body&&o.body.mode==='translate'){ const reqs=JSON.parse(localStorage.getItem('trReqs')||'[]'); reqs.push(o.body); localStorage.setItem('trReqs',JSON.stringify(reqs)); const m=localStorage.getItem('translateMode'); if(m==='off') return Promise.resolve({data:null,error:{message:'503',context:{json:async()=>({error:'not_set_up'})}}}); const src=o.body.sources; const rej=m==='rejectFirst'?[src[0]]:[]; let cutL=[]; let use=src.filter(x=>!rej.includes(x)); if(m==='cutOff'){ const h=src.length>1?Math.floor(src.length/2):0; cutL=src.slice(h); use=src.slice(0,h); } const resp={ok:true,model:o.body.kind==='screens'||o.body.kind==='guide'?'claude-sonnet-5-5':'claude-haiku-5-5',cut_off:m==='cutOff',translations:use.map(x=>({source:x,text:'<'+o.body.lang+'> '+x})),rejected:rej.map(x=>({source:x,reason:'number changed'})).concat(cutL.map(x=>({source:x,reason:'cut off'}))),usage:{input:10,output:10}}; const D=+localStorage.getItem('translateDelay')||0; return D?new Promise(r=>setTimeout(()=>r({data:resp,error:null}),D)):ok(resp); }

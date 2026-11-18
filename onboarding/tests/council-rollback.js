@@ -9,7 +9,7 @@ const { makeFetch, SCENARIOS } = require('./files/council-fixtures.js');
   const res = await core.lookup({ address: SCENARIOS.dunedin.asked }, { fetch: makeFetch('dunedin'), now: () => new Date('2026-11-18T01:00:00Z') });
   const mig = fs.readFileSync(path.join(__dirname, '..', 'migrations', '013_council_lookup.sql'), 'utf8');
   // only the values the test uses, without the per-source list, to keep the statement small (each value exactly as the core made it)
-  const KEYS = ['title_ref', 'legal_description', 'land_area', 'capital_value', 'zone', 'hazard_dcc_none'];
+  const KEYS = ['title_ref', 'legal_description', 'land_area', 'capital_value', 'zone', 'hazard_dcc_none', 'rates_council'];
   const json = JSON.stringify(Object.assign({}, res, { sources: [], info: [], values: res.values.filter(v => KEYS.includes(v.key)) }));
   for (const tag of ['$mig$', '$t$', '$res$']) if (mig.includes(tag) || json.includes(tag)) throw new Error('tag clash ' + tag);
   process.stdout.write(fs.readFileSync(path.join(__dirname, 'council-rollback.sql'), 'utf8').replace('$mig$__MIGRATION__$mig$', () => '$mig$' + mig + '$mig$').replace('$res$__RESULT__$res$', () => '$res$' + json + '$res$'));

@@ -57,6 +57,31 @@ const SCENARIOS = {
     locator: { spatialReference: { wkid: 4326 }, candidates: [{ address: '15 High Street, Balclutha', location: { x: 169.7385, y: -46.2386 }, score: 75.69 }] },
   },
 };
+// Flats: "2/20 Thames Street" (constructed from the Oamaru record): two rating units at the point, flat 1 first in ORC's answer
+SCENARIOS.units = Object.assign({}, SCENARIOS.waitaki, {
+  asked: '2/20 Thames Street, Oamaru',
+  locator: { spatialReference: { wkid: 4326 }, candidates: [{ address: '2/20 Thames Street, Oamaru', location: { x: 170.9714, y: -45.0972 }, score: 100 }] },
+  orc: feat({ ValuationReference: '26280/29000A', RatingAuthority: 'Waitaki', CapitalValue: 410000, LandValue: 200000, CertificateOfTitle: 'OT1/1', LegalDescription: 'FLAT 1 DP 1', Hectares: 0.1, UpdateDate: ORC_UPDATE },
+    { ValuationReference: '26280/29000B', RatingAuthority: 'Waitaki', CapitalValue: 690000, LandValue: 200000, CertificateOfTitle: 'OT1/2', LegalDescription: 'FLAT 2 DP 1', Hectares: 0.1, UpdateDate: ORC_UPDATE }),
+  linz: feat({ valuation_reference: '26280/29000A', legal_description: 'Flat 1 DP 1', title_no: 'OT1/1', title_type: 'Cross lease', territorial_authority: 'Waitaki District', area: 1000 },
+    { valuation_reference: '26280/29000B', legal_description: 'Flat 2 DP 1', title_no: 'OT1/2', title_type: 'Cross lease', territorial_authority: 'Waitaki District', area: 1000 }),
+  // the council's rows carry no unit in their address here, so no certain match: Tim chooses
+  wdc: feat({ VALUATION_NO: '26280/29000A', CV: 410000, LV: 200000, REGIONAL_CNCL: 'Otago', CERT_TITLE: 'OT1/1', TITLE: 'Flat 1 DP 1', ADDRESS: '20 Thames Street, Oamaru 9400', LAND_AREA: 0.1 },
+    { VALUATION_NO: '26280/29000B', CV: 690000, LV: 200000, REGIONAL_CNCL: 'Otago', CERT_TITLE: 'OT1/2', TITLE: 'Flat 2 DP 1', ADDRESS: '20 Thames Street, Oamaru 9400', LAND_AREA: 0.1 }),
+});
+// the same, where the council's rows name each flat: a certain match on the typed unit
+SCENARIOS.unitsNamed = Object.assign({}, SCENARIOS.units, {
+  wdc: feat({ VALUATION_NO: '26280/29000A', CV: 410000, LV: 200000, REGIONAL_CNCL: 'Otago', CERT_TITLE: 'OT1/1', TITLE: 'Flat 1 DP 1', ADDRESS: '1/20 Thames Street, Oamaru 9400', LAND_AREA: 0.1 },
+    { VALUATION_NO: '26280/29000B', CV: 690000, LV: 200000, REGIONAL_CNCL: 'Otago', CERT_TITLE: 'OT1/2', TITLE: 'Flat 2 DP 1', ADDRESS: '2/20 Thames Street, Oamaru 9400', LAND_AREA: 0.1 }),
+});
+// the same street name in two towns: two candidates with the same text at different points (constructed)
+SCENARIOS.twoTowns = Object.assign({}, SCENARIOS.dunedin, {
+  asked: '12 High Street',
+  locator: { spatialReference: { wkid: 4326 }, candidates: [{ address: '12 High Street', location: { x: 170.5, y: -45.87 }, score: 100 }, { address: '12 High Street', location: { x: 169.74, y: -46.24 }, score: 100 }] },
+  boundaries: { '170.5': feat({ Id: 'DCC', Name: 'Dunedin City' }), '169.74': feat({ Id: 'CDC', Name: 'Clutha District' }) },
+  orc: feat({ ValuationReference: '28700/11111', HouseNumber: 12, StreetName: 'High St', RatingAuthority: 'Clutha', LandValue: 90000, CapitalValue: 240000, LegalDescription: 'LOT 3 DP 1234', Hectares: 0.08, UpdateDate: ORC_UPDATE }),
+  linz: NONE,
+});
 // South Dunedin: the Dunedin record with ORC liquefaction and tsunami answers at the point
 SCENARIOS.dunedinHazards = Object.assign({}, SCENARIOS.dunedin, {
   hazards: {
@@ -71,12 +96,13 @@ function respond(body, status) {
 }
 
 // opts.fail: list of URL fragments that fail (network), opts.slow: fragments that never answer (for the timeout),
-// opts.http: { fragment: status }
+// opts.delay: { fragment: ms } answers late, opts.http: { fragment: status }
 function makeFetch(name, opts) {
   const s = SCENARIOS[name]; opts = opts || {}; const asked = [];
   const f = async (url) => {
     asked.push(url);
     for (const frag of opts.slow || []) if (url.includes(frag)) return new Promise(() => {});
+    for (const [frag, ms] of Object.entries(opts.delay || {})) if (url.includes(frag)) await new Promise(r => setTimeout(r, ms));
     for (const frag of opts.fail || []) if (url.includes(frag)) throw new TypeError('fetch failed');
     for (const [frag, st] of Object.entries(opts.http || {})) if (url.includes(frag)) return respond({ error: { code: st } }, st);
     const u = new URL(url), p = u.pathname;
@@ -84,7 +110,7 @@ function makeFetch(name, opts) {
     if (p.endsWith('/findAddressCandidates')) return respond(s.locator);
     if (p.includes('/PropertyExternal/MapServer/0/query')) return respond(s.orc || NONE);
     if (p.includes('/LINZ_NZ_Property_Boundaries/FeatureServer/0/query')) return respond(s.linz || NONE);
-    if (p.includes('/Otago_Boundaries/MapServer/3/query')) return respond(NONE);
+    if (p.includes('/Otago_Boundaries/MapServer/3/query')) { const gx = (u.searchParams.get('geometry') || '').split(',')[0]; return respond((s.boundaries || {})[String(+gx)] || NONE); }
     if (p.includes('/Public/Rates/FeatureServer/0/query')) { const w = u.searchParams.get('where') || ''; return respond(/^Formatted_address LIKE '100 GLADSTONE%'$/.test(w) ? s.dccRates : NONE); }
     let m = p.match(/SecondGenerationPlan_Zones\/MapServer\/(\d+)\/query/); if (m) return respond((s.dccZone || {})[m[1]] || NONE);
     m = p.match(/SecondGenerationPlan_OverlayZones\/MapServer\/(\d+)\/query/); if (m) return respond((s.dccHaz || {})[m[1]] || NONE);
