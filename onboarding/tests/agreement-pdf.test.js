@@ -7,7 +7,9 @@ fs.mkdirSync(out, { recursive: true });
 let res;
 try {
   fs.writeFileSync(path.join(out, 'pdf_phase1.ts'), execFileSync('git', ['-C', root, 'show', 'a06eb62:fn/pdf.ts'], { encoding: 'utf8' }));
-  res = execFileSync('deno', ['run', '-A', path.join(__dirname, 'pdf-check.ts'), root, out, path.join(out, 'pdf_phase1.ts')], { encoding: 'utf8', timeout: 240000, stdio: ['ignore', 'pipe', 'pipe'] });
+  // the form builder before the property inspection (d9c3122, the same as main then), to prove declarations without notes print the same
+  fs.writeFileSync(path.join(out, 'pdf_before_inspection.ts'), execFileSync('git', ['-C', root, 'show', 'd9c3122:fn/pdf.ts'], { encoding: 'utf8' }));
+  res = execFileSync('deno', ['run', '-A', path.join(__dirname, 'pdf-check.ts'), root, out, path.join(out, 'pdf_phase1.ts'), path.join(out, 'pdf_before_inspection.ts')],{ encoding: 'utf8', timeout: 240000, stdio: ['ignore', 'pipe', 'pipe'] });
   const j = JSON.parse(res.slice(res.indexOf('{')));
   console.log(JSON.stringify(j, null, 1));
 } catch (e) {

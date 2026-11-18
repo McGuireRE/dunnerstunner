@@ -1,11 +1,11 @@
-// Run by agreement-pdf.test.js: deno run -A pdf-check.ts <repo root> <out dir> <phase 1 pdf.ts copy>
+// Run by agreement-pdf.test.js: deno run -A pdf-check.ts <repo root> <out dir> <phase 1 pdf.ts copy> <pdf.ts from before the inspection>
 // Builds agreement PDFs with the phase 1 code and with today's code, and checks:
 // - an agreement signed before phase 2 comes out the same (text of every page, page count);
 // - an agreement signed on phase 2 has the Vendor Guide ($575), the Complaints procedure and the REA guide appended,
 //   the REA guide pages unaltered, and the guide receipt with its version in the execution record;
 // - with no guide files, nothing about them is appended, and the app and PDF wording match.
 import { PDFDocument, StandardFonts } from "npm:pdf-lib@1.17.1";
-const [root, out, oldPath] = Deno.args;
+const [root, out, oldPath, BEFORE_INSP] = Deno.args;
 const NEW = await import("file://" + root + "/fn/pdf.ts");
 const LOAD = await import("file://" + root + "/fn/pdfload.ts");
 const OLD = await import("file://" + oldPath);
@@ -118,6 +118,22 @@ const formI = { ...form, data: { ...form.data, answers: { ...stored, pegs: { a: 
 const ti = (await text(await NEW.buildFormPdf({ font, bold, ag, people, form: formI, fsigs, images: {} }), "vendor-declaration-inspection")).replace(/\s+/g, " ");
 expect(ti.includes("Noted by Tim McGuire at the inspection on Wed, 18 November 2026; checked by Jane Mary Smith") && ti.includes("checked by Robert Smith"), "the PDF shows Tim's inspection notes and who checked each");
 expect(!tf.includes("Noted by Tim McGuire at the inspection"), "a declaration without inspection notes prints as before");
+expect(!ti.includes("Is the property tenanted, or will it be before settlement?"), "no Tenancy row unless Tim noted the tenancy");
+// Tim noted the tenancy: it is printed, with the marker and who checked it
+const formT = { ...formI, data: { ...formI.data, tenanted: "now", pre: { ...formI.data.pre, tenanted: "inspection" }, checked: { ...formI.data.checked, tenanted: { by: "P2", name: "Robert Smith", at: "2026-11-19T02:00:00Z" } } } };
+const tt = (await text(await NEW.buildFormPdf({ font, bold, ag, people, form: formT, fsigs, images: {} }), "vendor-declaration-tenancy")).replace(/\s+/g, " ");
+expect(/Is the property tenanted, or will it be before settlement\? Yes, it's tenanted now\.? Noted by Tim McGuire at the inspection on Wed, 18 November 2026; checked by Robert Smith/.test(tt), "Tim's tenancy note is printed with who checked it");
+// against the form builder from before the inspection: declarations without Tim's notes (a plain one, and an older one whose
+// answers came from the property file, pre: true) print exactly the same, page for page
+if (BEFORE_INSP) {
+  const B = await import("file://" + BEFORE_INSP);
+  const formF = { ...form, data: { ...form.data, tenanted: "now", pre: { pegs: true }, answers: { ...stored, water: { a: "yes", d: "Town supply" } } } };
+  for (const [nm, f] of [["plain", form], ["from-file", formF]] as [string, any][]) {
+    const args = { font, bold, ag, people, form: f, fsigs, images: { FS1: png, FS2: png, FS3: png } };
+    const nb = await NEW.buildFormPdf(args), ob = await B.buildFormPdf(args);
+    expect(stable(await text(nb, "vd-now-" + nm)) === stable(await text(ob, "vd-before-" + nm)) && (await pages(nb)) === (await pages(ob)), "a declaration without inspection notes prints exactly as before (" + nm + ")");
+  }
+} else expect(false, "the form builder from before the inspection was not given");
 let threw = false; try { await NEW.buildFormPdf({ font, bold, ag, people, form: { ...form, form_version: "VD-1999" }, fsigs, images: {} }); } catch (_) { threw = true; }
 expect(threw, "an unknown form version is refused, never guessed");
 const hh = (await text(await NEW.buildFormPdf({ font, bold, ag, people, form: { id: "F2", kind: "healthy_homes", form_version: "HH-2026-11", status: "signed", agent_data: { c: { ins3: { a: "N", n: "No underfloor insulation" } }, res: { req: "3.6" } } }, fsigs: fsigs.slice(0, 1), images: {} }), "healthy-homes")).replace(/\s+/g, " ");

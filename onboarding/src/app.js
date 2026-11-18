@@ -502,6 +502,7 @@
     const waiting = pendingAll();
     if (waiting && !window.confirm(`${waiting} inspection ${waiting === 1 ? 'answer hasn\'t' : 'answers haven\'t'} been saved yet. If you sign out now, ${waiting === 1 ? 'it is' : 'they are'} lost. Sign out anyway?`)) return;
     try { inspIds().forEach(id => localStorage.removeItem('inspQ:' + id)); localStorage.removeItem('inspOpen'); } catch (_) { }
+    INS = null; Object.keys(INS_STATE).forEach(k => { delete INS_STATE[k]; });
     IS_AGENT = false; setAgentNav(); await sb.auth.signOut(); location.hash = ''; });
 
   function viewLogin() {
@@ -2520,6 +2521,9 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   }
   function vdDoc(data, address, names, when) {
     const ans = data.answers || {};
+    // the tenancy answer is shown only when Tim noted it at an inspection (the same rule as fn/pdf.ts), so older declarations are unchanged
+    const TENL = { now: 'Yes, it\'s tenanted now', will: 'It will be tenanted', no: 'No' };
+    const tenancy = (data.pre || {}).tenanted === 'inspection' ? [{ title: 'Tenancy', rows: [['Is the property tenanted, or will it be before settlement?', TENL[data.tenanted] || '', vdInspNote(data, 'tenanted')]] }] : [];
     return {
       title: 'Vendor Declaration',
       head: [['Client / Vendor(s):', names], ['Property Address:', address], ['Date:', fmtDate(when)]],
@@ -2527,6 +2531,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         title: 'Vendor Declaration', sub: address, intro: [VD_LEAD].concat(VD_INTRO),
         sections: [{ title: 'From the property file', rows: (data.facts || []).map(([k, v]) => [k, v, '']).concat([['The Vendor confirmed these details', data.fileOk ? 'Still correct' : 'Something has changed', data.fileOk ? '' : data.fileChanges || '']]) }]
           .concat(VD_SECTIONS.map(([t, qs]) => ({ title: t, rows: qs.map(x => { const v = ans[x.k] || {}; return [x.q, x.text ? '' : ynuText(v.a), [v.d, vdInspNote(data, x.k)].filter(Boolean).join('. ')]; }) })))
+          .concat(tenancy)
           .concat([{ title: 'Additional Notes', rows: [['Additional Notes:', '', data.notes || 'None']] }]),
         after: ['Vendor Statement'].concat(VD_STATEMENT),
       }],
@@ -2667,10 +2672,11 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   // Only the answers this page changed go back, so a page opened before Tim sent a new note can't put the old answer back.
   const vfPatch = W => { const o = {}; ['tenanted', 'facts', 'fileOk', 'fileChanges', 'notes', 'hh', '_step', 'complete', 'fromFile'].forEach(k => { if (k in W) o[k] = W[k]; });
     o.answers = {}; Object.entries(W.answers || {}).forEach(([k, v]) => { if (JSON.stringify(v) !== JSON.stringify((VF.base || {})[k])) o.answers[k] = v; });
-    if ((W.pre || {}).tenanted === 'inspection' && 'tenanted' in o && o.tenanted === VF.baseTen) delete o.tenanted;
-    o.checked = Object.assign({}, W.ticks || {}); return o; };
+    if ('tenanted' in o && o.tenanted === VF.baseTen) delete o.tenanted;
+    // a tick goes only when it differs from what the server holds, so a page opened before a co-owner checked can't undo it
+    o.checked = {}; Object.entries(W.ticks || {}).forEach(([k, v]) => { if (!!v !== !!vfConfirmer(k)) o.checked[k] = !!v; }); return o; };
   // after a save, the server's record of who checked what
-  async function vfRefresh() { try { const { data } = await sb.from('property_forms').select('data').eq('id', VF.fm.id).single(); if (data && data.data) { const sd = data.data; VF.W.checked = sd.checked || {}; VF.W.pre = sd.pre || VF.W.pre; VF.W.ticks = {}; VF.W.answers = Object.assign({}, VF.W.answers, sd.answers || {}); VF.base = JSON.parse(JSON.stringify(sd.answers || {})); if ('tenanted' in sd) { VF.W.tenanted = sd.tenanted; VF.baseTen = sd.tenanted; } } } catch (_) { } }
+  async function vfRefresh() { try { const { data } = await sb.from('property_forms').select('data').eq('id', VF.fm.id).single(); if (data && data.data) { const sd = data.data; VF.W.checked = sd.checked || {}; VF.W.pre = sd.pre || VF.W.pre; if (sd.insp) VF.W.insp = sd.insp; VF.W.ticks = {}; VF.W.answers = Object.assign({}, VF.W.answers, sd.answers || {}); VF.base = JSON.parse(JSON.stringify(sd.answers || {})); if ('tenanted' in sd) { VF.W.tenanted = sd.tenanted; VF.baseTen = sd.tenanted; } } } catch (_) { } }
   const VF_INSP_MSG = 'Please check each answer Tim noted at the inspection: tick This is right, or change the answer.';
   function vfCheck(i) {
     const W = VF.W;
@@ -2920,8 +2926,9 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const v = INS.decl[k] || {}; return !!(v.a || String(v.d || '').trim());
   }
   const secCount = s => [s[2].filter(insAnswered).length, s[2].length];
-  // the page's copy of an inspection: kept while it is open (to resume with no signal) or while answers wait to be saved
-  const inspKeep = id => { if (INS && INS.id === id) inspLS(id, { row: INS.row, pending: INS.pending }); };
+  // the phone's copy of an inspection: kept only while answers wait to be saved, or while what is on screen hasn't come from the
+  // server (opened with no signal). Once nothing waits and the server has it, the copy is removed.
+  const inspKeep = id => { if (!INS || INS.id !== id) return; if (pendingCount(INS.pending) || INS.offline) inspLS(id, { row: INS.row, pending: INS.pending }); else inspLS(id, null); };
   function inspTidy() {
     const open = inspOpenId();
     inspIds().forEach(id => { if (id === open) return; const c = inspLS(id); if (!c) return;
@@ -2977,12 +2984,13 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       const msg = String(res.error.message || 'try again'), m = msg.match(/^Not saved \(([fdn]):([A-Za-z]+)\):\s*(.*)$/);
       if (netErr(res.error)) { INS_STATE[id] = { kind: 'net' }; return 'net'; }
       if (authErr(res.error)) { INS_STATE[id] = { kind: 'auth' }; return 'auth'; }
-      if (m) {   // only the answer the server named is dropped; everything else stays and goes again
+      if (m && m[2] in ((sent[P_KIND[m[1]]]) || {})) {   // only the answer the server named is dropped; everything else stays and goes again
         const kind = P_KIND[m[1]], k = m[2];
-        if (isame(cur.pending[kind][k], sent[kind][k])) { delete cur.pending[kind][k]; delete cur.pending.t[m[1] + ':' + k]; }
+        if (!isame(cur.pending[kind][k], sent[kind][k])) { INS_STATE[id] = { kind: 'ok' }; return 'refused'; }   // changed since: the new answer goes instead
+        delete cur.pending[kind][k]; delete cur.pending.t[m[1] + ':' + k];
         const note = `${inspLabel(k)} (${m[3] || 'refused'})`;
         INS_STATE[id] = { kind: 'ok', refused: note }; toast('Not saved: ' + note);
-        if (inspLS(id) || (INS && INS.id === id)) inspLS(id, cur);
+        if (INS && INS.id === id) inspKeep(id); else inspLS(id, pendingCount(cur.pending) ? cur : null);
         return 'refused';
       }
       INS_STATE[id] = { kind: 'fail', msg }; return 'fail';   // everything stays queued
@@ -3187,7 +3195,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     inspFlush();
     const synced = await inspSyncOne(id);   // waits for a save already in flight, then sends anything left
     let finished = false;
-    if (synced) { const { error } = await sb.rpc('agent_inspection_finish', { iid: id }); finished = !error; if (!error) { INS.row.status = 'finished'; INS.row.finished_at ||= new Date().toISOString(); inspLS(id, { row: INS.row, pending: INS.pending }); } }
+    if (synced) { const { error } = await sb.rpc('agent_inspection_finish', { iid: id }); finished = !error; if (!error) { INS.row.status = 'finished'; INS.row.finished_at ||= new Date().toISOString(); inspKeep(id); } }
     const pid = INS.row.property_id;
     let ags = [], form = null, fsigs = [];
     try { const { data } = await sb.from('agreements').select('id,ref,status,created_at').eq('property_id', pid).order('created_at', { ascending: false }); ags = data || []; } catch (_) { }

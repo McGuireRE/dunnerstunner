@@ -160,6 +160,10 @@ const TIM = ['agent-1', 'hello@timmcguire.co.nz'];
   expect(await p.isVisible('#newInsp'), 'Inspect a property on the dashboard');
   await p.click(`[data-need="${ni}"]`); await p.waitForTimeout(600);
   expect(await p.textContent('main h1') === 'Outside' && await p.$eval('[data-ik="d:pegs"] input[value="yes"]', e => e.checked), 'resumed with the answers');
+  out.openCopy = await p.evaluate(() => Object.keys(localStorage).filter(k => k.startsWith('inspQ:')));
+  expect(!out.openCopy.length, 'loaded from the server with nothing waiting: no copy is kept on the phone, even while open: ' + out.openCopy);
+  await tap('d:pegs', 'no'); await tap('d:pegs', 'yes');
+  expect(!(await p.evaluate(() => Object.keys(localStorage).filter(k => k.startsWith('inspQ:')).length)), 'and none once a new answer has saved');
   await p.click('#back'); await p.waitForTimeout(700);
   out.tile = await p.textContent('#inspTile'); expect(/Started, not finished/.test(out.tile) && /Carry on/.test(out.tile), 'Inspection tile on the property page: ' + out.tile.replace(/\s+/g, ' '));
   await p.click('#inspTile [data-inspopen]'); await p.waitForTimeout(600);
@@ -299,6 +303,14 @@ const TIM = ['agent-1', 'hello@timmcguire.co.nz'];
   await p.click('[data-form="vendor_declaration"]'); await p.waitForTimeout(600);
   out.robSees = (await p.textContent('main')).replace(/\s+/g, ' ');
   expect(/Noted by Tim McGuire at the inspection on .*2026; checked by Jane Mary Smith/.test(out.robSees), 'Rob sees Tim\'s notes and who checked them');
+  expect(/Tenancy ?Is the property tenanted, or will it be before settlement\? ?No\.? ?Noted by Tim McGuire at the inspection on .*; checked by Jane Mary Smith/.test(out.robSees), 'including the tenancy Tim noted: ' + (out.robSees.match(/Tenancy.{0,160}/) || [''])[0]);
+  // Rob goes back a step and carries on: nothing he didn't change is sent, so Jane's checks and answers stay hers
+  await p.click('#back'); await p.waitForTimeout(400);
+  expect(await p.isVisible('[data-q="water"] .insp-checked'), 'the question shows who checked it: ' + await p.textContent('[data-q="water"]').catch(() => ''));
+  await p.click('#next'); await p.waitForTimeout(500);
+  out.robSent = await p.evaluate(() => JSON.parse(localStorage.getItem('lastVendorSave') || '{}'));
+  expect(!Object.keys(out.robSent.checked || {}).length && !Object.keys(out.robSent.answers || {}).length && !('tenanted' in out.robSent), 'an unchanged page sends no ticks, answers or tenancy: ' + JSON.stringify(out.robSent));
+  d = await db(); expect(d.property_forms.find(f => f.id === vd.id).data.checked.water.name === 'Jane Mary Smith', 'Jane\'s check stands');
   await p.click('#back'); await p.waitForTimeout(300);
 
   // 14. Tim notes something else for a question Jane has answered: her answer stays, and he sees the difference

@@ -650,6 +650,7 @@ export const FORM_TEXT: any = {
   };
 const FORM_WORDING: Record<string, any> = { "VD-2026-11": FORM_TEXT, "HH-2026-11": FORM_TEXT };
 const YNU: Record<string, string> = { yes: "Yes", no: "No", unknown: "Unknown" };
+const TEN: Record<string, string> = { now: "Yes, it's tenanted now", will: "It will be tenanted", no: "No" };
 const nzLong = (d: string | Date) => new Date(d).toLocaleDateString("en-NZ", { weekday: "short", day: "numeric", month: "long", year: "numeric", timeZone: "Pacific/Auckland" });
 
 // The document as signed, from the stored record (the same layout the app shows on screen)
@@ -664,6 +665,9 @@ export function formDoc(form: any, address: string, names: string, when: string 
       const on = (data.insp || {}).on, c = (data.checked || {})[k];
       return `Noted by Tim McGuire at the inspection on ${on ? nzLong(on + "T00:00:00Z") : ""}${c && typeof c === "object" && c.name ? `; checked by ${c.name}` : "; not checked yet"}`;
     };
+    // the tenancy answer is printed only when Tim noted it at an inspection, so every other declaration prints exactly as before
+    const tenancy = (data.pre || {}).tenanted === "inspection"
+      ? [{ title: "Tenancy", rows: [["Is the property tenanted, or will it be before settlement?", TEN[data.tenanted] || "", inspNote("tenanted")]] }] : [];
     return {
       title: "Vendor Declaration",
       head: [["Client / Vendor(s):", names], ["Property Address:", address], ["Date:", nzLong(when)]],
@@ -671,6 +675,7 @@ export function formDoc(form: any, address: string, names: string, when: string 
         title: "Vendor Declaration", sub: address, intro: [T.VD_LEAD].concat(T.VD_INTRO),
         sections: [{ title: "From the property file", rows: (data.facts || []).map(([k, v]: string[]) => [k, v, ""]).concat([["The Vendor confirmed these details", data.fileOk ? "Still correct" : "Something has changed", data.fileOk ? "" : data.fileChanges || ""]]) }]
           .concat(T.VD_SECTIONS.map(([t, qs]: [string, any[]]) => ({ title: t, rows: qs.map((x) => { const v = ans[x.k] || {}; return [x.q, x.text ? "" : (YNU[v.a] || ""), [v.d, inspNote(x.k)].filter(Boolean).join(". ")]; }) })))
+          .concat(tenancy)
           .concat([{ title: "Additional Notes", rows: [["Additional Notes:", "", data.notes || "None"]] }]),
         after: ["Vendor Statement"].concat(T.VD_STATEMENT),
       }],
