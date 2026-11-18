@@ -78,12 +78,12 @@ const TIM = ['agent-1', 'hello@timmcguire.co.nz'];
 
   // 3. answers save as tapped: facts to the property file, declaration answers to the inspection only
   out.status0 = await status(); expect(out.status0 === 'Saved', 'Saved shows in the top bar');
-  await tap('f:pType', 'House'); await tap('d:pegs', 'yes'); await p.click('[data-ik="f:hazards"] input[value="Steep driveway or steps"] + span'); await p.waitForTimeout(250);
+  await tap('f:pType', 'House'); await tap('d:pegs', 'yes'); await tap('d:hazard', 'yes'); await p.click('[data-ik="d:hazard"] input[value="Steep driveway or steps"] + span'); await p.waitForTimeout(250);
   await typeIn('[data-itext="f:pLand"]', '650');
   ({ pr, i } = await insp('9 Test Road, Roslyn'));
   expect(pr.description.pType === 'House' && pr.description.pLand === '650' && (pr.disclosures.hazards || []).includes('Steep driveway or steps'), 'facts are on the property file as soon as they are tapped');
   expect(i.declaration.pegs.a === 'yes' && !pr.description.pegs && !pr.disclosures.pegs, 'the declaration answer stays on the inspection');
-  out.count = await p.textContent('[data-iseccount="outside"]'); expect(out.count === '4 of 8 answered', 'progress count per section: ' + out.count);
+  out.count = await p.textContent('[data-iseccount="outside"]'); expect(out.count === '4 of 6 answered', 'progress count per section: ' + out.count);
   await typeIn('#inote', 'Tidy section, north facing');
   ({ i } = await insp('9 Test Road, Roslyn')); expect(i.notes.outside === 'Tidy section, north facing', 'a note per section');
   // clearing an answer takes it off again
@@ -95,7 +95,7 @@ const TIM = ['agent-1', 'hello@timmcguire.co.nz'];
   // 4. structure, mid-way (screenshot)
   await p.click('#next'); await p.waitForTimeout(300);
   expect(await p.textContent('main h1') === 'Structure and cladding', 'Next goes to the next section');
-  await tap('d:era', 'no'); await tap('f:wt', 'no'); await tap('d:asbestos', 'unknown');
+  await tap('d:era', 'no'); await tap('d:wt', 'no'); await tap('d:asbestos', 'unknown');
   await p.evaluate(() => window.scrollTo(0, 0)); await p.waitForTimeout(150);
   expect(await p.isVisible('#inspStatus'), 'the saved status is on screen at 390 px');
   await p.screenshot({ path: path.join(__dirname, 'out', 'insp_section.png'), fullPage: false });
@@ -131,7 +131,7 @@ const TIM = ['agent-1', 'hello@timmcguire.co.nz'];
   await p.evaluate(() => localStorage.setItem('mockRefuse', 'all'));
   await tap('d:wt', 'yes');
   out.fail = await status(); expect(/^Not saved: Something went wrong/.test(out.fail) && await p.isVisible('#inspRetry'), 'Not saved, with a retry: ' + out.fail);
-  expect(pendingLeft(await p.evaluate(id => JSON.parse(localStorage.getItem('inspQ:' + id)), i.id)) === 1, 'the answer is kept on the phone');
+  expect(pendingLeft(await p.evaluate(id => JSON.parse(localStorage.getItem('inspQ:' + id)), i.id)) === 2, 'the answer is kept on the phone (the weathertightness answer and the fact it fills)');
   await p.evaluate(() => localStorage.removeItem('mockRefuse')); await p.click('#inspRetry'); await p.waitForTimeout(600);
   ({ i } = await insp('9 Test Road, Roslyn')); expect(i.declaration.wt.a === 'yes' && await status() === 'Saved', 'Try again saves it');
   // an expired sign-in: kept, asked to sign in again, saved once signed in
@@ -143,7 +143,7 @@ const TIM = ['agent-1', 'hello@timmcguire.co.nz'];
   ({ i } = await insp('9 Test Road, Roslyn')); expect(i.declaration.wt.a === 'yes', 'nothing saved while signed out');
   await p.evaluate(() => localStorage.removeItem('mockAuthFail')); await p.reload(); await p.waitForTimeout(1200);
   ({ i } = await insp('9 Test Road, Roslyn')); expect(i.declaration.wt.a === 'no' && await status() === 'Saved', 'saved once signed in again');
-  expect(await p.$eval('#inote', e => e.maxLength) === 4000 && await p.$eval('[data-itext="d:wt"]', e => e.maxLength) === 4000, 'notes and details stop at the server\'s limit');
+  expect(await p.$eval('#inote', e => e.maxLength) === 4000 && await p.$eval('[data-itext="d:faults"]', e => e.maxLength) === 4000, 'notes and details stop at the server\'s limit');
   // an older answer from another phone never replaces a newer one
   out.older = await p.evaluate(async id => { const c = window.supabase.createClient(); const r = await c.rpc('agent_inspection_save', { iid: id, p_facts: {}, p_decl: { wt: { a: 'unknown', d: '' } }, p_notes: {}, p_stamps: { 'd:wt': '2000-01-01T00:00:00Z' } }); return r.data && r.data.skipped; }, i.id);
   ({ i } = await insp('9 Test Road, Roslyn')); expect(out.older && 'd:wt' in out.older && i.declaration.wt.a === 'no', 'the server keeps the newer answer: ' + JSON.stringify(out.older));
@@ -171,10 +171,9 @@ const TIM = ['agent-1', 'hello@timmcguire.co.nz'];
   // 7. the rest of the walk-round
   await tab('Inside'); await tap('f:pBed', '3'); await tap('f:pBath', '2'); await typeIn('[data-itext="f:pHeat"]', 'Heat pump, ceiling insulation');
   await tab('Services'); await tap('d:water', 'yes');
-  await tab('Consents'); await tap('f:work', 'yes'); await typeIn('[data-itext="f:workDetail"]', 'Deck 2019, consented'); await tap('f:meth', 'no');
-  expect(await p.isVisible('[data-iuse="meth"]'), 'Use my answer above is offered for the matching declaration question');
-  await p.click('[data-iuse="meth"]'); await p.waitForTimeout(400);
-  expect(await p.$eval('[data-ik="d:meth"] input[value="no"]', e => e.checked), 'one tap copies it across');
+  await tab('Consents'); await tap('d:reno', 'yes'); await typeIn('[data-itext="d:reno"]', 'Deck 2019, consented');
+  await p.click('input[name="idf_meth_aware"][value="no"] + span'); await p.waitForTimeout(250); await p.click('input[name="idf_meth_tested"][value="no"] + span'); await p.waitForTimeout(250);
+  expect(!(await p.$('[data-iuse]')) && !(await p.$('[data-ik="f:meth"]')), 'no separate fact question and no "Use my answer above"');
   await tab('Tenancy'); await tap('d:tenanted', 'no');
   const keys = await p.evaluate(() => [...new Set([...document.querySelectorAll('.insp-tab')].map(x => x.textContent))]);
   // every Vendor Declaration question is in the walk-round, with Tim's wording
@@ -211,11 +210,14 @@ const TIM = ['agent-1', 'hello@timmcguire.co.nz'];
   // a large queue from a long time without signal (27 long answers, more than one save can take): the phone sends it in smaller
   // batches, and when the server still says a batch is too much (here its limit is lowered to 20000), halves it until all is saved
   await p.evaluate(() => { localStorage.setItem('mockOffline', '1'); localStorage.setItem('mockMaxBatch', '20000'); localStorage.removeItem('mockBatchLog'); });
-  for (const sec of ['Outside', 'Structure', 'Inside', 'Services', 'Consents']) { await tab(sec); for (const t of await p.$$('textarea[data-itext^="d:"]')) await t.fill('x'.repeat(3500)); await p.waitForTimeout(900); }
+  // each question answered Unknown (or Yes for the renovations question, which has no Unknown) so its details box shows
+  for (const sec of ['Outside', 'Structure', 'Inside', 'Services', 'Consents']) { await tab(sec);
+    for (const k of await p.$$eval('.vdq-i', e => e.map(c => c.dataset.ik))) { const u = (await p.$(`[data-ik="${k}"] input[data-is="a"][value="unknown"]`)) || (await p.$(`[data-ik="${k}"] input[data-is="fu:aware"][value="unknown"]`)) || (await p.$(`[data-ik="${k}"] input[data-is="a"][value="yes"]`)); if (u) { await u.evaluate(e => e.click()); await p.waitForTimeout(80); } }
+    for (const t of await p.$$('textarea[data-itext^="d:"]')) await t.fill('x'.repeat(3500)); await p.waitForTimeout(900); }
   out.bigQueued = await p.evaluate(() => { const k = Object.keys(localStorage).find(x => x.startsWith('inspQ:')); return k ? Object.keys(JSON.parse(localStorage.getItem(k)).pending.decl).length : 0; });
   await p.evaluate(() => { localStorage.removeItem('mockOffline'); window.dispatchEvent(new Event('online')); }); await p.waitForTimeout(3000);
   out.batchLog = await p.evaluate(() => JSON.parse(localStorage.getItem('mockBatchLog') || '[]'));
-  d = await db(); out.bigSaved = Object.values((d.property_inspections || []).filter(x => x.property_id === 'PR3').pop().declaration).filter(v => (v.d || '').length === 3500).length;
+  d = await db(); out.bigSaved = Object.values((d.property_inspections || []).filter(x => x.property_id === 'PR3').pop().declaration).filter(v => (v.d || '').length >= 3500).length;
   expect(out.bigQueued === 27 && out.bigSaved === 27 && out.batchLog.some(x => x.startsWith('refused:')) && out.batchLog.filter(x => x.startsWith('saved:')).length > 1 && await status() === 'Saved'
     && !(await p.evaluate(() => Object.keys(localStorage).filter(k => k.startsWith('inspQ:')).length)), 'a queue too big for one save is split and halved until every answer is saved: ' + JSON.stringify([out.bigQueued, out.bigSaved, out.batchLog]));
   await p.evaluate(() => localStorage.removeItem('mockMaxBatch'));
@@ -233,7 +235,7 @@ const TIM = ['agent-1', 'hello@timmcguire.co.nz'];
   expect(/MRE-2026-1003 has been sent, so it wasn't changed. Recall it, or raise the change with the vendors/.test(out.sentNote), 'Tim is told to recall it or raise it: ' + out.sentNote);
   await p.click('[data-iresolve="pBath"][data-use="agreement"]'); await p.waitForTimeout(800);
   out.factCount = (await p.textContent('.view-pad.insp')).match(/(\d+) details? (?:is|are) on the property file/);
-  expect(out.factCount && out.factCount[1] === '1', 'facts kept as the agreement\'s aren\'t counted: ' + (out.factCount && out.factCount[0]));
+  expect(out.factCount && out.factCount[1] === '2', 'facts kept as the agreement\'s aren\'t counted: ' + (out.factCount && out.factCount[0]));
 
   // 10. after listing: a signed agreement on the property (Jane and Rob). 3 bedrooms signed; Tim notes 4
   ({ pr, i } = await insp('9 Test Road, Roslyn'));
@@ -291,13 +293,20 @@ const TIM = ['agent-1', 'hello@timmcguire.co.nz'];
   expect(['pegs', 'era', 'dux', 'asbestos', 'meth'].every(k => out.badges.includes(k)), 'Tim\'s notes are marked: ' + out.badges);
   out.badgeText = await p.textContent('[data-q="pegs"] .insp-badge'); expect(/Noted by Tim at the inspection on .*2026\. Please check/.test(out.badgeText), out.badgeText);
   expect(await p.$eval('[data-q="pegs"] .insp-badge [translate="no"]', e => /2026/.test(e.textContent)), 'the date is marked translate="no"');
-  await p.$$eval('.vdq', cs => cs.forEach(c => { if (!c.querySelector('input:checked') && c.querySelector('input[value="no"]')) c.querySelector('input[value="no"]').checked = true; }));
+  // Tim's Unknown (asbestos) is a question for Jane to answer: nothing chosen for her, and no "This is right" to tick
+  out.askBadge = await p.textContent('[data-q="asbestos"] .insp-badge');
+  expect(/^Tim noted this as Unknown at the inspection on .*2026\. Please answer it from what you know$/.test(out.askBadge) && !(await p.$('[data-q="asbestos"] input:checked')) && !(await p.$('[data-q="asbestos"] .iconfirm')),
+    'an Unknown note asks the vendor to answer, with nothing chosen and nothing to tick: ' + out.askBadge);
+  await p.click('#next'); await p.waitForTimeout(300); out.askErr = await errText();
+  expect(/Please answer each question Tim couldn't answer at the inspection/.test(out.askErr), 'Continue asks for an answer to it: ' + out.askErr);
+  await p.$$eval('.vdq', cs => cs.forEach(c => { if (!c.querySelector('input:checked') && c.querySelector('input[value="no"]') && !c.querySelector('.insp-ask')) c.querySelector('input[value="no"]').checked = true; }));
   for (const k of ['faults', 'reno']) { const v = await p.inputValue(`[data-qd="${k}"]`); if (!v) await p.fill(`[data-qd="${k}"]`, 'None known'); }
+  await p.click('[data-q="asbestos"] input[value="unknown"] + .mark');   // Jane doesn't know either: Unknown is her own answer
   await p.click('#next'); await p.waitForTimeout(300); out.vErr = await errText();
   expect(/Please check each answer Tim noted/.test(out.vErr), 'Continue needs each of Tim\'s notes checked: ' + out.vErr);
   await p.click('[data-q="pegs"] input[value="unknown"] + .mark'); await p.waitForTimeout(100);
   expect(await p.$eval('[data-qc="pegs"]', e => e.checked), 'changing an answer counts as checking it');
-  for (const k of out.badges.filter(k => k !== 'pegs')) await p.click(`[data-q="${k}"] .iconfirm`);
+  for (const k of out.badges.filter(k => k !== 'pegs')) await p.click(await p.$(`[data-q="${k}"] .insp-ask`) ? `[data-q="${k}"] input[value="unknown"] + .mark` : `[data-q="${k}"] .iconfirm`);
   await p.click('#next'); await p.waitForTimeout(500);
   out.sent1 = await p.evaluate(() => JSON.parse(localStorage.getItem('lastVendorSave') || '{}'));
   expect(out.sent1.answers && 'pegs' in out.sent1.answers && !('era' in out.sent1.answers) && out.sent1.checked.era === true && !('pre' in out.sent1) && !('insp' in out.sent1),
@@ -439,7 +448,146 @@ const TIM = ['agent-1', 'hello@timmcguire.co.nz'];
   out.afterSignOut = await p.evaluate(() => Object.keys(localStorage).filter(k => k.startsWith('insp')));
   await p.evaluate(() => { localStorage.removeItem('mockOffline'); localStorage.removeItem('mockSaveDelay'); }); await go();
   expect(!out.afterSignOut.length && /Your agency agreement/.test(await p.textContent('main h1')), 'signed out, and nothing of the inspection is left on the phone: ' + out.afterSignOut);
+
+  // 19. Tim's on-site report (18 November 2026): questions asked once, follow-ups from each question's own wording, the right
+  //     issue on each question, Unknown sent to the vendors to answer. A listed property (3 Kiln Street, Kim Brown).
+  await setDb(`d => { const t='2026-11-12T00:00:00Z'; d.properties.push({ id:'PR9', address:'3 Kiln Street, Opoho', ownership:{}, description:{}, disclosures:{}, stage:'signed', stage_at:t, created_at:t, updated_at:t });
+    d.agreements.push({ id:'A9', ref:'MRE-2026-1009', address:'3 Kiln Street, Opoho', property_id:'PR9', status:'signed', config:{}, answers:{}, legal:{ choice:'have' }, signed_at:t, agreement_version:'v3.15-26102026', created_at:t });
+    d.agreement_people.push({ id:'P9', agreement_id:'A9', position:1, legal_name:'Kim Brown', pref_name:'Kim', email:'kim@example.com', phone:'', user_id:'v-kim', signed_at:t }); }`);
+  await as(...TIM); await p.click('#navHome').catch(() => {}); await p.waitForTimeout(300);
+  await p.click('#homeInspect'); await p.waitForTimeout(400); await p.fill('#insAddr', '3 Kiln'); await p.waitForTimeout(200);
+  await p.click('[data-insp-prop="PR9"]'); await p.waitForTimeout(700);
+  const tapn = async (name, v) => { await p.click(`input[name="${name}"][value="${v}"] + span`); await p.waitForTimeout(300); };
+  const k9 = async () => { const r = await insp('3 Kiln Street, Opoho'); return { decl: r.i.declaration, facts: r.i.facts, pr: r.pr }; };
+  const FT = new Function('return ' + fs.readFileSync(path.join(__dirname, '..', 'src', 'app.js'), 'utf8').match(/const FORM_TEXT = (\{[\s\S]*?\n  \});/)[1])();
+  const VDQ = Object.fromEntries(FT.VD_SECTIONS.flatMap(x => x[1]).map(x => [x.k, x.q]));
+
+  // 19a. every declaration question once, its text exactly FORM_TEXT's for its key; no fact asked twice
+  const shown = await p.evaluate(async () => { const n = []; for (const b of [...document.querySelectorAll('[data-isecn]')]) { b.click(); await new Promise(r => setTimeout(r, 150));
+    document.querySelectorAll('.vdq-i').forEach(c => n.push([c.dataset.ik.slice(2), c.querySelector('h3').textContent])); n.push(...[...document.querySelectorAll('[data-ik^="f:"]')].map(c => ['fact', c.dataset.ik])); } return n; });
+  const dq = shown.filter(x => x[0] !== 'fact'), facts9 = shown.filter(x => x[0] === 'fact').map(x => x[1]);
+  out.textMismatch = dq.filter(([k, q]) => VDQ[k] !== q).map(x => x[0]);
+  expect(dq.length === 27 && new Set(dq.map(x => x[0])).size === 27 && Object.keys(VDQ).every(k => dq.some(x => x[0] === k)) && !out.textMismatch.length, 'each of the 27 questions once, with FORM_TEXT\'s text for its key: ' + dq.length + ' ' + out.textMismatch);
+  expect(!['f:meth', 'f:wt', 'f:work', 'f:hazards', 'f:hazOther', 'f:wtDetail', 'f:workDetail', 'f:methDetail'].some(f => facts9.includes(f)), 'facts asked inside a declaration question are not asked again: ' + facts9);
+  expect(!(await p.$('[data-iuse]')), 'no "Use my answer above"');
+
+  // 19b. wood burner: Yes asks the question's own follow-ups; the certificate's availability only once it exists; No shows nothing more
+  await tab('Inside');
+  expect(!(await p.$('[data-ik="d:burner"] .ifu')) && !(await p.$('[data-ik="d:burner"] textarea')), 'nothing more before an answer');
+  await tapn('id_burner', 'yes');
+  out.burnerQs = await p.$$eval('[data-ik="d:burner"] .ifq', e => e.map(x => x.textContent));
+  expect(out.burnerQs.join('|') === 'Does it have a Code Compliance Certificate?', 'Yes asks about the certificate: ' + out.burnerQs);
+  expect(await p.$$eval('[data-ik="d:burner"] [data-ifu="ccc"] input', e => e.map(x => x.value).join()) === 'yes,no,unknown', 'certificate: Yes / No / Unknown');
+  await tapn('idf_burner_ccc', 'no'); expect(!(await p.$('[data-ik="d:burner"] [data-ifu="avail"]')), 'no certificate: availability isn\'t asked');
+  await tapn('idf_burner_ccc', 'yes');
+  expect(await p.$$eval('[data-ik="d:burner"] [data-ifu="avail"] input', e => e.map(x => x.value).join()) === 'yes,no', 'a certificate: is it available, Yes / No');
+  await tapn('idf_burner_avail', 'no');
+  out.burnerLabel = await p.textContent('[data-ik="d:burner"] label[for="idd_burner"]');
+  expect(/^What kind of fire, and where\?/.test(out.burnerLabel) && !/Details \(optional\)/.test(out.burnerLabel), 'a details prompt for this question: ' + out.burnerLabel);
+  await typeIn('[data-itext="d:burner"]', 'Wood burner in the lounge');
+  let r9 = await k9();
+  expect(isEq(r9.decl.burner, { a: 'yes', d: 'Code Compliance Certificate: yes. Certificate available: no. Wood burner in the lounge' }), 'the follow-ups are written into the details as a readable sentence: ' + JSON.stringify(r9.decl.burner));
+  expect(!(await sideways()), 'the burner question fits 390 px');
+  await (await p.$('[data-ik="d:burner"]')).screenshot({ path: path.join(__dirname, 'out', 'insp_burner.png') });
+  await p.reload(); await p.waitForTimeout(900); if ((await p.textContent('main h1')) !== 'Inside') await tab('Inside');
+  expect(await p.$eval('input[name="idf_burner_ccc"][value="yes"]', e => e.checked) && await p.$eval('input[name="idf_burner_avail"][value="no"]', e => e.checked) && (await p.inputValue('[data-itext="d:burner"]')) === 'Wood burner in the lounge', 'read back into the follow-ups after a reload');
+  await tapn('id_burner', 'no');
+  expect(!(await p.$('[data-ik="d:burner"] .ifu')) && !(await p.$('[data-ik="d:burner"] textarea')), 'No: nothing more shows');
+  r9 = await k9(); expect(isEq(r9.decl.burner, { a: 'no', d: '' }), 'and the details are not kept with No: ' + JSON.stringify(r9.decl.burner));
+  await tapn('id_burner', 'yes'); await tapn('idf_burner_ccc', 'yes'); await tapn('idf_burner_avail', 'no');
+  // the other questions whose wording asks more on Yes ("If 'Yes', ...", "If so, ...") get their follow-ups too
+  out.ifYes = Object.entries(VDQ).filter(([, q]) => /If 'Yes'|If so/.test(q)).map(x => x[0]);
+  for (const k of out.ifYes.filter(k => k !== 'burner')) { const sec = { hai: 'Consents', lim: 'Consents', reports: 'Consents' }[k]; await tab(sec); await tapn('id_' + k, 'yes');
+    expect((await p.$$(`[data-ik="d:${k}"] .ifu`)).length >= 1, 'follow-ups for ' + k); await p.click(`[data-iclear="d:${k}"]`); await p.waitForTimeout(250); }
+  expect(out.ifYes.sort().join() === 'burner,hai,lim,reports', 'the questions with an "If Yes" part: ' + out.ifYes);
+  await tapn('id_lim', 'yes'); await typeIn('#idf_lim_when', 'March 2025.'); await tapn('idf_lim_avail', 'yes');
+  r9 = await k9(); expect(r9.decl.lim.d === 'Obtained: March 2025. Available for review: yes', 'LIM follow-ups: ' + r9.decl.lim.d);
+  // a details box only where the answer asks for one: town water Yes has none, No asks what it uses instead
+  await tab('Services'); await tapn('id_water', 'yes'); expect(!(await p.$('[data-ik="d:water"] textarea')), 'town water Yes: no details box');
+  await tapn('id_water', 'no'); out.waterNo = await p.textContent('[data-ik="d:water"] label.f');
+  expect(/What does it use instead\?.*the vendors are asked for this/.test(out.waterNo), 'No: a specific prompt, marked as expected: ' + out.waterNo);
+  await tapn('id_water', 'yes');
+
+  // 19c. methamphetamine: asked once, with its two parts. "Not that they know of" fills the fact and never says "not tested"
+  await tab('Consents');
+  out.methCards = await p.$$eval('.iq h3', e => e.filter(x => /methamphetamine/i.test(x.textContent)).length);
+  expect(out.methCards === 1 && !(await p.$('[data-ik="d:meth"] input[data-is="a"]')), 'one methamphetamine question, no plain Yes / No: ' + out.methCards);
+  await tapn('idf_meth_aware', 'no');
+  r9 = await k9();
+  expect(r9.decl.meth && !r9.decl.meth.a && r9.decl.meth.d === 'Known or suspected contamination: not that they know of' && !/test/i.test(r9.decl.meth.d) && r9.pr.disclosures.meth === 'no',
+    'fills the fact (Not that they know of) and the declaration note, with no answer and nothing about testing: ' + JSON.stringify([r9.decl.meth, r9.pr.disclosures.meth]));
+  await (await p.$('[data-ik="d:meth"]')).screenshot({ path: path.join(__dirname, 'out', 'insp_meth.png') });
+  await tapn('idf_meth_tested', 'no'); r9 = await k9();
+  expect(isEq(r9.decl.meth, { a: 'no', d: 'Known or suspected contamination: not that they know of. Tested: no' }), 'No only when both parts are No: ' + JSON.stringify(r9.decl.meth));
+  await tapn('idf_meth_tested', 'yes'); await typeIn('[data-itext="d:meth"]', 'Tested 2024, clear'); r9 = await k9();
+  expect(r9.decl.meth.a === 'yes' && r9.pr.disclosures.meth === 'no' && !r9.pr.disclosures.methDetail, 'tested: the answer is Yes, the fact stays "not that they know of": ' + JSON.stringify(r9.decl.meth));
+  await tapn('idf_meth_aware', 'unknown'); await p.click('[data-ik="d:meth"] input[name="idf_meth_tested"][value="yes"] + span').catch(() => {}); await p.waitForTimeout(200);
+  await p.click('[data-iclear="d:meth"]'); await p.waitForTimeout(300); await tapn('idf_meth_aware', 'unknown');
+  r9 = await k9(); expect(r9.decl.meth.a === 'unknown' && !r9.pr.disclosures.meth && await p.isVisible('[data-ik="d:meth"] .ihint'), 'Unknown: no fact, and Tim is told the vendors answer it: ' + JSON.stringify([r9.decl.meth, r9.pr.disclosures]));
+
+  // 19d. the other questions asked once: weathertightness, renovations, hazards; each answer fills the fact too
+  await tab('Structure'); await tapn('id_wt', 'yes'); await typeIn('[data-itext="d:wt"]', 'Old leak at the back door, fixed 2023');
+  await tab('Consents'); await tapn('id_reno', 'no');
+  await tab('Outside'); await tapn('id_hazard', 'yes'); await p.click('[data-ik="d:hazard"] input[value="Dog or other pets"] + span'); await p.waitForTimeout(300); await typeIn('#iho_hazard', 'Loose step at the back');
+  r9 = await k9(); const D9 = r9.pr.disclosures;
+  expect(r9.decl.wt.a === 'yes' && r9.decl.wt.d === 'Old leak at the back door, fixed 2023' && D9.wt === 'yes' && D9.wtDetail === 'Old leak at the back door, fixed 2023', 'weathertightness fills both: ' + JSON.stringify([r9.decl.wt, D9.wt]));
+  expect(isEq(r9.decl.reno, { d: 'None known' }) && D9.work === 'no', 'renovations: None known fills both: ' + JSON.stringify([r9.decl.reno, D9.work]));
+  expect(r9.decl.hazard.a === 'yes' && r9.decl.hazard.d === 'Dog or other pets. Loose step at the back' && isEq(D9.hazards, ['Dog or other pets']) && D9.hazOther === 'Loose step at the back', 'hazards fill both: ' + JSON.stringify([r9.decl.hazard, D9.hazards]));
+  await tapn('id_hazard', 'no'); r9 = await k9();
+  expect(isEq(r9.decl.hazard, { a: 'no', d: '' }) && !(r9.pr.disclosures.hazards || []).length && !r9.pr.disclosures.hazOther, 'No hazards takes the chips back off the file');
+  // only partly the same question: kept apart, the link explained, and copying offered (never filled in for him)
+  await tab('Inside'); await typeIn('[data-itext="f:pHeat"]', 'Heat pump, ceiling insulation');
+  out.copyIns = await p.textContent('[data-icopy="insulation"]').catch(() => '');
+  expect(/: ceiling insulation$/.test(out.copyIns) && !/Heat pump/.test(out.copyIns) && /goes on the agreement/.test(await p.textContent('[data-ik="d:insulation"] .ilink')), 'insulation: the insulation part of the heating note only, offered: ' + out.copyIns);
+  r9 = await k9(); expect(!r9.decl.insulation, 'not filled in until he copies it');
+  await p.click('[data-icopy="insulation"]'); await p.waitForTimeout(300); r9 = await k9(); expect(isEq(r9.decl.insulation, { d: 'ceiling insulation' }), 'copied');
+  expect(/don't work/.test(await p.textContent('[data-ik="d:chattels"] .ilink')), 'chattels not working is told apart from what stays');
+
+  // 19e. derived: the 1995 to 2004 question from the year built, shown as answered with the reason, and Tim can change it
+  await tab('Structure'); await typeIn('[data-itext="f:pYear"]', '1999');
+  r9 = await k9(); out.eraHint = await p.textContent('[data-ik="d:era"] .iderived').catch(() => '');
+  expect(isEq(r9.decl.era, { a: 'yes', d: 'Built about 1999' }) && await p.$eval('[data-ik="d:era"] input[value="yes"]', e => e.checked) && /Answered from the year built \(about 1999\)/.test(out.eraHint), 'answered Yes from the year built: ' + JSON.stringify(r9.decl.era) + ' ' + out.eraHint);
+  await typeIn('[data-itext="f:pYear"]', '1970'); r9 = await k9(); out.eraOut = await p.textContent('[data-ik="d:era"]');
+  expect(!r9.decl.era && /outside 1995 to 2004\. Answer No unless an addition/.test(out.eraOut), 'outside the period: not answered for him, with a hint: ' + JSON.stringify(r9.decl.era));
+  await typeIn('[data-itext="f:pYear"]', '2001'); await tapn('id_era', 'no'); await typeIn('[data-itext="f:pYear"]', '2002');
+  r9 = await k9(); expect(r9.decl.era.a === 'no' && /year built \(about 2002\) is in this period/.test(await p.textContent('[data-ik="d:era"]')), 'Tim\'s own answer is kept, with a warning: ' + JSON.stringify(r9.decl.era));
+  await tapn('id_era', 'yes');
+  expect(!(await sideways()), 'the walk-round fits 390 px');
+
+  // 19f. dark mode, 390 px, with the follow-ups open
+  { const dk2 = await page('dark'); const q2 = dk2.p;
+    await q2.goto('https://packages.dunnerstunner.co.nz/onboarding/'); await q2.waitForTimeout(300);
+    await q2.evaluate(([s, dbs, o]) => { localStorage.setItem('mocksession', s); localStorage.setItem('mockdb', dbs); localStorage.setItem('inspOpen', o); }, [JSON.stringify({ user: { id: TIM[0], email: TIM[1] } }), JSON.stringify(await db()), (await insp('3 Kiln Street, Opoho')).i.id + ':2']);
+    await q2.goto('https://packages.dunnerstunner.co.nz/onboarding/'); await q2.waitForTimeout(900);
+    out.dark2 = await q2.evaluate(() => ({ h1: document.querySelector('main h1').textContent, side: document.documentElement.scrollWidth > window.innerWidth, fu: !!document.querySelector('[data-ik="d:burner"] [data-ifu="avail"]'), bg: getComputedStyle(document.body).backgroundColor }));
+    expect(out.dark2.h1 === 'Inside' && out.dark2.fu && !out.dark2.side && out.dark2.bg !== 'rgb(247, 245, 242)', 'dark, 390 px, follow-ups shown, no sideways scroll: ' + JSON.stringify(out.dark2));
+    await (await q2.$('[data-ik="d:burner"]')).screenshot({ path: path.join(__dirname, 'out', 'insp_burner_dark.png') });
+    await dk2.ctx.close(); }
+
+  // 19g. sent to Kim: the composed details read as a sentence on her screens; the Unknown is hers to answer
+  await p.click('#insGoFinish'); await p.waitForTimeout(900); await p.click('#insSend'); await p.waitForTimeout(700);
+  await as('v-kim', 'kim@example.com'); await p.click('[data-form="vendor_declaration"]'); await p.waitForTimeout(600);
+  await pick('input[name="vfFile"][value="ok"]'); await p.click('#next'); await p.waitForTimeout(400);
+  expect(await p.$('[data-q="meth"] .insp-ask') && !(await p.$('[data-q="meth"] input:checked')) && !(await p.$('[data-q="meth"] .iconfirm')), 'Kim answers the methamphetamine question Tim noted as Unknown');
+  await p.$$eval('.vdq', cs => cs.forEach(c => { if (!c.querySelector('input:checked') && c.querySelector('input[value="no"]') && !c.querySelector('.insp-ask')) c.querySelector('input[value="no"]').checked = true; }));
+  for (const k of ['faults']) if (!(await p.inputValue(`[data-qd="${k}"]`))) await p.fill(`[data-qd="${k}"]`, 'None known');
+  await p.click('[data-q="meth"] input[value="no"] + .mark');
+  for (const c of await p.$$('.vdq .iconfirm')) await c.click();
+  await p.click('#next'); await p.waitForTimeout(500);
+  out.kimBurner = await p.inputValue('[data-qd="burner"]');
+  expect(out.kimBurner === 'Code Compliance Certificate: yes. Certificate available: no. Wood burner in the lounge' && await p.$eval('input[name="vq_burner"][value="yes"]', e => e.checked), 'Kim sees the follow-ups as a sentence in the details: ' + out.kimBurner);
+  await p.$$eval('.vdq', cs => cs.forEach(c => { if (!c.querySelector('input:checked') && c.querySelector('input[value="no"]')) c.querySelector('input[value="no"]').checked = true; }));
+  for (const k of ['internet', 'glazing']) if (!(await p.inputValue(`[data-qd="${k}"]`))) await p.fill(`[data-qd="${k}"]`, 'Fibre');
+  for (const c of await p.$$('.vdq .iconfirm')) await c.click();
+  await pick('input[name="vfTen"][value="no"]'); await p.click('#next'); await p.waitForTimeout(600);
+  out.kimH1 = await p.textContent('main h1');
+  out.kimDoc = (await p.textContent('main')).replace(/\s+/g, ' ');
+  expect(/Vendor Statement and signing/.test(out.kimH1) && /certificate available\?Yes\. Code Compliance Certificate: yes\. Certificate available: no\. Wood burner in the lounge\. Noted by Timothy McGuire at the inspection on [^;]*; checked by Kim Brown\./.test(out.kimDoc),
+    'the declaration row reads cleanly, one full stop before the marker: ' + out.kimH1 + ' ' + (out.kimDoc.match(/certificate available\?.{0,160}/) || [''])[0]);
+  d = await db(); const kf = d.property_forms.find(f => f.agreement_id === 'A9');
+  expect(kf.data.answers.meth.a === 'no' && kf.data.checked.meth && kf.data.checked.meth.changed === true && kf.data.answers.burner.d === out.kimBurner, 'Kim\'s own methamphetamine answer is recorded as hers; the stored answer keeps its shape: ' + JSON.stringify(kf.data.checked.meth));
   } catch (e) { fail.push('CRASHED: ' + e.message.split('\n').slice(0, 3).join(' | ')); }
   console.log(JSON.stringify(Object.assign(out, { errs: errs.concat(fail) }), null, 1)); await b.close();
 })();
+function isEq(a, b) { return JSON.stringify(a) === JSON.stringify(b); }
 function pendingLeft(c) { const P = (c || {}).pending || {}; return Object.keys(P.facts || {}).length + Object.keys(P.decl || {}).length + Object.keys(P.notes || {}).length; }

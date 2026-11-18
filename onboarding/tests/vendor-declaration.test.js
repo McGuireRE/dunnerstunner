@@ -48,7 +48,9 @@ await pick('input[name="vfFile"][value="ok"]'); await next();
 out.step2=await p.textContent('main h1'); expect(out.step2==='Property Condition and Known Issues','step 2 is the condition questions');
 out.badges=await p.$$eval('.vdq',e=>e.filter(c=>c.querySelector('.src-badge')).map(c=>c.dataset.q));
 expect(['meth','wt','faults','reno','era','hazard'].every(k=>out.badges.includes(k)),'answers from the file are prefilled and marked: '+out.badges.join(','));
-out.methPre=await p.$eval('input[name="vq_meth"][value="no"]',e=>e.checked); expect(out.methPre,'meth answer from the file');
+// "Not that they know of" on page 1 answers only half the methamphetamine question (it also asks whether it was tested): shown as a note, never as No
+out.methPre=await p.$eval('[data-qd="meth"]',e=>e.value); out.methNoAnswer=!(await p.$('input[name="vq_meth"]:checked'));
+expect(out.methNoAnswer&&out.methPre==='Known or suspected contamination: not that they know of','meth from the file is a note for the vendor to answer: '+out.methPre);
 out.renoPre=await p.$eval('[data-qd="reno"]',e=>e.value); expect(out.renoPre.includes('New bathroom 2019'),'renovations from the file');
 out.eraPre=await p.$eval('input[name="vq_era"][value="yes"]',e=>e.checked); expect(out.eraPre,'built 1998: the 1995 to 2004 question is answered Yes');
 await next(); out.e2=await errText(); expect(/answer each question/.test(out.e2),'every question must be answered');
@@ -62,6 +64,7 @@ await next();
 
 // step 3: services, registrations and the tenancy question (Healthy Homes offered only if tenanted)
 out.step3=await p.textContent('main h1'); expect(out.step3==='Services and Features','step 3');
+out.insPre=await p.$eval('[data-qd="insulation"]',e=>e.value); expect(out.insPre==='ceiling insulation','insulation from the file is the insulation part only, not the heating: '+out.insPre);
 await p.$$eval('.vdq',cs=>cs.forEach(c=>{ const r=c.querySelector('input[value="yes"]'); if(r) r.checked=true; }));
 await pick('input[name="vq_hai"][value="no"]'); await pick('input[name="vq_burner"][value="no"]');
 await p.fill('[data-qd="internet"]','Fibre'); await p.fill('[data-qd="glazing"]','Double glazed throughout');
