@@ -102,13 +102,14 @@ const offline=()=>{ try{ return localStorage.getItem('mockOffline')==='1'||navig
 const PI=()=>(DB.property_inspections||=[]);
 const DECL_KEYS=['pegs','unpaid','history','meth','chattels','repairs','faults','era','wt','dux','asbestos','pipes','reno','consents','lim','claims','reports','hazard','water','sewer','storm','power','internet','insulation','glazing','hai','burner','tenanted'];
 const NOTE_KEYS=['outside','structure','inside','services','history','tenancy'];
-const jblank=v=>v==null||v===''||(Array.isArray(v)&&!v.length)||(typeof v==='object'&&!Array.isArray(v)&&!Object.keys(v).length);
+// jblank and pickKeep are function declarations so the backfill near the top (syncAgreement) can use them as the mock loads
+function jblank(v){ return v==null||v===''||(Array.isArray(v)&&!v.length)||(typeof v==='object'&&!Array.isArray(v)&&!Object.keys(v).length); }
 const same=(a,b)=>JSON.stringify(a??null)===JSON.stringify(b??null);
 const isObj=x=>!!x&&typeof x==='object'&&!Array.isArray(x);
 const confirmed=(chk,k)=>isObj(chk)&&isObj(chk[k]);   // is_confirmed(): a {by, name, at} written by vendor_form_save
 const stampTs=t=>typeof t==='string'&&/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(t)&&!isNaN(Date.parse(t))?Date.parse(t):null;
 const nzDay=iso=>new Date(iso).toLocaleDateString('en-CA',{timeZone:'Pacific/Auckland'});
-const pickKeep=(cur,j)=>{ const o={}; Object.entries(j||{}).forEach(([k,v])=>{ if(!(jblank(v)&&!jblank((cur||{})[k]))) o[k]=v; }); return o; };   // pick_keep()
+function pickKeep(cur,j){ const o={}; Object.entries(j||{}).forEach(([k,v])=>{ if(!(jblank(v)&&!jblank((cur||{})[k]))) o[k]=v; }); return o; }   // pick_keep()
 function mergeDecl(d,i){ d=JSON.parse(JSON.stringify(isObj(d)?d:{}));
   let ans=isObj(d.answers)?d.answers:{}, pre=isObj(d.pre)?d.pre:{}, chk=isObj(d.checked)?d.checked:{}; let added=0, updated=0; const kept=[];
   Object.keys(pre).filter(k=>pre[k]==='inspection').forEach(k=>{ if(!(k in i.declaration)&&!confirmed(chk,k)){ if(k==='tenanted') delete d.tenanted; else delete ans[k]; delete pre[k]; } });
