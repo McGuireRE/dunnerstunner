@@ -168,7 +168,7 @@ Tests: stage changes, reminders appearing on the dashboard, the journey marker m
 
 ## Added 18 November 2026: property inspection (Tim: "go around and prefill all the property info and the vendor declaration")
 
-Migration 012 (ready to apply, not applied). Tim starts an inspection from Home, the Dashboard or any property's Inspection tile,
+Migration 012 (applied 18 November 2026; reviewed independently three times, all findings fixed). Tim starts an inspection from Home, the Dashboard or any property's Inspection tile,
 with only an address: a property file at Appraisal, no vendor, pre-listing or agreement, nothing sent. Six short sections (Outside,
 Structure and cladding, Inside, Services, Consents and history, Tenancy) hold page 1's property facts and every Vendor Declaration
 question in Tim's wording, each optional, with a progress count and a note per section. Answers save as tapped; with no signal
