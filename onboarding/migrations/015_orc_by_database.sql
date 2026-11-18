@@ -14,7 +14,7 @@
 -- A redirect from ORC's server would be followed; what comes back is still only accepted as a JSON object, and the function only ever
 -- reads ArcGIS fields from it. Flagged for Tim.
 -- pg_net keeps responses for 6 hours (pg_net.ttl). orc_http_requests keeps a small row per request (id, url, when); nothing removes them.
--- Additive: one table and two functions. No DELETE or DROP.
+-- Additive: one table and two functions. No DELETE or DROP. Applied 18 November 2026 (live function bodies checked against this file).
 
 create table public.orc_http_requests (
   id bigint primary key,            -- pg_net's request id
