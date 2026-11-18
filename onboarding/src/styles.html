@@ -277,6 +277,13 @@ hr.soft { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
 .insp .iuse { width: 100%; margin: 0 0 8px; font-size: 15px; text-align: left; white-space: normal; }
 .insp input[type=text], .insp textarea { font-size: 17px; }
 .iconf { color: var(--warn); margin: 8px 0 0; }
+/* a declaration question's own follow-ups ("If 'Yes', ..."), shown only when they apply, set in from the main answer */
+.insp .ifu { margin: 12px 0 0; padding: 0 0 0 12px; border-left: 3px solid var(--accent-soft); }
+.insp .ifq { margin: 0 0 6px; font-weight: 600; font-size: 15.5px; color: var(--ink); }
+.insp .ifu .f { margin-top: 10px; }
+.insp .ihint { margin: 8px 0 0; }
+.insp .iderived { color: var(--ok); }
+.insp .ilink { margin: -2px 0 8px; font-style: italic; }
 .insp-match { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
 .insp-match > div { min-width: 0; overflow-wrap: anywhere; }
 .iconfirm { margin-top: 10px; }

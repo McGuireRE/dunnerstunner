@@ -286,6 +286,13 @@ hr.soft { border: none; border-top: 1px solid var(--line); margin: 24px 0; }
 .insp .iuse { width: 100%; margin: 0 0 8px; font-size: 15px; text-align: left; white-space: normal; }
 .insp input[type=text], .insp textarea { font-size: 17px; }
 .iconf { color: var(--warn); margin: 8px 0 0; }
+/* a declaration question's own follow-ups ("If 'Yes', ..."), shown only when they apply, set in from the main answer */
+.insp .ifu { margin: 12px 0 0; padding: 0 0 0 12px; border-left: 3px solid var(--accent-soft); }
+.insp .ifq { margin: 0 0 6px; font-weight: 600; font-size: 15.5px; color: var(--ink); }
+.insp .ifu .f { margin-top: 10px; }
+.insp .ihint { margin: 8px 0 0; }
+.insp .iderived { color: var(--ok); }
+.insp .ilink { margin: -2px 0 8px; font-style: italic; }
 .insp-match { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
 .insp-match > div { min-width: 0; overflow-wrap: anywhere; }
 .iconfirm { margin-top: 10px; }
@@ -1541,6 +1548,9 @@ window.I18N_STRINGS = {
     "no answer",
     "Tenancy",
     "This is right",
+    "Tim noted this as Unknown at the inspection on {date}. Please answer it from what you know",
+    "Tim noted part of this at the inspection on {date}. Please choose an answer",
+    "Please answer each question Tim couldn't answer at the inspection. Choose Unknown if you don't know either.",
     "Please check each answer Tim noted at the inspection: tick This is right, or change the answer.",
     "Tim has noted some answers from his inspection. Please check each one, then sign.",
     "Check and carry on",
@@ -5973,12 +5983,14 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const haz = (d.hazards || []).join(', ') + (d.hazOther ? ((d.hazards || []).length ? '. ' : '') + d.hazOther : '');
     return {
       fill: {
-        meth: yn('meth', 'methDetail'), wt: yn('wt', 'wtDetail'),
+        // "Not that they know of" answers only half the declaration's question (it also asks whether the property has been
+        // tested), so it is shown as a note and the vendors choose the answer; it is never filled in as No
+        meth: d.meth === 'yes' ? { a: 'yes', d: d.methDetail || '' } : d.meth === 'no' ? { d: 'Known or suspected contamination: not that they know of' } : null, wt: yn('wt', 'wtDetail'),
         faults: d.def === 'yes' ? { d: d.defDetail || '' } : d.def === 'no' ? { d: 'None known' } : null,
         reno: d.work === 'yes' ? { d: d.workDetail || '' } : d.work === 'no' ? { d: 'None known' } : null,
         era: yr >= 1995 && yr <= 2004 ? { a: 'yes', d: `Built about ${yr}` } : null,
         hazard: haz ? { a: 'yes', d: haz } : null,
-        insulation: d.pHeat ? { d: d.pHeat } : null,
+        // insulation is not filled in from the "Heating and insulation" note: that note also covers heating, so the vendors answer it
       },
       facts: [['Type', d.pType], ['Year built', d.pYear], ['Bedrooms / bathrooms', d.pBed || d.pBath ? `${d.pBed || '?'} / ${d.pBath || '?'}` : ''], ['Floor / land area', d.pFloor || d.pLand ? `${d.pFloor || '?'} m² / ${d.pLand || '?'} m²` : ''], ['Construction', d.pBuild], ['Parking', d.pPark], ['Heating and insulation', d.pHeat],
         ['Chattels included', (d.chattels || []).join(', ') + (d.chatOther ? '. ' + d.chatOther : '')],
@@ -6137,9 +6149,17 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   const vfConfirmer = k => { const c = ((VF && VF.W.checked) || {})[k]; return c && typeof c === 'object' ? c : null; };
   const vfChecked = k => VF && k in (VF.W.ticks || {}) ? !!VF.W.ticks[k] : !!vfConfirmer(k);
   const inspConfirm = k => `<label class="choice cb iconfirm"><input type="checkbox" data-qc="${k}" ${vfChecked(k) ? 'checked' : ''}><span class="mark"></span><span class="ct">This is right</span></label>`;
-  const ynuRow = (x, v, pre) => `<div class="card tight vdq" data-q="${x.k}"><h3 style="font-size:16px">${esc(x.q)}</h3>${pre === 'inspection' ? inspBadge(x.k) : pre ? '<span class="src-badge">From your property file. Please check</span>' : ''}
-    ${x.text ? '' : `<div class="choices three">${YNU.map(([val, l]) => `<label class="choice"><input type="radio" name="vq_${x.k}" value="${val}" ${v.a === val ? 'checked' : ''}><span class="mark"></span><span class="ct">${l}</span></label>`).join('')}</div>`}
-    <label class="f" for="vqd_${x.k}">${x.text ? 'Your answer' : 'Details'} ${x.text ? '' : '<span class="opt">(' + (x.why ? 'needed if Yes' : 'optional') + ')</span>'}</label><textarea id="vqd_${x.k}" data-qd="${x.k}">${esc(v.d || '')}</textarea>${pre === 'inspection' ? inspConfirm(x.k) : ''}</div>`;
+  // one of Tim's notes that isn't an answer (he noted Unknown, or only part of the answer, such as "not that they know of" for
+  // the methamphetamine question, which also asks about testing): the vendors answer it themselves. Nothing is chosen for them
+  // and there is no "This is right" to tick; choosing an answer (Unknown included) is what checks it. Once checked, as usual.
+  const vfAsk = k => { if (!VF || (VF.W.pre || {})[k] !== 'inspection' || k === 'tenanted' || vfConfirmer(k) || (VD_QS.find(x => x.k === k) || {}).text) return false;
+    const n = (VF.W.noted || {})[k] || VF.W.answers[k] || {}; return !['yes', 'no'].includes(n.a); };
+  const askBadge = k => { const on = ((VF && VF.W.insp) || {}).on, n = (VF.W.noted || {})[k] || {}, day = `<span translate="no">${esc(on ? fmtDate(on + 'T00:00:00Z') : '')}</span>`;
+    return `<span class="src-badge insp-badge insp-ask">${n.a === 'unknown' ? `Tim noted this as Unknown at the inspection on ${day}. Please answer it from what you know` : `Tim noted part of this at the inspection on ${day}. Please choose an answer`}</span>`; };
+  const ynuRow = (x, v, pre) => { const ask = pre === 'inspection' && vfAsk(x.k), sel = ask && !(VF.W.ticks || {})[x.k] ? '' : v.a;
+    return `<div class="card tight vdq" data-q="${x.k}"><h3 style="font-size:16px">${esc(x.q)}</h3>${ask ? askBadge(x.k) : pre === 'inspection' ? inspBadge(x.k) : pre ? '<span class="src-badge">From your property file. Please check</span>' : ''}
+    ${x.text ? '' : `<div class="choices three">${YNU.map(([val, l]) => `<label class="choice"><input type="radio" name="vq_${x.k}" value="${val}" ${sel === val ? 'checked' : ''}><span class="mark"></span><span class="ct">${l}</span></label>`).join('')}</div>`}
+    <label class="f" for="vqd_${x.k}">${x.text ? 'Your answer' : 'Details'} ${x.text ? '' : '<span class="opt">(' + (x.why ? 'needed if Yes' : 'optional') + ')</span>'}</label><textarea id="vqd_${x.k}" data-qd="${x.k}">${esc(ask && VF.W.askDraft && x.k in VF.W.askDraft ? VF.W.askDraft[x.k] || '' : v.d || '')}</textarea>${ask ? '' : pre === 'inspection' ? inspConfirm(x.k) : ''}</div>`; };
   function vfRead() {
     const W = VF.W;
     $$('.vdq').forEach(c => { const k = c.dataset.q, r = $(`input[name="vq_${k}"]:checked`, c), d = $('[data-qd]', c).value.trim(); W.answers[k] = Object.assign({}, W.answers[k], r ? { a: r.value } : {}, { d }); });
@@ -6149,23 +6169,37 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const tn = $('input[name="vfTen"]:checked'); if (tn) W.tenanted = tn.value;
     const hh = $('input[name="vfHH"]:checked'); if (hh) W.hh = hh.value;
     $$('[data-qc]').forEach(cb => { (W.ticks ||= {})[cb.dataset.qc] = cb.checked; });
+    // a note to answer: checked only by choosing an answer, and never left holding Tim's Unknown unchosen
+    // until they choose, the server's copy stays as it is (what they typed is kept on this page only), so nothing is sent
+    $$('.vdq').forEach(c => { const k = c.dataset.q; if (!vfAsk(k)) return; const r = $(`input[name="vq_${k}"]:checked`, c);
+      (W.ticks ||= {})[k] = !!r;
+      if (!r) { (W.askDraft ||= {})[k] = W.answers[k] ? W.answers[k].d : ''; W.answers[k] = JSON.parse(JSON.stringify((VF.base || {})[k] ?? null)); if (W.answers[k] == null) delete W.answers[k]; }
+      else if (W.askDraft) delete W.askDraft[k]; });
   }
   // a question's marker: Tim's note (server), else from the property file (page, or an older form's pre: true)
   const vfPre = k => (VF.W.pre || {})[k] === 'inspection' ? 'inspection' : (VF.W.fromFile || {})[k] || (VF.W.pre || {})[k] === true;
   // what the vendors' save sends: their own fields and answers, and a yes or no per note they've checked. Never pre or insp.
   // Only the answers this page changed go back, so a page opened before Tim sent a new note can't put the old answer back.
   const vfPatch = W => { const o = {}; ['tenanted', 'facts', 'fileOk', 'fileChanges', 'notes', 'hh', '_step', 'complete', 'fromFile'].forEach(k => { if (k in W) o[k] = W[k]; });
-    o.answers = {}; Object.entries(W.answers || {}).forEach(([k, v]) => { if (JSON.stringify(v) !== JSON.stringify((VF.base || {})[k])) o.answers[k] = v; });
+    const held = []; VF.held = held;
+    o.answers = {}; Object.entries(W.answers || {}).forEach(([k, v]) => { if (vfAsk(k) && !(W.ticks || {})[k]) return;
+      if ((W.pre || {})[k] === 'inspection' && !vfHasAnswer(k, v)) { held.push(k); return; }   // the server refuses it; its own step asks for it
+      if (JSON.stringify(v) !== JSON.stringify((VF.base || {})[k])) o.answers[k] = v; });
     if ('tenanted' in o && o.tenanted === VF.baseTen) delete o.tenanted;
-    // a tick goes only when it differs from what the server holds, so a page opened before a co-owner checked can't undo it
-    o.checked = {}; Object.entries(W.ticks || {}).forEach(([k, v]) => { if (!!v !== !!vfConfirmer(k)) o.checked[k] = !!v; }); return o; };
+    // a tick goes only when it differs from what the server holds, so a page opened before a co-owner checked can't undo it,
+    // and never for a note whose answer has been emptied on this page (it would confirm the note she has just removed)
+    o.checked = {}; Object.entries(W.ticks || {}).forEach(([k, v]) => { if (v && held.includes(k)) return; if (!!v !== !!vfConfirmer(k)) o.checked[k] = !!v; }); return o; };
+  // an answer with a choice (the same rule as the server's decl_has_answer, migration 014): Unknown counts; a description needs text
+  const vfHasAnswer = (k, v) => (VD_QS.find(x => x.k === k) || {}).text ? !!String((v || {}).d || '').trim() : ['yes', 'no', 'unknown'].includes((v || {}).a);
   // after a save, the server's record of who checked what
-  async function vfRefresh() { try { const { data } = await sb.from('property_forms').select('data').eq('id', VF.fm.id).single(); if (data && data.data) { const sd = data.data; VF.W.checked = sd.checked || {}; VF.W.pre = sd.pre || VF.W.pre; if (sd.insp) VF.W.insp = sd.insp; if (sd.noted) VF.W.noted = sd.noted; VF.W.ticks = {}; VF.W.answers = Object.assign({}, VF.W.answers, sd.answers || {}); VF.base = JSON.parse(JSON.stringify(sd.answers || {})); if ('tenanted' in sd) { VF.W.tenanted = sd.tenanted; VF.baseTen = sd.tenanted; } } } catch (_) { } }
+  async function vfRefresh() { try { const { data } = await sb.from('property_forms').select('data').eq('id', VF.fm.id).single(); if (data && data.data) { const sd = data.data; VF.W.checked = sd.checked || {}; VF.W.pre = sd.pre || VF.W.pre; if (sd.insp) VF.W.insp = sd.insp; if (sd.noted) VF.W.noted = sd.noted; VF.W.ticks = {}; const prev = VF.W.answers || {}; VF.W.answers = Object.assign({}, prev, sd.answers || {}); (VF.held || []).forEach(k => { VF.W.answers[k] = prev[k]; }); VF.base = JSON.parse(JSON.stringify(sd.answers || {})); if ('tenanted' in sd) { VF.W.tenanted = sd.tenanted; VF.baseTen = sd.tenanted; } } } catch (_) { } }
   const VF_INSP_MSG = 'Please check each answer Tim noted at the inspection: tick This is right, or change the answer.';
+  const VF_ASK_MSG = 'Please answer each question Tim couldn\'t answer at the inspection. Choose Unknown if you don\'t know either.';
   function vfCheck(i) {
     const W = VF.W;
     if (i === 0) { if (W.fileOk === undefined) return 'Let us know if these details are still correct.'; if (!W.fileOk && !W.fileChanges) return 'Tell us what has changed.'; }
     const qs = i === 1 ? VD_SECTIONS[0][1] : i === 2 ? VD_SECTIONS[1][1].concat(VD_SECTIONS[2][1]) : [];
+    if (qs.some(x => vfAsk(x.k) && !vfChecked(x.k))) return VF_ASK_MSG;
     if (qs.concat(i === 2 ? [{ k: 'tenanted' }] : []).some(x => (W.pre || {})[x.k] === 'inspection' && !vfChecked(x.k))) return VF_INSP_MSG;
     for (const x of qs) { const v = W.answers[x.k] || {}; if (x.text ? !v.d : !v.a) return 'Please answer each question. Choose Unknown if you\'re not sure.'; if (x.why && v.a === 'yes' && !v.d) return 'Add a few details for anything you answered Yes to.'; }
     if (i === 2) { if (!W.tenanted) return 'Let us know whether the property is tenanted.'; if (W.tenanted !== 'no' && !W.hh) return 'Let us know about the Healthy Homes checklist.'; }
@@ -6370,15 +6404,60 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   };
   const INSP_TEN_Q = 'Is the property tenanted, or will it be before settlement?';
   const INSP_TEN = [['now', 'Yes, it\'s tenanted now'], ['will', 'It will be tenanted'], ['no', 'No']];
-  // short sections to do while walking round; f: a property fact, d: a Vendor Declaration question (every one, in Tim's wording)
+  // short sections to do while walking round; f: a property fact, d: a Vendor Declaration question (every one, in Tim's wording).
+  // Four facts are asked once, inside the declaration question that asks the same thing (INSP_DQ kind): hazards and hazOther
+  // (hazard), wt and wtDetail (wt), work and workDetail (reno), meth and methDetail (meth). The answer fills both.
   const INSP_SECTIONS = [
-    ['outside', 'Outside', ['f:pType', 'f:pLand', 'f:pPark', 'f:hazards', 'f:hazOther', 'd:pegs', 'd:hazard', 'd:pipes']],
-    ['structure', 'Structure and cladding', ['f:pYear', 'f:pFloor', 'f:pBuild', 'd:era', 'd:dux', 'd:asbestos', 'f:wt', 'd:wt', 'd:faults']],
-    ['inside', 'Inside', ['f:pBed', 'f:pBath', 'f:pHeat', 'd:insulation', 'd:glazing', 'f:chattels', 'f:chatOther', 'd:chattels', 'd:repairs', 'f:pLove']],
-    ['services', 'Services', ['d:water', 'd:sewer', 'd:storm', 'd:power', 'd:internet', 'd:burner']],
-    ['history', 'Consents and history', ['f:work', 'd:reno', 'd:consents', 'd:lim', 'f:def', 'd:claims', 'd:reports', 'd:history', 'd:unpaid', 'f:meth', 'd:meth', 'd:hai']],
+    ['outside', 'Outside', ['f:pType', 'f:pLand', 'f:pPark', 'd:hazard', 'd:pegs', 'd:pipes']],
+    ['structure', 'Structure and cladding', ['f:pYear', 'f:pFloor', 'f:pBuild', 'd:era', 'd:dux', 'd:asbestos', 'd:wt', 'f:def', 'd:faults']],
+    ['inside', 'Inside', ['f:pBed', 'f:pBath', 'f:pHeat', 'd:burner', 'd:insulation', 'd:glazing', 'f:chattels', 'f:chatOther', 'd:chattels', 'd:repairs', 'f:pLove']],
+    ['services', 'Services', ['d:water', 'd:sewer', 'd:storm', 'd:power', 'd:internet']],
+    ['history', 'Consents and history', ['d:reno', 'd:consents', 'd:lim', 'd:claims', 'd:reports', 'd:history', 'd:unpaid', 'd:meth', 'd:hai']],
     ['tenancy', 'Tenancy', ['d:tenanted']],
   ];
+  // How the walk-round asks each Vendor Declaration question. The question shown is always FORM_TEXT's, word for word.
+  //   yes / no: the details prompt for that answer, and 1 when the vendors are asked for details then (else optional).
+  //     With no prompt for an answer, the details box is hidden for it. Unknown always offers a note for the vendors.
+  //   fu: the follow-up questions the wording itself asks ("If 'Yes', ...", "If so, ..."), shown on Yes (or when `when` says).
+  //     They are written into the details as "Label: answer" sentences, so the stored answer keeps its {a, d} shape and the
+  //     vendors' screens, the signed snapshot and fn/pdf.ts read it unchanged; the walk-round reads them back from there.
+  //   text: a description question (no Yes / No / Unknown); its prompt.
+  //   kind: asked once for a property fact too (see INSP_SECTIONS). copy: a related fact to copy from. link: how two
+  //     related questions differ, shown on the card.
+  const YN2 = [['yes', 'Yes'], ['no', 'No']];
+  const INSP_DQ = {
+    pegs: { no: ['Anything to note about the boundary? e.g. which pegs are missing'] },
+    unpaid: { yes: ['What isn\'t fully paid for, or won\'t be cleared at settlement?', 1] },
+    history: { yes: ['What happened, and roughly when?', 1] },
+    meth: { kind: 'meth', yes: ['What is known: who tested, when, and the result', 1],
+      fu: [{ id: 'aware', always: 1, l: 'Known or suspected contamination', q: 'Do they know of, or suspect, any contamination?', opts: [['yes', 'Yes'], ['no', 'Not that they know of'], ['unknown', 'Unknown']] },
+        { id: 'tested', always: 1, l: 'Tested', q: 'Has the property been tested?', opts: YNU }] },
+    chattels: { yes: ['Which chattels, and what\'s wrong with them?', 1], link: 'Not the list of what stays with the house: this asks about chattels that don\'t work.' },
+    repairs: { yes: ['What will be done, and by when?', 1] },
+    faults: { text: 'Faults or issues seen or known, or "None known"', copy: 'def', link: 'Goes with the defects question above. That one, for the agreement, also covers council notices and requirements; this one describes faults for buyers.' },
+    era: { yes: ['Which part, and roughly when?'], derive: 1 },
+    wt: { kind: 'wt', yes: ['What happened, where, and was it fixed?', 1] },
+    dux: { yes: ['Where on the property?'], fu: [{ id: 'which', l: 'Which', q: 'Which ones?', multi: ['Dux Qest plumbing', 'Weatherside cladding', 'Monolithic cladding'] }] },
+    asbestos: { yes: ['Where, and is it known or only suspected?', 1] },
+    pipes: { yes: ['What happened, and was it fixed?', 1] },
+    reno: { kind: 'reno', yes: [INSP_YN.work[2], 1] },
+    consents: { no: ['Which work wasn\'t signed off?', 1], link: 'Goes with the renovation work above.' },
+    lim: { yes: ['Anything in it buyers should know?'], fu: [{ id: 'when', l: 'Obtained', q: 'When was it obtained?', text: 'e.g. March 2025' }, { id: 'avail', l: 'Available for review', q: 'Is it available for review?', opts: YN2 }] },
+    claims: { yes: ['What was the claim for, when, and was the work completed?', 1] },
+    reports: { yes: ['What issue did it find?', 1], fu: [{ id: 'copy', l: 'Copy of the report given to the Agent', q: 'Has a copy of that report been given to the Agent?', opts: YN2 }] },
+    hazard: { kind: 'hazard' },
+    water: { no: ['What does it use instead? e.g. tank water', 1] },
+    sewer: { no: ['What does it use instead? e.g. a septic tank', 1] },
+    storm: { no: ['Where does stormwater go instead? e.g. a soak hole', 1] },
+    power: { no: ['How is it powered instead? e.g. solar, off grid', 1] },
+    internet: { text: 'e.g. fibre, wireless broadband, or none' },
+    insulation: { text: 'Where it is, e.g. ceiling and underfloor, walls unknown', copy: 'pHeat', link: 'Your heating and insulation note above goes on the agreement. Here, just where the insulation is.' },
+    glazing: { text: 'e.g. double glazed throughout, or single glazed bedrooms' },
+    hai: { yes: ['What is registered, e.g. a B&B?'], fu: [{ id: 'ccc', l: 'Code Compliance Certificate', q: 'Does a Code Compliance Certificate exist?', opts: YNU }] },
+    burner: { yes: ['What kind of fire, and where? e.g. wood burner in the lounge'], fu: [{ id: 'ccc', l: 'Code Compliance Certificate', q: 'Does it have a Code Compliance Certificate?', opts: YNU },
+      { id: 'avail', l: 'Certificate available', q: 'Is that certificate available?', opts: YN2, when: s => s.fu.ccc === 'yes' }] },
+  };
+
   const INSP_ITEMS = INSP_SECTIONS.flatMap(s => s[2]);
   let INS = null;   // the inspection on screen
   const INS_RUN = {}, INS_STATE = {}, INS_TIMERS = {}, INS_LIMIT = {};   // per inspection: the save in flight, how the last one went, a smaller batch size
@@ -6407,12 +6486,149 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   const pendingAll = () => inspIds().reduce((n, id) => n + pendingCount((inspLS(id) || {}).pending), 0);
   const vdQ = k => VD_QS.find(x => x.k === k);
   const inspLabel = k => INSP_F[k] ? INSP_F[k].l : k === 'tenanted' ? INSP_TEN_Q : vdQ(k) ? vdQ(k).q : (IMP_LABELS[k] || k);
-  const inspVal = (k, v) => { if (v == null || v === '') return 'Blank'; if (Array.isArray(v)) return v.join(', ') || 'Blank'; if (typeof v === 'object') return [k === 'tenanted' ? (INSP_TEN.find(x => x[0] === v.a) || ['', v.a])[1] : ynuText(v.a), v.d].filter(Boolean).join('. ') || 'Blank';
+  const inspVal = (k, v) => { if (['hazards', 'hazOther'].includes(k) && ijblank(v)) return 'None'; if (v == null || v === '') return 'Blank'; if (Array.isArray(v)) return v.join(', ') || 'Blank'; if (typeof v === 'object') return [k === 'tenanted' ? (INSP_TEN.find(x => x[0] === v.a) || ['', v.a])[1] : ynuText(v.a), v.d].filter(Boolean).join('. ') || 'Blank';
     return v === 'yes' ? 'Yes' : v === 'no' ? (INSP_YN[k] ? INSP_YN[k][1] : 'No') : String(v); };
   function insAnswered(it) {
     const [t, k] = it.split(':');
     if (t === 'f') { const v = INS.facts[k]; return Array.isArray(v) ? v.length > 0 : !!String(v ?? '').trim(); }
-    const v = INS.decl[k] || {}; return !!(v.a || String(v.d || '').trim());
+    if (k === 'tenanted') return !!(INS.decl[k] || {}).a;
+    const o = inspOut(k).decl || {}; return !!(inspS(k).a || o.a || String(o.d || '').trim());
+  }
+
+  /* One declaration question on the walk-round, as it stands on screen: a (the answer chosen), fu (follow-up answers), det (the
+     details typed), and for the hazard question the chips and the "anything else" text. Read back from the saved answer (and,
+     for the questions asked once for a fact too, from the fact), and turned into the saved answer by inspOut. */
+  const fuText = (f, v) => f.multi ? (v || []).join(', ') : f.opts ? ((f.opts.find(o => o[0] === v) || [])[1] || '').toLowerCase() : String(v || '').trim().replace(/\.\s+/g, ', ').replace(/\.+$/, '');
+  const inspFuOn = (k, s, f) => f.always || (s.a === 'yes' && (!f.when || f.when(s)));
+  // the follow-up sentences and the details, as inspOut writes them (no full stop added, none taken off what was typed)
+  const inspCompose = (k, s, det) => { const sp = INSP_DQ[k] || {};
+    const parts = (sp.fu || []).filter(f => inspFuOn(k, s, f) && fuText(f, s.fu[f.id])).map(f => `${f.l}: ${fuText(f, s.fu[f.id])}`);
+    return parts.concat(det ? [det] : []).join('. '); };
+  // a saved answer back into the card. Follow-ups are read only where they apply to the answer saved, and only when writing them
+  // out again gives exactly the text saved; otherwise the text stays as it was, as plain details (so nothing typed is ever lost)
+  function inspParse(k, v) {
+    const sp = INSP_DQ[k] || {}, s = { a: (v && v.a) || '', fu: {}, det: '', chips: [], other: '' };
+    const stored = String((v && v.d) || '');
+    let rest = stored;
+    for (const f of sp.fu || []) {
+      if (!inspFuOn(k, s, f) || !rest.startsWith(f.l + ': ')) continue;
+      const r = rest.slice(f.l.length + 2), m = r.match(/^(.*?)(?:\. |$)/), seg = m[1];
+      let val;
+      if (f.opts) { const o = f.opts.find(x => x[1].toLowerCase() === seg); if (!o) break; val = o[0]; }
+      else if (f.multi) { const l = seg.split(', '); if (!l.every(x => f.multi.includes(x))) break; val = l; }
+      else val = seg;
+      s.fu[f.id] = val; rest = r.slice(m[0].length);
+    }
+    s.det = rest;
+    if (Object.keys(s.fu).length && inspCompose(k, s, s.det) !== stored) { s.fu = {}; s.det = stored; }
+    return s;
+  }
+  // the methamphetamine answer from its two parts: Yes if they know of contamination or it has been tested (the question asks
+  // both); No only when Tim noted both as No; Unknown when either part is unknown; otherwise not answered. Never "not tested".
+  const methA = s => s.fu.aware === 'yes' || s.fu.tested === 'yes' ? 'yes' : s.fu.aware === 'no' && s.fu.tested === 'no' ? 'no' : s.fu.aware === 'unknown' || s.fu.tested === 'unknown' ? 'unknown' : '';
+  const hazText = (chips, other) => (chips || []).join(', ') + (String(other || '').trim() ? ((chips || []).length ? '. ' : '') + String(other).trim() : '');
+  // the facts each question asked once fills, and how the card reads from the facts alone
+  const INSP_KIND_FACTS = { meth: ['meth', 'methDetail'], wt: ['wt', 'wtDetail'], reno: ['work', 'workDetail'], hazard: ['hazards', 'hazOther'] };
+  function inspFromFacts(k, cur) {
+    const sp = INSP_DQ[k] || {}, F = INS.facts, s = { a: '', fu: {}, det: '', chips: [], other: '' };
+    if (sp.kind === 'meth') { s.fu = { aware: ['yes', 'no'].includes(F.meth) ? F.meth : '', tested: (cur && cur.fu.tested) || '' }; s.det = F.meth === 'yes' ? String(F.methDetail || '') : ''; s.a = methA(s); if (cur && cur.legacy) s.legacy = cur.legacy; }
+    if (sp.kind === 'wt') { s.a = ['yes', 'no'].includes(F.wt) ? F.wt : ''; s.det = F.wt === 'yes' ? String(F.wtDetail || '') : ''; }
+    if (sp.kind === 'reno') { s.a = ['yes', 'no'].includes(F.work) ? F.work : ''; s.det = F.work === 'yes' ? String(F.workDetail || '') : ''; }
+    if (sp.kind === 'hazard') { s.chips = Array.isArray(F.hazards) ? F.hazards.slice() : []; s.other = String(F.hazOther || ''); s.a = s.chips.length || s.other.trim() ? 'yes' : ''; }
+    return s;
+  }
+  // a card always opens on what the declaration note says; the facts are only compared with it (inspDiff), never written on open
+  function inspInit(k) {
+    const sp = INSP_DQ[k] || {}, v = INS.decl[k];
+    const s = inspParse(k, v);
+    if (sp.kind === 'meth') {
+      // a note saved as one answer (before the two parts were asked), or whose parts don't give its answer: shown as it was
+      if (v && v.a && methA(s) !== v.a) s.legacy = v.a;
+      s.a = methA(s);
+    }
+    if (sp.kind === 'reno' && v) { if (s.det === 'None known') { s.a = 'no'; s.det = ''; } else if (s.det.trim()) s.a = 'yes'; }
+    if (sp.kind === 'hazard' && v && s.a === 'yes') {
+      const d = s.det, i = d.indexOf('. '), head = i < 0 ? d : d.slice(0, i), l = head.split(', ');
+      if (head && l.every(x => HAZ.includes(x))) { s.chips = l; s.other = i < 0 ? '' : d.slice(i + 2); } else s.other = d;
+      s.det = '';
+    }
+    if (s.det && !inspDetFor(k, s)) s.keep = 1;   // text saved where the answer wouldn't show a box: never hidden
+    return s;
+  }
+  // a card opened with its note and fact disagreeing holds the facts back until Tim chooses (s.held), whatever he types meanwhile
+  const inspHeld = k => { const s = inspS(k); if (s.held === undefined) s.held = !!inspDiff(k); return s.held; };
+  // the declaration note and a fact it fills disagree (an inspection noted before they were asked once, or a fact changed since):
+  // both are shown and Tim chooses. Null when they agree, or when only the note has a value (it fills the fact when touched).
+  function inspDiff(k) {
+    const sp = INSP_DQ[k] || {}, keys = INSP_KIND_FACTS[sp.kind]; if (!keys) return null;
+    const F = INS.facts; if (!keys.some(x => inorm(F[x]))) return null;
+    const s = inspS(k); if (sp.kind === 'meth' && s.legacy && !methA(s)) return null;   // shown with the earlier answer instead
+    const out = inspOut(k).facts || {};
+    return keys.some(x => (k !== 'hazard' || out[x] !== undefined || inorm(F[x])) && inorm(F[x]) !== inorm(out[x])) ? keys : null;
+  }
+  const inspFactText = k => { const sp = INSP_DQ[k] || {}, F = INS.facts, y = INSP_YN[{ meth: 'meth', wt: 'wt', reno: 'work' }[sp.kind]];
+    if (sp.kind === 'hazard') return hazText(F.hazards, F.hazOther) || 'None';
+    const a = F[{ meth: 'meth', wt: 'wt', reno: 'work' }[sp.kind]], det = F[{ meth: 'methDetail', wt: 'wtDetail', reno: 'workDetail' }[sp.kind]];
+    return a === 'yes' ? 'Yes' + (det ? `: ${det}` : '') : a === 'no' ? y[1] : 'Not answered'; };
+  const inspS = k => ((INS.ui ||= {})[k] ||= inspInit(k));
+  // the details box for the answer chosen: [prompt, expected] or null (hidden)
+  function inspDetFor(k, s) {
+    const sp = INSP_DQ[k] || {};
+    if (sp.text) return [sp.text, 0];
+    const a = sp.kind === 'meth' ? methA(s) || s.legacy || '' : s.a;
+    let r = null;
+    if (a === 'unknown') r = ['Note for the vendors', 0];
+    else if (sp.kind === 'hazard') r = null;
+    else if (a === 'yes') r = sp.yes || null;
+    else if (a === 'no' && sp.kind !== 'reno') r = sp.no || null;
+    return r || (s.keep ? ['Details', 0] : null);
+  }
+  // what the walk-round saves for one question: the declaration answer ({a, d}, or null when blank) and the facts it fills
+  function inspOut(k) {
+    const sp = INSP_DQ[k] || {}, s = inspS(k), det = inspDetFor(k, s) ? String(s.det || '').trim() : '';
+    if (sp.text) return { decl: det ? { d: det } : null };
+    if (sp.kind === 'reno') return { decl: s.a === 'no' ? { d: 'None known' } : det ? { d: det } : null,
+      facts: { work: s.a, workDetail: s.a === 'yes' ? det : '' } };
+    if (sp.kind === 'hazard') {
+      const d = s.a === 'yes' ? hazText(s.chips, s.other) : det;
+      return { decl: s.a || d ? Object.assign(s.a ? { a: s.a } : {}, { d }) : null,
+        facts: s.a === 'yes' ? Object.assign({ hazards: s.chips.slice() }, String(s.other || '').trim() || inorm(INS.facts.hazOther) ? { hazOther: String(s.other || '').trim() } : {})
+          : s.a === 'no' ? { hazards: [], hazOther: '' } : {} };   // Unknown says nothing about the facts; only No means none
+    }
+    const a = sp.kind === 'meth' ? methA(s) || s.legacy || '' : s.a;   // an earlier one-answer note stands until both parts are answered
+    const d = inspCompose(k, s, det);
+    const decl = a || d ? Object.assign(a ? { a } : {}, { d }) : null;
+    if (sp.kind === 'wt') return { decl, facts: { wt: ['yes', 'no'].includes(a) ? a : '', wtDetail: a === 'yes' ? det : '' } };
+    if (sp.kind === 'meth') return { decl, facts: s.legacy && !s.fu.aware ? {} : { meth: ['yes', 'no'].includes(s.fu.aware) ? s.fu.aware : '', methDetail: s.fu.aware === 'yes' ? det : '' } };
+    return { decl };
+  }
+  const inorm = v => ijblank(v) || (typeof v === 'object' && !Array.isArray(v) && !v.a && !String(v.d || '').trim()) ? '' : JSON.stringify(v);
+  // save what the card says: sync false only keeps it on the phone at once (while typing); true queues and saves it
+  function inspCommit(k, sync) {
+    const o = inspOut(k), P = INS.pending; let waiting = false;
+    const put = (kind, kk, v) => {
+      const T = kind === 'facts' ? INS.facts : INS.decl;
+      // No hazards is always sent, so the server can compare it with the agreement in force (even where this inspection had nothing)
+      const force = sync && kind === 'facts' && k === 'hazard' && (o.decl || {}).a === 'no' && !(INS.conflicts || {})[kk] && !(kk in P.facts);
+      if (inorm(T[kk]) === inorm(v) && !force) { if (kk in P[kind]) waiting = true; return; }
+      if (sync) return inspQueue(kind, kk, v);
+      P[kind][kk] = v; (P.t ||= {})[KIND_P[kind] + ':' + kk] = new Date().toISOString(); T[kk] = v; waiting = true;
+    };
+    put('decl', k, o.decl); if (!(INSP_DQ[k] || {}).kind || !inspHeld(k)) Object.entries(o.facts || {}).forEach(([kk, v]) => put('facts', kk, v));
+    if (!sync) { inspKeep(INS.id); inspShow(INS.id); } else if (waiting) inspSyncOne(INS.id);
+  }
+  // the 1995 to 2004 question, answered from the year built when it falls in that period (Tim can change it)
+  const eraFrom = y => { const n = parseInt(y, 10); return n >= 1995 && n <= 2004 ? { a: 'yes', d: `Built about ${n}` } : null; };
+  const eraDerived = () => { const v = INS.decl.era; return !!(v && v.a === 'yes' && /^Built about \d{4}$/.test(v.d || '')); };
+  function inspDeriveEra() {
+    const want = eraFrom(INS.facts.pYear), v = INS.decl.era;
+    if ((!inorm(v) || eraDerived()) && inorm(v) !== inorm(want)) { delete (INS.ui || {}).era; inspQueue('decl', 'era', want); }
+    inspRedrawCard('d:era');
+  }
+  function inspRedrawCard(it) {
+    const c = $(`.view-pad.insp [data-ik="${it}"]`); if (!c) return;
+    const tmp = document.createElement('div'); tmp.innerHTML = inspItemHTML(it).trim(); c.replaceWith(tmp.firstElementChild);
+    inspConflictsPaint(); inspCopyPaint();
   }
   const secCount = s => [s[2].filter(insAnswered).length, s[2].length];
   // the phone's copy of an inspection: kept only while answers wait to be saved, or while what is on screen hasn't come from the
@@ -6458,7 +6674,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     (kind === 'facts' ? INS.facts : kind === 'decl' ? INS.decl : INS.notes)[k] = v;
     if (INS_STATE[INS.id]) delete INS_STATE[INS.id].refused;
     inspKeep(INS.id);
-    inspShow(INS.id); inspCounts(); inspUsePaint();
+    inspShow(INS.id); inspCounts(); inspCopyPaint();
     inspSyncOne(INS.id);
   }
   // one save of what is waiting, in a batch the server will take: at most INSP_BATCH characters, and at most INS_LIMIT[id] answers
@@ -6500,7 +6716,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       const sk = KIND_P[kind] + ':' + k, r = cur.row[map[kind]] ||= {};
       const val = sk in skipped ? skipped[sk] : v;   // a newer answer from another phone was kept by the server
       if (ijblank(val)) delete r[k]; else r[k] = val;
-      if (sk in skipped && INS && INS.id === id) { (kind === 'facts' ? INS.facts : kind === 'decl' ? INS.decl : INS.notes)[k] = ijblank(val) ? (kind === 'facts' ? '' : null) : val; INS.redraw = true; }
+      if (sk in skipped && INS && INS.id === id) { (kind === 'facts' ? INS.facts : kind === 'decl' ? INS.decl : INS.notes)[k] = ijblank(val) ? (kind === 'facts' ? '' : null) : val; INS.redraw = true; INS.ui = {}; }
       if (isame(cur.pending[kind][k], v) && cur.pending.t[sk] === sent.t[sk]) { delete cur.pending[kind][k]; delete cur.pending.t[sk]; }
     }));
     cur.row.conflicts = (res.data && res.data.conflicts) || {}; cur.row.resolved = (res.data && res.data.resolved) || cur.row.resolved || {};
@@ -6596,10 +6812,40 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     }
     const v = INS.decl[k] || {};
     if (k === 'tenanted') return `<div class="card tight iq" data-ik="${ik}"><h3>${esc(INSP_TEN_Q)}</h3>${radios('id_tenanted', INSP_TEN, v.a)}<button class="btn link iclr" type="button" data-iclear="${ik}">Clear</button></div>`;
-    const x = vdQ(k), use = x.from ? `<div data-iusebox="${esc(k)}"></div>` : '';
-    return `<div class="card tight iq vdq-i" data-ik="${ik}"><span class="ivd">Vendor Declaration</span><h3>${esc(x.q)}</h3>${use}
-      ${x.text ? '' : `${radios('id_' + k, YNU, v.a, 'three')}<button class="btn link iclr" type="button" data-iclear="${ik}">Clear</button>`}
-      <label class="f" for="idd_${k}">${x.text ? 'Your note' : 'Details'} <span class="opt">(optional)</span></label><textarea id="idd_${k}" maxlength="${INSP_MAX}" data-itext="d:${esc(k)}">${esc(v.d || '')}</textarea></div>`;
+    const x = vdQ(k), sp = INSP_DQ[k] || {}, s = inspS(k), a = sp.kind === 'meth' ? methA(s) : s.a;
+    const isel = (name, opts, cur, attr, cls) => `<div class="ipick ${cls || ''}">${opts.map(([val, l]) => `<label class="ichip"><input type="radio" name="${name}" value="${esc(val)}" data-is="${attr}" ${cur === val ? 'checked' : ''}><span>${esc(l)}</span></label>`).join('')}</div>`;
+    const fuHTML = f => `<div class="ifu" data-ifu="${f.id}"><p class="ifq">${esc(f.q)}</p>${f.opts ? isel(`idf_${k}_${f.id}`, f.opts, s.fu[f.id], 'fu:' + f.id, f.opts.length === 2 ? 'two' : 'three')
+      : f.multi ? `<div class="ipick">${f.multi.map(o => `<label class="ichip"><input type="checkbox" value="${esc(o)}" data-is="fum:${f.id}" ${(s.fu[f.id] || []).includes(o) ? 'checked' : ''}><span>${esc(o)}</span></label>`).join('')}</div>`
+      : `<input type="text" id="idf_${k}_${f.id}" maxlength="200" data-is="fut:${f.id}" value="${esc(s.fu[f.id] || '')}" placeholder="${esc(f.text || '')}" aria-label="${esc(f.q)}">`}</div>`;
+    let main = '', more = '', notes = '';
+    if (sp.kind === 'reno') main = isel('id_' + k, [['yes', 'Yes'], ['no', INSP_YN.work[1]]], s.a, 'a', 'two');
+    else if (!x.text && sp.kind !== 'meth') main = isel('id_' + k, YNU, s.a, 'a', 'three');
+    (sp.fu || []).filter(f => inspFuOn(k, s, f)).forEach(f => { more += fuHTML(f); });
+    if (sp.kind === 'hazard' && s.a === 'yes') more += `<div class="ifu"><p class="ifq">${esc(INSP_F.hazards.l)}</p><div class="ipick">${HAZ.map(o => `<label class="ichip"><input type="checkbox" value="${esc(o)}" data-is="chip" ${s.chips.includes(o) ? 'checked' : ''}><span>${esc(o)}</span></label>`).join('')}</div>
+      <label class="f" for="iho_${k}">${esc(INSP_F.hazOther.l)} <span class="opt">(optional)</span></label><input type="text" id="iho_${k}" maxlength="${INSP_MAX}" data-is="other" value="${esc(s.other || '')}"></div>`;
+    const dp = inspDetFor(k, s);
+    if (dp) more += `<label class="f" for="idd_${k}">${esc(dp[0])} <span class="opt">(${dp[1] ? 'the vendors are asked for this' : 'optional'})</span></label><textarea id="idd_${k}" maxlength="${INSP_MAX}" data-itext="d:${esc(k)}" data-is="det">${esc(s.det || '')}</textarea>`;
+    if (sp.kind === 'meth') notes += '<p class="small ihint">Both parts matter: Yes to either makes the answer Yes. No is only noted when both are No.</p>';
+    if (sp.kind === 'meth' && s.legacy && !methA(s)) notes += `<p class="small iconf ilegacy">Your earlier note answered this as one question: ${esc(ynuText(s.legacy))}. It stays until you answer both parts above.${['yes', 'no'].includes(INS.facts.meth) ? ` The agreement's page 1 fact says: ${esc(INS.facts.meth === 'yes' ? 'Yes' : INSP_YN.meth[1])}.` : ''}</p>`;
+    if (k === 'burner' && /wood ?burner|wood ?fire|log ?burner|fireplace|\bfire\b|pellet/i.test(String(INS.facts.pHeat || ''))) notes += '<p class="small ilink">You mentioned a fire under heating.</p>';
+    const dk = inspHeld(k);
+    if (dk) notes += `<div class="card warnc tight idiff" data-idiff="${esc(k)}"><p class="small" style="margin:0">Your declaration note and the agreement's page 1 fact say different things. Choose which is right. Until you do, the page 1 fact is not changed.</p>
+      <div class="fact"><div class="k">Declaration note</div><div class="v" style="font-weight:400">${esc(inorm(INS.decl[k]) ? inspVal(k, INS.decl[k]) : 'Not answered')}</div></div>
+      <div class="fact"><div class="k">Page 1 fact</div><div class="v" style="font-weight:400">${esc(inspFactText(k))}</div></div>
+      <div class="toolbar">${inorm(INS.decl[k]) ? `<button class="btn ghost" type="button" data-iside="note" data-ik2="${esc(k)}">Use the note for both</button>` : ''}<button class="btn primary" type="button" data-iside="fact" data-ik2="${esc(k)}">Use the fact for both</button></div></div>`;
+    if (a === 'unknown') notes += '<p class="small ihint">Unknown goes to the vendors as a question for them to answer. They can\'t just confirm it.</p>';
+    if (sp.derive) { const yr = parseInt(INS.facts.pYear, 10);
+      if (eraDerived()) notes += `<p class="small ihint iderived">Answered from the year built (about ${yr}). Change it if you need to.</p>`;
+      else if (yr && a === 'no' && eraFrom(yr)) notes += `<p class="small iconf">The year built (about ${yr}) is in this period.</p>`;
+      else if (yr && !a && !eraFrom(yr)) notes += `<p class="small ihint">Built about ${yr}, outside 1995 to 2004. Answer No unless an addition or alteration was built in that period.</p>`; }
+    if (sp.kind === 'reno') notes += '<p class="small ihint">This answer also goes on the agreement\'s page 1 (renovations, additions or repairs).</p>';
+    if (sp.kind === 'wt') notes += '<p class="small ihint">This answer also goes on the agreement\'s page 1 (leaks or weathertightness).</p>';
+    if (sp.kind === 'meth') notes += '<p class="small ihint">Whether they know of any goes on the agreement\'s page 1 too.</p>';
+    if (sp.kind === 'hazard') notes += '<p class="small ihint">This answer also goes on the agreement\'s page 1 (hazards for visitors).</p>';
+    const confK = { meth: ['meth'], wt: ['wt', 'wtDetail'], reno: ['work', 'workDetail'], hazard: ['hazards', 'hazOther'] }[sp.kind] || [];
+    const clear = x.text && sp.kind !== 'reno' ? '' : `<button class="btn link iclr" type="button" data-iclear="${ik}">Clear</button>`;
+    return `<div class="card tight iq vdq-i" data-ik="${ik}"><span class="ivd">Vendor Declaration</span><h3>${esc(x.q)}</h3>${sp.link ? `<p class="small ilink">${esc(sp.link)}</p>` : ''}${sp.copy ? `<div data-icopybox="${esc(k)}"></div>` : ''}
+      ${main}${more}${clear}${notes}${confK.map(c => `<div data-iconf="${c}"></div>`).join('')}</div>`;
   }
   // what the inspection saw for one question, read from the screen
   function inspReadItem(it) {
@@ -6611,22 +6857,43 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       if (f.kind === 'pick' || f.kind === 'yn') { inspQueue('facts', k, r ? r.value : ''); if (f.kind === 'yn') { const w = $(`[data-ireveal="${k}"]`, card); if (w) w.hidden = !(r && r.value === 'yes') && !INS.facts[k + 'Detail']; } return; }
       return;
     }
-    const r = $(`input[name="id_${k}"]:checked`, card), d = $(`[data-itext="d:${k}"]`, card);
-    inspQueue('decl', k, k === 'tenanted' ? (r ? { a: r.value } : null) : Object.assign(r ? { a: r.value } : {}, { d: d ? d.value.trim() : '' }));
+    if (k === 'tenanted') { const r = $('input[name="id_tenanted"]:checked', card); return inspQueue('decl', k, r ? { a: r.value } : null); }
+    inspCommit(k, true);
+  }
+  // a field on a declaration card changed: update what the card says (data-is names the part)
+  function inspFieldSet(k, t) {
+    const s = inspS(k), [part, id] = String(t.dataset.is).split(':'), card = t.closest('[data-ik]');
+    if (part === 'a') s.a = t.checked ? t.value : '';
+    else if (part === 'fu') s.fu[id] = t.checked ? t.value : '';
+    else if (part === 'fum') s.fu[id] = $$(`[data-is="fum:${id}"]`, card).filter(c => c.checked).map(c => c.value);
+    else if (part === 'fut') s.fu[id] = t.value;
+    else if (part === 'chip') s.chips = $$('[data-is="chip"]', card).filter(c => c.checked).map(c => c.value);
+    else if (part === 'other') s.other = t.value;
+    else if (part === 'det') s.det = t.value;
   }
   function inspCounts() {
     if (!INS) return;
     INSP_SECTIONS.forEach(s => { const [a, n] = secCount(s), el = $(`[data-isec="${s[0]}"] .n`); if (el) el.textContent = `${a}/${n}`; const ln = $(`[data-iseccount="${s[0]}"]`); if (ln) ln.textContent = `${a} of ${n} answered`; });
     const all = INSP_ITEMS.filter(insAnswered).length; $('#barFill').style.width = (all / INSP_ITEMS.length * 100) + '%';
   }
-  // "Use my answer above": a declaration question that matches a property fact already noted (the same mapping the vendors' file prefill uses)
-  const inspFill = k => vdFromFile({ description: INS.facts, disclosures: INS.facts }, {}).fill[k] || null;
-  function inspUsePaint() {
-    $$('[data-iusebox]').forEach(el => { const k = el.dataset.iusebox, v = INS.decl[k] || {}, fill = inspFill(k);
-      el.innerHTML = fill && !(v.a || String(v.d || '').trim()) ? `<button class="btn ghost iuse" type="button" data-iuse="${esc(k)}">Use my answer above: ${esc(inspVal(k, fill))}</button>` : ''; });
+  // a related fact noted just above that a description question can start from (only partly the same question, so it is offered,
+  // never filled in): the defects note for the faults question, the insulation part of the heating note for the insulation one
+  const inspCopyFrom = k => { const F = INS.facts;
+    if (k === 'faults') return F.def === 'yes' ? String(F.defDetail || '').trim() : F.def === 'no' ? 'None known' : '';
+    if (k === 'insulation') return String(F.pHeat || '').trim();   // the whole note, for Tim to edit
+    return ''; };
+  const INSP_COPY_L = { faults: 'Copy from the defects question', insulation: 'Copy my heating and insulation note' };
+  function inspCopyPaint() {
+    $$('[data-icopybox]').forEach(el => { const k = el.dataset.icopybox, src = inspCopyFrom(k);
+      el.innerHTML = src && !String(inspS(k).det || '').trim() ? `<button class="btn ghost iuse" type="button" data-icopy="${esc(k)}">${esc(INSP_COPY_L[k])}: ${esc(src)}</button>` : ''; });
   }
+  // the differences to show: a "no hazards" difference only while the hazard answer is still No (after Unknown or Yes it no
+  // longer stands, so it is never offered for "Use mine")
+  const inspConflictsNow = () => Object.fromEntries(Object.entries(INS.conflicts || {}).filter(([k, c]) =>
+    !(['hazards', 'hazOther'].includes(k) && ijblank(c.inspection) && ((INS.decl.hazard || {}).a || '') !== 'no')));
   function inspConflictsPaint() {
-    $$('[data-iconf]').forEach(el => { const c = (INS.conflicts || {})[el.dataset.iconf]; el.innerHTML = c ? `<p class="small iconf">The agreement ${esc(c.ref || '')} says ${esc(inspVal(el.dataset.iconf, c.agreement))}. Your note is kept, and you choose which to use when you finish.</p>` : ''; });
+    const now = inspConflictsNow();
+    $$('[data-iconf]').forEach(el => { const c = now[el.dataset.iconf]; el.innerHTML = c ? `<p class="small iconf">The agreement ${esc(c.ref || '')} says ${esc(inspVal(el.dataset.iconf, c.agreement))}. Your note is kept, and you choose which to use when you finish.</p>` : ''; });
   }
   const inspFlush = () => { Object.keys(INS_TIMERS).forEach(k => { clearTimeout(INS_TIMERS[k].t); INS_TIMERS[k].go(); delete INS_TIMERS[k]; }); };
 
@@ -6653,39 +6920,64 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     actions(true, i ? 'Back' : 'Property file', last ? 'Finish' : `Next: ${INSP_SECTIONS[i + 1][1]}`);
     onBack = () => { inspFlush(); if (i) { INS.sec = i - 1; inspDraw(); } else { inspOpenSet(null); viewProperty(INS.row.property_id); } };
     onNext = async () => { inspFlush(); if (last) return viewInspectionFinish(); INS.sec = i + 1; inspDraw(); };
-    $$('[data-iclear]').forEach(b => b.addEventListener('click', () => { const it = b.dataset.iclear, card = $(`[data-ik="${it}"]`); $$('input[type=radio]', card).forEach(r => { r.checked = false; }); inspReadItem(it); if (it.startsWith('f:') && INSP_F[it.slice(2)].kind === 'yn') { const k = it.slice(2); const w = $(`[data-ireveal="${k}"]`, card); if (w) w.hidden = true; } }));
     $$('[data-isecn]').forEach(b => b.addEventListener('click', () => { inspFlush(); INS.sec = +b.dataset.isecn; inspDraw(); }));
     $('#insGoFinish').addEventListener('click', () => { inspFlush(); viewInspectionFinish(); });
-    inspCounts(); inspConflictsPaint(); inspUsePaint(); inspShow(INS.id);
+    inspCounts(); inspConflictsPaint(); inspCopyPaint(); inspShow(INS.id);
     top();
   }
 
-  // one set of listeners for the walk-round (main is never replaced, only its content)
+  // one set of listeners for the walk-round (main is never replaced, only its content, and a card can be redrawn)
     main().addEventListener('click', e => {
-      const b = e.target.closest && e.target.closest('[data-iuse]'); if (!b || !INS || !b.closest('.view-pad.insp')) return;
-      const k = b.dataset.iuse, fill = inspFill(k); if (!fill) return;
-      inspQueue('decl', k, Object.assign(fill.a ? { a: fill.a } : {}, { d: fill.d || '' }));
-      const card = $(`[data-ik="d:${k}"]`); if (card) { if (fill.a) { const r = $(`input[name="id_${k}"][value="${fill.a}"]`, card); if (r) r.checked = true; } const t = $(`[data-itext="d:${k}"]`, card); if (t) t.value = fill.d || ''; }
+      if (!INS || !e.target.closest || !e.target.closest('.view-pad.insp')) return;
+      const cl = e.target.closest('[data-iclear]');
+      if (cl) {
+        const it = cl.dataset.iclear, card = $(`[data-ik="${it}"]`), k = it.slice(2);
+        if (it.startsWith('d:') && k !== 'tenanted') { (INS.ui ||= {})[k] = { a: '', fu: {}, det: '', chips: [], other: '' }; inspCommit(k, true); inspRedrawCard(it); return; }
+        $$('input[type=radio]', card).forEach(r => { r.checked = false; }); inspReadItem(it);
+        if (it.startsWith('f:') && INSP_F[k].kind === 'yn') { const w = $(`[data-ireveal="${k}"]`, card); if (w) w.hidden = true; }
+        return;
+      }
+      const sd = e.target.closest('[data-iside]');
+      if (sd) { const k = sd.dataset.ik2; if (sd.dataset.iside === 'fact') { INS.ui[k] = inspFromFacts(k, inspS(k)); } inspS(k).held = false; inspCommit(k, true); inspRedrawCard('d:' + k); return; }
+      const b = e.target.closest('[data-icopy]'); if (!b) return;
+      const k = b.dataset.icopy, src = inspCopyFrom(k); if (!src) return;
+      inspS(k).det = src; inspCommit(k, true); inspRedrawCard('d:' + k);
     });
     main().addEventListener('change', e => {
       if (!INS || !e.target.closest('.view-pad.insp')) return;
       const t = e.target, card = t.closest('[data-ik]'); if (!card) return;
+      if (t.dataset.is && card.classList.contains('vdq-i')) {
+        if (!t.matches('input[type=radio],input[type=checkbox]')) return;   // typed fields save from the input listener
+        const k = card.dataset.ik.slice(2); inspFieldSet(k, t); inspCommit(k, true); inspRedrawCard(card.dataset.ik); return;
+      }
       if (t.matches('input[type=radio],input[type=checkbox]')) inspReadItem(card.dataset.ik);
     });
+    // the timer key for a typed field: a declaration card's fields share one (they make one answer)
+    const itKey = t => { const c = t.dataset.is && t.closest('.vdq-i'); return c ? c.dataset.ik : t.dataset.itext; };
     main().addEventListener('input', e => {
       if (!INS || !e.target.closest('.view-pad.insp')) return;
-      const t = e.target; if (!t.matches('[data-itext]')) return;
+      const t = e.target;
+      if (t.dataset.is && t.closest('.vdq-i')) {
+        if (t.matches('input[type=radio],input[type=checkbox]')) return;
+        const it = t.closest('.vdq-i').dataset.ik, k = it.slice(2);
+        inspFieldSet(k, t); inspCommit(k, false);   // kept in this browser at once, so a reload never loses it
+        if (INS_TIMERS[it]) clearTimeout(INS_TIMERS[it].t);
+        const go = () => { inspCommit(k, true); inspCopyPaint(); };
+        INS_TIMERS[it] = { go, t: setTimeout(() => { delete INS_TIMERS[it]; go(); }, 700) };
+        return;
+      }
+      if (!t.matches('[data-itext]')) return;
       const key = t.dataset.itext, [kind, k] = key.split(':');
-      const go = () => { const v = t.value.trim(); if (kind === 'f') inspQueue('facts', k, v); else if (kind === 'n') inspQueue('notes', k, v); else inspReadItem('d:' + k); };
+      const go = () => { const v = t.value.trim(); if (kind === 'f') { inspQueue('facts', k, v); if (k === 'pYear') inspDeriveEra(); } else if (kind === 'n') inspQueue('notes', k, v); };
       if (INS_TIMERS[key]) clearTimeout(INS_TIMERS[key].t);
       INS_TIMERS[key] = { go, t: setTimeout(() => { delete INS_TIMERS[key]; go(); }, 700) };
       // typed text is kept in this browser at once, so a reload never loses it
-      const P = INS.pending, kk = kind === 'f' ? 'facts' : kind === 'n' ? 'notes' : 'decl';
-      if (kk === 'decl') { const r = $(`input[name="id_${k}"]:checked`); P.decl[k] = Object.assign(r ? { a: r.value } : {}, { d: t.value.trim() }); INS.decl[k] = P.decl[k]; } else { P[kk][k] = t.value.trim(); INS[kk][k] = t.value.trim(); }
+      const P = INS.pending, kk = kind === 'f' ? 'facts' : 'notes';
+      P[kk][k] = t.value.trim(); INS[kk][k] = t.value.trim();
       (P.t ||= {})[kind + ':' + k] = new Date().toISOString();
       inspKeep(INS.id); inspShow(INS.id);
     });
-    main().addEventListener('focusout', e => { if (!INS || !e.target.closest || !e.target.closest('.view-pad.insp')) return; const t = e.target; if (t.matches && t.matches('[data-itext]') && INS_TIMERS[t.dataset.itext]) { clearTimeout(INS_TIMERS[t.dataset.itext].t); const g = INS_TIMERS[t.dataset.itext].go; delete INS_TIMERS[t.dataset.itext]; g(); } });
+    main().addEventListener('focusout', e => { if (!INS || !e.target.closest || !e.target.closest('.view-pad.insp')) return; const t = e.target; if (!t.matches || !(t.matches('[data-itext]') || t.dataset.is)) return; const key = itKey(t); if (INS_TIMERS[key]) { clearTimeout(INS_TIMERS[key].t); const g = INS_TIMERS[key].go; delete INS_TIMERS[key]; g(); } });
 
   // finishing: what was noted, any differences with an agreement in force, and where the declaration answers go next
   async function viewInspectionFinish() {
@@ -6705,8 +6997,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       if (form) { try { const { data } = await sb.from('form_signatures').select('id').eq('form_id', form.id); fsigs = data || []; } catch (_) { } } }
     const resolvedAg = k => ((INS.row.resolved || {})[k] || {}).use === 'agreement';
     const nDecl = Object.keys(INS.decl).filter(k => insAnswered('d:' + k)).length;
-    const nFacts = INSP_ITEMS.filter(it => it.startsWith('f:') && insAnswered(it) && !(INS.conflicts || {})[it.slice(2)] && !resolvedAg(it.slice(2))).length;   // not those kept as the agreement's
-    const conflicts = Object.entries(INS.conflicts || {});
+    const nFacts = Object.keys(INSP_F).filter(k => insAnswered('f:' + k) && !(INS.conflicts || {})[k] && !resolvedAg(k)).length;   // not those kept as the agreement's
+    const conflicts = Object.entries(inspConflictsNow());
     const formSigned = form && (form.status !== 'draft' || fsigs.length);
     const diffs = formSigned ? Object.entries(INS.decl).filter(([k, v]) => !ijblank(v) && (k === 'tenanted' ? !isame((form.data || {}).tenanted, v.a) : !isame(((form.data || {}).answers || {})[k], v))) : [];
     main().innerHTML = `<div class="view-pad insp">
