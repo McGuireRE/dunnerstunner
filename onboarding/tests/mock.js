@@ -22,7 +22,7 @@ const live=a=>!['ended','cancelled'].includes(a.status);
 function syncAgreement(ag,old){ if(!ag.property_id) return; const p=PT().find(x=>x.id===ag.property_id); if(!p) return;
   const others=(DB.agreements||[]).filter(o=>o.property_id===p.id&&o.id!==ag.id&&live(o));
   const changed=!old||old.address!==ag.address||JSON.stringify(old.config)!==JSON.stringify(ag.config)||JSON.stringify(old.answers)!==JSON.stringify(ag.answers);
-  if(live(ag)&&changed&&!others.some(o=>(o.created_at||'')>(ag.created_at||''))){ if(ag.address) p.address=ag.address; if((ag.config||{}).title) p.title_ref=ag.config.title; if((ag.config||{}).owners) p.owners_on_title=ag.config.owners; Object.assign(p.ownership,pick(ag.answers,['capacity','entity'])); Object.assign(p.description,pick(ag.answers,DESC)); Object.assign(p.disclosures,pick(ag.answers,DISC)); }
+  if(live(ag)&&changed&&!others.some(o=>(o.created_at||'')>(ag.created_at||''))){ if(ag.address) p.address=ag.address; if((ag.config||{}).title) p.title_ref=ag.config.title; if((ag.config||{}).owners) p.owners_on_title=ag.config.owners; Object.assign(p.ownership,pickKeep(p.ownership,pick(ag.answers,['capacity','entity']))); Object.assign(p.description,pickKeep(p.description,pick(ag.answers,DESC))); Object.assign(p.disclosures,pickKeep(p.disclosures,pick(ag.answers,DISC))); }
   if(!live(ag)){ if(old&&live(old)&&!others.length&&!['settled','withdrawn'].includes(p.stage)){ p.stage='withdrawn'; p.stage_at=now(); } }
   else bump(p.id, ['signed','countersigned'].includes(ag.status)?'signed':'agreement'); }
 function syncPrelisting(pl,old){ if(!pl.property_id) return; if(old&&old.address!==pl.address&&!(DB.agreements||[]).some(a=>a.property_id===pl.property_id&&live(a))){ const p=PT().find(x=>x.id===pl.property_id); if(p) p.address=pl.address; } bump(pl.property_id, {appraisal:pl.proceeded_at?'questionnaire':'appraisal',submitted:'questionnaire',plan:'plan',question:'plan',accepted:'accepted'}[pl.status]||'appraisal'); }
@@ -75,7 +75,10 @@ function q(table){ logCall('from:'+table);
     // property inspections (migration 012): Tim reads them; nobody writes them directly (the agent_inspection_* functions do); vendors see none.
     // With localStorage mockOffline = '1' the inspection calls fail as they would with no signal.
     if(table==='property_inspections'){ if(offline()) throw new Error('Failed to fetch'); if(op!=='select') throw new Error('permission denied for table property_inspections'); if(!(S&&S.user&&AGENTS.includes(S.user.email))) return {data:single?undefined:[],error:single?{message:'not found'}:null}; }
-    if(table==='property_forms'&&(op==='insert'||op==='update')){ const P=Array.isArray(payload)?payload:[payload]; P.forEach(x=>{ if(!x||!x.data) return; const rows=op==='insert'?[{data:{}}]:(DB.property_forms||[]).filter(r=>filters.every(f=>f(r))); rows.forEach(r=>{ if(op==='update') guard(table,r,x); if(['checked','pre','insp'].some(k=>JSON.stringify((x.data||{})[k]??null)!==JSON.stringify(((r.data||{})[k])??null))) throw new Error('Only the vendors confirm their answers'); }); }); }   // guard_form_checks (after guard_form, as triggers fire in name order)
+    // guard_form_checks (after guard_form, as triggers fire in name order): a direct write can't add a declaration with answers, change what one says, change a form to or from one, or remove one
+    if(table==='property_forms'&&op==='insert'){ (Array.isArray(payload)?payload:[payload]).forEach(x=>{ if(x&&x.kind==='vendor_declaration'&&!jblank(x.data)) throw new Error('Only the vendors fill in their declaration'); }); }
+    if(table==='property_forms'&&op==='update'){ (DB.property_forms||[]).filter(r=>filters.every(f=>f(r))).forEach(r=>{ guard(table,r,payload); if('kind' in payload&&payload.kind!==r.kind&&[payload.kind,r.kind].includes('vendor_declaration')) throw new Error('Only the vendors fill in their declaration'); if(r.kind==='vendor_declaration'&&'data' in payload&&!same(payload.data,r.data)) throw new Error('Only the vendors fill in their declaration'); }); }
+    if(table==='property_forms'&&op==='delete'&&(DB.property_forms||[]).some(r=>filters.every(f=>f(r))&&r.kind==='vendor_declaration'&&!(DB.form_signatures||[]).some(x=>x.form_id===r.id))) throw new Error("The Vendor Declaration is the vendors' own record, so it can't be removed here");
     if(op==='insert'){ const arr=(Array.isArray(payload)?payload:[payload]).map(p=>{const r=Object.assign({id:uid(),created_at:now(),updated_at:now()},p); if(table==='agreements'){r.ref=r.ref||'MRE-2026-'+(1001+T.length); r.status=r.status||'draft'; r.config=r.config||{}; r.answers=r.answers||{}; r.legal=r.legal||{}; r.agreement_version='v3.15-26102026';} if(table.endsWith('events')) r.at=now(); if(table==='signatures') r.signed_at=now(); if(table==='agreement_variations'){r.status='draft';} if(table==='prelistings'){r.status=r.status||'appraisal';r.answers=r.answers||{};r.plan=r.plan||{}; if(!r.property_id){ const p=newProp(r.address); r.property_id=p.id; } mergePerson(r.property_id,r.contact_name,'',r.contact_email,'',null,'appraisal'); }
       if(table==='agreements'&&!r.property_id){ const p=newProp(r.address); p.title_ref=(r.config||{}).title||null; p.owners_on_title=(r.config||{}).owners||null; r.property_id=p.id; }
       if(table==='property_forms'&&(r.status==='signed'||r.signed_at||r.countersigned_at||r.document_id||r.filing_at)) throw new Error('A document is only signed or filed by signing it'); if(table==='property_forms'&&r.kind==='vendor_declaration') r.data=inspPrefill(r.property_id,r.data||{}); if(table==='property_people'){ r.role=r.role||'owner'; r.name_from=r.name_from||r.source; } if(table==='properties'){ r.ownership=r.ownership||{}; r.description=r.description||{}; r.disclosures=r.disclosures||{}; r.stage=r.stage||'appraisal'; r.stage_at=now(); } T.push(r); if(table==='agreements') syncAgreement(r); if(table==='prelistings') syncPrelisting(r); if(table==='agreement_people') personSync(r); return r;}); save(); return {data: single?arr[0]:arr, error:null}; }
@@ -101,24 +104,39 @@ const DECL_KEYS=['pegs','unpaid','history','meth','chattels','repairs','faults',
 const NOTE_KEYS=['outside','structure','inside','services','history','tenancy'];
 const jblank=v=>v==null||v===''||(Array.isArray(v)&&!v.length)||(typeof v==='object'&&!Array.isArray(v)&&!Object.keys(v).length);
 const same=(a,b)=>JSON.stringify(a??null)===JSON.stringify(b??null);
+const isObj=x=>!!x&&typeof x==='object'&&!Array.isArray(x);
+const confirmed=(chk,k)=>isObj(chk)&&isObj(chk[k]);   // is_confirmed(): a {by, name, at} written by vendor_form_save
+const stampTs=t=>typeof t==='string'&&/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(t)&&!isNaN(Date.parse(t))?Date.parse(t):null;
 const nzDay=iso=>new Date(iso).toLocaleDateString('en-CA',{timeZone:'Pacific/Auckland'});
-function mergeDecl(d,i){ d=JSON.parse(JSON.stringify(d&&typeof d==='object'&&!Array.isArray(d)?d:{})); const obj=x=>x&&typeof x==='object'&&!Array.isArray(x)?x:{};
-  let ans=obj(d.answers), pre=obj(d.pre), chk=obj(d.checked); let added=0, updated=0; const kept=[];
-  Object.keys(pre).filter(k=>pre[k]==='inspection').forEach(k=>{ if(!(k in i.declaration)&&chk[k]!==true){ if(k==='tenanted') delete d.tenanted; else delete ans[k]; delete pre[k]; } });
-  Object.entries(i.declaration).forEach(([k,v])=>{ const tims=pre[k]==='inspection'&&chk[k]!==true;
+const pickKeep=(cur,j)=>{ const o={}; Object.entries(j||{}).forEach(([k,v])=>{ if(!(jblank(v)&&!jblank((cur||{})[k]))) o[k]=v; }); return o; };   // pick_keep()
+function mergeDecl(d,i){ d=JSON.parse(JSON.stringify(isObj(d)?d:{}));
+  let ans=isObj(d.answers)?d.answers:{}, pre=isObj(d.pre)?d.pre:{}, chk=isObj(d.checked)?d.checked:{}; let added=0, updated=0; const kept=[];
+  Object.keys(pre).filter(k=>pre[k]==='inspection').forEach(k=>{ if(!(k in i.declaration)&&!confirmed(chk,k)){ if(k==='tenanted') delete d.tenanted; else delete ans[k]; delete pre[k]; } });
+  Object.entries(i.declaration).forEach(([k,v])=>{ const tims=pre[k]==='inspection'&&!confirmed(chk,k);
     if(k==='tenanted'){ const cur=d.tenanted; if(jblank(cur)||tims){ if(jblank(cur)) added++; else if(cur!==v.a) updated++; d.tenanted=v.a; pre[k]='inspection'; delete chk[k]; } else if(cur!==v.a) kept.push({k,vendor:{a:cur},inspection:v}); return; }
     const cur=ans[k], empty=jblank(cur)||(jblank(cur.a)&&!(cur.d||''));
     if(empty||tims){ if(empty) added++; else if(!same(cur,v)) updated++; ans[k]=v; pre[k]='inspection'; delete chk[k]; }
     else if((cur.a||'')!==(v.a||'')||(cur.d||'')!==(v.d||'')) kept.push({k,vendor:cur,inspection:v}); });
   Object.assign(d,{answers:ans,pre,checked:chk,insp:{id:i.id,on:nzDay(i.started_at),by:'Tim McGuire'}}); if(added+updated) d.complete=false;
   return {data:d,added,updated,kept}; }
-function latestInsp(pid){ const p=PT().find(x=>x.id===pid)||{}; return PI().filter(i=>i.property_id===pid&&Object.keys(i.declaration).length&&(!p.cycle_at||i.started_at>=p.cycle_at)).sort((a,b)=>((a.finished_at||a.updated_at)<(b.finished_at||b.updated_at)?1:-1))[0]||null; }
-function inspPrefill(pid,data){ if(data&&data.insp) return data; const i=latestInsp(pid); return i?mergeDecl(data,i).data:data; }
-const needsChecks=fm=>{ const d=fm.data||{}, pre=d.pre||{}, chk=d.checked||{}; return Object.keys(pre).some(k=>pre[k]==='inspection'&&chk[k]!==true); };
+// latest_inspection(): the newest inspection of this round, with the declaration merged across all of them (newest answer per question wins)
+function latestInsp(pid){ const p=PT().find(x=>x.id===pid)||{}; const L=PI().filter(i=>i.property_id===pid&&(!p.cycle_at||i.started_at>=p.cycle_at)); if(!L.length) return null;
+  const newest=L.slice().sort((a,b)=>((a.finished_at||a.updated_at)<(b.finished_at||b.updated_at)?1:-1))[0]; const best={};
+  L.forEach(i=>{ const keys=new Set(Object.keys(i.declaration).concat(Object.keys(i.stamps||{}).filter(s=>s.startsWith('d:')).map(s=>s.slice(2))));
+    keys.forEach(k=>{ const t=stampTs((i.stamps||{})['d:'+k])??Date.parse(i.updated_at); if(!best[k]||t>best[k].t) best[k]={t,v:i.declaration[k]}; }); });
+  const decl={}; Object.entries(best).forEach(([k,x])=>{ if(!jblank(x.v)) decl[k]=x.v; }); return Object.assign({},newest,{declaration:decl}); }
+function inspPrefill(pid,data){ if(data&&data.insp) return data; const i=latestInsp(pid); return i&&Object.keys(i.declaration).length?mergeDecl(data,i).data:data; }
+// guard_form_checks(): on any path but the vendors' own save, an answer that changes loses its confirmation
+function clearChanged(oldD,newD){ const oa=isObj((oldD||{}).answers)?oldD.answers:{}, na=isObj(newD.answers)?newD.answers:{}; if(!isObj(newD.checked)) return newD;
+  Object.keys(newD.checked).forEach(k=>{ if(k==='tenanted'?!same((oldD||{}).tenanted,newD.tenanted):!same(na[k],oa[k])) delete newD.checked[k]; }); return newD; }
+const needsChecks=fm=>{ const d=fm.data||{}, pre=isObj(d.pre)?d.pre:{}; return Object.keys(pre).some(k=>pre[k]==='inspection'&&!confirmed(d.checked,k)); };
 const AGENT_ONLY=['property_events','campaign_stats','buyer_feedback','property_offers'];
 function mkNotices(ag){ if((ag.answers||{}).prior!=='yes') return; (DB.prior_agency_notices||=[]); (ag.answers.priorAgencies||[]).forEach((x,i)=>{ if(x.agency&&!DB.prior_agency_notices.some(n=>n.agreement_id===ag.id&&n.idx===i)) DB.prior_agency_notices.push({id:uid(),agreement_id:ag.id,idx:i,agency:x.agency,agent_name:x.agent||null,email:x.email||null,kind:x.kind,dated:x.dated||null,status:'to_send',created_at:now()}); }); }
 const ok=d=>Promise.resolve({data:d,error:null}); const bad=m=>Promise.resolve({data:null,error:{message:m}});
-function rpc(name,a){ logCall('rpc:'+name); if(localStorage.getItem('trHang')==='1'&&['get_translations','set_my_language'].includes(name)) return new Promise(()=>{}); const before=new Map((DB.agreements||[]).map(x=>[x.id,JSON.parse(JSON.stringify(x))])); const res=rpcInner(name,a); (DB.agreements||[]).forEach(x=>{ const o=before.get(x.id); if(o&&JSON.stringify(o)!==JSON.stringify(x)) syncAgreement(x,o); }); save(); return res; }
+function rpc(name,a){ logCall('rpc:'+name); if(localStorage.getItem('trHang')==='1'&&['get_translations','set_my_language'].includes(name)) return new Promise(()=>{}); const before=new Map((DB.agreements||[]).map(x=>[x.id,JSON.parse(JSON.stringify(x))]));
+  // mockSaveDelay = ms: the inspection save answers late, as on a slow connection (the work is done when the answer arrives)
+  let dl=0; try{ dl=+localStorage.getItem('mockSaveDelay')||0; }catch(_){} if(dl&&name==='agent_inspection_save') return new Promise(r=>setTimeout(()=>{ const out=rpcInner(name,a); save(); r(out); },dl));
+  const res=rpcInner(name,a); (DB.agreements||[]).forEach(x=>{ const o=before.get(x.id); if(o&&JSON.stringify(o)!==JSON.stringify(x)) syncAgreement(x,o); }); save(); return res; }
 function rpcInner(name,a){
   const me=S&&S.user; const ag=a&&a.a?DB.agreements.find(x=>x.id===a.a):null;
   const mine=()=>DB.agreement_people.find(p=>p.agreement_id===a.a&&p.user_id===me.id);
@@ -146,7 +164,14 @@ function rpcInner(name,a){
   const fCheck=(fm,signer,path)=>{ const g=DB.agreements.find(x=>x.id===fm.agreement_id); if(!g||!['signed','countersigned'].includes(g.status)) return 'The agreement for this document is no longer in force'; const pre='agreements/'+fm.agreement_id+'/signatures/'; if(!String(path||'').startsWith(pre)||!String(path).slice(pre.length).includes('form-'+fm.id+'-'+signer+'-')) return 'Bad signature path'; return ''; };
   const fSign=(fm,pr,a,extra)=>{ if(needsChecks(fm)) return bad('Please check each answer Tim noted at the inspection before signing'); const snap=Object.assign({},a.p_snapshot,{form_kind:fm.kind,form_version:fm.form_version,form_data:fm.data,agent_data:fm.agent_data},extra||{}); FS().push({id:uid(),form_id:fm.id,agreement_id:fm.agreement_id,person_id:pr.id,signer_role:'client',signer_name:pr.legal_name,image_path:a.p_image_path,snapshot:JSON.parse(JSON.stringify(snap)),snapshot_sha256:fsha(snap),user_agent:a.p_user_agent,signed_at:now()}); DB.agreement_events.push({id:uid(),agreement_id:fm.agreement_id,at:now(),actor:me.email,kind:'form_signed',detail:{form:fm.kind,name:pr.legal_name}}); return fAfter(fm); };
   if(name==='vendor_form_start'){ if(!isParty(a.a)) return bad('Not your agreement'); const g=DB.agreements.find(x=>x.id===a.a); if(!['signed','countersigned'].includes(g.status)) return bad('This comes after the agreement is signed'); if(!FV[a.p_kind]) return bad('Unknown document'); let fm=PF().find(x=>x.agreement_id===a.a&&x.kind===a.p_kind); if(!fm){ fm={id:uid(),property_id:g.property_id,agreement_id:a.a,kind:a.p_kind,form_version:FV[a.p_kind],status:'draft',data:a.p_kind==='vendor_declaration'?inspPrefill(g.property_id,{}):{},agent_data:{},created_by:me.email,created_at:now(),updated_at:now(),document_id:null}; PF().push(fm); DB.agreement_events.push({id:uid(),agreement_id:a.a,at:now(),actor:me.email,kind:'form_started',detail:{form:a.p_kind}}); save(); } return ok(fm.id); }
-  if(name==='vendor_form_save'){ const fm=PF().find(x=>x.id===a.f); if(!fm||!isParty(fm.agreement_id)) return bad('Not found'); if(fm.kind!=='vendor_declaration') return bad('Tim fills in this one'); if(fm.status!=='draft') return bad('This document can no longer be changed'); const nd=Object.assign({},fm.data,JSON.parse(JSON.stringify(a.patch))); try{ guard('property_forms',fm,{data:nd}); }catch(e){ return bad(e.message); } fm.data=nd; fm.updated_at=now(); save(); return ok(null); }
+  if(name==='vendor_form_save'){ const fm=PF().find(x=>x.id===a.f); if(!fm||!isParty(fm.agreement_id)) return bad('Not found'); if(fm.kind!=='vendor_declaration') return bad('Tim fills in this one'); if(fm.status!=='draft') return bad('This document can no longer be changed');
+    const P=JSON.parse(JSON.stringify(a.patch||{})); if(!isObj(P)) return bad('Too much to save at once'); try{ localStorage.setItem('lastVendorSave', JSON.stringify(P)); }catch(_){} /* for tests: what the page sent */ const m=DB.agreement_people.filter(p=>p.agreement_id===fm.agreement_id&&p.user_id===me.id).sort((x,y)=>x.position-y.position)[0]; if(!m) return bad('Not found');
+    const d=JSON.parse(JSON.stringify(fm.data||{})), ans=isObj(d.answers)?d.answers:{}, pre=isObj(d.pre)?d.pre:{}, chk=isObj(d.checked)?d.checked:{}, mine={by:m.id,name:m.legal_name,at:now()};
+    if(isObj(P.answers)) for(const [k,v] of Object.entries(P.answers)){ if(!isObj(v)) return bad('Not an answer'); if(pre[k]==='inspection'&&!same(ans[k],v)&&!confirmed(chk,k)) chk[k]=mine; ans[k]=v; }
+    if('tenanted' in P&&pre.tenanted==='inspection'&&!same(d.tenanted,P.tenanted)&&!confirmed(chk,'tenanted')) chk.tenanted=mine;
+    if(isObj(P.checked)) Object.entries(P.checked).forEach(([k,v])=>{ if(pre[k]!=='inspection') return; if(v===true){ if(!confirmed(chk,k)) chk[k]=mine; } else if(v===false) delete chk[k]; });
+    ['tenanted','facts','fileOk','fileChanges','notes','hh','_step','complete','fromFile'].forEach(k=>{ if(k in P) d[k]=P[k]; }); d.answers=ans; d.checked=chk;
+    try{ guard('property_forms',fm,{data:d}); }catch(e){ return bad(e.message); } fm.data=d; fm.updated_at=now(); save(); return ok(null); }
   if(name==='vendor_form_sign'){ const fm=PF().find(x=>x.id===a.f); if(!fm||!isParty(fm.agreement_id)) return bad('Not found'); if(fm.status==='signed') return bad('Already signed by everyone'); if(fm.kind==='healthy_homes'&&fm.status!=='ready') return bad("Tim hasn't finished the checklist yet"); const m=DB.agreement_people.find(p=>p.agreement_id===fm.agreement_id&&p.user_id===me.id&&p.signed_at); if(!m) return bad('Signer not found'); if(FS().some(s=>s.form_id===fm.id&&s.person_id===m.id)) return bad('Already signed'); const ce=fCheck(fm,m.id,a.p_image_path); if(ce) return bad(ce); return fSign(fm,m,a); }
   if(name==='agent_form_sign_in_person'){ if(!AGENTS.includes(me.email)) return bad('Not allowed'); const fm=PF().find(x=>x.id===a.f); if(!fm) return bad('Not found'); if(fm.status==='signed') return bad('Already signed by everyone'); if(fm.kind==='healthy_homes'&&fm.status!=='ready') return bad('Finish the checklist first'); const pr=DB.agreement_people.find(p=>p.id===a.pid&&p.agreement_id===fm.agreement_id&&p.signed_at); if(!pr) return bad('Signer not found'); if(FS().some(s=>s.form_id===fm.id&&s.person_id===pr.id)) return bad('Already signed'); const ce=fCheck(fm,pr.id,a.p_image_path); if(ce) return bad(ce); return fSign(fm,pr,a,{signing_method:"In person, on the licensee's device",witnessed_by:'Timothy McGuire'}); }
   if(name==='agent_form_countersign'){ if(!AGENTS.includes(me.email)) return bad('Not allowed'); const fm=PF().find(x=>x.id===a.f); if(!fm) return bad('Not found'); if(fm.kind!=='vendor_declaration') return bad('Only the Vendor Declaration is countersigned'); if(fm.status!=='signed') return bad('Every vendor signs first'); if(fm.countersigned_at) return bad('Already countersigned'); const ce=fCheck(fm,'agent',a.p_image_path); if(ce) return bad(ce); const snap=Object.assign({},a.p_snapshot,{form_kind:fm.kind,form_version:fm.form_version,form_data:fm.data,agent_data:fm.agent_data,countersigned_by:'Timothy McGuire REA#20117983, for McGuire Real Estate Limited',vendor_signatures:FS().filter(s=>s.form_id===fm.id&&s.signer_role==='client').map(s=>s.snapshot_sha256)}); FS().push({id:uid(),form_id:fm.id,agreement_id:fm.agreement_id,person_id:null,signer_role:'agent',signer_name:'Timothy McGuire',image_path:a.p_image_path,snapshot:JSON.parse(JSON.stringify(snap)),snapshot_sha256:fsha(snap),user_agent:a.p_user_agent,signed_at:now()}); fm.countersigned_at=now(); DB.agreement_events.push({id:uid(),agreement_id:fm.agreement_id,at:now(),actor:me.email,kind:'form_countersigned',detail:{form:fm.kind}}); save(); return ok(null); }
@@ -181,42 +206,58 @@ function rpcInner(name,a){
     const kind=back?'stage_back':'stage_changed', detail=Object.assign({from,to:a.p_stage},why?{reason:why}:{});
     (DB.property_events||=[]).push({id:DB.property_events.length+1,property_id:p.id,agreement_id:newest.id,at:now(),actor:me.email,kind,detail});
     DB.agreement_events.push({id:uid(),agreement_id:newest.id,at:now(),actor:me.email,kind,detail}); save(); return ok({from,to:a.p_stage,agreement_id:newest.id}); }
-  if(name.startsWith('agent_inspection_')){ if(offline()) return bad('Failed to fetch'); if(!me||!AGENTS.includes(me.email)) return bad('Agent only');
+  if(name.startsWith('agent_inspection_')){ if(offline()) return bad('Failed to fetch');
+    // test switches: mockAuthFail = '1' (the sign-in has run out), mockRefuse = 'd:pegs' (the server names one answer it refuses) or 'all' (a refusal naming none)
+    try{ if(localStorage.getItem('mockAuthFail')==='1') return bad('JWT expired'); }catch(_){}
+    if(!me||!AGENTS.includes(me.email)) return bad('Agent only');
     if(name==='agent_inspection_start'){ let pid=a.p_property; const addr=String(a.p_address||'').replace(/\s+/g,' ').trim(); let made=false;
       if(!pid){ if(addr.length<3) return bad('Add the address'); if(PT().some(p=>(p.address||'').replace(/\s+/g,' ').trim().toLowerCase()===addr.toLowerCase())) return bad('That address is already on file. Choose it from the list'); pid=newProp(addr).id; made=true; }
       else if(!PT().some(p=>p.id===pid)) return bad('Property not found');
       const p=PT().find(x=>x.id===pid); const open=PI().filter(i=>i.property_id===pid&&i.status==='in_progress'&&(!p.cycle_at||i.started_at>=p.cycle_at)).sort((x,y)=>x.started_at<y.started_at?1:-1)[0];
       if(open){ save(); return ok({inspection_id:open.id,property_id:pid,created_property:made,resumed:true}); }
-      const i={id:uid(),property_id:pid,status:'in_progress',facts:{},declaration:{},notes:{},photos:[],applied:{},conflicts:{},resolved:{},sent_form_id:null,sent_at:null,created_by:me.email,started_at:now(),finished_at:null,created_at:now(),updated_at:now()}; PI().push(i); save();
+      const i={id:uid(),property_id:pid,status:'in_progress',facts:{},declaration:{},notes:{},photos:[],stamps:{},applied:{},conflicts:{},resolved:{},sent_form_id:null,sent_at:null,created_by:me.email,started_at:now(),finished_at:null,created_at:now(),updated_at:now()}; PI().push(i); save();
       return ok({inspection_id:i.id,property_id:pid,created_property:made,resumed:false}); }
     const i=PI().find(x=>x.id===a.iid); if(!i) return bad('Inspection not found');
-    if(name==='agent_inspection_save'){ const isObj=x=>x==null||(typeof x==='object'&&!Array.isArray(x)); if(!isObj(a.p_facts)||!isObj(a.p_decl)||!isObj(a.p_notes)) return bad('Bad answers');
-      const W=JSON.parse(JSON.stringify(i));
-      for(const [k,v] of Object.entries(a.p_notes||{})){ if(!NOTE_KEYS.includes(k)) return bad('Unknown section '+k); if(jblank(v)) delete W.notes[k]; else if(typeof v!=='string'||v.length>4000) return bad('Bad note'); else W.notes[k]=v; }
-      for(const [k,v] of Object.entries(a.p_decl||{})){ if(!DECL_KEYS.includes(k)) return bad('Unknown question '+k); if(jblank(v)||(jblank(v.a)&&jblank(v.d))){ delete W.declaration[k]; continue; }
-        if(k==='tenanted'){ if(!['now','will','no'].includes(v.a)) return bad('Bad answer'); W.declaration[k]={a:v.a}; }
-        else { if(!jblank(v.a)&&!['yes','no','unknown'].includes(v.a)) return bad('Bad answer'); W.declaration[k]=Object.assign(v.a?{a:v.a}:{},{d:v.d||''}); } }
+    if(name==='agent_inspection_save'){ const isO=x=>x==null||isObj(x); if(!isO(a.p_facts)||!isO(a.p_decl)||!isO(a.p_notes)||!isO(a.p_stamps)) return bad('Bad answers');
+      let refuse=null; try{ refuse=localStorage.getItem('mockRefuse'); }catch(_){}
+      if(refuse==='all') return bad('Something went wrong on the server');
+      const W=JSON.parse(JSON.stringify(i)); W.stamps||={}; const ST=a.p_stamps||{}, skipped={}, nowIso=()=>new Date().toISOString();
+      const older=sk=>{ const t=stampTs(ST[sk]), o=stampTs(W.stamps[sk]); return t!=null&&o!=null&&o>t; };
+      const named=sk=>refuse===sk;   // the server refuses this one answer, by name
+      for(const [k,v] of Object.entries(a.p_notes||{})){ const sk='n:'+k; if(!NOTE_KEYS.includes(k)) return bad('Not saved ('+sk+'): unknown section'); if(older(sk)){ skipped[sk]=W.notes[k]??null; continue; } W.stamps[sk]=ST[sk]||nowIso(); if(jblank(v)) delete W.notes[k]; else if(typeof v!=='string'||v.length>4000||named(sk)) return bad('Not saved ('+sk+'): a note can be up to 4000 characters'); else W.notes[k]=v; }
+      for(const [k,v] of Object.entries(a.p_decl||{})){ const sk='d:'+k; if(!DECL_KEYS.includes(k)) return bad('Not saved ('+sk+'): unknown question'); if(older(sk)){ skipped[sk]=W.declaration[k]??null; continue; }
+        if(jblank(v)||(isObj(v)&&jblank(v.a)&&jblank(v.d))){ delete W.declaration[k]; W.stamps[sk]=ST[sk]||nowIso(); continue; } if(!isObj(v)) return bad('Not saved ('+sk+'): not an answer');
+        if(named(sk)) return bad('Not saved ('+sk+'): not one of the choices');
+        if(k==='tenanted'){ if(!['now','will','no'].includes(v.a)) return bad('Not saved ('+sk+'): not one of the choices'); W.declaration[k]={a:v.a}; }
+        else { if(!jblank(v.a)&&!['yes','no','unknown'].includes(v.a)) return bad('Not saved ('+sk+'): not one of the choices'); if(String(v.d||'').length>4000) return bad('Not saved ('+sk+'): details can be up to 4000 characters'); W.declaration[k]=Object.assign(v.a?{a:v.a}:{},{d:v.d||''}); }
+        W.stamps[sk]=ST[sk]||nowIso(); }
       const pr=PT().find(x=>x.id===i.property_id); const ag=(DB.agreements||[]).filter(g=>g.property_id===i.property_id&&live(g)).sort((x,y)=>(x.created_at||'')<(y.created_at||'')?1:-1)[0];
+      const draftOk=!!ag&&ag.status==='draft'&&!DB.agreement_people.some(p=>p.agreement_id===ag.id&&p.signed_at), draft={};
       const dsc=Object.assign({},pr.description), dis=Object.assign({},pr.disclosures);
-      for(const [k,v] of Object.entries(a.p_facts||{})){ if(!DESC.includes(k)&&!DISC.includes(k)) return bad('Unknown property detail '+k);
-        if(!jblank(v)&&!(typeof v==='string'&&v.length<=4000)&&!(Array.isArray(v)&&v.length<=40&&v.every(e=>typeof e==='string'))) return bad('Bad property detail');
+      for(const [k,v] of Object.entries(a.p_facts||{})){ const sk='f:'+k; if(!DESC.includes(k)&&!DISC.includes(k)) return bad('Not saved ('+sk+'): unknown property detail');
+        if(named(sk)||(!jblank(v)&&!(typeof v==='string'&&v.length<=4000)&&!(Array.isArray(v)&&v.length<=40&&v.every(e=>typeof e==='string')))) return bad('Not saved ('+sk+'): not a property detail');
+        if(older(sk)){ skipped[sk]=W.facts[k]??null; continue; } W.stamps[sk]=ST[sk]||nowIso();
         const T=DESC.includes(k)?dsc:dis;
         if(jblank(v)){ if(k in W.applied&&same(T[k],W.applied[k].v)){ const was=W.applied[k].was; if(jblank(was)) delete T[k]; else T[k]=was; } delete W.facts[k]; delete W.conflicts[k]; delete W.applied[k]; delete W.resolved[k]; continue; }
         W.facts[k]=v; delete W.resolved[k];
         if(ag&&!jblank((ag.answers||{})[k])&&!same(ag.answers[k],v)){ W.conflicts[k]={agreement_id:ag.id,ref:ag.ref,agreement:ag.answers[k],inspection:v}; continue; }
-        delete W.conflicts[k]; W.applied[k]={v,was:k in W.applied?W.applied[k].was:(T[k]??null)}; T[k]=v; }
-      pr.description=dsc; pr.disclosures=dis; Object.assign(i,W,{updated_at:now()}); save(); return ok({conflicts:i.conflicts}); }
+        delete W.conflicts[k]; W.applied[k]={v,was:k in W.applied?W.applied[k].was:(T[k]??null)}; T[k]=v;
+        if(draftOk&&!same((ag.answers||{})[k],v)) draft[k]=v; }
+      pr.description=dsc; pr.disclosures=dis; Object.assign(i,W,{updated_at:now()});
+      if(Object.keys(draft).length){ const old=JSON.parse(JSON.stringify(ag)); ag.answers=Object.assign({},ag.answers,draft); syncAgreement(ag,old); DB.agreement_events.push({id:uid(),agreement_id:ag.id,at:now(),actor:me.email,kind:'inspection_applied',detail:{keys:Object.keys(draft)}}); }
+      save(); return ok({conflicts:i.conflicts,resolved:i.resolved,skipped}); }
     if(name==='agent_inspection_resolve'){ if(!['inspection','agreement'].includes(a.p_use)) return bad('Choose which to keep'); const c=i.conflicts[a.p_key]; if(!c) return bad('Nothing to choose here'); let upd=false;
+      const g=(DB.agreements||[]).find(x=>x.id===c.agreement_id)||{};
       if(a.p_use==='inspection'){ const v=i.facts[a.p_key], pr=PT().find(x=>x.id===i.property_id), T=DESC.includes(a.p_key)?pr.description:pr.disclosures; i.applied[a.p_key]={v,was:T[a.p_key]??null}; T[a.p_key]=v;
-        const g=(DB.agreements||[]).find(x=>x.id===c.agreement_id); if(g&&['draft','sent','parked'].includes(g.status)&&!DB.agreement_people.some(p=>p.agreement_id===g.id&&p.signed_at)){ g.answers=Object.assign({},g.answers,{[a.p_key]:v}); upd=true; DB.agreement_events.push({id:uid(),agreement_id:g.id,at:now(),actor:me.email,kind:'inspection_applied',detail:{key:a.p_key}}); } }
-      delete i.conflicts[a.p_key]; i.resolved[a.p_key]={use:a.p_use,at:now()}; i.updated_at=now(); save(); return ok({agreement_updated:upd}); }
+        if(g.status==='draft'&&!DB.agreement_people.some(p=>p.agreement_id===g.id&&p.signed_at)){ g.answers=Object.assign({},g.answers,{[a.p_key]:v}); upd=true; DB.agreement_events.push({id:uid(),agreement_id:g.id,at:now(),actor:me.email,kind:'inspection_applied',detail:{key:a.p_key}}); } }
+      delete i.conflicts[a.p_key]; i.resolved[a.p_key]={use:a.p_use,at:now()}; i.updated_at=now(); save(); return ok({agreement_updated:upd,agreement_status:g.status||null,ref:g.ref||null}); }
     if(name==='agent_inspection_finish'){ i.status='finished'; i.finished_at=i.finished_at||now(); i.updated_at=now(); save(); return ok(null); }
-    if(name==='agent_inspection_send'){ if(!Object.keys(i.declaration).length) return bad('There are no Vendor Declaration answers to send');
+    if(name==='agent_inspection_send'){ const li=latestInsp(i.property_id); if(!li||!Object.keys(li.declaration).length) return bad('There are no Vendor Declaration answers to send');
       const g=(DB.agreements||[]).filter(x=>x.property_id===i.property_id&&['signed','countersigned'].includes(x.status)).sort((x,y)=>(x.created_at||'')<(y.created_at||'')?1:-1)[0]; if(!g) return bad('The agreement has to be signed first');
       let fm=PF().find(x=>x.agreement_id===g.id&&x.kind==='vendor_declaration'); if(fm&&(fm.status!=='draft'||FS().some(s=>s.form_id===fm.id))) return bad("The Vendor Declaration has been signed, so the inspection can't change it");
-      const m=mergeDecl(fm?fm.data:{},i); let made=false;
+      const m=mergeDecl(fm?fm.data:{},li); let made=false;
       if(!fm){ fm={id:uid(),property_id:g.property_id,agreement_id:g.id,kind:'vendor_declaration',form_version:FV.vendor_declaration,status:'draft',data:m.data,agent_data:{},created_by:me.email,created_at:now(),updated_at:now(),document_id:null}; PF().push(fm); made=true; DB.agreement_events.push({id:uid(),agreement_id:g.id,at:now(),actor:me.email,kind:'form_started',detail:{form:'vendor_declaration',via:'inspection'}}); }
-      else { fm.data=m.data; fm.updated_at=now(); }
+      else { fm.data=clearChanged(fm.data,m.data); fm.updated_at=now(); }
       i.sent_form_id=fm.id; i.sent_at=now(); DB.agreement_events.push({id:uid(),agreement_id:g.id,at:now(),actor:me.email,kind:'inspection_sent',detail:{added:m.added,updated:m.updated,kept:m.kept.length}}); save();
       return ok({form_id:fm.id,agreement_id:g.id,created:made,added:m.added,updated:m.updated,kept:m.kept}); }
   }

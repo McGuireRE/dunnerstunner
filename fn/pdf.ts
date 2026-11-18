@@ -658,13 +658,19 @@ export function formDoc(form: any, address: string, names: string, when: string 
   if (!T) throw new Error(`Unknown form version ${form.form_version}`);
   if (form.kind === "vendor_declaration") {
     const data = form.data || {}, ans = data.answers || {};
+    // an answer Tim noted at an inspection says so, and who checked it (the same line the app shows; absent on older forms)
+    const inspNote = (k: string) => {
+      if ((data.pre || {})[k] !== "inspection") return "";
+      const on = (data.insp || {}).on, c = (data.checked || {})[k];
+      return `Noted by Tim McGuire at the inspection on ${on ? nzLong(on + "T00:00:00Z") : ""}${c && typeof c === "object" && c.name ? `; checked by ${c.name}` : "; not checked yet"}`;
+    };
     return {
       title: "Vendor Declaration",
       head: [["Client / Vendor(s):", names], ["Property Address:", address], ["Date:", nzLong(when)]],
       pages: [{
         title: "Vendor Declaration", sub: address, intro: [T.VD_LEAD].concat(T.VD_INTRO),
         sections: [{ title: "From the property file", rows: (data.facts || []).map(([k, v]: string[]) => [k, v, ""]).concat([["The Vendor confirmed these details", data.fileOk ? "Still correct" : "Something has changed", data.fileOk ? "" : data.fileChanges || ""]]) }]
-          .concat(T.VD_SECTIONS.map(([t, qs]: [string, any[]]) => ({ title: t, rows: qs.map((x) => { const v = ans[x.k] || {}; return [x.q, x.text ? "" : (YNU[v.a] || ""), v.d || ""]; }) })))
+          .concat(T.VD_SECTIONS.map(([t, qs]: [string, any[]]) => ({ title: t, rows: qs.map((x) => { const v = ans[x.k] || {}; return [x.q, x.text ? "" : (YNU[v.a] || ""), [v.d, inspNote(x.k)].filter(Boolean).join(". ")]; }) })))
           .concat([{ title: "Additional Notes", rows: [["Additional Notes:", "", data.notes || "None"]] }]),
         after: ["Vendor Statement"].concat(T.VD_STATEMENT),
       }],

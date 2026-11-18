@@ -112,6 +112,12 @@ expect(tf.includes("Witnessed by: Timothy McGuire (Licensee)") && tf.includes("e
 expect(tf.includes("Timothy McGuire (Licensee, REA#20117983, for McGuire Real Estate Limited)") && tf.includes("02".repeat(32)), "the licensee's countersignature is in the PDF");
 const tf2 = (await text(await NEW.buildFormPdf({ font, bold, ag, people, form, fsigs: fsigs.slice(0, 2), images: {} }), "vendor-declaration-uncountersigned")).replace(/\s+/g, " ");
 expect(tf2.includes("Not yet signed by the Licensee."), "before Tim countersigns, the PDF says so");
+// a declaration with Tim's inspection notes: each says so, with who checked it; an older form (above) prints no such line
+const formI = { ...form, data: { ...form.data, answers: { ...stored, pegs: { a: "yes", d: "" }, water: { a: "yes", d: "" } }, pre: { pegs: "inspection", water: "inspection", meth: true }, insp: { id: "I1", on: "2026-11-18", by: "Tim McGuire" },
+  checked: { pegs: { by: "P1", name: "Jane Mary Smith", at: "2026-11-19T01:00:00Z" }, water: { by: "P2", name: "Robert Smith", at: "2026-11-19T02:00:00Z" } } } };
+const ti = (await text(await NEW.buildFormPdf({ font, bold, ag, people, form: formI, fsigs, images: {} }), "vendor-declaration-inspection")).replace(/\s+/g, " ");
+expect(ti.includes("Noted by Tim McGuire at the inspection on Wed, 18 November 2026; checked by Jane Mary Smith") && ti.includes("checked by Robert Smith"), "the PDF shows Tim's inspection notes and who checked each");
+expect(!tf.includes("Noted by Tim McGuire at the inspection"), "a declaration without inspection notes prints as before");
 let threw = false; try { await NEW.buildFormPdf({ font, bold, ag, people, form: { ...form, form_version: "VD-1999" }, fsigs, images: {} }); } catch (_) { threw = true; }
 expect(threw, "an unknown form version is refused, never guessed");
 const hh = (await text(await NEW.buildFormPdf({ font, bold, ag, people, form: { id: "F2", kind: "healthy_homes", form_version: "HH-2026-11", status: "signed", agent_data: { c: { ins3: { a: "N", n: "No underfloor insulation" } }, res: { req: "3.6" } } }, fsigs: fsigs.slice(0, 1), images: {} }), "healthy-homes")).replace(/\s+/g, " ");

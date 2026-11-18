@@ -40,7 +40,7 @@
   const saveNote = label => `<p class="sig-save-note">When you're happy with it, press <strong>${esc(label)}</strong>. Your signature isn't saved until you do.</p>`;
   function header(name, count, pct) {
     const wasPitch = PITCH_ON; PITCH_ON = false; document.title = DEFAULT_TITLE;   // every other screen leaves the journey page and its title behind
-    if (IS_AGENT) { try { localStorage.removeItem('inspOpen'); } catch (_) { } }
+    if (IS_AGENT) { try { localStorage.removeItem('inspOpen'); } catch (_) { } inspTidy(); }
     if (IS_AGENT || wasPitch) setAgentNav(); $('#stepName').textContent = name || ''; JDIRTY = false; $('#stepName').dataset.count = count || ''; $('#stepCount').textContent = count || ''; $('#barFill').style.width = (pct || 0) + '%'; }
   function actions(show, backLabel, nextLabel) {
     $('#actions').hidden = !show;
@@ -498,7 +498,11 @@
     return viewVendorHome();
   }
   sb.auth.onAuthStateChange((ev, s) => { if (ev === 'SIGNED_IN' && !SESSION) { SESSION = s; boot(); } if (ev === 'SIGNED_OUT') { SESSION = null; boot(); } });
-  $('#signOut').addEventListener('click', async () => { try { localStorage.removeItem('inspOpen'); } catch (_) { } IS_AGENT = false; setAgentNav(); await sb.auth.signOut(); location.hash = ''; });
+  $('#signOut').addEventListener('click', async () => {
+    const waiting = pendingAll();
+    if (waiting && !window.confirm(`${waiting} inspection ${waiting === 1 ? 'answer hasn\'t' : 'answers haven\'t'} been saved yet. If you sign out now, ${waiting === 1 ? 'it is' : 'they are'} lost. Sign out anyway?`)) return;
+    try { inspIds().forEach(id => localStorage.removeItem('inspQ:' + id)); localStorage.removeItem('inspOpen'); } catch (_) { }
+    IS_AGENT = false; setAgentNav(); await sb.auth.signOut(); location.hash = ''; });
 
   function viewLogin() {
     header('', '', 0); actions(false);
@@ -2508,6 +2512,12 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         ['Methamphetamine', d.meth === 'yes' ? d.methDetail : d.meth === 'no' ? 'None known' : ''], ['Defects, notices or requisitions', d.def === 'yes' ? d.defDetail : d.def === 'no' ? 'None known' : ''], ['Hazards for visitors', haz]].filter(x => x[1]),
     };
   }
+  // an answer Tim noted at an inspection says so, and who checked it (the same line fn/pdf.ts prints)
+  function vdInspNote(data, k) {
+    if (((data.pre || {})[k]) !== 'inspection') return '';
+    const on = (data.insp || {}).on, c = (data.checked || {})[k];
+    return `Noted by Tim McGuire at the inspection on ${on ? fmtDate(on + 'T00:00:00Z') : ''}${c && typeof c === 'object' && c.name ? `; checked by ${c.name}` : '; not checked yet'}`;
+  }
   function vdDoc(data, address, names, when) {
     const ans = data.answers || {};
     return {
@@ -2516,7 +2526,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       pages: [{
         title: 'Vendor Declaration', sub: address, intro: [VD_LEAD].concat(VD_INTRO),
         sections: [{ title: 'From the property file', rows: (data.facts || []).map(([k, v]) => [k, v, '']).concat([['The Vendor confirmed these details', data.fileOk ? 'Still correct' : 'Something has changed', data.fileOk ? '' : data.fileChanges || '']]) }]
-          .concat(VD_SECTIONS.map(([t, qs]) => ({ title: t, rows: qs.map(x => { const v = ans[x.k] || {}; return [x.q, x.text ? '' : ynuText(v.a), v.d || '']; }) })))
+          .concat(VD_SECTIONS.map(([t, qs]) => ({ title: t, rows: qs.map(x => { const v = ans[x.k] || {}; return [x.q, x.text ? '' : ynuText(v.a), [v.d, vdInspNote(data, x.k)].filter(Boolean).join('. ')]; }) })))
           .concat([{ title: 'Additional Notes', rows: [['Additional Notes:', '', data.notes || 'None']] }]),
         after: ['Vendor Statement'].concat(VD_STATEMENT),
       }],
@@ -2622,18 +2632,23 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     if (!fm) { const id = await must(sb.rpc('vendor_form_start', { a: A.id, p_kind: kind })); await loadForms(); fm = FORMS.find(x => x.id === id); }
     if (!fm) return showStep(LAST);
     let prop = null; if (A.property_id) { try { const { data } = await sb.from('properties').select('*').eq('id', A.property_id).single(); prop = data; } catch (_) { } }
-    const W = JSON.parse(JSON.stringify(fm.data || {})); W.answers ||= {}; W.pre ||= {};
+    const W = JSON.parse(JSON.stringify(fm.data || {})); W.answers ||= {}; W.pre ||= {}; W.fromFile ||= {}; W.ticks = {};
+    const base = JSON.parse(JSON.stringify(W.answers));   // what the server holds; only answers changed on this page are sent back
     const ff = vdFromFile(prop, A.answers);
-    if (!W.facts) { W.facts = ff.facts; Object.entries(ff.fill).forEach(([k, v]) => { if (v && !W.answers[k]) { W.answers[k] = v; W.pre[k] = true; } }); }
+    if (!W.facts) { W.facts = ff.facts; Object.entries(ff.fill).forEach(([k, v]) => { if (v && !W.answers[k]) { W.answers[k] = v; W.fromFile[k] = true; } }); }
     const locked = FSIGS.some(s => s.form_id === fm.id) || fm.kind === 'healthy_homes';
-    VF = { fm, W, locked };
+    VF = { fm, W, locked, base, baseTen: (fm.data || {}).tenanted };
     vfStep(locked ? 3 : Math.min(+(W._step || 0), 3));
   }
   const VF_STEPS = ['Your property file', 'Condition and known issues', 'Services, registrations and tenancy', 'Statement and signing'];
   // Tim's notes from an inspection (pre = 'inspection'): marked with the date, and the vendor ticks "This is right" or changes the answer
-  const inspBadge = () => { const on = ((VF && VF.W.insp) || {}).on; return `<span class="src-badge insp-badge">Noted by Tim at the inspection on <span translate="no">${esc(on ? fmtDate(on + 'T12:00:00') : '')}</span>. Please check</span>`; };
-  const inspConfirm = k => `<label class="choice cb iconfirm"><input type="checkbox" data-qc="${k}" ${((VF && VF.W.checked) || {})[k] ? 'checked' : ''}><span class="mark"></span><span class="ct">This is right</span></label>`;
-  const ynuRow = (x, v, pre) => `<div class="card tight vdq" data-q="${x.k}"><h3 style="font-size:16px">${esc(x.q)}</h3>${pre === 'inspection' ? inspBadge() : pre ? '<span class="src-badge">From your property file. Please check</span>' : ''}
+  const inspBadge = k => { const on = ((VF && VF.W.insp) || {}).on, c = vfConfirmer(k);
+    return `<span class="src-badge insp-badge">Noted by Tim at the inspection on <span translate="no">${esc(on ? fmtDate(on + 'T00:00:00Z') : '')}</span>. Please check</span>${c ? `<span class="src-badge insp-checked">Checked by <span translate="no">${esc(c.name || '')}</span></span>` : ''}`; };
+  // who confirmed one of Tim's notes: recorded by the server ({by, name, at}); a tick on this page only asks for it
+  const vfConfirmer = k => { const c = ((VF && VF.W.checked) || {})[k]; return c && typeof c === 'object' ? c : null; };
+  const vfChecked = k => VF && k in (VF.W.ticks || {}) ? !!VF.W.ticks[k] : !!vfConfirmer(k);
+  const inspConfirm = k => `<label class="choice cb iconfirm"><input type="checkbox" data-qc="${k}" ${vfChecked(k) ? 'checked' : ''}><span class="mark"></span><span class="ct">This is right</span></label>`;
+  const ynuRow = (x, v, pre) => `<div class="card tight vdq" data-q="${x.k}"><h3 style="font-size:16px">${esc(x.q)}</h3>${pre === 'inspection' ? inspBadge(x.k) : pre ? '<span class="src-badge">From your property file. Please check</span>' : ''}
     ${x.text ? '' : `<div class="choices three">${YNU.map(([val, l]) => `<label class="choice"><input type="radio" name="vq_${x.k}" value="${val}" ${v.a === val ? 'checked' : ''}><span class="mark"></span><span class="ct">${l}</span></label>`).join('')}</div>`}
     <label class="f" for="vqd_${x.k}">${x.text ? 'Your answer' : 'Details'} ${x.text ? '' : '<span class="opt">(' + (x.why ? 'needed if Yes' : 'optional') + ')</span>'}</label><textarea id="vqd_${x.k}" data-qd="${x.k}">${esc(v.d || '')}</textarea>${pre === 'inspection' ? inspConfirm(x.k) : ''}</div>`;
   function vfRead() {
@@ -2644,14 +2659,24 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     if ($('#vfNotes')) W.notes = $('#vfNotes').value.trim();
     const tn = $('input[name="vfTen"]:checked'); if (tn) W.tenanted = tn.value;
     const hh = $('input[name="vfHH"]:checked'); if (hh) W.hh = hh.value;
-    $$('[data-qc]').forEach(cb => { W.checked ||= {}; if (cb.checked) W.checked[cb.dataset.qc] = true; else delete W.checked[cb.dataset.qc]; });
+    $$('[data-qc]').forEach(cb => { (W.ticks ||= {})[cb.dataset.qc] = cb.checked; });
   }
+  // a question's marker: Tim's note (server), else from the property file (page, or an older form's pre: true)
+  const vfPre = k => (VF.W.pre || {})[k] === 'inspection' ? 'inspection' : (VF.W.fromFile || {})[k] || (VF.W.pre || {})[k] === true;
+  // what the vendors' save sends: their own fields and answers, and a yes or no per note they've checked. Never pre or insp.
+  // Only the answers this page changed go back, so a page opened before Tim sent a new note can't put the old answer back.
+  const vfPatch = W => { const o = {}; ['tenanted', 'facts', 'fileOk', 'fileChanges', 'notes', 'hh', '_step', 'complete', 'fromFile'].forEach(k => { if (k in W) o[k] = W[k]; });
+    o.answers = {}; Object.entries(W.answers || {}).forEach(([k, v]) => { if (JSON.stringify(v) !== JSON.stringify((VF.base || {})[k])) o.answers[k] = v; });
+    if ((W.pre || {}).tenanted === 'inspection' && 'tenanted' in o && o.tenanted === VF.baseTen) delete o.tenanted;
+    o.checked = Object.assign({}, W.ticks || {}); return o; };
+  // after a save, the server's record of who checked what
+  async function vfRefresh() { try { const { data } = await sb.from('property_forms').select('data').eq('id', VF.fm.id).single(); if (data && data.data) { const sd = data.data; VF.W.checked = sd.checked || {}; VF.W.pre = sd.pre || VF.W.pre; VF.W.ticks = {}; VF.W.answers = Object.assign({}, VF.W.answers, sd.answers || {}); VF.base = JSON.parse(JSON.stringify(sd.answers || {})); if ('tenanted' in sd) { VF.W.tenanted = sd.tenanted; VF.baseTen = sd.tenanted; } } } catch (_) { } }
   const VF_INSP_MSG = 'Please check each answer Tim noted at the inspection: tick This is right, or change the answer.';
   function vfCheck(i) {
     const W = VF.W;
     if (i === 0) { if (W.fileOk === undefined) return 'Let us know if these details are still correct.'; if (!W.fileOk && !W.fileChanges) return 'Tell us what has changed.'; }
     const qs = i === 1 ? VD_SECTIONS[0][1] : i === 2 ? VD_SECTIONS[1][1].concat(VD_SECTIONS[2][1]) : [];
-    if (qs.concat(i === 2 ? [{ k: 'tenanted' }] : []).some(x => (W.pre || {})[x.k] === 'inspection' && !(W.checked || {})[x.k])) return VF_INSP_MSG;
+    if (qs.concat(i === 2 ? [{ k: 'tenanted' }] : []).some(x => (W.pre || {})[x.k] === 'inspection' && !vfChecked(x.k))) return VF_INSP_MSG;
     for (const x of qs) { const v = W.answers[x.k] || {}; if (x.text ? !v.d : !v.a) return 'Please answer each question. Choose Unknown if you\'re not sure.'; if (x.why && v.a === 'yes' && !v.d) return 'Add a few details for anything you answered Yes to.'; }
     if (i === 2) { if (!W.tenanted) return 'Let us know whether the property is tenanted.'; if (W.tenanted !== 'no' && !W.hh) return 'Let us know about the Healthy Homes checklist.'; }
     return '';
@@ -2667,11 +2692,11 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <div class="card tight">${(W.facts || []).length ? W.facts.map(([k, v]) => `<div class="fact"><div class="k">${esc(k)}</div><div class="v" style="font-weight:400">${esc(v)}</div></div>`).join('') : '<p class="small" style="margin:0">Nothing recorded yet.</p>'}</div>
       <div class="choices"><label class="choice"><input type="radio" name="vfFile" value="ok" ${W.fileOk === true ? 'checked' : ''}><span class="mark"></span><span class="ct">These are still correct</span></label><label class="choice"><input type="radio" name="vfFile" value="changed" ${W.fileOk === false ? 'checked' : ''}><span class="mark"></span><span class="ct">Something has changed</span></label></div>
       <div id="vfChWrap" ${W.fileOk === false ? '' : 'hidden'}><label class="f" for="vfChanges">What has changed?</label><textarea id="vfChanges">${esc(W.fileChanges || '')}</textarea></div>`;
-    if (i === 1) h = `<h1>${esc(VD_SECTIONS[0][0])}</h1><p class="lede">Answer from your own knowledge. If you're not sure, choose Unknown.</p>${VD_SECTIONS[0][1].map(x => ynuRow(x, W.answers[x.k] || {}, W.pre[x.k])).join('')}`;
-    if (i === 2) h = `<h1>${esc(VD_SECTIONS[1][0])}</h1>${VD_SECTIONS[1][1].map(x => ynuRow(x, W.answers[x.k] || {}, W.pre[x.k])).join('')}
-      <h2>${esc(VD_SECTIONS[2][0])}</h2>${VD_SECTIONS[2][1].map(x => ynuRow(x, W.answers[x.k] || {}, W.pre[x.k])).join('')}
+    if (i === 1) h = `<h1>${esc(VD_SECTIONS[0][0])}</h1><p class="lede">Answer from your own knowledge. If you're not sure, choose Unknown.</p>${VD_SECTIONS[0][1].map(x => ynuRow(x, W.answers[x.k] || {}, vfPre(x.k))).join('')}`;
+    if (i === 2) h = `<h1>${esc(VD_SECTIONS[1][0])}</h1>${VD_SECTIONS[1][1].map(x => ynuRow(x, W.answers[x.k] || {}, vfPre(x.k))).join('')}
+      <h2>${esc(VD_SECTIONS[2][0])}</h2>${VD_SECTIONS[2][1].map(x => ynuRow(x, W.answers[x.k] || {}, vfPre(x.k))).join('')}
       <label class="f" for="vfNotes">Additional Notes: <span class="opt">(optional)</span></label><textarea id="vfNotes">${esc(W.notes || '')}</textarea>
-      <h2>Tenants</h2><p class="small">Is the property tenanted, or will it be before settlement?</p>${(W.pre || {}).tenanted === 'inspection' ? inspBadge() : ''}
+      <h2>Tenants</h2><p class="small">Is the property tenanted, or will it be before settlement?</p>${(W.pre || {}).tenanted === 'inspection' ? inspBadge('tenanted') : ''}
       <div class="choices">${[['now', 'Yes, it\'s tenanted now'], ['will', 'It will be tenanted'], ['no', 'No']].map(([v, l]) => `<label class="choice"><input type="radio" name="vfTen" value="${v}" ${W.tenanted === v ? 'checked' : ''}><span class="mark"></span><span class="ct">${l}</span></label>`).join('')}</div>
       ${(W.pre || {}).tenanted === 'inspection' ? `<div class="vdq-ten">${inspConfirm('tenanted')}</div>` : ''}
       <div id="vfHHWrap" ${W.tenanted && W.tenanted !== 'no' ? '' : 'hidden'}><div class="card note tight"><h3>Healthy Homes checklist and statement</h3><p class="small" style="margin:0">As it's rented, I can complete a Healthy Homes checklist with you. I take the measurements on site and fill it in on my phone, and you sign it as landlord. It helps you with your compliance statement, and buyers often ask for it.</p></div>
@@ -2702,7 +2727,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       if (i < 3) {
         vfRead(); const e = vfCheck(i); if (e) return err(e);
         W._step = i + 1; if (i === 2) W.complete = true;
-        await must(sb.rpc('vendor_form_save', { f: fm.id, patch: W }));
+        await must(sb.rpc('vendor_form_save', { f: fm.id, patch: vfPatch(W) })); await vfRefresh();
         if (i === 2 && W.tenanted !== 'no' && W.hh === 'yes' && !formOf('healthy_homes')) { await must(sb.rpc('vendor_form_start', { a: A.id, p_kind: 'healthy_homes' })); await loadForms(); }
         return vfStep(i + 1);
       }
@@ -2710,7 +2735,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       if (!locked) { const bad = [0, 1, 2].map(vfCheck).find(Boolean); if (bad) return err(bad); }
       if (!$('#vfOk').checked) return err(isHH ? 'Tick the box once you\'ve checked it.' : 'Tick the box to make the declaration, or call Tim if something isn\'t right.');
       if (!pad || !pad.drawn()) return err('Please sign in the box.');
-      if (!locked) await must(sb.rpc('vendor_form_save', { f: fm.id, patch: W }));
+      if (!locked) { await must(sb.rpc('vendor_form_save', { f: fm.id, patch: vfPatch(W) })); await vfRefresh(); }
       const path = await uploadSig($('#vfSig'), A.id, 'form-' + fm.id + '-' + ME.id);
       const doc = isHH ? hhDoc(fm.agent_data, A.address, names) : vdDoc(W, A.address, names, new Date());
       const res = await must(sb.rpc('vendor_form_sign', { f: fm.id, p_image_path: path, p_snapshot: { document: doc.title, doc, property: A.address, agreement_ref: A.ref, signer: { name: ME.legal_name, email: SESSION.user.email }, signed_at_client: new Date().toISOString() }, p_user_agent: navigator.userAgent }));
@@ -2863,19 +2888,28 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   ];
   const INSP_ITEMS = INSP_SECTIONS.flatMap(s => s[2]);
   let INS = null;   // the inspection on screen
-  const INS_SYNCING = {}, INS_NET = {}, INS_TIMERS = {};
+  const INS_RUN = {}, INS_STATE = {}, INS_TIMERS = {};   // per inspection: the save in flight, and how the last one went
   const inspKey = id => 'inspQ:' + id;
   function inspLS(id, val) {   // the browser copy: the last known record and the answers not yet saved; every access guarded
-    try { if (val === undefined) return JSON.parse(localStorage.getItem(inspKey(id)) || 'null'); localStorage.setItem(inspKey(id), JSON.stringify(val)); } catch (_) { }
+    try {
+      if (val === undefined) return JSON.parse(localStorage.getItem(inspKey(id)) || 'null');
+      if (val === null) localStorage.removeItem(inspKey(id)); else localStorage.setItem(inspKey(id), JSON.stringify(val));
+    } catch (_) { }
     return null;
   }
   const inspIds = () => { const out = []; try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.startsWith('inspQ:')) out.push(k.slice(6)); } } catch (_) { } return out; };
   const inspOpenSet = id => { try { if (id) localStorage.setItem('inspOpen', id); else localStorage.removeItem('inspOpen'); } catch (_) { } };
   const inspOpenGet = () => { try { return localStorage.getItem('inspOpen'); } catch (_) { return null; } };
+  const inspOpenId = () => (inspOpenGet() || '').split(':')[0] || null;
   const ijblank = v => v == null || v === '' || (Array.isArray(v) && !v.length) || (typeof v === 'object' && !Array.isArray(v) && !Object.keys(v).length);
   const isame = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
   const netErr = e => !navigator.onLine || /fetch|network|timeout|offline|load failed/i.test(String((e && e.message) || e || ''));
+  const authErr = e => /jwt|expired|not authenticated|permission denied|agent only|401|403/i.test(String((e && e.message) || e || ''));
+  const INSP_MAX = 4000;   // the server's limit for a note, a detail or a fact; the page stops typing there
+  const KIND_P = { facts: 'f', decl: 'd', notes: 'n' }, P_KIND = { f: 'facts', d: 'decl', n: 'notes' };
+  const emptyPending = () => ({ facts: {}, decl: {}, notes: {}, t: {} });
   const pendingCount = P => P ? Object.keys(P.facts || {}).length + Object.keys(P.decl || {}).length + Object.keys(P.notes || {}).length : 0;
+  const pendingAll = () => inspIds().reduce((n, id) => n + pendingCount((inspLS(id) || {}).pending), 0);
   const vdQ = k => VD_QS.find(x => x.k === k);
   const inspLabel = k => INSP_F[k] ? INSP_F[k].l : k === 'tenanted' ? INSP_TEN_Q : vdQ(k) ? vdQ(k).q : (IMP_LABELS[k] || k);
   const inspVal = (k, v) => { if (v == null || v === '') return 'Blank'; if (Array.isArray(v)) return v.join(', ') || 'Blank'; if (typeof v === 'object') return [k === 'tenanted' ? (INSP_TEN.find(x => x[0] === v.a) || ['', v.a])[1] : ynuText(v.a), v.d].filter(Boolean).join('. ') || 'Blank';
@@ -2886,45 +2920,99 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const v = INS.decl[k] || {}; return !!(v.a || String(v.d || '').trim());
   }
   const secCount = s => [s[2].filter(insAnswered).length, s[2].length];
+  // the page's copy of an inspection: kept while it is open (to resume with no signal) or while answers wait to be saved
+  const inspKeep = id => { if (INS && INS.id === id) inspLS(id, { row: INS.row, pending: INS.pending }); };
+  function inspTidy() {
+    const open = inspOpenId();
+    inspIds().forEach(id => { if (id === open) return; const c = inspLS(id); if (!c) return;
+      if (!pendingCount(c.pending)) inspLS(id, null); });   // answers still waiting keep their copy, so it can be resumed and saved
+  }
 
-  // the status in the sticky bar under the top bar (always on screen): Saved, Saving, or Waiting for signal
-  const inspStatusSlot = title => { $('#stepName').innerHTML = `<span class="insp-sub"><span class="t">${esc(title)}</span><span id="inspStatus" class="insp-st ok" role="status" aria-live="polite">Saved</span></span>`; };
+  // the status in the sticky bar under the top bar (always on screen). "Saved" only when nothing is waiting.
+  const inspStatusSlot = title => {
+    $('#stepName').innerHTML = `<span class="insp-sub"><span class="t">${esc(title)}</span><span class="insp-stw"><span id="inspStatus" class="insp-st busy" role="status" aria-live="polite"></span><button type="button" class="btn link insp-retry" id="inspRetry" hidden></button></span></span>`;
+    $('#inspRetry').addEventListener('click', inspRetry);
+    if (INS) inspShow(INS.id);
+  };
   function inspShow(id) {
-    if (!INS || INS.id !== id) return; const el = $('#inspStatus'); if (!el) return;
-    const n = pendingCount(INS.pending), wait = n && (INS_NET[id] === false || !navigator.onLine);
-    el.className = 'insp-st ' + (wait ? 'wait' : n || INS_SYNCING[id] ? 'busy' : 'ok');
-    el.textContent = wait ? `Waiting for signal: ${n} ${n === 1 ? 'answer' : 'answers'} kept on this phone` : n || INS_SYNCING[id] ? 'Saving...' : 'Saved';
+    if (!INS || INS.id !== id) return; const el = $('#inspStatus'), rb = $('#inspRetry'); if (!el) return;
+    const n = pendingCount(INS.pending), st = INS_STATE[id] || {}, busy = !!INS_RUN[id];
+    let cls = 'ok', txt = 'Saved', retry = '';
+    if (busy) { cls = 'busy'; txt = 'Saving...'; }
+    else if (n && st.kind === 'auth') { cls = 'fail'; txt = 'Not saved: your sign-in has run out. Your answers are kept on this phone'; retry = 'Sign in again'; }
+    else if (n && st.kind === 'fail') { cls = 'fail'; txt = 'Not saved: ' + st.msg; retry = 'Try again'; }
+    else if (n && (st.kind === 'net' || !navigator.onLine)) { cls = 'wait'; txt = `Waiting for signal: ${n} ${n === 1 ? 'answer' : 'answers'} kept on this phone`; retry = 'Try again'; }
+    else if (n) { cls = 'busy'; txt = `Not saved yet: ${n} ${n === 1 ? 'answer' : 'answers'}`; retry = 'Try again'; }
+    else if (st.refused) { cls = 'fail'; txt = 'Not saved: ' + st.refused; }
+    el.className = 'insp-st ' + cls; el.textContent = txt;
+    if (rb) { rb.hidden = !retry; rb.textContent = retry; }
+  }
+  async function inspRetry() {
+    if (!INS) return; const id = INS.id;
+    if ((INS_STATE[id] || {}).kind === 'auth') {
+      const email = SESSION && SESSION.user && SESSION.user.email;
+      const { error } = email ? await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: APP_URL } }) : { error: true };
+      toast(error ? 'Couldn\'t send a sign-in link. Try again when you have signal.' : 'Check your email for a sign-in link. Your answers stay on this phone and save once you\'re signed in.');
+      return;
+    }
+    inspSyncOne(id);
   }
   function inspQueue(kind, k, v) {
-    const P = INS.pending; P[kind][k] = v;
+    const P = INS.pending; P[kind][k] = v; (P.t ||= {})[KIND_P[kind] + ':' + k] = new Date().toISOString();
     (kind === 'facts' ? INS.facts : kind === 'decl' ? INS.decl : INS.notes)[k] = v;
-    inspLS(INS.id, { row: INS.row, pending: P });
+    if (INS_STATE[INS.id]) delete INS_STATE[INS.id].refused;
+    inspKeep(INS.id);
     inspShow(INS.id); inspCounts(); inspUsePaint();
     inspSyncOne(INS.id);
   }
-  // send what is waiting; keep anything that changed meanwhile, and anything the network didn't take
-  async function inspSyncOne(id) {
-    if (INS_SYNCING[id]) { INS_SYNCING[id] = 'again'; return; }
-    const c = inspLS(id) || (INS && INS.id === id ? { row: INS.row, pending: INS.pending } : null); if (!c || !pendingCount(c.pending)) { inspShow(id); return true; }
-    const sent = JSON.parse(JSON.stringify(c.pending));
-    INS_SYNCING[id] = true; inspShow(id);
-    let res; try { res = await sb.rpc('agent_inspection_save', { iid: id, p_facts: sent.facts, p_decl: sent.decl, p_notes: sent.notes }); } catch (e) { res = { error: e }; }
-    const again = INS_SYNCING[id] === 'again'; INS_SYNCING[id] = false;
-    const cur = (INS && INS.id === id) ? { row: INS.row, pending: INS.pending } : (inspLS(id) || c);
-    if (res.error && netErr(res.error)) { INS_NET[id] = false; inspShow(id); return false; }
-    INS_NET[id] = true;
-    if (res.error) toast('Something you noted couldn\'t be saved: ' + (res.error.message || 'try again'));
-    const map = { facts: 'facts', decl: 'declaration', notes: 'notes' };
+  // one save of everything waiting. 'ok' | 'refused' (one answer named by the server was dropped) | 'net' | 'auth' | 'fail'
+  async function inspSyncStep(id) {
+    const live = () => (INS && INS.id === id) ? { row: INS.row, pending: INS.pending } : inspLS(id);
+    const c = live(); if (!c || !pendingCount(c.pending)) return 'ok';
+    const sent = JSON.parse(JSON.stringify(c.pending)); sent.t ||= {};
+    const stamps = {}; ['facts', 'decl', 'notes'].forEach(kind => Object.keys(sent[kind]).forEach(k => { const sk = KIND_P[kind] + ':' + k; if (sent.t[sk]) stamps[sk] = sent.t[sk]; }));
+    let res; try { res = await sb.rpc('agent_inspection_save', { iid: id, p_facts: sent.facts, p_decl: sent.decl, p_notes: sent.notes, p_stamps: stamps }); } catch (e) { res = { error: e }; }
+    const cur = live() || c; cur.pending.t ||= {};
+    if (res.error) {
+      const msg = String(res.error.message || 'try again'), m = msg.match(/^Not saved \(([fdn]):([A-Za-z]+)\):\s*(.*)$/);
+      if (netErr(res.error)) { INS_STATE[id] = { kind: 'net' }; return 'net'; }
+      if (authErr(res.error)) { INS_STATE[id] = { kind: 'auth' }; return 'auth'; }
+      if (m) {   // only the answer the server named is dropped; everything else stays and goes again
+        const kind = P_KIND[m[1]], k = m[2];
+        if (isame(cur.pending[kind][k], sent[kind][k])) { delete cur.pending[kind][k]; delete cur.pending.t[m[1] + ':' + k]; }
+        const note = `${inspLabel(k)} (${m[3] || 'refused'})`;
+        INS_STATE[id] = { kind: 'ok', refused: note }; toast('Not saved: ' + note);
+        if (inspLS(id) || (INS && INS.id === id)) inspLS(id, cur);
+        return 'refused';
+      }
+      INS_STATE[id] = { kind: 'fail', msg }; return 'fail';   // everything stays queued
+    }
+    const map = { facts: 'facts', decl: 'declaration', notes: 'notes' }, skipped = (res.data && res.data.skipped) || {};
     Object.keys(map).forEach(kind => Object.entries(sent[kind]).forEach(([k, v]) => {
-      if (!res.error) { const r = cur.row[map[kind]] ||= {}; if (ijblank(v)) delete r[k]; else r[k] = v; }
-      if (isame(cur.pending[kind][k], v)) delete cur.pending[kind][k];
+      const sk = KIND_P[kind] + ':' + k, r = cur.row[map[kind]] ||= {};
+      const val = sk in skipped ? skipped[sk] : v;   // a newer answer from another phone was kept by the server
+      if (ijblank(val)) delete r[k]; else r[k] = val;
+      if (sk in skipped && INS && INS.id === id) { (kind === 'facts' ? INS.facts : kind === 'decl' ? INS.decl : INS.notes)[k] = ijblank(val) ? (kind === 'facts' ? '' : null) : val; INS.redraw = true; }
+      if (isame(cur.pending[kind][k], v) && cur.pending.t[sk] === sent.t[sk]) { delete cur.pending[kind][k]; delete cur.pending.t[sk]; }
     }));
-    if (!res.error && res.data) cur.row.conflicts = res.data.conflicts || {};
-    inspLS(id, cur);
-    if (INS && INS.id === id) { INS.conflicts = cur.row.conflicts || {}; inspConflictsPaint(); }
-    inspShow(id);
-    if (pendingCount(cur.pending) && (again || !res.error)) return inspSyncOne(id);
-    return !pendingCount(cur.pending);
+    cur.row.conflicts = (res.data && res.data.conflicts) || {}; cur.row.resolved = (res.data && res.data.resolved) || cur.row.resolved || {};
+    INS_STATE[id] = Object.assign({}, INS_STATE[id], { kind: 'ok' });
+    if (INS && INS.id === id) { INS.conflicts = cur.row.conflicts; inspKeep(id); inspConflictsPaint(); if (INS.redraw && $('.view-pad.insp [data-ik]')) { INS.redraw = false; inspDraw(); } }
+    else if (pendingCount(cur.pending)) inspLS(id, cur); else inspLS(id, null);
+    return 'ok';
+  }
+  // save everything waiting for one inspection; a second call while one runs waits for it (and it goes round again)
+  function inspSyncOne(id) {
+    const run = INS_RUN[id]; if (run) { run.again = true; return run.p; }
+    const r = { again: false };
+    r.p = (async () => {
+      let st;
+      do { r.again = false; inspShow(id); st = await inspSyncStep(id); }
+      while (r.again || ((st === 'ok' || st === 'refused') && pendingCount(((INS && INS.id === id) ? INS : inspLS(id) || {}).pending)));
+      delete INS_RUN[id]; inspShow(id);
+      return !pendingCount(((INS && INS.id === id) ? INS : inspLS(id) || {}).pending);
+    })();
+    INS_RUN[id] = r; return r.p;
   }
   const inspSyncAll = () => inspIds().forEach(id => { const c = inspLS(id); if (c && pendingCount(c.pending)) inspSyncOne(id); });
   window.addEventListener('online', () => { if (IS_AGENT) inspSyncAll(); });
@@ -2936,14 +3024,13 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     let row = null, prop = null;
     try { const { data, error } = await sb.from('property_inspections').select('*').eq('id', id).single(); if (!error && data) row = data; } catch (_) { }
     if (row) { try { const { data } = await sb.from('properties').select('id,address,stage').eq('id', row.property_id).single(); prop = data; } catch (_) { } }
-    if (!row && !cache) return null;
-    const base = row ? Object.assign({}, row, { address: (prop && prop.address) || (cache && cache.row.address) || '' }) : cache.row;
-    const pending = (cache && cache.pending) || { facts: {}, decl: {}, notes: {} };
-    ['facts', 'decl', 'notes'].forEach(k => { pending[k] ||= {}; });
+    if (!row && !(cache && cache.row && (cache.row.facts || cache.row.declaration))) return null;
+    const base = row ? Object.assign({}, row, { address: (prop && prop.address) || (cache && cache.row && cache.row.address) || '' }) : cache.row;
+    const pending = Object.assign(emptyPending(), (cache && cache.pending) || {});
+    ['facts', 'decl', 'notes', 't'].forEach(k => { pending[k] ||= {}; });
     INS = { id, row: base, pending, conflicts: base.conflicts || {}, offline: !row,
       facts: Object.assign({}, base.facts, pending.facts), decl: Object.assign({}, base.declaration, pending.decl), notes: Object.assign({}, base.notes, pending.notes) };
-    inspLS(id, { row: base, pending });
-    if (!row) INS_NET[id] = false;
+    if (!row) INS_STATE[id] = { kind: 'net' };
     return INS;
   }
 
@@ -2994,8 +3081,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       if (f.kind === 'pick') { const opts = f.opts.concat(v && !f.opts.includes(v) ? [v] : []); return `<div class="card tight iq" data-ik="${ik}"><h3>${esc(f.l)}</h3>${radios('if_' + k, opts.map(o => [o, o]), v)}<button class="btn link iclr" type="button" data-iclear="${ik}">Clear</button>${conf}</div>`; }
       if (f.kind === 'chips') return `<div class="card tight iq" data-ik="${ik}"><h3>${esc(f.l)}</h3><div class="ipick">${f.opts.map(o => `<label class="ichip"><input type="checkbox" data-ichip="${esc(k)}" value="${esc(o)}" ${(v || []).includes(o) ? 'checked' : ''}><span>${esc(o)}</span></label>`).join('')}</div>${conf}</div>`;
       if (f.kind === 'yn') { const y = INSP_YN[k]; return `<div class="card tight iq" data-ik="${ik}"><h3>${esc(f.l)}</h3>${radios('if_' + k, [['no', y[1]], ['yes', 'Yes']], v, 'two')}<button class="btn link iclr" type="button" data-iclear="${ik}">Clear</button>
-        <div data-ireveal="${esc(k)}" ${v === 'yes' || INS.facts[k + 'Detail'] ? '' : 'hidden'}><label class="f" for="ifd_${k}">${esc(y[2])}</label><textarea id="ifd_${k}" data-itext="f:${esc(k)}Detail">${esc(INS.facts[k + 'Detail'] || '')}</textarea></div>${conf}</div>`; }
-      const inp = f.kind === 'area' ? `<textarea id="if_${k}" data-itext="${ik}">${esc(v || '')}</textarea>` : `<input type="text" id="if_${k}" data-itext="${ik}" value="${esc(v || '')}" ${f.kind === 'num' ? 'inputmode="numeric"' : ''}>`;
+        <div data-ireveal="${esc(k)}" ${v === 'yes' || INS.facts[k + 'Detail'] ? '' : 'hidden'}><label class="f" for="ifd_${k}">${esc(y[2])}</label><textarea id="ifd_${k}" maxlength="${INSP_MAX}" data-itext="f:${esc(k)}Detail">${esc(INS.facts[k + 'Detail'] || '')}</textarea></div>${conf}</div>`; }
+      const inp = f.kind === 'area' ? `<textarea id="if_${k}" maxlength="${INSP_MAX}" data-itext="${ik}">${esc(v || '')}</textarea>` : `<input type="text" id="if_${k}" maxlength="${f.kind === 'num' ? 20 : INSP_MAX}" data-itext="${ik}" value="${esc(v || '')}" ${f.kind === 'num' ? 'inputmode="numeric"' : ''}>`;
       return `<div class="card tight iq" data-ik="${ik}"><label class="f" for="if_${k}" style="margin-top:0;font-weight:600">${esc(f.l)}</label>${inp}${conf}</div>`;
     }
     const v = INS.decl[k] || {};
@@ -3003,7 +3090,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const x = vdQ(k), use = x.from ? `<div data-iusebox="${esc(k)}"></div>` : '';
     return `<div class="card tight iq vdq-i" data-ik="${ik}"><span class="ivd">Vendor Declaration</span><h3>${esc(x.q)}</h3>${use}
       ${x.text ? '' : `${radios('id_' + k, YNU, v.a, 'three')}<button class="btn link iclr" type="button" data-iclear="${ik}">Clear</button>`}
-      <label class="f" for="idd_${k}">${x.text ? 'Your note' : 'Details'} <span class="opt">(optional)</span></label><textarea id="idd_${k}" data-itext="d:${esc(k)}">${esc(v.d || '')}</textarea></div>`;
+      <label class="f" for="idd_${k}">${x.text ? 'Your note' : 'Details'} <span class="opt">(optional)</span></label><textarea id="idd_${k}" maxlength="${INSP_MAX}" data-itext="d:${esc(k)}">${esc(v.d || '')}</textarea></div>`;
   }
   // what the inspection saw for one question, read from the screen
   function inspReadItem(it) {
@@ -3044,7 +3131,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   }
   function inspDraw() {
     const i = INS.sec, s = INSP_SECTIONS[i], last = i === INSP_SECTIONS.length - 1;
-    header(s[1], '', 0); inspOpenSet(INS.id + ':' + i); inspStatusSlot(s[1]);
+    header(s[1], '', 0); inspOpenSet(INS.id + ':' + i); inspKeep(INS.id); inspStatusSlot(s[1]);
     main().innerHTML = `<div class="view-pad insp">
       <p class="small insp-addr"><span class="agent-flag" style="margin:0 6px 0 0">Inspection</span>${nt(INS.row.address || 'Address to come')}</p>
       <nav class="insp-tabs" aria-label="Sections">${INSP_SECTIONS.map((x, j) => `<button type="button" class="insp-tab ${j === i ? 'on' : ''}" data-isec="${x[0]}" data-isecn="${j}" ${j === i ? 'aria-current="step"' : ''}>${esc(x[1])} <span class="n"></span></button>`).join('')}<button type="button" class="insp-tab" id="insGoFinish">Finish</button></nav>
@@ -3052,7 +3139,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <p class="small" data-iseccount="${s[0]}"></p>
       ${INS.offline ? '<div class="card warnc tight"><p class="small" style="margin:0">No signal: showing what this phone has kept. Keep going; it saves when the signal returns.</p></div>' : ''}
       ${s[2].map(inspItemHTML).join('')}
-      <div class="card tight iq"><label class="f" for="inote" style="margin-top:0;font-weight:600">Notes for ${esc(s[1].toLowerCase())} <span class="opt">(only you see these)</span></label><textarea id="inote" data-itext="n:${s[0]}">${esc(INS.notes[s[0]] || '')}</textarea></div>
+      <div class="card tight iq"><label class="f" for="inote" style="margin-top:0;font-weight:600">Notes for ${esc(s[1].toLowerCase())} <span class="opt">(only you see these)</span></label><textarea id="inote" maxlength="${INSP_MAX}" data-itext="n:${s[0]}">${esc(INS.notes[s[0]] || '')}</textarea></div>
     </div>`;
     actions(true, i ? 'Back' : 'Property file', last ? 'Finish' : `Next: ${INSP_SECTIONS[i + 1][1]}`);
     onBack = () => { inspFlush(); if (i) { INS.sec = i - 1; inspDraw(); } else { inspOpenSet(null); viewProperty(INS.row.property_id); } };
@@ -3086,7 +3173,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       // typed text is kept in this browser at once, so a reload never loses it
       const P = INS.pending, kk = kind === 'f' ? 'facts' : kind === 'n' ? 'notes' : 'decl';
       if (kk === 'decl') { const r = $(`input[name="id_${k}"]:checked`); P.decl[k] = Object.assign(r ? { a: r.value } : {}, { d: t.value.trim() }); INS.decl[k] = P.decl[k]; } else { P[kk][k] = t.value.trim(); INS[kk][k] = t.value.trim(); }
-      inspLS(INS.id, { row: INS.row, pending: P }); inspShow(INS.id);
+      (P.t ||= {})[kind + ':' + k] = new Date().toISOString();
+      inspKeep(INS.id); inspShow(INS.id);
     });
     main().addEventListener('focusout', e => { if (!INS || !e.target.closest || !e.target.closest('.view-pad.insp')) return; const t = e.target; if (t.matches && t.matches('[data-itext]') && INS_TIMERS[t.dataset.itext]) { clearTimeout(INS_TIMERS[t.dataset.itext].t); const g = INS_TIMERS[t.dataset.itext].go; delete INS_TIMERS[t.dataset.itext]; g(); } });
 
@@ -3094,9 +3182,10 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   async function viewInspectionFinish() {
     const id = INS.id;
     header('Inspection', '', 100); actions(false);
-    inspStatusSlot('Inspection'); inspOpenSet(id + ':finish');
+    inspOpenSet(id + ':finish'); inspKeep(id); inspStatusSlot('Inspection');
     main().innerHTML = '<div class="loading">Saving...</div>';
-    const synced = await inspSyncOne(id);
+    inspFlush();
+    const synced = await inspSyncOne(id);   // waits for a save already in flight, then sends anything left
     let finished = false;
     if (synced) { const { error } = await sb.rpc('agent_inspection_finish', { iid: id }); finished = !error; if (!error) { INS.row.status = 'finished'; INS.row.finished_at ||= new Date().toISOString(); inspLS(id, { row: INS.row, pending: INS.pending }); } }
     const pid = INS.row.property_id;
@@ -3105,7 +3194,9 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const signedAg = ags.find(a => ['signed', 'countersigned'].includes(a.status)) || null;
     if (signedAg) { try { const { data } = await sb.from('property_forms').select('*').eq('agreement_id', signedAg.id).eq('kind', 'vendor_declaration'); form = (data || [])[0] || null; } catch (_) { }
       if (form) { try { const { data } = await sb.from('form_signatures').select('id').eq('form_id', form.id); fsigs = data || []; } catch (_) { } } }
-    const nDecl = Object.keys(INS.decl).filter(k => insAnswered('d:' + k)).length, nFacts = INSP_ITEMS.filter(it => it.startsWith('f:') && insAnswered(it)).length;
+    const resolvedAg = k => ((INS.row.resolved || {})[k] || {}).use === 'agreement';
+    const nDecl = Object.keys(INS.decl).filter(k => insAnswered('d:' + k)).length;
+    const nFacts = INSP_ITEMS.filter(it => it.startsWith('f:') && insAnswered(it) && !(INS.conflicts || {})[it.slice(2)] && !resolvedAg(it.slice(2))).length;   // not those kept as the agreement's
     const conflicts = Object.entries(INS.conflicts || {});
     const formSigned = form && (form.status !== 'draft' || fsigs.length);
     const diffs = formSigned ? Object.entries(INS.decl).filter(([k, v]) => !ijblank(v) && (k === 'tenanted' ? !isame((form.data || {}).tenanted, v.a) : !isame(((form.data || {}).answers || {})[k], v))) : [];
@@ -3113,7 +3204,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <span class="agent-flag">Only you see this</span>
       <h1>${finished ? 'Inspection finished' : 'Not saved yet'}</h1>
       <p class="small">${nt(INS.row.address || '')}${INS.row.started_at ? ` · started ${esc(fmtDT(INS.row.started_at))}` : ''}</p>
-      ${finished ? '' : `<div class="card warnc"><p class="small" style="margin:0">Waiting for signal. Every answer is kept on this phone and saves when the signal returns. Finish again then.</p><div class="toolbar"><button class="btn primary" type="button" id="insRetry">Try again</button></div></div>`}
+      ${finished ? '' : `<div class="card warnc"><p class="small" style="margin:0">${(INS_STATE[id] || {}).kind === 'auth' ? 'Your sign-in has run out. Every answer is kept on this phone: use Sign in again at the top, then finish.' : (INS_STATE[id] || {}).kind === 'fail' ? 'The last save didn\'t go through. Every answer is kept on this phone. Try again.' : 'Waiting for signal. Every answer is kept on this phone and saves when the signal returns. Finish again then.'}</p><div class="toolbar"><button class="btn primary" type="button" id="insRetry">Try again</button></div></div>`}
+      ${INS.resolveNote ? `<div class="card warnc tight" id="insResolveNote"><p class="small" style="margin:0">${esc(INS.resolveNote)}</p></div>` : ''}
       <div class="card tight">${INSP_SECTIONS.map(s => { const [a, n] = secCount(s); return `<div class="fact"><div class="v" style="font-weight:400;display:flex;justify-content:space-between;gap:8px"><span>${esc(s[1])}</span><span class="small">${a} of ${n}</span></div></div>`; }).join('')}</div>
       ${conflicts.length ? `<h2>Different from the agreement</h2><p class="small">These weren't put on the property file. Choose which to keep.</p>${conflicts.map(([k, c]) => `<div class="card tight" data-iconflict="${esc(k)}"><h3>${esc(inspLabel(k))}</h3>
           <div class="fact"><div class="k">Agreement ${esc(c.ref || '')}</div><div class="v">${esc(inspVal(k, c.agreement))}</div></div><div class="fact"><div class="k">You noted</div><div class="v">${esc(inspVal(k, c.inspection))}</div></div>
@@ -3134,8 +3226,10 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     $$('[data-iresolve]').forEach(b => b.addEventListener('click', async () => {
       b.disabled = true;
       try { const r = await must(sb.rpc('agent_inspection_resolve', { iid: id, p_key: b.dataset.iresolve, p_use: b.dataset.use }));
-        delete INS.conflicts[b.dataset.iresolve]; INS.row.conflicts = INS.conflicts; inspLS(id, { row: INS.row, pending: INS.pending });
-        toast(b.dataset.use === 'agreement' ? 'Kept the agreement\'s' : r && r.agreement_updated ? 'Used yours, on the property file and the unsigned agreement' : 'Used yours on the property file. The signed agreement stays as signed.');
+        const k = b.dataset.iresolve; delete INS.conflicts[k]; INS.row.conflicts = INS.conflicts; (INS.row.resolved ||= {})[k] = { use: b.dataset.use }; inspKeep(id);
+        const ref = (r && r.ref) || 'The agreement';
+        INS.resolveNote = b.dataset.use === 'inspection' && r && ['sent', 'parked'].includes(r.agreement_status) ? `${inspLabel(k)}: yours is on the property file. Agreement ${ref} has been sent, so it wasn't changed. Recall it, or raise the change with the vendors.` : '';
+        toast(b.dataset.use === 'agreement' ? 'Kept the agreement\'s' : r && r.agreement_updated ? 'Used yours, on the property file and the draft agreement' : r && ['sent', 'parked'].includes(r.agreement_status) ? 'Used yours on the property file. The sent agreement wasn\'t changed.' : 'Used yours on the property file. The signed agreement stays as signed.');
         viewInspectionFinish();
       } catch (_) { b.disabled = false; }
     }));
