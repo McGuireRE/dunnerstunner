@@ -39,7 +39,7 @@ begin
     for k, v in select * from jsonb_each(patch->'answers') loop
       if jsonb_typeof(v) <> 'object' then raise exception 'Not an answer'; end if;
       if pre->>k = 'inspection' and not public.decl_same(ans->k, v) then
-        if not public.decl_has_answer(k, v) then raise exception 'Please choose an answer for each question Tim noted at the inspection'; end if;
+        if not public.decl_has_answer(k, v) then raise exception 'Please answer each question Tim noted at the inspection'; end if;
         chk := chk || jsonb_build_object(k, mine || jsonb_build_object('changed', nt ? k and not public.decl_same(nt->k, v)));
       end if;
       ans := ans || jsonb_build_object(k, v);
@@ -47,7 +47,7 @@ begin
   end if;
   ten := case when patch ? 'tenanted' then patch->'tenanted' else d->'tenanted' end;
   if patch ? 'tenanted' and pre->>'tenanted' = 'inspection' and not public.decl_same(d->'tenanted', patch->'tenanted') then
-    if not public.decl_has_answer('tenanted', ten) then raise exception 'Please choose an answer for each question Tim noted at the inspection'; end if;
+    if not public.decl_has_answer('tenanted', ten) then raise exception 'Please answer each question Tim noted at the inspection'; end if;
     chk := chk || jsonb_build_object('tenanted', mine || jsonb_build_object('changed', nt ? 'tenanted' and not public.decl_same(nt->'tenanted', ten)));
   end if;
   if jsonb_typeof(patch->'checked') = 'object' then
@@ -55,7 +55,7 @@ begin
       if coalesce(pre->>k, '') <> 'inspection' then continue; end if;
       if v = 'true'::jsonb then
         if not public.is_confirmed(chk, k) then
-          if not public.decl_has_answer(k, case when k = 'tenanted' then ten else ans->k end) then raise exception 'Please choose an answer for each question Tim noted at the inspection'; end if;
+          if not public.decl_has_answer(k, case when k = 'tenanted' then ten else ans->k end) then raise exception 'Please answer each question Tim noted at the inspection'; end if;
           chk := chk || jsonb_build_object(k, mine || jsonb_build_object('changed', nt ? k and not public.decl_same(nt->k, case when k = 'tenanted' then ten else ans->k end)));
         end if;
       elsif v = 'false'::jsonb then chk := chk - k; end if;
@@ -154,7 +154,8 @@ begin
           else dis := case when public.jblank(was) then dis - k else dis || jsonb_build_object(k, was) end; end if;
         end if;
         -- 014: "no hazards" noted while the agreement in force lists some is a difference for Tim to choose, not a silent clear
-        if k in ('hazards', 'hazOther') and ag.id is not null and not public.jblank(ag.answers -> k) and (ag.answers -> k) is distinct from (i.applied -> k -> 'v') then
+        --      (even when the agreement's value came from this inspection's earlier Yes: Tim then confirms the change to the draft)
+        if k in ('hazards', 'hazOther') and ag.id is not null and not public.jblank(ag.answers -> k) then
           i.facts := i.facts || jsonb_build_object(k, v); i.applied := i.applied - k; i.resolved := i.resolved - k;
           i.conflicts := i.conflicts || jsonb_build_object(k, jsonb_build_object('agreement_id', ag.id, 'ref', ag.ref, 'agreement', ag.answers -> k, 'inspection', v));
           continue;

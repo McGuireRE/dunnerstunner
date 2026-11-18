@@ -2699,12 +2699,18 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   // what the vendors' save sends: their own fields and answers, and a yes or no per note they've checked. Never pre or insp.
   // Only the answers this page changed go back, so a page opened before Tim sent a new note can't put the old answer back.
   const vfPatch = W => { const o = {}; ['tenanted', 'facts', 'fileOk', 'fileChanges', 'notes', 'hh', '_step', 'complete', 'fromFile'].forEach(k => { if (k in W) o[k] = W[k]; });
-    o.answers = {}; Object.entries(W.answers || {}).forEach(([k, v]) => { if (vfAsk(k) && !(W.ticks || {})[k]) return; if (JSON.stringify(v) !== JSON.stringify((VF.base || {})[k])) o.answers[k] = v; });
+    const held = []; VF.held = held;
+    o.answers = {}; Object.entries(W.answers || {}).forEach(([k, v]) => { if (vfAsk(k) && !(W.ticks || {})[k]) return;
+      if ((W.pre || {})[k] === 'inspection' && !vfHasAnswer(k, v)) { held.push(k); return; }   // the server refuses it; its own step asks for it
+      if (JSON.stringify(v) !== JSON.stringify((VF.base || {})[k])) o.answers[k] = v; });
     if ('tenanted' in o && o.tenanted === VF.baseTen) delete o.tenanted;
-    // a tick goes only when it differs from what the server holds, so a page opened before a co-owner checked can't undo it
-    o.checked = {}; Object.entries(W.ticks || {}).forEach(([k, v]) => { if (!!v !== !!vfConfirmer(k)) o.checked[k] = !!v; }); return o; };
+    // a tick goes only when it differs from what the server holds, so a page opened before a co-owner checked can't undo it,
+    // and never for a note whose answer has been emptied on this page (it would confirm the note she has just removed)
+    o.checked = {}; Object.entries(W.ticks || {}).forEach(([k, v]) => { if (v && held.includes(k)) return; if (!!v !== !!vfConfirmer(k)) o.checked[k] = !!v; }); return o; };
+  // an answer with a choice (the same rule as the server's decl_has_answer, migration 014): Unknown counts; a description needs text
+  const vfHasAnswer = (k, v) => (VD_QS.find(x => x.k === k) || {}).text ? !!String((v || {}).d || '').trim() : ['yes', 'no', 'unknown'].includes((v || {}).a);
   // after a save, the server's record of who checked what
-  async function vfRefresh() { try { const { data } = await sb.from('property_forms').select('data').eq('id', VF.fm.id).single(); if (data && data.data) { const sd = data.data; VF.W.checked = sd.checked || {}; VF.W.pre = sd.pre || VF.W.pre; if (sd.insp) VF.W.insp = sd.insp; if (sd.noted) VF.W.noted = sd.noted; VF.W.ticks = {}; VF.W.answers = Object.assign({}, VF.W.answers, sd.answers || {}); VF.base = JSON.parse(JSON.stringify(sd.answers || {})); if ('tenanted' in sd) { VF.W.tenanted = sd.tenanted; VF.baseTen = sd.tenanted; } } } catch (_) { } }
+  async function vfRefresh() { try { const { data } = await sb.from('property_forms').select('data').eq('id', VF.fm.id).single(); if (data && data.data) { const sd = data.data; VF.W.checked = sd.checked || {}; VF.W.pre = sd.pre || VF.W.pre; if (sd.insp) VF.W.insp = sd.insp; if (sd.noted) VF.W.noted = sd.noted; VF.W.ticks = {}; const prev = VF.W.answers || {}; VF.W.answers = Object.assign({}, prev, sd.answers || {}); (VF.held || []).forEach(k => { VF.W.answers[k] = prev[k]; }); VF.base = JSON.parse(JSON.stringify(sd.answers || {})); if ('tenanted' in sd) { VF.W.tenanted = sd.tenanted; VF.baseTen = sd.tenanted; } } } catch (_) { } }
   const VF_INSP_MSG = 'Please check each answer Tim noted at the inspection: tick This is right, or change the answer.';
   const VF_ASK_MSG = 'Please answer each question Tim couldn\'t answer at the inspection. Choose Unknown if you don\'t know either.';
   function vfCheck(i) {
@@ -3067,6 +3073,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     if (s.det && !inspDetFor(k, s)) s.keep = 1;   // text saved where the answer wouldn't show a box: never hidden
     return s;
   }
+  // a card opened with its note and fact disagreeing holds the facts back until Tim chooses (s.held), whatever he types meanwhile
+  const inspHeld = k => { const s = inspS(k); if (s.held === undefined) s.held = !!inspDiff(k); return s.held; };
   // the declaration note and a fact it fills disagree (an inspection noted before they were asked once, or a fact changed since):
   // both are shown and Tim chooses. Null when they agree, or when only the note has a value (it fills the fact when touched).
   function inspDiff(k) {
@@ -3102,7 +3110,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     if (sp.kind === 'hazard') {
       const d = s.a === 'yes' ? hazText(s.chips, s.other) : det;
       return { decl: s.a || d ? Object.assign(s.a ? { a: s.a } : {}, { d }) : null,
-        facts: s.a === 'yes' ? { hazards: s.chips.slice(), hazOther: String(s.other || '').trim() } : s.a ? { hazards: [], hazOther: '' } : {} };
+        facts: s.a === 'yes' ? Object.assign({ hazards: s.chips.slice() }, String(s.other || '').trim() || inorm(INS.facts.hazOther) ? { hazOther: String(s.other || '').trim() } : {})
+          : s.a === 'no' ? { hazards: [], hazOther: '' } : {} };   // Unknown says nothing about the facts; only No means none
     }
     const a = sp.kind === 'meth' ? methA(s) || s.legacy || '' : s.a;   // an earlier one-answer note stands until both parts are answered
     const d = inspCompose(k, s, det);
@@ -3117,11 +3126,13 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const o = inspOut(k), P = INS.pending; let waiting = false;
     const put = (kind, kk, v) => {
       const T = kind === 'facts' ? INS.facts : INS.decl;
-      if (inorm(T[kk]) === inorm(v)) { if (kk in P[kind]) waiting = true; return; }
+      // No hazards is always sent, so the server can compare it with the agreement in force (even where this inspection had nothing)
+      const force = sync && kind === 'facts' && k === 'hazard' && (o.decl || {}).a === 'no' && !(INS.conflicts || {})[kk] && !(kk in P.facts);
+      if (inorm(T[kk]) === inorm(v) && !force) { if (kk in P[kind]) waiting = true; return; }
       if (sync) return inspQueue(kind, kk, v);
       P[kind][kk] = v; (P.t ||= {})[KIND_P[kind] + ':' + kk] = new Date().toISOString(); T[kk] = v; waiting = true;
     };
-    put('decl', k, o.decl); Object.entries(o.facts || {}).forEach(([kk, v]) => put('facts', kk, v));
+    put('decl', k, o.decl); if (!(INSP_DQ[k] || {}).kind || !inspHeld(k)) Object.entries(o.facts || {}).forEach(([kk, v]) => put('facts', kk, v));
     if (!sync) { inspKeep(INS.id); inspShow(INS.id); } else if (waiting) inspSyncOne(INS.id);
   }
   // the 1995 to 2004 question, answered from the year built when it falls in that period (Tim can change it)
@@ -3335,8 +3346,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     if (sp.kind === 'meth') notes += '<p class="small ihint">Both parts matter: Yes to either makes the answer Yes. No is only noted when both are No.</p>';
     if (sp.kind === 'meth' && s.legacy && !methA(s)) notes += `<p class="small iconf ilegacy">Your earlier note answered this as one question: ${esc(ynuText(s.legacy))}. It stays until you answer both parts above.${['yes', 'no'].includes(INS.facts.meth) ? ` The agreement's page 1 fact says: ${esc(INS.facts.meth === 'yes' ? 'Yes' : INSP_YN.meth[1])}.` : ''}</p>`;
     if (k === 'burner' && /wood ?burner|wood ?fire|log ?burner|fireplace|\bfire\b|pellet/i.test(String(INS.facts.pHeat || ''))) notes += '<p class="small ilink">You mentioned a fire under heating.</p>';
-    const dk = inspDiff(k);
-    if (dk) notes += `<div class="card warnc tight idiff" data-idiff="${esc(k)}"><p class="small" style="margin:0">Your declaration note and the agreement's page 1 fact say different things. Choose which is right; until you do, neither is changed.</p>
+    const dk = inspHeld(k);
+    if (dk) notes += `<div class="card warnc tight idiff" data-idiff="${esc(k)}"><p class="small" style="margin:0">Your declaration note and the agreement's page 1 fact say different things. Choose which is right. Until you do, the page 1 fact is not changed.</p>
       <div class="fact"><div class="k">Declaration note</div><div class="v" style="font-weight:400">${esc(inorm(INS.decl[k]) ? inspVal(k, INS.decl[k]) : 'Not answered')}</div></div>
       <div class="fact"><div class="k">Page 1 fact</div><div class="v" style="font-weight:400">${esc(inspFactText(k))}</div></div>
       <div class="toolbar">${inorm(INS.decl[k]) ? `<button class="btn ghost" type="button" data-iside="note" data-ik2="${esc(k)}">Use the note for both</button>` : ''}<button class="btn primary" type="button" data-iside="fact" data-ik2="${esc(k)}">Use the fact for both</button></div></div>`;
@@ -3394,8 +3405,13 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     $$('[data-icopybox]').forEach(el => { const k = el.dataset.icopybox, src = inspCopyFrom(k);
       el.innerHTML = src && !String(inspS(k).det || '').trim() ? `<button class="btn ghost iuse" type="button" data-icopy="${esc(k)}">${esc(INSP_COPY_L[k])}: ${esc(src)}</button>` : ''; });
   }
+  // the differences to show: a "no hazards" difference only while the hazard answer is still No (after Unknown or Yes it no
+  // longer stands, so it is never offered for "Use mine")
+  const inspConflictsNow = () => Object.fromEntries(Object.entries(INS.conflicts || {}).filter(([k, c]) =>
+    !(['hazards', 'hazOther'].includes(k) && ijblank(c.inspection) && ((INS.decl.hazard || {}).a || '') !== 'no')));
   function inspConflictsPaint() {
-    $$('[data-iconf]').forEach(el => { const c = (INS.conflicts || {})[el.dataset.iconf]; el.innerHTML = c ? `<p class="small iconf">The agreement ${esc(c.ref || '')} says ${esc(inspVal(el.dataset.iconf, c.agreement))}. Your note is kept, and you choose which to use when you finish.</p>` : ''; });
+    const now = inspConflictsNow();
+    $$('[data-iconf]').forEach(el => { const c = now[el.dataset.iconf]; el.innerHTML = c ? `<p class="small iconf">The agreement ${esc(c.ref || '')} says ${esc(inspVal(el.dataset.iconf, c.agreement))}. Your note is kept, and you choose which to use when you finish.</p>` : ''; });
   }
   const inspFlush = () => { Object.keys(INS_TIMERS).forEach(k => { clearTimeout(INS_TIMERS[k].t); INS_TIMERS[k].go(); delete INS_TIMERS[k]; }); };
 
@@ -3440,7 +3456,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         return;
       }
       const sd = e.target.closest('[data-iside]');
-      if (sd) { const k = sd.dataset.ik2; if (sd.dataset.iside === 'fact') { INS.ui[k] = inspFromFacts(k, inspS(k)); } inspCommit(k, true); inspRedrawCard('d:' + k); return; }
+      if (sd) { const k = sd.dataset.ik2; if (sd.dataset.iside === 'fact') { INS.ui[k] = inspFromFacts(k, inspS(k)); } inspS(k).held = false; inspCommit(k, true); inspRedrawCard('d:' + k); return; }
       const b = e.target.closest('[data-icopy]'); if (!b) return;
       const k = b.dataset.icopy, src = inspCopyFrom(k); if (!src) return;
       inspS(k).det = src; inspCommit(k, true); inspRedrawCard('d:' + k);
@@ -3500,7 +3516,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const resolvedAg = k => ((INS.row.resolved || {})[k] || {}).use === 'agreement';
     const nDecl = Object.keys(INS.decl).filter(k => insAnswered('d:' + k)).length;
     const nFacts = Object.keys(INSP_F).filter(k => insAnswered('f:' + k) && !(INS.conflicts || {})[k] && !resolvedAg(k)).length;   // not those kept as the agreement's
-    const conflicts = Object.entries(INS.conflicts || {});
+    const conflicts = Object.entries(inspConflictsNow());
     const formSigned = form && (form.status !== 'draft' || fsigs.length);
     const diffs = formSigned ? Object.entries(INS.decl).filter(([k, v]) => !ijblank(v) && (k === 'tenanted' ? !isame((form.data || {}).tenanted, v.a) : !isame(((form.data || {}).answers || {})[k], v))) : [];
     main().innerHTML = `<div class="view-pad insp">

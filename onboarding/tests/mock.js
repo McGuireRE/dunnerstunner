@@ -140,7 +140,7 @@ const needsChecks=fm=>{ const d=fm.data||{}, pre=isObj(d.pre)?d.pre:{}; return O
 const DECL_TEXT=['faults','reno','internet','insulation','glazing'];
 const hasAnswer=(k,v)=>k==='tenanted'?['now','will','no'].includes(v):DECL_TEXT.includes(k)?isObj(v)&&String(v.d||'').trim()!=='':isObj(v)&&['yes','no','unknown'].includes(v.a);
 const needsAnswers=fm=>{ const d=fm.data||{}, pre=isObj(d.pre)?d.pre:{}, ans=isObj(d.answers)?d.answers:{}; return Object.keys(pre).some(k=>pre[k]==='inspection'&&!hasAnswer(k,k==='tenanted'?d.tenanted:ans[k])); };
-const NEED_ANSWER='Please choose an answer for each question Tim noted at the inspection';
+const NEED_ANSWER='Please answer each question Tim noted at the inspection';
 const AGENT_ONLY=['property_events','campaign_stats','buyer_feedback','property_offers'];
 function mkNotices(ag){ if((ag.answers||{}).prior!=='yes') return; (DB.prior_agency_notices||=[]); (ag.answers.priorAgencies||[]).forEach((x,i)=>{ if(x.agency&&!DB.prior_agency_notices.some(n=>n.agreement_id===ag.id&&n.idx===i)) DB.prior_agency_notices.push({id:uid(),agreement_id:ag.id,idx:i,agency:x.agency,agent_name:x.agent||null,email:x.email||null,kind:x.kind,dated:x.dated||null,status:'to_send',created_at:now()}); }); }
 const ok=d=>Promise.resolve({data:d,error:null}); const bad=m=>Promise.resolve({data:null,error:{message:m}});
@@ -258,7 +258,7 @@ function rpcInner(name,a){
         const T=DESC.includes(k)?dsc:dis;
         if(jblank(v)){ if(k in W.applied&&same(T[k],W.applied[k].v)){ const was=W.applied[k].was; if(jblank(was)) delete T[k]; else T[k]=was; }
           // 014: "no hazards" while the agreement in force lists some is a difference for Tim, not a silent clear
-          if(['hazards','hazOther'].includes(k)&&ag&&!jblank((ag.answers||{})[k])&&!same(ag.answers[k],k in W.applied?W.applied[k].v:undefined)){ W.facts[k]=v; delete W.applied[k]; delete W.resolved[k]; W.conflicts[k]={agreement_id:ag.id,ref:ag.ref,agreement:ag.answers[k],inspection:v}; continue; }
+          if(['hazards','hazOther'].includes(k)&&ag&&!jblank((ag.answers||{})[k])){ W.facts[k]=v; delete W.applied[k]; delete W.resolved[k]; W.conflicts[k]={agreement_id:ag.id,ref:ag.ref,agreement:ag.answers[k],inspection:v}; continue; }
           delete W.facts[k]; delete W.conflicts[k]; delete W.applied[k]; delete W.resolved[k]; continue; }
         W.facts[k]=v; delete W.resolved[k];
         if(ag&&!jblank((ag.answers||{})[k])&&!same(ag.answers[k],v)){ W.conflicts[k]={agreement_id:ag.id,ref:ag.ref,agreement:ag.answers[k],inspection:v}; continue; }

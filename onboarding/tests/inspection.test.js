@@ -587,7 +587,7 @@ const TIM = ['agent-1', 'hello@timmcguire.co.nz'];
   out.kimForge = await p.evaluate(async () => { const c = window.supabase.createClient(), f = JSON.parse(localStorage.getItem('mockdb')).property_forms.find(x => x.agreement_id === 'A9');
     const a = await c.rpc('vendor_form_save', { f: f.id, patch: { answers: { meth: { d: 'stripped' } } } });
     return [a.error && a.error.message]; });
-  expect(out.kimForge.every(m => /Please choose an answer for each question Tim noted/.test(m || '')), 'the server refuses an unanswered note: ' + JSON.stringify(out.kimForge));
+  expect(out.kimForge.every(m => /Please answer each question Tim noted at the inspection/.test(m || '')), 'the server refuses an unanswered note: ' + JSON.stringify(out.kimForge));
   await p.$$eval('.vdq', cs => cs.forEach(c => { if (!c.querySelector('input:checked') && c.querySelector('input[value="no"]') && !c.querySelector('.insp-ask')) c.querySelector('input[value="no"]').checked = true; }));
   for (const k of ['faults']) if (!(await p.inputValue(`[data-qd="${k}"]`))) await p.fill(`[data-qd="${k}"]`, 'None known');
   await p.click('[data-q="meth"] input[value="no"] + .mark');
@@ -653,6 +653,60 @@ const TIM = ['agent-1', 'hello@timmcguire.co.nz'];
   expect(/Uneven paths/.test(out.hazFinish) && /You noted ?None/.test(out.hazFinish), 'the finish screen asks Tim to choose: ' + out.hazFinish);
   await p.click('[data-iresolve="hazards"][data-use="inspection"]'); await p.waitForTimeout(800);
   d = await db(); expect(isEq(d.properties.find(q => q.id === 'PR10').disclosures.hazards, []) && isEq(d.agreements.find(g => g.id === 'A10').answers.hazards, ['Uneven paths']), 'Use mine: the property file says none; the signed agreement keeps what was signed');
+
+  // 21. the re-review's three sequences
+  // 21a. a card whose note and fact disagree holds the fact back while Tim types: one character in the renovations details
+  //      changes neither the page 1 fact nor the unsigned draft agreement, until he chooses
+  await setDb(`d => { const t='2026-11-17T00:00:00Z'; d.properties.push({ id:'PR11', address:'1 Old Road, Roslyn', ownership:{}, description:{}, disclosures:{ work:'yes', workDetail:'Bathroom 2010' }, stage:'agreement', stage_at:t, created_at:t, updated_at:t });
+    d.agreements.push({ id:'A11', ref:'MRE-2026-1011', address:'1 Old Road, Roslyn', property_id:'PR11', status:'draft', config:{}, answers:{}, legal:{}, agreement_version:'v3.15-26102026', created_at:t });
+    d.property_inspections.push({ id:'I11', property_id:'PR11', status:'in_progress', created_by:'hello@timmcguire.co.nz', started_at:t, created_at:t, updated_at:t, finished_at:null, sent_at:null, sent_form_id:null, photos:[], notes:{}, stamps:{}, applied:{}, conflicts:{}, resolved:{},
+      facts:{ work:'yes', workDetail:'Bathroom 2010' }, declaration:{ reno:{ d:'Kitchen 2015, bathroom 2010' } } }); }`);
+  await p.evaluate(() => localStorage.setItem('inspOpen', 'I11:4')); await go(); await p.waitForTimeout(300);
+  expect(await p.isVisible('[data-idiff="reno"]'), 'the renovations note and fact disagree, so both are shown');
+  await p.click('[data-itext="d:reno"]'); await p.keyboard.press('End'); await p.keyboard.type('.'); await p.waitForTimeout(1300);
+  d = await db(); let x11 = d.property_inspections.find(x => x.id === 'I11');
+  expect(x11.declaration.reno.d === 'Kitchen 2015, bathroom 2010.' && x11.facts.workDetail === 'Bathroom 2010' && d.properties.find(q => q.id === 'PR11').disclosures.workDetail === 'Bathroom 2010'
+    && !('workDetail' in d.agreements.find(g => g.id === 'A11').answers) && await p.isVisible('[data-idiff="reno"]'), 'typing changes the note only; the fact and the draft agreement wait: ' + JSON.stringify([x11.declaration.reno, await p.isVisible('[data-idiff="reno"]'), x11.facts.workDetail, d.agreements.find(g => g.id === 'A11').answers]));
+  await tapn('id_reno', 'yes'); d = await db();
+  expect(d.properties.find(q => q.id === 'PR11').disclosures.workDetail === 'Bathroom 2010' && await p.isVisible('[data-idiff="reno"]'), 'tapping an answer waits too, until he chooses');
+  await p.click('[data-idiff="reno"] [data-iside="note"]'); await p.waitForTimeout(700); d = await db();
+  expect(d.properties.find(q => q.id === 'PR11').disclosures.workDetail === 'Kitchen 2015, bathroom 2010.' && d.agreements.find(g => g.id === 'A11').answers.workDetail === 'Kitchen 2015, bathroom 2010.' && !(await p.$('[data-idiff="reno"]')),
+    'Use the note for both: then the fact and the draft follow');
+
+  // 21b. hazards: Unknown sends no facts (nothing flagged, nothing for "Use mine" to clear); a Yes with no extra text doesn't flag
+  //      the agreement's text as "None"; only No means none
+  await setDb(`d => { d.agreements.find(g => g.id === 'A9').answers = { hazards:['Pool or spa'], hazOther:'Gate code 1234' }; d.properties.find(q => q.id === 'PR9').disclosures.hazards = ['Pool or spa']; d.properties.find(q => q.id === 'PR9').disclosures.hazOther = 'Gate code 1234'; }`);
+  await go(); await p.click('#navHome'); await p.waitForTimeout(300); await p.click('#homeInspect'); await p.waitForTimeout(400); await p.fill('#insAddr', '3 Kiln'); await p.waitForTimeout(200); await p.click('[data-insp-prop="PR9"]'); await p.waitForTimeout(800);
+  const i9 = async () => (await db()).property_inspections.filter(x => x.property_id === 'PR9').pop();
+  if (await p.$('[data-iclear="d:hazard"]')) { await p.click('[data-iclear="d:hazard"]'); await p.waitForTimeout(400); }
+  await tapn('id_hazard', 'unknown'); let h9 = await i9();
+  expect(!('hazards' in h9.facts) && !('hazOther' in h9.facts) && !h9.conflicts.hazards && !h9.conflicts.hazOther && isEq((await db()).properties.find(q => q.id === 'PR9').disclosures.hazards, ['Pool or spa']), 'Unknown: no hazard facts, no difference, the file untouched: ' + JSON.stringify([h9.id, h9.declaration.hazard, h9.facts, Object.keys(h9.conflicts), (await db()).properties.find(q => q.id === 'PR9').disclosures, await p.textContent('main h1')]));
+  await tapn('id_hazard', 'yes'); await p.click('[data-ik="d:hazard"] input[value="Pool or spa"] + span'); await p.waitForTimeout(500); h9 = await i9();
+  expect(isEq(h9.facts.hazards, ['Pool or spa']) && !('hazOther' in h9.facts) && !h9.conflicts.hazOther && !h9.conflicts.hazards, 'Yes with ticks and no extra text: nothing flagged against the agreement\'s text: ' + JSON.stringify([h9.facts, Object.keys(h9.conflicts)]));
+  await tapn('id_hazard', 'no'); h9 = await i9();
+  expect(h9.conflicts.hazards && h9.conflicts.hazOther, 'No: both are a difference with the agreement: ' + JSON.stringify(Object.keys(h9.conflicts)));
+  await tapn('id_hazard', 'unknown'); await p.click('#insGoFinish'); await p.waitForTimeout(900);
+  expect(!(await p.$('[data-iconflict="hazards"]')), 'Unknown: the finish screen asks nothing about hazards');
+
+  // 21c. a description note Tim made (glazing) emptied on the vendor's Services step, then Back, then Continue from the step
+  //      before: the save goes through (the emptied note isn't sent), and Services asks for it again. No stuck page.
+  await setDb(`d => { const f=d.property_forms.find(f=>f.agreement_id==='A9'); f.data.answers.glazing={d:'Double glazed'}; f.data.pre.glazing='inspection'; f.data.noted.glazing={d:'Double glazed'}; delete (f.data.checked||{}).glazing; }`);
+  await as('v-kim', 'kim@example.com'); await p.click('[data-form="vendor_declaration"]'); await p.waitForTimeout(700);
+  for (let n = 0; n < 4 && (await p.textContent('main h1')) !== 'Services and Features'; n++) { await p.click('#back'); await p.waitForTimeout(400); }
+  expect(await p.textContent('main h1') === 'Services and Features', 'on Services');
+  await p.fill('[data-qd="glazing"]', ''); await p.click('#back'); await p.waitForTimeout(400);
+  await p.click('#next'); await p.waitForTimeout(700);
+  out.glazSent = await p.evaluate(() => JSON.parse(localStorage.getItem('lastVendorSave') || '{}'));
+  out.glazAfter = { h1: await p.textContent('main h1'), toast: await p.textContent('#toast').catch(() => '') };
+  d = await db(); const g9 = d.property_forms.find(f => f.agreement_id === 'A9').data;
+  expect(out.glazAfter.h1 === 'Services and Features' && !('glazing' in (out.glazSent.answers || {})) && isEq(g9.answers.glazing, { d: 'Double glazed' }) && !(g9.checked || {}).glazing,
+    'Continue saves without the emptied note, and moves on; Tim\'s note is intact: ' + JSON.stringify([out.glazAfter, out.glazSent.answers]));
+  expect((await p.inputValue('[data-qd="glazing"]')) === '', 'her emptied answer is still on her screen');
+  await p.click('#next'); await p.waitForTimeout(500);
+  expect(await p.textContent('main h1') === 'Services and Features' && /Please (answer|check) each/.test(await errText()), 'Services asks for it, on the page: ' + await errText());
+  await p.fill('[data-qd="glazing"]', 'Single glazed'); await p.click('#next'); await p.waitForTimeout(600);
+  d = await db(); const g9b = d.property_forms.find(f => f.agreement_id === 'A9').data;
+  expect(/Vendor Statement and signing/.test(await p.textContent('main h1')) && g9b.answers.glazing.d === 'Single glazed' && g9b.checked.glazing && g9b.checked.glazing.changed === true, 'answered: saved and recorded as her change');
   } catch (e) { fail.push('CRASHED: ' + e.message.split('\n').slice(0, 3).join(' | ')); }
   console.log(JSON.stringify(Object.assign(out, { errs: errs.concat(fail) }), null, 1)); await b.close();
 })();

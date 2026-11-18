@@ -7,7 +7,8 @@
 -- a blank tick, a stripped answer, a blank description, a blank tenancy and signing with an unanswered note; Unknown ticked and a
 -- chosen answer recorded as before; hazards cleared against a signed agreement kept as differences; the live form: 0 unanswered
 -- notes, its Unknown can be ticked, and can't be sent back blank). Afterwards no test row, sign-in or function was left, and the
--- live form's checks were still empty.
+-- live form's checks were still empty. Run again after the re-review (refusal wording "Please answer each question Tim noted at
+-- the inspection"; a cleared hazards list is a difference even after a matching Yes): every line as expected, nothing left.
 do $t$
 declare out text := ''; r jsonb; pid uuid; iid uuid; aid uuid; fid uuid; d jsonb; n int; lf record; lu uuid;
   vuid uuid := '11111111-1111-1111-1111-1111111111b1';
@@ -76,6 +77,10 @@ begin
   r := public.agent_inspection_save(iid, '{"pBed":"3"}', null, null);
   r := public.agent_inspection_save(iid, '{"pBed":""}', null, null);
   out := out || 'other blanks unchanged conflicts=' || coalesce((select string_agg(k, ',') from jsonb_object_keys(r->'conflicts') k), 'none') || '; ';
+  -- a Yes that matches the agreement, then No: still a difference (the agreement's value is not taken as this inspection's own)
+  perform public.agent_inspection_save(iid, '{"hazards":["Uneven paths"]}', null, null);
+  r := public.agent_inspection_save(iid, '{"hazards":[]}', null, null);
+  out := out || 'yes then no conflicts=' || coalesce((select string_agg(k, ',') from jsonb_object_keys(r->'conflicts') k), 'none') || '; ';
 
   -- 5. the live draft declaration with Tim's Unknown for "reports": every note there has an answer, so nothing changes for it;
   --    its vendor can still tick the Unknown (a choice), and can't send it back blank (both undone by the final exception)
