@@ -6,7 +6,7 @@
 --   * form_sign_needs_checks: a vendor can't sign while any of Tim's notes has no answer. Otherwise identical (012).
 --   * agent_inspection_save: "no hazards" (a cleared hazards or hazOther) while the agreement in force lists some is kept as a
 --     difference for Tim ("Keep the agreement's" / "Use mine"), as a different value already is. Otherwise identical (012).
--- Not applied yet: needs Tim's OK. Tested in a rollback block (tests/decl-notes-rollback.sql via decl-notes-rollback.py).
+-- Applied 18 November 2026 (live function bodies checked against this file). Tested in a rollback block (tests/decl-notes-rollback.sql via decl-notes-rollback.py).
 
 -- the description questions of the Vendor Declaration (FORM_TEXT VD_SECTIONS, text: 1), stored as {d}
 create or replace function public.decl_text_keys() returns text[] language sql immutable as $$
