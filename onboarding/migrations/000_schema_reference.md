@@ -183,8 +183,14 @@ agreements/<agreement id>/signatures/... (vendors may upload their own signature
   `log_property_document` trigger and the export; agent reads.
 - Functions: `agent_repo_add(p_property, p_item)` (checks the stored file's size and type in storage, the path by key, the kind, a
   fingerprint; the same key returns the same row), `agent_repo_set(p_id, p_patch)` (kind, title, issued_on, room, caption),
-  `agent_repo_share(p_id, p_on)`, `agent_repo_archive(p_id, p_on)`, `agent_property_export(p_property)` (the "mre.property/1" JSON,
-  `schema/mre.property-1.schema.json`), `vendor_repo_list(p_property)` (a party's view of shared items), `repo_vendor_can_read(name)`
-  (for the storage policy), `repo_shareable`, `repo_mime_ok`, `repo_object` (internal).
+  `agent_repo_share(p_id, p_on)` (only items in property-files), `agent_repo_archive(p_id, p_on)`,
+  `agent_property_export(p_property, p_details default false)` (the "mre.property/1" JSON, `schema/mre.property-1.schema.json`; the
+  vendors' written disclosure details only when p_details, otherwise named in `left_out.withheld`), `repo_party(pid)` (an owner on
+  the property now, or a person on an agreement made in this round of owners; not contacts, not the pre-listing contact, not
+  earlier rounds), `vendor_repo_list(p_property)` and `repo_vendor_can_read(name)` (items shared in this round, to `repo_party`
+  only), `repo_shareable`, `repo_mime_ok`, `repo_object` (internal).
+- `agent_reopen_property` replaced: the 013 body plus, for new owners, every shared item unshared (logged).
+- Indexes on `path` and `thumb_path`; TRUNCATE revoked from anon and authenticated.
 - Storage: bucket `property-files` (private, 25 MB, PDF, JPEG, PNG, WebP, Word, Excel, text and CSV). Agent reads and adds under
-  `properties/<id>/docs|photos/`; a party reads a file or its preview only while it is shared; no update or delete policy.
+  `properties/<id>/docs|photos/`; no update or delete policy, and no vendor policy: vendors get a 600-second link from the
+  `repo-link` edge function (`fn/repo_link.ts`, gateway JWT on), which asks `repo_vendor_can_read` with their own token.

@@ -6,12 +6,18 @@
 -- "uploaded" files, so filing can be tested without a bucket. The replacement is undone with everything else.
 -- The output is the exception message: refusals read in lower case; a line in CAPITALS means something that should have
 -- been refused was allowed, or a value was wrong. No DELETE anywhere, except the ones the test expects to be refused.
--- Last run: 18 November 2026, live project hwpwyjxhdvlqrjwzxzqz, with PART A as committed: every line as expected, no CAPITALS,
--- no [NULL]; afterwards the project had no repo_kinds, property_document_events or new function, property_documents had its
--- 9 columns as before, and no test row or sign-in was left. PART B's three storage policies were created and rolled back in a
--- separate block (with a stand-in repo_vendor_can_read) to check they parse; the bucket row was not run.
+-- Last run: 18 November 2026 (after the first review: owner rounds, contacts, dropped-in items, withheld details, truncate,
+-- indexes), live project hwpwyjxhdvlqrjwzxzqz, with PART A as committed (comment lines left out): every line as expected, no
+-- CAPITALS, no [NULL]; afterwards the project had no repo_kinds, repo_party or other new function, property_documents had its
+-- 9 columns as before, agent_reopen_property was the 013 body, and no test row, agreement or sign-in was left. PART B's storage
+-- policies were created and rolled back separately to check they parse (the vendor read policy has since been removed); the
+-- bucket row was not run.
 do $t$
-declare out text := ''; r jsonb; pid uuid; pid2 uuid; iid uuid; iid2 uuid; ph uuid; ap uuid; gen uuid; dr uuid; n int; x text; ex jsonb;
+declare out text := ''; r jsonb; pid uuid; pid2 uuid; iid uuid; iid2 uuid; ph uuid; ap uuid; gen uuid; dr uuid; n int; x text; ex jsonb; lim uuid; aid uuid;
+  cuid uuid := '11111111-1111-1111-1111-1111111111d3'; suid uuid := '11111111-1111-1111-1111-1111111111d4'; nuid uuid := '11111111-1111-1111-1111-1111111111d5';
+  contact text := '{"email":"rb-repo-contact@example.com","sub":"11111111-1111-1111-1111-1111111111d3","role":"authenticated"}';
+  signer text := '{"email":"rb-repo-signer@example.com","sub":"11111111-1111-1111-1111-1111111111d4","role":"authenticated"}';
+  newown text := '{"email":"rb-repo-new@example.com","sub":"11111111-1111-1111-1111-1111111111d5","role":"authenticated"}';
   k1 uuid := 'aaaaaaaa-0000-4000-8000-000000000001'; k2 uuid := 'aaaaaaaa-0000-4000-8000-000000000002'; k3 uuid := 'aaaaaaaa-0000-4000-8000-000000000003';
   vuid uuid := '11111111-1111-1111-1111-1111111111d1'; ouid uuid := '11111111-1111-1111-1111-1111111111d2';
   agent text := json_build_object('email', (select email from public.agents order by created_at limit 1), 'sub', '22222222-2222-2222-2222-222222222222', 'role', 'authenticated')::text;
@@ -21,7 +27,8 @@ declare out text := ''; r jsonb; pid uuid; pid2 uuid; iid uuid; iid2 uuid; ph uu
   item jsonb;
 begin
   execute $mig$__MIGRATION__$mig$;
-  insert into auth.users (id, email, aud, role) values (vuid, 'rb-repo-vendor@example.com', 'authenticated', 'authenticated'), (ouid, 'rb-repo-other@example.com', 'authenticated', 'authenticated');
+  insert into auth.users (id, email, aud, role) values (vuid, 'rb-repo-vendor@example.com', 'authenticated', 'authenticated'), (ouid, 'rb-repo-other@example.com', 'authenticated', 'authenticated'),
+    (cuid, 'rb-repo-contact@example.com', 'authenticated', 'authenticated'), (suid, 'rb-repo-signer@example.com', 'authenticated', 'authenticated'), (nuid, 'rb-repo-new@example.com', 'authenticated', 'authenticated');
   insert into public.properties (address, description, disclosures, owners_on_title, title_ref, legal_description)
     values ('RB 16 Repo Street, Dunedin', '{"pBed":"3","pLand":"650 m2","pLove":"The morning sun","pType":"House"}', '{"meth":"no","wt":"yes","wtDetail":"Monolithic, 2001"}',
             'Jane Example and John Example', 'OT1/234', 'Lot 1 DP 1234') returning id into pid;
@@ -30,7 +37,10 @@ begin
   perform set_config('app.council_accept', '', true);
   insert into public.properties (address) values ('RB 17 Other Street, Dunedin') returning id into pid2;
   insert into public.property_people (property_id, position, legal_name, email, role) values (pid, 1, 'Jane Example', 'rb-repo-vendor@example.com', 'owner'),
-    (pid, 2, 'Old Owner', 'rb-repo-other@example.com', 'former');
+    (pid, 2, 'Old Owner', 'rb-repo-other@example.com', 'former'), (pid, 3, 'Cam Contact', 'rb-repo-contact@example.com', 'contact');
+  -- an agreement of this round, made yesterday, with a signer who is not on property_people
+  insert into public.agreements (ref, address, property_id, status, config, answers, created_at) values ('RB-016-1', 'RB 16 Repo Street, Dunedin', pid, 'sent', '{}', '{}', now() - interval '1 day') returning id into aid;
+  insert into public.agreement_people (agreement_id, position, legal_name, email, user_id) values (aid, 1, 'Sid Signer', 'rb-repo-signer@example.com', suid);
   insert into public.property_inspections (property_id, created_by) values (pid, 'rb') returning id into iid;
   insert into public.property_inspections (property_id, created_by) values (pid2, 'rb') returning id into iid2;
   out := out || 'kinds=' || (select count(*) from public.repo_kinds) || ' folders=' || (select count(distinct folder) from public.repo_kinds) || '; ';
@@ -70,6 +80,7 @@ begin
   r := public.agent_repo_add(pid, jsonb_build_object('key', k2, 'kind', 'Appraisal', 'name', 'appraisal.pdf', 'path', 'properties/' || pid || '/docs/' || k2 || '-appraisal.pdf', 'mime_type', 'application/pdf', 'size_bytes', 50000, 'sha256', sha));
   ap := (r->>'id')::uuid;
   r := public.agent_repo_add(pid, jsonb_build_object('key', k3, 'kind', 'LIM report', 'name', 'LIM.pdf', 'path', 'properties/' || pid || '/docs/' || k3 || '-LIM.pdf', 'mime_type', 'application/pdf', 'size_bytes', 90000, 'sha256', sha, 'issued_on', '2026-10-01'));
+  lim := (r->>'id')::uuid;
   -- the dropped-in path (direct insert, as today) still works
   insert into public.property_documents (property_id, name, path, kind, source, created_by) values (pid, 'Title.pdf', 'imports/' || gen_random_uuid() || '/1-Title.pdf', 'Record of title', 'dropped', 'rb') returning id into dr;
   out := out || 'dropped insert folder=' || (select folder from public.property_documents where id = dr) || '; ';
@@ -99,6 +110,11 @@ begin
   perform set_config('request.jwt.claims', other, true);
   select count(*) into n from public.vendor_repo_list(pid);
   out := out || 'former owner sees=' || n || ' reads=' || public.repo_vendor_can_read('properties/' || pid || '/photos/' || k1 || '.jpg') || '; ';
+  perform set_config('request.jwt.claims', contact, true);
+  out := out || 'contact sees=' || (select count(*) from public.vendor_repo_list(pid)) || ' reads=' || public.repo_vendor_can_read('properties/' || pid || '/photos/' || k1 || '.jpg')
+    || ' is_property_party=' || public.is_property_party(pid) || '; ';
+  perform set_config('request.jwt.claims', signer, true);
+  out := out || 'signer (this round) sees=' || (select count(*) from public.vendor_repo_list(pid)) || ' reads=' || public.repo_vendor_can_read('properties/' || pid || '/photos/' || k1 || '.jpg') || '; ';
   perform set_config('request.jwt.claims', agent, true);
   perform public.agent_repo_share(ph, false);
   perform set_config('request.jwt.claims', vendor, true);
@@ -136,6 +152,8 @@ begin
   begin perform public.agent_repo_share(gen, true); out := out || 'GENERATED SHARED; '; exception when others then out := out || 'share generated: ' || sqlerrm || '; '; end;
   begin perform public.agent_repo_set(gen, '{"title":"x"}'); out := out || 'GENERATED TITLED; '; exception when others then out := out || 'title generated: ' || sqlerrm || '; '; end;
   begin delete from public.property_documents where id = gen; out := out || 'GENERATED DELETED; '; exception when others then out := out || 'delete generated: ' || sqlerrm || '; '; end;
+  begin perform public.agent_repo_share(dr, true); out := out || 'DROPPED SHARED; '; exception when others then out := out || 'share dropped: ' || sqlerrm || '; '; end;
+  begin update public.property_documents set shared_at = now() where id = dr; out := out || 'DROPPED SHARED DIRECTLY; '; exception when others then out := out || 'direct share dropped: ' || sqlerrm || '; '; end;
 
   -- 5. the export
   ex := public.agent_property_export(pid);
@@ -146,18 +164,52 @@ begin
   out := out || 'export has owners=' || (ex::text like '%Jane Example%') || ' email=' || (ex::text like '%@%') || ' love=' || (ex::text like '%morning sun%')
     || ' appraisal=' || (ex::text like '%appraisal.pdf%') || ' generated=' || (ex::text like '%VD.pdf%') || ' wt=' || coalesce(ex->'property'->'disclosures'->>'weathertightness', '[NULL]')
     || ' photo room=' || coalesce((select i->>'room' from jsonb_array_elements(ex->'items') i where i->>'kind' = 'Photo'), '[NULL]') || '; ';
+  out := out || 'withheld=' || (ex->'left_out'->'withheld')::text || ' detail text=' || (ex::text like '%Monolithic%') || '; ';
+  ex := public.agent_property_export(pid, true);
+  out := out || 'with details: detail=' || coalesce(ex->'property'->'disclosures'->>'weathertightness_detail', '[NULL]') || ' withheld=' || (ex->'left_out'->'withheld')::text || '; ';
   out := out || 'events=' || (select string_agg(kind, ',' order by id) from public.property_document_events where property_id = pid) || '; ';
   begin update public.property_document_events set actor = 'x' where property_id = pid; out := out || 'EVENT CHANGED; '; exception when others then out := out || 'event change: ' || sqlerrm || '; '; end;
   begin insert into public.property_document_events (property_id, actor, kind) values (pid, 'x', 'added'); out := out || 'EVENT INSERTED; '; exception when others then out := out || 'event insert: ' || sqlerrm || '; '; end;
   begin insert into public.repo_kinds values ('Mine', 'other', 1, true, true); out := out || 'KIND ADDED; '; exception when others then out := out || 'kind insert: ' || sqlerrm || '; '; end;
   execute 'reset role';
 
-  -- 6. anon and grants
+  -- 6. a new round of owners: shared items stop being shared, and nothing crosses between the rounds
+  perform set_config('request.jwt.claims', agent, true);
+  execute 'set local role authenticated';
+  perform public.agent_repo_share(ph, true); perform public.agent_repo_share(lim, true);
+  execute 'reset role';
+  perform set_config('request.jwt.claims', signer, true);
+  out := out || 'before: signer sees=' || (select count(*) from public.vendor_repo_list(pid)) || '; ';
+  update public.properties set stage = 'withdrawn' where id = pid;
+  select count(*) into n from public.property_document_events where property_id = pid and kind = 'unshared';
+  perform set_config('request.jwt.claims', agent, true);
+  execute 'set local role authenticated';
+  perform public.agent_reopen_property(pid, true);
+  execute 'reset role';
+  out := out || 'reopen: shared left=' || (select count(*) from public.property_documents where property_id = pid and shared_at is not null)
+    || ' unshared logged=' || ((select count(*) from public.property_document_events where property_id = pid and kind = 'unshared') - n)
+    || ' stage=' || (select stage from public.properties where id = pid) || ' found cleared=' || (select pq.found = '{}'::jsonb from public.properties pq where pq.id = pid) || '; ';
+  insert into public.property_people (property_id, position, legal_name, email, role) values (pid, 1, 'Nina New', 'rb-repo-new@example.com', 'owner');
+  perform set_config('request.jwt.claims', agent, true);
+  execute 'set local role authenticated';
+  perform public.agent_repo_share(ph, true);
+  execute 'reset role';
+  perform set_config('request.jwt.claims', signer, true);
+  out := out || 'old signer sees=' || (select count(*) from public.vendor_repo_list(pid)) || ' reads photo=' || public.repo_vendor_can_read('properties/' || pid || '/photos/' || k1 || '.jpg') || '; ';
+  perform set_config('request.jwt.claims', vendor, true);
+  out := out || 'old owner sees=' || (select count(*) from public.vendor_repo_list(pid)) || ' reads photo=' || public.repo_vendor_can_read('properties/' || pid || '/photos/' || k1 || '.jpg') || '; ';
+  perform set_config('request.jwt.claims', newown, true);
+  out := out || 'new owner sees=' || (select count(*) from public.vendor_repo_list(pid)) || ' reads photo=' || public.repo_vendor_can_read('properties/' || pid || '/photos/' || k1 || '.jpg')
+    || ' reads old LIM=' || public.repo_vendor_can_read('properties/' || pid || '/docs/' || k3 || '-LIM.pdf') || '; ';
+
+  -- 7. anon and grants
   execute 'set local role anon';
   begin perform public.vendor_repo_list(pid); out := out || 'ANON LISTED; '; exception when others then out := out || 'anon: ' || sqlerrm || '; '; end;
   execute 'reset role';
   out := out || 'anon exec add=' || has_function_privilege('anon', 'public.agent_repo_add(uuid, jsonb)', 'execute')
-    || ' anon exec export=' || has_function_privilege('anon', 'public.agent_property_export(uuid)', 'execute')
+    || ' anon exec export=' || has_function_privilege('anon', 'public.agent_property_export(uuid, boolean)', 'execute')
+    || ' auth truncate docs=' || has_table_privilege('authenticated', 'public.property_documents', 'truncate') || ' anon truncate docs=' || has_table_privilege('anon', 'public.property_documents', 'truncate')
+    || ' indexes=' || (select count(*) from pg_indexes where tablename = 'property_documents' and indexname in ('property_documents_path', 'property_documents_thumb_path'))
     || ' auth exec object=' || has_function_privilege('authenticated', 'public.repo_object(text)', 'execute')
     || ' auth exec guard=' || has_function_privilege('authenticated', 'public.guard_property_document()', 'execute')
     || ' rls=' || (select relrowsecurity from pg_class where oid = 'public.property_document_events'::regclass) || '/' || (select relrowsecurity from pg_class where oid = 'public.repo_kinds'::regclass) || '; ';

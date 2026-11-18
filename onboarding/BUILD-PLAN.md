@@ -230,5 +230,9 @@ when there is signal (waiting for signal, uploading, saved, didn't save with Try
 filed twice. Kinds and folders are DwellHub's document types one to one, plus agency papers. Inspection sections have "Add photos" with
 the room. Tim can share an item with the vendors (read only, 10 minute links, on their page); appraisals, offers, ID and AML papers and
 signed documents never. Remove archives (restorable); nothing is deleted. "Download property file (JSON)": schema "mre.property/1" with
-facts, public record values and the item list (no files, no people). Nothing is sent to DwellHub. No edge function change. Tests:
-`property-repository.test.js`; database: `repo-rollback.sql` (via `repo-rollback.js`).
+facts, public record values and the item list (no files, no people, and not the vendors' written disclosure details). Nothing is
+sent to DwellHub. After the first review: only this round's owners and agreement signers see shared items (not contacts, the
+pre-listing contact or earlier owners), starting again for new owners unshares everything, dropped-in documents can't be shared,
+and vendors' links come from a new edge function, `fn/repo_link.ts` (deployed as `repo-link`, JWT on), not a storage policy. Queued
+items belong to the sign-in that added them and carry on by themselves after signing in again. Tests: `property-repository.test.js`,
+`repo-link-fn.test.js`; database: `repo-rollback.sql` (via `repo-rollback.js`).

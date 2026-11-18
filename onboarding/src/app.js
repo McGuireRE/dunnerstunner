@@ -488,6 +488,7 @@
     let qlr = null; try { qlr = localStorage.getItem('qlReturn'); localStorage.removeItem('qlReturn'); } catch (_) { }
     if (qlr) { try { const u = new URL(qlr); if (u.origin === location.origin && u.pathname !== location.pathname) return location.replace(qlr); } catch (_) { } }
     IS_AGENT = !!(await must(sb.rpc('is_agent'))); JREADY = true; setAgentNav();
+    if (IS_AGENT) rqSignedIn();   // photos and documents waiting on this phone for this sign-in carry on sending
     if (IS_AGENT) agentEnglish(); else await within(syncLangRecord(), 3000);   // never wait on the language: English first, the translation arrives when it does
     await Promise.race([loadGuides(), new Promise(r => setTimeout(r, 4000))]);   // never wait more than a few seconds
     let pend = null; try { pend = JSON.parse(localStorage.getItem('pendingCampaign') || 'null'); } catch (_) { }
@@ -1361,7 +1362,17 @@ function lawyerForm(id, title, blurb) {
     const key = crypto.randomUUID(), sha = await REPO.sha256(await blob.arrayBuffer()), p = REPO.paths(ctx.pid, key, kind, name, mime, !!thumb);
     return { key, pid: ctx.pid, inspection_id: ctx.inspection_id || null, room: ctx.room || '', kind, name: name.slice(0, 200), title: REPO.titleFrom(file.name),
       mime, size: blob.size, sha256: sha, blob, thumb, width, height, taken_at: new Date(file.lastModified || Date.now()).toISOString(),
-      path: p.path, thumb_path: p.thumb, state: 'waiting', error: '', added_at: new Date().toISOString(), tries: 0 };
+      path: p.path, thumb_path: p.thumb, state: 'waiting', error: '', added_at: new Date().toISOString(), tries: 0, by: rqMe() };
+  }
+  // each item belongs to the sign-in that added it: only that sign-in sends it (another sees a plain note)
+  const rqMe = () => String((SESSION && SESSION.user && SESSION.user.email) || '').toLowerCase();
+  const rqMine = it => !!it.by && it.by === rqMe();
+  // after a sign-in: items that stopped for "Sign in again" go by themselves, as their note says
+  async function rqSignedIn() {
+    if (!IS_AGENT) return;
+    await rqLoad();
+    for (const it of RQ.items.values()) if (rqMine(it) && it.auth) { it.auth = false; it.error = ''; it.state = 'waiting'; try { await rqPut(it); } catch (_) { } }
+    rqPaint(); rqPump();
   }
   async function rqAdd(files, ctx) {
     await rqLoad();
@@ -1397,7 +1408,7 @@ function lawyerForm(id, title, blurb) {
     } catch (e) {
       it.tries = (it.tries || 0) + 1;
       if (netErr(e)) { it.state = 'waiting'; it.error = ''; }
-      else if (authErr(e) && !/Only Tim/.test(String(e.message || ''))) { it.state = 'waiting'; it.error = 'Sign in again to send it.'; }
+      else if (authErr(e) && !/Only Tim/.test(String(e.message || ''))) { it.state = 'waiting'; it.auth = true; it.error = 'Sign in again to send it. It sends by itself once you have.'; }
       else { it.state = 'failed'; it.error = String((e && e.message) || e || 'Something went wrong'); }
       try { await rqPut(it); } catch (_) { }
       rqPaint();
@@ -1414,7 +1425,7 @@ function lawyerForm(id, title, blurb) {
       do {
         RQ.again = false;
         for (const it of [...RQ.items.values()].sort((a, b) => a.added_at < b.added_at ? -1 : 1)) {
-          if (it.state !== 'waiting' || it.error) continue;
+          if (it.state !== 'waiting' || it.error || it.auth || !rqMine(it)) continue;
           if (!navigator.onLine) break;
           if ((await rqSend(it)) === 'net') break;
         }
@@ -1425,6 +1436,9 @@ function lawyerForm(id, title, blurb) {
   const repoIcon = mime => /pdf/.test(mime || '') ? 'PDF' : /word|msword/.test(mime || '') ? 'DOC' : /sheet|excel/.test(mime || '') ? 'XLS' : /csv/.test(mime || '') ? 'CSV' : /text/.test(mime || '') ? 'TXT' : /image/.test(mime || '') ? 'IMG' : 'FILE';
   function rqRowHTML(it) {
     const th = rqThumb(it);
+    if (!rqMine(it)) return `<li class="rq-row rq-waiting" data-rq-key="${esc(it.key)}">${th ? `<img class="repo-th" src="${esc(th)}" alt="">` : `<span class="repo-ic" aria-hidden="true">${repoIcon(it.mime)}</span>`}
+      <span class="rq-t"><span class="rq-n">${esc(it.title || it.name)}</span><span class="small">Added on this phone by another sign-in. It sends when that person signs in here again.</span></span>
+      <span class="rq-s"><span class="rq-chip">Waiting</span></span></li>`;
     return `<li class="rq-row rq-${it.state}" data-rq-key="${esc(it.key)}">
       ${th ? `<img class="repo-th" src="${esc(th)}" alt="">` : `<span class="repo-ic" aria-hidden="true">${repoIcon(it.mime)}</span>`}
       <span class="rq-t"><span class="rq-n">${esc(it.title || it.name)}</span><span class="small">${esc(it.kind)}${it.room ? ' · ' + esc(it.room) : ''} · ${esc(REPO.sizeText(it.size))}</span>
@@ -1446,9 +1460,9 @@ function lawyerForm(id, title, blurb) {
   }
   document.addEventListener('click', async e => {
     const t = e.target.closest && e.target.closest('[data-rq-retry],[data-rq-drop],[data-rq-send]'); if (!t) return;
-    if (t.dataset.rqSend !== undefined) { [...RQ.items.values()].forEach(x => { if (x.state === 'failed') x.state = 'waiting'; x.error = ''; }); return rqPump(); }
-    const it = RQ.items.get(t.dataset.rqRetry || t.dataset.rqDrop); if (!it) return;
-    if (t.dataset.rqRetry) { it.state = 'waiting'; it.error = ''; try { await rqPut(it); } catch (_) { } rqPaint(); return rqPump(); }
+    if (t.dataset.rqSend !== undefined) { [...RQ.items.values()].filter(rqMine).forEach(x => { if (x.state === 'failed') x.state = 'waiting'; x.error = ''; x.auth = false; }); return rqPump(); }
+    const it = RQ.items.get(t.dataset.rqRetry || t.dataset.rqDrop); if (!it || !rqMine(it)) return;
+    if (t.dataset.rqRetry) { it.state = 'waiting'; it.error = ''; it.auth = false; try { await rqPut(it); } catch (_) { } rqPaint(); return rqPump(); }
     if (!window.confirm(`Don't send "${it.title || it.name}"? It is taken off this phone and isn't filed.`)) return;
     RQ.items.delete(it.key); try { await rqDel(it.key); } catch (_) { } rqPaint();
   });
@@ -1466,7 +1480,7 @@ function lawyerForm(id, title, blurb) {
   const roomOptions = sel => `<option value="">Not noted</option>${REPO.ROOMS.map(r => `<option ${r === sel ? 'selected' : ''}>${esc(r)}</option>`).join('')}`;
   const repoDate = d => d.issued_on ? fmtDate(d.issued_on + 'T12:00:00') : fmtDate(d.taken_at || d.created_at);
   function repoItemHTML(d) {
-    const gen = d.source === 'generated', can = REPO.shareable(d.kind, d.source), fo = d.folder || REPO.folderOf(d.kind);
+    const gen = d.source === 'generated', here = d.bucket === RBUCKET, can = here && REPO.shareable(d.kind, d.source), fo = d.folder || REPO.folderOf(d.kind);
     return `<div class="repo-item" data-doc="${esc(d.id)}">
       <div class="repo-row">
         ${d.thumb_path ? `<img class="repo-th" data-th="${esc(d.thumb_path)}" data-bk="${esc(d.bucket || 'private')}" alt="">` : `<span class="repo-ic" aria-hidden="true">${repoIcon(d.mime_type || (/\.pdf$/i.test(d.name) ? 'application/pdf' : ''))}</span>`}
@@ -1479,7 +1493,7 @@ function lawyerForm(id, title, blurb) {
       <div class="toolbar repo-acts">
         <button class="btn link" type="button" data-rp-open>Open</button>
         ${gen ? '' : `<button class="btn link" type="button" data-rp-edit>Details</button>`}
-        ${gen ? '' : can ? `<button class="btn link" type="button" data-rp-share="${d.shared_at ? 'off' : 'on'}">${d.shared_at ? 'Stop sharing' : 'Share with the vendors'}</button>` : `<span class="small repo-never">${fo === 'agency' || !fo ? (fo ? 'Never shared' : 'Choose a kind to share it') : 'Never shared'}</span>`}
+        ${gen ? '' : can ? `<button class="btn link" type="button" data-rp-share="${d.shared_at ? 'off' : 'on'}">${d.shared_at ? 'Stop sharing' : 'Share with the vendors'}</button>` : `<span class="small repo-never">${!here ? 'Dropped in for reading, so not shared' : !fo ? 'Choose a kind to share it' : 'Never shared'}</span>`}
         ${gen ? '' : `<button class="btn link" type="button" data-rp-archive>Remove</button>`}
       </div>
       <div class="repo-edit" hidden></div>
@@ -1513,12 +1527,20 @@ function lawyerForm(id, title, blurb) {
         <div class="toolbar"><button class="btn ghost" type="button" id="repoExport">Download property file (JSON)</button></div></div>
     </section>`;
   }
+  // a 10-minute link: Tim through his own storage policy; a vendor through the repo-link function (fn/repo_link.ts), which checks
+  // repo_vendor_can_read with their sign-in and makes the link itself (vendors have no storage policy on this bucket)
+  async function repoLink(bucket, path) {
+    if (IS_AGENT) { const { data, error } = await sb.storage.from(bucket || 'private').createSignedUrl(path, 600); if (error || !data) throw error || new Error('no link'); return data.signedUrl; }
+    const { data, error } = await sb.functions.invoke('repo-link', { body: { path } });
+    if (error || !data || !data.url) throw error || new Error('no link');
+    return data.url;
+  }
   async function repoThumbs() {
-    for (const img of $$('img[data-th]')) { const p = img.dataset.th; img.removeAttribute('data-th'); try { const { data } = await sb.storage.from(img.dataset.bk || RBUCKET).createSignedUrl(p, 600); if (data && data.signedUrl) img.src = data.signedUrl; } catch (_) { } }
+    for (const img of $$('img[data-th]')) { const p = img.dataset.th; img.removeAttribute('data-th'); try { img.src = await repoLink(img.dataset.bk || RBUCKET, p); } catch (_) { } }
   }
   async function repoOpen(d) {
     const w = window.open('', '_blank');
-    try { const { data, error } = await sb.storage.from(d.bucket || 'private').createSignedUrl(d.path, 600); if (error || !data) throw error || new Error('no link'); if (w) w.location.href = data.signedUrl; }
+    try { const u = await repoLink(d.bucket || 'private', d.path); if (w) w.location.href = u; }
     catch (e) { if (w) w.close(); toast(netErr(e) ? 'No signal. It opens once the signal returns.' : 'It couldn\'t be opened. Try again.'); }
   }
   async function repoRefresh(pid) {

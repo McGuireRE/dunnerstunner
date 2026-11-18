@@ -101,7 +101,7 @@ function q(table){ logCall('from:'+table);
   }
   return b;
 }
-const AGENTS=['hello@timmcguire.co.nz'];
+const AGENTS=['hello@timmcguire.co.nz'].concat((()=>{ try{ return JSON.parse(localStorage.getItem('mockAgents')||'[]'); }catch(_){ return []; } })());   // mockAgents: more agent sign-ins for a test
 const offline=()=>{ try{ return localStorage.getItem('mockOffline')==='1'||navigator.onLine===false; }catch(_){ return false; } };
 // property inspections (mirrors migrations/012_property_inspection.sql)
 const PI=()=>(DB.property_inspections||=[]);
@@ -288,7 +288,8 @@ function rpcInner(name,a){
       i.sent_form_id=fm.id; i.sent_at=now(); DB.agreement_events.push({id:uid(),agreement_id:g.id,at:now(),actor:me.email,kind:'inspection_sent',detail:{added:m.added,updated:m.updated,kept:m.kept.length}}); save();
       return ok({form_id:fm.id,agreement_id:g.id,created:made,added:m.added,updated:m.updated,kept:m.kept}); }
   }
-  if(name==='agent_reopen_property'){ const p=PT().find(x=>x.id===a.pid); if(!p||!['withdrawn','settled'].includes(p.stage)) return bad('Only a withdrawn or settled property can start again'); if(a.new_owners){ active(p.id).forEach(x=>x.role='former'); p.owners_on_title=null; p.ownership={}; p.disclosures={}; p.cycle_at=now(); if(Object.keys(p.found||{}).length){ p.found={}; p.provenance={}; (DB.council_use_log||=[]).push({id:DB.council_use_log.length+1,property_id:p.id,kind:'cleared',detail:{reason:'new owners'},actor:me.email,at:now()}); } } p.stage='appraisal'; p.stage_at=now(); save(); return ok(null); }
+  if(name==='agent_reopen_property'){ const p=PT().find(x=>x.id===a.pid); if(!p||!['withdrawn','settled'].includes(p.stage)) return bad('Only a withdrawn or settled property can start again'); if(a.new_owners){ active(p.id).forEach(x=>x.role='former'); p.owners_on_title=null; p.ownership={}; p.disclosures={}; p.cycle_at=now(); if(Object.keys(p.found||{}).length){ p.found={}; p.provenance={}; (DB.council_use_log||=[]).push({id:DB.council_use_log.length+1,property_id:p.id,kind:'cleared',detail:{reason:'new owners'},actor:me.email,at:now()}); }
+      /* migration 016: new owners start with nothing shared */ (DB.property_documents||[]).filter(d=>d.property_id===p.id&&d.shared_at).forEach(d=>pdUpdate(d,{shared_at:null})); } p.stage='appraisal'; p.stage_at=now(); save(); return ok(null); }
   if(name==='is_agent') return ok(AGENTS.includes(me.email));
   if(name==='claim_my_agreements'){ DB.agreement_people.forEach(p=>{ if(p.email.toLowerCase()===me.email&&!p.user_id) p.user_id=me.id;}); save(); return ok([...new Set(DB.agreement_people.filter(p=>p.user_id===me.id).map(p=>p.agreement_id))].filter(id=>DB.agreements.find(x=>x.id===id).status!=='draft')); }
   if(name==='vendor_forward_to_lawyer'){ if(!mine()) return bad('Not your agreement'); if(!['signed','countersigned'].includes(ag.status)) return bad('not signed'); DB.lawyer_links.push({id:uid(),agreement_id:a.a,lawyer_name:a.l_name,firm:a.l_firm,email:a.l_email,sent_by:mine().legal_name,sent_at:now(),open_count:0}); save(); return ok(null);}
@@ -416,7 +417,7 @@ function pdUpdate(o,patch){ const n=Object.assign({},o,patch), who=meEmail();
   if(n.bucket===RB&&!rk(n.kind)) throw new Error('Choose a kind from the list');
   if(n.archived_at&&!o.archived_at){ n.shared_at=null; n.shared_by=null; n.archived_by=who; }
   if(!n.archived_at) n.archived_by=null;
-  if(n.shared_at){ if(n.archived_at) throw new Error("A removed item can't be shared"); if(!repoShareable(n.kind,n.source)) throw new Error('This kind of item is never shared with the vendors');
+  if(n.shared_at){ if(n.archived_at) throw new Error("A removed item can't be shared"); if(n.bucket!==RB) throw new Error('Only a file added under Photos and documents can be shared'); if(!repoShareable(n.kind,n.source)) throw new Error('This kind of item is never shared with the vendors');
     if(!o.shared_at) n.shared_by=who; else { n.shared_at=o.shared_at; n.shared_by=o.shared_by; } } else n.shared_by=null;
   n.updated_at=now();
   const ch={}; ['kind','title','issued_on','room','caption'].forEach(k=>{ if(!same(n[k]??null,o[k]??null)) ch[k]={from:o[k]??null,to:n[k]??null}; });
@@ -435,7 +436,18 @@ function repoTable(table,op,payload,rows,single){
   if(op==='insert'){ (Array.isArray(payload)?payload:[payload]).forEach(pdInsertRow); return null; }
   if(op==='update'){ rows.forEach(r=>pdUpdate(r,payload)); save(); return {data:rows,error:null}; }
   return null; }
-const repoCanRead=p=>{ const d=PD().find(x=>x.bucket===RB&&(x.path===p||x.thumb_path===p)); return !!d&&!!d.shared_at&&!d.archived_at&&repoShareable(d.kind,d.source)&&propParty(d.property_id); };
+// repo_party(): an owner on the property now (role owner, by user id or email), or a person on an agreement made in this round
+// (created at or after cycle_at) that hasn't ended or been cancelled. Not contacts, not the pre-listing contact, not earlier rounds.
+function repoParty(pid){ const me=S&&S.user; if(!me) return false; const p=PT().find(x=>x.id===pid); if(!p) return false; const em=(me.email||'').toLowerCase(), cyc=p.cycle_at||'';
+  return PP().some(x=>x.property_id===pid&&(x.role||'owner')==='owner'&&(x.user_id===me.id||(x.email&&x.email.toLowerCase()===em)))
+    ||(DB.agreements||[]).some(a=>a.property_id===pid&&!['ended','cancelled'].includes(a.status)&&(a.created_at||'')>=cyc&&(DB.agreement_people||[]).some(ap=>ap.agreement_id===a.id&&ap.user_id===me.id)); }
+const repoSeen=d=>{ const p=PT().find(x=>x.id===d.property_id)||{}; return d.bucket===RB&&!!d.shared_at&&d.shared_at>=(p.cycle_at||'')&&!d.archived_at&&repoShareable(d.kind,d.source)&&repoParty(d.property_id); };
+const repoCanRead=path=>PD().some(d=>(d.path===path||d.thumb_path===path)&&repoSeen(d));
+// the repo-link edge function (fn/repo_link.ts): a signed-in caller, a file they may read, a link for 600 seconds
+function repoLinkInvoke(o){ if(offline()) return Promise.resolve({data:null,error:{name:'FunctionsFetchError',message:'Failed to send a request to the Edge Function'}});
+  if(!(S&&S.user)) return Promise.resolve({data:null,error:{name:'FunctionsHttpError',message:'Edge Function returned a non-2xx status code',status:401}});
+  const path=String(((o&&o.body)||{}).path||''); if(!repoCanRead(path)) return Promise.resolve({data:null,error:{name:'FunctionsHttpError',message:'Edge Function returned a non-2xx status code',status:403}});
+  const bl=(window.__repoBlobs||{})[path]; return ok({url:bl?URL.createObjectURL(bl):PNG1,expires_in:600}); }
 function repoBucket(){ return {
   upload:(p,blob,o)=>{ logCall('up:'+p); if(offline()) return netFail(); if(!isAgentMe()) return bad('new row violates row-level security policy');
     const f=String(p).split('/'); if(f[0]!=='properties'||!['docs','photos'].includes(f[2])) return bad('new row violates row-level security policy');
@@ -443,16 +455,17 @@ function repoBucket(){ return {
     const mime=(o&&o.contentType)||blob.type; if(!STORED_MIME.includes(mime)) return bad('mime type '+mime+' is not supported');
     if(blob.size>26214400) return bad('The object exceeded the maximum allowed size');
     SO()[p]={size:blob.size,mime}; (window.__repoBlobs||={})[p]=blob; save(); return ok({path:p}); },
-  createSignedUrl:(p)=>{ if(offline()) return netFail(); if(!isAgentMe()&&!repoCanRead(p)) return bad('Object not found'); if(!SO()[p]) return bad('Object not found');
+  createSignedUrl:(p)=>{ if(offline()) return netFail(); if(!isAgentMe()) return bad('Object not found');   // vendors have no storage policy: they use repo-link if(!SO()[p]) return bad('Object not found');
     const bl=(window.__repoBlobs||{})[p]; return ok({signedUrl:bl?URL.createObjectURL(bl):PNG1}); } }; }
 function repoRpc(name,a){
   if(offline()) return netFail();
   const me=S&&S.user;
-  if(name==='vendor_repo_list'){ if(!me) return bad('permission denied for function vendor_repo_list'); if(!propParty(a.p_property)) return ok([]);
-    return ok(PD().filter(d=>d.property_id===a.p_property&&d.bucket===RB&&d.shared_at&&!d.archived_at&&repoShareable(d.kind,d.source)).sort((x,y)=>x.folder===y.folder?(x.created_at<y.created_at?1:-1):(x.folder<y.folder?-1:1))
+  if(name==='vendor_repo_list'){ if(!me) return bad('permission denied for function vendor_repo_list');
+    return ok(PD().filter(d=>d.property_id===a.p_property&&repoSeen(d)).sort((x,y)=>x.folder===y.folder?(x.created_at<y.created_at?1:-1):(x.folder<y.folder?-1:1))
       .map(d=>({id:d.id,kind:d.kind,folder:d.folder,title:d.title||null,name:d.name,issued_on:d.issued_on||null,mime_type:d.mime_type,size_bytes:d.size_bytes,path:d.path,thumb_path:d.thumb_path||null,room:d.room||null,caption:d.caption||null,taken_at:d.taken_at||null,created_at:d.created_at}))); }
   if(!isAgentMe()) return bad({agent_property_export:'Only Tim can export a property file',agent_repo_add:'Only Tim can add to a property file',agent_repo_share:'Only Tim can share from a property file',agent_repo_archive:'Only Tim can remove from a property file'}[name]||'Only Tim can change a property file');
   if(name==='agent_repo_add'){ const it=a.p_item||{}, k=it.key;
+    if(localStorage.getItem('mockAuthFail')==='1') return bad('JWT expired');   // localStorage mockAuthFail = '1': the sign-in has run out, nothing is filed
     if(!/^[0-9a-f-]{36}$/i.test(k||'')) return bad('Each item needs its own key');
     const ex=PD().find(d=>d.client_key===k);
     if(ex){ if(ex.property_id!==a.p_property) return bad('That item is filed on another property'); return ok({id:ex.id,existing:true}); }
@@ -484,12 +497,16 @@ function repoRpc(name,a){
         if('issued_on' in p){ if(p.issued_on&&!/^\d{4}-\d{2}-\d{2}$/.test(p.issued_on)) return bad('Check the date'); patch.issued_on=p.issued_on||null; }
         [['title',200],['room',60],['caption',1000]].forEach(([k,n])=>{ if(k in p){ const v=String(p[k]??'').trim(); patch[k]=v?v.slice(0,n):null; } });
         pdUpdate(d,patch); }
-      if(name==='agent_repo_share') pdUpdate(d,{shared_at:a.p_on?(d.shared_at||now()):null});
+      if(name==='agent_repo_share'){ if(a.p_on&&d.bucket!==RB) return bad('Only a file added under Photos and documents can be shared'); pdUpdate(d,{shared_at:a.p_on?(d.shared_at||now()):null}); }
       if(name==='agent_repo_archive') pdUpdate(d,{archived_at:a.p_on?(d.archived_at||now()):null});
     } catch(e){ return bad(e.message); }
     save(); return ok(null); }
   if(name==='agent_property_export'){ const p=PT().find(x=>x.id===a.p_property); if(!p) return bad('Property not found');
-    const dsc=p.description||{}, ds=p.disclosures||{}, strip=o=>{ const c={}; Object.entries(o).forEach(([k,v])=>{ if(v!=null) c[k]=v; }); return c; };
+    const DMAP={workDetail:'work_detail',wtDetail:'weathertightness_detail',methDetail:'meth_detail',defDetail:'defects_detail',hazOther:'hazards_other'};
+    const ds=Object.assign({},p.disclosures||{}), withheld=[];
+    if(!a.p_details) Object.keys(DMAP).forEach(k=>{ if(String(ds[k]??'').trim()) withheld.push('disclosures.'+DMAP[k]); delete ds[k]; });
+    withheld.sort();
+    const dsc=p.description||{}, strip=o=>{ const c={}; Object.entries(o).forEach(([k,v])=>{ if(v!=null) c[k]=v; }); return c; };
     const lm=String(dsc.pLand||'').match(/^\s*(\d+(?:\.\d+)?)\s*(m2|m²|sqm|square metres)?\s*$/);
     const recs=Object.entries(p.found||{}).filter(([,v])=>isObj(v)).sort((x,y)=>x[0]<y[0]?-1:1).map(([k,v])=>strip({key:k,label:v.label,value:v.value,display:v.display,note:v.note,source:v.source,source_name:v.source_name,source_url:v.source_url,as_of:v.as_of,as_of_label:v.as_of_label,fetched_at:v.fetched_at}));
     const prov={}; Object.entries(p.provenance||{}).filter(([,v])=>isObj(v)).forEach(([k,v])=>{ prov[k]=strip({from:v.from,source:v.source,source_name:v.source_name,as_of:v.as_of,as_of_label:v.as_of_label}); });
@@ -506,12 +523,12 @@ function repoRpc(name,a){
         provenance:prov}),
       public_records:recs, items,
       left_out:{agency_papers:live.filter(x=>x.source==='generated'||(rk(x.kind)||{}).folder==='agency').length,removed:mine.filter(x=>x.archived_at).length,
-        not_sorted:live.filter(x=>x.source!=='generated'&&!rk(x.kind)).length,missing_details:live.filter(x=>x.source!=='generated'&&(rk(x.kind)||{}).exportable&&!(x.sha256&&x.size_bytes&&x.mime_type)).length}};
+        not_sorted:live.filter(x=>x.source!=='generated'&&!rk(x.kind)).length,missing_details:live.filter(x=>x.source!=='generated'&&(rk(x.kind)||{}).exportable&&!(x.sha256&&x.size_bytes&&x.mime_type)).length,withheld}};
     PDE().push({id:PDE().length+1,property_id:p.id,document_id:null,at:now(),actor:me.email,kind:'exported',detail:{schema:'mre.property/1',items:items.length,public_records:recs.length}}); save();
     return ok(out); }
   return bad('unknown rpc '+name); }
 window.supabase={createClient(){ return {
-  from:q, rpc, functions:{invoke:(n,o)=>{ logCall('fn:'+n+(o&&o.body&&o.body.mode?':'+o.body.mode:'')); if(n==='property-lookup') return councilInvoke(o); if(n==='doc-prefill'&&o.body&&o.body.mode==='translate'){ const reqs=JSON.parse(localStorage.getItem('trReqs')||'[]'); reqs.push(o.body); localStorage.setItem('trReqs',JSON.stringify(reqs)); const m=localStorage.getItem('translateMode'); if(m==='off') return Promise.resolve({data:null,error:{message:'503',context:{json:async()=>({error:'not_set_up'})}}}); const src=o.body.sources; const rej=m==='rejectFirst'?[src[0]]:[]; let cutL=[]; let use=src.filter(x=>!rej.includes(x)); if(m==='cutOff'){ const h=src.length>1?Math.floor(src.length/2):0; cutL=src.slice(h); use=src.slice(0,h); } const resp={ok:true,model:o.body.kind==='screens'||o.body.kind==='guide'?'claude-sonnet-5-5':'claude-haiku-5-5',cut_off:m==='cutOff',translations:use.map(x=>({source:x,text:'<'+o.body.lang+'> '+x})),rejected:rej.map(x=>({source:x,reason:'number changed'})).concat(cutL.map(x=>({source:x,reason:'cut off'}))),usage:{input:10,output:10}}; const D=+localStorage.getItem('translateDelay')||0; return D?new Promise(r=>setTimeout(()=>r({data:resp,error:null}),D)):ok(resp); }
+  from:q, rpc, functions:{invoke:(n,o)=>{ logCall('fn:'+n+(o&&o.body&&o.body.mode?':'+o.body.mode:'')); if(n==='property-lookup') return councilInvoke(o); if(n==='repo-link') return repoLinkInvoke(o); if(n==='doc-prefill'&&o.body&&o.body.mode==='translate'){ const reqs=JSON.parse(localStorage.getItem('trReqs')||'[]'); reqs.push(o.body); localStorage.setItem('trReqs',JSON.stringify(reqs)); const m=localStorage.getItem('translateMode'); if(m==='off') return Promise.resolve({data:null,error:{message:'503',context:{json:async()=>({error:'not_set_up'})}}}); const src=o.body.sources; const rej=m==='rejectFirst'?[src[0]]:[]; let cutL=[]; let use=src.filter(x=>!rej.includes(x)); if(m==='cutOff'){ const h=src.length>1?Math.floor(src.length/2):0; cutL=src.slice(h); use=src.slice(0,h); } const resp={ok:true,model:o.body.kind==='screens'||o.body.kind==='guide'?'claude-sonnet-5-5':'claude-haiku-5-5',cut_off:m==='cutOff',translations:use.map(x=>({source:x,text:'<'+o.body.lang+'> '+x})),rejected:rej.map(x=>({source:x,reason:'number changed'})).concat(cutL.map(x=>({source:x,reason:'cut off'}))),usage:{input:10,output:10}}; const D=+localStorage.getItem('translateDelay')||0; return D?new Promise(r=>setTimeout(()=>r({data:resp,error:null}),D)):ok(resp); }
     if(n==='doc-prefill'){ const mode=localStorage.getItem('prefillMode'); if(mode==='off') return Promise.resolve({data:null,error:{message:'503',context:{json:async()=>({error:'not_set_up'})}}}); return ok({ok:true,skipped:[],result:JSON.parse(localStorage.getItem('prefillResult'))}); }const a=JSON.parse(localStorage.getItem('inv')||'[]');a.push(n+':'+o.body.type);localStorage.setItem('inv',JSON.stringify(a));
     if(n==='notify'&&o.body.type==='form_signed'){ const fm=(DB.property_forms||[]).find(x=>x.id===o.body.form_id); if(fm&&fm.status==='signed'&&(fm.kind==='healthy_homes'||fm.countersigned_at)&&!fm.document_id&&fm.agreement_id===o.body.agreement_id){ const d={id:uid(),property_id:fm.property_id,kind:fm.kind==='healthy_homes'?'Healthy Homes checklist and statement':'Vendor Declaration',name:(fm.kind==='healthy_homes'?'Healthy-Homes-Checklist-and-Statement':'Vendor-Declaration')+'.pdf',path:'properties/'+fm.property_id+'/generated/'+fm.id+'.pdf',source:'generated',created_by:'system',created_at:now(),bucket:'private',folder:'agency'}; (DB.property_documents||=[]).push(d); fm.document_id=d.id; save(); } }
     return ok({ok:true});}},

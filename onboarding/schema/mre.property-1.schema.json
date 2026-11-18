@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://packages.dunnerstunner.co.nz/onboarding/schema/mre.property-1.schema.json",
   "title": "McGuire Real Estate property file, version 1",
-  "description": "One property as agent_property_export (migration 016) returns it: the facts, public record values with their source and date, and the list of photos and documents (no file contents). No owners, names, emails, phones or the owners on the title. Agency papers, removed items and items without a fingerprint are left out and counted. A receiver ignores keys it does not know.",
+  "description": "One property as agent_property_export (migration 016) returns it: the facts, public record values with their source and date, and the list of photos and documents (no file contents). No owners, names, emails, phones or the owners on the title. Agency papers, removed items and items without a fingerprint are left out and counted. A receiver ignores keys it does not know. Keys marked \"sensitive\": true may hold text the vendors wrote.",
   "type": "object",
   "required": [
     "schema",
@@ -71,13 +71,15 @@
         "description": {
           "type": "object",
           "additionalProperties": false,
-          "description": "As recorded on the property file, in its own words",
+          "description": "As recorded on the property file, in its own words. Fields marked sensitive may hold text the vendors wrote.",
           "properties": {
             "type": {
-              "$ref": "#/$defs/value"
+              "$ref": "#/$defs/value",
+              "sensitive": true
             },
             "year_built": {
-              "$ref": "#/$defs/value"
+              "$ref": "#/$defs/value",
+              "sensitive": true
             },
             "bedrooms": {
               "$ref": "#/$defs/value"
@@ -92,58 +94,74 @@
               "$ref": "#/$defs/value"
             },
             "construction": {
-              "$ref": "#/$defs/value"
+              "$ref": "#/$defs/value",
+              "sensitive": true
             },
             "parking": {
-              "$ref": "#/$defs/value"
+              "$ref": "#/$defs/value",
+              "sensitive": true
             },
             "heating": {
-              "$ref": "#/$defs/value"
+              "$ref": "#/$defs/value",
+              "sensitive": true
             },
             "chattels": {
-              "$ref": "#/$defs/value"
+              "$ref": "#/$defs/value",
+              "sensitive": true
             },
             "other_chattels": {
-              "$ref": "#/$defs/value"
+              "$ref": "#/$defs/value",
+              "sensitive": true
             }
           }
         },
         "disclosures": {
           "type": "object",
           "additionalProperties": false,
-          "description": "Sensitive: keep private to the owner on arrival",
+          "description": "Yes / no answers and hazard kinds. Sensitive: keep private to the owner on arrival. The vendors' written details are left out by default.",
           "properties": {
             "work": {
               "$ref": "#/$defs/value"
             },
             "work_detail": {
-              "$ref": "#/$defs/value"
+              "$ref": "#/$defs/value",
+              "sensitive": true,
+              "description": "The vendors' own written details: only present when the export was asked for them (agent_property_export p_details); left out by default and named in left_out.withheld"
             },
             "weathertightness": {
               "$ref": "#/$defs/value"
             },
             "weathertightness_detail": {
-              "$ref": "#/$defs/value"
+              "$ref": "#/$defs/value",
+              "sensitive": true,
+              "description": "The vendors' own written details: only present when the export was asked for them (agent_property_export p_details); left out by default and named in left_out.withheld"
             },
             "meth": {
               "$ref": "#/$defs/value"
             },
             "meth_detail": {
-              "$ref": "#/$defs/value"
+              "$ref": "#/$defs/value",
+              "sensitive": true,
+              "description": "The vendors' own written details: only present when the export was asked for them (agent_property_export p_details); left out by default and named in left_out.withheld"
             },
             "defects": {
               "$ref": "#/$defs/value"
             },
             "defects_detail": {
-              "$ref": "#/$defs/value"
+              "$ref": "#/$defs/value",
+              "sensitive": true,
+              "description": "The vendors' own written details: only present when the export was asked for them (agent_property_export p_details); left out by default and named in left_out.withheld"
             },
             "hazards": {
               "$ref": "#/$defs/value"
             },
             "hazards_other": {
-              "$ref": "#/$defs/value"
+              "$ref": "#/$defs/value",
+              "sensitive": true,
+              "description": "The vendors' own written details: only present when the export was asked for them (agent_property_export p_details); left out by default and named in left_out.withheld"
             }
-          }
+          },
+          "sensitive": true
         },
         "provenance": {
           "type": "object",
@@ -385,7 +403,8 @@
         "agency_papers",
         "removed",
         "not_sorted",
-        "missing_details"
+        "missing_details",
+        "withheld"
       ],
       "additionalProperties": false,
       "properties": {
@@ -404,6 +423,14 @@
         "missing_details": {
           "type": "integer",
           "minimum": 0
+        },
+        "withheld": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^disclosures\\.[a-z_]+$"
+          },
+          "description": "Fields that held the vendors' own written text and were left out"
         }
       }
     }

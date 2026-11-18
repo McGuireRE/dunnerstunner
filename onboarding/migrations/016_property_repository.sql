@@ -21,8 +21,10 @@
 --   * property_document_events: a permanent record (added, changed, shared, unshared, archived, restored, exported).
 --   * Functions (agent only unless named vendor_): agent_repo_add (files an uploaded item once the file has arrived; the same
 --     client key returns the same row), agent_repo_set, agent_repo_share, agent_repo_archive, agent_property_export (the
---     "mre.property/1" JSON), vendor_repo_list (what a party to the property may see), repo_vendor_can_read (for the storage
---     policy), repo_object (internal: the stored file's size and type).
+--     "mre.property/1" JSON; the vendors' written disclosure details only when asked), vendor_repo_list and repo_vendor_can_read
+--     (what this round's owners and agreement signers may see, through repo_party; the second for fn/repo_link.ts), repo_object
+--     (internal: the stored file's size and type).
+--   * agent_reopen_property replaced: the live body from migration 013, plus unsharing everything for new owners.
 
 -- ═══════════════ PART A ═══════════════
 
@@ -84,6 +86,10 @@ alter table public.property_documents add constraint property_documents_size_che
 alter table public.property_documents add constraint property_documents_text_check check (coalesce(length(title),0) <= 200 and coalesce(length(caption),0) <= 1000 and coalesce(length(room),0) <= 60);
 create unique index property_documents_client_key on public.property_documents (client_key) where client_key is not null;
 create index property_documents_inspection on public.property_documents (inspection_id) where inspection_id is not null;
+create index property_documents_path on public.property_documents (path);
+create index property_documents_thumb_path on public.property_documents (thumb_path) where thumb_path is not null;
+-- nobody empties the table (a trigger can't stop TRUNCATE)
+revoke truncate on public.property_documents from anon, authenticated;
 -- the folder of what is already there (nothing is live yet; generated PDFs are 'Vendor Declaration' or the Healthy Homes label)
 update public.property_documents d set folder = k.folder from public.repo_kinds k where k.kind = d.kind and d.folder is distinct from k.folder;
 
@@ -149,6 +155,7 @@ begin
   if new.archived_at is null then new.archived_by := null; end if;
   if new.shared_at is not null then
     if new.archived_at is not null then raise exception 'A removed item can''t be shared'; end if;
+    if new.bucket <> 'property-files' then raise exception 'Only a file added under Photos and documents can be shared'; end if;
     if not public.repo_shareable(new.kind, new.source) then raise exception 'This kind of item is never shared with the vendors'; end if;
     if old.shared_at is null then new.shared_by := who; else new.shared_at := old.shared_at; new.shared_by := old.shared_by; end if;
   else new.shared_by := null; end if;
@@ -280,6 +287,7 @@ create or replace function public.agent_repo_share(p_id uuid, p_on boolean) retu
 begin
   if not public.is_agent() then raise exception 'Only Tim can share from a property file'; end if;
   if not exists (select 1 from public.property_documents where id = p_id) then raise exception 'Not found'; end if;
+  if p_on and exists (select 1 from public.property_documents where id = p_id and bucket <> 'property-files') then raise exception 'Only a file added under Photos and documents can be shared'; end if;
   update public.property_documents set shared_at = case when p_on then coalesce(shared_at, now()) else null end where id = p_id;
 end $$;
 revoke execute on function public.agent_repo_share(uuid, boolean) from public, anon;
@@ -295,24 +303,43 @@ end $$;
 revoke execute on function public.agent_repo_archive(uuid, boolean) from public, anon;
 grant execute on function public.agent_repo_archive(uuid, boolean) to authenticated;
 
--- what a party to the property may see: items Tim shared, not removed, of a kind that may be shared, never a generated one
+-- who may see what Tim shares on a property: the signed-in person is an owner on it now (role 'owner', not a contact, not set
+-- aside), or a person on an agreement for it made in this round of owners (created at or after cycle_at) and not ended or
+-- cancelled. Not is_property_party, which also counts contacts, the pre-listing contact and earlier rounds' agreements.
+create or replace function public.repo_party(pid uuid) returns boolean language sql stable security definer set search_path = public as $$
+  select auth.uid() is not null and exists (select 1 from public.properties p where p.id = pid and (
+    exists (select 1 from public.property_people pp where pp.property_id = pid and pp.role = 'owner'
+            and (pp.user_id = auth.uid() or (pp.email <> '' and lower(pp.email) = lower(coalesce(auth.jwt()->>'email', '')))))
+    or exists (select 1 from public.agreements a join public.agreement_people ap on ap.agreement_id = a.id
+            where a.property_id = pid and a.status not in ('ended', 'cancelled') and a.created_at >= coalesce(p.cycle_at, '-infinity'::timestamptz)
+              and ap.user_id = auth.uid())));
+$$;
+revoke execute on function public.repo_party(uuid) from public, anon;
+grant execute on function public.repo_party(uuid) to authenticated;
+
+-- what that person may see: items Tim shared in this round (shared at or after cycle_at), not removed, added under Photos and
+-- documents, of a kind that may be shared, never a generated one
 create or replace function public.vendor_repo_list(p_property uuid) returns table (id uuid, kind text, folder text, title text, name text, issued_on date,
   mime_type text, size_bytes bigint, path text, thumb_path text, room text, caption text, taken_at timestamptz, created_at timestamptz)
 language sql stable security definer set search_path = public as $$
   select d.id, d.kind, d.folder, d.title, d.name, d.issued_on, d.mime_type, d.size_bytes, d.path, d.thumb_path, d.room, d.caption, d.taken_at, d.created_at
-  from public.property_documents d
-  where d.property_id = p_property and public.is_property_party(p_property) and d.bucket = 'property-files'
-    and d.shared_at is not null and d.archived_at is null and public.repo_shareable(d.kind, d.source)
+  from public.property_documents d join public.properties p on p.id = d.property_id
+  where d.property_id = p_property and public.repo_party(p_property) and d.bucket = 'property-files'
+    and d.shared_at is not null and d.shared_at >= coalesce(p.cycle_at, '-infinity'::timestamptz)
+    and d.archived_at is null and public.repo_shareable(d.kind, d.source)
   order by d.folder, d.created_at desc;
 $$;
 revoke execute on function public.vendor_repo_list(uuid) from public, anon;
 grant execute on function public.vendor_repo_list(uuid) to authenticated;
 
--- the storage policy's question: may this signed-in person read this file (an item or its preview) from property-files?
+-- the repo-link edge function's question (fn/repo_link.ts, asked with the caller's own token): may this signed-in person read
+-- this file (an item or its preview) from property-files? The same rules as vendor_repo_list. There is no storage policy for
+-- vendors: the function makes the 10-minute link with the service role only when this says yes.
 create or replace function public.repo_vendor_can_read(p_name text) returns boolean language sql stable security definer set search_path = public as $$
-  select auth.uid() is not null and exists (select 1 from public.property_documents d
+  select auth.uid() is not null and exists (select 1 from public.property_documents d join public.properties p on p.id = d.property_id
     where d.bucket = 'property-files' and (d.path = p_name or d.thumb_path = p_name)
-      and d.shared_at is not null and d.archived_at is null and public.repo_shareable(d.kind, d.source) and public.is_property_party(d.property_id));
+      and d.shared_at is not null and d.shared_at >= coalesce(p.cycle_at, '-infinity'::timestamptz)
+      and d.archived_at is null and public.repo_shareable(d.kind, d.source) and public.repo_party(d.property_id));
 $$;
 revoke execute on function public.repo_vendor_can_read(text) from public, anon;
 grant execute on function public.repo_vendor_can_read(text) to authenticated;
@@ -322,13 +349,24 @@ grant execute on function public.repo_vendor_can_read(text) to authenticated;
 -- names, emails, phones or the owners on the title, and not what the vendors love about the place (their own words).
 -- Left out and counted: agency papers, removed items, items with no kind from the list, and items filed before this
 -- migration without a fingerprint.
-create or replace function public.agent_property_export(p_property uuid) returns jsonb language plpgsql security definer set search_path = public as $$
-declare p record; d jsonb; s jsonb; land numeric; items jsonb; recs jsonb; prov jsonb; lo jsonb; out jsonb;
+-- The vendors' own written details of their disclosures (work, weathertightness, meth, defects, other hazards) are left out unless
+-- p_details is true (the page never asks for them); the yes / no answers and the hazard kinds stay. left_out.withheld names each
+-- field that held text and was left out.
+create or replace function public.agent_property_export(p_property uuid, p_details boolean default false) returns jsonb language plpgsql security definer set search_path = public as $$
+declare p record; d jsonb; s jsonb; land numeric; items jsonb; recs jsonb; prov jsonb; lo jsonb; out jsonb; withheld jsonb := '[]'::jsonb; dk text;
+  dmap jsonb := '{"workDetail":"work_detail","wtDetail":"weathertightness_detail","methDetail":"meth_detail","defDetail":"defects_detail","hazOther":"hazards_other"}';
 begin
   if not public.is_agent() then raise exception 'Only Tim can export a property file'; end if;
   select * into p from public.properties where id = p_property;
   if p.id is null then raise exception 'Property not found'; end if;
   d := coalesce(p.description, '{}'::jsonb); s := coalesce(p.disclosures, '{}'::jsonb);
+  if not coalesce(p_details, false) then
+    for dk in select jsonb_object_keys(dmap) loop
+      if coalesce(trim(s->>dk), '') <> '' then withheld := withheld || to_jsonb('disclosures.' || (dmap->>dk)); end if;
+      s := s - dk;
+    end loop;
+    select coalesce(jsonb_agg(x order by x), '[]'::jsonb) into withheld from jsonb_array_elements_text(withheld) x;
+  end if;
   land := case when coalesce(d->>'pLand', '') ~ '^\s*\d+(\.\d+)?\s*(m2|m²|sqm|square metres)?\s*$' then substring(d->>'pLand' from '\d+(?:\.\d+)?')::numeric end;
   select coalesce(jsonb_agg(jsonb_strip_nulls(jsonb_build_object('key', e.key, 'label', e.value->'label', 'value', e.value->'value', 'display', e.value->'display',
       'note', e.value->'note', 'source', e.value->'source', 'source_name', e.value->'source_name', 'source_url', e.value->'source_url',
@@ -348,7 +386,8 @@ begin
       'agency_papers', count(*) filter (where x.archived_at is null and (x.source = 'generated' or k.folder = 'agency')),
       'removed', count(*) filter (where x.archived_at is not null),
       'not_sorted', count(*) filter (where x.archived_at is null and x.source <> 'generated' and k.kind is null),
-      'missing_details', count(*) filter (where x.archived_at is null and x.source <> 'generated' and k.exportable and (x.sha256 is null or x.size_bytes is null or x.mime_type is null)))
+      'missing_details', count(*) filter (where x.archived_at is null and x.source <> 'generated' and k.exportable and (x.sha256 is null or x.size_bytes is null or x.mime_type is null)),
+      'withheld', withheld)
     into lo from public.property_documents x left join public.repo_kinds k on k.kind = x.kind where x.property_id = p_property;
   out := jsonb_build_object(
     'schema', 'mre.property/1',
@@ -365,16 +404,40 @@ begin
     'items', items,
     'left_out', lo);
   insert into public.property_document_events (property_id, actor, kind, detail)
-  values (p_property, coalesce(auth.jwt()->>'email', 'agent'), 'exported', jsonb_build_object('schema', 'mre.property/1', 'items', jsonb_array_length(items), 'public_records', jsonb_array_length(recs)));
+  values (p_property, coalesce(auth.jwt()->>'email', 'agent'), 'exported', jsonb_build_object('schema', 'mre.property/1', 'items', jsonb_array_length(items), 'public_records', jsonb_array_length(recs), 'details', coalesce(p_details, false)));
   return out;
 end $$;
-revoke execute on function public.agent_property_export(uuid) from public, anon;
-grant execute on function public.agent_property_export(uuid) to authenticated;
+revoke execute on function public.agent_property_export(uuid, boolean) from public, anon;
+grant execute on function public.agent_property_export(uuid, boolean) to authenticated;
+
+-- Starting again: as in migration 013 (the live body, unchanged), except that new owners also start with nothing shared: every
+-- item shared with the earlier owners stops being shared (each logged as 'unshared' in property_document_events by the trigger).
+create or replace function public.agent_reopen_property(pid uuid, new_owners boolean) returns void
+language plpgsql security definer set search_path = public as $$
+declare n int;
+begin
+  if not public.is_agent() then raise exception 'Agent only'; end if;
+  if not exists (select 1 from public.properties where id = pid and stage in ('withdrawn','settled')) then raise exception 'Only a withdrawn or settled property can start again'; end if;
+  if new_owners then
+    update public.property_people set role = 'former' where property_id = pid and role <> 'former';
+    update public.properties set owners_on_title = null, ownership = '{}'::jsonb, disclosures = '{}'::jsonb, cycle_at = now() where id = pid;
+    select count(*) into n from public.properties pp, jsonb_object_keys(pp.found) where pp.id = pid;
+    if n > 0 then
+      perform set_config('app.council_accept', 'on', true);
+      update public.properties set found = '{}'::jsonb, provenance = '{}'::jsonb where id = pid;
+      perform set_config('app.council_accept', 'off', true);
+      insert into public.council_use_log (property_id, kind, detail, actor) values (pid, 'cleared', jsonb_build_object('reason', 'new owners', 'values', n), coalesce(auth.jwt()->>'email', 'agent'));
+    end if;
+    update public.property_documents set shared_at = null where property_id = pid and shared_at is not null;
+  end if;
+  update public.properties set stage = 'appraisal', stage_at = now() where id = pid;
+end $$;
 
 -- ═══════════════ PART B: the storage bucket (run once when applied; not run by the rollback test) ═══════════════
 -- A private bucket of its own, so its limits (25 MB, the accepted types) don't touch the 'private' bucket's signatures,
 -- imports and Quiet List files. Read only through signed links. Tim adds files; nobody overwrites or deletes one (no
--- update or delete policy). A party to the property may read a file (and its preview) only while Tim shares it.
+-- update or delete policy). Vendors have no policy here at all: the repo-link edge function makes their 10-minute link with
+-- the service role, after repo_vendor_can_read says yes for them.
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values ('property-files', 'property-files', false, 26214400, array['application/pdf','image/jpeg','image/png','image/webp',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -383,4 +446,3 @@ on conflict (id) do nothing;
 create policy repo_agent_read on storage.objects for select to authenticated using (bucket_id = 'property-files' and public.is_agent());
 create policy repo_agent_add on storage.objects for insert to authenticated with check (bucket_id = 'property-files' and public.is_agent()
   and (storage.foldername(name))[1] = 'properties' and (storage.foldername(name))[3] in ('docs', 'photos'));
-create policy repo_party_read on storage.objects for select to authenticated using (bucket_id = 'property-files' and public.repo_vendor_can_read(name));
