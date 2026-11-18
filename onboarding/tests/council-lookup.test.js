@@ -41,6 +41,10 @@ const norm = t => String(t || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim
     [norm('9 Sent Street, Balclutha')]: await look('sent', '9 Sent Street, Balclutha'),
     [norm('8 Slow Street, Dunedin')]: { status: 'slow', asked: '8 Slow Street, Dunedin', values: [], sources: [], links: [], info: [] },
   };
+  // a property whose land area is found as 2071, then (a newer lookup) 2100: the Dunedin answer with its asked address and land area changed
+  const keptResult = area => { const r = JSON.parse(JSON.stringify(RESULTS[norm('100 Gladstone Road, Dunedin')])); r.asked = '30 Kept Street, Dunedin';
+    const la = r.values.find(v => v.key === 'land_area'); la.value = area; la.display = area.toLocaleString('en-NZ') + ' m²'; la.also = []; return r; };
+  RESULTS[norm('30 Kept Street, Dunedin')] = keptResult(2071);
   const b = await chromium.launch();
   const page = async scheme => {
     const ctx = await b.newContext({ viewport: { width: 390, height: 844 }, colorScheme: scheme || 'light' });
@@ -74,7 +78,8 @@ const norm = t => String(t || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim
         { id: 'PR1', address: '100 Gladstone Road, Dunedin', title_ref: '430432', ownership: {}, description: {}, disclosures: {}, found: {}, provenance: {}, stage: 'appraisal', stage_at: now, created_at: now, updated_at: now },
         { id: 'PR3', address: '24 Tarbert Street, Alexandra', title_ref: '', ownership: {}, description: { pLand: '2000' }, disclosures: {}, found: {}, provenance: {}, stage: 'signed', stage_at: now, created_at: now, updated_at: now },
         { id: 'PR5', address: '2/20 Thames Street, Oamaru', title_ref: '', ownership: {}, description: {}, disclosures: {}, found: {}, provenance: {}, stage: 'appraisal', stage_at: now, created_at: now, updated_at: now },
-        { id: 'PR6', address: '9 Sent Street, Balclutha', title_ref: '', ownership: {}, description: { pLand: '900' }, disclosures: {}, found: {}, provenance: {}, stage: 'agreement', stage_at: now, created_at: now, updated_at: now }],
+        { id: 'PR6', address: '9 Sent Street, Balclutha', title_ref: '', ownership: {}, description: { pLand: '900' }, disclosures: {}, found: {}, provenance: {}, stage: 'agreement', stage_at: now, created_at: now, updated_at: now },
+        { id: 'PR7', address: '30 Kept Street, Dunedin', title_ref: '', ownership: {}, description: { pLand: '800' }, disclosures: {}, found: {}, provenance: {}, stage: 'appraisal', stage_at: now, created_at: now, updated_at: now }],
       property_people: [{ id: 'PP3', property_id: 'PR3', position: 1, legal_name: 'Sam Lee', pref_name: 'Sam', email: 'sam@example.com', phone: '', user_id: 'v-sam', role: 'owner', source: 'agreement', name_from: 'agreement' }],
       agreements: [{ id: 'A6', ref: 'MRE-2026-1006', address: '9 Sent Street, Balclutha', property_id: 'PR6', status: 'sent', config: {}, answers: { pLand: '900' }, legal: {}, sent_at: now, agreement_version: 'v3.15-26102026', created_at: now }, { id: 'A3', ref: 'MRE-2026-1003', address: '24 Tarbert Street, Alexandra', property_id: 'PR3', status: 'signed', config: { title: '' }, answers: { pLand: '2000' }, legal: { choice: 'have' }, signed_at: now, agreement_version: 'v3.15-26102026', created_at: now }],
       agreement_people: [{ id: 'S1', agreement_id: 'A3', position: 1, legal_name: 'Sam Lee', pref_name: 'Sam', email: 'sam@example.com', phone: '', user_id: 'v-sam', signed_at: now }],
@@ -263,6 +268,28 @@ const norm = t => String(t || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim
   d = await db();
   expect(d.agreements.find(x => x.id === 'A6').answers.pLand === '900' && d.properties.find(x => x.id === 'PR6').description.pLand === '726', 'sent agreement left alone; the file takes the choice');
   expect(d.council_use_log.some(x => x.property_id === 'PR6' && (x.detail.agreement_left || []).some(y => y.ref === 'MRE-2026-1006')), 'the agreement left alone is logged');
+
+  // 7e2. removing a KEPT record leaves the field alone: the file says 800; Tim uses the public record (2071); a newer lookup says
+  // 2100 and Tim keeps 2071; removing that kept record must not take the land area back to 800
+  await openProp('30 Kept Street, Dunedin');
+  await p.click('#crStart'); await p.waitForTimeout(500);
+  await p.check('[data-cr-tick="land_area"]'); await p.check('input[data-cr-ch="land_area"][value="replace"]'); await p.click(useBtn); await p.waitForTimeout(700);
+  d = await db(); expect(d.properties.find(x => x.id === 'PR7').description.pLand === '2071', 'public record used: 2071');
+  await p.evaluate(r => { const all = JSON.parse(localStorage.getItem('councilResults')); all['30 kept street dunedin'] = r; localStorage.setItem('councilResults', JSON.stringify(all)); }, keptResult(2100));
+  await p.click('#crStart'); await p.waitForTimeout(600);
+  expect(/2,100 m²/.test(await row('land_area')) && /On the file now: 2071/.test(await row('land_area')), 'newer lookup: 2100 against 2071 on file');
+  await p.check('[data-cr-tick="land_area"]'); await p.check('input[data-cr-ch="land_area"][value="keep"]'); await p.click(useBtn); await p.waitForTimeout(700);
+  d = await db(); let p7 = d.properties.find(x => x.id === 'PR7');
+  expect(p7.description.pLand === '2071' && p7.found.land_area.written === false && p7.found.land_area.value === 2100 && p7.provenance.pLand.value === '2071', 'kept 2071; 2100 stored beside it, not written');
+  const t7 = (await p.textContent('#crTile')).replace(/\s+/g, ' ');
+  expect(/You kept your own/.test(t7) && /On the file: 2071/.test(t7), 'tile shows the kept record');
+  await p.click('[data-cr-rm="land_area"]'); await p.click('[data-cr-rm="land_area"]'); await p.waitForTimeout(400);
+  out.keptRemoveToast = await p.textContent('#toast');
+  await p.waitForTimeout(400);
+  d = await db(); p7 = d.properties.find(x => x.id === 'PR7');
+  expect(p7.description.pLand === '2071' && !p7.found.land_area && p7.provenance.pLand && p7.provenance.pLand.value === '2071', 'removing the kept record: land area stays 2071, its provenance stays: ' + p7.description.pLand);
+  expect(!/back to what it was/.test(out.keptRemoveToast), 'and the page doesn\'t say it went back: ' + out.keptRemoveToast);
+  expect(/From Dunedin City Council rates/.test(await p.textContent('label[for="pfd_pLand"]')), 'the line under the land area still names where 2071 came from');
 
   // 7f. the lookup ran out of time: "taking longer than usual", not "no signal"
   await openProp('100 Gladstone Road, Dunedin');

@@ -5141,7 +5141,9 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <button class="btn link" type="button" data-cr-wrong>None of these</button>${other}`);
     // flats, units and cross-leases: never one picked for Tim
     if (r.status === 'choose_unit') return shell(`<h3>Public records</h3><p class="small" style="margin:0 0 8px">There's more than one rating unit at ${nt(r.matched_address || r.asked || ctx.address)} (flats, units or a cross-lease), so nothing is shown yet. Which one is it?</p>
-      ${(r.units || []).map((u, i) => `<button class="btn ghost cr-cand cr-unit" type="button" data-cr-unit="${i}">${nt(u.address)}<span class="small">Valuation ${nt(u.ref)}${u.legal ? ` · ${nt(u.legal)}` : ''}</span></button>`).join('')}
+      ${(r.units || []).map((u, i) => u.address
+        ? `<button class="btn ghost cr-cand cr-unit" type="button" data-cr-unit="${i}">${nt(u.address)}<span class="small">Valuation ${nt(u.ref)}${u.legal ? ` · ${nt(u.legal)}` : ''}</span></button>`
+        : `<button class="btn ghost cr-cand cr-unit" type="button" data-cr-unit="${i}">Valuation ${nt(u.ref)}${u.legal ? ` · ${nt(u.legal)}` : ''}<span class="small">Address not given in the record</span></button>`).join('')}
       <button class="btn link" type="button" data-cr-wrong>None of these</button>${other}`);
     if (r.status !== 'ok') return shell(`<h3>Public records</h3><p class="small">${r.status === 'unavailable' ? 'The address finder didn\'t answer just now. Try again in a moment.' : `Nothing found on public records for ${nt(r.asked || ctx.address)}. A new subdivision may not be on the roll yet.`}</p>${links}<div class="toolbar">${goBtn('Look again')}<button class="btn link" type="button" data-cr-wrong>Try another address</button></div>${other}`);
     const vals = r.values || [];

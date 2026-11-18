@@ -158,7 +158,7 @@ const { makeFetch } = require('./files/council-fixtures.js');
   { // outside Otago-style: no ORC record, several LINZ records: Tim chooses from LINZ's
     const S = require('./files/council-fixtures.js').SCENARIOS; S.linzOnly = Object.assign({}, S.units, { orc: { features: [] } });
     const { r } = await run('linzOnly');
-    expect(r.status === 'choose_unit' && r.units.length === 2 && r.units[1].legal === 'Flat 2 DP 1', 'several LINZ records: choose');
+    expect(r.status === 'choose_unit' && r.units.length === 2 && r.units[1].legal === 'Flat 2 DP 1' && r.units.every(u => u.address === null), 'several LINZ records: choose, with no address made up for them');
     const { r: r2 } = await run('linzOnly', null, { address: '2/20 Thames Street, Oamaru', unitRef: '26280/29000B' });
     expect(r2.status === 'ok' && val(r2, 'legal_description').value === 'Flat 2 DP 1', 'LINZ unit chosen'); }
   { const u = core.parseUnit; expect(JSON.stringify(u('2/20 Thames Street')) === '{"unit":"2","number":"20"}' && JSON.stringify(u('Flat 2, 20 Thames Street')) === '{"unit":"2","number":"20"}' && JSON.stringify(u('Unit 3B 14 King St')) === '{"unit":"3B","number":"14"}' && u('20A Thames Street') === null && u('20 Thames Street') === null, 'units read from addresses'); }

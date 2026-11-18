@@ -3,11 +3,11 @@
 -- __RESULT__, so the whole thing is one statement: the final exception undoes the migration and every test row, so nothing is
 -- kept. The output is the exception message: refusals read in lower case; a line in CAPITALS means something that should have
 -- been refused was allowed, or a value was wrong. No DELETE anywhere.
--- Last run: 18 November 2026 (after the independent review), live project hwpwyjxhdvlqrjwzxzqz, with migration 013 exactly as
--- committed: every line as expected, no CAPITALS, no [NULL]; afterwards the project had no council table, no found or provenance
+-- Last run: 18 November 2026 (after the second review: removing a kept record, towns and units in the address fit), live project
+-- hwpwyjxhdvlqrjwzxzqz, with migration 013's statements as committed: every line as expected, no CAPITALS, no [NULL]; afterwards the project had no council table, no found or provenance
 -- column, none of the new functions or the trigger, agent_reopen_property as before, and no test row or sign-in.
 do $t$
-declare out text := ''; r jsonb; pid uuid; pid2 uuid; pid3 uuid; pid4 uuid; lid uuid; lid2 uuid; lid3 uuid; lid4 uuid; lid5 uuid; aid uuid; aid4 uuid; n int; x text; pr record;
+declare out text := ''; r jsonb; pid uuid; pid2 uuid; pid3 uuid; pid4 uuid; lid uuid; lid2 uuid; lid3 uuid; lid4 uuid; lid5 uuid; lid6 uuid; lid7 uuid; res2 jsonb; aid uuid; aid4 uuid; n int; x text; pr record;
   vuid uuid := '11111111-1111-1111-1111-1111111111c1';
   agent text := json_build_object('email', (select email from public.agents order by created_at limit 1), 'sub', '22222222-2222-2222-2222-222222222222')::text;
   vendor text := '{"email":"rb-council-vendor@example.com","sub":"11111111-1111-1111-1111-1111111111c1","role":"authenticated"}';
@@ -53,7 +53,10 @@ begin
   -- address fit
   out := out || 'fits: unit vs none=' || public.council_addr_fits('9/100 Gladstone Road, Dunedin', '100 Gladstone Road, Dalmore, Dunedin')
     || ' flat form=' || public.council_addr_fits('Flat 2, 20 Thames Street', '2/20 thames st') || ' other unit=' || public.council_addr_fits('1/20 Thames Street', '2/20 Thames Street')
-    || ' other number=' || public.council_addr_fits('102 Gladstone Road', '100 Gladstone Road') || ' other street=' || public.council_addr_fits('100 Gladstone Road', '100 Highgate') || '; ';
+    || ' other number=' || public.council_addr_fits('102 Gladstone Road', '100 Gladstone Road') || ' other street=' || public.council_addr_fits('100 Gladstone Road', '100 Highgate')
+    || ' other town=' || public.council_addr_fits('20 High Street, Mosgiel', '20 High Street, Balclutha') || ' shared suburb=' || public.council_addr_fits('100 Gladstone Road, Dunedin', '100 Gladstone Road, Dalmore, Dunedin')
+    || ' postcode ignored=' || public.council_addr_fits('20 Thames Street, Oamaru', '20 Thames Street, Oamaru 9400')
+    || ' unit not chosen=' || public.council_addr_fits('20 Thames Street', '2/20 Thames Street') || ' unit chosen=' || public.council_addr_fits('20 Thames Street', '2/20 Thames Street', true) || '; ';
 
   -- accept into an empty file: title, legal description and land area are written; the rest stored in found
   r := public.agent_council_accept(pid, lid, array['title_ref', 'legal_description', 'land_area', 'capital_value', 'zone', 'hazard_dcc_none', 'rates_council', 'not_a_key', 'BAD KEY']);
@@ -154,6 +157,21 @@ begin
   select * into pr from public.properties where id = pid4;
   out := out || coalesce('remove held by agreement: restored=' || (r->>'restored') || ' holds=' || coalesce(r->>'agreement_holds', 'NONE') || ' title=' || pr.title_ref || ' in found=' || (pr.found ? 'title_ref'), '[NULL]') || '; ';
   out := out || coalesce('removals logged=' || (select count(*) from public.council_use_log where property_id = pid4 and kind = 'removed'), '[NULL]') || '; ';
+  -- removing a KEPT record leaves the field and its provenance alone (the reviewer's sequence): the file says 800; Tim uses the
+  -- public record; a newer lookup says something else and Tim keeps the first; removing the kept record keeps the field as it is
+  insert into public.properties (address, description) values ('11/100 Gladstone Road, Dunedin', '{"pLand":"800"}') returning id into pid3;
+  insert into public.council_lookups (property_id, asked, matched_address, council, status, result, created_by)
+  values (null, '11/100 Gladstone Road, Dunedin', res->>'matched_address', res->>'council', 'ok', res, 'rb test') returning id into lid6;
+  r := public.agent_council_accept(pid3, lid6, array['land_area'], array['land_area']);
+  res2 := jsonb_set(res, '{values}', (select jsonb_agg(case when v->>'key' = 'land_area' then v || '{"value":3700,"display":"3,700 m²"}'::jsonb else v end) from jsonb_array_elements(res->'values') v));
+  insert into public.council_lookups (property_id, asked, matched_address, council, status, result, created_by)
+  values (null, '11/100 Gladstone Road, Dunedin', res2->>'matched_address', res2->>'council', 'ok', res2, 'rb test') returning id into lid7;
+  r := public.agent_council_accept(pid3, lid7, array['land_area'], '{}', array['land_area']);
+  select * into pr from public.properties where id = pid3;
+  out := out || coalesce('kept newer: pLand=' || (pr.description->>'pLand') || ' found value=' || (pr.found->'land_area'->>'value') || ' written=' || (pr.found->'land_area'->>'written') || ' provenance value=' || (pr.provenance->'pLand'->>'value'), '[NULL]') || '; ';
+  r := public.agent_council_remove(pid3, 'land_area');
+  select * into pr from public.properties where id = pid3;
+  out := out || coalesce('remove kept: restored=' || (r->>'restored') || ' pLand=' || coalesce(pr.description->>'pLand', 'NONE') || ' in found=' || (pr.found ? 'land_area') || ' provenance value=' || coalesce(pr.provenance->'pLand'->>'value', 'GONE'), '[NULL]') || '; ';
 
   -- starting again with new owners clears the public-record values (logged); with the same owners they stay
   r := public.agent_council_accept(pid4, lid5, array['zone']);

@@ -299,7 +299,8 @@ export async function lookup(input: LookupInput, deps: Deps) {
   function unitList() {
     return orcUnits.map((u) => {
       const ref = str(u.ValuationReference || u.VNZ); const c = layer ? layerRows.find((a) => sameRef(a[layer.refField], ref)) : null;
-      return { ref, address: (c && layer ? layer.addr(c) : "") || orcAddr(u) || matched, legal: str(u.LegalDescription) || null, title: str(u.CertificateOfTitle) || null };
+      // a unit's own address only: never the address typed or matched, which may be another unit's
+      return { ref, address: (c && layer ? layer.addr(c) : "") || orcAddr(u) || null, legal: str(u.LegalDescription) || null, title: str(u.CertificateOfTitle) || null };
     });
   }
   const ref = str(orc?.ValuationReference || orc?.VNZ) || null;
@@ -309,7 +310,7 @@ export async function lookup(input: LookupInput, deps: Deps) {
   else if (linzRows.length === 1) linz = linzRows[0];
   else if (linzRows.length > 1) {
     if (input.unitRef) linz = linzRows.find((a) => sameRef(a.valuation_reference, input.unitRef)) || null;
-    if (!linz) return { status: "choose_unit", ...base, matched_address: matched, units: linzRows.map((a) => ({ ref: str(a.valuation_reference), address: matched, legal: str(a.legal_description) || null, title: str(a.title_no) || null })), sources, values, links, info };
+    if (!linz) return { status: "choose_unit", ...base, matched_address: matched, units: linzRows.map((a) => ({ ref: str(a.valuation_reference), address: null, legal: str(a.legal_description) || null, title: str(a.title_no) || null })), sources, values, links, info };
   }
   if (linzR) track("linz_boundaries", "LINZ NZ Property Boundaries", linzUrl, linzR, linzR.ok ? !!linz : null, linzRows.length > 1 ? `${linzRows.length} records at this point` : undefined);
   if (!council && linz) taName = str(linz.territorial_authority) || null;

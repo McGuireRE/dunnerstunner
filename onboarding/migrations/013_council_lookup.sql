@@ -100,21 +100,33 @@ create or replace function public.council_addr_key(t text) returns jsonb languag
   select case when (select g from m) is null then null
     else jsonb_build_object('unit', (select g[1] from m), 'number', (select g[2] from m), 'street', (select g[3] from m)) end;
 $$;
--- does a lookup's address fit the property's: the same house number and street, and the same unit when both name one; an
--- address with no house number (a rural road) fits only when the two are the same apart from punctuation
-create or replace function public.council_addr_fits(p_prop text, p_lookup text) returns boolean language sql immutable set search_path = public as $$
+-- the towns or suburbs in an address: everything after the first comma, without postcodes ("20 Thames Street, Oamaru 9400" gives
+-- {oamaru}; "100 Gladstone Road, Dalmore, Dunedin" gives {dalmore, dunedin}); null when there are none
+create or replace function public.council_addr_towns(t text) returns text[] language sql immutable set search_path = public as $$
+  select array_agg(x) from (select public.council_norm(regexp_replace(seg, '[0-9]+', '', 'g')) as x
+    from unnest((string_to_array(coalesce(t, ''), ','))[2:]) seg) s where x <> '';
+$$;
+-- does a lookup's address fit the property's: the same house number and street; a shared town or suburb when both name one
+-- ("20 High Street, Mosgiel" doesn't fit "20 High Street, Balclutha"); the same unit when both name one; and a property with no
+-- unit fits a lookup for a particular unit only when Tim chose that unit in the lookup (p_chosen). An address with no house number
+-- (a rural road) fits only when the two are the same apart from punctuation.
+create or replace function public.council_addr_fits(p_prop text, p_lookup text, p_chosen boolean default false) returns boolean language sql immutable set search_path = public as $$
   select case
     when public.council_addr_key(p_prop) is null or public.council_addr_key(p_lookup) is null
       then length(public.council_norm(p_prop)) >= 3 and public.council_norm(p_prop) = public.council_norm(p_lookup)
     else (public.council_addr_key(p_prop)->>'number') = (public.council_addr_key(p_lookup)->>'number')
      and (public.council_addr_key(p_prop)->>'street') = (public.council_addr_key(p_lookup)->>'street')
-     and (public.council_addr_key(p_prop)->>'unit' is null or public.council_addr_key(p_lookup)->>'unit' is null
-          or public.council_addr_key(p_prop)->>'unit' = public.council_addr_key(p_lookup)->>'unit')
+     and (public.council_addr_towns(p_prop) is null or public.council_addr_towns(p_lookup) is null
+          or public.council_addr_towns(p_prop) && public.council_addr_towns(p_lookup))
+     and case
+       when public.council_addr_key(p_lookup)->>'unit' is null then true
+       when public.council_addr_key(p_prop)->>'unit' is null then coalesce(p_chosen, false)
+       else public.council_addr_key(p_prop)->>'unit' = public.council_addr_key(p_lookup)->>'unit' end
   end;
 $$;
 create or replace function public.council_lookup_fits(p_prop text, l public.council_lookups) returns boolean language sql immutable set search_path = public as $$
-  select public.council_addr_fits(p_prop, l.asked) or public.council_addr_fits(p_prop, l.matched_address)
-      or public.council_addr_fits(p_prop, l.result->>'unit_address');
+  select public.council_addr_fits(p_prop, l.asked, l.result->>'unit_ref' is not null) or public.council_addr_fits(p_prop, l.matched_address, l.result->>'unit_ref' is not null)
+      or public.council_addr_fits(p_prop, l.result->>'unit_address', l.result->>'unit_ref' is not null);
 $$;
 
 -- the newest usable lookup for this property (while it still fits both the property's address and the address asked), or for this
@@ -264,7 +276,9 @@ begin
   if e is null then raise exception 'That value isn''t on the property file'; end if;
   field := nullif(e->>'field', ''); pv := coalesce(p.provenance, '{}'::jsonb);
   new_title := p.title_ref; new_legal := p.legal_description; new_desc := coalesce(p.description, '{}'::jsonb);
-  if field is not null and coalesce(pv->field->>'key', '') = p_key then
+  -- only a value that was written to its field gives that field back; a kept one (written false) just leaves found, and the
+  -- field and its provenance (which belong to whatever Tim kept) stay as they are
+  if field is not null and coalesce(e->>'written', 'false') = 'true' and coalesce(pv->field->>'key', '') = p_key then
     pr := pv->field; pv := pv - field;
     cur := case field when 'title_ref' then p.title_ref when 'legal_description' then p.legal_description else new_desc->>'pLand' end;
     if public.council_same(field, cur, pr->>'value') then
@@ -313,4 +327,4 @@ grant execute on function public.agent_council_cached(text, uuid), public.agent_
   public.agent_council_remove(uuid, text) to authenticated;
 revoke execute on function public.guard_found() from public, anon, authenticated;
 revoke execute on function public.council_norm(text), public.council_same(text, text, text), public.council_addr_key(text),
-  public.council_addr_fits(text, text), public.council_lookup_fits(text, public.council_lookups) from public, anon;
+  public.council_addr_towns(text), public.council_addr_fits(text, text, boolean), public.council_lookup_fits(text, public.council_lookups) from public, anon;

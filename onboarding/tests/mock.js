@@ -318,8 +318,12 @@ function councilInvoke(o){ const mode=localStorage.getItem('councilMode');
 const cSame=(f,a,b)=>{ const n=x=>String(x??'').trim(); if(f==='pLand'&&/^\d+(\.\d+)?$/.test(n(a))&&/^\d+(\.\d+)?$/.test(n(b))) return Math.round(+n(a))===Math.round(+n(b)); return n(a).toLowerCase().replace(/[^a-z0-9]/g,'')===n(b).toLowerCase().replace(/[^a-z0-9]/g,''); };
 // council_addr_key() and council_addr_fits()
 function cAddrKey(t){ const v=String(t||'').toLowerCase().replace(/^\s*(flat|unit|apartment|apt)\.?\s*([0-9]+[a-z]?|[a-z])\s*,?\s+/,'$2/').replace(/[^a-z0-9/ ]+/g,' '); const m=v.match(/^\s*(?:([0-9]+[a-z]?|[a-z])\s*\/\s*)?([0-9]+[a-z]?)\s+([a-z]+)/); return m?{unit:m[1]||null,number:m[2],street:m[3]}:null; }
-function cFits(prop,look){ const a=cAddrKey(prop), b=cAddrKey(look); if(!a||!b) return cNorm(prop).length>=3&&cNorm(prop)===cNorm(look); return a.number===b.number&&a.street===b.street&&(!a.unit||!b.unit||a.unit===b.unit); }
-const lookFits=(prop,l)=>cFits(prop,l.asked)||cFits(prop,l.matched_address)||cFits(prop,(l.result||{}).unit_address);
+// council_addr_towns(): what follows the first comma, without postcodes
+const cTowns=t=>{ const x=String(t||'').split(',').slice(1).map(s=>cNorm(s.replace(/[0-9]+/g,''))).filter(Boolean); return x.length?x:null; };
+function cFits(prop,look,chosen){ const a=cAddrKey(prop), b=cAddrKey(look); if(!a||!b) return cNorm(prop).length>=3&&cNorm(prop)===cNorm(look);
+  const ta=cTowns(prop), tb=cTowns(look);
+  return a.number===b.number&&a.street===b.street&&(!ta||!tb||ta.some(x=>tb.includes(x)))&&(!b.unit?true:!a.unit?!!chosen:a.unit===b.unit); }
+const lookFits=(prop,l)=>{ const ch=!!(l.result||{}).unit_ref; return cFits(prop,l.asked,ch)||cFits(prop,l.matched_address,ch)||cFits(prop,(l.result||{}).unit_address,ch); };
 const DAY30=30*864e5;
 function councilRpc(name,a,me){ if(offline()) return bad('Failed to fetch'); if(!me||!AGENTS.includes(me.email)) return bad('Agent only');
   if(name==='agent_council_cached'){ const n=cNorm(a.p_asked), pid=a.p_property||null, addr=pid?(PT().find(x=>x.id===pid)||{}).address:null;
@@ -365,8 +369,9 @@ function councilRpc(name,a,me){ if(offline()) return bad('Failed to fetch'); if(
     if(out.stored.length) CUL().push({id:CUL().length+1,property_id:p.id,lookup_id:l.id,kind:'used',keys:out.stored,detail:{written:out.written,kept:out.kept,agreement_updated:agKeys,agreement_left:left},actor:who,at:now()});
     save(); return ok(Object.assign(out,{agreement_updated:agKeys.length>0,agreement_left:left,ref:ag?ag.ref:null})); }
   if(name==='agent_council_remove'){ const p=PT().find(x=>x.id===a.p_property); if(!p) return bad('Property not found'); const e=(p.found||{})[a.p_key]; if(!e) return bad("That value isn't on the property file");
+    // only a value written to its field gives that field back; a kept one (written false) leaves the field and its provenance alone
     const field=e.field||null, pv=Object.assign({},p.provenance), desc=Object.assign({},p.description); let restored=false, keptBy=null;
-    if(field&&pv[field]&&pv[field].key===a.p_key){ const pr=pv[field]; delete pv[field]; const cur=field==='title_ref'?p.title_ref:field==='legal_description'?p.legal_description:desc.pLand;
+    if(field&&e.written===true&&pv[field]&&pv[field].key===a.p_key){ const pr=pv[field]; delete pv[field]; const cur=field==='title_ref'?p.title_ref:field==='legal_description'?p.legal_description:desc.pLand;
       if(cSame(field,cur,pr.value)){ const ag=(DB.agreements||[]).filter(g=>g.property_id===p.id&&live(g)).sort((x,y)=>(x.created_at||'')<(y.created_at||'')?1:-1)[0]; const held=!ag?null:field==='title_ref'?(ag.config||{}).title:field==='pLand'?(ag.answers||{}).pLand:null;
         if(String(held??'').trim()&&cSame(field,held,pr.value)) keptBy=ag.ref; else { if(field==='title_ref') p.title_ref=pr.was??null; else if(field==='legal_description') p.legal_description=pr.was??null; else if(pr.was==null) delete desc.pLand; else desc.pLand=pr.was; restored=true; } } }
     const f=Object.assign({},p.found); delete f[a.p_key]; Object.assign(p,{found:f,provenance:pv,description:desc,updated_at:now()});
