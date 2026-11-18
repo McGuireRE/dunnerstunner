@@ -3,6 +3,11 @@
 -- undoes the migration and every test row. Refusals read in lower case ("blank:" ...); a line in CAPITALS means something that
 -- should have been refused was allowed, or a value was wrong. No DELETE anywhere. The live draft declaration with Tim's Unknown
 -- for "reports" is used read-only, and once inside the block (its vendor's check, undone with everything else).
+-- Last run: 18 November 2026, live project hwpwyjxhdvlqrjwzxzqz: every line as expected, no CAPITALS (refusals for a blank change,
+-- a blank tick, a stripped answer, a blank description, a blank tenancy and signing with an unanswered note; Unknown ticked and a
+-- chosen answer recorded as before; hazards cleared against a signed agreement kept as differences; the live form: 0 unanswered
+-- notes, its Unknown can be ticked, and can't be sent back blank). Afterwards no test row, sign-in or function was left, and the
+-- live form's checks were still empty.
 do $t$
 declare out text := ''; r jsonb; pid uuid; iid uuid; aid uuid; fid uuid; d jsonb; n int; lf record; lu uuid;
   vuid uuid := '11111111-1111-1111-1111-1111111111b1';
