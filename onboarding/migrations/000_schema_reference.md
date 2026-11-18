@@ -112,11 +112,17 @@ agreements/<agreement id>/signatures/... (vendors may upload their own signature
   agreement is updated too, a signed one never), `agent_inspection_finish(iid)`, `agent_inspection_send(iid)` (after listing:
   starts or adds to the unsigned Vendor Declaration on the newest signed agreement; never replaces a vendor's answer, and returns
   those it kept so Tim sees the difference; refused once anyone has signed).
-- Tim's notes in a declaration: `data.pre[k] = 'inspection'`, `data.insp = {id, on, by}`; the vendor's confirmation is
-  `data.checked[k] = {by, name, at}` (the agreement person, their legal name and when), written only by `vendor_form_save` when
-  they tick "This is right" or change the answer, never taken from the page. Any other change to that answer (or to `tenanted`)
-  clears it. The locked view and the PDF print "Noted by Tim McGuire at the inspection on ...; checked by ..." on each such answer,
-  and a Tenancy row only when Tim noted the tenancy; declarations without notes print as before.
+- Tim's notes in a declaration: `data.pre[k] = 'inspection'`, `data.noted[k]` (a copy of Tim's answer, for comparing),
+  `data.insp = {id, on, by}`. Who dealt with each note is `data.checked[k] = {by, name, at, changed}` (the agreement person, their
+  legal name, when, and whether the answer now differs from Tim's note, compared by value: choice and details, key order and an
+  empty details field make no difference). Written only by `vendor_form_save`, never taken from the page: any change to the
+  answer replaces whoever checked it with the person changing it; setting it back to Tim's answer is a check (`changed` false);
+  ticking "This is right" checks the answer as it stands. A changed answer counts as dealt with for signing. Any other change to
+  that answer (or to `tenanted`) clears it. On screen, in the locked view, in the signed snapshot and in the PDF each such answer
+  reads "Noted by Timothy McGuire at the inspection on {date}; checked by {name}." or, if changed, "Timothy McGuire noted {his
+  answer} at the inspection on {date}; changed by {name}." A Tenancy row is printed only when Tim noted the tenancy; declarations
+  without notes print as before. Tim's own form page says the vendors check his notes on their own sign-in, with how many are left.
+- `decl_same(x, y)`: two declaration answers compared by value (revoked from anon).
 - `latest_inspection(pid)`: the newest inspection of this round of owners, with the declaration notes merged across all of them
   (newest answer per question, by the phone's time). `agent_inspection_save` takes `p_stamps` (the phone's time per answer): an
   older answer never replaces a newer one, and a refused answer is named in the error ("Not saved (d:pegs): ...").

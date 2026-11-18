@@ -19,7 +19,7 @@ begin
   perform set_config('request.jwt.claims', vendor, true);
   begin perform public.agent_inspection_start(null, 'RB 1 Rollback Lane'); out := out || 'VENDOR-START-ALLOWED; '; exception when others then out := out || 'vstart:' || sqlerrm || '; '; end;
   out := out || 'anon jblank=' || has_function_privilege('anon', 'public.jblank(jsonb)', 'execute') || ' keys=' || has_function_privilege('anon', 'public.inspection_decl_keys()', 'execute')
-    || ' notes=' || has_function_privilege('anon', 'public.inspection_note_keys()', 'execute') || ' save=' || has_function_privilege('anon', 'public.agent_inspection_save(uuid,jsonb,jsonb,jsonb,jsonb)', 'execute') || '; ';
+    || ' notes=' || has_function_privilege('anon', 'public.inspection_note_keys()', 'execute') || ' same=' || has_function_privilege('anon', 'public.decl_same(jsonb,jsonb)', 'execute') || ' save=' || has_function_privilege('anon', 'public.agent_inspection_save(uuid,jsonb,jsonb,jsonb,jsonb)', 'execute') || '; ';
 
   -- 2. Tim starts with only an address: a property at Appraisal, nobody on it, nothing else made
   perform set_config('request.jwt.claims', agent, true);
@@ -114,6 +114,20 @@ begin
     || ' pre kept=' || (d->'pre' ? 'pegs') || ' insp kept=' || (d ? 'insp' and d->'insp' <> 'null') || ' faults kept=' || (d->'answers' ? 'faults') || ' fileOk=' || (d->>'fileOk') || '; ';
   perform public.vendor_form_save(fid, '{"checked":{"faults":{"by":"x","name":"Forged"}}}'::jsonb);
   out := out || 'forged confirm=' || coalesce((select data->'checked'->>'faults' from public.property_forms where id = fid),'NULL') || '; ';
+  -- who dealt with Tim's notes: meth was changed (Tim noted No; the vendor said Unknown), pegs was ticked as he noted it
+  out := out || 'meth changed=' || coalesce(d->'checked'->'meth'->>'changed','NULL') || ' pegs ticked changed=' || coalesce(d->'checked'->'pegs'->>'changed','NULL')
+    || ' noted pegs=' || coalesce(d->'noted'->'pegs'->>'a','NULL') || '; ';
+  -- the second vendor changes the note the first one confirmed: the second vendor is now named, as a change; then changes it back
+  -- (the same answer with its keys the other way round) and that is a confirmation by them
+  perform set_config('request.jwt.claims', '{"email":"rb-vendor2@example.com","sub":"11111111-1111-1111-1111-1111111111a2","role":"authenticated"}', true);
+  perform public.vendor_form_save(fid, '{"answers":{"pegs":{"a":"no","d":"Only two found"}}}'::jsonb);
+  select data into d from public.property_forms where id = fid;
+  out := out || 'rob changed pegs: by=' || (d->'checked'->'pegs'->>'name') || ' changed=' || (d->'checked'->'pegs'->>'changed');
+  perform public.vendor_form_save(fid, '{"answers":{"pegs":{"d":"","a":"yes"}}}'::jsonb);
+  select data into d from public.property_forms where id = fid;
+  out := out || ' back: by=' || (d->'checked'->'pegs'->>'name') || ' changed=' || (d->'checked'->'pegs'->>'changed');
+  perform public.vendor_form_save(fid, '{"answers":{"pegs":{"a":"yes","d":""}}}'::jsonb);
+  out := out || ' same again by=' || (select data->'checked'->'pegs'->>'name' from public.property_forms where id = fid) || '; ';
   -- any other path that changes a confirmed answer clears its confirmation (here the database owner, as a definer function would)
   update public.property_forms set data = jsonb_set(data, '{answers,pegs}', '{"a":"no","d":""}') where id = fid;
   out := out || 'other path cleared pegs=' || (not ((select data->'checked' from public.property_forms where id = fid) ? 'pegs')) || ' meth still=' || ((select data->'checked' from public.property_forms where id = fid) ? 'meth') || '; ';
@@ -157,6 +171,13 @@ begin
   fid2 := public.vendor_form_start(aid2, 'vendor_declaration');
   select data into d from public.property_forms where id = fid2;
   out := out || 'vendor start pre=' || (d->'pre')::text || ' water=' || (d->'answers'->'water'->>'a') || ' on=' || (d->'insp'->>'on') || '; ';
+  -- a single vendor changes Tim's note (a change, by them), then sets it back to his answer written without the empty details (the
+  -- same answer by value: a confirmation)
+  perform public.vendor_form_save(fid2, '{"answers":{"water":{"a":"no","d":"Tank"}}}'::jsonb);
+  out := out || 'single changed=' || (select data->'checked'->'water'->>'changed' from public.property_forms where id = fid2);
+  perform public.vendor_form_save(fid2, '{"answers":{"water":{"a":"yes"}}}'::jsonb);
+  out := out || ' back changed=' || (select data->'checked'->'water'->>'changed' from public.property_forms where id = fid2)
+    || ' by=' || (select data->'checked'->'water'->>'name' from public.property_forms where id = fid2) || '; ';
   hid := public.vendor_form_start(aid2, 'healthy_homes');
   out := out || 'hh data=' || (select data::text from public.property_forms where id = hid) || '; ';
   perform set_config('request.jwt.claims', agent, true);
