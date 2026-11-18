@@ -4,7 +4,7 @@
 -- Additive. Builds on property_documents (001), which already holds what Tim drops in (source 'dropped') and the PDFs the
 -- system files after signing (source 'generated'). Nothing is dropped and nothing is deleted.
 --
--- PART A (tables, functions, triggers): tested in a rollback block on the live project (tests/repo-rollback.sql).
+-- Applied 18 November 2026 in four parts (live function bodies checked against this file). PART A tested in a rollback block (tests/repo-rollback.sql).
 -- PART B (the storage bucket and its policies): at the end, run once when this is applied. Not run by the rollback test.
 --
 -- What it does:
