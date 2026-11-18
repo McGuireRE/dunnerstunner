@@ -521,13 +521,15 @@ const TIM = ['agent-1', 'hello@timmcguire.co.nz'];
   expect(isEq(r9.decl.meth, { a: 'no', d: 'Known or suspected contamination: not that they know of. Tested: no' }), 'No only when both parts are No: ' + JSON.stringify(r9.decl.meth));
   await tapn('idf_meth_tested', 'yes'); await typeIn('[data-itext="d:meth"]', 'Tested 2024, clear'); r9 = await k9();
   expect(r9.decl.meth.a === 'yes' && r9.pr.disclosures.meth === 'no' && !r9.pr.disclosures.methDetail, 'tested: the answer is Yes, the fact stays "not that they know of": ' + JSON.stringify(r9.decl.meth));
+  await tapn('idf_meth_aware', 'yes'); r9 = await k9();
+  expect(r9.pr.disclosures.meth === 'yes' && r9.pr.disclosures.methDetail === 'Tested 2024, clear' && /^Known or suspected contamination: yes\. Tested: yes\. Tested 2024, clear$/.test(r9.decl.meth.d), 'page 1\'s detail gets the details text only, the note the full sentence: ' + JSON.stringify([r9.pr.disclosures.methDetail, r9.decl.meth.d]));
   await tapn('idf_meth_aware', 'unknown'); await p.click('[data-ik="d:meth"] input[name="idf_meth_tested"][value="yes"] + span').catch(() => {}); await p.waitForTimeout(200);
   await p.click('[data-iclear="d:meth"]'); await p.waitForTimeout(300); await tapn('idf_meth_aware', 'unknown');
   r9 = await k9(); expect(r9.decl.meth.a === 'unknown' && !r9.pr.disclosures.meth && await p.isVisible('[data-ik="d:meth"] .ihint'), 'Unknown: no fact, and Tim is told the vendors answer it: ' + JSON.stringify([r9.decl.meth, r9.pr.disclosures]));
 
   // 19d. the other questions asked once: weathertightness, renovations, hazards; each answer fills the fact too
   await tab('Structure'); await tapn('id_wt', 'yes'); await typeIn('[data-itext="d:wt"]', 'Old leak at the back door, fixed 2023');
-  await tab('Consents'); await tapn('id_reno', 'no');
+  await tab('Consents'); await tapn('id_reno', 'no'); expect(await p.isVisible('[data-iclear="d:reno"]'), 'the renovations question has a Clear button');
   await tab('Outside'); await tapn('id_hazard', 'yes'); await p.click('[data-ik="d:hazard"] input[value="Dog or other pets"] + span'); await p.waitForTimeout(300); await typeIn('#iho_hazard', 'Loose step at the back');
   r9 = await k9(); const D9 = r9.pr.disclosures;
   expect(r9.decl.wt.a === 'yes' && r9.decl.wt.d === 'Old leak at the back door, fixed 2023' && D9.wt === 'yes' && D9.wtDetail === 'Old leak at the back door, fixed 2023', 'weathertightness fills both: ' + JSON.stringify([r9.decl.wt, D9.wt]));
@@ -538,9 +540,9 @@ const TIM = ['agent-1', 'hello@timmcguire.co.nz'];
   // only partly the same question: kept apart, the link explained, and copying offered (never filled in for him)
   await tab('Inside'); await typeIn('[data-itext="f:pHeat"]', 'Heat pump, ceiling insulation');
   out.copyIns = await p.textContent('[data-icopy="insulation"]').catch(() => '');
-  expect(/: ceiling insulation$/.test(out.copyIns) && !/Heat pump/.test(out.copyIns) && /goes on the agreement/.test(await p.textContent('[data-ik="d:insulation"] .ilink')), 'insulation: the insulation part of the heating note only, offered: ' + out.copyIns);
+  expect(out.copyIns === 'Copy my heating and insulation note: Heat pump, ceiling insulation' && /goes on the agreement/.test(await p.textContent('[data-ik="d:insulation"] .ilink')), 'insulation: the whole heating note offered, never split: ' + out.copyIns);
   r9 = await k9(); expect(!r9.decl.insulation, 'not filled in until he copies it');
-  await p.click('[data-icopy="insulation"]'); await p.waitForTimeout(300); r9 = await k9(); expect(isEq(r9.decl.insulation, { d: 'ceiling insulation' }), 'copied');
+  await p.click('[data-icopy="insulation"]'); await p.waitForTimeout(300); r9 = await k9(); expect(isEq(r9.decl.insulation, { d: 'Heat pump, ceiling insulation' }) && (await p.inputValue('[data-itext="d:insulation"]')) === 'Heat pump, ceiling insulation', 'copied whole, for Tim to edit');
   expect(/don't work/.test(await p.textContent('[data-ik="d:chattels"] .ilink')), 'chattels not working is told apart from what stays');
 
   // 19e. derived: the 1995 to 2004 question from the year built, shown as answered with the reason, and Tim can change it
@@ -552,6 +554,8 @@ const TIM = ['agent-1', 'hello@timmcguire.co.nz'];
   await typeIn('[data-itext="f:pYear"]', '2001'); await tapn('id_era', 'no'); await typeIn('[data-itext="f:pYear"]', '2002');
   r9 = await k9(); expect(r9.decl.era.a === 'no' && /year built \(about 2002\) is in this period/.test(await p.textContent('[data-ik="d:era"]')), 'Tim\'s own answer is kept, with a warning: ' + JSON.stringify(r9.decl.era));
   await tapn('id_era', 'yes');
+  out.eraLabel = await p.textContent('[data-ik="d:era"] label.f').catch(() => '');
+  expect(!/\(optional\).*\(optional\)/.test(out.eraLabel) && /\(optional\)/.test(out.eraLabel), 'one "(optional)" on the label: ' + out.eraLabel);
   expect(!(await sideways()), 'the walk-round fits 390 px');
 
   // 19f. dark mode, 390 px, with the follow-ups open
@@ -569,6 +573,21 @@ const TIM = ['agent-1', 'hello@timmcguire.co.nz'];
   await as('v-kim', 'kim@example.com'); await p.click('[data-form="vendor_declaration"]'); await p.waitForTimeout(600);
   await pick('input[name="vfFile"][value="ok"]'); await p.click('#next'); await p.waitForTimeout(400);
   expect(await p.$('[data-q="meth"] .insp-ask') && !(await p.$('[data-q="meth"] input:checked')) && !(await p.$('[data-q="meth"] .iconfirm')), 'Kim answers the methamphetamine question Tim noted as Unknown');
+  // the reviewer's case: Kim types in the details without choosing, goes Back, then Continue. Nothing is recorded or sent for
+  // the note, Tim's note is intact, and what she typed is still on her screen
+  const kimBefore = (await db()).property_forms.find(f => f.agreement_id === 'A9').data;
+  await p.fill('[data-qd="meth"]', 'Not sure'); await p.click('#back'); await p.waitForTimeout(400); await p.click('#next'); await p.waitForTimeout(500);
+  out.backSent = await p.evaluate(() => JSON.parse(localStorage.getItem('lastVendorSave') || '{}'));
+  const kimAfter = (await db()).property_forms.find(f => f.agreement_id === 'A9').data;
+  expect(!('meth' in (out.backSent.answers || {})) && !('meth' in (out.backSent.checked || {})) && isEq(kimAfter.answers.meth, kimBefore.answers.meth) && !(kimAfter.checked || {}).meth,
+    'Back then Continue records nothing for the note and leaves Tim\'s note intact: ' + JSON.stringify([out.backSent.answers, kimAfter.answers.meth, kimAfter.checked]));
+  expect((await p.inputValue('[data-qd="meth"]')) === 'Not sure' && !(await p.$('[data-q="meth"] input:checked')), 'her typing is still there, nothing chosen');
+  await p.click('#next'); await p.waitForTimeout(300); expect(/Please answer each question Tim couldn't answer/.test(await errText()), 'Continue still asks her to answer it');
+  // the server refuses a note sent back with no choice, as a change or as a tick (migration 014, mirrored in the mock)
+  out.kimForge = await p.evaluate(async () => { const c = window.supabase.createClient(), f = JSON.parse(localStorage.getItem('mockdb')).property_forms.find(x => x.agreement_id === 'A9');
+    const a = await c.rpc('vendor_form_save', { f: f.id, patch: { answers: { meth: { d: 'stripped' } } } });
+    return [a.error && a.error.message]; });
+  expect(out.kimForge.every(m => /Please choose an answer for each question Tim noted/.test(m || '')), 'the server refuses an unanswered note: ' + JSON.stringify(out.kimForge));
   await p.$$eval('.vdq', cs => cs.forEach(c => { if (!c.querySelector('input:checked') && c.querySelector('input[value="no"]') && !c.querySelector('.insp-ask')) c.querySelector('input[value="no"]').checked = true; }));
   for (const k of ['faults']) if (!(await p.inputValue(`[data-qd="${k}"]`))) await p.fill(`[data-qd="${k}"]`, 'None known');
   await p.click('[data-q="meth"] input[value="no"] + .mark');
@@ -586,6 +605,54 @@ const TIM = ['agent-1', 'hello@timmcguire.co.nz'];
     'the declaration row reads cleanly, one full stop before the marker: ' + out.kimH1 + ' ' + (out.kimDoc.match(/certificate available\?.{0,160}/) || [''])[0]);
   d = await db(); const kf = d.property_forms.find(f => f.agreement_id === 'A9');
   expect(kf.data.answers.meth.a === 'no' && kf.data.checked.meth && kf.data.checked.meth.changed === true && kf.data.answers.burner.d === out.kimBurner, 'Kim\'s own methamphetamine answer is recorded as hers; the stored answer keeps its shape: ' + JSON.stringify(kf.data.checked.meth));
+
+  // 20. an inspection noted before these fixes (old shapes, as on the live database): every card opens on what is stored, nothing
+  //     is written on open, and where the note and the fact disagree Tim sees both and chooses. A signed agreement lists hazards.
+  await setDb(`d => { const t='2026-11-17T00:00:00Z'; d.properties.push({ id:'PR10', address:'7 Old Shape Road, Roslyn', ownership:{}, description:{ pHeat:'Heatpump, Woodfire' }, disclosures:{ wt:'yes', wtDetail:'Leak at the chimney', hazards:['Uneven paths'], meth:'no' }, stage:'signed', stage_at:t, created_at:t, updated_at:t });
+    d.agreements.push({ id:'A10', ref:'MRE-2026-1010', address:'7 Old Shape Road, Roslyn', property_id:'PR10', status:'signed', config:{}, answers:{ hazards:['Uneven paths'] }, legal:{ choice:'have' }, signed_at:t, agreement_version:'v3.15-26102026', created_at:t });
+    d.agreement_people.push({ id:'P10', agreement_id:'A10', position:1, legal_name:'Lee Old', pref_name:'Lee', email:'lee@example.com', phone:'', user_id:'v-lee', signed_at:t });
+    (d.property_inspections ||= []).push({ id:'I10', property_id:'PR10', status:'in_progress', created_by:'hello@timmcguire.co.nz', started_at:t, created_at:t, updated_at:t, finished_at:null, sent_at:null, sent_form_id:null, photos:[], notes:{}, stamps:{}, applied:{}, conflicts:{}, resolved:{},
+      facts:{ pHeat:'Heatpump, Woodfire', wt:'yes', wtDetail:'Leak at the chimney', meth:'no', hazards:['Uneven paths', 'Dog or other pets'], hazOther:'the dog' },
+      declaration:{ meth:{ a:'no', d:'' }, reno:{ d:'New deck 2020, consented' }, wt:{ a:'no', d:'' }, hazard:{ a:'no', d:'' }, burner:{ a:'unknown', d:'Code Compliance Certificate: yes. Owner unsure where it is' }, lim:{ a:'yes', d:'Obtained: 2019.' } } }); }`);
+  await as(...TIM); await p.goto('https://packages.dunnerstunner.co.nz/onboarding/'); await p.waitForTimeout(500);
+  await p.evaluate(() => localStorage.setItem('inspOpen', 'I10:4')); await go(); await p.waitForTimeout(400);
+  const i10 = async () => (await db()).property_inspections.find(x => x.id === 'I10');
+  const before10 = JSON.stringify(await i10());
+  // renovations: the stored note's text, not the fact; the old one-answer meth note shown as it was, with a prompt for both parts
+  expect(await p.textContent('main h1') === 'Consents and history', 'opened on Consents: ' + await p.textContent('main h1'));
+  expect(await p.$eval('[data-ik="d:reno"] input[value="yes"]', e => e.checked) && (await p.inputValue('[data-itext="d:reno"]')) === 'New deck 2020, consented', 'renovations open on the stored note');
+  out.legacy = await p.textContent('[data-ik="d:meth"] .ilegacy').catch(() => '');
+  expect(/answered this as one question: No\. It stays until you answer both parts/.test(out.legacy) && /page 1 fact says: Not that they know of/.test(out.legacy) && !(await p.$('[data-ik="d:meth"] input:checked')), 'the earlier meth answer is shown, with both parts to answer: ' + out.legacy);
+  // follow-up text that doesn't fit the answer, or doesn't come out the same, stays as the details (the reviewer's example)
+  expect(await p.$eval('input[name="id_lim"][value="yes"]', e => e.checked) && (await p.inputValue('[data-itext="d:lim"]')) === 'Obtained: 2019.' && !(await p.$eval('#idf_lim_when', e => e.value).catch(() => '')), 'LIM text that isn\'t the follow-ups is kept whole as details');
+  await tab('Inside');
+  expect(await p.$eval('input[name="id_burner"][value="unknown"]', e => e.checked) && (await p.inputValue('[data-itext="d:burner"]')) === 'Code Compliance Certificate: yes. Owner unsure where it is' && !(await p.$('[data-ik="d:burner"] .ifu')), 'burner Unknown keeps its typed details whole');
+  expect(/You mentioned a fire under heating\./.test(await p.textContent('[data-ik="d:burner"]')), 'a fire under heating is pointed out on the burner question, not answered');
+  // the note and the fact disagree: both shown, nothing changed until Tim chooses
+  await tab('Structure');
+  out.wtDiff = (await p.textContent('[data-idiff="wt"]').catch(() => '')).replace(/\s+/g, ' ');
+  expect(/Declaration note ?No/.test(out.wtDiff) && /Page 1 fact ?Yes: Leak at the chimney/.test(out.wtDiff), 'weathertightness note and fact both shown: ' + out.wtDiff);
+  await tab('Outside');
+  out.hazDiff = (await p.textContent('[data-idiff="hazard"]').catch(() => '')).replace(/\s+/g, ' ');
+  expect(/Declaration note ?No/.test(out.hazDiff) && /Uneven paths, Dog or other pets\. the dog/.test(out.hazDiff), 'hazards note and fact both shown: ' + out.hazDiff);
+  await p.waitForTimeout(600);
+  expect(JSON.stringify(await i10()) === before10 && !(await p.evaluate(() => Object.keys(localStorage).filter(k => k.startsWith('inspQ:')).length)), 'opening every section wrote nothing');
+  await tab('Structure'); await p.click('[data-idiff="wt"] [data-iside="fact"]'); await p.waitForTimeout(500);
+  let x10 = await i10(); expect(isEq(x10.declaration.wt, { a: 'yes', d: 'Leak at the chimney' }) && x10.facts.wt === 'yes' && !(await p.$('[data-idiff="wt"]')), 'Use the fact for both: ' + JSON.stringify(x10.declaration.wt));
+  // the meth parts: the earlier No stands until both are answered, then the parts decide
+  await tab('Consents'); await tapn('idf_meth_aware', 'no'); x10 = await i10();
+  expect(x10.declaration.meth.a === 'no' && await p.isVisible('[data-ik="d:meth"] .ilegacy'), 'one part answered: the earlier No stands: ' + JSON.stringify(x10.declaration.meth));
+  await tapn('idf_meth_tested', 'yes'); x10 = await i10();
+  expect(x10.declaration.meth.a === 'yes' && !(await p.$('[data-ik="d:meth"] .ilegacy')), 'both parts: the parts decide: ' + JSON.stringify(x10.declaration.meth));
+  // hazards: the note says No and the agreement lists hazards. Keeping the note asks Tim, rather than clearing silently
+  await tab('Outside'); await p.click('[data-idiff="hazard"] [data-iside="note"]'); await p.waitForTimeout(700);
+  x10 = await i10(); out.hazConf = await p.textContent('[data-ik="d:hazard"] [data-iconf="hazards"]').catch(() => '');
+  expect(x10.conflicts.hazards && /MRE-2026-1010 says Uneven paths/.test(out.hazConf) && isEq((await db()).properties.find(q => q.id === 'PR10').disclosures.hazards, ['Uneven paths']), 'the agreement\'s hazards are shown as a difference, not cleared: ' + out.hazConf);
+  await p.click('#insGoFinish'); await p.waitForTimeout(900);
+  out.hazFinish = (await p.textContent('[data-iconflict="hazards"]').catch(() => '')).replace(/\s+/g, ' ');
+  expect(/Uneven paths/.test(out.hazFinish) && /You noted ?None/.test(out.hazFinish), 'the finish screen asks Tim to choose: ' + out.hazFinish);
+  await p.click('[data-iresolve="hazards"][data-use="inspection"]'); await p.waitForTimeout(800);
+  d = await db(); expect(isEq(d.properties.find(q => q.id === 'PR10').disclosures.hazards, []) && isEq(d.agreements.find(g => g.id === 'A10').answers.hazards, ['Uneven paths']), 'Use mine: the property file says none; the signed agreement keeps what was signed');
   } catch (e) { fail.push('CRASHED: ' + e.message.split('\n').slice(0, 3).join(' | ')); }
   console.log(JSON.stringify(Object.assign(out, { errs: errs.concat(fail) }), null, 1)); await b.close();
 })();

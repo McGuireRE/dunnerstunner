@@ -64,10 +64,11 @@ await next();
 
 // step 3: services, registrations and the tenancy question (Healthy Homes offered only if tenanted)
 out.step3=await p.textContent('main h1'); expect(out.step3==='Services and Features','step 3');
-out.insPre=await p.$eval('[data-qd="insulation"]',e=>e.value); expect(out.insPre==='ceiling insulation','insulation from the file is the insulation part only, not the heating: '+out.insPre);
+// the "Heating and insulation" note covers heating too, so it is never put in as the answer to where the insulation is
+out.insPre=await p.$eval('[data-qd="insulation"]',e=>e.value); expect(out.insPre===''&&!(await p.$('[data-q="insulation"] .src-badge')),'insulation is not filled in from the heating note: '+out.insPre);
 await p.$$eval('.vdq',cs=>cs.forEach(c=>{ const r=c.querySelector('input[value="yes"]'); if(r) r.checked=true; }));
 await pick('input[name="vq_hai"][value="no"]'); await pick('input[name="vq_burner"][value="no"]');
-await p.fill('[data-qd="internet"]','Fibre'); await p.fill('[data-qd="glazing"]','Double glazed throughout');
+await p.fill('[data-qd="internet"]','Fibre'); await p.fill('[data-qd="glazing"]','Double glazed throughout');await p.fill('[data-qd="insulation"]','Ceiling');
 out.hhHidden=await p.$eval('#vfHHWrap',e=>e.hidden); expect(out.hhHidden,'Healthy Homes not offered until they say it is tenanted');
 await pick('input[name="vfTen"][value="now"]'); out.hhShown=!(await p.$eval('#vfHHWrap',e=>e.hidden)); expect(out.hhShown,'Healthy Homes offered when tenanted');
 await next(); out.e3=await errText(); expect(/Healthy Homes/.test(out.e3),'asks about the Healthy Homes checklist');
