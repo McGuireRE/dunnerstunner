@@ -194,3 +194,8 @@ agreements/<agreement id>/signatures/... (vendors may upload their own signature
 - Storage: bucket `property-files` (private, 25 MB, PDF, JPEG, PNG, WebP, Word, Excel, text and CSV). Agent reads and adds under
   `properties/<id>/docs|photos/`; no update or delete policy, and no vendor policy: vendors get a 600-second link from the
   `repo-link` edge function (`fn/repo_link.ts`, gateway JWT on), which asks `repo_vendor_can_read` with their own token.
+
+## 017 Wellbeing (19 November 2026)
+- `wellbeing_docs` (user_id, path, body jsonb, updated_at; primary key user_id + path). Tim's personal wellbeing app at
+  `/wellbeing/`. `path` is `config/main` or `days/YYYY-MM-DD`. One policy, `wb_own`: the signed-in agent reads and writes
+  only their own rows. Vendors and anon have no access. `wellbeing_touch` trigger sets `updated_at`.

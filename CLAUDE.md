@@ -16,6 +16,7 @@ never mix their code, data, AI accounts or billing.
   - `onboarding/BUILD-PLAN.md`: the phased plan, with the model and builder for each phase.
 - `fn/`: Supabase edge function sources (emails, PDFs, document reading). Deployed by a tiny index.ts that
   imports the raw GitHub file pinned to a commit SHA, so push first, then deploy pointing at that SHA.
+- `wellbeing/`: Tim's personal wellbeing app (installable, offline, syncs to `wellbeing_docs`). Plain files, no build step.
 - `quiet/`: The Quiet List (members-only listings). `catalogue.js`: marketing packages, shared.
 
 ## Database
