@@ -84,6 +84,19 @@ input[type=number]{width:96px}
 .grid td.n{color:var(--ink2);white-space:nowrap;padding-right:6px;max-width:118px;overflow:hidden;text-overflow:ellipsis}
 .grid td.c{width:16px;height:16px;border-radius:4px;background:var(--bg);border:1px solid var(--line)}
 .grid td.c.on{background:var(--good);border-color:var(--good)}
+.grid td.c.na{background:transparent;border-style:dashed;opacity:.45}
+.plan{display:grid;grid-template-columns:62px 1fr;gap:2px 10px;font-size:14px}
+.plan .t{font-variant-numeric:tabular-nums;color:var(--ink2);text-align:right}
+.plan .now{font-weight:700;color:var(--ink)}
+.phase{font-size:12px;border-radius:999px;padding:2px 8px;background:var(--accent-soft);color:var(--ink);font-weight:600}
+.pending{flex:0 0 28px;height:28px;border-radius:8px;border:2px dashed var(--line);display:grid;place-items:center;color:var(--ink3);font-size:13px}
+.review{border-color:var(--accent);border-width:2px}
+.review .habit .name{font-weight:500}
+.sleepbox{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px}
+.sleepbox label{font-size:12px;color:var(--ink2);display:block;margin-bottom:3px}
+.opts{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:0 0 6px;font-size:12px;color:var(--ink2)}
+.opts select{font:inherit;font-size:12px;padding:3px 6px}
+.opts label{display:flex;gap:4px;align-items:center}
 .grid th{font-weight:400;color:var(--ink3);font-size:10px}
 .edit-row{display:flex;gap:6px;align-items:center;padding:6px 0;border-top:1px solid var(--line)}
 .edit-row input[type=text]{flex:1;min-width:0}
@@ -124,19 +137,43 @@ const ytm=ch=>"https://music.youtube.com/search?q="+encodeURIComponent("Streetli
 
 /* ---------- Defaults ---------- */
 const DEFAULT_CFG={
-  goalKg:null, otNext:0, ntNext:0,
-  groups:["Morning","Eating","Movement","Evening"],
+  v:2, goalKg:null, otNext:0, ntNext:0,
+  groups:["Morning","Light","Eating","Movement","Evening"],
   habits:[
-    {id:"sunrise",name:"Watch the sunrise",group:"Morning",cue:"When I wake up"},
-    {id:"swim",name:"Swim",group:"Morning"},
+    {id:"sunrise",name:"Watch the sunrise",group:"Morning",cue:"When I wake up",season:"summer"},
+    {id:"swim",name:"Swim",group:"Morning",season:"summer"},
+    {id:"lowam",name:"Low light at home until sunrise",group:"Morning",cue:"When I get up at 7",season:"winter"},
     {id:"quiet",name:"Quiet time",group:"Morning"},
     {id:"bible",name:"Audio Bible (4 readings)",group:"Morning",type:"bible"},
+    {id:"dayam",name:"Out in the daylight after drop-offs",group:"Morning",season:"winter"},
+    {id:"midsun",name:"Midday sun",group:"Light",cue:"Around solar noon, with exercise if it suits"},
     {id:"fasted",name:"Fasted until first meal",group:"Eating",cue:"When I get hungry in the morning"},
     {id:"hflc",name:"Semi-carnivore / HFLC meals",group:"Eating"},
-    {id:"kitchen",name:"Finished eating by 1pm",group:"Eating",type:"window"},
-    {id:"walk",name:"Long low-intensity movement",group:"Movement",cue:"After lunch"}
+    {id:"kitchen",name:"Finished eating by 1pm",group:"Eating",type:"window",confirm:true},
+    {id:"walk",name:"Long low-intensity movement",group:"Movement",cue:"After lunch"},
+    {id:"lowpm",name:"Low light after sunset",group:"Evening",cue:"When the sun sets",confirm:true},
+    {id:"bed9",name:"In bed by 9pm",group:"Evening",type:"bed",confirm:true}
   ]
 };
+/* Bring an older saved setup up to date without losing Tim's own changes. */
+function migrate(c){
+  if(c.v>=2)return false;
+  const has=id=>c.habits.some(h=>h.id===id);
+  const at=id=>c.habits.findIndex(h=>h.id===id);
+  if(!c.groups.includes("Light")){const i=c.groups.indexOf("Morning");c.groups.splice(i<0?0:i+1,0,"Light")}
+  if(!c.groups.includes("Evening"))c.groups.push("Evening");
+  c.habits.forEach(h=>{if(h.id==="sunrise"||h.id==="swim")h.season=h.season||"summer";if(h.id==="kitchen")h.confirm=true});
+  const D=id=>JSON.parse(JSON.stringify(DEFAULT_CFG.habits.find(h=>h.id===id)));
+  const insertAfter=(ids,h)=>{let i=-1;ids.forEach(x=>{const k=at(x);if(k>i)i=k});
+    if(i<0){i=c.habits.map(x=>x.group).lastIndexOf(h.group);if(i<0)i=c.habits.length-1}
+    c.habits.splice(i+1,0,h)};
+  if(!has("lowam")){const h=D("lowam");const i=c.habits.findIndex(x=>x.group==="Morning"&&!x.season);if(i<0)c.habits.push(h);else c.habits.splice(i,0,h)}
+  if(!has("dayam"))insertAfter(["bible","quiet","lowam"],D("dayam"));
+  if(!has("midsun"))insertAfter([],D("midsun"));
+  if(!has("lowpm"))insertAfter([],D("lowpm"));
+  if(!has("bed9"))insertAfter(["lowpm"],D("bed9"));
+  c.v=2;return true;
+}
 
 /* ---------- Dates ---------- */
 const pad=n=>String(n).padStart(2,"0");
@@ -166,7 +203,11 @@ try{const raw=localStorage.getItem(LS);if(raw)store=Object.assign(store,JSON.par
 function persist(){try{localStorage.setItem(LS,JSON.stringify(store))}catch(e){showStatus("This device's storage is full or blocked, so changes may not be kept.")}}
 function loadFromStore(){
   const n={};Object.entries(store.docs).forEach(([p,v])=>{if(p.startsWith("days/")&&v&&v.date)n[v.date]=v});days=n;
-  if(store.docs["config/main"])cfg=Object.assign(JSON.parse(JSON.stringify(DEFAULT_CFG)),store.docs["config/main"]);
+  const saved=store.docs["config/main"];
+  if(saved){
+    cfg=Object.assign(JSON.parse(JSON.stringify(DEFAULT_CFG)),JSON.parse(JSON.stringify(saved)));
+    if(!(saved.v>=2)){cfg.v=1;if(migrate(cfg))setTimeout(()=>save("config/main",cfg),0)}
+  }
 }
 let sb=null,session=null,allowed=false,syncing=false,syncAgain=false,syncTimer=null;
 function save(path,body){
@@ -215,16 +256,73 @@ function setDay(d,fn){
 }
 function setCfg(fn){fn(cfg);save("config/main",cfg);render()}
 
+/* ---------- Sun, seasons and sleep (Dunedin) ---------- */
+const LAT=-45.874, LNG=170.503, TZ="Pacific/Auckland";
+const SUN=(()=>{const rad=Math.PI/180,e=rad*23.4397,J1970=2440588,J2000=2451545,J0=0.0009;
+  return function(dateStr){
+    const[y,m,dd]=dateStr.split("-").map(Number);
+    const dms=Date.UTC(y,m-1,dd,0,0,0); // midday in NZ
+    const d=dms/864e5-0.5+J1970-J2000, lw=rad*-LNG, phi=rad*LAT;
+    const n=Math.round(d-J0-lw/(2*Math.PI));
+    const ds=J0+lw/(2*Math.PI)+n;
+    const M=rad*(357.5291+0.98560028*ds);
+    const C=rad*(1.9148*Math.sin(M)+0.02*Math.sin(2*M)+0.0003*Math.sin(3*M));
+    const L=M+C+rad*102.9372+Math.PI;
+    const dec=Math.asin(Math.sin(e)*Math.sin(L));
+    const transit=a=>J2000+a+0.0053*Math.sin(M)-0.0069*Math.sin(2*L);
+    const noon=transit(ds);
+    const w=Math.acos((Math.sin(-0.833*rad)-Math.sin(phi)*Math.sin(dec))/(Math.cos(phi)*Math.cos(dec)));
+    const set=transit(J0+(w+lw)/(2*Math.PI)+n), rise=noon-(set-noon);
+    const ms=j=>(j+0.5-J1970)*864e5;
+    return {rise:ms(rise),noon:ms(noon),set:ms(set),len:(set-rise)*24};
+  }})();
+const clock=ms=>new Date(ms).toLocaleTimeString("en-NZ",{timeZone:TZ,hour:"numeric",minute:"2-digit"}).replace(/\s/g,"").toLowerCase();
+const hm=ms=>{const p=new Intl.DateTimeFormat("en-GB",{timeZone:TZ,hour:"2-digit",minute:"2-digit",hourCycle:"h23"}).format(new Date(ms));return p};
+const toMin=t=>{const[a,b]=t.split(":").map(Number);return a*60+b};
+const fromMin=x=>{x=((Math.round(x)%1440)+1440)%1440;return pad(Math.floor(x/60))+":"+pad(x%60)};
+const clock24=t=>{const[a,b]=t.split(":").map(Number);return (a%12||12)+":"+pad(b)+(a<12?"am":"pm")};
+const durTxt=h=>{const m=Math.round(h*60);return Math.floor(m/60)+"h"+(m%60?" "+pad(m%60)+"m":"")};
+// NZ daylight saving: last Sunday of September to first Sunday of April.
+function lastSun(y,mo){const d=new Date(y,mo+1,0);d.setDate(d.getDate()-d.getDay());return ymd(d)}
+function firstSun(y,mo){const d=new Date(y,mo,1);d.setDate(d.getDate()+((7-d.getDay())%7));return ymd(d)}
+const isSummer=s=>{const y=+s.slice(0,4);return s>=lastSun(y,8)||s<firstSun(y,3)};
+const seasonOf=s=>isSummer(s)?"summer":"winter";
+const inSeason=(h,d)=>!h.season||h.season===seasonOf(d);
+// Sleep goal: 7.5 h on the longest day, rising to 10 h on the shortest, in step with day length.
+function sleepGoal(s){
+  const y=s.slice(0,4), L=SUN(s).len, Lmax=SUN(y+"-12-21").len, Lmin=SUN(y+"-06-21").len;
+  const f=Math.min(1,Math.max(0,(Lmax-L)/(Lmax-Lmin)));
+  return Math.round((7.5+2.5*f)*12)/12; // nearest 5 minutes
+}
+function wakeTarget(s){
+  if(!isSummer(s))return "07:00";
+  // Up for sunrise: 5am at midsummer, keeping the same lead on sunrise as the days change.
+  const y=+s.slice(0,4), mid=(s<y+"-07-01"?(y-1):y)+"-12-21";
+  const lead=toMin(hm(SUN(mid).rise))-300;
+  return fromMin(Math.min(420,Math.max(300,toMin(hm(SUN(s).rise))-lead)));
+}
+const bedOk=t=>!!t&&t>="12:00"&&t<="21:00";
+function sleepHours(d){ // night before day d: bedtime is saved on the day before, wake time on d
+  const p=day(addDays(d,-1)).bed, w=day(d).wake;if(!p||!w)return null;
+  let x=toMin(w)-toMin(p);if(x<=0)x+=1440;return x/60;
+}
+
 /* ---------- Derived ---------- */
 function isDone(h,d){
   const b=day(d);
+  if(!inSeason(h,d))return false;
+  if(h.type==="bed"){if(b.bed)return bedOk(b.bed);return !!(b.h&&b.h[h.id])}
   if(h.type==="bible"){const r=b.r||{};return !!(r.prov&&r.ps&&r.ot!=null&&r.nt!=null)}
   if(h.type==="window"){if(b.lastMeal)return b.lastMeal<="13:00";return !!(b.h&&b.h[h.id])}
   return !!(b.h&&b.h[h.id]);
 }
 function streak(h){
   let d=TODAY();if(!isDone(h,d))d=addDays(d,-1);
-  let n=0;while(isDone(h,d)&&n<3650){n++;d=addDays(d,-1)}return n;
+  let n=0,k=0;
+  while(k<3650){k++;
+    if(!inSeason(h,d)){d=addDays(d,-1);continue}
+    if(!isDone(h,d))break;n++;d=addDays(d,-1)}
+  return n;
 }
 function fastHours(d){
   const b=day(d),p=day(addDays(d,-1));
@@ -239,25 +337,29 @@ function render(){
   document.getElementById("dlabel").textContent=(view===TODAY()?"Today, ":"")+fmtLong(view);
   document.getElementById("next").disabled=view>=TODAY();
   const app=document.getElementById("app");
-  app.innerHTML=stackCard()+bibleCard()+eatingCard()+workoutCard()+weightCard()+historyCard();
+  app.innerHTML=(view===TODAY()?reviewCard():"")+lightCard()+stackCard()+bibleCard()+eatingCard()+workoutCard()+weightCard()+historyCard();
   drawChart();
 }
 
 function stackCard(){
   if(editing)return editCard();
   const b=day(view);
+  const isToday=view===TODAY();
   let html=`<div class="card"><h2>Habit stack <button class="ghost small" data-act="edit">Edit</button></h2>`;
-  const total=cfg.habits.length, done=cfg.habits.filter(h=>isDone(h,view)).length;
-  html+=`<div class="tiny">${done} of ${total} done${view===TODAY()?" today":""}</div>`;
+  const vis=cfg.habits.filter(h=>inSeason(h,view));
+  const later=isToday?vis.filter(h=>h.confirm).length:0;
+  const total=vis.length, done=vis.filter(h=>isDone(h,view)).length;
+  html+=`<div class="tiny">${done} of ${total} done${isToday?" today":""}${later?` · ${later} to confirm tomorrow morning`:""}</div>`;
+  if(!isToday)html+=b.confirmed?`<div class="tiny ok" style="margin-top:4px">Day confirmed</div>`:`<div class="row" style="margin-top:8px"><button class="primary small" data-act="confirm" data-d="${view}">Confirm this day</button><span class="tiny">once the ticks below are right</span></div>`;
   cfg.groups.forEach(g=>{
-    const hs=cfg.habits.filter(h=>h.group===g);if(!hs.length)return;
+    const hs=vis.filter(h=>h.group===g);if(!hs.length)return;
     html+=`<div class="group"><div class="group-name">${esc(g)}</div>`;
     hs.forEach((h,i)=>{
-      const on=isDone(h,view);
+      const on=isDone(h,view), wait=isToday&&h.confirm;
       const cue=i===0?(h.cue?esc(h.cue)+", I will":"I will"):"After "+esc(lower(hs[i-1].name))+", I will";
-      const auto=h.type==="bible"?" (ticks itself when all 4 readings are done)":h.type==="window"&&b.lastMeal?" (from your last meal time)":"";
+      const auto=wait?"Confirm tomorrow morning, once the day is over":h.type==="bible"?" (ticks itself when all 4 readings are done)":h.type==="window"&&b.lastMeal?" (from your last meal time)":h.type==="bed"&&b.bed?" (from your bedtime)":"";
       const s=streak(h);
-      html+=`<div class="habit"><button class="check ${on?"on":""}" data-act="habit" data-id="${h.id}" aria-label="${esc(h.name)}">${on?"✓":""}</button>
+      html+=`<div class="habit">${wait?`<span class="pending" title="Confirm tomorrow">…</span>`:`<button class="check ${on?"on":""}" data-act="habit" data-id="${h.id}" aria-label="${esc(h.name)}">${on?"✓":""}</button>`}
         <div class="txt"><div class="cue">${cue}</div><div class="name">${esc(h.name)}</div>${auto?`<div class="tiny">${auto.trim()}</div>`:""}</div>
         <div class="streak">${s?s+" day"+(s>1?"s":""):""}</div></div>`;
     });
@@ -269,7 +371,7 @@ const lower=s=>s.charAt(0).toLowerCase()+s.slice(1);
 
 function editCard(){
   let html=`<div class="card"><h2>Edit habit stack <button class="primary small" data-act="done-edit">Done</button></h2>
-  <div class="tiny">Order matters: each habit is cued by the one before it. The first habit in each group uses its own cue.</div>`;
+  <div class="tiny">Order matters: each habit is cued by the one before it. The first habit in each group uses its own cue. Summer plan habits show during daylight saving, winter plan ones the rest of the year. "Confirm next morning" is for goals that run to the end of the day.</div>`;
   cfg.groups.forEach(g=>{
     html+=`<div class="group-name">${esc(g)}</div>`;
     cfg.habits.forEach((h,i)=>{ if(h.group!==g)return;
@@ -278,11 +380,66 @@ function editCard(){
         <button class="ghost" data-act="up" data-i="${i}" aria-label="Move up">↑</button>
         <button class="ghost" data-act="down" data-i="${i}" aria-label="Move down">↓</button>
         ${h.type?"":`<button class="ghost" data-act="del" data-i="${i}" aria-label="Remove">✕</button>`}</div>
+        <div class="opts"><select data-act="season" data-i="${i}" aria-label="When">${[["","All year"],["summer","Summer plan"],["winter","Winter plan"]].map(([v,t])=>`<option value="${v}" ${(h.season||"")===v?"selected":""}>${t}</option>`).join("")}</select>
+        <label><input type="checkbox" data-act="confirmflag" data-i="${i}" ${h.confirm?"checked":""}> Confirm next morning</label></div>
         ${first?`<div class="edit-row"><span class="tiny" style="width:60px">Cue</span><input type="text" value="${esc(h.cue||"")}" placeholder="e.g. When I wake up" data-act="cue" data-i="${i}"></div>`:""}`;
     });
   });
   html+=`<div class="edit-row" style="margin-top:8px"><input type="text" id="newname" placeholder="New habit"><select id="newgroup">${cfg.groups.map(g=>`<option>${esc(g)}</option>`).join("")}</select><button data-act="add">Add</button></div>
   <div class="edit-row"><span class="tiny">Goal weight (kg)</span><input type="number" step="0.1" value="${cfg.goalKg??""}" data-act="goal"></div></div>`;
+  return html;
+}
+
+function lightCard(){
+  const d=view, sun=SUN(d), summer=isSummer(d), goal=sleepGoal(d), wake=wakeTarget(d);
+  const rows=[
+    [wake, summer?"Up for sunrise":"Up. Low light at home until sunrise"],
+    [hm(sun.rise), summer?"Sunrise, then swim":"Sunrise: out in the daylight after drop-offs"],
+    ["07:45","Household drop-offs, back by 8:15"],
+    [hm(sun.noon),"Midday sun (with exercise if it suits)"],
+    ["13:00","Finish eating"],
+    [hm(sun.set),"Sunset: low light from here"],
+    ["21:00","In bed"]
+  ].sort((a,b)=>a[0]<b[0]?-1:a[0]>b[0]?1:0);
+  const nowM=d===TODAY()?toMin(hm(Date.now())):-1;
+  let cur=-1;rows.forEach((r,i)=>{if(toMin(r[0])<=nowM)cur=i});
+  // next phase change within a fortnight
+  const y=+d.slice(0,4);let change="";
+  [[lastSun(y,8),"Summer plan"],[firstSun(y,3),"Winter plan"],[firstSun(y+1,3),"Winter plan"]].forEach(([c,t])=>{if(!change&&c>d&&c<=addDays(d,14))change=`${t} starts ${fmtLong(c)}`});
+  const sh=sleepHours(d), pb=day(addDays(d,-1)).bed||"", wk=day(d).wake||"";
+  const met=sh!=null&&sh>=goal-1/12;
+  return `<div class="card"><h2>Light and sleep <span class="phase">${summer?"Summer plan":"Winter plan"}</span></h2>
+    <div class="plan">${rows.map((r,i)=>`<span class="t ${i===cur?"now":""}">${clock24(r[0])}</span><span class="${i===cur?"now":""}">${r[1]}</span>`).join("")}</div>
+    <div class="tiny" style="margin-top:8px">Daylight ${durTxt(sun.len)} · Sleep goal <b>${durTxt(goal)}</b> (7.5h at midsummer, rising to 10h at midwinter)${change?` · ${change}`:""}</div>
+    <div class="sleepbox">
+      <div><label for="bd">Bed ${d===TODAY()?"last night":"the night before"}</label><input type="time" id="bd" value="${pb}" data-act="bed" data-d="${addDays(d,-1)}"></div>
+      <div><label for="wk">Woke</label><input type="time" id="wk" value="${wk}" data-act="wake" data-d="${d}"></div>
+    </div>
+    <div class="small" style="margin-top:6px">${sh!=null?`Slept <b>${durTxt(sh)}</b> <span class="${met?"ok":"late"}">${met?"goal met":"under goal"}</span>`:`<span class="muted">Enter bed and wake times to see your sleep.</span>`}</div></div>`;
+}
+
+function reviewCard(){
+  const y=addDays(TODAY(),-1), b=day(y);
+  const vis=cfg.habits.filter(h=>inSeason(h,y)), done=vis.filter(h=>isDone(h,y)).length;
+  const sh=sleepHours(TODAY());
+  if(b.confirmed)return `<div class="card"><div class="row small" style="justify-content:space-between"><span><span class="ok">Yesterday confirmed</span> · ${done} of ${vis.length}${sh!=null?` · slept ${durTxt(sh)}`:""}</span><button class="ghost small" data-act="unconfirm" data-d="${y}">Reopen</button></div></div>`;
+  let html=`<div class="card review"><h2>Confirm yesterday <span class="tiny">${fmtLong(y)}</span></h2>
+    <div class="tiny">The day's over, so the goals that ran to the last minute can be ticked now. Fix anything that's wrong, then confirm.</div>`;
+  vis.forEach(h=>{
+    const on=isDone(h,y);let ctl,extra="";
+    if(h.type==="bible"){ctl=`<span class="check ${on?"on":""}" style="display:grid">${on?"✓":""}</span>`;if(!on)extra=`<button class="ghost small" data-act="goto" data-d="${y}">Tick yesterday's readings</button>`}
+    else if(h.type==="window"&&b.lastMeal){ctl=`<span class="check ${on?"on":""}" style="display:grid">${on?"✓":""}</span>`;extra=`<span class="tiny">last meal ${clock24(b.lastMeal)}</span>`}
+    else if(h.type==="window"){ctl=`<button class="check ${on?"on":""}" data-act="habit" data-id="${h.id}" data-d="${y}" aria-label="${esc(h.name)}">${on?"✓":""}</button>`;extra=`<input type="time" value="" data-act="last" data-d="${y}" aria-label="Last meal time" style="padding:3px 6px">`}
+    else if(h.type==="bed"&&b.bed){ctl=`<span class="check ${on?"on":""}" style="display:grid">${on?"✓":""}</span>`;extra=`<span class="tiny">in bed ${clock24(b.bed)}</span>`}
+    else ctl=`<button class="check ${on?"on":""}" data-act="habit" data-id="${h.id}" data-d="${y}" aria-label="${esc(h.name)}">${on?"✓":""}</button>`;
+    html+=`<div class="habit">${ctl}<div class="txt"><div class="name">${esc(h.name)}</div>${extra?`<div>${extra}</div>`:""}</div></div>`;
+  });
+  html+=`<div class="habit"><button class="check ${b.hiit?"on":""}" data-act="hiit" data-d="${y}" aria-label="HIIT">${b.hiit?"✓":""}</button><div class="txt"><div class="name">HIIT</div></div>
+    <button class="check ${b.lift?"on":""}" data-act="lift" data-d="${y}" aria-label="Lift">${b.lift?"✓":""}</button><div class="txt"><div class="name">Lift</div></div></div>`;
+  html+=`<div class="sleepbox"><div><label for="rbd">In bed last night</label><input type="time" id="rbd" value="${b.bed||""}" data-act="bed" data-d="${y}"></div>
+    <div><label for="rwk">Woke this morning</label><input type="time" id="rwk" value="${day(TODAY()).wake||""}" data-act="wake" data-d="${TODAY()}"></div></div>
+    <div class="small" style="margin-top:6px">${sh!=null?`Slept <b>${durTxt(sh)}</b>, goal ${durTxt(sleepGoal(TODAY()))}`:`<span class="muted">Sleep goal last night: ${durTxt(sleepGoal(TODAY()))}</span>`}</div>
+    <div class="row" style="margin-top:10px"><button class="primary" data-act="confirm" data-d="${y}">Confirm yesterday</button><span class="tiny">${done} of ${vis.length} ticked</span></div></div>`;
   return html;
 }
 
@@ -398,7 +555,9 @@ function niceStep(x){const p=Math.pow(10,Math.floor(Math.log10(x)));const n=x/p;
 function historyCard(){
   const ds=[...Array(14)].map((_,i)=>addDays(TODAY(),i-13));
   let html=`<div class="card"><h2>Last 14 days</h2><div class="grid"><table><tr><th></th>${ds.map(d=>`<th>${parse(d).getDate()}</th>`).join("")}</tr>`;
-  cfg.habits.forEach(h=>{html+=`<tr><td class="n">${esc(h.name)}</td>${ds.map(d=>`<td class="c ${isDone(h,d)?"on":""}" title="${fmtShort(d)}"></td>`).join("")}</tr>`});
+  cfg.habits.filter(h=>ds.some(d=>inSeason(h,d))).forEach(h=>{html+=`<tr><td class="n">${esc(h.name)}</td>${ds.map(d=>`<td class="c ${!inSeason(h,d)?"na":isDone(h,d)?"on":""}" title="${fmtShort(d)}"></td>`).join("")}</tr>`});
+  html+=`<tr><td class="n">Sleep goal</td>${ds.map(d=>{const x=sleepHours(d);return `<td class="c ${x!=null&&x>=sleepGoal(d)-1/12?"on":""}" title="${x!=null?durTxt(x):""}"></td>`}).join("")}</tr>`;
+  html+=`<tr><td class="n">Day confirmed</td>${ds.map(d=>`<td class="c ${day(d).confirmed?"on":""}"></td>`).join("")}</tr>`;
   [["hiit","HIIT"],["lift","Lift"]].forEach(([k,n])=>{html+=`<tr><td class="n">${n}</td>${ds.map(d=>`<td class="c ${day(d)[k]?"on":""}"></td>`).join("")}</tr>`});
   return html+`</table></div></div>`;
 }
@@ -408,11 +567,17 @@ document.getElementById("prev").onclick=()=>{view=addDays(view,-1);render()};
 document.getElementById("next").onclick=()=>{if(view<TODAY()){view=addDays(view,1);render()}};
 document.addEventListener("click",e=>{
   const el=e.target.closest("[data-act]");if(!el)return;const a=el.dataset.act;
+  const dt=el.dataset.d||view;
   if(a==="habit"){const h=cfg.habits.find(x=>x.id===el.dataset.id);
     if(h.type==="bible"){return} // driven by readings
-    if(h.type==="window"&&day(view).lastMeal){return}
-    setDay(view,b=>{b.h[h.id]=!b.h[h.id]})}
-  if(a==="hiit"||a==="lift")setDay(view,b=>{b[a]=!b[a]});
+    if(h.type==="window"&&day(dt).lastMeal){return}
+    if(h.type==="bed"&&day(dt).bed){return}
+    if(h.confirm&&dt===TODAY()){return} // confirmed tomorrow morning
+    setDay(dt,b=>{b.h[h.id]=!b.h[h.id]})}
+  if(a==="hiit"||a==="lift")setDay(dt,b=>{b[a]=!b[a]});
+  if(a==="confirm"){if(dt<TODAY())setDay(dt,b=>{b.confirmed=new Date().toISOString()})}
+  if(a==="unconfirm")setDay(dt,b=>{delete b.confirmed});
+  if(a==="goto"){view=dt;render();scrollTo(0,0)}
   if(a==="read")toggleRead(el.dataset.k);
   if(a==="range"){range=+el.dataset.r;render()}
   if(a==="savew"){const v=parseFloat(document.getElementById("wkg").value);setDay(view,b=>{if(isNaN(v))delete b.w;else b.w=Math.round(v*10)/10})}
@@ -430,8 +595,13 @@ document.addEventListener("change",e=>{
   if(a==="rename"){const v=el.value.trim();if(v)setCfg(c=>{c.habits[+el.dataset.i].name=v})}
   if(a==="cue")setCfg(c=>{c.habits[+el.dataset.i].cue=el.value.trim()});
   if(a==="goal"){const v=parseFloat(el.value);setCfg(c=>{c.goalKg=isNaN(v)?null:v})}
-  if(a==="first")setDay(view,b=>{if(el.value)b.firstMeal=el.value;else delete b.firstMeal});
-  if(a==="last")setDay(view,b=>{if(el.value)b.lastMeal=el.value;else delete b.lastMeal});
+  const dt=el.dataset.d||view;
+  if(a==="first")setDay(dt,b=>{if(el.value)b.firstMeal=el.value;else delete b.firstMeal});
+  if(a==="last")setDay(dt,b=>{if(el.value)b.lastMeal=el.value;else delete b.lastMeal});
+  if(a==="bed")setDay(dt,b=>{if(el.value)b.bed=el.value;else delete b.bed});
+  if(a==="wake")setDay(dt,b=>{if(el.value)b.wake=el.value;else delete b.wake});
+  if(a==="season")setCfg(c=>{const h=c.habits[+el.dataset.i];if(el.value)h.season=el.value;else delete h.season});
+  if(a==="confirmflag")setCfg(c=>{const h=c.habits[+el.dataset.i];if(el.checked)h.confirm=true;else delete h.confirm});
   if(a==="setot"||a==="setotc"){const card=el.closest("details");const bk=card.querySelector('[data-act="setot"]').value;const c=+card.querySelector('[data-act="setotc"]').value||1;const i=OTC.indexOf(bk+" "+c);if(i>=0)setCfg(x=>{x.otNext=i})}
   if(a==="setnt"||a==="setntc"){const card=el.closest("details");const bk=card.querySelector('[data-act="setnt"]').value;const c=+card.querySelector('[data-act="setntc"]').value||1;const i=NTC.indexOf(bk+" "+c);if(i>=0)setCfg(x=>{x.ntNext=i})}
 });

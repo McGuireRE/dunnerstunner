@@ -1,5 +1,5 @@
 // Offline copy of the wellbeing app. Scope is /wellbeing/ only.
-const CACHE = "wellbeing-v1";
+const CACHE = "wellbeing-v2";
 const FILES = ["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png", "./supabase.min.js", "./591.supabase.js"];
 self.addEventListener("install", e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)).then(() => self.skipWaiting()));
