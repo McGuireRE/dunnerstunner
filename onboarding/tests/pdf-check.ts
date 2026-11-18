@@ -112,17 +112,21 @@ expect(tf.includes("Witnessed by: Timothy McGuire (Licensee)") && tf.includes("e
 expect(tf.includes("Timothy McGuire (Licensee, REA#20117983, for McGuire Real Estate Limited)") && tf.includes("02".repeat(32)), "the licensee's countersignature is in the PDF");
 const tf2 = (await text(await NEW.buildFormPdf({ font, bold, ag, people, form, fsigs: fsigs.slice(0, 2), images: {} }), "vendor-declaration-uncountersigned")).replace(/\s+/g, " ");
 expect(tf2.includes("Not yet signed by the Licensee."), "before Tim countersigns, the PDF says so");
-// a declaration with Tim's inspection notes: each says so, with who checked it; an older form (above) prints no such line
-const formI = { ...form, data: { ...form.data, answers: { ...stored, pegs: { a: "yes", d: "" }, water: { a: "yes", d: "" } }, pre: { pegs: "inspection", water: "inspection", meth: true }, insp: { id: "I1", on: "2026-11-18", by: "Tim McGuire" },
-  checked: { pegs: { by: "P1", name: "Jane Mary Smith", at: "2026-11-19T01:00:00Z" }, water: { by: "P2", name: "Robert Smith", at: "2026-11-19T02:00:00Z" } } } };
+// a declaration with Tim's inspection notes: pegs left as he noted it and checked by Jane; water changed by Rob (so it says what
+// Tim noted, and who changed it); an older form (above) prints no such line
+const formI = { ...form, data: { ...form.data, answers: { ...stored, pegs: { a: "yes", d: "" }, water: { a: "no", d: "Tank water" } }, pre: { pegs: "inspection", water: "inspection", meth: true }, insp: { id: "I1", on: "2026-11-18", by: "Tim McGuire" },
+  noted: { pegs: { a: "yes", d: "" }, water: { a: "yes", d: "Town supply" } },
+  checked: { pegs: { by: "P1", name: "Jane Mary Smith", at: "2026-11-19T01:00:00Z", changed: false }, water: { by: "P2", name: "Robert Smith", at: "2026-11-19T02:00:00Z", changed: true } } } };
 const ti = (await text(await NEW.buildFormPdf({ font, bold, ag, people, form: formI, fsigs, images: {} }), "vendor-declaration-inspection")).replace(/\s+/g, " ");
-expect(ti.includes("Noted by Tim McGuire at the inspection on Wed, 18 November 2026; checked by Jane Mary Smith") && ti.includes("checked by Robert Smith"), "the PDF shows Tim's inspection notes and who checked each");
-expect(!tf.includes("Noted by Tim McGuire at the inspection"), "a declaration without inspection notes prints as before");
+expect(ti.includes("Noted by Timothy McGuire at the inspection on Wed, 18 November 2026; checked by Jane Mary Smith."), "an answer left as Tim noted it: noted by Timothy McGuire, checked by Jane");
+expect(ti.includes("Timothy McGuire noted Yes (Town supply) at the inspection on Wed, 18 November 2026; changed by Robert Smith."), "a changed answer: what Timothy McGuire noted, and who changed it");
+expect(!/Noted by Timothy McGuire[^.]*changed by|checked by Jane Mary Smith[^.]*Tank water/.test(ti) && !ti.includes("Noted by Tim McGuire"), "a changed answer never says noted by Tim and checked by someone else");
+expect(!tf.includes("McGuire at the inspection") && !tf.includes("McGuire noted"), "a declaration without inspection notes prints as before");
 expect(!ti.includes("Is the property tenanted, or will it be before settlement?"), "no Tenancy row unless Tim noted the tenancy");
-// Tim noted the tenancy: it is printed, with the marker and who checked it
-const formT = { ...formI, data: { ...formI.data, tenanted: "now", pre: { ...formI.data.pre, tenanted: "inspection" }, checked: { ...formI.data.checked, tenanted: { by: "P2", name: "Robert Smith", at: "2026-11-19T02:00:00Z" } } } };
+// Tim noted "It will be tenanted"; Rob changed it to tenanted now
+const formT = { ...formI, data: { ...formI.data, tenanted: "now", pre: { ...formI.data.pre, tenanted: "inspection" }, noted: { ...formI.data.noted, tenanted: "will" }, checked: { ...formI.data.checked, tenanted: { by: "P2", name: "Robert Smith", at: "2026-11-19T02:00:00Z", changed: true } } } };
 const tt = (await text(await NEW.buildFormPdf({ font, bold, ag, people, form: formT, fsigs, images: {} }), "vendor-declaration-tenancy")).replace(/\s+/g, " ");
-expect(/Is the property tenanted, or will it be before settlement\? Yes, it's tenanted now\.? Noted by Tim McGuire at the inspection on Wed, 18 November 2026; checked by Robert Smith/.test(tt), "Tim's tenancy note is printed with who checked it");
+expect(/Is the property tenanted, or will it be before settlement\? Yes, it's tenanted now\.? Timothy McGuire noted It will be tenanted at the inspection on Wed, 18 November 2026; changed by Robert Smith\./.test(tt), "the tenancy: what Timothy McGuire noted and who changed it");
 // against the form builder from before the inspection: declarations without Tim's notes (a plain one, and an older one whose
 // answers came from the property file, pre: true) print exactly the same, page for page
 if (BEFORE_INSP) {

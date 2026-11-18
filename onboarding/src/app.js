@@ -501,6 +501,7 @@
   $('#signOut').addEventListener('click', async () => {
     const waiting = pendingAll();
     if (waiting && !window.confirm(`${waiting} inspection ${waiting === 1 ? 'answer hasn\'t' : 'answers haven\'t'} been saved yet. If you sign out now, ${waiting === 1 ? 'it is' : 'they are'} lost. Sign out anyway?`)) return;
+    INS_EPOCH++;   // a save still on its way finishes without writing anything back to the phone
     try { inspIds().forEach(id => localStorage.removeItem('inspQ:' + id)); localStorage.removeItem('inspOpen'); } catch (_) { }
     INS = null; Object.keys(INS_STATE).forEach(k => { delete INS_STATE[k]; });
     IS_AGENT = false; setAgentNav(); await sb.auth.signOut(); location.hash = ''; });
@@ -2513,17 +2514,26 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         ['Methamphetamine', d.meth === 'yes' ? d.methDetail : d.meth === 'no' ? 'None known' : ''], ['Defects, notices or requisitions', d.def === 'yes' ? d.defDetail : d.def === 'no' ? 'None known' : ''], ['Hazards for visitors', haz]].filter(x => x[1]),
     };
   }
-  // an answer Tim noted at an inspection says so, and who checked it (the same line fn/pdf.ts prints)
+  // Tim's answer to one question as he noted it, for "Timothy McGuire noted ... at the inspection" (the same wording as fn/pdf.ts)
+  const VD_TENL = { now: 'Yes, it\'s tenanted now', will: 'It will be tenanted', no: 'No' };
+  function vdNotedText(k, v) {
+    if (k === 'tenanted') return VD_TENL[v] || 'no answer';
+    const q = VD_QS.find(x => x.k === k) || {}, o = v && typeof v === 'object' ? v : {}, d = String(o.d || '').trim();
+    if (q.text) return d || 'no answer';
+    const a = ynuText(o.a); return a ? a + (d ? ` (${d})` : '') : d || 'no answer';
+  }
+  // an answer Tim noted at an inspection says so, and who dealt with it: checked (left as he noted it) or changed (the same lines
+  // fn/pdf.ts prints, and the signed snapshot keeps)
   function vdInspNote(data, k) {
     if (((data.pre || {})[k]) !== 'inspection') return '';
-    const on = (data.insp || {}).on, c = (data.checked || {})[k];
-    return `Noted by Tim McGuire at the inspection on ${on ? fmtDate(on + 'T00:00:00Z') : ''}${c && typeof c === 'object' && c.name ? `; checked by ${c.name}` : '; not checked yet'}`;
+    const on = (data.insp || {}).on, c = (data.checked || {})[k], day = on ? fmtDate(on + 'T00:00:00Z') : '';
+    if (c && typeof c === 'object' && c.name && c.changed) return `Timothy McGuire noted ${vdNotedText(k, (data.noted || {})[k])} at the inspection on ${day}; changed by ${c.name}.`;
+    return `Noted by Timothy McGuire at the inspection on ${day}${c && typeof c === 'object' && c.name ? `; checked by ${c.name}` : '; not checked yet'}.`;
   }
   function vdDoc(data, address, names, when) {
     const ans = data.answers || {};
     // the tenancy answer is shown only when Tim noted it at an inspection (the same rule as fn/pdf.ts), so older declarations are unchanged
-    const TENL = { now: 'Yes, it\'s tenanted now', will: 'It will be tenanted', no: 'No' };
-    const tenancy = (data.pre || {}).tenanted === 'inspection' ? [{ title: 'Tenancy', rows: [['Is the property tenanted, or will it be before settlement?', TENL[data.tenanted] || '', vdInspNote(data, 'tenanted')]] }] : [];
+    const tenancy = (data.pre || {}).tenanted === 'inspection' ? [{ title: 'Tenancy', rows: [['Is the property tenanted, or will it be before settlement?', VD_TENL[data.tenanted] || '', vdInspNote(data, 'tenanted')]] }] : [];
     return {
       title: 'Vendor Declaration',
       head: [['Client / Vendor(s):', names], ['Property Address:', address], ['Date:', fmtDate(when)]],
@@ -2647,9 +2657,11 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   }
   const VF_STEPS = ['Your property file', 'Condition and known issues', 'Services, registrations and tenancy', 'Statement and signing'];
   // Tim's notes from an inspection (pre = 'inspection'): marked with the date, and the vendor ticks "This is right" or changes the answer
+  // once someone has dealt with a note, the badge says who, and whether they kept or changed Tim's answer (the locked view's line)
   const inspBadge = k => { const on = ((VF && VF.W.insp) || {}).on, c = vfConfirmer(k);
-    return `<span class="src-badge insp-badge">Noted by Tim at the inspection on <span translate="no">${esc(on ? fmtDate(on + 'T00:00:00Z') : '')}</span>. Please check</span>${c ? `<span class="src-badge insp-checked">Checked by <span translate="no">${esc(c.name || '')}</span></span>` : ''}`; };
-  // who confirmed one of Tim's notes: recorded by the server ({by, name, at}); a tick on this page only asks for it
+    if (c) return `<span class="src-badge insp-badge insp-checked">${esc(vdInspNote(VF.W, k))}</span>`;
+    return `<span class="src-badge insp-badge">Noted by Tim at the inspection on <span translate="no">${esc(on ? fmtDate(on + 'T00:00:00Z') : '')}</span>. Please check</span>`; };
+  // who dealt with one of Tim's notes: recorded by the server ({by, name, at, changed}); a tick on this page only asks for it
   const vfConfirmer = k => { const c = ((VF && VF.W.checked) || {})[k]; return c && typeof c === 'object' ? c : null; };
   const vfChecked = k => VF && k in (VF.W.ticks || {}) ? !!VF.W.ticks[k] : !!vfConfirmer(k);
   const inspConfirm = k => `<label class="choice cb iconfirm"><input type="checkbox" data-qc="${k}" ${vfChecked(k) ? 'checked' : ''}><span class="mark"></span><span class="ct">This is right</span></label>`;
@@ -2676,7 +2688,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     // a tick goes only when it differs from what the server holds, so a page opened before a co-owner checked can't undo it
     o.checked = {}; Object.entries(W.ticks || {}).forEach(([k, v]) => { if (!!v !== !!vfConfirmer(k)) o.checked[k] = !!v; }); return o; };
   // after a save, the server's record of who checked what
-  async function vfRefresh() { try { const { data } = await sb.from('property_forms').select('data').eq('id', VF.fm.id).single(); if (data && data.data) { const sd = data.data; VF.W.checked = sd.checked || {}; VF.W.pre = sd.pre || VF.W.pre; if (sd.insp) VF.W.insp = sd.insp; VF.W.ticks = {}; VF.W.answers = Object.assign({}, VF.W.answers, sd.answers || {}); VF.base = JSON.parse(JSON.stringify(sd.answers || {})); if ('tenanted' in sd) { VF.W.tenanted = sd.tenanted; VF.baseTen = sd.tenanted; } } } catch (_) { } }
+  async function vfRefresh() { try { const { data } = await sb.from('property_forms').select('data').eq('id', VF.fm.id).single(); if (data && data.data) { const sd = data.data; VF.W.checked = sd.checked || {}; VF.W.pre = sd.pre || VF.W.pre; if (sd.insp) VF.W.insp = sd.insp; if (sd.noted) VF.W.noted = sd.noted; VF.W.ticks = {}; VF.W.answers = Object.assign({}, VF.W.answers, sd.answers || {}); VF.base = JSON.parse(JSON.stringify(sd.answers || {})); if ('tenanted' in sd) { VF.W.tenanted = sd.tenanted; VF.baseTen = sd.tenanted; } } } catch (_) { } }
   const VF_INSP_MSG = 'Please check each answer Tim noted at the inspection: tick This is right, or change the answer.';
   function vfCheck(i) {
     const W = VF.W;
@@ -2778,6 +2790,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const canSign = fm.status !== 'signed' && (isHH ? fm.status === 'ready' : (fm.data || {}).complete);
     const needsCounter = !isHH && fm.status === 'signed' && !fm.countersigned_at;
     const toSign = signers.filter(p => !fs.some(s => s.person_id === p.id));
+    // Tim's inspection notes still to be checked by the vendors: they do it on their own sign-in; Tim can't confirm them for them
+    const dd = fm.data || {}, unchecked = isHH ? 0 : Object.entries(dd.pre || {}).filter(([k, v]) => v === 'inspection' && !(dd.checked && dd.checked[k] && typeof dd.checked[k] === 'object')).length;
     main().innerHTML = `<div class="view-pad">
       <div class="toolbar no-print"><button class="btn ghost" type="button" id="fBack">Property file</button></div>
       <span class="agent-flag">Only you see this</span>
@@ -2797,7 +2811,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         ${HH_ST.map(([t, items]) => `<div class="card tight"><h3>${esc(t)}</h3>${items.map(([k, q]) => `<label class="f">${esc(q)}</label><input type="text" data-hs="${k}" value="${esc(ad.st[k] || '')}">`).join('')}</div>`).join('')}
         <div class="toolbar"><button class="btn ghost" type="button" id="hSave">Save</button><button class="btn primary" type="button" id="hReady">${fm.status === 'ready' ? 'Save, still ready to sign' : 'Ready for the landlord to sign'}</button></div><div class="err" id="hErr"></div>`
         : docHTML(doc)}
-      ${canSign && toSign.length ? `<h2>Sign in person</h2><p class="small">${isHH ? 'The landlord' : 'Each vendor'} can sign here on your phone, witnessed by you, or on their own phone from their agreement page.</p>
+      ${unchecked && fm.status !== 'signed' ? `<div class="card warnc tight" id="fInspWait"><p class="small" style="margin:0">The vendors need to check the answers you noted at the inspection from their own sign-in before anyone can sign here. You can't confirm your own notes for them.</p><p class="small" style="margin:6px 0 0"><strong>${unchecked} ${unchecked === 1 ? 'answer is' : 'answers are'} still to check.</strong></p></div>` : ''}
+      ${canSign && toSign.length && !unchecked ? `<h2>Sign in person</h2><p class="small">${isHH ? 'The landlord' : 'Each vendor'} can sign here on your phone, witnessed by you, or on their own phone from their agreement page.</p>
         ${toSign.map(p => `<div class="card tight" data-fsigner="${p.id}"><label class="choice cb" style="margin:0 0 8px"><input type="checkbox" data-fok="${p.id}"><span class="mark"></span><span><span class="ct">${nt(p.legal_name)} has checked it${isHH ? '' : ' and makes the Vendor Statement'}</span></span></label>
           <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:8px"><h3 style="margin:0">${nt(p.legal_name)}</h3><button class="btn link" type="button" data-fclr="${p.id}">Clear</button></div>
           <div class="sig-wrap"><canvas id="fpad_${p.id}" aria-label="Signature pad for ${esc(p.legal_name)}"></canvas><div class="sig-line"></div><span class="hint">${esc(callName(p) || p.legal_name)} signs here</span></div>${saveNote(`Save ${callName(p) || p.legal_name}'s signature`)}
@@ -2894,7 +2909,9 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   ];
   const INSP_ITEMS = INSP_SECTIONS.flatMap(s => s[2]);
   let INS = null;   // the inspection on screen
-  const INS_RUN = {}, INS_STATE = {}, INS_TIMERS = {};   // per inspection: the save in flight, and how the last one went
+  const INS_RUN = {}, INS_STATE = {}, INS_TIMERS = {}, INS_LIMIT = {};   // per inspection: the save in flight, how the last one went, a smaller batch size
+  let INS_EPOCH = 0;   // goes up on sign-out, so a save still on its way then never writes the phone's copy back
+  const INSP_BATCH = 50000;   // characters of answers in one save (the server takes up to 60000)
   const inspKey = id => 'inspQ:' + id;
   function inspLS(id, val) {   // the browser copy: the last known record and the answers not yet saved; every access guarded
     try {
@@ -2972,17 +2989,28 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     inspShow(INS.id); inspCounts(); inspUsePaint();
     inspSyncOne(INS.id);
   }
-  // one save of everything waiting. 'ok' | 'refused' (one answer named by the server was dropped) | 'net' | 'auth' | 'fail'
+  // one save of what is waiting, in a batch the server will take: at most INSP_BATCH characters, and at most INS_LIMIT[id] answers
+  // once the server has said a batch was too much (it is halved each time, so nothing gets stuck). Returns 'ok' | 'refused' (one
+  // answer named by the server was dropped) | 'split' (try again with a smaller batch) | 'net' | 'auth' | 'fail' | 'stopped'
+  // (signed out while it was on its way: nothing is written back to the phone).
   async function inspSyncStep(id) {
     const live = () => (INS && INS.id === id) ? { row: INS.row, pending: INS.pending } : inspLS(id);
     const c = live(); if (!c || !pendingCount(c.pending)) return 'ok';
-    const sent = JSON.parse(JSON.stringify(c.pending)); sent.t ||= {};
+    const ep = INS_EPOCH, all = JSON.parse(JSON.stringify(c.pending)); all.t ||= {};
+    const sent = { facts: {}, decl: {}, notes: {}, t: all.t }; let n = 0, size = 0;
+    for (const kind of ['facts', 'decl', 'notes']) for (const [k, v] of Object.entries(all[kind])) {
+      const w = JSON.stringify(k).length + JSON.stringify(v ?? null).length + 2;
+      if (n && (n >= (INS_LIMIT[id] || Infinity) || size + w > INSP_BATCH)) continue;
+      sent[kind][k] = v; n++; size += w;
+    }
     const stamps = {}; ['facts', 'decl', 'notes'].forEach(kind => Object.keys(sent[kind]).forEach(k => { const sk = KIND_P[kind] + ':' + k; if (sent.t[sk]) stamps[sk] = sent.t[sk]; }));
     let res; try { res = await sb.rpc('agent_inspection_save', { iid: id, p_facts: sent.facts, p_decl: sent.decl, p_notes: sent.notes, p_stamps: stamps }); } catch (e) { res = { error: e }; }
+    if (ep !== INS_EPOCH) return 'stopped';
     const cur = live() || c; cur.pending.t ||= {};
     if (res.error) {
       const msg = String(res.error.message || 'try again'), m = msg.match(/^Not saved \(([fdn]):([A-Za-z]+)\):\s*(.*)$/);
       if (netErr(res.error)) { INS_STATE[id] = { kind: 'net' }; return 'net'; }
+      if (/Too much to save at once/.test(msg) && n > 1) { INS_LIMIT[id] = Math.max(1, Math.floor(n / 2)); INS_STATE[id] = { kind: 'ok' }; return 'split'; }
       if (authErr(res.error)) { INS_STATE[id] = { kind: 'auth' }; return 'auth'; }
       if (m && m[2] in ((sent[P_KIND[m[1]]]) || {})) {   // only the answer the server named is dropped; everything else stays and goes again
         const kind = P_KIND[m[1]], k = m[2];
@@ -3005,6 +3033,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     }));
     cur.row.conflicts = (res.data && res.data.conflicts) || {}; cur.row.resolved = (res.data && res.data.resolved) || cur.row.resolved || {};
     INS_STATE[id] = Object.assign({}, INS_STATE[id], { kind: 'ok' });
+    if (!pendingCount(cur.pending)) delete INS_LIMIT[id];
     if (INS && INS.id === id) { INS.conflicts = cur.row.conflicts; inspKeep(id); inspConflictsPaint(); if (INS.redraw && $('.view-pad.insp [data-ik]')) { INS.redraw = false; inspDraw(); } }
     else if (pendingCount(cur.pending)) inspLS(id, cur); else inspLS(id, null);
     return 'ok';
@@ -3016,8 +3045,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     r.p = (async () => {
       let st;
       do { r.again = false; inspShow(id); st = await inspSyncStep(id); }
-      while (r.again || ((st === 'ok' || st === 'refused') && pendingCount(((INS && INS.id === id) ? INS : inspLS(id) || {}).pending)));
-      delete INS_RUN[id]; inspShow(id);
+      while (st !== 'stopped' && (r.again || (['ok', 'refused', 'split'].includes(st) && pendingCount(((INS && INS.id === id) ? INS : inspLS(id) || {}).pending))));
+      if (INS_RUN[id] === r) delete INS_RUN[id]; inspShow(id);
       return !pendingCount(((INS && INS.id === id) ? INS : inspLS(id) || {}).pending);
     })();
     INS_RUN[id] = r; return r.p;

@@ -60,6 +60,13 @@ $$;
 create or replace function public.is_confirmed(chk jsonb, k text) returns boolean language sql immutable as $$
   select coalesce(jsonb_typeof(coalesce(chk, '{}'::jsonb) -> k) = 'object', false);
 $$;
+-- two Vendor Declaration answers are the same answer: compared by value (the choice and the details), never as text, so key order
+-- or a missing empty "d" makes no difference; the tenancy answer is a plain value
+create or replace function public.decl_same(x jsonb, y jsonb) returns boolean language sql immutable as $$
+  select case when jsonb_typeof(x) = 'object' or jsonb_typeof(y) = 'object'
+              then coalesce(x->>'a', '') = coalesce(y->>'a', '') and coalesce(x->>'d', '') = coalesce(y->>'d', '')
+              else coalesce(x, 'null'::jsonb) = coalesce(y, 'null'::jsonb) end;
+$$;
 -- a phone's timestamp for an answer, or null if it isn't one
 create or replace function public.stamp_ts(t text) returns timestamptz language plpgsql immutable as $$
 begin
@@ -267,24 +274,26 @@ end $$;
 
 -- Merge an inspection's declaration answers into a Vendor Declaration's data. A question is filled only when the vendor hasn't
 -- answered it, or when it still holds Tim's earlier unconfirmed note. A vendor's own answer (typed, chosen or confirmed) is never
--- replaced: a different one is listed in "kept" for Tim to see. Tim's notes are marked pre = 'inspection', and the vendors'
--- confirmation (checked) is cleared for anything that changed.
+-- replaced: a different one is listed in "kept" for Tim to see. Tim's notes are marked pre = 'inspection' and a copy of each is
+-- kept in noted (so the vendors' save can tell a changed answer from a confirmed one), and the vendors' confirmation (checked) is
+-- cleared for anything that changed.
 create or replace function public.inspection_merge_decl(d jsonb, i public.property_inspections) returns jsonb
 language plpgsql stable security definer set search_path = public as $$
 declare
   ans jsonb := coalesce(d->'answers', '{}'::jsonb); pre jsonb := coalesce(d->'pre', '{}'::jsonb); chk jsonb := coalesce(d->'checked', '{}'::jsonb);
-  k text; v jsonb; cur jsonb; tims boolean; added int := 0; updated int := 0; kept jsonb := '[]'::jsonb;
+  nt jsonb := coalesce(d->'noted', '{}'::jsonb); k text; v jsonb; cur jsonb; tims boolean; added int := 0; updated int := 0; kept jsonb := '[]'::jsonb;
 begin
   d := coalesce(d, '{}'::jsonb);
   if jsonb_typeof(d) <> 'object' then d := '{}'::jsonb; end if;
   if jsonb_typeof(ans) <> 'object' then ans := '{}'::jsonb; end if;
   if jsonb_typeof(pre) <> 'object' then pre := '{}'::jsonb; end if;
   if jsonb_typeof(chk) <> 'object' then chk := '{}'::jsonb; end if;
+  if jsonb_typeof(nt) <> 'object' then nt := '{}'::jsonb; end if;
   -- Tim's earlier unconfirmed notes that are no longer in the inspection are taken back
   for k in select key from jsonb_each_text(pre) where value = 'inspection' loop
     if not (i.declaration ? k) and not public.is_confirmed(chk, k) then
       if k = 'tenanted' then d := d - 'tenanted'; else ans := ans - k; end if;
-      pre := pre - k;
+      pre := pre - k; nt := nt - k;
     end if;
   end loop;
   for k, v in select * from jsonb_each(i.declaration) loop
@@ -293,19 +302,19 @@ begin
     if k = 'tenanted' then
       if public.jblank(cur) or tims then
         if public.jblank(cur) then added := added + 1; elsif cur is distinct from (v->'a') then updated := updated + 1; end if;
-        d := d || jsonb_build_object('tenanted', v->'a'); pre := pre || jsonb_build_object(k, 'inspection'); chk := chk - k;
+        d := d || jsonb_build_object('tenanted', v->'a'); pre := pre || jsonb_build_object(k, 'inspection'); nt := nt || jsonb_build_object(k, v->'a'); chk := chk - k;
       elsif cur is distinct from (v->'a') then kept := kept || jsonb_build_array(jsonb_build_object('k', k, 'vendor', jsonb_build_object('a', cur), 'inspection', v));
       end if;
     else
       if public.jblank(cur) or (public.jblank(cur->'a') and coalesce(cur->>'d', '') = '') or tims then
         if public.jblank(cur) or (public.jblank(cur->'a') and coalesce(cur->>'d', '') = '') then added := added + 1; elsif cur is distinct from v then updated := updated + 1; end if;
-        ans := ans || jsonb_build_object(k, v); pre := pre || jsonb_build_object(k, 'inspection'); chk := chk - k;
+        ans := ans || jsonb_build_object(k, v); pre := pre || jsonb_build_object(k, 'inspection'); nt := nt || jsonb_build_object(k, v); chk := chk - k;
       elsif coalesce(cur->>'a', '') is distinct from coalesce(v->>'a', '') or coalesce(cur->>'d', '') is distinct from coalesce(v->>'d', '') then
         kept := kept || jsonb_build_array(jsonb_build_object('k', k, 'vendor', cur, 'inspection', v));
       end if;
     end if;
   end loop;
-  d := d || jsonb_build_object('answers', ans, 'pre', pre, 'checked', chk,
+  d := d || jsonb_build_object('answers', ans, 'pre', pre, 'noted', nt, 'checked', chk,
          'insp', jsonb_build_object('id', i.id, 'on', to_char((i.started_at at time zone 'Pacific/Auckland')::date, 'YYYY-MM-DD'), 'by', 'Tim McGuire'));
   if added + updated > 0 then d := d || jsonb_build_object('complete', false); end if;
   return jsonb_build_object('data', d, 'added', added, 'updated', updated, 'kept', kept);
@@ -381,11 +390,14 @@ create trigger guard_form_checks before insert or update or delete on public.pro
 
 -- The vendors' save (replaces migration 005's, which wrote data || patch). Merged key by key on the server:
 --   answers: each question sent replaces that question only; tenanted, facts, fileOk, fileChanges, notes, hh, _step, complete and
---   fromFile (the vendor's own fields) are taken as sent; checked is a list of yes or no per question, and a confirmation is
---   recorded here as {by, name, at} for the vendor signed in, only for Tim's notes (never trusted from the page); pre and insp are
---   never taken from the page; nothing the page didn't send is removed. A vendor changing one of Tim's notes has confirmed it.
+--   fromFile (the vendor's own fields) are taken as sent; checked is a list of yes or no per question; pre, noted and insp are never
+--   taken from the page; nothing the page didn't send is removed.
+--   For Tim's notes only, the server records who dealt with each one as checked[k] = {by, name, at, changed} for the vendor signed
+--   in (never trusted from the page). Any change to the answer replaces whoever checked it before with the person changing it, and
+--   changed says whether the answer now differs from Tim's note (compared by value): so setting it back to Tim's answer is a
+--   confirmation (changed false). Ticking "This is right" confirms the answer as it stands.
 create or replace function public.vendor_form_save(f uuid, patch jsonb) returns void language plpgsql security definer set search_path = public as $$
-declare fm public.property_forms; me public.agreement_people; d jsonb; ans jsonb; pre jsonb; chk jsonb; k text; v jsonb; mine jsonb;
+declare fm public.property_forms; me public.agreement_people; d jsonb; ans jsonb; pre jsonb; chk jsonb; nt jsonb; k text; v jsonb; mine jsonb; ten jsonb;
 begin
   select * into fm from public.property_forms where id = f for update;
   if fm.id is null or not public.is_party(fm.agreement_id) then raise exception 'Not found'; end if;
@@ -398,21 +410,28 @@ begin
   if jsonb_typeof(ans) <> 'object' then ans := '{}'::jsonb; end if;
   if jsonb_typeof(pre) <> 'object' then pre := '{}'::jsonb; end if;
   if jsonb_typeof(chk) <> 'object' then chk := '{}'::jsonb; end if;
+  nt := coalesce(d->'noted', '{}'::jsonb); if jsonb_typeof(nt) <> 'object' then nt := '{}'::jsonb; end if;
   mine := jsonb_build_object('by', me.id, 'name', me.legal_name, 'at', now());
   if jsonb_typeof(patch->'answers') = 'object' then
     for k, v in select * from jsonb_each(patch->'answers') loop
       if jsonb_typeof(v) <> 'object' then raise exception 'Not an answer'; end if;
-      if pre->>k = 'inspection' and (ans->k) is distinct from v and not public.is_confirmed(chk, k) then chk := chk || jsonb_build_object(k, mine); end if;
+      if pre->>k = 'inspection' and not public.decl_same(ans->k, v) then
+        chk := chk || jsonb_build_object(k, mine || jsonb_build_object('changed', nt ? k and not public.decl_same(nt->k, v)));
+      end if;
       ans := ans || jsonb_build_object(k, v);
     end loop;
   end if;
-  if patch ? 'tenanted' and pre->>'tenanted' = 'inspection' and (d->'tenanted') is distinct from (patch->'tenanted') and not public.is_confirmed(chk, 'tenanted') then
-    chk := chk || jsonb_build_object('tenanted', mine);
+  ten := case when patch ? 'tenanted' then patch->'tenanted' else d->'tenanted' end;
+  if patch ? 'tenanted' and pre->>'tenanted' = 'inspection' and not public.decl_same(d->'tenanted', patch->'tenanted') then
+    chk := chk || jsonb_build_object('tenanted', mine || jsonb_build_object('changed', nt ? 'tenanted' and not public.decl_same(nt->'tenanted', ten)));
   end if;
   if jsonb_typeof(patch->'checked') = 'object' then
     for k, v in select * from jsonb_each(patch->'checked') loop
       if coalesce(pre->>k, '') <> 'inspection' then continue; end if;
-      if v = 'true'::jsonb then if not public.is_confirmed(chk, k) then chk := chk || jsonb_build_object(k, mine); end if;
+      if v = 'true'::jsonb then
+        if not public.is_confirmed(chk, k) then
+          chk := chk || jsonb_build_object(k, mine || jsonb_build_object('changed', nt ? k and not public.decl_same(nt->k, case when k = 'tenanted' then ten else ans->k end)));
+        end if;
       elsif v = 'false'::jsonb then chk := chk - k; end if;
     end loop;
   end if;
@@ -475,6 +494,6 @@ grant execute on function public.agent_inspection_start(uuid, text), public.agen
   public.agent_inspection_resolve(uuid, text, text), public.agent_inspection_finish(uuid), public.agent_inspection_send(uuid) to authenticated;
 revoke execute on function public.inspection_merge_decl(jsonb, public.property_inspections), public.latest_inspection(uuid),
   public.inspection_prefill_form(), public.guard_form_checks(), public.form_sign_needs_checks() from public, anon, authenticated;
-revoke execute on function public.jblank(jsonb), public.inspection_decl_keys(), public.inspection_note_keys(), public.pick_keep(jsonb, jsonb),
+revoke execute on function public.jblank(jsonb), public.inspection_decl_keys(), public.inspection_note_keys(), public.pick_keep(jsonb, jsonb), public.decl_same(jsonb, jsonb),
   public.is_confirmed(jsonb, text), public.stamp_ts(text) from public, anon;
 -- vendor_form_save keeps migration 005's grants (create or replace leaves them as they were)

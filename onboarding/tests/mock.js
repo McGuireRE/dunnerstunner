@@ -34,7 +34,7 @@ const noNotes=c=>{ const o=Object.assign({},c||{}); delete o.agent_notes; return
 function guard(table,r,payload){ if(table==='agreements'&&(DB.agreement_people||[]).some(x=>x.agreement_id===r.id&&x.signed_at)&&(('address' in payload&&payload.address!==r.address)||('answers' in payload&&JSON.stringify(payload.answers)!==JSON.stringify(r.answers))||('config' in payload&&noNotes(payload.config)!==noNotes(r.config)))) throw new Error('This agreement has been signed, so its terms can no longer be changed');
   if(table==='agreement_people'&&r.signed_at&&['legal_name','email','position'].some(k=>k in payload&&payload[k]!==r[k])) throw new Error('This person has signed, so their name and email can no longer be changed');
   if(table==='property_forms'&&(('status' in payload&&(payload.status==='signed')!==(r.status==='signed'))||['signed_at','countersigned_at','document_id','filing_at'].some(k=>k in payload&&(payload[k]??null)!==(r[k]??null)))) throw new Error('A document is only signed or filed by signing it');
-  if(table==='property_forms'&&(DB.form_signatures||[]).some(x=>x.form_id===r.id)){ if(['data','agent_data','kind','form_version','agreement_id','property_id'].some(k=>k in payload&&JSON.stringify(payload[k])!==JSON.stringify(r[k]))) throw new Error('This document has been signed, so it can no longer be changed'); if(r.status==='signed'&&'status' in payload&&payload.status!=='signed') throw new Error('This document has been signed by everyone'); }
+  if(table==='property_forms'&&(DB.form_signatures||[]).some(x=>x.form_id===r.id)){ if(['data','agent_data','kind','form_version','agreement_id','property_id'].some(k=>k in payload&&!same(payload[k],r[k]))) throw new Error('This document has been signed, so it can no longer be changed'); if(r.status==='signed'&&'status' in payload&&payload.status!=='signed') throw new Error('This document has been signed by everyone'); }
   if(['form_signatures','guide_receipts','signatures'].includes(table)) throw new Error('Records in '+table+' cannot be changed or deleted'); }
 function personSync(ap,old){ const ag=(DB.agreements||[]).find(x=>x.id===ap.agreement_id); if(ag&&ag.property_id&&live(ag)&&old&&old.email&&ap.email&&old.email.toLowerCase()!==ap.email.toLowerCase()&&!active(ag.property_id).some(x=>x.email===ap.email.toLowerCase())) active(ag.property_id).forEach(x=>{ if(x.email===old.email.toLowerCase()) x.email=ap.email.trim().toLowerCase(); }); if(ag&&ag.property_id&&live(ag)) mergePerson(ag.property_id,ap.legal_name,ap.pref_name,ap.email,ap.phone,ap.user_id,'agreement'); }
 // backfill on load, like the migration
@@ -104,21 +104,25 @@ const DECL_KEYS=['pegs','unpaid','history','meth','chattels','repairs','faults',
 const NOTE_KEYS=['outside','structure','inside','services','history','tenancy'];
 // jblank and pickKeep are function declarations so the backfill near the top (syncAgreement) can use them as the mock loads
 function jblank(v){ return v==null||v===''||(Array.isArray(v)&&!v.length)||(typeof v==='object'&&!Array.isArray(v)&&!Object.keys(v).length); }
-const same=(a,b)=>JSON.stringify(a??null)===JSON.stringify(b??null);
+// compared by value with key order not mattering, as Postgres compares jsonb
+function canon(x){ return Array.isArray(x)?'['+x.map(canon).join(',')+']':(x&&typeof x==='object')?'{'+Object.keys(x).sort().map(k=>JSON.stringify(k)+':'+canon(x[k])).join(',')+'}':JSON.stringify(x??null); }
+function same(a,b){ return canon(a??null)===canon(b??null); }
+// decl_same(): two Vendor Declaration answers by value (choice and details); the tenancy answer is a plain value
+const declSame=(x,y)=>(isObj(x)||isObj(y))?((isObj(x)?x.a:null)||'')===((isObj(y)?y.a:null)||'')&&((isObj(x)?x.d:null)||'')===((isObj(y)?y.d:null)||''):same(x,y);
 const isObj=x=>!!x&&typeof x==='object'&&!Array.isArray(x);
 const confirmed=(chk,k)=>isObj(chk)&&isObj(chk[k]);   // is_confirmed(): a {by, name, at} written by vendor_form_save
 const stampTs=t=>typeof t==='string'&&/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(t)&&!isNaN(Date.parse(t))?Date.parse(t):null;
 const nzDay=iso=>new Date(iso).toLocaleDateString('en-CA',{timeZone:'Pacific/Auckland'});
 function pickKeep(cur,j){ const o={}; Object.entries(j||{}).forEach(([k,v])=>{ if(!(jblank(v)&&!jblank((cur||{})[k]))) o[k]=v; }); return o; }   // pick_keep()
 function mergeDecl(d,i){ d=JSON.parse(JSON.stringify(isObj(d)?d:{}));
-  let ans=isObj(d.answers)?d.answers:{}, pre=isObj(d.pre)?d.pre:{}, chk=isObj(d.checked)?d.checked:{}; let added=0, updated=0; const kept=[];
-  Object.keys(pre).filter(k=>pre[k]==='inspection').forEach(k=>{ if(!(k in i.declaration)&&!confirmed(chk,k)){ if(k==='tenanted') delete d.tenanted; else delete ans[k]; delete pre[k]; } });
+  let ans=isObj(d.answers)?d.answers:{}, pre=isObj(d.pre)?d.pre:{}, chk=isObj(d.checked)?d.checked:{}, nt=isObj(d.noted)?d.noted:{}; let added=0, updated=0; const kept=[];
+  Object.keys(pre).filter(k=>pre[k]==='inspection').forEach(k=>{ if(!(k in i.declaration)&&!confirmed(chk,k)){ if(k==='tenanted') delete d.tenanted; else delete ans[k]; delete pre[k]; delete nt[k]; } });
   Object.entries(i.declaration).forEach(([k,v])=>{ const tims=pre[k]==='inspection'&&!confirmed(chk,k);
-    if(k==='tenanted'){ const cur=d.tenanted; if(jblank(cur)||tims){ if(jblank(cur)) added++; else if(cur!==v.a) updated++; d.tenanted=v.a; pre[k]='inspection'; delete chk[k]; } else if(cur!==v.a) kept.push({k,vendor:{a:cur},inspection:v}); return; }
+    if(k==='tenanted'){ const cur=d.tenanted; if(jblank(cur)||tims){ if(jblank(cur)) added++; else if(cur!==v.a) updated++; d.tenanted=v.a; pre[k]='inspection'; nt[k]=v.a; delete chk[k]; } else if(cur!==v.a) kept.push({k,vendor:{a:cur},inspection:v}); return; }
     const cur=ans[k], empty=jblank(cur)||(jblank(cur.a)&&!(cur.d||''));
-    if(empty||tims){ if(empty) added++; else if(!same(cur,v)) updated++; ans[k]=v; pre[k]='inspection'; delete chk[k]; }
+    if(empty||tims){ if(empty) added++; else if(!same(cur,v)) updated++; ans[k]=v; pre[k]='inspection'; nt[k]=v; delete chk[k]; }
     else if((cur.a||'')!==(v.a||'')||(cur.d||'')!==(v.d||'')) kept.push({k,vendor:cur,inspection:v}); });
-  Object.assign(d,{answers:ans,pre,checked:chk,insp:{id:i.id,on:nzDay(i.started_at),by:'Tim McGuire'}}); if(added+updated) d.complete=false;
+  Object.assign(d,{answers:ans,pre,noted:nt,checked:chk,insp:{id:i.id,on:nzDay(i.started_at),by:'Tim McGuire'}}); if(added+updated) d.complete=false;
   return {data:d,added,updated,kept}; }
 // latest_inspection(): the newest inspection of this round, with the declaration merged across all of them (newest answer per question wins)
 function latestInsp(pid){ const p=PT().find(x=>x.id===pid)||{}; const L=PI().filter(i=>i.property_id===pid&&(!p.cycle_at||i.started_at>=p.cycle_at)); if(!L.length) return null;
@@ -168,10 +172,13 @@ function rpcInner(name,a){
   if(name==='vendor_form_start'){ if(!isParty(a.a)) return bad('Not your agreement'); const g=DB.agreements.find(x=>x.id===a.a); if(!['signed','countersigned'].includes(g.status)) return bad('This comes after the agreement is signed'); if(!FV[a.p_kind]) return bad('Unknown document'); let fm=PF().find(x=>x.agreement_id===a.a&&x.kind===a.p_kind); if(!fm){ fm={id:uid(),property_id:g.property_id,agreement_id:a.a,kind:a.p_kind,form_version:FV[a.p_kind],status:'draft',data:a.p_kind==='vendor_declaration'?inspPrefill(g.property_id,{}):{},agent_data:{},created_by:me.email,created_at:now(),updated_at:now(),document_id:null}; PF().push(fm); DB.agreement_events.push({id:uid(),agreement_id:a.a,at:now(),actor:me.email,kind:'form_started',detail:{form:a.p_kind}}); save(); } return ok(fm.id); }
   if(name==='vendor_form_save'){ const fm=PF().find(x=>x.id===a.f); if(!fm||!isParty(fm.agreement_id)) return bad('Not found'); if(fm.kind!=='vendor_declaration') return bad('Tim fills in this one'); if(fm.status!=='draft') return bad('This document can no longer be changed');
     const P=JSON.parse(JSON.stringify(a.patch||{})); if(!isObj(P)) return bad('Too much to save at once'); try{ localStorage.setItem('lastVendorSave', JSON.stringify(P)); }catch(_){} /* for tests: what the page sent */ const m=DB.agreement_people.filter(p=>p.agreement_id===fm.agreement_id&&p.user_id===me.id).sort((x,y)=>x.position-y.position)[0]; if(!m) return bad('Not found');
-    const d=JSON.parse(JSON.stringify(fm.data||{})), ans=isObj(d.answers)?d.answers:{}, pre=isObj(d.pre)?d.pre:{}, chk=isObj(d.checked)?d.checked:{}, mine={by:m.id,name:m.legal_name,at:now()};
-    if(isObj(P.answers)) for(const [k,v] of Object.entries(P.answers)){ if(!isObj(v)) return bad('Not an answer'); if(pre[k]==='inspection'&&!same(ans[k],v)&&!confirmed(chk,k)) chk[k]=mine; ans[k]=v; }
-    if('tenanted' in P&&pre.tenanted==='inspection'&&!same(d.tenanted,P.tenanted)&&!confirmed(chk,'tenanted')) chk.tenanted=mine;
-    if(isObj(P.checked)) Object.entries(P.checked).forEach(([k,v])=>{ if(pre[k]!=='inspection') return; if(v===true){ if(!confirmed(chk,k)) chk[k]=mine; } else if(v===false) delete chk[k]; });
+    const d=JSON.parse(JSON.stringify(fm.data||{})), ans=isObj(d.answers)?d.answers:{}, pre=isObj(d.pre)?d.pre:{}, chk=isObj(d.checked)?d.checked:{}, nt=isObj(d.noted)?d.noted:{};
+    // any change to one of Tim's notes: the person changing it, and whether it now differs from his note (by value)
+    const mine=(k,val)=>({by:m.id,name:m.legal_name,at:now(),changed:(k in nt)&&!declSame(nt[k],val)});
+    if(isObj(P.answers)) for(const [k,v] of Object.entries(P.answers)){ if(!isObj(v)) return bad('Not an answer'); if(pre[k]==='inspection'&&!declSame(ans[k],v)) chk[k]=mine(k,v); ans[k]=v; }
+    const ten='tenanted' in P?P.tenanted:d.tenanted;
+    if('tenanted' in P&&pre.tenanted==='inspection'&&!declSame(d.tenanted,P.tenanted)) chk.tenanted=mine('tenanted',ten);
+    if(isObj(P.checked)) Object.entries(P.checked).forEach(([k,v])=>{ if(pre[k]!=='inspection') return; if(v===true){ if(!confirmed(chk,k)) chk[k]=mine(k,k==='tenanted'?ten:ans[k]); } else if(v===false) delete chk[k]; });
     ['tenanted','facts','fileOk','fileChanges','notes','hh','_step','complete','fromFile'].forEach(k=>{ if(k in P) d[k]=P[k]; }); d.answers=ans; d.checked=chk;
     try{ guard('property_forms',fm,{data:d}); }catch(e){ return bad(e.message); } fm.data=d; fm.updated_at=now(); save(); return ok(null); }
   if(name==='vendor_form_sign'){ const fm=PF().find(x=>x.id===a.f); if(!fm||!isParty(fm.agreement_id)) return bad('Not found'); if(fm.status==='signed') return bad('Already signed by everyone'); if(fm.kind==='healthy_homes'&&fm.status!=='ready') return bad("Tim hasn't finished the checklist yet"); const m=DB.agreement_people.find(p=>p.agreement_id===fm.agreement_id&&p.user_id===me.id&&p.signed_at); if(!m) return bad('Signer not found'); if(FS().some(s=>s.form_id===fm.id&&s.person_id===m.id)) return bad('Already signed'); const ce=fCheck(fm,m.id,a.p_image_path); if(ce) return bad(ce); return fSign(fm,m,a); }
@@ -221,6 +228,10 @@ function rpcInner(name,a){
       return ok({inspection_id:i.id,property_id:pid,created_property:made,resumed:false}); }
     const i=PI().find(x=>x.id===a.iid); if(!i) return bad('Inspection not found');
     if(name==='agent_inspection_save'){ const isO=x=>x==null||isObj(x); if(!isO(a.p_facts)||!isO(a.p_decl)||!isO(a.p_notes)||!isO(a.p_stamps)) return bad('Bad answers');
+      // the server's limit on one save (60000 characters of answers); mockMaxBatch = n lowers it, for testing how the phone splits a queue
+      const size=JSON.stringify(a.p_facts||{}).length+JSON.stringify(a.p_decl||{}).length+JSON.stringify(a.p_notes||{}).length; let lim=60000; try{ lim=+localStorage.getItem('mockMaxBatch')||60000; }catch(_){}
+      if(size>lim){ try{ const l=JSON.parse(localStorage.getItem('mockBatchLog')||'[]'); l.push('refused:'+size); localStorage.setItem('mockBatchLog',JSON.stringify(l)); }catch(_){} return bad('Too much to save at once'); }
+      try{ const l=JSON.parse(localStorage.getItem('mockBatchLog')||'[]'); l.push('saved:'+size); localStorage.setItem('mockBatchLog',JSON.stringify(l)); }catch(_){}
       let refuse=null; try{ refuse=localStorage.getItem('mockRefuse'); }catch(_){}
       if(refuse==='all') return bad('Something went wrong on the server');
       const W=JSON.parse(JSON.stringify(i)); W.stamps||={}; const ST=a.p_stamps||{}, skipped={}, nowIso=()=>new Date().toISOString();

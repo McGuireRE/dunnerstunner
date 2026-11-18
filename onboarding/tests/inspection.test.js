@@ -208,6 +208,17 @@ const TIM = ['agent-1', 'hello@timmcguire.co.nz'];
   d = await db(); expect(d.properties.find(x => x.id === 'PR3').description.pLand === '500', 'a blank on the draft doesn\'t wipe the property file');
   await go(); await p.click('#homeInspect'); await p.waitForTimeout(400);   // (not Home from page 1, which would save it as a draft)
   await p.fill('#insAddr', '5 Draft'); await p.waitForTimeout(200); await p.click('[data-insp-prop="PR3"]'); await p.waitForTimeout(600);
+  // a large queue from a long time without signal (27 long answers, more than one save can take): the phone sends it in smaller
+  // batches, and when the server still says a batch is too much (here its limit is lowered to 20000), halves it until all is saved
+  await p.evaluate(() => { localStorage.setItem('mockOffline', '1'); localStorage.setItem('mockMaxBatch', '20000'); localStorage.removeItem('mockBatchLog'); });
+  for (const sec of ['Outside', 'Structure', 'Inside', 'Services', 'Consents']) { await tab(sec); for (const t of await p.$$('textarea[data-itext^="d:"]')) await t.fill('x'.repeat(3500)); await p.waitForTimeout(900); }
+  out.bigQueued = await p.evaluate(() => { const k = Object.keys(localStorage).find(x => x.startsWith('inspQ:')); return k ? Object.keys(JSON.parse(localStorage.getItem(k)).pending.decl).length : 0; });
+  await p.evaluate(() => { localStorage.removeItem('mockOffline'); window.dispatchEvent(new Event('online')); }); await p.waitForTimeout(3000);
+  out.batchLog = await p.evaluate(() => JSON.parse(localStorage.getItem('mockBatchLog') || '[]'));
+  d = await db(); out.bigSaved = Object.values((d.property_inspections || []).filter(x => x.property_id === 'PR3').pop().declaration).filter(v => (v.d || '').length === 3500).length;
+  expect(out.bigQueued === 27 && out.bigSaved === 27 && out.batchLog.some(x => x.startsWith('refused:')) && out.batchLog.filter(x => x.startsWith('saved:')).length > 1 && await status() === 'Saved'
+    && !(await p.evaluate(() => Object.keys(localStorage).filter(k => k.startsWith('inspQ:')).length)), 'a queue too big for one save is split and halved until every answer is saved: ' + JSON.stringify([out.bigQueued, out.bigSaved, out.batchLog]));
+  await p.evaluate(() => localStorage.removeItem('mockMaxBatch'));
   await tab('Inside'); await tap('f:pBath', '2');
   d = await db(); expect(d.agreements.find(a => a.id === 'A3').answers.pBath === '2', 'the draft agreement gets the value it didn\'t have');
   await tap('f:pBed', '4'); await p.click('#insGoFinish'); await p.waitForTimeout(800);
@@ -256,6 +267,13 @@ const TIM = ['agent-1', 'hello@timmcguire.co.nz'];
     const x = await c.from('property_forms').delete().eq('id', id); return [u.error && u.error.message, x.error && x.error.message]; }, vd.id);
   expect(/Only the vendors fill in/.test(direct[0] || '') && /can't be removed/.test(direct[1] || ''), 'a direct agent update or delete of the declaration is refused: ' + JSON.stringify(direct));
   d = await db(); expect(d.property_forms.some(f => f.id === vd.id && !f.data.answers.history), 'the declaration is untouched');
+  // Tim's own page for the declaration says plainly that the vendors check his notes on their own sign-in, and how many are left
+  await p.click('#insProp'); await p.waitForTimeout(700); await p.click(`[data-fopen="${vd.id}"]`); await p.waitForTimeout(700);
+  out.timWait = (await p.textContent('#fInspWait').catch(() => '')).replace(/\s+/g, ' ');
+  const nNotes = Object.values(vd.data.pre).filter(v => v === 'inspection').length;
+  expect(out.timWait.includes('The vendors need to check the answers you noted at the inspection from their own sign-in before anyone can sign here. You can\'t confirm your own notes for them.') && out.timWait.includes(`${nNotes} answers are still to check.`) && !(await p.$('[data-fsigner]')),
+    'Tim is told the vendors check his notes themselves, with the count, and offered no in-person signing: ' + out.timWait);
+  expect(!(await sideways()), 'Tim\'s form page fits 390 px');
 
   // 12. vendors can't read the inspection, or call its functions
   await as('v-jane', 'jane@example.com');
@@ -298,12 +316,14 @@ const TIM = ['agent-1', 'hello@timmcguire.co.nz'];
 
   d = await db(); vd = d.property_forms.find(f => f.id === vd.id);
   expect(vd.data.checked.pegs && vd.data.checked.pegs.name === 'Jane Mary Smith' && vd.data.checked.pegs.by === 'P1' && vd.data.checked.dux.name === 'Jane Mary Smith', 'the server records who checked each note: ' + JSON.stringify(vd.data.checked.pegs));
+  expect(vd.data.checked.pegs.changed === true && vd.data.checked.dux.changed === false && vd.data.noted.pegs.a === 'yes', 'pegs was changed from Tim\'s note (Yes to Unknown); dux was left as he noted it: ' + JSON.stringify([vd.data.checked.pegs, vd.data.checked.dux]));
   // Rob, before signing: one owner's check is enough, and he sees which answers came from Tim and who checked them
   await as('v-rob', 'rob@example.com');
   await p.click('[data-form="vendor_declaration"]'); await p.waitForTimeout(600);
   out.robSees = (await p.textContent('main')).replace(/\s+/g, ' ');
-  expect(/Noted by Tim McGuire at the inspection on .*2026; checked by Jane Mary Smith/.test(out.robSees), 'Rob sees Tim\'s notes and who checked them');
-  expect(/Tenancy ?Is the property tenanted, or will it be before settlement\? ?No\.? ?Noted by Tim McGuire at the inspection on .*; checked by Jane Mary Smith/.test(out.robSees), 'including the tenancy Tim noted: ' + (out.robSees.match(/Tenancy.{0,160}/) || [''])[0]);
+  expect(/Noted by Timothy McGuire at the inspection on [^;]*2026; checked by Jane Mary Smith\./.test(out.robSees), 'Rob sees Tim\'s notes and who checked them');
+  expect(/Unknown\.? ?Timothy McGuire noted Yes at the inspection on [^;]*2026; changed by Jane Mary Smith\./.test(out.robSees) && !/boundary pegs\?Unknown\.? ?Noted by/.test(out.robSees), 'and the one Jane changed says what Tim noted and that Jane changed it: ' + (out.robSees.match(/boundary pegs\?.{0,140}/) || [''])[0]);
+  expect(/Tenancy ?Is the property tenanted, or will it be before settlement\? ?No\.? ?Noted by Timothy McGuire at the inspection on [^;]*; checked by Jane Mary Smith\./.test(out.robSees), 'including the tenancy Tim noted: ' + (out.robSees.match(/Tenancy.{0,160}/) || [''])[0]);
   // Rob goes back a step and carries on: nothing he didn't change is sent, so Jane's checks and answers stay hers
   await p.click('#back'); await p.waitForTimeout(400);
   expect(await p.isVisible('[data-q="water"] .insp-checked'), 'the question shows who checked it: ' + await p.textContent('[data-q="water"]').catch(() => ''));
@@ -311,6 +331,15 @@ const TIM = ['agent-1', 'hello@timmcguire.co.nz'];
   out.robSent = await p.evaluate(() => JSON.parse(localStorage.getItem('lastVendorSave') || '{}'));
   expect(!Object.keys(out.robSent.checked || {}).length && !Object.keys(out.robSent.answers || {}).length && !('tenanted' in out.robSent), 'an unchanged page sends no ticks, answers or tenancy: ' + JSON.stringify(out.robSent));
   d = await db(); expect(d.property_forms.find(f => f.id === vd.id).data.checked.water.name === 'Jane Mary Smith', 'Jane\'s check stands');
+  // Jane confirmed Tim's "Yes" for town water; Rob changes it to No: Rob is now the one who dealt with it, as a change
+  await p.click('#back'); await p.waitForTimeout(400);
+  await p.click('[data-q="water"] input[value="no"] + .mark'); await p.waitForTimeout(100); await p.click('#next'); await p.waitForTimeout(500);
+  d = await db(); out.robWater = d.property_forms.find(f => f.id === vd.id).data.checked.water;
+  expect(d.property_forms.find(f => f.id === vd.id).data.answers.water.a === 'no' && out.robWater.name === 'Robert Smith' && out.robWater.by === 'P2' && out.robWater.changed === true, 'Rob\'s change replaces Jane as the checker, marked changed: ' + JSON.stringify(out.robWater));
+  await p.click('#back'); await p.waitForTimeout(400);
+  out.robBadge = (await p.textContent('[data-q="water"] .insp-badge')).replace(/\s+/g, ' ');
+  expect(/^Timothy McGuire noted Yes at the inspection on [^;]*2026; changed by Robert Smith\.$/.test(out.robBadge), 'on screen too: ' + out.robBadge);
+  await p.click('#next'); await p.waitForTimeout(400);
   await p.click('#back'); await p.waitForTimeout(300);
 
   // 14. Tim notes something else for a question Jane has answered: her answer stays, and he sees the difference
@@ -344,10 +373,14 @@ const TIM = ['agent-1', 'hello@timmcguire.co.nz'];
   await pick('#vfOk'); await draw('#vfSig'); await p.click('#next'); await p.waitForTimeout(3600);
   d = await db(); const sig = (d.form_signatures || []).find(s => s.form_id === vd.id);
   expect(sig && sig.snapshot.form_data.pre.pegs === 'inspection' && sig.snapshot.form_data.checked.pegs.name === 'Jane Mary Smith' && sig.snapshot.form_data.checked.meth.name === 'Jane Mary Smith' && sig.snapshot.form_data.answers.pegs.a === 'unknown', 'what was signed is the stored form, with the vendor\'s checks');
+  const snapDoc = JSON.stringify((sig || {}).snapshot && sig.snapshot.doc || {});
+  expect(/Timothy McGuire noted Yes at the inspection on [^;]*; changed by Robert Smith\./.test(snapDoc) && /Noted by Timothy McGuire at the inspection on [^;]*; checked by Jane Mary Smith\./.test(snapDoc) && !/Tim McGuire (at|noted)|by Tim McGuire/.test(snapDoc),
+    'the signed snapshot says Timothy McGuire, with who checked and who changed: ' + (snapDoc.match(/town water supply.{0,140}/) || [''])[0]);
   // Rob, after Jane has signed: the locked declaration shows Tim's notes and who checked them
   await as('v-rob', 'rob@example.com'); await p.click('[data-form="vendor_declaration"]'); await p.waitForTimeout(600);
   out.robLocked = (await p.textContent('main')).replace(/\s+/g, ' ');
-  expect(/Check and sign the Vendor Declaration/.test(out.robLocked) && /Noted by Tim McGuire at the inspection on .*; checked by Jane Mary Smith/.test(out.robLocked), 'the locked view shows the marker and who checked');
+  expect(/Check and sign the Vendor Declaration/.test(out.robLocked) && /Noted by Timothy McGuire at the inspection on [^;]*; checked by Jane Mary Smith\./.test(out.robLocked)
+    && /Timothy McGuire noted Yes at the inspection on [^;]*; changed by Robert Smith\./.test(out.robLocked), 'the locked view shows the marker, who checked, and who changed');
   await as(...TIM);
   const late = await p.evaluate(async id => { const c = window.supabase.createClient(); const r = await c.rpc('agent_inspection_send', { iid: id }); return r.error && r.error.message; }, i.id);
   expect(/has been signed, so the inspection can't change it/.test(late || ''), 'a signed declaration can\'t be changed by the inspection: ' + late);
@@ -369,6 +402,13 @@ const TIM = ['agent-1', 'hello@timmcguire.co.nz'];
   await p.$$eval('.vdq', cs => cs.forEach(c => { const r = c.querySelector('input[value="no"]'); if (r) r.checked = true; })); for (const k of ['faults', 'reno']) await p.fill(`[data-qd="${k}"]`, 'None known');
   await p.click('#next'); await p.waitForTimeout(400);
   expect(await p.isVisible('[data-q="water"] .insp-badge') && await p.isVisible('[data-qc="water"]'), 'marked for Sam too');
+  // Sam alone: changing Tim's note is recorded as a change by Sam; changing it back (same answer, keys in another order) is a check
+  out.samChk = await p.evaluate(async id => { const c = window.supabase.createClient(), get = () => JSON.parse(localStorage.getItem('mockdb')).property_forms.find(x => x.id === id).data;
+    const noted = get().noted.water; await c.rpc('vendor_form_save', { f: id, patch: { answers: { water: { a: 'no', d: 'Tank' } } } }); const one = get().checked.water;
+    await c.rpc('vendor_form_save', { f: id, patch: { answers: { water: { d: noted.d || '', a: noted.a } } } }); const two = get().checked.water;
+    await c.rpc('vendor_form_save', { f: id, patch: { checked: { water: true } } }); const three = get().checked.water; return [noted, one, two, three]; }, sv.id);
+  expect(out.samChk[1].name === 'Sam Lee' && out.samChk[1].changed === true && out.samChk[2].name === 'Sam Lee' && out.samChk[2].changed === false && out.samChk[3].changed === false && out.samChk[3].at === out.samChk[2].at,
+    'a single vendor: change is recorded as changed, changing back as a check, a tick after that changes nothing: ' + JSON.stringify(out.samChk));
 
   // 17. no em dashes on Tim's screens; dark mode at 390 px
   await as(...TIM); expect(await p.textContent('main h1') === 'Inspection finished', 'Tim lands back where he left off'); await p.click('#navHome'); await p.waitForTimeout(300); await p.click('#homeInspect'); await p.waitForTimeout(400);
@@ -391,10 +431,13 @@ const TIM = ['agent-1', 'hello@timmcguire.co.nz'];
   let dialog = ''; p.once('dialog', dg => { dialog = dg.message(); dg.dismiss(); });
   await p.click('#signOut'); await p.waitForTimeout(500);
   expect(/1 inspection answer hasn't been saved yet/.test(dialog) && await p.isVisible('#signOut') && (await p.evaluate(() => Object.keys(localStorage).filter(k => k.startsWith('inspQ:')).length)) > 0, 'cancel keeps him signed in, with the answer: ' + dialog);
+  // the signal returns and a save is on its way (slowly) when he signs out: when it answers, nothing is written back to the phone
+  await p.evaluate(() => { localStorage.removeItem('mockOffline'); localStorage.setItem('mockSaveDelay', '1500'); });
+  await tap('d:pipes', 'yes');
   p.once('dialog', dg => dg.accept());
-  await p.click('#signOut'); await p.waitForTimeout(800);
+  await p.click('#signOut'); await p.waitForTimeout(2500);
   out.afterSignOut = await p.evaluate(() => Object.keys(localStorage).filter(k => k.startsWith('insp')));
-  await p.evaluate(() => localStorage.removeItem('mockOffline')); await go();
+  await p.evaluate(() => { localStorage.removeItem('mockOffline'); localStorage.removeItem('mockSaveDelay'); }); await go();
   expect(!out.afterSignOut.length && /Your agency agreement/.test(await p.textContent('main h1')), 'signed out, and nothing of the inspection is left on the phone: ' + out.afterSignOut);
   } catch (e) { fail.push('CRASHED: ' + e.message.split('\n').slice(0, 3).join(' | ')); }
   console.log(JSON.stringify(Object.assign(out, { errs: errs.concat(fail) }), null, 1)); await b.close();

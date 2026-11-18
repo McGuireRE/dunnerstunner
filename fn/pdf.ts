@@ -659,11 +659,20 @@ export function formDoc(form: any, address: string, names: string, when: string 
   if (!T) throw new Error(`Unknown form version ${form.form_version}`);
   if (form.kind === "vendor_declaration") {
     const data = form.data || {}, ans = data.answers || {};
-    // an answer Tim noted at an inspection says so, and who checked it (the same line the app shows; absent on older forms)
+    // an answer Tim noted at an inspection says so, and who dealt with it: checked (left as he noted it) or changed, with his answer
+    // (the same lines the app shows and the signed snapshot keeps; absent on declarations without inspection notes)
+    const textQ = new Set(T.VD_SECTIONS.flatMap(([, qs]: [string, any[]]) => qs.filter((x) => x.text).map((x) => x.k)));
+    const notedText = (k: string, v: any) => {
+      if (k === "tenanted") return TEN[v] || "no answer";
+      const o = v && typeof v === "object" ? v : {}, d = String(o.d || "").trim();
+      if (textQ.has(k)) return d || "no answer";
+      const a = YNU[o.a] || ""; return a ? a + (d ? ` (${d})` : "") : d || "no answer";
+    };
     const inspNote = (k: string) => {
       if ((data.pre || {})[k] !== "inspection") return "";
-      const on = (data.insp || {}).on, c = (data.checked || {})[k];
-      return `Noted by Tim McGuire at the inspection on ${on ? nzLong(on + "T00:00:00Z") : ""}${c && typeof c === "object" && c.name ? `; checked by ${c.name}` : "; not checked yet"}`;
+      const on = (data.insp || {}).on, c = (data.checked || {})[k], day = on ? nzLong(on + "T00:00:00Z") : "";
+      if (c && typeof c === "object" && c.name && c.changed) return `Timothy McGuire noted ${notedText(k, (data.noted || {})[k])} at the inspection on ${day}; changed by ${c.name}.`;
+      return `Noted by Timothy McGuire at the inspection on ${day}${c && typeof c === "object" && c.name ? `; checked by ${c.name}` : "; not checked yet"}.`;
     };
     // the tenancy answer is printed only when Tim noted it at an inspection, so every other declaration prints exactly as before
     const tenancy = (data.pre || {}).tenanted === "inspection"
