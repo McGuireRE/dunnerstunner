@@ -125,7 +125,8 @@ function latestInsp(pid){ const p=PT().find(x=>x.id===pid)||{}; const L=PI().fil
   L.forEach(i=>{ const keys=new Set(Object.keys(i.declaration).concat(Object.keys(i.stamps||{}).filter(s=>s.startsWith('d:')).map(s=>s.slice(2))));
     keys.forEach(k=>{ const t=stampTs((i.stamps||{})['d:'+k])??Date.parse(i.updated_at); if(!best[k]||t>best[k].t) best[k]={t,v:i.declaration[k]}; }); });
   const decl={}; Object.entries(best).forEach(([k,x])=>{ if(!jblank(x.v)) decl[k]=x.v; }); return Object.assign({},newest,{declaration:decl}); }
-function inspPrefill(pid,data){ if(isObj(data)&&('insp' in data)) return data;   // like coalesce(new.data,'{}') ? 'insp': the key, even when null const i=latestInsp(pid); return i&&Object.keys(i.declaration).length?mergeDecl(data,i).data:data; }
+/* like coalesce(new.data,'{}') ? 'insp': the key alone, even when null, means the form already has Tim's notes */
+function inspPrefill(pid,data){ if(isObj(data)&&('insp' in data)) return data; const i=latestInsp(pid); return i&&Object.keys(i.declaration).length?mergeDecl(data,i).data:data; }
 // guard_form_checks(): on any path but the vendors' own save, an answer that changes loses its confirmation
 function clearChanged(oldD,newD){ const oa=isObj((oldD||{}).answers)?oldD.answers:{}, na=isObj(newD.answers)?newD.answers:{}; if(!isObj(newD.checked)) return newD;
   Object.keys(newD.checked).forEach(k=>{ if(k==='tenanted'?!same((oldD||{}).tenanted,newD.tenanted):!same(na[k],oa[k])) delete newD.checked[k]; }); return newD; }
