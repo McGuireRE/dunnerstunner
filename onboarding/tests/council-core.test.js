@@ -1,0 +1,134 @@
+// Unit test of the public council records lookup (fn/property_lookup_core.ts), run with recorded answers (files/council-fixtures.js),
+// no network. Covers: Dunedin (council rates cross-checked against ORC, 2GP zone, "no hazard overlay"), Waitaki (council parcel,
+// zone, the council's own page link), Clutha (PropertyPublic only, with its date), Central Otago (ORC and LINZ only, a link and a
+// plain note for what the council doesn't publish), a weak address match refused, a partial upstream failure and a timeout,
+// a council record whose valuation reference doesn't match (nothing used from it), hazards with the LIM note, the labels,
+// the allow-list of hosts (no other host is ever asked), suggestions, and the health check (no property data).
+const path = require('path');
+const { makeFetch } = require('./files/council-fixtures.js');
+(async () => {
+  const errs = [], out = {};
+  const expect = (ok, msg) => { if (!ok) errs.push(msg); };
+  const core = await import(path.join(__dirname, '..', '..', 'fn', 'property_lookup_core.ts'));
+  const NOW = () => new Date('2026-11-18T01:00:00Z');
+  const run = async (name, opts, input) => { const f = makeFetch(name, opts); const r = await core.lookup(input || { address: require('./files/council-fixtures.js').SCENARIOS[name].asked }, { fetch: f, now: NOW, timeoutMs: (opts && opts.timeoutMs) || 500 }); return { r, asked: f.asked }; };
+  const val = (r, k) => r.values.find(v => v.key === k);
+  const hostsOk = asked => asked.every(u => core.HOSTS.includes(new URL(u).hostname) && u.startsWith('https://'));
+
+  // 1. Dunedin
+  { const { r, asked } = await run('dunedin');
+    out.dunedin = r.values.map(v => `${v.key}=${v.display}`);
+    expect(r.status === 'ok', 'dunedin status ' + r.status);
+    expect(r.matched_address === '100 Gladstone Road, Dalmore, Dunedin', 'matched address returned');
+    expect(r.council === 'Dunedin City Council' && r.council_id === 'DCC', 'council from ORC');
+    expect(val(r, 'valuation_ref').value === '26780/29604', 'valuation ref from ORC');
+    // the council's own figure first (1,110,000 for 2026-2027), ORC's (1,160,000) beside it
+    const cv = val(r, 'capital_value'); expect(cv.value === 1110000 && cv.display === '$1,110,000' && cv.source === 'dcc_rates', 'DCC capital value used: ' + JSON.stringify(cv));
+    expect(cv.as_of === '2026-2027' && cv.note === 'Council rating valuation (as at 2026-2027 rating year), not a market value.', 'valuation label: ' + cv.note);
+    expect(cv.also.length === 1 && cv.also[0].display === '$1,160,000' && /ORC/.test(cv.also[0].source_name) && cv.also[0].as_of_label === '15 Nov 2026', 'ORC value beside it: ' + JSON.stringify(cv.also));
+    const lv = val(r, 'land_value'); expect(lv.value === 570000 && lv.source === 'orc_properties' && lv.as_of_label === '15 Nov 2026' && /as at 15 Nov 2026\), not a market value/.test(lv.note), 'Dunedin land value from ORC with its date');
+    expect(val(r, 'rates_council').display === '$8,151.01' && /not a market value/.test(val(r, 'rates_council').note), 'DCC rates and label');
+    expect(val(r, 'rates_orc').display === '$688.09', 'ORC rates');
+    const t = val(r, 'title_ref'); expect(t.value === '430431, 430432' && t.field === 'title_ref' && t.source === 'linz_boundaries', 'title from LINZ');
+    expect(val(r, 'legal_description').value === 'Lot 8 DP 608, Lot 10 DP 608, Lot 11 DP 608' && val(r, 'legal_description').field === 'legal_description', 'legal description from LINZ');
+    const la = val(r, 'land_area'); expect(la.value === 3647 && la.display === '3,647 m²' && la.field === 'pLand' && la.source === 'dcc_rates', 'land area from DCC hectares: ' + JSON.stringify(la));
+    expect(val(r, 'land_use').value === 'Residential : Multi Unit' && val(r, 'land_use').kind === 'hint', 'land use trimmed, a hint');
+    const z = val(r, 'zone'); expect(z && z.value === 'Residential: General Residential 1' && /Not a substitute for a LIM\.$/.test(z.note), 'DCC 2GP zone with LIM note');
+    const hn = val(r, 'hazard_dcc_none'); expect(hn && /Not a substitute for a LIM/.test(hn.note), 'no 2GP overlay line');
+    expect(val(r, 'improvements_value').label === 'Improvements value (worked out)' && val(r, 'improvements_value').value === 590000, 'IV worked out from ORC pair');
+    expect(r.values.every(v => v.fetched_at && v.source_url.startsWith('https://') && v.source_name), 'every value has source, URL and fetch time');
+    expect(r.credits.some(c => /CC BY 4\.0/.test(c)), 'LINZ credit');
+    expect(r.sources.find(s => s.id === 'dcc_rates').status === 'ok', 'dcc source ok');
+    expect(hostsOk(asked), 'only allowed hosts asked');
+    // the DCC rates query is the verified address form
+    expect(asked.some(u => (new URL(u).searchParams.get('where') || '').includes("Formatted_address LIKE '100 GLADSTONE%'")), 'DCC rates by address text');
+    expect(asked.every(u => !/OverlayZones\/MapServer\/(?![0-9]+\/query)/.test(u)), 'overlay queries only'); }
+
+  // 2. South Dunedin hazards: ORC liquefaction (verified layers 65 and 66 only) and tsunami
+  { const { r, asked } = await run('dunedinHazards');
+    const hz = r.values.filter(v => v.kind === 'hazard' && v.key.startsWith('hazard_orc_'));
+    out.hazards = hz.map(v => v.display);
+    expect(hz.some(v => /Moderate to high/.test(v.display)), 'liquefaction shown');
+    expect(hz.some(v => /Yellow/.test(v.display)), 'tsunami shown');
+    expect(hz.every(v => v.note.endsWith('Not a substitute for a LIM.') && v.display.startsWith("The regional council's map shows: ")), 'hazard notes and wording');
+    expect(!hz.some(v => /Disclaimer|substitute for a Land/.test(v.value)), 'long disclaimer text not shown as the value');
+    expect(!asked.some(u => /Liquefaction_and_ground_class_Otago\/FeatureServer\/(?!65|66)\d+\/query/.test(u)), 'only liquefaction layers 65 and 66 asked');
+    expect(r.info.some(i => /nothing at this point for: flood hazard/.test(i)), 'nothing-mapped line for the rest'); }
+
+  // 3. Waitaki
+  { const { r, asked } = await run('waitaki');
+    out.waitaki = r.values.map(v => `${v.key}=${v.display}`);
+    expect(r.council === 'Waitaki District Council', 'WDC council');
+    expect(val(r, 'capital_value').source === 'wdc_parcels' && val(r, 'capital_value').value === 2250000, 'WDC CV');
+    expect(val(r, 'land_value').value === 720000 && val(r, 'land_value').source === 'wdc_parcels', 'WDC LV');
+    expect(val(r, 'land_area').value === 2071, 'WDC area');
+    expect(val(r, 'zone').value === 'BUSINESS H (HERITAGE) ZONE' && /LIM/.test(val(r, 'zone').note), 'WDC zone');
+    expect(val(r, 'title_ref').value === 'OT13A/1386', 'title');
+    expect(!val(r, 'rates_council'), 'no district rates for Waitaki');
+    expect(r.links.some(l => l.url === 'https://opencitiesfrontend.waitaki.govt.nz/propertyrating?assessmentNo=112719'), 'WDC per-property link');
+    expect(hostsOk(asked), 'waitaki hosts'); }
+
+  // 4. Clutha: only PropertyPublic, and its date
+  { const { r, asked } = await run('clutha');
+    out.clutha = r.values.map(v => `${v.key}=${v.display}`);
+    expect(r.council === 'Clutha District Council', 'CDC');
+    expect(asked.some(u => u.includes('/PropertyPublic/MapServer/0/query')) && !asked.some(u => /cluthadc[^?]*\/(Property|PropertyValuations)\/MapServer|Internal|Staff/.test(u)), 'only PropertyPublic');
+    const rc = val(r, 'rates_council'); expect(rc.value === 3905.06 && rc.as_of_label === '14 Aug 2025' && /as at 14 Aug 2025/.test(rc.note), 'Clutha rates with its own date: ' + JSON.stringify(rc));
+    expect(val(r, 'legal_description').value === 'LOT 1 DP 11505', 'CDC legal (no LINZ)');
+    expect(!val(r, 'title_ref'), 'no title offered when only ORC has one (a hint)');
+    expect(r.info.some(i => /updated less often/.test(i)), 'Clutha date note'); }
+
+  // 5. Central Otago: ORC and LINZ only, the council's search page, a plain note
+  { const { r, asked } = await run('centralOtago');
+    out.centralOtago = r.values.map(v => `${v.key}=${v.display}`);
+    expect(r.council === 'Central Otago District Council' && r.matched_address === '24 Tarbert Street, Alexandra', 'CODC');
+    expect(val(r, 'capital_value').source === 'orc_properties' && val(r, 'capital_value').value === 510000, 'CODC CV from ORC');
+    expect(!val(r, 'zone') && !val(r, 'rates_council'), 'no CODC zone or district rates');
+    expect(r.links.some(l => l.url === 'https://www.codc.govt.nz/do-it-online/rating-and-property-search'), 'CODC search link');
+    expect(r.info.some(i => /doesn't publish its zone map/.test(i)), 'CODC note');
+    expect(!asked.some(u => /codc\.govt\.nz/.test(u)), 'CODC page never fetched'); }
+
+  // 6. a weak match is refused: candidates only, no values, no property queries
+  { const { r, asked } = await run('weak');
+    expect(r.status === 'weak' && !r.values.length && r.candidates[0].address === '15 High Street, Balclutha' && r.candidates[0].score === 75.69, 'weak refused: ' + JSON.stringify(r).slice(0, 200));
+    expect(asked.length === 1, 'nothing else asked after a weak match'); }
+
+  // 7. partial failure: DCC fails, LINZ never answers (timeout); ORC still gives the values, each source has its status
+  { const t0 = Date.now(); const { r } = await run('dunedin', { fail: ['apps.dunedin.govt.nz'], slow: ['LINZ_NZ_Property_Boundaries'], timeoutMs: 300 });
+    out.partial = r.sources.filter(s => s.status !== 'ok' && s.status !== 'none').map(s => `${s.id}:${s.status}`);
+    expect(Date.now() - t0 < 3000, 'timeouts bound the lookup');
+    expect(r.status === 'ok' && val(r, 'capital_value').source === 'orc_properties' && val(r, 'capital_value').value === 1160000, 'falls back to ORC');
+    expect(r.sources.find(s => s.id === 'linz_boundaries').status === 'timeout', 'LINZ timeout recorded');
+    expect(r.sources.find(s => s.id === 'dcc_rates').status === 'failed', 'DCC failure recorded');
+    expect(!val(r, 'title_ref') && val(r, 'legal_description').source === 'orc_properties', 'no LINZ title; ORC legal description');
+    expect(!val(r, 'zone') && !val(r, 'hazard_dcc_none'), 'no zone or "none mapped" when DCC failed'); }
+
+  // 8. the locator down: unavailable, nothing guessed
+  { const { r } = await run('dunedin', { fail: ['OtagoAddress_Locator'] });
+    expect(r.status === 'unavailable' && !r.values.length, 'locator down: unavailable'); }
+
+  // 9. a council record whose valuation reference doesn't match ORC's: nothing from it
+  { const S = require('./files/council-fixtures.js').SCENARIOS; const keep = S.dunedin.dccRates; S.dunedin.dccRates = { features: keep.features.slice(1) };
+    const { r } = await run('dunedin'); S.dunedin.dccRates = keep;
+    expect(val(r, 'capital_value').source === 'orc_properties' && !val(r, 'rates_council'), 'mismatched council record not used');
+    expect(/did not match/.test(r.sources.find(s => s.id === 'dcc_rates').note || ''), 'mismatch noted'); }
+
+  // 10. a redirect or a host off the list is refused
+  { const f = async () => ({ ok: false, status: 302, text: async () => '' });
+    const r = await core.getJson('https://maps.orc.govt.nz/x?f=json', { fetch: f }); expect(!r.ok && r.error === 'redirect refused', 'redirect refused');
+    const r2 = await core.getJson('https://example.com/x', { fetch: async () => { throw new Error('should not be called'); } }); expect(!r2.ok && r2.error === 'host not allowed', 'host refused');
+    const r3 = await core.getJson('http://maps.orc.govt.nz/x', { fetch: async () => { throw new Error('should not be called'); } }); expect(!r3.ok && r3.error === 'host not allowed', 'http refused'); }
+
+  // 11. suggestions and the health check
+  { const s = await core.suggest('100 gladstone road', { fetch: makeFetch('dunedin') }); expect(s.ok && s.suggestions[0].text === '100 Gladstone Road, Dalmore, Dunedin' && s.suggestions[0].magicKey === 'mk0', 'suggest');
+    const h = await core.health({ fetch: makeFetch('dunedin', { fail: ['gis.cluthadc.govt.nz'] }), timeoutMs: 300 });
+    out.health = h.hosts;
+    expect(Object.keys(h.hosts).length === 7 && h.hosts['maps.orc.govt.nz'].ok === true && h.hosts['gis.cluthadc.govt.nz'].ok === false, 'health per host');
+    expect(Object.values(h.hosts).every(x => Object.keys(x).sort().join() === 'ok,status'), 'health returns only ok and status'); }
+
+  // 12. wording: no em dashes, and never "verified"
+  { const all = JSON.stringify((await run('dunedinHazards')).r) + JSON.stringify((await run('centralOtago')).r);
+    expect(!/—/.test(all), 'no em dashes'); expect(!/verified/i.test(all), 'never "verified"'); }
+
+  console.log(JSON.stringify(Object.assign(out, { errs }), null, 1));
+})().catch(e => console.log(JSON.stringify({ errs: ['crashed: ' + e.stack] })));
