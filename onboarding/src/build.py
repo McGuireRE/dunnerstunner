@@ -3,7 +3,7 @@ import base64, os
 here = os.path.dirname(os.path.abspath(__file__))
 read = lambda f: open(os.path.join(here, f)).read()
 css, body, js = read('styles.html'), read('body.html'), read('app.js')
-strings, i18n = read('strings.js'), read('i18n.js')
+strings, i18n, repo = read('strings.js'), read('i18n.js'), read('repo-core.js')
 for k, f in [('__LOGO_LIGHT__', 'logo-light.png'), ('__LOGO_DARK__', 'logo-dark.png')]:
     body = body.replace(k, 'data:image/png;base64,' + base64.b64encode(open(os.path.join(here, f), 'rb').read()).decode())
 html = f'''<!doctype html>
@@ -26,6 +26,9 @@ html = f'''<!doctype html>
 </script>
 <script>
 {i18n}
+</script>
+<script>
+{repo}
 </script>
 <script>
 {js}

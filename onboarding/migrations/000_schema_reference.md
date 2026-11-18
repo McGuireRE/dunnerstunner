@@ -167,3 +167,24 @@ agreements/<agreement id>/signatures/... (vendors may upload their own signature
   over 2,000,000 characters, or anything that isn't a JSON object.
 - Both security definer, service role only (revoked from public, anon and authenticated). pg_net follows redirects and that can't be
   turned off; what comes back is still only accepted as a JSON object. The http extension was tested and is not used.
+
+## Photos and documents on the property file (migration 016, written and tested in a rollback block on the live project; to be applied with Tim's OK)
+- `repo_kinds` (kind, folder, position, shareable, exportable): the kinds of item, DwellHub's document type names and folders one to one
+  (title, council, plans, reports, work, systems, insurance, photos, rental, valuation, other), plus folder `agency` (never exported;
+  Appraisal, Offer, Identity document, AML record, CRM export and the Sale and purchase agreement are never shared). Read by any
+  signed-in user; nobody writes it. The same list is `KINDS` in `src/repo-core.js` (the test compares them).
+- `property_documents` gains `folder` (set by the database from the kind), `title`, `issued_on`, `mime_type`, `size_bytes`, `sha256`,
+  `thumb_path`, `bucket` ('private' for everything before; 'property-files' for uploads), `client_key` (unique: the phone's key for the
+  item), `inspection_id`, `room`, `caption`, `taken_at`, `width`, `height`, `shared_at`/`shared_by`, `archived_at`/`archived_by`, `updated_at`.
+- `guard_property_document` (before insert, update, delete): no row is ever deleted (Remove archives); a generated document never
+  changes; path, bucket, source, key, inspection, fingerprint, size and type never change once set; only a shareable kind, not
+  archived and not generated, can be shared; removing unshares; a file in property-files sits under its own property.
+- `property_document_events`: permanent (added, changed, shared, unshared, archived, restored, exported), written by the
+  `log_property_document` trigger and the export; agent reads.
+- Functions: `agent_repo_add(p_property, p_item)` (checks the stored file's size and type in storage, the path by key, the kind, a
+  fingerprint; the same key returns the same row), `agent_repo_set(p_id, p_patch)` (kind, title, issued_on, room, caption),
+  `agent_repo_share(p_id, p_on)`, `agent_repo_archive(p_id, p_on)`, `agent_property_export(p_property)` (the "mre.property/1" JSON,
+  `schema/mre.property-1.schema.json`), `vendor_repo_list(p_property)` (a party's view of shared items), `repo_vendor_can_read(name)`
+  (for the storage policy), `repo_shareable`, `repo_mime_ok`, `repo_object` (internal).
+- Storage: bucket `property-files` (private, 25 MB, PDF, JPEG, PNG, WebP, Word, Excel, text and CSV). Agent reads and adds under
+  `properties/<id>/docs|photos/`; a party reads a file or its preview only while it is shared; no update or delete policy.

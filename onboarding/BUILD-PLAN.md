@@ -219,3 +219,16 @@ handler passes the route, health via, one health check for simultaneous calls, t
   `is_prelisting_party(prelistings)`.
 - The questionnaire's meeting preference shown to Tim where he books the appointment.
 - The appraisal page's "link to your full appraisal" becomes a PDF upload into property documents.
+
+## Added 18 November 2026: photos and documents on the property file (Tim: "a photo and document uploader and repository that can talk to dwellhub")
+
+Migration 016 (written and tested in a rollback block on the live project; not applied). A "Photos and documents" section on every
+property file, agent only: Take photos (the camera, several at once), Choose files, or drag and drop on a computer. Each file is checked
+by its own bytes (`src/repo-core.js`), photos are redrawn on the phone (2560 px long edge, JPEG, the right way up, location and other
+hidden data left behind) with a 400 px preview, and a SHA-256 fingerprint is taken. Items wait in IndexedDB with their own key and send
+when there is signal (waiting for signal, uploading, saved, didn't save with Try again); a reload keeps them; the key means nothing is
+filed twice. Kinds and folders are DwellHub's document types one to one, plus agency papers. Inspection sections have "Add photos" with
+the room. Tim can share an item with the vendors (read only, 10 minute links, on their page); appraisals, offers, ID and AML papers and
+signed documents never. Remove archives (restorable); nothing is deleted. "Download property file (JSON)": schema "mre.property/1" with
+facts, public record values and the item list (no files, no people). Nothing is sent to DwellHub. No edge function change. Tests:
+`property-repository.test.js`; database: `repo-rollback.sql` (via `repo-rollback.js`).

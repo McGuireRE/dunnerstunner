@@ -1,0 +1,422 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://packages.dunnerstunner.co.nz/onboarding/schema/mre.property-1.schema.json",
+  "title": "McGuire Real Estate property file, version 1",
+  "description": "One property as agent_property_export (migration 016) returns it: the facts, public record values with their source and date, and the list of photos and documents (no file contents). No owners, names, emails, phones or the owners on the title. Agency papers, removed items and items without a fingerprint are left out and counted. A receiver ignores keys it does not know.",
+  "type": "object",
+  "required": [
+    "schema",
+    "exported_at",
+    "source",
+    "property",
+    "public_records",
+    "items",
+    "left_out"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {
+      "const": "mre.property/1"
+    },
+    "exported_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "source": {
+      "type": "object",
+      "required": [
+        "system",
+        "agency"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "system": {
+          "type": "string"
+        },
+        "agency": {
+          "type": "string"
+        }
+      }
+    },
+    "property": {
+      "type": "object",
+      "required": [
+        "ref",
+        "address",
+        "description",
+        "disclosures",
+        "provenance"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "ref": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The property's id in the onboarding system"
+        },
+        "address": {
+          "type": "string"
+        },
+        "title_ref": {
+          "type": "string"
+        },
+        "legal_description": {
+          "type": "string"
+        },
+        "land_area_m2": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Only when the land area on file is a plain number of square metres"
+        },
+        "description": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "As recorded on the property file, in its own words",
+          "properties": {
+            "type": {
+              "$ref": "#/$defs/value"
+            },
+            "year_built": {
+              "$ref": "#/$defs/value"
+            },
+            "bedrooms": {
+              "$ref": "#/$defs/value"
+            },
+            "bathrooms": {
+              "$ref": "#/$defs/value"
+            },
+            "floor_area": {
+              "$ref": "#/$defs/value"
+            },
+            "land_area": {
+              "$ref": "#/$defs/value"
+            },
+            "construction": {
+              "$ref": "#/$defs/value"
+            },
+            "parking": {
+              "$ref": "#/$defs/value"
+            },
+            "heating": {
+              "$ref": "#/$defs/value"
+            },
+            "chattels": {
+              "$ref": "#/$defs/value"
+            },
+            "other_chattels": {
+              "$ref": "#/$defs/value"
+            }
+          }
+        },
+        "disclosures": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Sensitive: keep private to the owner on arrival",
+          "properties": {
+            "work": {
+              "$ref": "#/$defs/value"
+            },
+            "work_detail": {
+              "$ref": "#/$defs/value"
+            },
+            "weathertightness": {
+              "$ref": "#/$defs/value"
+            },
+            "weathertightness_detail": {
+              "$ref": "#/$defs/value"
+            },
+            "meth": {
+              "$ref": "#/$defs/value"
+            },
+            "meth_detail": {
+              "$ref": "#/$defs/value"
+            },
+            "defects": {
+              "$ref": "#/$defs/value"
+            },
+            "defects_detail": {
+              "$ref": "#/$defs/value"
+            },
+            "hazards": {
+              "$ref": "#/$defs/value"
+            },
+            "hazards_other": {
+              "$ref": "#/$defs/value"
+            }
+          }
+        },
+        "provenance": {
+          "type": "object",
+          "description": "Where title_ref, legal_description and the land area on file came from",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "from": {
+                "type": "string"
+              },
+              "source": {
+                "type": "string"
+              },
+              "source_name": {
+                "type": "string"
+              },
+              "as_of": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "as_of_label": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "public_records": {
+      "type": "array",
+      "description": "Values Tim chose from public council records, each with its source and its own date. Not checked by a person; not a LIM.",
+      "items": {
+        "type": "object",
+        "required": [
+          "key",
+          "value",
+          "source"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "value": {},
+          "display": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "source_name": {
+            "type": "string"
+          },
+          "source_url": {
+            "type": "string"
+          },
+          "as_of": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "as_of_label": {
+            "type": "string"
+          },
+          "fetched_at": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "folder",
+          "title",
+          "file_name",
+          "date",
+          "added_at",
+          "size_bytes",
+          "sha256",
+          "mime_type",
+          "origin",
+          "shared_with_vendors"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "enum": [
+              "Record of title",
+              "Sale and purchase agreement",
+              "Easement or covenant",
+              "Cross lease or unit title document",
+              "LIM report",
+              "Building consent",
+              "Code compliance certificate",
+              "Resource consent",
+              "Property file from council",
+              "Floor plan",
+              "Building plans",
+              "Survey plan",
+              "Builder's report",
+              "Meth test",
+              "Healthy homes assessment",
+              "Electrical certificate",
+              "Gas certificate",
+              "Engineer's report",
+              "Invoice",
+              "Quote",
+              "Producer statement",
+              "Warranty",
+              "Manual",
+              "Service record",
+              "Insurance policy",
+              "Insurance renewal",
+              "Insurance claim",
+              "Photo",
+              "Tenancy agreement",
+              "Bond lodgement",
+              "Property management agreement",
+              "Rates notice",
+              "Registered valuation",
+              "Listing ad",
+              "Other"
+            ]
+          },
+          "folder": {
+            "enum": [
+              "title",
+              "council",
+              "plans",
+              "reports",
+              "work",
+              "systems",
+              "insurance",
+              "photos",
+              "rental",
+              "valuation",
+              "other"
+            ]
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "file_name": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "date": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "description": "Date issued, else the day taken, else the day added (New Zealand time)"
+          },
+          "issued_on": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+          },
+          "taken_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "added_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 26214400
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "description": "Of the stored file, as the phone took it after preparing the file"
+          },
+          "mime_type": {
+            "enum": [
+              "application/pdf",
+              "image/jpeg",
+              "image/png",
+              "image/webp",
+              "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+              "application/msword",
+              "application/vnd.ms-excel",
+              "text/plain",
+              "text/csv"
+            ]
+          },
+          "room": {
+            "type": "string",
+            "maxLength": 60
+          },
+          "caption": {
+            "type": "string",
+            "maxLength": 1000
+          },
+          "width": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "height": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "origin": {
+            "enum": [
+              "uploaded",
+              "dropped"
+            ]
+          },
+          "shared_with_vendors": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "left_out": {
+      "type": "object",
+      "required": [
+        "agency_papers",
+        "removed",
+        "not_sorted",
+        "missing_details"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "agency_papers": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "removed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "not_sorted": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "missing_details": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  },
+  "$defs": {
+    "value": {
+      "type": [
+        "string",
+        "number",
+        "boolean",
+        "array"
+      ],
+      "description": "As stored on the property file: usually text; a council land area is a number; some answers are lists"
+    }
+  }
+}

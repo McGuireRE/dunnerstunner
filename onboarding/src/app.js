@@ -501,6 +501,8 @@
   $('#signOut').addEventListener('click', async () => {
     const waiting = pendingAll();
     if (waiting && !window.confirm(`${waiting} inspection ${waiting === 1 ? 'answer hasn\'t' : 'answers haven\'t'} been saved yet. If you sign out now, ${waiting === 1 ? 'it is' : 'they are'} lost. Sign out anyway?`)) return;
+    const files = rqWaiting();
+    if (files && !window.confirm(`${files} ${files === 1 ? 'photo or document is' : 'photos or documents are'} still to send. ${files === 1 ? 'It stays' : 'They stay'} on this phone and ${files === 1 ? 'sends' : 'send'} next time you sign in. Sign out now?`)) return;
     INS_EPOCH++;   // a save still on its way finishes without writing anything back to the phone
     try { inspIds().forEach(id => localStorage.removeItem('inspQ:' + id)); localStorage.removeItem('inspOpen'); } catch (_) { }
     INS = null; Object.keys(INS_STATE).forEach(k => { delete INS_STATE[k]; });
@@ -1024,6 +1026,7 @@ function lawyerForm(id, title, blurb) {
     <div class="toolbar">${pdfBtn(A.status === 'signed' || A.status === 'countersigned' ? 'Download your signed agreement (PDF)' : 'Read the full agreement (PDF)')}</div>
     ${['signed', 'countersigned', 'ended'].includes(A.status) ? '<h2>Send a copy to your lawyer</h2>' + lawyerForm('fwd', 'Forward the signed agreement', 'Your lawyer gets an email with a read-only link to the signed agreement. Tim gets a copy. You can do this as often as you like.') : ''}
     ${paperworkHTML()}
+    ${sharedHTML()}
     ${varDoneHTML()}
     ${A.cooling_off_until && ['signed', 'countersigned'].includes(A.status) ? `<p class="small" style="margin-top:28px;color:var(--muted)">${CR && CR.status !== 'processed' ? `A request to cancel this agreement is with Tim (sent ${esc(fmtDT(CR.requested_at))}). He'll call you to talk it through.` : `Your cooling-off period ${new Date() <= new Date(A.cooling_off_until) ? 'ends' : 'ended'} ${unsol ? 'at the end of ' : '5pm, '}${esc(fmtDate(A.cooling_off_until))}. If you need to change or cancel this agreement, <a href="#" id="cancelLink">start here</a>.`}</p>` : ''}`;
   };
@@ -1079,7 +1082,7 @@ function lawyerForm(id, title, blurb) {
     };
     top();
   }
-  BIND[10] = () => { wirePdf(A.id); if ($('#fwd')) wireLawyerForm('fwd', async (n, fm, e) => { await must(sb.rpc('vendor_forward_to_lawyer', { a: A.id, l_name: n, l_firm: fm, l_email: e })); }); const cl = $('#cancelLink'); if (cl) cl.addEventListener('click', e => { e.preventDefault(); viewCancelRequest(); }); wireVarDone(); wirePaperwork(); };
+  BIND[10] = () => { wirePdf(A.id); if ($('#fwd')) wireLawyerForm('fwd', async (n, fm, e) => { await must(sb.rpc('vendor_forward_to_lawyer', { a: A.id, l_name: n, l_firm: fm, l_email: e })); }); const cl = $('#cancelLink'); if (cl) cl.addEventListener('click', e => { e.preventDefault(); viewCancelRequest(); }); wireVarDone(); wirePaperwork(); wireShared(); };
 
   /* ═════════════════ AGENT ═════════════════ */
   /* ═════════ PROPERTY FILE: one record of the property and its owners, read and written by every page ═════════ */
@@ -1247,8 +1250,7 @@ function lawyerForm(id, title, blurb) {
       </div>
       ${locked ? '' : '<div class="toolbar"><button class="btn primary" type="button" id="pfSave">Save the property file</button></div><div class="err" id="pfErr"></div>'}
       ${flags.length ? `<div class="card warnc"><h3>From the documents: talk these through</h3><ul class="small" style="margin:6px 0 0;padding-left:20px">${flags.map(f => `<li>${esc(f.text)} <span class="src-badge">From ${esc(f.source)}</span></li>`).join('')}</ul></div>` : ''}
-      <h2>Documents</h2>
-      ${docs.length ? `<div class="card tight">${docs.map((d, i) => `<div class="fact"><div class="k">${esc(d.kind || 'Document')} · ${esc(fmtDate(d.created_at))}</div><div class="v" style="font-weight:400;display:flex;justify-content:space-between;gap:10px;align-items:center"><span style="overflow-wrap:anywhere">${esc(d.name)}</span><button class="btn link no-print" type="button" data-pfdoc="${i}">Open</button></div></div>`).join('')}</div>` : ''}
+      ${repoSectionHTML(id, docs)}
       ${importCardHTML(PROP_TARGET)}
     </div>`;
     if (IMPT === PROP_TARGET) wireImport();
@@ -1266,7 +1268,7 @@ function lawyerForm(id, title, blurb) {
     const ag = $('#pfAgree'); if (ag) ag.addEventListener('click', () => viewTable(null, null, 0, PF));
     $$('[data-pfreopen]').forEach(b => b.addEventListener('click', async () => { await must(sb.rpc('agent_reopen_property', { pid: id, new_owners: b.dataset.pfreopen === 'new' })); toast(b.dataset.pfreopen === 'new' ? 'Started again for new owners' : 'Started again'); viewProperty(id); }));
     $$('[data-pfown]').forEach(b => b.addEventListener('click', async () => { const x = PF.contacts[+b.dataset.pfown]; await must(sb.from('property_people').update({ role: 'owner', position: PF.people.length + 1 }).eq('id', x.id)); viewProperty(id); }));
-    $$('[data-pfdoc]').forEach(b => b.addEventListener('click', async () => { const d = docs[+b.dataset.pfdoc]; const w = window.open('', '_blank'); const { data } = await sb.storage.from('private').createSignedUrl(d.path, 600); if (data && w) w.location.href = data.signedUrl; else if (w) w.close(); }));
+    repoWire(id, docs);
     if (!locked) {
       const readPeople = () => $$('.pfp').forEach(c => { const x = PF.people[+c.dataset.i]; $$('[data-pf]', c).forEach(inp => { if (x[inp.dataset.pf] !== inp.value) { x[inp.dataset.pf] = inp.value; x._dirty = true; } }); });
       const readProp = () => { p.address = $('#pfAddr').value.trim(); p.title_ref = $('#pfTitle').value.trim(); p.owners_on_title = $('#pfOwners').value.trim(); $$('[data-pfd]').forEach(i => { const v = i.value.trim(); if (v) p.description[i.dataset.pfd] = v; else delete p.description[i.dataset.pfd]; }); };
@@ -1282,6 +1284,342 @@ function lawyerForm(id, title, blurb) {
       });
     }
     top();
+  }
+
+  /* ═════════ PHOTOS AND DOCUMENTS on the property file (migration 016) ═════════ */
+  // Tim adds photos and documents from his phone (the camera, several at once, or files) or a computer (drag and drop). Each item
+  // is prepared on the device first: its own bytes are checked (src/repo-core.js sniff, never the name alone), a picture is
+  // redrawn (a photo to 2560 px on the long edge, JPEG, the right way up, with its location and every other hidden detail left
+  // behind) with a small preview, and a SHA-256 fingerprint is taken. It is then kept in this browser's IndexedDB under its own
+  // key and sent when there is signal. The key names the stored file and the database row, so a retry (after a dropped signal
+  // or a reload) can never file it twice. Nothing is shared with the vendors until Tim marks it; appraisals, offers, identity
+  // and AML papers, and the signed documents the system files, never can be.
+  const RBUCKET = 'property-files';
+  const RQ = { items: new Map(), db: null, loaded: null, running: false, again: false, noStore: false };
+  const RQ_SAY = { waiting: 'Waiting for signal', uploading: 'Uploading', saved: 'Saved', failed: 'Didn\'t save' };
+  function rqDb() {
+    if (!RQ.db) RQ.db = new Promise((res, rej) => {
+      try { const r = indexedDB.open('mre-repo', 1); r.onupgradeneeded = () => { if (!r.result.objectStoreNames.contains('queue')) r.result.createObjectStore('queue', { keyPath: 'key' }); }; r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }
+      catch (e) { rej(e); }
+    });
+    return RQ.db;
+  }
+  async function rqStore(mode, fn) {
+    const db = await rqDb();
+    return new Promise((res, rej) => { const tx = db.transaction('queue', mode); let out; const rq = fn(tx.objectStore('queue')); if (rq) rq.onsuccess = () => { out = rq.result; }; tx.oncomplete = () => res(out); tx.onerror = () => rej(tx.error); tx.onabort = () => rej(tx.error || new Error('aborted')); });
+  }
+  const rqRecord = it => { const o = Object.assign({}, it); delete o.turl; return o; };   // a preview's address is only good on this page
+  const rqPut = it => rqStore('readwrite', s => s.put(rqRecord(it)));
+  const rqDel = key => rqStore('readwrite', s => s.delete(key));
+  function rqLoad() {
+    if (!RQ.loaded) RQ.loaded = (async () => {
+      try { ((await rqStore('readonly', s => s.getAll())) || []).forEach(r => { if (RQ.items.has(r.key)) return; if (r.state === 'uploading') r.state = 'waiting'; RQ.items.set(r.key, r); }); }
+      catch (e) { RQ.noStore = true; console.warn('queue storage', e); }
+    })();
+    return RQ.loaded;
+  }
+  const rqWaiting = () => [...RQ.items.values()].filter(x => x.state !== 'saved').length;
+  const rqRead = async (file, a, b) => new Uint8Array(await file.slice(a, b).arrayBuffer());
+  // a picture redrawn: the browser turns it the right way up from its EXIF orientation as it decodes it; the redrawn copy has
+  // none of the original's hidden data (location, camera, times)
+  async function rqImage(file, edge, png) {
+    let src;
+    try { src = await createImageBitmap(file, { imageOrientation: 'from-image' }); }
+    catch (_) { src = await new Promise((res, rej) => { const u = URL.createObjectURL(file), im = new Image(); im.onload = () => { URL.revokeObjectURL(u); res(im); }; im.onerror = () => { URL.revokeObjectURL(u); rej(new Error('decode')); }; im.src = u; }); }
+    const w0 = src.naturalWidth || src.width, h0 = src.naturalHeight || src.height;
+    if (!w0 || !h0) throw new Error('decode');
+    const draw = async (long, mime, q) => {
+      const s = Math.min(1, long / Math.max(w0, h0)), w = Math.max(1, Math.round(w0 * s)), h = Math.max(1, Math.round(h0 * s));
+      const c = document.createElement('canvas'); c.width = w; c.height = h; const g = c.getContext('2d');
+      if (mime === 'image/jpeg') { g.fillStyle = '#fff'; g.fillRect(0, 0, w, h); }
+      g.imageSmoothingQuality = 'high'; g.drawImage(src, 0, 0, w, h);
+      const blob = await new Promise(r => c.toBlob(r, mime, q)); if (!blob) throw new Error('encode');
+      return { blob, w, h };
+    };
+    const big = await draw(edge, png ? 'image/png' : 'image/jpeg', 0.85), small = await draw(REPO.THUMB_EDGE, 'image/jpeg', 0.72);
+    if (src.close) src.close();
+    return { blob: big.blob, mime: png ? 'image/png' : 'image/jpeg', width: big.w, height: big.h, thumb: small.blob };
+  }
+  // ctx: pid, kind ('' to decide from the file), inspection_id, room
+  async function rqPrepare(file, ctx) {
+    if (!file.size) throw new Error('This file is empty.');
+    const head = await rqRead(file, 0, 65536), tail = file.size > 65536 ? await rqRead(file, Math.max(65536, file.size - 65536), file.size) : new Uint8Array(0);
+    const s = REPO.sniff(head, tail, file.name);
+    if (s.error) throw new Error(s.error);
+    let kind = REPO.guessKind(file.name, s.image, ctx.kind);
+    if (kind === 'Photo' && !s.image) kind = REPO.guessKind(file.name, false, '');
+    if (!s.image && file.size > REPO.MAX_BYTES) throw new Error('Files can be up to 25 MB.');
+    if (s.image && file.size > 4 * REPO.MAX_BYTES) throw new Error('This picture is too large to add.');
+    let blob = file, mime = s.mime, thumb = null, width = null, height = null, name = file.name || 'file';
+    if (s.image) {
+      let r; try { r = await rqImage(file, kind === 'Photo' ? REPO.PHOTO_EDGE : REPO.DOC_IMAGE_EDGE, kind !== 'Photo' && s.mime === 'image/png'); }
+      catch (_) { throw new Error(s.mime === REPO.MIME.heic ? 'This phone can\'t read this HEIC photo. Set the camera to Most Compatible, or share it as a JPEG.' : 'This picture couldn\'t be read.'); }
+      ({ blob, mime, thumb, width, height } = r);
+      name = name.replace(/\.[^.]*$/, '') + (mime === 'image/png' ? '.png' : '.jpg');
+    }
+    if (blob.size > REPO.MAX_BYTES) throw new Error('Files can be up to 25 MB.');
+    const key = crypto.randomUUID(), sha = await REPO.sha256(await blob.arrayBuffer()), p = REPO.paths(ctx.pid, key, kind, name, mime, !!thumb);
+    return { key, pid: ctx.pid, inspection_id: ctx.inspection_id || null, room: ctx.room || '', kind, name: name.slice(0, 200), title: REPO.titleFrom(file.name),
+      mime, size: blob.size, sha256: sha, blob, thumb, width, height, taken_at: new Date(file.lastModified || Date.now()).toISOString(),
+      path: p.path, thumb_path: p.thumb, state: 'waiting', error: '', added_at: new Date().toISOString(), tries: 0 };
+  }
+  async function rqAdd(files, ctx) {
+    await rqLoad();
+    const refused = []; let n = 0;
+    for (const f of Array.from(files || [])) {
+      try { const it = await rqPrepare(f, ctx); RQ.items.set(it.key, it); try { await rqPut(it); } catch (e) { it.memOnly = true; RQ.noStore = true; } n++; rqPaint(); }
+      catch (e) { refused.push(`${f.name}: ${e.message}`); }
+    }
+    try { if (n && navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (_) { }
+    if (refused.length) { toast(refused.length === 1 ? refused[0] : `${refused.length} files couldn't be added. ${refused[0]}`); $$('[data-rq-refused]').forEach(el => { el.textContent = refused.join(' '); }); }
+    else $$('[data-rq-refused]').forEach(el => { el.textContent = ''; });
+    rqPaint(); rqPump();
+    return { added: n, refused };
+  }
+  async function rqUpload(path, blob, mime) {
+    const { error } = await sb.storage.from(RBUCKET).upload(path, blob, { contentType: mime, upsert: false, cacheControl: '3600' });
+    // already there: the same key is the same item, sent before the answer was lost; filing checks its size and type
+    if (error && !/already exists|duplicate/i.test(String(error.message || '')) && String(error.statusCode || '') !== '409') throw error;
+  }
+  async function rqSend(it) {
+    it.state = 'uploading'; it.error = ''; rqPaint();
+    try {
+      if (!it.blob) throw new Error('The file is no longer on this phone. Add it again.');
+      await rqUpload(it.path, it.blob, it.mime);
+      if (it.thumb_path && it.thumb) await rqUpload(it.thumb_path, it.thumb, 'image/jpeg');
+      const { data, error } = await sb.rpc('agent_repo_add', { p_property: it.pid, p_item: { key: it.key, kind: it.kind, title: it.title, name: it.name, path: it.path, thumb_path: it.thumb_path,
+        mime_type: it.mime, size_bytes: it.size, sha256: it.sha256, room: it.room, taken_at: it.taken_at, width: it.width, height: it.height, inspection_id: it.inspection_id } });
+      if (error) throw error;
+      it.state = 'saved'; it.doc_id = data && data.id; it.blob = null;
+      try { await rqDel(it.key); } catch (_) { }
+      rqPaint(); rqSaved(it);
+      return 'ok';
+    } catch (e) {
+      it.tries = (it.tries || 0) + 1;
+      if (netErr(e)) { it.state = 'waiting'; it.error = ''; }
+      else if (authErr(e) && !/Only Tim/.test(String(e.message || ''))) { it.state = 'waiting'; it.error = 'Sign in again to send it.'; }
+      else { it.state = 'failed'; it.error = String((e && e.message) || e || 'Something went wrong'); }
+      try { await rqPut(it); } catch (_) { }
+      rqPaint();
+      return it.state === 'waiting' ? 'net' : 'fail';
+    }
+  }
+  // sends what is waiting, one at a time; a second call while one runs makes it go round again
+  async function rqPump() {
+    if (!IS_AGENT) return;
+    await rqLoad();
+    if (RQ.running) { RQ.again = true; return; }
+    RQ.running = true;
+    try {
+      do {
+        RQ.again = false;
+        for (const it of [...RQ.items.values()].sort((a, b) => a.added_at < b.added_at ? -1 : 1)) {
+          if (it.state !== 'waiting' || it.error) continue;
+          if (!navigator.onLine) break;
+          if ((await rqSend(it)) === 'net') break;
+        }
+      } while (RQ.again && navigator.onLine);
+    } finally { RQ.running = false; rqPaint(); }
+  }
+  function rqThumb(it) { if (!it.thumb) return ''; try { it.turl ||= URL.createObjectURL(it.thumb); } catch (_) { return ''; } return it.turl; }
+  const repoIcon = mime => /pdf/.test(mime || '') ? 'PDF' : /word|msword/.test(mime || '') ? 'DOC' : /sheet|excel/.test(mime || '') ? 'XLS' : /csv/.test(mime || '') ? 'CSV' : /text/.test(mime || '') ? 'TXT' : /image/.test(mime || '') ? 'IMG' : 'FILE';
+  function rqRowHTML(it) {
+    const th = rqThumb(it);
+    return `<li class="rq-row rq-${it.state}" data-rq-key="${esc(it.key)}">
+      ${th ? `<img class="repo-th" src="${esc(th)}" alt="">` : `<span class="repo-ic" aria-hidden="true">${repoIcon(it.mime)}</span>`}
+      <span class="rq-t"><span class="rq-n">${esc(it.title || it.name)}</span><span class="small">${esc(it.kind)}${it.room ? ' · ' + esc(it.room) : ''} · ${esc(REPO.sizeText(it.size))}</span>
+      ${it.error ? `<span class="small rq-err">${esc(it.error)}</span>` : ''}</span>
+      <span class="rq-s"><span class="rq-chip">${esc(RQ_SAY[it.state] || it.state)}</span>
+      ${it.state === 'failed' || it.error ? `<button class="btn link" type="button" data-rq-retry="${esc(it.key)}">Try again</button>` : ''}
+      ${it.state === 'failed' ? `<button class="btn link" type="button" data-rq-drop="${esc(it.key)}">Don't send</button>` : ''}</span></li>`;
+  }
+  // every queue box on the page: data-rq is the property, data-rq-insp narrows it to one inspection
+  function rqPaint() {
+    $$('[data-rq]').forEach(box => {
+      const pid = box.dataset.rq, iid = box.dataset.rqInsp || null;
+      const list = [...RQ.items.values()].filter(x => x.pid === pid && (!iid || x.inspection_id === iid)).sort((a, b) => a.added_at < b.added_at ? -1 : 1);
+      const n = s => list.filter(x => x.state === s).length, wait = n('waiting'), fail = n('failed'), up = n('uploading');
+      const sum = !list.length ? '' : wait && !navigator.onLine ? `${wait} waiting for signal. ${wait === 1 ? 'It sends' : 'They send'} by ${wait === 1 ? 'itself' : 'themselves'} when the signal returns.`
+        : up || wait ? `Sending ${up + wait}...` : fail ? `${fail} didn't save. Try again, or choose not to send.` : 'All saved.';
+      box.innerHTML = list.length ? `<p class="small rq-sum" role="status">${esc(sum)}${(wait || fail) && navigator.onLine ? ' <button class="btn link" type="button" data-rq-send>Send now</button>' : ''}${RQ.noStore ? ' This browser can\'t keep them if the page closes, so keep it open until they are saved.' : ''}</p><ul class="rq-list">${list.map(rqRowHTML).join('')}</ul>` : '';
+    });
+  }
+  document.addEventListener('click', async e => {
+    const t = e.target.closest && e.target.closest('[data-rq-retry],[data-rq-drop],[data-rq-send]'); if (!t) return;
+    if (t.dataset.rqSend !== undefined) { [...RQ.items.values()].forEach(x => { if (x.state === 'failed') x.state = 'waiting'; x.error = ''; }); return rqPump(); }
+    const it = RQ.items.get(t.dataset.rqRetry || t.dataset.rqDrop); if (!it) return;
+    if (t.dataset.rqRetry) { it.state = 'waiting'; it.error = ''; try { await rqPut(it); } catch (_) { } rqPaint(); return rqPump(); }
+    if (!window.confirm(`Don't send "${it.title || it.name}"? It is taken off this phone and isn't filed.`)) return;
+    RQ.items.delete(it.key); try { await rqDel(it.key); } catch (_) { } rqPaint();
+  });
+  window.addEventListener('online', () => { rqPaint(); rqPump(); });
+  window.addEventListener('offline', rqPaint);
+  setInterval(async () => { if (!IS_AGENT) return; await rqLoad(); if ([...RQ.items.values()].some(x => x.state === 'waiting' && !x.error)) rqPump(); }, 15000);
+  // a saved item: the property page shows it in its folder; an inspection counts it
+  let REPO_VIEW = null;
+  function rqSaved(it) {
+    if (REPO_VIEW && REPO_VIEW.pid === it.pid && document.getElementById('repoSaved')) { clearTimeout(rqSaved.t); rqSaved.t = setTimeout(() => repoRefresh(it.pid), 300); }
+    if (it.inspection_id) inspPhotoCount(it.inspection_id);
+  }
+
+  const kindOptions = sel => REPO.FOLDERS.map(([f, fname]) => `<optgroup label="${esc(fname)}">${REPO.KINDS.filter(k => k[1] === f).map(k => `<option value="${esc(k[0])}" ${k[0] === sel ? 'selected' : ''}>${esc(k[0])}</option>`).join('')}</optgroup>`).join('');
+  const roomOptions = sel => `<option value="">Not noted</option>${REPO.ROOMS.map(r => `<option ${r === sel ? 'selected' : ''}>${esc(r)}</option>`).join('')}`;
+  const repoDate = d => d.issued_on ? fmtDate(d.issued_on + 'T12:00:00') : fmtDate(d.taken_at || d.created_at);
+  function repoItemHTML(d) {
+    const gen = d.source === 'generated', can = REPO.shareable(d.kind, d.source), fo = d.folder || REPO.folderOf(d.kind);
+    return `<div class="repo-item" data-doc="${esc(d.id)}">
+      <div class="repo-row">
+        ${d.thumb_path ? `<img class="repo-th" data-th="${esc(d.thumb_path)}" data-bk="${esc(d.bucket || 'private')}" alt="">` : `<span class="repo-ic" aria-hidden="true">${repoIcon(d.mime_type || (/\.pdf$/i.test(d.name) ? 'application/pdf' : ''))}</span>`}
+        <div class="repo-t"><strong>${esc(d.title || d.name)}</strong>
+          <span class="small">${esc(d.kind || 'Kind not chosen')} · ${esc(repoDate(d))}${d.size_bytes ? ' · ' + esc(REPO.sizeText(d.size_bytes)) : ''}${d.room ? ' · ' + esc(d.room) : ''}</span>
+          ${d.caption ? `<span class="small">${esc(d.caption)}</span>` : ''}
+          <span class="repo-badges">${gen ? '<span class="src-badge">Signed record, kept as filed</span>' : ''}${d.shared_at ? '<span class="status done">Shared with the vendors</span>' : ''}${!fo && !gen ? '<span class="src-badge">Choose a kind to sort it</span>' : ''}</span>
+        </div>
+      </div>
+      <div class="toolbar repo-acts">
+        <button class="btn link" type="button" data-rp-open>Open</button>
+        ${gen ? '' : `<button class="btn link" type="button" data-rp-edit>Details</button>`}
+        ${gen ? '' : can ? `<button class="btn link" type="button" data-rp-share="${d.shared_at ? 'off' : 'on'}">${d.shared_at ? 'Stop sharing' : 'Share with the vendors'}</button>` : `<span class="small repo-never">${fo === 'agency' || !fo ? (fo ? 'Never shared' : 'Choose a kind to share it') : 'Never shared'}</span>`}
+        ${gen ? '' : `<button class="btn link" type="button" data-rp-archive>Remove</button>`}
+      </div>
+      <div class="repo-edit" hidden></div>
+    </div>`;
+  }
+  function repoSavedHTML(docs) {
+    const live = docs.filter(d => !d.archived_at), gone = docs.filter(d => d.archived_at);
+    const groups = REPO.FOLDERS.map(([f, name]) => [f, name, live.filter(d => (d.folder || REPO.folderOf(d.kind)) === f)]).concat([[null, 'Not sorted yet', live.filter(d => !(d.folder || REPO.folderOf(d.kind)))]]).filter(g => g[2].length);
+    return `${groups.map(([f, name, list]) => `<details class="card tight repo-folder" data-folder="${esc(f || 'none')}" open><summary><strong>${esc(name)}</strong> <span class="small">${list.length}</span>${f === 'agency' ? ' <span class="small">(never in the property file download)</span>' : ''}</summary>${list.map(repoItemHTML).join('')}</details>`).join('')}
+      ${!live.length ? '<p class="small">Nothing filed yet.</p>' : ''}
+      ${gone.length ? `<details class="card tight repo-gone"><summary class="small">Removed (${gone.length})</summary>${gone.map(d => `<div class="fact"><div class="v" style="font-weight:400;display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><span style="overflow-wrap:anywhere">${esc(d.title || d.name)} <span class="small">${esc(d.kind || '')}</span></span><button class="btn link" type="button" data-rp-restore="${esc(d.id)}">Restore</button></div></div>`).join('')}</details>` : ''}`;
+  }
+  function repoSectionHTML(pid, docs) {
+    return `<section class="repo" id="repo" data-pid="${esc(pid)}">
+      <h2>Photos and documents</h2>
+      <div class="card tight repo-add" id="repoDrop">
+        <label class="f" for="repoKind" style="margin-top:0">What are you adding?</label>
+        <select id="repoKind"><option value="">Photos as photos, documents from their name</option>${kindOptions('')}</select>
+        <div class="toolbar">
+          <label class="btn primary file-btn">Take photos<input type="file" accept="image/*" capture="environment" multiple data-repo-in="camera"></label>
+          <label class="btn ghost file-btn">Choose files<input type="file" multiple accept="${esc(REPO.ACCEPT)}" data-repo-in="files"></label>
+        </div>
+        <p class="small repo-droptext">Or drag files here.</p>
+        <p class="small" style="margin:0">PDF, photos, Word, Excel or text, up to 25 MB each. Photos are made smaller and their location is taken out. Only you see these until you share one.</p>
+        <p class="small rq-err" data-rq-refused role="alert"></p>
+        <div data-rq="${esc(pid)}"></div>
+      </div>
+      <div id="repoSaved">${repoSavedHTML(docs)}</div>
+      <div class="card tight"><h3 style="margin:0 0 4px">Property file for DwellHub</h3>
+        <p class="small" style="margin:0">One file with the property facts, the public record values with their source and date, and the list of photos and documents with their fingerprints. No files themselves, no owners' names or contact details, and no agency papers. Nothing is sent anywhere.</p>
+        <div class="toolbar"><button class="btn ghost" type="button" id="repoExport">Download property file (JSON)</button></div></div>
+    </section>`;
+  }
+  async function repoThumbs() {
+    for (const img of $$('img[data-th]')) { const p = img.dataset.th; img.removeAttribute('data-th'); try { const { data } = await sb.storage.from(img.dataset.bk || RBUCKET).createSignedUrl(p, 600); if (data && data.signedUrl) img.src = data.signedUrl; } catch (_) { } }
+  }
+  async function repoOpen(d) {
+    const w = window.open('', '_blank');
+    try { const { data, error } = await sb.storage.from(d.bucket || 'private').createSignedUrl(d.path, 600); if (error || !data) throw error || new Error('no link'); if (w) w.location.href = data.signedUrl; }
+    catch (e) { if (w) w.close(); toast(netErr(e) ? 'No signal. It opens once the signal returns.' : 'It couldn\'t be opened. Try again.'); }
+  }
+  async function repoRefresh(pid) {
+    const box = document.getElementById('repoSaved'); if (!box || !REPO_VIEW || REPO_VIEW.pid !== pid) return;
+    try { const { data, error } = await sb.from('property_documents').select('*').eq('property_id', pid).order('created_at', { ascending: false }); if (error) return; REPO_VIEW.docs = data || []; }
+    catch (_) { return; }
+    box.innerHTML = repoSavedHTML(REPO_VIEW.docs); repoThumbs();
+  }
+  function repoFiles(list, kind) { if (!REPO_VIEW) return; rqAdd(list, { pid: REPO_VIEW.pid, kind: kind || '' }); }
+  function repoWire(pid, docs) {
+    REPO_VIEW = { pid, docs };
+    rqLoad().then(rqPaint); rqPump();
+    $$('[data-repo-in]').forEach(inp => inp.addEventListener('change', () => { const files = Array.from(inp.files || []); inp.value = ''; if (files.length) repoFiles(files, inp.dataset.repoIn === 'camera' ? ($('#repoKind').value || 'Photo') : $('#repoKind').value); }));
+    const dz = $('#repoDrop');
+    ['dragenter', 'dragover'].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.add('over'); }));
+    ['dragleave', 'drop'].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); if (ev === 'dragleave' && dz.contains(e.relatedTarget)) return; dz.classList.remove('over'); }));
+    dz.addEventListener('drop', e => { const files = Array.from((e.dataTransfer && e.dataTransfer.files) || []); if (files.length) repoFiles(files, $('#repoKind').value); });
+    $('#repoExport').addEventListener('click', repoExport);
+    const saved = $('#repoSaved');
+    saved.addEventListener('click', async e => {
+      const rs = e.target.closest('[data-rp-restore]');
+      if (rs) { rs.disabled = true; try { await must(sb.rpc('agent_repo_archive', { p_id: rs.dataset.rpRestore, p_on: false })); toast('Restored'); } catch (_) { } return repoRefresh(pid); }
+      const card = e.target.closest('[data-doc]'); if (!card) return;
+      const d = REPO_VIEW.docs.find(x => x.id === card.dataset.doc); if (!d) return;
+      if (e.target.closest('[data-rp-open]')) return repoOpen(d);
+      const sh = e.target.closest('[data-rp-share]');
+      if (sh) { sh.disabled = true; const on = sh.dataset.rpShare === 'on'; try { await must(sb.rpc('agent_repo_share', { p_id: d.id, p_on: on })); toast(on ? 'Shared. The vendors can open it from their page.' : 'No longer shared.'); } catch (_) { } return repoRefresh(pid); }
+      if (e.target.closest('[data-rp-archive]')) {
+        if (!window.confirm(`Remove "${d.title || d.name}"? It goes to Removed at the bottom${d.shared_at ? ', stops being shared,' : ''} and can be restored.`)) return;
+        try { await must(sb.rpc('agent_repo_archive', { p_id: d.id, p_on: true })); toast('Removed'); } catch (_) { } return repoRefresh(pid);
+      }
+      if (e.target.closest('[data-rp-edit]')) {
+        const ed = $('.repo-edit', card); if (!ed.hidden) { ed.hidden = true; return; }
+        ed.innerHTML = `<div class="row2 stack"><div><label class="f">Kind</label><select data-re="kind">${REPO.kindInfo(d.kind) ? '' : `<option value="" selected>${esc(d.kind || 'Choose a kind')}</option>`}${kindOptions(d.kind)}</select></div>
+          <div><label class="f">Title</label><input type="text" maxlength="200" data-re="title" value="${esc(d.title || '')}" placeholder="${esc(d.name)}"></div></div>
+          <div class="row2 stack"><div><label class="f">Date issued <span class="opt">(if it has one)</span></label><input type="date" data-re="issued_on" value="${esc(d.issued_on || '')}"></div>
+          <div><label class="f">Room or area</label><select data-re="room">${roomOptions(d.room || '')}</select></div></div>
+          <label class="f">Note</label><input type="text" maxlength="1000" data-re="caption" value="${esc(d.caption || '')}">
+          <div class="toolbar"><button class="btn primary" type="button" data-re-save>Save</button><button class="btn ghost" type="button" data-re-cancel>Cancel</button></div><div class="err" role="alert"></div>`;
+        ed.hidden = false;
+        $('[data-re-cancel]', ed).addEventListener('click', () => { ed.hidden = true; });
+        $('[data-re-save]', ed).addEventListener('click', async () => {
+          const patch = {}; $$('[data-re]', ed).forEach(i => { const v = i.value.trim(); if (i.dataset.re === 'kind' && !v) return; if ((d[i.dataset.re] || '') !== v) patch[i.dataset.re] = v; });
+          if (!Object.keys(patch).length) { ed.hidden = true; return; }
+          const { error } = await sb.rpc('agent_repo_set', { p_id: d.id, p_patch: patch });
+          if (error) { $('.err', ed).textContent = error.message; return; }
+          toast('Saved'); repoRefresh(pid);
+        });
+      }
+    });
+    repoThumbs();
+  }
+  async function repoExport() {
+    const b = $('#repoExport'); if (b) b.disabled = true;
+    try {
+      const data = await must(sb.rpc('agent_property_export', { p_property: REPO_VIEW.pid }));
+      const slug = String((data.property || {}).address || 'property').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'property';
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }), a = document.createElement('a');
+      a.href = URL.createObjectURL(blob); a.download = `property-${slug}-${isoDay(new Date())}.json`; document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+      toast('Downloaded');
+    } catch (_) { } finally { if (b) b.disabled = false; }
+  }
+
+  // the inspection's photos: added from any section with the room or area, filed to the property with the inspection noted
+  const INSP_ROOM = { outside: 'Outside', structure: 'Outside', inside: 'Living', services: 'Detail', history: 'Detail', tenancy: 'Other' };
+  function inspPhotosHTML(secKey) {
+    const room = ((INS.rooms ||= {})[secKey]) ?? INSP_ROOM[secKey] ?? '';
+    return `<div class="card tight iq insp-photos"><h3 style="margin:0 0 4px">Photos</h3>
+      <div class="row2 stack"><div><label class="f" for="iRoom" style="margin-top:0">Room or area</label><select id="iRoom">${roomOptions(room)}</select></div>
+      <div class="toolbar" style="align-self:end"><label class="btn ghost file-btn">Add photos<input type="file" accept="image/*" capture="environment" multiple data-insp-photos></label></div></div>
+      <p class="small" id="iPhotoCount" style="margin:6px 0 0"></p>
+      <p class="small rq-err" data-rq-refused role="alert"></p>
+      <div data-rq="${esc(INS.row.property_id)}" data-rq-insp="${esc(INS.id)}"></div></div>`;
+  }
+  function inspPhotosWire(secKey) {
+    const sel = $('#iRoom'), inp = $('[data-insp-photos]'); if (!sel || !inp) return;
+    sel.addEventListener('change', () => { (INS.rooms ||= {})[secKey] = sel.value; });
+    inp.addEventListener('change', () => { const files = Array.from(inp.files || []); inp.value = ''; if (files.length) rqAdd(files, { pid: INS.row.property_id, kind: 'Photo', inspection_id: INS.id, room: sel.value }); });
+    rqLoad().then(rqPaint); rqPump(); inspPhotoCount(INS.id);
+  }
+  async function inspPhotoCount(iid) {
+    const el = document.getElementById('iPhotoCount'); if (!el || !INS || INS.id !== iid) return;
+    let n = null; try { const { data, error } = await sb.from('property_documents').select('id').eq('inspection_id', iid).is('archived_at', null); if (!error) n = (data || []).length; } catch (_) { }
+    if (n != null && INS && INS.id === iid && document.getElementById('iPhotoCount')) el.textContent = n ? `${n} ${n === 1 ? 'photo' : 'photos'} saved from this inspection. They are on the property file.` : 'Photos go to the property file, with the room noted. Only you see them.';
+  }
+
+  /* vendor: what Tim has shared, read only, by short signed links */
+  let SHARED = [];
+  async function loadShared() { SHARED = []; if (!A || !A.property_id) return; try { const { data, error } = await sb.rpc('vendor_repo_list', { p_property: A.property_id }); if (!error) SHARED = data || []; } catch (_) { } }
+  function sharedHTML() {
+    if (!SHARED.length) return '';
+    return `<h2>Photos and documents from Tim</h2><div class="card tight repo-shared">${SHARED.map((d, i) => `<div class="repo-row repo-v">
+      ${d.thumb_path ? `<img class="repo-th" data-th="${esc(d.thumb_path)}" data-bk="${RBUCKET}" alt="">` : `<span class="repo-ic" aria-hidden="true">${repoIcon(d.mime_type)}</span>`}
+      <div class="repo-t"><strong translate="no">${esc(d.title || d.name)}</strong><span class="small">${esc(d.kind)} · <span translate="no">${esc(repoDate(d))}</span>${d.room ? ' · ' + esc(d.room) : ''}</span>${d.caption ? `<span class="small">${esc(d.caption)}</span>` : ''}</div>
+      <button class="btn link" type="button" data-shared="${i}">Open</button></div>`).join('')}
+      <p class="small" style="margin:8px 0 0">Tim has shared these for you to read. Each opens for 10 minutes at a time.</p></div>`;
+  }
+  function wireShared() {
+    $$('[data-shared]').forEach(b => b.addEventListener('click', () => { const d = SHARED[+b.dataset.shared]; if (d) repoOpen(Object.assign({ bucket: RBUCKET }, d)); }));
+    repoThumbs();
   }
 
   /* ═════════ TRANSLATIONS (Tim only): translate everything, read English beside the translation, correct, show English again ═════════ */
@@ -2783,6 +3121,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   async function loadForms() {
     FORMS = []; FSIGS = []; RECEIPTS = [];
     if (!A || !['signed', 'countersigned'].includes(A.status)) return;
+    await loadShared();
     try { const { data, error } = await sb.from('property_forms').select('*').eq('agreement_id', A.id); if (!error) FORMS = data || []; } catch (_) { }
     try { const { data, error } = await sb.from('form_signatures').select('*').eq('agreement_id', A.id); if (!error) FSIGS = data || []; } catch (_) { }
     try { const { data, error } = await sb.from('guide_receipts').select('*').eq('agreement_id', A.id); if (!error) RECEIPTS = data || []; } catch (_) { }
@@ -3641,13 +3980,14 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       ${INS.offline ? '<div class="card warnc tight"><p class="small" style="margin:0">No signal: showing what this phone has kept. Keep going; it saves when the signal returns.</p></div>' : ''}
       ${s[2].map(inspItemHTML).join('')}
       <div class="card tight iq"><label class="f" for="inote" style="margin-top:0;font-weight:600">Notes for ${esc(s[1].toLowerCase())} <span class="opt">(only you see these)</span></label><textarea id="inote" maxlength="${INSP_MAX}" data-itext="n:${s[0]}">${esc(INS.notes[s[0]] || '')}</textarea></div>
+      ${inspPhotosHTML(s[0])}
     </div>`;
     actions(true, i ? 'Back' : 'Property file', last ? 'Finish' : `Next: ${INSP_SECTIONS[i + 1][1]}`);
     onBack = () => { inspFlush(); if (i) { INS.sec = i - 1; inspDraw(); } else { inspOpenSet(null); viewProperty(INS.row.property_id); } };
     onNext = async () => { inspFlush(); if (last) return viewInspectionFinish(); INS.sec = i + 1; inspDraw(); };
     $$('[data-isecn]').forEach(b => b.addEventListener('click', () => { inspFlush(); INS.sec = +b.dataset.isecn; inspDraw(); }));
     $('#insGoFinish').addEventListener('click', () => { inspFlush(); viewInspectionFinish(); });
-    inspCounts(); inspConflictsPaint(); inspCopyPaint(); inspShow(INS.id);
+    inspCounts(); inspConflictsPaint(); inspCopyPaint(); inspShow(INS.id); inspPhotosWire(s[0]);
     top();
   }
 

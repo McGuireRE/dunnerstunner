@@ -68,6 +68,8 @@ function q(table){ logCall('from:'+table);
   };
   function run(){
     const T=(DB[table]||=[]);
+    // photos and documents (migration 016): vendors see none of it; guard_property_document() on every write
+    if(['property_documents','property_document_events','repo_kinds'].includes(table)){ const r0=repoTable(table,op,payload,op==='update'?T.filter(r=>filters.every(f=>f(r))):[],single); if(r0) return r0; }
     // after signing (migrations 009 and 010): these tables are for the agent only. A vendor sees and writes nothing; nobody writes the
     // stage record directly (agent_set_stage does) or removes a row from any of them.
     if(AGENT_ONLY.includes(table)){ const vendor=S&&S.user&&!AGENTS.includes(S.user.email); if(vendor){ if(op==='select') return {data:single?undefined:[],error:single?{message:'not found'}:null}; throw new Error('new row violates row-level security policy for table "'+table+'"'); }
@@ -147,7 +149,7 @@ const NEED_ANSWER='Please answer each question Tim noted at the inspection';
 const AGENT_ONLY=['property_events','campaign_stats','buyer_feedback','property_offers'];
 function mkNotices(ag){ if((ag.answers||{}).prior!=='yes') return; (DB.prior_agency_notices||=[]); (ag.answers.priorAgencies||[]).forEach((x,i)=>{ if(x.agency&&!DB.prior_agency_notices.some(n=>n.agreement_id===ag.id&&n.idx===i)) DB.prior_agency_notices.push({id:uid(),agreement_id:ag.id,idx:i,agency:x.agency,agent_name:x.agent||null,email:x.email||null,kind:x.kind,dated:x.dated||null,status:'to_send',created_at:now()}); }); }
 const ok=d=>Promise.resolve({data:d,error:null}); const bad=m=>Promise.resolve({data:null,error:{message:m}});
-function rpc(name,a){ logCall('rpc:'+name); if(localStorage.getItem('trHang')==='1'&&['get_translations','set_my_language'].includes(name)) return new Promise(()=>{}); const before=new Map((DB.agreements||[]).map(x=>[x.id,JSON.parse(JSON.stringify(x))]));
+function rpc(name,a){ logCall('rpc:'+name); if(['agent_repo_add','agent_repo_set','agent_repo_share','agent_repo_archive','vendor_repo_list','agent_property_export'].includes(name)) return repoRpc(name,a); if(localStorage.getItem('trHang')==='1'&&['get_translations','set_my_language'].includes(name)) return new Promise(()=>{}); const before=new Map((DB.agreements||[]).map(x=>[x.id,JSON.parse(JSON.stringify(x))]));
   // mockSaveDelay = ms: the inspection save answers late, as on a slow connection (the work is done when the answer arrives)
   let dl=0; try{ dl=+localStorage.getItem('mockSaveDelay')||0; }catch(_){} if(dl&&name==='agent_inspection_save') return new Promise(r=>setTimeout(()=>{ const out=rpcInner(name,a); save(); r(out); },dl));
   const res=rpcInner(name,a); (DB.agreements||[]).forEach(x=>{ const o=before.get(x.id); if(o&&JSON.stringify(o)!==JSON.stringify(x)) syncAgreement(x,o); }); save(); return res; }
@@ -386,12 +388,134 @@ function councilRpc(name,a,me){ if(offline()) return bad('Failed to fetch'); if(
     CUL().push({id:CUL().length+1,property_id:p.id,lookup_id:null,kind:'removed',keys:[a.p_key],detail:{value:e.value,field,restored,agreement_holds:keptBy},actor:me.email,at:now()}); save();
     return ok({removed:a.p_key,field,restored,agreement_holds:keptBy}); }
   return bad('unknown rpc '+name); }
+// ── photos and documents on the property file (mirrors migrations/016_property_repository.sql) ──
+// Storage: the 'property-files' bucket keeps each file's size and type in DB.storage_objects (as storage.objects does) and the
+// bytes in memory (window.__repoBlobs, for the tests to inspect). Kinds come from src/repo-core.js (the test checks that list
+// against repo_kinds in the migration). localStorage mockOffline = '1' fails uploads and the repository calls as with no
+// signal; mockDropReply = 'N' files the next N items but answers as if the signal dropped, so the phone never hears back.
+const RB='property-files', PNG1='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=';
+const RKS=()=>(window.REPO&&window.REPO.KINDS)||[];
+const rk=k=>{ const L=RKS(), i=L.findIndex(x=>x[0]===k); return i<0?null:{kind:L[i][0],folder:L[i][1],shareable:!!L[i][2],exportable:!!L[i][3],position:i}; };
+const repoShareable=(kind,source)=>source!=='generated'&&!!(rk(kind)||{}).shareable;
+const PD=()=>(DB.property_documents||=[]), PDE=()=>(DB.property_document_events||=[]), SO=()=>(DB.storage_objects||={});
+const meEmail=()=>(S&&S.user&&S.user.email)||'system';
+const STORED_MIME=['application/pdf','image/jpeg','image/png','image/webp','application/vnd.openxmlformats-officedocument.wordprocessingml.document','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','application/msword','application/vnd.ms-excel','text/plain','text/csv'];
+const netFail=()=>Promise.resolve({data:null,error:{message:'Failed to fetch'}});
+function pdLog(d,kind,detail){ PDE().push({id:PDE().length+1,property_id:d.property_id,document_id:d.id||null,at:now(),actor:meEmail(),kind,detail:detail||{}}); }
+// guard_property_document() on insert
+function pdInsertRow(x){ if(x.shared_at||x.archived_at) throw new Error('Share or remove an item after it is filed'); x.bucket=x.bucket||'private'; x.folder=(rk(x.kind)||{}).folder||null;
+  if(x.bucket===RB&&!String(x.path||'').startsWith('properties/'+x.property_id+'/')) throw new Error("A file must sit in its own property's folder");
+  x.shared_by=null; x.archived_by=null; x.shared_at=null; x.archived_at=null; return x; }
+// guard_property_document() and log_property_document() on update
+function pdUpdate(o,patch){ const n=Object.assign({},o,patch), who=meEmail();
+  n.folder=(rk(n.kind)||{}).folder||null;
+  if(n.bucket===RB&&!String(n.path).startsWith('properties/'+n.property_id+'/')) throw new Error("A file must sit in its own property's folder");
+  if(n.thumb_path&&!String(n.thumb_path).startsWith('properties/'+n.property_id+'/')) throw new Error("A preview must sit in its own property's folder");
+  if(o.source==='generated'){ const strip=x=>{ const c=Object.assign({},x); delete c.updated_at; delete c.folder; return canon(c); }; if(strip(n)!==strip(o)) throw new Error('A signed document is kept exactly as it was filed'); }
+  if(['id','property_id','path','bucket','source','created_at','created_by','client_key','inspection_id'].some(k=>!same(n[k],o[k]))||['thumb_path','sha256','size_bytes','mime_type','taken_at'].some(k=>o[k]!=null&&!same(n[k],o[k]))) throw new Error("Where a file is kept, what it is and its fingerprint can't change");
+  if(n.bucket===RB&&!rk(n.kind)) throw new Error('Choose a kind from the list');
+  if(n.archived_at&&!o.archived_at){ n.shared_at=null; n.shared_by=null; n.archived_by=who; }
+  if(!n.archived_at) n.archived_by=null;
+  if(n.shared_at){ if(n.archived_at) throw new Error("A removed item can't be shared"); if(!repoShareable(n.kind,n.source)) throw new Error('This kind of item is never shared with the vendors');
+    if(!o.shared_at) n.shared_by=who; else { n.shared_at=o.shared_at; n.shared_by=o.shared_by; } } else n.shared_by=null;
+  n.updated_at=now();
+  const ch={}; ['kind','title','issued_on','room','caption'].forEach(k=>{ if(!same(n[k]??null,o[k]??null)) ch[k]={from:o[k]??null,to:n[k]??null}; });
+  const was=Object.assign({},o); Object.assign(o,n);
+  if(Object.keys(ch).length) pdLog(o,'changed',ch);
+  if(!was.archived_at&&o.archived_at) pdLog(o,'archived',{was_shared:!!was.shared_at});
+  if(was.archived_at&&!o.archived_at) pdLog(o,'restored');
+  if(!was.shared_at&&o.shared_at) pdLog(o,'shared');
+  if(was.shared_at&&!o.shared_at&&!o.archived_at) pdLog(o,'unshared');
+  return o; }
+// table access: vendors see none of it; nobody removes a row or writes the record or the kind list
+function repoTable(table,op,payload,rows,single){
+  if(!isAgentMe()){ if(op==='select') return {data:single?undefined:[],error:single?{message:'not found'}:null}; throw new Error('new row violates row-level security policy for table "'+table+'"'); }
+  if(table!=='property_documents'){ if(op!=='select') throw new Error('permission denied for table '+table); if(table==='repo_kinds') return {data:RKS().map((r,i)=>({kind:r[0],folder:r[1],position:i,shareable:!!r[2],exportable:!!r[3]})),error:null}; return null; }
+  if(op==='delete') throw new Error('Items on a property file are kept. Remove one with Remove, which archives it');
+  if(op==='insert'){ (Array.isArray(payload)?payload:[payload]).forEach(pdInsertRow); return null; }
+  if(op==='update'){ rows.forEach(r=>pdUpdate(r,payload)); save(); return {data:rows,error:null}; }
+  return null; }
+const repoCanRead=p=>{ const d=PD().find(x=>x.bucket===RB&&(x.path===p||x.thumb_path===p)); return !!d&&!!d.shared_at&&!d.archived_at&&repoShareable(d.kind,d.source)&&propParty(d.property_id); };
+function repoBucket(){ return {
+  upload:(p,blob,o)=>{ logCall('up:'+p); if(offline()) return netFail(); if(!isAgentMe()) return bad('new row violates row-level security policy');
+    const f=String(p).split('/'); if(f[0]!=='properties'||!['docs','photos'].includes(f[2])) return bad('new row violates row-level security policy');
+    if(SO()[p]) return Promise.resolve({data:null,error:{message:'The resource already exists',statusCode:'409'}});
+    const mime=(o&&o.contentType)||blob.type; if(!STORED_MIME.includes(mime)) return bad('mime type '+mime+' is not supported');
+    if(blob.size>26214400) return bad('The object exceeded the maximum allowed size');
+    SO()[p]={size:blob.size,mime}; (window.__repoBlobs||={})[p]=blob; save(); return ok({path:p}); },
+  createSignedUrl:(p)=>{ if(offline()) return netFail(); if(!isAgentMe()&&!repoCanRead(p)) return bad('Object not found'); if(!SO()[p]) return bad('Object not found');
+    const bl=(window.__repoBlobs||{})[p]; return ok({signedUrl:bl?URL.createObjectURL(bl):PNG1}); } }; }
+function repoRpc(name,a){
+  if(offline()) return netFail();
+  const me=S&&S.user;
+  if(name==='vendor_repo_list'){ if(!me) return bad('permission denied for function vendor_repo_list'); if(!propParty(a.p_property)) return ok([]);
+    return ok(PD().filter(d=>d.property_id===a.p_property&&d.bucket===RB&&d.shared_at&&!d.archived_at&&repoShareable(d.kind,d.source)).sort((x,y)=>x.folder===y.folder?(x.created_at<y.created_at?1:-1):(x.folder<y.folder?-1:1))
+      .map(d=>({id:d.id,kind:d.kind,folder:d.folder,title:d.title||null,name:d.name,issued_on:d.issued_on||null,mime_type:d.mime_type,size_bytes:d.size_bytes,path:d.path,thumb_path:d.thumb_path||null,room:d.room||null,caption:d.caption||null,taken_at:d.taken_at||null,created_at:d.created_at}))); }
+  if(!isAgentMe()) return bad({agent_property_export:'Only Tim can export a property file',agent_repo_add:'Only Tim can add to a property file',agent_repo_share:'Only Tim can share from a property file',agent_repo_archive:'Only Tim can remove from a property file'}[name]||'Only Tim can change a property file');
+  if(name==='agent_repo_add'){ const it=a.p_item||{}, k=it.key;
+    if(!/^[0-9a-f-]{36}$/i.test(k||'')) return bad('Each item needs its own key');
+    const ex=PD().find(d=>d.client_key===k);
+    if(ex){ if(ex.property_id!==a.p_property) return bad('That item is filed on another property'); return ok({id:ex.id,existing:true}); }
+    if(!PT().some(p=>p.id===a.p_property)) return bad('Property not found');
+    const kd=rk(it.kind); if(!kd) return bad('Choose a kind from the list');
+    const photo=kd.kind==='Photo', nm=String(it.name||'').replace(/[\x00-\x1f/\\]/g,'').slice(0,200); if(!nm) return bad('The item needs a file name');
+    const base='properties/'+a.p_property+(photo?'/photos/':'/docs/');
+    if(photo?it.path!==base+k+'.jpg':!new RegExp('^'+base.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+k+'-[A-Za-z0-9._-]{1,120}$').test(it.path||'')) return bad(photo?'A photo is stored at its own key':'A document is stored at its own key');
+    if(it.thumb_path&&it.thumb_path!==base+k+'.thumb.jpg') return bad('A preview is stored beside its item');
+    if(!STORED_MIME.includes(it.mime_type)) return bad("That type of file isn't accepted");
+    if(photo&&it.mime_type!=='image/jpeg') return bad('Photos are stored as JPEG');
+    if(!(it.size_bytes>0&&it.size_bytes<=26214400)) return bad('Files can be up to 25 MB');
+    if(!/^[0-9a-f]{64}$/.test(it.sha256||'')) return bad('The item needs its fingerprint');
+    const obj=SO()[it.path]; if(!obj) return bad("The file hasn't arrived yet");
+    if(obj.size!==it.size_bytes||obj.mime!==it.mime_type) return bad("The stored file doesn't match what the phone sent");
+    if(it.thumb_path&&!(SO()[it.thumb_path]&&SO()[it.thumb_path].mime==='image/jpeg')) return bad("The preview hasn't arrived yet");
+    if(it.inspection_id&&!PI().some(i=>i.id===it.inspection_id&&i.property_id===a.p_property)) return bad('That inspection is of another property');
+    const t=s=>{ s=String(s??'').trim(); return s||null; };
+    const d=pdInsertRow({id:uid(),property_id:a.p_property,kind:kd.kind,name:nm,title:(t(it.title)||'').slice(0,200)||null,path:it.path,thumb_path:it.thumb_path||null,bucket:RB,source:'uploaded',created_by:me.email,
+      mime_type:it.mime_type,size_bytes:it.size_bytes,sha256:it.sha256,client_key:k,inspection_id:it.inspection_id||null,room:(t(it.room)||'').slice(0,60)||null,caption:(t(it.caption)||'').slice(0,1000)||null,
+      issued_on:/^\d{4}-\d{2}-\d{2}$/.test(it.issued_on||'')?it.issued_on:null,taken_at:/^\d{4}-\d{2}-\d{2}T/.test(it.taken_at||'')?it.taken_at:null,width:it.width||null,height:it.height||null,read_result:null,created_at:now(),updated_at:now()});
+    PD().push(d); pdLog(d,'added',{kind:d.kind,name:d.name,source:'uploaded',sha256:d.sha256,size_bytes:d.size_bytes}); save();
+    const drop=+localStorage.getItem('mockDropReply')||0; if(drop>0){ localStorage.setItem('mockDropReply',String(drop-1)); return netFail(); }
+    return ok({id:d.id,existing:false}); }
+  const d=a.p_id&&PD().find(x=>x.id===a.p_id);
+  if(['agent_repo_set','agent_repo_share','agent_repo_archive'].includes(name)){ if(!d) return bad('Not found');
+    try {
+      if(name==='agent_repo_set'){ const p=a.p_patch||{}, patch={}; if('kind' in p){ if(!rk(p.kind)) return bad('Choose a kind from the list'); patch.kind=p.kind; }
+        if('issued_on' in p){ if(p.issued_on&&!/^\d{4}-\d{2}-\d{2}$/.test(p.issued_on)) return bad('Check the date'); patch.issued_on=p.issued_on||null; }
+        [['title',200],['room',60],['caption',1000]].forEach(([k,n])=>{ if(k in p){ const v=String(p[k]??'').trim(); patch[k]=v?v.slice(0,n):null; } });
+        pdUpdate(d,patch); }
+      if(name==='agent_repo_share') pdUpdate(d,{shared_at:a.p_on?(d.shared_at||now()):null});
+      if(name==='agent_repo_archive') pdUpdate(d,{archived_at:a.p_on?(d.archived_at||now()):null});
+    } catch(e){ return bad(e.message); }
+    save(); return ok(null); }
+  if(name==='agent_property_export'){ const p=PT().find(x=>x.id===a.p_property); if(!p) return bad('Property not found');
+    const dsc=p.description||{}, ds=p.disclosures||{}, strip=o=>{ const c={}; Object.entries(o).forEach(([k,v])=>{ if(v!=null) c[k]=v; }); return c; };
+    const lm=String(dsc.pLand||'').match(/^\s*(\d+(?:\.\d+)?)\s*(m2|m²|sqm|square metres)?\s*$/);
+    const recs=Object.entries(p.found||{}).filter(([,v])=>isObj(v)).sort((x,y)=>x[0]<y[0]?-1:1).map(([k,v])=>strip({key:k,label:v.label,value:v.value,display:v.display,note:v.note,source:v.source,source_name:v.source_name,source_url:v.source_url,as_of:v.as_of,as_of_label:v.as_of_label,fetched_at:v.fetched_at}));
+    const prov={}; Object.entries(p.provenance||{}).filter(([,v])=>isObj(v)).forEach(([k,v])=>{ prov[k]=strip({from:v.from,source:v.source,source_name:v.source_name,as_of:v.as_of,as_of_label:v.as_of_label}); });
+    const mine=PD().filter(x=>x.property_id===p.id);
+    const items=mine.filter(x=>!x.archived_at&&x.source!=='generated'&&(rk(x.kind)||{}).exportable&&x.sha256&&x.size_bytes&&x.mime_type)
+      .sort((x,y)=>rk(x.kind).position-rk(y.kind).position||(x.created_at<y.created_at?-1:1))
+      .map(x=>strip({id:x.id,kind:x.kind,folder:rk(x.kind).folder,title:x.title||x.name,file_name:x.name,date:x.issued_on||nzDay(x.taken_at||x.created_at),issued_on:x.issued_on||null,taken_at:x.taken_at||null,added_at:x.created_at,
+        size_bytes:x.size_bytes,sha256:x.sha256,mime_type:x.mime_type,room:x.room||null,caption:x.caption||null,width:x.width||null,height:x.height||null,origin:x.source,shared_with_vendors:!!x.shared_at}));
+    const live=mine.filter(x=>!x.archived_at);
+    const out={schema:'mre.property/1',exported_at:new Date().toISOString().replace(/\.\d{3}Z$/,'Z'),source:{system:'dunnerstunner onboarding',agency:'McGuire Real Estate Limited'},
+      property:strip({ref:p.id,address:p.address,title_ref:p.title_ref||null,legal_description:p.legal_description||null,land_area_m2:lm?+lm[1]:null,
+        description:strip({type:dsc.pType,year_built:dsc.pYear,bedrooms:dsc.pBed,bathrooms:dsc.pBath,floor_area:dsc.pFloor,land_area:dsc.pLand,construction:dsc.pBuild,parking:dsc.pPark,heating:dsc.pHeat,chattels:dsc.chattels,other_chattels:dsc.chatOther}),
+        disclosures:strip({work:ds.work,work_detail:ds.workDetail,weathertightness:ds.wt,weathertightness_detail:ds.wtDetail,meth:ds.meth,meth_detail:ds.methDetail,defects:ds.def,defects_detail:ds.defDetail,hazards:ds.hazards,hazards_other:ds.hazOther}),
+        provenance:prov}),
+      public_records:recs, items,
+      left_out:{agency_papers:live.filter(x=>x.source==='generated'||(rk(x.kind)||{}).folder==='agency').length,removed:mine.filter(x=>x.archived_at).length,
+        not_sorted:live.filter(x=>x.source!=='generated'&&!rk(x.kind)).length,missing_details:live.filter(x=>x.source!=='generated'&&(rk(x.kind)||{}).exportable&&!(x.sha256&&x.size_bytes&&x.mime_type)).length}};
+    PDE().push({id:PDE().length+1,property_id:p.id,document_id:null,at:now(),actor:me.email,kind:'exported',detail:{schema:'mre.property/1',items:items.length,public_records:recs.length}}); save();
+    return ok(out); }
+  return bad('unknown rpc '+name); }
 window.supabase={createClient(){ return {
   from:q, rpc, functions:{invoke:(n,o)=>{ logCall('fn:'+n+(o&&o.body&&o.body.mode?':'+o.body.mode:'')); if(n==='property-lookup') return councilInvoke(o); if(n==='doc-prefill'&&o.body&&o.body.mode==='translate'){ const reqs=JSON.parse(localStorage.getItem('trReqs')||'[]'); reqs.push(o.body); localStorage.setItem('trReqs',JSON.stringify(reqs)); const m=localStorage.getItem('translateMode'); if(m==='off') return Promise.resolve({data:null,error:{message:'503',context:{json:async()=>({error:'not_set_up'})}}}); const src=o.body.sources; const rej=m==='rejectFirst'?[src[0]]:[]; let cutL=[]; let use=src.filter(x=>!rej.includes(x)); if(m==='cutOff'){ const h=src.length>1?Math.floor(src.length/2):0; cutL=src.slice(h); use=src.slice(0,h); } const resp={ok:true,model:o.body.kind==='screens'||o.body.kind==='guide'?'claude-sonnet-5-5':'claude-haiku-5-5',cut_off:m==='cutOff',translations:use.map(x=>({source:x,text:'<'+o.body.lang+'> '+x})),rejected:rej.map(x=>({source:x,reason:'number changed'})).concat(cutL.map(x=>({source:x,reason:'cut off'}))),usage:{input:10,output:10}}; const D=+localStorage.getItem('translateDelay')||0; return D?new Promise(r=>setTimeout(()=>r({data:resp,error:null}),D)):ok(resp); }
     if(n==='doc-prefill'){ const mode=localStorage.getItem('prefillMode'); if(mode==='off') return Promise.resolve({data:null,error:{message:'503',context:{json:async()=>({error:'not_set_up'})}}}); return ok({ok:true,skipped:[],result:JSON.parse(localStorage.getItem('prefillResult'))}); }const a=JSON.parse(localStorage.getItem('inv')||'[]');a.push(n+':'+o.body.type);localStorage.setItem('inv',JSON.stringify(a));
-    if(n==='notify'&&o.body.type==='form_signed'){ const fm=(DB.property_forms||[]).find(x=>x.id===o.body.form_id); if(fm&&fm.status==='signed'&&(fm.kind==='healthy_homes'||fm.countersigned_at)&&!fm.document_id&&fm.agreement_id===o.body.agreement_id){ const d={id:uid(),property_id:fm.property_id,kind:fm.kind==='healthy_homes'?'Healthy Homes checklist and statement':'Vendor Declaration',name:(fm.kind==='healthy_homes'?'Healthy-Homes-Checklist-and-Statement':'Vendor-Declaration')+'.pdf',path:'properties/'+fm.property_id+'/generated/'+fm.id+'.pdf',source:'generated',created_by:'system',created_at:now()}; (DB.property_documents||=[]).push(d); fm.document_id=d.id; save(); } }
+    if(n==='notify'&&o.body.type==='form_signed'){ const fm=(DB.property_forms||[]).find(x=>x.id===o.body.form_id); if(fm&&fm.status==='signed'&&(fm.kind==='healthy_homes'||fm.countersigned_at)&&!fm.document_id&&fm.agreement_id===o.body.agreement_id){ const d={id:uid(),property_id:fm.property_id,kind:fm.kind==='healthy_homes'?'Healthy Homes checklist and statement':'Vendor Declaration',name:(fm.kind==='healthy_homes'?'Healthy-Homes-Checklist-and-Statement':'Vendor-Declaration')+'.pdf',path:'properties/'+fm.property_id+'/generated/'+fm.id+'.pdf',source:'generated',created_by:'system',created_at:now(),bucket:'private',folder:'agency'}; (DB.property_documents||=[]).push(d); fm.document_id=d.id; save(); } }
     return ok({ok:true});}},
-  storage:{from(){return{upload:(p)=>ok({path:p}),createSignedUrl:()=>ok({signedUrl:'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII='})}}},
+  storage:{from(b){ if(b===RB) return repoBucket(); return{upload:(p)=>ok({path:p}),createSignedUrl:()=>ok({signedUrl:PNG1})}}},
   auth:{getSession:()=>ok({session:S}),onAuthStateChange(){},signInWithOtp:()=>ok({}),signOut:async()=>{localStorage.removeItem('mocksession');}}
 };}};
 })();
