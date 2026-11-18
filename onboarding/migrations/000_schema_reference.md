@@ -134,3 +134,24 @@ agreements/<agreement id>/signatures/... (vendors may upload their own signature
   `guard_form_checks` (a direct write by a signed-in user, Tim included, can't add a declaration with answers, change its `data`
   at all, change a form to or from a declaration, or remove one; Healthy Homes `agent_data` is unaffected), and
   `form_sign_needs_checks` on `form_signatures` (a vendor signature is refused while any of Tim's notes is unconfirmed).
+
+## Public council records (migration 013, written and tested in a rollback block on the live project; to be applied with Tim's OK)
+- `council_lookups`: every public-records lookup (`asked`, `asked_norm` generated, `matched_address`, `council`, `status` ok, weak,
+  choose, choose_unit, not_found, slow or unavailable, `result` jsonb as `fn/property_lookup_core.ts` returned it, `created_by`,
+  `created_at`, `property_id` once tied). Written only by the `property-lookup` edge function (service role). Agent reads; nobody
+  writes directly; vendors see nothing. Reused for 30 days; "Look again" makes a new one (at most one fresh lookup per address a minute).
+- `council_use_log`: who used, removed or cleared which public-record values on which property, from which lookup, and when. Agent
+  reads; nobody writes directly; vendors see nothing.
+- `properties.found` (jsonb, per key: value, display, label, kind, note, source, source_name, source_url, as_of, as_of_label,
+  fetched_at, field, written, matched_address, unit_address, council, used_at; never who used it or a lookup id) and
+  `properties.provenance` (jsonb, per field title_ref, legal_description, pLand: where the value now on the file came from, its date
+  label, and what the field held before, `was`). Written only by the functions below; `guard_found` refuses any other change.
+  Readable by a party to the property (Tim's decision: rating information is public).
+- Functions (agent only, revoked from public and anon): `agent_council_cached(p_asked, p_property)` (newest usable lookup under 30
+  days that fits both the property's address and the address asked, never one tied to another property),
+  `agent_council_accept(p_property, p_lookup, p_keys, p_replace, p_keep)` (values from the stored lookup only; refused when the
+  lookup's address doesn't fit the property's; a different value on the file or the agreement waits for a choice; a draft agreement
+  nobody has signed is brought into line, a sent or parked one is left alone, a signed one is never changed),
+  `agent_council_remove(p_property, p_key)` (takes one value back out; the field gets back what it held before unless the agreement in
+  force holds the public value). `agent_reopen_property` (replaced, same signature): new owners also start with no public-record
+  values (cleared and logged). Helpers `council_norm`, `council_same`, `council_addr_key`, `council_addr_fits`, `council_lookup_fits`.

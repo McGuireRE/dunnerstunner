@@ -181,6 +181,25 @@ Tim noted it), so the edge functions need redeploying with this change; declarat
 email is sent for "Send to the vendors". Photos are left for later (an empty `photos` list on the inspection). Test: `inspection.test.js`;
 database: `inspection-rollback.sql` (via `inspection-rollback.py`).
 
+## Added 18 November 2026: prefill from public council records (Tim: "rating information is public, and the councils are the originators")
+
+Migration 013 (written and tested in a rollback block on the live project; not applied). New edge function `fn/property_lookup.ts`
+(deployed as `property-lookup`) with a pure core, `fn/property_lookup_core.ts`. After an address is entered (Inspect a property, Let's
+begin, Let's agree page 1) or from the Public records tile on any property page, Tim sees a "Found on public records" card: the matched
+address, each value with its source, its own date and a tick box. Only strong address matches are used. Sources: the ORC address locator,
+ORC Properties (all five Otago councils), LINZ property boundaries, then the council's own layer where one is public (Dunedin rates and
+2GP, Queenstown Lakes, Waitaki, Clutha PropertyPublic), cross-checked on the valuation reference, and ORC hazard maps. Rating valuations
+and rates read "Council rating valuation (as at {date}), not a market value"; hazards and zones "Not a substitute for a LIM". Nothing
+is used until Tim ticks it and taps "Use these"; a value already held is never replaced without his choice; a signed agreement is never
+changed. After the first independent review: flats, units and cross-leases (never one picked silently: a certain match on the typed
+unit, otherwise Tim chooses the rating unit), the same street in two towns (Tim chooses), only the ORC hazard maps checked at a real
+address (liquefaction, tsunami; flood, HAIL, landslides, coastal erosion and alluvial fans switched off and said so) and the Waitaki
+zone off until its service address is confirmed, a Remove control, sent or parked agreements left alone, a lookup used only on a
+property whose address fits it, new owners start clean, nothing personal in `found`, a cached health check, server-side reuse and a
+once-a-minute limit, one deadline for the whole lookup. Tests: `council-core.test.js` (the core, with recorded answers),
+`council-fn.test.js` (the edge function's request handling), `council-lookup.test.js` (screens, against the mock); database:
+`council-rollback.sql` (via `council-rollback.js`).
+
 ---
 
 ## Housekeeping to fold into phase 1
