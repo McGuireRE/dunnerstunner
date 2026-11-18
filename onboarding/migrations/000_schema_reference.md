@@ -155,3 +155,15 @@ agreements/<agreement id>/signatures/... (vendors may upload their own signature
   `agent_council_remove(p_property, p_key)` (takes one value back out; the field gets back what it held before unless the agreement in
   force holds the public value). `agent_reopen_property` (replaced, same signature): new owners also start with no public-record
   values (cleared and logged). Helpers `council_norm`, `council_same`, `council_addr_key`, `council_addr_fits`, `council_lookup_fits`.
+
+## ORC map server through the database (migration 015, written and tested in a rollback block on the live project; to be applied with Tim's OK)
+- Why: maps.orc.govt.nz resets connections from the edge runtime; the database reaches it with pg_net (0.20.4, already installed).
+- `orc_http_requests` (id = pg_net's request id, url, created_at): one small row per request made through `orc_http_start`. RLS on,
+  no policy, revoked from anon and authenticated; only the two functions below touch it. Nothing removes its rows.
+- `orc_http_start(p_url)` returns the request id: only `https://maps.orc.govt.nz/arcgis/rest/services/...` (no "..", plain URL
+  characters, 2,000 at most); one GET queued with a 5 second timeout (sent once the call has committed).
+- `orc_http_result(p_id)`: only for an id recorded by `orc_http_start`; `{pending: true}` until pg_net has the answer, then
+  `{status, json}` with the parsed JSON object only, or `{status, error}` for a timeout, a network failure, a status outside 2xx,
+  over 2,000,000 characters, or anything that isn't a JSON object.
+- Both security definer, service role only (revoked from public, anon and authenticated). pg_net follows redirects and that can't be
+  turned off; what comes back is still only accepted as a JSON object. The http extension was tested and is not used.

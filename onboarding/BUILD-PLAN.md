@@ -202,6 +202,18 @@ once-a-minute limit, one deadline for the whole lookup. Tests: `council-core.tes
 
 ---
 
+## Added 18 November 2026: the ORC map server through the database
+
+The deployed `property-lookup` function couldn't reach maps.orc.govt.nz (the connection is reset from the edge runtime), so the
+address finder and ORC Properties failed. Migration 015 (written and tested in a rollback block on the live project; not applied)
+lets the database make those GETs with pg_net: `orc_http_start` and `orc_http_result`, service role only, ORC map service addresses
+only. The function still tries ORC directly first; when that fails with a network error it asks the database instead and remembers
+that for 10 minutes, then tries directly again, so it goes back to normal by itself if ORC starts answering. Every other host is
+unchanged. The health check now says which way each host answered (`via`: direct or database) and stays cached for a minute, one
+check at a time. Tests: `council-core.test.js` (route, memory, the answers checked like direct ones), `council-fn.test.js` (the
+handler passes the route, health via, one health check for simultaneous calls, the database polling); database:
+`orc-route-rollback.sql` (via `orc-route-rollback.js`).
+
 ## Housekeeping to fold into phase 1
 - Revoke execute on `on_agreement_signed()` from anon and authenticated; drop the unused
   `is_prelisting_party(prelistings)`.

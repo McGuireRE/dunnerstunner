@@ -6,7 +6,7 @@
 // A lookup reuses a stored one for the same address (and the same choice of address and unit) less than 30 days old, unless Tim
 // asks to look again (fresh). However asked, the same address is fetched from the councils at most once a minute: a repeat within
 // the minute gets the stored answer. Every fresh lookup is saved, so the page and agent_council_accept work from what was stored.
-import { health, lookup, suggest } from "./property_lookup_core.ts";
+import { health, lookup, suggest, type Route } from "./property_lookup_core.ts";
 
 export type Stored = { id: string; created_at: string; status: string; property_id: string | null; result: any };
 export type HandlerDeps = {
@@ -16,8 +16,31 @@ export type HandlerDeps = {
   recent: (askedNorm: string, sinceIso: string) => Promise<Stored[]>; // newest first
   save: (row: Record<string, unknown>) => Promise<{ id: string; created_at: string } | null>;
   fetch: (url: string, init?: any) => Promise<any>;
+  routes?: Record<string, Route>;   // per host: another way in when a direct connection fails (maps.orc.govt.nz, by the database)
   now?: () => number;
 };
+
+// The database route for maps.orc.govt.nz (migration 015): orc_http_start queues one GET with pg_net, which sends it once that call
+// has committed; orc_http_result answers 'pending' until pg_net has the response. rpc: the service-role client's rpc.
+export function makeDbRoute(rpc: (fn: string, args: Record<string, unknown>) => Promise<{ data: any; error: any }>, pollMs = 100) {
+  return {
+    name: "database",
+    get: async (url: string, ms: number) => {
+      const end = Date.now() + ms;
+      const { data: id, error } = await rpc("orc_http_start", { p_url: url });
+      if (error || id == null) return { status: 0, error: "network" };
+      let wait = pollMs;
+      while (Date.now() < end) {
+        await new Promise((r) => setTimeout(r, Math.max(0, Math.min(wait, end - Date.now()))));
+        const { data, error: e2 } = await rpc("orc_http_result", { p_id: id });
+        if (e2 || !data) return { status: 0, error: "network" };
+        if (!data.pending) return data as { status: number; json?: unknown; error?: string };
+        wait = Math.min(wait + pollMs, 4 * pollMs);
+      }
+      return { status: 0, error: "timeout" };
+    },
+  };
+}
 
 export const REUSE_DAYS = 30;
 export const REPEAT_MS = 60_000;
@@ -27,8 +50,11 @@ export const norm = (t: unknown) => String(t ?? "").toLowerCase().replace(/[^a-z
 // statuses that mean the councils answered (a slow or unavailable answer is not held against a retry)
 const ANSWERED = ["ok", "weak", "choose", "choose_unit", "not_found"];
 
-let healthCache: { at: number; body: any } | null = null;
-export function resetHealthCache() { healthCache = null; }
+// per instance: the health answer (one shared promise, so simultaneous calls make one check, at most once a minute), and which
+// hosts are reached by their route for now
+let healthCache: { at: number; body: Promise<any> } | null = null;
+let routeMemo: Record<string, number> = {};
+export function resetHealthCache() { healthCache = null; routeMemo = {}; }
 
 export function makeHandler(d: HandlerDeps) {
   const now = () => (d.now ? d.now() : Date.now());
@@ -38,15 +64,16 @@ export function makeHandler(d: HandlerDeps) {
     try {
       const url = new URL(req.url);
       if (req.method === "GET" && url.searchParams.get("health") === "1") {
-        if (!healthCache || now() - healthCache.at > HEALTH_MS) healthCache = { at: now(), body: await health({ fetch: d.fetch }) };
-        return json(Object.assign({}, healthCache.body, { checked_at: new Date(healthCache.at).toISOString() }));
+        if (!healthCache || now() - healthCache.at > HEALTH_MS) healthCache = { at: now(), body: health({ fetch: d.fetch, routes: d.routes, routeMemo }) };
+        const c = healthCache;
+        return json(Object.assign({}, await c.body, { checked_at: new Date(c.at).toISOString() }));
       }
       if (req.method !== "POST") return json({ error: "Not allowed" }, 405);
       const who = await d.agent(req.headers.get("Authorization") || "");
       if (!who) return json({ error: "Not allowed" }, 403);
 
       const body: any = await req.json().catch(() => ({}));
-      if (body.mode === "suggest") return json(await suggest(String(body.text || ""), { fetch: d.fetch }));
+      if (body.mode === "suggest") return json(await suggest(String(body.text || ""), { fetch: d.fetch, routes: d.routes, routeMemo }));
       if (body.mode !== "lookup") return json({ error: "Unknown request" }, 400);
 
       const address = String(body.address || "").replace(/\s+/g, " ").trim();
@@ -66,7 +93,7 @@ export function makeHandler(d: HandlerDeps) {
       if (repeat) return json({ ok: true, saved: true, reused: true, limited: !!body.fresh, lookup_id: repeat.id, created_at: repeat.created_at, result: repeat.result });
       if (!body.fresh) { const ok = rows.find((s) => s.status === "ok"); if (ok) return json({ ok: true, saved: true, reused: true, lookup_id: ok.id, created_at: ok.created_at, result: ok.result }); }
 
-      const result: any = await lookup({ address, magicKey, candidate, unitRef }, { fetch: d.fetch });
+      const result: any = await lookup({ address, magicKey, candidate, unitRef }, { fetch: d.fetch, routes: d.routes, routeMemo });
       const saved = await d.save({ property_id: pid, asked: address, matched_address: result.matched_address || null, council: result.council || null, status: result.status, result, created_by: who });
       if (!saved) return json({ ok: true, saved: false, error: "Not saved", result });
       return json({ ok: true, saved: true, lookup_id: saved.id, created_at: saved.created_at, result });

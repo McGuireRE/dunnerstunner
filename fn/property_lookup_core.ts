@@ -10,7 +10,14 @@
 // Erasable TypeScript only (types, no enums), so Node can import this file directly for the unit test.
 
 export type FetchFn = (url: string, init?: any) => Promise<any>;
-export type Deps = { fetch: FetchFn; now?: () => Date; timeoutMs?: number; deadlineMs?: number };
+// A route is another way to reach one host when a direct connection from here fails (maps.orc.govt.nz resets the edge runtime's
+// connections; the database can reach it). It answers with the status and the parsed JSON object, or an error.
+export type RouteResult = { status: number; json?: any; error?: string };
+export type Route = { name: string; get: (url: string, ms: number) => Promise<RouteResult> };   // ms: the time it has
+// routes: per host. routeMemo: per host, until when to use the route without trying directly first (kept by the caller, so it lasts
+// for the life of an edge function instance); after that, one direct try again, so it heals itself if the host is fixed.
+export type Deps = { fetch: FetchFn; now?: () => Date; timeoutMs?: number; deadlineMs?: number; routes?: Record<string, Route>; routeMemo?: Record<string, number>; routeMemoMs?: number };
+export const ROUTE_MEMO_MS = 10 * 60_000;
 export type Value = {
   key: string; group: string; label: string; value: string | number; display: string; kind: string;
   field: string | null; source: string; source_name: string; source_url: string; as_of: string | null; as_of_label: string | null;
@@ -96,7 +103,37 @@ export function parseUnit(a: unknown): { unit: string; number: string } | null {
 }
 
 // one GET to an allowed host: https only, no redirects, size cap while reading, timeout. Never throws.
-export async function getJson(url: string, deps: Deps): Promise<{ ok: boolean; data?: any; status?: number; ms: number; error?: string; at: string }> {
+export type GetResult = { ok: boolean; data?: any; status?: number; ms: number; error?: string; at: string; via?: string };
+// one GET: directly, or by the host's route when a direct connection fails (a reset costs about 100 ms, once in ROUTE_MEMO_MS)
+export async function getJson(url: string, deps: Deps): Promise<GetResult> {
+  const t0 = Date.now(); const at = () => (deps.now ? deps.now() : new Date()).toISOString();
+  let u: URL; try { u = new URL(url); } catch { return { ok: false, ms: 0, error: "bad url", at: at() }; }
+  if (u.protocol !== "https:" || !HOSTS.includes(u.hostname)) return { ok: false, ms: 0, error: "host not allowed", at: at() };
+  const route = deps.routes?.[u.hostname], memo = deps.routeMemo, total = Math.max(1, deps.timeoutMs ?? CALL_TIMEOUT_MS);
+  if (route && memo && (memo[u.hostname] || 0) > Date.now()) return viaRoute(url, route, total, t0, at);
+  const r = await getDirect(url, deps);
+  if (route && !r.ok && r.error === "network") {
+    if (memo) memo[u.hostname] = Date.now() + (deps.routeMemoMs ?? ROUTE_MEMO_MS);
+    return viaRoute(url, route, total - (Date.now() - t0), t0, at);
+  }
+  return Object.assign(r, { via: "direct" });
+}
+async function viaRoute(url: string, route: Route, ms: number, t0: number, at: () => string): Promise<GetResult> {
+  let timer: any;
+  const timeout = new Promise<RouteResult>((res) => { timer = setTimeout(() => res({ status: 0, error: "timeout" }), Math.max(1, ms)); });
+  let r: RouteResult;
+  try { r = await Promise.race([route.get(url, Math.max(1, ms)).catch(() => ({ status: 0, error: "network" })), timeout]); } finally { clearTimeout(timer); }
+  const base = { ms: Date.now() - t0, at: at(), via: route.name, status: Number(r?.status || 0) };
+  if (!r || r.error) return { ok: false, ...base, error: r?.error === "timeout" ? "timeout" : r?.error === "too large" ? "too large" : r?.error === "not json" ? "not json" : /^http \d+$/.test(String(r?.error)) ? String(r.error) : "network" };
+  if (base.status >= 300 && base.status < 400) return { ok: false, ...base, error: "redirect refused" };
+  if (base.status < 200 || base.status >= 300) return { ok: false, ...base, error: "http " + base.status };
+  const data = r.json;
+  if (!data || typeof data !== "object" || Array.isArray(data)) return { ok: false, ...base, error: "not json" };
+  if (JSON.stringify(data).length > MAX_BYTES) return { ok: false, ...base, error: "too large" };
+  if (data.error) return { ok: false, ...base, error: "service error " + str(data.error.code || data.error.message) };
+  return { ok: true, ...base, data };
+}
+async function getDirect(url: string, deps: Deps): Promise<GetResult> {
   const t0 = Date.now(); const at = () => (deps.now ? deps.now() : new Date()).toISOString();
   let u: URL; try { u = new URL(url); } catch { return { ok: false, ms: 0, error: "bad url", at: at() }; }
   if (u.protocol !== "https:" || !HOSTS.includes(u.hostname)) return { ok: false, ms: 0, error: "host not allowed", at: at() };
@@ -175,7 +212,8 @@ export async function health(deps: Deps) {
     ["services6.arcgis.com (WDC)", `${WDC}/WDC_PARCELS_view/FeatureServer/0?f=json`],
     ["gis.cluthadc.govt.nz", `${CDC}/PropertyPublic/MapServer/0?f=json`],
   ];
-  const res = await Promise.all(checks.map(async ([name, url]) => { const r = await getJson(url, deps); return [name, { ok: r.ok, status: r.status ?? 0 }] as const; }));
+  // each host: up or down, its status, and which way it was reached (direct, or a route such as the database)
+  const res = await Promise.all(checks.map(async ([name, url]) => { const r = await getJson(url, deps); return [name, { ok: r.ok, status: r.status ?? 0, via: r.via || "direct" }] as const; }));
   return { ok: true, hosts: Object.fromEntries(res) };
 }
 

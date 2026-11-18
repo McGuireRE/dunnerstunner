@@ -132,7 +132,7 @@ const { makeFetch } = require('./files/council-fixtures.js');
     const h = await core.health({ fetch: makeFetch('dunedin', { fail: ['gis.cluthadc.govt.nz'] }), timeoutMs: 300 });
     out.health = h.hosts;
     expect(Object.keys(h.hosts).length === 7 && h.hosts['maps.orc.govt.nz'].ok === true && h.hosts['gis.cluthadc.govt.nz'].ok === false, 'health per host');
-    expect(Object.values(h.hosts).every(x => Object.keys(x).sort().join() === 'ok,status'), 'health returns only ok and status'); }
+    expect(Object.values(h.hosts).every(x => Object.keys(x).sort().join() === 'ok,status,via' && x.via === 'direct'), 'health returns only ok, status and the way it was reached'); }
 
   // 13. flats: two rating units at the point and no certain match: Tim chooses; nothing is used from either until he does
   { const { r, asked } = await run('units');
@@ -191,6 +191,52 @@ const { makeFetch } = require('./files/council-fixtures.js');
     await core.lookup({ address: '100 Gladstone Road, Dunedin' }, { fetch: f });
     const i = re => f.asked.findIndex(u => re.test(u));
     expect(i(/Liquefaction_and_ground_class_Otago\/FeatureServer\/65\/query/) < i(/Public\/Rates/) && i(/LINZ_NZ_Property_Boundaries/) < i(/Public\/Rates/), 'hazards and LINZ asked before ORC answered'); }
+
+  // 18. a route for one host (maps.orc.govt.nz through the database, migration 015): direct first; on a network failure the same
+  // request goes by the route and the route is remembered for a while; then direct is tried again (heals itself). Other hosts never use it.
+  { const S = require('./files/council-fixtures.js');
+    const routed = [];
+    const answer = url => S.makeFetch('dunedin')(url, {}).then(r => r.text()).then(JSON.parse);
+    const route = { name: 'database', get: async (url, ms) => { routed.push({ url, ms }); return { status: 200, json: await answer(url) }; } };
+    const memo = {}; let t = Date.parse('2026-11-18T01:00:00Z'); const realNow = Date.now; Date.now = () => t;
+    try {
+      const f = makeFetch('dunedin', { fail: ['maps.orc.govt.nz'] });
+      const r = await core.lookup({ address: '100 Gladstone Road, Dunedin' }, { fetch: f, routes: { 'maps.orc.govt.nz': route }, routeMemo: memo, timeoutMs: 500 });
+      expect(r.status === 'ok' && val(r, 'capital_value'), 'lookup completes with ORC reached through the route: ' + r.status);
+      expect(routed.length > 0 && routed.every(x => new URL(x.url).hostname === 'maps.orc.govt.nz' && x.ms > 0 && x.ms <= 500), 'only ORC addresses go by the route, each with the time it has');
+      expect(memo['maps.orc.govt.nz'] === t + core.ROUTE_MEMO_MS, 'the route is remembered for ROUTE_MEMO_MS');
+      const direct1 = f.asked.filter(u => u.includes('maps.orc.govt.nz')).length;
+      routed.length = 0; t += 60_000;
+      const g = await core.getJson('https://maps.orc.govt.nz/arcgis/rest/services/OtagoAddress_Locator/GeocodeServer?f=json', { fetch: f, routes: { 'maps.orc.govt.nz': route }, routeMemo: memo });
+      expect(g.ok && g.via === 'database' && routed.length === 1 && f.asked.filter(u => u.includes('maps.orc.govt.nz')).length === direct1, 'while remembered, direct isn\'t tried first');
+      t += core.ROUTE_MEMO_MS; routed.length = 0;
+      const ok = makeFetch('dunedin');
+      const g2 = await core.getJson('https://maps.orc.govt.nz/arcgis/rest/services/OtagoAddress_Locator/GeocodeServer?f=json', { fetch: ok, routes: { 'maps.orc.govt.nz': route }, routeMemo: memo });
+      expect(g2.ok && g2.via === 'direct' && routed.length === 0 && ok.asked.length === 1, 'after the memo runs out, direct is tried again and used when it answers');
+      // a direct answer that isn't a network failure (an http error, a timeout) doesn't switch to the route
+      routed.length = 0; const m2 = {};
+      const e = await core.getJson('https://maps.orc.govt.nz/x?f=json', { fetch: async () => ({ ok: false, status: 500, headers: { get: () => null } }), routes: { 'maps.orc.govt.nz': route }, routeMemo: m2 });
+      expect(!e.ok && e.error === 'http 500' && e.via === 'direct' && !routed.length && !m2['maps.orc.govt.nz'], 'only a network failure switches to the route');
+      // no route for other hosts
+      const d = await core.getJson('https://apps.dunedin.govt.nz/x?f=json', { fetch: async () => { throw new TypeError('fetch failed'); }, routes: { 'maps.orc.govt.nz': route }, routeMemo: {} });
+      expect(!d.ok && d.error === 'network' && d.via === 'direct' && !routed.length, 'other hosts never use the route');
+    } finally { Date.now = realNow; }
+    // what comes back by the route is checked like a direct answer
+    const via = async res => core.getJson('https://maps.orc.govt.nz/x?f=json', { fetch: async () => { throw new TypeError('fetch failed'); }, routes: { 'maps.orc.govt.nz': { name: 'database', get: async () => (typeof res === 'function' ? res() : res) } }, routeMemo: {}, timeoutMs: 300 });
+    const cases = [
+      [{ status: 0, error: 'timeout' }, 'timeout'], [{ status: 0, error: 'network' }, 'network'], [{ status: 404, error: 'http 404' }, 'http 404'],
+      [{ status: 200, error: 'too large' }, 'too large'], [{ status: 200, error: 'not json' }, 'not json'], [{ status: 0, error: 'weird <b>' }, 'network'],
+      [{ status: 302, json: {} }, 'redirect refused'], [{ status: 500, json: {} }, 'http 500'], [{ status: 200, json: [1, 2] }, 'not json'], [{ status: 200 }, 'not json'],
+      [{ status: 200, json: { big: 'x'.repeat(2_100_000) } }, 'too large'], [{ status: 200, json: { error: { code: 498 } } }, 'service error 498'],
+      [() => { throw new Error('rpc down'); }, 'network'], [() => new Promise(() => {}), 'timeout'],
+    ];
+    for (const [res, want] of cases) { const r = await via(res); expect(!r.ok && r.error === want && r.via === 'database', 'route answer -> ' + want + ': got ' + r.error); }
+    const good = await via({ status: 200, json: { candidates: [] } });
+    expect(good.ok && good.via === 'database' && Array.isArray(good.data.candidates), 'a good route answer is used');
+    // health says which way each host was reached
+    const h = await core.health({ fetch: makeFetch('dunedin', { fail: ['maps.orc.govt.nz'] }), routes: { 'maps.orc.govt.nz': route }, routeMemo: {} });
+    expect(h.hosts['maps.orc.govt.nz'].ok && h.hosts['maps.orc.govt.nz'].via === 'database' && h.hosts['apps.dunedin.govt.nz'].via === 'direct', 'health reports the route that answered');
+    out.routeHealth = h.hosts['maps.orc.govt.nz']; }
 
   // 12. wording: no em dashes, and never "verified"
   { const all = JSON.stringify((await run('dunedinHazards')).r) + JSON.stringify((await run('centralOtago')).r) + JSON.stringify((await run('units')).r);

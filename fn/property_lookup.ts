@@ -7,11 +7,17 @@
 // itself), or the keyless health check can't be reached.
 import { admin, cors } from "./shared.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
-import { makeHandler } from "./property_lookup_handler.ts";
+import { makeDbRoute, makeHandler } from "./property_lookup_handler.ts";
+
+// maps.orc.govt.nz resets connections from the edge runtime (18 November 2026), while the database reaches it with pg_net: when a
+// direct connection fails, its GETs go through orc_http_start and orc_http_result (migration 015, service role only), and a direct
+// try is made again later (ROUTE_MEMO_MS in property_lookup_core.ts).
+const ORC_BY_DATABASE = makeDbRoute((fn, args) => admin().rpc(fn, args) as any);
 
 Deno.serve(makeHandler({
   cors,
   fetch,
+  routes: { "maps.orc.govt.nz": ORC_BY_DATABASE },
   agent: async (authorization) => {
     if (!authorization) return null;
     const uc = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!, { global: { headers: { Authorization: authorization } } });
