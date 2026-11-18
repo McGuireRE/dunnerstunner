@@ -3,7 +3,8 @@
 -- migration and every test row, so nothing is kept. The output is the exception message: refusals read in lower case ("dup:",
 -- "agentedit:" ...); a line in CAPITALS means something that should have been refused was allowed, or a value was wrong.
 -- No DELETE anywhere (the refusal of a direct delete of a declaration is checked in inspection.test.js against the mock).
--- Last run: 18 November 2026, live project hwpwyjxhdvlqrjwzxzqz (see the report for the output).
+-- Last run: 18 November 2026 (review fixes), live project hwpwyjxhdvlqrjwzxzqz: every line as expected, no CAPITALS; afterwards
+-- the project matched its state before the run (no table, function, trigger, row or test sign-in left).
 do $t$
 declare out text := ''; r jsonb; pid uuid; pid2 uuid; iid uuid; iid2 uuid; iid3 uuid; aid uuid; aid2 uuid; fid uuid; fid2 uuid; hid uuid; d jsonb; n int; st text; x text; li record;
   vuid uuid := '11111111-1111-1111-1111-1111111111a1'; vuid2 uuid := '11111111-1111-1111-1111-1111111111a2';
@@ -88,6 +89,11 @@ begin
   begin update public.property_forms set data = data - 'pre' where id = fid; out := out || 'AGENT-UNMARK-ALLOWED; '; exception when others then out := out || 'agentunmark:' || sqlerrm || '; '; end;
   begin insert into public.property_forms (property_id, agreement_id, kind, form_version, data) values (pid, aid, 'healthy_homes', 'HH-2026-11', '{}') returning id into hid;
         update public.property_forms set kind = 'vendor_declaration' where id = hid; out := out || 'AGENT-KIND-ALLOWED; '; exception when others then out := out || 'agentkind:' || sqlerrm || '; '; end;
+  begin insert into public.property_forms (property_id, agreement_id, kind, form_version, data) values (pid, aid, 'vendor_declaration', 'VD-2026-11', '{"answers":{"pegs":{"a":"no"}}}');
+        out := out || 'AGENT-INSERT-ANSWERS-ALLOWED; '; exception when others then out := out || 'agentinsert:' || sqlerrm || '; '; end;
+  -- a direct change that leaves what the declaration says alone still works (here the PDF error note)
+  begin update public.property_forms set pdf_error = null where id = fid; get diagnostics n = row_count; out := out || 'agent other column rows=' || n || '; ';
+  exception when others then out := out || 'AGENT-OTHER-COLUMN-REFUSED:' || sqlerrm || '; '; end;
   perform set_config('request.jwt.claims', vendor, true);
   select count(*) into n from public.property_inspections; out := out || 'vendor reads inspections=' || n || '; ';
   select count(*) into n from public.property_forms where id = fid; out := out || 'vendor reads form=' || n || '; ';
@@ -111,6 +117,12 @@ begin
   -- any other path that changes a confirmed answer clears its confirmation (here the database owner, as a definer function would)
   update public.property_forms set data = jsonb_set(data, '{answers,pegs}', '{"a":"no","d":""}') where id = fid;
   out := out || 'other path cleared pegs=' || (not ((select data->'checked' from public.property_forms where id = fid) ? 'pegs')) || ' meth still=' || ((select data->'checked' from public.property_forms where id = fid) ? 'meth') || '; ';
+  perform set_config('request.jwt.claims', vendor, true);
+  perform public.vendor_form_save(fid, '{"checked":{"tenanted":true}}'::jsonb);
+  out := out || 'ten confirmed=' || ((select data->'checked' from public.property_forms where id = fid) ? 'tenanted');
+  update public.property_forms set data = jsonb_set(data, '{tenanted}', '"now"') where id = fid;
+  out := out || ' other path cleared ten=' || (not ((select data->'checked' from public.property_forms where id = fid) ? 'tenanted')) || '; ';
+  update public.property_forms set data = jsonb_set(data, '{tenanted}', '"no"') where id = fid;
   perform public.vendor_form_save(fid, '{"checked":{"pegs":true}}'::jsonb);
   perform set_config('request.jwt.claims', agent, true);
   perform public.agent_inspection_save(iid, null, '{"meth":{"a":"yes","d":"Tested 2024"},"faults":{"d":"Crack in garage slab, and a leak"},"dux":{"a":"no"}}', null);
@@ -152,6 +164,12 @@ begin
   begin update public.property_forms set agent_data = '{"c":{"heat1":{"a":"Y","n":""}}}', status = 'ready' where id = hid; get diagnostics n = row_count; out := out || 'hh agent save rows=' || n || '; ';
   exception when others then out := out || 'HH-SAVE-REFUSED:' || sqlerrm || '; '; end;
   execute 'reset role';
+
+  -- 12. the declaration guard also runs on deletes (a direct delete is refused in its first lines; the delete itself is checked
+  --     in inspection.test.js, as this test runs no DELETE). Trigger type bits: 2 before, 4 insert, 8 delete, 16 update.
+  select tgtype into n from pg_trigger where tgrelid = 'public.property_forms'::regclass and tgname = 'guard_form_checks';
+  out := out || 'guard on insert=' || ((n & 4) <> 0) || ' delete=' || ((n & 8) <> 0) || ' update=' || ((n & 16) <> 0) || ' before=' || ((n & 2) <> 0)
+    || ' agreement_after pick_keep=' || (pg_get_functiondef('public.agreement_after()'::regprocedure) like '%pick_keep%') || '; ';
 
   raise exception 'ROLLBACK %', out;
 end $t$;

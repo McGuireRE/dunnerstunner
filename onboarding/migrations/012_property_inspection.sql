@@ -8,7 +8,7 @@
 --     on the server with who and when); a vendor signature is refused while any of them is unconfirmed. Nothing is signed,
 --     confirmed or locked for the vendor, and only the vendors' own save, the inspection send and the prefill change what a
 --     declaration says.
--- Additive, plus two replaced functions, both with Tim's review: vendor_form_save (005) now merges per key and records
+-- Additive, plus two replaced functions, both needing Tim's OK: vendor_form_save (005) now merges per key and records
 -- confirmations on the server, and agreement_after (002) no longer lets a blank answer wipe a value on the property file.
 -- No signed record, snapshot, fingerprint, guard_form or signature trigger is changed.
 

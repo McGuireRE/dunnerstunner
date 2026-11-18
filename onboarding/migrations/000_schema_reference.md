@@ -113,8 +113,18 @@ agreements/<agreement id>/signatures/... (vendors may upload their own signature
   starts or adds to the unsigned Vendor Declaration on the newest signed agreement; never replaces a vendor's answer, and returns
   those it kept so Tim sees the difference; refused once anyone has signed).
 - Tim's notes in a declaration: `data.pre[k] = 'inspection'`, `data.insp = {id, on, by}`; the vendor's confirmation is
-  `data.checked[k] = true` (ticked "This is right", or changed the answer).
+  `data.checked[k] = {by, name, at}` (the agreement person, their legal name and when), written only by `vendor_form_save` when
+  they tick "This is right" or change the answer, never taken from the page. Any other change to that answer (or to `tenanted`)
+  clears it. The locked view and the PDF print "Noted by Tim McGuire at the inspection on ...; checked by ..." on each such answer,
+  and a Tenancy row only when Tim noted the tenancy; declarations without notes print as before.
+- `latest_inspection(pid)`: the newest inspection of this round of owners, with the declaration notes merged across all of them
+  (newest answer per question, by the phone's time). `agent_inspection_save` takes `p_stamps` (the phone's time per answer): an
+  older answer never replaces a newer one, and a refused answer is named in the error ("Not saved (d:pegs): ...").
+- Replaced: `vendor_form_save` merges per key on the server (answers per question; only the vendor's own fields; `pre`, `insp`
+  and confirmations never from the page; nothing unsent removed). `agreement_after` (002) is unchanged except that a blank
+  answer on an agreement no longer wipes a value already on the property file (`pick_keep`).
 - New triggers (additive; `guard_form` and the signature triggers are unchanged): `inspection_prefill_form` (a new Vendor
   Declaration, including one the vendors start with `vendor_form_start`, opens with the latest inspection of this round of owners),
-  `guard_form_checks` (a direct write by a signed-in user, Tim included, can't change `pre`, `checked` or `insp`), and
+  `guard_form_checks` (a direct write by a signed-in user, Tim included, can't add a declaration with answers, change its `data`
+  at all, change a form to or from a declaration, or remove one; Healthy Homes `agent_data` is unaffected), and
   `form_sign_needs_checks` on `form_signatures` (a vendor signature is refused while any of Tim's notes is unconfirmed).

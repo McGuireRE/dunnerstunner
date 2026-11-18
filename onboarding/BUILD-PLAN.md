@@ -175,8 +175,10 @@ question in Tim's wording, each optional, with a progress count and a note per s
 they wait in the browser and sync when it returns, and a reload goes back to the same section. Facts go to the property file (a
 value an agreement in force holds differently waits for Tim to choose). Declaration answers stay on the inspection, agent only,
 and reach the vendors as marked answers ("Noted by Tim at the inspection on ...") that they confirm or change before they can
-sign, either when they start the declaration themselves or when Tim sends them after listing. No edge function changes; no email
-is sent for "Send to the vendors". Photos are left for later (an empty `photos` list on the inspection). Test: `inspection.test.js`;
+sign, either when they start the declaration themselves or when Tim sends them after listing. Who confirmed each note is recorded
+on the server and shown on screen and in the PDF. One edge function change: `fn/pdf.ts` prints that marker (and a Tenancy row when
+Tim noted it), so the edge functions need redeploying with this change; declarations without notes print exactly as before. No
+email is sent for "Send to the vendors". Photos are left for later (an empty `photos` list on the inspection). Test: `inspection.test.js`;
 database: `inspection-rollback.sql` (via `inspection-rollback.py`).
 
 ---
