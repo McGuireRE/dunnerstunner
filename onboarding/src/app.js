@@ -1226,6 +1226,7 @@ function lawyerForm(id, title, blurb) {
         ${formsTileHTML(pforms, live)}
         ${stageTileHTML(p, govAg, pevents)}
         ${jTileHTML(p, live, pforms, pl)}
+        ${crTileHTML(p)}
       </div>
       <h2>Owners</h2>
       ${locked ? `<div class="card tight">${PF.people.map(person).join('') || '<p class="small" style="margin:0">No owners yet.</p>'}<p class="small" style="margin:10px 0 0">The agreement is under way, so change owners there. Changes flow back here.</p></div>`
@@ -1255,6 +1256,7 @@ function lawyerForm(id, title, blurb) {
     const jt = $('#jToggle'); if (jt) jt.addEventListener('click', () => { const l = $('#jListA'); const on = !l.classList.contains('open'); l.classList.toggle('open', on); const tl = $('#jTile'); if (tl) tl.classList.toggle('jopen', on); jt.setAttribute('aria-expanded', on); jt.textContent = on ? 'Show the current stop only' : 'Show every stop'; });
     $$('[data-agopen]').forEach(b => b.addEventListener('click', () => viewAgentDetail(b.dataset.agopen)));
     wireStageTile(id, p, inForce);
+    crWireProperty(p);
     $$('[data-openlive]').forEach(b => b.addEventListener('click', () => live && viewAgentDetail(live.id)));
     $$('[data-plopen]').forEach(b => b.addEventListener('click', () => viewPrelistingAgent(b.dataset.plopen)));
     $$('[data-fopen]').forEach(b => b.addEventListener('click', () => viewFormAgent(b.dataset.fopen)));
@@ -1564,6 +1566,180 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       try { const n = await must(sb.rpc('agent_publish_translations', { p_scope: scope, p_ref: ref, p_lang: code })); toast(`${n} shown to vendors in ${I18N.byCode(code).name}.`); redraw(); } catch (_) { b.disabled = false; }
     }));
     $$('[data-trc-off]', box).forEach(b => b.addEventListener('click', async () => { try { await must(sb.rpc('agent_withdraw_translations', { p_scope: scope, p_ref: ref, p_lang: b.dataset.trcOff })); toast('Vendors see English again.'); redraw(); } catch (_) { } }));
+  }
+
+  /* ═════════ PUBLIC COUNCIL RECORDS (Tim, 18 November 2026; migration 013, fn/property_lookup.ts) ═════════
+     Tim looks a property up on the public records of the Otago Regional Council, the district council and LINZ. Nothing is used
+     until he ticks it and taps "Use these", and the server takes each value from the stored lookup, never from this page. A value
+     already on the file or an agreement is never replaced without his choice, and a signed agreement is never changed. The lookup
+     never holds anything up: with no signal, or if the function doesn't answer in time, the card says so and the page goes on. */
+  const CR_WAIT = 15000;
+  const CR_GROUPS = ['Title and land', 'Council rating valuation', 'Rates', 'Plan and hazards'];
+  const CR_FIELD_LABEL = { title_ref: 'Title reference', legal_description: 'Legal description', pLand: 'Land area (m²)' };
+  const crRace = (p, ms) => Promise.race([Promise.resolve(p).catch(e => ({ error: e })), new Promise(r => setTimeout(() => r({ timeout: true }), ms))]);
+  const crSame = (field, a, b) => { const n = x => String(x ?? '').trim(); if (field === 'pLand' && /^\d+(\.\d+)?$/.test(n(a)) && /^\d+(\.\d+)?$/.test(n(b))) return Math.round(+n(a)) === Math.round(+n(b)); return n(a).toLowerCase().replace(/[^a-z0-9]/g, '') === n(b).toLowerCase().replace(/[^a-z0-9]/g, ''); };
+  const crDay = iso => { try { return new Date(iso).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Pacific/Auckland' }); } catch (_) { return ''; } };
+  const crSrcLine = v => `From ${/^https:\/\//.test(v.source_url || '') ? `<a href="${esc(v.source_url)}" target="_blank" rel="noopener noreferrer">${esc(v.source_name)}</a>` : esc(v.source_name)}${v.as_of_label ? `, as at ${esc(v.as_of_label)}` : ''}. Found ${esc(crDay(v.fetched_at))}. Not checked.`;
+  const crAddrOk = a => /\d/.test(a) && a.replace(/\s+/g, ' ').trim().length >= 8;
+  // a lookup: the stored one (30 days) unless fresh, else the edge function, raced against CR_WAIT. Never throws.
+  async function crFetch(address, pid, fresh, cachedOnly) {
+    if (!fresh) {
+      try { const { data, error } = await sb.rpc('agent_council_cached', { p_asked: address, p_property: pid || null }); if (!error && data && data.result) return { lookup_id: data.id, created_at: data.created_at, result: data.result, cached: true }; if (error && netErr(error)) return { offline: true }; } catch (e) { if (netErr(e)) return { offline: true }; }
+      if (cachedOnly) return null;
+    }
+    if (navigator.onLine === false) return { offline: true };
+    const r = await crRace(sb.functions.invoke('property-lookup', { body: { mode: 'lookup', address, property_id: pid || null } }), CR_WAIT);
+    if (r.timeout) return { offline: true, slow: true };
+    const err = r.error;
+    if (err) { const m = String(err.message || err); if (netErr(err) || /Failed to send|FunctionsFetchError|FunctionsRelayError/i.test(m + ' ' + (err.name || ''))) return { offline: true }; return { error: 'The public records lookup didn\'t work just now. Try again shortly.' }; }
+    const d = r.data || {}; if (!d.result) return { error: d.error || 'The public records lookup didn\'t answer.' };
+    return { lookup_id: d.saved === false ? null : d.lookup_id, created_at: d.created_at || new Date().toISOString(), result: d.result, cached: false };
+  }
+  // ctx: { address, pid, cur: {title_ref, legal_description, pLand}, canUse, useNote, useLabel, before: async () => pid, onUsed(res), auto: 'cached' | 'lookup' | null }
+  function crMount(el, ctx) {
+    if (!el) return;
+    const S = el._cr = { ctx, data: null, conf: {}, ticks: new Set(), choice: {}, run: 0 };
+    const draw = () => { el.innerHTML = crHTML(S); crWire(el, S, draw, go); };
+    const go = async (addr, fresh, cachedOnly) => {
+      if (addr) ctx.address = addr;
+      const a = String(ctx.address || '').replace(/\s+/g, ' ').trim(); if (a.length < 3) { S.data = null; draw(); return; }
+      const run = ++S.run; S.data = { loading: true }; if (!cachedOnly) draw();
+      const d = await crFetch(a, ctx.pid, fresh, cachedOnly);
+      if (run !== S.run || !el.isConnected) return;
+      S.data = d; S.conf = {}; S.ticks = new Set(); S.choice = {};
+      if (d && d.result && d.result.status === 'ok') (d.result.values || []).forEach(v => { const cur = (ctx.cur || {})[v.field]; if (v.field && String(cur ?? '').trim() && !crSame(v.field, cur, v.value)) S.conf[v.key] = { current: cur, where: 'file' }; });
+      draw();
+    };
+    S.go = go;
+    draw();
+    if (ctx.auto && crAddrOk(String(ctx.address || ''))) go(null, false, ctx.auto === 'cached');
+    return S;
+  }
+  function crHTML(S) {
+    const { ctx, data: d } = S;
+    const intro = '<p class="small" style="margin:0 0 8px">Title, land area, the council\'s rating valuation and rates, zone and hazards, from the councils\' own public records. Nothing is used until you tick it.</p>';
+    const goBtn = (l, cls) => `<button class="btn ${cls || 'ghost'}" type="button" data-cr-go>${esc(l)}</button>`;
+    const shell = (inner, cls) => `<div class="card tight cr-card ${cls || ''}" data-cr-card>${inner}</div>`;
+    if (!d) return shell(`<h3>Public records</h3>${intro}<div class="toolbar">${goBtn('Look up public records')}</div>`);
+    if (d.loading) return shell(`<h3>Public records</h3><p class="small cr-wait" role="status">Looking up ${nt(ctx.address)} on public records...</p>`);
+    if (d.offline) return shell(`<h3>Public records</h3><p class="small" role="status">The public records lookup will be available when there's signal${d.slow ? ' (it didn\'t answer in time)' : ''}. Everything else here carries on as normal.</p><div class="toolbar">${goBtn('Try again')}</div>`, 'cr-off');
+    if (d.error) return shell(`<h3>Public records</h3><p class="small">${esc(d.error)}</p><div class="toolbar">${goBtn('Try again')}</div>`);
+    const r = d.result || {}, other = `<div class="cr-other" data-cr-other hidden><label class="f" for="crAddr_${S.run}">Look up another address</label><input type="text" id="crAddr_${S.run}" data-cr-addr value="${esc(ctx.address || '')}" autocomplete="off"><div class="toolbar"><button class="btn ghost" type="button" data-cr-other-go>Look it up</button></div></div>`;
+    const links = (r.links || []).filter(l => /^https:\/\//.test(l.url)).map(l => `<p class="small" style="margin:6px 0 0"><a href="${esc(l.url)}" target="_blank" rel="noopener noreferrer">${esc(l.label)}</a></p>`).join('');
+    if (r.status === 'weak' || r.status === 'choose') return shell(`<h3>Public records</h3><p class="small" style="margin:0 0 8px">${r.status === 'weak' ? `No clear match for ${nt(r.asked || ctx.address)} on public records, so nothing is shown. Did you mean:` : `More than one property matches ${nt(r.asked || ctx.address)}. Which one?`}</p>
+      ${(r.candidates || []).map((c, i) => `<button class="btn ghost cr-cand" type="button" data-cr-cand="${i}">${nt(c.address)}</button>`).join('')}
+      <button class="btn link" type="button" data-cr-wrong>None of these</button>${other}`);
+    if (r.status !== 'ok') return shell(`<h3>Public records</h3><p class="small">${r.status === 'unavailable' ? 'The address finder didn\'t answer. The public records lookup will be available when there\'s signal.' : `Nothing found on public records for ${nt(r.asked || ctx.address)}. A new subdivision may not be on the roll yet.`}</p>${links}<div class="toolbar">${goBtn('Look again')}<button class="btn link" type="button" data-cr-wrong>Try another address</button></div>${other}`);
+    const vals = r.values || [];
+    const row = v => { const c = S.conf[v.key], on = S.ticks.has(v.key), ch = S.choice[v.key];
+      return `<div class="cr-row ${on ? 'on' : ''}" data-cr-key="${esc(v.key)}">
+        <label class="cr-tick"><input type="checkbox" data-cr-tick="${esc(v.key)}" ${on ? 'checked' : ''}><span class="cr-l">${esc(v.label)}</span></label>
+        <div class="cr-v">${nt(v.display)}</div>
+        ${v.note ? `<p class="small cr-note">${esc(v.note)}</p>` : ''}
+        <p class="small cr-src">${crSrcLine(v)}</p>
+        ${(v.also || []).length ? `<p class="small cr-also">${v.also.map(a => `${esc(a.source_name)} has ${nt(a.display)}${a.as_of_label ? ` (as at ${esc(a.as_of_label)})` : ''}`).join('. ')}.</p>` : ''}
+        ${c ? `<div class="cr-conf"><p class="small" style="margin:0 0 4px">${c.where === 'signed_agreement' ? `The signed agreement ${esc(c.ref || '')} says ${nt(c.current)}. It stays as it is.` : c.where === 'agreement' ? `The agreement ${esc(c.ref || '')} says ${nt(c.current)}.` : `On the file now: ${nt(c.current)}.`} Which do you want?</p>
+          <label class="cr-ch"><input type="radio" name="crch_${esc(v.key)}" value="keep" data-cr-ch="${esc(v.key)}" ${ch === 'keep' ? 'checked' : ''}> Keep ${c.where === 'file' ? 'what\'s on the file' : 'the agreement\'s'}</label>
+          ${c.where === 'signed_agreement' ? '' : `<label class="cr-ch"><input type="radio" name="crch_${esc(v.key)}" value="replace" data-cr-ch="${esc(v.key)}" ${ch === 'replace' ? 'checked' : ''}> Use the public record</label>`}</div>` : ''}
+      </div>`; };
+    const groups = CR_GROUPS.map(g => { const vs = vals.filter(v => v.group === g); return vs.length ? `<h4 class="cr-g">${esc(g)}</h4>${vs.map(row).join('')}` : ''; }).join('');
+    const down = (r.sources || []).filter(s => s.status === 'failed' || s.status === 'timeout');
+    const downNames = [...new Set(down.map(s => s.name.replace(/:.*$/, '').replace(/ \(.*\)$/, '')))];
+    return shell(`<div class="cr-head"><h3>Found on public records</h3><span class="cr-flag">Not checked</span></div>
+      <div class="cr-match"><span class="small">Matched to</span><strong>${nt(r.matched_address)}</strong><span class="small">${esc(r.council || '')}${r.valuation_ref ? ` · valuation ${nt(r.valuation_ref)}` : ''}</span></div>
+      <button class="btn link" type="button" data-cr-wrong>Not the right property?</button>${other}
+      <p class="small cr-when">${d.cached ? 'Looked up' : 'Found'} ${esc(fmtDT(d.created_at))}. <button class="btn link" type="button" data-cr-again>Look again</button></p>
+      ${downNames.length ? `<p class="small cr-down">Didn't answer this time: ${esc(downNames.join(', '))}. What they hold isn't shown; look again later.</p>` : ''}
+      ${groups || '<p class="small">Nothing usable came back.</p>'}
+      ${(r.info || []).map(i => `<p class="small cr-info">${esc(i)}</p>`).join('')}${links}
+      <div class="toolbar"><button class="btn primary" type="button" data-cr-use ${ctx.canUse === false ? 'disabled' : ''}>${esc(ctx.useLabel || 'Use these')}</button></div>
+      ${ctx.useNote ? `<p class="small" style="margin:4px 0 0">${esc(ctx.useNote)}</p>` : ''}
+      <div class="err" data-cr-err role="alert"></div>
+      <p class="small cr-credit">${(r.credits || []).map(esc).join('. ')}.</p>`, 'cr-found');
+  }
+  function crWire(el, S, draw, go) {
+    const { ctx } = S, q = s => $(s, el), qq = s => $$(s, el);
+    const g = q('[data-cr-go]'); if (g) g.addEventListener('click', () => go(null, !!(S.data && !S.data.offline && !S.data.error)));
+    const ag = q('[data-cr-again]'); if (ag) ag.addEventListener('click', () => go(null, true));
+    qq('[data-cr-wrong]').forEach(b => b.addEventListener('click', () => { const o = q('[data-cr-other]'); if (o) { o.hidden = false; const i = q('[data-cr-addr]'); if (i) i.focus(); } }));
+    const og = q('[data-cr-other-go]'); if (og) og.addEventListener('click', () => { const a = q('[data-cr-addr]').value.replace(/\s+/g, ' ').trim(); if (a.length >= 3) go(a, true); });
+    qq('[data-cr-cand]').forEach(b => b.addEventListener('click', () => { const c = S.data.result.candidates[+b.dataset.crCand]; go(c.address, true); }));
+    qq('[data-cr-tick]').forEach(b => b.addEventListener('change', () => { const k = b.dataset.crTick; if (b.checked) S.ticks.add(k); else S.ticks.delete(k); b.closest('.cr-row').classList.toggle('on', b.checked); }));
+    qq('[data-cr-ch]').forEach(b => b.addEventListener('change', () => { if (b.checked) S.choice[b.dataset.crCh] = b.value; }));
+    const use = q('[data-cr-use]'); if (!use) return;
+    use.addEventListener('click', async () => {
+      const err = q('[data-cr-err]'), vals = (S.data.result.values || []), keys = vals.map(v => v.key).filter(k => S.ticks.has(k));
+      err.textContent = '';
+      if (!keys.length) return err.textContent = 'Tick what you want to use.';
+      const open = keys.find(k => S.conf[k] && !S.choice[k]); if (open) return err.textContent = `Choose which to keep for ${vals.find(v => v.key === open).label.toLowerCase()}.`;
+      if (!S.data.lookup_id) return err.textContent = 'This lookup wasn\'t saved, so it can\'t be used. Tap Look again.';
+      use.disabled = true;
+      let pid = ctx.pid; if (ctx.before) { try { pid = await ctx.before(); } catch (_) { pid = null; } if (!pid) { use.disabled = false; return; } ctx.pid = pid; }
+      const replace = keys.filter(k => S.choice[k] === 'replace'), keep = keys.filter(k => S.choice[k] === 'keep');
+      const { data: res, error } = await sb.rpc('agent_council_accept', { p_property: pid, p_lookup: S.data.lookup_id, p_keys: keys, p_replace: replace, p_keep: keep });
+      if (error) { use.disabled = false; err.textContent = netErr(error) ? 'No signal. Try again when there\'s signal; nothing was changed.' : error.message; return; }
+      const conf = (res && res.conflicts) || [];
+      if (conf.length) {
+        // some differ from what's held: those wait for a choice; the rest were used
+        S.ticks = new Set(conf.map(c => c.key)); conf.forEach(c => { S.conf[c.key] = { current: c.current, where: c.where, ref: c.ref }; delete S.choice[c.key]; });
+        draw(); const e2 = q('[data-cr-err]'); if (e2) e2.textContent = `${(res.stored || []).length ? `Used ${res.stored.length}. ` : ''}${conf.length === 1 ? 'One value differs' : 'Some values differ'} from what you have. Choose which to keep, then tap ${ctx.useLabel || 'Use these'} again.`;
+        return;
+      }
+      toast(`Used ${(res.stored || []).length}. Each one says where it came from.`);
+      if (ctx.onUsed) ctx.onUsed(res, pid); else go(null, false);
+    });
+  }
+  // the Public records tile on the property page: what Tim has used, with its source, and the lookup
+  function crTileHTML(p) {
+    const f = p.found || {}, ks = Object.keys(f);
+    const order = k => { const g = CR_GROUPS.indexOf((f[k] || {}).group); return g < 0 ? 9 : g; };
+    const onFile = { title_ref: p.title_ref, legal_description: p.legal_description, pLand: (p.description || {}).pLand };
+    const rows = ks.sort((a, b) => order(a) - order(b)).map(k => { const v = f[k] || {}, kept = v.field && v.written === false;
+      return `<div class="fact"><div class="k">${esc(v.label || k)}${kept ? ' <span class="src-badge">You kept your own</span>' : ''}</div><div class="v" style="font-weight:400">${kept ? `On the file: ${nt(onFile[v.field] || '')}<br><span class="small">Public record: ${nt(v.display || v.value)}</span>` : nt(v.display || v.value)}${v.note ? `<br><span class="small">${esc(v.note)}</span>` : ''}<br><span class="small">${crSrcLine(v)} You used it ${esc(crDay(v.used_at))}.</span></div></div>`; }).join('');
+    return `<div class="card ptile cr-tile no-print" id="crTile"><h3>Public records</h3>
+      ${rows || '<p class="small" style="margin:0 0 8px">Look the property up on the councils\' public records: title, land area, rating valuation, rates, zone and hazards.</p>'}
+      <div id="crBox"><div class="toolbar"><button class="btn ghost" type="button" id="crStart">${ks.length ? 'Look again' : 'Look up public records'}</button></div></div></div>`;
+  }
+  function crWireProperty(p) {
+    const b = $('#crStart'); if (!b) return;
+    b.addEventListener('click', () => { $('#crTile').classList.add('cr-wide');
+      const S = crMount($('#crBox'), { address: p.address, pid: p.id, cur: { title_ref: p.title_ref, legal_description: p.legal_description, pLand: (p.description || {}).pLand }, onUsed: () => viewProperty(p.id) });
+      S.go(null, Object.keys(p.found || {}).length > 0); });
+    // the quiet line under a field that came from public records, while it still holds that value
+    const pv = p.provenance || {};
+    [['title_ref', '#pfTitle', p.title_ref], ['pLand', '#pfd_pLand', (p.description || {}).pLand]].forEach(([k, sel, cur]) => { const x = pv[k], inp = $(sel); if (!x || !inp || !crSame(k, cur, x.value)) return; const lab = $(`label[for="${inp.id}"]`); if (lab && !lab.querySelector('.cr-badge')) lab.insertAdjacentHTML('beforeend', ` <span class="src-badge cr-badge">From ${esc(x.source_name || 'public records')}${x.as_of ? `, ${esc(x.as_of)}` : ''}. Not checked</span>`); });
+  }
+  // an address field that offers the lookup once an address is entered (on leaving the field, or the button)
+  function crAddressHook(input, box, ctxFn) {
+    if (!input || !box) return;
+    let last = '';
+    const run = (force) => { const a = input.value.replace(/\s+/g, ' ').trim(); if (!crAddrOk(a)) { box.innerHTML = ''; last = ''; return; } if (a === last && !force) return; last = a; const S = crMount(box, Object.assign({ address: a }, ctxFn())); S.go(null, false); };
+    input.addEventListener('change', () => run(false));
+    const v = input.value.replace(/\s+/g, ' ').trim(); if (crAddrOk(v)) { last = v; crMount(box, Object.assign({ address: v, auto: 'cached' }, ctxFn())); }
+  }
+  // Inspect a property: the lookup runs once the address is entered; starting never waits for it. "Start the inspection and use
+  // these" makes the property file (as Start does), uses the ticked values, then opens the walk-round.
+  function crInspectHook() {
+    let iid = null;
+    crAddressHook($('#insAddr'), $('#crInsp'), () => ({ pid: null, useLabel: 'Start the inspection and use these',
+      before: async () => { const a = $('#insAddr').value.replace(/\s+/g, ' ').trim(); const { data, error } = await sb.rpc('agent_inspection_start', { p_property: null, p_address: a });
+        if (error) { toast(netErr(error) ? 'No signal. Starting needs a connection for a moment.' : error.message); return null; } iid = data.inspection_id; return data.property_id; },
+      onUsed: () => { INS = null; viewInspection(iid); } }));
+  }
+  // Let's begin: values are used once the appraisal page (and so the property file) exists
+  function crPrelistingHook(pl, id) {
+    crAddressHook($('#plAddr'), $('#crPl'), () => ({ pid: pl.property_id || null, cur: {}, canUse: !!pl.property_id,
+      useNote: pl.property_id ? '' : 'Create the appraisal page first. This lookup is kept, so you can use these from it straight after.',
+      onUsed: () => (id ? viewPrelistingAgent(id) : viewProperty(pl.property_id)) }));
+  }
+  // Let's agree, page 1: saves the page first (making the agreement and property file if new), then uses the ticked values,
+  // which also fill page 1's title and land area while the agreement is unsigned. Not offered once anyone has signed.
+  function crAgreementHook() {
+    if (!T || T.locked) return;
+    crAddressHook($('#tAddr'), $('#crAg'), () => ({ pid: T.ag.property_id || null,
+      cur: { title_ref: ($('#t_title') || {}).value, pLand: ($('#t_pLand') || {}).value },
+      before: async () => { tCollect(); if (!(await tSave())) return null; return T.ag.property_id || null; },
+      onUsed: () => viewTable(T.id, null, 0) }));
   }
 
   /* ═════════ AGENT HOME (Let's begin / Let's agree) and DASHBOARD ═════════ */
@@ -2011,7 +2187,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <p class="lede">Fill in what you know before the appointment. At the table, check it together and complete the rest.</p>
       ${importCardHTML()}
       <h2>Property</h2>
-      <label class="f" for="tAddr" style="margin-top:0">Address</label><input type="text" id="tAddr" value="${esc(T.ag.address)}" placeholder="Street, suburb, Dunedin">
+      <label class="f" for="tAddr" style="margin-top:0">Address</label><input type="text" id="tAddr" value="${esc(T.ag.address)}" placeholder="Street, suburb, Dunedin"><div id="crAg"></div>
       <div class="row2 stack">${TF.text('c', 'owners', 'Registered owners <span class="opt">(from the title)</span>')}${TF.text('c', 'title', 'Title reference')}</div>
       <h2>Who's selling</h2>
       <p class="small">Everyone on the title signs. An email for each person is needed for their signed copy.</p>
@@ -2067,6 +2243,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     $('#tAddP').addEventListener('click', () => { T.people.push({ legal_name: '', pref_name: '', email: '', phone: '' }); draw(); });
     const ask = $('#t_ask'); if (ask) ask.addEventListener('change', () => { if (HAS_CAT) setBand(T.CAMP, bandFor(ask.value)); });
     wireImport();
+    crAgreementHook();
   }
 
   /* page 2 */
@@ -3091,7 +3268,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <label class="f" for="insAddr" style="margin-top:0">Address</label><input type="text" id="insAddr" autocomplete="off" placeholder="Street, suburb, Dunedin">
       <div id="insMatches"></div>
       <div class="toolbar"><button class="btn primary" type="button" id="insNew">Start a new property file</button></div>
-      <div class="err" id="insErr" role="alert"></div></div>`;
+      <div class="err" id="insErr" role="alert"></div><div id="crInsp"></div></div>`;
+    crInspectHook();
     const draw = () => {
       const q = norm($('#insAddr').value); let m = [];
       if (q.length >= 3) m = props.filter(p => { const a = norm(p.address); return a && (a.includes(q) || q.includes(a) || (q.split(' ').length > 1 && q.split(' ').slice(0, 2).join(' ') === a.split(' ').slice(0, 2).join(' '))); }).slice(0, 6);
@@ -3872,7 +4050,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       ${APP_TRANSLATION && ['plan', 'question', 'accepted'].includes(pl.status) ? '<h2>Your plan in other languages</h2><div id="trPlan"></div>' : ''}
       <h2>Appraisal page</h2>
       <div class="card">
-        <label class="f" for="plAddr" style="margin-top:0">Property address</label><input type="text" id="plAddr" value="${esc(pl.address)}" ${editable ? '' : 'disabled'}>
+        <label class="f" for="plAddr" style="margin-top:0">Property address</label><input type="text" id="plAddr" value="${esc(pl.address)}" ${editable ? '' : 'disabled'}><div id="crPl" class="no-print"></div>
         <div class="row2 stack"><div><label class="f" for="plCName">Vendor's name</label><input type="text" id="plCName" value="${esc(pl.contact_name || '')}" ${editable ? '' : 'disabled'}></div><div><label class="f" for="plCEmail">Vendor's email</label><input type="email" id="plCEmail" value="${esc(pl.contact_email || '')}" ${pl.status === 'appraisal' ? '' : 'disabled'}></div></div>
         <div class="row2 stack"><div><label class="f" for="plMethod">Sale method</label><select id="plMethod" ${editable ? '' : 'disabled'}>${methods.map(m => `<option ${ap.method === m ? 'selected' : ''}>${esc(m)}</option>`).join('')}</select></div><div><label class="f" for="plPrice">Indicative price</label><input type="text" id="plPrice" value="${esc(ap.price || '')}" placeholder="For example: $850,000 to $900,000" ${editable ? '' : 'disabled'}></div></div>
         <div class="row2 stack"><div><label class="f" for="plStart">Start date</label><input type="text" id="plStart" value="${esc(ap.start || '')}" placeholder="For example: early February" ${editable ? '' : 'disabled'}></div><div><label class="f" for="plMkt">Marketing</label><input type="text" id="plMkt" value="${esc(ap.marketing || '')}" placeholder="For example: Premium package, $5,800" ${editable ? '' : 'disabled'}></div></div>
@@ -3886,6 +4064,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <div class="err" id="plErr"></div>
     </div>`;
     $('#plBack').addEventListener('click', viewAgentList);
+    crPrelistingHook(pl, id);
     const ppb = $('#plProp'); if (ppb) ppb.addEventListener('click', () => viewProperty(pl.property_id));
     const readAp = () => ({ address: $('#plAddr').value.trim(), contact_name: $('#plCName').value.trim(), contact_email: $('#plCEmail').value.trim().toLowerCase(), appraisal: { method: $('#plMethod').value, price: $('#plPrice').value.trim(), start: $('#plStart').value.trim(), marketing: $('#plMkt').value.trim(), note: $('#plNote').value.trim(), link: $('#plLink').value.trim() } });
     const sa = $('#plSaveAp'); if (sa) sa.addEventListener('click', async () => {

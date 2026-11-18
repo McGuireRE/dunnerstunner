@@ -181,6 +181,19 @@ Tim noted it), so the edge functions need redeploying with this change; declarat
 email is sent for "Send to the vendors". Photos are left for later (an empty `photos` list on the inspection). Test: `inspection.test.js`;
 database: `inspection-rollback.sql` (via `inspection-rollback.py`).
 
+## Added 18 November 2026: prefill from public council records (Tim: "rating information is public, and the councils are the originators")
+
+Migration 013 (written and tested in a rollback block on the live project; not applied). New edge function `fn/property_lookup.ts`
+(deployed as `property-lookup`) with a pure core, `fn/property_lookup_core.ts`. After an address is entered (Inspect a property, Let's
+begin, Let's agree page 1) or from the Public records tile on any property page, Tim sees a "Found on public records" card: the matched
+address, each value with its source, its own date and a tick box. Only strong address matches are used. Sources: the ORC address locator,
+ORC Properties (all five Otago councils), LINZ property boundaries, then the council's own layer where one is public (Dunedin rates and
+2GP, Queenstown Lakes, Waitaki, Clutha PropertyPublic), cross-checked on the valuation reference, and ORC hazard maps. Rating valuations
+and rates read "Council rating valuation (as at {date}), not a market value"; hazards and zones "Not a substitute for a LIM". Nothing
+is used until Tim ticks it and taps "Use these"; a value already held is never replaced without his choice; a signed agreement is never
+changed. Tests: `council-core.test.js` (the core, with recorded answers), `council-lookup.test.js` (screens, against the mock);
+database: `council-rollback.sql` (via `council-rollback.js`).
+
 ---
 
 ## Housekeeping to fold into phase 1
