@@ -84,6 +84,20 @@ input[type=number]{width:96px}
 .grid td.n{color:var(--ink2);white-space:nowrap;padding-right:6px;max-width:118px;overflow:hidden;text-overflow:ellipsis}
 .grid td.c{width:16px;height:16px;border-radius:4px;background:var(--bg);border:1px solid var(--line)}
 .grid td.c.on{background:var(--good);border-color:var(--good)}
+
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:10px}
+.kpis .stat b{font-size:18px}
+.bars{display:flex;align-items:flex-end;gap:3px;height:64px;margin:4px 0 2px}
+.bars div{flex:1;display:flex;flex-direction:column;justify-content:flex-end;height:100%}
+.bars i{display:block;border-radius:3px 3px 0 0;min-height:2px}
+.barlbl{display:flex;gap:3px;font-size:10px;color:var(--ink3)}.barlbl span{flex:1;text-align:center}
+.kt{width:100%;border-collapse:collapse;font-size:13px;margin-top:8px}
+.kt th{font-weight:400;font-size:11px;color:var(--ink3);text-align:right;padding:2px 0 4px 4px}
+.kt th:first-child{text-align:left}
+.kt td{border-top:1px solid var(--line);padding:6px 0 6px 4px;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.kt td:first-child{text-align:left;white-space:normal;padding-left:0}
+.kt td.s{color:var(--ink2)}
+.hi{color:var(--good);font-weight:600}.mid{color:var(--ink)}.lo{color:var(--warn);font-weight:600}
 .grid td.c.na{background:transparent;border-style:dashed;opacity:.45}
 .plan{display:grid;grid-template-columns:62px 1fr;gap:2px 10px;font-size:14px}
 .plan .t{font-variant-numeric:tabular-nums;color:var(--ink2);text-align:right}
@@ -331,13 +345,98 @@ function fastHours(d){
   return ((24*60-(a1*60+a2))+(b1*60+b2))/60;
 }
 
+/* ---------- Scores, KPIs and streaks ---------- */
+const STRONG=()=>cfg.strongPct||80;
+const sleepPct=d=>{const x=sleepHours(d);return x==null?null:Math.min(1,x/sleepGoal(d))};
+const sleepMet=d=>{const x=sleepHours(d);return x!=null&&x>=sleepGoal(d)-1/12};
+function firstDay(){let f=null;Object.keys(days).forEach(k=>{const b=days[k];
+  const has=b&&((b.h&&Object.values(b.h).some(Boolean))||(b.r&&Object.keys(b.r).length)||b.lastMeal||b.firstMeal||b.bed||b.wake||b.hiit||b.lift||b.w!=null||b.confirmed);
+  if(has&&(!f||k<f))f=k});return f}
+// Day score: share of that day's in-season habits done, plus sleep as a share of its goal when logged.
+// Today counts only what can be ticked today (goals confirmed tomorrow are left out until then).
+function dayScore(d){
+  const today=d===TODAY();
+  const vis=cfg.habits.filter(h=>inSeason(h,d)&&!(today&&h.confirm));
+  let sum=vis.filter(h=>isDone(h,d)).length, n=vis.length;
+  const sp=sleepPct(d);if(sp!=null){sum+=sp;n++}
+  return n?sum/n:null;
+}
+function pastDays(n){ // completed days in the last n days, from the first tracked day, up to yesterday
+  const f=firstDay();if(!f)return[];const out=[];
+  for(let i=n;i>=1;i--){const d=addDays(TODAY(),-i);if(d>=f)out.push(d)}return out;
+}
+const avg=a=>a.length?a.reduce((x,y)=>x+y,0)/a.length:null;
+const scoreAvg=n=>avg(pastDays(n).map(dayScore).filter(v=>v!=null));
+function habitPct(h,n){const ds=pastDays(n).filter(d=>inSeason(h,d));return ds.length?ds.filter(d=>isDone(h,d)).length/ds.length:null}
+function sleepAvg(n){return avg(pastDays(n).map(sleepPct).filter(v=>v!=null))}
+// Streaks: count back from today (today only counts once it's done), skipping days a target doesn't apply.
+function runs(ok,skip){
+  const f=firstDay();if(!f)return{now:0,best:0};
+  let best=0,cur=0;
+  for(let d=f;d<=TODAY();d=addDays(d,1)){
+    if(skip&&skip(d))continue;
+    if(ok(d)){cur++;if(cur>best)best=cur}else if(d<TODAY())cur=0;
+  }
+  return{now:cur,best};
+}
+const habitRuns=h=>runs(d=>isDone(h,d),d=>!inSeason(h,d));
+const sleepRuns=()=>runs(sleepMet,d=>d===TODAY()&&sleepHours(d)==null);
+const strongRuns=()=>runs(d=>d<TODAY()&&(dayScore(d)??0)*100>=STRONG(),d=>d===TODAY());
+const confirmRuns=()=>runs(d=>!!day(d).confirmed,d=>d===TODAY());
+function weekRuns(k){ // weeks with 3 or more sessions; this week only counts once it reaches 3
+  const f=firstDay();if(!f)return{now:0,best:0};
+  let best=0,cur=0;
+  for(let m=mondayOf(f);m<=TODAY();m=addDays(m,7)){
+    const c=[...Array(7)].map((_,i)=>addDays(m,i)).filter(d=>day(d)[k]).length;
+    const thisWeek=m===mondayOf(TODAY());
+    if(c>=3){cur++;if(cur>best)best=cur}else if(!thisWeek)cur=0;
+  }return{now:cur,best};
+}
+function weekPct(k,weeks){ // sessions as a share of 3 a week, over full past weeks
+  const f=firstDay();if(!f)return null;const out=[];
+  for(let i=1;i<=weeks;i++){const m=addDays(mondayOf(TODAY()),-7*i);if(addDays(m,6)<f)break;
+    out.push(Math.min(1,[...Array(7)].map((_,j)=>addDays(m,j)).filter(d=>day(d)[k]).length/3))}
+  return avg(out);
+}
+const pctTxt=v=>v==null?"–":Math.round(v*100)+"%";
+const pctCls=v=>v==null?"":v*100>=STRONG()?"hi":v>=0.5?"mid":"lo";
+const pctSpan=v=>`<span class="${pctCls(v)}">${pctTxt(v)}</span>`;
+const stTxt=r=>`${r.now}<span class="tiny"> · ${r.best}</span>`;
+
+function scoreCard(){
+  const t=dayScore(TODAY()), y=addDays(TODAY(),-1), ys=dayScore(y);
+  const firstD=firstDay();
+  const s7=scoreAvg(7), s30=scoreAvg(30);
+  const sr=strongRuns(), cr=confirmRuns();
+  const ds=[...Array(14)].map((_,i)=>addDays(TODAY(),i-13));
+  const col=v=>v==null?"var(--line)":v*100>=STRONG()?"var(--good)":v>=0.5?"var(--accent)":"var(--warn)";
+  let html=`<div class="card"><h2>Scorecard <span class="tiny">strong day: ${STRONG()}%+</span></h2>
+    <div class="kpis">
+      <div class="stat"><b>${pctSpan(t)}</b><span>today so far</span></div>
+      <div class="stat"><b>${pctSpan(ys)}</b><span>yesterday${day(y).confirmed?"":" *"}</span></div>
+      <div class="stat"><b>${pctSpan(s7)}</b><span>7-day avg</span></div>
+      <div class="stat"><b>${pctSpan(s30)}</b><span>30-day avg</span></div>
+    </div>
+    <div class="row small"><span>Strong-day streak <b>${sr.now}</b> <span class="tiny">best ${sr.best}</span></span><span>Confirmed streak <b>${cr.now}</b> <span class="tiny">best ${cr.best}</span></span></div>
+    <div class="bars" aria-label="Daily score, last 14 days">${ds.map(d=>{const v=firstD&&d>=firstD?dayScore(d):null;return `<div title="${fmtShort(d)}: ${pctTxt(v)}"><i style="height:${v==null?2:Math.max(3,v*100)}%;background:${col(v)}"></i></div>`}).join("")}</div>
+    <div class="barlbl">${ds.map(d=>`<span>${parse(d).getDate()}</span>`).join("")}</div>
+    ${day(y).confirmed?"":`<div class="tiny" style="margin-top:4px">* not confirmed yet</div>`}
+    <table class="kt"><tr><th>Target</th><th>Streak·best</th><th>7d</th><th>30d</th><th>90d</th></tr>`;
+  cfg.groups.forEach(g=>{cfg.habits.filter(h=>h.group===g&&(inSeason(h,TODAY())||pastDays(90).some(d=>inSeason(h,d)))).forEach(h=>{
+    html+=`<tr><td>${esc(h.name)}${inSeason(h,TODAY())?"":` <span class="tiny">(${h.season} plan)</span>`}</td><td class="s">${stTxt(habitRuns(h))}</td><td>${pctSpan(habitPct(h,7))}</td><td>${pctSpan(habitPct(h,30))}</td><td>${pctSpan(habitPct(h,90))}</td></tr>`})});
+  html+=`<tr><td>Sleep <span class="tiny">(% of goal)</span></td><td class="s">${stTxt(sleepRuns())}</td><td>${pctSpan(sleepAvg(7))}</td><td>${pctSpan(sleepAvg(30))}</td><td>${pctSpan(sleepAvg(90))}</td></tr>`;
+  [["hiit","HIIT"],["lift","Lift"]].forEach(([k,n])=>{html+=`<tr><td>${n} <span class="tiny">(3 a week)</span></td><td class="s">${stTxt(weekRuns(k))}</td><td>${pctSpan(weekPct(k,1))}</td><td>${pctSpan(weekPct(k,4))}</td><td>${pctSpan(weekPct(k,13))}</td></tr>`});
+  html+=`</table><div class="tiny" style="margin-top:6px">Averages use finished days only, from the first day you tracked. Daily score = habits done that day, plus sleep as a share of its goal when you log it. Training uses full weeks (7d = last week) and its streak counts weeks.</div></div>`;
+  return html;
+}
+
 /* ---------- Render ---------- */
 const esc=s=>String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 function render(){
   document.getElementById("dlabel").textContent=(view===TODAY()?"Today, ":"")+fmtLong(view);
   document.getElementById("next").disabled=view>=TODAY();
   const app=document.getElementById("app");
-  app.innerHTML=(view===TODAY()?reviewCard():"")+lightCard()+stackCard()+bibleCard()+eatingCard()+workoutCard()+weightCard()+historyCard();
+  app.innerHTML=(view===TODAY()?reviewCard()+scoreCard():"")+lightCard()+stackCard()+bibleCard()+eatingCard()+workoutCard()+weightCard()+historyCard();
   drawChart();
 }
 
@@ -349,7 +448,7 @@ function stackCard(){
   const vis=cfg.habits.filter(h=>inSeason(h,view));
   const later=isToday?vis.filter(h=>h.confirm).length:0;
   const total=vis.length, done=vis.filter(h=>isDone(h,view)).length;
-  html+=`<div class="tiny">${done} of ${total} done${isToday?" today":""}${later?` · ${later} to confirm tomorrow morning`:""}</div>`;
+  html+=`<div class="tiny">${done} of ${total} done · score ${pctSpan(dayScore(view))}${isToday?" so far":""}${later?` · ${later} to confirm tomorrow morning`:""}</div>`;
   if(!isToday)html+=b.confirmed?`<div class="tiny ok" style="margin-top:4px">Day confirmed</div>`:`<div class="row" style="margin-top:8px"><button class="primary small" data-act="confirm" data-d="${view}">Confirm this day</button><span class="tiny">once the ticks below are right</span></div>`;
   cfg.groups.forEach(g=>{
     const hs=vis.filter(h=>h.group===g);if(!hs.length)return;
@@ -386,6 +485,7 @@ function editCard(){
     });
   });
   html+=`<div class="edit-row" style="margin-top:8px"><input type="text" id="newname" placeholder="New habit"><select id="newgroup">${cfg.groups.map(g=>`<option>${esc(g)}</option>`).join("")}</select><button data-act="add">Add</button></div>
+  <div class="edit-row"><span class="tiny">Strong day is a score of (%)</span><input type="number" min="50" max="100" step="5" value="${STRONG()}" data-act="strong"></div>
   <div class="edit-row"><span class="tiny">Goal weight (kg)</span><input type="number" step="0.1" value="${cfg.goalKg??""}" data-act="goal"></div></div>`;
   return html;
 }
@@ -407,7 +507,7 @@ function lightCard(){
   const y=+d.slice(0,4);let change="";
   [[lastSun(y,8),"Summer plan"],[firstSun(y,3),"Winter plan"],[firstSun(y+1,3),"Winter plan"]].forEach(([c,t])=>{if(!change&&c>d&&c<=addDays(d,14))change=`${t} starts ${fmtLong(c)}`});
   const sh=sleepHours(d), pb=day(addDays(d,-1)).bed||"", wk=day(d).wake||"";
-  const met=sh!=null&&sh>=goal-1/12;
+  const sp=sh!=null?Math.min(1,sh/goal):null;
   return `<div class="card"><h2>Light and sleep <span class="phase">${summer?"Summer plan":"Winter plan"}</span></h2>
     <div class="plan">${rows.map((r,i)=>`<span class="t ${i===cur?"now":""}">${clock24(r[0])}</span><span class="${i===cur?"now":""}">${r[1]}</span>`).join("")}</div>
     <div class="tiny" style="margin-top:8px">Daylight ${durTxt(sun.len)} · Sleep goal <b>${durTxt(goal)}</b> (7.5h at midsummer, rising to 10h at midwinter)${change?` · ${change}`:""}</div>
@@ -415,14 +515,14 @@ function lightCard(){
       <div><label for="bd">Bed ${d===TODAY()?"last night":"the night before"}</label><input type="time" id="bd" value="${pb}" data-act="bed" data-d="${addDays(d,-1)}"></div>
       <div><label for="wk">Woke</label><input type="time" id="wk" value="${wk}" data-act="wake" data-d="${d}"></div>
     </div>
-    <div class="small" style="margin-top:6px">${sh!=null?`Slept <b>${durTxt(sh)}</b> <span class="${met?"ok":"late"}">${met?"goal met":"under goal"}</span>`:`<span class="muted">Enter bed and wake times to see your sleep.</span>`}</div></div>`;
+    <div class="small" style="margin-top:6px">${sh!=null?`Slept <b>${durTxt(sh)}</b> · ${pctSpan(sp)} of goal`:`<span class="muted">Enter bed and wake times to see your sleep.</span>`}</div></div>`;
 }
 
 function reviewCard(){
   const y=addDays(TODAY(),-1), b=day(y);
   const vis=cfg.habits.filter(h=>inSeason(h,y)), done=vis.filter(h=>isDone(h,y)).length;
   const sh=sleepHours(TODAY());
-  if(b.confirmed)return `<div class="card"><div class="row small" style="justify-content:space-between"><span><span class="ok">Yesterday confirmed</span> · ${done} of ${vis.length}${sh!=null?` · slept ${durTxt(sh)}`:""}</span><button class="ghost small" data-act="unconfirm" data-d="${y}">Reopen</button></div></div>`;
+  if(b.confirmed)return `<div class="card"><div class="row small" style="justify-content:space-between"><span><span class="ok">Yesterday confirmed</span> · score ${pctSpan(dayScore(y))}${sh!=null?` · slept ${durTxt(sh)}`:""}</span><button class="ghost small" data-act="unconfirm" data-d="${y}">Reopen</button></div></div>`;
   let html=`<div class="card review"><h2>Confirm yesterday <span class="tiny">${fmtLong(y)}</span></h2>
     <div class="tiny">The day's over, so the goals that ran to the last minute can be ticked now. Fix anything that's wrong, then confirm.</div>`;
   vis.forEach(h=>{
@@ -438,8 +538,8 @@ function reviewCard(){
     <button class="check ${b.lift?"on":""}" data-act="lift" data-d="${y}" aria-label="Lift">${b.lift?"✓":""}</button><div class="txt"><div class="name">Lift</div></div></div>`;
   html+=`<div class="sleepbox"><div><label for="rbd">In bed last night</label><input type="time" id="rbd" value="${b.bed||""}" data-act="bed" data-d="${y}"></div>
     <div><label for="rwk">Woke this morning</label><input type="time" id="rwk" value="${day(TODAY()).wake||""}" data-act="wake" data-d="${TODAY()}"></div></div>
-    <div class="small" style="margin-top:6px">${sh!=null?`Slept <b>${durTxt(sh)}</b>, goal ${durTxt(sleepGoal(TODAY()))}`:`<span class="muted">Sleep goal last night: ${durTxt(sleepGoal(TODAY()))}</span>`}</div>
-    <div class="row" style="margin-top:10px"><button class="primary" data-act="confirm" data-d="${y}">Confirm yesterday</button><span class="tiny">${done} of ${vis.length} ticked</span></div></div>`;
+    <div class="small" style="margin-top:6px">${sh!=null?`Slept <b>${durTxt(sh)}</b> · ${pctSpan(Math.min(1,sh/sleepGoal(TODAY())))} of the ${durTxt(sleepGoal(TODAY()))} goal`:`<span class="muted">Sleep goal last night: ${durTxt(sleepGoal(TODAY()))}</span>`}</div>
+    <div class="row" style="margin-top:10px"><button class="primary" data-act="confirm" data-d="${y}">Confirm yesterday</button><span class="small">Score ${pctSpan(dayScore(y))}</span></div></div>`;
   return html;
 }
 
@@ -556,7 +656,7 @@ function historyCard(){
   const ds=[...Array(14)].map((_,i)=>addDays(TODAY(),i-13));
   let html=`<div class="card"><h2>Last 14 days</h2><div class="grid"><table><tr><th></th>${ds.map(d=>`<th>${parse(d).getDate()}</th>`).join("")}</tr>`;
   cfg.habits.filter(h=>ds.some(d=>inSeason(h,d))).forEach(h=>{html+=`<tr><td class="n">${esc(h.name)}</td>${ds.map(d=>`<td class="c ${!inSeason(h,d)?"na":isDone(h,d)?"on":""}" title="${fmtShort(d)}"></td>`).join("")}</tr>`});
-  html+=`<tr><td class="n">Sleep goal</td>${ds.map(d=>{const x=sleepHours(d);return `<td class="c ${x!=null&&x>=sleepGoal(d)-1/12?"on":""}" title="${x!=null?durTxt(x):""}"></td>`}).join("")}</tr>`;
+  html+=`<tr><td class="n">Sleep goal</td>${ds.map(d=>{const p=sleepPct(d);return `<td class="c ${p!=null&&p>=0.99?"on":""}" style="${p!=null&&p<0.99?`background:var(--good);opacity:${(0.2+0.6*p).toFixed(2)}`:""}" title="${p!=null?durTxt(sleepHours(d))+", "+pctTxt(p):""}"></td>`}).join("")}</tr>`;
   html+=`<tr><td class="n">Day confirmed</td>${ds.map(d=>`<td class="c ${day(d).confirmed?"on":""}"></td>`).join("")}</tr>`;
   [["hiit","HIIT"],["lift","Lift"]].forEach(([k,n])=>{html+=`<tr><td class="n">${n}</td>${ds.map(d=>`<td class="c ${day(d)[k]?"on":""}"></td>`).join("")}</tr>`});
   return html+`</table></div></div>`;
@@ -594,6 +694,7 @@ document.addEventListener("change",e=>{
   const el=e.target;const a=el.dataset&&el.dataset.act;if(!a)return;
   if(a==="rename"){const v=el.value.trim();if(v)setCfg(c=>{c.habits[+el.dataset.i].name=v})}
   if(a==="cue")setCfg(c=>{c.habits[+el.dataset.i].cue=el.value.trim()});
+  if(a==="strong"){const v=parseInt(el.value,10);setCfg(c=>{c.strongPct=isNaN(v)?80:Math.min(100,Math.max(50,v))})}
   if(a==="goal"){const v=parseFloat(el.value);setCfg(c=>{c.goalKg=isNaN(v)?null:v})}
   const dt=el.dataset.d||view;
   if(a==="first")setDay(dt,b=>{if(el.value)b.firstMeal=el.value;else delete b.firstMeal});
