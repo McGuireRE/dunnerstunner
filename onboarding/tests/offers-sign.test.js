@@ -322,6 +322,31 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   expect(/No room on the signature page for every purchaser\. Add a signature page in the portal, then load the blank again\./.test(out.noRoom) && await p.isDisabled('#sgRelease'), 'no room for a fourth signature: named, and Ready to sign waits');
   expect(!(await side(p)), 'the refusal at 390 px: no sideways scroll'); await shot(p, 'no_room');
 
+  // ── 10. everyone has signed but Round 1 isn't locked yet, and a newer draft replaces it: those signatures show as replaced, void ──
+  process.stderr.write('step 10\n');
+  const gil = { first: 'Gil', last: 'Onebuyer', email: 'gil.o@example.com', phone: '027 500 6000' };
+  const offE = (await rpc(p, 'agent_offer_add', { p_property: 'P1', p_offer: offer({ sign: 'digital', price: '661000', conditions: [{ key: 'finance', days: 10 }], chattels_add: [], chattels_exclude: [], purchasers: [gil] }) })).data;
+  await openProp(p); await draftAndApprove(offE); await p.click('#sgReady'); await p.waitForSelector('#sgReleaseView', { timeout: 30000 }); await p.click('#sgRelease'); await p.waitForSelector('#sgSendGo'); await p.click('#sgSendGo'); await p.waitForSelector('#sgSigners');
+  const gilLink = (await mails(p)).filter(m => m.kind === 'offer_sign_link' && m.to === gil.email).pop().link;
+  await p.evaluate(() => { localStorage.removeItem('mocksession'); localStorage.setItem('mockLockFail', '1'); }); await p.close();
+  q = await page(); await q.goto(gilLink); await q.waitForSelector('#sgCode'); await q.click('#sgSendCode'); await q.waitForFunction(() => /Sent/.test(document.querySelector('#sgCodeMsg').textContent));
+  await q.fill('#sgCodeIn', (await mails(q)).filter(m => m.kind === 'offer_sign_code' && m.to === gil.email).pop().code); await q.click('#sgCodeGo');
+  await q.waitForSelector('#sgConsent'); await tick(q, '#sgAgree'); await q.click('#sgAgreeGo'); await q.waitForSelector('#sgCcaPages .dr-pg canvas'); await tick(q, '#sgCcaOk'); await tick(q, '#sgSpOk'); await q.click('#sgGuidesGo');
+  await q.waitForSelector('#sgDraw'); await draw(q, '#sgSig', 9); await draw(q, '#sgInit', 10); await q.click('#sgDrawGo'); await q.waitForSelector('#sgPlaces');
+  await tapAll(q); await q.click('#sgFinishGo'); await q.waitForSelector('#sgThanks', { timeout: 30000 });
+  await q.evaluate(s => localStorage.setItem('mocksession', s), SESSION); await q.close();
+  p = await page(); await p.goto(BASE); await p.waitForTimeout(600);
+  d = await db(p); const gE1 = d.offer_signings.find(x => x.offer_id === offE && x.status === 'complete');
+  expect(gE1 && !d.offer_rounds.some(r_ => r_.signing_id === gE1.id), 'everyone signed, Round 1 not locked yet');
+  await rpc(p, 'agent_offer_correct', { p_offer: offE, p_details: offer({ sign: 'digital', price: '662000', conditions: [{ key: 'finance', days: 10 }], chattels_add: [], chattels_exclude: [], purchasers: [gil] }), p_note: 'Buyer raised the price before it was locked' });
+  await openProp(p); await draftAndApprove(offE); await p.click('#sgReady'); await p.waitForSelector('#sgReleaseView', { timeout: 30000 }); await p.click('#sgRelease'); await p.waitForSelector('#sgSendGo');
+  d = await db(p); const sE1 = d.offer_signers.filter(s_ => s_.signing_id === gE1.id);
+  expect(d.offer_signings.find(x => x.id === gE1.id).status === 'replaced' && sE1.length === 1 && sE1.every(s_ => s_.void_at && s_.finished_at && s_.seen_sha256 && !s_.token_hash), 'the fully signed version is replaced: its signer marked void, still recorded as finished, the link closed');
+  await p.click('#sgBackO'); await p.waitForSelector('#sgList'); await p.click(`[data-signing="${gE1.id}"]`); await p.waitForSelector('#sgReplaced');
+  out.replacedSigner = (await p.textContent('#sgSigners [data-signer="1"]')).replace(/\s+/g, ' ').trim();
+  expect(/Replaced \(kept, void\)/.test(out.replacedSigner) && !/Finished/.test(out.replacedSigner), 'Tim sees the signer as replaced, not finished');
+  await p.evaluate(() => localStorage.removeItem('mockLockFail'));
+
   console.log(JSON.stringify(Object.assign(out, { errs }), null, 1));
   await b.close();
 })().catch(e => { console.log(JSON.stringify({ errs: ['crashed: ' + (e.stack || e.message)] })); process.exit(0); });

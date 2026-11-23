@@ -184,6 +184,11 @@ begin
   if coalesce(current_setting('offers.fn', true), '') <> 'on' then raise exception 'Signing is changed only through the signing screens, so there is a record'; end if;
   if new.signing_id is distinct from old.signing_id or new.position is distinct from old.position or new.name is distinct from old.name or new.email is distinct from old.email then raise exception 'Who signs is kept as it was released'; end if;
   if old.void_at is not null then raise exception 'These signatures were replaced, and are kept as they were'; end if;
+  -- a newer draft replaces the signing: its signers are marked void (and their link closed), even when everyone had signed; nothing
+  -- else about them may change in the same step
+  if new.void_at is not null and new.token_hash is null and new.session_hash is null and new.code_hash is null
+     and (select status from public.offer_signings where id = old.signing_id) in ('ready', 'signing', 'held', 'complete')
+     and (to_jsonb(new) - array['void_at', 'token_hash', 'session_hash', 'code_hash']) is not distinct from (to_jsonb(old) - array['void_at', 'token_hash', 'session_hash', 'code_hash']) then return new; end if;
   -- once everyone has signed, nothing about any signer changes
   if (select status from public.offer_signings where id = old.signing_id) in ('complete', 'locked', 'replaced', 'cancelled') then raise exception 'Signing is finished, so the signers are kept as they were'; end if;
   -- a finished signer's record stays as it was: only Tim re-approving a mark reopens it, and replacing it voids it
@@ -426,7 +431,7 @@ begin
   end loop;
   for prev in select * from public.offer_signings where offer_id = o.id and id <> sid and status in ('ready', 'signing', 'held', 'complete') loop
     select count(*) into c from public.offer_signers where signing_id = prev.id and finished_at is not null;
-    if prev.status <> 'complete' then update public.offer_signers set void_at = now(), token_hash = null, session_hash = null, code_hash = null where signing_id = prev.id; end if;
+    update public.offer_signers set void_at = now(), token_hash = null, session_hash = null, code_hash = null where signing_id = prev.id;   -- before the status changes
     update public.offer_signings set status = 'replaced', replaced_at = now(), replaced_by = sid where id = prev.id;
     insert into public.offer_events (property_id, offer_id, actor, kind, detail) values (o.property_id, o.id, me, 'sign_replaced', jsonb_build_object('signing_id', prev.id, 'replaced_by', sid, 'finished', c));
   end loop;

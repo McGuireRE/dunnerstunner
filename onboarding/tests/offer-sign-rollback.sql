@@ -13,7 +13,7 @@ declare out text := ''; r jsonb; pid uuid; oid uuid; oid2 uuid; bl uuid; m uuid;
   sizes jsonb := '[[595.32,842.04],[595.32,842.04],[595.32,842.04]]';
   png text := 'data:image/png;base64,' || repeat('iVBORw0KGgo', 30);
   good jsonb; places jsonb; places1 jsonb; sha_d1 text := repeat('d1', 32); sha_d2 text := repeat('d2', 32); sha_d3 text := repeat('d3', 32); rpath text; rsha text := repeat('5a', 32);
-  ok_ boolean;
+  ok_ boolean; d5 uuid; sg5 uuid; tk jsonb;
 begin
   execute $mig$__MIGRATION__$mig$;
   -- the chain hash is SHA-256 of the previous fingerprint, a new line and the body (the same as SIGN.chainHash in src/sign-core.js)
@@ -235,6 +235,31 @@ begin
   r := public.offer_sign_open(tok1, 'n', 'ua'); out := out || 'old link=' || coalesce(r ->> 'stopped', r ->> 'ok') || '; ';
   execute 'reset role';
   begin perform set_config('offers.fn', 'on', true); update public.offer_signers set finished_at = now() where id = l1; out := out || 'VOID SIGNER CHANGED; '; exception when others then out := out || 'void change: ' || sqlerrm || '; '; end;
+  perform set_config('offers.fn', '', true);
+  -- everyone signs the new version (complete, not yet locked); then a newer draft replaces it: they are marked void too, kept finished
+  execute 'set local role service_role';
+  tk := public.offer_sign_issue(sg3, 'agent@example.test');
+  for n in 0..1 loop
+    x := tk->'links'->n->>'token'; ses := public.offer_sign_verify(x, public.offer_sign_code(x, 'net-s' || n) ->> 'code', 'net-s' || n, 'ua') ->> 'session';
+    perform public.offer_sign_consent(x, ses, 'n', 'ua'); perform public.offer_sign_receipt(x, ses, 'cca', null, null, null, '{3}'); perform public.offer_sign_receipt(x, ses, 'sale_purchase', 'August 2022', 'rea-sale-purchase-guide-2022-en.pdf', null, null);
+    perform public.offer_sign_marks(x, ses, png, png);
+    perform public.offer_sign_tap(x, ses, z.pid_) from (select e->>'id' pid_ from jsonb_array_elements(places) e where (e->>'signer')::int = n + 1) z;
+    perform public.offer_sign_finish(x, ses, 'n', 'ua');
+  end loop;
+  execute 'reset role';
+  out := out || 'new version status=' || (select status from public.offer_signings where id = sg3) || '; ';
+  insert into public.offer_drafts (offer_id, property_id, number, blank_id, blank_sha256, map_id, details, placed, needs, path, sha256, size_bytes, created_by)
+    values (oid2, pid, 3, bl, repeat('ab', 32), m, (select details from public.property_offers where id = oid2), '[]', '[]', 'rb-draft-5', repeat('d5', 32), 100, 'test') returning id into d5;
+  insert into public.offer_draft_approvals (draft_id, sha256, approved_by) values (d5, repeat('d5', 32), 'test');
+  execute 'set local role authenticated'; perform set_config('request.jwt.claims', agent, true);
+  sg5 := (public.agent_signing_release(d5, 'in_person', sizes, places, '{3}') ->> 'id')::uuid;
+  execute 'reset role';
+  out := out || 'complete signing replaced=' || (select status from public.offer_signings where id = sg3) || ' its signers void=' || (select bool_and(void_at is not null) from public.offer_signers where signing_id = sg3)
+    || ' still recorded as finished=' || (select bool_and(finished_at is not null and seen_sha256 is not null) from public.offer_signers where signing_id = sg3) || ' links closed=' || (select bool_and(token_hash is null) from public.offer_signers where signing_id = sg3) || '; ';
+  -- the guard still blocks any other change to a finished signer, and voiding the signers of a locked round
+  begin perform set_config('offers.fn', 'on', true); update public.offer_signers set void_at = now(), token_hash = null, session_hash = null, code_hash = null, user_agent = 'changed' where id = s1; out := out || 'FINISHED SIGNER CHANGED WHILE VOIDED; '; exception when others then out := out || 'void with a change: ' || sqlerrm || '; '; end;
+  begin perform set_config('offers.fn', 'on', true); update public.offer_signers set void_at = now(), token_hash = null, session_hash = null, code_hash = null where id = s1; out := out || 'LOCKED ROUND''S SIGNER VOIDED; '; exception when others then out := out || 'void a locked round: ' || sqlerrm || '; '; end;
+  begin perform set_config('offers.fn', 'on', true); update public.offer_signers set seen_sha256 = repeat('00', 32) where id = s2; out := out || 'FINISHED SIGNER CHANGED; '; exception when others then out := out || 'finished change: ' || sqlerrm || '; '; end;
   perform set_config('offers.fn', '', true);
 
   -- 8. the chain finds a missing or altered event (the guards have to be switched off to do either, as only the owner could)
