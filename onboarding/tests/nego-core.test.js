@@ -79,10 +79,14 @@ function png(w, h, seed) {
   // ── Round 3 goes back to the purchasers: they accept ──
   const pr3 = N.presentPlaces({ pages, placed, mapPlaces: map.places, side: 'purchaser', signers: P, layers: [L1, L2] });
   ok(!pr3.first && !pr3.blocking.length, 'the purchasers\' later round: nothing blocks');
-  ok(P.every(s => pr3.places.some(p => p.signer === s.position && p.kind === 'signature' && p.id === `block:sig${s.position}:s${s.position}`)), 'they sign again where they signed in Round 1');
+  ok(!pr3.places.some(p => p.kind === 'signature'), 'by default their Round 1 signatures stand (nothing lifted them): no signing again');
+  const pr3all = N.presentPlaces({ pages, placed, mapPlaces: map.places, side: 'purchaser', signers: P, layers: [L1, L2], resignEvery: true });
+  ok(P.every(s => pr3all.places.some(p => p.signer === s.position && p.kind === 'signature' && p.id === `block:sig${s.position}:s${s.position}`)), 'with the "sign every round" setting, they sign again where they signed in Round 1');
   ok([strike, insert].every(c => P.every(s => pr3.places.some(p => p.id === `chg:${c.id}:s${s.position}`))), 'and initial each change the vendors made (as the database insists)');
   ok(!pr3.places.some(p => p.why === 'foot' || p.why === 'filled'), 'no foot or box initials again');
-  const L3 = { doc_round: 3, number: 3, side: 'purchaser', signing_id: 'g3', places: pr3.places, taps: pr3.places.map(p => ({ place_id: p.id, signer: p.signer })), marks: [], signers: L1.signers };
+  const L3 = { doc_round: 3, number: 3, side: 'purchaser', signing_id: 'g3', places: pr3all.places, taps: pr3all.places.map(p => ({ place_id: p.id, signer: p.signer })), marks: [], signers: L1.signers };
+  const L3d = Object.assign({}, L3, { places: pr3.places, taps: pr3.places.map(p => ({ place_id: p.id, signer: p.signer })) });
+  ok(N.formed(N.standing([L1, L2, L3d]), { purchaser: P, vendor: V }, 0), 'accepting by initialling the changes only (signatures standing): the agreement is formed');
   st = N.standing([L1, L2, L3]);
   ok(!N.outstanding(st, { purchaser: P, vendor: V }).length && N.formed(st, { purchaser: P, vendor: V }, 0), 'the purchasers accept: nothing outstanding, the agreement is formed');
   ok(st.ink.filter(k => k.side === 'purchaser' && k.kind === 'signature').length === 2 && st.ink.filter(k => k.side === 'purchaser' && k.kind === 'signature').every(k => k.round === 3), 'their newer signatures replace the older on the working copy');
@@ -92,7 +96,24 @@ function png(w, h, seed) {
   const pr3b = N.changePlaces(L3b.marks[0], P, pages, N.standing([L1, L2], { doc_round: 3, side: 'purchaser', signing_id: 'g3', marks: L3b.marks }), pr3.places); L3b.places = pr3.places.concat(pr3b); L3b.taps = L3b.places.map(p => ({ place_id: p.id, signer: p.signer }));
   const stb = N.standing([L1, L2, L3b]), osb = N.outstanding(stb, { purchaser: P, vendor: V });
   out.liftedB = stb.lifted.filter(x => x.by === L3b.marks[0].id).map(x => x.who + ':' + x.kind);
+  const pr4 = N.presentPlaces({ pages, placed, mapPlaces: map.places, side: 'vendor', signers: V, layers: [L1, L2, L3b] });
+  ok(pr4.places.filter(p => p.kind === 'signature').map(p => p.signer).join() === '1', 'Round 4: only the vendor whose signature was lifted signs again; the other\'s stands');
   ok(out.liftedB.includes('Testy Vendorperson:signature') && osb.some(x => x.side === 'vendor' && x.signer === 1 && x.what === 'signature') && osb.some(x => x.side === 'vendor' && x.what === 'change') && !N.formed(stb, { purchaser: P, vendor: V }, 1), 'a change over the vendors\' signature lifts it: their signature and initials are outstanding again');
+
+  // ── a mark in Round 1 (phase 3, on Tim's screen), initialled by both purchasers as 'mark'; the vendors accept with no changes ──
+  const m1 = { id: '44444444-4444-4444-8444-444444444444', kind: 'note', page: 2, geometry: { strokes: [[[100, 600], [180, 610], [220, 590]]] }, by: 'Ana Testbuyer' };
+  const markIni = S.markPlaces([m1], P, pages, M1.places);
+  const L1m = Object.assign({}, L1, { places: M1.places.concat(markIni), taps: M1.places.concat(markIni).map(p => ({ place_id: p.id, signer: p.signer })), marks: [m1] });
+  ok(markIni.every(p => p.why === 'mark' && p.ref === m1.id), 'Round 1: the purchasers initial the mark, as phase 3 does');
+  const pm = N.presentPlaces({ pages, placed, mapPlaces: map.places, side: 'vendor', signers: V, layers: [L1m] });
+  ok(V.every(v => pm.places.some(p => p.id === `chg:${m1.id}:s${v.position}`)) && !P.some(x => pm.places.some(p => p.signer === x.position && p.ref === m1.id && p.why === 'mark')), 'the vendors initial the Round 1 mark; the purchasers\' own mark initials count');
+  const L2m = { doc_round: 2, number: 2, side: 'vendor', signing_id: 'g2m', places: pm.places, taps: pm.places.map(p => ({ place_id: p.id, signer: p.signer })), marks: [], signers: L2.signers };
+  const stm = N.standing([L1m, L2m]); out.markOutstanding = N.outstanding(stm, { purchaser: P, vendor: V });
+  ok(!out.markOutstanding.length && N.formed(stm, { purchaser: P, vendor: V }, 0), 'the vendors accept with no changes: nothing outstanding, the agreement is formed');
+
+  // ── typed words measured as Helvetica draws them ──
+  const PDFdoc = await PDFLib.PDFDocument.create(), helv = await PDFdoc.embedFont(PDFLib.StandardFonts.Helvetica);
+  ok(['$690,000', 'Settlement 1 March 2027', 'WWW iii'].every(t => Math.abs(N.textWidth(t, 9) - helv.widthOfTextAtSize(t, 9)) < 0.05) && Math.abs(N.changeRect(insert).w - helv.widthOfTextAtSize('$680,000', 9)) < 0.05, 'typed words are measured with Helvetica\'s own widths');
 
   // ── dates ──
   ok(N.fullDate('2026-11-24') === '24 November 2026' && N.parseFullDate('24 November 2026') === '2026-11-24' && N.parseFullDate('1 March 2027') === '2027-03-01', 'the date in full with the month name, both ways');
@@ -104,6 +125,8 @@ function png(w, h, seed) {
     changes: [{ kind: 'strike', page: 1, by: 'Testy Vendorperson', at: new Date().toISOString() }, { kind: 'insert', page: 1, by: 'Testy Vendorperson', at: new Date().toISOString(), text: '$680,000' }], lifted: N.standing([L1, L2]).lifted, outstanding: 4 };
   const st2 = N.standing([L1, L2]);
   const rr = await N.renderWorking(PDFLib, r.bytes, { ink: st2.ink, changes: st2.changes, lines: N.roundLines(rec), title: 'Round 2' });
+  const again = await N.redrawRound(PDFLib, r.bytes, JSON.parse(JSON.stringify([L1, L2])), JSON.parse(JSON.stringify(Object.assign({}, rec, { title: 'Round 2' }))));
+  ok(crypto.createHash('sha256').update(Buffer.from(again.bytes)).digest('hex') === crypto.createHash('sha256').update(Buffer.from(rr.bytes)).digest('hex'), 'Round 2 drawn again from its stored layers and record is byte for byte the same (the drawing is deterministic)');
   const rt = (await D.readPages(pdfjs, rr.bytes)).map(p => p.items.map(i => i.s).join(' '));
   ok(rt.length > dpages.length && /Execution record: Round 2/.test(rt.slice(dpages.length).join(' ')) && !rt.slice(0, dpages.length).some(t => /Execution record/.test(t)), 'the record is on pages of its own at the end');
   ok(rt[priceBox.page - 1].includes('$680,000'), 'the typed price is on the page');
@@ -120,12 +143,15 @@ function png(w, h, seed) {
   ok(dateItem && Math.abs(dateItem.y - datePlace.y) < 3 && dateItem.x >= datePlace.x - 1, 'the agreed copy: the date at the top, in its place');
   ok(/The agreement as agreed/.test(at.slice(dpages.length).map(p => p.items.map(i => i.s).join(' ')).join(' ')), 'with its record at the end');
 
+  let noPlace = null; try { await N.renderWorking(PDFLib, r.bytes, { ink: [], changes: [], lines: [], date: { text: '24 November 2026', place: null } }); } catch (e) { noPlace = e.message; }
+  ok(/no date place/.test(noPlace || ''), 'no date place: the date is never put anywhere else');
+
   // ── the lawyers' pack ──
   const events = []; let prev = S.ZERO;
   [['submitted', {}], ['round_locked', { number: 1, document: 1, round: 1, side: 'purchaser', sha256: 'a'.repeat(64) }], ['round_presented', { checked_round: 1, side: 'vendor', method: 'link' }], ['round_change', { round: 2, kind: 'insert', page: 1, text: '$680,000 <b>' }]].forEach(([kind, detail], i) => {
     const e = { chain: 'o1', seq: i + 1, at: new Date().toISOString(), actor: i === 3 ? 'Testy Vendorperson' : 'agent@example.com', kind, offer_id: 'o1', property_id: 'p1', detail }; e.prev_hash = prev; e.body = S.chainBody(e); e.hash = S.chainHash(prev, e.body); prev = e.hash; events.push(e); });
   const html = N.timelineHtml(events, { address: '1 Example Road', offer_ref: 'AT', made_at: new Date().toISOString(), check: S.verifyChain(events), files: [{ name: 'Round-1.pdf', sha256: 'a'.repeat(64) }] });
-  ok(/Checked: 4 events/.test(html) && /Tim authorised presentation of Round 1 to the vendors/.test(html) && /&lt;b&gt;/.test(html) && !/<b>/.test(html), 'the timeline reads plainly, checked, with anything typed escaped');
+  ok(!/agent@example\.com/.test(html) && /<td>Tim McGuire<\/td>/.test(html) && /Checked: 4 events/.test(html) && /Tim authorised presentation of Round 1 to the vendors/.test(html) && /&lt;b&gt;/.test(html) && !/<b>/.test(html), 'the timeline reads plainly, checked, with anything typed escaped');
   const files = [{ name: 'Round-1.pdf', bytes: r.bytes }, { name: 'Round-2.pdf', bytes: rr.bytes }, { name: 'timeline.html', bytes: new TextEncoder().encode(html) }];
   const z = N.zip(files), dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pack-')), zf = path.join(dir, 'pack.zip'); fs.writeFileSync(zf, z);
   const t = execFileSync('unzip', ['-t', zf], { encoding: 'utf8' }); ok(/No errors detected/.test(t), 'the pack is a sound zip');

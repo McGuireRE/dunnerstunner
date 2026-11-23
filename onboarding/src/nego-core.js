@@ -26,12 +26,20 @@
   const SIDE = { purchaser: 'purchasers', vendor: 'vendors' };
   const sideName = s => SIDE[s] || s;
   const other = s => s === 'vendor' ? 'purchaser' : 'vendor';
+  const ansi = s => String(s == null ? '' : s).normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^\x20-\x7e]/g, '?');
+  // the version of the drawing code: a locked round can be drawn again from its layers and record and come out byte for byte the same
+  const DRAW_VERSION = 'nego-draw-1';
+  // initials beside a change: from Round 2 on 'change'; in Round 1 a mark Tim re-approved was initialled as 'mark' (phase 3)
+  const initialsFor = (k, id) => (k.why === 'change' || k.why === 'mark') && k.ref === id;
 
   /* ───── shapes ───── */
-  // a change's rectangle on the page (typed words: about half a point per point of size per letter)
+  // Helvetica's widths (the font typed words are drawn in), per 1000 points, for the characters 32 to 126 (pdf-lib's own metrics)
+  const HELV = [278,278,355,556,556,889,667,191,333,333,389,584,278,333,278,278,556,556,556,556,556,556,556,556,556,556,278,278,584,584,584,556,1015,667,667,722,722,667,611,778,722,278,500,667,556,833,722,778,667,778,722,667,611,722,667,944,667,667,611,278,278,278,469,556,333,556,556,500,556,556,278,556,556,222,222,500,222,833,556,556,556,556,333,500,278,556,500,722,500,500,500,334,260,334,584];
+  const textWidth = (t, size) => { let w = 0; for (const ch of ansi(t)) { const c = ch.charCodeAt(0); w += HELV[c - 32] || 556; } return w * (size || 9) / 1000; };
+  // a change's rectangle on the page (typed words measured as Helvetica draws them)
   function changeRect(c) {
     const g = (c && c.geometry) || {};
-    if (c && c.kind === 'insert') { const size = g.size || 9; return { x: g.x, y: g.y - 2, w: Math.max(8, String(g.text || '').length * size * 0.5), h: size + 4 }; }
+    if (c && c.kind === 'insert') { const size = g.size || 9; return { x: g.x, y: g.y - 2, w: Math.max(8, textWidth(g.text, size)), h: size + 4 }; }
     return SIGN.markRect(c || {});
   }
   // is a piece of ink at the place of a change? It touches the change (allowing 4 points), or it sits on the change's own line within
@@ -78,7 +86,7 @@
     const out = [], has = (side, pos, f) => st.ink.some(k => k.side === side && k.signer === pos && f(k));
     Object.entries(sides || {}).forEach(([side, list]) => (list || []).forEach(s => {
       if (!has(side, s.position, k => k.kind === 'signature')) out.push({ side, signer: s.position, who: s.name || '', what: 'signature' });
-      st.changes.forEach(c => { if (!has(side, s.position, k => k.why === 'change' && k.ref === c.id)) out.push({ side, signer: s.position, who: s.name || '', what: 'change', ref: c.id, page: c.page }); });
+      st.changes.forEach(c => { if (!has(side, s.position, k => initialsFor(k, c.id))) out.push({ side, signer: s.position, who: s.name || '', what: 'change', ref: c.id, page: c.page }); });
     }));
     return out;
   }
@@ -100,8 +108,9 @@
     const page = (pages || []).find(p => p.n === c.page), obs = rectsOf(st).concat(current || []);
     return initialsBeside(c, signers, page, obs);
   }
-  // input: { pages: [{ n, w, h, items? }], placed, mapPlaces, side, signers: [{ position, name }], layers (the document's locked rounds) }
-  // -> { places, blocking, counts, first }: what the side the newest round goes to does
+  // input: { pages: [{ n, w, h, items? }], placed, mapPlaces, side, signers: [{ position, name }] (for a later round: the side's newest
+  //   round's signers), layers (the document's locked rounds), resignEvery (false: a side signs again only where its signature was
+  //   lifted; true: every round) } -> { places, blocking, counts, first }: what the side the newest round goes to does
   function presentPlaces(input) {
     const side = input.side, signers = (input.signers || []).slice().sort((a, b) => a.position - b.position), layers = input.layers || [];
     const st = standing(layers), first = !layers.some(L => L.side === side), pages = input.pages || [];
@@ -110,15 +119,17 @@
       const M = SIGN.makePlaces({ pages, placed: input.placed || [], mapPlaces: input.mapPlaces || [], signers, side, obstacles: rectsOf(st) });
       places = M.places; blocking = M.blocking;
     } else {
-      // everyone signs again where they signed before (the newer signature replaces the older on the working copy)
+      // a signer signs again where they signed before when their signature was lifted (or, with resignEvery, every round); the newer
+      // signature replaces the older on the working copy. Otherwise their signature stands and they initial the changes.
       const mine = layers.filter(L => L.side === side).sort((a, b) => b.doc_round - a.doc_round)[0];
-      signers.forEach(s => { (mine.places || []).filter(p => p.signer === s.position && p.why === 'block').forEach(p => places.push(Object.assign({}, p))); });
-      signers.forEach(s => { if (!places.some(p => p.signer === s.position && p.kind === 'signature')) blocking.push({ id: 'sig:' + s.position, label: 'Signatures', why: `${s.name} has no signature place from an earlier round.` }); });
+      signers.forEach(s => { const standingSig = st.ink.some(k => k.side === side && k.signer === s.position && k.kind === 'signature'); if (standingSig && !input.resignEvery) return;
+        const blockPl = (mine.places || []).filter(p => p.signer === s.position && p.why === 'block'); blockPl.forEach(p => places.push(Object.assign({}, p)));
+        if (!blockPl.some(p => p.kind === 'signature')) blocking.push({ id: 'sig:' + s.position, label: 'Signatures', why: `${s.name} has no signature place from an earlier round.` }); });
     }
     // everyone initials each change not yet initialled by them (the other side's, and their own where the other side lifted them)
     const obs = rectsOf(st).concat(places);
     st.changes.forEach(c => {
-      const need = signers.filter(s => !st.ink.some(k => k.side === side && k.signer === s.position && k.why === 'change' && k.ref === c.id));
+      const need = signers.filter(s => !st.ink.some(k => k.side === side && k.signer === s.position && initialsFor(k, c.id)));
       if (!need.length) return;
       const page = pages.find(p => p.n === c.page); if (!page) { blocking.push({ id: 'chg:' + c.id, label: 'A change', why: `Page ${c.page} isn't in the document.` }); return; }
       const add = initialsBeside(c, need, page, obs); add.forEach(p => { places.push(p); obs.push(p); });
@@ -138,7 +149,7 @@
     const mo = MONTHS.indexOf(m[2]) + 1, d = new Date(Date.UTC(+m[3], mo - 1, +m[1])); if (d.getUTCMonth() !== mo - 1) return null;
     return `${m[3]}-${String(mo).padStart(2, '0')}-${String(+m[1]).padStart(2, '0')}`;
   }
-  const NZ = SIGN.NZ, ansi = s => String(s == null ? '' : s).normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/[^\x20-\x7e]/g, '?');
+  const NZ = SIGN.NZ;
   // the record for a locked round from Round 2 on. rec: { address, offer_ref, number, document, round, side, base: { number, sha256 },
   //   draft: { number, sha256 }, places_sha256, made_at, signers (as SIGN.executionLines), changes: [{ kind, page, by, at, text? }],
   //   lifted: [{ side, who, kind, page, by_round }], outstanding }
@@ -178,7 +189,8 @@
     add(`Property: ${rec.address || ''}`, { gap: 6 }); add(`Offer: ${rec.offer_ref || ''}`);
     add(`Agreed as Document ${rec.document}, Round ${rec.round}: both sides signed and initialled the same version, with nothing outstanding.`);
     add(`Acceptance was communicated: ${NZ(rec.accepted_at)}. Confirmed by ${rec.confirmed_by || 'Tim McGuire'}.`);
-    add(`The date at the top, "${rec.date_text}", was typed by Tim McGuire once the agreement was agreed. It is the only thing added to this copy after the last signature.`);
+    add(`The date at the top, "${rec.date_text}", was typed by Tim McGuire once the agreement was agreed. The date and this record page are the only things added after the last signature.`);
+    if (rec.base) add(`Everything else is Round ${rec.base.round} as locked (SHA-256 ${rec.base.sha256}), drawn again from the same signatures, initials and changes with drawing version ${rec.draw_version || DRAW_VERSION}.`, { size: 8.5 });
     add(`This copy was made and locked by the server on ${NZ(rec.made_at)}.`, { size: 8.5 });
     add('Every locked round of this offer', { bold: true, gap: 8 });
     (rec.rounds || []).forEach(r => add(`Document ${r.document}, Round ${r.round} (number ${r.number}): signed by the ${sideName(r.side)}, ${r.changes ? r.changes + (r.changes === 1 ? ' change' : ' changes') : 'no changes'}, locked ${NZ(r.locked_at)}. SHA-256 ${r.sha256}`, { size: 8 }));
@@ -211,14 +223,20 @@
       else if (c.kind === 'reinstate') { pg.drawText('Reinstated', { x: g.x, y: g.y + 2, size: 7, font: bold, color: ink }); pg.drawCircle({ x: g.x - 3, y: g.y + 4.5, size: 1.6, color: ink }); }
       else if (c.kind === 'insert') pg.drawText(ansi(g.text), { x: g.x, y: g.y, size: g.size || 9, font, color: ink });
     }
-    if (m.date && m.date.text) { const p = m.date.place || {}, pg = pages[(p.page || 1) - 1] || pages[0], H = pg.getHeight();
-      pg.drawText(ansi(m.date.text), { x: p.x != null ? p.x : 60, y: p.y != null ? p.y : H - 40, size: 10, font, color: ink }); }
+    if (m.date && m.date.text) { const p = m.date.place, pg = p && pages[p.page - 1];
+      if (!pg || typeof p.x !== 'number' || typeof p.y !== 'number') throw new Error('The agreement blank has no date place, so the date can\'t be added. Add it to the places on the blank first.');
+      pg.drawText(ansi(m.date.text), { x: p.x, y: p.y, size: 10, font, color: ink }); }
     const W = 595.32, H = 841.92; let pg = doc.addPage([W, H]), y = H - 56;
     for (const l of m.lines || []) { const size = l.size || 9.5, f = l.bold ? bold : font; y -= (l.gap || 0);
       for (const t of wrapText(f, l.t, size, W - 96)) { if (y < 50) { pg = doc.addPage([W, H]); y = H - 56; } pg.drawText(t, { x: 48, y, size, font: f, color: PDFLib.rgb(0.1, 0.1, 0.1) }); y -= size * 1.35; } }
     if (m.title) doc.setTitle(ansi(m.title), { showInWindowTitleBar: false });
     const bytes = await doc.save({ useObjectStreams: false, addDefaultPage: false });
     return { bytes, pages: doc.getPageCount(), recordPages: doc.getPageCount() - pages.length };
+  }
+
+  // a locked round drawn again from the layers up to it and its stored execution record: the same bytes, if nothing has changed
+  async function redrawRound(PDFLib, draftBytes, layers, execution) {
+    const st = standing(layers); return renderWorking(PDFLib, draftBytes, { ink: st.ink, changes: st.changes, lines: roundLines(execution), title: execution.title });
   }
 
   /* ───── the lawyers' pack ───── */
@@ -245,7 +263,9 @@
   // the timeline as a page a lawyer can read: every event in order, each with its fingerprint and the one before it
   function timelineHtml(events, meta) {
     const ev = (events || []).filter(e => e.hash).slice().sort((a, b) => a.seq - b.seq), m = meta || {};
-    const rows = ev.map(e => `<tr><td>${e.seq}</td><td>${escH(NZ(e.at))}</td><td>${escH(e.actor)}</td><td>${escH(eventWords(e))}</td><td class="h">${escH(String(e.hash).slice(0, 16))}<br><span>after ${escH(String(e.prev_hash).slice(0, 16))}</span></td></tr>`).join('');
+    // Tim's own sign-in (an email) shows as his name; buyers and vendors are named as they signed; never anyone's contact details
+    const who = a => /@/.test(String(a || '')) ? 'Tim McGuire' : a;
+    const rows = ev.map(e => `<tr><td>${e.seq}</td><td>${escH(NZ(e.at))}</td><td>${escH(who(e.actor))}</td><td>${escH(eventWords(e))}</td><td class="h">${escH(String(e.hash).slice(0, 16))}<br><span>after ${escH(String(e.prev_hash).slice(0, 16))}</span></td></tr>`).join('');
     return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Timeline: ${escH(m.address || 'offer')}</title><style>body{font-family:Helvetica,Arial,sans-serif;font-size:13px;color:#1f1d1a;margin:24px}table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid #ddd;padding:5px;text-align:left;vertical-align:top}.h{font-family:monospace;font-size:11px}.h span{color:#777}</style></head><body>
 <h1>Timeline of the offer</h1><p>${escH(m.address || '')}<br>Offer: ${escH(m.offer_ref || '')}<br>Made ${escH(NZ(m.made_at))} by McGuire Real Estate for the parties' lawyers.</p>
 <p>Each event carries the fingerprint (SHA-256) of the one before it, so a missing or changed event shows. ${m.check ? escH(m.check.ok ? `Checked: ${m.check.events} events, each following on from the one before.` : 'The check found a problem: ' + (((m.check.problems || [])[0] || {}).why || '')) : ''}</p>
@@ -270,6 +290,6 @@
   }
 
   const NEGO = { changeRect, atPlace, ROW_REACH, inkOf, standing, outstanding, formed, presentPlaces, changePlaces, initialsBeside, rectsOf, KIND_WORDS, fullDate, parseFullDate, roundLines, agreementLines,
-    renderWorking, timelineHtml, eventWords, zip, crc32, sideName, other, MONTHS };
+    renderWorking, redrawRound, timelineHtml, eventWords, zip, crc32, sideName, other, MONTHS, DRAW_VERSION, textWidth, initialsFor };
   if (typeof module !== 'undefined' && module.exports) module.exports = NEGO; else root.NEGO = NEGO;
 })(typeof window !== 'undefined' ? window : globalThis);
