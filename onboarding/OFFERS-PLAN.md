@@ -153,7 +153,9 @@ Added by Tim, 23 November 2026 (built in phase 1):
   automatic lawyer lookup in phase 1.
 
 Open questions for Tim before phase 2: the wording of his electrical and technical report clauses and the Specified
-Due Diligence clauses as he wants them used (he is sending these).
+Due Diligence clauses as he wants them used (he is sending these). Answered 24 November 2026: Tim's own clause wording will come from
+his OneDrive folder McGuire > Forms > Clauses. The most recent version of each may be the right one, but the folder is disorganised, so
+each needs his tick before it goes in the clause library.
 
 ## Phase 2 detail: drafting (built 23 November 2026, branch `offers-phase2`; revised after the first review; not applied, pushed or deployed)
 
@@ -214,7 +216,8 @@ Choices made while Tim was asleep (each easy to change):
 
 Questions for Tim:
 - His wording for the electrical, specified technical, sale of another property and Specified Due Diligence clauses (placeholders
-  until then).
+  until then). Answered 24 November 2026: it will come from his OneDrive folder McGuire > Forms > Clauses; the most recent version of
+  each may be the right one, but the folder is disorganised, so Tim ticks each before use.
 - Should clause 21.2 be struck through when KiwiSaver funds the deposit, and 21.3 when it doesn't?
 - Are choices 3 to 7 and 9 right for him?
 - The sale of another property condition names the buyer's own address, so the vendors will see it. Is that acceptable to him, or
@@ -307,15 +310,15 @@ Choices made while Tim was asleep (each easy to change):
 10. Sealing: not done. See questions.
 
 Questions for Tim:
-- Text messages for the code: there is no SMS provider. Codes go by email. Which provider would you like (it needs an account and a
-  key you set up), or is email enough? It plugs in at `offer_sign_code` / the send_code action.
+- (Answered 24 November 2026) Text messages for the code: no. Codes go by email only for now, because some people, older ones
+  especially, don't use mobiles. If ever wanted, a provider plugs in at `offer_sign_code` / the send_code action.
 - Sealing the final PDF so a reader reports it unchanged needs a signing certificate (a document-signing certificate from a
   provider, or one McGuire Real Estate makes itself, which readers show as "unknown signer"). No pure-JS signing library is in the
   repository to test with here. Which do you want? Until then, the server-confirmed SHA-256 and the hash chain are the proof.
 - Should each purchaser get a copy of Round 1 by email once it locks?
 - Are foot initials wanted on every page of the pack (guides, title, LIM inserts), or only the agreement's own pages?
 - Choices 2, 3, 6 and 8 above: right for you?
-- Your solicitor confirms the method before first live use (as the signing standard says).
+- (Answered 24 November 2026) Tim's solicitor will confirm the method before first live use (as the signing standard says).
 
 Deploy steps (phase 3), after review and with Tim's approval, after phase 2's:
 1. Run the rollback block on the live project (`node onboarding/tests/offer-sign-rollback.js`): no CAPITALS. Then apply 020.
@@ -442,6 +445,18 @@ Review fixes (24 November 2026, after the first review):
     'sign_change', widened) and 30 an hour per signer; `offer_sign_reviews` keeps `reviewed_by` for Tim's re-approvals only, with `kind`
     and `changed_by` for changes.
 
+Tim's answers (24 November 2026, the morning after the build):
+- Changes from a link: allowed, under Tim's control. Some vendors want to make changes themselves after a private discussion. Each round
+  he presents has a switch, "Let them make changes from their link" (`offer_signings.link_changes`, recorded on the timeline and on the
+  round's execution record as "Changes from link: allowed" or "not allowed"). Its starting position is his setting
+  `offer_settings.link_changes_default` (on by default; `agent_offer_link_changes_default`). It applies to the purchasers too when a
+  round goes back to them. Switched off, the link shows only accept (initial and sign), decline (a note to Tim) and "Ask Tim for a
+  change", and the database refuses a change from the link, said plainly. On Tim's own device changes can always be made. Both negotiation
+  settings (this one and signing again every round) are toggles under "Link and settings" on the property's Offers tile.
+  (Rollback block; offers-nego.test.js; offer-nego-fn.test.js.)
+- Signing codes go by email only for now, because some people, older ones especially, don't use mobiles. No SMS provider.
+- Tim's solicitor will confirm the signing method before first live use.
+
 Decisions from the coordinator: presenting defaults to in person; the vendors declining is "declined"; signing again only where lifted,
 with the setting for every round; an offer marked current again after a withdrawal needs a fresh copy.
 
@@ -451,7 +466,7 @@ Choices made while Tim was asleep (each easy to change):
 3. The vendors' first round initials the foot of every page and every filled box, as the purchasers did (Tim's rule "each signer").
    That is 54 places each on the real pack.
 4. Vendors are the property's owners on its file (role owner), in their order there, by legal name.
-5. Changes can be made from a link as well as on Tim's device (phase 3 kept marking to Tim's screen). Tim still looks at every round
+5. (Answered by Tim) Changes from a link are allowed for a round when Tim switches it on (on by default); Tim still looks at every round
    before it goes anywhere.
 6. A change can't be undone once saved (it is a record); strike it or reinstate it instead, as on paper.
 7. (Decided) Present defaults to in person; Tim can choose a link.
@@ -464,10 +479,9 @@ Questions for Tim:
 - Signing again: by default a side signs again only where a change lifted its signature, otherwise its first signature stands and it
   initials the changes. Is that right, or should everyone sign every round (the setting)?
 - Choice 3: do the vendors initial every page foot and every filled box in their first round, or only sign and initial the changes?
-- Should the vendors be able to make changes from their own link, or only with you in person (choice 5)?
 - Is 60 points along the line the right reach for lifting the other side's initials (choice 2)?
 - Should both sides get a copy of each locked round, and of the agreed copy, by email (and to the lawyers)?
-- Your solicitor confirms the method (phases 3 and 4) before first live use.
+- (Answered) Your solicitor confirms the method (phases 3 and 4) before first live use: Tim says he will.
 
 Deploy steps (phase 4), after review and with Tim's approval, after phases 2 and 3:
 1. Run the rollback block on the live project (`node onboarding/tests/offer-negotiation-rollback.js`): no CAPITALS. Then apply 021.

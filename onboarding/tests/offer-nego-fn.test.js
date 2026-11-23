@@ -36,7 +36,7 @@ const D = require(path.join(__dirname, '..', 'src', 'draft-core.js'));
   let marks2 = [strike, insert], calls = [], mails = [], files = {}, agent = 'agent@example.test', changeErr = null, outstandingLayers = false, reopen = null, noDatePlace = false;
   files[DRAFT] = draft;
   const vSigner = { id: 'v1', position: 1, name: 'Vera Vendor', sig_png: png, init_png: png, verified_at: '2026-11-24T01:30:00Z', consent_at: '2026-11-24T01:31:00Z', receipts: [{ guide: 'chattels', at: '2026-11-24T01:32:00Z' }], places: 4, ua: 'Phone', net: 'f'.repeat(64), seen_sha256: 'd'.repeat(64) };
-  const material = () => ({ signing_id: SID, offer_id: OID, property_id: PID, address: '1 Example Road, Testville', offer_ref: 'Ana Testbuyer', method: 'link', number: 2, round: 2, side: 'vendor', document: 1, earlier: [L1],
+  const material = () => ({ signing_id: SID, offer_id: OID, property_id: PID, address: '1 Example Road, Testville', offer_ref: 'Ana Testbuyer', method: 'link', number: 2, round: 2, side: 'vendor', document: 1, earlier: [L1], link_changes: true,
     draft: { id: 'd', number: 1, path: DRAFT, sha256: draftSha }, places_sha256: 'b'.repeat(64), made_at: '2026-11-24T03:00:00Z', places: v2places, taps: v2places.map(p => ({ place_id: p.id, signer: 1, at: '2026-11-24T02:30:00Z' })), signers: [vSigner], marks: marks2, replaced: [] });
   const L2 = () => ({ round_id: RID, number: 2, doc_round: 2, side: 'vendor', signing_id: SID, sha256: 'c'.repeat(64), places: v2places, taps: v2places.map(p => ({ place_id: p.id, signer: 1 })), signers: [{ position: 1, name: 'Vera Vendor', sig_png: png, init_png: png }], marks: [strike, insert] });
   const L3 = () => { const pl = [r1places[2], { id: `chg:${strike.id}:s1`, signer: 1, kind: 'initial', why: 'change', ref: strike.id, page: 1, x: 195, y: 410, w: 26, h: 13 }, { id: `chg:${insert.id}:s1`, signer: 1, kind: 'initial', why: 'change', ref: insert.id, page: 1, x: 195, y: 384, w: 26, h: 13 }];
@@ -112,6 +112,7 @@ const D = require(path.join(__dirname, '..', 'src', 'draft-core.js'));
   const rt = await text(stored);
   expect(rt[0].includes('$690,000') && rt.length === 3 && /Execution record: Round 2/.test(rt[2]) && /lifted/i.test(rt[2]) && !/vera@example|SHOULD-NOT/.test(rt.join(' ')), 'the round shows the typed price, with its record at the end and no contact details');
   const ini = rt[0]; out.r2text = ini.slice(0, 80);
+  expect(/Changes from link: allowed/.test(rt[2]) && lk[1].p_execution.link_changes === true, 'the round\'s record says whether changes from the link were allowed');
   const tm = mails.find(m => m.kind === 'offer_round_locked'); expect(tm && /Round 2 signed and locked/.test(tm.subject) && /Nothing has gone back to the purchasers/.test(tm.html), 'Tim is told nothing has gone back yet');
   // an acceptance (no changes, nothing outstanding) is flagged as the agreement formed
   marks2 = []; const accM = material; calls = [];

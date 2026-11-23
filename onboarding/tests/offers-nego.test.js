@@ -66,7 +66,7 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   const count = p => p.$eval('#sgCount', e => +e.textContent.match(/(\d+) of/)[1]);
   const tapAll = async (p) => { let miss = 0; for (let i = 0; i < 800; i++) {
       const t = await p.$('#sgPage .sg-todo'); if (!t) { const gn = await p.$('#sgGoNext'); if (!gn) break; await gn.click(); await p.waitForSelector('#sgPage .sg-todo', { timeout: 10000 }); continue; }
-      const c0 = await count(p); await p.evaluate(el => el.click(), t).catch(() => null); try { await p.waitForFunction(c => +document.querySelector('#sgCount').textContent.match(/(\d+) of/)[1] > c, c0, { timeout: 4000 }); } catch (e) { if (++miss > 5) throw new Error('tap did not count: ' + (await p.textContent('#sgErr'))); } } };
+      const c0 = await count(p); await p.evaluate(el => el.click(), t).catch(() => null); try { await p.waitForFunction(c => +document.querySelector('#sgCount').textContent.match(/(\d+) of/)[1] > c, c0, { timeout: 4000 }); } catch (e) { if (++miss > 5) throw new Error('tap did not count: ' + (await p.textContent('#sgErr')) + ' id=' + (await t.getAttribute('data-id').catch(() => 'gone')) + ' count=' + (await p.textContent('#sgCount')) + ' todo=' + (await p.$$eval('#sgPage .sg-todo', x => x.map(y => y.dataset.id + (y.dataset.busy ? '*' : '')).join('|')))); } } };
   const turnStart = async (p, n) => { await p.waitForSelector('#sgView'); await p.click(`#sgSigners [data-signer="${n}"] [data-turn]`); await p.waitForSelector('#sgFlow'); };
   const consentDraw = async (p, k) => { await p.waitForSelector('#sgConsent'); await tick(p, '#sgAgree'); await p.click('#sgAgreeGo'); await p.waitForSelector('#sgDraw');
     const bg = await p.$eval('#sgDraw .sig-wrap', e => getComputedStyle(e).backgroundColor); expect(bg === 'rgb(255, 255, 255)', 'the signature pad is white (' + bg + ')');
@@ -129,12 +129,14 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   expect(/Nothing has gone to the vendors yet/.test(await p.textContent('#ngNext')), 'the offer page says nothing has gone to the vendors');
   await p.click('#ngPresent'); await p.waitForSelector('#ngPresentView'); await p.waitForSelector('#ngCanvas .dr-pg canvas');
   expect(/first round, so each initials the foot of every page/.test(await p.textContent('#ngWho')) && /Testy Vendorperson/.test(await p.textContent('#ngWho')) && /Otherly Vendorperson/.test(await p.textContent('#ngWho')), 'the present screen shows who signs and what they do');
+  expect(await p.isChecked('#ngLinkChanges'), 'the present screen has "Let them make changes from their link", on by default (Tim\'s setting)');
   expect(!(await side(p)), 'the present screen at 390 px: no sideways scroll'); await shot(p, 'present');
   await tick(p, 'input[name="ngMethod"][value="link"]'); await p.waitForTimeout(150);
   await p.click('#ngGo'); await p.waitForFunction(() => /Tick that you have looked at Round 1/.test(document.querySelector('#ngErr').textContent));
   d = await db(p); expect(!d.offer_signings.some(g => g.side === 'vendor'), 'not presented until Tim ticks that he has looked at Round 1');
   await tick(p, '#ngChecked'); await p.click('#ngGo'); await p.waitForSelector('#sgSendGo');
   d = await db(p); const g2 = d.offer_signings.find(g => g.offer_id === offA && g.round_no === 2);
+  expect(g2 && g2.link_changes === true, 'the vendors\' round allows changes from their link, as Tim left the switch');
   expect(g2 && g2.side === 'vendor' && g2.status === 'ready' && d.offer_events.some(e => e.kind === 'round_presented' && e.detail.checked_round === 1), 'presented: Round 2 for the vendors, recorded as authorised after looking');
   expect(!(await mails(p)).some(m => m.kind === 'offer_sign_link'), 'still nothing sent before Send');
   expect(/Round 2: the vendors sign/.test(await p.textContent('#sgView h1')), 'the signing screen says it is the vendors\' round');
@@ -330,10 +332,28 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   // ── 10. withdrawal (offer C): the vendors withdraw while their round is out by link; the link stops working ──
   process.stderr.write('step 10\n');
   await p.click('#ofBackP'); await p.waitForSelector('#offTile');
+  // Tim's negotiation settings on the Offers tile: changes from a link switched off by default from now on
+  await p.click('#offSetD summary'); expect(await p.isChecked('#offNgLink') && !(await p.isChecked('#offNgResign')), 'the Offers tile shows both negotiation settings (changes from a link on, sign every round off)');
+  await p.$eval('#offNgLink', e => e.click()); await p.waitForFunction(() => JSON.parse(localStorage.getItem('mockdb')).offer_settings[0].link_changes_default === false);
   await draftAndApprove(p, offC); await p.click('#sgReady'); await p.waitForSelector('#sgReleaseView', { timeout: 30000 }); await tick(p, 'input[name="sgMethod"][value="in_person"]'); await p.waitForTimeout(100); await p.click('#sgRelease'); await p.waitForSelector('#sgView');
   d = await db(p); r = await rpcRound(p, d.offer_signings.find(g => g.offer_id === offC && g.round_no === 1).id); expect(r && r.ok, 'offer C: Round 1 locked');
   pr = await rpcPresent(p, offC, 'link'); await invoke(p, { action: 'send', signing_id: pr.id });
+  d = await db(p); expect(pr.link_changes === false && d.offer_events.some(e => e.kind === 'round_presented' && e.detail.signing_id === pr.id && e.detail.link_changes === false), 'the round follows the new default: changes from the link not allowed, recorded on the timeline');
   const cLink = (await mails(p)).filter(m => m.kind === 'offer_sign_link' && m.to === 'vendor@example.com').pop().link;
+  // the vendor's link with changes switched off: accept or decline, and Ask Tim for a change; no change tools; a change is refused plainly
+  { const ses0 = await p.evaluate(() => localStorage.getItem('mocksession')); await p.evaluate(() => localStorage.removeItem('mocksession'));
+    const v = await page(); await v.goto(cLink); await v.waitForSelector('#sgCode'); await v.click('#sgSendCode'); await v.waitForFunction(() => /Sent/.test(document.querySelector('#sgCodeMsg').textContent));
+    await v.fill('#sgCodeIn', (await mails(v)).filter(m => m.kind === 'offer_sign_code' && m.to === 'vendor@example.com').pop().code); await v.click('#sgCodeGo');
+    await v.waitForSelector('#sgConsent'); await tick(v, '#sgAgree'); await v.click('#sgAgreeGo'); await v.waitForSelector('#ngChattels'); await tick(v, '#ngChatOk'); await v.click('#ngChatGo');
+    await v.waitForSelector('#sgDraw'); await draw(v, '#sgSig', 2); await draw(v, '#sgInit', 3); await v.click('#sgDrawGo'); await v.waitForSelector('#sgPlaces');
+    expect(!(await v.$('#sgTools')) && await v.$('#ngNoChanges') && await v.$('#ngDecline') && await v.$('#sgAskBox'), 'with the switch off, the link shows accept or decline and Ask Tim for a change, and no change tools');
+    const sesV = await v.evaluate(() => Object.keys(sessionStorage).filter(k => /^sgSes:/.test(k)).map(k => sessionStorage.getItem(k))[0]);
+    const rc = await invoke(v, { action: 'change', token: cLink.split('sign=')[1], session: sesV, id: '7a7a7a7a-0000-4000-8000-000000000001', kind: 'strike', page: 1, geometry: { x0: 100, x1: 180, y: 300 }, places: [] });
+    expect(rc.ok === false && /hasn't switched on changes from this link/.test(rc.error), 'a change from the link is refused, and said plainly');
+    await v.click('#ngDecline'); await v.waitForFunction(() => /Sent to Tim/.test(document.querySelector('#ngDeclineOut').textContent));
+    expect((await mails(v)).some(m => m.kind === 'offer_sign_ask' && m.to === 'tim' && /decline/.test(m.text)), 'Decline tells Tim');
+    expect(!(await side(v)), 'the accept-or-decline link screen at 390 px: no sideways scroll');
+    await v.close(); await p.evaluate(s => localStorage.setItem('mocksession', s), ses0); }
   await toOffer(p, offC); await p.waitForSelector('#ngWithdraw'); await p.click('#ngWithdraw summary');
   await p.click('#ngWdGo'); expect(/Choose who withdrew/.test(await p.textContent('#ngWdErr')), 'who withdrew must be chosen');
   await tick(p, 'input[name="ngWdSide"][value="vendor"]'); await p.fill('#ngWdNote', 'Testy rang: they are keeping the house'); await p.click('#ngWdGo'); await p.waitForSelector('#ofView');

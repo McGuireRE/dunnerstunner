@@ -67,7 +67,11 @@ alter table public.offer_sign_reviews add constraint offer_sign_reviews_who chec
 alter table public.offer_hits drop constraint offer_hits_kind_check, add constraint offer_hits_kind_check check (kind in ('info', 'bad', 'submit', 'ai', 'sign_code', 'sign_try', 'sign_change'));
 -- Tim's setting: does a side sign again every round, or only where its signature was lifted (the default)?
 alter table public.offer_settings add column resign_every_round boolean not null default false;
-grant select (resign_every_round) on public.offer_settings to authenticated;
+-- Tim's setting: may the side a round goes to make changes from their own link? (on by default; he chooses for each round)
+alter table public.offer_settings add column link_changes_default boolean not null default true;
+grant select (resign_every_round, link_changes_default) on public.offer_settings to authenticated;
+-- and the choice Tim made for each round he presents (null for Round 1, which has no changes)
+alter table public.offer_signings add column link_changes boolean;
 create table public.offer_agreements (
   id uuid primary key default gen_random_uuid(),
   offer_id uuid not null unique references public.property_offers(id),
@@ -453,9 +457,10 @@ end $$;
 -- in person on his device or by a personal link to each (sent with Send, as in 020). The places are made by the core on his screen:
 -- a side signing for the first time initials the foot of every page and every filled box and signs; every signer initials each change
 -- the other side made; everyone signs. Nothing is sent here.
-create or replace function public.agent_round_present(p_offer uuid, p_method text, p_places jsonb, p_checked boolean, p_note text default null) returns jsonb language plpgsql security definer set search_path = public as $$
+create or replace function public.agent_round_present(p_offer uuid, p_method text, p_places jsonb, p_checked boolean, p_note text default null, p_link_changes boolean default null) returns jsonb language plpgsql security definer set search_path = public as $$
 declare me text := public.offer_agent(); o public.property_offers; doc public.offer_documents; last public.offer_rounds; base public.offer_signings; side_ text; n int; sid uuid; ex uuid; em text; i int; x jsonb; first_ boolean; m record; ppl jsonb;
   prev public.offer_rounds; owners uuid[]; resign boolean := coalesce((select resign_every_round from public.offer_settings limit 1), false); mk public.offer_sign_marks;
+  lc boolean := coalesce(p_link_changes, (select link_changes_default from public.offer_settings limit 1), true);
 begin
   if coalesce(p_method, '') not in ('in_person', 'link') then raise exception 'Choose in person or by link'; end if;
   select * into o from public.property_offers where id = p_offer for update; if o.id is null then raise exception 'No such offer'; end if;
@@ -519,15 +524,15 @@ begin
     if mk.id is null or (x->>'page')::int <> mk.page or public.offer_gap(x, public.offer_change_rect(mk.kind, mk.geometry)) > 60 then raise exception 'Please check the signing places: initials for a change go beside it'; end if;
   end loop;
   perform set_config('offers.fn', 'on', true);
-  insert into public.offer_signings (offer_id, property_id, draft_id, draft_sha256, method, pages, places, places_sha256, cca_pages, released_by, round_no, side, document_id, base_round_id)
-  values (o.id, o.property_id, doc.draft_id, doc.draft_sha256, p_method, base.pages, p_places, public.offer_sha(p_places::text), '{}', me, last.doc_round + 1, side_, doc.id, last.id) returning id into sid;
+  insert into public.offer_signings (offer_id, property_id, draft_id, draft_sha256, method, pages, places, places_sha256, cca_pages, released_by, round_no, side, document_id, base_round_id, link_changes)
+  values (o.id, o.property_id, doc.draft_id, doc.draft_sha256, p_method, base.pages, p_places, public.offer_sha(p_places::text), '{}', me, last.doc_round + 1, side_, doc.id, last.id, lc) returning id into sid;
   for i in 0..n - 1 loop
     insert into public.offer_signers (signing_id, position, name, email, person_id) values (sid, i + 1, left(ppl->i->>'name', 250), ppl->i->>'email', (ppl->i->>'person')::uuid);
   end loop;
   insert into public.offer_events (property_id, offer_id, actor, kind, detail) values (o.property_id, o.id, me, 'round_presented',
-    jsonb_build_object('signing_id', sid, 'document', doc.number, 'round', last.doc_round + 1, 'side', side_, 'method', p_method, 'checked_round', last.doc_round, 'checked_sha256', last.sha256, 'signers', n, 'places', jsonb_array_length(p_places), 'places_sha256', public.offer_sha(p_places::text), 'note', left(nullif(trim(coalesce(p_note, '')), ''), 300)));
+    jsonb_build_object('signing_id', sid, 'document', doc.number, 'round', last.doc_round + 1, 'side', side_, 'method', p_method, 'checked_round', last.doc_round, 'checked_sha256', last.sha256, 'signers', n, 'places', jsonb_array_length(p_places), 'places_sha256', public.offer_sha(p_places::text), 'note', left(nullif(trim(coalesce(p_note, '')), ''), 300), 'link_changes', lc));
   perform set_config('offers.fn', '', true);
-  return jsonb_build_object('id', sid, 'existing', false, 'round', last.doc_round + 1, 'side', side_);
+  return jsonb_build_object('id', sid, 'existing', false, 'round', last.doc_round + 1, 'side', side_, 'link_changes', lc);
 end $$;
 -- a change on Tim's device, by the signer whose turn it is
 create or replace function public.agent_round_change(p_signer uuid, p_id uuid, p_kind text, p_page int, p_geometry jsonb, p_target uuid, p_places jsonb) returns jsonb language plpgsql security definer set search_path = public as $$
@@ -641,7 +646,7 @@ begin
       'receipts', (select coalesce(jsonb_agg(jsonb_build_object('guide', r.guide, 'version', r.version, 'at', r.at)), '[]'::jsonb) from public.offer_sign_receipts r where r.signer_id = s.id)),
     'signing', jsonb_build_object('status', g.status, 'stopped', case when s.void_at is not null then 'This version has been replaced. Tim will send you the new one.' else public.offer_sign_current(g) end, 'pages', g.pages, 'cca_pages', to_jsonb(g.cca_pages),
       'draft_path', case when s.consent_at is not null then d.path end, 'draft_sha256', d.sha256, 'address', addr,   -- the document only once they agree to sign electronically
-      'round', g.round_no, 'side', g.side, 'signers', (select count(*) from public.offer_signers x where x.signing_id = g.id and x.void_at is null),
+      'round', g.round_no, 'side', g.side, 'link_changes', coalesce(g.link_changes, false), 'signers', (select count(*) from public.offer_signers x where x.signing_id = g.id and x.void_at is null),
       'parties', case when g.side = 'vendor' then public.offer_parties(g.offer_id) end,
       'layers', case when g.round_no > 1 and s.consent_at is not null then public.offer_doc_layers(g.document_id, g.round_no - 1) else '[]'::jsonb end,
       'marks', case when g.round_no > 1 then (select coalesce(jsonb_agg(jsonb_build_object('id', m.id, 'kind', m.kind, 'page', m.page, 'geometry', m.geometry, 'target', m.target, 'by', m.by_name, 'at', m.at) order by m.at, m.id), '[]'::jsonb) from public.offer_sign_marks m where m.signing_id = g.id) else '[]'::jsonb end,
@@ -656,6 +661,7 @@ create or replace function public.offer_sign_change(p_token text, p_session text
 declare s public.offer_signers; n text := public.offer_net(p_net);
 begin
   s := public.offer_sign_me(p_token, p_session);
+  if (select link_changes from public.offer_signings where id = s.signing_id) is not true then raise exception 'Tim hasn''t switched on changes from this link for this round. You can accept it, decline it, or use Ask Tim for a change'; end if;
   if public.offer_hit_count('sign_change', n, null, interval '1 hour') >= 60 then raise exception 'A lot of changes have been made from here in the last hour. Please call Tim on 027 562 7207'; end if;
   insert into public.offer_hits (kind, net) values ('sign_change', n);
   return public.offer_sign_do_change(s.id, p_id, p_kind, p_page, p_geometry, p_target, p_places);
@@ -671,7 +677,7 @@ begin
   select * into doc from public.offer_documents where id = g.document_id;
   nxt := coalesce((select max(number) from public.offer_rounds where offer_id = g.offer_id), 0) + 1;
   return jsonb_build_object('signing_id', g.id, 'offer_id', o.id, 'property_id', g.property_id, 'address', addr, 'offer_ref', o.buyer_ref, 'method', g.method,
-    'number', nxt, 'round', g.round_no, 'side', g.side, 'document', coalesce(doc.number, (select count(*) from public.offer_documents x where x.offer_id = o.id) + 1),
+    'number', nxt, 'round', g.round_no, 'side', g.side, 'link_changes', g.link_changes, 'document', coalesce(doc.number, (select count(*) from public.offer_documents x where x.offer_id = o.id) + 1),
     'earlier', case when g.round_no > 1 then public.offer_doc_layers(g.document_id, g.round_no - 1) else '[]'::jsonb end,
     'draft', jsonb_build_object('id', d.id, 'number', d.number, 'path', d.path, 'sha256', d.sha256), 'places_sha256', g.places_sha256, 'pages', g.pages,
     'places', g.places || coalesce((select jsonb_agg(e) from public.offer_sign_reviews r, jsonb_array_elements(r.places) e where r.signing_id = g.id), '[]'::jsonb),
@@ -835,11 +841,19 @@ begin
   update public.offer_settings set resign_every_round = p_resign_every_round, updated_by = me, updated_at = now();
 end $$;
 
+-- Tim's setting: the default for "Let them make changes from their link" on each round he presents (on unless he switches it off)
+create or replace function public.agent_offer_link_changes_default(p_on boolean) returns void language plpgsql security definer set search_path = public as $$
+declare me text := public.offer_agent();
+begin
+  if p_on is null then raise exception 'Choose yes or no'; end if;
+  update public.offer_settings set link_changes_default = p_on, updated_by = me, updated_at = now();
+end $$;
+
 -- ───── execute rights ─────
 revoke execute on function public.guard_offer_document(), public.offer_change_ok(text, jsonb, numeric, numeric), public.offer_nsn(text), public.offer_private_hit(uuid, text), public.offer_doc_layers(uuid, int), public.offer_parties(uuid),
   public.offer_doc_last(uuid), public.offer_stop_signings(uuid, uuid, text, text, text), public.offer_doc_close(uuid, text, text), public.offer_sign_do_change(uuid, uuid, text, int, jsonb, uuid, jsonb), public.offer_agreement_check(uuid, timestamptz, text),
   public.offer_plain(text), public.offer_change_rect(text, jsonb), public.offer_gap(jsonb, jsonb), public.offer_date_place(uuid), public.offer_agreed_terms(uuid) from public, anon, authenticated;
 revoke execute on function public.offer_sign_change(text, text, text, uuid, text, int, jsonb, uuid, jsonb), public.offer_agreement_material(uuid, timestamptz, text), public.offer_agreement_lock(uuid, uuid, text, text, bigint, timestamptz, text, jsonb, text) from public, anon, authenticated;
 grant execute on function public.offer_sign_change(text, text, text, uuid, text, int, jsonb, uuid, jsonb), public.offer_agreement_material(uuid, timestamptz, text), public.offer_agreement_lock(uuid, uuid, text, text, bigint, timestamptz, text, jsonb, text) to service_role;
-revoke execute on function public.agent_round_present(uuid, text, jsonb, boolean, text), public.agent_round_change(uuid, uuid, text, int, jsonb, uuid, jsonb), public.agent_offer_layers(uuid, uuid), public.agent_document_close(uuid, text), public.agent_negotiation_withdraw(uuid, text, timestamptz, text), public.agent_offer_negotiation_setting(boolean) from public, anon;
-grant execute on function public.agent_round_present(uuid, text, jsonb, boolean, text), public.agent_round_change(uuid, uuid, text, int, jsonb, uuid, jsonb), public.agent_offer_layers(uuid, uuid), public.agent_document_close(uuid, text), public.agent_negotiation_withdraw(uuid, text, timestamptz, text), public.agent_offer_negotiation_setting(boolean) to authenticated;
+revoke execute on function public.agent_round_present(uuid, text, jsonb, boolean, text, boolean), public.agent_round_change(uuid, uuid, text, int, jsonb, uuid, jsonb), public.agent_offer_layers(uuid, uuid), public.agent_document_close(uuid, text), public.agent_negotiation_withdraw(uuid, text, timestamptz, text), public.agent_offer_negotiation_setting(boolean), public.agent_offer_link_changes_default(boolean) from public, anon;
+grant execute on function public.agent_round_present(uuid, text, jsonb, boolean, text, boolean), public.agent_round_change(uuid, uuid, text, int, jsonb, uuid, jsonb), public.agent_offer_layers(uuid, uuid), public.agent_document_close(uuid, text), public.agent_negotiation_withdraw(uuid, text, timestamptz, text), public.agent_offer_negotiation_setting(boolean), public.agent_offer_link_changes_default(boolean) to authenticated;

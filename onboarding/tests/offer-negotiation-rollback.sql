@@ -101,7 +101,7 @@ begin
 
   -- 4. Vera opens her link: the vendors' side, round 2; a code; the reminder about chattels comes before any place
   r := public.offer_sign_issue(g2, 'agent'); tok := r->'links'->0->>'token';
-  out := out || 'issue side=' || (r->>'side') || ' round=' || (r->>'round') || ' links=' || jsonb_array_length(r->'links') || '; ';
+  out := out || 'issue side=' || (r->>'side') || ' round=' || (r->>'round') || ' links=' || jsonb_array_length(r->'links') || ' changes from link (default on)=' || (select link_changes from public.offer_signings where id = g2) || ' recorded=' || (select detail->>'link_changes' from public.offer_events where kind = 'round_presented' and detail->>'signing_id' = g2::text) || '; ';
   r := public.offer_sign_open(tok, 'n1', 'ua'); out := out || 'open: first=' || (r->>'first') || ' side=' || (r->>'side') || ' stopped=' || coalesce(r->>'stopped', 'none') || '; ';
   code := public.offer_sign_code(tok, 'n1')->>'code'; ses := public.offer_sign_verify(tok, code, 'n1', 'ua')->>'session';
   r := public.offer_sign_state(tok, ses);
@@ -245,7 +245,12 @@ begin
 
   -- 9. withdrawal (offer 3): the vendors withdraw while their round is out by link; it stops and the link dies
   g1 := (public.agent_signing_release(d3, 'in_person', sizes, pg_temp.rb_places(2, true, null, false), '{}') ->> 'id')::uuid; perform pg_temp.rb_prep(g1); perform pg_temp.rb_finish(g1); perform pg_temp.rb_lock(g1, '{}');
+  -- Tim's switch: the default follows his setting (now off); off, a change from the link is refused; on, allowed (above)
+  perform public.agent_offer_link_changes_default(false);
   g2 := (public.agent_round_present(o3, 'link', pg_temp.rb_places(2, true, null, true), true)->>'id')::uuid; r := public.offer_sign_issue(g2, 'agent'); tok := r->'links'->0->>'token';
+  code := public.offer_sign_code(tok, 'n3')->>'code'; ses := public.offer_sign_verify(tok, code, 'n3', 'ua')->>'session'; perform public.offer_sign_consent(tok, ses, 'n3', 'ua');
+  out := out || 'default off: link_changes=' || (select link_changes from public.offer_signings where id = g2) || ' state says=' || (public.offer_sign_state(tok, ses)->'signing'->>'link_changes') || '; ';
+  begin perform public.offer_sign_change(tok, ses, 'n3', mk4, 'strike', 1, '{"x0":100,"x1":180,"y":200}', null, pg_temp.rb_change_places(2, mk4, 'strike', '{"x0":100,"x1":180,"y":200}')); out := out || 'A LINK CHANGE WITH THE SWITCH OFF; '; exception when others then out := out || 'switch off: ' || sqlerrm || '; '; end;
   begin perform public.agent_negotiation_withdraw(o3, 'them', now(), null); out := out || 'WITHDRAWN BY NOBODY; '; exception when others then out := out || 'who: ' || sqlerrm || '; '; end;
   r := public.agent_negotiation_withdraw(o3, 'vendor', now() - interval '1 minute', 'Vera rang: they are taking it off the market');
   out := out || 'withdrawn: stopped=' || (r->>'stopped') || ' signing=' || (select status from public.offer_signings where id = g2) || ' link=' || coalesce((public.offer_sign_by_token(tok)).id::text, 'dead') || ' offer=' || (select status from public.property_offers where id = o3) || ' event side=' || (select detail->>'side' from public.offer_events where offer_id = o3 and kind = 'withdrawn')
@@ -258,7 +263,8 @@ begin
 
   -- item 11: a map with no date place: no agreement until the places are put right
   g1 := (public.agent_signing_release(d4, 'in_person', sizes, pg_temp.rb_places(2, true, null, false), '{}') ->> 'id')::uuid; perform pg_temp.rb_prep(g1); perform pg_temp.rb_finish(g1); perform pg_temp.rb_lock(g1, '{}');
-  g4 := (public.agent_round_present(o4, 'in_person', pg_temp.rb_places(2, true, null, true), true)->>'id')::uuid; perform pg_temp.rb_prep(g4); perform pg_temp.rb_finish(g4); perform pg_temp.rb_lock(g4, '{"lifted":[],"outstanding":[]}');
+  g4 := (public.agent_round_present(o4, 'in_person', pg_temp.rb_places(2, true, null, true), true, null, true)->>'id')::uuid;
+  out := out || 'switched on for this round despite the default=' || (select link_changes from public.offer_signings where id = g4) || '; '; perform pg_temp.rb_prep(g4); perform pg_temp.rb_finish(g4); perform pg_temp.rb_lock(g4, '{"lifted":[],"outstanding":[]}');
   begin perform public.offer_agreement_check(o4, now(), to_char(public.offer_nz_today(), 'FMDD FMMonth YYYY')); out := out || 'AGREED WITH NO DATE PLACE; '; exception when others then out := out || 'no date place: ' || sqlerrm || '; '; end;
 
   -- 10. the timelines still check out, every round's event carrying the one before

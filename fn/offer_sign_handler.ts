@@ -84,7 +84,7 @@ export function makeHandler(d: Deps) {
       const outstanding = N.outstanding(st, sides);
       formed = (m.marks || []).length === 0 && outstanding.length === 0 && Object.keys(sides).length === 2;
       const base = earlier[earlier.length - 1] || {};
-      const rec = Object.assign({}, executionRecord(m), { number: n, document: m.document, round, side: m.side, base: { round: base.doc_round, sha256: base.sha256 },
+      const rec = Object.assign({}, executionRecord(m), { number: n, document: m.document, round, side: m.side, base: { round: base.doc_round, sha256: base.sha256 }, link_changes: m.link_changes == null ? null : !!m.link_changes,
         changes: (m.marks || []).map((k: any) => ({ kind: k.kind, page: k.page, by: k.by, at: k.at, text: k.kind === "insert" ? k.geometry?.text : undefined })), lifted, outstanding: outstanding.length });
       // the record keeps the title and drawing version, so the round can be drawn again from its layers and come out byte for byte the same
       const title = `Round ${round} (signed by the ${m.side === "vendor" ? "vendors" : "purchasers"}): ${m.address || "agreement"}`;

@@ -288,3 +288,6 @@ agreements/<agreement id>/signatures/... (vendors may upload their own signature
   `resign_every_round` (default false; `agent_offer_negotiation_setting`). `offer_agreements` gains `round_sha256`, `draw_version` and
   `terms` (the agreed terms for later phases). `agent_offer_correct` refuses once agreed. `offer_private_hit` also checks
   `agreement_people`. Withdrawing, declining or lapsing closes the open document.
+- Tim's answers: `offer_settings.link_changes_default` (default true; `agent_offer_link_changes_default`) and `offer_signings.link_changes`
+  (set when Tim presents a round, `agent_round_present(..., p_link_changes)`); `offer_sign_change` refuses when it is off.
+

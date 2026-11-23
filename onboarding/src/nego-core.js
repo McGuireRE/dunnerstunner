@@ -159,6 +159,7 @@
     add('This page is added by McGuire Real Estate after the agreement. It is not part of the REINZ form, and nothing on the form has been changed: every change is added on top.', { size: 8.5 });
     add(`Property: ${rec.address || ''}`, { gap: 6 }); add(`Offer: ${rec.offer_ref || ''}. Document ${rec.document || 1}, Round ${rec.round} (number ${rec.number} for this offer), signed by the ${sideName(rec.side)}.`);
     add(`It answers Round ${rec.base && rec.base.round || rec.round - 1}, fingerprint (SHA-256): ${(rec.base && rec.base.sha256) || ''}`, { size: 8 });
+    if (rec.link_changes != null) add(`Changes from link: ${rec.link_changes ? 'allowed' : 'not allowed'} (Tim's choice when he presented this round).`, { size: 8.5 });
     add(`Approved draft ${rec.draft && rec.draft.number || ''}, fingerprint (SHA-256): ${(rec.draft && rec.draft.sha256) || ''}`, { size: 8 });
     add(`This copy was made and locked by the server on ${NZ(rec.made_at)}. Its own fingerprint is recorded when it is locked, and it is never changed.`, { size: 8.5 });
     const ch = rec.changes || [];
