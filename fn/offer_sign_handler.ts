@@ -86,8 +86,10 @@ export function makeHandler(d: Deps) {
       const base = earlier[earlier.length - 1] || {};
       const rec = Object.assign({}, executionRecord(m), { number: n, document: m.document, round, side: m.side, base: { round: base.doc_round, sha256: base.sha256 },
         changes: (m.marks || []).map((k: any) => ({ kind: k.kind, page: k.page, by: k.by, at: k.at, text: k.kind === "insert" ? k.geometry?.text : undefined })), lifted, outstanding: outstanding.length });
-      record = Object.assign({}, rec, { check: { lifted, outstanding } });
-      bytes = (await d.renderWorking(draft, { ink: st.ink, changes: st.changes, lines: N.roundLines(rec), title: `Round ${round} (signed by the ${m.side === "vendor" ? "vendors" : "purchasers"}): ${m.address || "agreement"}` })).bytes;
+      // the record keeps the title and drawing version, so the round can be drawn again from its layers and come out byte for byte the same
+      const title = `Round ${round} (signed by the ${m.side === "vendor" ? "vendors" : "purchasers"}): ${m.address || "agreement"}`;
+      record = Object.assign({}, rec, { title, draw_version: N.DRAW_VERSION, check: { lifted, outstanding } });
+      bytes = (await d.renderWorking(draft, { ink: st.ink, changes: st.changes, lines: N.roundLines(rec), title })).bytes;
     }
     const sha = await sha256(bytes), path = `properties/${m.property_id}/docs/offer-round-${m.offer_id}-${n}-${sha.slice(0, 12)}.pdf`;
     const up = await d.upload(path, bytes); if (!up.ok && !up.exists) throw new Error("The round couldn't be stored. Try again.");
@@ -108,7 +110,10 @@ export function makeHandler(d: Deps) {
     if (os.length) throw new Error("Something is still outstanding, so the agreement can't be confirmed yet.");
     const draft = await d.download(m.draft.path);
     if (!draft || await sha256(draft) !== m.draft.sha256) throw new Error("The approved draft doesn't match its fingerprint. Tim will look into it.");
-    const record = { address: m.address, offer_ref: m.offer_ref, date_text: m.date_text, accepted_at: m.accepted_at, confirmed_by: "Tim McGuire", made_at: m.made_at, document: m.document, round: m.round, rounds: m.rounds || [] };
+    if (!m.date_place) throw new Error("The agreement blank has no date place, so the date can't be added. Add it to the places on the blank first.");
+    // drawn again from Round N's own layers; its fingerprint and the drawing version are recorded on the copy and with the agreement
+    const record = { address: m.address, offer_ref: m.offer_ref, date_text: m.date_text, accepted_at: m.accepted_at, confirmed_by: "Tim McGuire", made_at: m.made_at, document: m.document, round: m.round, rounds: m.rounds || [],
+      base: { round: m.round, sha256: m.round_sha256 }, draw_version: N.DRAW_VERSION };
     const { bytes } = await d.renderWorking(draft, { ink: st.ink, changes: st.changes, lines: N.agreementLines(record), date: { text: m.date_text, place: m.date_place || null }, title: `Agreement: ${m.address || ""}` });
     const sha = await sha256(bytes), path = `properties/${m.property_id}/docs/offer-agreement-${m.offer_id}-${sha.slice(0, 12)}.pdf`;
     const up = await d.upload(path, bytes); if (!up.ok && !up.exists) throw new Error("The agreement couldn't be stored. Try again.");
@@ -206,7 +211,13 @@ export function makeHandler(d: Deps) {
       if (action === "change") {
         const id = String(body.id || ""), target = body.target == null ? null : String(body.target);
         if (!UUID.test(id) || (target !== null && !UUID.test(target)) || !Number.isInteger(body.page) || !body.geometry || typeof body.geometry !== "object" || !Array.isArray(body.places)) return json({ ok: false, error: "That change didn't save. Please try again." }, 400);
-        const r = await call("offer_sign_change", { p_token: token, p_session: session, p_id: id, p_kind: String(body.kind || "").slice(0, 12), p_page: body.page, p_geometry: body.geometry, p_target: target, p_places: body.places.slice(0, 20) });
+        const r = await call("offer_sign_change", { p_token: token, p_session: session, p_net: net, p_id: id, p_kind: String(body.kind || "").slice(0, 12), p_page: body.page, p_geometry: body.geometry, p_target: target, p_places: body.places.slice(0, 20) });
+        // anyone on this side who had finished now has a change to initial: they are told (their link still works), and so is Tim
+        if (r.reopened > 0) {
+          for (const x of r.reopened_signers || []) { if (!x.email) continue;
+            try { await d.sendMail("offer_change_reopened", { to: x.email, subject: `A change to initial: ${r.address || "the offer"}`, html: wrap(`<p>Kia ora ${esc(String(x.name || "").split(" ")[0])},</p><p>${esc(r.by || "Someone on your side")} has made a change to the document for <strong>${esc(r.address || "")}</strong> since you finished. Please open the link I sent you earlier and initial the change, then finish again. You'll be asked for a new code.</p><p>Nothing goes anywhere until you have all signed and I have checked it. You can talk to your lawyer at any time.</p><p>Tim</p>`) }); } catch (_) { /* Tim is told below */ } }
+          try { await d.sendMail("offer_change_reopened", { to: d.timEmail, subject: `A change reopened signing: ${r.address || "an offer"}`, html: wrap(`<p>${esc(r.by || "A signer")} made a change in Round ${esc(r.round)} for <strong>${esc(r.address || "")}</strong>. ${esc(r.reopened)} ${r.reopened === 1 ? "person who had" : "people who had"} finished now ${r.reopened === 1 ? "needs" : "need"} to initial it and finish again: ${esc((r.reopened_signers || []).map((x: any) => x.name).join(", "))}. They have been emailed.</p>`) }); } catch (_) { /* the change is saved either way */ }
+        }
         return json({ ok: true, id: r.id, reopened: r.reopened });
       }
       if (action === "ask") {

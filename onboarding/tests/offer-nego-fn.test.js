@@ -33,7 +33,7 @@ const D = require(path.join(__dirname, '..', 'src', 'draft-core.js'));
   const insert = { id: MK.replace('5555', '6666'), kind: 'insert', page: 1, geometry: { x: 100, y: 386, text: '$690,000', size: 9 }, by: 'Vera Vendor', at: '2026-11-24T02:01:00Z' };
   const v2places = [{ id: 'foot:p1:s1', signer: 1, kind: 'initial', why: 'foot', ref: 'p1', page: 1, x: 470, y: 5, w: 26, h: 13 }, { id: 'block:vsig1:s1', signer: 1, kind: 'signature', why: 'block', ref: 'vsig1', page: 2, x: 330, y: 500, w: 150, h: 22 },
     { id: `chg:${strike.id}:s1`, signer: 1, kind: 'initial', why: 'change', ref: strike.id, page: 1, x: 165, y: 410, w: 26, h: 13 }, { id: `chg:${insert.id}:s1`, signer: 1, kind: 'initial', why: 'change', ref: insert.id, page: 1, x: 165, y: 384, w: 26, h: 13 }];
-  let marks2 = [strike, insert], calls = [], mails = [], files = {}, agent = 'agent@example.test', changeErr = null, outstandingLayers = false;
+  let marks2 = [strike, insert], calls = [], mails = [], files = {}, agent = 'agent@example.test', changeErr = null, outstandingLayers = false, reopen = null, noDatePlace = false;
   files[DRAFT] = draft;
   const vSigner = { id: 'v1', position: 1, name: 'Vera Vendor', sig_png: png, init_png: png, verified_at: '2026-11-24T01:30:00Z', consent_at: '2026-11-24T01:31:00Z', receipts: [{ guide: 'chattels', at: '2026-11-24T01:32:00Z' }], places: 4, ua: 'Phone', net: 'f'.repeat(64), seen_sha256: 'd'.repeat(64) };
   const material = () => ({ signing_id: SID, offer_id: OID, property_id: PID, address: '1 Example Road, Testville', offer_ref: 'Ana Testbuyer', method: 'link', number: 2, round: 2, side: 'vendor', document: 1, earlier: [L1],
@@ -43,7 +43,7 @@ const D = require(path.join(__dirname, '..', 'src', 'draft-core.js'));
     return { round_id: 'r3', number: 3, doc_round: 3, side: 'purchaser', signing_id: 'g3', sha256: 'e'.repeat(64), places: pl, taps: (outstandingLayers ? pl.slice(0, 1) : pl).map(p => ({ place_id: p.id, signer: 1 })), signers: L1.signers, marks: [] }; };
   const db = async (fn, args) => {
     calls.push([fn, args]);
-    if (fn === 'offer_sign_change') return changeErr ? { data: null, error: { message: changeErr } } : { data: { id: args.p_id, reopened: 0 }, error: null };
+    if (fn === 'offer_sign_change') return changeErr ? { data: null, error: { message: changeErr } } : { data: Object.assign({ id: args.p_id, reopened: 0, reopened_signers: [], by: 'Vera Vendor', round: 2, address: '1 Example Road' }, reopen || {}), error: null };
     if (fn === 'offer_sign_issue') return { data: { address: '1 Example Road', side: 'vendor', round: 2, links: [{ signer_id: 's1', position: 1, name: 'Vera Vendor', email: 'vera@example.com', token: TOK }] }, error: null };
     if (fn === 'offer_sign_open') return { data: { ok: true, first: 'Vera', address: '1 Example Road', finished: false, stopped: null, held: false, email_hint: 'v***@example.com', side: 'vendor', round: 2, email: 'vera@example.com' }, error: null };
     if (fn === 'offer_sign_finish') return { data: { ok: true, complete: true, signing_id: SID }, error: null };
@@ -51,7 +51,7 @@ const D = require(path.join(__dirname, '..', 'src', 'draft-core.js'));
     if (fn === 'offer_file_confirm') return { data: null, error: null };
     if (fn === 'offer_round_lock') return { data: { id: RID, number: 2, round: 2, sha256: args.p_sha256, existing: false }, error: null };
     if (fn === 'offer_agreement_material') return { data: { offer_id: OID, property_id: PID, address: '1 Example Road, Testville', offer_ref: 'Ana Testbuyer', document: 1, round: 3, number: 3, round_id: 'r3', date_text: args.p_date_text, accepted_at: args.p_accepted_at, made_at: '2026-11-24T05:00:00Z',
-      draft: { path: DRAFT, sha256: draftSha }, date_place: { id: 'date', kind: 'date', page: 1, x: 70, y: 730, w: 200, h: 10 }, layers: [L1, L2(), L3()], rounds: [{ number: 1, document: 1, round: 1, side: 'purchaser', changes: 0, sha256: 'a'.repeat(64), locked_at: '2026-11-24T01:00:00Z' }] }, error: null };
+      draft: { path: DRAFT, sha256: draftSha }, round_sha256: 'e'.repeat(64), date_place: noDatePlace ? null : { id: 'date', kind: 'date', page: 1, x: 70, y: 730, w: 200, h: 10 }, layers: [L1, L2(), L3()], rounds: [{ number: 1, document: 1, round: 1, side: 'purchaser', changes: 0, sha256: 'a'.repeat(64), locked_at: '2026-11-24T01:00:00Z' }] }, error: null };
     if (fn === 'offer_agreement_lock') return { data: { id: 'ag1', sha256: args.p_sha256, existing: false }, error: null };
     return { data: null, error: { message: 'unknown' } };
   };
@@ -59,7 +59,7 @@ const D = require(path.join(__dirname, '..', 'src', 'draft-core.js'));
     whoIsAgent: async (a) => (a === 'Bearer good' ? agent : null), rpc: db, signedUrl: async (p) => 'https://signed.example/' + encodeURIComponent(p),
     download: async (p) => files[p] || null, upload: async (p, b) => { if (files[p]) return { ok: false, exists: true }; files[p] = b; return { ok: true }; },
     sendMail: async (kind, m) => { mails.push(Object.assign({ kind }, m)); }, renderRound: (d, m) => S.renderRound(PDFLib, d, m), renderWorking: (d, m) => N.renderWorking(PDFLib, d, m), nego: N, net: netOf });
-  const post = (body, headers) => h(new Request('https://x.supabase.co/functions/v1/offer-sign', { method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json', 'user-agent': 'Phone browser' }, headers || {}), body: JSON.stringify(body) }));
+  const post = (body, headers) => h(new Request('https://x.supabase.co/functions/v1/offer-sign', { method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json', 'user-agent': 'Phone browser', 'x-forwarded-for': '203.0.113.7' }, headers || {}), body: JSON.stringify(body) }));
   const J = async r => ({ status: r.status, j: await r.json() });
   const text = async bytes => (await D.readPages(pdfjs, new Uint8Array(bytes))).map(p => p.items.map(i => i.s).join(' '));
 
@@ -70,7 +70,14 @@ const D = require(path.join(__dirname, '..', 'src', 'draft-core.js'));
   expect(r.status === 400 && !calls.some(c => c[0] === 'offer_sign_change'), 'and with a page that is not a number');
   r = await J(await post({ action: 'change', token: TOK, session: SES, id: MK, kind: 'insert', page: 1, geometry: { x: 100, y: 386, text: '$690,000', size: 9 }, target: null, places: [{ id: `chg:${MK}:s1` }] }));
   const ch = calls.find(c => c[0] === 'offer_sign_change');
-  expect(r.status === 200 && r.j.ok && r.j.id === MK && ch && ch[1].p_token === TOK && ch[1].p_session === SES && ch[1].p_geometry.text === '$690,000' && ch[1].p_places.length === 1, 'a change is passed on to the database as data, with the token and session');
+  expect(r.status === 200 && r.j.ok && r.j.id === MK && ch && ch[1].p_token === TOK && ch[1].p_session === SES && typeof ch[1].p_net === 'string' && ch[1].p_net.length > 8 && ch[1].p_geometry.text === '$690,000' && ch[1].p_places.length === 1, 'a change is passed on to the database as data, with the token, session and network (for its limit)');
+  expect(!mails.length, 'nobody reopened: nobody emailed');
+  // a change that reopens someone who had finished: they are told by email (their link still works), and so is Tim
+  reopen = { reopened: 1, reopened_signers: [{ position: 2, name: 'Val Vendor', email: 'val@example.com' }] };
+  r = await J(await post({ action: 'change', token: TOK, session: SES, id: MK, kind: 'strike', page: 1, geometry: { x0: 100, x1: 160, y: 403 }, places: [] }));
+  const vm2 = mails.find(m => m.to === 'val@example.com'), tm2 = mails.find(m => m.to === 'tim@example.test' && m.kind === 'offer_change_reopened');
+  expect(r.j.ok && r.j.reopened === 1 && vm2 && /A change to initial/.test(vm2.subject) && /link I sent you earlier/.test(vm2.html) && tm2 && /Val Vendor/.test(tm2.html), 'a reopened signer and Tim are each emailed');
+  reopen = null; mails = [];
   changeErr = "Those words hold a purchaser's own phone or email, so they can't go on the agreement. Only the lawyers' details go on it";
   r = await J(await post({ action: 'change', token: TOK, session: SES, id: MK, kind: 'insert', page: 1, geometry: { x: 1, y: 1, text: 'x', size: 9 }, places: [] }));
   expect(r.status === 400 && r.j.error === changeErr, 'the privacy refusal is shown plainly');
@@ -98,6 +105,10 @@ const D = require(path.join(__dirname, '..', 'src', 'draft-core.js'));
   expect(ck.lifted.some(x => x.why === 'filled' && x.who === 'Ana Testbuyer') && !ck.lifted.some(x => x.why === 'foot' || x.kind === 'signature'), 'the core lifted the purchaser\'s price initials (and nothing else) where the vendors changed it');
   expect(ck.outstanding.length === 2 && ck.outstanding.every(x => x.side === 'purchaser' && x.what === 'change'), 'outstanding: the purchaser\'s initials beside each change');
   const stored = files[lk[1].p_path]; expect(stored && sha(stored) === lk[1].p_sha256, 'its fingerprint is from the file as stored');
+  // drawn again from its layers (as the database will hand them back) and its stored record: byte for byte the same round
+  const ex = JSON.parse(JSON.stringify(lk[1].p_execution)), L2back = { doc_round: 2, number: 2, side: 'vendor', signing_id: SID, places: v2places, taps: v2places.map(p => ({ place_id: p.id, signer: 1 })), signers: [{ position: 1, name: 'Vera Vendor', sig_png: png, init_png: png }], marks: marks2 };
+  const redrawn = await N.redrawRound(PDFLib, draft, JSON.parse(JSON.stringify([L1, L2back])), ex);
+  expect(ex.draw_version === N.DRAW_VERSION && sha(redrawn.bytes) === lk[1].p_sha256, 'Round 2 drawn again from its layers and record reproduces its fingerprint exactly');
   const rt = await text(stored);
   expect(rt[0].includes('$690,000') && rt.length === 3 && /Execution record: Round 2/.test(rt[2]) && /lifted/i.test(rt[2]) && !/vera@example|SHOULD-NOT/.test(rt.join(' ')), 'the round shows the typed price, with its record at the end and no contact details');
   const ini = rt[0]; out.r2text = ini.slice(0, 80);
@@ -121,11 +132,16 @@ const D = require(path.join(__dirname, '..', 'src', 'draft-core.js'));
   outstandingLayers = true;
   r = await J(await post({ action: 'agree', offer_id: OID, accepted_at: '2026-11-24T05:00:00+13:00', date_text: '24 November 2026' }, { Authorization: 'Bearer good' }));
   expect(r.status === 400 && /outstanding/.test(r.j.error) && !calls.some(c => c[0] === 'offer_agreement_lock'), 'the core finds something outstanding: nothing is locked');
-  outstandingLayers = false;
+  outstandingLayers = false; noDatePlace = true; calls = [];
+  r = await J(await post({ action: 'agree', offer_id: OID, accepted_at: '2026-11-24T05:00:00+13:00', date_text: '24 November 2026' }, { Authorization: 'Bearer good' }));
+  expect(r.status === 400 && /no date place/.test(r.j.error) && !calls.some(c => c[0] === 'offer_agreement_lock'), 'no date place on the blank: no agreed copy, and no date put anywhere else');
+  noDatePlace = false;
   r = await J(await post({ action: 'agree', offer_id: OID, accepted_at: '2026-11-24T05:00:00+13:00', date_text: '24 November 2026' }, { Authorization: 'Bearer good' }));
   const al = calls.find(c => c[0] === 'offer_agreement_lock');
   expect(r.j.ok && al && new RegExp(`^properties/${PID}/docs/offer-agreement-${OID}-[0-9a-f]{12}\\.pdf$`).test(al[1].p_path) && al[1].p_round === 'r3' && al[1].p_date_text === '24 November 2026', 'agreed: stored at its own place and locked against the newest round');
   const ab = files[al[1].p_path]; expect(ab && sha(ab) === al[1].p_sha256, 'its fingerprint from the stored file');
+  expect(al[1].p_record.base.sha256 === 'e'.repeat(64) && al[1].p_record.draw_version === N.DRAW_VERSION, 'the record names the round it was drawn from and the drawing version');
+  expect(/Everything else is Round 3 as locked \(SHA-256 e{64}\)/.test((await text(ab)).slice(2).join(' ')) && /only things added after the last signature/.test((await text(ab)).slice(2).join(' ')), 'and says so on its record page');
   const apages = await D.readPages(pdfjs, new Uint8Array(ab)), dateItem = apages[0].items.find(i => i.s === '24 November 2026');
   expect(dateItem && Math.abs(dateItem.y - 730) < 2 && Math.abs(dateItem.x - 70) < 2, 'the date Tim typed is at the top, in the date place');
   expect(/The agreement as agreed/.test(apages.slice(2).map(p => p.items.map(i => i.s).join(' ')).join(' ')), 'with the agreement record at the end');
