@@ -3,7 +3,7 @@
 -- The output is the exception message: refusals read in lower case; a line in CAPITALS means something that should have been
 -- refused was allowed, or a value was wrong. Roles: the agent and a vendor are simulated with request.jwt.claims and the
 -- authenticated role; the edge function with service_role; a buyer's browser with anon.
--- Last run: 23 November 2026 (after the first review), on a local PostgreSQL 16 with a minimal Supabase-like setup (roles anon, authenticated, service_role;
+-- Live run: 23 November 2026, on hwpwyjxhdvlqrjwzxzqz with Tim's approval: every line as expected, no CAPITALS. Earlier run: 23 November 2026 (after the first review), on a local PostgreSQL 16 with a minimal Supabase-like setup (roles anon, authenticated, service_role;
 -- auth.jwt(); pgcrypto in extensions; agents, properties, property_people; migration 010 applied first): every line as expected, no
 -- CAPITALS. The run on the live project hwpwyjxhdvlqrjwzxzqz was refused at the confirmation step, so nothing ran there and it is
 -- still to do before the migration is applied.

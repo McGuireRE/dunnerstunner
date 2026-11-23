@@ -75,6 +75,9 @@ deployed.
 
 Deploy steps (phase 1):
 
+Done 23 November 2026: the rollback block ran on the live project with Tim's approval (every line as expected, no CAPITALS;
+a real vendor sees the property but 0 offers, links or events), then 018 was applied as `018_offer_form`.
+
 1. With Tim's approval, run the rollback block on the live project; then apply 018.
 2. Push, then deploy `offer-public` (fn/offer_public.ts) pinned to that commit, with the gateway's JWT verification OFF (buyers have
    no account; every action needs a live link token). doc-prefill is unchanged and keeps JWT verification on.
