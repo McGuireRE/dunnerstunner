@@ -100,6 +100,10 @@ Date help and checks:
 - KiwiSaver funding a deposit due on the unconditional date: warn that funds may not arrive in time and that late
   deposits attract interest (clause 21.1).
 
-Open questions for Tim before phase 2: the wording of his electrical and technical report clauses; whether the
-Specified Due Diligence clauses have his solicitor's sign-off; what happens to printed clause 22 (lawyer's approval)
-when a buyer does not choose it.
+Lawyer's approval (printed clause 22 in the blank): on the form it is unticked by default. When a buyer does not
+choose it, the printed clause is struck out at drafting (phase 2). Where the buyer decides on it, the form tells
+them plainly that they can talk to a lawyer at any time before going further, as Tim's client and customer care
+obligations require (Tim, 23 November 2026).
+
+Open questions for Tim before phase 2: the wording of his electrical and technical report clauses and the Specified
+Due Diligence clauses as he wants them used (he is sending these).
