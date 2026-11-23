@@ -3,7 +3,17 @@
   /* ───────── config ───────── */
   const SB_URL = 'https://hwpwyjxhdvlqrjwzxzqz.supabase.co';
   const SB_KEY = 'sb_publishable_luFnpeEPhaXWotpQiwVcVw_Yhkii6-1';
-  const APP_URL = location.origin + location.pathname;
+  // The portal: Tim's own pages, each with its own address and a footer menu (PORTAL-PLAN.md, phase P1). It is this same app,
+  // opened from the portal shell (portal/index.html, and 404.html for deep addresses), which sets window.MRE_PORTAL. Opened
+  // at packages.dunnerstunner.co.nz/onboarding, none of the portal code runs and everything behaves as before.
+  const PORTAL = !!window.MRE_PORTAL;
+  const ONBOARDING_URL = 'https://packages.dunnerstunner.co.nz/onboarding/';
+  // Every link given to a vendor, buyer or lawyer (emails, offer links, QR codes) points at the onboarding app, also from the portal
+  const APP_URL = PORTAL ? ONBOARDING_URL : location.origin + location.pathname;
+  // The portal's own base path: / at portal.dunnerstunner.co.nz, /portal/ while it is served from this site
+  const PORTAL_BASE = PORTAL ? (location.hostname.indexOf('portal.') === 0 ? '/' : '/portal/') : '';
+  // Where a sign-in link brings Tim back to. In the portal it is the portal's front door; the page he asked for is remembered on the device.
+  const SIGNIN_URL = PORTAL ? location.origin + PORTAL_BASE : APP_URL;
   const AGREEMENT_VERSION = 'v3.15-26102026';
   // Sign-in lock that can't hang. Chrome (above all on Android) freezes background tabs; a frozen tab of this site can hold the
   // sign-in lock forever, and the page then sits on "Loading..." (23 November 2026). Wait up to 5 seconds for the lock, then go on.
@@ -298,7 +308,7 @@
   async function loadGuides() {
     const found = {};
     try {
-      const base = new URL('assets/guides/', location.href);
+      const base = new URL('assets/guides/', PORTAL ? ONBOARDING_URL : location.href);   // the portal's addresses are deeper: the guides stay with the onboarding app
       const r = await fetchT(new URL('guides.json', base), { cache: 'no-store' });
       if (!r.ok) { GUIDES = {}; return; }
       const j = await r.json();
@@ -496,16 +506,18 @@
     $('#signOut').hidden = !SESSION;
     closeJourney(); JCTX.pid = null; JREADY = false;
     IS_AGENT = false; setAgentNav();
-    if (!SESSION) { JREADY = true; setAgentNav(); return pitchRoute() ? viewPitch() : viewLogin(); }   // the journey pages are public: no sign-in, and no data read
+    if (!SESSION) { JREADY = true; setAgentNav(); if (PORTAL) return viewLogin(); return pitchRoute() ? viewPitch() : viewLogin(); }   // the journey pages are public: no sign-in, and no data read (the portal has no public pages)
     let qlr = null; try { qlr = localStorage.getItem('qlReturn'); localStorage.removeItem('qlReturn'); } catch (_) { }
     if (qlr) { try { const u = new URL(qlr); if (u.origin === location.origin && u.pathname !== location.pathname) return location.replace(qlr); } catch (_) { } }
     IS_AGENT = !!(await must(sb.rpc('is_agent'))); JREADY = true; setAgentNav();
+    if (PORTAL && !IS_AGENT) return viewPortalNotAgent();   // the portal is Tim's alone: vendors keep their own page
     if (IS_AGENT) rqSignedIn();   // photos and documents waiting on this phone for this sign-in carry on sending
     if (IS_AGENT) agentEnglish(); else await within(syncLangRecord(), 3000);   // never wait on the language: English first, the translation arrives when it does
     await Promise.race([loadGuides(), new Promise(r => setTimeout(r, 4000))]);   // never wait more than a few seconds
     let pend = null; try { pend = JSON.parse(localStorage.getItem('pendingCampaign') || 'null'); } catch (_) { }
     if (IS_AGENT && pend) { try { localStorage.removeItem('pendingCampaign'); } catch (_) { } return viewTable(null, pend); }
     setAgentNav();
+    if (PORTAL) return portalBoot();
     if (pitchRoute()) return viewPitch();
     if (IS_AGENT) { const io = inspOpenGet(); if (io) { const [iid, sec] = io.split(':'); if (sec !== 'finish') return viewInspection(iid, +sec || 0); await viewInspection(iid); return INS && INS.id === iid ? viewInspectionFinish() : undefined; } inspSyncAll(); return viewAgentHome(); }
     return viewVendorHome();
@@ -525,8 +537,8 @@
     header('', '', 0); actions(false);
     main().innerHTML = `
       <div class="login-card">
-        <h1>Your agency agreement</h1>
-        <p class="lede">Enter the email address Tim has for you. We'll email you a link to sign in. No password needed.</p>
+        ${PORTAL ? '<h1>Your portal</h1><p class="lede">Sign in with your email address. We\'ll email you a link. No password needed. After signing in you come back to the page you asked for.</p>' : `<h1>Your agency agreement</h1>
+        <p class="lede">Enter the email address Tim has for you. We'll email you a link to sign in. No password needed.</p>`}
         ${(() => { try { return localStorage.getItem('pendingCampaign') ? '<div class="card note tight"><p class="small" style="margin:0">Campaign ready. Sign in as Tim to start a listing with it.</p></div>' : ''; } catch (_) { return ''; } })()}
         <label class="f" for="loginEmail">Email</label>
         <input type="email" id="loginEmail" autocomplete="email" inputmode="email">
@@ -539,7 +551,8 @@
       const email = $('#loginEmail').value.trim();
       if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { $('#loginErr').textContent = 'Please check your email address.'; return; }
       $('#loginErr').textContent = ''; $('#loginBtn').disabled = true;
-      const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: APP_URL } });
+      if (PORTAL) portalRemember();
+      const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: SIGNIN_URL } });
       $('#loginBtn').disabled = false;
       if (error) { $('#loginErr').textContent = error.message; return; }
       $('#loginSent').hidden = false;
@@ -2149,12 +2162,13 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   /* ═════════ AGENT HOME (Let's begin / Let's agree) and DASHBOARD ═════════ */
   function setAgentNav(cur) {
     const nav = $('#agentNav'); if (!nav) return;
-    nav.hidden = !IS_AGENT; document.body.classList.toggle('is-agent', !!IS_AGENT);
+    nav.hidden = !IS_AGENT || PORTAL; document.body.classList.toggle('is-agent', !!IS_AGENT);   // the portal has its footer menu instead
     const lw = $('#langWrap'); if (lw) lw.hidden = !!IS_AGENT || !APP_TRANSLATION;
-    const jb = $('#journeyBtn'); if (jb) jb.hidden = !!IS_AGENT || !JREADY || PITCH_ON;   // the Journey button is for vendors, and for anyone not signed in; the journey page is itself the journey
+    const jb = $('#journeyBtn'); if (jb) jb.hidden = !!IS_AGENT || !JREADY || PITCH_ON || PORTAL;   // the Journey button is for vendors, and for anyone not signed in; the journey page is itself the journey
     $('#navHome').toggleAttribute('aria-current', cur === 'home'); if (cur === 'home') $('#navHome').setAttribute('aria-current', 'page');
     if ($('#navTr')) { $('#navTr').hidden = !APP_TRANSLATION; $('#navTr').removeAttribute('aria-current'); if (cur === 'tr') $('#navTr').setAttribute('aria-current', 'page'); }
     $('#navDash').toggleAttribute('aria-current', cur === 'dash'); if (cur === 'dash') $('#navDash').setAttribute('aria-current', 'page');
+    if (PORTAL) portalChrome();
   }
   // leaving the appointment flow from the top bar keeps what's been typed
   async function navGo(fn) {
@@ -2164,18 +2178,19 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   $('#navHome').addEventListener('click', () => navGo(viewAgentHome));
   $('#navDash').addEventListener('click', () => navGo(viewAgentDashboard));
   $('#navTr').addEventListener('click', () => { if (APP_TRANSLATION) navGo(viewTranslations); });
-  $$('.brand img').forEach(i => i.addEventListener('click', () => { if (IS_AGENT) navGo(viewAgentHome); }));
+  $$('.brand img').forEach(i => i.addEventListener('click', () => { if (IS_AGENT) { if (PORTAL) portalNav(''); else navGo(viewAgentHome); } }));
 
+  const HOME_TILES = `<button class="home-tile" type="button" id="homeBegin"><span class="kick">After an appraisal</span><span class="ttl">Let's begin</span><span class="txt">Set up their appraisal page. They answer a few questions, you send back an updated plan, and they're ready to sign.</span><span class="go">Start an appraisal page →</span></button>
+        <button class="home-tile" type="button" id="homeInspect"><span class="kick">At the property</span><span class="ttl">Inspect a property</span><span class="txt">Walk round with your phone and note the property facts and the Vendor Declaration answers. Only the address is needed.</span><span class="go">Start an inspection →</span></button>
+        <button class="home-tile primary" type="button" id="homeAgree"><span class="kick">At the listing appointment</span><span class="ttl">Let's agree</span><span class="txt">Go through the agency agreement together, then sign here or send it to their phones.</span><span class="go">Start the agreement →</span></button>
+        <button class="home-tile" type="button" id="homeOffer"><span class="kick">When a buyer is ready</span><span class="ttl">Draft an offer</span><span class="txt">Fill in an offer for a buyer, see the offers received, or share a property's offer link and QR code.</span><span class="go">Choose the property →</span></button>`;
   function viewAgentHome() {
     header('', '', 0); actions(false); setAgentNav('home');
     const h = +new Date().toLocaleString('en-NZ', { hour: 'numeric', hour12: false, timeZone: 'Pacific/Auckland' });
     main().innerHTML = `<div class="view-pad">
       <h1>${h < 12 ? 'Morning' : h < 17 ? 'Afternoon' : 'Evening'}, Tim</h1>
       <div class="home-tiles">
-        <button class="home-tile" type="button" id="homeBegin"><span class="kick">After an appraisal</span><span class="ttl">Let's begin</span><span class="txt">Set up their appraisal page. They answer a few questions, you send back an updated plan, and they're ready to sign.</span><span class="go">Start an appraisal page →</span></button>
-        <button class="home-tile" type="button" id="homeInspect"><span class="kick">At the property</span><span class="ttl">Inspect a property</span><span class="txt">Walk round with your phone and note the property facts and the Vendor Declaration answers. Only the address is needed.</span><span class="go">Start an inspection →</span></button>
-        <button class="home-tile primary" type="button" id="homeAgree"><span class="kick">At the listing appointment</span><span class="ttl">Let's agree</span><span class="txt">Go through the agency agreement together, then sign here or send it to their phones.</span><span class="go">Start the agreement →</span></button>
-        <button class="home-tile" type="button" id="homeOffer"><span class="kick">When a buyer is ready</span><span class="ttl">Draft an offer</span><span class="txt">Fill in an offer for a buyer, see the offers received, or share a property's offer link and QR code.</span><span class="go">Choose the property →</span></button>
+        ${HOME_TILES}
       </div>
       <p class="small" id="homeNeeds">Your agreements and pre-listings are on the <a href="#" id="homeDash">Dashboard</a>.</p>
     </div>`;
@@ -2242,9 +2257,20 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     return { props, rows, pls: pls.filter(p => p.status !== 'closed'), needs };
   }
 
+  // the "Needs you" list: on the Dashboard, and on the portal's Home
+  const needsHTML = needs => needs.length ? `<div class="card tight"><ul class="needs">${needs.map((n, i) => `<li><div class="what"><strong>${esc(n.what)}</strong><span class="small">${esc(n.where)} · ${esc(n.sub)}</span></div><span class="needbtns"><button class="btn ${n.hot ? 'primary' : 'ghost'}" type="button" data-need="${i}">Open</button>${n.done ? `<button class="btn ghost" type="button" data-needdone="${i}">Done</button>` : ''}${n.give ? `<input type="date" data-needdate="${i}" value="${esc(new Date().toLocaleDateString('en-CA', { timeZone: 'Pacific/Auckland' }))}" aria-label="Date the written appraisal was given"><button class="btn primary" type="button" data-needgive="${i}">Written appraisal given</button>` : ''}</span></li>`).join('')}</ul></div>` : '<div class="card okc tight"><p class="small" style="margin:0">Nothing waiting on you.</p></div>';
+  function needsWire(needs, redraw) {
+    $$('[data-need]').forEach(b => b.addEventListener('click', () => needs[+b.dataset.need].go()));
+    $$('[data-needgive]').forEach(b => b.addEventListener('click', async () => {
+      const i = +b.dataset.needgive, d = ($(`[data-needdate="${i}"]`) || {}).value || '', today = new Date().toLocaleDateString('en-CA', { timeZone: 'Pacific/Auckland' });
+      if (!d || d > today) return toast('Choose the day it was given: today or earlier.');
+      b.disabled = true; try { await needs[i].give(d); toast('Recorded. The review date is now 90 days on.'); redraw(); } catch (_) { b.disabled = false; }
+    }));
+    $$('[data-needdone]').forEach(b => b.addEventListener('click', async () => { b.disabled = true; try { await needs[+b.dataset.needdone].done(); toast('Ticked off'); redraw(); } catch (_) { b.disabled = false; } }));
+  }
   let DASH_FILTER = 'all';
   async function viewAgentDashboard() {
-    header('Dashboard', '', 0); actions(false); setAgentNav('dash');
+    header(PORTAL ? 'Properties' : 'Dashboard', '', 0); actions(false); setAgentNav('dash');   // in the portal this is Properties: the Needs you list is on Home
     main().innerHTML = '<div class="loading">Loading...</div>';
     const { props, needs } = await dashData();
     const grp = k => STAGE_GROUPS.find(g => g[0] === k) || STAGE_GROUPS[0];
@@ -2254,29 +2280,23 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const owners = p => (p.property_people || []).filter(x => (x.role || 'owner') === 'owner').slice().sort((a, b) => a.position - b.position).map(x => callName(x) || x.legal_name).filter(Boolean).join(', ');
     main().innerHTML = `<div class="view-pad">
       <span class="agent-flag">Only you see this</span>
-      <h1>Dashboard</h1>
+      <h1>${PORTAL ? 'Properties' : 'Dashboard'}</h1>
       <div class="stats">
-        <button class="stat ${needs.length ? 'hot' : ''}" type="button" data-jump="needs"><div class="n">${needs.length}</div><div class="l">Need you</div></button>
+        ${PORTAL ? '' : `<button class="stat ${needs.length ? 'hot' : ''}" type="button" data-jump="needs"><div class="n">${needs.length}</div><div class="l">Need you</div></button>`}
         <button class="stat" type="button" data-filter="before"><div class="n">${count('before')}</div><div class="l">Before signing</div></button>
         <button class="stat" type="button" data-filter="signed"><div class="n">${count('signed')}</div><div class="l">Signed</div></button>
         <button class="stat" type="button" data-filter="done"><div class="n">${count('done')}</div><div class="l">Finished</div></button>
       </div>
-      <h2 id="d-needs">Needs you</h2>
-      ${needs.length ? `<div class="card tight"><ul class="needs">${needs.map((n, i) => `<li><div class="what"><strong>${esc(n.what)}</strong><span class="small">${esc(n.where)} · ${esc(n.sub)}</span></div><span class="needbtns"><button class="btn ${n.hot ? 'primary' : 'ghost'}" type="button" data-need="${i}">Open</button>${n.done ? `<button class="btn ghost" type="button" data-needdone="${i}">Done</button>` : ''}${n.give ? `<input type="date" data-needdate="${i}" value="${esc(new Date().toLocaleDateString('en-CA', { timeZone: 'Pacific/Auckland' }))}" aria-label="Date the written appraisal was given"><button class="btn primary" type="button" data-needgive="${i}">Written appraisal given</button>` : ''}</span></li>`).join('')}</ul></div>` : '<div class="card okc tight"><p class="small" style="margin:0">Nothing waiting on you.</p></div>'}
-      <h2 id="d-props">Properties</h2>
+      ${PORTAL ? '' : `<h2 id="d-needs">Needs you</h2>
+      ${needsHTML(needs)}
+      <h2 id="d-props">Properties</h2>`}
       <div class="chip-row" role="tablist">${STAGE_GROUPS.map(([k, l]) => `<button class="chip" type="button" role="tab" aria-selected="${DASH_FILTER === k}" data-filter="${k}" style="${DASH_FILTER === k ? 'border-color:var(--accent);background:var(--accent-soft)' : ''}">${l} <span class="small">${count(k)}</span></button>`).join('')}</div>
       ${shown.length ? `<div class="card tight" style="overflow-x:auto;margin-top:10px"><table class="tbl"><thead><tr><th>Property</th><th>Owners</th><th>Where it's up to</th><th class="hide-sm">Updated</th></tr></thead><tbody>
       ${shown.map(r => { const la = latestAg(r); return `<tr class="click" data-prop="${r.id}" ${la ? `data-ag="${la.id}"` : ''} ${(r.prelistings || [])[0] ? `data-plrow="${r.prelistings[0].id}"` : ''}><td><strong>${esc(r.address || '(no address yet)')}</strong>${la ? `<br><span class="small">${esc(la.ref)}</span>` : ''}</td><td>${esc(owners(r) || '–')}</td><td>${stagePill(r.stage)}</td><td class="small hide-sm">${esc(fmtDT(r.updated_at))}</td></tr>`; }).join('')}
       </tbody></table></div>` : `<div class="card note tight" style="margin-top:10px"><p class="small" style="margin:0">${props.length ? 'None here.' : 'No properties yet. Start with Let\'s begin or Let\'s agree.'}</p></div>`}
       <div class="toolbar"><button class="btn ghost" type="button" id="newInsp">Inspect a property</button><button class="btn ghost" type="button" id="newPl">Let's begin: new appraisal page</button><button class="btn primary" type="button" id="newAg">Let's agree: new agreement</button></div>
     </div>`;
-    $$('[data-need]').forEach(b => b.addEventListener('click', () => needs[+b.dataset.need].go()));
-    $$('[data-needgive]').forEach(b => b.addEventListener('click', async () => {
-      const i = +b.dataset.needgive, d = ($(`[data-needdate="${i}"]`) || {}).value || '', today = new Date().toLocaleDateString('en-CA', { timeZone: 'Pacific/Auckland' });
-      if (!d || d > today) return toast('Choose the day it was given: today or earlier.');
-      b.disabled = true; try { await needs[i].give(d); toast('Recorded. The review date is now 90 days on.'); viewAgentDashboard(); } catch (_) { b.disabled = false; }
-    }));
-    $$('[data-needdone]').forEach(b => b.addEventListener('click', async () => { b.disabled = true; try { await needs[+b.dataset.needdone].done(); toast('Ticked off'); viewAgentDashboard(); } catch (_) { b.disabled = false; } }));
+    needsWire(needs, viewAgentDashboard);
     $$('[data-filter]').forEach(b => b.addEventListener('click', () => { DASH_FILTER = b.dataset.filter; viewAgentDashboard(); }));
     $$('[data-jump]').forEach(b => b.addEventListener('click', () => { const t = $('#d-' + b.dataset.jump); if (t) t.scrollIntoView({ behavior: 'smooth', block: 'start' }); }));
     $('#newAg').addEventListener('click', () => viewTable(null));
@@ -2285,7 +2305,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     $$('tr[data-prop]').forEach(tr => tr.addEventListener('click', () => viewProperty(tr.dataset.prop)));
     top();
   }
-  const viewAgentList = viewAgentDashboard;
+  function viewAgentList() { return viewAgentDashboard(); }   // a function, so the portal's addresses follow it too
 
   /* ═════════ APPOINTMENT: 1 property and people → 2 discussion → 3 signing ═════════ */
   const TPAGES = ['Property and people', 'Discussion', 'Signing'];
@@ -2418,6 +2438,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
 
   function tShow(p) {
     T.page = p; T.pads = {};
+    if (PORTAL) { const pid = T.ag.property_id; portalAt(T.id ? (pid ? `properties/${pid}/agreement/${T.id}/edit${p ? '/' + (p + 1) : ''}` : null) : pid ? `properties/${pid}/agreement/new` : 'processes/agreement'); }
     header(TPAGES[p], `Page ${p + 1} of 3`, (p + 1) / 3 * 100);
     const tabs = `<div class="ttabs">${TPAGES.map((t, i) => `<button type="button" class="ttab ${i === p ? 'on' : ''}" data-tp="${i}"><span class="n">${i + 1}</span>${t}</button>`).join('')}</div>`;
     const flag = T.locked ? `Review only: ${T.ag.status === 'signed' || T.ag.status === 'countersigned' ? 'signed, so the terms can\'t change here' : T.people.some(x => x.signed_at) ? 'someone has signed, so the terms can\'t change here' : 'this agreement has ended'}. Your own notes and the owner's contact details can still be updated on the agreement page.` : ['Fill in before the appointment, then check it together', 'Talk these through together', 'Go through this together, then sign'][p];
@@ -3772,7 +3793,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     if (!INS) return; const id = INS.id;
     if ((INS_STATE[id] || {}).kind === 'auth') {
       const email = SESSION && SESSION.user && SESSION.user.email;
-      const { error } = email ? await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: APP_URL } }) : { error: true };
+      if (PORTAL && email) portalRemember();
+      const { error } = email ? await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: SIGNIN_URL } }) : { error: true };
       toast(error ? 'Couldn\'t send a sign-in link. Try again when you have signal.' : 'Check your email for a sign-in link. Your answers stay on this phone and save once you\'re signed in.');
       return;
     }
@@ -4018,6 +4040,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   function inspDraw() {
     const i = INS.sec, s = INSP_SECTIONS[i], last = i === INSP_SECTIONS.length - 1;
     header(s[1], '', 0); inspOpenSet(INS.id + ':' + i); inspKeep(INS.id); inspStatusSlot(s[1]);
+    if (PORTAL && INS.row.property_id) portalAt(`properties/${INS.row.property_id}/inspection/${INS.id}${i ? '/' + (i + 1) : ''}`);
     main().innerHTML = `<div class="view-pad insp">
       <p class="small insp-addr"><span class="agent-flag" style="margin:0 6px 0 0">Inspection</span>${nt(INS.row.address || 'Address to come')}</p>
       <nav class="insp-tabs" aria-label="Sections">${INSP_SECTIONS.map((x, j) => `<button type="button" class="insp-tab ${j === i ? 'on' : ''}" data-isec="${x[0]}" data-isecn="${j}" ${j === i ? 'aria-current="step"' : ''}>${esc(x[1])} <span class="n"></span></button>`).join('')}<button type="button" class="insp-tab" id="insGoFinish">Finish</button></nav>
@@ -4095,6 +4118,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const id = INS.id;
     header('Inspection', '', 100); actions(false);
     inspOpenSet(id + ':finish'); inspKeep(id); inspStatusSlot('Inspection');
+    if (PORTAL && INS.row.property_id) portalAt(`properties/${INS.row.property_id}/inspection/${id}/finish`);
     main().innerHTML = '<div class="loading">Saving...</div>';
     inspFlush();
     const synced = await inspSyncOne(id);   // waits for a save already in flight, then sends anything left
@@ -5186,7 +5210,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     c.classList.remove('flash'); void c.offsetWidth; c.classList.add('flash'); c.focus({ preventScroll: true });
   }
   const jActivate = k => JLINKS[k] ? jGo(k) : jReveal(k);
-  document.addEventListener('input', e => { if (e.target.closest && e.target.closest('#main')) JDIRTY = true; });
+  document.addEventListener('input', e => { if (PORTAL && (e.target.type === 'file' || (e.target.closest && e.target.closest('[data-nodirty]')))) return; if (e.target.closest && e.target.closest('#main')) JDIRTY = true; });
   $('#journeyBtn').addEventListener('click', openJourney);
   $('#journey').addEventListener('click', async e => {
     if (e.target.closest('#jClose')) return closeJourney();
@@ -6432,11 +6456,347 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     top();
   }
 
+  /* ═════════════════ PORTAL (PORTAL-PLAN.md, phase P1): an address for every page, and a footer menu ═════════════════
+     Only when the app runs as the portal. One table of addresses (ROUTES) opens each page; opening a page any other way (a
+     button, a Needs you item) goes through the same view functions, which are wrapped so each sets its own address
+     (ADDR). Steps inside a flow (the agreement's pages, the inspection's sections) set theirs where they are drawn.
+     Addresses hold database ids only, never a name, email or phone number. */
+  let CUR = null;            // the portal address on screen, without the base (for example 'properties/<id>')
+  let NAV_SEQ = 0;           // counts page openings, so a slow address lookup never overwrites a newer page's address
+  let NAV_FRESH = null;      // 'push' or 'replace': how the first address of the page just opened goes into the history
+  let ROUTE_OPENING = null;  // a page is being opened from its address (its own token): any page it moves on to replaces that address
+  let INPERSON_VIEW = false; // a page done together with the vendors on this device (the agreement appointment, signing together)
+  const RAW = {};            // the view functions before wrapping, for opening a page from its address
+  const PID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+  const okId = x => typeof x === 'string' && PID_RE.test(x);
+  const IN_PERSON_VIEWS = ['viewTable', 'viewVarTogether'];
+  function portalPath() {
+    let p = location.pathname; try { p = decodeURI(p); } catch (_) { }
+    if (p === PORTAL_BASE.replace(/\/$/, '')) return '';
+    if (p.indexOf(PORTAL_BASE) !== 0) return '';
+    return p.slice(PORTAL_BASE.length).replace(/^index\.html$/, '').replace(/\/+$/, '');
+  }
+  // the page asked for before signing in, kept on this device for an hour, so the sign-in link brings Tim back to it
+  function portalRemember() { const p = portalPath(); try { if (p) localStorage.setItem('portalReturn', JSON.stringify({ p, at: Date.now() })); else localStorage.removeItem('portalReturn'); } catch (_) { } }
+  function portalReturnTake() { try { const r = JSON.parse(localStorage.getItem('portalReturn') || 'null'); localStorage.removeItem('portalReturn'); if (r && typeof r.p === 'string' && Date.now() - r.at < 3600000 && /^[A-Za-z0-9_\/-]{1,300}$/.test(r.p)) return r.p; } catch (_) { } return ''; }
+  function setAddr(path, mode) {
+    const url = PORTAL_BASE + path;
+    if (location.pathname !== url || location.search || location.hash) { try { history[mode === 'push' && CUR !== null && CUR !== path ? 'pushState' : 'replaceState']({ portal: path }, '', url); } catch (_) { } }
+    CUR = path; portalChrome();
+  }
+  // a page sets its own address: the first time after it opens it goes into the history as that opening said; after that it replaces
+  function portalAt(path) { if (!PORTAL || path == null) return; const mode = NAV_FRESH || 'replace'; NAV_FRESH = null; setAddr(path, mode); }
+  const isCreation = p => /\/new$/.test(p || '') || p === 'processes/agreement' || p === 'processes/appraisal';
+  function portalView(name) { INPERSON_VIEW = IN_PERSON_VIEWS.includes(name); }
+  // the property (and other ids) a page belongs to, looked up once and remembered
+  const ROWS = {};
+  async function rowOf(table, id, cols) {
+    if (!okId(id)) return null; const k = table + ':' + id; if (ROWS[k]) return ROWS[k];
+    try { const { data, error } = await sb.from(table).select(cols).eq('id', id).limit(1); if (error) return null; const r = Array.isArray(data) ? data[0] : data; if (r) ROWS[k] = r; return r || null; } catch (_) { return null; }
+  }
+  const pidOf = async (table, id) => { const r = await rowOf(table, id, 'id,property_id'); return r && okId(r.property_id) ? r.property_id : null; };
+  const under = (pid, rest) => okId(pid) ? `properties/${pid}/${rest}` : null;
+  const ADDR = {
+    viewAgentHome: () => '',
+    viewAgentDashboard: () => 'properties',
+    viewProperty: id => okId(id) ? `properties/${id}` : null,
+    viewAgentDetail: async id => okId(id) ? under(await pidOf('agreements', id), `agreement/${id}`) : null,
+    viewPrelistingAgent: async (id, propId) => okId(id) ? under(await pidOf('prelistings', id), `appraisal/${id}`) : okId(propId) ? `properties/${propId}/appraisal/new` : 'processes/appraisal',
+    viewAml: async (agId, person) => okId(person) ? under(await pidOf('agreements', agId), `aml/${person}`) : null,
+    viewVariation: async (agId, vid) => okId(vid) ? under(await pidOf('agreements', agId), `variations/${vid}`) : null,
+    viewVarIssue: async (agId, vid) => okId(vid) ? under(await pidOf('agreements', agId), `variations/${vid}/issue`) : null,
+    viewVarTogether: async (agId, vid) => okId(vid) ? under(await pidOf('agreements', agId), `variations/${vid}/together`) : null,
+    viewFormAgent: async fid => { const r = await rowOf('property_forms', fid, 'id,property_id,agreement_id'); if (!r) return null; return under(okId(r.property_id) ? r.property_id : await pidOf('agreements', r.agreement_id), `forms/${fid}`); },
+    viewOfferAgent: async oid => okId(oid) ? under(await pidOf('property_offers', oid), `offers/${oid}`) : null,
+    viewOfferCorrect: async oid => okId(oid) ? under(await pidOf('property_offers', oid), `offers/${oid}/correct`) : null,
+    viewOfferNew: pid => under(pid, 'offers/new'),
+    viewOfferPick: () => 'processes/offer',
+    viewBlankMap: async bid => okId(bid) ? under(await pidOf('offer_blanks', bid), `offers/blank/${bid}`) : null,
+    viewClauseLibrary: pid => under(pid, 'offers/clauses'),
+    viewDraftReview: async did => { const r = await rowOf('offer_drafts', did, 'id,property_id,offer_id'); return r && okId(r.offer_id) ? under(r.property_id, `offers/${r.offer_id}/draft/${did}`) : null; },
+    viewInspectStart: () => 'processes/inspection',
+    viewTranslations: () => APP_TRANSLATION ? 'translations' : null,
+    // these set their own address where they are drawn: viewTable (tShow), viewInspection (inspDraw), viewInspectionFinish
+    viewTable: () => null, viewInspection: () => null, viewInspectionFinish: () => null,
+  };
+  function portalWrap(name, fn) {
+    return function (...args) {
+      const s = ++NAV_SEQ; portalView(name);
+      NAV_FRESH = ROUTE_OPENING || CUR === null || isCreation(CUR) ? 'replace' : 'push';
+      const up = $('#pUpRow'); if (up) up.hidden = true;   // the up link comes back with the new address
+      let a = null; try { a = ADDR[name] ? ADDR[name](...args) : null; } catch (_) { a = null; }
+      if (a && typeof a.then === 'function') a.then(x => { if (x != null && s === NAV_SEQ) portalAt(x); else if (s === NAV_SEQ) portalChrome(); }, () => null);
+      else if (a != null) portalAt(a);
+      return fn.apply(this, args);
+    };
+  }
+  // the agreement appointment started from a property: the property file, as the property page hands it over
+  async function portalPF(pid) {
+    const p = await must(sb.from('properties').select('*').eq('id', pid).single());
+    const [people, docs] = await Promise.all([must(sb.from('property_people').select('*').eq('property_id', pid).order('position')), must(sb.from('property_documents').select('*').eq('property_id', pid).order('created_at', { ascending: false }))]);
+    return { p, docs, people: people.filter(x => (x.role || 'owner') === 'owner') };
+  }
+  async function portalPropAt(pid, sel) { await RAW.viewProperty(pid); const t = $(sel); if (t) t.scrollIntoView({ block: 'start' }); }
+  const R = (pat, view, open) => [new RegExp('^' + pat.replace(/:id/g, '([A-Za-z0-9_-]{1,64})') + '$'), view, open];
+  const ROUTES = [
+    R('', 'home', () => viewPortalHome()),
+    R('properties', 'viewAgentDashboard', () => RAW.viewAgentDashboard()),
+    R('properties/:id', 'viewProperty', p => RAW.viewProperty(p)),
+    R('properties/:id/offers', 'viewProperty', p => portalPropAt(p, '#offTile')),
+    R('properties/:id/documents', 'viewProperty', p => portalPropAt(p, '#repo')),
+    R('properties/:id/records', 'viewProperty', p => portalPropAt(p, '#crTile')),
+    R('properties/:id/agreement', 'viewAgentDetail', async p => {
+      const ags = await must(sb.from('agreements').select('id,status,created_at,property_id').eq('property_id', p).order('created_at', { ascending: false }));
+      const a = ags.find(x => !['ended', 'cancelled'].includes(x.status)) || ags[0];
+      if (!a) { setAddr(`properties/${p}`, 'replace'); return RAW.viewProperty(p); }
+      setAddr(`properties/${p}/agreement/${a.id}`, 'replace'); return RAW.viewAgentDetail(a.id);
+    }),
+    R('properties/:id/agreement/new', 'viewTable', async p => RAW.viewTable(null, null, 0, await portalPF(p))),
+    R('properties/:id/agreement/:id', 'viewAgentDetail', (p, a) => RAW.viewAgentDetail(a)),
+    R('properties/:id/agreement/:id/edit(?:/([1-3]))?', 'viewTable', (p, a, n) => RAW.viewTable(a, null, n ? +n - 1 : 0)),
+    R('properties/:id/appraisal/new', 'viewPrelistingAgent', p => RAW.viewPrelistingAgent(null, p)),
+    R('properties/:id/appraisal/:id', 'viewPrelistingAgent', (p, l) => RAW.viewPrelistingAgent(l)),
+    R('properties/:id/inspection/:id(?:/([0-9]{1,2}|finish))?', 'viewInspection', async (p, i, s) => {
+      if (s === 'finish') { await RAW.viewInspection(i); return INS && INS.id === i ? RAW.viewInspectionFinish() : undefined; }
+      return RAW.viewInspection(i, s ? Math.max(0, Math.min(INSP_SECTIONS.length - 1, +s - 1)) : 0);
+    }),
+    R('properties/:id/aml/:id', 'viewAml', async (p, x) => { const r = await rowOf('agreement_people', x, 'id,agreement_id'); return r ? RAW.viewAml(r.agreement_id, x) : viewPortalMissing(); }),
+    R('properties/:id/variations/:id(?:/(issue|together))?', 'viewVariation', async (p, v, k) => {
+      const r = await rowOf('agreement_variations', v, 'id,agreement_id'); if (!r) return viewPortalMissing();
+      if (k === 'together') portalView('viewVarTogether');
+      return (k === 'issue' ? RAW.viewVarIssue : k === 'together' ? RAW.viewVarTogether : RAW.viewVariation)(r.agreement_id, v);
+    }),
+    R('properties/:id/forms/:id', 'viewFormAgent', (p, f) => RAW.viewFormAgent(f)),
+    R('properties/:id/offers/new', 'viewOfferNew', p => RAW.viewOfferNew(p)),
+    R('properties/:id/offers/clauses', 'viewClauseLibrary', p => RAW.viewClauseLibrary(p)),
+    R('properties/:id/offers/blank/:id', 'viewBlankMap', (p, b) => RAW.viewBlankMap(b)),
+    R('properties/:id/offers/:id/draft/:id', 'viewDraftReview', (p, o, d) => RAW.viewDraftReview(d)),
+    R('properties/:id/offers/:id/correct', 'viewOfferCorrect', (p, o) => RAW.viewOfferCorrect(o)),
+    R('properties/:id/offers/:id', 'viewOfferAgent', (p, o) => RAW.viewOfferAgent(o)),
+    R('people', 'people', () => viewPortalPeople()),
+    R('processes', 'processes', () => viewPortalProcesses()),
+    R('processes/appraisal', 'viewPrelistingAgent', () => RAW.viewPrelistingAgent(null)),
+    R('processes/agreement', 'viewTable', () => RAW.viewTable(null)),
+    R('processes/inspection', 'viewInspectStart', () => RAW.viewInspectStart()),
+    R('processes/offer', 'viewOfferPick', () => RAW.viewOfferPick()),
+    R('processes/forms', 'forms', () => viewPortalForms()),
+    R('processes/assessment', 'assessment', () => viewPortalAssess()),
+    R('translations', 'viewTranslations', () => APP_TRANSLATION ? RAW.viewTranslations() : viewPortalMissing()),
+  ];
+  // open the page for an address (after sign-in, a typed or saved address, back and forward, the menu and links)
+  async function portalOpen(path) {
+    const hit = ROUTES.map(([re, view, open]) => [re.exec(path), view, open]).find(x => x[0]);
+    NAV_SEQ++; NAV_FRESH = null; CUR = path; portalView(hit ? hit[1] : '');
+    if (!hit) { portalChrome(); return viewPortalMissing(); }
+    const tok = {}; ROUTE_OPENING = tok;
+    try { portalChrome(); await hit[2](...hit[0].slice(1)); }
+    catch (e) { console.error(e); if (CUR === path) viewPortalMissing('This page didn\'t open. Check you have signal, then try again.'); }
+    finally { if (ROUTE_OPENING === tok) ROUTE_OPENING = null; portalChrome(); }
+  }
+  // leaving a page: the appointment saves what's typed (as the old top bar did); inspection answers are saved as they're tapped;
+  // anything else typed and not saved asks first (the same warning vendors see)
+  async function leaveOk() {
+    if (T && !T.locked && $('.ttabs') && T.ag && ($('#tAddr') ? $('#tAddr').value.trim() : T.ag.address)) { try { tCollect(); if (await tSave()) JDIRTY = false; } catch (_) { } }
+    if ($('#main .insp')) { try { inspFlush(); } catch (_) { } JDIRTY = false; }
+    if (JDIRTY && !confirm(trs('You have typed something on this page that is not saved yet. If you go to another page it will be lost. Go anyway?'))) return false;
+    return true;
+  }
+  // the menu, the up link and every portal link: a new history entry, then the page
+  async function portalNav(path) {
+    if (!(await leaveOk())) return;
+    try { if (path !== CUR) history.pushState({ portal: path }, '', PORTAL_BASE + path); } catch (_) { }
+    return portalOpen(path);
+  }
+  const plink = (path, text, cls) => `<a href="${esc(PORTAL_BASE + path)}" data-plink="${esc(path)}"${cls ? ` class="${cls}"` : ''}>${text}</a>`;
+  // the up link: property work goes up to its property, a property up to Properties, and so on
+  function upOf(path) {
+    const id = '([A-Za-z0-9_-]{1,64})'; let m;
+    if (!path) return null;
+    if ((m = new RegExp(`^properties/${id}/offers/${id}/(draft/${id}|correct)$`).exec(path))) return [`properties/${m[1]}/offers/${m[2]}`, 'Offer'];
+    if ((m = new RegExp(`^properties/${id}/agreement/${id}/edit`).exec(path))) return [`properties/${m[1]}/agreement/${m[2]}`, 'Agreement'];
+    if ((m = new RegExp(`^properties/${id}/offers/(clauses|blank/${id})$`).exec(path))) return [`properties/${m[1]}/offers`, 'Property file'];
+    if ((m = new RegExp(`^properties/${id}/.+$`).exec(path))) return [`properties/${m[1]}`, 'Property file'];
+    if (new RegExp(`^properties/${id}$`).test(path)) return ['properties', 'Properties'];
+    if (/^processes\/.+/.test(path)) return ['processes', 'Processes'];
+    if (/^people\/.+/.test(path)) return ['people', 'People'];
+    if (path === 'translations') return ['', 'Home'];
+    return null;
+  }
+  // in person: a signing pad, or a page done together with the vendors, is on screen. A vendor may be holding the tablet, so
+  // the menu and the up link go away until it is finished.
+  const portalInPerson = () => INPERSON_VIEW || !!$('#main .sig-wrap') || PITCH_ON || !!($('#journey') && !$('#journey').hidden);
+  function portalChrome() {
+    if (!PORTAL) return;
+    const on = !!IS_AGENT && !!SESSION, inp = on && portalInPerson();
+    document.body.classList.toggle('portal', on);
+    const nav = $('#pNav'), upRow = $('#pUpRow'), up = $('#pUp');
+    if (nav) {
+      nav.hidden = !on || inp;
+      const sec = CUR == null ? null : CUR.split('/')[0];
+      $$('a', nav).forEach(a => { const here = sec !== null && a.dataset.plink === (sec === 'translations' ? '-' : sec); if (here) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); });
+    }
+    const u = on && !inp ? upOf(CUR) : null;
+    if (upRow && up) { upRow.hidden = !u; if (u) { up.href = PORTAL_BASE + u[0]; up.dataset.plink = u[0]; up.querySelector('span').textContent = u[1]; } }
+    document.body.classList.toggle('pnav-on', !!nav && !nav.hidden);
+    document.body.classList.toggle('pup-on', !!u);
+  }
+  function portalMount() {
+    const up = document.createElement('div'); up.className = 'p-up-row no-print'; up.id = 'pUpRow'; up.hidden = true;
+    up.innerHTML = '<a class="p-up" id="pUp" href="' + esc(PORTAL_BASE) + '" data-plink=""><b aria-hidden="true">‹</b><span></span></a>';   // the arrow, then the words
+    main().parentNode.insertBefore(up, main());
+    const nav = document.createElement('nav'); nav.className = 'pnav no-print'; nav.id = 'pNav'; nav.setAttribute('aria-label', 'Portal menu'); nav.hidden = true;
+    nav.innerHTML = `<div class="pnav-in">${[['', 'Home'], ['properties', 'Properties'], ['people', 'People'], ['processes', 'Processes']].map(([p, t]) => plink(p, t)).join('')}</div>`;
+    document.body.appendChild(nav);
+    // any portal link: a plain click moves within the portal (with the unsaved-work check); a new tab or window opens the address itself
+    document.addEventListener('click', e => {
+      const a = e.target.closest && e.target.closest('a[data-plink]'); if (!a || !IS_AGENT) return;
+      if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      e.preventDefault(); portalNav(a.dataset.plink);
+    });
+    window.addEventListener('popstate', async () => {
+      if (!IS_AGENT || !SESSION) return;
+      const path = portalPath(); if (path === CUR) return;
+      if (!(await leaveOk())) { try { history.pushState({ portal: CUR }, '', PORTAL_BASE + CUR); } catch (_) { } return; }   // stay put
+      portalOpen(path);
+    });
+    let q = false; const later = () => { if (q) return; q = true; Promise.resolve().then(() => { q = false; portalChrome(); }); };
+    new MutationObserver(later).observe(main(), { childList: true, subtree: true });
+    new MutationObserver(later).observe($('#actions'), { attributes: true, attributeFilter: ['hidden'] });
+    try { history.scrollRestoration = 'manual'; } catch (_) { }   // every page starts at the top, as it does when opened from a button
+    // leaving the portal altogether (reload, closing the tab, back to a page opened separately): the browser's own question
+    window.addEventListener('beforeunload', e => { if (IS_AGENT && JDIRTY) { e.preventDefault(); e.returnValue = ''; } });
+  }
+  // after sign-in: the address on screen, or the one asked for before the sign-in link, or an unfinished inspection, or Home
+  async function portalBoot() {
+    inspSyncAll();
+    let path = portalPath();
+    const back = portalReturnTake();
+    if (!path && back) { path = back; try { history.replaceState({ portal: path }, '', PORTAL_BASE + path); } catch (_) { } }
+    if (!path) {
+      const io = inspOpenGet();
+      if (io) { const [iid, sec] = io.split(':'); CUR = null; if (sec !== 'finish') return viewInspection(iid, +sec || 0); await viewInspection(iid); return INS && INS.id === iid ? viewInspectionFinish() : undefined; }
+    }
+    return portalOpen(path);
+  }
+
+  // Home: what needs Tim, and today's shortcuts
+  async function viewPortalHome() {
+    header('', '', 0); actions(false);
+    const h = +new Date().toLocaleString('en-NZ', { hour: 'numeric', hour12: false, timeZone: 'Pacific/Auckland' });
+    main().innerHTML = `<div class="view-pad" id="pHome">
+      <span class="agent-flag">Only you see this</span>
+      <h1>${h < 12 ? 'Morning' : h < 17 ? 'Afternoon' : 'Evening'}, Tim</h1>
+      <h2 id="d-needs">Needs you</h2>
+      <div id="pNeeds"><div class="loading">Loading...</div></div>
+      <h2>Shortcuts</h2>
+      <div class="p-short">${plink('processes/appraisal', 'Let\'s begin')}${plink('processes/inspection', 'Inspect a property')}${plink('processes/agreement', 'Let\'s agree')}${plink('processes/offer', 'Draft an offer')}${plink('properties', 'Properties')}</div>
+    </div>`;
+    top();
+    const { needs } = await dashData();
+    const box = $('#pNeeds'); if (!box) return;   // Tim has moved on
+    box.innerHTML = needsHTML(needs);
+    needsWire(needs, viewAgentHome);
+  }
+  // Processes: every way to start something
+  function viewPortalProcesses() {
+    header('Processes', '', 0); actions(false);
+    main().innerHTML = `<div class="view-pad" id="pProc">
+      <h1>Processes</h1>
+      <p class="small">Start something new. Each one carries on at its property's own page.</p>
+      <div class="home-tiles">
+        ${HOME_TILES}
+        <button class="home-tile" type="button" id="homeForms"><span class="kick">After signing</span><span class="ttl">Forms</span><span class="txt">The Vendor Declaration and the Healthy Homes checklist for each property: fill in, countersign and file.</span><span class="go">Choose the form →</span></button>
+        <button class="home-tile" type="button" id="homeAssess"><span class="kick">Before you visit</span><span class="ttl">Property assessment</span><span class="txt">Look up a property on the council's public records: rating valuation, title, zone and hazards, each with its source, for you to tick.</span><span class="go">Choose the property →</span></button>
+      </div>
+    </div>`;
+    [['homeBegin', 'processes/appraisal'], ['homeInspect', 'processes/inspection'], ['homeAgree', 'processes/agreement'], ['homeOffer', 'processes/offer'], ['homeForms', 'processes/forms'], ['homeAssess', 'processes/assessment']]
+      .forEach(([id, p]) => $('#' + id).addEventListener('click', () => portalNav(p)));
+    top();
+  }
+  // Processes, Forms: the forms on each property (vendors start them from their own page; Tim fills in, countersigns and files)
+  async function viewPortalForms() {
+    header('Forms', '', 0); actions(false);
+    main().innerHTML = '<div class="loading">Loading...</div>';
+    const safe = async q => { try { return (await must(q)) || []; } catch (_) { return []; } };
+    const [forms, ags, props] = await Promise.all([safe(sb.from('property_forms').select('id,kind,status,agreement_id,property_id,countersigned_at,document_id')), safe(sb.from('agreements').select('id,property_id')), safe(sb.from('properties').select('id,address'))]);
+    if (!$('#main .loading')) return;
+    const pidFor = f => okId(f.property_id) ? f.property_id : ((ags.find(a => a.id === f.agreement_id) || {}).property_id || null);
+    const addr = pid => (props.find(p => p.id === pid) || {}).address || 'Property';
+    const st = f => f.status === 'signed' && f.kind === 'vendor_declaration' && !f.countersigned_at ? 'Signed by the vendors: your countersignature next' : f.status === 'signed' ? (f.document_id ? 'Signed and filed' : 'Signed, not filed yet') : 'Not signed yet';
+    const rows = forms.map(f => ({ f, pid: pidFor(f) })).filter(x => okId(x.pid) && okId(x.f.id));
+    main().innerHTML = `<div class="view-pad" id="pForms"><h1>Forms</h1>
+      <p class="small">Vendors start their Vendor Declaration, and ask for the Healthy Homes checklist, from their own page after signing. Each one shows here and on its property.</p>
+      ${rows.length ? `<div class="card tight"><ul class="needs">${rows.map(({ f, pid }) => `<li><div class="what"><strong>${esc(FORM_LABEL[f.kind] || 'Form')}</strong><span class="small"><span translate="no">${esc(addr(pid))}</span> · ${esc(st(f))}</span></div><span class="needbtns">${plink(`properties/${pid}/forms/${f.id}`, 'Open', 'btn ghost')}</span></li>`).join('')}</ul></div>` : '<div class="card note tight"><p class="small" style="margin:0">No forms yet. They appear once vendors have signed and started them.</p></div>'}
+    </div>`;
+    top();
+  }
+  // Processes, Property assessment: choose the property, then its Public records card
+  async function viewPortalAssess() {
+    header('Property assessment', '', 0); actions(false);
+    main().innerHTML = '<div class="loading">Loading...</div>';
+    let props = []; try { props = (await must(sb.from('properties').select('id,address,stage,updated_at').order('updated_at', { ascending: false }))) || []; } catch (_) { }
+    if (!$('#main .loading')) return;
+    props = props.filter(p => okId(p.id) && !['withdrawn', 'settled'].includes(p.stage));
+    main().innerHTML = `<div class="view-pad" id="pAssess"><h1>Property assessment</h1>
+      <p class="small">Choose the property to look it up on the council's public records. For a new address, start with ${plink('processes/inspection', 'Inspect a property')} or ${plink('processes/appraisal', 'Let\'s begin')}: both look the address up too.</p>
+      ${props.length ? `<div class="card tight"><ul class="needs">${props.map(p => `<li><div class="what"><strong translate="no">${esc(p.address || '(no address yet)')}</strong></div><span class="needbtns">${plink(`properties/${p.id}/records`, 'Public records', 'btn ghost')}</span></li>`).join('')}</ul></div>` : '<div class="card note tight"><p class="small" style="margin:0">No properties yet.</p></div>'}
+    </div>`;
+    top();
+  }
+  // People: for now, the people already on the property files. The full people database comes in the next part of the portal.
+  async function viewPortalPeople() {
+    header('People', '', 0); actions(false);
+    main().innerHTML = '<div class="loading">Loading...</div>';
+    const safe = async q => { try { return (await must(q)) || []; } catch (_) { return []; } };
+    const [props, people] = await Promise.all([safe(sb.from('properties').select('id,address')), safe(sb.from('property_people').select('id,property_id,legal_name,pref_name,role,position'))]);
+    if (!$('#main .loading')) return;
+    const addr = pid => (props.find(p => p.id === pid) || {}).address || 'Property';
+    const ROLE = { owner: 'Owner', contact: 'Contact', former: 'Earlier owner' };
+    const list = people.filter(x => okId(x.property_id) && ((x.legal_name || '').trim() || (x.pref_name || '').trim()))
+      .map(x => ({ x, name: (x.legal_name || '').trim() || (x.pref_name || '').trim() }))
+      .sort((a, b) => a.name.localeCompare(b.name, 'en-NZ', { sensitivity: 'base' }));
+    main().innerHTML = `<div class="view-pad" id="pPeople"><span class="agent-flag">Only you see this</span><h1>People</h1>
+      <div class="card note tight"><p class="small" style="margin:0">The full people database is coming next: contact details, everyone linked to all their properties, and their files. For now this lists the owners and contacts already on your property files.</p></div>
+      ${list.length ? `<label class="f" for="pPeopleQ">Find a person or property</label><input type="search" id="pPeopleQ" data-nodirty autocomplete="off">
+      <div class="card tight"><ul class="needs" id="pPeopleList">${list.map(({ x, name }) => `<li data-q="${esc((name + ' ' + (x.pref_name || '') + ' ' + addr(x.property_id)).toLowerCase())}"><div class="what"><strong translate="no">${esc(name)}</strong><span class="small">${esc(ROLE[x.role || 'owner'] || 'Owner')}${x.pref_name && x.pref_name.trim() && x.pref_name.trim() !== name ? ', goes by <span translate="no">' + esc(x.pref_name.trim()) + '</span>' : ''}</span></div><span class="needbtns">${plink(`properties/${x.property_id}`, `<span translate="no">${esc(addr(x.property_id))}</span>`, 'btn ghost')}</span></li>`).join('')}</ul></div>
+      <p class="small" id="pPeopleNone" hidden>No one matches.</p>` : '<div class="card tight"><p class="small" style="margin:0">No people on the property files yet.</p></div>'}
+    </div>`;
+    const qb = $('#pPeopleQ'); if (qb) qb.addEventListener('input', () => { const v = qb.value.trim().toLowerCase(); let n = 0; $$('#pPeopleList li').forEach(li => { const show = !v || li.dataset.q.includes(v); li.hidden = !show; if (show) n++; }); $('#pPeopleNone').hidden = n > 0; });
+    top();
+  }
+  function viewPortalMissing(msg) {
+    header('', '', 0); actions(false);
+    main().innerHTML = `<div class="view-pad" id="pMissing"><h1>This page isn't here</h1><p class="lede">${esc(msg || 'There is no page at this address. It may have been typed wrongly, or what it showed has gone.')}</p><div class="toolbar">${plink('', 'Home', 'btn primary')}</div></div>`;
+    top();
+  }
+  function viewPortalNotAgent() {
+    header('', '', 0); actions(false); portalChrome();
+    main().innerHTML = `<div class="login-card" id="pNotAgent"><h1>This page is for Tim</h1><p class="lede">Your own page is at <a href="${esc(ONBOARDING_URL)}">packages.dunnerstunner.co.nz/onboarding</a>. Open it and sign in with the same email address.</p><p class="small">Questions? Call or text Tim on <strong>027 562 7207</strong>.</p></div>`;
+  }
+  if (PORTAL) {
+    portalMount();
+    Object.assign(RAW, { viewAgentDashboard, viewProperty, viewAgentDetail, viewPrelistingAgent, viewAml, viewVariation, viewVarIssue, viewVarTogether, viewFormAgent,
+      viewOfferAgent, viewOfferCorrect, viewOfferNew, viewOfferPick, viewBlankMap, viewClauseLibrary, viewDraftReview, viewInspectStart, viewTranslations,
+      viewTable, viewInspection, viewInspectionFinish });
+    viewAgentHome = portalWrap('viewAgentHome', viewPortalHome);
+    viewAgentDashboard = portalWrap('viewAgentDashboard', viewAgentDashboard); viewProperty = portalWrap('viewProperty', viewProperty);
+    viewAgentDetail = portalWrap('viewAgentDetail', viewAgentDetail); viewPrelistingAgent = portalWrap('viewPrelistingAgent', viewPrelistingAgent);
+    viewAml = portalWrap('viewAml', viewAml); viewVariation = portalWrap('viewVariation', viewVariation); viewVarIssue = portalWrap('viewVarIssue', viewVarIssue);
+    viewVarTogether = portalWrap('viewVarTogether', viewVarTogether); viewFormAgent = portalWrap('viewFormAgent', viewFormAgent);
+    viewOfferAgent = portalWrap('viewOfferAgent', viewOfferAgent); viewOfferCorrect = portalWrap('viewOfferCorrect', viewOfferCorrect); viewOfferNew = portalWrap('viewOfferNew', viewOfferNew);
+    viewOfferPick = portalWrap('viewOfferPick', viewOfferPick); viewBlankMap = portalWrap('viewBlankMap', viewBlankMap); viewClauseLibrary = portalWrap('viewClauseLibrary', viewClauseLibrary);
+    viewDraftReview = portalWrap('viewDraftReview', viewDraftReview); viewInspectStart = portalWrap('viewInspectStart', viewInspectStart); viewTranslations = portalWrap('viewTranslations', viewTranslations);
+    viewTable = portalWrap('viewTable', viewTable); viewInspection = portalWrap('viewInspection', viewInspection); viewInspectionFinish = portalWrap('viewInspectionFinish', viewInspectionFinish);
+  }
+  // the onboarding app's own links (an offer form, a lawyer's link) always open there, never in the portal
+  if (PORTAL && /[?&](offer|lawyer)=/.test(location.search)) { location.replace(ONBOARDING_URL + location.search); return; }
+
   const offerToken = new URLSearchParams(location.search).get('offer');
   if (offerToken) { const w = $('#langWrap'); if (w) w.hidden = true; viewOfferPublic(offerToken); return; }
   const lawyerToken = new URLSearchParams(location.search).get('lawyer');
   if (lawyerToken) { const w = $('#langWrap'); if (w) w.hidden = true; viewLawyer(lawyerToken); return; }
   window.addEventListener('hashchange', e => {
+    if (PORTAL) return;   // the portal has no journey pages; its addresses are paths, not #
     if (pitchRoute()) {
       // the Back button into the journey page must not throw away what a vendor has typed: ask first, as Read more does, and if they say no stay put
       if (!PITCH_ON && JDIRTY && !confirm(trs('You have typed something on this page that is not saved yet. If you go to another page it will be lost. Go anyway?'))) { try { history.replaceState(null, '', e.oldURL || (location.pathname + location.search)); } catch (_) { } return; }
