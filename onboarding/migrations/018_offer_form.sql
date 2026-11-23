@@ -471,6 +471,18 @@ begin
   return items;
 end $$;
 
+-- Tim moves an offer out of "Possible spam": it becomes a new, unread offer (so it shows in Needs you), and the change is recorded
+create or replace function public.agent_offer_not_spam(p_offer uuid) returns void language plpgsql security definer set search_path = public as $$
+declare me text := public.offer_agent(); o public.property_offers;
+begin
+  select * into o from public.property_offers where id = p_offer for update; if o.id is null or o.source = 'manual' then raise exception 'No such offer'; end if;
+  if not o.suspected_spam then return; end if;
+  perform set_config('offers.fn', 'on', true);
+  update public.property_offers set suspected_spam = false, read_at = null, read_by = null where id = p_offer;
+  insert into public.offer_events (property_id, offer_id, actor, kind) values (o.property_id, p_offer, me, 'not_spam');
+  perform set_config('offers.fn', '', true);
+end $$;
+
 create or replace function public.agent_offer_settings(p_ks_days int) returns void language plpgsql security definer set search_path = public as $$
 declare me text := public.offer_agent();
 begin
@@ -495,6 +507,6 @@ revoke execute on function public.offer_token(), public.offer_stage_ok(text), pu
 revoke execute on function public.offer_public_info(text, text), public.offer_public_submit(text, jsonb, text, boolean), public.offer_public_ai_claim(text, text), public.offer_public_notified(uuid, text) from public, anon, authenticated;
 grant execute on function public.offer_public_info(text, text), public.offer_public_submit(text, jsonb, text, boolean), public.offer_public_ai_claim(text, text), public.offer_public_notified(uuid, text) to service_role;
 revoke execute on function public.agent_offer_link(uuid, text, text), public.agent_offer_add(uuid, jsonb), public.agent_offer_correct(uuid, jsonb, text), public.agent_offer_status(uuid, text, timestamptz, text),
-  public.agent_offer_read(uuid), public.agent_offer_gap(uuid, text), public.agent_offer_settings(int), public.agent_offer_clause(text, text), public.agent_offer_chattels(uuid, jsonb) from public, anon;
+  public.agent_offer_read(uuid), public.agent_offer_gap(uuid, text), public.agent_offer_settings(int), public.agent_offer_clause(text, text), public.agent_offer_chattels(uuid, jsonb), public.agent_offer_not_spam(uuid) from public, anon;
 grant execute on function public.agent_offer_link(uuid, text, text), public.agent_offer_add(uuid, jsonb), public.agent_offer_correct(uuid, jsonb, text), public.agent_offer_status(uuid, text, timestamptz, text),
-  public.agent_offer_read(uuid), public.agent_offer_gap(uuid, text), public.agent_offer_settings(int), public.agent_offer_clause(text, text), public.agent_offer_chattels(uuid, jsonb) to authenticated;
+  public.agent_offer_read(uuid), public.agent_offer_gap(uuid, text), public.agent_offer_settings(int), public.agent_offer_clause(text, text), public.agent_offer_chattels(uuid, jsonb), public.agent_offer_not_spam(uuid) to authenticated;

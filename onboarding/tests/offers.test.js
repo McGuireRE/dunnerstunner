@@ -112,7 +112,7 @@ const AGENT = 'agent-test@example.com';
   await q.fill('#ofEmail', 'buyer@example.com'); await q.fill('#ofPhone', '021 555 0100');
   await q.click('input[name="of_seen_docs"][value="yes"] + .mark');
   await q.fill('#ofPrice', 'six fifty'); expect(/type the price in numbers/.test(await q.textContent('#ofPriceSay')), 'letters: asked for the full number');
-  await q.fill('#ofPrice', '$1.2m'); expect((await q.textContent('#ofPriceSay')) === '$1,200,000: one million two hundred thousand dollars', '$1.2m read back in figures and words');
+  await q.fill('#ofPrice', '$1.2m'); expect((await q.textContent('#ofPriceSay')) === '$1,200,000: one million, two hundred thousand dollars', '$1.2m read back in figures and words');
   await q.fill('#ofPrice', '650k'); out.priceSay = await q.textContent('#ofPriceSay'); expect(out.priceSay === '$650,000: six hundred and fifty thousand dollars', 'price read back in figures and words: ' + out.priceSay);
   await q.click('label:has([data-cond="finance"]) .mark'); await q.fill('#ofd_finance', '10'); await q.waitForTimeout(100);
   out.finCalc = await q.textContent('[data-ccalc="finance"]'); expect(/^That is \w{3}, \d+ \w+ \d{4}\.$/.test(out.finCalc), 'working days show the date: ' + out.finCalc);
@@ -298,7 +298,21 @@ const AGENT = 'agent-test@example.com';
   expect(/Possible spam \(1\)/.test(out.spamFold.summary) && !out.spamFold.inMain && !(await p.$eval('#offSpam', e => e.open)), 'possible spam in its own closed fold');
   const unread = (await db(p)).property_offers.filter(x => x.source === 'buyer' && !x.read_at);
   expect(out.needsAfter.filter(t => /New offer/.test(t)).length === unread.filter(x => !x.suspected_spam).length && unread.some(x => x.suspected_spam), 'Needs you lists the real new offers, not the spam');
-  await p.click('#offSpam summary'); await p.click('#offSpam .of-row'); await p.waitForTimeout(500); expect(await p.isVisible('.of-spamflag'), 'the spam offer says so');
+  // a quiet Needs you line for it, opening the fold
+  out.spamNeed = out.needsAfter.filter(t => /possible spam/.test(t)); expect(out.spamNeed.join() === '1 possible spam offer to check', 'Needs you: ' + out.spamNeed);
+  await p.click('#navDash'); await p.waitForTimeout(500);
+  const si = await p.$$eval('.needs strong', e => e.findIndex(x => /possible spam/.test(x.textContent))); await p.click(`[data-need="${si}"]`); await p.waitForTimeout(600);
+  expect(await p.$eval('#offSpam', e => e.open), 'the line opens the property\'s Possible spam fold');
+  await p.click('#offSpam .of-row'); await p.waitForTimeout(500); expect(await p.isVisible('.of-spamflag'), 'the spam offer says so');
+  // Not spam: back into the main list as a new, unread offer, in Needs you
+  const mailsBefore = (await db(p)).email_log.length;
+  await p.click('#ofNotSpam'); await p.waitForTimeout(600);
+  out.afterNotSpam = { fold: !!(await p.$('#offSpam')), main: await p.$$eval('#offTile > .of-list .of-row', e => e.filter(x => /\$1(\D|$)/.test(x.textContent)).map(x => x.textContent.includes('New'))) };
+  expect(!out.afterNotSpam.fold && out.afterNotSpam.main.join() === 'true', 'moved into the main list, marked New');
+  d = await db(p); const ns = d.property_offers.find(x => x.id === sp.id); expect(!ns.suspected_spam && !ns.read_at && d.offer_events.some(e => e.offer_id === sp.id && e.kind === 'not_spam') && d.email_log.length === mailsBefore, 'flag cleared, unread, recorded, still no email');
+  await p.click('#navDash'); await p.waitForTimeout(500); const nn = await p.$$eval('.needs strong', e => e.map(x => x.textContent));
+  expect(!nn.some(t => /possible spam/.test(t)) && nn.filter(t => /New offer/.test(t)).length === out.needsAfter.filter(t => /New offer/.test(t)).length + 1, 'Needs you: one more new offer, no spam line');
+  await p.click('tr[data-prop="P1"]'); await p.waitForTimeout(500); await p.click('#offTile > .of-list .of-row'); await p.waitForTimeout(400);
   // a form offer: notes and expiry may change directly, nothing else
   out.direct = await p.evaluate(async id => { const c = window.supabase.createClient(); const a = await c.from('property_offers').update({ notes: 'rang them' }).eq('id', id); const b2 = await c.from('property_offers').update({ read_by: 'x' }).eq('id', id); return [!a.error, !!b2.error]; }, sp.id);
   expect(out.direct.every(Boolean), 'notes editable, other columns locked');

@@ -81,7 +81,9 @@ Deploy steps (phase 1):
 3. Check the network address can't be faked: send one `info` request to offer-public with a made-up `X-Forwarded-For` header (for
    example `X-Forwarded-For: 192.0.2.123`), then look at the newest `offer_hits` row's `net` and confirm it is the hash of the
    real address (send a second request without the header from the same machine: the two `net` values must match). If they
-   differ, the platform passes the caller's header through and netOf must be changed before the form goes live.
+   differ, the platform passes the caller's header through and netOf must be changed before the form goes live. Then send one
+   request with a made-up `CF-Connecting-IP` header (for example `CF-Connecting-IP: 192.0.2.124`) and confirm the recorded `net`
+   is still the same as without it. If it changes, the caller can set that header too, and netOf must stop trusting it.
 4. Check the notification email reaches Tim, and run the Jotform in parallel for a while.
 
 Unconfirmed, for Tim: when Otago Anniversary Day (the Monday nearest 23 March) is also Easter Monday, the working-day count takes the

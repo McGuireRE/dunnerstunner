@@ -227,4 +227,4 @@ agreements/<agreement id>/signatures/... (vendors may upload their own signature
 - Tim: `agent_offer_link(property, action get|open|close|regenerate|province, province)` (open only at signed, live or under
   offer), `agent_offer_add`, `agent_offer_correct(offer, details, note)`, `agent_offer_status(offer, withdrawn|lapsed|received, at,
   note)`, `agent_offer_read`, `agent_offer_gap(offer, reason)`, `agent_offer_settings(ks_days)`, `agent_offer_clause(key, wording)`,
-  `agent_offer_chattels(property, items)`. Vendors: no policy and no function: they see nothing.
+  `agent_offer_chattels(property, items)`, `agent_offer_not_spam(offer)` (out of "Possible spam": a new unread offer, recorded). Vendors: no policy and no function: they see nothing.

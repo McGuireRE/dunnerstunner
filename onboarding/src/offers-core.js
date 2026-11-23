@@ -187,7 +187,8 @@
     let d = Math.floor(n); const c = Math.round((n - d) * 100); const out = [];
     [[1e9, 'billion'], [1e6, 'million'], [1e3, 'thousand']].forEach(([v, w]) => { const q = Math.floor(d / v); if (q) { out.push(under1000(q) + ' ' + w); d %= v; } });
     if (d) out.push((out.length && d < 100 ? 'and ' : '') + under1000(d));
-    return out.join(' ') + (Math.floor(n) === 1 ? ' dollar' : ' dollars') + (c ? ' and ' + under1000(c) + (c === 1 ? ' cent' : ' cents') : '');
+    // a comma after millions or billions when more follows ("one million, two hundred thousand"), but not before "and"
+    return out.map((x, i) => i < out.length - 1 && /(million|billion)$/.test(x) && !/^and /.test(out[i + 1]) ? x + ',' : x).join(' ') + (Math.floor(n) === 1 ? ' dollar' : ' dollars') + (c ? ' and ' + under1000(c) + (c === 1 ? ' cent' : ' cents') : '');
   }
 
   /* ───── the date checks ───── */

@@ -2191,6 +2191,10 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const insps = await safe(sb.from('property_inspections').select('id,property_id,status,started_at').eq('status', 'in_progress'));
     // offers from the form that Tim hasn't opened yet (offers phase 1)
     const fresh = await safe(sb.from('property_offers').select('id,property_id,amount,received_at,related_party,source,suspected_spam').is('read_at', null).order('received_at', { ascending: false }));
+    // possible spam: one quiet line per property, opening its fold (no email was sent for these)
+    const spamBy = {}; fresh.filter(o => o.source === 'buyer' && o.suspected_spam).forEach(o => { spamBy[o.property_id] = (spamBy[o.property_id] || 0) + 1; });
+    Object.entries(spamBy).forEach(([pid, n]) => { const pr = props.find(p => p.id === pid); needs.push({ what: `${n} possible spam ${n === 1 ? 'offer' : 'offers'} to check`, where: (pr && pr.address) || 'Property', sub: 'Sent with the hidden field filled in', spam: true,
+      go: async () => { await viewProperty(pid); const f = $('#offSpam'); if (f) { f.open = true; f.scrollIntoView({ block: 'start' }); } } }); });
     fresh.filter(o => o.source === 'buyer' && !o.suspected_spam).forEach(o => { const pr = props.find(p => p.id === o.property_id); needs.push({ what: o.related_party ? 'New offer: a purchaser is connected with you' : 'New offer to read', where: (pr && pr.address) || 'Property', sub: money(+o.amount) + ', ' + fmtDT(o.received_at), go: () => viewOfferAgent(o.id), hot: true, offer: o.id }); });
     insps.forEach(x => { const pr = props.find(p => p.id === x.property_id); needs.push({ what: 'Inspection started, not finished', where: (pr && pr.address) || 'Property', sub: 'Started ' + fmtDT(x.started_at), go: () => { INS = null; viewInspection(x.id); }, insp: x.id }); });
     crs.forEach(r => needs.push({ what: 'Call them about cancelling', where: addr(r.agreement_id), sub: 'Request from ' + r.requested_by, go: () => viewAgentDetail(r.agreement_id), hot: true }));
@@ -5860,7 +5864,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <h1>${esc(money(+o.amount))} offer</h1>
       <p>${nt(p.address)}<br><span class="small">${o.source === 'agent' ? 'Entered by you' : 'From the offer form'}, ${esc(fmtDT(o.received_at))}</span>${off ? ` <span class="pill of-off">${o.status === 'withdrawn' ? 'Withdrawn' : 'Lapsed'} ${esc(fmtDT(o.status_at))}</span>` : ''}</p>
       ${o.related_party ? `<div class="card warnc of-related" role="alert"><h3 style="margin:0 0 4px">Connected to you</h3><p class="small" style="margin:0">The buyer says a purchaser is related to, or connected with, you or McGuire Real Estate. Deal with this before you go any further with the offer.</p></div>` : ''}
-      ${o.suspected_spam ? '<div class="card warnc tight of-spamflag"><p class="small" style="margin:0"><strong>Possible spam.</strong> It was sent with the form\'s hidden field filled in, which is usually a robot. You weren\'t emailed about it.</p></div>' : ''}
+      ${o.suspected_spam ? '<div class="card warnc tight of-spamflag"><p class="small" style="margin:0"><strong>Possible spam.</strong> It was sent with the form\'s hidden field filled in, which is usually a robot. You weren\'t emailed about it.</p><div class="toolbar"><button class="btn ghost" type="button" id="ofNotSpam">Not spam: treat it as a real offer</button></div></div>' : ''}
       ${o.needs_date_help ? '<div class="card note tight of-helpflag"><p class="small" style="margin:0">They asked for your help with the dates.</p></div>' : ''}
       <h2>Dates</h2>
       <div class="card tight"><table class="sum of-dates">${chk.conditions.filter(c => c.date).map(c => `<tr><td>${esc(c.label)}</td><td>${esc(L(c.date))} <span class="small">(${c.days} working days)</span></td></tr>`).join('')}
@@ -5885,6 +5889,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     </div>`;
     $('#ofBackP').addEventListener('click', () => viewProperty(o.property_id));
     $('#ofFix').addEventListener('click', () => viewOfferCorrect(oid));
+    const ns = $('#ofNotSpam'); if (ns) ns.addEventListener('click', async () => { ns.disabled = true; try { await must(sb.rpc('agent_offer_not_spam', { p_offer: oid })); toast('Moved to the offers list as a new offer'); viewProperty(o.property_id); } catch (_) { ns.disabled = false; } });
     const go = async (fn, args, errBox) => { try { await must(sb.rpc(fn, args)); viewOfferAgent(oid); } catch (e) { if (errBox) $(errBox).textContent = e.message || 'That didn\'t save.'; } };
     const gk = $('#ofGapOk'); if (gk) gk.addEventListener('click', () => { const r = $('#ofGapWhy').value.trim(); if (r.length < 5) return $('#ofGapErr').textContent = 'Give your reason.'; go('agent_offer_gap', { p_offer: oid, p_reason: r }, '#ofGapErr'); });
     const gc = $('#ofGapClear'); if (gc) gc.addEventListener('click', () => go('agent_offer_gap', { p_offer: oid, p_reason: null }));

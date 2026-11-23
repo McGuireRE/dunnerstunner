@@ -108,6 +108,15 @@ begin
   -- the hidden field filled: kept, flagged, the buyer told the truth (received)
   r := public.offer_public_submit(tok, good, '198.18.2.1', true);
   out := out || 'spam: ok=' || (r ->> 'ok') || ' flagged=' || (select suspected_spam from public.property_offers where id = (r ->> 'id')::uuid) || '; ';
+  -- moving it out of "Possible spam": only through Tim's function, which makes it a new unread offer and records it
+  oid := (r ->> 'id')::uuid; execute 'reset role'; execute 'set local role authenticated'; perform set_config('request.jwt.claims', agent, true);
+  perform public.agent_offer_read(oid);
+  begin update public.property_offers set suspected_spam = false where id = oid; out := out || 'SPAM FLAG CLEARED DIRECTLY; '; exception when others then out := out || 'direct unspam: ' || sqlerrm || '; '; end;
+  perform public.agent_offer_not_spam(oid);
+  out := out || 'not spam: ' || (select concat_ws(' ', suspected_spam, read_at is null) from public.property_offers where id = oid) || ' event=' || (select count(*) from public.offer_events where offer_id = oid and kind = 'not_spam') || '; ';
+  perform set_config('request.jwt.claims', vendor, true);
+  begin perform public.agent_offer_not_spam(oid); out := out || 'VENDOR UNSPAMMED; '; exception when others then out := out || 'vendor unspam: ' || sqlerrm || '; '; end;
+  execute 'reset role'; execute 'set local role service_role';
 
   -- 6. switched off, then a new token: the old one stops at once
   execute 'reset role'; execute 'set local role authenticated'; perform set_config('request.jwt.claims', agent, true);
