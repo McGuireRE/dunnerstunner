@@ -21,6 +21,8 @@
     ['Healthy Homes checklist and statement', 'agency', 1, 0], ['Marketing proof', 'agency', 1, 0],
     ['Appraisal', 'agency', 0, 0], ['Offer', 'agency', 0, 0], ['Identity document', 'agency', 0, 0], ['AML record', 'agency', 0, 0], ['CRM export', 'agency', 0, 0],
   ];
+  // kinds filed only from their own screen, never from the general uploader: the REINZ agreement blank (Offers tile, migration 019)
+  const SPECIAL_KINDS = [['REINZ agreement blank', 'agency', 0, 0]];
   const FOLDERS = [['photos', 'Photos'], ['title', 'Title and legal'], ['council', 'Council'], ['plans', 'Plans'], ['reports', 'Reports and checks'],
     ['work', 'Work done'], ['systems', 'Appliances and systems'], ['insurance', 'Insurance'], ['rental', 'Rental'], ['valuation', 'Rates and valuation'],
     ['other', 'Other'], ['agency', 'Agency papers']];
@@ -33,7 +35,7 @@
   const STORED = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp', MIME.docx, MIME.xlsx, MIME.doc, MIME.xls, 'text/plain', 'text/csv'];
   const ACCEPT = '.pdf,.jpg,.jpeg,.png,.webp,.heic,.heif,.docx,.xlsx,.doc,.xls,.txt,.csv,application/pdf,image/*';
 
-  const kindInfo = k => { const r = KINDS.find(x => x[0] === k); return r ? { kind: r[0], folder: r[1], shareable: !!r[2], exportable: !!r[3] } : null; };
+  const kindInfo = k => { const r = KINDS.find(x => x[0] === k) || SPECIAL_KINDS.find(x => x[0] === k); return r ? { kind: r[0], folder: r[1], shareable: !!r[2], exportable: !!r[3] } : null; };
   const folderOf = k => (kindInfo(k) || {}).folder || null;
   const folderName = f => (FOLDERS.find(x => x[0] === f) || [null, 'Not sorted yet'])[1];
   // may Tim share it with the vendors? a kind from the list that may be shared, and never a signed document the system filed
@@ -100,6 +102,6 @@
     const r = rules.find(([re]) => re.test(n)); return r ? r[1] : 'Other';
   }
 
-  const REPO = { KINDS, FOLDERS, ROOMS, MAX_BYTES, PHOTO_EDGE, DOC_IMAGE_EDGE, THUMB_EDGE, MIME, STORED, ACCEPT, kindInfo, folderOf, folderName, shareable, sniff, safeName, paths, titleFrom, sizeText, sha256, guessKind, ext };
+  const REPO = { KINDS, SPECIAL_KINDS, FOLDERS, ROOMS, MAX_BYTES, PHOTO_EDGE, DOC_IMAGE_EDGE, THUMB_EDGE, MIME, STORED, ACCEPT, kindInfo, folderOf, folderName, shareable, sniff, safeName, paths, titleFrom, sizeText, sha256, guessKind, ext };
   if (typeof module !== 'undefined' && module.exports) module.exports = REPO; else root.REPO = REPO;
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -155,6 +155,51 @@ Added by Tim, 23 November 2026 (built in phase 1):
 Open questions for Tim before phase 2: the wording of his electrical and technical report clauses and the Specified
 Due Diligence clauses as he wants them used (he is sending these).
 
+## Phase 2 detail: drafting (built 23 November 2026, branch `offers-phase2`; not reviewed, applied, pushed or deployed)
+
+Status: built and tested locally only (Tim was asleep; nothing live could be approved). Migration 019 is written and passed its
+rollback block on a local PostgreSQL 16 stand-in (`tests/pg-standin.sql`, then 010, 016 part A and 018), NOT the live project.
+
+- Blank per listing (Offers tile, agent only): "Agreement blank: load the PDF" (file picker; drag and drop on a computer). The PDF
+  is filed unchanged on the property file as kind "REINZ agreement blank" (agency papers, never shareable, never exported, filed
+  only from the Offers tile), with its SHA-256. `offer_blanks` records it with its pages, page sizes and the edition read from it.
+  A new blank keeps the old. Only an edition in the checked list (`EDITIONS` in `src/draft-core.js` and `offer_edition_ok()` in
+  019; now "Eleventh Edition 2022 (4)") can be mapped or drafted on; any other gets a plain message and is kept.
+- Places (`src/draft-core.js`, pdf.js): found by anchoring on printed labels (front page date, purchaser and and/or nominee, GST
+  and PPA Yes/No, price, Plus/Inclusive of GST, deposit, settlement, the six condition Yes/No and date fields, tenancies, Further
+  Terms, appendix 21.2, 21.3 and 22.0 with its working-days space, Schedule 1 2(a), Schedule 2 chattels, the back page parties and
+  lawyers, signatures, names and witnesses). Text the portal already filled in is read as "printed". Places are saved as versions
+  in `offer_blank_maps`; the newest approved version is used. The AI reading (edge function `offer-draft`, Haiku) proposes the
+  chattels, places to initial, sign or acknowledge (with page, reason and a position from the line it names) and notes; Tim keeps,
+  moves or deletes each, adds his own, ticks the chattels and approves. Approving sets the chattels buyers see on the offer form.
+- Clause library (`offer_terms`, agent-editable, "Your clause library" on the Offers tile): printed clauses 21.2, 21.3 and 22.0 by
+  number only, with a "strike it through when it doesn't apply" switch (22.0 on; 21.2 and 21.3 off until Tim decides); Tim's four
+  condition clauses take their wording from `offer_clauses`; the buyer's own condition only once Tim ticks it on the draft; chattels
+  on Schedule 2 (or as a further term); Tim can add his own standard terms with a rule. No wording means a highlighted placeholder,
+  "[Tim to add his electrical report clause]", which blocks approval. No REINZ or TLANZ text is held anywhere.
+- Drafting: "Draft on the agreement" on the offer. pdf-lib adds new content streams on top; the original streams are kept byte for
+  byte (tested). Further terms that don't fit continue on a page added straight after the Further Terms page. The draft PDF is
+  filed with its own SHA-256, the blank's fingerprint and the map (`offer_drafts`), recorded in `offer_events`. Only the lawyers'
+  details go on; a purchaser's own phone or email is never placed, even if typed as the lawyer's. The date at the top stays blank
+  (a disabled field: "added once fully agreed").
+- Review: the drafted pages at phone width with every filled place highlighted and numbered, everything placed (editable), Needs
+  you (blocking) and To check, "Re-draft with my changes", "Re-draft after a change" (after a correction), "Approve draft" (newest
+  draft only, by its fingerprint, nothing blocking: `offer_draft_approvals`), Download the PDF. Old drafts are never changed.
+- Lawyer lookup ("Find the lawyer's details" on the offer): the Anthropic web search tool through `fn/prefill_shared.ts`, values
+  kept only from pages the search returned, a direct dial or mobile before the firm's main line, each with its source link for
+  Tim's tick (`agent_lawyer_use`, recorded as a correction). Without the key or web search it says so and gives the links (a web
+  search prefilled and the Law Society pages).
+
+Deploy steps (phase 2), after review and with Tim's approval:
+1. Run the rollback block on the live project (`node onboarding/tests/offer-draft-rollback.js`): no CAPITALS. Then apply 019.
+2. Push, then deploy `offer-draft` (fn/offer_draft.ts) pinned to that commit, with the gateway's JWT verification ON. doc-prefill
+   and offer-public are unchanged.
+3. For the lawyer lookup, Tim switches on web search for the Anthropic account (Anthropic console). Until then it falls back to links.
+
+Known limits: strike-throughs the portal drew on the blank (Yes/No choices, struck chattels) are vector lines, not text, so they
+aren't read; Tim checks them (the chattels note says so). The typed font is Helvetica: a name with letters it can't show (such as
+macrons) is not placed and blocks approval with a message.
+
 ## Rules for later phases (Tim, 23 November 2026)
 
 Phase 2 (drafting):

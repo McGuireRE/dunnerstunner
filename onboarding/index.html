@@ -694,6 +694,42 @@ table.sum.of-sum td:first-child, table.sum.of-dates td:first-child { width: 40%;
   body.print-qr #offQr { position: absolute; left: 0; top: 0; width: 100%; }
   body.print-qr .of-qrimg { width: 120mm; }
 }
+/* offers phase 2: the agreement blank, its places, and the draft review */
+.dr-blank { border-top: 1px solid var(--line); margin-top: 10px; padding-top: 8px; }
+.dr-h { margin: 0 0 4px; font-size: 15px; }
+.dr-drop { display: none; border: 1.5px dashed var(--line); border-radius: 10px; padding: 10px; text-align: center; font-size: 14px; color: var(--muted); margin-top: 6px; }
+@media (hover: hover) and (pointer: fine) { .dr-drop { display: block; } }
+.dr-drop.over { border-color: var(--accent); color: var(--ink); }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.dr-page .card { overflow-wrap: anywhere; }
+.dr-holder { margin: 8px 0; max-width: 100%; overflow: hidden; }
+.dr-pg { position: relative; max-width: 100%; background: #fff; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.dr-cv { display: block; width: 100%; height: 100%; }
+.dr-box { position: absolute; box-sizing: border-box; border: 1.5px solid #1F5FBF; background: rgba(31, 95, 191, .12); border-radius: 3px; padding: 0; margin: 0; min-width: 6px; min-height: 6px; cursor: pointer; font: inherit; }
+.dr-box.dr-ai { border-color: #B26A00; background: rgba(255, 170, 0, .18); }
+.dr-box.dr-ai.dr-undecided { border-style: dashed; }
+.dr-box.dr-tim { border-color: #1E7A45; background: rgba(30, 122, 69, .16); }
+.dr-box.dr-never { border-color: #8A8580; background: repeating-linear-gradient(45deg, rgba(0,0,0,.06) 0 4px, transparent 4px 8px); }
+.dr-box.dr-on { outline: 2.5px solid #D9432C; outline-offset: 1px; }
+.dr-box.dr-fill { border-color: #1F5FBF; background: rgba(255, 230, 0, .22); cursor: default; }
+.dr-box.dr-ph { border-color: #B26A00; background: rgba(255, 200, 0, .42); cursor: default; }
+.dr-badge { position: absolute; top: -9px; left: -9px; min-width: 16px; height: 16px; border-radius: 8px; background: #1F5FBF; color: #fff; font-size: 10px; line-height: 16px; text-align: center; padding: 0 3px; }
+.dr-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; }
+.dr-key { display: inline-block; width: 14px; height: 10px; border: 1.5px solid #1F5FBF; background: rgba(31, 95, 191, .12); margin-right: 4px; vertical-align: middle; }
+.dr-key.dr-ai { border-color: #B26A00; background: rgba(255, 170, 0, .18); } .dr-key.dr-tim { border-color: #1E7A45; background: rgba(30, 122, 69, .16); }
+.dr-nav { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.dr-nav select { max-width: 60%; }
+.dr-move { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+.dr-list { list-style: none; padding: 0; margin: 4px 0; }
+.dr-list > li { padding: 6px 0; border-bottom: 1px solid var(--line); }
+.dr-prop { display: flex; gap: 8px; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; }
+.dr-prop.deleted { opacity: .6; }
+.dr-acts { display: flex; gap: 6px; flex-wrap: wrap; }
+.dr-need { color: var(--warn); font-weight: 500; }
+.dr-items { padding-left: 22px; margin: 4px 0; }
+.dr-items > li { margin: 0 0 10px; }
+.dr-items input, .dr-items textarea { width: 100%; box-sizing: border-box; }
+.pill.okp { background: var(--ok-soft); color: var(--ok-text, var(--ok)); }
 </style>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script src="../catalogue.js"></script>
@@ -3636,6 +3672,8 @@ window.JOURNEY_MEDIA_HINTS = {
     ['Healthy Homes checklist and statement', 'agency', 1, 0], ['Marketing proof', 'agency', 1, 0],
     ['Appraisal', 'agency', 0, 0], ['Offer', 'agency', 0, 0], ['Identity document', 'agency', 0, 0], ['AML record', 'agency', 0, 0], ['CRM export', 'agency', 0, 0],
   ];
+  // kinds filed only from their own screen, never from the general uploader: the REINZ agreement blank (Offers tile, migration 019)
+  const SPECIAL_KINDS = [['REINZ agreement blank', 'agency', 0, 0]];
   const FOLDERS = [['photos', 'Photos'], ['title', 'Title and legal'], ['council', 'Council'], ['plans', 'Plans'], ['reports', 'Reports and checks'],
     ['work', 'Work done'], ['systems', 'Appliances and systems'], ['insurance', 'Insurance'], ['rental', 'Rental'], ['valuation', 'Rates and valuation'],
     ['other', 'Other'], ['agency', 'Agency papers']];
@@ -3648,7 +3686,7 @@ window.JOURNEY_MEDIA_HINTS = {
   const STORED = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp', MIME.docx, MIME.xlsx, MIME.doc, MIME.xls, 'text/plain', 'text/csv'];
   const ACCEPT = '.pdf,.jpg,.jpeg,.png,.webp,.heic,.heif,.docx,.xlsx,.doc,.xls,.txt,.csv,application/pdf,image/*';
 
-  const kindInfo = k => { const r = KINDS.find(x => x[0] === k); return r ? { kind: r[0], folder: r[1], shareable: !!r[2], exportable: !!r[3] } : null; };
+  const kindInfo = k => { const r = KINDS.find(x => x[0] === k) || SPECIAL_KINDS.find(x => x[0] === k); return r ? { kind: r[0], folder: r[1], shareable: !!r[2], exportable: !!r[3] } : null; };
   const folderOf = k => (kindInfo(k) || {}).folder || null;
   const folderName = f => (FOLDERS.find(x => x[0] === f) || [null, 'Not sorted yet'])[1];
   // may Tim share it with the vendors? a kind from the list that may be shared, and never a signed document the system filed
@@ -3715,7 +3753,7 @@ window.JOURNEY_MEDIA_HINTS = {
     const r = rules.find(([re]) => re.test(n)); return r ? r[1] : 'Other';
   }
 
-  const REPO = { KINDS, FOLDERS, ROOMS, MAX_BYTES, PHOTO_EDGE, DOC_IMAGE_EDGE, THUMB_EDGE, MIME, STORED, ACCEPT, kindInfo, folderOf, folderName, shareable, sniff, safeName, paths, titleFrom, sizeText, sha256, guessKind, ext };
+  const REPO = { KINDS, SPECIAL_KINDS, FOLDERS, ROOMS, MAX_BYTES, PHOTO_EDGE, DOC_IMAGE_EDGE, THUMB_EDGE, MIME, STORED, ACCEPT, kindInfo, folderOf, folderName, shareable, sniff, safeName, paths, titleFrom, sizeText, sha256, guessKind, ext };
   if (typeof module !== 'undefined' && module.exports) module.exports = REPO; else root.REPO = REPO;
 })(typeof window !== 'undefined' ? window : globalThis);
 
@@ -4111,6 +4149,583 @@ window.JOURNEY_MEDIA_HINTS = {
   }
   const QR = { encode, svg };
   if (typeof module !== 'undefined' && module.exports) module.exports = QR; else root.QR = QR;
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
+/* Drafting offers onto the REINZ blank (offers phase 2). No page or database code here, so the tests can load it on its own
+   (draft-core.test.js) and the same rules run in the browser.
+
+   What it does:
+     readPages(pdfjs, bytes)   the text on each page of the blank, with positions (pdf.js, in the browser or in Node)
+     readEdition(pages)        the edition string printed on it; editionOk(e) says whether that edition has been checked
+     buildMap(pages)           the places to write, found by anchoring on the printed labels (never by copying the form's text)
+     planDraft(input)          what goes where for one offer: the drafting rules
+     renderDraft(PDFLib, ...)  the drafted PDF: the original pages untouched, with typed text and marks added on top
+
+   The form's own text is never kept here: only short label patterns to find places by, and clause numbers. Positions are PDF
+   points from the bottom left of the page, as pdf.js reports them and pdf-lib draws them. */
+(function (root) {
+  'use strict';
+  const OF = root.OFFERS || (typeof require === 'function' ? require('./offers-core.js') : null);
+
+  // The editions whose labels and layout have been checked against a real blank. Drafting is refused on any other. Keep the same
+  // list in offer_edition_ok() (migration 019).
+  const EDITIONS = { 'Eleventh Edition 2022 (4)': { checked: '2026-11-23', note: 'ADLS/TLANZ and REINZ, checked on the 309 Pine Hill Road pack' } };
+  const EDITION_RE = /\b([A-Z][a-z]+(?:-[a-z]+)?) Edition (\d{4})(?: \((\d+)\))?/;
+  const editionOk = e => Object.prototype.hasOwnProperty.call(EDITIONS, String(e || ''));
+  const INK = [0.05, 0.16, 0.45];   // typed text: a dark blue, plainly added
+  const FONT_SIZE = 9;
+
+  /* ───── reading the blank ───── */
+  async function readPages(pdfjs, bytes, opts) {
+    const doc = await pdfjs.getDocument(Object.assign({ data: new Uint8Array(bytes).slice(0), isEvalSupported: false, disableFontFace: true, useSystemFonts: false, verbosity: 0 }, opts || {})).promise;
+    const pages = [];
+    try {
+      for (let i = 1; i <= doc.numPages; i++) {
+        const pg = await doc.getPage(i), vp = pg.getViewport({ scale: 1 }), tc = await pg.getTextContent();
+        pages.push({ n: i, w: +vp.width.toFixed(2), h: +vp.height.toFixed(2), items: tc.items.filter(t => t.str && t.str.trim()).map(t => ({ s: t.str, x: +t.transform[4].toFixed(2), y: +t.transform[5].toFixed(2), w: +(t.width || 0).toFixed(2), h: +(t.height || Math.abs(t.transform[3]) || 9).toFixed(2) })) });
+        if (pg.cleanup) pg.cleanup();
+      }
+    } finally { try { if (doc.destroy) await doc.destroy(); else if (doc.cleanup) await doc.cleanup(); } catch (_) { } }
+    return pages;
+  }
+  // a character's rough width as a share of the font size (Helvetica-like), to find where a word sits inside a run of text
+  const cw = c => /[il.,:;'’|!()\[\]\/ jtfr]/.test(c) ? 0.28 : /[mwMW]/.test(c) ? 0.83 : /[A-Z]/.test(c) ? 0.68 : /[0-9]/.test(c) ? 0.556 : 0.52;
+  // the text of a page as lines (items on the same baseline, left to right), each with where every character falls
+  function lines(page) {
+    const its = page.items.slice().sort((a, b) => b.y - a.y || a.x - b.x), L = [];
+    for (const it of its) {
+      let ln = null;
+      for (const l of L) if (Math.abs(l.y - it.y) <= Math.max(1.5, Math.min(l.h, it.h) * 0.3)) { ln = l; break; }
+      if (!ln) { ln = { y: it.y, h: it.h, items: [] }; L.push(ln); }
+      ln.items.push(it); ln.h = Math.max(ln.h, it.h);
+    }
+    L.forEach((l, i) => {
+      l.items.sort((a, b) => a.x - b.x); let t = ''; const spans = [];
+      l.items.forEach((it, j) => {
+        if (j) { const pv = l.items[j - 1], gap = it.x - (pv.x + pv.w); if (gap > 0.8 && !/\s$/.test(t) && !/^\s/.test(it.s)) t += gap > 14 ? '   ' : ' '; }
+        spans.push({ it, start: t.length, end: t.length + it.s.length }); t += it.s;
+      });
+      Object.assign(l, { text: t, spans, x0: l.items[0].x, x1: Math.max(...l.items.map(x => x.x + x.w)), page: page.n });
+    });
+    L.sort((a, b) => b.y - a.y); L.forEach((l, i) => { l.i = i; });
+    return L;
+  }
+  // where a character index of a line sits on the page
+  function xAt(line, idx) {
+    for (const sp of line.spans) {
+      if (idx >= sp.start && idx <= sp.end) {
+        const s = sp.it.s, tot = Array.from(s).reduce((a, c) => a + cw(c), 0) || 1, part = Array.from(s.slice(0, idx - sp.start)).reduce((a, c) => a + cw(c), 0);
+        return sp.it.x + sp.it.w * (part / tot);
+      }
+      if (idx < sp.start) return sp.it.x;
+    }
+    return line.x1;
+  }
+  // every match of a pattern on a line: { start, end, x0, x1 }
+  function matchAll(line, re) {
+    const out = [], g = new RegExp(re.source, re.flags.includes('g') ? re.flags : re.flags + 'g'); let m;
+    while ((m = g.exec(line.text))) { out.push({ start: m.index, end: m.index + m[0].length, x0: xAt(line, m.index), x1: xAt(line, m.index + m[0].length), m }); if (!m[0].length) g.lastIndex++; }
+    return out;
+  }
+  const findLine = (L, re, from) => L.find(l => (from == null || l.y < from) && re.test(l.text));
+  const findLines = (L, re) => L.filter(l => re.test(l.text));
+  const allLines = pages => pages.map(p => ({ page: p, L: lines(p) }));
+
+  function readEdition(pages) {
+    const counts = {};
+    for (const p of pages.slice(0, 30)) for (const it of p.items) { const m = EDITION_RE.exec(it.s); if (m) { const e = m[0].trim(); counts[e] = (counts[e] || 0) + 1; } }
+    const best = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
+    return best ? best[0] : null;
+  }
+  // the agreement's own pages (they carry the edition string)
+  const editionPages = (pages, ed) => pages.filter(p => ed && p.items.some(i => i.s.includes(ed))).map(p => p.n);
+
+  /* ───── number words, for reading what a blank already says ───── */
+  const WORDS = { zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19, twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60 };
+  function numberIn(s) {
+    const t = String(s || '').toLowerCase(); let m = /\b(\d{1,3})\b/.exec(t); if (m) return +m[1];
+    m = /\b(twenty|thirty|forty|fifty|sixty)[- ](one|two|three|four|five|six|seven|eight|nine)\b/.exec(t); if (m) return WORDS[m[1]] + WORDS[m[2]];
+    m = new RegExp('\\b(' + Object.keys(WORDS).join('|') + ')\\b').exec(t); return m ? WORDS[m[1]] : null;
+  }
+  const NUM_WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen', 'twenty'];
+  const daysWords = n => (n <= 20 ? NUM_WORDS[n] : String(n)) + ` (${n}) working ${n === 1 ? 'day' : 'days'}`;
+
+  /* ───── the map: places found by their printed labels ───── */
+  // the six front-page conditions: offer key, clause number
+  const FRONT_CONDITIONS = [['finance', '9.1'], ['lim', '9.3'], ['builders', '9.4'], ['toxicology', '9.5'], ['oia', '9.6'], ['land_act', '9.7']];
+  const LABELS = {   // what each place is called on Tim's screens
+    date: 'Date of the agreement', purchaser: 'Purchaser', nominee: 'and/or nominee', gst_vendor: "GST: the vendor's registration", ppa_vendor: 'PPA: vendor', ppa_purchaser: 'PPA: purchaser',
+    price: 'Purchase price', gst_plus: 'Plus GST', gst_incl: 'Inclusive of GST', deposit: 'Deposit', settlement: 'Settlement date', tenancies: 'Tenancies',
+    further_terms: 'Further terms of sale', clause21_2: 'Clause 21.2 (deposit to NZ Real Estate Trust)', clause21_3: 'Clause 21.3 (KiwiSaver deposit)', clause22: "Clause 22.0 (lawyer's approval)", clause22_days: "Clause 22.0 working days",
+    chattels: 'Schedule 2: chattels', gst_purchaser: "Schedule 1, 2(a): purchaser's GST registration",
+    purchaser_back: 'Back page: purchaser', p_contact: "Back page: purchaser's contact details (never filled)", v_contact: "Back page: vendor's contact details (never filled)",
+    pl_firm: "Purchaser's lawyers: firm", pl_person: "Purchaser's lawyers: individual acting", pl_email: "Purchaser's lawyers: email", pl_phone: "Purchaser's lawyers: contact details", pl_service: "Purchaser's lawyers: email for notices",
+    vl_firm: "Vendor's lawyers: firm", vl_person: "Vendor's lawyers: individual acting", vl_email: "Vendor's lawyers: email", vl_phone: "Vendor's lawyers: contact details", vl_service: "Vendor's lawyers: email for notices",
+  };
+  FRONT_CONDITIONS.forEach(([k, c]) => { const n = (OF && OF.condInfo(k) || { label: k }).label; LABELS['c_' + k] = `${n} (clause ${c}): Yes/No`; LABELS['d_' + k] = `${n} (clause ${c}): date`; });
+  const r1 = n => Math.round(n * 10) / 10;
+  const box = (o) => Object.assign(o, { x: r1(o.x), y: r1(o.y), w: r1(Math.max(0, o.w)), h: r1(Math.max(0, o.h)) });
+  // text already on the blank to the right of a label (the eForms portal sometimes fills a field), and on lines carried under it
+  function printedAfter(L, line, x, stopRe, right) {
+    const same = line.spans.filter(sp => sp.it.x >= x - 1 && (right == null || sp.it.x < right)).map(sp => sp.it.s).join(' ').trim();
+    const out = same ? [same] : []; let prev = line;
+    if (same) for (const l of L) {
+      if (l.y >= prev.y) continue; if (prev.y - l.y > prev.h * 1.6) break; if (stopRe && stopRe.test(l.text)) break;
+      if (Math.abs(l.x0 - x) <= 12) { out.push(l.text.trim()); prev = l; } else break;
+    }
+    return out.join(' ').replace(/\s+/g, ' ').trim();
+  }
+  // a Yes/No (or Yes/No/NA) on a line: the place, with where Yes and No each sit
+  function yesNoOn(line, key, which) {
+    const ms = matchAll(line, /\bYes\s*\/\s*No\b/); if (!ms.length) return null; const m = which === 'first' ? ms[0] : ms[ms.length - 1];
+    const s = m.m[0], yEnd = m.start + 3, nStart = m.start + s.lastIndexOf('No');
+    return box({ id: key, key, kind: 'yesno', page: line.page, x: m.x0, y: line.y, w: m.x1 - m.x0, h: line.h, label: LABELS[key] || key, source: 'anchor',
+      yes: { x: r1(m.x0), w: r1(xAt(line, yEnd) - m.x0) }, no: { x: r1(xAt(line, nStart)), w: r1(xAt(line, nStart + 2) - xAt(line, nStart)) } });
+  }
+  function textAfter(L, line, m, key, page, stopX, opts) {
+    const x = m.x1 + 4, right = stopX != null ? stopX - 6 : page.w - 28;
+    const printed = printedAfter(L, line, x - 3, opts && opts.stop, stopX != null ? stopX - 1 : null);
+    return box({ id: key, key, kind: (opts && opts.kind) || 'text', page: page.n, x, y: line.y, w: right - x, h: line.h, label: LABELS[key] || key, source: 'anchor', printed: printed || undefined });
+  }
+  // the lines of a paragraph block from a heading line down to (not including) the next line matching stop, or the footer
+  function blockFrom(L, first, stopRe) {
+    const out = [first];
+    for (const l of L) { if (l.y >= first.y) continue; const prev = out[out.length - 1];
+      if (stopRe.test(l.text) || /©/.test(l.text) || prev.y - l.y > Math.max(prev.h, l.h) * 2.6) break; out.push(l); }
+    return out;
+  }
+  const blockPlace = (key, ls, page) => box({ id: key, key, kind: 'block', page: page.n, x: Math.min(...ls.map(l => l.x0)), y: ls[ls.length - 1].y, w: Math.max(...ls.map(l => l.x1)) - Math.min(...ls.map(l => l.x0)), h: ls[0].y + ls[0].h - ls[ls.length - 1].y,
+    label: LABELS[key] || key, source: 'anchor', lines: ls.map(l => ({ x0: r1(l.x0), x1: r1(l.x1), y: r1(l.y), h: r1(l.h) })) });
+
+  // Chattels as listed on Schedule 2: "Stove ( ) Rangehood (1 )" and plain names in columns. qty: a number, '' (empty brackets), or
+  // null (no brackets). Each with where it sits, so a chattel the buyer leaves out can be struck through on the schedule.
+  function parseChattels(ls) {
+    const out = [];
+    for (const l of ls) {
+      const parts = []; const re = /([A-Za-z][A-Za-z0-9/&'’ .,-]*?)\s*\(\s*(\d*)\s*\)/g; let m, last = 0;
+      while ((m = re.exec(l.text))) { if (m.index > last) parts.push({ s: l.text.slice(last, m.index), at: last }); parts.push({ s: m[1], at: m.index, qty: m[2] === '' ? '' : +m[2], end: m.index + m[0].length }); last = re.lastIndex; }
+      if (last < l.text.length) parts.push({ s: l.text.slice(last), at: last });
+      for (const p of parts) {
+        if (p.qty !== undefined) { const nm = p.s.trim(); if (nm) out.push({ name: nm, qty: p.qty, page: l.page, x0: r1(xAt(l, p.at)), x1: r1(xAt(l, p.end)), y: r1(l.y), h: r1(l.h) }); continue; }
+        // plain names, split where the columns are (three or more spaces)
+        let off = p.at; for (const seg of p.s.split(/(\s{3,})/)) { const nm = seg.trim(); if (nm && !/^\s+$/.test(seg)) { const st = off + seg.indexOf(nm); out.push({ name: nm, qty: null, page: l.page, x0: r1(xAt(l, st)), x1: r1(xAt(l, st + nm.length)), y: r1(l.y), h: r1(l.h) }); } off += seg.length; }
+      }
+    }
+    return out.filter(c => c.name.length >= 3 && c.name.length <= 80);
+  }
+
+  function buildMap(pages) {
+    const edition = readEdition(pages), places = [], missing = [], found = new Set();
+    const add = p => { if (p && !places.some(x => x.id === p.id)) { places.push(p); found.add(p.key); } };
+    const PL = allLines(pages);
+    const pageOf = re => PL.find(x => x.L.some(l => re.test(l.text)));
+    // the front page
+    const front = pageOf(/^PAYMENT OF PURCHASE PRICE/) || pageOf(/^PURCHASER:/);
+    if (front) {
+      const { page, L } = front;
+      const dl = findLine(L, /^DATE:/); if (dl) { const m = matchAll(dl, /^DATE:/)[0]; add(textAfter(L, dl, m, 'date', page, null, { kind: 'date' })); }
+      const pl = findLine(L, /^PURCHASER:/);
+      if (pl) {
+        const nom = matchAll(pl, /and\/or nominee/)[0];
+        const below = L.find(l => l.y < pl.y - 3 && /registered under the GST Act|^PROPERTY|^The vendor/.test(l.text));
+        const bottom = below ? below.y + below.h + 2 : pl.y - 50;
+        const printed = L.filter(l => l.y < pl.y - 2 && l.y > bottom).map(l => l.text.trim()).join(' ').trim();
+        add(box({ id: 'purchaser', key: 'purchaser', kind: 'area', page: page.n, x: pl.x0 + 3, y: pl.y - 12, w: (nom ? nom.x0 : page.w - 28) - pl.x0 - 9, h: pl.y - 12 - bottom + FONT_SIZE, label: LABELS.purchaser, source: 'anchor', printed: printed || undefined }));
+        if (nom) add(box({ id: 'nominee', key: 'nominee', kind: 'strike', page: page.n, x: nom.x0, y: pl.y, w: nom.x1 - nom.x0, h: pl.h, label: LABELS.nominee, source: 'anchor' }));
+      }
+      const g = findLine(L, /registered under the GST Act/); if (g) add(yesNoOn(g, 'gst_vendor'));
+      const ppv = findLine(L, /Purchase price allocation/); if (ppv) add(yesNoOn(ppv, 'ppa_vendor'));
+      const ppp = findLine(L, /Purchaser\s*\/\s*Purchaser.{0,2}s\s*Nominee/); if (ppp) add(yesNoOn(ppp, 'ppa_purchaser'));
+      const pr = findLine(L, /^Purchase price\s*:\s*\$/);
+      if (pr) { const m = matchAll(pr, /^Purchase price\s*:\s*\$/)[0], plus = matchAll(pr, /Plus GST/)[0], incl = matchAll(pr, /Inclusive of GST/)[0];
+        add(textAfter(L, pr, m, 'price', page, plus ? plus.x0 : null));
+        if (plus) add(box({ id: 'gst_plus', key: 'gst_plus', kind: 'strike', page: page.n, x: plus.x0, y: pr.y, w: plus.x1 - plus.x0, h: pr.h, label: LABELS.gst_plus, source: 'anchor' }));
+        if (incl) add(box({ id: 'gst_incl', key: 'gst_incl', kind: 'strike', page: page.n, x: incl.x0, y: pr.y, w: incl.x1 - incl.x0, h: pr.h, label: LABELS.gst_incl, source: 'anchor' })); }
+      const dp = findLine(L, /^Deposit\b.*?:\s*\$/); if (dp) { const m = matchAll(dp, /^Deposit\b.*?:\s*\$/)[0]; add(textAfter(L, dp, m, 'deposit', page, null, { stop: /^Balance of purchase price/ })); }
+      const st = findLine(L, /settlement date which is\s*:/); if (st) { const m = matchAll(st, /settlement date which is\s*:/)[0]; add(textAfter(L, st, m, 'settlement', page, null, { stop: /^OR\b/ })); }
+      for (const [k, c] of FRONT_CONDITIONS) {
+        const cl = L.find(l => l.text.includes(`(clause ${c})`) && /required/i.test(l.text));
+        if (!cl) continue;
+        add(yesNoOn(cl, 'c_' + k, 'first'));
+        const ds = matchAll(cl, /\bdate\b[^:]*:/); const dm = ds[ds.length - 1];
+        if (dm) add(textAfter(L, cl, dm, 'd_' + k, page));
+      }
+      const tn = findLine(L, /^TENANCIES\b/); if (tn) add(yesNoOn(tn, 'tenancies'));
+    }
+    // Further Terms of Sale
+    const ft = pageOf(/^FURTHER TERMS OF SALE/);
+    if (ft) { const { page, L } = ft, h = findLine(L, /^FURTHER TERMS OF SALE/), cont = findLine(L, /^Further Terms continued/);
+      const top = (cont && cont.y < h.y && h.y - cont.y < 30 ? cont.y : h.y) - 16, foot = L.filter(l => /©/.test(l.text)).map(l => l.y + l.h).sort((a, b) => b - a)[0] || 40;
+      add(box({ id: 'further_terms', key: 'further_terms', kind: 'area', page: page.n, x: h.x0 + 2, y: top, w: page.w - h.x0 - 30, h: top - foot - 10 + FONT_SIZE, label: LABELS.further_terms, source: 'anchor',
+        printed: L.filter(l => l.y < top + 4 && l.y > foot + 2).map(l => l.text.trim()).join(' ').trim() || undefined })); }
+    // the appendix: 21.2, 21.3 and 22.0
+    const ftIdx = ft ? ft.page.n : 0;
+    const ap = PL.find(x => x.page.n > ftIdx && x.L.some(l => /^Appendix\b/.test(l.text)) && x.L.some(l => /^2[12]\.\d\b/.test(l.text)))
+      || PL.find(x => x.page.n > ftIdx && x.L.some(l => /^21\.2\b/.test(l.text)) && x.L.some(l => /^22\.0\b/.test(l.text)))
+      || PL.find(x => x.page.n > ftIdx && x.L.some(l => /^22\.0\b/.test(l.text)));
+    if (ap) { const { page, L } = ap;
+      const c212 = findLine(L, /^21\.2\b/), c213 = findLine(L, /^21\.3\b/), c22 = findLine(L, /^22\.0\b/);
+      if (c212) add(blockPlace('clause21_2', blockFrom(L, c212, /^2[12]\.\d\b/), page));
+      if (c213) add(blockPlace('clause21_3', blockFrom(L, c213, /^2[12]\.\d\b|^23\.\d/), page));
+      if (c22) { const ls = blockFrom(L, c22, /^2[3-9]\.\d\b/); add(blockPlace('clause22', ls, page));
+        // the working days space: the word before the last "working day(s)" in the block
+        for (let i = ls.length - 1; i >= 0; i--) { const ms = matchAll(ls[i], /\bworking\b/); if (!ms.length) continue; const wm = ms[ms.length - 1];
+          const before = ls[i].text.slice(0, wm.start), pm = /(\S+)\s*$/.exec(before), word = pm ? pm[1] : '';
+          if (numberIn(word) != null) { const st = wm.start - (before.length - before.trimEnd().length) - word.length;
+            add(box({ id: 'clause22_days', key: 'clause22_days', kind: 'text', page: page.n, x: xAt(ls[i], st), y: ls[i].y, w: xAt(ls[i], st + word.length) - xAt(ls[i], st), h: ls[i].h, label: LABELS.clause22_days, source: 'anchor', printed: word }));
+          } else add(box({ id: 'clause22_days', key: 'clause22_days', kind: 'text', page: page.n, x: wm.x0 - 30, y: ls[i].y, w: 26, h: ls[i].h, label: LABELS.clause22_days, source: 'anchor' }));
+          break; } } }
+    // Schedule 1, 2(a): the purchaser's GST registration
+    const s1 = pageOf(/^SCHEDULE 1\b|\bSCHEDULE 1\b.*Edition/);
+    if (s1) { const l = s1.L.find(x => /^2\(a\)/.test(x.text.trim()) && /purchaser is registered/i.test(x.text)); if (l) add(yesNoOn(l, 'gst_purchaser')); }
+    // Schedule 2: chattels
+    const s2 = pageOf(/^SCHEDULE 2\b/);
+    let chattels = [];
+    if (s2) { const { page, L } = s2, hd = findLine(L, /^SCHEDULE 2\b/), stop = L.find(l => l.y < hd.y && /^Both parties should check|^SCHEDULE 3\b/.test(l.text));
+      const startL = L.filter(l => l.y < hd.y && /Strike out or add|List all chattels/.test(l.text)).pop() || hd;
+      const list = L.filter(l => l.y < startL.y && (!stop || l.y > stop.y));
+      chattels = parseChattels(list);
+      const lowest = list.length ? list[list.length - 1].y : startL.y, bottom = stop ? stop.y + stop.h + 4 : lowest - 40;
+      add(box({ id: 'chattels', key: 'chattels', kind: 'area', page: page.n, x: (list[0] || startL).x0, y: lowest - 13, w: page.w - (list[0] || startL).x0 - 30, h: Math.max(0, lowest - 13 - bottom + FONT_SIZE), label: LABELS.chattels, source: 'anchor' })); }
+    // the back page: parties and lawyers
+    const bp = pageOf(/^PURCHASER.?S LAWYERS:/);
+    if (bp) { const { page, L } = bp;
+      const lawyerBlock = (headRe, pre, endRe) => { const h = findLine(L, headRe); if (!h) return;
+        const end = L.find(l => l.y < h.y && endRe.test(l.text)); const ls = L.filter(l => l.y < h.y && (!end || l.y > end.y));
+        const pick = (re, k, opts) => { const l = ls.find(x => re.test(x.text)); if (!l) return; const m = matchAll(l, re)[0]; add(textAfter(L, l, m, pre + k, page, null, opts)); };
+        pick(/^Firm:/, 'firm'); pick(/^Individual Acting:/, 'person'); pick(/^Email:/, 'email'); pick(/^Contact Details:/, 'phone', { kind: 'area' }); pick(/^Email address for service of notices.*?:/, 'service');
+        const ph = places.find(p => p.id === pre + 'phone'), sv = places.find(p => p.id === pre + 'service');
+        if (ph && sv && sv.y < ph.y) { ph.h = r1(ph.y - sv.y - 4); } };
+      lawyerBlock(/^VENDOR.?S LAWYERS:/, 'vl_', /^PURCHASER:/);
+      lawyerBlock(/^PURCHASER.?S LAWYERS:/, 'pl_', /^SALE BY|LICENSED REAL ESTATE AGENT/);
+      const party = (re, key, never, nextRe) => { const h = findLine(L, re); if (!h) return; const cd = L.find(l => l.y < h.y && /^Contact Details:/.test(l.text));
+        if (key) add(box({ id: key, key, kind: 'area', page: page.n, x: h.x0 + 3, y: h.y - 12, w: page.w - h.x0 - 34, h: cd ? h.y - 12 - (cd.y + cd.h) + FONT_SIZE : 24, label: LABELS[key], source: 'anchor',
+          printed: L.filter(l => l.y < h.y - 2 && cd && l.y > cd.y + 2).map(l => l.text.trim()).join(' ').trim() || undefined }));
+        if (cd) { const m = matchAll(cd, /^Contact Details:/)[0]; const nx = L.find(l => l.y < cd.y && nextRe.test(l.text));
+          add(box({ id: never, key: never, kind: 'never', page: page.n, x: m.x1 + 4, y: cd.y, w: page.w - m.x1 - 32, h: nx ? cd.y - nx.y - 4 : cd.h, label: LABELS[never], source: 'anchor' })); } };
+      party(/^PURCHASER:/, 'purchaser_back', 'p_contact', /^PURCHASER.?S LAWYERS:/);
+      party(/^VENDOR:/, null, 'v_contact', /^VENDOR.?S LAWYERS:/); }
+    // signatures, names and witnesses
+    const sg = pageOf(/Signature of Purchaser\(s\):/);
+    if (sg) { const { page, L } = sg, mid = page.w / 2, hd = findLine(L, /Signature of Purchaser\(s\):/);
+      let ip = 0, iv = 0;
+      L.filter(l => l.y < hd.y).forEach(l => {
+        matchAll(l, /_{12,}/).forEach(m => { const left = m.x0 < mid, i = left ? ++ip : ++iv, k = (left ? 'sig_purchaser_' : 'sig_vendor_') + i;
+          add(box({ id: k, key: left ? 'sig_purchaser' : 'sig_vendor', kind: 'signature', page: page.n, x: m.x0, y: l.y + 1, w: m.x1 - m.x0, h: 22, label: (left ? 'Purchaser signature ' : 'Vendor signature ') + i, source: 'anchor' })); });
+      });
+      let np = 0, nv = 0;
+      L.filter(l => l.y < hd.y).forEach(l => {
+        matchAll(l, /\bName:/).forEach(m => { const left = m.x0 < mid, i = left ? ++np : ++nv, k = (left ? 'name_purchaser_' : 'name_vendor_') + i;
+          const right = left ? mid - 12 : page.w - 28, pr = l.spans.filter(sp => sp.it.x >= m.x1 - 1 && sp.it.x < right).map(sp => sp.it.s).join(' ').trim();
+          add(box({ id: k, key: left ? 'name_purchaser' : 'name_vendor', kind: 'name', page: page.n, x: m.x1 + 4, y: l.y, w: right - m.x1 - 4, h: l.h, label: (left ? 'Purchaser name ' : 'Vendor name ') + i, source: 'anchor', printed: pr || undefined })); });
+      }); }
+    PL.forEach(({ page, L }) => L.filter(l => /^Witness(ed)?\b/.test(l.text.trim())).forEach((l, i) => add(box({ id: `witness_p${page.n}_${i + 1}`, key: 'witness', kind: 'witness', page: page.n, x: l.x0, y: l.y - 22, w: 200, h: 20, label: 'Witness (page ' + page.n + ')', source: 'anchor' }))));
+    const want = ['date', 'purchaser', 'nominee', 'gst_vendor', 'price', 'deposit', 'settlement', ...FRONT_CONDITIONS.flatMap(([k]) => ['c_' + k, 'd_' + k]), 'tenancies', 'further_terms', 'clause21_2', 'clause21_3', 'clause22', 'clause22_days', 'chattels',
+      'purchaser_back', 'pl_firm', 'pl_person', 'pl_email', 'pl_phone', 'pl_service', 'vl_firm', 'vl_person', 'vl_email', 'vl_phone', 'p_contact', 'sig_purchaser', 'name_purchaser', 'sig_vendor'];
+    want.forEach(k => { if (!found.has(k)) missing.push(k); });
+    return { edition, edition_checked: editionOk(edition), pages: pages.length, sizes: pages.map(p => [p.w, p.h]), agreement_pages: editionPages(pages, edition), places, missing, chattels };
+  }
+
+  // where a place sits on the page, as { bottom, top } in points: an area hangs down from its first line; a line of text sits on
+  // its baseline; a block, signature or proposed place rises from its y
+  function rectOf(p) {
+    if (p.kind === 'area' || p.kind === 'never') return { bottom: p.y + FONT_SIZE - p.h, top: p.y + FONT_SIZE };
+    if (['text', 'date', 'yesno', 'strike', 'name'].includes(p.kind)) return { bottom: p.y - 2, top: p.y + p.h };
+    if (p.kind === 'block') return { bottom: p.y - 2, top: p.y + p.h };
+    return { bottom: p.y, top: p.y + p.h };
+  }
+
+  /* ───── the pack's text for the AI, and its proposals back onto the page ───── */
+  // each page as numbered lines, so a proposal can name the line it is about (the text is data, never instructions)
+  function packText(pages, maxLine) {
+    return pages.map(p => ({ page: p.n, lines: lines(p).map(l => ({ i: l.i, t: l.text.replace(/\s+/g, ' ').trim().slice(0, maxLine || 300) })).filter(l => l.t) }));
+  }
+  // batches of pages for the reader: at most so many pages and characters each
+  function packBatches(pt, maxPages, maxChars) {
+    const out = []; let cur = [], n = 0;
+    for (const p of pt) { const c = p.lines.reduce((a, l) => a + l.t.length + 8, 0);
+      if (cur.length && (cur.length >= (maxPages || 6) || n + c > (maxChars || 40000))) { out.push(cur); cur = []; n = 0; }
+      cur.push(p); n += c; }
+    if (cur.length) out.push(cur); return out;
+  }
+  const PROPOSAL_KINDS = { initial: { w: 46, h: 18, label: 'Initials' }, sign: { w: 150, h: 22, label: 'Signature' }, ack: { w: 120, h: 18, label: 'Acknowledge' } };
+  // an AI proposal { page, line, kind, reason } as a place beside the line it names (an approximate position, for Tim to move)
+  function placeFromProposal(pages, pr, i) {
+    const page = pages.find(p => p.n === pr.page); if (!page) return null;
+    const L = lines(page), l = L.find(x => x.i === pr.line) || L[0]; if (!l) return null;
+    const k = PROPOSAL_KINDS[pr.kind] ? pr.kind : 'initial', d = PROPOSAL_KINDS[k];
+    const x = Math.min(page.w - d.w - 14, Math.max(l.x1 + 8, page.w - d.w - 40));
+    return box({ id: 'ai' + (i + 1), key: 'ai_' + k, kind: k === 'sign' ? 'signature' : k === 'ack' ? 'ack' : 'initial', page: page.n, x, y: l.y - 5, w: d.w, h: d.h, label: d.label + ' (page ' + page.n + ')', source: 'ai', reason: String(pr.reason || '').slice(0, 300), line: l.i });
+  }
+
+  /* ───── the drafting rules ───── */
+  const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  const fullDate = iso => { const [y, m, d] = String(iso).split('-').map(Number); return `${d} ${MONTHS[m - 1]} ${y}`; };
+  const money = n => '$' + Number(n).toLocaleString('en-NZ', { minimumFractionDigits: n % 1 ? 2 : 0, maximumFractionDigits: 2 });
+  const PLACEHOLDERS = { electrical: '[Tim to add his electrical report clause]', technical: '[Tim to add his specified technical report clause]', sale: '[Tim to add his sale of another property clause]', sdd: '[Tim to add his Specified Due Diligence clause]', custom: "[Tim to tick the buyer's own condition wording]" };
+  const placeholderFor = (key, title) => PLACEHOLDERS[key] || `[Tim to add his ${String(title || key).toLowerCase()} clause]`;
+  const isPlaceholder = s => /^\[Tim to /.test(String(s || ''));
+  // does a library rule apply to this offer?
+  function ruleApplies(rule, d) {
+    const w = (rule && rule.when) || {}, keys = (d.conditions || []).map(c => c.key);
+    if (!Object.keys(w).length) return false;
+    for (const [k, v] of Object.entries(w)) {
+      if (k === 'always') { if (v !== true) return false; }
+      else if (k === 'kiwisaver') { if (d.kiwisaver !== v) return false; }
+      else if (k === 'condition') { if (!keys.includes(v)) return false; }
+      else if (k === 'no_condition') { if (keys.includes(v)) return false; }
+      else if (k === 'lawyer_approval') { if (!!d.lawyer_approval !== !!v) return false; }
+      else if (k === 'gst_registered') { if (d.gst_registered !== v) return false; }
+      else if (k === 'entity') { if (!!String(d.entity || '').trim() !== !!v) return false; }
+      else if (k === 'nominee') { if ((d.nominee !== false) !== !!v) return false; }
+      else if (k === 'chattels') { if (!!((d.chattels_add || []).length || (d.chattels_exclude || []).length) !== !!v) return false; }
+      else if (k === 'settlement') { if (((d.settlement || {}).kind || '') !== v) return false; }
+      else return false;
+    }
+    return true;
+  }
+  const winAnsi = s => /^[\n\x20-\x7e -ÿ‘’“”•…€]*$/.test(String(s || ''));
+  const norm = s => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const sameChattel = (a, b) => { const x = norm(a), y = norm(b); return !!x && !!y && (x === y || x.replace(/s\b/g, '') === y.replace(/s\b/g, '')); };
+
+  // input: { details (the offer as it stands), map (places), terms (the library rows), clauses (Tim's wording: {electrical, ...}),
+  //   edits ({items: {id: text}, custom_ok, custom_wording, date_format: 'date'|'date_days', extra_terms: [text]}),
+  //   today ('YYYY-MM-DD', the day the draft counts working days from), province, vendorLawyer ({firm, person, email, phone, source}) }
+  // returns { items: [{ id, key, place, page, kind: text|area|strike|lines, text, x, y, w, h, label, placeholder }], needs: [{ id, text, blocking }], terms: [...] }
+  function planDraft(input) {
+    const d = input.details || {}, map = input.map || { places: [] }, E = input.edits || {}, edits = E.items || {}, items = [], needs = [];
+    const P = id => (map.places || []).find(p => p.id === id), byKey = k => (map.places || []).filter(p => p.key === k);
+    const today = input.today || (OF ? OF.nzToday() : new Date().toISOString().slice(0, 10)), province = input.province || 'otago', fmt = E.date_format === 'date_days' ? 'date_days' : 'date';
+    const need = (id, text, blocking) => { if (!needs.some(n => n.id === id)) needs.push({ id, text, blocking: !!blocking }); };
+    const put = (id, place, text, extra) => {
+      if (!place) { need('missing_' + id, `There is no place for ${extra && extra.label || id} on this blank. Add it to the places on the blank, or write it in by hand.`, !(extra && extra.optional)); return; }
+      let t = Object.prototype.hasOwnProperty.call(edits, id) ? edits[id] : text; if (t == null || t === '') return;
+      t = String(t);
+      if (!winAnsi(t)) { need('font_' + id, `${extra && extra.label || place.label}: "${t.slice(0, 80)}" has letters the typed font can't show (such as macrons). Write it in by hand, or change it.`, true); return; }
+      const it = Object.assign({ id, key: place.key, place: place.id, page: place.page, kind: place.kind === 'area' ? 'area' : 'text', text: t, x: place.x, y: place.y, w: place.w, h: place.h, label: (extra && extra.label) || place.label, edited: Object.prototype.hasOwnProperty.call(edits, id) }, extra && extra.item);
+      if (isPlaceholder(t)) { it.placeholder = true; need('ph_' + id, `${it.label}: ${t}`, true); }
+      items.push(it); return it;
+    };
+    const strike = (id, place, label, extra) => { if (!place) return; items.push(Object.assign({ id, key: place.key, place: place.id, page: place.page, kind: 'strike', x: place.x, y: place.y, w: place.w, h: place.h, label }, extra || {})); };
+    const strikeYesNo = (id, place, yes, label) => { if (!place || !place.yes) return; const part = yes ? place.no : place.yes;
+      items.push({ id, key: place.key, place: place.id, page: place.page, kind: 'strike', x: part.x, y: place.y, w: part.w, h: place.h, label: `${label}: ${yes ? 'Yes' : 'No'}`, value: yes ? 'Yes' : 'No' }); };
+    const already = (place, label) => { if (place && place.printed) need('printed_' + place.id, `${label}: the blank already says "${place.printed.slice(0, 120)}". Check it against the offer.`, false); };
+
+    // the date at the top: left blank until fully agreed
+    need('date', 'The date at the top is left blank. You add it in full, with the month name, once the agreement is fully agreed.', false);
+    // the purchaser: full legal names, or the entity, and "and/or nominee" as chosen
+    const names = (d.purchasers || []).map(p => [p.first, p.last].map(x => String(x || '').trim()).filter(Boolean).join(' ')).filter(Boolean);
+    const entity = String(d.entity || '').trim();
+    const who = entity || (names.length > 1 ? names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1] : names[0] || '');
+    const pp = P('purchaser'); if (pp && pp.printed) already(pp, 'Purchaser');
+    put('purchaser', pp, who, { label: 'Purchaser' });
+    if (d.nominee === false) strike('nominee', P('nominee'), 'and/or nominee: struck out (the buyer chose no nominee)');
+    put('purchaser_back', P('purchaser_back'), who, { label: 'Back page: purchaser', optional: true });
+    // names under the purchasers' signature lines (never anyone's contact details)
+    const nameSlots = byKey('name_purchaser');
+    const signers = entity ? [] : names;
+    signers.forEach((n, i) => { if (nameSlots[i]) put('name_purchaser_' + (i + 1), nameSlots[i], n, { label: 'Purchaser name ' + (i + 1) }); });
+    if (signers.length > nameSlots.length) need('names_more', `There are ${signers.length} purchasers and ${nameSlots.length} name places under the signatures. Add the others by hand or on a separate page.`, true);
+    if (entity) need('entity_signers', `The purchaser is ${entity}. Fill in who signs for it, and which of Director, Trustee and so on applies, under the signatures.`, false);
+    // GST: the front page asks about the vendor's registration: always yours. Schedule 1, 2(a) is the purchaser's: only if they said.
+    need('gst_vendor', "GST on the front page is the vendor's registration: fill it in yourself.", false);
+    if (d.gst_registered === true || d.gst_registered === false) {
+      const g = P('gst_purchaser');
+      if (g) strikeYesNo('gst_purchaser', g, d.gst_registered, "Schedule 1, 2(a), the purchaser's GST registration");
+      need('gst_schedule', `The buyer says they are ${d.gst_registered ? '' : 'not '}registered for GST for this purchase${d.gst_number ? ` (GST number ${d.gst_number})` : ''}. Schedule 1 is only completed if the vendor is registered.`, false);
+    } else need('gst_unknown', 'The buyer did not say whether they are registered for GST for this purchase.', false);
+    // price
+    if (d.price != null) put('price', P('price'), money(+d.price), { label: 'Purchase price' });
+    need('gst_inclusive', 'Plus GST or inclusive of GST: strike out one if it applies (if neither is struck out, the price includes GST, if any).', false);
+    // deposit: the blank's own (printed) unless it has none
+    const dp = P('deposit'); if (dp && dp.printed) need('deposit', `Deposit: the blank already says "${dp.printed.slice(0, 120)}". Left as it is.`, false);
+    else if (dp) need('deposit_empty', 'Deposit: the blank has no deposit filled in. Add it.', true);
+    // settlement
+    const s = d.settlement || {}, sp = P('settlement');
+    let settleText = '';
+    if (s.kind === 'date' && s.date) settleText = fullDate(OF ? OF.onOrBefore(s.date, { province }) : s.date);
+    else if (s.kind === 'relative' && +s.days >= 1) settleText = daysWords(+s.days) + ' from the date of confirmation of this agreement';
+    if (sp && sp.printed) {
+      const same = s.kind === 'relative' && numberIn(sp.printed) === +s.days && /working day/i.test(sp.printed) && /confirmation/i.test(sp.printed);
+      if (same) need('settlement_same', `Settlement: the blank already says "${sp.printed.slice(0, 120)}", which matches the offer.`, false);
+      else if (settleText) { strike('settlement_struck', sp, 'Settlement: the wording already on the blank, struck out', { w: Math.min(sp.w, 240) }); put('settlement', Object.assign({}, sp, { y: sp.y - 9.5 }), settleText, { label: 'Settlement date' });
+        need('settlement_changed', `Settlement: the blank already said "${sp.printed.slice(0, 120)}". It is struck out and the offer's settlement written under it. Check it.`, false); }
+    } else if (settleText) put('settlement', sp, settleText, { label: 'Settlement date' });
+    // the six front-page conditions: Yes or No, and the date
+    const cond = k => (d.conditions || []).find(c => c.key === k);
+    const dateText = c => { if (!OF) return c.date || `${c.days} working days`; const r = OF.conditionDate(c, today, province); if (!r) return '';
+      return fmt === 'date_days' ? `${fullDate(r.date)} (${r.days} working ${r.days === 1 ? 'day' : 'days'})` : fullDate(r.date); };
+    for (const [k, clause] of FRONT_CONDITIONS) {
+      const c = cond(k), yn = P('c_' + k), label = `${(OF && OF.condInfo(k) || { label: k }).label} (clause ${clause})`;
+      if (!yn) { if (c) need('missing_c_' + k, `There is no Yes/No for ${label} on this blank. Add it to the places on the blank.`, true); continue; }
+      strikeYesNo('c_' + k, yn, !!c, label);
+      if (c) put('d_' + k, P('d_' + k), dateText(c), { label: label + ': date' });
+    }
+    if ((d.conditions || []).some(c => c.days && !c.date)) need('days_from', `Condition dates given as working days are counted from today (${fullDate(today)}). On the agreement they run from the day everyone signs, so check them on the day.`, false);
+    // tenancies: not on the offer form
+    need('tenancies', 'Tenancies: Yes or No is for you to fill in.', false);
+    // the clause library
+    const terms = (input.terms || []).filter(t => t.active !== false).sort((a, b) => (a.position || 0) - (b.position || 0)), ft = [];
+    const T = k => terms.find(t => t.key === k);
+    // deposit clauses 21.2 and 21.3 are printed; a rule keeps the one that applies and may strike the other
+    [['deposit_nzret', 'clause21_2'], ['deposit_kiwisaver', 'clause21_3']].forEach(([k, pid]) => { const t = T(k); if (!t) return; const on = ruleApplies(t.rule, d);
+      if (on) need('keep_' + k, `${t.title}: kept, as the buyer answered ${d.kiwisaver ? 'yes' : 'no'} to KiwiSaver.`, false);
+      else if ((t.rule || {}).strike_when_unused && P(pid)) strike('strike_' + pid, P(pid), `${t.title}: struck through (does not apply)`, { kind: 'lines', lines: P(pid).lines }); });
+    // lawyer's approval: printed clause 22.0 struck through when not chosen; its working days filled in when it is
+    const law = cond('lawyer'), c22 = P('clause22'), t22 = T('lawyer_approval');
+    if (law) {
+      if (!c22) need('missing_clause22', "The buyer chose lawyer's approval, but this blank has no clause 22.0. Add it as a further term.", true);
+      else { const r = OF ? OF.conditionDate(law, today, province) : null, n = law.days ? +law.days : r ? r.days : null, dp22 = P('clause22_days');
+        if (n && dp22) { if (dp22.printed) { if (numberIn(dp22.printed) !== n) { strike('clause22_days_struck', dp22, "Clause 22.0: the working days already on the blank, struck out"); put('clause22_days', Object.assign({}, dp22, { x: dp22.x + dp22.w / 2 - 3, y: dp22.y + dp22.h * 0.72, w: 40 }), String(n), { label: "Clause 22.0: working days", item: { size: 7 } }); }
+            else need('clause22_same', `Clause 22.0 already says ${dp22.printed} working day${n === 1 ? '' : 's'}, which matches the offer.`, false); }
+          else put('clause22_days', dp22, String(n), { label: "Clause 22.0: working days" }); }
+        if (law.date) need('clause22_date', `Lawyer's approval: the buyer gave a date (${fullDate(law.date)}); clause 22.0 counts working days, so ${n} working days from today is used. Check it.`, false); }
+    } else if (c22 && (!t22 || (t22.rule || {}).strike_when_unused !== false)) strike('clause22', c22, "Clause 22.0 (lawyer's approval): struck through, not chosen", { kind: 'lines', lines: c22.lines });
+    // further terms: Tim's clauses by rule, from the library, in its order
+    let ftn = 0; const term = (id, title, text, extra) => { ft.push(Object.assign({ id, title, text }, extra || {})); };
+    for (const t of terms) {
+      if (t.kind !== 'further_term' || t.key === 'chattels' || !ruleApplies(t.rule, d)) continue;
+      if (t.wording_from === 'custom') {
+        const c = cond('custom'); if (!c) continue;
+        const w = String(E.custom_wording || c.wording || '').trim();
+        if (E.custom_ok && w) term('ft_custom', "Purchaser's condition", w, { custom: true, request: c.request || '', wording: c.wording || '', ai: !!c.ai, date: dateText(c) });
+        else term('ft_custom', "Purchaser's condition", PLACEHOLDERS.custom, { custom: true, request: c.request || '', wording: c.wording || '', ai: !!c.ai, date: dateText(c) });
+        continue;
+      }
+      let w = t.wording_from ? String((input.clauses || {})[t.wording_from] || '').trim() : String(t.wording || '').trim();
+      const c = t.wording_from ? cond(t.wording_from) : null;
+      if (!w) w = placeholderFor(t.wording_from || t.key, t.title);
+      else if (c) w = w.replace(/\{detail\}/g, c.detail || '').replace(/\{address\}/g, d.sale_address || '').replace(/\{date\}/g, dateText(c));
+      term('ft_' + t.key, t.title, w, c ? { date: dateText(c), detail: c.detail || (t.wording_from === 'sale' ? d.sale_address : '') } : {});
+    }
+    (E.extra_terms || []).map(x => String(x || '').trim()).filter(Boolean).forEach((x, i) => term('ft_extra_' + (i + 1), 'Your further term', x));
+    // chattels: on the schedule (strike out or add), or as a further term, as the library says
+    const chT = T('chattels'), where = ((chT && chT.rule) || {}).where === 'further_terms' ? 'further_terms' : 'schedule';
+    const add = (d.chattels_add || []).filter(Boolean), exc = (d.chattels_exclude || []).filter(Boolean);
+    if (add.length || exc.length) {
+      if (where === 'schedule' && P('chattels')) {
+        if (add.length) put('chattels_add', P('chattels'), 'Also included: ' + add.join(', '), { label: 'Schedule 2: chattels added' });
+        exc.forEach((x, i) => { const hit = (input.map.chattels || []).find(c => sameChattel(c.name, x));
+          if (hit) items.push({ id: 'chattel_x_' + (i + 1), key: 'chattels', place: 'chattels', page: hit.page, kind: 'strike', x: hit.x0, y: hit.y, w: hit.x1 - hit.x0, h: hit.h, label: `Schedule 2: ${hit.name} struck out (excluded)` });
+          else need('chattel_x_' + (i + 1), `The buyer wants "${x}" left out, but it isn't on Schedule 2. Add it to the further terms if it matters.`, false); });
+      } else {
+        const w = chT && String(chT.wording || '').trim();
+        term('ft_chattels', 'Chattels', w ? w.replace(/\{add\}/g, add.join(', ')).replace(/\{exclude\}/g, exc.join(', ')) : placeholderFor('chattels', 'chattels'), { detail: [add.length ? 'Add: ' + add.join(', ') : '', exc.length ? 'Leave out: ' + exc.join(', ') : ''].filter(Boolean).join('. ') });
+      }
+    }
+    // the further terms go on as a numbered list (a placeholder for anything Tim hasn't worded)
+    const ftp = P('further_terms');
+    if (ft.length) {
+      const text = ft.map(x => { ftn++; const edited = Object.prototype.hasOwnProperty.call(edits, x.id) ? String(edits[x.id] || '') : null; const body = edited != null ? edited : x.text; x.number = ftn; x.text = body;
+        return `${ftn}. ${x.title}${x.detail ? ' (' + x.detail + ')' : ''}: ${body}${x.date && !/\{date\}/.test(body) ? ' Condition date: ' + x.date + '.' : ''}`; });
+      const it = put('further_terms', ftp, text.join('\n'), { label: 'Further terms of sale', item: { terms: ft.map(x => ({ id: x.id, number: x.number, title: x.title, text: x.text, placeholder: isPlaceholder(x.text), custom: !!x.custom, request: x.request, wording: x.wording, ai: x.ai })) } });
+      ft.filter(x => isPlaceholder(x.text)).forEach(x => need('ph_' + x.id, `Further term ${x.number}, ${x.title}: ${x.text}`, true));
+      if (it && ftp && ftp.printed) need('further_printed', `The Further Terms page already has writing on it: "${ftp.printed.slice(0, 120)}". The terms are added below it; check they don't overlap.`, false);
+    }
+    // the lawyers' details, and only theirs: never a purchaser's or vendor's own phone or email
+    const L = d.lawyer || {};
+    put('pl_firm', P('pl_firm'), L.firm, { label: "Purchaser's lawyers: firm", optional: true });
+    put('pl_person', P('pl_person'), L.person, { label: "Purchaser's lawyers: individual acting", optional: true });
+    put('pl_email', P('pl_email'), L.email, { label: "Purchaser's lawyers: email", optional: true });
+    put('pl_phone', P('pl_phone'), L.phone, { label: "Purchaser's lawyers: contact details", optional: true });
+    put('pl_service', P('pl_service'), L.email, { label: "Purchaser's lawyers: email for notices", optional: true });
+    if (!L.firm && !L.person) need('lawyer_none', "The buyer hasn't named a lawyer yet.", false);
+    else if (!L.email || !L.phone) need('lawyer_lookup', "The purchaser's lawyer's email or phone is missing. Use Find the lawyer's details.", false);
+    const V = input.vendorLawyer || null, vlEmpty = ['vl_firm', 'vl_person', 'vl_email'].every(k => !(P(k) || {}).printed);
+    if (vlEmpty && V && (V.firm || V.person)) {
+      put('vl_firm', P('vl_firm'), V.firm, { label: "Vendor's lawyers: firm", optional: true }); put('vl_person', P('vl_person'), V.person, { label: "Vendor's lawyers: individual acting", optional: true });
+      put('vl_email', P('vl_email'), V.email, { label: "Vendor's lawyers: email", optional: true }); put('vl_phone', P('vl_phone'), V.phone, { label: "Vendor's lawyers: contact details", optional: true });
+      put('vl_service', P('vl_service'), V.email, { label: "Vendor's lawyers: email for notices", optional: true });
+      need('vendor_lawyer_from', `Vendor's lawyers: taken from ${V.source || 'the property file'}. Check they are acting on this sale.`, false);
+    } else if (vlEmpty) need('vendor_lawyer_none', "The vendor's lawyers aren't on the blank or the property file. Add them.", false);
+    // privacy: a value that is a party's own phone or email never goes on, wherever it came from
+    const own = []; (d.purchasers || []).forEach(p => { own.push(p.email, p.phone); }); own.push(d.email, d.phone);
+    const ownSet = own.map(x => String(x || '').trim().toLowerCase()).filter(x => x.length >= 5), ownDigits = own.map(x => String(x || '').replace(/\D/g, '')).filter(x => x.length >= 6);
+    // (a lawyer's detail that is the same as a purchaser's own, typed by mistake, is left off too)
+    for (let i = items.length - 1; i >= 0; i--) { const t = String(items[i].text || '').toLowerCase(); if (!t) continue; const digits = t.replace(/\D/g, '');
+      if (ownSet.some(v => t.includes(v)) || ownDigits.some(v => digits.includes(v))) {
+        need('privacy_' + items[i].id, `${items[i].label}: left off, because it is a purchaser's own phone or email. Only the lawyers' details go on the agreement.`, true); items.splice(i, 1); } }
+    if (!needs.find(n => n.id === 'privacy_check')) need('privacy_check', "Only the lawyers' contact details are on the agreement, never the purchasers' or vendors' own.", false);
+    return { items, needs, terms: ft, today, date_format: fmt };
+  }
+
+  /* ───── the drafted PDF ───── */
+  // wrap text into lines no wider than w at the given size
+  function wrap(font, text, size, w) {
+    const out = [];
+    for (const para of String(text).split('\n')) {
+      const words = para.split(/\s+/).filter(Boolean); let cur = '';
+      for (const wd of words) { const t = cur ? cur + ' ' + wd : wd; if (font.widthOfTextAtSize(t, size) <= w || !cur) cur = t; else { out.push(cur); cur = wd; } }
+      out.push(cur);
+    }
+    return out;
+  }
+  // The blank with the plan added on top. The original pages and their content are untouched: pdf-lib adds a new content stream to
+  // each page it writes on. A further terms list too long for its page continues on a page added straight after it, headed
+  // "Further Terms of Sale (continued)". Returns { bytes, boxes: what was placed, where (for the review screen), continued }.
+  async function renderDraft(PDFLib, blankBytes, plan, opts) {
+    const o = opts || {};
+    const doc = await PDFLib.PDFDocument.load(blankBytes, { updateMetadata: false });
+    const font = await doc.embedFont(PDFLib.StandardFonts.Helvetica), bold = await doc.embedFont(PDFLib.StandardFonts.HelveticaBold);
+    const ink = PDFLib.rgb(INK[0], INK[1], INK[2]), hl = PDFLib.rgb(1, 0.93, 0.45);
+    const pages = doc.getPages(), boxes = []; let continued = null, pending = null;
+    for (const it of plan.items) {
+      const pg = pages[it.page - 1]; if (!pg) continue;
+      if (it.kind === 'strike' || it.kind === 'lines') {
+        const ls = it.kind === 'lines' ? it.lines : [{ x0: it.x, x1: it.x + it.w, y: it.y, h: it.h }];
+        ls.forEach(l => pg.drawLine({ start: { x: l.x0 - 1, y: l.y + l.h * 0.32 }, end: { x: l.x1 + 1, y: l.y + l.h * 0.32 }, thickness: 0.9, color: ink }));
+        boxes.push({ id: it.id, page: it.page, x: Math.min(...ls.map(l => l.x0)), y: Math.min(...ls.map(l => l.y)), w: Math.max(...ls.map(l => l.x1)) - Math.min(...ls.map(l => l.x0)), h: Math.max(...ls.map(l => l.y + l.h)) - Math.min(...ls.map(l => l.y)), kind: 'strike', label: it.label });
+        continue;
+      }
+      let size = it.size || FONT_SIZE; const lh = size * 1.25;
+      if (it.kind === 'text') {
+        let t = it.text; while (size > 6.5 && font.widthOfTextAtSize(t, size) > it.w) size -= 0.25;
+        const lines_ = font.widthOfTextAtSize(t, size) > it.w ? wrap(font, t, size, Math.max(it.w, 40)) : [t];
+        lines_.forEach((ln, i) => { const y = it.y - i * size * 1.2; if (it.placeholder) pg.drawRectangle({ x: it.x - 1, y: y - 2, width: font.widthOfTextAtSize(ln, size) + 2, height: size + 2, color: hl });
+          pg.drawText(ln, { x: it.x, y, size, font, color: ink }); });
+        boxes.push({ id: it.id, page: it.page, x: it.x, y: it.y - (lines_.length - 1) * size * 1.2 - 2, w: Math.max(...lines_.map(l => font.widthOfTextAtSize(l, size))), h: lines_.length * size * 1.2 + 2, kind: 'text', label: it.label, placeholder: !!it.placeholder });
+        continue;
+      }
+      // an area: wrapped lines from the top down; any that don't fit continue on an added page (further terms only)
+      const all = wrap(font, it.text, size, it.w), fit = Math.max(1, Math.floor((it.h - size) / lh) + 1);
+      const here = all.slice(0, fit), rest = all.slice(fit);
+      const drawLines = (p, ls, x, y0, pageNo) => { ls.forEach((ln, i) => { const y = y0 - i * lh; const ph = /\[Tim to [^\]]*\]/.exec(ln);
+          if (ph) { const pre = ln.slice(0, ph.index); pg_hl(p, x + font.widthOfTextAtSize(pre, size) - 1, y - 2, font.widthOfTextAtSize(ph[0], size) + 2, size + 2); }
+          p.drawText(ln, { x, y, size, font, color: ink }); });
+        boxes.push({ id: it.id, page: pageNo, x, y: y0 - (ls.length - 1) * lh - 2, w: it.w, h: (ls.length - 1) * lh + size + 4, kind: 'area', label: it.label, placeholder: ls.some(l => /\[Tim to /.test(l)) }); };
+      const pg_hl = (p, x, y, w, h) => p.drawRectangle({ x, y, width: w, height: h, color: hl });
+      drawLines(pg, here, it.x, it.y, it.page);
+      if (rest.length) {
+        if (it.key !== 'further_terms') { boxes.push({ id: it.id + '_overflow', page: it.page, overflow: rest.length, kind: 'overflow', label: it.label }); continue; }
+        pending = { it, rest, size, lh };
+      }
+    }
+    // further terms that didn't fit: pages added straight after the Further Terms page, then every later page's boxes move along
+    if (pending) {
+      const { it, rest, size, lh } = pending, pg = pages[it.page - 1], [w, h] = [pg.getWidth(), pg.getHeight()], n = Math.max(1, Math.floor((h - 130) / lh));
+      let at = it.page, left = rest, added = 0; continued = it.page + 1;
+      while (left.length) {
+        const np = doc.insertPage(at, [w, h]); at++; added++;
+        np.drawText('Further Terms of Sale (continued)', { x: 40, y: h - 60, size: 13, font: bold, color: ink });
+        np.drawText(`Continued from page ${it.page}.`, { x: 40, y: h - 76, size: 8, font, color: ink });
+        const ls = left.slice(0, n); left = left.slice(n);
+        ls.forEach((ln, i) => { const y = h - 100 - i * lh, ph = /\[Tim to [^\]]*\]/.exec(ln);
+          if (ph) np.drawRectangle({ x: 40 + font.widthOfTextAtSize(ln.slice(0, ph.index), size) - 1, y: y - 2, width: font.widthOfTextAtSize(ph[0], size) + 2, height: size + 2, color: hl });
+          np.drawText(ln, { x: 40, y, size, font, color: ink }); });
+        boxes.push({ id: it.id + '_cont' + added, page: -at, x: 40, y: h - 100 - (ls.length - 1) * lh - 2, w: w - 80, h: (ls.length - 1) * lh + size + 4, kind: 'area', label: it.label + ' (continued)', placeholder: ls.some(l => /\[Tim to /.test(l)) });
+      }
+      boxes.forEach(b => { if (b.page < 0) b.page = -b.page; else if (b.page > it.page) b.page += added; });
+    }
+    if (o.title) doc.setTitle(o.title, { showInWindowTitleBar: false });
+    const bytes = await doc.save({ useObjectStreams: false, addDefaultPage: false });
+    return { bytes, boxes, continued };
+  }
+
+  const DRAFT = { EDITIONS, EDITION_RE, editionOk, readPages, lines, xAt, matchAll, readEdition, editionPages, buildMap, parseChattels, numberIn, daysWords, FRONT_CONDITIONS, LABELS,
+    packText, packBatches, placeFromProposal, rectOf, PROPOSAL_KINDS, planDraft, ruleApplies, fullDate, PLACEHOLDERS, placeholderFor, isPlaceholder, winAnsi, renderDraft, wrap, INK, FONT_SIZE };
+  if (typeof module !== 'undefined' && module.exports) module.exports = DRAFT; else root.DRAFT = DRAFT;
 })(typeof window !== 'undefined' ? window : globalThis);
 
 </script>
@@ -10010,6 +10625,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const d = o.details || {}, chk = OF.checkDates(d, ofOpts(ctx)), L = OF.longDate, gap = chk.problems.find(x => x.kind === 'gap');
     const fixes = evs.filter(e => e.kind === 'corrected'), off = ['withdrawn', 'lapsed'].includes(o.status);
     const nowLocal = (() => { const t = new Date(); t.setMinutes(t.getMinutes() - t.getTimezoneOffset()); return t.toISOString().slice(0, 16); })();
+    const drH = await drOfferHTML(o);   // the agreement: drafting and the lawyer lookup (offers phase 2)
     main().innerHTML = `<div class="view-pad of-page" id="ofView">
       <div class="toolbar no-print"><button class="btn ghost" type="button" id="ofBackP">Back to the property</button></div>
       <span class="agent-flag">Only you see this</span>
@@ -10033,6 +10649,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       ${fixes.length ? `<h2>What they sent</h2><details class="card tight" id="ofOrig" open><summary class="small">The original, unchanged</summary>${ofSummaryHTML(o.submission || {}, ctx, o.as_at)}</details>
         <div class="card tight"><h3 style="margin:0 0 4px">Corrections</h3>${fixes.map(e => `<div class="fact"><div class="k">${esc(fmtDT(e.at))} · ${esc(e.actor)}</div><div class="v" style="font-weight:400">${esc((e.detail || {}).note || '')}</div></div>`).join('')}</div>` : ''}
       <div class="toolbar no-print"><button class="btn primary" type="button" id="ofFix">Correct details</button></div>
+      ${drH}
       <h2>Withdrawn or lapsed</h2>
       <div class="card tight" id="ofStatus">${off ? `<p class="small" style="margin:0">${o.status === 'withdrawn' ? 'Withdrawn' : 'Lapsed'} at ${esc(fmtDT(o.status_at))}.</p><div class="toolbar"><button class="btn ghost" type="button" id="ofStBack">Mark it current again</button></div>`
         : `<label class="f" for="ofStAt" style="margin-top:0">When</label><input type="datetime-local" id="ofStAt" value="${nowLocal}"><label class="f" for="ofStNote">Note <span class="opt">(optional)</span></label><input type="text" id="ofStNote" maxlength="500">
@@ -10041,6 +10658,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     </div>`;
     $('#ofBackP').addEventListener('click', () => viewProperty(o.property_id));
     $('#ofFix').addEventListener('click', () => viewOfferCorrect(oid));
+    drOfferWire(o);
     const ns = $('#ofNotSpam'); if (ns) ns.addEventListener('click', async () => { ns.disabled = true; try { await must(sb.rpc('agent_offer_not_spam', { p_offer: oid })); toast('Moved to the offers list as a new offer'); viewProperty(o.property_id); } catch (_) { ns.disabled = false; } });
     const go = async (fn, args, errBox) => { try { await must(sb.rpc(fn, args)); viewOfferAgent(oid); } catch (e) { if (errBox) $(errBox).textContent = e.message || 'That didn\'t save.'; } };
     const gk = $('#ofGapOk'); if (gk) gk.addEventListener('click', () => { const r = $('#ofGapWhy').value.trim(); if (r.length < 5) return $('#ofGapErr').textContent = 'Give your reason.'; go('agent_offer_gap', { p_offer: oid, p_reason: r }, '#ofGapErr'); });
@@ -10052,7 +10670,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   // the property's Offers tile (agent only)
   async function offersLoad(pid) {
     const [lk, ofs, wd] = await Promise.all([ofSafe(sb.from('offer_links').select('*').eq('property_id', pid)), ofSafe(sb.from('property_offers').select('*').eq('property_id', pid).order('received_at', { ascending: false })), ofWording()]);
-    return { link: (lk || [])[0] || null, offers: (ofs || []).filter(o => o.source && o.source !== 'manual'), ks: await ofKs(), wording: wd };
+    return { link: (lk || [])[0] || null, offers: (ofs || []).filter(o => o.source && o.source !== 'manual'), ks: await ofKs(), wording: wd, blanks: await drLoadBlanks(pid) };
   }
   function ofRowHTML(o, X) {
     const d = o.details || {}, chk = OF.checkDates(d, { asAt: o.as_at, province: o.province, ksDays: X.ks }), L = OF.longDate;
@@ -10077,6 +10695,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <div id="offQr" class="of-qr" hidden></div>
       ${real.length ? `<ul class="of-list">${real.map(o => ofRowHTML(o, X)).join('')}</ul>` : '<p class="small" style="margin:6px 0 0">No offers yet.</p>'}
       ${spam.length ? `<details class="of-more of-spam" id="offSpam"><summary class="small">Possible spam (${spam.length})</summary><p class="small" style="margin:4px 0">Sent with the form's hidden field filled in, which is usually a robot. Kept in case one is real. You weren't emailed about these.</p><ul class="of-list">${spam.map(o => ofRowHTML(o, X)).join('')}</ul></details>` : ''}
+      ${drTileHTML(X)}
       <details class="of-more" id="offChD"><summary class="small">Chattels buyers see (${((l && l.chattels) || []).length || 'none yet'})</summary>
         <label class="f" for="offCh">One chattel per line. With none, buyers see "Tim will confirm the chattels list with you".</label><textarea id="offCh" rows="5">${esc(((l && l.chattels) || []).join('\n'))}</textarea>
         <div class="toolbar"><button class="btn ghost" type="button" id="offChSave">Save chattels</button></div></details>
@@ -10105,7 +10724,415 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     $$('[data-offer]').forEach(b => b.addEventListener('click', () => viewOfferAgent(b.dataset.offer)));
     on('#offChSave', async () => { try { const items = $('#offCh').value.split('\n').map(x => x.trim()).filter(Boolean); await must(sb.rpc('agent_offer_chattels', { p_property: pid, p_items: items })); toast('Chattels saved'); viewProperty(pid); } catch (_) { } });
     on('#offKsSave', async () => { try { await must(sb.rpc('agent_offer_settings', { p_ks_days: +$('#offKs').value })); toast('Saved'); } catch (_) { } });
+    drTileWire(p, X);
     on('#offWSave', async () => { try { for (const t of $$('[data-offw]')) { const k = t.dataset.offw; if ((X.wording[k] || '') !== t.value.trim()) { await must(sb.rpc('agent_offer_clause', { p_key: k, p_wording: t.value.trim() || null })); X.wording[k] = t.value.trim(); } } toast('Wording saved'); } catch (_) { } });
+  }
+
+  /* ═════════ OFFERS PHASE 2: drafting each offer onto the REINZ blank (migration 019) ═════════ */
+  // Tim loads the REINZ agreement pack once per listing (Offers tile). Its fingerprint is taken and the original kept unchanged on the
+  // property file (kind "REINZ agreement blank", never shared). The edition printed on it must be in the checked list (DRAFT.EDITIONS).
+  // The places to write are found from the printed labels (DRAFT.buildMap); the AI may read the pack and propose more places, the
+  // chattels list and anything unusual (the offer-draft edge function); Tim ticks, moves, deletes or adds places, then approves. One
+  // tap on an offer drafts it: the original pages untouched, typed text and marks added on top (pdf-lib), filed with its own
+  // fingerprint, the blank's fingerprint and the map used. Tim reviews every placed value, fixes the "Needs you" items, and approves.
+  // Agent only throughout; vendors see none of it. Signing is phase 3.
+  const DR = window.DRAFT, BLANK_KIND = 'REINZ agreement blank';
+  const PDFJS_V = '6.2.108', PDFJS_BASE = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${PDFJS_V}/`, PDFLIB_URL = 'https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js';
+  const PDF_OPTS = { standardFontDataUrl: PDFJS_BASE + 'standard_fonts/', wasmUrl: PDFJS_BASE + 'wasm/' };
+  let PDFJS_P = null, PDFLIB_P = null;
+  // pdf.js reads and draws the pages; it runs on the page itself (no separate worker), which is plenty for one pack at a time
+  function drPdfjs() {
+    return PDFJS_P ||= (async () => { const w = await import(PDFJS_BASE + 'build/pdf.worker.min.mjs'); globalThis.pdfjsWorker = w; const m = await import(PDFJS_BASE + 'build/pdf.min.mjs'); m.GlobalWorkerOptions.workerSrc = PDFJS_BASE + 'build/pdf.worker.min.mjs'; return m; })().catch(e => { PDFJS_P = null; throw e; });
+  }
+  function drPdfLib() {
+    return PDFLIB_P ||= new Promise((res, rej) => { if (window.PDFLib) return res(window.PDFLib); const s = document.createElement('script'); s.src = PDFLIB_URL; s.onload = () => window.PDFLib ? res(window.PDFLib) : rej(new Error('pdf-lib')); s.onerror = () => { PDFLIB_P = null; rej(new Error('pdf-lib')); }; document.head.appendChild(s); });
+  }
+  const drNoLib = 'The PDF tools didn\'t load. Check you have signal, then try again.';
+  const drShort = h => String(h || '').slice(0, 12);
+  // the blank's bytes and pages, kept in memory once read; fetched from storage otherwise and checked against its fingerprint
+  const DR_CACHE = {};
+  async function drBlankBytes(b) {
+    if (DR_CACHE[b.id] && DR_CACHE[b.id].bytes) return DR_CACHE[b.id].bytes;
+    const d = await must(sb.from('property_documents').select('id,path,bucket').eq('id', b.document_id).single());
+    const { data, error } = await sb.storage.from(d.bucket || 'property-files').createSignedUrl(d.path, 300); if (error || !data) throw new Error('The blank couldn\'t be opened. Check you have signal.');
+    const bytes = new Uint8Array(await (await fetch(data.signedUrl)).arrayBuffer());
+    if (await REPO.sha256(bytes) !== b.sha256) throw new Error('The stored blank doesn\'t match its fingerprint, so it won\'t be used. Load it again.');
+    (DR_CACHE[b.id] ||= {}).bytes = bytes; return bytes;
+  }
+  async function drBlankPages(b) {
+    if (DR_CACHE[b.id] && DR_CACHE[b.id].pages) return DR_CACHE[b.id].pages;
+    const pages = await DR.readPages(await drPdfjs(), await drBlankBytes(b), PDF_OPTS); (DR_CACHE[b.id] ||= {}).pages = pages; return pages;
+  }
+  async function drLoadBlanks(pid) {
+    const blanks = (await ofSafe(sb.from('offer_blanks').select('*').eq('property_id', pid).order('created_at', { ascending: false }))) || [];
+    const maps = blanks.length ? ((await ofSafe(sb.from('offer_blank_maps').select('id,blank_id,version,approved,created_at,chattels,missing').in('blank_id', blanks.map(b => b.id)).order('version', { ascending: false }))) || []) : [];
+    blanks.forEach(b => { b.maps = maps.filter(m => m.blank_id === b.id); b.approvedMap = b.maps.find(m => m.approved) || null; });
+    return blanks;
+  }
+  // the blank and map an offer is drafted on: the newest blank whose places are approved
+  const drUsable = blanks => blanks.find(b => b.edition_checked && b.approvedMap) || null;
+
+  // ── the Offers tile: load the blank ──
+  function drTileHTML(X) {
+    const bl = X.blanks || [], b = bl[0], use = drUsable(bl);
+    return `<div class="dr-blank" id="drBlank"><h4 class="dr-h">Agreement blank</h4>
+      ${b ? `<p class="small" style="margin:0 0 4px"><strong>${esc(b.file_name)}</strong><br>${esc(b.edition || 'Edition not found')} · ${b.pages} pages · fingerprint <span translate="no">${esc(drShort(b.sha256))}</span></p>
+        ${!b.edition_checked ? `<div class="card warnc tight" id="drEditionNo"><p class="small" style="margin:0">This blank is the ${esc(b.edition || 'unknown')} edition, which hasn't been checked yet, so offers can't be drafted on it. It is kept on the property file. Ask for this edition to be checked before you use it.</p></div>`
+          : b.approvedMap ? `<p class="small" style="margin:0" id="drMapOk">Places approved (version ${b.approvedMap.version}). Offers can be drafted on it.</p>` : `<p class="small" style="margin:0" id="drMapNo">Check and approve the places on the blank before drafting.</p>`}
+        ${use && use.id !== b.id ? `<p class="small" style="margin:4px 0 0">Offers are drafted on the earlier blank (${esc(use.file_name)})${b.edition_checked ? ' until this one\'s places are approved' : ''}. <button class="btn link" type="button" id="drMapUseBtn" data-blank="${use.id}">Check its places</button></p>` : ''}
+        <div class="toolbar">${b.edition_checked ? `<button class="btn ${b.approvedMap ? 'ghost' : 'primary'}" type="button" id="drMapBtn" data-blank="${b.id}">Check the places on the blank</button>` : ''}<button class="btn ghost" type="button" id="drLoadBtn">Load a new blank</button></div>
+        ${bl.length > 1 ? `<details class="of-more"><summary class="small">Earlier blanks (${bl.length - 1}), kept</summary>${bl.slice(1).map(x => `<p class="small" style="margin:2px 0">${esc(x.file_name)} · ${esc(fmtDT(x.created_at))} · <span translate="no">${esc(drShort(x.sha256))}</span></p>`).join('')}</details>` : ''}`
+      : `<p class="small" style="margin:0 0 6px">Load the REINZ agreement pack for this listing once. Each offer is then drafted onto it for you to check, so nothing is retyped.</p>
+        <div class="toolbar"><button class="btn primary" type="button" id="drLoadBtn">Agreement blank: load the PDF</button></div>`}
+      <input type="file" id="drFile" accept="application/pdf,.pdf" hidden>
+      <div class="dr-drop" id="drDrop" aria-hidden="true">Or drop the PDF here</div>
+      <p class="small err" id="drErr" role="alert"></p>
+      <div class="toolbar"><button class="btn link" type="button" id="drLibBtn">Your clause library</button></div></div>`;
+  }
+  function drTileWire(p, X) {
+    const inp = $('#drFile'); if (!inp) return;
+    const go = f => { if (f) drLoadBlank(p.id, f).catch(e => { $('#drErr').textContent = e.message || 'That didn\'t load.'; }); };
+    $('#drLoadBtn').addEventListener('click', () => inp.click());
+    inp.addEventListener('change', () => { const f = (inp.files || [])[0]; inp.value = ''; go(f); });
+    const dz = $('#drDrop');
+    ['dragenter', 'dragover'].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.add('over'); }));
+    ['dragleave', 'drop'].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.remove('over'); }));
+    dz.addEventListener('drop', e => go(((e.dataTransfer && e.dataTransfer.files) || [])[0]));
+    const mb = $('#drMapBtn'); if (mb) mb.addEventListener('click', () => viewBlankMap(mb.dataset.blank));
+    const mu = $('#drMapUseBtn'); if (mu) mu.addEventListener('click', () => viewBlankMap(mu.dataset.blank));
+    $('#drLibBtn').addEventListener('click', () => viewClauseLibrary(p.id));
+  }
+  // file the PDF as it is (never changed), then register it with its edition and pages
+  async function drLoadBlank(pid, file) {
+    const err = $('#drErr'); const say = t => { if (err) { err.className = 'small'; err.textContent = t; } };
+    if (file.size > REPO.MAX_BYTES) throw new Error('That file is over 25 MB.');
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const kind = REPO.sniff(bytes.subarray(0, 65536), bytes.subarray(Math.max(0, bytes.length - 65536)), file.name);
+    if (kind.mime !== 'application/pdf') throw new Error('The agreement blank needs to be the PDF from the REINZ portal.');
+    say('Reading the blank...');
+    let pdfjs; try { pdfjs = await drPdfjs(); } catch (_) { throw new Error(drNoLib); }
+    let pages; try { pages = await DR.readPages(pdfjs, bytes, PDF_OPTS); } catch (_) { throw new Error('That PDF couldn\'t be read. Download it from the portal again and load the new copy.'); }
+    const edition = DR.readEdition(pages), sha = await REPO.sha256(bytes), key = crypto.randomUUID();
+    const pth = REPO.paths(pid, key, BLANK_KIND, file.name, 'application/pdf').path;
+    say('Saving the blank on the property file...');
+    const up = await sb.storage.from('property-files').upload(pth, new Blob([bytes], { type: 'application/pdf' }), { contentType: 'application/pdf', upsert: false });
+    if (up.error) throw new Error('The blank didn\'t save. Check you have signal, then try again.');
+    const doc = await must(sb.rpc('agent_repo_add', { p_property: pid, p_item: { key, kind: BLANK_KIND, name: file.name, title: 'Agreement blank' + (edition ? ', ' + edition : ''), path: pth, mime_type: 'application/pdf', size_bytes: bytes.length, sha256: sha } }));
+    const r = await must(sb.rpc('agent_blank_add', { p_document: doc.id, p_pages: pages.length, p_sizes: pages.map(x => [x.w, x.h]), p_edition: edition }));
+    DR_CACHE[r.id] = { bytes, pages };
+    if (!r.edition_checked) { toast('Blank kept, but its edition hasn\'t been checked'); return viewProperty(pid); }
+    toast('Blank loaded'); return viewBlankMap(r.id);
+  }
+
+  // ── the places on the blank ──
+  const DR_COLOURS = { anchor: 'dr-anchor', ai: 'dr-ai', tim: 'dr-tim' };
+  const DR_ADD_KINDS = [['initial', 'Initials'], ['signature', 'Signature'], ['ack', 'Acknowledgement tick'], ['text', 'Text to fill in']];
+  let DRM = null;   // the map being checked
+  async function viewBlankMap(bid) {
+    header('Places on the blank', '', 0); actions(false);
+    main().innerHTML = '<div class="loading">Loading...</div>';
+    const b = await must(sb.from('offer_blanks').select('*').eq('id', bid).single());
+    const maps = (await ofSafe(sb.from('offer_blank_maps').select('*').eq('blank_id', bid).order('version', { ascending: false }))) || [];
+    const p = await must(sb.from('properties').select('id,address').eq('id', b.property_id).single());
+    let pages; try { pages = await drBlankPages(b); } catch (e) { main().innerHTML = `<div class="view-pad"><p class="err">${esc(e.message === 'pdf-lib' ? drNoLib : e.message || drNoLib)}</p><div class="toolbar"><button class="btn ghost" type="button" id="drBk">Back to the property</button></div></div>`; $('#drBk').addEventListener('click', () => viewProperty(b.property_id)); return; }
+    const found = DR.buildMap(pages), last = maps[0];
+    const props = last ? (last.proposals || []).map(x => Object.assign({}, x)) : [];
+    const places = last ? last.places.filter(x => x.source !== 'ai').map(x => Object.assign({}, x)) : found.places.map(x => Object.assign({}, x));
+    // the chattels as read from Schedule 2: included when they have a number or no brackets; Tim ticks the list
+    const chat = last ? (last.chattels || []).map(n => ({ name: n, on: true, from: 'saved' })) : found.chattels.map(c => ({ name: c.name, on: c.qty === null || (typeof c.qty === 'number' && c.qty > 0), qty: c.qty, from: 'schedule' }));
+    DRM = { b, p, pages, maps, found, places, props, chat, notes: last ? (last.notes || []).map(x => Object.assign({}, x)) : [], missing: found.missing, page: 1, sel: null, adding: null, dirty: false };
+    drMapPaint(); top();
+  }
+  const drPageW = () => Math.min(Math.max(240, (main().clientWidth || 360) - 34), 760);
+  async function drRender(holder, n, boxes, opts) {
+    // draw page n into holder (a canvas sized to the screen) and lay the boxes over it
+    const o = opts || {}, pdfjs = await drPdfjs();
+    const key = o.key || 'blank'; holder._docs ||= {};
+    const doc = holder._docs[key] ||= await pdfjs.getDocument(Object.assign({ data: o.bytes.slice(0), isEvalSupported: false }, PDF_OPTS)).promise;
+    const pg = await doc.getPage(n), w = drPageW(), vp1 = pg.getViewport({ scale: 1 }), scale = w / vp1.width, vp = pg.getViewport({ scale: scale * (window.devicePixelRatio || 1) });
+    const cv = document.createElement('canvas'); cv.width = Math.round(vp.width); cv.height = Math.round(vp.height); cv.className = 'dr-cv'; cv.setAttribute('aria-hidden', 'true');
+    const wrapEl = document.createElement('div'); wrapEl.className = 'dr-pg'; wrapEl.style.width = w + 'px'; wrapEl.style.aspectRatio = vp1.width + ' / ' + vp1.height; wrapEl.dataset.page = n; wrapEl.appendChild(cv);
+    holder.innerHTML = ''; holder.appendChild(wrapEl);
+    try { await pg.render({ canvasContext: cv.getContext('2d'), canvas: cv, viewport: vp }).promise; } catch (_) { }
+    const W = vp1.width, H = vp1.height;
+    boxes.filter(x => x.page === n).forEach(x => {
+      // boxes come in page points; each as { x, w, bottom, top } (DRAFT.rectOf for a place on the blank)
+      const rc = x.rect || { bottom: x.y, top: x.y + x.h };
+      const el = document.createElement(o.button ? 'button' : 'div'); if (o.button) el.type = 'button';
+      el.className = 'dr-box ' + (x.cls || '');
+      el.style.left = (x.x / W * 100) + '%'; el.style.width = (Math.max(x.w, 6) / W * 100) + '%';
+      el.style.top = (Math.max(0, H - rc.top) / H * 100) + '%'; el.style.height = (Math.max(rc.top - rc.bottom, 6) / H * 100) + '%';
+      el.dataset.id = x.id; el.title = x.label || ''; if (o.button) el.setAttribute('aria-label', x.label || x.id);
+      if (x.badge) { const sp = document.createElement('span'); sp.className = 'dr-badge'; sp.textContent = x.badge; el.appendChild(sp); }
+      wrapEl.appendChild(el);
+    });
+    return { wrapEl, W, H, scale };
+  }
+  // what Tim sees as places: the found ones, AI proposals he hasn't deleted, and his own
+  const drVisible = () => DRM.places.concat(DRM.props.filter(x => x.decision !== 'deleted').map(x => Object.assign({}, x.place, { decision: x.decision })));
+  function drMapPaint() {
+    const M = DRM, b = M.b, kept = M.props.filter(x => ['kept', 'moved'].includes(x.decision)).length, waiting = M.props.filter(x => !x.decision || x.decision === 'proposed').length;
+    const sel = M.sel ? drVisible().find(x => x.id === M.sel) : null;
+    const pagesWith = [...new Set(drVisible().map(x => x.page))].sort((a, c) => a - c);
+    main().innerHTML = `<div class="view-pad dr-page" id="drMap">
+      <div class="toolbar no-print"><button class="btn ghost" type="button" id="drBack">Back to the property</button></div><span class="agent-flag">Only you see this</span>
+      <h1>Places on the blank</h1>
+      <p class="lede">${nt(M.p.address)}</p>
+      <p class="small">${esc(b.file_name)} · ${esc(b.edition)} · ${b.pages} pages · fingerprint <span translate="no">${esc(drShort(b.sha256))}</span>${M.maps[0] ? ` · last saved as version ${M.maps[0].version}${M.maps[0].approved ? ', approved' : ''}` : ''}</p>
+      <p class="small">Each place was found from the labels printed on the blank. Check them, add any the pack needs, then approve. Nothing the AI suggests is used until you keep it.</p>
+      ${M.missing.length ? `<div class="card warnc tight" id="drMissing"><p class="small" style="margin:0"><strong>Not found on this blank:</strong> ${esc(M.missing.map(k => DR.LABELS[k] || k).join('; '))}. Add them yourself on the page, or write them in by hand.</p></div>` : '<p class="small" id="drAllFound">Every standard place was found.</p>'}
+      <section class="card" id="drAi"><h2>Read the pack with AI</h2><p class="small">The AI reads the pack's text page by page and suggests the chattels, places to initial, sign or acknowledge, and anything unusual. You decide on each.</p>
+        <div class="toolbar"><button class="btn ghost" type="button" id="drAiGo">${M.props.length ? 'Read it again' : 'Read the pack'}</button></div><p class="small" id="drAiMsg" role="status" aria-live="polite"></p>
+        ${M.props.length ? `<p class="small" style="margin:6px 0 2px"><strong>Suggested places</strong> (${kept} kept, ${waiting} to decide)</p><ul class="dr-list" id="drProps">${M.props.map((x, i) => `<li class="dr-prop ${x.decision || 'proposed'}" data-prop="${i}">
+            <span><strong>Page ${x.place.page}:</strong> ${esc(x.place.label)}<br><span class="small">${esc(x.place.reason || '')}</span>${x.decision === 'deleted' ? '<br><span class="small">Deleted</span>' : x.decision === 'moved' ? '<br><span class="small">Kept, moved</span>' : x.decision === 'kept' ? '<br><span class="small">Kept</span>' : ''}</span>
+            <span class="dr-acts">${x.decision === 'deleted' ? `<button class="btn link" type="button" data-pkeep="${i}">Restore</button>` : `${x.decision !== 'kept' && x.decision !== 'moved' ? `<button class="btn ghost" type="button" data-pkeep="${i}">Keep</button>` : ''}<button class="btn link" type="button" data-pshow="${i}">Show</button><button class="btn link" type="button" data-pdel="${i}">Delete</button>`}</span></li>`).join('')}</ul>` : ''}
+        ${M.notes.length ? `<p class="small" style="margin:8px 0 2px"><strong>Worth knowing about this pack</strong></p><ul class="dr-list" id="drNotes">${M.notes.map((n, i) => `<li><label class="choice cb"><input type="checkbox" data-note="${i}" ${n.seen ? 'checked' : ''}><span class="mark"></span><span><span class="ct">Page ${n.page}: ${esc(n.text)}</span><span class="cd">Tick when you have read it</span></span></label></li>`).join('')}</ul>` : ''}</section>
+      <section class="card" id="drPages"><h2>The pages</h2>
+        <div class="dr-nav"><button class="btn ghost" type="button" id="drPrev" ${M.page <= 1 ? 'disabled' : ''}>Previous</button>
+          <label class="sr" for="drPick">Page</label><select id="drPick">${M.pages.map(pg => `<option value="${pg.n}" ${pg.n === M.page ? 'selected' : ''}>Page ${pg.n}${pagesWith.includes(pg.n) ? ' (' + drVisible().filter(x => x.page === pg.n).length + ')' : ''}</option>`).join('')}</select>
+          <button class="btn ghost" type="button" id="drNext" ${M.page >= M.pages.length ? 'disabled' : ''}>Next</button></div>
+        <p class="small dr-legend"><span class="dr-key dr-anchor"></span>Found from the labels <span class="dr-key dr-ai"></span>Suggested by the AI <span class="dr-key dr-tim"></span>Added by you</p>
+        <div id="drCanvas" class="dr-holder"></div>
+        <div class="toolbar"><label class="sr" for="drAddKind">Kind of place</label><select id="drAddKind">${DR_ADD_KINDS.map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select><button class="btn ghost" type="button" id="drAdd">${M.adding ? 'Tap the page where it goes' : 'Add a place on this page'}</button></div>
+        ${sel ? `<div class="card tight dr-sel" id="drSel"><p class="small" style="margin:0"><strong>${esc(sel.label)}</strong> (page ${sel.page})${sel.reason ? '<br>' + esc(sel.reason) : ''}${sel.printed ? `<br>Already on the blank: "${esc(sel.printed.slice(0, 120))}"` : ''}</p>
+          <div class="dr-move" role="group" aria-label="Move this place"><button class="btn ghost" type="button" data-mv="0,4" aria-label="Move up">Up</button><button class="btn ghost" type="button" data-mv="-4,0" aria-label="Move left">Left</button><button class="btn ghost" type="button" data-mv="4,0" aria-label="Move right">Right</button><button class="btn ghost" type="button" data-mv="0,-4" aria-label="Move down">Down</button></div>
+          <div class="toolbar">${sel.source === 'ai' && !['kept', 'moved'].includes(sel.decision) ? '<button class="btn ghost" type="button" id="drSelKeep">Keep</button>' : ''}<button class="btn ghost" type="button" id="drSelDel">Delete this place</button><button class="btn link" type="button" id="drSelDone">Done</button></div></div>` : ''}
+      </section>
+      <section class="card" id="drChat"><h2>Chattels</h2><p class="small">Read from Schedule 2${M.chat.some(c => c.from === 'ai') ? ' and by the AI' : ''}. Tick those included in the sale. When you approve, buyers see this list on the offer form. Strike-throughs already on the blank aren't read, so check the schedule.</p>
+        ${M.chat.length ? `<ul class="dr-list">${M.chat.map((c, i) => `<li><label class="choice cb"><input type="checkbox" data-chat="${i}" ${c.on ? 'checked' : ''}><span class="mark"></span><span><span class="ct">${esc(c.name)}</span><span class="cd">${c.qty === '' ? 'Empty brackets on the schedule' : c.qty != null && c.qty !== undefined ? 'Quantity ' + esc(c.qty) : c.from === 'ai' ? 'Suggested by the AI' : c.from === 'saved' ? 'As you saved it' : 'Listed without brackets'}</span></span></label></li>`).join('')}</ul>` : '<p class="small">No chattels were read from the blank.</p>'}
+        <label class="f" for="drChatAdd">Add a chattel</label><div class="toolbar"><input type="text" id="drChatAdd" maxlength="200"><button class="btn ghost" type="button" id="drChatAddBtn">Add</button></div></section>
+      <div class="err" id="drMapErr" role="alert"></div>
+      <div class="toolbar"><button class="btn ghost" type="button" id="drSave">Save</button><button class="btn primary" type="button" id="drApprove">Approve the places</button></div>
+    </div>`;
+    drMapWire(); drMapCanvas();
+  }
+  async function drMapCanvas() {
+    const M = DRM, holder = $('#drCanvas'); if (!holder) return;
+    const boxes = drVisible().map(x => Object.assign({}, x, { rect: DR.rectOf(x), cls: (DR_COLOURS[x.source] || '') + (x.source === 'ai' && !['kept', 'moved'].includes(x.decision) ? ' dr-undecided' : '') + (M.sel === x.id ? ' dr-on' : '') + (x.kind === 'never' ? ' dr-never' : '') }));
+    let r; try { r = await drRender(holder, M.page, boxes, { bytes: await drBlankBytes(M.b), key: 'blank-' + M.b.id, button: true }); } catch (_) { holder.innerHTML = `<p class="small err">${drNoLib}</p>`; return; }
+    r.wrapEl.addEventListener('click', e => {
+      const bx = e.target.closest('.dr-box');
+      if (M.adding) { const rect = r.wrapEl.getBoundingClientRect(), x = (e.clientX - rect.left) / rect.width * r.W, y = r.H - (e.clientY - rect.top) / rect.height * r.H;
+        const k = M.adding, d = k === 'text' ? { w: 160, h: 12 } : k === 'signature' ? { w: 150, h: 22 } : k === 'ack' ? { w: 120, h: 18 } : { w: 46, h: 18 };
+        const id = 'tim' + Date.now().toString(36); M.places.push({ id, key: 'tim_' + k, kind: k === 'ack' ? 'ack' : k, page: M.page, x: Math.round(Math.max(0, Math.min(r.W - d.w, x - d.w / 2)) * 10) / 10, y: Math.round(Math.max(0, Math.min(r.H - d.h, y - d.h / 2)) * 10) / 10, w: d.w, h: d.h, label: (DR_ADD_KINDS.find(z => z[0] === k) || [0, 'Place'])[1] + ' (page ' + M.page + ')', source: 'tim' });
+        M.adding = null; M.sel = id; M.dirty = true; return drMapPaint(); }
+      if (bx) { M.sel = bx.dataset.id; drMapPaint(); }
+    });
+  }
+  function drFindSel() { const M = DRM; const pl = M.places.find(x => x.id === M.sel); if (pl) return { pl }; const pr = M.props.find(x => x.place.id === M.sel); return pr ? { pr } : {}; }
+  function drMapWire() {
+    const M = DRM, on = (s, f, ev) => { const el = $(s); if (el) el.addEventListener(ev || 'click', f); };
+    on('#drBack', () => { if (!M.dirty || confirm('You have changes that aren\'t saved. Leave anyway?')) viewProperty(M.b.property_id); });
+    on('#drPrev', () => { M.page--; M.sel = null; drMapPaint(); }); on('#drNext', () => { M.page++; M.sel = null; drMapPaint(); });
+    on('#drPick', e => { M.page = +e.target.value; M.sel = null; drMapPaint(); }, 'change');
+    on('#drAdd', () => { M.adding = M.adding ? null : $('#drAddKind').value; drMapPaint(); });
+    $$('[data-pkeep]').forEach(x => x.addEventListener('click', () => { const pr = M.props[+x.dataset.pkeep]; pr.decision = pr.moved ? 'moved' : 'kept'; M.dirty = true; drMapPaint(); }));
+    $$('[data-pdel]').forEach(x => x.addEventListener('click', () => { const pr = M.props[+x.dataset.pdel]; pr.decision = 'deleted'; if (M.sel === pr.place.id) M.sel = null; M.dirty = true; drMapPaint(); }));
+    $$('[data-pshow]').forEach(x => x.addEventListener('click', () => { const pr = M.props[+x.dataset.pshow]; M.page = pr.place.page; M.sel = pr.place.id; drMapPaint(); const c = $('#drPages'); if (c) c.scrollIntoView(); }));
+    $$('[data-note]').forEach(x => x.addEventListener('change', () => { M.notes[+x.dataset.note].seen = x.checked; M.dirty = true; }));
+    $$('[data-chat]').forEach(x => x.addEventListener('change', () => { M.chat[+x.dataset.chat].on = x.checked; M.dirty = true; }));
+    on('#drChatAddBtn', () => { const v = $('#drChatAdd').value.trim(); if (v) { M.chat.push({ name: v.slice(0, 200), on: true, from: 'tim' }); M.dirty = true; drMapPaint(); } });
+    $$('[data-mv]').forEach(x => x.addEventListener('click', () => { const [dx, dy] = x.dataset.mv.split(',').map(Number), s = drFindSel(), t = s.pl || (s.pr && s.pr.place); if (!t) return;
+      t.x = Math.round((t.x + dx) * 10) / 10; t.y = Math.round((t.y + dy) * 10) / 10; if (s.pr) { s.pr.moved = true; if (s.pr.decision === 'kept') s.pr.decision = 'moved'; } M.dirty = true; drMapPaint(); }));
+    on('#drSelKeep', () => { const s = drFindSel(); if (s.pr) { s.pr.decision = s.pr.moved ? 'moved' : 'kept'; M.dirty = true; drMapPaint(); } });
+    on('#drSelDel', () => { const s = drFindSel(); if (s.pr) s.pr.decision = 'deleted'; else if (s.pl) M.places = M.places.filter(x => x !== s.pl); M.sel = null; M.dirty = true; drMapPaint(); });
+    on('#drSelDone', () => { M.sel = null; drMapPaint(); });
+    on('#drAiGo', drReadPack);
+    on('#drSave', () => drMapSave(false)); on('#drApprove', () => drMapSave(true));
+  }
+  async function drReadPack() {
+    const M = DRM, msg = $('#drAiMsg'), btn = $('#drAiGo'); btn.disabled = true;
+    const batches = DR.packBatches(DR.packText(M.pages), 6, 40000); const got = { places: [], chattels: [], notes: [] }; let failed = 0, off = null;
+    for (let i = 0; i < batches.length; i++) {
+      msg.textContent = `Reading pages ${batches[i][0].page} to ${batches[i][batches[i].length - 1].page} of ${M.pages.length}...`;
+      const r = await offerCall('offer-draft', { action: 'read_pack', blank_id: M.b.id, total_pages: M.pages.length, pages: batches[i] });
+      if (r && r.ok) { got.places.push(...(r.places || [])); got.chattels.push(...(r.chattels || [])); got.notes.push(...(r.notes || [])); }
+      else if (r && r.reason === 'off') { off = r.message || 'Document reading isn\'t switched on yet.'; break; } else failed++;
+    }
+    btn.disabled = false;
+    if (off) { msg.textContent = off; return; }
+    // proposals replace earlier undecided ones; decided ones stay as Tim left them
+    const keep = M.props.filter(x => x.decision && x.decision !== 'proposed'); const n0 = keep.length;
+    got.places.forEach((x, i) => { const pl = DR.placeFromProposal(M.pages, x, n0 + i); if (pl && !keep.some(k => k.place.page === pl.page && k.place.line === pl.line && k.place.kind === pl.kind)) { pl.id = 'ai' + Date.now().toString(36) + i; keep.push({ id: pl.id, place: pl, decision: 'proposed' }); } });
+    M.props = keep;
+    got.notes.forEach(n => { if (!M.notes.some(x => x.text === n.text)) M.notes.push({ page: n.page, text: n.text, seen: false }); });
+    got.chattels.forEach(c => { if (!M.chat.some(x => x.name.toLowerCase() === c.name.toLowerCase())) M.chat.push({ name: c.name, on: !!c.included, qty: c.qty, from: 'ai' }); });
+    M.dirty = true; drMapPaint();
+    $('#drAiMsg').textContent = `${got.places.length} places, ${got.notes.length} notes and ${got.chattels.length} chattels suggested.` + (failed ? ` ${failed} part${failed === 1 ? '' : 's'} couldn't be read; try again.` : '');
+  }
+  async function drMapSave(approve) {
+    const M = DRM, err = $('#drMapErr'); err.textContent = '';
+    const waiting = M.props.filter(x => !x.decision || x.decision === 'proposed').length;
+    if (approve && waiting && !confirm(`${waiting} suggested place${waiting === 1 ? ' is' : 's are'} not kept yet and will be left off. Approve anyway?`)) return;
+    const places = M.places.concat(M.props.filter(x => ['kept', 'moved'].includes(x.decision)).map(x => Object.assign({}, x.place, { decision: x.decision })));
+    const proposals = M.props.map(x => ({ id: x.place.id, page: x.place.page, line: x.place.line, kind: x.place.kind, reason: x.place.reason, decision: x.decision || 'proposed', x: x.place.x, y: x.place.y, place: x.place }));
+    try {
+      const r = await must(sb.rpc('agent_blank_map_save', { p_blank: M.b.id, p_places: places, p_proposals: proposals, p_chattels: M.chat.filter(c => c.on).map(c => c.name), p_notes: M.notes, p_missing: M.missing, p_approve: !!approve }));
+      M.dirty = false; toast(approve ? 'Places approved' : 'Saved');
+      if (approve) return viewProperty(M.b.property_id);
+      M.maps.unshift({ version: r.version, approved: false }); drMapPaint();
+    } catch (e) { err.textContent = e.message || 'That didn\'t save.'; }
+  }
+
+  // ── the clause library ──
+  async function viewClauseLibrary(pid) {
+    header('Clause library', '', 0); actions(false);
+    const terms = (await ofSafe(sb.from('offer_terms').select('*').order('position'))) || [], wording = await ofWording();
+    const ruleText = r => { const w = (r || {}).when || {}; if (w.always) return 'Every offer'; if ('kiwisaver' in w) return w.kiwisaver ? 'When KiwiSaver funds the deposit' : 'When KiwiSaver doesn\'t fund the deposit';
+      if (w.condition) return 'When the buyer chooses ' + ((OF.condInfo(w.condition) || { label: w.condition }).label); if (w.chattels) return 'When the buyer adds or leaves out chattels'; return 'By its rule'; };
+    main().innerHTML = `<div class="view-pad" id="drLib"><div class="toolbar no-print"><button class="btn ghost" type="button" id="drLibBack">Back to the property</button></div><span class="agent-flag">Only you see this</span>
+      <h1>Your clause library</h1><p class="small">Your standard further terms and the rules that put them on each draft. Clauses already printed in the blank are named by their number only. Where you haven't added wording, the draft shows a highlighted placeholder and never makes wording up.</p>
+      ${terms.map(t => `<section class="card tight dr-term" data-term="${esc(t.key)}"><h3 style="margin:0 0 2px">${esc(t.title)}</h3><p class="small" style="margin:0 0 6px">${esc(ruleText(t.rule))}${t.clause ? ' · printed clause ' + esc(t.clause) : ''}</p>
+        ${t.kind === 'printed' ? `<label class="choice cb"><input type="checkbox" data-tstrike="${esc(t.key)}" ${(t.rule || {}).strike_when_unused ? 'checked' : ''}><span class="mark"></span><span><span class="ct">Strike it through when it doesn't apply</span></span></label>`
+          : t.wording_from && t.wording_from !== 'custom' ? `<p class="small" style="margin:0">${wording[t.wording_from] ? 'Your wording: ' + esc(wording[t.wording_from].slice(0, 160)) + (wording[t.wording_from].length > 160 ? '...' : '') : '<strong>No wording yet.</strong> Drafts show "' + esc(DR.placeholderFor(t.wording_from)) + '".'} Edit it on the Offers tile, under Link and settings.</p>`
+          : t.wording_from === 'custom' ? '<p class="small" style="margin:0">The buyer\'s or the AI\'s wording, only once you tick it on the draft.</p>'
+          : `${t.key === 'chattels' ? `<label class="f" for="drWhere_${t.key}">Where</label><select id="drWhere_${t.key}" data-twhere="${esc(t.key)}"><option value="schedule" ${(t.rule || {}).where !== 'further_terms' ? 'selected' : ''}>On Schedule 2 (strike out or add)</option><option value="further_terms" ${(t.rule || {}).where === 'further_terms' ? 'selected' : ''}>As a further term</option></select>` : ''}
+            <label class="f" for="drTw_${t.key}">Wording${t.key === 'chattels' ? ' <span class="opt">({add} and {exclude} are replaced by the items)</span>' : ''}</label><textarea id="drTw_${t.key}" rows="3" maxlength="4000" data-tword="${esc(t.key)}">${esc(t.wording || '')}</textarea>`}
+        <label class="choice cb"><input type="checkbox" data-tactive="${esc(t.key)}" ${t.active !== false ? 'checked' : ''}><span class="mark"></span><span><span class="ct">In use</span></span></label></section>`).join('')}
+      <section class="card tight" id="drNewTerm"><h3 style="margin:0 0 4px">Add a standard further term</h3>
+        <label class="f" for="drNtTitle">Title</label><input type="text" id="drNtTitle" maxlength="200">
+        <label class="f" for="drNtWhen">When it goes on</label><select id="drNtWhen"><option value="always">Every offer</option><option value="ks1">When KiwiSaver funds the deposit</option><option value="ks0">When KiwiSaver doesn't fund the deposit</option>${OF.CONDITIONS.map(c => `<option value="c:${c.key}">When the buyer chooses ${esc(c.label)}</option>`).join('')}</select>
+        <label class="f" for="drNtWord">Wording</label><textarea id="drNtWord" rows="3" maxlength="4000"></textarea></section>
+      <div class="err" id="drLibErr" role="alert"></div><div class="toolbar"><button class="btn primary" type="button" id="drLibSave">Save the library</button></div></div>`;
+    $('#drLibBack').addEventListener('click', () => viewProperty(pid));
+    $('#drLibSave').addEventListener('click', async () => {
+      const err = $('#drLibErr'); err.textContent = '';
+      try {
+        for (const t of terms) {
+          const rule = Object.assign({}, t.rule || {}), act = $(`[data-tactive="${t.key}"]`).checked, st = $(`[data-tstrike="${t.key}"]`), wh = $(`[data-twhere="${t.key}"]`), tw = $(`[data-tword="${t.key}"]`);
+          if (st) rule.strike_when_unused = st.checked; if (wh) rule.where = wh.value;
+          const w = tw ? tw.value.trim() : null;
+          if (act !== (t.active !== false) || JSON.stringify(rule) !== JSON.stringify(t.rule || {}) || (tw && w !== (t.wording || ''))) await must(sb.rpc('agent_offer_term', { p_key: t.key, p_title: null, p_wording: w || null, p_rule: rule, p_position: null, p_active: act }));
+        }
+        const ti = $('#drNtTitle').value.trim();
+        if (ti) { const v = $('#drNtWhen').value, when = v === 'always' ? { always: true } : v === 'ks1' ? { kiwisaver: true } : v === 'ks0' ? { kiwisaver: false } : { condition: v.slice(2) };
+          const key = 'std_' + ti.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 30) || 'std_term';
+          await must(sb.rpc('agent_offer_term', { p_key: key, p_title: ti, p_wording: $('#drNtWord').value.trim() || null, p_rule: { when }, p_position: 100, p_active: true })); }
+        toast('Library saved'); viewClauseLibrary(pid);
+      } catch (e) { err.textContent = e.message || 'That didn\'t save.'; }
+    });
+    top();
+  }
+
+  // ── on the offer: draft, lawyer lookup ──
+  async function drOfferHTML(o) {
+    const blanks = await drLoadBlanks(o.property_id), use = drUsable(blanks);
+    const drafts = (await ofSafe(sb.from('offer_drafts').select('id,number,sha256,created_at,needs,note').eq('offer_id', o.id).order('number', { ascending: false }))) || [];
+    const apps = drafts.length ? ((await ofSafe(sb.from('offer_draft_approvals').select('draft_id,approved_at').in('draft_id', drafts.map(x => x.id)))) || []) : [];
+    const law = (o.details || {}).lawyer || {};
+    return `<h2>The agreement</h2><div class="card tight" id="drOffer">
+      ${use ? `<p class="small" style="margin:0 0 6px">Drafted on ${esc(use.file_name)} (${esc(use.edition)}), places version ${use.approvedMap.version}.</p><div class="toolbar"><button class="btn primary" type="button" id="drDraftBtn">${drafts.length ? 'Re-draft after a change' : 'Draft on the agreement'}</button></div>`
+        : `<p class="small" style="margin:0" id="drNoBlank">${blanks.length ? 'Check and approve the places on the agreement blank first, on the property\'s Offers tile.' : 'Load the agreement blank for this property first, on its Offers tile.'}</p>`}
+      <p class="small err" id="drDraftErr" role="alert"></p>
+      ${drafts.length ? `<ul class="dr-list" id="drDrafts">${drafts.map((x, i) => { const ap = apps.find(a => a.draft_id === x.id); const nb = (x.needs || []).filter(n => n.blocking).length;
+        return `<li><button class="of-row" type="button" data-draft="${x.id}"><span class="of-r1"><strong>Draft ${x.number}</strong>${i === 0 ? ' <span class="pill">Newest</span>' : ''}${ap ? ' <span class="pill okp">Approved</span>' : nb ? ` <span class="pill of-warnp">${nb} need${nb === 1 ? 's' : ''} you</span>` : ''}</span><span class="small">${esc(fmtDT(x.created_at))} · <span translate="no">${esc(drShort(x.sha256))}</span>${x.note ? ' · ' + esc(x.note) : ''}</span></button></li>`; }).join('')}</ul>` : ''}
+      <label class="f" for="drAgDate">Date of the agreement</label><input type="text" id="drAgDate" disabled placeholder="Added once fully agreed" aria-describedby="drAgDateNote"><p class="small" id="drAgDateNote" style="margin:2px 0 0">Added once fully agreed. You type it in full, with the month name.</p>
+      <h3 style="margin:14px 0 4px">The purchaser's lawyer</h3>
+      <p class="small" style="margin:0">${law.firm || law.person ? esc([law.person, law.firm].filter(Boolean).join(', ')) : 'No lawyer named yet.'}${law.email ? ' · ' + esc(law.email) : ''}${law.phone ? ' · ' + esc(law.phone) : ''}</p>
+      <p class="small" style="margin:2px 0 0">Only the lawyers' details go on the agreement, never the buyer's own.</p>
+      ${law.firm || law.person ? '<div class="toolbar"><button class="btn ghost" type="button" id="drLawBtn">Find the lawyer\'s details</button></div>' : ''}<div id="drLaw" aria-live="polite"></div></div>`;
+  }
+  function drOfferWire(o) {
+    const b = $('#drDraftBtn'); if (b) b.addEventListener('click', async () => { b.disabled = true; $('#drDraftErr').textContent = 'Drafting...'; try { const id = await drMakeDraft(o.id, null, null); viewDraftReview(id); } catch (e) { $('#drDraftErr').textContent = e.message || 'That didn\'t draft.'; b.disabled = false; } });
+    $$('[data-draft]').forEach(x => x.addEventListener('click', () => viewDraftReview(x.dataset.draft)));
+    const lb = $('#drLawBtn'); if (lb) lb.addEventListener('click', () => drLawLookup(o));
+  }
+  async function drLawLookup(o) {
+    const box = $('#drLaw'), law = (o.details || {}).lawyer || {}; box.innerHTML = '<p class="small">Looking on public pages (the firm\'s website and the Law Society)...</p>';
+    const r = await offerCall('offer-draft', { action: 'lawyer_lookup', offer_id: o.id, firm: law.firm || '', person: law.person || '' });
+    const links = (r.manual || []).map(l => `<a href="${esc(l.url)}" target="_blank" rel="noopener noreferrer">${esc(l.label)}</a>`).join(' · ');
+    if (!r.ok || !(r.values || []).length) { box.innerHTML = `<div class="card note tight" id="drLawManual"><p class="small" style="margin:0">${esc(r.ok ? 'Nothing was found on public pages.' : r.message || 'The lookup didn\'t work this time.')} Look them up yourself: ${links || 'search the web for the firm\'s contact page.'}</p><p class="small" style="margin:4px 0 0">Then fix the details with Correct details.</p></div>`; return; }
+    box.innerHTML = `<div class="card tight" id="drLawFound"><p class="small" style="margin:0 0 4px">Found on public pages. Tick what to use${r.fallback ? '. No direct dial or mobile was published, so this is the firm\'s main line' : ''}.</p>
+      ${r.values.map(v => `<label class="choice cb"><input type="checkbox" data-lawv="${esc(v.id)}"><span class="mark"></span><span><span class="ct" translate="no">${esc(v.value)}</span><span class="cd">${esc({ email: 'Email', direct: 'Direct dial', mobile: 'Mobile', reception: 'Firm\'s main line' }[v.kind] || v.kind)} · source: <a href="${esc(v.source_url)}" target="_blank" rel="noopener noreferrer">${esc(v.source_title || v.source_url)}</a></span></span></label>`).join('')}
+      <div class="toolbar"><button class="btn primary" type="button" id="drLawUse">Use the ticked details</button></div><p class="small">${links}</p><p class="small err" id="drLawErr" role="alert"></p></div>`;
+    $('#drLawUse').addEventListener('click', async () => { const keys = $$('[data-lawv]').filter(x => x.checked).map(x => x.dataset.lawv); if (!keys.length) return $('#drLawErr').textContent = 'Tick at least one.';
+      try { await must(sb.rpc('agent_lawyer_use', { p_lookup: r.lookup_id, p_keys: keys })); toast('Lawyer\'s details updated'); viewOfferAgent(o.id); } catch (e) { $('#drLawErr').textContent = e.message || 'That didn\'t save.'; } });
+  }
+  // one tap: the plan, the PDF on top of the blank, filed with its fingerprints
+  async function drMakeDraft(oid, edits, note) {
+    const o = await must(sb.from('property_offers').select('*').eq('id', oid).single());
+    const blanks = await drLoadBlanks(o.property_id), b = drUsable(blanks); if (!b) throw new Error('Approve the places on the agreement blank first.');
+    const map = await must(sb.from('offer_blank_maps').select('*').eq('id', b.approvedMap.id).single());
+    const [terms, clauses, PDFLib] = await Promise.all([ofSafe(sb.from('offer_terms').select('*').order('position')), ofWording(), drPdfLib().catch(() => null)]);
+    if (!PDFLib) throw new Error(drNoLib);
+    const bytes = await drBlankBytes(b);
+    // the vendor's lawyer, if the file holds one: the newest lawyer link on an agreement for this property
+    let vendorLawyer = null; try { const ags = (await ofSafe(sb.from('agreements').select('id,created_at').eq('property_id', o.property_id).order('created_at', { ascending: false }))) || [];
+      if (ags.length) { const ls = (await ofSafe(sb.from('lawyer_links').select('lawyer_name,firm,email,sent_at').eq('agreement_id', ags[0].id).order('sent_at', { ascending: false }))) || [];
+        if (ls[0]) vendorLawyer = { firm: ls[0].firm, person: ls[0].lawyer_name, email: ls[0].email, source: 'the lawyer the agency agreement was sent to' }; } } catch (_) { }
+    const plan = DR.planDraft({ details: o.details || {}, map: { places: map.places, chattels: (DR_CACHE[b.id] && DR_CACHE[b.id].pages ? DR.buildMap(DR_CACHE[b.id].pages).chattels : DR.buildMap(await drBlankPages(b)).chattels) }, terms: terms || [], clauses, edits: edits || {}, today: OF.nzToday(), province: o.province || OF.DEFAULT_PROVINCE, vendorLawyer });
+    const r = await DR.renderDraft(PDFLib, bytes, plan, { title: 'Draft agreement: ' + (o.buyer_ref || 'offer') });
+    const sha = await REPO.sha256(r.bytes), prev = (await ofSafe(sb.from('offer_drafts').select('number').eq('offer_id', oid).order('number', { ascending: false }))) || [], n = ((prev[0] || {}).number || 0) + 1;
+    const pth = `properties/${o.property_id}/docs/offer-draft-${oid}-${n}-${sha.slice(0, 12)}.pdf`;
+    const up = await sb.storage.from('property-files').upload(pth, new Blob([r.bytes], { type: 'application/pdf' }), { contentType: 'application/pdf', upsert: false });
+    if (up.error && !/exists/i.test(up.error.message || '')) throw new Error('The draft didn\'t save. Check you have signal, then try again.');
+    const placed = plan.items.map(it => { const bx = r.boxes.filter(x => x.id === it.id || x.id.startsWith(it.id + '_cont'));
+      return { id: it.id, label: it.label, kind: it.kind, text: it.text || null, value: it.value || null, placeholder: !!it.placeholder, edited: !!it.edited, terms: it.terms, boxes: bx.map(x => ({ page: x.page, x: Math.round(x.x * 10) / 10, y: Math.round(x.y * 10) / 10, w: Math.round(x.w * 10) / 10, h: Math.round(x.h * 10) / 10 })) }; });
+    const res = await must(sb.rpc('agent_draft_add', { p_offer: oid, p_map: map.id, p_path: pth, p_sha256: sha, p_size: r.bytes.length, p_placed: placed, p_needs: plan.needs, p_edits: Object.assign({}, edits || {}, { date_format: plan.date_format }), p_note: note || null }));
+    DR_CACHE['draft-' + res.id] = { bytes: r.bytes };
+    return res.id;
+  }
+  async function drDraftBytes(d) {
+    const k = 'draft-' + d.id; if (DR_CACHE[k]) return DR_CACHE[k].bytes;
+    const { data, error } = await sb.storage.from('property-files').createSignedUrl(d.path, 300); if (error || !data) throw new Error('The draft couldn\'t be opened. Check you have signal.');
+    const bytes = new Uint8Array(await (await fetch(data.signedUrl)).arrayBuffer());
+    if (await REPO.sha256(bytes) !== d.sha256) throw new Error('The stored draft doesn\'t match its fingerprint.');
+    DR_CACHE[k] = { bytes }; return bytes;
+  }
+  // Tim's review screen
+  async function viewDraftReview(did) {
+    header('Draft agreement', '', 0); actions(false);
+    main().innerHTML = '<div class="loading">Loading...</div>';
+    const d = await must(sb.from('offer_drafts').select('*').eq('id', did).single());
+    const [o, all, apps, p] = await Promise.all([must(sb.from('property_offers').select('*').eq('id', d.offer_id).single()), ofSafe(sb.from('offer_drafts').select('id,number').eq('offer_id', d.offer_id).order('number', { ascending: false })),
+      ofSafe(sb.from('offer_draft_approvals').select('*').eq('draft_id', did)), must(sb.from('properties').select('id,address').eq('id', d.property_id).single())]);
+    const ap = (apps || [])[0], newest = ((all || [])[0] || {}).id === d.id, changed = o.updated_at && o.updated_at > d.created_at && JSON.stringify(o.details) !== JSON.stringify(d.details);
+    const block = d.needs.filter(n => n.blocking), check = d.needs.filter(n => !n.blocking), E = d.edits || {};
+    const items = d.placed.filter(x => x.kind !== 'strike' && x.kind !== 'lines' && x.id !== 'further_terms'), strikes = d.placed.filter(x => x.kind === 'strike' || x.kind === 'lines'), ft = d.placed.find(x => x.id === 'further_terms');
+    const customT = ft && (ft.terms || []).find(t => t.custom);
+    const boxes = []; d.placed.forEach((x, i) => (x.boxes || []).forEach(bx => boxes.push(Object.assign({ id: x.id, label: x.label, kind: 'text', cls: x.placeholder ? 'dr-ph' : 'dr-fill', badge: String(i + 1) }, bx, { y: bx.y }))));
+    const pagesWith = [...new Set(boxes.map(x => x.page))].sort((a, b) => a - b);
+    main().innerHTML = `<div class="view-pad dr-page" id="drReview">
+      <div class="toolbar no-print"><button class="btn ghost" type="button" id="drRvBack">Back to the offer</button></div><span class="agent-flag">Only you see this</span>
+      <h1>Draft ${d.number} of the agreement</h1>
+      <p class="lede">${nt(p.address)}</p><p class="small">For ${esc(o.buyer_ref || 'the buyer')}, ${esc(money(+o.amount))}. Made ${esc(fmtDT(d.created_at))}. Draft fingerprint <span translate="no">${esc(drShort(d.sha256))}</span>, on the blank <span translate="no">${esc(drShort(d.blank_sha256))}</span>.</p>
+      ${ap ? `<div class="card okc tight" id="drApproved"><p class="small" style="margin:0"><strong>Approved</strong> by ${esc(ap.approved_by)}, ${esc(fmtDT(ap.approved_at))}. Fingerprint <span translate="no">${esc(drShort(ap.sha256))}</span>. Signing comes next (not built yet).</p></div>` : ''}
+      ${!newest ? '<div class="card warnc tight" id="drNotNewest"><p class="small" style="margin:0">There is a newer draft of this offer. This one is kept as it was.</p></div>' : ''}
+      ${changed && newest ? '<div class="card warnc tight" id="drChanged"><p class="small" style="margin:0">The offer has been corrected since this draft. Re-draft it so the agreement matches.</p></div>' : ''}
+      <section class="card" id="drNeeds"><h2>Needs you ${block.length ? `<span class="pill of-warnp">${block.length}</span>` : ''}</h2>
+        ${block.length ? `<ul class="dr-list">${block.map(n => `<li class="dr-need" data-need="${esc(n.id)}">${esc(n.text)}</li>`).join('')}</ul>` : '<p class="small" id="drNoNeeds">Nothing is waiting on you before approval.</p>'}
+        ${check.length ? `<details class="of-more" open><summary class="small">To check (${check.length})</summary><ul class="dr-list">${check.map(n => `<li class="small" data-check="${esc(n.id)}">${esc(n.text)}</li>`).join('')}</ul></details>` : ''}</section>
+      <section class="card" id="drPagesRv"><h2>The drafted pages</h2><p class="small">Every place filled or marked is highlighted and numbered. Placeholders are in yellow.</p>
+        <div class="dr-nav"><label class="sr" for="drRvPick">Page</label><select id="drRvPick">${pagesWith.map(n => `<option value="${n}">Page ${n} (${boxes.filter(x => x.page === n).length})</option>`).join('')}</select></div>
+        <div id="drRvCanvas" class="dr-holder"></div></section>
+      <section class="card" id="drPlaced"><h2>Everything placed</h2>
+        <ol class="dr-items">${d.placed.map((x, i) => `<li data-item="${esc(x.id)}" value="${i + 1}"><span class="small"><strong>${esc(x.label)}</strong>${x.edited ? ' <span class="pill">Edited by you</span>' : ''}</span>
+          ${x.kind === 'strike' || x.kind === 'lines' ? '' : x.id === 'further_terms' ? `<div class="small">${(x.terms || []).map(t => `<label class="f" for="drFt_${esc(t.id)}">${t.number}. ${esc(t.title)}${t.placeholder ? ' <span class="pill of-warnp">Needs you</span>' : ''}</label>${t.custom ? `<p class="small" style="margin:0">The buyer asked for: ${esc(t.request || '(no description)')}${t.ai ? ' (worded with AI help)' : ''}</p>` : ''}<textarea id="drFt_${esc(t.id)}" rows="3" data-edit="${esc(t.id)}" data-orig="${esc(t.text)}">${esc(t.custom && t.placeholder ? (t.wording || '') : t.text)}</textarea>`).join('')}</div>`
+            : `<label class="sr" for="drEd_${esc(x.id)}">${esc(x.label)}</label><input type="text" id="drEd_${esc(x.id)}" data-edit="${esc(x.id)}" data-orig="${esc(x.text || '')}" value="${esc(x.text || '')}">`}</li>`).join('')}</ol>
+        ${customT ? `<label class="choice cb" id="drCustomOk"><input type="checkbox" id="drCustomTick" ${E.custom_ok ? 'checked' : ''}><span class="mark"></span><span><span class="ct">Use the wording above for the buyer's own condition</span><span class="cd">It goes on the agreement only once you tick this and re-draft.</span></span></label>` : ''}
+        <label class="f" for="drExtra">Add a further term <span class="opt">(your own wording, one per line)</span></label><textarea id="drExtra" rows="2">${esc((E.extra_terms || []).join('\n'))}</textarea>
+        <label class="f" for="drFmt">Condition dates</label><select id="drFmt"><option value="date" ${E.date_format !== 'date_days' ? 'selected' : ''}>The date, for example 8 December 2026</option><option value="date_days" ${E.date_format === 'date_days' ? 'selected' : ''}>The date and the working days, for example 8 December 2026 (10 working days)</option></select>
+        <label class="f" for="drRvDate">Date of the agreement</label><input type="text" id="drRvDate" disabled placeholder="Added once fully agreed"><p class="small" style="margin:2px 0 0">Added once fully agreed, in full with the month name.</p>
+        <label class="f" for="drNote">What changed <span class="opt">(kept with the new draft)</span></label><input type="text" id="drNote" maxlength="500">
+        <div class="toolbar"><button class="btn ghost" type="button" id="drRedraft">Re-draft with my changes</button></div></section>
+      <div class="err" id="drRvErr" role="alert"></div>
+      <div class="toolbar"><button class="btn primary" type="button" id="drApproveDraft" ${ap || !newest || block.length ? 'disabled' : ''}>${ap ? 'Approved' : 'Approve draft'}</button><button class="btn ghost" type="button" id="drDownload">Download the PDF</button>${newest ? '<button class="btn ghost" type="button" id="drRedraftChange">Re-draft after a change</button>' : ''}</div>
+      ${!ap && newest && block.length ? '<p class="small">Approve is available once nothing needs you. Fill in each placeholder above and re-draft.</p>' : ''}
+    </div>`;
+    const go = async (edits, note) => { const btns = $$('#drRedraft,#drRedraftChange'); btns.forEach(x => { x.disabled = true; }); $('#drRvErr').textContent = 'Drafting...';
+      try { const id = await drMakeDraft(d.offer_id, edits, note); toast('New draft made; the earlier one is kept'); viewDraftReview(id); } catch (e) { $('#drRvErr').textContent = e.message || 'That didn\'t draft.'; btns.forEach(x => { x.disabled = false; }); } };
+    const collect = () => { const ed = { items: Object.assign({}, E.items || {}) };
+      $$('[data-edit]').forEach(x => { const v = x.value.trim(); if (v !== x.dataset.orig) ed.items[x.dataset.edit] = v; });
+      if (customT) { ed.custom_ok = $('#drCustomTick').checked; const ta = $(`[data-edit="${customT.id}"]`); if (ta) { ed.custom_wording = ta.value.trim(); delete ed.items[customT.id]; } }
+      ed.extra_terms = $('#drExtra').value.split('\n').map(s => s.trim()).filter(Boolean); ed.date_format = $('#drFmt').value; return ed; };
+    $('#drRvBack').addEventListener('click', () => viewOfferAgent(d.offer_id));
+    $('#drRedraft').addEventListener('click', () => go(collect(), $('#drNote').value.trim() || 'Re-drafted with your changes'));
+    const rc = $('#drRedraftChange'); if (rc) rc.addEventListener('click', () => go({ date_format: E.date_format, extra_terms: E.extra_terms, custom_ok: E.custom_ok, custom_wording: E.custom_wording }, $('#drNote').value.trim() || 'Re-drafted after a change'));
+    $('#drApproveDraft').addEventListener('click', async () => { try { await must(sb.rpc('agent_draft_approve', { p_draft: did, p_sha256: d.sha256 })); toast('Draft approved'); viewDraftReview(did); } catch (e) { $('#drRvErr').textContent = e.message || 'That didn\'t save.'; } });
+    $('#drDownload').addEventListener('click', async () => { try { const bytes = await drDraftBytes(d); const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' })); a.download = `Draft-${d.number}-${(p.address || 'agreement').replace(/[^A-Za-z0-9]+/g, '-').slice(0, 60)}.pdf`; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000); } catch (e) { $('#drRvErr').textContent = e.message; } });
+    const paint = async n => { try { const r = await drRender($('#drRvCanvas'), n, boxes, { bytes: await drDraftBytes(d), key: 'draft-' + d.id }); r.wrapEl.dataset.draft = d.id; } catch (e) { $('#drRvCanvas').innerHTML = `<p class="small err">${esc(e.message || drNoLib)}</p>`; } };
+    const pick = $('#drRvPick'); pick.addEventListener('change', () => paint(+pick.value)); if (pagesWith.length) paint(pagesWith[0]);
+    top();
   }
 
   const offerToken = new URLSearchParams(location.search).get('offer');

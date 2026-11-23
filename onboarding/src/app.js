@@ -5893,6 +5893,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const d = o.details || {}, chk = OF.checkDates(d, ofOpts(ctx)), L = OF.longDate, gap = chk.problems.find(x => x.kind === 'gap');
     const fixes = evs.filter(e => e.kind === 'corrected'), off = ['withdrawn', 'lapsed'].includes(o.status);
     const nowLocal = (() => { const t = new Date(); t.setMinutes(t.getMinutes() - t.getTimezoneOffset()); return t.toISOString().slice(0, 16); })();
+    const drH = await drOfferHTML(o);   // the agreement: drafting and the lawyer lookup (offers phase 2)
     main().innerHTML = `<div class="view-pad of-page" id="ofView">
       <div class="toolbar no-print"><button class="btn ghost" type="button" id="ofBackP">Back to the property</button></div>
       <span class="agent-flag">Only you see this</span>
@@ -5916,6 +5917,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       ${fixes.length ? `<h2>What they sent</h2><details class="card tight" id="ofOrig" open><summary class="small">The original, unchanged</summary>${ofSummaryHTML(o.submission || {}, ctx, o.as_at)}</details>
         <div class="card tight"><h3 style="margin:0 0 4px">Corrections</h3>${fixes.map(e => `<div class="fact"><div class="k">${esc(fmtDT(e.at))} · ${esc(e.actor)}</div><div class="v" style="font-weight:400">${esc((e.detail || {}).note || '')}</div></div>`).join('')}</div>` : ''}
       <div class="toolbar no-print"><button class="btn primary" type="button" id="ofFix">Correct details</button></div>
+      ${drH}
       <h2>Withdrawn or lapsed</h2>
       <div class="card tight" id="ofStatus">${off ? `<p class="small" style="margin:0">${o.status === 'withdrawn' ? 'Withdrawn' : 'Lapsed'} at ${esc(fmtDT(o.status_at))}.</p><div class="toolbar"><button class="btn ghost" type="button" id="ofStBack">Mark it current again</button></div>`
         : `<label class="f" for="ofStAt" style="margin-top:0">When</label><input type="datetime-local" id="ofStAt" value="${nowLocal}"><label class="f" for="ofStNote">Note <span class="opt">(optional)</span></label><input type="text" id="ofStNote" maxlength="500">
@@ -5924,6 +5926,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     </div>`;
     $('#ofBackP').addEventListener('click', () => viewProperty(o.property_id));
     $('#ofFix').addEventListener('click', () => viewOfferCorrect(oid));
+    drOfferWire(o);
     const ns = $('#ofNotSpam'); if (ns) ns.addEventListener('click', async () => { ns.disabled = true; try { await must(sb.rpc('agent_offer_not_spam', { p_offer: oid })); toast('Moved to the offers list as a new offer'); viewProperty(o.property_id); } catch (_) { ns.disabled = false; } });
     const go = async (fn, args, errBox) => { try { await must(sb.rpc(fn, args)); viewOfferAgent(oid); } catch (e) { if (errBox) $(errBox).textContent = e.message || 'That didn\'t save.'; } };
     const gk = $('#ofGapOk'); if (gk) gk.addEventListener('click', () => { const r = $('#ofGapWhy').value.trim(); if (r.length < 5) return $('#ofGapErr').textContent = 'Give your reason.'; go('agent_offer_gap', { p_offer: oid, p_reason: r }, '#ofGapErr'); });
@@ -5935,7 +5938,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   // the property's Offers tile (agent only)
   async function offersLoad(pid) {
     const [lk, ofs, wd] = await Promise.all([ofSafe(sb.from('offer_links').select('*').eq('property_id', pid)), ofSafe(sb.from('property_offers').select('*').eq('property_id', pid).order('received_at', { ascending: false })), ofWording()]);
-    return { link: (lk || [])[0] || null, offers: (ofs || []).filter(o => o.source && o.source !== 'manual'), ks: await ofKs(), wording: wd };
+    return { link: (lk || [])[0] || null, offers: (ofs || []).filter(o => o.source && o.source !== 'manual'), ks: await ofKs(), wording: wd, blanks: await drLoadBlanks(pid) };
   }
   function ofRowHTML(o, X) {
     const d = o.details || {}, chk = OF.checkDates(d, { asAt: o.as_at, province: o.province, ksDays: X.ks }), L = OF.longDate;
@@ -5960,6 +5963,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <div id="offQr" class="of-qr" hidden></div>
       ${real.length ? `<ul class="of-list">${real.map(o => ofRowHTML(o, X)).join('')}</ul>` : '<p class="small" style="margin:6px 0 0">No offers yet.</p>'}
       ${spam.length ? `<details class="of-more of-spam" id="offSpam"><summary class="small">Possible spam (${spam.length})</summary><p class="small" style="margin:4px 0">Sent with the form's hidden field filled in, which is usually a robot. Kept in case one is real. You weren't emailed about these.</p><ul class="of-list">${spam.map(o => ofRowHTML(o, X)).join('')}</ul></details>` : ''}
+      ${drTileHTML(X)}
       <details class="of-more" id="offChD"><summary class="small">Chattels buyers see (${((l && l.chattels) || []).length || 'none yet'})</summary>
         <label class="f" for="offCh">One chattel per line. With none, buyers see "Tim will confirm the chattels list with you".</label><textarea id="offCh" rows="5">${esc(((l && l.chattels) || []).join('\n'))}</textarea>
         <div class="toolbar"><button class="btn ghost" type="button" id="offChSave">Save chattels</button></div></details>
@@ -5988,7 +5992,415 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     $$('[data-offer]').forEach(b => b.addEventListener('click', () => viewOfferAgent(b.dataset.offer)));
     on('#offChSave', async () => { try { const items = $('#offCh').value.split('\n').map(x => x.trim()).filter(Boolean); await must(sb.rpc('agent_offer_chattels', { p_property: pid, p_items: items })); toast('Chattels saved'); viewProperty(pid); } catch (_) { } });
     on('#offKsSave', async () => { try { await must(sb.rpc('agent_offer_settings', { p_ks_days: +$('#offKs').value })); toast('Saved'); } catch (_) { } });
+    drTileWire(p, X);
     on('#offWSave', async () => { try { for (const t of $$('[data-offw]')) { const k = t.dataset.offw; if ((X.wording[k] || '') !== t.value.trim()) { await must(sb.rpc('agent_offer_clause', { p_key: k, p_wording: t.value.trim() || null })); X.wording[k] = t.value.trim(); } } toast('Wording saved'); } catch (_) { } });
+  }
+
+  /* ═════════ OFFERS PHASE 2: drafting each offer onto the REINZ blank (migration 019) ═════════ */
+  // Tim loads the REINZ agreement pack once per listing (Offers tile). Its fingerprint is taken and the original kept unchanged on the
+  // property file (kind "REINZ agreement blank", never shared). The edition printed on it must be in the checked list (DRAFT.EDITIONS).
+  // The places to write are found from the printed labels (DRAFT.buildMap); the AI may read the pack and propose more places, the
+  // chattels list and anything unusual (the offer-draft edge function); Tim ticks, moves, deletes or adds places, then approves. One
+  // tap on an offer drafts it: the original pages untouched, typed text and marks added on top (pdf-lib), filed with its own
+  // fingerprint, the blank's fingerprint and the map used. Tim reviews every placed value, fixes the "Needs you" items, and approves.
+  // Agent only throughout; vendors see none of it. Signing is phase 3.
+  const DR = window.DRAFT, BLANK_KIND = 'REINZ agreement blank';
+  const PDFJS_V = '6.2.108', PDFJS_BASE = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${PDFJS_V}/`, PDFLIB_URL = 'https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js';
+  const PDF_OPTS = { standardFontDataUrl: PDFJS_BASE + 'standard_fonts/', wasmUrl: PDFJS_BASE + 'wasm/' };
+  let PDFJS_P = null, PDFLIB_P = null;
+  // pdf.js reads and draws the pages; it runs on the page itself (no separate worker), which is plenty for one pack at a time
+  function drPdfjs() {
+    return PDFJS_P ||= (async () => { const w = await import(PDFJS_BASE + 'build/pdf.worker.min.mjs'); globalThis.pdfjsWorker = w; const m = await import(PDFJS_BASE + 'build/pdf.min.mjs'); m.GlobalWorkerOptions.workerSrc = PDFJS_BASE + 'build/pdf.worker.min.mjs'; return m; })().catch(e => { PDFJS_P = null; throw e; });
+  }
+  function drPdfLib() {
+    return PDFLIB_P ||= new Promise((res, rej) => { if (window.PDFLib) return res(window.PDFLib); const s = document.createElement('script'); s.src = PDFLIB_URL; s.onload = () => window.PDFLib ? res(window.PDFLib) : rej(new Error('pdf-lib')); s.onerror = () => { PDFLIB_P = null; rej(new Error('pdf-lib')); }; document.head.appendChild(s); });
+  }
+  const drNoLib = 'The PDF tools didn\'t load. Check you have signal, then try again.';
+  const drShort = h => String(h || '').slice(0, 12);
+  // the blank's bytes and pages, kept in memory once read; fetched from storage otherwise and checked against its fingerprint
+  const DR_CACHE = {};
+  async function drBlankBytes(b) {
+    if (DR_CACHE[b.id] && DR_CACHE[b.id].bytes) return DR_CACHE[b.id].bytes;
+    const d = await must(sb.from('property_documents').select('id,path,bucket').eq('id', b.document_id).single());
+    const { data, error } = await sb.storage.from(d.bucket || 'property-files').createSignedUrl(d.path, 300); if (error || !data) throw new Error('The blank couldn\'t be opened. Check you have signal.');
+    const bytes = new Uint8Array(await (await fetch(data.signedUrl)).arrayBuffer());
+    if (await REPO.sha256(bytes) !== b.sha256) throw new Error('The stored blank doesn\'t match its fingerprint, so it won\'t be used. Load it again.');
+    (DR_CACHE[b.id] ||= {}).bytes = bytes; return bytes;
+  }
+  async function drBlankPages(b) {
+    if (DR_CACHE[b.id] && DR_CACHE[b.id].pages) return DR_CACHE[b.id].pages;
+    const pages = await DR.readPages(await drPdfjs(), await drBlankBytes(b), PDF_OPTS); (DR_CACHE[b.id] ||= {}).pages = pages; return pages;
+  }
+  async function drLoadBlanks(pid) {
+    const blanks = (await ofSafe(sb.from('offer_blanks').select('*').eq('property_id', pid).order('created_at', { ascending: false }))) || [];
+    const maps = blanks.length ? ((await ofSafe(sb.from('offer_blank_maps').select('id,blank_id,version,approved,created_at,chattels,missing').in('blank_id', blanks.map(b => b.id)).order('version', { ascending: false }))) || []) : [];
+    blanks.forEach(b => { b.maps = maps.filter(m => m.blank_id === b.id); b.approvedMap = b.maps.find(m => m.approved) || null; });
+    return blanks;
+  }
+  // the blank and map an offer is drafted on: the newest blank whose places are approved
+  const drUsable = blanks => blanks.find(b => b.edition_checked && b.approvedMap) || null;
+
+  // ── the Offers tile: load the blank ──
+  function drTileHTML(X) {
+    const bl = X.blanks || [], b = bl[0], use = drUsable(bl);
+    return `<div class="dr-blank" id="drBlank"><h4 class="dr-h">Agreement blank</h4>
+      ${b ? `<p class="small" style="margin:0 0 4px"><strong>${esc(b.file_name)}</strong><br>${esc(b.edition || 'Edition not found')} · ${b.pages} pages · fingerprint <span translate="no">${esc(drShort(b.sha256))}</span></p>
+        ${!b.edition_checked ? `<div class="card warnc tight" id="drEditionNo"><p class="small" style="margin:0">This blank is the ${esc(b.edition || 'unknown')} edition, which hasn't been checked yet, so offers can't be drafted on it. It is kept on the property file. Ask for this edition to be checked before you use it.</p></div>`
+          : b.approvedMap ? `<p class="small" style="margin:0" id="drMapOk">Places approved (version ${b.approvedMap.version}). Offers can be drafted on it.</p>` : `<p class="small" style="margin:0" id="drMapNo">Check and approve the places on the blank before drafting.</p>`}
+        ${use && use.id !== b.id ? `<p class="small" style="margin:4px 0 0">Offers are drafted on the earlier blank (${esc(use.file_name)})${b.edition_checked ? ' until this one\'s places are approved' : ''}. <button class="btn link" type="button" id="drMapUseBtn" data-blank="${use.id}">Check its places</button></p>` : ''}
+        <div class="toolbar">${b.edition_checked ? `<button class="btn ${b.approvedMap ? 'ghost' : 'primary'}" type="button" id="drMapBtn" data-blank="${b.id}">Check the places on the blank</button>` : ''}<button class="btn ghost" type="button" id="drLoadBtn">Load a new blank</button></div>
+        ${bl.length > 1 ? `<details class="of-more"><summary class="small">Earlier blanks (${bl.length - 1}), kept</summary>${bl.slice(1).map(x => `<p class="small" style="margin:2px 0">${esc(x.file_name)} · ${esc(fmtDT(x.created_at))} · <span translate="no">${esc(drShort(x.sha256))}</span></p>`).join('')}</details>` : ''}`
+      : `<p class="small" style="margin:0 0 6px">Load the REINZ agreement pack for this listing once. Each offer is then drafted onto it for you to check, so nothing is retyped.</p>
+        <div class="toolbar"><button class="btn primary" type="button" id="drLoadBtn">Agreement blank: load the PDF</button></div>`}
+      <input type="file" id="drFile" accept="application/pdf,.pdf" hidden>
+      <div class="dr-drop" id="drDrop" aria-hidden="true">Or drop the PDF here</div>
+      <p class="small err" id="drErr" role="alert"></p>
+      <div class="toolbar"><button class="btn link" type="button" id="drLibBtn">Your clause library</button></div></div>`;
+  }
+  function drTileWire(p, X) {
+    const inp = $('#drFile'); if (!inp) return;
+    const go = f => { if (f) drLoadBlank(p.id, f).catch(e => { $('#drErr').textContent = e.message || 'That didn\'t load.'; }); };
+    $('#drLoadBtn').addEventListener('click', () => inp.click());
+    inp.addEventListener('change', () => { const f = (inp.files || [])[0]; inp.value = ''; go(f); });
+    const dz = $('#drDrop');
+    ['dragenter', 'dragover'].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.add('over'); }));
+    ['dragleave', 'drop'].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.remove('over'); }));
+    dz.addEventListener('drop', e => go(((e.dataTransfer && e.dataTransfer.files) || [])[0]));
+    const mb = $('#drMapBtn'); if (mb) mb.addEventListener('click', () => viewBlankMap(mb.dataset.blank));
+    const mu = $('#drMapUseBtn'); if (mu) mu.addEventListener('click', () => viewBlankMap(mu.dataset.blank));
+    $('#drLibBtn').addEventListener('click', () => viewClauseLibrary(p.id));
+  }
+  // file the PDF as it is (never changed), then register it with its edition and pages
+  async function drLoadBlank(pid, file) {
+    const err = $('#drErr'); const say = t => { if (err) { err.className = 'small'; err.textContent = t; } };
+    if (file.size > REPO.MAX_BYTES) throw new Error('That file is over 25 MB.');
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const kind = REPO.sniff(bytes.subarray(0, 65536), bytes.subarray(Math.max(0, bytes.length - 65536)), file.name);
+    if (kind.mime !== 'application/pdf') throw new Error('The agreement blank needs to be the PDF from the REINZ portal.');
+    say('Reading the blank...');
+    let pdfjs; try { pdfjs = await drPdfjs(); } catch (_) { throw new Error(drNoLib); }
+    let pages; try { pages = await DR.readPages(pdfjs, bytes, PDF_OPTS); } catch (_) { throw new Error('That PDF couldn\'t be read. Download it from the portal again and load the new copy.'); }
+    const edition = DR.readEdition(pages), sha = await REPO.sha256(bytes), key = crypto.randomUUID();
+    const pth = REPO.paths(pid, key, BLANK_KIND, file.name, 'application/pdf').path;
+    say('Saving the blank on the property file...');
+    const up = await sb.storage.from('property-files').upload(pth, new Blob([bytes], { type: 'application/pdf' }), { contentType: 'application/pdf', upsert: false });
+    if (up.error) throw new Error('The blank didn\'t save. Check you have signal, then try again.');
+    const doc = await must(sb.rpc('agent_repo_add', { p_property: pid, p_item: { key, kind: BLANK_KIND, name: file.name, title: 'Agreement blank' + (edition ? ', ' + edition : ''), path: pth, mime_type: 'application/pdf', size_bytes: bytes.length, sha256: sha } }));
+    const r = await must(sb.rpc('agent_blank_add', { p_document: doc.id, p_pages: pages.length, p_sizes: pages.map(x => [x.w, x.h]), p_edition: edition }));
+    DR_CACHE[r.id] = { bytes, pages };
+    if (!r.edition_checked) { toast('Blank kept, but its edition hasn\'t been checked'); return viewProperty(pid); }
+    toast('Blank loaded'); return viewBlankMap(r.id);
+  }
+
+  // ── the places on the blank ──
+  const DR_COLOURS = { anchor: 'dr-anchor', ai: 'dr-ai', tim: 'dr-tim' };
+  const DR_ADD_KINDS = [['initial', 'Initials'], ['signature', 'Signature'], ['ack', 'Acknowledgement tick'], ['text', 'Text to fill in']];
+  let DRM = null;   // the map being checked
+  async function viewBlankMap(bid) {
+    header('Places on the blank', '', 0); actions(false);
+    main().innerHTML = '<div class="loading">Loading...</div>';
+    const b = await must(sb.from('offer_blanks').select('*').eq('id', bid).single());
+    const maps = (await ofSafe(sb.from('offer_blank_maps').select('*').eq('blank_id', bid).order('version', { ascending: false }))) || [];
+    const p = await must(sb.from('properties').select('id,address').eq('id', b.property_id).single());
+    let pages; try { pages = await drBlankPages(b); } catch (e) { main().innerHTML = `<div class="view-pad"><p class="err">${esc(e.message === 'pdf-lib' ? drNoLib : e.message || drNoLib)}</p><div class="toolbar"><button class="btn ghost" type="button" id="drBk">Back to the property</button></div></div>`; $('#drBk').addEventListener('click', () => viewProperty(b.property_id)); return; }
+    const found = DR.buildMap(pages), last = maps[0];
+    const props = last ? (last.proposals || []).map(x => Object.assign({}, x)) : [];
+    const places = last ? last.places.filter(x => x.source !== 'ai').map(x => Object.assign({}, x)) : found.places.map(x => Object.assign({}, x));
+    // the chattels as read from Schedule 2: included when they have a number or no brackets; Tim ticks the list
+    const chat = last ? (last.chattels || []).map(n => ({ name: n, on: true, from: 'saved' })) : found.chattels.map(c => ({ name: c.name, on: c.qty === null || (typeof c.qty === 'number' && c.qty > 0), qty: c.qty, from: 'schedule' }));
+    DRM = { b, p, pages, maps, found, places, props, chat, notes: last ? (last.notes || []).map(x => Object.assign({}, x)) : [], missing: found.missing, page: 1, sel: null, adding: null, dirty: false };
+    drMapPaint(); top();
+  }
+  const drPageW = () => Math.min(Math.max(240, (main().clientWidth || 360) - 34), 760);
+  async function drRender(holder, n, boxes, opts) {
+    // draw page n into holder (a canvas sized to the screen) and lay the boxes over it
+    const o = opts || {}, pdfjs = await drPdfjs();
+    const key = o.key || 'blank'; holder._docs ||= {};
+    const doc = holder._docs[key] ||= await pdfjs.getDocument(Object.assign({ data: o.bytes.slice(0), isEvalSupported: false }, PDF_OPTS)).promise;
+    const pg = await doc.getPage(n), w = drPageW(), vp1 = pg.getViewport({ scale: 1 }), scale = w / vp1.width, vp = pg.getViewport({ scale: scale * (window.devicePixelRatio || 1) });
+    const cv = document.createElement('canvas'); cv.width = Math.round(vp.width); cv.height = Math.round(vp.height); cv.className = 'dr-cv'; cv.setAttribute('aria-hidden', 'true');
+    const wrapEl = document.createElement('div'); wrapEl.className = 'dr-pg'; wrapEl.style.width = w + 'px'; wrapEl.style.aspectRatio = vp1.width + ' / ' + vp1.height; wrapEl.dataset.page = n; wrapEl.appendChild(cv);
+    holder.innerHTML = ''; holder.appendChild(wrapEl);
+    try { await pg.render({ canvasContext: cv.getContext('2d'), canvas: cv, viewport: vp }).promise; } catch (_) { }
+    const W = vp1.width, H = vp1.height;
+    boxes.filter(x => x.page === n).forEach(x => {
+      // boxes come in page points; each as { x, w, bottom, top } (DRAFT.rectOf for a place on the blank)
+      const rc = x.rect || { bottom: x.y, top: x.y + x.h };
+      const el = document.createElement(o.button ? 'button' : 'div'); if (o.button) el.type = 'button';
+      el.className = 'dr-box ' + (x.cls || '');
+      el.style.left = (x.x / W * 100) + '%'; el.style.width = (Math.max(x.w, 6) / W * 100) + '%';
+      el.style.top = (Math.max(0, H - rc.top) / H * 100) + '%'; el.style.height = (Math.max(rc.top - rc.bottom, 6) / H * 100) + '%';
+      el.dataset.id = x.id; el.title = x.label || ''; if (o.button) el.setAttribute('aria-label', x.label || x.id);
+      if (x.badge) { const sp = document.createElement('span'); sp.className = 'dr-badge'; sp.textContent = x.badge; el.appendChild(sp); }
+      wrapEl.appendChild(el);
+    });
+    return { wrapEl, W, H, scale };
+  }
+  // what Tim sees as places: the found ones, AI proposals he hasn't deleted, and his own
+  const drVisible = () => DRM.places.concat(DRM.props.filter(x => x.decision !== 'deleted').map(x => Object.assign({}, x.place, { decision: x.decision })));
+  function drMapPaint() {
+    const M = DRM, b = M.b, kept = M.props.filter(x => ['kept', 'moved'].includes(x.decision)).length, waiting = M.props.filter(x => !x.decision || x.decision === 'proposed').length;
+    const sel = M.sel ? drVisible().find(x => x.id === M.sel) : null;
+    const pagesWith = [...new Set(drVisible().map(x => x.page))].sort((a, c) => a - c);
+    main().innerHTML = `<div class="view-pad dr-page" id="drMap">
+      <div class="toolbar no-print"><button class="btn ghost" type="button" id="drBack">Back to the property</button></div><span class="agent-flag">Only you see this</span>
+      <h1>Places on the blank</h1>
+      <p class="lede">${nt(M.p.address)}</p>
+      <p class="small">${esc(b.file_name)} · ${esc(b.edition)} · ${b.pages} pages · fingerprint <span translate="no">${esc(drShort(b.sha256))}</span>${M.maps[0] ? ` · last saved as version ${M.maps[0].version}${M.maps[0].approved ? ', approved' : ''}` : ''}</p>
+      <p class="small">Each place was found from the labels printed on the blank. Check them, add any the pack needs, then approve. Nothing the AI suggests is used until you keep it.</p>
+      ${M.missing.length ? `<div class="card warnc tight" id="drMissing"><p class="small" style="margin:0"><strong>Not found on this blank:</strong> ${esc(M.missing.map(k => DR.LABELS[k] || k).join('; '))}. Add them yourself on the page, or write them in by hand.</p></div>` : '<p class="small" id="drAllFound">Every standard place was found.</p>'}
+      <section class="card" id="drAi"><h2>Read the pack with AI</h2><p class="small">The AI reads the pack's text page by page and suggests the chattels, places to initial, sign or acknowledge, and anything unusual. You decide on each.</p>
+        <div class="toolbar"><button class="btn ghost" type="button" id="drAiGo">${M.props.length ? 'Read it again' : 'Read the pack'}</button></div><p class="small" id="drAiMsg" role="status" aria-live="polite"></p>
+        ${M.props.length ? `<p class="small" style="margin:6px 0 2px"><strong>Suggested places</strong> (${kept} kept, ${waiting} to decide)</p><ul class="dr-list" id="drProps">${M.props.map((x, i) => `<li class="dr-prop ${x.decision || 'proposed'}" data-prop="${i}">
+            <span><strong>Page ${x.place.page}:</strong> ${esc(x.place.label)}<br><span class="small">${esc(x.place.reason || '')}</span>${x.decision === 'deleted' ? '<br><span class="small">Deleted</span>' : x.decision === 'moved' ? '<br><span class="small">Kept, moved</span>' : x.decision === 'kept' ? '<br><span class="small">Kept</span>' : ''}</span>
+            <span class="dr-acts">${x.decision === 'deleted' ? `<button class="btn link" type="button" data-pkeep="${i}">Restore</button>` : `${x.decision !== 'kept' && x.decision !== 'moved' ? `<button class="btn ghost" type="button" data-pkeep="${i}">Keep</button>` : ''}<button class="btn link" type="button" data-pshow="${i}">Show</button><button class="btn link" type="button" data-pdel="${i}">Delete</button>`}</span></li>`).join('')}</ul>` : ''}
+        ${M.notes.length ? `<p class="small" style="margin:8px 0 2px"><strong>Worth knowing about this pack</strong></p><ul class="dr-list" id="drNotes">${M.notes.map((n, i) => `<li><label class="choice cb"><input type="checkbox" data-note="${i}" ${n.seen ? 'checked' : ''}><span class="mark"></span><span><span class="ct">Page ${n.page}: ${esc(n.text)}</span><span class="cd">Tick when you have read it</span></span></label></li>`).join('')}</ul>` : ''}</section>
+      <section class="card" id="drPages"><h2>The pages</h2>
+        <div class="dr-nav"><button class="btn ghost" type="button" id="drPrev" ${M.page <= 1 ? 'disabled' : ''}>Previous</button>
+          <label class="sr" for="drPick">Page</label><select id="drPick">${M.pages.map(pg => `<option value="${pg.n}" ${pg.n === M.page ? 'selected' : ''}>Page ${pg.n}${pagesWith.includes(pg.n) ? ' (' + drVisible().filter(x => x.page === pg.n).length + ')' : ''}</option>`).join('')}</select>
+          <button class="btn ghost" type="button" id="drNext" ${M.page >= M.pages.length ? 'disabled' : ''}>Next</button></div>
+        <p class="small dr-legend"><span class="dr-key dr-anchor"></span>Found from the labels <span class="dr-key dr-ai"></span>Suggested by the AI <span class="dr-key dr-tim"></span>Added by you</p>
+        <div id="drCanvas" class="dr-holder"></div>
+        <div class="toolbar"><label class="sr" for="drAddKind">Kind of place</label><select id="drAddKind">${DR_ADD_KINDS.map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select><button class="btn ghost" type="button" id="drAdd">${M.adding ? 'Tap the page where it goes' : 'Add a place on this page'}</button></div>
+        ${sel ? `<div class="card tight dr-sel" id="drSel"><p class="small" style="margin:0"><strong>${esc(sel.label)}</strong> (page ${sel.page})${sel.reason ? '<br>' + esc(sel.reason) : ''}${sel.printed ? `<br>Already on the blank: "${esc(sel.printed.slice(0, 120))}"` : ''}</p>
+          <div class="dr-move" role="group" aria-label="Move this place"><button class="btn ghost" type="button" data-mv="0,4" aria-label="Move up">Up</button><button class="btn ghost" type="button" data-mv="-4,0" aria-label="Move left">Left</button><button class="btn ghost" type="button" data-mv="4,0" aria-label="Move right">Right</button><button class="btn ghost" type="button" data-mv="0,-4" aria-label="Move down">Down</button></div>
+          <div class="toolbar">${sel.source === 'ai' && !['kept', 'moved'].includes(sel.decision) ? '<button class="btn ghost" type="button" id="drSelKeep">Keep</button>' : ''}<button class="btn ghost" type="button" id="drSelDel">Delete this place</button><button class="btn link" type="button" id="drSelDone">Done</button></div></div>` : ''}
+      </section>
+      <section class="card" id="drChat"><h2>Chattels</h2><p class="small">Read from Schedule 2${M.chat.some(c => c.from === 'ai') ? ' and by the AI' : ''}. Tick those included in the sale. When you approve, buyers see this list on the offer form. Strike-throughs already on the blank aren't read, so check the schedule.</p>
+        ${M.chat.length ? `<ul class="dr-list">${M.chat.map((c, i) => `<li><label class="choice cb"><input type="checkbox" data-chat="${i}" ${c.on ? 'checked' : ''}><span class="mark"></span><span><span class="ct">${esc(c.name)}</span><span class="cd">${c.qty === '' ? 'Empty brackets on the schedule' : c.qty != null && c.qty !== undefined ? 'Quantity ' + esc(c.qty) : c.from === 'ai' ? 'Suggested by the AI' : c.from === 'saved' ? 'As you saved it' : 'Listed without brackets'}</span></span></label></li>`).join('')}</ul>` : '<p class="small">No chattels were read from the blank.</p>'}
+        <label class="f" for="drChatAdd">Add a chattel</label><div class="toolbar"><input type="text" id="drChatAdd" maxlength="200"><button class="btn ghost" type="button" id="drChatAddBtn">Add</button></div></section>
+      <div class="err" id="drMapErr" role="alert"></div>
+      <div class="toolbar"><button class="btn ghost" type="button" id="drSave">Save</button><button class="btn primary" type="button" id="drApprove">Approve the places</button></div>
+    </div>`;
+    drMapWire(); drMapCanvas();
+  }
+  async function drMapCanvas() {
+    const M = DRM, holder = $('#drCanvas'); if (!holder) return;
+    const boxes = drVisible().map(x => Object.assign({}, x, { rect: DR.rectOf(x), cls: (DR_COLOURS[x.source] || '') + (x.source === 'ai' && !['kept', 'moved'].includes(x.decision) ? ' dr-undecided' : '') + (M.sel === x.id ? ' dr-on' : '') + (x.kind === 'never' ? ' dr-never' : '') }));
+    let r; try { r = await drRender(holder, M.page, boxes, { bytes: await drBlankBytes(M.b), key: 'blank-' + M.b.id, button: true }); } catch (_) { holder.innerHTML = `<p class="small err">${drNoLib}</p>`; return; }
+    r.wrapEl.addEventListener('click', e => {
+      const bx = e.target.closest('.dr-box');
+      if (M.adding) { const rect = r.wrapEl.getBoundingClientRect(), x = (e.clientX - rect.left) / rect.width * r.W, y = r.H - (e.clientY - rect.top) / rect.height * r.H;
+        const k = M.adding, d = k === 'text' ? { w: 160, h: 12 } : k === 'signature' ? { w: 150, h: 22 } : k === 'ack' ? { w: 120, h: 18 } : { w: 46, h: 18 };
+        const id = 'tim' + Date.now().toString(36); M.places.push({ id, key: 'tim_' + k, kind: k === 'ack' ? 'ack' : k, page: M.page, x: Math.round(Math.max(0, Math.min(r.W - d.w, x - d.w / 2)) * 10) / 10, y: Math.round(Math.max(0, Math.min(r.H - d.h, y - d.h / 2)) * 10) / 10, w: d.w, h: d.h, label: (DR_ADD_KINDS.find(z => z[0] === k) || [0, 'Place'])[1] + ' (page ' + M.page + ')', source: 'tim' });
+        M.adding = null; M.sel = id; M.dirty = true; return drMapPaint(); }
+      if (bx) { M.sel = bx.dataset.id; drMapPaint(); }
+    });
+  }
+  function drFindSel() { const M = DRM; const pl = M.places.find(x => x.id === M.sel); if (pl) return { pl }; const pr = M.props.find(x => x.place.id === M.sel); return pr ? { pr } : {}; }
+  function drMapWire() {
+    const M = DRM, on = (s, f, ev) => { const el = $(s); if (el) el.addEventListener(ev || 'click', f); };
+    on('#drBack', () => { if (!M.dirty || confirm('You have changes that aren\'t saved. Leave anyway?')) viewProperty(M.b.property_id); });
+    on('#drPrev', () => { M.page--; M.sel = null; drMapPaint(); }); on('#drNext', () => { M.page++; M.sel = null; drMapPaint(); });
+    on('#drPick', e => { M.page = +e.target.value; M.sel = null; drMapPaint(); }, 'change');
+    on('#drAdd', () => { M.adding = M.adding ? null : $('#drAddKind').value; drMapPaint(); });
+    $$('[data-pkeep]').forEach(x => x.addEventListener('click', () => { const pr = M.props[+x.dataset.pkeep]; pr.decision = pr.moved ? 'moved' : 'kept'; M.dirty = true; drMapPaint(); }));
+    $$('[data-pdel]').forEach(x => x.addEventListener('click', () => { const pr = M.props[+x.dataset.pdel]; pr.decision = 'deleted'; if (M.sel === pr.place.id) M.sel = null; M.dirty = true; drMapPaint(); }));
+    $$('[data-pshow]').forEach(x => x.addEventListener('click', () => { const pr = M.props[+x.dataset.pshow]; M.page = pr.place.page; M.sel = pr.place.id; drMapPaint(); const c = $('#drPages'); if (c) c.scrollIntoView(); }));
+    $$('[data-note]').forEach(x => x.addEventListener('change', () => { M.notes[+x.dataset.note].seen = x.checked; M.dirty = true; }));
+    $$('[data-chat]').forEach(x => x.addEventListener('change', () => { M.chat[+x.dataset.chat].on = x.checked; M.dirty = true; }));
+    on('#drChatAddBtn', () => { const v = $('#drChatAdd').value.trim(); if (v) { M.chat.push({ name: v.slice(0, 200), on: true, from: 'tim' }); M.dirty = true; drMapPaint(); } });
+    $$('[data-mv]').forEach(x => x.addEventListener('click', () => { const [dx, dy] = x.dataset.mv.split(',').map(Number), s = drFindSel(), t = s.pl || (s.pr && s.pr.place); if (!t) return;
+      t.x = Math.round((t.x + dx) * 10) / 10; t.y = Math.round((t.y + dy) * 10) / 10; if (s.pr) { s.pr.moved = true; if (s.pr.decision === 'kept') s.pr.decision = 'moved'; } M.dirty = true; drMapPaint(); }));
+    on('#drSelKeep', () => { const s = drFindSel(); if (s.pr) { s.pr.decision = s.pr.moved ? 'moved' : 'kept'; M.dirty = true; drMapPaint(); } });
+    on('#drSelDel', () => { const s = drFindSel(); if (s.pr) s.pr.decision = 'deleted'; else if (s.pl) M.places = M.places.filter(x => x !== s.pl); M.sel = null; M.dirty = true; drMapPaint(); });
+    on('#drSelDone', () => { M.sel = null; drMapPaint(); });
+    on('#drAiGo', drReadPack);
+    on('#drSave', () => drMapSave(false)); on('#drApprove', () => drMapSave(true));
+  }
+  async function drReadPack() {
+    const M = DRM, msg = $('#drAiMsg'), btn = $('#drAiGo'); btn.disabled = true;
+    const batches = DR.packBatches(DR.packText(M.pages), 6, 40000); const got = { places: [], chattels: [], notes: [] }; let failed = 0, off = null;
+    for (let i = 0; i < batches.length; i++) {
+      msg.textContent = `Reading pages ${batches[i][0].page} to ${batches[i][batches[i].length - 1].page} of ${M.pages.length}...`;
+      const r = await offerCall('offer-draft', { action: 'read_pack', blank_id: M.b.id, total_pages: M.pages.length, pages: batches[i] });
+      if (r && r.ok) { got.places.push(...(r.places || [])); got.chattels.push(...(r.chattels || [])); got.notes.push(...(r.notes || [])); }
+      else if (r && r.reason === 'off') { off = r.message || 'Document reading isn\'t switched on yet.'; break; } else failed++;
+    }
+    btn.disabled = false;
+    if (off) { msg.textContent = off; return; }
+    // proposals replace earlier undecided ones; decided ones stay as Tim left them
+    const keep = M.props.filter(x => x.decision && x.decision !== 'proposed'); const n0 = keep.length;
+    got.places.forEach((x, i) => { const pl = DR.placeFromProposal(M.pages, x, n0 + i); if (pl && !keep.some(k => k.place.page === pl.page && k.place.line === pl.line && k.place.kind === pl.kind)) { pl.id = 'ai' + Date.now().toString(36) + i; keep.push({ id: pl.id, place: pl, decision: 'proposed' }); } });
+    M.props = keep;
+    got.notes.forEach(n => { if (!M.notes.some(x => x.text === n.text)) M.notes.push({ page: n.page, text: n.text, seen: false }); });
+    got.chattels.forEach(c => { if (!M.chat.some(x => x.name.toLowerCase() === c.name.toLowerCase())) M.chat.push({ name: c.name, on: !!c.included, qty: c.qty, from: 'ai' }); });
+    M.dirty = true; drMapPaint();
+    $('#drAiMsg').textContent = `${got.places.length} places, ${got.notes.length} notes and ${got.chattels.length} chattels suggested.` + (failed ? ` ${failed} part${failed === 1 ? '' : 's'} couldn't be read; try again.` : '');
+  }
+  async function drMapSave(approve) {
+    const M = DRM, err = $('#drMapErr'); err.textContent = '';
+    const waiting = M.props.filter(x => !x.decision || x.decision === 'proposed').length;
+    if (approve && waiting && !confirm(`${waiting} suggested place${waiting === 1 ? ' is' : 's are'} not kept yet and will be left off. Approve anyway?`)) return;
+    const places = M.places.concat(M.props.filter(x => ['kept', 'moved'].includes(x.decision)).map(x => Object.assign({}, x.place, { decision: x.decision })));
+    const proposals = M.props.map(x => ({ id: x.place.id, page: x.place.page, line: x.place.line, kind: x.place.kind, reason: x.place.reason, decision: x.decision || 'proposed', x: x.place.x, y: x.place.y, place: x.place }));
+    try {
+      const r = await must(sb.rpc('agent_blank_map_save', { p_blank: M.b.id, p_places: places, p_proposals: proposals, p_chattels: M.chat.filter(c => c.on).map(c => c.name), p_notes: M.notes, p_missing: M.missing, p_approve: !!approve }));
+      M.dirty = false; toast(approve ? 'Places approved' : 'Saved');
+      if (approve) return viewProperty(M.b.property_id);
+      M.maps.unshift({ version: r.version, approved: false }); drMapPaint();
+    } catch (e) { err.textContent = e.message || 'That didn\'t save.'; }
+  }
+
+  // ── the clause library ──
+  async function viewClauseLibrary(pid) {
+    header('Clause library', '', 0); actions(false);
+    const terms = (await ofSafe(sb.from('offer_terms').select('*').order('position'))) || [], wording = await ofWording();
+    const ruleText = r => { const w = (r || {}).when || {}; if (w.always) return 'Every offer'; if ('kiwisaver' in w) return w.kiwisaver ? 'When KiwiSaver funds the deposit' : 'When KiwiSaver doesn\'t fund the deposit';
+      if (w.condition) return 'When the buyer chooses ' + ((OF.condInfo(w.condition) || { label: w.condition }).label); if (w.chattels) return 'When the buyer adds or leaves out chattels'; return 'By its rule'; };
+    main().innerHTML = `<div class="view-pad" id="drLib"><div class="toolbar no-print"><button class="btn ghost" type="button" id="drLibBack">Back to the property</button></div><span class="agent-flag">Only you see this</span>
+      <h1>Your clause library</h1><p class="small">Your standard further terms and the rules that put them on each draft. Clauses already printed in the blank are named by their number only. Where you haven't added wording, the draft shows a highlighted placeholder and never makes wording up.</p>
+      ${terms.map(t => `<section class="card tight dr-term" data-term="${esc(t.key)}"><h3 style="margin:0 0 2px">${esc(t.title)}</h3><p class="small" style="margin:0 0 6px">${esc(ruleText(t.rule))}${t.clause ? ' · printed clause ' + esc(t.clause) : ''}</p>
+        ${t.kind === 'printed' ? `<label class="choice cb"><input type="checkbox" data-tstrike="${esc(t.key)}" ${(t.rule || {}).strike_when_unused ? 'checked' : ''}><span class="mark"></span><span><span class="ct">Strike it through when it doesn't apply</span></span></label>`
+          : t.wording_from && t.wording_from !== 'custom' ? `<p class="small" style="margin:0">${wording[t.wording_from] ? 'Your wording: ' + esc(wording[t.wording_from].slice(0, 160)) + (wording[t.wording_from].length > 160 ? '...' : '') : '<strong>No wording yet.</strong> Drafts show "' + esc(DR.placeholderFor(t.wording_from)) + '".'} Edit it on the Offers tile, under Link and settings.</p>`
+          : t.wording_from === 'custom' ? '<p class="small" style="margin:0">The buyer\'s or the AI\'s wording, only once you tick it on the draft.</p>'
+          : `${t.key === 'chattels' ? `<label class="f" for="drWhere_${t.key}">Where</label><select id="drWhere_${t.key}" data-twhere="${esc(t.key)}"><option value="schedule" ${(t.rule || {}).where !== 'further_terms' ? 'selected' : ''}>On Schedule 2 (strike out or add)</option><option value="further_terms" ${(t.rule || {}).where === 'further_terms' ? 'selected' : ''}>As a further term</option></select>` : ''}
+            <label class="f" for="drTw_${t.key}">Wording${t.key === 'chattels' ? ' <span class="opt">({add} and {exclude} are replaced by the items)</span>' : ''}</label><textarea id="drTw_${t.key}" rows="3" maxlength="4000" data-tword="${esc(t.key)}">${esc(t.wording || '')}</textarea>`}
+        <label class="choice cb"><input type="checkbox" data-tactive="${esc(t.key)}" ${t.active !== false ? 'checked' : ''}><span class="mark"></span><span><span class="ct">In use</span></span></label></section>`).join('')}
+      <section class="card tight" id="drNewTerm"><h3 style="margin:0 0 4px">Add a standard further term</h3>
+        <label class="f" for="drNtTitle">Title</label><input type="text" id="drNtTitle" maxlength="200">
+        <label class="f" for="drNtWhen">When it goes on</label><select id="drNtWhen"><option value="always">Every offer</option><option value="ks1">When KiwiSaver funds the deposit</option><option value="ks0">When KiwiSaver doesn't fund the deposit</option>${OF.CONDITIONS.map(c => `<option value="c:${c.key}">When the buyer chooses ${esc(c.label)}</option>`).join('')}</select>
+        <label class="f" for="drNtWord">Wording</label><textarea id="drNtWord" rows="3" maxlength="4000"></textarea></section>
+      <div class="err" id="drLibErr" role="alert"></div><div class="toolbar"><button class="btn primary" type="button" id="drLibSave">Save the library</button></div></div>`;
+    $('#drLibBack').addEventListener('click', () => viewProperty(pid));
+    $('#drLibSave').addEventListener('click', async () => {
+      const err = $('#drLibErr'); err.textContent = '';
+      try {
+        for (const t of terms) {
+          const rule = Object.assign({}, t.rule || {}), act = $(`[data-tactive="${t.key}"]`).checked, st = $(`[data-tstrike="${t.key}"]`), wh = $(`[data-twhere="${t.key}"]`), tw = $(`[data-tword="${t.key}"]`);
+          if (st) rule.strike_when_unused = st.checked; if (wh) rule.where = wh.value;
+          const w = tw ? tw.value.trim() : null;
+          if (act !== (t.active !== false) || JSON.stringify(rule) !== JSON.stringify(t.rule || {}) || (tw && w !== (t.wording || ''))) await must(sb.rpc('agent_offer_term', { p_key: t.key, p_title: null, p_wording: w || null, p_rule: rule, p_position: null, p_active: act }));
+        }
+        const ti = $('#drNtTitle').value.trim();
+        if (ti) { const v = $('#drNtWhen').value, when = v === 'always' ? { always: true } : v === 'ks1' ? { kiwisaver: true } : v === 'ks0' ? { kiwisaver: false } : { condition: v.slice(2) };
+          const key = 'std_' + ti.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 30) || 'std_term';
+          await must(sb.rpc('agent_offer_term', { p_key: key, p_title: ti, p_wording: $('#drNtWord').value.trim() || null, p_rule: { when }, p_position: 100, p_active: true })); }
+        toast('Library saved'); viewClauseLibrary(pid);
+      } catch (e) { err.textContent = e.message || 'That didn\'t save.'; }
+    });
+    top();
+  }
+
+  // ── on the offer: draft, lawyer lookup ──
+  async function drOfferHTML(o) {
+    const blanks = await drLoadBlanks(o.property_id), use = drUsable(blanks);
+    const drafts = (await ofSafe(sb.from('offer_drafts').select('id,number,sha256,created_at,needs,note').eq('offer_id', o.id).order('number', { ascending: false }))) || [];
+    const apps = drafts.length ? ((await ofSafe(sb.from('offer_draft_approvals').select('draft_id,approved_at').in('draft_id', drafts.map(x => x.id)))) || []) : [];
+    const law = (o.details || {}).lawyer || {};
+    return `<h2>The agreement</h2><div class="card tight" id="drOffer">
+      ${use ? `<p class="small" style="margin:0 0 6px">Drafted on ${esc(use.file_name)} (${esc(use.edition)}), places version ${use.approvedMap.version}.</p><div class="toolbar"><button class="btn primary" type="button" id="drDraftBtn">${drafts.length ? 'Re-draft after a change' : 'Draft on the agreement'}</button></div>`
+        : `<p class="small" style="margin:0" id="drNoBlank">${blanks.length ? 'Check and approve the places on the agreement blank first, on the property\'s Offers tile.' : 'Load the agreement blank for this property first, on its Offers tile.'}</p>`}
+      <p class="small err" id="drDraftErr" role="alert"></p>
+      ${drafts.length ? `<ul class="dr-list" id="drDrafts">${drafts.map((x, i) => { const ap = apps.find(a => a.draft_id === x.id); const nb = (x.needs || []).filter(n => n.blocking).length;
+        return `<li><button class="of-row" type="button" data-draft="${x.id}"><span class="of-r1"><strong>Draft ${x.number}</strong>${i === 0 ? ' <span class="pill">Newest</span>' : ''}${ap ? ' <span class="pill okp">Approved</span>' : nb ? ` <span class="pill of-warnp">${nb} need${nb === 1 ? 's' : ''} you</span>` : ''}</span><span class="small">${esc(fmtDT(x.created_at))} · <span translate="no">${esc(drShort(x.sha256))}</span>${x.note ? ' · ' + esc(x.note) : ''}</span></button></li>`; }).join('')}</ul>` : ''}
+      <label class="f" for="drAgDate">Date of the agreement</label><input type="text" id="drAgDate" disabled placeholder="Added once fully agreed" aria-describedby="drAgDateNote"><p class="small" id="drAgDateNote" style="margin:2px 0 0">Added once fully agreed. You type it in full, with the month name.</p>
+      <h3 style="margin:14px 0 4px">The purchaser's lawyer</h3>
+      <p class="small" style="margin:0">${law.firm || law.person ? esc([law.person, law.firm].filter(Boolean).join(', ')) : 'No lawyer named yet.'}${law.email ? ' · ' + esc(law.email) : ''}${law.phone ? ' · ' + esc(law.phone) : ''}</p>
+      <p class="small" style="margin:2px 0 0">Only the lawyers' details go on the agreement, never the buyer's own.</p>
+      ${law.firm || law.person ? '<div class="toolbar"><button class="btn ghost" type="button" id="drLawBtn">Find the lawyer\'s details</button></div>' : ''}<div id="drLaw" aria-live="polite"></div></div>`;
+  }
+  function drOfferWire(o) {
+    const b = $('#drDraftBtn'); if (b) b.addEventListener('click', async () => { b.disabled = true; $('#drDraftErr').textContent = 'Drafting...'; try { const id = await drMakeDraft(o.id, null, null); viewDraftReview(id); } catch (e) { $('#drDraftErr').textContent = e.message || 'That didn\'t draft.'; b.disabled = false; } });
+    $$('[data-draft]').forEach(x => x.addEventListener('click', () => viewDraftReview(x.dataset.draft)));
+    const lb = $('#drLawBtn'); if (lb) lb.addEventListener('click', () => drLawLookup(o));
+  }
+  async function drLawLookup(o) {
+    const box = $('#drLaw'), law = (o.details || {}).lawyer || {}; box.innerHTML = '<p class="small">Looking on public pages (the firm\'s website and the Law Society)...</p>';
+    const r = await offerCall('offer-draft', { action: 'lawyer_lookup', offer_id: o.id, firm: law.firm || '', person: law.person || '' });
+    const links = (r.manual || []).map(l => `<a href="${esc(l.url)}" target="_blank" rel="noopener noreferrer">${esc(l.label)}</a>`).join(' · ');
+    if (!r.ok || !(r.values || []).length) { box.innerHTML = `<div class="card note tight" id="drLawManual"><p class="small" style="margin:0">${esc(r.ok ? 'Nothing was found on public pages.' : r.message || 'The lookup didn\'t work this time.')} Look them up yourself: ${links || 'search the web for the firm\'s contact page.'}</p><p class="small" style="margin:4px 0 0">Then fix the details with Correct details.</p></div>`; return; }
+    box.innerHTML = `<div class="card tight" id="drLawFound"><p class="small" style="margin:0 0 4px">Found on public pages. Tick what to use${r.fallback ? '. No direct dial or mobile was published, so this is the firm\'s main line' : ''}.</p>
+      ${r.values.map(v => `<label class="choice cb"><input type="checkbox" data-lawv="${esc(v.id)}"><span class="mark"></span><span><span class="ct" translate="no">${esc(v.value)}</span><span class="cd">${esc({ email: 'Email', direct: 'Direct dial', mobile: 'Mobile', reception: 'Firm\'s main line' }[v.kind] || v.kind)} · source: <a href="${esc(v.source_url)}" target="_blank" rel="noopener noreferrer">${esc(v.source_title || v.source_url)}</a></span></span></label>`).join('')}
+      <div class="toolbar"><button class="btn primary" type="button" id="drLawUse">Use the ticked details</button></div><p class="small">${links}</p><p class="small err" id="drLawErr" role="alert"></p></div>`;
+    $('#drLawUse').addEventListener('click', async () => { const keys = $$('[data-lawv]').filter(x => x.checked).map(x => x.dataset.lawv); if (!keys.length) return $('#drLawErr').textContent = 'Tick at least one.';
+      try { await must(sb.rpc('agent_lawyer_use', { p_lookup: r.lookup_id, p_keys: keys })); toast('Lawyer\'s details updated'); viewOfferAgent(o.id); } catch (e) { $('#drLawErr').textContent = e.message || 'That didn\'t save.'; } });
+  }
+  // one tap: the plan, the PDF on top of the blank, filed with its fingerprints
+  async function drMakeDraft(oid, edits, note) {
+    const o = await must(sb.from('property_offers').select('*').eq('id', oid).single());
+    const blanks = await drLoadBlanks(o.property_id), b = drUsable(blanks); if (!b) throw new Error('Approve the places on the agreement blank first.');
+    const map = await must(sb.from('offer_blank_maps').select('*').eq('id', b.approvedMap.id).single());
+    const [terms, clauses, PDFLib] = await Promise.all([ofSafe(sb.from('offer_terms').select('*').order('position')), ofWording(), drPdfLib().catch(() => null)]);
+    if (!PDFLib) throw new Error(drNoLib);
+    const bytes = await drBlankBytes(b);
+    // the vendor's lawyer, if the file holds one: the newest lawyer link on an agreement for this property
+    let vendorLawyer = null; try { const ags = (await ofSafe(sb.from('agreements').select('id,created_at').eq('property_id', o.property_id).order('created_at', { ascending: false }))) || [];
+      if (ags.length) { const ls = (await ofSafe(sb.from('lawyer_links').select('lawyer_name,firm,email,sent_at').eq('agreement_id', ags[0].id).order('sent_at', { ascending: false }))) || [];
+        if (ls[0]) vendorLawyer = { firm: ls[0].firm, person: ls[0].lawyer_name, email: ls[0].email, source: 'the lawyer the agency agreement was sent to' }; } } catch (_) { }
+    const plan = DR.planDraft({ details: o.details || {}, map: { places: map.places, chattels: (DR_CACHE[b.id] && DR_CACHE[b.id].pages ? DR.buildMap(DR_CACHE[b.id].pages).chattels : DR.buildMap(await drBlankPages(b)).chattels) }, terms: terms || [], clauses, edits: edits || {}, today: OF.nzToday(), province: o.province || OF.DEFAULT_PROVINCE, vendorLawyer });
+    const r = await DR.renderDraft(PDFLib, bytes, plan, { title: 'Draft agreement: ' + (o.buyer_ref || 'offer') });
+    const sha = await REPO.sha256(r.bytes), prev = (await ofSafe(sb.from('offer_drafts').select('number').eq('offer_id', oid).order('number', { ascending: false }))) || [], n = ((prev[0] || {}).number || 0) + 1;
+    const pth = `properties/${o.property_id}/docs/offer-draft-${oid}-${n}-${sha.slice(0, 12)}.pdf`;
+    const up = await sb.storage.from('property-files').upload(pth, new Blob([r.bytes], { type: 'application/pdf' }), { contentType: 'application/pdf', upsert: false });
+    if (up.error && !/exists/i.test(up.error.message || '')) throw new Error('The draft didn\'t save. Check you have signal, then try again.');
+    const placed = plan.items.map(it => { const bx = r.boxes.filter(x => x.id === it.id || x.id.startsWith(it.id + '_cont'));
+      return { id: it.id, label: it.label, kind: it.kind, text: it.text || null, value: it.value || null, placeholder: !!it.placeholder, edited: !!it.edited, terms: it.terms, boxes: bx.map(x => ({ page: x.page, x: Math.round(x.x * 10) / 10, y: Math.round(x.y * 10) / 10, w: Math.round(x.w * 10) / 10, h: Math.round(x.h * 10) / 10 })) }; });
+    const res = await must(sb.rpc('agent_draft_add', { p_offer: oid, p_map: map.id, p_path: pth, p_sha256: sha, p_size: r.bytes.length, p_placed: placed, p_needs: plan.needs, p_edits: Object.assign({}, edits || {}, { date_format: plan.date_format }), p_note: note || null }));
+    DR_CACHE['draft-' + res.id] = { bytes: r.bytes };
+    return res.id;
+  }
+  async function drDraftBytes(d) {
+    const k = 'draft-' + d.id; if (DR_CACHE[k]) return DR_CACHE[k].bytes;
+    const { data, error } = await sb.storage.from('property-files').createSignedUrl(d.path, 300); if (error || !data) throw new Error('The draft couldn\'t be opened. Check you have signal.');
+    const bytes = new Uint8Array(await (await fetch(data.signedUrl)).arrayBuffer());
+    if (await REPO.sha256(bytes) !== d.sha256) throw new Error('The stored draft doesn\'t match its fingerprint.');
+    DR_CACHE[k] = { bytes }; return bytes;
+  }
+  // Tim's review screen
+  async function viewDraftReview(did) {
+    header('Draft agreement', '', 0); actions(false);
+    main().innerHTML = '<div class="loading">Loading...</div>';
+    const d = await must(sb.from('offer_drafts').select('*').eq('id', did).single());
+    const [o, all, apps, p] = await Promise.all([must(sb.from('property_offers').select('*').eq('id', d.offer_id).single()), ofSafe(sb.from('offer_drafts').select('id,number').eq('offer_id', d.offer_id).order('number', { ascending: false })),
+      ofSafe(sb.from('offer_draft_approvals').select('*').eq('draft_id', did)), must(sb.from('properties').select('id,address').eq('id', d.property_id).single())]);
+    const ap = (apps || [])[0], newest = ((all || [])[0] || {}).id === d.id, changed = o.updated_at && o.updated_at > d.created_at && JSON.stringify(o.details) !== JSON.stringify(d.details);
+    const block = d.needs.filter(n => n.blocking), check = d.needs.filter(n => !n.blocking), E = d.edits || {};
+    const items = d.placed.filter(x => x.kind !== 'strike' && x.kind !== 'lines' && x.id !== 'further_terms'), strikes = d.placed.filter(x => x.kind === 'strike' || x.kind === 'lines'), ft = d.placed.find(x => x.id === 'further_terms');
+    const customT = ft && (ft.terms || []).find(t => t.custom);
+    const boxes = []; d.placed.forEach((x, i) => (x.boxes || []).forEach(bx => boxes.push(Object.assign({ id: x.id, label: x.label, kind: 'text', cls: x.placeholder ? 'dr-ph' : 'dr-fill', badge: String(i + 1) }, bx, { y: bx.y }))));
+    const pagesWith = [...new Set(boxes.map(x => x.page))].sort((a, b) => a - b);
+    main().innerHTML = `<div class="view-pad dr-page" id="drReview">
+      <div class="toolbar no-print"><button class="btn ghost" type="button" id="drRvBack">Back to the offer</button></div><span class="agent-flag">Only you see this</span>
+      <h1>Draft ${d.number} of the agreement</h1>
+      <p class="lede">${nt(p.address)}</p><p class="small">For ${esc(o.buyer_ref || 'the buyer')}, ${esc(money(+o.amount))}. Made ${esc(fmtDT(d.created_at))}. Draft fingerprint <span translate="no">${esc(drShort(d.sha256))}</span>, on the blank <span translate="no">${esc(drShort(d.blank_sha256))}</span>.</p>
+      ${ap ? `<div class="card okc tight" id="drApproved"><p class="small" style="margin:0"><strong>Approved</strong> by ${esc(ap.approved_by)}, ${esc(fmtDT(ap.approved_at))}. Fingerprint <span translate="no">${esc(drShort(ap.sha256))}</span>. Signing comes next (not built yet).</p></div>` : ''}
+      ${!newest ? '<div class="card warnc tight" id="drNotNewest"><p class="small" style="margin:0">There is a newer draft of this offer. This one is kept as it was.</p></div>' : ''}
+      ${changed && newest ? '<div class="card warnc tight" id="drChanged"><p class="small" style="margin:0">The offer has been corrected since this draft. Re-draft it so the agreement matches.</p></div>' : ''}
+      <section class="card" id="drNeeds"><h2>Needs you ${block.length ? `<span class="pill of-warnp">${block.length}</span>` : ''}</h2>
+        ${block.length ? `<ul class="dr-list">${block.map(n => `<li class="dr-need" data-need="${esc(n.id)}">${esc(n.text)}</li>`).join('')}</ul>` : '<p class="small" id="drNoNeeds">Nothing is waiting on you before approval.</p>'}
+        ${check.length ? `<details class="of-more" open><summary class="small">To check (${check.length})</summary><ul class="dr-list">${check.map(n => `<li class="small" data-check="${esc(n.id)}">${esc(n.text)}</li>`).join('')}</ul></details>` : ''}</section>
+      <section class="card" id="drPagesRv"><h2>The drafted pages</h2><p class="small">Every place filled or marked is highlighted and numbered. Placeholders are in yellow.</p>
+        <div class="dr-nav"><label class="sr" for="drRvPick">Page</label><select id="drRvPick">${pagesWith.map(n => `<option value="${n}">Page ${n} (${boxes.filter(x => x.page === n).length})</option>`).join('')}</select></div>
+        <div id="drRvCanvas" class="dr-holder"></div></section>
+      <section class="card" id="drPlaced"><h2>Everything placed</h2>
+        <ol class="dr-items">${d.placed.map((x, i) => `<li data-item="${esc(x.id)}" value="${i + 1}"><span class="small"><strong>${esc(x.label)}</strong>${x.edited ? ' <span class="pill">Edited by you</span>' : ''}</span>
+          ${x.kind === 'strike' || x.kind === 'lines' ? '' : x.id === 'further_terms' ? `<div class="small">${(x.terms || []).map(t => `<label class="f" for="drFt_${esc(t.id)}">${t.number}. ${esc(t.title)}${t.placeholder ? ' <span class="pill of-warnp">Needs you</span>' : ''}</label>${t.custom ? `<p class="small" style="margin:0">The buyer asked for: ${esc(t.request || '(no description)')}${t.ai ? ' (worded with AI help)' : ''}</p>` : ''}<textarea id="drFt_${esc(t.id)}" rows="3" data-edit="${esc(t.id)}" data-orig="${esc(t.text)}">${esc(t.custom && t.placeholder ? (t.wording || '') : t.text)}</textarea>`).join('')}</div>`
+            : `<label class="sr" for="drEd_${esc(x.id)}">${esc(x.label)}</label><input type="text" id="drEd_${esc(x.id)}" data-edit="${esc(x.id)}" data-orig="${esc(x.text || '')}" value="${esc(x.text || '')}">`}</li>`).join('')}</ol>
+        ${customT ? `<label class="choice cb" id="drCustomOk"><input type="checkbox" id="drCustomTick" ${E.custom_ok ? 'checked' : ''}><span class="mark"></span><span><span class="ct">Use the wording above for the buyer's own condition</span><span class="cd">It goes on the agreement only once you tick this and re-draft.</span></span></label>` : ''}
+        <label class="f" for="drExtra">Add a further term <span class="opt">(your own wording, one per line)</span></label><textarea id="drExtra" rows="2">${esc((E.extra_terms || []).join('\n'))}</textarea>
+        <label class="f" for="drFmt">Condition dates</label><select id="drFmt"><option value="date" ${E.date_format !== 'date_days' ? 'selected' : ''}>The date, for example 8 December 2026</option><option value="date_days" ${E.date_format === 'date_days' ? 'selected' : ''}>The date and the working days, for example 8 December 2026 (10 working days)</option></select>
+        <label class="f" for="drRvDate">Date of the agreement</label><input type="text" id="drRvDate" disabled placeholder="Added once fully agreed"><p class="small" style="margin:2px 0 0">Added once fully agreed, in full with the month name.</p>
+        <label class="f" for="drNote">What changed <span class="opt">(kept with the new draft)</span></label><input type="text" id="drNote" maxlength="500">
+        <div class="toolbar"><button class="btn ghost" type="button" id="drRedraft">Re-draft with my changes</button></div></section>
+      <div class="err" id="drRvErr" role="alert"></div>
+      <div class="toolbar"><button class="btn primary" type="button" id="drApproveDraft" ${ap || !newest || block.length ? 'disabled' : ''}>${ap ? 'Approved' : 'Approve draft'}</button><button class="btn ghost" type="button" id="drDownload">Download the PDF</button>${newest ? '<button class="btn ghost" type="button" id="drRedraftChange">Re-draft after a change</button>' : ''}</div>
+      ${!ap && newest && block.length ? '<p class="small">Approve is available once nothing needs you. Fill in each placeholder above and re-draft.</p>' : ''}
+    </div>`;
+    const go = async (edits, note) => { const btns = $$('#drRedraft,#drRedraftChange'); btns.forEach(x => { x.disabled = true; }); $('#drRvErr').textContent = 'Drafting...';
+      try { const id = await drMakeDraft(d.offer_id, edits, note); toast('New draft made; the earlier one is kept'); viewDraftReview(id); } catch (e) { $('#drRvErr').textContent = e.message || 'That didn\'t draft.'; btns.forEach(x => { x.disabled = false; }); } };
+    const collect = () => { const ed = { items: Object.assign({}, E.items || {}) };
+      $$('[data-edit]').forEach(x => { const v = x.value.trim(); if (v !== x.dataset.orig) ed.items[x.dataset.edit] = v; });
+      if (customT) { ed.custom_ok = $('#drCustomTick').checked; const ta = $(`[data-edit="${customT.id}"]`); if (ta) { ed.custom_wording = ta.value.trim(); delete ed.items[customT.id]; } }
+      ed.extra_terms = $('#drExtra').value.split('\n').map(s => s.trim()).filter(Boolean); ed.date_format = $('#drFmt').value; return ed; };
+    $('#drRvBack').addEventListener('click', () => viewOfferAgent(d.offer_id));
+    $('#drRedraft').addEventListener('click', () => go(collect(), $('#drNote').value.trim() || 'Re-drafted with your changes'));
+    const rc = $('#drRedraftChange'); if (rc) rc.addEventListener('click', () => go({ date_format: E.date_format, extra_terms: E.extra_terms, custom_ok: E.custom_ok, custom_wording: E.custom_wording }, $('#drNote').value.trim() || 'Re-drafted after a change'));
+    $('#drApproveDraft').addEventListener('click', async () => { try { await must(sb.rpc('agent_draft_approve', { p_draft: did, p_sha256: d.sha256 })); toast('Draft approved'); viewDraftReview(did); } catch (e) { $('#drRvErr').textContent = e.message || 'That didn\'t save.'; } });
+    $('#drDownload').addEventListener('click', async () => { try { const bytes = await drDraftBytes(d); const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' })); a.download = `Draft-${d.number}-${(p.address || 'agreement').replace(/[^A-Za-z0-9]+/g, '-').slice(0, 60)}.pdf`; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000); } catch (e) { $('#drRvErr').textContent = e.message; } });
+    const paint = async n => { try { const r = await drRender($('#drRvCanvas'), n, boxes, { bytes: await drDraftBytes(d), key: 'draft-' + d.id }); r.wrapEl.dataset.draft = d.id; } catch (e) { $('#drRvCanvas').innerHTML = `<p class="small err">${esc(e.message || drNoLib)}</p>`; } };
+    const pick = $('#drRvPick'); pick.addEventListener('change', () => paint(+pick.value)); if (pagesWith.length) paint(pagesWith[0]);
+    top();
   }
 
   const offerToken = new URLSearchParams(location.search).get('offer');
