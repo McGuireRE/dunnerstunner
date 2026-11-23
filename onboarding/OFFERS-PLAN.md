@@ -231,6 +231,79 @@ Deploy steps (phase 2), after review and with Tim's approval:
 Known limits: strike-throughs the portal drew on the blank (Yes/No choices, struck chattels) are lines, not text, so they aren't
 read; Tim checks them (the chattels note says so). The layout below printed further terms has only been tested on a synthetic blank.
 
+## Phase 3 detail: purchaser signing (built 24 November 2026, branch `offers-phase3`, on top of `offers-phase2`; not applied, pushed or deployed)
+
+Status: built and tested locally only (Tim was asleep). Migration 020 passed its rollback block on a local PostgreSQL 16 stand-in
+(`tests/pg-standin.sql`, then 010, 016 part A, 018 and 019), NOT the live project. Phases 2 and 3 go live together, in order (019, then 020).
+
+How it works:
+- "Ready to sign" on an approved draft (the newest, the offer unchanged since). The places are made by `src/sign-core.js` from the draft
+  and its map, with no set-up: each purchaser initials the foot of every page, every box the draft filled or marked (a struck line and
+  the words beside it count as one change; each struck chattel is its own), and each further term (the draft now leaves a blank line
+  after each term for this); signs in the signature block (a purchaser beyond the printed lines gets a signature and name place
+  beneath the others); and does each acknowledgement, initial or signature place Tim kept on the map. The date at the top is never a
+  place. The Client and Customer Acknowledgement is found by its heading; Tim can change its page numbers. He picks in person or by
+  link (defaulting to what the buyer asked on the form). Nothing is sent: by link, he taps Send next.
+- Each signer: agrees to sign electronically; receipts the Client and Customer Acknowledgement (its pages shown) and the REA sale and
+  purchase guide (the same guide viewer and receipt as the agency agreement); draws a signature and initials once on a white pad; taps
+  every place (a count, no "apply to all", Finish only when every place is done). Each tap is recorded with server time.
+- In person: Tim's device, one purchaser at a time. Tim ticks that he saw them sign and picks the photo ID type (never a number).
+  Marks on Tim's screen only: a freehand note, a line through text, a crossed-out box, a reinstatement (of a line or box). They are an
+  overlay; the draft is never altered. Any mark holds signing; Tim checks it and re-approves; every purchaser then initials beside
+  it (anyone who had finished does those initials and finishes again).
+- By link: each purchaser's own link by email (a 43-character token, kept only as a fingerprint, 14 days), then a 6-digit code by
+  email as its own message (15 minutes, 5 tries, 5 codes an hour), then a 2-hour session. They see only their own places and the
+  draft by a 10-minute link. They can't mark the page; "Ask Tim for a change" emails Tim. Send again makes new links.
+- Tweak and re-sign: Tim corrects the offer (phase 1). Signing the old version stops at once. He re-drafts, approves and taps Ready
+  to sign: the old signing is "replaced", its signatures and taps kept but void, the old links dead. Everyone signs the new one.
+- Locking: when the last purchaser finishes, the offer-sign edge function makes Round 1 (the draft checked against its fingerprint;
+  signatures, initials and marks added on top; the execution record on pages at the end), stores it, takes its fingerprint from the
+  stored file, and locks it (`offer_round_lock`). In person, Tim's screen asks the function to lock straight after. Tim is emailed.
+- The execution record: per signer the name, the method, "email verified with a one-time code" and when (never the address) or "Tim
+  saw them sign" and the ID type, consent time, guide receipts, first and last tap and finish (server time), the device, the network
+  as a fingerprint, and the SHA-256 of what they saw; the marks; any replaced draft. No phone or email of anyone.
+- Timeline: every offer event (all phases, from 020 on) carries the fingerprint of the one before it in its chain; "Check the
+  timeline" on Round 1 checks it, and Round 1 records the newest fingerprint.
+
+Edge function: `offer-sign` (new, fn/offer_sign.ts and fn/offer_sign_handler.ts), JWT verification OFF (buyers have no account; every
+buyer action needs their token, then their session; Tim's send and lock check is_agent with his own token). offer-draft, offer-public
+and doc-prefill are unchanged.
+
+Choices made while Tim was asleep (each easy to change):
+1. One method per release: all in person or all by link. Mixing would be a later step.
+2. The names typed by the draft under the signatures are part of the signature block, so they aren't initialled separately.
+3. Further terms now have a blank line after each (for the initials). It changes phase 2's layout slightly (terms continue onto an
+   added page a little sooner); not yet live.
+4. Four or more purchasers no longer block drafting: signing adds places beneath the printed lines. With no room on the page,
+   release is refused and Tim adds a signature page in the portal.
+5. Every page of the pack, guides included, has foot initials, per Tim's rule. On the real 40-page pack that is 57 places each.
+6. Each mark is initialled by every purchaser, reinstatements too, and holds signing until Tim re-approves.
+7. Codes by email only (there is no text provider in the repository). Each code email is a separate message from the link.
+8. Round 1 goes to Tim by email notice only. Purchasers aren't sent a copy yet.
+9. Round 1 is stored with the offer (offer_rounds, property-files), not as an item on the property file's documents list.
+10. Sealing: not done. See questions.
+
+Questions for Tim:
+- Text messages for the code: there is no SMS provider. Codes go by email. Which provider would you like (it needs an account and a
+  key you set up), or is email enough? It plugs in at `offer_sign_code` / the send_code action.
+- Sealing the final PDF so a reader reports it unchanged needs a signing certificate (a document-signing certificate from a
+  provider, or one McGuire Real Estate makes itself, which readers show as "unknown signer"). No pure-JS signing library is in the
+  repository to test with here. Which do you want? Until then, the server-confirmed SHA-256 and the hash chain are the proof.
+- Should each purchaser get a copy of Round 1 by email once it locks?
+- Are foot initials wanted on every page of the pack (guides, title, LIM inserts), or only the agreement's own pages?
+- Choices 2, 3, 6 and 8 above: right for you?
+- Your solicitor confirms the method before first live use (as the signing standard says).
+
+Deploy steps (phase 3), after review and with Tim's approval, after phase 2's:
+1. Run the rollback block on the live project (`node onboarding/tests/offer-sign-rollback.js`): no CAPITALS. Then apply 020.
+2. Push, then deploy `offer-sign` (fn/offer_sign.ts) pinned to that commit, with the gateway's JWT verification OFF.
+3. Sign a test offer with four test purchasers (in person) and one by link to Tim's own second address.
+
+Known limits: initials are placed clear of other places and as clear as possible of printed text, but on a crowded page they may sit
+over printed words (an overlay; Tim sees every place on the Ready to sign screen). On the real pack the fourth signature goes beneath
+the printed three on the signature page; check it there. Marking and the place taps were tested with a mouse on a phone-sized screen,
+not on a real phone or stylus.
+
 ## Rules for later phases (Tim, 23 November 2026)
 
 Phase 2 (drafting):

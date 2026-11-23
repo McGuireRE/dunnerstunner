@@ -249,3 +249,6 @@ Phase 2 (drafting onto the REINZ blank) built 23 November 2026 on branch `offers
 block on a local PostgreSQL stand-in only), edge function `offer-draft` (new; JWT on). doc-prefill and offer-public unchanged.
 Awaiting review. Tests: `offers-draft.test.js`, `draft-core.test.js`, `offer-draft-fn.test.js`; database: `offer-draft-rollback.sql`
 (via `offer-draft-rollback.js`). See `OFFERS-PLAN.md`, "Phase 2 detail".
+Phase 3 (purchaser signing) built 24 November 2026 on branch `offers-phase3`: migration 020 (tested in a rollback block on a local
+PostgreSQL stand-in only), edge function `offer-sign` (new; JWT off, token checked). Awaiting review. Tests: `offers-sign.test.js`,
+`sign-core.test.js`, `offer-sign-fn.test.js`; database: `offer-sign-rollback.sql` (via `offer-sign-rollback.js`). See `OFFERS-PLAN.md`, "Phase 3 detail".
