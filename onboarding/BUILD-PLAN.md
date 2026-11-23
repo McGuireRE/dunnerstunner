@@ -247,5 +247,10 @@ it also serves the AI condition helper). doc-prefill is unchanged. Awaiting revi
 `offer-rollback.js`).
 Phase 2 (drafting onto the REINZ blank) built 23 November 2026 on branch `offers-phase2`: migration 019 (tested in a rollback
 block on a local PostgreSQL stand-in only), edge function `offer-draft` (new; JWT on). doc-prefill and offer-public unchanged.
-Awaiting review. Tests: `offers-draft.test.js`, `draft-core.test.js`, `offer-draft-fn.test.js`; database: `offer-draft-rollback.sql`
+Tests: `offers-draft.test.js`, `draft-core.test.js`, `offer-draft-fn.test.js`; database: `offer-draft-rollback.sql`
 (via `offer-draft-rollback.js`). See `OFFERS-PLAN.md`, "Phase 2 detail".
+LIVE 24 November 2026 (NZ): reviewed until ready; the rollback block passed on the live project (no capitals); 019 applied as
+`019_offer_drafting`; merged to main (181c875); `offer-draft` deployed with JWT on, pinned to 181c875. Tim's electrical,
+technical-report and sale-of-property wording loaded (tokens {date} and {address}; the sale price stays a line for Tim to fill);
+both deposit clauses now struck when they don't apply. Specified Due Diligence left unworded (his file is a draft awaiting the
+solicitor), so a draft using it shows a placeholder Tim must fill before approving.

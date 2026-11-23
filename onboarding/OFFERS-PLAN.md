@@ -155,7 +155,7 @@ Added by Tim, 23 November 2026 (built in phase 1):
 Open questions for Tim before phase 2: the wording of his electrical and technical report clauses and the Specified
 Due Diligence clauses as he wants them used (he is sending these).
 
-## Phase 2 detail: drafting (built 23 November 2026, branch `offers-phase2`; revised after the first review; not applied, pushed or deployed)
+## Phase 2 detail: drafting (LIVE 24 November 2026: 019 applied after the live rollback passed; main 181c875; offer-draft deployed, JWT on)
 
 Status: built and tested locally only (Tim was asleep; nothing live could be approved). Migration 019 passed its rollback block on a
 local PostgreSQL 16 stand-in (`tests/pg-standin.sql`, then 010, 016 part A and 018), NOT the live project.
