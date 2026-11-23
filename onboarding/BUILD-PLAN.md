@@ -236,3 +236,8 @@ pre-listing contact or earlier owners), starting again for new owners unshares e
 and vendors' links come from a new edge function, `fn/repo_link.ts` (deployed as `repo-link`, JWT on), not a storage policy. Queued
 items belong to the sign-in that added them and carry on by themselves after signing in again. Tests: `property-repository.test.js`,
 `repo-link-fn.test.js`; database: `repo-rollback.sql` (via `repo-rollback.js`).
+
+## Added 23 November 2026: offers and negotiation
+
+A new six-phase plan for the offer form, drafting onto the REINZ blank, signing, counteroffers, deadline day and
+after agreement lives in `OFFERS-PLAN.md`. Phase 1 (the offer form) is next. Not started.
