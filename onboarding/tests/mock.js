@@ -154,7 +154,7 @@ const DECL_TEXT=['faults','reno','internet','insulation','glazing'];
 const hasAnswer=(k,v)=>k==='tenanted'?['now','will','no'].includes(v):DECL_TEXT.includes(k)?isObj(v)&&String(v.d||'').trim()!=='':isObj(v)&&['yes','no','unknown'].includes(v.a);
 const needsAnswers=fm=>{ const d=fm.data||{}, pre=isObj(d.pre)?d.pre:{}, ans=isObj(d.answers)?d.answers:{}; return Object.keys(pre).some(k=>pre[k]==='inspection'&&!hasAnswer(k,k==='tenanted'?d.tenanted:ans[k])); };
 const NEED_ANSWER='Please answer each question Tim noted at the inspection';
-const AGENT_ONLY=['property_events','campaign_stats','buyer_feedback','property_offers','offer_links','offer_events','offer_settings','offer_clauses','offer_hits','offer_blanks','offer_blank_maps','offer_blank_reads','offer_terms','offer_term_changes','offer_drafts','offer_draft_approvals','offer_lawyer_lookups'];
+const AGENT_ONLY=['property_events','campaign_stats','buyer_feedback','property_offers','offer_links','offer_events','offer_settings','offer_clauses','offer_hits','offer_blanks','offer_blank_maps','offer_blank_reads','offer_terms','offer_term_changes','offer_drafts','offer_draft_approvals','offer_lawyer_lookups','offer_file_hashes'];
 function mkNotices(ag){ if((ag.answers||{}).prior!=='yes') return; (DB.prior_agency_notices||=[]); (ag.answers.priorAgencies||[]).forEach((x,i)=>{ if(x.agency&&!DB.prior_agency_notices.some(n=>n.agreement_id===ag.id&&n.idx===i)) DB.prior_agency_notices.push({id:uid(),agreement_id:ag.id,idx:i,agency:x.agency,agent_name:x.agent||null,email:x.email||null,kind:x.kind,dated:x.dated||null,status:'to_send',created_at:now()}); }); }
 const ok=d=>Promise.resolve({data:d,error:null}); const bad=m=>Promise.resolve({data:null,error:{message:m}});
 function rpc(name,a){ logCall('rpc:'+name); if(['agent_repo_add','agent_repo_set','agent_repo_share','agent_repo_archive','vendor_repo_list','agent_property_export'].includes(name)) return repoRpc(name,a); if(localStorage.getItem('trHang')==='1'&&['get_translations','set_my_language'].includes(name)) return new Promise(()=>{}); const before=new Map((DB.agreements||[]).map(x=>[x.id,JSON.parse(JSON.stringify(x))]));
@@ -331,7 +331,7 @@ function councilTable(op){ if(offline()) throw new Error('Failed to fetch'); if(
 // submit) and doc-prefill's offer_condition mode (help wording a condition). localStorage mockNet names the caller's network (for
 // the rate limits); offerAiMode = 'off' | 'fail' | 'unsuitable' changes the helper's answer. No email is ever sent: the
 // notification is recorded in email_log with mock: true.
-const DRAFT_TABLES=['offer_blanks','offer_blank_maps','offer_blank_reads','offer_terms','offer_term_changes','offer_drafts','offer_draft_approvals','offer_lawyer_lookups'];   // migration 019
+const DRAFT_TABLES=['offer_blanks','offer_blank_maps','offer_blank_reads','offer_terms','offer_term_changes','offer_drafts','offer_draft_approvals','offer_lawyer_lookups','offer_file_hashes'];   // migration 019
 const OFFER_TABLES=['offer_links','offer_events','offer_settings','offer_clauses','offer_hits'].concat(DRAFT_TABLES);
 const OL=()=>(DB.offer_links||=[]), OE=()=>(DB.offer_events||=[]), OH=()=>(DB.offer_hits||=[]), PO=()=>(DB.property_offers||=[]);
 const OSET=()=>{ DB.offer_settings||=[]; if(!DB.offer_settings.length) DB.offer_settings.push({id:true,ks_warn_working_days:15,ai_daily_cap:40,updated_at:now()}); return DB.offer_settings[0]; };
@@ -660,6 +660,7 @@ function draftRpc(name,a,me){ if(!me||!AGENTS.includes(me.email)) return bad('On
   if(name==='agent_blank_add'){ const d=PD().find(x=>x.id===a.p_document); if(!d) return bad("That file isn't on a property file");
     if(d.kind!=='REINZ agreement blank'||d.bucket!==RB||d.mime_type!=='application/pdf') return bad('Only a PDF filed as an agreement blank can be used'); if(d.archived_at) return bad('That file has been removed');
     const ex=OB().find(b=>b.document_id===d.id); if(ex) return ok({id:ex.id,existing:true,edition_checked:ex.edition_checked});
+    if(!(DB.offer_file_hashes||[]).some(h=>h.path===d.path&&h.sha256===d.sha256&&h.size_bytes===d.size_bytes)) return bad("The file's fingerprint hasn't been confirmed by the server yet. Try again");
     if(!(a.p_pages>=1&&a.p_pages<=400)) return bad('Please check the page count');
     if(!Array.isArray(a.p_sizes)||a.p_sizes.length!==a.p_pages||a.p_sizes.some(s=>!Array.isArray(s)||s.length!==2||!(s[0]>=50&&s[0]<=5000)||!(s[1]>=50&&s[1]<=5000))) return bad('Please check the page sizes');
     const ed=String(a.p_edition||'').trim().slice(0,80)||null; const b={id:uid(),property_id:d.property_id,document_id:d.id,sha256:d.sha256,size_bytes:d.size_bytes,file_name:d.name,pages:a.p_pages,sizes:a.p_sizes,edition:ed,edition_checked:EDITIONS_OK.includes(ed),created_by:me.email,created_at:now()};
@@ -687,14 +688,20 @@ function draftRpc(name,a,me){ if(!me||!AGENTS.includes(me.email)) return bad('On
     if(!/^[0-9a-f]{64}$/.test(a.p_sha256||'')) return bad('The draft needs its fingerprint'); if(a.p_sha256===b.sha256) return bad('That is the blank itself, not a draft');
     if(!new RegExp('^properties/'+o.property_id+'/docs/offer-draft-'+o.id+'-[0-9]{1,4}-[0-9a-f]{12}\\.pdf$').test(a.p_path||'')) return bad('A draft is stored at its own place');
     const obj=SO()[a.p_path]; if(!obj) return bad("The draft hasn't arrived yet"); if(obj.size!==a.p_size||obj.mime!=='application/pdf') return bad("The stored draft doesn't match");
+    if(!(DB.offer_file_hashes||[]).some(h=>h.path===a.p_path&&h.sha256===a.p_sha256&&h.size_bytes===a.p_size)) return bad("The draft's fingerprint hasn't been confirmed by the server yet. Try again");
     const n=OD().filter(x=>x.offer_id===o.id).reduce((m_,x)=>Math.max(m_,x.number),0)+1;
     const d={id:uid(),offer_id:o.id,property_id:o.property_id,number:n,blank_id:b.id,blank_sha256:b.sha256,map_id:m.id,details:JSON.parse(JSON.stringify(o.details)),edits:a.p_edits||{},placed:a.p_placed||[],needs:a.p_needs||[],path:a.p_path,sha256:a.p_sha256,size_bytes:a.p_size,note:(a.p_note||'').trim()||null,created_by:me.email,created_at:now()};
     OD().push(d); ev(o.property_id,o.id,'drafted',{draft_id:d.id,number:n,sha256:d.sha256,blank_sha256:b.sha256,map_version:m.version,needs:d.needs.length,note:d.note}); return ok({id:d.id,number:n}); }
   if(name==='agent_draft_approve'){ const d=OD().find(x=>x.id===a.p_draft); if(!d) return bad('No such draft'); if(a.p_sha256!==d.sha256) return bad("That isn't the draft on your screen. Open it again");
-    if(d.number!==Math.max(...OD().filter(x=>x.offer_id===d.offer_id).map(x=>x.number))) return bad('There is a newer draft of this offer. Approve that one');
-    if(d.needs.some(x=>x.blocking===true)) return bad('Some places still need you. Fill them in and draft again');
     if(ODA().some(x=>x.draft_id===d.id)) return ok({ok:true,existing:true});
-    ODA().push({id:ODA().length+1,draft_id:d.id,sha256:d.sha256,approved_by:me.email,approved_at:now()}); ev(d.property_id,d.offer_id,'draft_approved',{draft_id:d.id,number:d.number,sha256:d.sha256,blank_sha256:d.blank_sha256}); return ok({ok:true,existing:false}); }
+    if(d.number!==Math.max(...OD().filter(x=>x.offer_id===d.offer_id).map(x=>x.number))) return bad('There is a newer draft of this offer. Approve that one');
+    if(!same((PO().find(x=>x.id===d.offer_id)||{}).details,d.details)) return bad('The offer has changed since this draft. Re-draft it first');
+    const m=OBM().find(x=>x.id===d.map_id), b=OB().find(x=>x.id===d.blank_id);
+    if(OBM().some(x=>x.blank_id===b.id&&x.approved&&x.version>m.version)) return bad('The places on the blank have been approved again since this draft. Re-draft it first');
+    if(OB().some(x=>x.property_id===b.property_id&&x.edition_checked&&x.created_at>b.created_at)) return bad('A newer agreement blank has been loaded since this draft. Approve its places and re-draft first');
+    const ck=Array.isArray(a.p_checked)?a.p_checked:[];
+    if(d.needs.some(x=>x.blocking===true&&!(x.ackable===true&&ck.includes(x.id)))) return bad('Some places still need you. Fill them in and draft again');
+    ODA().push({id:ODA().length+1,draft_id:d.id,sha256:d.sha256,approved_by:me.email,approved_at:now(),checked:ck}); ev(d.property_id,d.offer_id,'draft_approved',{draft_id:d.id,number:d.number,sha256:d.sha256,blank_sha256:d.blank_sha256,checked:ck}); return ok({ok:true,existing:false}); }
   if(name==='agent_lawyer_use'){ const l=OLL().find(x=>x.id===a.p_lookup); if(!l||!l.ok) return bad('No such lookup'); const o=PO().find(x=>x.id===l.offer_id); if(!o) return bad('No such offer');
     if(!Array.isArray(a.p_keys)||!a.p_keys.length) return bad('Tick at least one'); const law=Object.assign({},o.details.lawyer||{}), used=[];
     for(const k of a.p_keys){ const v=((l.result||{}).values||[]).find(x=>x.id===k); if(!v) return bad("That value isn't in the lookup"); if(!['email','phone'].includes(v.field)) return bad("Only the lawyer's email and phone are used"); law[v.field]=v.field==='email'?v.value.toLowerCase():v.value; used.push({field:v.field,value:v.value,kind:v.kind,source_url:v.source_url}); }
@@ -705,6 +712,11 @@ function draftInvoke(o){ const b=(o&&o.body)||{}; const me=S&&S.user; const res=
   const calls=JSON.parse(localStorage.getItem('draftCalls')||'[]'); calls.push(b.action); localStorage.setItem('draftCalls',JSON.stringify(calls));
   if(!me) return res({error:'Sign in first'},401); if(!AGENTS.includes(me.email)) return res({error:'Only Tim can do this'},403);
   const ai=row=>(DB.ai_calls||=[]).push(Object.assign({id:(DB.ai_calls.length+1),at:now(),model:'claude-haiku-5-5',agent:me.email},row));
+  if(b.action==='confirm_file'){ const pth=String(b.path||''); if(!/^properties\/[0-9A-Za-z-]+\/docs\/[A-Za-z0-9._-]{1,200}$/.test(pth)) return res({error:'Bad request'},400);
+    const bl=(window.__repoBlobs||{})[pth]; if(!bl) return res({ok:false,error:"The file isn't in storage yet. Try again."},404);
+    return bl.arrayBuffer().then(buf=>crypto.subtle.digest('SHA-256',buf).then(h=>{ const sha=Array.from(new Uint8Array(h),x=>x.toString(16).padStart(2,'0')).join(''); const H=(DB.offer_file_hashes||=[]); const ex=H.find(x=>x.path===pth);
+      if(ex&&(ex.sha256!==sha||ex.size_bytes!==buf.byteLength)) return {data:null,error:{message:'409',context:{json:async()=>({ok:false,error:"The file's fingerprint couldn't be recorded."})}}};
+      if(!ex) H.push({path:pth,sha256:sha,size_bytes:buf.byteLength,confirmed_by:me.email,confirmed_at:now()}); save(); return {data:{ok:true,sha256:sha,size:buf.byteLength},error:null}; })); }
   if(b.action==='read_pack'){ const m=localStorage.getItem('draftAiMode'); if(m==='off') return ok({ok:false,reason:'off',message:"Document reading isn't switched on yet."});
     if(!Array.isArray(b.pages)||!b.pages.length||b.pages.length>8) return res({error:'Send 1 to 8 pages at a time'},400);
     ai({purpose:'agreement pack read',ok:m!=='fail'}); if(m==='fail'){ save(); return ok({ok:false,reason:'failed',message:"The AI didn't answer. Try again in a minute."}); }

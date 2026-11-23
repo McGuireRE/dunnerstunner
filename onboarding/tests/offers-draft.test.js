@@ -106,7 +106,7 @@ const sha = b => crypto.createHash('sha256').update(Buffer.from(b)).digest('hex'
   const pg = await p.$('#drCanvas .dr-pg'); const bb = await pg.boundingBox(); await p.mouse.click(bb.x + bb.width * 0.8, bb.y + bb.height * 0.9); await p.waitForSelector('#drSel');
   await p.click('[data-mv="0,-4"]'); await p.waitForTimeout(100);
   // untick the AI's spa pool, tick the garden shed, add a chattel by hand
-  await p.evaluate(() => { const box = [...document.querySelectorAll('[data-chat]')].find(x => x.closest('label').textContent.includes('Spa pool')); box.click(); });
+  expect(out.chatTicks && await p.evaluate(() => { const box = [...document.querySelectorAll('[data-chat]')].find(x => x.closest('label').textContent.includes('Spa pool')); return box && !box.checked; }), "the AI's chattel starts unticked");
   await p.evaluate(() => { const box = [...document.querySelectorAll('[data-chat]')].find(x => x.closest('label').textContent.includes('Garden shed')); box.click(); });
   await p.fill('#drChatAdd', 'Wall-mounted TV bracket'); await p.click('#drChatAddBtn'); await p.waitForTimeout(150);
   await p.evaluate(() => document.querySelector('#drNotes input').click()); await p.click('#drApprove'); await p.waitForSelector('#offTile');
@@ -169,6 +169,7 @@ const sha = b => crypto.createHash('sha256').update(Buffer.from(b)).digest('hex'
   out.needs = await p.$$eval('.dr-need', e => e.map(x => x.textContent));
   expect(out.needs.some(t => /\[Tim to add his electrical report clause\]/.test(t)) && await p.isDisabled('#drApproveDraft'), 'the placeholder is listed as Needs you, and approval waits');
   expect(d.offer_events.some(e => e.kind === 'drafted' && e.detail.sha256 === dr1.sha256 && e.detail.blank_sha256 === blankSha), 'drafting recorded in offer_events');
+  expect(d.offer_file_hashes.some(h => h.path === doc1.path && h.sha256 === blankSha) && d.offer_file_hashes.some(h => h.path === dr1.path && h.sha256 === dr1.sha256), 'the server confirmed both fingerprints from the stored files');
   out.rvBoxes = await p.$$eval('#drRvCanvas .dr-box', e => e.length); expect(out.rvBoxes >= 8, 'filled places highlighted on the page');
   expect(!(await side(p)), 'review at 390 px: no sideways scroll'); await shot(p, 'review');
 
@@ -198,7 +199,7 @@ const sha = b => crypto.createHash('sha256').update(Buffer.from(b)).digest('hex'
   d = await db(p); const dr3 = d.offer_drafts.find(x => x.number === 3); const t3 = await pdfText(await blob(p, dr3.path));
   expect(t3[0].includes('$670,000') && !t3[0].includes('$655,000') && d.offer_drafts.length === 3 && d.offer_draft_approvals.length === 1, 'the new draft has the corrected price; earlier drafts and the approval are kept');
   expect(/1\. Electrical report: \[Tim to add his electrical report clause\]/.test(t3[2]), 'item edits are not carried into a re-draft after a change (the placeholder is back for Tim)');
-  const r72 = await rpc(p, 'agent_draft_approve', { p_draft: dr2.id, p_sha256: dr2.sha256 }); expect(r72.error && /newer draft/.test(r72.error.message), 'once re-drafted, the earlier approved draft is not approved again (its approval stays on record)');
+  const r72 = await rpc(p, 'agent_draft_approve', { p_draft: dr2.id, p_sha256: dr2.sha256 }); expect(r72.data && r72.data.existing && (await db(p)).offer_draft_approvals.length === 1, 'approving draft 2 again changes nothing: its approval stays on record');
   const r7 = await rpc(p, 'agent_draft_approve', { p_draft: d.offer_drafts.find(x => x.number === 1).id, p_sha256: dr1.sha256 }); expect(r7.error && /newer draft/.test(r7.error.message), 'an older draft cannot be approved');
 
   // ── 8. the lawyer lookup: values with their sources, used only once Tim ticks them; and the manual fallback ──
@@ -210,11 +211,18 @@ const sha = b => crypto.createHash('sha256').update(Buffer.from(b)).digest('hex'
   await p.click('#drLawUse'); expect(/Tick at least one/.test(await p.textContent('#drLawErr')), 'tick at least one');
   await p.evaluate(() => document.querySelectorAll('[data-lawv]').forEach(x => x.click())); await p.click('#drLawUse'); await p.waitForSelector('#drOffer');
   d = await db(p); const law = d.property_offers.find(x => x.id === off1).details.lawyer;
+  const r8 = await rpc(p, 'agent_draft_approve', { p_draft: dr3.id, p_sha256: dr3.sha256 }); expect(r8.error && /offer has changed/.test(r8.error.message), 'once the offer changes, its draft is refused approval');
   expect(law.email === 'pat@synthlaw.example' && law.phone === '03 477 1234' && law.firm === 'Synthetic Law', 'the ticked values are the lawyer\'s details now');
   const le = d.offer_events.filter(e => e.kind === 'corrected').pop(); expect(le && le.detail.used.length === 2 && le.detail.used.every(u => /^https:/.test(u.source_url)), 'recorded with the sources');
   expect(d.property_offers.find(x => x.id === off1).details.phone === '021 999 8888', 'the buyer\'s own phone is untouched');
   await p.click('#drDraftBtn'); await p.waitForSelector('#drReview h1:has-text("Draft 4")', { timeout: 30000 });
-  d = await db(p); const t4 = await pdfText(await blob(p, d.offer_drafts.find(x => x.number === 4).path));
+  d = await db(p); const t4 = await pdfText(await blob(p, d.offer_drafts.find(x => x.number === 4).path)); const dr4 = d.offer_drafts.find(x => x.number === 4);
+  // the places approved again after the draft: refused, and the screen says so with Approve off
+  await rpc(p, 'agent_blank_map_save', { p_blank: m1.blank_id, p_places: m1.places, p_proposals: m1.proposals, p_chattels: m1.chattels, p_notes: m1.notes, p_missing: m1.missing, p_approve: true });
+  const r8b = await rpc(p, 'agent_draft_approve', { p_draft: dr4.id, p_sha256: dr4.sha256 }); expect(r8b.error && /approved again/.test(r8b.error.message), 'a newer approved map: the draft is refused approval');
+  await p.click('#drRvBack'); await p.waitForSelector('#drDrafts'); await p.click(`[data-draft="${dr4.id}"]`); await p.waitForSelector('#drStaleBlank');
+  expect(await p.isDisabled('#drApproveDraft'), 'Approve is off on a draft made on superseded places');
+  await p.click('#drRedraftChange'); await p.waitForSelector('#drReview h1:has-text("Draft 5")', { timeout: 30000 });
   expect(t4[6].includes('pat@synthlaw.example') && t4[6].includes('03 477 1234') && !/buyer\.own@|ana\.p@|999 8888|777 6666/.test(t4.join('\n')), 'the lawyer\'s email and phone on the back page, never the buyer\'s');
   await p.evaluate(() => localStorage.setItem('lawyerMode', 'no_search'));
   await p.click('#drRvBack'); await p.waitForSelector('#drLawBtn'); await p.click('#drLawBtn'); await p.waitForSelector('#drLawManual');
@@ -245,6 +253,12 @@ const sha = b => crypto.createHash('sha256').update(Buffer.from(b)).digest('hex'
   expect(/Purchaser's condition: Synthetic custom condition wording from the buyer\./.test(te2[2]), "ticked: the buyer's wording goes on");
   expect(te2[6].includes('lee@otherlaw.example') && !/buyer\.own@|999 8888/.test(te2.join('\n')), 'lawyer details on; the buyer\'s own never');
   await shot(q, 'review_dark');
+  // a vendor's own phone, typed in another format, never goes on: left off and blocking
+  const off3 = (await rpc(q, 'agent_offer_add', { p_property: 'P1', p_offer: offer({ conditions: [], chattels_add: ['Ring the vendor on +64 21 000 1111 about the spa'], chattels_exclude: [] }) })).data;
+  await q.click('#drRvBack'); await q.waitForSelector('#drOffer'); await q.click('#ofBackP'); await q.waitForSelector('#offTile'); await q.click(`[data-offer="${off3}"]`); await q.waitForSelector('#drDraftBtn');
+  await q.click('#drDraftBtn'); await q.waitForSelector('#drReview', { timeout: 30000 });
+  d = await db(q); const e3 = d.offer_drafts.find(x => x.offer_id === off3), t3v = await pdfText(await blob(q, e3.path));
+  expect(e3.needs.some(n => n.id === 'privacy_chattels_add' && n.blocking && /a vendor's own/.test(n.text)) && !/000 1111/.test(t3v.join('\n')) && await q.isDisabled('#drApproveDraft'), "a vendor's own phone in another format is left off the PDF and blocks approval");
   // the places screen in dark mode
   await q.click('#drRvBack'); await q.waitForSelector('#drOffer'); await q.click('#ofBackP'); await q.waitForSelector('#drMapUseBtn'); await q.click('#drMapUseBtn'); await q.waitForSelector('#drCanvas .dr-box', { timeout: 30000 });
   expect(!(await side(q)), 'places screen in dark mode at 390 px: no sideways scroll');

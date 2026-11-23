@@ -34,7 +34,7 @@ const ok = (c, msg) => { if (!c) errs.push(msg); };
   eq(D.FRONT_CONDITIONS.map(([k]) => !!P('c_' + k) && !!P('d_' + k)), [true, true, true, true, true, true], 'six conditions with Yes/No and date');
   ok(P('d_oia').x > 340, 'the OIA date goes after "(clause 9.8):"');
   ok(!P('price').printed && P('price').x > 97.8 && P('price').x + P('price').w < 326.1, 'price after "$", before Plus GST, empty');
-  ok(/Ten percent filler/.test(P('deposit').printed) && /unconditional/.test(P('deposit').printed), 'deposit text already on the blank (two lines) read as printed');
+  ok(/Ten percent filler/.test(P('deposit').printed) && /second filler line/.test(P('deposit').printed), 'deposit text already on the blank (two lines) read as printed');
   ok(/fifteen working days/.test(P('settlement').printed), 'settlement already on the blank read as printed');
   eq(P('clause22').page, 8, 'clause 22.0 found on the appendix, not the "22.0" in the general terms'); eq(P('clause22').lines.length, 4, 'clause 22.0 block: heading and three lines');
   eq(P('clause22_days').printed, 'one', 'clause 22.0 working days already says one'); eq(P('clause21_2').lines.length, 2, 'clause 21.2 block'); eq(P('clause21_3').lines.length, 2, 'clause 21.3 block');
@@ -149,6 +149,65 @@ const ok = (c, msg) => { if (!c) errs.push(msg); };
   const rl = await D.renderDraft(PDFLib, blank, long), lp = await D.readPages(pdfjs, rl.bytes);
   ok(rl.continued === 4 && lp.length === pages.length + 1 && lp[3].items.some(i => /Further Terms of Sale \(continued\)/.test(i.s)) && lp[3].items.some(i => /Extra term 70/.test(i.s)), 'further terms that don\'t fit continue on an added page after page 3');
   ok(rl.boxes.find(b => b.id === 'pl_firm').page === 8, 'boxes on later pages move along by the added page');
+  // ── review findings ──
+  // 1. phones by national digits, emails without case, also inside a sentence, wherever the text comes from
+  eq(['+64 21 555 0199', '0064 21 555 0199', '21 555 0199', '(021) 555-0199', '021-555-0199', '+64 3 477 1234', '03 477 1234'].map(D.nsn), ['215550199', '215550199', '215550199', '215550199', '215550199', '34771234', '34771234'], 'NZ numbers reduced to national digits');
+  const own1 = D.ownContacts([{ who: 'a purchaser', email: 'Ana.P@Buyer.Example', phone: '+64 21 555 0199' }]);
+  ['Call 021 555 0199 after five', '+64 21 555 0199', '0064 21 555 0199', '21 555 0199', '(021) 555-0199', 'write to ANA.P@buyer.example today'].forEach(t => ok(D.holdsOwn(t, own1) === 'a purchaser', 'found in: ' + t));
+  ok(!D.holdsOwn('$655,000, 8 December 2026 (10 working days)', own1) && !D.holdsOwn('03 477 1234', own1), 'prices, dates and other numbers are not mistaken for it');
+  const pp = { purchasers: [{ first: 'Ana', last: 'Testbuyer', email: 'ana.p@buyer.example', phone: '+64 21 555 0199' }], email: 'own@buyer.example', phone: '022 333 4444' };
+  const priv = D.planDraft({ details: Object.assign({}, base, pp, { conditions: [{ key: 'custom', days: 10, wording: 'Ring (021) 555-0199 to arrange it.' }], chattels_add: ['Ask OWN@buyer.example'],
+    lawyer: { firm: 'Synthetic Law', person: 'Pat', email: 'pat@synthlaw.example', phone: '0064 21 555 0199' } }), map, terms, today: '2026-11-24', edits: { custom_ok: true, items: { price: 'Phone 022-333-4444' }, extra_terms: ['Text +64 21 555 0199 first.'] } });
+  ok(!I(priv, 'pl_phone') && N(priv, 'privacy_pl_phone').blocking, 'a lawyer phone that is the purchaser\'s own (other format) is left off and blocks');
+  ok(!I(priv, 'price') && N(priv, 'privacy_price').blocking, 'Tim\'s edit holding the buyer\'s phone is left off');
+  ok(!I(priv, 'further_terms') && N(priv, 'privacy_further_terms').blocking, 'further terms holding a phone (custom wording, extra term) are left off');
+  ok(!I(priv, 'chattels_add') && N(priv, 'privacy_chattels_add').blocking, 'chattels holding the buyer\'s email are left off');
+  ok(I(priv, 'pl_email') && I(priv, 'pl_firm'), 'the lawyer\'s own details still go on');
+  // 2. the vendors' own details too, and the vendor's lawyer from the file only for this round, signed
+  const parties = [{ who: 'a vendor', email: 'testy@vendor.example', phone: '021 000 1111' }];
+  const pvv = D.planDraft({ details: Object.assign({}, base, { conditions: [{ key: 'custom', days: 5, wording: 'Vendor to call +64 21 000 1111.' }] }), map, terms, today: '2026-11-24', edits: { custom_ok: true }, parties });
+  ok(!I(pvv, 'further_terms') && /a vendor's own/.test(N(pvv, 'privacy_further_terms').text) && N(pvv, 'privacy_further_terms').blocking, "a vendor's own phone is never placed");
+  const vmap = D.buildMap(await D.readPages(pdfjs, await SB.make({ vendorLawyer: false })));
+  const pvl = D.planDraft({ details: base, map: vmap, terms, today: '2026-11-24', parties, vendorLawyer: { firm: 'Self', person: 'Testy', email: 'Testy@Vendor.example', source: 'file' } });
+  ok(!I(pvl, 'vl_email') && !I(pvl, 'vl_service') && N(pvl, 'privacy_vl_email').blocking, "a vendor's lawyer email that is the vendor's own is left off and blocks");
+  const ags = [{ id: 'old', status: 'countersigned', created_at: '2025-01-01T00:00:00Z' }, { id: 'draft', status: 'draft', created_at: '2026-11-01T00:00:00Z' }, { id: 'now', status: 'countersigned', created_at: '2026-10-01T00:00:00Z' }];
+  const lks = [{ agreement_id: 'old', firm: 'Old Law', lawyer_name: 'Olly', email: 'olly@old.example', sent_at: '2025-01-02' }, { agreement_id: 'draft', firm: 'Draft Law', email: 'd@draft.example', sent_at: '2026-11-02' }, { agreement_id: 'now', firm: 'Now Law', lawyer_name: 'Nina', email: 'nina@now.example', sent_at: '2026-10-02' }];
+  eq((D.pickVendorLawyer({ cycle_at: '2026-06-01T00:00:00Z' }, ags, lks, parties) || {}).firm, 'Now Law', 'vendor lawyer: only a signed agreement of this round of owners');
+  eq(D.pickVendorLawyer({ cycle_at: '2026-06-01T00:00:00Z' }, ags.filter(a => a.id !== 'now'), lks, parties), null, 'none when only an earlier round or an unsigned agreement has one');
+  eq(D.pickVendorLawyer({}, ags, lks.concat({ agreement_id: 'now', firm: 'Mine', email: 'testy@vendor.example', sent_at: '2026-12-01' }), parties).firm, 'Now Law', "a link to the vendor's own email is never taken");
+  // 3. anything but the further terms that doesn't fit blocks approval
+  const p30 = plan({ chattels_add: Array.from({ length: 30 }, (_, i) => 'Synthetic chattel number ' + (i + 1)) });
+  const r30 = await D.renderDraft(PDFLib, blank, p30);
+  ok(r30.overflow.length === 1 && r30.overflow[0].id === 'chattels_add' && p30.needs.find(n => n.id === 'overflow_chattels_add').blocking, '30 chattels: the overflow is a blocking Needs you item');
+  // 4. printed further terms: ours start below them, numbered on, with a check Tim must tick
+  const pmap = D.buildMap(await D.readPages(pdfjs, await SB.make({ printedTerms: true }))), pf = pmap.places.find(x => x.id === 'further_terms');
+  ok(pf.printed_count === 3 && pf.printed_last === 2 && Math.abs(pf.printed_bottom - 706) < 0.5, 'printed terms on the Further Terms page read: three lines, numbered to 2');
+  const ppt = D.planDraft({ details: Object.assign({}, base, { conditions: [{ key: 'electrical', days: 10 }] }), map: pmap, terms, clauses: { electrical: 'Words.' }, today: '2026-11-24', edits: { extra_terms: ['Extra.'] } });
+  const pit = I(ppt, 'further_terms'); ok(pit.y < 706 - 10 && /^3\. Electrical report/.test(pit.text) && /\n4\. Your further term: Extra\./.test(pit.text), 'our terms start below the lowest printed line, numbered from 3');
+  const fpn = N(ppt, 'further_printed'); ok(fpn && fpn.blocking && fpn.ackable && /3 printed lines, numbered to 2/.test(fpn.text) && /numbered from 3/.test(fpn.text), 'and Tim must tick that he has checked the page');
+  ok(!N(p, 'further_printed'), 'no such check on a page with no printed terms');
+  // 10. settlement: every printed line struck, within the text, the new text below the last
+  const m2 = D.buildMap(await D.readPages(pdfjs, await SB.make({ twoLineSettlement: true }))), sp2 = m2.places.find(x => x.id === 'settlement');
+  const p2 = D.planDraft({ details: Object.assign({}, base, { settlement: { kind: 'relative', days: 20 } }), map: m2, terms, today: '2026-11-24' });
+  const st2 = I(p2, 'settlement_struck'), nt2 = I(p2, 'settlement');
+  ok(st2.kind === 'lines' && st2.lines.length === 2 && st2.lines.every(l => l.x1 - l.x0 < 200 && l.x0 >= 315), 'both printed settlement lines struck, each within its own text');
+  ok(nt2.y < Math.min(...st2.lines.map(l => l.y)) - 5, 'the new settlement is written below the last struck line');
+  // 11. a date moved to a working day is noted
+  const pmv = plan({ settlement: { kind: 'date', date: '2027-02-13' }, conditions: [{ key: 'finance', date: '2026-12-26' }] });
+  ok(N(pmv, 'settlement_moved') && !N(pmv, 'settlement_moved').blocking && /13 February 2027/.test(N(pmv, 'settlement_moved').text), 'settlement moved to a working day: To check');
+  ok(N(pmv, 'moved_finance') && /26 December 2026/.test(N(pmv, 'moved_finance').text), 'a condition date moved: To check');
+  // 12. the email for notices follows Tim's edit of the lawyer's email
+  eq(I(plan({}, { items: { pl_email: 'new@synthlaw.example' } }), 'pl_service').text, 'new@synthlaw.example', 'notices email follows the edit');
+  // 13. clause 22.0's new count: in the margin with a caret, never above the line
+  const c22p = P('clause22_days'), c22n = I(pl, 'clause22_days');
+  ok(c22n.x >= c22p.line_x1 + 5 && Math.abs(c22n.y - c22p.y) < 0.01 && I(pl, 'clause22_caret') && N(pl, 'clause22_margin'), 'clause 22.0: the new count in the margin on the same line, with a caret under the struck word');
+  // 14. "Continued on the next page" at the foot of the Further Terms page
+  const lt = await D.readPages(pdfjs, rl.bytes); ok(lt[2].items.some(i => i.s === 'Continued on the next page.'), 'the Further Terms page says it continues');
+  // the sale of another property names the buyer's address: noted for Tim
+  const psale = D.planDraft({ details: Object.assign({}, base, { conditions: [{ key: 'sale', days: 20 }], sale_address: '9 Filler Street, Testville' }), map, terms: terms.concat({ key: 'sale', kind: 'further_term', title: 'Sale of another property', wording_from: 'sale', rule: { when: { condition: 'sale' } }, position: 22 }), clauses: { sale: 'Sale of {address}.' }, today: '2026-11-24' });
+  ok(N(psale, 'sale_address_seen') && !N(psale, 'sale_address_seen').blocking && /9 Filler Street/.test(N(psale, 'sale_address_seen').text) && /9 Filler Street/.test(I(psale, 'further_terms').text), "the buyer's address stays in the term, with a To check note that the vendors will see it");
+  ok(!Object.values(D.EDITIONS).some(e => /Pine Hill/.test(JSON.stringify(e))), 'no real address in the editions list');
+
   // AI proposals onto the page, and the pack's text for the reader
   const pt = D.packText(pages); ok(pt.length === pages.length && pt[0].lines[0].i === 0, 'the pack as numbered lines per page');
   const bt = D.packBatches(pt, 3, 100000); eq(bt.map(b => b.length), [3, 3, 3, 1], 'batches of at most 3 pages');

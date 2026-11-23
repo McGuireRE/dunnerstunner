@@ -241,10 +241,15 @@ agreements/<agreement id>/signatures/... (vendors may upload their own signature
 - `offer_drafts` (offer, property, number, blank and its sha256, map, details from the server, Tim's edits, placed, needs, path,
   sha256, size, note). `offer_draft_approvals` (draft unique, sha256, by, at). `offer_lawyer_lookups` (offer, firm, person, model,
   ok, result with each value's source).
+- `offer_file_hashes` (path, sha256, size, confirmed_by, confirmed_at): the fingerprint of a stored blank or draft, worked out by the
+  offer-draft edge function from the file itself (`offer_file_confirm`, service role). `agent_blank_add` and `agent_draft_add` accept
+  only a fingerprint and size confirmed here. The edition, page sizes, places, what was placed and which items block come from Tim's
+  screen and are trusted as such.
 - All of these: agent read only; nobody writes directly; rows can't be changed or removed (`guard_offer_record`) or the tables
   emptied; vendors and anon see nothing.
 - Functions (agent): `agent_blank_add(document, pages, sizes, edition)`, `agent_blank_map_save(blank, places, proposals, chattels,
   notes, missing, approve)` (approving sets the offer form's chattels), `agent_offer_term(key, title, wording, rule, position,
   active)`, `agent_draft_add(offer, map, path, sha256, size, placed, needs, edits, note)` (the newest approved map, the stored file
-  checked), `agent_draft_approve(draft, sha256)` (newest draft, nothing blocking), `agent_lawyer_use(lookup, keys)` (email and phone
-  only, from the stored lookup). Service role (offer-draft): `offer_ai_read_save`, `offer_lawyer_save`.
+  checked), `agent_draft_approve(draft, sha256, checked)` (newest draft, the offer unchanged since, the newest approved
+  places of the newest usable blank, nothing blocking except "ackable" items Tim ticked as checked, kept in `offer_draft_approvals.checked`), `agent_lawyer_use(lookup, keys)` (email and phone
+  only, from the stored lookup). Service role (offer-draft): `offer_ai_read_save`, `offer_lawyer_save`, `offer_file_confirm`.

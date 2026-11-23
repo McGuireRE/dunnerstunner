@@ -16,7 +16,7 @@
 
   // The editions whose labels and layout have been checked against a real blank. Drafting is refused on any other. Keep the same
   // list in offer_edition_ok() (migration 019).
-  const EDITIONS = { 'Eleventh Edition 2022 (4)': { checked: '2026-11-23', note: 'ADLS/TLANZ and REINZ, checked on the 309 Pine Hill Road pack' } };
+  const EDITIONS = { 'Eleventh Edition 2022 (4)': { checked: '2026-11-23', note: 'ADLS/TLANZ and REINZ, checked on a real pack' } };
   const EDITION_RE = /\b([A-Z][a-z]+(?:-[a-z]+)?) Edition (\d{4})(?: \((\d+)\))?/;
   const editionOk = e => Object.prototype.hasOwnProperty.call(EDITIONS, String(e || ''));
   const INK = [0.05, 0.16, 0.45];   // typed text: a dark blue, plainly added
@@ -113,14 +113,16 @@
   const r1 = n => Math.round(n * 10) / 10;
   const box = (o) => Object.assign(o, { x: r1(o.x), y: r1(o.y), w: r1(Math.max(0, o.w)), h: r1(Math.max(0, o.h)) });
   // text already on the blank to the right of a label (the eForms portal sometimes fills a field), and on lines carried under it
+  // returns { text, lines: [{ x0, x1, y, h }] } (each printed line's own extent, so it can be struck through exactly)
   function printedAfter(L, line, x, stopRe, right) {
-    const same = line.spans.filter(sp => sp.it.x >= x - 1 && (right == null || sp.it.x < right)).map(sp => sp.it.s).join(' ').trim();
-    const out = same ? [same] : []; let prev = line;
+    const sps = line.spans.filter(sp => sp.it.x >= x - 1 && (right == null || sp.it.x < right));
+    const same = sps.map(sp => sp.it.s).join(' ').trim();
+    const out = same ? [same] : [], ext = same ? [{ x0: r1(sps[0].it.x), x1: r1(Math.max(...sps.map(sp => sp.it.x + sp.it.w))), y: r1(sps[0].it.y), h: r1(Math.max(...sps.map(sp => sp.it.h))) }] : []; let prev = line;
     if (same) for (const l of L) {
       if (l.y >= prev.y) continue; if (prev.y - l.y > prev.h * 1.6) break; if (stopRe && stopRe.test(l.text)) break;
-      if (Math.abs(l.x0 - x) <= 12) { out.push(l.text.trim()); prev = l; } else break;
+      if (Math.abs(l.x0 - x) <= 12 || Math.abs(l.x0 - ext[0].x0) <= 12) { out.push(l.text.trim()); ext.push({ x0: r1(l.x0), x1: r1(l.x1), y: r1(l.y), h: r1(l.h) }); prev = l; } else break;
     }
-    return out.join(' ').replace(/\s+/g, ' ').trim();
+    return { text: out.join(' ').replace(/\s+/g, ' ').trim(), lines: ext };
   }
   // a Yes/No (or Yes/No/NA) on a line: the place, with where Yes and No each sit
   function yesNoOn(line, key, which) {
@@ -131,8 +133,8 @@
   }
   function textAfter(L, line, m, key, page, stopX, opts) {
     const x = m.x1 + 4, right = stopX != null ? stopX - 6 : page.w - 28;
-    const printed = printedAfter(L, line, x - 3, opts && opts.stop, stopX != null ? stopX - 1 : null);
-    return box({ id: key, key, kind: (opts && opts.kind) || 'text', page: page.n, x, y: line.y, w: right - x, h: line.h, label: LABELS[key] || key, source: 'anchor', printed: printed || undefined });
+    const pr = printedAfter(L, line, x - 3, opts && opts.stop, stopX != null ? stopX - 1 : null);
+    return box({ id: key, key, kind: (opts && opts.kind) || 'text', page: page.n, x, y: line.y, w: right - x, h: line.h, label: LABELS[key] || key, source: 'anchor', printed: pr.text || undefined, printed_lines: pr.text ? pr.lines : undefined });
   }
   // the lines of a paragraph block from a heading line down to (not including) the next line matching stop, or the footer
   function blockFrom(L, first, stopRe) {
@@ -203,8 +205,10 @@
     const ft = pageOf(/^FURTHER TERMS OF SALE/);
     if (ft) { const { page, L } = ft, h = findLine(L, /^FURTHER TERMS OF SALE/), cont = findLine(L, /^Further Terms continued/);
       const top = (cont && cont.y < h.y && h.y - cont.y < 30 ? cont.y : h.y) - 16, foot = L.filter(l => /©/.test(l.text)).map(l => l.y + l.h).sort((a, b) => b - a)[0] || 40;
+      const pl = L.filter(l => l.y < top + 4 && l.y > foot + 2 && !/^Further Terms continued/.test(l.text));
+      const nums = pl.map(l => /^\s*(\d{1,2})\s*[.)]/.exec(l.text)).filter(Boolean).map(m => +m[1]);
       add(box({ id: 'further_terms', key: 'further_terms', kind: 'area', page: page.n, x: h.x0 + 2, y: top, w: page.w - h.x0 - 30, h: top - foot - 10 + FONT_SIZE, label: LABELS.further_terms, source: 'anchor',
-        printed: L.filter(l => l.y < top + 4 && l.y > foot + 2).map(l => l.text.trim()).join(' ').trim() || undefined })); }
+        printed: pl.map(l => l.text.trim()).join(' ').trim() || undefined, printed_count: pl.length || undefined, printed_bottom: pl.length ? r1(Math.min(...pl.map(l => l.y))) : undefined, printed_last: nums.length ? Math.max(...nums) : undefined, foot: r1(foot) })); }
     // the appendix: 21.2, 21.3 and 22.0
     const ftIdx = ft ? ft.page.n : 0;
     const ap = PL.find(x => x.page.n > ftIdx && x.L.some(l => /^Appendix\b/.test(l.text)) && x.L.some(l => /^2[12]\.\d\b/.test(l.text)))
@@ -219,7 +223,8 @@
         for (let i = ls.length - 1; i >= 0; i--) { const ms = matchAll(ls[i], /\bworking\b/); if (!ms.length) continue; const wm = ms[ms.length - 1];
           const before = ls[i].text.slice(0, wm.start), pm = /(\S+)\s*$/.exec(before), word = pm ? pm[1] : '';
           if (numberIn(word) != null) { const st = wm.start - (before.length - before.trimEnd().length) - word.length;
-            add(box({ id: 'clause22_days', key: 'clause22_days', kind: 'text', page: page.n, x: xAt(ls[i], st), y: ls[i].y, w: xAt(ls[i], st + word.length) - xAt(ls[i], st), h: ls[i].h, label: LABELS.clause22_days, source: 'anchor', printed: word }));
+            add(box({ id: 'clause22_days', key: 'clause22_days', kind: 'text', page: page.n, x: xAt(ls[i], st), y: ls[i].y, w: xAt(ls[i], st + word.length) - xAt(ls[i], st), h: ls[i].h, label: LABELS.clause22_days, source: 'anchor', printed: word,
+              line_x1: r1(ls[i].x1), margin: r1(page.w - 8 - (ls[i].x1 + 6)) }));
           } else add(box({ id: 'clause22_days', key: 'clause22_days', kind: 'text', page: page.n, x: wm.x0 - 30, y: ls[i].y, w: 26, h: ls[i].h, label: LABELS.clause22_days, source: 'anchor' }));
           break; } } }
     // Schedule 1, 2(a): the purchaser's GST registration
@@ -335,15 +340,48 @@
   const norm = s => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
   const sameChattel = (a, b) => { const x = norm(a), y = norm(b); return !!x && !!y && (x === y || x.replace(/s\b/g, '') === y.replace(/s\b/g, '')); };
 
+  // A New Zealand phone number as its national significant digits: +64 21 555 0199, 0064 21 555 0199, (021) 555-0199 and 21 555 0199
+  // are all 215550199.
+  const nsn = v => { let x = String(v || '').replace(/\D/g, ''); if (x.startsWith('0064')) x = x.slice(4); else if (x.startsWith('64') && x.length >= 10) x = x.slice(2); else if (x.startsWith('0')) x = x.slice(1); return x; };
+  // every run of digits in some text that could be a phone number, as national digits
+  const phoneRuns = t => (String(t || '').match(/[+(]?\d[\d\s().\-]{4,}\d/g) || []).map(nsn).filter(x => x.length >= 6);
+  // the parties' own contact details, ready to compare: [{ who, email, phone }] -> { emails: [[email, who]], phones: [[digits, who]] }
+  function ownContacts(list) {
+    const emails = [], phones = [];
+    (list || []).forEach(p => { const e = String((p && p.email) || '').trim().toLowerCase(); if (e.length >= 5 && e.includes('@')) emails.push([e, p.who || 'a party']);
+      const n = nsn(p && p.phone); if (n.length >= 7) phones.push([n, p.who || 'a party']); });
+    return { emails, phones };
+  }
+  // whose own phone or email a piece of text holds ('' when none)
+  function holdsOwn(text, own) {
+    const t = String(text || '').toLowerCase(); if (!t) return '';
+    const e = own.emails.find(([v]) => t.includes(v)); if (e) return e[1];
+    const runs = phoneRuns(t), ph = own.phones.find(([v]) => runs.some(r => r.includes(v))); return ph ? ph[1] : '';
+  }
+  // The vendor's lawyer from the property file: only from an agreement of the current owners (made at or after cycle_at) that is
+  // signed or countersigned, newest first; never a link whose email is a vendor's own.
+  function pickVendorLawyer(property, agreements, links, parties) {
+    const cyc = (property && property.cycle_at) || '', O = ownContacts(parties || []);
+    const ags = (agreements || []).filter(a => ['signed', 'countersigned'].includes(a.status) && (a.created_at || '') >= cyc).sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
+    for (const a of ags) {
+      const ls = (links || []).filter(l => l.agreement_id === a.id && !holdsOwn(l.email, O)).sort((x, y) => ((x.sent_at || '') < (y.sent_at || '') ? 1 : -1));
+      if (ls[0]) return { firm: ls[0].firm || '', person: ls[0].lawyer_name || '', email: ls[0].email || '', source: 'the lawyer the agency agreement was sent to' };
+    }
+    return null;
+  }
+
   // input: { details (the offer as it stands), map (places), terms (the library rows), clauses (Tim's wording: {electrical, ...}),
   //   edits ({items: {id: text}, custom_ok, custom_wording, date_format: 'date'|'date_days', extra_terms: [text]}),
-  //   today ('YYYY-MM-DD', the day the draft counts working days from), province, vendorLawyer ({firm, person, email, phone, source}) }
+  //   today ('YYYY-MM-DD', the day the draft counts working days from), province, vendorLawyer ({firm, person, email, phone, source}),
+  //   parties ([{ who, email, phone }]: the vendors and anyone else whose own details must never go on) }
   // returns { items: [{ id, key, place, page, kind: text|area|strike|lines, text, x, y, w, h, label, placeholder }], needs: [{ id, text, blocking }], terms: [...] }
   function planDraft(input) {
     const d = input.details || {}, map = input.map || { places: [] }, E = input.edits || {}, edits = E.items || {}, items = [], needs = [];
     const P = id => (map.places || []).find(p => p.id === id), byKey = k => (map.places || []).filter(p => p.key === k);
     const today = input.today || (OF ? OF.nzToday() : new Date().toISOString().slice(0, 10)), province = input.province || 'otago', fmt = E.date_format === 'date_days' ? 'date_days' : 'date';
-    const need = (id, text, blocking) => { if (!needs.some(n => n.id === id)) needs.push({ id, text, blocking: !!blocking }); };
+    // a blocking item stops approval; an "ackable" one can be cleared by Tim ticking that he has checked it
+    const need = (id, text, blocking, ackable) => { if (!needs.some(n => n.id === id)) needs.push(Object.assign({ id, text, blocking: !!blocking }, ackable ? { ackable: true } : {})); };
+    const has = k => Object.prototype.hasOwnProperty.call(edits, k);
     const put = (id, place, text, extra) => {
       if (!place) { need('missing_' + id, `There is no place for ${extra && extra.label || id} on this blank. Add it to the places on the blank, or write it in by hand.`, !(extra && extra.optional)); return; }
       let t = Object.prototype.hasOwnProperty.call(edits, id) ? edits[id] : text; if (t == null || t === '') return;
@@ -390,17 +428,21 @@
     // settlement
     const s = d.settlement || {}, sp = P('settlement');
     let settleText = '';
-    if (s.kind === 'date' && s.date) settleText = fullDate(OF ? OF.onOrBefore(s.date, { province }) : s.date);
+    if (s.kind === 'date' && s.date) { const on = OF ? OF.onOrBefore(s.date, { province }) : s.date; settleText = fullDate(on);
+      if (on !== s.date) need('settlement_moved', `Settlement: the buyer chose ${fullDate(s.date)}, which isn't a working day, so the agreement says ${fullDate(on)} (the working day before). Check it with them.`, false); }
     else if (s.kind === 'relative' && +s.days >= 1) settleText = daysWords(+s.days) + ' from the date of confirmation of this agreement';
     if (sp && sp.printed) {
       const same = s.kind === 'relative' && numberIn(sp.printed) === +s.days && /working day/i.test(sp.printed) && /confirmation/i.test(sp.printed);
       if (same) need('settlement_same', `Settlement: the blank already says "${sp.printed.slice(0, 120)}", which matches the offer.`, false);
-      else if (settleText) { strike('settlement_struck', sp, 'Settlement: the wording already on the blank, struck out', { w: Math.min(sp.w, 240) }); put('settlement', Object.assign({}, sp, { y: sp.y - 9.5 }), settleText, { label: 'Settlement date' });
+      else if (settleText) { const pls = sp.printed_lines && sp.printed_lines.length ? sp.printed_lines : [{ x0: sp.x, x1: sp.x + Math.min(sp.w, 240), y: sp.y, h: sp.h }], low = Math.min(...pls.map(l => l.y));
+        items.push({ id: 'settlement_struck', key: 'settlement', place: sp.id, page: sp.page, kind: 'lines', lines: pls, x: Math.min(...pls.map(l => l.x0)), y: low, w: Math.max(...pls.map(l => l.x1)) - Math.min(...pls.map(l => l.x0)), h: sp.h, label: 'Settlement: the wording already on the blank, struck out' });
+        put('settlement', Object.assign({}, sp, { y: low - 9.5 }), settleText, { label: 'Settlement date' });
         need('settlement_changed', `Settlement: the blank already said "${sp.printed.slice(0, 120)}". It is struck out and the offer's settlement written under it. Check it.`, false); }
     } else if (settleText) put('settlement', sp, settleText, { label: 'Settlement date' });
     // the six front-page conditions: Yes or No, and the date
     const cond = k => (d.conditions || []).find(c => c.key === k);
     const dateText = c => { if (!OF) return c.date || `${c.days} working days`; const r = OF.conditionDate(c, today, province); if (!r) return '';
+      if (r.adjusted) need('moved_' + c.key, `${(OF.condInfo(c.key) || { label: c.key }).label}: the buyer chose ${fullDate(r.chosen)}, which isn't a working day, so the agreement says ${fullDate(r.date)} (the working day before). Check it with them.`, false);
       return fmt === 'date_days' ? `${fullDate(r.date)} (${r.days} working ${r.days === 1 ? 'day' : 'days'})` : fullDate(r.date); };
     for (const [k, clause] of FRONT_CONDITIONS) {
       const c = cond(k), yn = P('c_' + k), label = `${(OF && OF.condInfo(k) || { label: k }).label} (clause ${clause})`;
@@ -423,7 +465,13 @@
     if (law) {
       if (!c22) need('missing_clause22', "The buyer chose lawyer's approval, but this blank has no clause 22.0. Add it as a further term.", true);
       else { const r = OF ? OF.conditionDate(law, today, province) : null, n = law.days ? +law.days : r ? r.days : null, dp22 = P('clause22_days');
-        if (n && dp22) { if (dp22.printed) { if (numberIn(dp22.printed) !== n) { strike('clause22_days_struck', dp22, "Clause 22.0: the working days already on the blank, struck out"); put('clause22_days', Object.assign({}, dp22, { x: dp22.x + dp22.w / 2 - 3, y: dp22.y + dp22.h * 0.72, w: 40 }), String(n), { label: "Clause 22.0: working days", item: { size: 7 } }); }
+        if (n && dp22) { if (dp22.printed) { if (numberIn(dp22.printed) !== n) { strike('clause22_days_struck', dp22, "Clause 22.0: the working days already on the blank, struck out");
+              // the new count goes in the margin at the end of that line, with a caret under the struck word, so it never touches the line above;
+              // only with no margin does it go just above the struck word, small
+              if ((dp22.margin || 0) >= 14) { put('clause22_days', Object.assign({}, dp22, { x: dp22.line_x1 + 6, w: Math.min(dp22.margin, 40) }), String(n), { label: "Clause 22.0: working days" });
+                items.push({ id: 'clause22_caret', key: 'clause22_days', place: dp22.id, page: dp22.page, kind: 'caret', x: dp22.x + dp22.w / 2, y: dp22.y, w: 4, h: 2.5, label: 'Clause 22.0: where the new count goes' });
+                need('clause22_margin', `Clause 22.0: the blank said "${dp22.printed}" working days. It is struck out and ${n} is written in the margin at the end of that line. Check it reads clearly.`, false); }
+              else put('clause22_days', Object.assign({}, dp22, { x: dp22.x + dp22.w / 2 - 2, y: dp22.y + dp22.h * 0.62, w: 40 }), String(n), { label: "Clause 22.0: working days", item: { size: 6 } }); }
             else need('clause22_same', `Clause 22.0 already says ${dp22.printed} working day${n === 1 ? '' : 's'}, which matches the offer.`, false); }
           else put('clause22_days', dp22, String(n), { label: "Clause 22.0: working days" }); }
         if (law.date) need('clause22_date', `Lawyer's approval: the buyer gave a date (${fullDate(law.date)}); clause 22.0 counts working days, so ${n} working days from today is used. Check it.`, false); }
@@ -445,6 +493,7 @@
       else if (c) w = w.replace(/\{detail\}/g, c.detail || '').replace(/\{address\}/g, d.sale_address || '').replace(/\{date\}/g, dateText(c));
       term('ft_' + t.key, t.title, w, c ? { date: dateText(c), detail: c.detail || (t.wording_from === 'sale' ? d.sale_address : '') } : {});
     }
+    if (cond('sale')) need('sale_address_seen', `Sale of another property: the buyer's own address (${d.sale_address || 'not given'}) is named in that further term, so the vendors will see it on the agreement. Check the buyer is happy with that.`, false);
     (E.extra_terms || []).map(x => String(x || '').trim()).filter(Boolean).forEach((x, i) => term('ft_extra_' + (i + 1), 'Your further term', x));
     // chattels: on the schedule (strike out or add), or as a further term, as the library says
     const chT = T('chattels'), where = ((chT && chT.rule) || {}).where === 'further_terms' ? 'further_terms' : 'schedule';
@@ -461,13 +510,17 @@
       }
     }
     // the further terms go on as a numbered list (a placeholder for anything Tim hasn't worded)
-    const ftp = P('further_terms');
+    let ftp = P('further_terms');
+    if (ft.length && ftp && ftp.printed_bottom != null) {
+      // terms already printed on the page: ours start below the lowest printed line, numbered on from the last printed number
+      const top = ftp.printed_bottom - 14, cut = ftp.y - top; ftp = Object.assign({}, ftp, { y: top, h: ftp.h - cut }); ftn = ftp.printed_last || 0;
+      need('further_printed', `The Further Terms page already has ${ftp.printed_count} printed line${ftp.printed_count === 1 ? '' : 's'}${ftp.printed_last ? `, numbered to ${ftp.printed_last}` : ''}. The offer's terms start below the lowest of them, numbered from ${ftn + 1}. This layout hasn't been checked on a real blank yet: look at the page before you approve.`, true, true);
+    }
     if (ft.length) {
       const text = ft.map(x => { ftn++; const edited = Object.prototype.hasOwnProperty.call(edits, x.id) ? String(edits[x.id] || '') : null; const body = edited != null ? edited : x.text; x.number = ftn; x.text = body;
         return `${ftn}. ${x.title}${x.detail ? ' (' + x.detail + ')' : ''}: ${body}${x.date && !/\{date\}/.test(body) ? ' Condition date: ' + x.date + '.' : ''}`; });
       const it = put('further_terms', ftp, text.join('\n'), { label: 'Further terms of sale', item: { terms: ft.map(x => ({ id: x.id, number: x.number, title: x.title, text: x.text, placeholder: isPlaceholder(x.text), custom: !!x.custom, request: x.request, wording: x.wording, ai: x.ai })) } });
       ft.filter(x => isPlaceholder(x.text)).forEach(x => need('ph_' + x.id, `Further term ${x.number}, ${x.title}: ${x.text}`, true));
-      if (it && ftp && ftp.printed) need('further_printed', `The Further Terms page already has writing on it: "${ftp.printed.slice(0, 120)}". The terms are added below it; check they don't overlap.`, false);
     }
     // the lawyers' details, and only theirs: never a purchaser's or vendor's own phone or email
     const L = d.lawyer || {};
@@ -475,7 +528,7 @@
     put('pl_person', P('pl_person'), L.person, { label: "Purchaser's lawyers: individual acting", optional: true });
     put('pl_email', P('pl_email'), L.email, { label: "Purchaser's lawyers: email", optional: true });
     put('pl_phone', P('pl_phone'), L.phone, { label: "Purchaser's lawyers: contact details", optional: true });
-    put('pl_service', P('pl_service'), L.email, { label: "Purchaser's lawyers: email for notices", optional: true });
+    put('pl_service', P('pl_service'), has('pl_email') ? edits.pl_email : L.email, { label: "Purchaser's lawyers: email for notices", optional: true });   // follows Tim's edit of the email
     if (!L.firm && !L.person) need('lawyer_none', "The buyer hasn't named a lawyer yet.", false);
     else if (!L.email || !L.phone) need('lawyer_lookup', "The purchaser's lawyer's email or phone is missing. Use Find the lawyer's details.", false);
     const V = input.vendorLawyer || null, vlEmpty = ['vl_firm', 'vl_person', 'vl_email'].every(k => !(P(k) || {}).printed);
@@ -485,13 +538,15 @@
       put('vl_service', P('vl_service'), V.email, { label: "Vendor's lawyers: email for notices", optional: true });
       need('vendor_lawyer_from', `Vendor's lawyers: taken from ${V.source || 'the property file'}. Check they are acting on this sale.`, false);
     } else if (vlEmpty) need('vendor_lawyer_none', "The vendor's lawyers aren't on the blank or the property file. Add them.", false);
-    // privacy: a value that is a party's own phone or email never goes on, wherever it came from
-    const own = []; (d.purchasers || []).forEach(p => { own.push(p.email, p.phone); }); own.push(d.email, d.phone);
-    const ownSet = own.map(x => String(x || '').trim().toLowerCase()).filter(x => x.length >= 5), ownDigits = own.map(x => String(x || '').replace(/\D/g, '')).filter(x => x.length >= 6);
-    // (a lawyer's detail that is the same as a purchaser's own, typed by mistake, is left off too)
-    for (let i = items.length - 1; i >= 0; i--) { const t = String(items[i].text || '').toLowerCase(); if (!t) continue; const digits = t.replace(/\D/g, '');
-      if (ownSet.some(v => t.includes(v)) || ownDigits.some(v => digits.includes(v))) {
-        need('privacy_' + items[i].id, `${items[i].label}: left off, because it is a purchaser's own phone or email. Only the lawyers' details go on the agreement.`, true); items.splice(i, 1); } }
+    // privacy: a purchaser's or vendor's own phone or email never goes on, wherever it came from (the offer, Tim's edits, a further
+    // term, the buyer's own wording, chattels, a lawyer's field typed by mistake, or the vendor's lawyer on file). Phones are compared
+    // by their national digits, emails without regard to case, also inside a sentence. Any hit is left off and blocks approval.
+    const own = [];
+    (d.purchasers || []).forEach(p => own.push({ who: 'a purchaser', email: p.email, phone: p.phone })); own.push({ who: 'the buyer', email: d.email, phone: d.phone });
+    (input.parties || []).forEach(p => own.push({ who: p.who || 'a vendor', email: p.email, phone: p.phone }));
+    const O = ownContacts(own);
+    for (let i = items.length - 1; i >= 0; i--) { const hit = holdsOwn(items[i].text, O); if (!hit) continue;
+      need('privacy_' + items[i].id, `${items[i].label}: left off, because it holds ${hit}'s own phone or email. Only the lawyers' details go on the agreement.`, true); items.splice(i, 1); }
     if (!needs.find(n => n.id === 'privacy_check')) need('privacy_check', "Only the lawyers' contact details are on the agreement, never the purchasers' or vendors' own.", false);
     return { items, needs, terms: ft, today, date_format: fmt };
   }
@@ -515,9 +570,13 @@
     const doc = await PDFLib.PDFDocument.load(blankBytes, { updateMetadata: false });
     const font = await doc.embedFont(PDFLib.StandardFonts.Helvetica), bold = await doc.embedFont(PDFLib.StandardFonts.HelveticaBold);
     const ink = PDFLib.rgb(INK[0], INK[1], INK[2]), hl = PDFLib.rgb(1, 0.93, 0.45);
-    const pages = doc.getPages(), boxes = []; let continued = null, pending = null;
+    const pages = doc.getPages(), boxes = [], overflow = []; let continued = null, pending = null;
     for (const it of plan.items) {
       const pg = pages[it.page - 1]; if (!pg) continue;
+      if (it.kind === 'caret') {   // a small ^ under a struck word, pointing to the margin
+        pg.drawLine({ start: { x: it.x - 2.2, y: it.y - 2.8 }, end: { x: it.x, y: it.y - 0.6 }, thickness: 0.7, color: ink }); pg.drawLine({ start: { x: it.x, y: it.y - 0.6 }, end: { x: it.x + 2.2, y: it.y - 2.8 }, thickness: 0.7, color: ink });
+        boxes.push({ id: it.id, page: it.page, x: it.x - 3, y: it.y - 3, w: 6, h: 3, kind: 'strike', label: it.label }); continue;
+      }
       if (it.kind === 'strike' || it.kind === 'lines') {
         const ls = it.kind === 'lines' ? it.lines : [{ x0: it.x, x1: it.x + it.w, y: it.y, h: it.h }];
         ls.forEach(l => pg.drawLine({ start: { x: l.x0 - 1, y: l.y + l.h * 0.32 }, end: { x: l.x1 + 1, y: l.y + l.h * 0.32 }, thickness: 0.9, color: ink }));
@@ -534,7 +593,8 @@
         continue;
       }
       // an area: wrapped lines from the top down; any that don't fit continue on an added page (further terms only)
-      const all = wrap(font, it.text, size, it.w), fit = Math.max(1, Math.floor((it.h - size) / lh) + 1);
+      const all = wrap(font, it.text, size, it.w); let fit = Math.max(1, Math.floor((it.h - size) / lh) + 1);
+      if (it.key === 'further_terms' && all.length > fit) fit = Math.max(1, fit - 1);   // the last line is kept for the "continued" note
       const here = all.slice(0, fit), rest = all.slice(fit);
       const drawLines = (p, ls, x, y0, pageNo) => { ls.forEach((ln, i) => { const y = y0 - i * lh; const ph = /\[Tim to [^\]]*\]/.exec(ln);
           if (ph) { const pre = ln.slice(0, ph.index); pg_hl(p, x + font.widthOfTextAtSize(pre, size) - 1, y - 2, font.widthOfTextAtSize(ph[0], size) + 2, size + 2); }
@@ -543,14 +603,20 @@
       const pg_hl = (p, x, y, w, h) => p.drawRectangle({ x, y, width: w, height: h, color: hl });
       drawLines(pg, here, it.x, it.y, it.page);
       if (rest.length) {
-        if (it.key !== 'further_terms') { boxes.push({ id: it.id + '_overflow', page: it.page, overflow: rest.length, kind: 'overflow', label: it.label }); continue; }
-        pending = { it, rest, size, lh };
+        // anything but the further terms that doesn't fit is cut off: that blocks approval until Tim deals with it
+        if (it.key !== 'further_terms') { overflow.push({ id: it.id, label: it.label, lines: rest.length });
+          if (plan.needs) plan.needs.push({ id: 'overflow_' + it.id, text: `${it.label}: ${rest.length} line${rest.length === 1 ? '' : 's'} didn't fit in the space on the blank and ${rest.length === 1 ? 'is' : 'are'} not on the draft. Shorten it, or move it to the further terms.`, blocking: true });
+          continue; }
+        pending = { it, rest, size, lh, noteY: it.y - here.length * lh };
       }
     }
     // further terms that didn't fit: pages added straight after the Further Terms page, then every later page's boxes move along
     if (pending) {
-      const { it, rest, size, lh } = pending, pg = pages[it.page - 1], [w, h] = [pg.getWidth(), pg.getHeight()], n = Math.max(1, Math.floor((h - 130) / lh));
+      const { it, rest, size, lh, noteY } = pending, pg = pages[it.page - 1], [w, h] = [pg.getWidth(), pg.getHeight()], n = Math.max(1, Math.floor((h - 130) / lh));
       let at = it.page, left = rest, added = 0; continued = it.page + 1;
+      // say so at the foot of the Further Terms page itself
+      const note = 'Continued on the next page.', ny = noteY;
+      pg.drawText(note, { x: it.x, y: ny, size: 8, font: bold, color: ink }); boxes.push({ id: it.id + '_contnote', page: it.page, x: it.x, y: ny - 2, w: bold.widthOfTextAtSize(note, 8), h: 10, kind: 'text', label: it.label + ': continued on the next page' });
       while (left.length) {
         const np = doc.insertPage(at, [w, h]); at++; added++;
         np.drawText('Further Terms of Sale (continued)', { x: 40, y: h - 60, size: 13, font: bold, color: ink });
@@ -565,10 +631,10 @@
     }
     if (o.title) doc.setTitle(o.title, { showInWindowTitleBar: false });
     const bytes = await doc.save({ useObjectStreams: false, addDefaultPage: false });
-    return { bytes, boxes, continued };
+    return { bytes, boxes, continued, overflow };
   }
 
   const DRAFT = { EDITIONS, EDITION_RE, editionOk, readPages, lines, xAt, matchAll, readEdition, editionPages, buildMap, parseChattels, numberIn, daysWords, FRONT_CONDITIONS, LABELS,
-    packText, packBatches, placeFromProposal, rectOf, PROPOSAL_KINDS, planDraft, ruleApplies, fullDate, PLACEHOLDERS, placeholderFor, isPlaceholder, winAnsi, renderDraft, wrap, INK, FONT_SIZE };
+    packText, packBatches, placeFromProposal, rectOf, nsn, phoneRuns, ownContacts, holdsOwn, pickVendorLawyer, PROPOSAL_KINDS, planDraft, ruleApplies, fullDate, PLACEHOLDERS, placeholderFor, isPlaceholder, winAnsi, renderDraft, wrap, INK, FONT_SIZE };
   if (typeof module !== 'undefined' && module.exports) module.exports = DRAFT; else root.DRAFT = DRAFT;
 })(typeof window !== 'undefined' ? window : globalThis);

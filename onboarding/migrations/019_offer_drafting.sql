@@ -14,6 +14,11 @@
 --   * offer_drafts and offer_draft_approvals: each drafted PDF (its own SHA-256, the blank's fingerprint, the map used, the offer as
 --     it stood, what was placed and what still needs Tim), and Tim's approval of one, with the fingerprint he approved.
 --   * offer_lawyer_lookups: the purchaser's lawyer's public contact details found by the lookup, each with its source, for Tim's tick.
+--   * offer_file_hashes: the SHA-256 and size of a stored blank or draft, worked out by the offer-draft edge function from the file
+--     in storage (service role), never taken from the page. A blank or draft row is accepted only when its fingerprint matches.
+-- What Tim's own screen supplies and is trusted as such (he is the only one who can call these functions): the edition read from the
+-- blank, the page sizes, the places, what was placed on a draft and which items need him ("blocking"). The fingerprints are not:
+-- the server confirms those.
 -- Agent only throughout: vendors and anon have no policy and no function, so they see nothing. Records can't be changed, removed
 -- or emptied. Nothing here touches agreements, signatures, signed records or their triggers.
 
@@ -131,8 +136,16 @@ create table public.offer_draft_approvals (
   id bigserial primary key,
   draft_id uuid not null unique references public.offer_drafts(id),
   sha256 text not null check (sha256 ~ '^[0-9a-f]{64}$'),
+  checked jsonb not null default '[]'::jsonb,   -- the items Tim ticked as checked (blocking items he may clear himself)
   approved_by text not null,
   approved_at timestamptz not null default now()
+);
+create table public.offer_file_hashes (
+  path text primary key check (path ~ '^properties/[0-9a-f-]{36}/docs/[A-Za-z0-9._-]{1,200}$'),
+  sha256 text not null check (sha256 ~ '^[0-9a-f]{64}$'),
+  size_bytes bigint not null check (size_bytes > 0),
+  confirmed_by text not null,
+  confirmed_at timestamptz not null default now()
 );
 create table public.offer_lawyer_lookups (
   id bigserial primary key,
@@ -154,6 +167,8 @@ create trigger offer_blank_maps_fixed before update or delete on public.offer_bl
 create trigger offer_blank_reads_fixed before update or delete on public.offer_blank_reads for each row execute function public.guard_offer_record();
 create trigger offer_drafts_fixed before update or delete on public.offer_drafts for each row execute function public.guard_offer_record();
 create trigger offer_draft_approvals_fixed before update or delete on public.offer_draft_approvals for each row execute function public.guard_offer_record();
+create trigger offer_file_hashes_fixed before update or delete on public.offer_file_hashes for each row execute function public.guard_offer_record();
+create trigger offer_file_hashes_no_truncate before truncate on public.offer_file_hashes for each statement execute function public.guard_offer_truncate();
 create trigger offer_lawyer_lookups_fixed before update or delete on public.offer_lawyer_lookups for each row execute function public.guard_offer_record();
 create trigger offer_term_changes_fixed before update or delete on public.offer_term_changes for each row execute function public.guard_offer_record();
 -- library entries are switched off, never removed
@@ -178,6 +193,8 @@ alter table public.offer_term_changes enable row level security;
 alter table public.offer_drafts enable row level security;
 alter table public.offer_draft_approvals enable row level security;
 alter table public.offer_lawyer_lookups enable row level security;
+alter table public.offer_file_hashes enable row level security;
+create policy ofh_agent_read on public.offer_file_hashes for select using (public.is_agent());
 create policy ob_agent_read on public.offer_blanks for select using (public.is_agent());
 create policy obm_agent_read on public.offer_blank_maps for select using (public.is_agent());
 create policy obr_agent_read on public.offer_blank_reads for select using (public.is_agent());
@@ -186,8 +203,8 @@ create policy otc_agent_read on public.offer_term_changes for select using (publ
 create policy od_agent_read on public.offer_drafts for select using (public.is_agent());
 create policy oda_agent_read on public.offer_draft_approvals for select using (public.is_agent());
 create policy oll_agent_read on public.offer_lawyer_lookups for select using (public.is_agent());
-revoke all on public.offer_blanks, public.offer_blank_maps, public.offer_blank_reads, public.offer_terms, public.offer_term_changes, public.offer_drafts, public.offer_draft_approvals, public.offer_lawyer_lookups from anon;
-revoke insert, update, delete, truncate, references, trigger on public.offer_blanks, public.offer_blank_maps, public.offer_blank_reads, public.offer_terms, public.offer_term_changes, public.offer_drafts, public.offer_draft_approvals, public.offer_lawyer_lookups from authenticated;
+revoke all on public.offer_blanks, public.offer_blank_maps, public.offer_blank_reads, public.offer_terms, public.offer_term_changes, public.offer_drafts, public.offer_draft_approvals, public.offer_lawyer_lookups, public.offer_file_hashes from anon;
+revoke insert, update, delete, truncate, references, trigger on public.offer_blanks, public.offer_blank_maps, public.offer_blank_reads, public.offer_terms, public.offer_term_changes, public.offer_drafts, public.offer_draft_approvals, public.offer_lawyer_lookups, public.offer_file_hashes from authenticated;
 revoke all on sequence public.offer_blank_reads_id_seq, public.offer_term_changes_id_seq, public.offer_draft_approvals_id_seq, public.offer_lawyer_lookups_id_seq from anon, authenticated;
 
 -- ───── helpers (internal) ─────
@@ -229,6 +246,9 @@ begin
   if d.archived_at is not null then raise exception 'That file has been removed'; end if;
   select * into b from public.offer_blanks where document_id = p_document;
   if b.id is not null then return jsonb_build_object('id', b.id, 'existing', true, 'edition_checked', b.edition_checked); end if;
+  if not exists (select 1 from public.offer_file_hashes h where h.path = d.path and h.sha256 = d.sha256 and h.size_bytes = d.size_bytes) then
+    raise exception 'The file''s fingerprint hasn''t been confirmed by the server yet. Try again';
+  end if;
   if p_pages is null or p_pages < 1 or p_pages > 400 then raise exception 'Please check the page count'; end if;
   if jsonb_typeof(p_sizes) is distinct from 'array' or jsonb_array_length(p_sizes) <> p_pages
      or exists (select 1 from jsonb_array_elements(p_sizes) s where jsonb_typeof(s) <> 'array' or jsonb_array_length(s) <> 2 or not public.offer_num_ok(s->0, 50, 5000) or not public.offer_num_ok(s->1, 50, 5000)) then
@@ -312,6 +332,9 @@ begin
   obj := public.repo_object(p_path);
   if obj is null then raise exception 'The draft hasn''t arrived yet'; end if;
   if (obj->>'size')::bigint is distinct from p_size or (obj->>'mime') is distinct from 'application/pdf' then raise exception 'The stored draft doesn''t match'; end if;
+  if not exists (select 1 from public.offer_file_hashes h where h.path = p_path and h.sha256 = p_sha256 and h.size_bytes = p_size) then
+    raise exception 'The draft''s fingerprint hasn''t been confirmed by the server yet. Try again';
+  end if;
   if length(coalesce(p_note, '')) > 500 then raise exception 'The note is too long'; end if;
   select coalesce(max(number), 0) + 1 into n from public.offer_drafts where offer_id = p_offer;
   insert into public.offer_drafts (offer_id, property_id, number, blank_id, blank_sha256, map_id, details, edits, placed, needs, path, sha256, size_bytes, note, created_by)
@@ -322,18 +345,26 @@ begin
   return jsonb_build_object('id', did, 'number', n);
 end $$;
 
--- Tim approves a draft: the newest for the offer, by the fingerprint his screen showed, with nothing left that blocks it.
-create or replace function public.agent_draft_approve(p_draft uuid, p_sha256 text) returns jsonb language plpgsql security definer set search_path = public as $$
-declare me text := public.offer_agent(); d public.offer_drafts; latest int;
+-- Tim approves a draft: the newest for the offer, by the fingerprint his screen showed, made from the offer as it stands now, on the
+-- newest approved places of the newest usable blank, with nothing left that blocks it. Blocking items marked "ackable" (such as
+-- printed further terms) need Tim's tick that he has checked them (p_checked); every other blocking item needs a re-draft.
+create or replace function public.agent_draft_approve(p_draft uuid, p_sha256 text, p_checked text[] default '{}') returns jsonb language plpgsql security definer set search_path = public as $$
+declare me text := public.offer_agent(); d public.offer_drafts; latest int; m public.offer_blank_maps; b public.offer_blanks; ck text[] := coalesce(p_checked, '{}');
 begin
   select * into d from public.offer_drafts where id = p_draft; if d.id is null then raise exception 'No such draft'; end if;
   if p_sha256 is distinct from d.sha256 then raise exception 'That isn''t the draft on your screen. Open it again'; end if;
+  if exists (select 1 from public.offer_draft_approvals where draft_id = p_draft) then return jsonb_build_object('ok', true, 'existing', true); end if;
   select max(number) into latest from public.offer_drafts where offer_id = d.offer_id;
   if d.number <> latest then raise exception 'There is a newer draft of this offer. Approve that one'; end if;
-  if exists (select 1 from jsonb_array_elements(d.needs) e where (e->>'blocking')::boolean is true) then raise exception 'Some places still need you. Fill them in and draft again'; end if;
-  if exists (select 1 from public.offer_draft_approvals where draft_id = p_draft) then return jsonb_build_object('ok', true, 'existing', true); end if;
-  insert into public.offer_draft_approvals (draft_id, sha256, approved_by) values (d.id, d.sha256, me);
-  insert into public.offer_events (property_id, offer_id, actor, kind, detail) values (d.property_id, d.offer_id, me, 'draft_approved', jsonb_build_object('draft_id', d.id, 'number', d.number, 'sha256', d.sha256, 'blank_sha256', d.blank_sha256));
+  if (select details from public.property_offers where id = d.offer_id) is distinct from d.details then raise exception 'The offer has changed since this draft. Re-draft it first'; end if;
+  select * into m from public.offer_blank_maps where id = d.map_id; select * into b from public.offer_blanks where id = d.blank_id;
+  if exists (select 1 from public.offer_blank_maps x where x.blank_id = b.id and x.approved and x.version > m.version) then raise exception 'The places on the blank have been approved again since this draft. Re-draft it first'; end if;
+  if exists (select 1 from public.offer_blanks x where x.property_id = b.property_id and x.edition_checked and x.created_at > b.created_at) then raise exception 'A newer agreement blank has been loaded since this draft. Approve its places and re-draft first'; end if;
+  if exists (select 1 from jsonb_array_elements(d.needs) e where (e->>'blocking')::boolean is true and not ((e->>'ackable')::boolean is true and (e->>'id') = any (ck))) then
+    raise exception 'Some places still need you. Fill them in and draft again';
+  end if;
+  insert into public.offer_draft_approvals (draft_id, sha256, approved_by, checked) values (d.id, d.sha256, me, to_jsonb(ck));
+  insert into public.offer_events (property_id, offer_id, actor, kind, detail) values (d.property_id, d.offer_id, me, 'draft_approved', jsonb_build_object('draft_id', d.id, 'number', d.number, 'sha256', d.sha256, 'blank_sha256', d.blank_sha256, 'checked', to_jsonb(ck)));
   return jsonb_build_object('ok', true, 'existing', false);
 end $$;
 
@@ -384,12 +415,25 @@ begin
   return rid;
 end $$;
 
+-- The offer-draft edge function, having read the stored file itself with the service role, records its fingerprint and size. A path
+-- is confirmed once; a different fingerprint for the same path is refused.
+create or replace function public.offer_file_confirm(p_path text, p_sha256 text, p_size bigint, p_actor text) returns void language plpgsql security definer set search_path = public as $$
+declare h public.offer_file_hashes;
+begin
+  select * into h from public.offer_file_hashes where path = p_path;
+  if h.path is not null then
+    if h.sha256 <> p_sha256 or h.size_bytes <> p_size then raise exception 'That file has already been confirmed with a different fingerprint'; end if;
+    return;
+  end if;
+  insert into public.offer_file_hashes (path, sha256, size_bytes, confirmed_by) values (p_path, p_sha256, p_size, left(coalesce(p_actor, 'agent'), 254));
+end $$;
+
 -- ───── execute rights ─────
 revoke execute on function public.guard_blank_document(), public.offer_edition_ok(text), public.guard_offer_record(), public.guard_offer_term(), public.offer_json_list(jsonb, int, int, text), public.offer_num_ok(jsonb, numeric, numeric),
   public.offer_places_ok(jsonb, jsonb) from public, anon, authenticated;
-revoke execute on function public.offer_ai_read_save(uuid, int[], text, boolean, jsonb, text), public.offer_lawyer_save(uuid, text, text, text, boolean, jsonb, text) from public, anon, authenticated;
-grant execute on function public.offer_ai_read_save(uuid, int[], text, boolean, jsonb, text), public.offer_lawyer_save(uuid, text, text, text, boolean, jsonb, text) to service_role;
+revoke execute on function public.offer_ai_read_save(uuid, int[], text, boolean, jsonb, text), public.offer_lawyer_save(uuid, text, text, text, boolean, jsonb, text), public.offer_file_confirm(text, text, bigint, text) from public, anon, authenticated;
+grant execute on function public.offer_ai_read_save(uuid, int[], text, boolean, jsonb, text), public.offer_lawyer_save(uuid, text, text, text, boolean, jsonb, text), public.offer_file_confirm(text, text, bigint, text) to service_role;
 revoke execute on function public.agent_blank_add(uuid, int, jsonb, text), public.agent_blank_map_save(uuid, jsonb, jsonb, jsonb, jsonb, jsonb, boolean), public.agent_offer_term(text, text, text, jsonb, int, boolean),
-  public.agent_draft_add(uuid, uuid, text, text, bigint, jsonb, jsonb, jsonb, text), public.agent_draft_approve(uuid, text), public.agent_lawyer_use(bigint, text[]) from public, anon;
+  public.agent_draft_add(uuid, uuid, text, text, bigint, jsonb, jsonb, jsonb, text), public.agent_draft_approve(uuid, text, text[]), public.agent_lawyer_use(bigint, text[]) from public, anon;
 grant execute on function public.agent_blank_add(uuid, int, jsonb, text), public.agent_blank_map_save(uuid, jsonb, jsonb, jsonb, jsonb, jsonb, boolean), public.agent_offer_term(text, text, text, jsonb, int, boolean),
-  public.agent_draft_add(uuid, uuid, text, text, bigint, jsonb, jsonb, jsonb, text), public.agent_draft_approve(uuid, text), public.agent_lawyer_use(bigint, text[]) to authenticated;
+  public.agent_draft_add(uuid, uuid, text, text, bigint, jsonb, jsonb, jsonb, text), public.agent_draft_approve(uuid, text, text[]), public.agent_lawyer_use(bigint, text[]) to authenticated;

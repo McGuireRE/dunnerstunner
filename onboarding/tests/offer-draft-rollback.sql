@@ -4,7 +4,7 @@
 -- should have been refused was allowed, or a value was wrong. Roles: the agent and a vendor are simulated with request.jwt.claims and
 -- the authenticated role; the offer-draft edge function with service_role; anyone not signed in with anon.
 -- Needs 018 (and 016, 010) applied first.
--- Local run: 23 November 2026, on a local PostgreSQL 16 stand-in (tests/pg-standin.sql, then 010, 016 part A and 018): every line as
+-- Local run (after the first review): 23 November 2026, on a local PostgreSQL 16 stand-in (tests/pg-standin.sql, then 010, 016 part A and 018): every line as
 -- expected, no CAPITALS. NOT yet run on the live project: that run, with Tim's approval, comes before 019 is applied.
 do $t$
 declare out text := ''; r jsonb; pid uuid; pid2 uuid; oid uuid; oid2 uuid; doc uuid; doc2 uuid; doc3 uuid; bl uuid; bl2 uuid; m1 uuid; m2 uuid; m3 uuid; d1 uuid; d2 uuid; n int; x text; lk bigint;
@@ -37,6 +37,14 @@ begin
   doc2 := (public.agent_repo_add(pid, jsonb_build_object('key', k2, 'kind', 'REINZ agreement blank', 'name', 'Blank old edition.pdf', 'path', 'properties/' || pid || '/docs/' || k2 || '-Blank-old-edition.pdf', 'mime_type', 'application/pdf', 'size_bytes', 1000, 'sha256', sha_b2)) ->> 'id')::uuid;
   doc3 := (public.agent_repo_add(pid, jsonb_build_object('key', k3, 'kind', 'LIM report', 'name', 'LIM.pdf', 'path', 'properties/' || pid || '/docs/' || k3 || '-LIM.pdf', 'mime_type', 'application/pdf', 'size_bytes', 2000, 'sha256', repeat('11', 32))) ->> 'id')::uuid;
   out := out || 'blank folder=' || (select folder from public.property_documents where id = doc) || '; ';
+  begin perform public.agent_blank_add(doc, 3, sizes, 'Eleventh Edition 2022 (4)'); out := out || 'BLANK WITHOUT A CONFIRMED FINGERPRINT; '; exception when others then out := out || 'unconfirmed: ' || sqlerrm || '; '; end;
+  begin perform public.offer_file_confirm('properties/' || pid || '/docs/' || k1 || '-Blank.pdf', sha_b, 2366517, 'x'); out := out || 'AGENT CONFIRMED A FINGERPRINT; '; exception when others then out := out || 'agent confirm: ' || sqlerrm || '; '; end;
+  execute 'reset role'; execute 'set local role service_role';   -- the offer-draft edge function, having hashed the stored files
+  perform public.offer_file_confirm('properties/' || pid || '/docs/' || k1 || '-Blank.pdf', sha_b, 2366517, 'agent@example.test');
+  perform public.offer_file_confirm('properties/' || pid || '/docs/' || k2 || '-Blank-old-edition.pdf', sha_b2, 1000, 'agent@example.test');
+  perform public.offer_file_confirm('properties/' || pid || '/docs/' || k1 || '-Blank.pdf', sha_b, 2366517, 'again');
+  begin perform public.offer_file_confirm('properties/' || pid || '/docs/' || k1 || '-Blank.pdf', sha_b2, 2366517, 'x'); out := out || 'FINGERPRINT REPLACED; '; exception when others then out := out || 'reconfirm: ' || sqlerrm || '; '; end;
+  execute 'reset role'; execute 'set local role authenticated'; perform set_config('request.jwt.claims', agent, true);
   begin perform public.agent_blank_add(doc3, 3, sizes, 'Eleventh Edition 2022 (4)'); out := out || 'A LIM BECAME A BLANK; '; exception when others then out := out || 'lim as blank: ' || sqlerrm || '; '; end;
   begin perform public.agent_blank_add(doc, 3, '[[595,842]]', 'Eleventh Edition 2022 (4)'); out := out || 'SIZES NOT CHECKED; '; exception when others then out := out || 'sizes: ' || sqlerrm || '; '; end;
   r := public.agent_blank_add(doc, 3, sizes, 'Eleventh Edition 2022 (4)'); bl := (r ->> 'id')::uuid;
@@ -64,6 +72,9 @@ begin
   insert into storage.objects (bucket_id, name, metadata) values
     ('property-files', 'properties/' || pid || '/docs/offer-draft-' || oid || '-1-' || left(sha_d1, 12) || '.pdf', '{"size": 2370000, "mimetype": "application/pdf"}'),
     ('property-files', 'properties/' || pid || '/docs/offer-draft-' || oid || '-2-' || left(sha_d2, 12) || '.pdf', '{"size": 2370100, "mimetype": "application/pdf"}');
+  execute 'set local role service_role';
+  perform public.offer_file_confirm('properties/' || pid || '/docs/offer-draft-' || oid || '-2-' || left(sha_d2, 12) || '.pdf', sha_d2, 2370100, 'agent@example.test');
+  execute 'reset role';
   execute 'set local role authenticated'; perform set_config('request.jwt.claims', agent, true);
   begin perform public.agent_draft_add(oid, m1, 'properties/' || pid || '/docs/offer-draft-' || oid || '-1-' || left(sha_d1, 12) || '.pdf', sha_d1, 2370000, '[]', '[]', '{}', null); out := out || 'DRAFTED ON AN UNAPPROVED MAP; '; exception when others then out := out || 'unapproved: ' || sqlerrm || '; '; end;
   m2 := (public.agent_blank_map_save(bl, places, '[{"id":"ai1","decision":"moved"}]', '["Stove", "Heat pump", "  "]', '[{"text":"An extra LIM page is inserted"}]', '[]', true) ->> 'id')::uuid;
@@ -73,19 +84,43 @@ begin
   begin perform public.agent_draft_add(oid, m2, 'properties/' || pid || '/docs/elsewhere.pdf', sha_d1, 2370000, '[]', '[]', '{}', null); out := out || 'DRAFT ANYWHERE; '; exception when others then out := out || 'path: ' || sqlerrm || '; '; end;
   begin perform public.agent_draft_add(oid, m2, 'properties/' || pid || '/docs/offer-draft-' || oid || '-1-' || left(sha_b, 12) || '.pdf', sha_b, 2370000, '[]', '[]', '{}', null); out := out || 'THE BLANK FILED AS A DRAFT; '; exception when others then out := out || 'blank as draft: ' || sqlerrm || '; '; end;
   begin perform public.agent_draft_add(oid, m2, 'properties/' || pid || '/docs/offer-draft-' || oid || '-1-' || left(sha_d1, 12) || '.pdf', sha_d1, 999, '[]', '[]', '{}', null); out := out || 'WRONG SIZE FILED; '; exception when others then out := out || 'size: ' || sqlerrm || '; '; end;
+  begin perform public.agent_draft_add(oid, m2, 'properties/' || pid || '/docs/offer-draft-' || oid || '-1-' || left(sha_d1, 12) || '.pdf', sha_d1, 2370000, '[]', '[]', '{}', null); out := out || 'DRAFT WITHOUT A CONFIRMED FINGERPRINT; '; exception when others then out := out || 'draft unconfirmed: ' || sqlerrm || '; '; end;
+  execute 'reset role'; execute 'set local role service_role';
+  perform public.offer_file_confirm('properties/' || pid || '/docs/offer-draft-' || oid || '-1-' || left(sha_d1, 12) || '.pdf', sha_d1, 2370000, 'agent@example.test');
+  execute 'reset role'; execute 'set local role authenticated'; perform set_config('request.jwt.claims', agent, true);
   r := public.agent_draft_add(oid, m2, 'properties/' || pid || '/docs/offer-draft-' || oid || '-1-' || left(sha_d1, 12) || '.pdf', sha_d1, 2370000,
     '[{"id":"price","text":"$650,000"}]', '[{"id":"electrical","text":"[Tim to add his electrical report clause]","blocking":true}]', '{}', null);
   d1 := (r ->> 'id')::uuid;
   out := out || 'draft 1 number=' || (r ->> 'number') || ' blank fingerprint=' || ((select blank_sha256 from public.offer_drafts where id = d1) = sha_b) || ' details from the server=' || ((select details from public.offer_drafts where id = d1) = (select details from public.property_offers where id = oid)) || '; ';
   begin perform public.agent_draft_approve(d1, sha_d1); out := out || 'APPROVED WITH A PLACEHOLDER; '; exception when others then out := out || 'placeholder: ' || sqlerrm || '; '; end;
-  r := public.agent_draft_add(oid, m2, 'properties/' || pid || '/docs/offer-draft-' || oid || '-2-' || left(sha_d2, 12) || '.pdf', sha_d2, 2370100, '[{"id":"price","text":"$650,000"}]', '[{"id":"gst","text":"Check GST","blocking":false}]', '{"electrical":"Wording"}', 'Re-draft after a change');
+  r := public.agent_draft_add(oid, m2, 'properties/' || pid || '/docs/offer-draft-' || oid || '-2-' || left(sha_d2, 12) || '.pdf', sha_d2, 2370100, '[{"id":"price","text":"$650,000"}]', '[{"id":"gst","text":"Check GST","blocking":false},{"id":"printed","text":"Printed terms","blocking":true,"ackable":true}]', '{"electrical":"Wording"}', 'Re-draft after a change');
   d2 := (r ->> 'id')::uuid; out := out || 'draft 2 number=' || (r ->> 'number') || ' drafts kept=' || (select count(*) from public.offer_drafts where offer_id = oid) || '; ';
   begin perform public.agent_draft_approve(d1, sha_d1); out := out || 'OLDER DRAFT APPROVED; '; exception when others then out := out || 'older: ' || sqlerrm || '; '; end;
   begin perform public.agent_draft_approve(d2, sha_d1); out := out || 'WRONG FINGERPRINT APPROVED; '; exception when others then out := out || 'fingerprint: ' || sqlerrm || '; '; end;
-  r := public.agent_draft_approve(d2, sha_d2); out := out || 'approved=' || (r ->> 'ok') || ' with sha=' || ((select sha256 from public.offer_draft_approvals where draft_id = d2) = sha_d2) || '; ';
+  begin perform public.agent_draft_approve(d2, sha_d2); out := out || 'APPROVED WITHOUT TICKING THE CHECK; '; exception when others then out := out || 'ackable unticked: ' || sqlerrm || '; '; end;
+  -- the offer changes after the draft: refused until re-drafted
+  perform public.agent_offer_correct(oid, good || '{"price": "651000"}', 'Buyer rang');
+  begin perform public.agent_draft_approve(d2, sha_d2, array['printed']); out := out || 'APPROVED A STALE DRAFT; '; exception when others then out := out || 'offer changed: ' || sqlerrm || '; '; end;
+  perform public.agent_offer_correct(oid, good, 'Back as it was');
+  r := public.agent_draft_approve(d2, sha_d2, array['printed']); out := out || 'approved=' || (r ->> 'ok') || ' with sha=' || ((select sha256 from public.offer_draft_approvals where draft_id = d2) = sha_d2) || ' checked=' || (select checked::text from public.offer_draft_approvals where draft_id = d2) || '; ';
   out := out || 'events=' || (select string_agg(kind, ',' order by id) from public.offer_events where property_id = pid and kind in ('blank_loaded','map_saved','map_approved','drafted','draft_approved')) || '; ';
   m3 := (public.agent_blank_map_save(bl, places, '[]', '[]', '[]', '[]', true) ->> 'id')::uuid;
   begin perform public.agent_draft_add(oid, m2, 'properties/' || pid || '/docs/offer-draft-' || oid || '-3-' || left(sha_d1, 12) || '.pdf', sha_d1, 2370000, '[]', '[]', '{}', null); out := out || 'DRAFTED ON A SUPERSEDED MAP; '; exception when others then out := out || 'superseded: ' || sqlerrm || '; '; end;
+  -- a second offer's draft on the old map: approval refused once newer places are approved, and once a newer checked blank is loaded
+  oid2 := public.agent_offer_add(pid, good);
+  execute 'reset role';
+  insert into public.offer_drafts (offer_id, property_id, number, blank_id, blank_sha256, map_id, details, placed, needs, path, sha256, size_bytes, created_by)
+    values (oid2, pid, 1, bl, sha_b, m2, (select details from public.property_offers where id = oid2), '[]', '[]', 'rb-stale-draft', repeat('f1', 32), 1, 'test') returning id into d1;
+  execute 'set local role authenticated'; perform set_config('request.jwt.claims', agent, true);
+  begin perform public.agent_draft_approve(d1, repeat('f1', 32)); out := out || 'APPROVED ON SUPERSEDED PLACES; '; exception when others then out := out || 'newer places: ' || sqlerrm || '; '; end;
+  execute 'reset role';
+  insert into public.offer_drafts (offer_id, property_id, number, blank_id, blank_sha256, map_id, details, placed, needs, path, sha256, size_bytes, created_by)
+    values (oid2, pid, 2, bl, sha_b, m3, (select details from public.property_offers where id = oid2), '[]', '[]', 'rb-stale-draft-2', repeat('f2', 32), 1, 'test') returning id into d1;
+  -- (inside one transaction now() doesn't move, so the newer blank is stamped a second later)
+  insert into public.offer_blanks (property_id, document_id, sha256, size_bytes, file_name, pages, sizes, edition, edition_checked, created_by, created_at)
+    values (pid, doc3, repeat('99', 32), 1, 'newer.pdf', 3, sizes, 'Eleventh Edition 2022 (4)', true, 'test', now() + interval '1 second');
+  execute 'set local role authenticated'; perform set_config('request.jwt.claims', agent, true);
+  begin perform public.agent_draft_approve(d1, repeat('f2', 32)); out := out || 'APPROVED ON AN OLDER BLANK; '; exception when others then out := out || 'newer blank: ' || sqlerrm || '; '; end;
 
   -- 5. Tim's clause library
   begin perform public.agent_offer_term('deposit_nzret', null, 'REINZ text here', null, null, null); out := out || 'PRINTED CLAUSE GIVEN WORDING; '; exception when others then out := out || 'printed: ' || sqlerrm || '; '; end;
@@ -119,6 +154,7 @@ begin
   begin delete from public.offer_drafts where id = d1; out := out || 'DRAFT DELETED; '; exception when others then out := out || 'draft delete: ' || sqlerrm || '; '; end;
   begin delete from public.offer_draft_approvals; out := out || 'APPROVAL DELETED; '; exception when others then out := out || 'approval delete: ' || sqlerrm || '; '; end;
   begin delete from public.offer_lawyer_lookups; out := out || 'LOOKUP DELETED; '; exception when others then out := out || 'lookup delete: ' || sqlerrm || '; '; end;
+  begin update public.offer_file_hashes set sha256 = sha_b2; out := out || 'HASH CHANGED; '; exception when others then out := out || 'hash change: ' || sqlerrm || '; '; end;
   begin truncate public.offer_drafts cascade; out := out || 'DRAFTS EMPTIED; '; exception when others then out := out || 'truncate drafts: ' || sqlerrm || '; '; end;
   begin truncate public.offer_blanks cascade; out := out || 'BLANKS EMPTIED; '; exception when others then out := out || 'truncate blanks: ' || sqlerrm || '; '; end;
   begin delete from public.property_documents where id = doc; out := out || 'BLANK FILE ROW DELETED; '; exception when others then out := out || 'blank file delete: ' || sqlerrm || '; '; end;
@@ -127,11 +163,12 @@ begin
   execute 'set local role authenticated'; perform set_config('request.jwt.claims', vendor, true);
   out := out || 'vendor sees blanks=' || (select count(*) from public.offer_blanks) || ' maps=' || (select count(*) from public.offer_blank_maps) || ' reads=' || (select count(*) from public.offer_blank_reads)
     || ' drafts=' || (select count(*) from public.offer_drafts) || ' approvals=' || (select count(*) from public.offer_draft_approvals) || ' terms=' || (select count(*) from public.offer_terms)
-    || ' lookups=' || (select count(*) from public.offer_lawyer_lookups) || ' blank file=' || (select count(*) from public.property_documents where kind = 'REINZ agreement blank') || '; ';
+    || ' lookups=' || (select count(*) from public.offer_lawyer_lookups) || ' hashes=' || (select count(*) from public.offer_file_hashes) || ' blank file=' || (select count(*) from public.property_documents where kind = 'REINZ agreement blank') || '; ';
   begin perform public.agent_blank_map_save(bl, places, '[]', '[]', '[]', '[]', true); out := out || 'VENDOR SAVED A MAP; '; exception when others then out := out || 'vendor map: ' || sqlerrm || '; '; end;
   begin perform public.agent_draft_approve(d2, sha_d2); out := out || 'VENDOR APPROVED; '; exception when others then out := out || 'vendor approve: ' || sqlerrm || '; '; end;
   begin perform public.agent_offer_term('std_v', 'V', 'x', '{}', 1, true); out := out || 'VENDOR ADDED A TERM; '; exception when others then out := out || 'vendor term: ' || sqlerrm || '; '; end;
   begin perform public.offer_lawyer_save(oid, 'x', 'y', 'm', true, '{}', 'v'); out := out || 'VENDOR SAVED A LOOKUP; '; exception when others then out := out || 'vendor lookup: ' || sqlerrm || '; '; end;
+  begin perform public.offer_file_confirm('properties/' || pid || '/docs/x.pdf', sha_b, 1, 'v'); out := out || 'VENDOR CONFIRMED A FINGERPRINT; '; exception when others then out := out || 'vendor confirm: ' || sqlerrm || '; '; end;
   execute 'reset role';
   execute 'set local role anon'; perform set_config('request.jwt.claims', '', true);
   begin select count(*) into n from public.offer_drafts; out := out || 'ANON READ DRAFTS ' || n || '; '; exception when others then out := out || 'anon drafts: ' || sqlerrm || '; '; end;

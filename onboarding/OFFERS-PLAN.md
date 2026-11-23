@@ -24,7 +24,7 @@ Replaces: the Jotform "Prepare My Offer" form, retyping each offer into the REIN
 1. Blank loaded once per listing: Tim drops the REINZ agreement pack PDF on the property. Take its SHA-256, read the
    edition printed on it (now "Eleventh Edition 2022 (4)") and find the places to write by anchoring on the printed
    labels (PURCHASER, Purchase price, Deposit, the six condition lines, FURTHER TERMS OF SALE, signature and initial
-   places). Refuse to draft on an edition that has not been checked. The 309 Pine Hill Road pack is flat (no form
+   places). Refuse to draft on an edition that has not been checked. The first real pack (a listing in Tim's farm area) is flat (no form
    fields), 40 pages: agreement, appendix clauses 21 and 22, Client and Customer Acknowledgement, OIO statement,
    complaints procedure, deadline sale acknowledgement, title, Vendor Declaration, REA guide.
 2. Buyer makes an offer on the property's own form (link and QR, address prefilled), or Tim fills it in for them.
@@ -57,7 +57,7 @@ PDF sealed so a reader reports it unchanged. Tim's solicitor confirms the method
 | Phase | Scope | Builder | Done when |
 | --- | --- | --- | --- |
 | 1. Offer form | "Make an offer" page per property (link, QR), conditions chooser, date help and checks, Offers tile on the property page, Tim notified. Jotform retired after a parallel run. | onboarding-light, reviewed | A test offer lands on the right property with nothing retyped |
-| 2. Drafting | Blank loaded per listing, places found, clause library, one-tap draft, Tim's review screen, PDF out | onboarding-core | The 309 Pine Hill Road blank drafts correctly from a test offer |
+| 2. Drafting | Blank loaded per listing, places found, clause library, one-tap draft, Tim's review screen, PDF out | onboarding-core | The first real blank drafts correctly from a test offer |
 | 3. Purchaser signing | On glass and by link, automatic signing places, tweak and re-sign, Round 1 locked | onboarding-core | Four purchasers sign a test offer with no field set-up |
 | 4. Presentation and counteroffers | Authorise gate, vendor signing screen, change tools, lifted initials, rounds, fresh copy, agreement formed | onboarding-core | A five-round test negotiation with one fresh copy, every round filed |
 | 5. Multi-offer and deadline day | Offers board, vendor comparison, prepare-all, multi-offer acknowledgements, closing out unsuccessful offers | onboarding-light, reviewed | Fourteen test offers drafted and ready to sign in minutes |
@@ -155,40 +155,72 @@ Added by Tim, 23 November 2026 (built in phase 1):
 Open questions for Tim before phase 2: the wording of his electrical and technical report clauses and the Specified
 Due Diligence clauses as he wants them used (he is sending these).
 
-## Phase 2 detail: drafting (built 23 November 2026, branch `offers-phase2`; not reviewed, applied, pushed or deployed)
+## Phase 2 detail: drafting (built 23 November 2026, branch `offers-phase2`; revised after the first review; not applied, pushed or deployed)
 
-Status: built and tested locally only (Tim was asleep; nothing live could be approved). Migration 019 is written and passed its
-rollback block on a local PostgreSQL 16 stand-in (`tests/pg-standin.sql`, then 010, 016 part A and 018), NOT the live project.
+Status: built and tested locally only (Tim was asleep; nothing live could be approved). Migration 019 passed its rollback block on a
+local PostgreSQL 16 stand-in (`tests/pg-standin.sql`, then 010, 016 part A and 018), NOT the live project.
 
 - Blank per listing (Offers tile, agent only): "Agreement blank: load the PDF" (file picker; drag and drop on a computer). The PDF
   is filed unchanged on the property file as kind "REINZ agreement blank" (agency papers, never shareable, never exported, filed
-  only from the Offers tile), with its SHA-256. `offer_blanks` records it with its pages, page sizes and the edition read from it.
-  A new blank keeps the old. Only an edition in the checked list (`EDITIONS` in `src/draft-core.js` and `offer_edition_ok()` in
-  019; now "Eleventh Edition 2022 (4)") can be mapped or drafted on; any other gets a plain message and is kept.
-- Places (`src/draft-core.js`, pdf.js): found by anchoring on printed labels (front page date, purchaser and and/or nominee, GST
-  and PPA Yes/No, price, Plus/Inclusive of GST, deposit, settlement, the six condition Yes/No and date fields, tenancies, Further
-  Terms, appendix 21.2, 21.3 and 22.0 with its working-days space, Schedule 1 2(a), Schedule 2 chattels, the back page parties and
-  lawyers, signatures, names and witnesses). Text the portal already filled in is read as "printed". Places are saved as versions
-  in `offer_blank_maps`; the newest approved version is used. The AI reading (edge function `offer-draft`, Haiku) proposes the
-  chattels, places to initial, sign or acknowledge (with page, reason and a position from the line it names) and notes; Tim keeps,
-  moves or deletes each, adds his own, ticks the chattels and approves. Approving sets the chattels buyers see on the offer form.
-- Clause library (`offer_terms`, agent-editable, "Your clause library" on the Offers tile): printed clauses 21.2, 21.3 and 22.0 by
-  number only, with a "strike it through when it doesn't apply" switch (22.0 on; 21.2 and 21.3 off until Tim decides); Tim's four
-  condition clauses take their wording from `offer_clauses`; the buyer's own condition only once Tim ticks it on the draft; chattels
-  on Schedule 2 (or as a further term); Tim can add his own standard terms with a rule. No wording means a highlighted placeholder,
-  "[Tim to add his electrical report clause]", which blocks approval. No REINZ or TLANZ text is held anywhere.
-- Drafting: "Draft on the agreement" on the offer. pdf-lib adds new content streams on top; the original streams are kept byte for
-  byte (tested). Further terms that don't fit continue on a page added straight after the Further Terms page. The draft PDF is
-  filed with its own SHA-256, the blank's fingerprint and the map (`offer_drafts`), recorded in `offer_events`. Only the lawyers'
-  details go on; a purchaser's own phone or email is never placed, even if typed as the lawyer's. The date at the top stays blank
-  (a disabled field: "added once fully agreed").
-- Review: the drafted pages at phone width with every filled place highlighted and numbered, everything placed (editable), Needs
-  you (blocking) and To check, "Re-draft with my changes", "Re-draft after a change" (after a correction), "Approve draft" (newest
-  draft only, by its fingerprint, nothing blocking: `offer_draft_approvals`), Download the PDF. Old drafts are never changed.
-- Lawyer lookup ("Find the lawyer's details" on the offer): the Anthropic web search tool through `fn/prefill_shared.ts`, values
-  kept only from pages the search returned, a direct dial or mobile before the firm's main line, each with its source link for
-  Tim's tick (`agent_lawyer_use`, recorded as a correction). Without the key or web search it says so and gives the links (a web
-  search prefilled and the Law Society pages).
+  only from the Offers tile). The server then reads the stored file itself and works out its SHA-256 and size (edge function
+  `offer-draft`, `confirm_file`); the blank is registered only if that matches. A new blank keeps the old. Only an edition in the
+  checked list (`EDITIONS` in `src/draft-core.js` and `offer_edition_ok()` in 019; now "Eleventh Edition 2022 (4)") can be mapped or
+  drafted on; any other gets a plain message and is kept.
+- Places (`src/draft-core.js`, pdf.js): found by anchoring on printed labels. Text the portal already filled in is read as
+  "printed". Places are saved as versions; the newest approved version is used. The AI (Haiku, through `offer-draft`) proposes
+  chattels, places to initial, sign or acknowledge, and notes. Every proposal, chattels included, starts unticked: Tim keeps, moves
+  or deletes each, adds his own and approves. Approving sets the chattels buyers see on the offer form.
+- Clause library (`offer_terms`): printed clauses by number only; Tim's own wording or a highlighted placeholder that blocks approval.
+- Drafting: one tap on the offer. The original pages and content streams are kept byte for byte; text and marks are added on top.
+  The draft is filed with its own SHA-256 (confirmed by the server from the stored file), the blank's fingerprint and the map.
+- Privacy: a purchaser's or vendor's own phone or email never goes on the agreement, wherever it came from (the offer, Tim's edits,
+  further terms, the buyer's own wording, chattels, a lawyer's field, the vendor's lawyer on file). Phones are compared by their
+  national digits (+64 21..., 0064 21..., 021..., 21... all match), emails without regard to case, also inside a sentence. A hit is
+  left off and blocks approval until Tim changes it.
+- Anything that doesn't fit its space (other than the further terms) blocks approval. Further terms that don't fit continue on a
+  page added straight after the Further Terms page, and that page says "Continued on the next page".
+- Approval: only the newest draft, by its fingerprint, made from the offer exactly as it stands, on the newest approved places of
+  the newest usable blank, with nothing blocking. A few blocking items (printed further terms already on the page) are cleared by
+  Tim ticking that he has checked them; the ticks are kept with the approval.
+- Lawyer lookup: the Anthropic web search tool through `fn/prefill_shared.ts`. A value is kept only if the search returned its page
+  and a quote cited from that page contains it; a paused search is carried on a few times. A direct dial or mobile is used before
+  the firm's main line. Each value is shown with its source for Tim's tick. Without web search it gives links to look it up by hand.
+
+What Tim's own screen supplies, and is trusted as such: the edition read from the blank, the page sizes, the places, what was placed
+on a draft, and which items are "blocking". Only Tim can call these functions, and his screen works them out from the files. The
+fingerprints are the exception: the server works those out from the stored files and the database checks them.
+
+Choices made while Tim was asleep (each easy to change):
+1. Deposit clauses 21.2 and 21.3 are both left as printed. Each has a "strike it through when it doesn't apply" switch in the clause
+   library, off for now. Clause 22.0's switch is on: it is struck through when the buyer doesn't choose lawyer's approval.
+2. GST: the GST line on the front page is about the vendor, so Tim fills it in. The buyer's own answer goes only on Schedule 1, 2(a).
+3. Condition dates given as working days are counted from the day of the draft. They show as a full date ("8 December 2026"), or as
+   the date and the working days if Tim chooses. A date that isn't a working day becomes the working day before, with a note.
+4. Settlement: when the offer differs from what the portal printed, every printed line is struck through and the offer's
+   settlement is written below, with a note to check.
+5. Clause 22.0: when the working days printed differ, the printed number is struck through and the new number is written in the
+   margin at the end of that line, with a small caret under the struck word.
+6. Chattels the buyer adds are written on Schedule 2; one they leave out is struck through there if it is listed. The library can
+   switch this to a numbered further term.
+7. Further terms that don't fit continue on an added page after the Further Terms page. When terms are already printed on that
+   page, the offer's start below them, numbered on, and Tim ticks that he has checked the page.
+8. The typed font is Helvetica. A name with letters it can't show (such as macrons) is not placed and blocks approval.
+9. The vendor's lawyer is taken from the property file only when the blank has none, and only from a signed agreement of the
+   current owners, with a note to check.
+10. "Re-draft after a change" carries over the date format, extra terms and the ticked custom condition, but not Tim's edits to
+    single values (so a corrected offer isn't overwritten by an old edit).
+11. The PDF tools (pdf.js, pdf-lib) load from a pinned public CDN only when Tim needs them. pdf.js runs on the page, without a
+    separate worker.
+
+Questions for Tim:
+- His wording for the electrical, specified technical, sale of another property and Specified Due Diligence clauses (placeholders
+  until then).
+- Should clause 21.2 be struck through when KiwiSaver funds the deposit, and 21.3 when it doesn't?
+- Are choices 3 to 7 and 9 right for him?
+- The sale of another property condition names the buyer's own address, so the vendors will see it. Is that acceptable to him, or
+  should the term describe the property another way?
+- Web search needs switching on for the Anthropic account before the lawyer lookup works.
+- Are names with macrons common enough to need an embedded font?
 
 Deploy steps (phase 2), after review and with Tim's approval:
 1. Run the rollback block on the live project (`node onboarding/tests/offer-draft-rollback.js`): no CAPITALS. Then apply 019.
@@ -196,9 +228,8 @@ Deploy steps (phase 2), after review and with Tim's approval:
    and offer-public are unchanged.
 3. For the lawyer lookup, Tim switches on web search for the Anthropic account (Anthropic console). Until then it falls back to links.
 
-Known limits: strike-throughs the portal drew on the blank (Yes/No choices, struck chattels) are vector lines, not text, so they
-aren't read; Tim checks them (the chattels note says so). The typed font is Helvetica: a name with letters it can't show (such as
-macrons) is not placed and blocks approval with a message.
+Known limits: strike-throughs the portal drew on the blank (Yes/No choices, struck chattels) are lines, not text, so they aren't
+read; Tim checks them (the chattels note says so). The layout below printed further terms has only been tested on a synthetic blank.
 
 ## Rules for later phases (Tim, 23 November 2026)
 

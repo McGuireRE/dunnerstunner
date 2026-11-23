@@ -3,6 +3,8 @@
 //   read_pack:      the AI reads part of an agreement pack (the text of up to 8 pages, as Tim's screen read it with pdf.js) and
 //                   proposes the chattels list, places to initial, sign or acknowledge, and anything unusual. The answer is kept in
 //                   offer_blank_reads and shown to Tim, who ticks, moves or deletes each proposal. Nothing is used until he does.
+//   confirm_file:   works out the SHA-256 and size of a blank or draft Tim has just uploaded, from the stored file itself (service
+//                   role), and records them (offer_file_confirm). The database accepts a blank or draft only with a matching fingerprint.
 //   lawyer_lookup:  finds the purchaser's lawyer's public work email and phone (the firm's own website, the Law Society) with the
 //                   Anthropic web search tool, each value with its source page. Only values from pages the search returned are kept;
 //                   with no direct dial or mobile, the firm's main line. Kept in offer_lawyer_lookups for Tim's tick. Always returns
@@ -13,11 +15,14 @@ import { buildLawyerLookupRequest, buildPackReadRequest, checkPackPages, LAWYER_
 
 export const MAX_BODY = 200000;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const FILE_RE = /^properties\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/docs\/[A-Za-z0-9._-]{1,200}$/;
+export const MAX_CONTINUE = 3;   // a lookup that pauses (pause_turn) is continued this many times at most
 type Rpc = (fn: string, args: Record<string, unknown>) => Promise<{ data: any; error: { message: string } | null }>;
 type Deps = {
   cors: Record<string, string>;
   whoIsAgent: (authorization: string) => Promise<string | null>;   // the agent's email when the caller is Tim, otherwise null
-  rpc: Rpc;                                                         // offer_ai_read_save and offer_lawyer_save, with the service role
+  rpc: Rpc;                                                         // offer_ai_read_save, offer_lawyer_save and offer_file_confirm, with the service role
+  download: (path: string) => Promise<Uint8Array | null>;           // a file from the property-files bucket, with the service role
   aiKey: () => string;
   callModel: (request: any, ms?: number) => Promise<{ ok: boolean; status: number; body: any }>;
   logAi: (row: { purpose: string; model: string; ok: boolean; error: string | null; input_tokens: number; output_tokens: number }, agent: string) => Promise<void>;
@@ -36,11 +41,22 @@ export function makeHandler(d: Deps) {
     let body: any = null; try { body = JSON.parse(text); } catch (_) { body = null; }
     if (!body || typeof body !== "object" || Array.isArray(body)) return json({ error: "Bad request" }, 400);
     const action = String(body.action || "");
-    if (!["read_pack", "lawyer_lookup"].includes(action)) return json({ error: "Bad request" }, 400);
+    if (!["read_pack", "lawyer_lookup", "confirm_file"].includes(action)) return json({ error: "Bad request" }, 400);
     let agent: string | null = null;
     try { agent = await d.whoIsAgent(auth); } catch (_) { agent = null; }
     if (!agent) return json({ error: "Only Tim can do this" }, 403);
     const key = d.aiKey();
+
+    if (action === "confirm_file") {
+      const path = typeof body.path === "string" ? body.path : "";
+      if (!FILE_RE.test(path) || path.includes("..")) return json({ error: "Bad request" }, 400);
+      let bytes: Uint8Array | null = null; try { bytes = await d.download(path); } catch (_) { bytes = null; }
+      if (!bytes || !bytes.length) return json({ ok: false, error: "The file isn't in storage yet. Try again." }, 404);
+      const h = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)), sha = Array.from(h, (x) => x.toString(16).padStart(2, "0")).join("");
+      const r = await d.rpc("offer_file_confirm", { p_path: path, p_sha256: sha, p_size: bytes.length, p_actor: agent });
+      if (r.error) return json({ ok: false, error: "The file's fingerprint couldn't be recorded." }, 409);
+      return json({ ok: true, sha256: sha, size: bytes.length });
+    }
 
     if (action === "read_pack") {
       const blank = String(body.blank_id || ""); if (!UUID.test(blank)) return json({ error: "Bad request" }, 400);
@@ -64,16 +80,24 @@ export function makeHandler(d: Deps) {
     const manual = lawyerManualLinks(firm, person);
     let request; try { request = buildLawyerLookupRequest(firm, person); } catch (e: any) { return json({ ok: false, reason: "need_name", message: String(e?.message || e), manual }); }
     if (!key) return json({ ok: false, reason: "off", message: "The lookup isn't switched on yet. Use the links to look the lawyer up yourself.", manual });
-    let r: { ok: boolean; status: number; body: any };
-    try { r = await d.callModel(request, 55000); } catch (e: any) { r = { ok: false, status: 0, body: { error: { message: String(e?.message || e) } } }; }
-    const usage = r.body?.usage || {}, err = r.ok ? null : String(r.body?.error?.message || r.status).slice(0, 300);
-    await d.logAi({ purpose: LAWYER_LOOKUP_PURPOSE, model: MODEL_READ, ok: r.ok, error: err, input_tokens: usage.input_tokens || 0, output_tokens: usage.output_tokens || 0 }, agent).catch(() => null);
+    // a long search can pause (stop_reason pause_turn): it is sent back to carry on, a few times at most, and every block kept
+    let r: { ok: boolean; status: number; body: any } = { ok: false, status: 0, body: {} }; const content: any[] = []; let turnReq: any = request;
+    for (let turn = 0; turn <= MAX_CONTINUE; turn++) {
+      try { r = await d.callModel(turnReq, 55000); } catch (e: any) { r = { ok: false, status: 0, body: { error: { message: String(e?.message || e) } } }; }
+      const usage = r.body?.usage || {}, e1 = r.ok ? null : String(r.body?.error?.message || r.status).slice(0, 300);
+      await d.logAi({ purpose: LAWYER_LOOKUP_PURPOSE, model: MODEL_READ, ok: r.ok, error: e1, input_tokens: usage.input_tokens || 0, output_tokens: usage.output_tokens || 0 }, agent).catch(() => null);
+      if (!r.ok) break;
+      content.push(...(r.body?.content || []));
+      if (r.body?.stop_reason !== "pause_turn") break;
+      turnReq = Object.assign({}, request, { messages: request.messages.concat({ role: "assistant", content: r.body.content || [] }) });
+    }
+    const err = r.ok ? null : String(r.body?.error?.message || r.status).slice(0, 300);
     if (!r.ok) {
       const noSearch = /web.?search/i.test(err || "");
       await d.rpc("offer_lawyer_save", { p_offer: offer, p_firm: firm, p_person: person, p_model: MODEL_READ, p_ok: false, p_result: { reason: noSearch ? "no_search" : "failed", error: err, manual }, p_actor: agent }).catch(() => null);
       return json({ ok: false, reason: noSearch ? "no_search" : "failed", message: noSearch ? "Web search isn't switched on for the AI account. Use the links to look the lawyer up yourself." : friendly(r.status, err || ""), manual });
     }
-    const res = readLawyerLookupResult(r.body);
+    const res = readLawyerLookupResult({ content });
     const saved = await d.rpc("offer_lawyer_save", { p_offer: offer, p_firm: firm, p_person: person, p_model: MODEL_READ, p_ok: true, p_result: { ...res, manual }, p_actor: agent });
     if (saved.error) return json({ ok: false, reason: "failed", message: "That offer couldn't be found.", manual });
     return json({ ok: true, lookup_id: saved.data, values: res.values, fallback: res.fallback, dropped: res.dropped, note: res.note, manual });

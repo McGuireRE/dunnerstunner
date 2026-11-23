@@ -6031,6 +6031,13 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     if (DR_CACHE[b.id] && DR_CACHE[b.id].pages) return DR_CACHE[b.id].pages;
     const pages = await DR.readPages(await drPdfjs(), await drBlankBytes(b), PDF_OPTS); (DR_CACHE[b.id] ||= {}).pages = pages; return pages;
   }
+  // the server works out the stored file's fingerprint itself (offer-draft, service role); the database accepts a blank or draft
+  // only with that confirmed fingerprint
+  async function drConfirm(path, sha) {
+    const r = await offerCall('offer-draft', { action: 'confirm_file', path });
+    if (!r || !r.ok) throw new Error((r && r.error) || 'The server couldn\'t check the file\'s fingerprint. Check you have signal, then try again.');
+    if (r.sha256 !== sha) throw new Error('The stored file doesn\'t match what this device sent, so it won\'t be used. Try again.');
+  }
   async function drLoadBlanks(pid) {
     const blanks = (await ofSafe(sb.from('offer_blanks').select('*').eq('property_id', pid).order('created_at', { ascending: false }))) || [];
     const maps = blanks.length ? ((await ofSafe(sb.from('offer_blank_maps').select('id,blank_id,version,approved,created_at,chattels,missing').in('blank_id', blanks.map(b => b.id)).order('version', { ascending: false }))) || []) : [];
@@ -6086,6 +6093,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const up = await sb.storage.from('property-files').upload(pth, new Blob([bytes], { type: 'application/pdf' }), { contentType: 'application/pdf', upsert: false });
     if (up.error) throw new Error('The blank didn\'t save. Check you have signal, then try again.');
     const doc = await must(sb.rpc('agent_repo_add', { p_property: pid, p_item: { key, kind: BLANK_KIND, name: file.name, title: 'Agreement blank' + (edition ? ', ' + edition : ''), path: pth, mime_type: 'application/pdf', size_bytes: bytes.length, sha256: sha } }));
+    await drConfirm(pth, sha);
     const r = await must(sb.rpc('agent_blank_add', { p_document: doc.id, p_pages: pages.length, p_sizes: pages.map(x => [x.w, x.h]), p_edition: edition }));
     DR_CACHE[r.id] = { bytes, pages };
     if (!r.edition_checked) { toast('Blank kept, but its edition hasn\'t been checked'); return viewProperty(pid); }
@@ -6224,7 +6232,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     got.places.forEach((x, i) => { const pl = DR.placeFromProposal(M.pages, x, n0 + i); if (pl && !keep.some(k => k.place.page === pl.page && k.place.line === pl.line && k.place.kind === pl.kind)) { pl.id = 'ai' + Date.now().toString(36) + i; keep.push({ id: pl.id, place: pl, decision: 'proposed' }); } });
     M.props = keep;
     got.notes.forEach(n => { if (!M.notes.some(x => x.text === n.text)) M.notes.push({ page: n.page, text: n.text, seen: false }); });
-    got.chattels.forEach(c => { if (!M.chat.some(x => x.name.toLowerCase() === c.name.toLowerCase())) M.chat.push({ name: c.name, on: !!c.included, qty: c.qty, from: 'ai' }); });
+    got.chattels.forEach(c => { if (!M.chat.some(x => x.name.toLowerCase() === c.name.toLowerCase())) M.chat.push({ name: c.name, on: false, qty: c.qty, from: 'ai' }); });   // nothing the AI suggests is ticked for Tim
     M.dirty = true; drMapPaint();
     $('#drAiMsg').textContent = `${got.places.length} places, ${got.notes.length} notes and ${got.chattels.length} chattels suggested.` + (failed ? ` ${failed} part${failed === 1 ? '' : 's'} couldn't be read; try again.` : '');
   }
@@ -6324,16 +6332,22 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const [terms, clauses, PDFLib] = await Promise.all([ofSafe(sb.from('offer_terms').select('*').order('position')), ofWording(), drPdfLib().catch(() => null)]);
     if (!PDFLib) throw new Error(drNoLib);
     const bytes = await drBlankBytes(b);
-    // the vendor's lawyer, if the file holds one: the newest lawyer link on an agreement for this property
-    let vendorLawyer = null; try { const ags = (await ofSafe(sb.from('agreements').select('id,created_at').eq('property_id', o.property_id).order('created_at', { ascending: false }))) || [];
-      if (ags.length) { const ls = (await ofSafe(sb.from('lawyer_links').select('lawyer_name,firm,email,sent_at').eq('agreement_id', ags[0].id).order('sent_at', { ascending: false }))) || [];
-        if (ls[0]) vendorLawyer = { firm: ls[0].firm, person: ls[0].lawyer_name, email: ls[0].email, source: 'the lawyer the agency agreement was sent to' }; } } catch (_) { }
-    const plan = DR.planDraft({ details: o.details || {}, map: { places: map.places, chattels: (DR_CACHE[b.id] && DR_CACHE[b.id].pages ? DR.buildMap(DR_CACHE[b.id].pages).chattels : DR.buildMap(await drBlankPages(b)).chattels) }, terms: terms || [], clauses, edits: edits || {}, today: OF.nzToday(), province: o.province || OF.DEFAULT_PROVINCE, vendorLawyer });
+    // whose own phone and email must never go on: the property's people (owners, contacts, earlier owners) and the agreements' people
+    const prop = await must(sb.from('properties').select('id,cycle_at').eq('id', o.property_id).single());
+    const ags = (await ofSafe(sb.from('agreements').select('id,status,created_at').eq('property_id', o.property_id))) || [];
+    const ppl = (await ofSafe(sb.from('property_people').select('email,phone,role').eq('property_id', o.property_id))) || [];
+    const apl = ags.length ? ((await ofSafe(sb.from('agreement_people').select('email,phone').in('agreement_id', ags.map(x => x.id)))) || []) : [];
+    const parties = ppl.map(x => ({ who: 'a vendor', email: x.email, phone: x.phone })).concat(apl.map(x => ({ who: 'a vendor', email: x.email, phone: x.phone })));
+    // the vendor's lawyer, if the file holds one: only from a signed agreement of the current owners
+    const links = ags.length ? ((await ofSafe(sb.from('lawyer_links').select('agreement_id,lawyer_name,firm,email,sent_at').in('agreement_id', ags.map(x => x.id)))) || []) : [];
+    const vendorLawyer = DR.pickVendorLawyer(prop, ags, links, parties);
+    const plan = DR.planDraft({ details: o.details || {}, map: { places: map.places, chattels: (DR_CACHE[b.id] && DR_CACHE[b.id].pages ? DR.buildMap(DR_CACHE[b.id].pages).chattels : DR.buildMap(await drBlankPages(b)).chattels) }, terms: terms || [], clauses, edits: edits || {}, today: OF.nzToday(), province: o.province || OF.DEFAULT_PROVINCE, vendorLawyer, parties });
     const r = await DR.renderDraft(PDFLib, bytes, plan, { title: 'Draft agreement: ' + (o.buyer_ref || 'offer') });
     const sha = await REPO.sha256(r.bytes), prev = (await ofSafe(sb.from('offer_drafts').select('number').eq('offer_id', oid).order('number', { ascending: false }))) || [], n = ((prev[0] || {}).number || 0) + 1;
     const pth = `properties/${o.property_id}/docs/offer-draft-${oid}-${n}-${sha.slice(0, 12)}.pdf`;
     const up = await sb.storage.from('property-files').upload(pth, new Blob([r.bytes], { type: 'application/pdf' }), { contentType: 'application/pdf', upsert: false });
     if (up.error && !/exists/i.test(up.error.message || '')) throw new Error('The draft didn\'t save. Check you have signal, then try again.');
+    await drConfirm(pth, sha);
     const placed = plan.items.map(it => { const bx = r.boxes.filter(x => x.id === it.id || x.id.startsWith(it.id + '_cont'));
       return { id: it.id, label: it.label, kind: it.kind, text: it.text || null, value: it.value || null, placeholder: !!it.placeholder, edited: !!it.edited, terms: it.terms, boxes: bx.map(x => ({ page: x.page, x: Math.round(x.x * 10) / 10, y: Math.round(x.y * 10) / 10, w: Math.round(x.w * 10) / 10, h: Math.round(x.h * 10) / 10 })) }; });
     const res = await must(sb.rpc('agent_draft_add', { p_offer: oid, p_map: map.id, p_path: pth, p_sha256: sha, p_size: r.bytes.length, p_placed: placed, p_needs: plan.needs, p_edits: Object.assign({}, edits || {}, { date_format: plan.date_format }), p_note: note || null }));
@@ -6347,6 +6361,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     if (await REPO.sha256(bytes) !== d.sha256) throw new Error('The stored draft doesn\'t match its fingerprint.');
     DR_CACHE[k] = { bytes }; return bytes;
   }
+  // the offer's details compared by value (key order doesn't matter, as the database compares them)
+  const drCanon = x => Array.isArray(x) ? x.map(drCanon) : x && typeof x === 'object' ? Object.keys(x).sort().reduce((a, k) => { a[k] = drCanon(x[k]); return a; }, {}) : x;
   // Tim's review screen
   async function viewDraftReview(did) {
     header('Draft agreement', '', 0); actions(false);
@@ -6354,8 +6370,12 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const d = await must(sb.from('offer_drafts').select('*').eq('id', did).single());
     const [o, all, apps, p] = await Promise.all([must(sb.from('property_offers').select('*').eq('id', d.offer_id).single()), ofSafe(sb.from('offer_drafts').select('id,number').eq('offer_id', d.offer_id).order('number', { ascending: false })),
       ofSafe(sb.from('offer_draft_approvals').select('*').eq('draft_id', did)), must(sb.from('properties').select('id,address').eq('id', d.property_id).single())]);
-    const ap = (apps || [])[0], newest = ((all || [])[0] || {}).id === d.id, changed = o.updated_at && o.updated_at > d.created_at && JSON.stringify(o.details) !== JSON.stringify(d.details);
-    const block = d.needs.filter(n => n.blocking), check = d.needs.filter(n => !n.blocking), E = d.edits || {};
+    const ap = (apps || [])[0], newest = ((all || [])[0] || {}).id === d.id, changed = JSON.stringify(drCanon(o.details)) !== JSON.stringify(drCanon(d.details));
+    // newer places on this blank, or a newer usable blank: the draft must be made again before it can be approved
+    const blanks = await drLoadBlanks(d.property_id), myBlank = blanks.find(x => x.id === d.blank_id) || {}, myMap = (myBlank.maps || []).find(m => m.id === d.map_id) || {};
+    const newerMap = (myBlank.maps || []).some(m => m.approved && m.version > (myMap.version || 0)), newerBlank = blanks.some(x => x.edition_checked && x.created_at > (myBlank.created_at || ''));
+    const block = d.needs.filter(n => n.blocking && !n.ackable), acks = d.needs.filter(n => n.blocking && n.ackable), check = d.needs.filter(n => !n.blocking), E = d.edits || {};
+    const stale = changed || newerMap || newerBlank;
     const items = d.placed.filter(x => x.kind !== 'strike' && x.kind !== 'lines' && x.id !== 'further_terms'), strikes = d.placed.filter(x => x.kind === 'strike' || x.kind === 'lines'), ft = d.placed.find(x => x.id === 'further_terms');
     const customT = ft && (ft.terms || []).find(t => t.custom);
     const boxes = []; d.placed.forEach((x, i) => (x.boxes || []).forEach(bx => boxes.push(Object.assign({ id: x.id, label: x.label, kind: 'text', cls: x.placeholder ? 'dr-ph' : 'dr-fill', badge: String(i + 1) }, bx, { y: bx.y }))));
@@ -6366,9 +6386,12 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <p class="lede">${nt(p.address)}</p><p class="small">For ${esc(o.buyer_ref || 'the buyer')}, ${esc(money(+o.amount))}. Made ${esc(fmtDT(d.created_at))}. Draft fingerprint <span translate="no">${esc(drShort(d.sha256))}</span>, on the blank <span translate="no">${esc(drShort(d.blank_sha256))}</span>.</p>
       ${ap ? `<div class="card okc tight" id="drApproved"><p class="small" style="margin:0"><strong>Approved</strong> by ${esc(ap.approved_by)}, ${esc(fmtDT(ap.approved_at))}. Fingerprint <span translate="no">${esc(drShort(ap.sha256))}</span>. Signing comes next (not built yet).</p></div>` : ''}
       ${!newest ? '<div class="card warnc tight" id="drNotNewest"><p class="small" style="margin:0">There is a newer draft of this offer. This one is kept as it was.</p></div>' : ''}
-      ${changed && newest ? '<div class="card warnc tight" id="drChanged"><p class="small" style="margin:0">The offer has been corrected since this draft. Re-draft it so the agreement matches.</p></div>' : ''}
+      ${changed && newest ? `<div class="card warnc tight" id="drChanged"><p class="small" style="margin:0">The offer has been corrected since this draft. Re-draft it so the agreement matches${ap ? '' : '; this draft can\'t be approved'}.</p></div>` : ''}
+      ${(newerMap || newerBlank) && !ap ? `<div class="card warnc tight" id="drStaleBlank"><p class="small" style="margin:0">${newerBlank ? 'A newer agreement blank has been loaded' : 'The places on the blank have been approved again'} since this draft. ${newerBlank ? 'Approve its places, then re-draft' : 'Re-draft'}; this draft can't be approved.</p></div>` : ''}
       <section class="card" id="drNeeds"><h2>Needs you ${block.length ? `<span class="pill of-warnp">${block.length}</span>` : ''}</h2>
-        ${block.length ? `<ul class="dr-list">${block.map(n => `<li class="dr-need" data-need="${esc(n.id)}">${esc(n.text)}</li>`).join('')}</ul>` : '<p class="small" id="drNoNeeds">Nothing is waiting on you before approval.</p>'}
+        ${block.length ? `<ul class="dr-list">${block.map(n => `<li class="dr-need" data-need="${esc(n.id)}">${esc(n.text)}</li>`).join('')}</ul>` : ''}
+        ${acks.length ? `<ul class="dr-list" id="drAcks">${acks.map(n => `<li><label class="choice cb"><input type="checkbox" data-ack="${esc(n.id)}" ${ap && (ap.checked || []).includes(n.id) ? 'checked' : ''} ${ap ? 'disabled' : ''}><span class="mark"></span><span><span class="ct dr-need">${esc(n.text)}</span><span class="cd">Tick once you have checked it on the page</span></span></label></li>`).join('')}</ul>` : ''}
+        ${!block.length && !acks.length ? '<p class="small" id="drNoNeeds">Nothing is waiting on you before approval.</p>' : ''}
         ${check.length ? `<details class="of-more" open><summary class="small">To check (${check.length})</summary><ul class="dr-list">${check.map(n => `<li class="small" data-check="${esc(n.id)}">${esc(n.text)}</li>`).join('')}</ul></details>` : ''}</section>
       <section class="card" id="drPagesRv"><h2>The drafted pages</h2><p class="small">Every place filled or marked is highlighted and numbered. Placeholders are in yellow.</p>
         <div class="dr-nav"><label class="sr" for="drRvPick">Page</label><select id="drRvPick">${pagesWith.map(n => `<option value="${n}">Page ${n} (${boxes.filter(x => x.page === n).length})</option>`).join('')}</select></div>
@@ -6384,8 +6407,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         <label class="f" for="drNote">What changed <span class="opt">(kept with the new draft)</span></label><input type="text" id="drNote" maxlength="500">
         <div class="toolbar"><button class="btn ghost" type="button" id="drRedraft">Re-draft with my changes</button></div></section>
       <div class="err" id="drRvErr" role="alert"></div>
-      <div class="toolbar"><button class="btn primary" type="button" id="drApproveDraft" ${ap || !newest || block.length ? 'disabled' : ''}>${ap ? 'Approved' : 'Approve draft'}</button><button class="btn ghost" type="button" id="drDownload">Download the PDF</button>${newest ? '<button class="btn ghost" type="button" id="drRedraftChange">Re-draft after a change</button>' : ''}</div>
-      ${!ap && newest && block.length ? '<p class="small">Approve is available once nothing needs you. Fill in each placeholder above and re-draft.</p>' : ''}
+      <div class="toolbar"><button class="btn primary" type="button" id="drApproveDraft" ${ap || !newest || block.length || stale || acks.length ? 'disabled' : ''}>${ap ? 'Approved' : 'Approve draft'}</button><button class="btn ghost" type="button" id="drDownload">Download the PDF</button>${newest ? '<button class="btn ghost" type="button" id="drRedraftChange">Re-draft after a change</button>' : ''}</div>
+      ${!ap && newest && (block.length || acks.length) && !stale ? `<p class="small">Approve is available once nothing needs you.${block.length ? ' Fill in each placeholder above and re-draft.' : ''}${acks.length ? ' Tick each check above.' : ''}</p>` : ''}
     </div>`;
     const go = async (edits, note) => { const btns = $$('#drRedraft,#drRedraftChange'); btns.forEach(x => { x.disabled = true; }); $('#drRvErr').textContent = 'Drafting...';
       try { const id = await drMakeDraft(d.offer_id, edits, note); toast('New draft made; the earlier one is kept'); viewDraftReview(id); } catch (e) { $('#drRvErr').textContent = e.message || 'That didn\'t draft.'; btns.forEach(x => { x.disabled = false; }); } };
@@ -6396,7 +6419,9 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     $('#drRvBack').addEventListener('click', () => viewOfferAgent(d.offer_id));
     $('#drRedraft').addEventListener('click', () => go(collect(), $('#drNote').value.trim() || 'Re-drafted with your changes'));
     const rc = $('#drRedraftChange'); if (rc) rc.addEventListener('click', () => go({ date_format: E.date_format, extra_terms: E.extra_terms, custom_ok: E.custom_ok, custom_wording: E.custom_wording }, $('#drNote').value.trim() || 'Re-drafted after a change'));
-    $('#drApproveDraft').addEventListener('click', async () => { try { await must(sb.rpc('agent_draft_approve', { p_draft: did, p_sha256: d.sha256 })); toast('Draft approved'); viewDraftReview(did); } catch (e) { $('#drRvErr').textContent = e.message || 'That didn\'t save.'; } });
+    const ackBoxes = $$('[data-ack]'), canApprove = () => !ap && newest && !block.length && !stale && ackBoxes.every(x => x.checked);
+    ackBoxes.forEach(x => x.addEventListener('change', () => { $('#drApproveDraft').disabled = !canApprove(); }));
+    $('#drApproveDraft').addEventListener('click', async () => { try { await must(sb.rpc('agent_draft_approve', { p_draft: did, p_sha256: d.sha256, p_checked: ackBoxes.filter(x => x.checked).map(x => x.dataset.ack) })); toast('Draft approved'); viewDraftReview(did); } catch (e) { $('#drRvErr').textContent = e.message || 'That didn\'t save.'; } });
     $('#drDownload').addEventListener('click', async () => { try { const bytes = await drDraftBytes(d); const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' })); a.download = `Draft-${d.number}-${(p.address || 'agreement').replace(/[^A-Za-z0-9]+/g, '-').slice(0, 60)}.pdf`; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000); } catch (e) { $('#drRvErr').textContent = e.message; } });
     const paint = async n => { try { const r = await drRender($('#drRvCanvas'), n, boxes, { bytes: await drDraftBytes(d), key: 'draft-' + d.id }); r.wrapEl.dataset.draft = d.id; } catch (e) { $('#drRvCanvas').innerHTML = `<p class="small err">${esc(e.message || drNoLib)}</p>`; } };
     const pick = $('#drRvPick'); pick.addEventListener('change', () => paint(+pick.value)); if (pagesWith.length) paint(pagesWith[0]);
