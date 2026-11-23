@@ -228,3 +228,28 @@ agreements/<agreement id>/signatures/... (vendors may upload their own signature
   offer), `agent_offer_add`, `agent_offer_correct(offer, details, note)`, `agent_offer_status(offer, withdrawn|lapsed|received, at,
   note)`, `agent_offer_read`, `agent_offer_gap(offer, reason)`, `agent_offer_settings(ks_days)`, `agent_offer_clause(key, wording)`,
   `agent_offer_chattels(property, items)`, `agent_offer_not_spam(offer)` (out of "Possible spam": a new unread offer, recorded). Vendors: no policy and no function: they see nothing.
+
+## 019 Drafting offers onto the REINZ blank (offers phase 2, 23 November 2026; tested in a rollback block on a local PostgreSQL stand-in, NOT yet on the live project)
+- `repo_kinds` gains 'REINZ agreement blank' (agency, not shareable, not exported). `guard_blank_document`: a blank keeps its kind and
+  is never shared; no other item becomes one. In `src/repo-core.js` it is in `SPECIAL_KINDS`, not the general uploader's list.
+- `offer_blanks` (property_id, document_id unique, sha256 and size from the filed item, file_name, pages, sizes [[w,h]...], edition,
+  edition_checked via `offer_edition_ok`). `offer_blank_maps` (blank_id, version, places, proposals with Tim's decisions, chattels,
+  notes, missing, approved): every save a new version. `offer_blank_reads` (the AI's proposals, from the edge function).
+- `offer_terms` (key, title, kind further_term or printed, clause number, wording (Tim's own only), wording_from (his offer_clauses
+  key or custom), rule {when, strike_when_unused, where}, position, active) seeded with deposit_nzret 21.2, deposit_kiwisaver 21.3,
+  lawyer_approval 22.0, electrical, technical, sale, sdd, custom, chattels. Switched off, never removed. `offer_term_changes`.
+- `offer_drafts` (offer, property, number, blank and its sha256, map, details from the server, Tim's edits, placed, needs, path,
+  sha256, size, note). `offer_draft_approvals` (draft unique, sha256, by, at). `offer_lawyer_lookups` (offer, firm, person, model,
+  ok, result with each value's source).
+- `offer_file_hashes` (path, sha256, size, confirmed_by, confirmed_at): the fingerprint of a stored blank or draft, worked out by the
+  offer-draft edge function from the file itself (`offer_file_confirm`, service role). `agent_blank_add` and `agent_draft_add` accept
+  only a fingerprint and size confirmed here. The edition, page sizes, places, what was placed and which items block come from Tim's
+  screen and are trusted as such.
+- All of these: agent read only; nobody writes directly; rows can't be changed or removed (`guard_offer_record`) or the tables
+  emptied; vendors and anon see nothing.
+- Functions (agent): `agent_blank_add(document, pages, sizes, edition)`, `agent_blank_map_save(blank, places, proposals, chattels,
+  notes, missing, approve)` (approving sets the offer form's chattels), `agent_offer_term(key, title, wording, rule, position,
+  active)`, `agent_draft_add(offer, map, path, sha256, size, placed, needs, edits, note)` (the newest approved map, the stored file
+  checked), `agent_draft_approve(draft, sha256, checked)` (newest draft, the offer unchanged since, the newest approved
+  places of the newest usable blank, nothing blocking except "ackable" items Tim ticked as checked, kept in `offer_draft_approvals.checked`), `agent_lawyer_use(lookup, keys)` (email and phone
+  only, from the stored lookup). Service role (offer-draft): `offer_ai_read_save`, `offer_lawyer_save`, `offer_file_confirm`.

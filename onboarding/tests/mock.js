@@ -67,6 +67,8 @@ function q(table){ logCall('from:'+table);
     then(res,rej){ if(localStorage.getItem('trHang')==='1'&&table==='user_language') return; try{ res(run()); }catch(e){ res({data:null,error:{message:e.message}}); } }
   };
   function run(){
+    // localStorage mockFailTable = a table name: reading it fails, as with a dropped connection or a database error
+    if(op==='select'&&localStorage.getItem('mockFailTable')===table) throw new Error('Failed to fetch');
     const T=(DB[table]||=[]);
     // photos and documents (migration 016): vendors see none of it; guard_property_document() on every write
     if(['property_documents','property_document_events','repo_kinds'].includes(table)){ const r0=repoTable(table,op,payload,op==='update'?T.filter(r=>filters.every(f=>f(r))):[],single); if(r0) return r0; }
@@ -76,6 +78,7 @@ function q(table){ logCall('from:'+table);
     if((OFFER_TABLES.includes(table)||table==='property_offers')&&!(S&&S.user)) throw new Error('permission denied for table '+table);
     if(OFFER_TABLES.includes(table)&&op!=='select') throw new Error('permission denied for table '+table);
     if(table==='offer_settings'&&op==='select') OSET();
+    if(table==='offer_terms'&&op==='select') OTERMS();
     if(table==='property_offers'&&op==='insert'&&(Array.isArray(payload)?payload:[payload]).some(x=>x&&((x.source||'manual')!=='manual'||x.submission||x.details))) throw new Error('Offers from the form are only added through the form');
     if(table==='property_offers'&&op==='update'&&(DB.property_offers||[]).some(r=>filters.every(f=>f(r))&&(r.source||'manual')!=='manual')&&Object.keys(payload||{}).some(k=>!['notes','expires_at'].includes(k))) throw new Error('Offers from the form are changed through the Offers tile, so there is a record');
     if(table==='property_offers'&&op==='update'&&['submission','details','suspected_spam','source'].some(k=>k in (payload||{}))) throw new Error('Offers from the form are only added through the form');
@@ -153,7 +156,7 @@ const DECL_TEXT=['faults','reno','internet','insulation','glazing'];
 const hasAnswer=(k,v)=>k==='tenanted'?['now','will','no'].includes(v):DECL_TEXT.includes(k)?isObj(v)&&String(v.d||'').trim()!=='':isObj(v)&&['yes','no','unknown'].includes(v.a);
 const needsAnswers=fm=>{ const d=fm.data||{}, pre=isObj(d.pre)?d.pre:{}, ans=isObj(d.answers)?d.answers:{}; return Object.keys(pre).some(k=>pre[k]==='inspection'&&!hasAnswer(k,k==='tenanted'?d.tenanted:ans[k])); };
 const NEED_ANSWER='Please answer each question Tim noted at the inspection';
-const AGENT_ONLY=['property_events','campaign_stats','buyer_feedback','property_offers','offer_links','offer_events','offer_settings','offer_clauses','offer_hits'];
+const AGENT_ONLY=['property_events','campaign_stats','buyer_feedback','property_offers','offer_links','offer_events','offer_settings','offer_clauses','offer_hits','offer_blanks','offer_blank_maps','offer_blank_reads','offer_terms','offer_term_changes','offer_drafts','offer_draft_approvals','offer_lawyer_lookups','offer_file_hashes'];
 function mkNotices(ag){ if((ag.answers||{}).prior!=='yes') return; (DB.prior_agency_notices||=[]); (ag.answers.priorAgencies||[]).forEach((x,i)=>{ if(x.agency&&!DB.prior_agency_notices.some(n=>n.agreement_id===ag.id&&n.idx===i)) DB.prior_agency_notices.push({id:uid(),agreement_id:ag.id,idx:i,agency:x.agency,agent_name:x.agent||null,email:x.email||null,kind:x.kind,dated:x.dated||null,status:'to_send',created_at:now()}); }); }
 const ok=d=>Promise.resolve({data:d,error:null}); const bad=m=>Promise.resolve({data:null,error:{message:m}});
 function rpc(name,a){ logCall('rpc:'+name); if(['agent_repo_add','agent_repo_set','agent_repo_share','agent_repo_archive','vendor_repo_list','agent_property_export'].includes(name)) return repoRpc(name,a); if(localStorage.getItem('trHang')==='1'&&['get_translations','set_my_language'].includes(name)) return new Promise(()=>{}); const before=new Map((DB.agreements||[]).map(x=>[x.id,JSON.parse(JSON.stringify(x))]));
@@ -164,6 +167,7 @@ function rpcInner(name,a){
   const me=S&&S.user; const ag=a&&a.a?DB.agreements.find(x=>x.id===a.a):null;
   const mine=()=>DB.agreement_people.find(p=>p.agreement_id===a.a&&p.user_id===me.id);
   if(name.startsWith('agent_council_')) return councilRpc(name,a,me);
+  if(DRAFT_RPCS.includes(name)) return draftRpc(name,a,me);
   if(name.startsWith('agent_offer_')) return offerRpc(name,a,me);
   if(name.startsWith('offer_public_')) return bad('permission denied for function '+name);
   const V=()=>(DB.agreement_variations||=[]), VS=()=>(DB.variation_signatures||=[]);
@@ -329,7 +333,8 @@ function councilTable(op){ if(offline()) throw new Error('Failed to fetch'); if(
 // submit) and doc-prefill's offer_condition mode (help wording a condition). localStorage mockNet names the caller's network (for
 // the rate limits); offerAiMode = 'off' | 'fail' | 'unsuitable' changes the helper's answer. No email is ever sent: the
 // notification is recorded in email_log with mock: true.
-const OFFER_TABLES=['offer_links','offer_events','offer_settings','offer_clauses','offer_hits'];
+const DRAFT_TABLES=['offer_blanks','offer_blank_maps','offer_blank_reads','offer_terms','offer_term_changes','offer_drafts','offer_draft_approvals','offer_lawyer_lookups','offer_file_hashes'];   // migration 019
+const OFFER_TABLES=['offer_links','offer_events','offer_settings','offer_clauses','offer_hits'].concat(DRAFT_TABLES);
 const OL=()=>(DB.offer_links||=[]), OE=()=>(DB.offer_events||=[]), OH=()=>(DB.offer_hits||=[]), PO=()=>(DB.property_offers||=[]);
 const OSET=()=>{ DB.offer_settings||=[]; if(!DB.offer_settings.length) DB.offer_settings.push({id:true,ks_warn_working_days:15,ai_daily_cap:40,updated_at:now()}); return DB.offer_settings[0]; };
 const offerStageOk=s=>['signed','live','under_offer'].includes(s);
@@ -501,7 +506,8 @@ function councilRpc(name,a,me){ if(offline()) return bad('Failed to fetch'); if(
 // signal; mockDropReply = 'N' files the next N items but answers as if the signal dropped, so the phone never hears back.
 const RB='property-files', PNG1='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=';
 const RKS=()=>(window.REPO&&window.REPO.KINDS)||[];
-const rk=k=>{ const L=RKS(), i=L.findIndex(x=>x[0]===k); return i<0?null:{kind:L[i][0],folder:L[i][1],shareable:!!L[i][2],exportable:!!L[i][3],position:i}; };
+const RKS_ALL=()=>RKS().concat((window.REPO&&window.REPO.SPECIAL_KINDS)||[]);   // migration 019 adds the REINZ agreement blank, filed only from the Offers tile
+const rk=k=>{ const L=RKS_ALL(), i=L.findIndex(x=>x[0]===k); return i<0?null:{kind:L[i][0],folder:L[i][1],shareable:!!L[i][2],exportable:!!L[i][3],position:i}; };
 const repoShareable=(kind,source)=>source!=='generated'&&!!(rk(kind)||{}).shareable;
 const PD=()=>(DB.property_documents||=[]), PDE=()=>(DB.property_document_events||=[]), SO=()=>(DB.storage_objects||={});
 const meEmail=()=>(S&&S.user&&S.user.email)||'system';
@@ -520,6 +526,8 @@ function pdUpdate(o,patch){ const n=Object.assign({},o,patch), who=meEmail();
   if(o.source==='generated'){ const strip=x=>{ const c=Object.assign({},x); delete c.updated_at; delete c.folder; return canon(c); }; if(strip(n)!==strip(o)) throw new Error('A signed document is kept exactly as it was filed'); }
   if(['id','property_id','path','bucket','source','created_at','created_by','client_key','inspection_id'].some(k=>!same(n[k],o[k]))||['thumb_path','sha256','size_bytes','mime_type','taken_at'].some(k=>o[k]!=null&&!same(n[k],o[k]))) throw new Error("Where a file is kept, what it is and its fingerprint can't change");
   if(n.bucket===RB&&!rk(n.kind)) throw new Error('Choose a kind from the list');
+  if(o.kind==='REINZ agreement blank'&&(n.kind!==o.kind||n.shared_at)) throw new Error('An agreement blank stays an agreement blank, and is never shared');   // guard_blank_document (019)
+  if(n.kind==='REINZ agreement blank'&&o.kind!==n.kind) throw new Error("Load an agreement blank from the property's Offers tile");
   if(n.archived_at&&!o.archived_at){ n.shared_at=null; n.shared_by=null; n.archived_by=who; }
   if(!n.archived_at) n.archived_by=null;
   if(n.shared_at){ if(n.archived_at) throw new Error("A removed item can't be shared"); if(n.bucket!==RB) throw new Error('Only a file added under Photos and documents can be shared'); if(!repoShareable(n.kind,n.source)) throw new Error('This kind of item is never shared with the vendors');
@@ -632,8 +640,105 @@ function repoRpc(name,a){
     PDE().push({id:PDE().length+1,property_id:p.id,document_id:null,at:now(),actor:me.email,kind:'exported',detail:{schema:'mre.property/1',items:items.length,public_records:recs.length}}); save();
     return ok(out); }
   return bad('unknown rpc '+name); }
+// ── drafting offers onto the REINZ blank (mirrors migrations/019_offer_drafting.sql and fn/offer_draft_handler.ts) ──
+// Tim only; vendors and anyone not signed in see nothing; nobody writes these tables directly; nothing made is ever changed. The
+// offer-draft edge function answers from the pages it is sent: a line saying a buyer acknowledges something becomes an "ack"
+// proposal, "Witnessed" a "sign" one, a page that mentions a LIM a note. localStorage draftAiMode = 'off' | 'fail', and
+// lawyerMode = 'off' | 'no_search' | 'none' | 'reception' change its answers. No model is ever called.
+const DRAFT_RPCS=['agent_blank_add','agent_blank_map_save','agent_offer_term','agent_draft_add','agent_draft_approve','agent_lawyer_use'];
+const EDITIONS_OK=['Eleventh Edition 2022 (4)'];
+const OTERMS=()=>{ DB.offer_terms||=[]; if(!DB.offer_terms.length) [
+  ['deposit_nzret','Deposit held by NZ Real Estate Trust (printed clause 21.2)','printed','21.2',null,{when:{kiwisaver:false},strike_when_unused:false},10],
+  ['deposit_kiwisaver',"Whole deposit to the vendor's lawyer's trust account when KiwiSaver funds it (printed clause 21.3)",'printed','21.3',null,{when:{kiwisaver:true},strike_when_unused:false},11],
+  ['lawyer_approval',"Lawyer's approval (printed clause 22.0): struck through when not chosen",'printed','22.0',null,{when:{condition:'lawyer'},strike_when_unused:true},12],
+  ['electrical','Electrical report','further_term',null,'electrical',{when:{condition:'electrical'}},20],['technical','Specified technical report','further_term',null,'technical',{when:{condition:'technical'}},21],
+  ['sale','Sale of another property','further_term',null,'sale',{when:{condition:'sale'}},22],['sdd','Specified Due Diligence','further_term',null,'sdd',{when:{condition:'sdd'}},23],
+  ['custom',"The buyer's own condition (only once you tick its wording)",'further_term',null,'custom',{when:{condition:'custom'}},24],['chattels','Chattels to add or leave out','further_term',null,null,{when:{chattels:true},where:'schedule'},30]
+].forEach(([key,title,kind,clause,wf,rule,position])=>DB.offer_terms.push({key,title,kind,clause,wording:null,wording_from:wf,rule,position,active:true,updated_by:null,updated_at:now()})); return DB.offer_terms; };
+const PLACE_KINDS=['text','area','date','yesno','strike','block','signature','initial','witness','name','ack','never'];
+function draftRpc(name,a,me){ if(!me||!AGENTS.includes(me.email)) return bad('Only Tim can do this');
+  const OB=()=>(DB.offer_blanks||=[]), OBM=()=>(DB.offer_blank_maps||=[]), OD=()=>(DB.offer_drafts||=[]), ODA=()=>(DB.offer_draft_approvals||=[]), OLL=()=>(DB.offer_lawyer_lookups||=[]);
+  const ev=(pid,oid,kind,detail)=>OE().push({id:OE().length+1,property_id:pid,offer_id:oid||null,at:now(),actor:me.email,kind,detail:detail||{}});
+  if(name==='agent_blank_add'){ const d=PD().find(x=>x.id===a.p_document); if(!d) return bad("That file isn't on a property file");
+    if(d.kind!=='REINZ agreement blank'||d.bucket!==RB||d.mime_type!=='application/pdf') return bad('Only a PDF filed as an agreement blank can be used'); if(d.archived_at) return bad('That file has been removed');
+    const ex=OB().find(b=>b.document_id===d.id); if(ex) return ok({id:ex.id,existing:true,edition_checked:ex.edition_checked});
+    if(!(DB.offer_file_hashes||[]).some(h=>h.path===d.path&&h.sha256===d.sha256&&h.size_bytes===d.size_bytes)) return bad("The file's fingerprint hasn't been confirmed by the server yet. Try again");
+    if(!(a.p_pages>=1&&a.p_pages<=400)) return bad('Please check the page count');
+    if(!Array.isArray(a.p_sizes)||a.p_sizes.length!==a.p_pages||a.p_sizes.some(s=>!Array.isArray(s)||s.length!==2||!(s[0]>=50&&s[0]<=5000)||!(s[1]>=50&&s[1]<=5000))) return bad('Please check the page sizes');
+    const ed=String(a.p_edition||'').trim().slice(0,80)||null; const b={id:uid(),property_id:d.property_id,document_id:d.id,sha256:d.sha256,size_bytes:d.size_bytes,file_name:d.name,pages:a.p_pages,sizes:a.p_sizes,edition:ed,edition_checked:EDITIONS_OK.includes(ed),created_by:me.email,created_at:now()};
+    OB().push(b); ev(b.property_id,null,'blank_loaded',{blank_id:b.id,sha256:b.sha256,edition:ed,edition_checked:b.edition_checked,pages:b.pages}); return ok({id:b.id,existing:false,edition_checked:b.edition_checked}); }
+  if(name==='agent_blank_map_save'){ const b=OB().find(x=>x.id===a.p_blank); if(!b) return bad('No such blank'); if(!b.edition_checked) return bad("This edition of the agreement hasn't been checked yet, so it can't be mapped or drafted on");
+    const pl=a.p_places||[]; if(!Array.isArray(pl)||pl.length>400) return bad('Please check the places');
+    for(const x of pl){ const sz=b.sizes[(x.page|0)-1]; if(!/^[A-Za-z0-9_.:-]{1,60}$/.test(x.id||'')||!/^[a-z][a-z0-9_]{0,40}$/.test(x.key||'')||!PLACE_KINDS.includes(x.kind)||!sz||!(x.x>=-1&&x.x<=sz[0]+1&&x.y>=-1&&x.y<=sz[1]+1&&x.w>=0&&x.w<=sz[0]+1&&x.h>=0&&x.h<=sz[1]+1)) return bad("One of the places doesn't sit on a page of this blank"); }
+    if(new Set(pl.map(x=>x.id)).size!==pl.length) return bad('Two places have the same id');
+    if(!Array.isArray(a.p_chattels||[])||(a.p_chattels||[]).length>60) return bad('Up to 60 chattels');
+    const ch=(a.p_chattels||[]).map(x=>String(x??'').trim()).filter(Boolean); if(ch.some(x=>x.length>200)) return bad('Please shorten each chattel: 200 characters at most');
+    const v=OBM().filter(m=>m.blank_id===b.id).reduce((m,x)=>Math.max(m,x.version),0)+1; const m={id:uid(),blank_id:b.id,version:v,places:JSON.parse(JSON.stringify(pl)),proposals:a.p_proposals||[],chattels:ch,notes:a.p_notes||[],missing:a.p_missing||[],approved:!!a.p_approve,created_by:me.email,created_at:now()};
+    OBM().push(m); const pr=m.proposals; ev(b.property_id,null,m.approved?'map_approved':'map_saved',{blank_id:b.id,sha256:b.sha256,map_id:m.id,version:v,places:pl.length,ai_kept:pr.filter(x=>['kept','moved'].includes(x.decision)).length,ai_deleted:pr.filter(x=>x.decision==='deleted').length});
+    if(m.approved&&ch.length) offerRpc('agent_offer_chattels',{p_property:b.property_id,p_items:ch},me);
+    return ok({id:m.id,version:v,approved:m.approved}); }
+  if(name==='agent_offer_term'){ const k=a.p_key; if(!/^[a-z][a-z0-9_]{1,40}$/.test(k||'')) return bad('A key is lower-case letters, digits and underscores'); const r=a.p_rule||{};
+    if(Object.keys(r.when||{}).some(x=>!['always','kiwisaver','condition','no_condition','lawyer_approval','gst_registered','entity','nominee','chattels','settlement'].includes(x))) return bad("That rule uses something the drafting doesn't know");
+    const w=String(a.p_wording||'').trim()||null; if(w&&w.length>4000) return bad('That wording is too long (4,000 characters at most)'); const T=OTERMS(), o=T.find(x=>x.key===k), before=o?JSON.parse(JSON.stringify(o)):null;
+    if(!o){ const ti=String(a.p_title||'').trim(); if(!ti) return bad('Give the clause a title'); T.push({key:k,title:ti.slice(0,200),kind:'further_term',clause:null,wording:w,wording_from:null,rule:r,position:a.p_position??100,active:a.p_active!==false,updated_by:me.email,updated_at:now()}); }
+    else { if(o.wording_from&&w) return bad("This clause's wording is kept with your condition wording (Offers tile, Link and settings)"); if(o.kind==='printed'&&w) return bad('A printed clause is referred to by its number; it has no wording here');
+      Object.assign(o,{title:String(a.p_title||'').trim()||o.title,wording:o.kind==='printed'||o.wording_from?null:w,rule:r,position:a.p_position??o.position,active:a.p_active??o.active,updated_by:me.email,updated_at:now()}); }
+    (DB.offer_term_changes||=[]).push({id:DB.offer_term_changes.length+1,key:k,before,after:JSON.parse(JSON.stringify(T.find(x=>x.key===k))),actor:me.email,at:now()}); return ok(null); }
+  if(name==='agent_draft_add'){ const o=PO().find(x=>x.id===a.p_offer&&x.source!=='manual'); if(!o||!o.details) return bad('No such offer'); const m=OBM().find(x=>x.id===a.p_map); if(!m) return bad('No such map'); if(!m.approved) return bad('Approve the places on the blank first');
+    const b=OB().find(x=>x.id===m.blank_id); if(b.property_id!==o.property_id) return bad('That blank is for another property'); if(!b.edition_checked) return bad("This edition of the agreement hasn't been checked yet");
+    const newest=OBM().filter(x=>x.blank_id===b.id&&x.approved).sort((x,y)=>y.version-x.version)[0]; if(newest.id!==m.id) return bad('A newer version of the places on this blank has been approved. Draft again');
+    if(!/^[0-9a-f]{64}$/.test(a.p_sha256||'')) return bad('The draft needs its fingerprint'); if(a.p_sha256===b.sha256) return bad('That is the blank itself, not a draft');
+    if(!new RegExp('^properties/'+o.property_id+'/docs/offer-draft-'+o.id+'-[0-9]{1,4}-[0-9a-f]{12}\\.pdf$').test(a.p_path||'')) return bad('A draft is stored at its own place');
+    const obj=SO()[a.p_path]; if(!obj) return bad("The draft hasn't arrived yet"); if(obj.size!==a.p_size||obj.mime!=='application/pdf') return bad("The stored draft doesn't match");
+    if(!(DB.offer_file_hashes||[]).some(h=>h.path===a.p_path&&h.sha256===a.p_sha256&&h.size_bytes===a.p_size)) return bad("The draft's fingerprint hasn't been confirmed by the server yet. Try again");
+    const n=OD().filter(x=>x.offer_id===o.id).reduce((m_,x)=>Math.max(m_,x.number),0)+1;
+    const d={id:uid(),offer_id:o.id,property_id:o.property_id,number:n,blank_id:b.id,blank_sha256:b.sha256,map_id:m.id,details:JSON.parse(JSON.stringify(o.details)),edits:a.p_edits||{},placed:a.p_placed||[],needs:a.p_needs||[],path:a.p_path,sha256:a.p_sha256,size_bytes:a.p_size,note:(a.p_note||'').trim()||null,created_by:me.email,created_at:now()};
+    OD().push(d); ev(o.property_id,o.id,'drafted',{draft_id:d.id,number:n,sha256:d.sha256,blank_sha256:b.sha256,map_version:m.version,needs:d.needs.length,note:d.note}); return ok({id:d.id,number:n}); }
+  if(name==='agent_draft_approve'){ const d=OD().find(x=>x.id===a.p_draft); if(!d) return bad('No such draft'); if(a.p_sha256!==d.sha256) return bad("That isn't the draft on your screen. Open it again");
+    if(ODA().some(x=>x.draft_id===d.id)) return ok({ok:true,existing:true});
+    if(d.number!==Math.max(...OD().filter(x=>x.offer_id===d.offer_id).map(x=>x.number))) return bad('There is a newer draft of this offer. Approve that one');
+    if(!same((PO().find(x=>x.id===d.offer_id)||{}).details,d.details)) return bad('The offer has changed since this draft. Re-draft it first');
+    const m=OBM().find(x=>x.id===d.map_id), b=OB().find(x=>x.id===d.blank_id);
+    if(OBM().some(x=>x.blank_id===b.id&&x.approved&&x.version>m.version)) return bad('The places on the blank have been approved again since this draft. Re-draft it first');
+    if(OB().some(x=>x.property_id===b.property_id&&x.edition_checked&&x.created_at>b.created_at)) return bad('A newer agreement blank has been loaded since this draft. Approve its places and re-draft first');
+    const ck=Array.isArray(a.p_checked)?a.p_checked:[];
+    if(d.needs.some(x=>x.blocking===true&&!(x.ackable===true&&ck.includes(x.id)))) return bad('Some places still need you. Fill them in and draft again');
+    ODA().push({id:ODA().length+1,draft_id:d.id,sha256:d.sha256,approved_by:me.email,approved_at:now(),checked:ck}); ev(d.property_id,d.offer_id,'draft_approved',{draft_id:d.id,number:d.number,sha256:d.sha256,blank_sha256:d.blank_sha256,checked:ck}); return ok({ok:true,existing:false}); }
+  if(name==='agent_lawyer_use'){ const l=OLL().find(x=>x.id===a.p_lookup); if(!l||!l.ok) return bad('No such lookup'); const o=PO().find(x=>x.id===l.offer_id); if(!o) return bad('No such offer');
+    if(!Array.isArray(a.p_keys)||!a.p_keys.length) return bad('Tick at least one'); const law=Object.assign({},o.details.lawyer||{}), used=[];
+    for(const k of a.p_keys){ const v=((l.result||{}).values||[]).find(x=>x.id===k); if(!v) return bad("That value isn't in the lookup"); if(!['email','phone'].includes(v.field)) return bad("Only the lawyer's email and phone are used"); law[v.field]=v.field==='email'?v.value.toLowerCase():v.value; used.push({field:v.field,value:v.value,kind:v.kind,source_url:v.source_url}); }
+    if(l.firm&&!law.firm) law.firm=l.firm; if(l.person&&!law.person) law.person=l.person; const before=o.details; o.details=Object.assign({},o.details,{lawyer:law}); o.updated_at=now();
+    ev(o.property_id,o.id,'corrected',{note:"Lawyer's contact details from the lookup, ticked by Tim",before,after:o.details,lookup:l.id,used}); return ok(law); }
+  return bad('unknown rpc '+name); }
+function draftInvoke(o){ const b=(o&&o.body)||{}; const me=S&&S.user; const res=(data,status)=>status&&status>=400?Promise.resolve({data:null,error:{message:String(status),context:{json:async()=>data}}}):ok(data);
+  const calls=JSON.parse(localStorage.getItem('draftCalls')||'[]'); calls.push(b.action); localStorage.setItem('draftCalls',JSON.stringify(calls));
+  if(!me) return res({error:'Sign in first'},401); if(!AGENTS.includes(me.email)) return res({error:'Only Tim can do this'},403);
+  const ai=row=>(DB.ai_calls||=[]).push(Object.assign({id:(DB.ai_calls.length+1),at:now(),model:'claude-haiku-5-5',agent:me.email},row));
+  if(b.action==='confirm_file'){ const pth=String(b.path||''); if(!/^properties\/[0-9A-Za-z-]+\/docs\/[A-Za-z0-9._-]{1,200}$/.test(pth)) return res({error:'Bad request'},400);
+    const bl=(window.__repoBlobs||{})[pth]; if(!bl) return res({ok:false,error:"The file isn't in storage yet. Try again."},404);
+    return bl.arrayBuffer().then(buf=>crypto.subtle.digest('SHA-256',buf).then(h=>{ const sha=Array.from(new Uint8Array(h),x=>x.toString(16).padStart(2,'0')).join(''); const H=(DB.offer_file_hashes||=[]); const ex=H.find(x=>x.path===pth);
+      if(ex&&(ex.sha256!==sha||ex.size_bytes!==buf.byteLength)) return {data:null,error:{message:'409',context:{json:async()=>({ok:false,error:"The file's fingerprint couldn't be recorded."})}}};
+      if(!ex) H.push({path:pth,sha256:sha,size_bytes:buf.byteLength,confirmed_by:me.email,confirmed_at:now()}); save(); return {data:{ok:true,sha256:sha,size:buf.byteLength},error:null}; })); }
+  if(b.action==='read_pack'){ const m=localStorage.getItem('draftAiMode'); if(m==='off') return ok({ok:false,reason:'off',message:"Document reading isn't switched on yet."});
+    if(!Array.isArray(b.pages)||!b.pages.length||b.pages.length>8) return res({error:'Send 1 to 8 pages at a time'},400);
+    ai({purpose:'agreement pack read',ok:m!=='fail'}); if(m==='fail'){ save(); return ok({ok:false,reason:'failed',message:"The AI didn't answer. Try again in a minute."}); }
+    const places=[], notes=[], chattels=[];
+    b.pages.forEach(pg=>{ (pg.lines||[]).forEach(l=>{ if(/acknowledges/i.test(l.t)) places.push({page:pg.page,line:l.i,kind:'ack',reason:'The buyer acknowledges something here.'}); if(/^Witnessed/i.test(l.t)) places.push({page:pg.page,line:l.i,kind:'sign',reason:'A witness signs here.'}); });
+      if((pg.lines||[]).some(l=>/inserted LIM/i.test(l.t))) notes.push({page:pg.page,text:'A LIM page is inserted into the pack.'}); if((pg.lines||[]).some(l=>/^SCHEDULE 2/.test(l.t))) chattels.push({name:'Spa pool',qty:null,included:true,page:pg.page}); });
+    (DB.offer_blank_reads||=[]).push({id:(DB.offer_blank_reads.length+1),blank_id:b.blank_id,pages:b.pages.map(p=>p.page),model:'claude-haiku-5-5',ok:true,result:{places,notes,chattels},created_by:me.email,created_at:now()}); save();
+    return ok({ok:true,read_id:DB.offer_blank_reads.length,places,notes,chattels}); }
+  if(b.action==='lawyer_lookup'){ const m=localStorage.getItem('lawyerMode'); const q=encodeURIComponent([b.person,b.firm,'lawyer New Zealand contact'].filter(Boolean).join(' '));
+    const manual=[{label:'Search the web',url:'https://www.google.com/search?q='+q},{label:'NZ Law Society: find a lawyer',url:'https://www.lawsociety.org.nz/for-the-public/find-a-lawyer/'},{label:'NZ Law Society register',url:'https://www.lawsociety.org.nz/registry-lookup/'}];
+    if(m==='off') return ok({ok:false,reason:'off',message:"The lookup isn't switched on yet. Use the links to look the lawyer up yourself.",manual});
+    ai({purpose:'lawyer contact lookup',ok:m!=='no_search'});
+    if(m==='no_search'){ save(); return ok({ok:false,reason:'no_search',message:"Web search isn't switched on for the AI account. Use the links to look the lawyer up yourself.",manual}); }
+    const values=m==='none'?[]:m==='reception'?[{id:'v1',field:'phone',kind:'reception',value:'03 477 0000',source_url:'https://synthlaw.example/contact',source_title:'Contact us'}]
+      :[{id:'v1',field:'email',kind:'email',value:'pat@synthlaw.example',source_url:'https://synthlaw.example/people/pat',source_title:'Pat Solicitor'},{id:'v2',field:'phone',kind:'direct',value:'03 477 1234',source_url:'https://synthlaw.example/people/pat',source_title:'Pat Solicitor'}];
+    const l={id:((DB.offer_lawyer_lookups||=[]).length+1),offer_id:b.offer_id,firm:b.firm,person:b.person,model:'claude-haiku-5-5',ok:true,result:{values,manual,fallback:m==='reception'},created_by:me.email,created_at:now()}; DB.offer_lawyer_lookups.push(l); save();
+    return ok({ok:true,lookup_id:l.id,values,fallback:m==='reception',dropped:0,manual}); }
+  return res({error:'Bad request'},400); }
 window.supabase={createClient(){ return {
-  from:q, rpc, functions:{invoke:(n,o)=>{ logCall('fn:'+n+(o&&o.body&&o.body.mode?':'+o.body.mode:'')); if(n==='property-lookup') return councilInvoke(o); if(n==='offer-public') return offerInvoke(o); if(n==='repo-link') return repoLinkInvoke(o); if(n==='doc-prefill'&&o.body&&o.body.mode==='translate'){ const reqs=JSON.parse(localStorage.getItem('trReqs')||'[]'); reqs.push(o.body); localStorage.setItem('trReqs',JSON.stringify(reqs)); const m=localStorage.getItem('translateMode'); if(m==='off') return Promise.resolve({data:null,error:{message:'503',context:{json:async()=>({error:'not_set_up'})}}}); const src=o.body.sources; const rej=m==='rejectFirst'?[src[0]]:[]; let cutL=[]; let use=src.filter(x=>!rej.includes(x)); if(m==='cutOff'){ const h=src.length>1?Math.floor(src.length/2):0; cutL=src.slice(h); use=src.slice(0,h); } const resp={ok:true,model:o.body.kind==='screens'||o.body.kind==='guide'?'claude-sonnet-5-5':'claude-haiku-5-5',cut_off:m==='cutOff',translations:use.map(x=>({source:x,text:'<'+o.body.lang+'> '+x})),rejected:rej.map(x=>({source:x,reason:'number changed'})).concat(cutL.map(x=>({source:x,reason:'cut off'}))),usage:{input:10,output:10}}; const D=+localStorage.getItem('translateDelay')||0; return D?new Promise(r=>setTimeout(()=>r({data:resp,error:null}),D)):ok(resp); }
+  from:q, rpc, functions:{invoke:(n,o)=>{ logCall('fn:'+n+(o&&o.body&&o.body.mode?':'+o.body.mode:'')); if(n==='property-lookup') return councilInvoke(o); if(n==='offer-public') return offerInvoke(o); if(n==='offer-draft') return draftInvoke(o); if(n==='repo-link') return repoLinkInvoke(o); if(n==='doc-prefill'&&o.body&&o.body.mode==='translate'){ const reqs=JSON.parse(localStorage.getItem('trReqs')||'[]'); reqs.push(o.body); localStorage.setItem('trReqs',JSON.stringify(reqs)); const m=localStorage.getItem('translateMode'); if(m==='off') return Promise.resolve({data:null,error:{message:'503',context:{json:async()=>({error:'not_set_up'})}}}); const src=o.body.sources; const rej=m==='rejectFirst'?[src[0]]:[]; let cutL=[]; let use=src.filter(x=>!rej.includes(x)); if(m==='cutOff'){ const h=src.length>1?Math.floor(src.length/2):0; cutL=src.slice(h); use=src.slice(0,h); } const resp={ok:true,model:o.body.kind==='screens'||o.body.kind==='guide'?'claude-sonnet-5-5':'claude-haiku-5-5',cut_off:m==='cutOff',translations:use.map(x=>({source:x,text:'<'+o.body.lang+'> '+x})),rejected:rej.map(x=>({source:x,reason:'number changed'})).concat(cutL.map(x=>({source:x,reason:'cut off'}))),usage:{input:10,output:10}}; const D=+localStorage.getItem('translateDelay')||0; return D?new Promise(r=>setTimeout(()=>r({data:resp,error:null}),D)):ok(resp); }
     if(n==='doc-prefill'){ const mode=localStorage.getItem('prefillMode'); if(mode==='off') return Promise.resolve({data:null,error:{message:'503',context:{json:async()=>({error:'not_set_up'})}}}); return ok({ok:true,skipped:[],result:JSON.parse(localStorage.getItem('prefillResult'))}); }const a=JSON.parse(localStorage.getItem('inv')||'[]');a.push(n+':'+o.body.type);localStorage.setItem('inv',JSON.stringify(a));
     if(n==='notify'&&o.body.type==='form_signed'){ const fm=(DB.property_forms||[]).find(x=>x.id===o.body.form_id); if(fm&&fm.status==='signed'&&(fm.kind==='healthy_homes'||fm.countersigned_at)&&!fm.document_id&&fm.agreement_id===o.body.agreement_id){ const d={id:uid(),property_id:fm.property_id,kind:fm.kind==='healthy_homes'?'Healthy Homes checklist and statement':'Vendor Declaration',name:(fm.kind==='healthy_homes'?'Healthy-Homes-Checklist-and-Statement':'Vendor-Declaration')+'.pdf',path:'properties/'+fm.property_id+'/generated/'+fm.id+'.pdf',source:'generated',created_by:'system',created_at:now(),bucket:'private',folder:'agency'}; (DB.property_documents||=[]).push(d); fm.document_id=d.id; save(); } }
     return ok({ok:true});}},

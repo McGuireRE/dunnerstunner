@@ -245,3 +245,7 @@ PostgreSQL stand-in only; the live rollback run, with Tim's approval, comes befo
 it also serves the AI condition helper). doc-prefill is unchanged. Awaiting review. Tests:
 `offers.test.js`, `offers-core.test.js`, `offer-qr.test.js`, `offer-public-fn.test.js`; database: `offer-rollback.sql` (via
 `offer-rollback.js`).
+Phase 2 (drafting onto the REINZ blank) built 23 November 2026 on branch `offers-phase2`: migration 019 (tested in a rollback
+block on a local PostgreSQL stand-in only), edge function `offer-draft` (new; JWT on). doc-prefill and offer-public unchanged.
+Awaiting review. Tests: `offers-draft.test.js`, `draft-core.test.js`, `offer-draft-fn.test.js`; database: `offer-draft-rollback.sql`
+(via `offer-draft-rollback.js`). See `OFFERS-PLAN.md`, "Phase 2 detail".
