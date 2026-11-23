@@ -79,9 +79,15 @@ addresses and says "Page not found" for any other missing address). The shell lo
 packages.dunnerstunner.co.nz addresses, so the same file goes into `McGuireRE/portal` as `index.html` and `404.html`. Test:
 `portal-routes.test.js`. Both portal addresses (`https://packages.dunnerstunner.co.nz/portal/` and
 `https://portal.dunnerstunner.co.nz/`) were added to Supabase's allowed sign-in addresses on 24 November 2026.
-After the first review: back and forward never leave an in-person screen (the appointment, vendors' pads, signing together); a
-drawn, unsaved signature is never dropped without asking; a new agreement's address becomes its own once saved; read-only review
-keeps the menu.
+After the first review: back and forward never leave an in-person screen (the live appointment, signing a variation together, and a
+form once a vendor has started signing on its pad); a drawn, unsaved signature is never dropped without asking; a new agreement's
+address becomes its own once saved; read-only review keeps the menu. Caveat: this holds within the portal. If the page before was
+a separate page load (for example /onboarding opened in the same tab before the portal), Back leaves without asking unless
+something is drawn or typed (then the browser asks).
+
+Open points for Tim (by design for now): the in-person exits ("Save and close", "Leave without saving", "Stop signing here") take
+whoever taps them to agent pages. If Tim wants a vendor-proof appointment, a later option is an exit that needs his PIN, which fits
+the P3 lock design.
 
 - A small router in `app.js`: one table of address patterns to view functions. Opening a view sets its address
   with `history.pushState`; back and forward (`popstate`) open the view for that address; loading any address
