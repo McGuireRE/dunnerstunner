@@ -75,14 +75,15 @@ print('built', os.path.normpath(bout), len(bundle), 'bytes')
 # The shell. Its script and styles come from absolute packages.dunnerstunner.co.nz addresses, so the same file works at
 # /portal/ here, at any depth below it (a relative address would break at /portal/properties/<id>), and at the root of
 # portal.dunnerstunner.co.nz. It is the portal only on portal.dunnerstunner.co.nz or under /portal/; anywhere else (this
-# file is also the 404 page of packages.dunnerstunner.co.nz) it just says the page isn't there.
+# file is also the 404 page of packages.dunnerstunner.co.nz) it just says the page isn't there. Its raw title is "Page not found",
+# so a link preview of a missing address never says "Portal"; the portal title is set only once it knows it is the portal.
 shell = '''<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex, nofollow">
-<title>Portal · McGuire Real Estate</title>
+<title>Page not found</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;1,400&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
@@ -101,15 +102,17 @@ shell = '''<!doctype html>
   var host = location.hostname, path = location.pathname;
   var portal = host.indexOf('portal.') === 0 || /^\\/portal(\\/|$)/.test(path);
   if (!portal) {
-    document.title = 'Page not found';
     document.body.insertAdjacentHTML('beforeend', '<div class="shell-msg"><h1>Page not found</h1><p>There is no page at this address.</p><p><a href="/">Go to the home page</a></p></div>');
     return;
   }
   window.MRE_PORTAL = true;
+  document.title = 'Portal · McGuire Real Estate';
+  var failed = false;
+  var fail = function () { if (failed) return; failed = true; document.body.insertAdjacentHTML('beforeend', '<div class="shell-msg" id="shellFail"><h1>Something went wrong</h1><p>The portal could not load. Check your connection and try again.</p><p><a href="">Try again</a></p></div>'); };
   var src = ['https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js',
     'https://packages.dunnerstunner.co.nz/catalogue.js',
     'https://packages.dunnerstunner.co.nz/onboarding/portal.js'];
-  src.forEach(function (s) { var e = document.createElement('script'); e.src = s; e.async = false; document.body.appendChild(e); });
+  src.forEach(function (s) { var e = document.createElement('script'); e.src = s; e.async = false; e.onerror = fail; document.body.appendChild(e); });
 })();
 </script>
 </body>
