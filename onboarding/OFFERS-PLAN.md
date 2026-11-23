@@ -360,8 +360,12 @@ The foundational REINZ document is never edited, text or marks are only ever add
   Every earlier locked round still shows them; nothing locked is ever changed. The round's record lists what was lifted.
 - What each side does in a round: a side's first round (the vendors' Round 2) initials the foot of every page and every filled box and
   signs at its own signature block, as the purchasers did in Round 1. Every later round: initial each change not yet initialled by
-  them (the other side's changes, and their own if the other side's later change lifted their initials there), and sign again where they
-  signed before (the newer signature replaces the older on the working copy). The purchasers don't receipt the guides again.
+  them (the other side's changes, and their own if the other side's later change lifted their initials there; a Round 1 mark the
+  purchasers initialled on Tim's screen counts). Their earlier signature stands; a signer signs again only where a change lifted their
+  signature. Tim's setting `resign_every_round` (off by default; `agent_offer_negotiation_setting`) makes everyone sign every round
+  instead (the newer signature replaces the older on the working copy). The signers of a side's later round are the same people as its
+  newest locked round, in the same order; if the owners on the property have changed since, presenting is refused and a fresh copy is
+  needed. The purchasers don't receipt the guides again.
 - Locking: when the last signer finishes, the offer-sign edge function makes the round from the draft and every round's layers (the
   negotiation core, `src/nego-core.js`), with the round's record on pages of its own at the end (who signed, how, ID type or code check,
   times, device, network fingerprint, each change with who and when, what was lifted, how much is still outstanding, the fingerprint of the
@@ -378,9 +382,11 @@ The foundational REINZ document is never edited, text or marks are only ever add
 - Lawyers' pack: one button on the offer page. One zip holding every locked round of every document, the agreed copy if there is one,
   and Timeline.html: every event in order, each with its fingerprint and the one before it, checked, in plain words, with no contact
   details. Each file inside is the locked copy byte for byte (checked against its fingerprint first). Agent only.
-- Withdrawal: "A side has withdrawn" on the offer page: the purchasers (their offer) or the vendors (their counteroffer), the time and a
-  note. The offer is marked withdrawn and every signing in progress stops, links included. Phase 1's own "Withdrawn" or "Lapsed" now
-  stops them too. Neither is possible once the agreement is made.
+- Withdrawal: "A side has withdrawn" on the offer page: the purchasers withdraw their offer (status "withdrawn") or the vendors decline it
+  or withdraw their counteroffer (status "declined"), with the time and a note; the side is recorded. Every signing in progress stops with
+  its own status "withdrawn" (distinct from Tim cancelling), links included, and the open document is closed as history. Phase 1's own
+  "Withdrawn" or "Lapsed" does the same. Marking the offer current again doesn't re-open anything: presenting needs a fresh copy (correct,
+  re-draft, Round 1 of a new document). None of this is possible once the agreement is made.
 
 Migration 021 (`021_offer_negotiation.sql`), additive: offer_documents; offer_agreements; columns on offer_signings (round_no, side,
 document_id, base_round_id), offer_signers (person_id) and offer_rounds (document_id, doc_round, side, base_round_id, changes, lifted,
@@ -403,9 +409,43 @@ by its relative path (`deno check` passes).
 Checked on the real 40-page pack locally (nothing copied): the vendors' places for their first round, beside one, two or three
 purchasers' Round 1: 54 each, none over printed words or over a purchaser's place, nothing blocking.
 
+Review fixes (24 November 2026, after the first review):
+1. A purchaser's Round 1 initials beside a mark Tim re-approved (phase 3, `why: 'mark'`) count as their initials for that change, in
+   "nothing outstanding" and in what the next round asks for. (nego-core.test.js: a Round 1 mark, the vendors accept, the agreement forms.)
+2. The privacy check on typed words (database `offer_private_hit`, and phase 2's `DRAFT.holdsOwn`) also covers the vendors on the
+   property's agency agreements (`agreement_people`), makes every kind of space a plain space, full-width digits ordinary ones, takes / and
+   _ between digits, and spaces around an @. The browser refuses any phone number or email address in typed words straight away, with a
+   plain message, before anything is sent (it never learns the parties' own details). (Rollback block; draft-core.test.js; offers-nego.test.js.)
+3. A change that reopens someone who had finished emails them (by link; their link still works) and Tim. In person, they are with Tim.
+   (offer-nego-fn.test.js.)
+4. The agreement date is from the New Zealand day acceptance was communicated to today, and is filled in with that day. (Rollback block;
+   offers-nego.test.js.)
+5. A side's later round signs with the same people as its newest locked round, in order; changed owners on the property refuse it,
+   with a message to start a fresh copy; reordered owners don't matter. (Rollback block.)
+6. Integrity of the agreed copy: pdf-lib can't write an incremental update reliably, so the fallback was taken. Every round from Round 2
+   on keeps its title and drawing version (`nego-draw-1`) in its execution record; the agreed copy's record page and `offer_agreements`
+   (`round_sha256`, `draw_version`) name the round it was drawn from, and the database refuses an agreed copy whose record names any other
+   round. Tests show the drawing is deterministic: Round 2 drawn again from its stored layers and record reproduces its fingerprint
+   exactly (nego-core.test.js and offer-nego-fn.test.js).
+7. Once agreed, `agent_offer_correct` (018, replaced in 021, otherwise unchanged) refuses. `offer_agreements.terms` holds the agreed terms
+   for later phases: price, settlement, conditions, KiwiSaver and where the deposit is paid, the drafted values (price, deposit,
+   settlement, each condition and its date), the deposit as printed, the further terms, and every change in order. (Rollback block;
+   offers-nego.test.js.)
+8. Typed words are measured with Helvetica's own widths (the font they are drawn in). (nego-core.test.js.)
+9. The database insists that the initials for a change are on its page, within about 60 points of it, both with the change and when
+   presenting. (Rollback block.)
+10. A change over the blank's date place is refused. (Rollback block.)
+11. No date place on the blank: no agreement (no fallback position). (Rollback block; nego-core.test.js; offer-nego-fn.test.js.)
+12. The agreed copy's record says the date and the record page are the only things added; withdrawal has its own status; the lawyers'
+    timeline shows "Tim McGuire" for his sign-in; changes from a link are limited to 60 an hour per network (`offer_hits` kind
+    'sign_change', widened) and 30 an hour per signer; `offer_sign_reviews` keeps `reviewed_by` for Tim's re-approvals only, with `kind`
+    and `changed_by` for changes.
+
+Decisions from the coordinator: presenting defaults to in person; the vendors declining is "declined"; signing again only where lifted,
+with the setting for every round; an offer marked current again after a withdrawal needs a fresh copy.
+
 Choices made while Tim was asleep (each easy to change):
-1. A countering side signs again every round at its signature block; the newer signature replaces the older on the working copy (both
-   stay on their own locked rounds). The alternative is that only changes are initialled and the first signature stands.
+1. (Decided) A side signs again only where its signature was lifted; Tim's setting can make it every round.
 2. Lifting reaches the box a change is in and 60 points either side on its line. A change elsewhere lifts nothing.
 3. The vendors' first round initials the foot of every page and every filled box, as the purchasers did (Tim's rule "each signer").
    That is 54 places each on the real pack.
@@ -413,18 +453,18 @@ Choices made while Tim was asleep (each easy to change):
 5. Changes can be made from a link as well as on Tim's device (phase 3 kept marking to Tim's screen). Tim still looks at every round
    before it goes anywhere.
 6. A change can't be undone once saved (it is a record); strike it or reinstate it instead, as on paper.
-7. Present defaults to "by link"; Tim can choose in person.
-8. "Withdrawn" is the offer's status whichever side withdrew; the side is recorded on the timeline.
+7. (Decided) Present defaults to in person; Tim can choose a link.
+8. (Decided) The purchasers withdrawing is "withdrawn"; the vendors declining or withdrawing their counteroffer is "declined".
 9. The agreed copy carries the date and a record page; it isn't emailed to anyone yet (phase 6's roadmap emails).
 10. The lawyers' pack is a zip of the original files rather than one merged PDF, so each round inside is exactly the locked copy.
 11. A round's PDF holds only its own record; earlier rounds' records are in their own files (and listed by fingerprint).
 
 Questions for Tim:
-- Choice 1: should the countering side sign again each round, or only initial the changes after their first signature?
+- Signing again: by default a side signs again only where a change lifted its signature, otherwise its first signature stands and it
+  initials the changes. Is that right, or should everyone sign every round (the setting)?
 - Choice 3: do the vendors initial every page foot and every filled box in their first round, or only sign and initial the changes?
 - Should the vendors be able to make changes from their own link, or only with you in person (choice 5)?
 - Is 60 points along the line the right reach for lifting the other side's initials (choice 2)?
-- When the vendors decline outright (no counter), should that be its own status ("declined") rather than "withdrawn"?
 - Should both sides get a copy of each locked round, and of the agreed copy, by email (and to the lawyers)?
 - Your solicitor confirms the method (phases 3 and 4) before first live use.
 
@@ -434,7 +474,8 @@ Deploy steps (phase 4), after review and with Tim's approval, after phases 2 and
 2. Push, then deploy `offer-sign` pinned to that commit, JWT verification OFF.
 3. A test negotiation with Tim's own addresses as vendor and purchaser: Round 1, a counter, an acceptance, the agreed copy, the pack.
 
-Known limits: lifting and initials are placed by shape, so a change drawn across a whole page lifts everything of the other side's on
+Known limits: the agreed copy is drawn again from Round N's layers rather than appended to Round N's file; determinism is tested, but a
+future pdf-lib upgrade must keep the drawing version's output byte for byte (or the version string changes). Lifting and initials are placed by shape, so a change drawn across a whole page lifts everything of the other side's on
 it (as on paper). The working copy on screen draws ink as an overlay of images, so very small screens show initials small. Tested with a
 mouse on a phone-sized screen, not a real phone or stylus. The agreed copy isn't sealed (see phase 3's question).
 

@@ -283,4 +283,8 @@ agreements/<agreement id>/signatures/... (vendors may upload their own signature
   `agent_offer_layers(offer, document)`, `agent_document_close(offer, reason)`, `agent_negotiation_withdraw(offer, side, at, note)`;
   `agent_offer_status` now stops signings in progress. Service role (offer-sign): `offer_sign_change`, `offer_agreement_material`,
   `offer_agreement_lock`; `offer_round_material` and `offer_round_lock` serve every round. Vendors: no policy and no agent function.
-
+- After review: `offer_signings.status` may be 'withdrawn' (a side withdrew or declined). `offer_sign_reviews` gains `kind` (review or
+  change) and `changed_by`; `reviewed_by` is for Tim's re-approvals only. `offer_hits.kind` may be 'sign_change'. `offer_settings` gains
+  `resign_every_round` (default false; `agent_offer_negotiation_setting`). `offer_agreements` gains `round_sha256`, `draw_version` and
+  `terms` (the agreed terms for later phases). `agent_offer_correct` refuses once agreed. `offer_private_hit` also checks
+  `agreement_people`. Withdrawing, declining or lapsing closes the open document.
