@@ -738,6 +738,8 @@ body.pnav-on .toast { bottom: calc(150px + env(safe-area-inset-bottom, 0px)); }
 body.pup-on main { padding-top: 10px; }
 body.portal a.btn { display: inline-block; text-decoration: none; text-align: center; }
 body.portal .stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.home-tile.soon { cursor: default; opacity: .72; border-style: dashed; }
+.home-tile.soon:hover { transform: none; border-color: var(--line); }
 .p-short { display: flex; flex-wrap: wrap; gap: 8px; }
 .p-short a { display: inline-block; border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 999px; padding: 8px 14px; font-weight: 600; font-size: 15px; text-decoration: none; }
 /* old "back to" buttons: the up link replaces them in the portal */

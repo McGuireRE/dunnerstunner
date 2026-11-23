@@ -2178,7 +2178,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   $('#navHome').addEventListener('click', () => navGo(viewAgentHome));
   $('#navDash').addEventListener('click', () => navGo(viewAgentDashboard));
   $('#navTr').addEventListener('click', () => { if (APP_TRANSLATION) navGo(viewTranslations); });
-  $$('.brand img').forEach(i => i.addEventListener('click', () => { if (IS_AGENT) { if (PORTAL) portalNav(''); else navGo(viewAgentHome); } }));
+  $$('.brand img').forEach(i => i.addEventListener('click', () => { if (IS_AGENT) { if (PORTAL) { if (!portalInPerson()) portalNav(''); } else navGo(viewAgentHome); } }));   // in person the logo does nothing: a vendor may be holding the tablet
 
   const HOME_TILES = `<button class="home-tile" type="button" id="homeBegin"><span class="kick">After an appraisal</span><span class="ttl">Let's begin</span><span class="txt">Set up their appraisal page. They answer a few questions, you send back an updated plan, and they're ready to sign.</span><span class="go">Start an appraisal page →</span></button>
         <button class="home-tile" type="button" id="homeInspect"><span class="kick">At the property</span><span class="ttl">Inspect a property</span><span class="txt">Walk round with your phone and note the property facts and the Vendor Declaration answers. Only the address is needed.</span><span class="go">Start an inspection →</span></button>
@@ -2403,6 +2403,9 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       const fresh = await must(sb.from('agreement_people').select('*').eq('agreement_id', T.id).order('position'));
       T.people = fresh.length ? fresh : [{ legal_name: '', pref_name: '', email: '', phone: '' }];
       T.ag = Object.assign(T.ag, await must(sb.from('agreements').select('id,ref,status,legal,sent_at,property_id').eq('id', T.id).single()));
+      // the portal: once the agreement has an id its address stops being a "new" one at once, so Back, Forward or a reload
+      // can never open a blank and make a second draft
+      if (PORTAL && okId(T.ag.property_id) && isCreation(CUR) && portalPath() === CUR) setAddr(`properties/${T.ag.property_id}/agreement/${T.id}/edit${T.page ? '/' + (T.page + 1) : ''}`, 'replace');
       return true;
     } catch (e) { return false; }
   }
@@ -2438,13 +2441,14 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
 
   function tShow(p) {
     T.page = p; T.pads = {};
-    if (PORTAL) { const pid = T.ag.property_id; portalAt(T.id ? (pid ? `properties/${pid}/agreement/${T.id}/edit${p ? '/' + (p + 1) : ''}` : null) : pid ? `properties/${pid}/agreement/new` : 'processes/agreement'); }
+    if (PORTAL) { INPERSON_VIEW = !T.locked; const pid = T.ag.property_id; portalAt(T.id ? (pid ? `properties/${pid}/agreement/${T.id}/edit${p ? '/' + (p + 1) : ''}` : null) : pid ? `properties/${pid}/agreement/new` : 'processes/agreement'); }
     header(TPAGES[p], `Page ${p + 1} of 3`, (p + 1) / 3 * 100);
     const tabs = `<div class="ttabs">${TPAGES.map((t, i) => `<button type="button" class="ttab ${i === p ? 'on' : ''}" data-tp="${i}"><span class="n">${i + 1}</span>${t}</button>`).join('')}</div>`;
     const flag = T.locked ? `Review only: ${T.ag.status === 'signed' || T.ag.status === 'countersigned' ? 'signed, so the terms can\'t change here' : T.people.some(x => x.signed_at) ? 'someone has signed, so the terms can\'t change here' : 'this agreement has ended'}. Your own notes and the owner's contact details can still be updated on the agreement page.` : ['Fill in before the appointment, then check it together', 'Talk these through together', 'Go through this together, then sign'][p];
     main().innerHTML = `<div class="view-pad"><span class="agent-flag">${flag}</span>${tabs}${[tPage1, tPage2, tPage3][p]()}<div class="err"></div></div>`;
     [tBind1, tBind2, tBind3][p]();
     tReveals(); impBadges();
+    if (PORTAL && !T.locked) tPortalExits(p);
     if (T.locked) {
       $$('input, select, textarea, button', main()).forEach(el => { if (el.closest('.ttabs') || el.hasAttribute('data-pdf') || el.hasAttribute('data-tp')) return; if (el.tagName === 'BUTTON') el.hidden = true; else el.disabled = true; });
       $$('.ttab', main()).forEach(b => b.disabled = false);
@@ -2465,6 +2469,22 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       onNext = async () => { tCollect(); if (!(await tSave())) return; toast('Saved'); viewAgentDetail(T.id); };
     }
     top();
+  }
+  // The portal hides the menu through the live appointment, so every page has its own way out: page 1 "Save and close" (the
+  // bar, left), page 3 "Save and close" (the bar, right), and on page 2 this one at the top. Nothing saved yet: leave without saving.
+  function tPortalExits(p) {
+    const pad = $('.view-pad', main()); if (!pad) return;
+    const bar = document.createElement('div'); bar.className = 'toolbar no-print t-exits';
+    if (p === 1) bar.insertAdjacentHTML('beforeend', '<button class="btn ghost" type="button" id="tSaveClose">Save and close</button>');
+    if (!T.id) bar.insertAdjacentHTML('beforeend', '<button class="btn link" type="button" id="tLeave">Leave without saving</button>');
+    if (!bar.children.length) return;
+    const flag = $('.agent-flag', pad); if (flag) flag.after(bar); else pad.prepend(bar);
+    const sc = $('#tSaveClose'); if (sc) sc.addEventListener('click', async () => { tCollect(); if (!(await tSave())) return; toast('Saved'); viewAgentDetail(T.id); });
+    const lv = $('#tLeave'); if (lv) lv.addEventListener('click', () => {
+      if (!confirm('Leave this new agreement without saving it? Nothing typed here is kept.')) return;
+      const to = okId(T.ag.property_id) ? `properties/${T.ag.property_id}` : 'processes';
+      JDIRTY = false; T = null; try { history.pushState({ portal: to }, '', PORTAL_BASE + to); } catch (_) { } portalOpen(to);
+    });
   }
   function tReveals() {
     $$('[data-treveal]').forEach(box => {
@@ -6580,7 +6600,6 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     R('processes/inspection', 'viewInspectStart', () => RAW.viewInspectStart()),
     R('processes/offer', 'viewOfferPick', () => RAW.viewOfferPick()),
     R('processes/forms', 'forms', () => viewPortalForms()),
-    R('processes/assessment', 'assessment', () => viewPortalAssess()),
     R('translations', 'viewTranslations', () => APP_TRANSLATION ? RAW.viewTranslations() : viewPortalMissing()),
   ];
   // open the page for an address (after sign-in, a typed or saved address, back and forward, the menu and links)
@@ -6595,7 +6614,9 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   }
   // leaving a page: the appointment saves what's typed (as the old top bar did); inspection answers are saved as they're tapped;
   // anything else typed and not saved asks first (the same warning vendors see)
+  const SIG_UNSAVED = 'A signature has been drawn here but not saved. If you leave this page it will be lost. Leave anyway?';
   async function leaveOk() {
+    if ($('#main .sig-wrap .unsaved') && !confirm(SIG_UNSAVED)) return false;
     if (T && !T.locked && $('.ttabs') && T.ag && ($('#tAddr') ? $('#tAddr').value.trim() : T.ag.address)) { try { tCollect(); if (await tSave()) JDIRTY = false; } catch (_) { } }
     if ($('#main .insp')) { try { inspFlush(); } catch (_) { } JDIRTY = false; }
     if (JDIRTY && !confirm(trs('You have typed something on this page that is not saved yet. If you go to another page it will be lost. Go anyway?'))) return false;
@@ -6624,7 +6645,10 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   }
   // in person: a signing pad, or a page done together with the vendors, is on screen. A vendor may be holding the tablet, so
   // the menu and the up link go away until it is finished.
-  const portalInPerson = () => INPERSON_VIEW || !!$('#main .sig-wrap') || PITCH_ON || !!($('#journey') && !$('#journey').hidden);
+  // Vendors' pads (the appointment, a form signed on this device, a variation signed together) are in person; Tim's own pads
+  // (countersigning, signing a variation to issue it) are not, but a drawn and unsaved signature is never dropped without asking.
+  const VENDOR_PADS = '#main canvas[id^="pad_"], #main canvas[id^="fpad_"], #main canvas[data-vcv], #main #sig0, #main #vfSig, #main #vSigV';
+  const portalInPerson = () => INPERSON_VIEW || !!$(VENDOR_PADS) || PITCH_ON || !!($('#journey') && !$('#journey').hidden);
   function portalChrome() {
     if (!PORTAL) return;
     const on = !!IS_AGENT && !!SESSION, inp = on && portalInPerson();
@@ -6656,15 +6680,18 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     window.addEventListener('popstate', async () => {
       if (!IS_AGENT || !SESSION) return;
       const path = portalPath(); if (path === CUR) return;
+      // in person (a vendor may be holding the tablet): back and forward never leave the page. Its own buttons are the way out.
+      if (portalInPerson()) { try { history.pushState({ portal: CUR }, '', PORTAL_BASE + CUR); } catch (_) { } toast('Use the buttons on this page to finish or to save and close.'); return; }
       if (!(await leaveOk())) { try { history.pushState({ portal: CUR }, '', PORTAL_BASE + CUR); } catch (_) { } return; }   // stay put
       portalOpen(path);
     });
     let q = false; const later = () => { if (q) return; q = true; Promise.resolve().then(() => { q = false; portalChrome(); }); };
     new MutationObserver(later).observe(main(), { childList: true, subtree: true });
     new MutationObserver(later).observe($('#actions'), { attributes: true, attributeFilter: ['hidden'] });
+    ['pointerdown', 'keydown', 'click'].forEach(t => document.addEventListener(t, e => { if (e.isTrusted) ROUTE_OPENING = null; }, true));   // a page Tim moves to himself is a new history entry, even while another is loading
     try { history.scrollRestoration = 'manual'; } catch (_) { }   // every page starts at the top, as it does when opened from a button
     // leaving the portal altogether (reload, closing the tab, back to a page opened separately): the browser's own question
-    window.addEventListener('beforeunload', e => { if (IS_AGENT && JDIRTY) { e.preventDefault(); e.returnValue = ''; } });
+    window.addEventListener('beforeunload', e => { if (IS_AGENT && (JDIRTY || $('#main .sig-wrap .unsaved'))) { e.preventDefault(); e.returnValue = ''; } });
   }
   // after sign-in: the address on screen, or the one asked for before the sign-in link, or an unfinished inspection, or Home
   async function portalBoot() {
@@ -6706,10 +6733,11 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <div class="home-tiles">
         ${HOME_TILES}
         <button class="home-tile" type="button" id="homeForms"><span class="kick">After signing</span><span class="ttl">Forms</span><span class="txt">The Vendor Declaration and the Healthy Homes checklist for each property: fill in, countersign and file.</span><span class="go">Choose the form →</span></button>
-        <button class="home-tile" type="button" id="homeAssess"><span class="kick">Before you visit</span><span class="ttl">Property assessment</span><span class="txt">Look up a property on the council's public records: rating valuation, title, zone and hazards, each with its source, for you to tick.</span><span class="go">Choose the property →</span></button>
+        <div class="home-tile soon" id="soonPrep" aria-disabled="true"><span class="kick">Coming soon</span><span class="ttl">Improvements and preparation assessment</span><span class="txt">What to improve and prepare before selling. Not built yet.</span></div>
+        <div class="home-tile soon" id="soonDesk" aria-disabled="true"><span class="kick">Coming soon</span><span class="ttl">Desktop analysis</span><span class="txt">A lighter look from the information a vendor supplies, less in depth than a market value opinion. Not built yet.</span></div>
       </div>
     </div>`;
-    [['homeBegin', 'processes/appraisal'], ['homeInspect', 'processes/inspection'], ['homeAgree', 'processes/agreement'], ['homeOffer', 'processes/offer'], ['homeForms', 'processes/forms'], ['homeAssess', 'processes/assessment']]
+    [['homeBegin', 'processes/appraisal'], ['homeInspect', 'processes/inspection'], ['homeAgree', 'processes/agreement'], ['homeOffer', 'processes/offer'], ['homeForms', 'processes/forms']]
       .forEach(([id, p]) => $('#' + id).addEventListener('click', () => portalNav(p)));
     top();
   }
@@ -6727,19 +6755,6 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     main().innerHTML = `<div class="view-pad" id="pForms"><h1>Forms</h1>
       <p class="small">Vendors start their Vendor Declaration, and ask for the Healthy Homes checklist, from their own page after signing. Each one shows here and on its property.</p>
       ${rows.length ? `<div class="card tight"><ul class="needs">${rows.map(({ f, pid }) => `<li><div class="what"><strong>${esc(FORM_LABEL[f.kind] || 'Form')}</strong><span class="small"><span translate="no">${esc(addr(pid))}</span> · ${esc(st(f))}</span></div><span class="needbtns">${plink(`properties/${pid}/forms/${f.id}`, 'Open', 'btn ghost')}</span></li>`).join('')}</ul></div>` : '<div class="card note tight"><p class="small" style="margin:0">No forms yet. They appear once vendors have signed and started them.</p></div>'}
-    </div>`;
-    top();
-  }
-  // Processes, Property assessment: choose the property, then its Public records card
-  async function viewPortalAssess() {
-    header('Property assessment', '', 0); actions(false);
-    main().innerHTML = '<div class="loading">Loading...</div>';
-    let props = []; try { props = (await must(sb.from('properties').select('id,address,stage,updated_at').order('updated_at', { ascending: false }))) || []; } catch (_) { }
-    if (!$('#main .loading')) return;
-    props = props.filter(p => okId(p.id) && !['withdrawn', 'settled'].includes(p.stage));
-    main().innerHTML = `<div class="view-pad" id="pAssess"><h1>Property assessment</h1>
-      <p class="small">Choose the property to look it up on the council's public records. For a new address, start with ${plink('processes/inspection', 'Inspect a property')} or ${plink('processes/appraisal', 'Let\'s begin')}: both look the address up too.</p>
-      ${props.length ? `<div class="card tight"><ul class="needs">${props.map(p => `<li><div class="what"><strong translate="no">${esc(p.address || '(no address yet)')}</strong></div><span class="needbtns">${plink(`properties/${p.id}/records`, 'Public records', 'btn ghost')}</span></li>`).join('')}</ul></div>` : '<div class="card note tight"><p class="small" style="margin:0">No properties yet.</p></div>'}
     </div>`;
     top();
   }
