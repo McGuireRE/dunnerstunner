@@ -12267,7 +12267,11 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const stale = g.status === 'replaced' || s.void_at ? 'This version has been replaced.' : (d.number !== Math.max(...allD.map(x => x.number)) || JSON.stringify(drCanon(o.details)) !== JSON.stringify(drCanon(d.details))) ? 'The offer has changed since this was released. Re-draft and release it again.' : s.finished_at ? `${s.name} has finished signing.` : ['complete', 'locked'].includes(g.status) ? 'Everyone has signed.' : ['cancelled', 'withdrawn'].includes(g.status) ? 'This round was stopped. Any links sent no longer work.' : null;
     const ua = navigator.userAgent, P_ = { p_signer: signerId }, RN = g.round_no || 1;
     // from Round 2 on: the earlier rounds of the document (the working copy), the parties as on the agreement, and everyone on this side
-    const R2x = RN > 1 ? { layers: ((await sgRpc('agent_offer_layers', { p_offer: g.offer_id, p_document: g.document_id })).layers || []).filter(L => L.doc_round < RN), parties: g.side === 'vendor' ? ngParties(o.details) : null,
+    // the parties' own contact details, for the check on typed words on this screen only (never sent to a signer's own screen)
+    const ownList = async () => { const pp = (await ofSafe(sb.from('property_people').select('email,phone').eq('property_id', g.property_id))) || [], ags = (await ofSafe(sb.from('agreements').select('id').eq('property_id', g.property_id))) || [];
+      const ap = ags.length ? ((await ofSafe(sb.from('agreement_people').select('email,phone').in('agreement_id', ags.map(x => x.id)))) || []) : [], dt = o.details || {};
+      return DR.ownContacts([{ who: 'a purchaser', email: dt.email, phone: dt.phone }].concat((dt.purchasers || []).map(q => ({ who: 'a purchaser', email: q.email, phone: q.phone })), pp.concat(ap).map(x => ({ who: 'a vendor', email: x.email, phone: x.phone })))); };
+    const R2x = RN > 1 ? { own: await ownList(), layers: ((await sgRpc('agent_offer_layers', { p_offer: g.offer_id, p_document: g.document_id })).layers || []).filter(L => L.doc_round < RN), parties: g.side === 'vendor' ? ngParties(o.details) : null,
       sideSigners: ((await ofSafe(sb.from('offer_signers').select(SG_COLS).eq('signing_id', sid).order('position'))) || []).filter(x => !x.void_at).map(x => ({ position: x.position, name: x.name })),
       side_places: (g.places || []).concat((rvs || []).flatMap(r => r.places || [])) } : {};
     signFlow({ mode: 'person', address: p.address, name: s.name, position: s.position, places: (g.places || []).concat((rvs || []).flatMap(r => r.places || [])).filter(x => x.signer === s.position), taps: new Set((taps || []).map(t => t.place_id)),
@@ -12331,8 +12335,9 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       let m = F.marking === 'reinstate' ? (F.pick ? { kind: 'reinstate', page: F.page, target: F.pick.id, geometry: { x: Math.round(SG.markRect(F.pick).x * 10) / 10, y: Math.round((SG.markRect(F.pick).y + SG.markRect(F.pick).h + 2) * 10) / 10 } } : null) : F.draft;
       if (!m) return (e.textContent = 'Change the page first.');
       if (m.kind === 'insert') { const t = ($('#ngInsText') || {}).value || ''; if (!t.trim()) return (e.textContent = 'Type the words to add.');
-        // straight away, before anything is sent: no phone number or email address goes on the agreement (the database checks the parties' own too)
-        const pt = DR.plainText(t); if (/[^\s@]+@[^\s@]+\.[^\s@]+/.test(pt) || DR.phoneRuns(pt).some(x => x.length >= 7)) return (e.textContent = 'Phone numbers and email addresses can\'t be typed onto the agreement here. Only the lawyers\' details go on it, and Tim adds those.');
+        // on Tim's own screen, where the parties' own contact details are loaded, his check straight away (phase 2's rule); dates and prices
+        // are fine. A link signer's screen never has those details: the database checks (offer_private_hit) and its refusal is shown plainly.
+        const who = ctx.own ? DR.holdsOwn(t, ctx.own) : ''; if (who) return (e.textContent = `Those words hold ${who}'s own phone or email, so they can't go on the agreement. Only the lawyers' details go on it.`);
         m = Object.assign({}, m, { geometry: Object.assign({}, m.geometry, { text: t.trim().replace(/\s+/g, ' ') }) }); }
       const pw = ctx.pages[F.page - 1]; if (m.kind !== 'insert' && !SG.markOk(Object.assign({}, m, { target: m.target || (m.kind === 'reinstate' ? 'x' : null) }), { w: pw[0], h: pw[1] })) return (e.textContent = 'That change doesn\'t sit on the page. Try again.');
       const btn = $('#sgMarkSave'); btn.disabled = true;

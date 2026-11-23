@@ -1008,7 +1008,7 @@ async function sgAgree(b,me){ const c=agreementCheck(b.offer_id,b.accepted_at,b.
   const pl=d.placed||[], docSigns=ORN().filter(r=>r.document_id===c.doc.id).map(r=>r.signing_id), dep=(map.places||[]).find(x=>x.id==='deposit');
   const terms={price:d.details.price,settlement:d.details.settlement,conditions:d.details.conditions,kiwisaver:d.details.kiwisaver,lawyer_approval:d.details.lawyer_approval,
     as_drafted:Object.fromEntries(pl.filter(x=>['price','deposit','settlement','purchaser'].includes(x.id)||/^[cd]_/.test(x.id)).map(x=>[x.id,x.text!=null?x.text:x.value!=null?x.value:null])),deposit_printed:dep?dep.printed||null:null,
-    deposit_paid_to:d.details.kiwisaver?"the vendor's lawyer's trust account (clause 21.3)":'NZ Real Estate Trust',further_terms:(pl.find(x=>x.id==='further_terms')||{}).terms||null,
+    further_terms:(pl.find(x=>x.id==='further_terms')||{}).terms||null,
     changes:OSM().filter(m=>docSigns.includes(m.signing_id)).map(m=>{ const g=OSG().find(x=>x.id===m.signing_id); return {round:g.round_no,side:g.side,kind:m.kind,page:m.page,text:m.geometry.text||null,by:m.by_name,at:m.at}; }).sort((x,y)=>x.round-y.round||(x.at<y.at?-1:1)),
     note:'Where a change made in the negotiation alters a term above, the change governs. Read with the signed rounds.'};
   const ev=OE()[OE().length-1]; OAG().push({id:uid(),offer_id:o.id,property_id:o.property_id,document_id:c.doc.id,round_id:c.last.id,path,sha256:sha,size_bytes:blob.size,agreement_date:c.iso,date_text:c.date_text,accepted_at:b.accepted_at,record,chain_last:ev.hash,confirmed_by:me.email,locked_at:now(),round_sha256:c.last.sha256,draw_version:NG.DRAW_VERSION,terms});

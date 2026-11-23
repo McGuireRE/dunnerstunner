@@ -414,8 +414,9 @@ Review fixes (24 November 2026, after the first review):
    "nothing outstanding" and in what the next round asks for. (nego-core.test.js: a Round 1 mark, the vendors accept, the agreement forms.)
 2. The privacy check on typed words (database `offer_private_hit`, and phase 2's `DRAFT.holdsOwn`) also covers the vendors on the
    property's agency agreements (`agreement_people`), makes every kind of space a plain space, full-width digits ordinary ones, takes / and
-   _ between digits, and spaces around an @. The browser refuses any phone number or email address in typed words straight away, with a
-   plain message, before anything is sent (it never learns the parties' own details). (Rollback block; draft-core.test.js; offers-nego.test.js.)
+   _ between digits, and spaces around an @. On Tim's own screen, where the parties' details are loaded, the browser applies the same check straight away (only the
+   parties' own phones and emails; dates and prices such as "20/12/2026", "2027-03-01" or "$1 250 000" are fine). A link signer's screen
+   never has those details, so it doesn't pre-check; the database refuses and its message is shown plainly. (After the second review.) (Rollback block; draft-core.test.js; offers-nego.test.js.)
 3. A change that reopens someone who had finished emails them (by link; their link still works) and Tim. In person, they are with Tim.
    (offer-nego-fn.test.js.)
 4. The agreement date is from the New Zealand day acceptance was communicated to today, and is filled in with that day. (Rollback block;
@@ -428,7 +429,7 @@ Review fixes (24 November 2026, after the first review):
    round. Tests show the drawing is deterministic: Round 2 drawn again from its stored layers and record reproduces its fingerprint
    exactly (nego-core.test.js and offer-nego-fn.test.js).
 7. Once agreed, `agent_offer_correct` (018, replaced in 021, otherwise unchanged) refuses. `offer_agreements.terms` holds the agreed terms
-   for later phases: price, settlement, conditions, KiwiSaver and where the deposit is paid, the drafted values (price, deposit,
+   for later phases: price, settlement, conditions, the KiwiSaver answer as given, the drafted values (price, deposit,
    settlement, each condition and its date), the deposit as printed, the further terms, and every change in order. (Rollback block;
    offers-nego.test.js.)
 8. Typed words are measured with Helvetica's own widths (the font they are drawn in). (nego-core.test.js.)

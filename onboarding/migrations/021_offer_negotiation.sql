@@ -801,13 +801,12 @@ begin
 end $$;
 
 -- the agreed terms, kept with the agreement for later phases (dates, reminders, roadmap emails) to read from here: the offer as drafted
--- (price, settlement, conditions with their dates, the deposit as printed and where it is paid) and every change made in the negotiation,
+-- (price, settlement, conditions with their dates, the deposit as printed on the blank, KiwiSaver as the buyer gave it) and every change made,
 -- in order. Where a change alters a term, the change governs: it is on the signed rounds.
 create or replace function public.offer_agreed_terms(p_document uuid) returns jsonb language sql stable security definer set search_path = public as $$
   select jsonb_build_object('price', d.details->'price', 'settlement', d.details->'settlement', 'conditions', d.details->'conditions', 'kiwisaver', d.details->'kiwisaver', 'lawyer_approval', d.details->'lawyer_approval',
     'as_drafted', coalesce((select jsonb_object_agg(x->>'id', coalesce(x->'text', x->'value')) from jsonb_array_elements(d.placed) x where x->>'id' in ('price', 'deposit', 'settlement', 'purchaser') or x->>'id' ~ '^[cd]_'), '{}'::jsonb),
     'deposit_printed', (select e->>'printed' from public.offer_blank_maps bm, jsonb_array_elements(bm.places) e where bm.id = d.map_id and e->>'id' = 'deposit' limit 1),
-    'deposit_paid_to', case when (d.details->>'kiwisaver')::boolean then 'the vendor''s lawyer''s trust account (clause 21.3)' else 'NZ Real Estate Trust' end,
     'further_terms', (select x->'terms' from jsonb_array_elements(d.placed) x where x->>'id' = 'further_terms' limit 1),
     'changes', coalesce((select jsonb_agg(jsonb_build_object('round', g.round_no, 'side', g.side, 'kind', m.kind, 'page', m.page, 'text', m.geometry->>'text', 'by', m.by_name, 'at', m.at) order by g.round_no, m.at, m.id)
       from public.offer_sign_marks m join public.offer_signings g on g.id = m.signing_id where g.id in (select r.signing_id from public.offer_rounds r where r.document_id = p_document)), '[]'::jsonb),

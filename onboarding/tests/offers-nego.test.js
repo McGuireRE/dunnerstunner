@@ -187,18 +187,28 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   await q.click('[data-tool="insert"]'); await q.waitForSelector('#sgPage .sg-draw', { state: 'attached' });
   { const el = await q.$('#sgPage .sg-draw'); await el.scrollIntoViewIfNeeded(); const bx = await el.boundingBox(); await q.mouse.click(bx.x + bx.width * (priceBox.x / W), bx.y + bx.height * fy(priceBox.y - 10)); }
   for (const bad of ['Call me on 021 000 1111', 'Call me on 021\u00a0000\u00a01111', 'Call me on 021/000/1111', 'Call me on ０２１ ０００ １１１１', 'email vendor @ example.com']) {
-    await q.fill('#ngInsText', bad); await q.click('#sgMarkSave'); await q.waitForFunction(() => /Phone numbers and email addresses can't be typed/.test(document.querySelector('#sgErr').textContent));
+    await q.fill('#ngInsText', bad); await q.click('#sgMarkSave'); await q.waitForFunction(() => /a vendor's own phone or email, so they can't go on the agreement/.test(document.querySelector('#sgErr').textContent));
     await q.evaluate(() => { document.querySelector('#sgErr').textContent = ''; }); }
-  d = await db(q); expect(!d.offer_sign_marks.some(m => m.kind === 'insert'), 'a phone or email in typed words (any spacing, full-width digits, slashes, a spaced @) is refused in the browser, before anything is sent');
+  d = await db(q); expect(!d.offer_sign_marks.some(m => m.kind === 'insert'), 'a vendor\'s own phone or email in typed words (any spacing, full-width digits, slashes, a spaced @) is refused by the database, and the refusal shown plainly on the link screen');
   // and by the database too, for a vendor's own phone that is only on the agency agreement, and for a phone written with underscores
   { const ses_ = await q.evaluate(() => Object.keys(sessionStorage).filter(k => /^sgSes:/.test(k)).map(k => sessionStorage.getItem(k))[0]);
     for (const t of ['Ring 021 000 2222', 'Ring 021_000_2222']) { const rr = await invoke(q, { action: 'change', token: linkV1.split('sign=')[1], session: ses_, id: '9f9f9f9f-0000-4000-8000-00000000000' + (t.length % 10), kind: 'insert', page: priceBox.page, geometry: { x: priceBox.x, y: priceBox.y - 10, text: t, size: 9 }, places: [] });
       expect(rr.ok === false && /a vendor's own phone or email/.test(rr.error), 'the database refuses a vendor\'s own phone: ' + t); } }
   await q.fill('#ngInsText', '$690,000'); await q.click('#sgMarkSave'); await q.waitForSelector('#sgPlaces'); await q.waitForSelector('#sgPage .dr-pg canvas');
+  // ordinary counteroffer wording with dates and prices in any format: accepted (the link screen doesn't pre-check digits)
+  const ORDINARY = ['Settlement 20/12/2026', 'Settlement 20.12.2026', 'Settlement 2027-03-01', 'Price $1 250 000', 'Price $1250000', 'Price $ 695 000.00'];
+  for (const [i, t] of ORDINARY.entries()) { await q.selectOption('#sgPgPick', '2'); await q.waitForSelector('#sgPage .dr-pg[data-page="2"] canvas');
+    await q.click('[data-tool="insert"]'); await q.waitForSelector('#sgPage .sg-draw', { state: 'attached' });
+    { const el = await q.$('#sgPage .sg-draw'); await el.scrollIntoViewIfNeeded(); const bx = await el.boundingBox(); await q.mouse.click(bx.x + bx.width * 0.08, bx.y + bx.height * (0.3 + i * 0.08)); }
+    await q.fill('#ngInsText', t); await q.click('#sgMarkSave'); await q.waitForFunction(n => window.JSON.parse(localStorage.getItem('mockdb')).offer_sign_marks.filter(m => m.kind === 'insert').length === n, i + 2, { timeout: 10000 }).catch(() => null);
+    await q.waitForSelector('#sgPlaces'); }
+  d = await db(q); out.ordinary = d.offer_sign_marks.filter(m => m.kind === 'insert').map(m => m.geometry.text);
+  expect(ORDINARY.every(t => out.ordinary.includes(t)), 'dates and prices typed in any format are accepted');
+  const NCH = 2 + ORDINARY.length;
   d = await db(q); const ch2 = d.offer_sign_marks.filter(m => m.signing_id === g2.id);
-  expect(ch2.length === 2 && ch2.some(m => m.kind === 'strike') && ch2.some(m => m.kind === 'insert' && m.geometry.text === '$690,000') && ch2.every(m => m.by_name === 'Testy Vendorperson'), 'two changes saved, with who made them');
+  expect(ch2.length === NCH && ch2.some(m => m.kind === 'strike') && ch2.some(m => m.kind === 'insert' && m.geometry.text === '$690,000') && ch2.every(m => m.by_name === 'Testy Vendorperson'), 'two changes saved, with who made them');
   expect(d.offer_sign_reviews.filter(r => r.signing_id === g2.id).every(r => r.places.length === 2 && r.places.every(x => x.why === 'change')), 'each change carries both vendors\' initials');
-  expect(d.offer_events.filter(e => e.kind === 'round_change' && e.offer_id === offA).length === 2, 'each change is on the timeline');
+  expect(d.offer_events.filter(e => e.kind === 'round_change' && e.offer_id === offA).length === NCH, 'each change is on the timeline');
   expect(!(await side(q)), 'the change tools at 390 px: no sideways scroll'); await shot(q, 'counter_dark');
   await tapAll(q); await q.click('#sgFinishGo'); await q.waitForSelector('#sgThanks'); await q.close();
   // the second vendor, by her own link: she must initial both changes too
@@ -207,14 +217,14 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   await q.waitForSelector('#sgConsent'); await tick(q, '#sgAgree'); await q.click('#sgAgreeGo'); await q.waitForSelector('#ngChattels'); await tick(q, '#ngChatOk'); await q.click('#ngChatGo');
   await q.waitForSelector('#sgDraw'); await draw(q, '#sgSig', 8); await draw(q, '#sgInit', 9); await q.click('#sgDrawGo'); await q.waitForSelector('#sgPlaces');
   d = await db(q); const v2 = d.offer_signers.find(s => s.signing_id === g2.id && s.position === 2), need2 = +(await q.textContent('#sgCount')).match(/of (\d+)/)[1];
-  expect(need2 === g2.places.filter(x => x.signer === 2).length + 2, 'the second vendor has every place plus her initials beside both changes');
+  expect(need2 === g2.places.filter(x => x.signer === 2).length + NCH, 'the second vendor has every place plus her initials beside every change');
   // a link of one offer can't be used for another
   const sesV2 = await q.evaluate(() => Object.keys(sessionStorage).filter(k => /^sgSes:/.test(k)).map(k => sessionStorage.getItem(k))[0]);
   await tapAll(q); await q.click('#sgFinishGo'); await q.waitForSelector('#sgThanks', { timeout: 30000 });
   expect(/locked/.test(await q.textContent('#sgThanks')) && /Nothing goes back to the purchasers/.test(await q.textContent('#sgThanks')), 'the last vendor is thanked; nothing goes back until Tim has checked it');
   d = await db(q); const rA2 = d.offer_rounds.find(r => r.offer_id === offA && r.doc_round === 2);
-  expect(rA2 && rA2.side === 'vendor' && rA2.changes === 2 && rA2.number === 2 && d.property_offers.find(o => o.id === offA).status === 'countered', 'Round 2 locked: the vendors\' counteroffer with its two changes');
-  expect(rA2.lifted.filter(x => x.why === 'filled' && x.side === 'purchaser').length === 2 && rA2.outstanding.length === 4, 'its record holds the lifted initials, and the purchasers\' initials beside each change outstanding');
+  expect(rA2 && rA2.side === 'vendor' && rA2.changes === NCH && rA2.number === 2 && d.property_offers.find(o => o.id === offA).status === 'countered', 'Round 2 locked: the vendors\' counteroffer with its two changes');
+  expect(rA2.lifted.filter(x => x.why === 'filled' && x.side === 'purchaser').length === 2 && rA2.outstanding.length === 2 * NCH, 'its record holds the lifted initials, and the purchasers\' initials beside each change outstanding');
   const r2Pdf = await blob(q, rA2.path); expect(sha(r2Pdf) === rA2.sha256, 'Round 2 stored with its fingerprint');
   const r2t = await pdfText(r2Pdf), np = (await D.readPages(pdfjs, new Uint8Array(r1Pdf))).length;
   expect(r2t[priceBox.page - 1].includes('$690,000') && /Execution record: Round 2/.test(r2t.slice(np - 1).join(' ')), 'Round 2 shows the new price, with its own record');
@@ -238,7 +248,14 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   for (const n of [1, 2]) { await turnStart(p, n); await consentDraw(p, n + 10);
     expect(!(await p.$('#sgGuides')) && !(await p.$('#ngChattels')), 'no guides again for the purchasers');
     out['need3_' + n] = +(await p.textContent('#sgCount')).match(/of (\d+)/)[1];
-    expect(out['need3_' + n] === 2, 'each purchaser: their initials beside the two changes (their Round 1 signature stands: nothing lifted it)');
+    expect(out['need3_' + n] === NCH, 'each purchaser: their initials beside every change (their Round 1 signature stands: nothing lifted it)');
+    if (n === 1) { // on Tim's own screen the parties' details are loaded: a purchaser's own phone is refused straight away, before anything is sent
+      await p.click('[data-tool="insert"]'); await p.waitForSelector('#sgPage .sg-draw', { state: 'attached' });
+      { const el = await p.$('#sgPage .sg-draw'); await el.scrollIntoViewIfNeeded(); const bx = await el.boundingBox(); await p.mouse.click(bx.x + bx.width * 0.1, bx.y + bx.height * 0.85); }
+      const calls0 = await p.evaluate(() => JSON.parse(localStorage.getItem('callLog') || '[]').filter(c => c === 'rpc:agent_round_change').length);
+      await p.fill('#ngInsText', 'Ring Ana on 022/777/6666'); await p.click('#sgMarkSave');
+      expect(/a purchaser's own phone or email/.test(await p.textContent('#sgErr')) && (await p.evaluate(() => JSON.parse(localStorage.getItem('callLog') || '[]').filter(c => c === 'rpc:agent_round_change').length)) === calls0, 'Tim\'s screen refuses a purchaser\'s own phone straight away, without asking the database');
+      await p.click('#sgMarkCancel'); }
     await tapAll(p); await finishInPerson(p); }
   await p.waitForSelector('#sgRound', { timeout: 30000 });
   d = await db(p); const rA3 = d.offer_rounds.find(r => r.offer_id === offA && r.doc_round === 3);
@@ -267,7 +284,7 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   r = await rpc(p, 'agent_round_present', { p_offer: offA, p_method: 'link', p_places: [], p_checked: true }); expect(r.error && /agreement has been made/.test(r.error.message), 'nothing more is presented once agreed');
   r = await rpc(p, 'agent_offer_correct', { p_offer: offA, p_details: offer({ price: '1' }), p_note: 'Trying to change an agreed offer' }); expect(r.error && /can't be corrected/.test(r.error.message), 'an agreed offer can\'t be corrected');
   out.terms = { price: ag.terms.price, changes: ag.terms.changes.map(c => c.kind + (c.text ? ':' + c.text : '')) };
-  expect(ag.terms.price && ag.terms.changes.length === 2 && ag.terms.changes.some(c => c.text === '$690,000') && ag.round_sha256 === rA3.sha256 && ag.draw_version === 'nego-draw-1', 'the agreed terms and the round it was drawn from are kept with the agreement');
+  expect(ag.terms.price && ag.terms.changes.length === NCH && !('deposit_paid_to' in ag.terms) && 'deposit_printed' in ag.terms && 'kiwisaver' in ag.terms && ag.terms.changes.some(c => c.text === '$690,000') && ag.round_sha256 === rA3.sha256 && ag.draw_version === 'nego-draw-1', 'the agreed terms and the round it was drawn from are kept with the agreement');
 
   // ── 8. a five-round negotiation with one fresh copy (offer B): R1, R2 vendors counter, R3 purchaser counters, a fresh copy, R1, R2 ──
   process.stderr.write('step 8\n');
