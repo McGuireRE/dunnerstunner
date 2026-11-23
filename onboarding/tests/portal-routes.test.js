@@ -233,7 +233,7 @@ const out = {}; const errs = [];
   // ── 5. In person: back, forward and the logo never leave the appointment, a pad vendors sign on, or signing together ──
   process.stderr.write('step 5\n');
   A = await mk(1024, 'dark'); p = A.p; await signIn(p, PB);
-  const draw = async sel => { const bx = await (await p.$(sel)).boundingBox(); await p.mouse.move(bx.x + 30, bx.y + 30); await p.mouse.down(); await p.mouse.move(bx.x + 120, bx.y + 60, { steps: 6 }); await p.mouse.up(); await wait(p, 150); };
+  const draw = async sel => { const el = await p.$(sel); await el.scrollIntoViewIfNeeded(); await wait(p, 150); const bx = await el.boundingBox(); await p.mouse.move(bx.x + 30, bx.y + 30); await p.mouse.down(); await p.mouse.move(bx.x + 120, bx.y + 60, { steps: 6 }); await p.mouse.up(); await wait(p, 150); };
   const stuck = async (want, what) => {   // Back three times, Forward once, the logo: still on the same page, no menu, nothing asked
     asked = [];
     for (let i = 0; i < 3; i++) { await p.goBack(); await wait(p, 500); expect((await at(p)) === want, `${what}: Back ${i + 1} stays put: ${await at(p)}`); }
@@ -256,7 +256,15 @@ const out = {}; const errs = [];
     const ok = (await p.isVisible(sel)) && (await p.textContent(sel)).trim() === txt; out.exits.push([tp + 1, sel, ok]);
     expect(ok, `appointment page ${tp + 1}: "${txt}" is visible (${sel})`);
   }
-  await p.click('.ttab[data-tp="1"]'); await wait(p, 600); await p.click('#tSaveClose'); await wait(p, 800);
+  // no signal: Save and close fails with a plain message, and Tim stays on the page with his work
+  await p.click('.ttab[data-tp="1"]'); await wait(p, 600);
+  await p.evaluate(() => localStorage.setItem('mockFailWrite', 'agreements'));
+  const errsBefore = errs.length; await p.click('#tSaveClose'); await wait(p, 600);
+  errs.splice(errsBefore, errs.length - errsBefore, ...errs.slice(errsBefore).filter(e => !/Failed to fetch/.test(e)));   // the failed save itself is expected
+  out.saveFail = [await at(p), (await p.textContent('#main .err')).trim()];
+  expect(out.saveFail[0] === '/portal/properties/P2/agreement/A2/edit/2' && out.saveFail[1] === 'Couldn\'t save. You\'re offline or the connection dropped. Your work is kept on this page; try Save and close again when you have signal.', 'a failed save: a plain message, still on the page: ' + JSON.stringify(out.saveFail));
+  await p.evaluate(() => localStorage.removeItem('mockFailWrite'));
+  await p.click('#tSaveClose'); await wait(p, 800);
   out.savedClose = await at(p); c = await chrome(p);
   expect(out.savedClose === '/portal/properties/P2/agreement/A2' && c.nav, 'Save and close on page 2 goes to the agreement, menu back: ' + out.savedClose);
   // read-only review of a signed agreement: not in person, so the menu and up link show
@@ -280,6 +288,38 @@ const out = {}; const errs = [];
   await open(p, 'processes'); await p.click('#homeAgree'); await wait(p, 700); await p.fill('#tAddr', '99 Never Saved Road');
   answer = true; asked = []; await p.click('#tLeave'); await wait(p, 700);
   expect(asked.length === 1 && (await at(p)) === '/portal/processes' && JSON.stringify(await count()) === JSON.stringify(made), 'Leave without saving: asked, back at Processes, nothing made: ' + (await at(p)));
+  // a new agreement saved without changing page (page 1's "Save and close"), then Back, Forward and reload: still one of each
+  await open(p, 'processes'); await p.click('#homeAgree'); await wait(p, 700);
+  const before2 = await count(); await p.fill('#tAddr', '5 Second Street, Dunedin');
+  await p.click('#back'); await wait(p, 900);
+  const ag2 = (await db(p)).agreements.find(a => a.address === '5 Second Street, Dunedin'); const after2 = await count();
+  out.saveClose1 = await at(p);
+  expect(ag2 && after2[0] === before2[0] + 1 && after2[1] === before2[1] + 1 && out.saveClose1 === `/portal/properties/${ag2.property_id}/agreement/${ag2.id}`, 'page 1 Save and close: one agreement, one property file, its own address: ' + out.saveClose1);
+  await p.goBack(); await wait(p, 800); out.saveCloseBack = await at(p);
+  expect(out.saveCloseBack === `/portal/properties/${ag2.property_id}/agreement/${ag2.id}/edit` && (await p.inputValue('#tAddr')) === '5 Second Street, Dunedin', 'Back lands on the saved agreement, never a blank new one: ' + out.saveCloseBack);
+  await p.goForward(); await wait(p, 800); await p.reload(); await wait(p, 900);
+  expect(JSON.stringify(await count()) === JSON.stringify(after2) && (await p.inputValue('#tAddr').catch(() => '')) === '5 Second Street, Dunedin', 'after Back, Forward and reload: still one agreement and one property file: ' + JSON.stringify([after2, await count()]));
+  // a form waiting for the vendors to sign: a normal page (menu, up link, Back) until a vendor pad is drawn on
+  const seedF = JSON.parse(JSON.stringify(seed)); seedF.property_forms.push({ id: 'F3', agreement_id: 'A1', property_id: 'P1', kind: 'healthy_homes', status: 'ready', data: {}, agent_data: {}, created_at: now, updated_at: now });
+  await p.evaluate(s => localStorage.setItem('mockdb', JSON.stringify(s)), seedF);
+  await open(p, 'properties/P1'); await p.click('[data-fopen="F3"]'); await wait(p, 900);
+  out.formAt = await at(p); c = await chrome(p); out.formPad = !!(await p.$('#main canvas[id^="fpad_"]'));
+  expect(out.formAt === '/portal/properties/P1/forms/F3' && out.formPad && c.nav && c.up === '/portal/properties/P1' && !(await p.isVisible('#pExit')), 'a form ready to sign, nothing drawn: menu, up link, no Stop signing: ' + JSON.stringify(c) + ' pad ' + out.formPad);
+  asked = []; await p.click('#pNav a:has-text("Home")'); await wait(p, 700); expect((await at(p)) === '/portal/' && !asked.length, 'nothing drawn: the menu leaves');
+  await p.goBack(); await wait(p, 900); expect((await at(p)) === '/portal/properties/P1/forms/F3', 'back to the form');
+  await p.click('#pUp'); await wait(p, 700); expect((await at(p)) === '/portal/properties/P1' && !asked.length, 'nothing drawn: the up link leaves');
+  await p.goBack(); await wait(p, 900); expect((await at(p)) === '/portal/properties/P1/forms/F3', 'back to the form again');
+  await p.goBack(); await wait(p, 800);
+  expect((await at(p)) === '/portal/properties/P1' && !asked.length, 'nothing drawn: Back leaves the form: ' + (await at(p)));
+  await p.goForward(); await wait(p, 900); expect((await at(p)) === '/portal/properties/P1/forms/F3', 'forward to the form');
+  await draw('#main canvas[id^="fpad_"]'); c = await chrome(p);
+  expect(!c.nav && !c.up && (await p.isVisible('#pExit')), 'a vendor has drawn: in person, no menu or up link, Stop signing shown: ' + JSON.stringify(c));
+  await stuck('/portal/properties/P1/forms/F3', 'signing a form in person');
+  answer = false; asked = []; await p.click('#pExit'); await wait(p, 500);
+  expect(asked.length === 1 && /Stop signing/.test(asked[0]) && (await at(p)) === '/portal/properties/P1/forms/F3' && !!(await p.$('#main .sig-wrap .unsaved')), 'Stop signing asks first; no keeps the drawing: ' + JSON.stringify(asked));
+  answer = true; asked = []; await p.click('#pExit'); await wait(p, 800);
+  expect(asked.length === 1 && (await at(p)) === '/portal/properties/P1' && (await chrome(p)).nav, 'yes: one question, then the property file with the menu: ' + JSON.stringify(asked));
+  await p.evaluate(s => localStorage.setItem('mockdb', JSON.stringify(s)), seed);
   // Tim's own countersigning pad: not in person (menu shown), but a drawn, unsaved signature is never dropped without asking
   const seed2 = JSON.parse(JSON.stringify(seed)); seed2.property_forms = [{ id: 'F2', agreement_id: 'A1', property_id: 'P1', kind: 'vendor_declaration', status: 'signed', signed_at: now, countersigned_at: null, data: { answers: {} }, agent_data: {}, created_at: now, updated_at: now }];
   seed2.form_signatures = [{ id: 'FS1', form_id: 'F2', person_id: 'AP1', signed_at: now, image: '' }];
@@ -330,6 +370,13 @@ const out = {}; const errs = [];
   expect(JSON.stringify(out.rootLinks) === JSON.stringify(['/', '/properties', '/people', '/processes']) && c.up === '/properties', 'at the root the menu and up link have no /portal/: ' + JSON.stringify(out.rootLinks) + ' ' + c.up);
   await p.click('#pNav a:has-text("Processes")'); await wait(p, 600); expect((await at(p)) === '/processes', 'root: the menu moves to /processes');
   await shot(p, 'root_processes_390_dark');
+  out.soonContrast = await p.evaluate(() => {
+    const rgb = s => s.match(/[\d.]+/g).slice(0, 3).map(Number), lum = c => { const v = c.map(x => { x /= 255; return x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4); }); return 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2]; };
+    const ratio = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((m, n) => n - m); return (x + 0.05) / (y + 0.05); };
+    return Array.from(document.querySelectorAll('.home-tile.soon')).flatMap(t => { const bg = rgb(getComputedStyle(t).backgroundColor), op = getComputedStyle(t).opacity;
+      return ['.kick', '.ttl', '.txt'].map(k => [k, op, Math.round(ratio(rgb(getComputedStyle(t.querySelector(k)).color), bg) * 100) / 100]); });
+  });
+  expect(out.soonContrast.length === 6 && out.soonContrast.every(([, op, r]) => op === '1' && r >= 4.5), 'Coming soon text: at least 4.5:1 in dark mode: ' + JSON.stringify(out.soonContrast));
   await p.evaluate(() => localStorage.removeItem('mocksession')); await p.goto(PR + 'people'); await wait(p, 600);
   await p.fill('#loginEmail', 'agent-test@example.com'); await p.click('#loginBtn'); await wait(p, 300);
   out.rootOtp = await p.evaluate(() => JSON.parse(localStorage.getItem('otpLog') || '[]').pop());
@@ -380,7 +427,7 @@ const out = {}; const errs = [];
 
   // ── 9. Addresses hold database ids only ──
   out.seen = Array.from(seen);
-  const bad = out.seen.filter(u => !/^\/[A-Za-z0-9_\/-]*$/.test(u) || NAMES.some(n => u.toLowerCase().includes(n.toLowerCase().replace(/\s+/g, '')) || u.toLowerCase().includes(n.toLowerCase().split(' ')[0])) || /@|%40/.test(u) || u.replace(/\D/g, ' ').split(' ').some(d => d.length >= 9));   // a phone number would be 9 or more digits in a row
+  const bad = out.seen.filter(u => !/^\/[A-Za-z0-9_\/-]*$/.test(u) || NAMES.some(n => u.toLowerCase().includes(n.toLowerCase().replace(/\s+/g, '')) || u.toLowerCase().includes(n.toLowerCase().split(' ')[0])) || /@|%40/.test(u) || u.includes('0210000000'));   // the seeded phone number, by its digits (random ids can hold long digit runs)
   expect(out.seen.length > 20 && !bad.length, 'every address is ids and words only: ' + JSON.stringify(bad));
 
   console.log(JSON.stringify(Object.assign(out, { errs }), null, 1)); await b.close();
