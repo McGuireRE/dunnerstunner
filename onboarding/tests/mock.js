@@ -743,6 +743,7 @@ window.supabase={createClient(){ return {
     if(n==='notify'&&o.body.type==='form_signed'){ const fm=(DB.property_forms||[]).find(x=>x.id===o.body.form_id); if(fm&&fm.status==='signed'&&(fm.kind==='healthy_homes'||fm.countersigned_at)&&!fm.document_id&&fm.agreement_id===o.body.agreement_id){ const d={id:uid(),property_id:fm.property_id,kind:fm.kind==='healthy_homes'?'Healthy Homes checklist and statement':'Vendor Declaration',name:(fm.kind==='healthy_homes'?'Healthy-Homes-Checklist-and-Statement':'Vendor-Declaration')+'.pdf',path:'properties/'+fm.property_id+'/generated/'+fm.id+'.pdf',source:'generated',created_by:'system',created_at:now(),bucket:'private',folder:'agency'}; (DB.property_documents||=[]).push(d); fm.document_id=d.id; save(); } }
     return ok({ok:true});}},
   storage:{from(b){ if(b===RB) return repoBucket(); return{upload:(p)=>ok({path:p}),createSignedUrl:()=>ok({signedUrl:PNG1})}}},
-  auth:{getSession:()=>ok({session:S}),onAuthStateChange(){},signInWithOtp:()=>ok({}),signOut:async()=>{localStorage.removeItem('mocksession');}}
+  auth:{getSession:()=>ok({session:S}),onAuthStateChange(){},signInWithOtp:o=>{ try{ const l=JSON.parse(localStorage.getItem('otpLog')||'[]'); l.push(o||null); localStorage.setItem('otpLog',JSON.stringify(l)); }catch(_){} return ok({}); },   // otpLog: each sign-in link asked for, with where it brings the person back to
+ signOut:async()=>{localStorage.removeItem('mocksession');}}
 };}};
 })();
