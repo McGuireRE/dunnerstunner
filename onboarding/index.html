@@ -705,6 +705,36 @@ table.sum.of-sum td:first-child, table.sum.of-dates td:first-child { width: 40%;
 .dr-holder { margin: 8px 0; max-width: 100%; overflow: hidden; }
 .dr-pg { position: relative; max-width: 100%; background: #fff; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
 .dr-cv { display: block; width: 100%; height: 100%; }
+.dr-terms { list-style: none; padding: 0; margin: 8px 0; }
+.dr-term-i { border: 1px solid var(--line); border-radius: 8px; padding: 8px; margin: 0 0 8px; background: var(--card, transparent); }
+.dr-term-i.dr-dragging { opacity: .5; }
+.dr-thead { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-bottom: 4px; }
+.dr-grip { cursor: grab; color: var(--muted); letter-spacing: -3px; user-select: none; touch-action: none; padding: 6px 8px; margin: -6px 0 -6px -6px; font-size: 18px; }
+.dr-tno { flex: 1 1 160px; min-width: 0; overflow-wrap: anywhere; }
+.dr-tbtns { display: flex; gap: 6px; }
+.dr-rich { border: 1px solid var(--line); border-radius: 6px; padding: 8px; min-height: 3em; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 15px; }
+.dr-rich[contenteditable="true"]:focus { outline: 2px solid #1F5FBF; outline-offset: 1px; }
+.dr-chip { display: inline; padding: 1px 6px; border-radius: 10px; background: #FFE58A; color: #3A2A00; border: 1px solid #C99700; cursor: pointer; white-space: normal; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+.dr-chip:focus { outline: 2px solid #1F5FBF; }
+.dr-chiped { margin-top: 8px; }
+.dr-addt { margin-top: 8px; }
+.dr-addt select, .dr-mktools select { max-width: 100%; min-width: 0; flex: 1 1 180px; }
+.dr-zoom { display: inline-flex; align-items: center; gap: 6px; margin-left: 10px; }
+.dr-holder.dr-zoomed { overflow: auto; -webkit-overflow-scrolling: touch; }
+.dr-pg.dr-drawing { touch-action: none; cursor: crosshair; }
+.dr-mark { position: absolute; box-sizing: border-box; border: 2px dashed #D9432C; background: rgba(217, 67, 44, .10); touch-action: none; cursor: move; z-index: 2; }
+.dr-mark.dr-sel { border-style: solid; background: rgba(217, 67, 44, .16); }
+.dr-mark.dr-moved { border-color: #1E7A45; background: rgba(30, 122, 69, .12); }
+.dr-mk-lbl { position: absolute; left: 0; bottom: 100%; font-size: 11px; line-height: 1.2; color: #fff; background: #D9432C; padding: 0 4px; border-radius: 3px 3px 0 0; white-space: nowrap; max-width: 220px; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
+.dr-mark.dr-moved .dr-mk-lbl { background: #1E7A45; }
+/* handles sit just outside the box, so even a small box keeps its middle free to drag; finger-sized wherever touch is possible */
+.dr-h { position: absolute; width: 12px; height: 12px; border-radius: 50%; background: #fff; border: 2px solid #D9432C; box-sizing: border-box; touch-action: none; display: none; }
+@media (any-pointer: coarse) { .dr-h { width: 24px; height: 24px; } }
+.dr-touch .dr-h { width: 24px; height: 24px; }
+.dr-mark.dr-sel .dr-h { display: block; }
+.dr-h-nw { left: 0; top: 0; transform: translate(-100%, -100%); cursor: nwse-resize; } .dr-h-n { left: 50%; top: 0; transform: translate(-50%, -100%); cursor: ns-resize; } .dr-h-ne { left: 100%; top: 0; transform: translate(0, -100%); cursor: nesw-resize; } .dr-h-e { left: 100%; top: 50%; transform: translate(0, -50%); cursor: ew-resize; }
+.dr-h-se { left: 100%; top: 100%; cursor: nwse-resize; } .dr-h-s { left: 50%; top: 100%; transform: translate(-50%, 0); cursor: ns-resize; } .dr-h-sw { left: 0; top: 100%; transform: translate(-100%, 0); cursor: nesw-resize; } .dr-h-w { left: 0; top: 50%; transform: translate(-100%, -50%); cursor: ew-resize; }
+.dr-mark.dr-sel .dr-mk-lbl { left: 26px; }
 .dr-box { position: absolute; box-sizing: border-box; border: 1.5px solid #1F5FBF; background: rgba(31, 95, 191, .12); border-radius: 3px; padding: 0; margin: 0; min-width: 6px; min-height: 6px; cursor: pointer; font: inherit; }
 .dr-box.dr-ai { border-color: #B26A00; background: rgba(255, 170, 0, .18); }
 .dr-box.dr-ai.dr-undecided { border-style: dashed; }
@@ -4438,7 +4468,7 @@ window.JOURNEY_MEDIA_HINTS = {
         printed: pl.map(l => l.text.trim()).join(' ').trim() || undefined, printed_count: pl.length || undefined, printed_bottom: pl.length ? r1(Math.min(...pl.map(l => l.y))) : undefined, printed_last: nums.length ? Math.max(...nums) : undefined, foot: r1(foot) })); }
     // the appendix: 21.2, 21.3 and 22.0
     const ftIdx = ft ? ft.page.n : 0;
-    const ap = PL.find(x => x.page.n > ftIdx && x.L.some(l => /^Appendix\b/.test(l.text)) && x.L.some(l => /^2[12]\.\d\b/.test(l.text)))
+    const ap = PL.find(x => x.page.n >= ftIdx && x.L.some(l => /^Appendix\b/.test(l.text)) && x.L.some(l => /^2[12]\.\d\b/.test(l.text)))
       || PL.find(x => x.page.n > ftIdx && x.L.some(l => /^21\.2\b/.test(l.text)) && x.L.some(l => /^22\.0\b/.test(l.text)))
       || PL.find(x => x.page.n > ftIdx && x.L.some(l => /^22\.0\b/.test(l.text)));
     if (ap) { const { page, L } = ap;
@@ -4454,6 +4484,27 @@ window.JOURNEY_MEDIA_HINTS = {
               line_x1: r1(ls[i].x1), margin: r1(page.w - 8 - (ls[i].x1 + 6)) }));
           } else add(box({ id: 'clause22_days', key: 'clause22_days', kind: 'text', page: page.n, x: wm.x0 - 30, y: ls[i].y, w: 26, h: ls[i].h, label: LABELS.clause22_days, source: 'anchor' }));
           break; } } }
+    // Numbering the further terms (Tim, 24 November 2026): on from the last general terms clause, read from the blank's own text (the
+    // agreement's pages other than the further terms and appendix pages), and from the highest clause printed on the appendix
+    const agp = editionPages(pages, edition), numbering = { general_last: 0, appendix_last: 0, printed_last: 0, ft_page: ft ? ft.page.n : null, appendix_page: ap ? ap.page.n : null, cont: null };
+    const clauseNo = l => { const m = /^\s*(\d{1,2})\.(\d{1,2})\b/.exec(l.text); return m && +m[1] <= 60 ? +m[1] : 0; };
+    PL.forEach(({ page, L }) => { if (!agp.includes(page.n) || (ft && page.n === ft.page.n) || (ap && page.n === ap.page.n)) return; L.forEach(l => { numbering.general_last = Math.max(numbering.general_last, clauseNo(l)); }); });
+    if (ap) ap.L.forEach(l => { numbering.appendix_last = Math.max(numbering.appendix_last, clauseNo(l)); });
+    const ftPlace = places.find(x => x.id === 'further_terms');
+    if (ftPlace) { numbering.printed_last = ftPlace.printed_last || 0; Object.assign(ftPlace, { general_last: numbering.general_last, appendix_last: numbering.appendix_last }); }
+    // the continuation page: the further terms page's own header band (down to its heading) and footer band (the copyright line and
+    // the page number), so a page added after it carries them and none of its printed clauses
+    if (ft && ftPlace) { const { page, L } = ft, h = findLine(L, /^FURTHER TERMS OF SALE/), apH = L.find(l => /^Appendix\b/.test(l.text) && l.y >= h.y - 2);
+      const cont = findLine(L, /^Further Terms continued/), heads = [h, apH, cont && cont.y < h.y && h.y - cont.y < 30 ? cont : null].filter(Boolean);
+      const headerBottom = r1(Math.min(...heads.map(l => l.y)) - 3), footTop = ftPlace.foot, hasCopy = L.some(l => /©/.test(l.text));
+      const printedLines = L.filter(l => l.y < headerBottom && l.y > footTop + 2);
+      const below = printedLines.every(l => l.y + l.h * 0.8 < headerBottom);
+      const pn = page.items.filter(it => /^\s*(?:page\s+)?\d{1,3}(?:\s+of\s+\d{1,3})?\s*$/i.test(it.s) && (it.y + it.h <= footTop + 1 || it.y > headerBottom)).sort((a, b) => a.y - b.y)[0];
+      const anchor = apH || h;
+      if (hasCopy && below) numbering.cont = { page: page.n, w: page.w, h: page.h, header: [headerBottom, r1(page.h)], footer: [0, r1(footTop + 1)],
+        head: { x1: r1(anchor.x1), y: r1(anchor.y), h: r1(anchor.h), text: anchor.text.trim().slice(0, 40) },
+        page_no: pn ? { text: pn.s.trim(), value: +(/(\d{1,3})/.exec(pn.s)[1]), x: r1(pn.x), y: r1(pn.y), w: r1(pn.w), h: r1(pn.h) } : null };
+    }
     // Schedule 1, 2(a): the purchaser's GST registration
     const s1 = pageOf(/^SCHEDULE 1\b|\bSCHEDULE 1\b.*Edition/);
     if (s1) { const l = s1.L.find(x => /^2\(a\)/.test(x.text.trim()) && /purchaser is registered/i.test(x.text)); if (l) add(yesNoOn(l, 'gst_purchaser')); }
@@ -4502,7 +4553,7 @@ window.JOURNEY_MEDIA_HINTS = {
     const want = ['date', 'purchaser', 'nominee', 'gst_vendor', 'price', 'deposit', 'settlement', ...FRONT_CONDITIONS.flatMap(([k]) => ['c_' + k, 'd_' + k]), 'tenancies', 'further_terms', 'clause21_2', 'clause21_3', 'clause22', 'clause22_days', 'chattels',
       'purchaser_back', 'pl_firm', 'pl_person', 'pl_email', 'pl_phone', 'pl_service', 'vl_firm', 'vl_person', 'vl_email', 'vl_phone', 'p_contact', 'sig_purchaser', 'name_purchaser', 'sig_vendor'];
     want.forEach(k => { if (!found.has(k)) missing.push(k); });
-    return { edition, edition_checked: editionOk(edition), pages: pages.length, sizes: pages.map(p => [p.w, p.h]), agreement_pages: editionPages(pages, edition), places, missing, chattels };
+    return { edition, edition_checked: editionOk(edition), pages: pages.length, sizes: pages.map(p => [p.w, p.h]), agreement_pages: editionPages(pages, edition), places, missing, chattels, numbering };
   }
 
   // where a place sits on the page, as { bottom, top } in points: an area hangs down from its first line; a line of text sits on
@@ -4764,25 +4815,60 @@ window.JOURNEY_MEDIA_HINTS = {
     const refMissing = k => { need('ref_missing_' + k, `A condition waits for ${labelOf(k)}, but ${labelOf(k)} isn't in the further terms, so its number is shown as "?". Add it, or change the timing.`, true); return '?'; };
     let resolveRefs = t => String(t).replace(/\[\[FT:(\w+)\]\]/g, (m, k) => refMissing(k)).replace(/\[\[TERM:\w+\]\]/g, '?');
     let ftn = 0; const term = (id, title, text, extra) => { ft.push(Object.assign({ id, title, text }, extra || {})); };
+    // A term's timing: the condition it belongs to, unless Tim set the timing of this term on the review screen (edits.term_timing,
+    // working days, a date, or after one of the offer's conditions). That changes the draft only: the offer's own dates stay as they are.
+    const TT = E.term_timing && typeof E.term_timing === 'object' ? E.term_timing : {};
+    const timedFor = (id, c, title) => { const ov = TT[id]; if (!ov || typeof ov !== 'object') return c || null;
+      const t = { key: c ? c.key : 'term_' + id };
+      if (ov.after) { if (!(cond(ov.after) && ov.after !== t.key && Math.floor(+ov.days) >= 1)) { need('term_timing_bad_' + id, `${title}: the timing you set waits for a condition that isn't on this offer, so it wasn't used. Set it again.`, !c); return c || null; }
+        Object.assign(t, { after: ov.after, days: Math.floor(+ov.days) }); }
+      else if (ov.date && OF && OF.isDate(ov.date)) t.date = ov.date; else if (Math.floor(+ov.days) >= 1) t.days = Math.floor(+ov.days); else return c || null;
+      if (c && JSON.stringify([c.after || '', c.date || '', c.after || c.date ? '' : +c.days]) !== JSON.stringify([t.after || '', t.date || '', t.after || t.date ? '' : +t.days]))
+        need('term_timing_' + id, `${title}: you set its timing on the draft to "${timingPhrase(t)}". The offer itself still says ${OF ? OF.timingPlain(c) : 'otherwise'}, so the date checks follow the offer. Correct the offer too if they should match.`, false);
+      return t; };
+    // a term's wording with its tokens filled: { text, template (the wording with {timing} and {date} kept), tokens, timing }.
+    // {timing} with no timing to give: a highlighted gap, and Tim must set it.
+    const NO_TIMING = '[Tim to set the timing]';
+    const fillTerm = (id, title, w, tm, extra) => { let tpl = w; Object.entries(extra || {}).forEach(([k, v]) => { tpl = tpl.split('{' + k + '}').join(v); });
+      if (tm) { const f = fill(tpl, tm); return { text: f.text, template: tpl, tokens: f.tokens, timing: tm }; }
+      const tokens = /\{(date|timing)\}/.test(tpl); if (tokens) need('timing_missing_' + id, `${title}: its wording has {timing} but no timing yet. Tap the timing in the term to set it.`, true);
+      return { text: tpl.replace(/\{(date|timing)\}/g, NO_TIMING), template: tpl, tokens, timing: null }; };
     for (const t of terms) {
       if (t.kind !== 'further_term' || t.key === 'chattels' || !ruleApplies(t.rule, d)) continue;
       if (t.wording_from === 'custom') {
         const c = cond('custom'); if (!c) continue;
         // the buyer's own wording may hold {timing} (the helper writes it so) or {date}: filled in like Tim's own clauses
-        const w = String(E.custom_wording || c.wording || '').trim(), f = E.custom_ok && w ? fill(w, c) : null;
-        term('ft_custom', "Purchaser's condition", f ? f.text : PLACEHOLDERS.custom, { custom: true, cond: 'custom', request: c.request || '', wording: c.wording || '', ai: !!c.ai, suffix: f && f.tokens ? '' : suffixFor(c) });
+        const w = String(E.custom_wording || c.wording || '').trim(), tm = timedFor('ft_custom', c, "Purchaser's condition"), f = E.custom_ok && w ? fillTerm('ft_custom', "Purchaser's condition", w, tm) : null;
+        term('ft_custom', "Purchaser's condition", f ? f.text : PLACEHOLDERS.custom, { custom: true, cond: 'custom', request: c.request || '', wording: c.wording || '', ai: !!c.ai, suffix: f && f.tokens ? '' : suffixFor(tm), template: f ? f.template : null, timing: tm });
         continue;
       }
       let w = t.wording_from ? String((input.clauses || {})[t.wording_from] || '').trim() : String(t.wording || '').trim();
-      const c = t.wording_from ? cond(t.wording_from) : null; let tokens = false;
+      const c = t.wording_from ? cond(t.wording_from) : null, id = 'ft_' + t.key, tm = timedFor(id, c, t.title); let f = null;
       if (!w) w = placeholderFor(t.wording_from || t.key, t.title);
-      else if (c) { const f = fill(w, c, { detail: c.detail || '', address: d.sale_address || '' }); w = f.text; tokens = f.tokens; }
-      term('ft_' + t.key, t.title, w, c ? { cond: c.key, suffix: tokens ? '' : suffixFor(c), detail: c.detail || (t.wording_from === 'sale' ? d.sale_address : '') } : {});
+      else if (tm || /\{(date|timing)\}/.test(w)) { f = fillTerm(id, t.title, w, tm, c ? { detail: c.detail || '', address: d.sale_address || '' } : {}); w = f.text; }
+      term(id, t.title, w, Object.assign({ template: f ? f.template : w, timing: tm }, c ? { cond: c.key, suffix: f && f.tokens ? '' : suffixFor(tm), detail: c.detail || (t.wording_from === 'sale' ? d.sale_address : '') } : {}));
     }
     // the dates of printed conditions that wait for another, where their own line couldn't hold them
     timeTerms.forEach(x => term(x.id, x.title, x.text, { timing: true }));
     if (cond('sale')) need('sale_address_seen', `Sale of another property: the buyer's own address (${d.sale_address || 'not given'}) is named in that further term, so the vendors will see it on the agreement. Check the buyer is happy with that.`, false);
-    (E.extra_terms || []).map(x => String(x || '').trim()).filter(Boolean).forEach((x, i) => term('ft_extra_' + (i + 1), 'Your further term', x));
+    // clauses Tim added from his library on the review screen (edits.added_terms: [{ id, key }]); the rule doesn't apply to these
+    (Array.isArray(E.added_terms) ? E.added_terms : []).forEach(a => { if (!a || !/^[A-Za-z0-9_]{1,80}$/.test(String(a.id || ''))) return;
+      const t = (input.terms || []).find(x => x.key === a.key && x.kind === 'further_term' && x.active !== false && x.wording_from !== 'custom');
+      if (!t) { need('added_gone_' + a.id, `A clause you added (${a.key}) isn't in your library any more. Remove it, or add it to the library again.`, true); return; }
+      if (ft.some(x => x.id === 'ft_' + t.key)) { need('added_twice_' + a.id, `${t.title} is already on this draft, so it was added only once.`, false); return; }
+      let w = t.wording_from ? String((input.clauses || {})[t.wording_from] || '').trim() : String(t.wording || '').trim();
+      const c = t.wording_from ? cond(t.wording_from) : null, tm = timedFor(a.id, c, t.title);
+      const f = w ? fillTerm(a.id, t.title, w, tm, c ? { detail: c.detail || '', address: d.sale_address || '' } : {}) : { text: placeholderFor(t.key, t.title), template: '', tokens: false, timing: tm };
+      term(a.id, t.title, f.text, { added: true, removable: true, library: t.key, cond: c ? c.key : null, template: f.template, timing: tm, suffix: c && !f.tokens ? suffixFor(tm) : '' }); });
+    // Tim's own terms: a line he typed (a string), or a clause he had written with AI help for this offer only ({ id, title, text })
+    (E.extra_terms || []).forEach((x, i) => {
+      if (x && typeof x === 'object') { const id = /^[A-Za-z0-9_]{1,80}$/.test(String(x.id || '')) ? x.id : 'ft_extra_' + (i + 1), title = String(x.title || 'Your further term').trim().slice(0, 200) || 'Your further term', w = String(x.text || '').trim(); if (!w) return;
+        const f = fillTerm(id, title, w, timedFor(id, null, title)); term(id, title, f.text, { removable: true, extra: true, ai: !!x.ai, template: f.template, timing: f.timing }); return; }
+      const w = String(x || '').trim(); if (!w) return; const id = 'ft_extra_' + (i + 1), f = fillTerm(id, 'Your further term', w, timedFor(id, null, 'Your further term'));
+      term(id, 'Your further term', f.text, { removable: true, extra: true, template: f.template, timing: f.timing }); });
+    // the order Tim chose on the review screen (edits.term_order); anything not in it keeps its place after those that are
+    if (Array.isArray(E.term_order) && E.term_order.length) { const pos = new Map(E.term_order.map((id, i) => [String(id), i]));
+      const keyed = ft.map((x, i) => [pos.has(x.id) ? pos.get(x.id) : 1000 + i, x]); keyed.sort((a, b) => a[0] - b[0]); ft.splice(0, ft.length, ...keyed.map(k => k[1])); }
     // chattels: on the schedule (strike out or add), or as a further term, as the library says
     const chT = T('chattels'), where = ((chT && chT.rule) || {}).where === 'further_terms' ? 'further_terms' : 'schedule';
     const add = (d.chattels_add || []).filter(Boolean), exc = (d.chattels_exclude || []).filter(Boolean);
@@ -4799,20 +4885,33 @@ window.JOURNEY_MEDIA_HINTS = {
     }
     // the further terms go on as a numbered list (a placeholder for anything Tim hasn't worded)
     let ftp = P('further_terms');
+    // Numbering (Tim, 24 November 2026): on from the last general terms clause and the highest clause printed on the appendix, read
+    // from the blank itself (input.numbering, from buildMap; an older saved map carries the same on its further terms place). A
+    // number once used is never used again: numbers Tim retired (a term he removed) are skipped, so a later term never takes one.
+    const NB = Object.assign({}, map.numbering || {}, input.numbering || {}), retired = new Set((E.retired_numbers || []).map(Number).filter(n => n >= 1));
+    const base = Math.max(+NB.general_last || +(ftp || {}).general_last || 0, +NB.appendix_last || +(ftp || {}).appendix_last || 0, +(ftp || {}).printed_last || 0);
+    ftn = base;
+    if (ft.length && !base) need('numbering_unknown', "The last general terms clause number couldn't be read from the blank, so the further terms are numbered from 1. Check the numbering.", false);
     if (ft.length && ftp && ftp.printed_bottom != null) {
-      // terms already printed on the page: ours start below the lowest printed line, numbered on from the last printed number
-      const top = ftp.printed_bottom - 14, cut = ftp.y - top; ftp = Object.assign({}, ftp, { y: top, h: ftp.h - cut }); ftn = ftp.printed_last || 0;
-      need('further_printed', `The Further Terms page already has ${ftp.printed_count} printed line${ftp.printed_count === 1 ? '' : 's'}${ftp.printed_last ? `, numbered to ${ftp.printed_last}` : ''}. The offer's terms start below the lowest of them, numbered from ${ftn + 1}. This layout hasn't been checked on a real blank yet: look at the page before you approve.`, true, true);
+      // terms already printed on the page: ours start below the lowest printed line, numbered on from the highest printed number
+      const top = ftp.printed_bottom - 14, cut = ftp.y - top; ftp = Object.assign({}, ftp, { y: top, h: ftp.h - cut });
+      let first = ftn + 1; while (retired.has(first)) first++;
+      need('further_printed', `The Further Terms page already has ${ftp.printed_count} printed line${ftp.printed_count === 1 ? '' : 's'}${ftp.printed_last ? `, numbered to ${ftp.printed_last}` : ''}. The offer's terms start below the lowest of them, numbered from ${first}. This layout hasn't been checked on a real blank yet: look at the page before you approve.`, true, true);
     }
     if (ft.length) {
-      ft.forEach(x => { ftn++; x.number = ftn; });
+      ft.forEach(x => { ftn++; while (retired.has(ftn)) ftn++; x.number = ftn; });
       // the further term numbers are known now: fill in every reference to one ("further term 3"), in the terms and on the page
       const numOf = new Map(), byId = new Map(ft.map(x => [x.id, x.number])); ft.forEach(x => { if (x.cond && !numOf.has(x.cond)) numOf.set(x.cond, x.number); });
       resolveRefs = t => String(t).replace(/\[\[FT:(\w+)\]\]/g, (m, k) => numOf.has(k) ? String(numOf.get(k)) : refMissing(k))
         .replace(/\[\[TERM:(\w+)\]\]/g, (m, id) => byId.has(id) ? String(byId.get(id)) : '?');
-      const text = ft.map(x => { const edited = Object.prototype.hasOwnProperty.call(edits, x.id) ? String(edits[x.id] || '') : null; const body = resolveRefs(edited != null ? edited : x.text); x.text = body;
+      // Tim's edit of a term is its wording as he left it: {timing} and {date} in it are filled in like any other
+      const text = ft.map(x => { const edited = Object.prototype.hasOwnProperty.call(edits, x.id) ? String(edits[x.id] || '') : null;
+        let body = edited != null ? edited : x.text; if (edited != null) { x.template = edited; if (/\{(date|timing)\}/.test(edited)) { const f = fillTerm(x.id, x.title, edited, x.timing); body = f.text; x.suffix = ''; } }
+        body = resolveRefs(body); x.text = body;
         return `${x.number}. ${x.title}${x.detail ? ' (' + x.detail + ')' : ''}: ${body}${resolveRefs(x.suffix || '')}`; });
-      const it = put('further_terms', ftp, text.join('\n'), { label: 'Further terms of sale', item: { terms: ft.map(x => ({ id: x.id, number: x.number, title: x.title, text: x.text, placeholder: isPlaceholder(x.text), custom: !!x.custom, request: x.request, wording: x.wording, ai: x.ai })) } });
+      const it = put('further_terms', ftp, text.join('\n'), { label: 'Further terms of sale', item: { cont: NB.cont || null, number_base: base, terms: ft.map(x => ({ id: x.id, number: x.number, title: x.title, text: x.text, placeholder: isPlaceholder(x.text), custom: !!x.custom, request: x.request, wording: x.wording, ai: x.ai,
+        template: x.template != null ? resolveRefs(x.template) : null, timing: x.timing ? { key: x.timing.key, days: x.timing.days, date: x.timing.date, after: x.timing.after } : null, timing_text: x.timing ? resolveRefs(timingPhrase(x.timing)) : '',
+        date_text: x.timing ? resolveRefs(dateText(x.timing)) : '', removable: !!x.removable, added: !!x.added, library: x.library || null, extra: !!x.extra })) } });
       ft.filter(x => isPlaceholder(x.text)).forEach(x => need('ph_' + x.id, `Further term ${x.number}, ${x.title}: ${x.text}`, true));
     }
     // any reference still waiting for its number (on the front page, beside clause 22.0, and in Tim's list of things to check)
@@ -4834,6 +4933,28 @@ window.JOURNEY_MEDIA_HINTS = {
       put('vl_service', P('vl_service'), V.email, { label: "Vendor's lawyers: email for notices", optional: true });
       need('vendor_lawyer_from', `Vendor's lawyers: taken from ${V.source || 'the property file'}. Check they are acting on this sale.`, false);
     } else if (vlEmpty) need('vendor_lawyer_none', "The vendor's lawyers aren't on the blank or the property file. Add them.", false);
+    // Areas Tim marked on the drafted pages (edits.marks), in PDF points on the blank's own pages: initials or a signature (signing
+    // places for the signing step; nothing is drawn), a strike-out (a line through one line of text, a crossed box over more), his
+    // typed text, or a highlight. Marks are only ever added; the REINZ text is never changed.
+    const MARK_WORDS = { initials: 'Initials', signature: 'Signature', strike: 'Strike-out', text: 'Text', highlight: 'Highlight' }, WHO = { purchasers: 'the purchasers', vendors: 'the vendors', both: 'everyone' };
+    let signMarks = 0;
+    (Array.isArray(E.marks) ? E.marks : []).forEach((m, i) => { if (!m || !MARK_WORDS[m.type] || !/^[A-Za-z0-9_-]{1,40}$/.test(String(m.id || ''))) return;
+      const id = 'mark_' + m.id, b = { page: +m.page, x: +m.x, y: +m.y, w: +m.w, h: +m.h };
+      const lbl = `${MARK_WORDS[m.type]}${m.type === 'initials' || m.type === 'signature' ? ' for ' + (WHO[m.who] || WHO.both) : ''} (page ${b.page}, marked by you)`;
+      if (m.type === 'text') { put(id, Object.assign({ id, key: 'mark', kind: 'area', page: b.page }, { x: b.x + 2, y: b.y + b.h - FONT_SIZE - 1, w: Math.max(8, b.w - 4), h: Math.max(FONT_SIZE, b.h - 2) }), String(m.text || '').trim().slice(0, 500), { label: lbl, item: { mark: 'text' } });
+        if (!String(m.text || '').trim()) need('mark_empty_' + m.id, `${lbl}: there is no text in it yet. Type it, or delete the box.`, true); return; }
+      if (m.type === 'initials' || m.type === 'signature') signMarks++;
+      items.push(Object.assign({ id, key: 'mark', place: null, kind: 'mark', mark: m.type === 'strike' && b.h > 16 ? 'cross' : m.type, who: m.type === 'initials' || m.type === 'signature' ? (WHO[m.who] ? m.who : 'both') : null, label: lbl }, b)); });
+    if (signMarks) need('sign_marks', `You marked ${signMarks} place${signMarks === 1 ? '' : 's'} for initials or a signature. ${signMarks === 1 ? 'It becomes a signing place' : 'They become signing places'} when the agreement is signed; nothing is drawn on the page for ${signMarks === 1 ? 'it' : 'them'}.`, false);
+    // Places on the draft Tim moved or resized (edits.moves: { item id: { from, to } }, the boxes he saw and where he left them). The
+    // place on the blank's map is unchanged (its history keeps every version); only this draft's item moves.
+    const MOVABLE = ['text', 'area', 'strike', 'lines', 'caret', 'mark'];
+    Object.entries(E.moves && typeof E.moves === 'object' ? E.moves : {}).forEach(([id, mv]) => { const it = items.find(x => x.id === id); if (!mv || !mv.from || !mv.to) return;
+      if (!it || !MOVABLE.includes(it.kind) || it.page !== +mv.to.page || +mv.from.page !== +mv.to.page) { need('move_gone_' + id, `A place you moved (${id}) isn't on this draft in the same place any more, so the move was left out. Move it again if you need to.`, false); return; }
+      const f = mv.from, t = mv.to, dx = t.x - f.x, dw = t.w - f.w, dh = t.h - f.h, dy = it.kind === 'area' ? (t.y + t.h) - (f.y + f.h) : t.y - f.y;
+      if (it.kind === 'lines') it.lines = it.lines.map(l => ({ x0: l.x0 + dx, x1: l.x1 + dx + dw, y: l.y + dy, h: l.h }));
+      Object.assign(it, { x: it.x + dx, y: it.y + dy, w: Math.max(6, it.w + dw), h: Math.max(4, it.h + dh), moved: true });
+      need('moved_' + id, `${it.label}: moved on this draft. The place on the blank is kept as it was.`, false); });
     // privacy: a purchaser's or vendor's own phone or email never goes on, wherever it came from (the offer, Tim's edits, a further
     // term, the buyer's own wording, chattels, a lawyer's field typed by mistake, or the vendor's lawyer on file). Phones are compared
     // by their national digits, emails without regard to case, also inside a sentence. Any hit is left off and blocks approval.
@@ -4844,7 +4965,9 @@ window.JOURNEY_MEDIA_HINTS = {
     for (let i = items.length - 1; i >= 0; i--) { const hit = holdsOwn(items[i].text, O); if (!hit) continue;
       need('privacy_' + items[i].id, `${items[i].label}: left off, because it holds ${hit}'s own phone or email. Only the lawyers' details go on the agreement.`, true); items.splice(i, 1); }
     if (!needs.find(n => n.id === 'privacy_check')) need('privacy_check', "Only the lawyers' contact details are on the agreement, never the purchasers' or vendors' own.", false);
-    return { items, needs, terms: ft, today, date_format: fmt };
+    // the highest further term number used or retired: later terms (a re-draft, a counteroffer) carry on from it
+    const term_last = Math.max(base, ftn, ...[...retired]);
+    return { items, needs, terms: ft, today, date_format: fmt, term_base: base, term_last, retired_numbers: [...retired].sort((a, b) => a - b) };
   }
 
   /* ───── the drafted PDF ───── */
@@ -4866,12 +4989,19 @@ window.JOURNEY_MEDIA_HINTS = {
     const doc = await PDFLib.PDFDocument.load(blankBytes, { updateMetadata: false });
     const font = await doc.embedFont(PDFLib.StandardFonts.Helvetica), bold = await doc.embedFont(PDFLib.StandardFonts.HelveticaBold);
     const ink = PDFLib.rgb(INK[0], INK[1], INK[2]), hl = PDFLib.rgb(1, 0.93, 0.45);
-    const pages = doc.getPages(), boxes = [], overflow = []; let continued = null, pending = null;
+    const pages = doc.getPages(), boxes = [], overflow = []; let continued = null, pending = null, addedPages = [];
     for (const it of plan.items) {
       const pg = pages[it.page - 1]; if (!pg) continue;
       if (it.kind === 'caret') {   // a small ^ under a struck word, pointing to the margin
         pg.drawLine({ start: { x: it.x - 2.2, y: it.y - 2.8 }, end: { x: it.x, y: it.y - 0.6 }, thickness: 0.7, color: ink }); pg.drawLine({ start: { x: it.x, y: it.y - 0.6 }, end: { x: it.x + 2.2, y: it.y - 2.8 }, thickness: 0.7, color: ink });
         boxes.push({ id: it.id, page: it.page, x: it.x - 3, y: it.y - 3, w: 6, h: 3, kind: 'strike', label: it.label }); continue;
+      }
+      if (it.kind === 'mark') {   // an area Tim marked: initials and signatures are signing places (nothing drawn); the rest are drawn
+        if (it.mark === 'strike') pg.drawLine({ start: { x: it.x, y: it.y + it.h / 2 }, end: { x: it.x + it.w, y: it.y + it.h / 2 }, thickness: 0.9, color: ink });
+        else if (it.mark === 'cross') { pg.drawRectangle({ x: it.x, y: it.y, width: it.w, height: it.h, borderColor: ink, borderWidth: 0.8 });
+          pg.drawLine({ start: { x: it.x, y: it.y }, end: { x: it.x + it.w, y: it.y + it.h }, thickness: 0.8, color: ink }); pg.drawLine({ start: { x: it.x, y: it.y + it.h }, end: { x: it.x + it.w, y: it.y }, thickness: 0.8, color: ink }); }
+        else if (it.mark === 'highlight') pg.drawRectangle({ x: it.x, y: it.y, width: it.w, height: it.h, color: hl, opacity: 0.4 });
+        boxes.push({ id: it.id, page: it.page, x: it.x, y: it.y, w: it.w, h: it.h, kind: 'mark', mark: it.mark, label: it.label }); continue;
       }
       if (it.kind === 'strike' || it.kind === 'lines') {
         const ls = it.kind === 'lines' ? it.lines : [{ x0: it.x, x1: it.x + it.w, y: it.y, h: it.h }];
@@ -4906,28 +5036,55 @@ window.JOURNEY_MEDIA_HINTS = {
         pending = { it, rest, size, lh, noteY: it.y - here.length * lh };
       }
     }
-    // further terms that didn't fit: pages added straight after the Further Terms page, then every later page's boxes move along
+    // Further terms that didn't fit: pages added straight after the Further Terms page (Tim, 24 November 2026). Each is made from
+    // that page's own header and footer bands only (the page embedded, clipped to those bands, so none of its printed clauses
+    // appear twice), with "(continued)" typed after its heading and its printed page number struck through, the right one beside
+    // it. Without the bands, a plain page (and a check for Tim). Then every later page's boxes move along.
     if (pending) {
-      const { it, rest, size, lh, noteY } = pending, pg = pages[it.page - 1], [w, h] = [pg.getWidth(), pg.getHeight()], n = Math.max(1, Math.floor((h - 130) / lh));
+      const { it, rest, size, lh, noteY } = pending, pg = pages[it.page - 1], [w, h] = [pg.getWidth(), pg.getHeight()], C = it.cont && it.cont.page === it.page ? it.cont : null;
       let at = it.page, left = rest, added = 0; continued = it.page + 1;
       // say so at the foot of the Further Terms page itself
       const note = 'Continued on the next page.', ny = noteY;
       pg.drawText(note, { x: it.x, y: ny, size: 8, font: bold, color: ink }); boxes.push({ id: it.id + '_contnote', page: it.page, x: it.x, y: ny - 2, w: bold.widthOfTextAtSize(note, 8), h: 10, kind: 'text', label: it.label + ': continued on the next page' });
+      const head = C ? await doc.embedPage(pg, { left: 0, bottom: C.header[0], right: w, top: h }) : null, foot = C ? await doc.embedPage(pg, { left: 0, bottom: 0, right: w, top: C.footer[1] }) : null;
+      const top0 = C ? C.header[0] - 22 : h - 100, bottom0 = C ? C.footer[1] + 14 : 40, n = Math.max(1, Math.floor((top0 - bottom0) / lh) + 1);
+      const added_pages = [];
       while (left.length) {
         const np = doc.insertPage(at, [w, h]); at++; added++;
-        np.drawText('Further Terms of Sale (continued)', { x: 40, y: h - 60, size: 13, font: bold, color: ink });
-        np.drawText(`Continued from page ${it.page}.`, { x: 40, y: h - 76, size: 8, font, color: ink });
+        let number = null;
+        if (C) {
+          np.drawPage(head, { x: 0, y: C.header[0] }); np.drawPage(foot, { x: 0, y: 0 });
+          const hs = Math.max(8, Math.min(14, C.head.h || 12)), ct = '(continued)';
+          np.drawText(ct, { x: C.head.x1 + 6, y: C.head.y, size: hs, font: bold, color: ink });
+          boxes.push({ id: it.id + '_conthead' + added, page: -at, x: C.head.x1 + 6, y: C.head.y - 2, w: bold.widthOfTextAtSize(ct, hs), h: hs + 2, kind: 'text', label: it.label + ': (continued) after the heading' });
+          if (C.page_no) { const pn = C.page_no, nv = pn.value + added, nt = pn.text.replace(String(pn.value), String(nv)), ps = Math.max(6, Math.min(10, pn.h || 8));
+            np.drawLine({ start: { x: pn.x - 1, y: pn.y + pn.h * 0.32 }, end: { x: pn.x + pn.w + 1, y: pn.y + pn.h * 0.32 }, thickness: 0.9, color: ink });
+            np.drawText(nt, { x: pn.x + pn.w + 4, y: pn.y, size: ps, font, color: ink });
+            boxes.push({ id: it.id + '_contpage' + added, page: -at, x: pn.x - 1, y: pn.y - 2, w: pn.w + 6 + font.widthOfTextAtSize(nt, ps), h: ps + 3, kind: 'text', label: `${it.label}: page number ${pn.text} struck, ${nt} written beside it` });
+            number = { printed: pn.text, written: nt }; }
+        } else {
+          np.drawText('Further Terms of Sale (continued)', { x: 40, y: h - 60, size: 13, font: bold, color: ink });
+          np.drawText(`Continued from page ${it.page}.`, { x: 40, y: h - 76, size: 8, font, color: ink });
+        }
+        const x0 = C ? it.x : 40, ww = C ? it.w : w - 80;
+        const T = l => typeof l === 'string' ? l : l.s;
         const ls = left.slice(0, n); left = left.slice(n);
-        ls.forEach((ln, i) => { const y = h - 100 - i * lh, ph = /\[Tim to [^\]]*\]/.exec(ln);
-          if (ph) np.drawRectangle({ x: 40 + font.widthOfTextAtSize(ln.slice(0, ph.index), size) - 1, y: y - 2, width: font.widthOfTextAtSize(ph[0], size) + 2, height: size + 2, color: hl });
-          np.drawText(ln, { x: 40, y, size, font, color: ink }); });
-        boxes.push({ id: it.id + '_cont' + added, page: -at, x: 40, y: h - 100 - (ls.length - 1) * lh - 2, w: w - 80, h: (ls.length - 1) * lh + size + 4, kind: 'area', label: it.label + ' (continued)', placeholder: ls.some(l => /\[Tim to /.test(l)) });
+        ls.forEach((l, i) => { const ln = T(l); if (!ln) return; const y = top0 - i * lh, ph = /\[Tim to [^\]]*\]/.exec(ln);
+          if (ph) np.drawRectangle({ x: x0 + font.widthOfTextAtSize(ln.slice(0, ph.index), size) - 1, y: y - 2, width: font.widthOfTextAtSize(ph[0], size) + 2, height: size + 2, color: hl });
+          np.drawText(ln, { x: x0, y, size, font, color: ink }); });
+        boxes.push({ id: it.id + '_cont' + added, page: -at, x: x0, y: top0 - (ls.length - 1) * lh - 2, w: ww, h: (ls.length - 1) * lh + size + 4, kind: 'area', label: it.label + ' (continued)', placeholder: ls.some(l => /\[Tim to /.test(T(l))) });
+        added_pages.push({ page: at, source_page: it.page, bands: C ? { header: C.header, footer: C.footer } : null, plain: !C, number });
       }
       boxes.forEach(b => { if (b.page < 0) b.page = -b.page; else if (b.page > it.page) b.page += added; });
+      addedPages = added_pages;
+      if (plan.needs) {
+        if (C) plan.needs.push({ id: 'continuation_check', text: `The further terms run onto ${added} added page${added === 1 ? '' : 's'} straight after page ${it.page}, made from that page's own header and footer, headed "(continued)"${added_pages[0].number ? `, numbered ${added_pages.map(x => x.number.written).join(', ')}` : ''}. Check ${added === 1 ? 'it' : 'them'} before you approve.`, blocking: true, ackable: true });
+        else plan.needs.push({ id: 'continuation_plain', text: `The further terms run onto ${added} added page${added === 1 ? '' : 's'}, but the Further Terms page's header and footer couldn't be found, so ${added === 1 ? 'it is a plain page' : 'they are plain pages'}. Check ${added === 1 ? 'it' : 'them'} before you approve.`, blocking: true, ackable: true });
+      }
     }
     if (o.title) doc.setTitle(o.title, { showInWindowTitleBar: false });
     const bytes = await doc.save({ useObjectStreams: false, addDefaultPage: false });
-    return { bytes, boxes, continued, overflow };
+    return { bytes, boxes, continued, overflow, added_pages: addedPages };
   }
 
   const DRAFT = { EDITIONS, EDITION_RE, editionOk, readPages, lines, xAt, matchAll, readEdition, editionPages, buildMap, parseChattels, numberIn, daysWords, FRONT_CONDITIONS, LABELS,
@@ -11248,7 +11405,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     header('Clause library', '', 0); actions(false);
     const terms = (await ofSafe(sb.from('offer_terms').select('*').order('position'))) || [], wording = await ofWording();
     const ruleText = r => { const w = (r || {}).when || {}; if (w.always) return 'Every offer'; if ('kiwisaver' in w) return w.kiwisaver ? 'When KiwiSaver funds the deposit' : 'When KiwiSaver doesn\'t fund the deposit';
-      if (w.condition) return 'When the buyer chooses ' + ((OF.condInfo(w.condition) || { label: w.condition }).label); if (w.chattels) return 'When the buyer adds or leaves out chattels'; return 'By its rule'; };
+      if (w.condition) return 'When the buyer chooses ' + ((OF.condInfo(w.condition) || { label: w.condition }).label); if (w.chattels) return 'When the buyer adds or leaves out chattels'; if (!Object.keys(w).length) return 'Only when you add it to a draft'; return 'By its rule'; };
     main().innerHTML = `<div class="view-pad" id="drLib"><div class="toolbar no-print"><button class="btn ghost" type="button" id="drLibBack">Back to the property</button></div><span class="agent-flag">Only you see this</span>
       <h1>Your clause library</h1><p class="small">Your standard further terms and the rules that put them on each draft. Clauses already printed in the blank are named by their number only. Where you haven't added wording, the draft shows a highlighted placeholder and never makes wording up.</p>
       ${terms.map(t => `<section class="card tight dr-term" data-term="${esc(t.key)}"><h3 style="margin:0 0 2px">${esc(t.title)}</h3><p class="small" style="margin:0 0 6px">${esc(ruleText(t.rule))}${t.clause ? ' · printed clause ' + esc(t.clause) : ''}</p>
@@ -11260,10 +11417,13 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         <label class="choice cb"><input type="checkbox" data-tactive="${esc(t.key)}" ${t.active !== false ? 'checked' : ''}><span class="mark"></span><span><span class="ct">In use</span></span></label></section>`).join('')}
       <section class="card tight" id="drNewTerm"><h3 style="margin:0 0 4px">Add a standard further term</h3>
         <label class="f" for="drNtTitle">Title</label><input type="text" id="drNtTitle" maxlength="200">
-        <label class="f" for="drNtWhen">When it goes on</label><select id="drNtWhen"><option value="always">Every offer</option><option value="ks1">When KiwiSaver funds the deposit</option><option value="ks0">When KiwiSaver doesn't fund the deposit</option>${OF.CONDITIONS.map(c => `<option value="c:${c.key}">When the buyer chooses ${esc(c.label)}</option>`).join('')}</select>
+        <label class="f" for="drNtWhen">When it goes on</label><select id="drNtWhen"><option value="always">Every offer</option><option value="pick">Only when I add it to a draft</option><option value="ks1">When KiwiSaver funds the deposit</option><option value="ks0">When KiwiSaver doesn't fund the deposit</option>${OF.CONDITIONS.map(c => `<option value="c:${c.key}">When the buyer chooses ${esc(c.label)}</option>`).join('')}</select>
         <label class="f" for="drNtWord">Wording</label><textarea id="drNtWord" rows="3" maxlength="4000"></textarea></section>
+      ${drAiPanelHTML(false)}
       <div class="err" id="drLibErr" role="alert"></div><div class="toolbar"><button class="btn primary" type="button" id="drLibSave">Save the library</button></div></div>`;
     $('#drLibBack').addEventListener('click', () => viewProperty(pid));
+    // a clause written with AI help, saved to the library once Tim has ticked it; it goes on a draft only when he adds it there
+    drAiWire(async (kind, c) => { const key = drNewKey(c.title, terms); await must(sb.rpc('agent_offer_term', { p_key: key, p_title: c.title, p_wording: c.text, p_rule: {}, p_position: 100, p_active: true })); toast('Saved to your clause library'); viewClauseLibrary(pid); });
     $('#drLibSave').addEventListener('click', async () => {
       const err = $('#drLibErr'); err.textContent = '';
       try {
@@ -11274,7 +11434,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
           if (act !== (t.active !== false) || JSON.stringify(rule) !== JSON.stringify(t.rule || {}) || (tw && w !== (t.wording || ''))) await must(sb.rpc('agent_offer_term', { p_key: t.key, p_title: null, p_wording: w || null, p_rule: rule, p_position: null, p_active: act }));
         }
         const ti = $('#drNtTitle').value.trim();
-        if (ti) { const v = $('#drNtWhen').value, when = v === 'always' ? { always: true } : v === 'ks1' ? { kiwisaver: true } : v === 'ks0' ? { kiwisaver: false } : { condition: v.slice(2) };
+        if (ti) { const v = $('#drNtWhen').value, when = v === 'pick' ? {} : v === 'always' ? { always: true } : v === 'ks1' ? { kiwisaver: true } : v === 'ks0' ? { kiwisaver: false } : { condition: v.slice(2) };
           const key = 'std_' + ti.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 30) || 'std_term';
           await must(sb.rpc('agent_offer_term', { p_key: key, p_title: ti, p_wording: $('#drNtWord').value.trim() || null, p_rule: { when }, p_position: 100, p_active: true })); }
         toast('Library saved'); viewClauseLibrary(pid);
@@ -11338,7 +11498,9 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     // the vendor's lawyer, if the file holds one: only from a signed agreement of the current owners
     const links = ags.length ? ((await ofSafe(sb.from('lawyer_links').select('agreement_id,lawyer_name,firm,email,sent_at').in('agreement_id', ags.map(x => x.id)))) || []) : [];
     const vendorLawyer = DR.pickVendorLawyer(prop, ags, links, parties);
-    const plan = DR.planDraft({ details: o.details || {}, map: { places: map.places, chattels: (DR_CACHE[b.id] && DR_CACHE[b.id].pages ? DR.buildMap(DR_CACHE[b.id].pages).chattels : DR.buildMap(await drBlankPages(b)).chattels) }, terms: terms || [], clauses, edits: edits || {}, today: OF.nzToday(), province: o.province || OF.DEFAULT_PROVINCE, vendorLawyer, parties });
+    // read from the blank itself each time: the chattels, and the further terms numbering and continuation bands
+    const fresh = DR.buildMap(DR_CACHE[b.id] && DR_CACHE[b.id].pages ? DR_CACHE[b.id].pages : await drBlankPages(b));
+    const plan = DR.planDraft({ details: o.details || {}, map: { places: map.places, chattels: fresh.chattels }, numbering: fresh.numbering, terms: terms || [], clauses, edits: edits || {}, today: OF.nzToday(), province: o.province || OF.DEFAULT_PROVINCE, vendorLawyer, parties });
     const r = await DR.renderDraft(PDFLib, bytes, plan, { title: 'Draft agreement: ' + (o.buyer_ref || 'offer') });
     const sha = await REPO.sha256(r.bytes), prev = (await ofSafe(sb.from('offer_drafts').select('number').eq('offer_id', oid).order('number', { ascending: false }))) || [], n = ((prev[0] || {}).number || 0) + 1;
     const pth = `properties/${o.property_id}/docs/offer-draft-${oid}-${n}-${sha.slice(0, 12)}.pdf`;
@@ -11346,8 +11508,10 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     if (up.error && !/exists/i.test(up.error.message || '')) throw new Error('The draft didn\'t save. Check you have signal, then try again.');
     await drConfirm(pth, sha);
     const placed = plan.items.map(it => { const bx = r.boxes.filter(x => x.id === it.id || x.id.startsWith(it.id + '_cont'));
-      return { id: it.id, label: it.label, kind: it.kind, text: it.text || null, value: it.value || null, placeholder: !!it.placeholder, edited: !!it.edited, terms: it.terms, boxes: bx.map(x => ({ page: x.page, x: Math.round(x.x * 10) / 10, y: Math.round(x.y * 10) / 10, w: Math.round(x.w * 10) / 10, h: Math.round(x.h * 10) / 10 })) }; });
-    const res = await must(sb.rpc('agent_draft_add', { p_offer: oid, p_map: map.id, p_path: pth, p_sha256: sha, p_size: r.bytes.length, p_placed: placed, p_needs: plan.needs, p_edits: Object.assign({}, edits || {}, { date_format: plan.date_format }), p_note: note || null }));
+      return { id: it.id, label: it.label, kind: it.kind, text: it.text || null, value: it.value || null, placeholder: !!it.placeholder, edited: !!it.edited, terms: it.terms, mark: it.mark || undefined, who: it.who || undefined, moved: it.moved || undefined, boxes: bx.map(x => ({ page: x.page, x: Math.round(x.x * 10) / 10, y: Math.round(x.y * 10) / 10, w: Math.round(x.w * 10) / 10, h: Math.round(x.h * 10) / 10 })) }; })
+      // each page added for the further terms, with the page it was made from and the bands used (the draft's fingerprint covers it)
+      .concat((r.added_pages || []).map((ap, i) => ({ id: 'added_page_' + (i + 1), label: `Page added after page ${ap.source_page}${ap.number ? `, numbered ${ap.number.written}` : ' (plain)'}`, kind: 'page', page: ap.page, source_page: ap.source_page, bands: ap.bands, number: ap.number, plain: !!ap.plain, boxes: [] })));
+    const res = await must(sb.rpc('agent_draft_add', { p_offer: oid, p_map: map.id, p_path: pth, p_sha256: sha, p_size: r.bytes.length, p_placed: placed, p_needs: plan.needs, p_edits: Object.assign({}, edits || {}, { date_format: plan.date_format, retired_numbers: plan.retired_numbers, term_last: plan.term_last }), p_note: note || null }));
     DR_CACHE['draft-' + res.id] = { bytes: r.bytes };
     return res.id;
   }
@@ -11360,13 +11524,66 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   }
   // the offer's details compared by value (key order doesn't matter, as the database compares them)
   const drCanon = x => Array.isArray(x) ? x.map(drCanon) : x && typeof x === 'object' ? Object.keys(x).sort().reduce((a, k) => { a[k] = drCanon(x[k]); return a; }, {}) : x;
+  // ── the review screen's further terms, AI clause writer and marks (Tim, 24 November 2026) ──
+  const DR_MONTHS = 'January|February|March|April|May|June|July|August|September|October|November|December';
+  const DR_LIT = new RegExp(`(?:(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday) )?\\b\\d{1,2} (?:${DR_MONTHS}) \\d{4}\\b|\\b\\d{1,3} working days?\\b`, 'g');
+  // a term's wording as editable text with its timing, dates and working days as small chips (a tap changes them)
+  function drChip(kind, label, val) { return `<span class="dr-chip" contenteditable="false" role="button" tabindex="0" data-chip="${kind}" data-val="${esc(val || '')}">${esc(label)}</span>`; }
+  function drRichHTML(t, tpl) {
+    return String(tpl).split(/(\{timing\}|\{date\})/).map(part => {
+      if (part === '{timing}') return drChip('timing', t.timing_text || 'set the timing', '{timing}');
+      if (part === '{date}') return drChip('date', t.date_text || 'set the date', '{date}');
+      let out = '', last = 0; part.replace(DR_LIT, (m, at) => { out += esc(part.slice(last, at)).replace(/\n/g, '<br>') + drChip('lit', m, m); last = at + m.length; return m; });
+      return out + esc(part.slice(last)).replace(/\n/g, '<br>'); }).join('');
+  }
+  // the editor's text back to a term's wording: chips become {timing}, {date} or their (possibly changed) words
+  function drRichText(el) {
+    const walk = n => Array.from(n.childNodes).map(c => c.nodeType === 3 ? c.nodeValue : c.nodeType !== 1 ? '' : c.classList.contains('dr-chip') ? (c.dataset.chip === 'lit' ? c.dataset.val : c.dataset.chip === 'date' ? '{date}' : '{timing}')
+      : c.tagName === 'BR' ? '\n' : (['DIV', 'P'].includes(c.tagName) ? '\n' : '') + walk(c)).join('');
+    return walk(el).replace(/\u00a0/g, ' ').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+  }
+  // a page of the draft and the same page of the blank (pages added for the further terms are not on the blank)
+  const drPageMaps = placed => { const added = (placed || []).filter(x => x.kind === 'page').map(x => x.page).sort((a, b) => a - b);
+    return { added, blankOf: dp => added.includes(dp) ? null : dp - added.filter(a => a < dp).length, draftOf: bp => { let dp = bp; for (const a of added) if (a <= dp) dp++; return dp; } }; };
+  const DR_MARK = { 'initials:purchasers': 'Initials: the purchasers', 'initials:vendors': 'Initials: the vendors', 'initials:both': 'Initials: everyone', 'signature:purchasers': 'Signature: the purchasers', 'signature:vendors': 'Signature: the vendors', strike: 'Strike-out', text: 'Text', highlight: 'Highlight' };
+  const DR_MOVABLE = ['text', 'area', 'strike', 'lines', 'caret', 'mark'];
+  // "Ask AI to write a clause": a panel for the review screen and the clause library. onUse(kind, { title, text }) is given only after
+  // Tim has read the draft and ticked it; kind is 'offer' (this offer only) or 'library' (saved to his library first)
+  function drAiPanelHTML(withOffer) {
+    return `<details class="card tight" id="drAi"><summary><strong>Ask AI to write a clause</strong></summary>
+      <p class="small" style="margin:4px 0">Describe the clause in plain words. The AI drafts it in legal wording for you to read, change and tick. Nothing is used until you do. For a condition, the time is written as a timing you set on the draft.</p>
+      <label class="f" for="drAiAsk">What the clause should say</label><textarea id="drAiAsk" rows="3" maxlength="3000" placeholder="For example: the vendor gets the spa pool serviced before settlement, for the purchaser's benefit only"></textarea>
+      <div class="toolbar"><button class="btn ghost" type="button" id="drAiGo">Write it</button></div><p class="small" id="drAiMsg" role="status" aria-live="polite"></p>
+      <div id="drAiOut" hidden><label class="f" for="drAiTitle">Title</label><input type="text" id="drAiTitle" maxlength="120">
+        <label class="f" for="drAiWord">Wording <span class="opt">(a draft from the AI: read and change it as you need)</span></label><textarea id="drAiWord" rows="5" maxlength="2400"></textarea>
+        <p class="small" id="drAiSum"></p>
+        <label class="choice cb"><input type="checkbox" id="drAiTick"><span class="mark"></span><span><span class="ct">I have read this wording and it can be used</span></span></label>
+        <div class="toolbar">${withOffer ? '<button class="btn primary" type="button" id="drAiUse" disabled>Use in this offer only</button>' : ''}<button class="btn ghost" type="button" id="drAiSave" disabled>Save to my clause library</button></div>
+        <p class="small err" id="drAiErr" role="alert"></p></div></details>`;
+  }
+  function drAiWire(onUse) {
+    const go = $('#drAiGo'); if (!go) return; const msg = $('#drAiMsg');
+    go.addEventListener('click', async () => { const t = $('#drAiAsk').value.trim(); if (t.length < 10) return msg.textContent = 'Describe the clause in a few more words first.';
+      go.disabled = true; msg.textContent = 'Writing a draft...'; const r = await offerCall('offer-draft', { action: 'write_clause', text: t }); go.disabled = false;
+      if (r && r.ok && r.wording) { $('#drAiOut').hidden = false; $('#drAiTitle').value = r.title || ''; $('#drAiWord').value = r.wording; $('#drAiSum').textContent = (r.summary || '') + (/\{timing\}/.test(r.wording) ? ' "{timing}" is the time for it, which you set on the draft.' : '');
+        $('#drAiTick').checked = false; $$('#drAiUse,#drAiSave').forEach(b => { b.disabled = true; }); return msg.textContent = 'A draft from the AI. Read it, change it if you need to, then tick it.'; }
+      msg.textContent = (r && (r.message || r.error)) || 'The clause writer isn\'t available right now. Type your own wording instead.'; });
+    $('#drAiTick').addEventListener('change', () => { $$('#drAiUse,#drAiSave').forEach(b => { b.disabled = !$('#drAiTick').checked; }); });
+    const use = kind => async () => { const title = $('#drAiTitle').value.trim(), text = $('#drAiWord').value.trim(); if (!$('#drAiTick').checked) return;
+      if (!title || text.length < 10) return $('#drAiErr').textContent = 'Give it a title and its wording.'; $('#drAiErr').textContent = '';
+      try { await onUse(kind, { title, text }); } catch (e) { $('#drAiErr').textContent = e.message || 'That didn\'t save.'; } };
+    const u = $('#drAiUse'); if (u) u.addEventListener('click', use('offer')); $('#drAiSave').addEventListener('click', use('library'));
+  }
+  // a new library key from a title, not already used
+  const drNewKey = (title, terms) => { const b = 'std_' + (title.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 30) || 'term'); let k = b, i = 2; while ((terms || []).some(t => t.key === k)) k = b + '_' + i++; return k; };
+
   // Tim's review screen
   async function viewDraftReview(did) {
     header('Draft agreement', '', 0); actions(false);
     main().innerHTML = '<div class="loading">Loading...</div>';
     const d = await must(sb.from('offer_drafts').select('*').eq('id', did).single());
-    const [o, all, apps, p] = await Promise.all([must(sb.from('property_offers').select('*').eq('id', d.offer_id).single()), ofSafe(sb.from('offer_drafts').select('id,number').eq('offer_id', d.offer_id).order('number', { ascending: false })),
-      ofSafe(sb.from('offer_draft_approvals').select('*').eq('draft_id', did)), must(sb.from('properties').select('id,address').eq('id', d.property_id).single())]);
+    const [o, all, apps, p, libTerms] = await Promise.all([must(sb.from('property_offers').select('*').eq('id', d.offer_id).single()), ofSafe(sb.from('offer_drafts').select('id,number').eq('offer_id', d.offer_id).order('number', { ascending: false })),
+      ofSafe(sb.from('offer_draft_approvals').select('*').eq('draft_id', did)), must(sb.from('properties').select('id,address').eq('id', d.property_id).single()), ofSafe(sb.from('offer_terms').select('*').order('position'))]);
     const ap = (apps || [])[0], newest = ((all || [])[0] || {}).id === d.id, changed = JSON.stringify(drCanon(o.details)) !== JSON.stringify(drCanon(d.details));
     // newer places on this blank, or a newer usable blank: the draft must be made again before it can be approved
     const blanks = await drLoadBlanks(d.property_id), myBlank = blanks.find(x => x.id === d.blank_id) || {}, myMap = (myBlank.maps || []).find(m => m.id === d.map_id) || {};
@@ -11390,15 +11607,34 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         ${acks.length ? `<ul class="dr-list" id="drAcks">${acks.map(n => `<li><label class="choice cb"><input type="checkbox" data-ack="${esc(n.id)}" ${ap && (ap.checked || []).includes(n.id) ? 'checked' : ''} ${ap ? 'disabled' : ''}><span class="mark"></span><span><span class="ct dr-need">${esc(n.text)}</span><span class="cd">Tick once you have checked it on the page</span></span></label></li>`).join('')}</ul>` : ''}
         ${!block.length && !acks.length ? '<p class="small" id="drNoNeeds">Nothing is waiting on you before approval.</p>' : ''}
         ${check.length ? `<details class="of-more" open><summary class="small">To check (${check.length})</summary><ul class="dr-list">${check.map(n => `<li class="small" data-check="${esc(n.id)}">${esc(n.text)}</li>`).join('')}</ul></details>` : ''}</section>
-      <section class="card" id="drPagesRv"><h2>The drafted pages</h2><p class="small">Every place filled or marked is highlighted and numbered. Placeholders are in yellow.</p>
-        <div class="dr-nav"><label class="sr" for="drRvPick">Page</label><select id="drRvPick">${pagesWith.map(n => `<option value="${n}">Page ${n} (${boxes.filter(x => x.page === n).length})</option>`).join('')}</select></div>
+      <section class="card" id="drPagesRv"><h2>The drafted pages</h2><p class="small">Every place filled or marked is highlighted and numbered. Placeholders are in yellow.${newest && !ap ? ' You can mark an area on any page, or tap a filled place to move or resize it. Marks are only ever added; the printed form is never changed.' : ''}</p>
+        <div class="dr-nav"><label class="sr" for="drRvPick">Page</label><select id="drRvPick">${pagesWith.map(n => `<option value="${n}">Page ${n} (${boxes.filter(x => x.page === n).length})</option>`).join('')}</select>
+          <span class="dr-zoom"><button class="btn link" type="button" id="drZoomOut" aria-label="Zoom out">&minus;</button><span id="drZoomV">100%</span><button class="btn link" type="button" id="drZoomIn" aria-label="Zoom in">+</button></span></div>
+        ${newest && !ap ? `<div class="dr-mktools" id="drMkTools"><label class="f" for="drMkType" style="margin-top:0">Mark an area</label><div class="toolbar" style="margin-top:0"><select id="drMkType">${Object.entries(DR_MARK).map(([v, l]) => `<option value="${v}">${esc(l)}</option>`).join('')}</select>
+            <button class="btn ghost" type="button" id="drMkDraw" aria-pressed="false">Draw a box</button><button class="btn ghost" type="button" id="drMkDel" disabled>Delete</button><button class="btn ghost" type="button" id="drMkReset" hidden>Put it back</button></div>
+          <div id="drMkTextW" hidden><label class="f" for="drMkText">Text in the box</label><input type="text" id="drMkText" maxlength="500"></div>
+          <p class="small" id="drMkSay" aria-live="polite">Choose a kind, tap Draw a box, then drag on the page. Drag a box to move it, or its handles to resize it.</p></div>` : ''}
         <div id="drRvCanvas" class="dr-holder"></div></section>
+      ${ft ? `<section class="card" id="drTerms"><h2>Further terms of sale</h2>
+        <p class="small">Change any wording here. The timing, dates and working days are the small highlighted pieces: tap one to change it. ${newest && !ap ? 'Drag a term to move it, or use its up and down buttons.' : ''} Changes go on the next draft.</p>
+        <ol class="dr-terms" id="drTermList">${(ft.terms || []).map(t => { const tpl = t.custom && t.placeholder ? (t.wording || '') : t.template != null ? t.template : t.text;
+          return `<li class="dr-term-i" data-term="${esc(t.id)}" ><div class="dr-thead">${newest && !ap ? '<span class="dr-grip" aria-hidden="true" title="Drag to move">&#8942;&#8942;</span>' : ''}<span class="dr-tno"><strong>${t.number}. ${esc(t.title)}</strong>${t.placeholder ? ' <span class="pill of-warnp">Needs you</span>' : ''}${t.ai ? ' <span class="pill">AI draft, ticked by you</span>' : ''}</span>
+            ${newest && !ap ? `<span class="dr-tbtns"><button class="btn link" type="button" data-tup="${esc(t.id)}" aria-label="Move ${esc(t.title)} up">Up</button><button class="btn link" type="button" data-tdown="${esc(t.id)}" aria-label="Move ${esc(t.title)} down">Down</button>${t.removable ? `<button class="btn link" type="button" data-trm="${esc(t.id)}">Remove</button>` : ''}</span>` : ''}</div>
+            ${t.custom ? `<p class="small" style="margin:0">The buyer asked for: ${esc(t.request || '(no description)')}${t.ai ? ' (worded with AI help)' : ''}</p>` : ''}
+            <div class="dr-rich" contenteditable="${newest && !ap ? 'true' : 'false'}" role="textbox" aria-multiline="true" aria-label="Wording of further term ${t.number}, ${esc(t.title)}" data-rich="${esc(t.id)}" data-orig="${esc(tpl)}">${drRichHTML(t, tpl)}</div></li>`; }).join('')}</ol>
+        <div class="card tight dr-chiped" id="drChipEd" hidden><p class="small" style="margin:0 0 4px" id="drChipFor"></p>
+          <div class="choices" id="drCmModes">${[['days', 'Working days from the date of the agreement'], ['date', 'By a date'], ['after', 'Working days after another condition is satisfied or waived']].map(([v, l]) => `<label class="choice"><input type="radio" name="dr_cm" value="${v}"><span class="mark"></span><span><span class="ct">${l}</span></span></label>`).join('')}</div>
+          <div class="of-when"><div id="drCmDaysW"><label class="f" for="drCmDays">Working days</label><input type="number" id="drCmDays" min="1" max="250" inputmode="numeric"></div><div id="drCmDateW"><label class="f" for="drCmDate">Date</label><input type="date" id="drCmDate"></div>
+            <div id="drCmAfterW"><label class="f" for="drCmAfter">After</label><select id="drCmAfter">${((o.details || {}).conditions || []).map(c => `<option value="${esc(c.key)}">${esc((OF.condInfo(c.key) || { label: c.key }).label)}</option>`).join('')}</select></div></div>
+          <div class="toolbar"><button class="btn primary" type="button" id="drCmDone">Done</button><button class="btn ghost" type="button" id="drCmCancel">Cancel</button></div><p class="small err" id="drCmErr" role="alert"></p></div>
+        ${newest && !ap ? `<div class="dr-addt"><label class="f" for="drAddTerm">Add a clause from your library</label><div class="toolbar" style="margin-top:0"><select id="drAddTerm"><option value="">Choose a clause</option>${(libTerms || []).filter(x => x.kind === 'further_term' && x.active !== false && x.wording_from !== 'custom' && x.key !== 'chattels' && !(ft.terms || []).some(t => t.id === 'ft_' + x.key || t.library === x.key)).map(x => `<option value="${esc(x.key)}">${esc(x.title)}</option>`).join('')}</select><button class="btn ghost" type="button" id="drAddTermGo">Add and re-draft</button></div></div>
+          ${drAiPanelHTML(true)}` : ''}</section>` : newest && !ap ? `<section class="card" id="drTerms"><h2>Further terms of sale</h2><p class="small">None yet.</p><div class="dr-addt"><label class="f" for="drAddTerm">Add a clause from your library</label><div class="toolbar" style="margin-top:0"><select id="drAddTerm"><option value="">Choose a clause</option>${(libTerms || []).filter(x => x.kind === 'further_term' && x.active !== false && x.wording_from !== 'custom' && x.key !== 'chattels').map(x => `<option value="${esc(x.key)}">${esc(x.title)}</option>`).join('')}</select><button class="btn ghost" type="button" id="drAddTermGo">Add and re-draft</button></div></div>${drAiPanelHTML(true)}</section>` : ''}
       <section class="card" id="drPlaced"><h2>Everything placed</h2>
         <ol class="dr-items">${d.placed.map((x, i) => `<li data-item="${esc(x.id)}" value="${i + 1}"><span class="small"><strong>${esc(x.label)}</strong>${x.edited ? ' <span class="pill">Edited by you</span>' : ''}</span>
-          ${x.kind === 'strike' || x.kind === 'lines' ? '' : x.id === 'further_terms' ? `<div class="small">${(x.terms || []).map(t => `<label class="f" for="drFt_${esc(t.id)}">${t.number}. ${esc(t.title)}${t.placeholder ? ' <span class="pill of-warnp">Needs you</span>' : ''}</label>${t.custom ? `<p class="small" style="margin:0">The buyer asked for: ${esc(t.request || '(no description)')}${t.ai ? ' (worded with AI help)' : ''}</p>` : ''}<textarea id="drFt_${esc(t.id)}" rows="3" data-edit="${esc(t.id)}" data-orig="${esc(t.text)}">${esc(t.custom && t.placeholder ? (t.wording || '') : t.text)}</textarea>`).join('')}</div>`
+          ${x.kind === 'strike' || x.kind === 'lines' || x.kind === 'mark' || x.kind === 'page' ? '' : x.id === 'further_terms' ? `<p class="small" style="margin:0">${(x.terms || []).length} term${(x.terms || []).length === 1 ? '' : 's'}: change them under Further terms of sale above.</p>`
             : `<label class="sr" for="drEd_${esc(x.id)}">${esc(x.label)}</label><input type="text" id="drEd_${esc(x.id)}" data-edit="${esc(x.id)}" data-orig="${esc(x.text || '')}" value="${esc(x.text || '')}">`}</li>`).join('')}</ol>
         ${customT ? `<label class="choice cb" id="drCustomOk"><input type="checkbox" id="drCustomTick" ${E.custom_ok ? 'checked' : ''}><span class="mark"></span><span><span class="ct">Use the wording above for the buyer's own condition</span><span class="cd">It goes on the agreement only once you tick this and re-draft.</span></span></label>` : ''}
-        <label class="f" for="drExtra">Add a further term <span class="opt">(your own wording, one per line)</span></label><textarea id="drExtra" rows="2">${esc((E.extra_terms || []).join('\n'))}</textarea>
+        <label class="f" for="drExtra">Add a further term <span class="opt">(your own wording, one per line)</span></label><textarea id="drExtra" rows="2">${esc((E.extra_terms || []).filter(x => typeof x === 'string').join('\n'))}</textarea>
         <label class="f" for="drFmt">Condition dates</label><select id="drFmt"><option value="date" ${E.date_format !== 'date_days' ? 'selected' : ''}>The date, for example 8 December 2026</option><option value="date_days" ${E.date_format === 'date_days' ? 'selected' : ''}>The date and the working days, for example 8 December 2026 (10 working days)</option></select>
         ${newest && !ap && ((o.details || {}).conditions || []).length > 1 ? `<details class="of-more" id="drLineUp"><summary class="small">Confirm all conditions on the same day</summary>
           <p class="small" style="margin:4px 0">Sets every condition on the offer to the same timing, records it as a correction (the buyer's original is kept), and re-drafts. Each can still be changed with Correct details.</p>
@@ -11411,15 +11647,24 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <div class="toolbar"><button class="btn primary" type="button" id="drApproveDraft" ${ap || !newest || block.length || stale || acks.length ? 'disabled' : ''}>${ap ? 'Approved' : 'Approve draft'}</button><button class="btn ghost" type="button" id="drDownload">Download the PDF</button>${newest ? '<button class="btn ghost" type="button" id="drRedraftChange">Re-draft after a change</button>' : ''}</div>
       ${!ap && newest && (block.length || acks.length) && !stale ? `<p class="small">Approve is available once nothing needs you.${block.length ? ' Fill in each placeholder above and re-draft.' : ''}${acks.length ? ' Tick each check above.' : ''}</p>` : ''}
     </div>`;
+    $$('[data-rich]').forEach(x => { x.dataset.base = drRichText(x); });   // the wording as shown: a change is anything different from this
     const go = async (edits, note) => { const btns = $$('#drRedraft,#drRedraftChange'); btns.forEach(x => { x.disabled = true; }); $('#drRvErr').textContent = 'Drafting...';
       try { const id = await drMakeDraft(d.offer_id, edits, note); toast('New draft made; the earlier one is kept'); viewDraftReview(id); } catch (e) { $('#drRvErr').textContent = e.message || 'That didn\'t draft.'; btns.forEach(x => { x.disabled = false; }); } };
-    const collect = () => { const ed = { items: Object.assign({}, E.items || {}) };
+    // what "Re-draft after a change" carries over: everything but Tim's edits to single values (phase 2, choice 10)
+    const carry = () => { const c = { date_format: E.date_format, extra_terms: E.extra_terms, custom_ok: E.custom_ok, custom_wording: E.custom_wording, retired_numbers: E.retired_numbers };
+      ['added_terms', 'term_order', 'term_timing', 'marks', 'moves'].forEach(k => { if (E[k] != null) c[k] = E[k]; }); return c; };
+    const TT = Object.assign({}, E.term_timing || {}), MK = { marks: JSON.parse(JSON.stringify(E.marks || [])), moves: JSON.parse(JSON.stringify(E.moves || {})) };
+    const collect = () => { const ed = { items: Object.assign({}, E.items || {}), retired_numbers: (E.retired_numbers || []).slice() };
       $$('[data-edit]').forEach(x => { const v = x.value.trim(); if (v !== x.dataset.orig) ed.items[x.dataset.edit] = v; });
-      if (customT) { ed.custom_ok = $('#drCustomTick').checked; const ta = $(`[data-edit="${customT.id}"]`); if (ta) { ed.custom_wording = ta.value.trim(); delete ed.items[customT.id]; } }
-      ed.extra_terms = $('#drExtra').value.split('\n').map(s => s.trim()).filter(Boolean); ed.date_format = $('#drFmt').value; return ed; };
+      $$('[data-rich]').forEach(x => { const id = x.dataset.rich; if (customT && id === customT.id) return; const v = drRichText(x); if (v !== x.dataset.base) ed.items[id] = v; });
+      if (customT) { ed.custom_ok = $('#drCustomTick').checked; const ta = $(`[data-rich="${customT.id}"]`); if (ta) { ed.custom_wording = drRichText(ta); delete ed.items[customT.id]; } }
+      ed.extra_terms = (E.extra_terms || []).filter(x => x && typeof x === 'object').concat($('#drExtra').value.split('\n').map(s => s.trim()).filter(Boolean)); ed.date_format = $('#drFmt').value;
+      if (E.added_terms) ed.added_terms = E.added_terms.slice(); if (Object.keys(TT).length) ed.term_timing = Object.assign({}, TT);
+      const order = $$('#drTermList [data-term]').map(li => li.dataset.term); if (order.length) ed.term_order = order;
+      if (MK.marks.length) ed.marks = MK.marks; if (Object.keys(MK.moves).length) ed.moves = MK.moves; return ed; };
     $('#drRvBack').addEventListener('click', () => viewOfferAgent(d.offer_id));
     $('#drRedraft').addEventListener('click', () => go(collect(), $('#drNote').value.trim() || 'Re-drafted with your changes'));
-    const rc = $('#drRedraftChange'); if (rc) rc.addEventListener('click', () => go({ date_format: E.date_format, extra_terms: E.extra_terms, custom_ok: E.custom_ok, custom_wording: E.custom_wording }, $('#drNote').value.trim() || 'Re-drafted after a change'));
+    const rc = $('#drRedraftChange'); if (rc) rc.addEventListener('click', () => go(carry(), $('#drNote').value.trim() || 'Re-drafted after a change'));
     // line the conditions up from here: a correction to the offer (so the checks and the record follow), then a new draft
     const lg = $('#drLuGo'); if (lg) lg.addEventListener('click', async () => {
       const days = $('#drLuDays').value.trim(), date = $('#drLuDate').value, t = date ? { date } : { days };
@@ -11427,14 +11672,115 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       const det = Object.assign({}, o.details, { conditions: OF.lineUp((o.details || {}).conditions, t), line_up: true }), say = date ? 'by ' + OF.longDate(date) : `within ${Math.floor(+days)} working days`;
       lg.disabled = true; $('#drLuErr').textContent = '';
       try { await must(sb.rpc('agent_offer_correct', { p_offer: d.offer_id, p_details: ofPayload(ofShape(det)), p_note: 'Lined up the conditions: all ' + say }));
-        await go({ date_format: E.date_format, extra_terms: E.extra_terms, custom_ok: E.custom_ok, custom_wording: E.custom_wording }, 'Conditions lined up: all ' + say); }
+        await go(carry(), 'Conditions lined up: all ' + say); }
       catch (e) { lg.disabled = false; $('#drLuErr').textContent = e.message || 'That didn\'t save.'; } });
+    // ── further terms: reorder (drag, or up and down), remove, add from the library, timing chips ──
+    const tl = $('#drTermList');
+    if (tl && newest && !ap) {
+      const move = (li, dir) => { if (dir < 0 && li.previousElementSibling) tl.insertBefore(li, li.previousElementSibling); else if (dir > 0 && li.nextElementSibling) tl.insertBefore(li.nextElementSibling, li); toast('Order changed: re-draft to apply it'); };
+      $$('[data-tup]', tl).forEach(b => b.addEventListener('click', () => move(b.closest('li'), -1))); $$('[data-tdown]', tl).forEach(b => b.addEventListener('click', () => move(b.closest('li'), 1)));
+      // drag a term by its grip (pointer events: mouse, finger or stylus); the up and down buttons do the same on any screen
+      $$('.dr-grip', tl).forEach(gr => gr.addEventListener('pointerdown', e => { const li = gr.closest('li'); e.preventDefault(); li.classList.add('dr-dragging'); let moved = false;
+        const mv = ev => { const sibs = $$('li[data-term]', tl).filter(x => x !== li), after = sibs.find(x => { const r = x.getBoundingClientRect(); return ev.clientY < r.top + r.height / 2; });
+          if ((after || null) !== li.nextElementSibling) { tl.insertBefore(li, after || null); moved = true; } };
+        // the term moves in the page as it is dragged, which ends any pointer capture: so the document follows the pointer instead
+        const up = () => { document.removeEventListener('pointermove', mv); document.removeEventListener('pointerup', up); document.removeEventListener('pointercancel', up); li.classList.remove('dr-dragging'); if (moved) toast('Order changed: re-draft to apply it'); };
+        document.addEventListener('pointermove', mv); document.addEventListener('pointerup', up); document.addEventListener('pointercancel', up); }));
+      // remove a term Tim added: its number is never used again
+      $$('[data-trm]', tl).forEach(b => b.addEventListener('click', () => { const id = b.dataset.trm, t = (ft.terms || []).find(x => x.id === id); if (!t || !confirm(`Remove further term ${t.number}, ${t.title}? Its number won't be used again.`)) return;
+        const ed = collect(); ed.retired_numbers = [...new Set((ed.retired_numbers || []).concat(t.number))];
+        if (t.added) ed.added_terms = (ed.added_terms || []).filter(a => a.id !== id);
+        else if (t.extra) { const objs = ed.extra_terms.filter(x => typeof x === 'object' && x.id !== id), strs = (E.extra_terms || []).filter(x => typeof x === 'string'), si = /^ft_extra_(\d+)$/.exec(id);
+          const keep = si ? strs.filter((x, i) => (E.extra_terms || []).indexOf(x) !== +si[1] - 1) : strs; ed.extra_terms = objs.concat(keep); Object.keys(ed.items).forEach(k => { if (/^ft_extra_\d+$/.test(k)) delete ed.items[k]; }); }
+        delete ed.items[id]; if (ed.term_timing) delete ed.term_timing[id]; if (ed.term_order) ed.term_order = ed.term_order.filter(x => x !== id);
+        go(ed, `Removed further term ${t.number}, ${t.title}`); }));
+      // the timing chips
+      let chip = null; const ced = $('#drChipEd'), mode = () => (($$('input[name="dr_cm"]').find(x => x.checked)) || {}).value || 'days';
+      const showMode = () => { const m = mode(), lit = chip && chip.dataset.chip === 'lit'; $('#drCmDaysW').hidden = m === 'date'; $('#drCmDateW').hidden = m !== 'date'; $('#drCmAfterW').hidden = m !== 'after'; $$('input[name="dr_cm"]')[2].closest('label').style.display = lit || !$('#drCmAfter').options.length ? 'none' : ''; };
+      const openChip = c => { chip = c; const li = c.closest('li'), t = (ft.terms || []).find(x => x.id === li.dataset.term) || {}, cur = TT[li.dataset.term] || t.timing || {};
+        $('#drChipFor').textContent = c.dataset.chip === 'lit' ? `Change "${c.dataset.val}" in ${t.title}` : `The timing of ${t.number}. ${t.title}`;
+        const m0 = c.dataset.chip === 'lit' ? (/working day/.test(c.dataset.val) ? 'days' : 'date') : cur.after ? 'after' : cur.date ? 'date' : 'days';
+        $$('input[name="dr_cm"]').forEach(x => { x.checked = x.value === m0; }); $('#drCmDays').value = c.dataset.chip === 'lit' ? ((/(\d+) working/.exec(c.dataset.val) || [])[1] || '') : (cur.days || ''); $('#drCmDate').value = cur.date || ''; if (cur.after) $('#drCmAfter').value = cur.after;
+        $('#drCmErr').textContent = ''; ced.hidden = false; li.appendChild(ced); showMode(); const f = $(m0 === 'date' ? '#drCmDate' : '#drCmDays'); if (f) f.focus(); };
+      tl.addEventListener('click', e => { const c = e.target.closest('.dr-chip'); if (c && c.closest('.dr-rich').isContentEditable) openChip(c); });
+      tl.addEventListener('keydown', e => { const c = e.target.closest && e.target.closest('.dr-chip'); if (c && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); openChip(c); } });
+      $$('input[name="dr_cm"]').forEach(x => x.addEventListener('change', showMode));
+      $('#drCmCancel').addEventListener('click', () => { ced.hidden = true; chip = null; });
+      $('#drCmDone').addEventListener('click', () => { if (!chip) return; const m = mode(), n = Math.floor(+$('#drCmDays').value), dt = $('#drCmDate').value, li = chip.closest('li'), id = li.dataset.term;
+        if (m === 'date' ? !OF.isDate(dt) : !(n >= 1 && n <= 250)) return $('#drCmErr').textContent = m === 'date' ? 'Choose a date.' : 'Enter 1 to 250 working days.';
+        if (chip.dataset.chip === 'lit') { const hadDay = /^[A-Z][a-z]+day /.test(chip.dataset.val), v = m === 'date' ? (hadDay ? `${['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][OF.dow(dt)]} ${DR.fullDate(dt)}` : DR.fullDate(dt)) : `${n} working ${n === 1 ? 'day' : 'days'}`; chip.dataset.val = v; chip.textContent = v; }
+        else { const t = m === 'after' ? { after: $('#drCmAfter').value, days: n } : m === 'date' ? { date: dt } : { days: n }; TT[id] = t;
+          $$('.dr-chip[data-chip="timing"],.dr-chip[data-chip="date"]', li).forEach(c => { c.textContent = OF.timingPlain(Object.assign({ key: id }, t)) + ' (re-draft to apply)'; }); }
+        ced.hidden = true; chip = null; });
+    }
+    const addGo = $('#drAddTermGo'); if (addGo) addGo.addEventListener('click', () => { const k = $('#drAddTerm').value; if (!k) return toast('Choose a clause first'); const t = (libTerms || []).find(x => x.key === k);
+      const ed = collect(), list = ed.added_terms || [], id = 'add_' + k + '_' + (list.filter(a => a.key === k).length + 1); ed.added_terms = list.concat({ id, key: k }); go(ed, 'Added ' + (t ? t.title : k) + ' from your library'); });
+    drAiWire(async (kind, c) => { const ed = collect();
+      if (kind === 'offer') { ed.extra_terms = (ed.extra_terms || []).concat({ id: 'ft_ai_' + Date.now().toString(36), title: c.title, text: c.text, ai: true }); return go(ed, 'Added a clause written with AI help: ' + c.title); }
+      const key = drNewKey(c.title, libTerms); await must(sb.rpc('agent_offer_term', { p_key: key, p_title: c.title, p_wording: c.text, p_rule: {}, p_position: 100, p_active: true }));
+      ed.added_terms = (ed.added_terms || []).concat({ id: 'add_' + key + '_1', key }); toast('Saved to your clause library'); return go(ed, 'Added ' + c.title + ' (saved to your library)'); });
     const ackBoxes = $$('[data-ack]'), canApprove = () => !ap && newest && !block.length && !stale && ackBoxes.every(x => x.checked);
     ackBoxes.forEach(x => x.addEventListener('change', () => { $('#drApproveDraft').disabled = !canApprove(); }));
     $('#drApproveDraft').addEventListener('click', async () => { try { await must(sb.rpc('agent_draft_approve', { p_draft: did, p_sha256: d.sha256, p_checked: ackBoxes.filter(x => x.checked).map(x => x.dataset.ack) })); toast('Draft approved'); viewDraftReview(did); } catch (e) { $('#drRvErr').textContent = e.message || 'That didn\'t save.'; } });
     $('#drDownload').addEventListener('click', async () => { try { const bytes = await drDraftBytes(d); const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' })); a.download = `Draft-${d.number}-${(p.address || 'agreement').replace(/[^A-Za-z0-9]+/g, '-').slice(0, 60)}.pdf`; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000); } catch (e) { $('#drRvErr').textContent = e.message; } });
-    const paint = async n => { try { const r = await drRender($('#drRvCanvas'), n, boxes, { bytes: await drDraftBytes(d), key: 'draft-' + d.id }); r.wrapEl.dataset.draft = d.id; } catch (e) { $('#drRvCanvas').innerHTML = `<p class="small err">${esc(e.message || drNoLib)}</p>`; } };
-    const pick = $('#drRvPick'); pick.addEventListener('change', () => paint(+pick.value)); if (pagesWith.length) paint(pagesWith[0]);
+    // ── the pages: zoom, marks Tim draws, and filled places he moves or resizes (pointer events: mouse, finger and stylus) ──
+    const PM = drPageMaps(d.placed), editable = newest && !ap, MIN_W = 10, MIN_H = 8;
+    let zoom = 1, cur = null, sel = null, drawOn = false;
+    const holder = $('#drRvCanvas'), say = t => { const e = $('#drMkSay'); if (e) e.textContent = t; };
+    const placedBox = id => { const x = d.placed.find(p => p.id === id); return x && (x.boxes || [])[0]; };
+    const markEl = (k, b, label, cls) => { const el = document.createElement('div'); el.className = 'dr-mark ' + (cls || ''); el.dataset.mk = k; el.setAttribute('role', 'group'); el.setAttribute('aria-label', label);
+      el.innerHTML = `<span class="dr-mk-lbl">${esc(label)}</span>` + ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'].map(h => `<span class="dr-h dr-h-${h}" data-h="${h}"></span>`).join(''); place(el, b); cur.wrapEl.appendChild(el); return el; };
+    const place = (el, b) => { const { W, H } = cur; el.style.left = (b.x / W * 100) + '%'; el.style.width = (b.w / W * 100) + '%'; el.style.top = ((H - b.y - b.h) / H * 100) + '%'; el.style.height = (b.h / H * 100) + '%'; };
+    const markLabel = m => (DR_MARK[m.type + (m.who ? ':' + m.who : '')] || DR_MARK[m.type] || m.type) + (m.type === 'text' && m.text ? ': ' + m.text.slice(0, 30) : '');
+    // a device that can be touched gets finger-sized handles (some phones don't report a coarse pointer to CSS)
+    if (navigator.maxTouchPoints > 0 || 'ontouchstart' in window) document.documentElement.classList.add('dr-touch');
+    const drawLayer = () => { if (!cur) return; $$('.dr-mark', cur.wrapEl).forEach(e => e.remove()); const bp = PM.blankOf(cur.n);
+      if (bp != null) MK.marks.filter(m => m.page === bp).forEach(m => markEl('m:' + m.id, m, markLabel(m), sel === 'm:' + m.id ? 'dr-sel' : ''));
+      if (bp != null) Object.entries(MK.moves).forEach(([id, mv]) => { if (+mv.to.page === bp && sel !== 'p:' + id) markEl('p:' + id, mv.to, 'Moved: ' + ((d.placed.find(x => x.id === id) || {}).label || id), 'dr-moved'); });
+      if (sel && sel.startsWith('p:')) { const id = sel.slice(2), b = MK.moves[id] ? MK.moves[id].to : Object.assign({ page: bp }, placedBox(id)); if (b) markEl(sel, b, 'Move or resize: ' + ((d.placed.find(x => x.id === id) || {}).label || id), 'dr-sel dr-moved'); }
+      const del = $('#drMkDel'), rs = $('#drMkReset'), tw = $('#drMkTextW'), m = sel && sel.startsWith('m:') ? MK.marks.find(x => 'm:' + x.id === sel) : null;
+      if (del) del.disabled = !m; if (rs) rs.hidden = !(sel && sel.startsWith('p:') && MK.moves[sel.slice(2)]); if (tw) { tw.hidden = !(m && m.type === 'text'); if (m && m.type === 'text') $('#drMkText').value = m.text || ''; } };
+    const paint = async n => { try { holder.classList.toggle('dr-zoomed', zoom > 1); const r = await drRender(holder, n, boxes, { bytes: await drDraftBytes(d), key: 'draft-' + d.id }); r.wrapEl.dataset.draft = d.id;
+        if (zoom > 1) { r.wrapEl.style.width = (parseFloat(r.wrapEl.style.width) * zoom) + 'px'; r.wrapEl.style.maxWidth = 'none'; }
+        cur = Object.assign(r, { n }); drawLayer(); if (editable) wirePage(r.wrapEl);
+        const doc = holder._docs && holder._docs['draft-' + d.id], pk = $('#drRvPick');
+        if (doc && pk.options.length < doc.numPages) { const cnt = k => boxes.filter(x => x.page === k).length; pk.innerHTML = Array.from({ length: doc.numPages }, (_, i) => i + 1).map(k => `<option value="${k}" ${k === n ? 'selected' : ''}>Page ${k}${cnt(k) ? ` (${cnt(k)})` : ''}${PM.added.includes(k) ? ', added' : ''}</option>`).join(''); }
+      } catch (e) { holder.innerHTML = `<p class="small err">${esc(e.message || drNoLib)}</p>`; } };
+    const pick = $('#drRvPick'); pick.addEventListener('change', () => { sel = null; paint(+pick.value); }); if (pagesWith.length) paint(pagesWith[0]);
+    const zv = () => { $('#drZoomV').textContent = Math.round(zoom * 100) + '%'; paint(cur ? cur.n : +pick.value); };
+    $('#drZoomIn').addEventListener('click', () => { if (zoom < 3) { zoom = Math.min(3, zoom + 0.5); zv(); } }); $('#drZoomOut').addEventListener('click', () => { if (zoom > 1) { zoom = Math.max(1, zoom - 0.5); zv(); } });
+    const dw = $('#drMkDraw'); if (dw) dw.addEventListener('click', () => { drawOn = !drawOn; dw.setAttribute('aria-pressed', String(drawOn)); dw.textContent = drawOn ? 'Drawing: drag on the page' : 'Draw a box'; if (cur) cur.wrapEl.classList.toggle('dr-drawing', drawOn);
+      if (drawOn && cur && PM.blankOf(cur.n) == null) say('This page was added for the further terms. Marks go on the pages of the blank.'); });
+    const dl = $('#drMkDel'); if (dl) dl.addEventListener('click', () => { if (!sel || !sel.startsWith('m:')) return; MK.marks = MK.marks.filter(m => 'm:' + m.id !== sel); sel = null; drawLayer(); say('Box deleted. Re-draft to apply it.'); });
+    const rsb = $('#drMkReset'); if (rsb) rsb.addEventListener('click', () => { if (!sel || !sel.startsWith('p:')) return; delete MK.moves[sel.slice(2)]; sel = null; drawLayer(); say('Put back where it was. Re-draft to apply it.'); });
+    const mt = $('#drMkText'); if (mt) mt.addEventListener('input', () => { const m = sel && MK.marks.find(x => 'm:' + x.id === sel); if (m) { m.text = mt.value.slice(0, 500); const l = $(`.dr-mark[data-mk="${sel}"] .dr-mk-lbl`); if (l) l.textContent = markLabel(m); } });
+    // page points from a pointer, kept inside the page
+    const pt = e => { const r = cur.wrapEl.getBoundingClientRect(); return { x: Math.max(0, Math.min(cur.W, (e.clientX - r.left) / r.width * cur.W)), y: Math.max(0, Math.min(cur.H, cur.H - (e.clientY - r.top) / r.height * cur.H)) }; };
+    const clamp = b => { const W = cur.W, H = cur.H; b.w = Math.max(MIN_W, Math.min(W, b.w)); b.h = Math.max(MIN_H, Math.min(H, b.h)); b.x = Math.max(0, Math.min(W - b.w, b.x)); b.y = Math.max(0, Math.min(H - b.h, b.y)); ['x', 'y', 'w', 'h'].forEach(k => { b[k] = Math.round(b[k] * 10) / 10; }); return b; };
+    function wirePage(wrap) {
+      wrap.addEventListener('pointerdown', e => {
+        if (e.button > 0) return; const bp = PM.blankOf(cur.n), h = e.target.closest('.dr-h'), mk = e.target.closest('.dr-mark'), bx = e.target.closest('.dr-box');
+        let target = null, kind = null, start = pt(e);
+        if (mk) { sel = mk.dataset.mk; target = sel; kind = h ? h.dataset.h : 'move'; }
+        else if (drawOn && bp != null) { const [ty, who] = $('#drMkType').value.split(':'), m = { id: 'k' + Date.now().toString(36) + Math.floor(Math.random() * 1e4), page: bp, x: start.x, y: start.y, w: MIN_W, h: MIN_H, type: ty }; if (who) m.who = who; if (ty === 'text') m.text = '';
+          MK.marks.push(m); sel = 'm:' + m.id; target = sel; kind = 'new'; }
+        else if (bx && bp != null) { const it = d.placed.find(x => x.id === bx.dataset.id); if (!it || !DR_MOVABLE.includes(it.kind)) { say('That place can\'t be moved here.'); return; } sel = 'p:' + it.id; drawLayer(); say('Drag it to move it, or its handles to resize it. Re-draft to apply it.'); return; }
+        else return;
+        e.preventDefault(); drawLayer(); const el = $(`.dr-mark[data-mk="${target}"]`, wrap); if (!el) return; try { el.setPointerCapture(e.pointerId); } catch (_) { }
+        const isMark = target.startsWith('m:'), m = isMark ? MK.marks.find(x => 'm:' + x.id === target) : null, pid = isMark ? null : target.slice(2);
+        const b0 = isMark ? Object.assign({}, m) : Object.assign({ page: bp }, MK.moves[pid] ? MK.moves[pid].to : placedBox(pid));
+        const onMove = ev => { const p = pt(ev), dx = p.x - start.x, dy = p.y - start.y; let b = Object.assign({}, b0);
+          if (kind === 'new') b = { x: Math.min(start.x, p.x), y: Math.min(start.y, p.y), w: Math.abs(p.x - start.x), h: Math.abs(p.y - start.y) };
+          else if (kind === 'move') { b.x = b0.x + dx; b.y = b0.y + dy; }
+          else { if (/w/.test(kind)) { b.x = Math.min(b0.x + dx, b0.x + b0.w - MIN_W); b.w = b0.w - (b.x - b0.x); } if (/e/.test(kind)) b.w = b0.w + dx;
+            if (/s/.test(kind)) { b.y = Math.min(b0.y + dy, b0.y + b0.h - MIN_H); b.h = b0.h - (b.y - b0.y); } if (/n/.test(kind)) b.h = b0.h + dy; }
+          b = clamp(Object.assign({ page: b0.page }, b)); if (isMark) Object.assign(m, { x: b.x, y: b.y, w: b.w, h: b.h }); else MK.moves[pid] = { from: MK.moves[pid] ? MK.moves[pid].from : Object.assign({ page: bp }, placedBox(pid)), to: Object.assign({ page: bp }, b) }; place(el, b); };
+        const onUp = () => { el.removeEventListener('pointermove', onMove); el.removeEventListener('pointerup', onUp); el.removeEventListener('pointercancel', onUp); drawLayer();
+          if (kind === 'new') { drawOn = false; if (dw) { dw.setAttribute('aria-pressed', 'false'); dw.textContent = 'Draw a box'; } wrap.classList.remove('dr-drawing'); say(m.type === 'text' ? 'Type the text for the box below, then re-draft.' : 'Box added. Drag it or its handles to adjust it, then re-draft.'); if (m.type === 'text') { const t = $('#drMkText'); if (t) t.focus(); } }
+          else say('Re-draft to apply it.'); };
+        el.addEventListener('pointermove', onMove); el.addEventListener('pointerup', onUp); el.addEventListener('pointercancel', onUp);
+      });
+    }
     top();
   }
 

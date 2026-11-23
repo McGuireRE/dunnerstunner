@@ -211,7 +211,7 @@
         printed: pl.map(l => l.text.trim()).join(' ').trim() || undefined, printed_count: pl.length || undefined, printed_bottom: pl.length ? r1(Math.min(...pl.map(l => l.y))) : undefined, printed_last: nums.length ? Math.max(...nums) : undefined, foot: r1(foot) })); }
     // the appendix: 21.2, 21.3 and 22.0
     const ftIdx = ft ? ft.page.n : 0;
-    const ap = PL.find(x => x.page.n > ftIdx && x.L.some(l => /^Appendix\b/.test(l.text)) && x.L.some(l => /^2[12]\.\d\b/.test(l.text)))
+    const ap = PL.find(x => x.page.n >= ftIdx && x.L.some(l => /^Appendix\b/.test(l.text)) && x.L.some(l => /^2[12]\.\d\b/.test(l.text)))
       || PL.find(x => x.page.n > ftIdx && x.L.some(l => /^21\.2\b/.test(l.text)) && x.L.some(l => /^22\.0\b/.test(l.text)))
       || PL.find(x => x.page.n > ftIdx && x.L.some(l => /^22\.0\b/.test(l.text)));
     if (ap) { const { page, L } = ap;
@@ -227,6 +227,27 @@
               line_x1: r1(ls[i].x1), margin: r1(page.w - 8 - (ls[i].x1 + 6)) }));
           } else add(box({ id: 'clause22_days', key: 'clause22_days', kind: 'text', page: page.n, x: wm.x0 - 30, y: ls[i].y, w: 26, h: ls[i].h, label: LABELS.clause22_days, source: 'anchor' }));
           break; } } }
+    // Numbering the further terms (Tim, 24 November 2026): on from the last general terms clause, read from the blank's own text (the
+    // agreement's pages other than the further terms and appendix pages), and from the highest clause printed on the appendix
+    const agp = editionPages(pages, edition), numbering = { general_last: 0, appendix_last: 0, printed_last: 0, ft_page: ft ? ft.page.n : null, appendix_page: ap ? ap.page.n : null, cont: null };
+    const clauseNo = l => { const m = /^\s*(\d{1,2})\.(\d{1,2})\b/.exec(l.text); return m && +m[1] <= 60 ? +m[1] : 0; };
+    PL.forEach(({ page, L }) => { if (!agp.includes(page.n) || (ft && page.n === ft.page.n) || (ap && page.n === ap.page.n)) return; L.forEach(l => { numbering.general_last = Math.max(numbering.general_last, clauseNo(l)); }); });
+    if (ap) ap.L.forEach(l => { numbering.appendix_last = Math.max(numbering.appendix_last, clauseNo(l)); });
+    const ftPlace = places.find(x => x.id === 'further_terms');
+    if (ftPlace) { numbering.printed_last = ftPlace.printed_last || 0; Object.assign(ftPlace, { general_last: numbering.general_last, appendix_last: numbering.appendix_last }); }
+    // the continuation page: the further terms page's own header band (down to its heading) and footer band (the copyright line and
+    // the page number), so a page added after it carries them and none of its printed clauses
+    if (ft && ftPlace) { const { page, L } = ft, h = findLine(L, /^FURTHER TERMS OF SALE/), apH = L.find(l => /^Appendix\b/.test(l.text) && l.y >= h.y - 2);
+      const cont = findLine(L, /^Further Terms continued/), heads = [h, apH, cont && cont.y < h.y && h.y - cont.y < 30 ? cont : null].filter(Boolean);
+      const headerBottom = r1(Math.min(...heads.map(l => l.y)) - 3), footTop = ftPlace.foot, hasCopy = L.some(l => /©/.test(l.text));
+      const printedLines = L.filter(l => l.y < headerBottom && l.y > footTop + 2);
+      const below = printedLines.every(l => l.y + l.h * 0.8 < headerBottom);
+      const pn = page.items.filter(it => /^\s*(?:page\s+)?\d{1,3}(?:\s+of\s+\d{1,3})?\s*$/i.test(it.s) && (it.y + it.h <= footTop + 1 || it.y > headerBottom)).sort((a, b) => a.y - b.y)[0];
+      const anchor = apH || h;
+      if (hasCopy && below) numbering.cont = { page: page.n, w: page.w, h: page.h, header: [headerBottom, r1(page.h)], footer: [0, r1(footTop + 1)],
+        head: { x1: r1(anchor.x1), y: r1(anchor.y), h: r1(anchor.h), text: anchor.text.trim().slice(0, 40) },
+        page_no: pn ? { text: pn.s.trim(), value: +(/(\d{1,3})/.exec(pn.s)[1]), x: r1(pn.x), y: r1(pn.y), w: r1(pn.w), h: r1(pn.h) } : null };
+    }
     // Schedule 1, 2(a): the purchaser's GST registration
     const s1 = pageOf(/^SCHEDULE 1\b|\bSCHEDULE 1\b.*Edition/);
     if (s1) { const l = s1.L.find(x => /^2\(a\)/.test(x.text.trim()) && /purchaser is registered/i.test(x.text)); if (l) add(yesNoOn(l, 'gst_purchaser')); }
@@ -275,7 +296,7 @@
     const want = ['date', 'purchaser', 'nominee', 'gst_vendor', 'price', 'deposit', 'settlement', ...FRONT_CONDITIONS.flatMap(([k]) => ['c_' + k, 'd_' + k]), 'tenancies', 'further_terms', 'clause21_2', 'clause21_3', 'clause22', 'clause22_days', 'chattels',
       'purchaser_back', 'pl_firm', 'pl_person', 'pl_email', 'pl_phone', 'pl_service', 'vl_firm', 'vl_person', 'vl_email', 'vl_phone', 'p_contact', 'sig_purchaser', 'name_purchaser', 'sig_vendor'];
     want.forEach(k => { if (!found.has(k)) missing.push(k); });
-    return { edition, edition_checked: editionOk(edition), pages: pages.length, sizes: pages.map(p => [p.w, p.h]), agreement_pages: editionPages(pages, edition), places, missing, chattels };
+    return { edition, edition_checked: editionOk(edition), pages: pages.length, sizes: pages.map(p => [p.w, p.h]), agreement_pages: editionPages(pages, edition), places, missing, chattels, numbering };
   }
 
   // where a place sits on the page, as { bottom, top } in points: an area hangs down from its first line; a line of text sits on
@@ -537,25 +558,60 @@
     const refMissing = k => { need('ref_missing_' + k, `A condition waits for ${labelOf(k)}, but ${labelOf(k)} isn't in the further terms, so its number is shown as "?". Add it, or change the timing.`, true); return '?'; };
     let resolveRefs = t => String(t).replace(/\[\[FT:(\w+)\]\]/g, (m, k) => refMissing(k)).replace(/\[\[TERM:\w+\]\]/g, '?');
     let ftn = 0; const term = (id, title, text, extra) => { ft.push(Object.assign({ id, title, text }, extra || {})); };
+    // A term's timing: the condition it belongs to, unless Tim set the timing of this term on the review screen (edits.term_timing,
+    // working days, a date, or after one of the offer's conditions). That changes the draft only: the offer's own dates stay as they are.
+    const TT = E.term_timing && typeof E.term_timing === 'object' ? E.term_timing : {};
+    const timedFor = (id, c, title) => { const ov = TT[id]; if (!ov || typeof ov !== 'object') return c || null;
+      const t = { key: c ? c.key : 'term_' + id };
+      if (ov.after) { if (!(cond(ov.after) && ov.after !== t.key && Math.floor(+ov.days) >= 1)) { need('term_timing_bad_' + id, `${title}: the timing you set waits for a condition that isn't on this offer, so it wasn't used. Set it again.`, !c); return c || null; }
+        Object.assign(t, { after: ov.after, days: Math.floor(+ov.days) }); }
+      else if (ov.date && OF && OF.isDate(ov.date)) t.date = ov.date; else if (Math.floor(+ov.days) >= 1) t.days = Math.floor(+ov.days); else return c || null;
+      if (c && JSON.stringify([c.after || '', c.date || '', c.after || c.date ? '' : +c.days]) !== JSON.stringify([t.after || '', t.date || '', t.after || t.date ? '' : +t.days]))
+        need('term_timing_' + id, `${title}: you set its timing on the draft to "${timingPhrase(t)}". The offer itself still says ${OF ? OF.timingPlain(c) : 'otherwise'}, so the date checks follow the offer. Correct the offer too if they should match.`, false);
+      return t; };
+    // a term's wording with its tokens filled: { text, template (the wording with {timing} and {date} kept), tokens, timing }.
+    // {timing} with no timing to give: a highlighted gap, and Tim must set it.
+    const NO_TIMING = '[Tim to set the timing]';
+    const fillTerm = (id, title, w, tm, extra) => { let tpl = w; Object.entries(extra || {}).forEach(([k, v]) => { tpl = tpl.split('{' + k + '}').join(v); });
+      if (tm) { const f = fill(tpl, tm); return { text: f.text, template: tpl, tokens: f.tokens, timing: tm }; }
+      const tokens = /\{(date|timing)\}/.test(tpl); if (tokens) need('timing_missing_' + id, `${title}: its wording has {timing} but no timing yet. Tap the timing in the term to set it.`, true);
+      return { text: tpl.replace(/\{(date|timing)\}/g, NO_TIMING), template: tpl, tokens, timing: null }; };
     for (const t of terms) {
       if (t.kind !== 'further_term' || t.key === 'chattels' || !ruleApplies(t.rule, d)) continue;
       if (t.wording_from === 'custom') {
         const c = cond('custom'); if (!c) continue;
         // the buyer's own wording may hold {timing} (the helper writes it so) or {date}: filled in like Tim's own clauses
-        const w = String(E.custom_wording || c.wording || '').trim(), f = E.custom_ok && w ? fill(w, c) : null;
-        term('ft_custom', "Purchaser's condition", f ? f.text : PLACEHOLDERS.custom, { custom: true, cond: 'custom', request: c.request || '', wording: c.wording || '', ai: !!c.ai, suffix: f && f.tokens ? '' : suffixFor(c) });
+        const w = String(E.custom_wording || c.wording || '').trim(), tm = timedFor('ft_custom', c, "Purchaser's condition"), f = E.custom_ok && w ? fillTerm('ft_custom', "Purchaser's condition", w, tm) : null;
+        term('ft_custom', "Purchaser's condition", f ? f.text : PLACEHOLDERS.custom, { custom: true, cond: 'custom', request: c.request || '', wording: c.wording || '', ai: !!c.ai, suffix: f && f.tokens ? '' : suffixFor(tm), template: f ? f.template : null, timing: tm });
         continue;
       }
       let w = t.wording_from ? String((input.clauses || {})[t.wording_from] || '').trim() : String(t.wording || '').trim();
-      const c = t.wording_from ? cond(t.wording_from) : null; let tokens = false;
+      const c = t.wording_from ? cond(t.wording_from) : null, id = 'ft_' + t.key, tm = timedFor(id, c, t.title); let f = null;
       if (!w) w = placeholderFor(t.wording_from || t.key, t.title);
-      else if (c) { const f = fill(w, c, { detail: c.detail || '', address: d.sale_address || '' }); w = f.text; tokens = f.tokens; }
-      term('ft_' + t.key, t.title, w, c ? { cond: c.key, suffix: tokens ? '' : suffixFor(c), detail: c.detail || (t.wording_from === 'sale' ? d.sale_address : '') } : {});
+      else if (tm || /\{(date|timing)\}/.test(w)) { f = fillTerm(id, t.title, w, tm, c ? { detail: c.detail || '', address: d.sale_address || '' } : {}); w = f.text; }
+      term(id, t.title, w, Object.assign({ template: f ? f.template : w, timing: tm }, c ? { cond: c.key, suffix: f && f.tokens ? '' : suffixFor(tm), detail: c.detail || (t.wording_from === 'sale' ? d.sale_address : '') } : {}));
     }
     // the dates of printed conditions that wait for another, where their own line couldn't hold them
     timeTerms.forEach(x => term(x.id, x.title, x.text, { timing: true }));
     if (cond('sale')) need('sale_address_seen', `Sale of another property: the buyer's own address (${d.sale_address || 'not given'}) is named in that further term, so the vendors will see it on the agreement. Check the buyer is happy with that.`, false);
-    (E.extra_terms || []).map(x => String(x || '').trim()).filter(Boolean).forEach((x, i) => term('ft_extra_' + (i + 1), 'Your further term', x));
+    // clauses Tim added from his library on the review screen (edits.added_terms: [{ id, key }]); the rule doesn't apply to these
+    (Array.isArray(E.added_terms) ? E.added_terms : []).forEach(a => { if (!a || !/^[A-Za-z0-9_]{1,80}$/.test(String(a.id || ''))) return;
+      const t = (input.terms || []).find(x => x.key === a.key && x.kind === 'further_term' && x.active !== false && x.wording_from !== 'custom');
+      if (!t) { need('added_gone_' + a.id, `A clause you added (${a.key}) isn't in your library any more. Remove it, or add it to the library again.`, true); return; }
+      if (ft.some(x => x.id === 'ft_' + t.key)) { need('added_twice_' + a.id, `${t.title} is already on this draft, so it was added only once.`, false); return; }
+      let w = t.wording_from ? String((input.clauses || {})[t.wording_from] || '').trim() : String(t.wording || '').trim();
+      const c = t.wording_from ? cond(t.wording_from) : null, tm = timedFor(a.id, c, t.title);
+      const f = w ? fillTerm(a.id, t.title, w, tm, c ? { detail: c.detail || '', address: d.sale_address || '' } : {}) : { text: placeholderFor(t.key, t.title), template: '', tokens: false, timing: tm };
+      term(a.id, t.title, f.text, { added: true, removable: true, library: t.key, cond: c ? c.key : null, template: f.template, timing: tm, suffix: c && !f.tokens ? suffixFor(tm) : '' }); });
+    // Tim's own terms: a line he typed (a string), or a clause he had written with AI help for this offer only ({ id, title, text })
+    (E.extra_terms || []).forEach((x, i) => {
+      if (x && typeof x === 'object') { const id = /^[A-Za-z0-9_]{1,80}$/.test(String(x.id || '')) ? x.id : 'ft_extra_' + (i + 1), title = String(x.title || 'Your further term').trim().slice(0, 200) || 'Your further term', w = String(x.text || '').trim(); if (!w) return;
+        const f = fillTerm(id, title, w, timedFor(id, null, title)); term(id, title, f.text, { removable: true, extra: true, ai: !!x.ai, template: f.template, timing: f.timing }); return; }
+      const w = String(x || '').trim(); if (!w) return; const id = 'ft_extra_' + (i + 1), f = fillTerm(id, 'Your further term', w, timedFor(id, null, 'Your further term'));
+      term(id, 'Your further term', f.text, { removable: true, extra: true, template: f.template, timing: f.timing }); });
+    // the order Tim chose on the review screen (edits.term_order); anything not in it keeps its place after those that are
+    if (Array.isArray(E.term_order) && E.term_order.length) { const pos = new Map(E.term_order.map((id, i) => [String(id), i]));
+      const keyed = ft.map((x, i) => [pos.has(x.id) ? pos.get(x.id) : 1000 + i, x]); keyed.sort((a, b) => a[0] - b[0]); ft.splice(0, ft.length, ...keyed.map(k => k[1])); }
     // chattels: on the schedule (strike out or add), or as a further term, as the library says
     const chT = T('chattels'), where = ((chT && chT.rule) || {}).where === 'further_terms' ? 'further_terms' : 'schedule';
     const add = (d.chattels_add || []).filter(Boolean), exc = (d.chattels_exclude || []).filter(Boolean);
@@ -572,20 +628,33 @@
     }
     // the further terms go on as a numbered list (a placeholder for anything Tim hasn't worded)
     let ftp = P('further_terms');
+    // Numbering (Tim, 24 November 2026): on from the last general terms clause and the highest clause printed on the appendix, read
+    // from the blank itself (input.numbering, from buildMap; an older saved map carries the same on its further terms place). A
+    // number once used is never used again: numbers Tim retired (a term he removed) are skipped, so a later term never takes one.
+    const NB = Object.assign({}, map.numbering || {}, input.numbering || {}), retired = new Set((E.retired_numbers || []).map(Number).filter(n => n >= 1));
+    const base = Math.max(+NB.general_last || +(ftp || {}).general_last || 0, +NB.appendix_last || +(ftp || {}).appendix_last || 0, +(ftp || {}).printed_last || 0);
+    ftn = base;
+    if (ft.length && !base) need('numbering_unknown', "The last general terms clause number couldn't be read from the blank, so the further terms are numbered from 1. Check the numbering.", false);
     if (ft.length && ftp && ftp.printed_bottom != null) {
-      // terms already printed on the page: ours start below the lowest printed line, numbered on from the last printed number
-      const top = ftp.printed_bottom - 14, cut = ftp.y - top; ftp = Object.assign({}, ftp, { y: top, h: ftp.h - cut }); ftn = ftp.printed_last || 0;
-      need('further_printed', `The Further Terms page already has ${ftp.printed_count} printed line${ftp.printed_count === 1 ? '' : 's'}${ftp.printed_last ? `, numbered to ${ftp.printed_last}` : ''}. The offer's terms start below the lowest of them, numbered from ${ftn + 1}. This layout hasn't been checked on a real blank yet: look at the page before you approve.`, true, true);
+      // terms already printed on the page: ours start below the lowest printed line, numbered on from the highest printed number
+      const top = ftp.printed_bottom - 14, cut = ftp.y - top; ftp = Object.assign({}, ftp, { y: top, h: ftp.h - cut });
+      let first = ftn + 1; while (retired.has(first)) first++;
+      need('further_printed', `The Further Terms page already has ${ftp.printed_count} printed line${ftp.printed_count === 1 ? '' : 's'}${ftp.printed_last ? `, numbered to ${ftp.printed_last}` : ''}. The offer's terms start below the lowest of them, numbered from ${first}. This layout hasn't been checked on a real blank yet: look at the page before you approve.`, true, true);
     }
     if (ft.length) {
-      ft.forEach(x => { ftn++; x.number = ftn; });
+      ft.forEach(x => { ftn++; while (retired.has(ftn)) ftn++; x.number = ftn; });
       // the further term numbers are known now: fill in every reference to one ("further term 3"), in the terms and on the page
       const numOf = new Map(), byId = new Map(ft.map(x => [x.id, x.number])); ft.forEach(x => { if (x.cond && !numOf.has(x.cond)) numOf.set(x.cond, x.number); });
       resolveRefs = t => String(t).replace(/\[\[FT:(\w+)\]\]/g, (m, k) => numOf.has(k) ? String(numOf.get(k)) : refMissing(k))
         .replace(/\[\[TERM:(\w+)\]\]/g, (m, id) => byId.has(id) ? String(byId.get(id)) : '?');
-      const text = ft.map(x => { const edited = Object.prototype.hasOwnProperty.call(edits, x.id) ? String(edits[x.id] || '') : null; const body = resolveRefs(edited != null ? edited : x.text); x.text = body;
+      // Tim's edit of a term is its wording as he left it: {timing} and {date} in it are filled in like any other
+      const text = ft.map(x => { const edited = Object.prototype.hasOwnProperty.call(edits, x.id) ? String(edits[x.id] || '') : null;
+        let body = edited != null ? edited : x.text; if (edited != null) { x.template = edited; if (/\{(date|timing)\}/.test(edited)) { const f = fillTerm(x.id, x.title, edited, x.timing); body = f.text; x.suffix = ''; } }
+        body = resolveRefs(body); x.text = body;
         return `${x.number}. ${x.title}${x.detail ? ' (' + x.detail + ')' : ''}: ${body}${resolveRefs(x.suffix || '')}`; });
-      const it = put('further_terms', ftp, text.join('\n'), { label: 'Further terms of sale', item: { terms: ft.map(x => ({ id: x.id, number: x.number, title: x.title, text: x.text, placeholder: isPlaceholder(x.text), custom: !!x.custom, request: x.request, wording: x.wording, ai: x.ai })) } });
+      const it = put('further_terms', ftp, text.join('\n'), { label: 'Further terms of sale', item: { cont: NB.cont || null, number_base: base, terms: ft.map(x => ({ id: x.id, number: x.number, title: x.title, text: x.text, placeholder: isPlaceholder(x.text), custom: !!x.custom, request: x.request, wording: x.wording, ai: x.ai,
+        template: x.template != null ? resolveRefs(x.template) : null, timing: x.timing ? { key: x.timing.key, days: x.timing.days, date: x.timing.date, after: x.timing.after } : null, timing_text: x.timing ? resolveRefs(timingPhrase(x.timing)) : '',
+        date_text: x.timing ? resolveRefs(dateText(x.timing)) : '', removable: !!x.removable, added: !!x.added, library: x.library || null, extra: !!x.extra })) } });
       ft.filter(x => isPlaceholder(x.text)).forEach(x => need('ph_' + x.id, `Further term ${x.number}, ${x.title}: ${x.text}`, true));
     }
     // any reference still waiting for its number (on the front page, beside clause 22.0, and in Tim's list of things to check)
@@ -607,6 +676,28 @@
       put('vl_service', P('vl_service'), V.email, { label: "Vendor's lawyers: email for notices", optional: true });
       need('vendor_lawyer_from', `Vendor's lawyers: taken from ${V.source || 'the property file'}. Check they are acting on this sale.`, false);
     } else if (vlEmpty) need('vendor_lawyer_none', "The vendor's lawyers aren't on the blank or the property file. Add them.", false);
+    // Areas Tim marked on the drafted pages (edits.marks), in PDF points on the blank's own pages: initials or a signature (signing
+    // places for the signing step; nothing is drawn), a strike-out (a line through one line of text, a crossed box over more), his
+    // typed text, or a highlight. Marks are only ever added; the REINZ text is never changed.
+    const MARK_WORDS = { initials: 'Initials', signature: 'Signature', strike: 'Strike-out', text: 'Text', highlight: 'Highlight' }, WHO = { purchasers: 'the purchasers', vendors: 'the vendors', both: 'everyone' };
+    let signMarks = 0;
+    (Array.isArray(E.marks) ? E.marks : []).forEach((m, i) => { if (!m || !MARK_WORDS[m.type] || !/^[A-Za-z0-9_-]{1,40}$/.test(String(m.id || ''))) return;
+      const id = 'mark_' + m.id, b = { page: +m.page, x: +m.x, y: +m.y, w: +m.w, h: +m.h };
+      const lbl = `${MARK_WORDS[m.type]}${m.type === 'initials' || m.type === 'signature' ? ' for ' + (WHO[m.who] || WHO.both) : ''} (page ${b.page}, marked by you)`;
+      if (m.type === 'text') { put(id, Object.assign({ id, key: 'mark', kind: 'area', page: b.page }, { x: b.x + 2, y: b.y + b.h - FONT_SIZE - 1, w: Math.max(8, b.w - 4), h: Math.max(FONT_SIZE, b.h - 2) }), String(m.text || '').trim().slice(0, 500), { label: lbl, item: { mark: 'text' } });
+        if (!String(m.text || '').trim()) need('mark_empty_' + m.id, `${lbl}: there is no text in it yet. Type it, or delete the box.`, true); return; }
+      if (m.type === 'initials' || m.type === 'signature') signMarks++;
+      items.push(Object.assign({ id, key: 'mark', place: null, kind: 'mark', mark: m.type === 'strike' && b.h > 16 ? 'cross' : m.type, who: m.type === 'initials' || m.type === 'signature' ? (WHO[m.who] ? m.who : 'both') : null, label: lbl }, b)); });
+    if (signMarks) need('sign_marks', `You marked ${signMarks} place${signMarks === 1 ? '' : 's'} for initials or a signature. ${signMarks === 1 ? 'It becomes a signing place' : 'They become signing places'} when the agreement is signed; nothing is drawn on the page for ${signMarks === 1 ? 'it' : 'them'}.`, false);
+    // Places on the draft Tim moved or resized (edits.moves: { item id: { from, to } }, the boxes he saw and where he left them). The
+    // place on the blank's map is unchanged (its history keeps every version); only this draft's item moves.
+    const MOVABLE = ['text', 'area', 'strike', 'lines', 'caret', 'mark'];
+    Object.entries(E.moves && typeof E.moves === 'object' ? E.moves : {}).forEach(([id, mv]) => { const it = items.find(x => x.id === id); if (!mv || !mv.from || !mv.to) return;
+      if (!it || !MOVABLE.includes(it.kind) || it.page !== +mv.to.page || +mv.from.page !== +mv.to.page) { need('move_gone_' + id, `A place you moved (${id}) isn't on this draft in the same place any more, so the move was left out. Move it again if you need to.`, false); return; }
+      const f = mv.from, t = mv.to, dx = t.x - f.x, dw = t.w - f.w, dh = t.h - f.h, dy = it.kind === 'area' ? (t.y + t.h) - (f.y + f.h) : t.y - f.y;
+      if (it.kind === 'lines') it.lines = it.lines.map(l => ({ x0: l.x0 + dx, x1: l.x1 + dx + dw, y: l.y + dy, h: l.h }));
+      Object.assign(it, { x: it.x + dx, y: it.y + dy, w: Math.max(6, it.w + dw), h: Math.max(4, it.h + dh), moved: true });
+      need('moved_' + id, `${it.label}: moved on this draft. The place on the blank is kept as it was.`, false); });
     // privacy: a purchaser's or vendor's own phone or email never goes on, wherever it came from (the offer, Tim's edits, a further
     // term, the buyer's own wording, chattels, a lawyer's field typed by mistake, or the vendor's lawyer on file). Phones are compared
     // by their national digits, emails without regard to case, also inside a sentence. Any hit is left off and blocks approval.
@@ -617,7 +708,9 @@
     for (let i = items.length - 1; i >= 0; i--) { const hit = holdsOwn(items[i].text, O); if (!hit) continue;
       need('privacy_' + items[i].id, `${items[i].label}: left off, because it holds ${hit}'s own phone or email. Only the lawyers' details go on the agreement.`, true); items.splice(i, 1); }
     if (!needs.find(n => n.id === 'privacy_check')) need('privacy_check', "Only the lawyers' contact details are on the agreement, never the purchasers' or vendors' own.", false);
-    return { items, needs, terms: ft, today, date_format: fmt };
+    // the highest further term number used or retired: later terms (a re-draft, a counteroffer) carry on from it
+    const term_last = Math.max(base, ftn, ...[...retired]);
+    return { items, needs, terms: ft, today, date_format: fmt, term_base: base, term_last, retired_numbers: [...retired].sort((a, b) => a - b) };
   }
 
   /* ───── the drafted PDF ───── */
@@ -639,12 +732,19 @@
     const doc = await PDFLib.PDFDocument.load(blankBytes, { updateMetadata: false });
     const font = await doc.embedFont(PDFLib.StandardFonts.Helvetica), bold = await doc.embedFont(PDFLib.StandardFonts.HelveticaBold);
     const ink = PDFLib.rgb(INK[0], INK[1], INK[2]), hl = PDFLib.rgb(1, 0.93, 0.45);
-    const pages = doc.getPages(), boxes = [], overflow = []; let continued = null, pending = null;
+    const pages = doc.getPages(), boxes = [], overflow = []; let continued = null, pending = null, addedPages = [];
     for (const it of plan.items) {
       const pg = pages[it.page - 1]; if (!pg) continue;
       if (it.kind === 'caret') {   // a small ^ under a struck word, pointing to the margin
         pg.drawLine({ start: { x: it.x - 2.2, y: it.y - 2.8 }, end: { x: it.x, y: it.y - 0.6 }, thickness: 0.7, color: ink }); pg.drawLine({ start: { x: it.x, y: it.y - 0.6 }, end: { x: it.x + 2.2, y: it.y - 2.8 }, thickness: 0.7, color: ink });
         boxes.push({ id: it.id, page: it.page, x: it.x - 3, y: it.y - 3, w: 6, h: 3, kind: 'strike', label: it.label }); continue;
+      }
+      if (it.kind === 'mark') {   // an area Tim marked: initials and signatures are signing places (nothing drawn); the rest are drawn
+        if (it.mark === 'strike') pg.drawLine({ start: { x: it.x, y: it.y + it.h / 2 }, end: { x: it.x + it.w, y: it.y + it.h / 2 }, thickness: 0.9, color: ink });
+        else if (it.mark === 'cross') { pg.drawRectangle({ x: it.x, y: it.y, width: it.w, height: it.h, borderColor: ink, borderWidth: 0.8 });
+          pg.drawLine({ start: { x: it.x, y: it.y }, end: { x: it.x + it.w, y: it.y + it.h }, thickness: 0.8, color: ink }); pg.drawLine({ start: { x: it.x, y: it.y + it.h }, end: { x: it.x + it.w, y: it.y }, thickness: 0.8, color: ink }); }
+        else if (it.mark === 'highlight') pg.drawRectangle({ x: it.x, y: it.y, width: it.w, height: it.h, color: hl, opacity: 0.4 });
+        boxes.push({ id: it.id, page: it.page, x: it.x, y: it.y, w: it.w, h: it.h, kind: 'mark', mark: it.mark, label: it.label }); continue;
       }
       if (it.kind === 'strike' || it.kind === 'lines') {
         const ls = it.kind === 'lines' ? it.lines : [{ x0: it.x, x1: it.x + it.w, y: it.y, h: it.h }];
@@ -679,28 +779,55 @@
         pending = { it, rest, size, lh, noteY: it.y - here.length * lh };
       }
     }
-    // further terms that didn't fit: pages added straight after the Further Terms page, then every later page's boxes move along
+    // Further terms that didn't fit: pages added straight after the Further Terms page (Tim, 24 November 2026). Each is made from
+    // that page's own header and footer bands only (the page embedded, clipped to those bands, so none of its printed clauses
+    // appear twice), with "(continued)" typed after its heading and its printed page number struck through, the right one beside
+    // it. Without the bands, a plain page (and a check for Tim). Then every later page's boxes move along.
     if (pending) {
-      const { it, rest, size, lh, noteY } = pending, pg = pages[it.page - 1], [w, h] = [pg.getWidth(), pg.getHeight()], n = Math.max(1, Math.floor((h - 130) / lh));
+      const { it, rest, size, lh, noteY } = pending, pg = pages[it.page - 1], [w, h] = [pg.getWidth(), pg.getHeight()], C = it.cont && it.cont.page === it.page ? it.cont : null;
       let at = it.page, left = rest, added = 0; continued = it.page + 1;
       // say so at the foot of the Further Terms page itself
       const note = 'Continued on the next page.', ny = noteY;
       pg.drawText(note, { x: it.x, y: ny, size: 8, font: bold, color: ink }); boxes.push({ id: it.id + '_contnote', page: it.page, x: it.x, y: ny - 2, w: bold.widthOfTextAtSize(note, 8), h: 10, kind: 'text', label: it.label + ': continued on the next page' });
+      const head = C ? await doc.embedPage(pg, { left: 0, bottom: C.header[0], right: w, top: h }) : null, foot = C ? await doc.embedPage(pg, { left: 0, bottom: 0, right: w, top: C.footer[1] }) : null;
+      const top0 = C ? C.header[0] - 22 : h - 100, bottom0 = C ? C.footer[1] + 14 : 40, n = Math.max(1, Math.floor((top0 - bottom0) / lh) + 1);
+      const added_pages = [];
       while (left.length) {
         const np = doc.insertPage(at, [w, h]); at++; added++;
-        np.drawText('Further Terms of Sale (continued)', { x: 40, y: h - 60, size: 13, font: bold, color: ink });
-        np.drawText(`Continued from page ${it.page}.`, { x: 40, y: h - 76, size: 8, font, color: ink });
+        let number = null;
+        if (C) {
+          np.drawPage(head, { x: 0, y: C.header[0] }); np.drawPage(foot, { x: 0, y: 0 });
+          const hs = Math.max(8, Math.min(14, C.head.h || 12)), ct = '(continued)';
+          np.drawText(ct, { x: C.head.x1 + 6, y: C.head.y, size: hs, font: bold, color: ink });
+          boxes.push({ id: it.id + '_conthead' + added, page: -at, x: C.head.x1 + 6, y: C.head.y - 2, w: bold.widthOfTextAtSize(ct, hs), h: hs + 2, kind: 'text', label: it.label + ': (continued) after the heading' });
+          if (C.page_no) { const pn = C.page_no, nv = pn.value + added, nt = pn.text.replace(String(pn.value), String(nv)), ps = Math.max(6, Math.min(10, pn.h || 8));
+            np.drawLine({ start: { x: pn.x - 1, y: pn.y + pn.h * 0.32 }, end: { x: pn.x + pn.w + 1, y: pn.y + pn.h * 0.32 }, thickness: 0.9, color: ink });
+            np.drawText(nt, { x: pn.x + pn.w + 4, y: pn.y, size: ps, font, color: ink });
+            boxes.push({ id: it.id + '_contpage' + added, page: -at, x: pn.x - 1, y: pn.y - 2, w: pn.w + 6 + font.widthOfTextAtSize(nt, ps), h: ps + 3, kind: 'text', label: `${it.label}: page number ${pn.text} struck, ${nt} written beside it` });
+            number = { printed: pn.text, written: nt }; }
+        } else {
+          np.drawText('Further Terms of Sale (continued)', { x: 40, y: h - 60, size: 13, font: bold, color: ink });
+          np.drawText(`Continued from page ${it.page}.`, { x: 40, y: h - 76, size: 8, font, color: ink });
+        }
+        const x0 = C ? it.x : 40, ww = C ? it.w : w - 80;
+        const T = l => typeof l === 'string' ? l : l.s;
         const ls = left.slice(0, n); left = left.slice(n);
-        ls.forEach((ln, i) => { const y = h - 100 - i * lh, ph = /\[Tim to [^\]]*\]/.exec(ln);
-          if (ph) np.drawRectangle({ x: 40 + font.widthOfTextAtSize(ln.slice(0, ph.index), size) - 1, y: y - 2, width: font.widthOfTextAtSize(ph[0], size) + 2, height: size + 2, color: hl });
-          np.drawText(ln, { x: 40, y, size, font, color: ink }); });
-        boxes.push({ id: it.id + '_cont' + added, page: -at, x: 40, y: h - 100 - (ls.length - 1) * lh - 2, w: w - 80, h: (ls.length - 1) * lh + size + 4, kind: 'area', label: it.label + ' (continued)', placeholder: ls.some(l => /\[Tim to /.test(l)) });
+        ls.forEach((l, i) => { const ln = T(l); if (!ln) return; const y = top0 - i * lh, ph = /\[Tim to [^\]]*\]/.exec(ln);
+          if (ph) np.drawRectangle({ x: x0 + font.widthOfTextAtSize(ln.slice(0, ph.index), size) - 1, y: y - 2, width: font.widthOfTextAtSize(ph[0], size) + 2, height: size + 2, color: hl });
+          np.drawText(ln, { x: x0, y, size, font, color: ink }); });
+        boxes.push({ id: it.id + '_cont' + added, page: -at, x: x0, y: top0 - (ls.length - 1) * lh - 2, w: ww, h: (ls.length - 1) * lh + size + 4, kind: 'area', label: it.label + ' (continued)', placeholder: ls.some(l => /\[Tim to /.test(T(l))) });
+        added_pages.push({ page: at, source_page: it.page, bands: C ? { header: C.header, footer: C.footer } : null, plain: !C, number });
       }
       boxes.forEach(b => { if (b.page < 0) b.page = -b.page; else if (b.page > it.page) b.page += added; });
+      addedPages = added_pages;
+      if (plan.needs) {
+        if (C) plan.needs.push({ id: 'continuation_check', text: `The further terms run onto ${added} added page${added === 1 ? '' : 's'} straight after page ${it.page}, made from that page's own header and footer, headed "(continued)"${added_pages[0].number ? `, numbered ${added_pages.map(x => x.number.written).join(', ')}` : ''}. Check ${added === 1 ? 'it' : 'them'} before you approve.`, blocking: true, ackable: true });
+        else plan.needs.push({ id: 'continuation_plain', text: `The further terms run onto ${added} added page${added === 1 ? '' : 's'}, but the Further Terms page's header and footer couldn't be found, so ${added === 1 ? 'it is a plain page' : 'they are plain pages'}. Check ${added === 1 ? 'it' : 'them'} before you approve.`, blocking: true, ackable: true });
+      }
     }
     if (o.title) doc.setTitle(o.title, { showInWindowTitleBar: false });
     const bytes = await doc.save({ useObjectStreams: false, addDefaultPage: false });
-    return { bytes, boxes, continued, overflow };
+    return { bytes, boxes, continued, overflow, added_pages: addedPages };
   }
 
   const DRAFT = { EDITIONS, EDITION_RE, editionOk, readPages, lines, xAt, matchAll, readEdition, editionPages, buildMap, parseChattels, numberIn, daysWords, FRONT_CONDITIONS, LABELS,

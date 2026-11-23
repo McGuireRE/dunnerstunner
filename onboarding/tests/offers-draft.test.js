@@ -164,7 +164,7 @@ const sha = b => crypto.createHash('sha256').update(Buffer.from(b)).digest('hex'
   const today = O.nzToday(), cd = n => D.fullDate(O.addWorkingDays(today, n, { province: 'otago' }));
   out.expected = ['Ana Maria Testbuyer and Bo Testbuyer', '$655,000', cd(10)];
   ['Ana Maria Testbuyer and Bo Testbuyer', '$655,000', cd(10)].forEach(v => expect(t1[0].includes(v), 'front page has ' + v));
-  expect(/1\. Electrical report: \[Tim to add his electrical report clause\]/.test(t1[2]) && /2\. Pets: Synthetic pets wording from Tim\./.test(t1[2]), 'further terms: the placeholder and Tim\'s standard term, numbered');
+  expect(/23\. Electrical report: \[Tim to add his electrical report clause\]/.test(t1[2]) && /24\. Pets: Synthetic pets wording from Tim\./.test(t1[2]), 'further terms: the placeholder and Tim\'s standard term, numbered');
   expect(t1[4].includes('Also included: Outdoor table'), 'chattels added on Schedule 2');
   ['Synthetic Law', 'Pat Solicitor'].forEach(v => expect(t1[6].includes(v), 'the purchaser\'s lawyer: ' + v));
   expect(t1[5].includes('Ana Maria Testbuyer') && t1[5].includes('Bo Testbuyer'), 'names under the purchasers\' signatures');
@@ -185,12 +185,12 @@ const sha = b => crypto.createHash('sha256').update(Buffer.from(b)).digest('hex'
   // ── 6. Tim fills the placeholder and re-drafts; the first draft is kept unchanged; then approves ──
   process.stderr.write('step 6\n');
   const keep1 = JSON.stringify(dr1);
-  await p.fill('[data-edit="ft_electrical"]', 'Synthetic electrical wording typed by Tim on the draft.'); await p.fill('#drNote', 'Electrical wording added');
+  await p.fill('[data-rich="ft_electrical"]', 'Synthetic electrical wording typed by Tim on the draft.'); await p.fill('#drNote', 'Electrical wording added');
   await p.click('#drRedraft'); await p.waitForSelector('#drReview h1:has-text("Draft 2")', { timeout: 30000 });
   d = await db(p); const dr2 = d.offer_drafts.find(x => x.number === 2);
   expect(d.offer_drafts.length === 2 && JSON.stringify(d.offer_drafts.find(x => x.number === 1)) === keep1, 're-draft keeps the old draft, unchanged');
   const pdf2 = await blob(p, dr2.path); const t2 = await pdfText(pdf2);
-  expect(/1\. Electrical report: Synthetic electrical wording typed by Tim on the draft\./.test(t2[2]) && dr2.edits.items.ft_electrical && dr2.note === 'Electrical wording added', 'Tim\'s wording on the new draft, with his note');
+  expect(/23\. Electrical report: Synthetic electrical wording typed by Tim on the draft\./.test(t2[2]) && dr2.edits.items.ft_electrical && dr2.note === 'Electrical wording added', 'Tim\'s wording on the new draft, with his note');
   expect(await p.$('#drNoNeeds') && !(await p.isDisabled('#drApproveDraft')), 'nothing needs Tim: approve is available');
   await p.click('#drApproveDraft'); await p.waitForSelector('#drApproved');
   d = await db(p); const ap = d.offer_draft_approvals[0];
@@ -207,7 +207,7 @@ const sha = b => crypto.createHash('sha256').update(Buffer.from(b)).digest('hex'
   await p.click('#drRedraftChange'); await p.waitForSelector('#drReview h1:has-text("Draft 3")', { timeout: 30000 });
   d = await db(p); const dr3 = d.offer_drafts.find(x => x.number === 3); const t3 = await pdfText(await blob(p, dr3.path));
   expect(t3[0].includes('$670,000') && !t3[0].includes('$655,000') && d.offer_drafts.length === 3 && d.offer_draft_approvals.length === 1, 'the new draft has the corrected price; earlier drafts and the approval are kept');
-  expect(/1\. Electrical report: \[Tim to add his electrical report clause\]/.test(t3[2]), 'item edits are not carried into a re-draft after a change (the placeholder is back for Tim)');
+  expect(/23\. Electrical report: \[Tim to add his electrical report clause\]/.test(t3[2]), 'item edits are not carried into a re-draft after a change (the placeholder is back for Tim)');
   const r72 = await rpc(p, 'agent_draft_approve', { p_draft: dr2.id, p_sha256: dr2.sha256 }); expect(r72.data && r72.data.existing && (await db(p)).offer_draft_approvals.length === 1, 'approving draft 2 again changes nothing: its approval stays on record');
   const r7 = await rpc(p, 'agent_draft_approve', { p_draft: d.offer_drafts.find(x => x.number === 1).id, p_sha256: dr1.sha256 }); expect(r7.error && /newer draft/.test(r7.error.message), 'an older draft cannot be approved');
 
@@ -271,6 +271,113 @@ const sha = b => crypto.createHash('sha256').update(Buffer.from(b)).digest('hex'
   expect(dl3.placed.find(x => x.id === 'd_finance').text === D.fullDate(O.addWorkingDays(O.nzToday(), 7, { province: 'otago' })) && dl3.placed.find(x => x.id === 'clause22_days').text === '7' && dl3.edits.custom_ok === true, 'the new draft: finance and clause 22.0 on 7 working days, Tim\'s tick kept');
   expect(!(await side(q)), 'review with line-up at 390 px: no sideways scroll');
   await shot(q, 'review_dark');
+
+  // ── 9b. the review screen (Tim, 24 November 2026): clauses from the library, timing chips, order, removing, the AI clause writer,
+  //    marks on the pages and moving a place (dark, 390 px, touch) ──
+  process.stderr.write('step 9b\n');
+  const latest = async () => { const dd = await db(q); return dd.offer_drafts.filter(x => x.offer_id === off2).sort((a, b2) => b2.number - a.number)[0]; };
+  const waitDraft = async n => { await q.waitForSelector(`#drReview h1:has-text("Draft ${n}")`, { timeout: 30000 }); return latest(); };
+  await rpc(q, 'agent_offer_term', { p_key: 'std_pool', p_title: 'Pool fence', p_wording: 'The Vendor shall provide a pool fence compliance certificate {timing}.', p_rule: {}, p_position: 60, p_active: true });
+  await rpc(q, 'agent_offer_term', { p_key: 'std_keys', p_title: 'Keys', p_wording: 'The Vendor shall hand over all keys by 5 December 2026.', p_rule: {}, p_position: 61, p_active: true });
+  let dn = (await latest()).number; await q.click('#drRvBack'); await q.waitForSelector('#drDrafts'); await q.click(`[data-draft="${(await latest()).id}"]`); await q.waitForSelector('#drTerms');
+  out.libOpts = await q.$$eval('#drAddTerm option', e => e.map(x => x.value).filter(Boolean)); expect(out.libOpts.includes('std_pool') && out.libOpts.includes('std_keys') && !out.libOpts.includes('custom'), 'the library clauses to choose from: ' + out.libOpts);
+  await q.selectOption('#drAddTerm', 'std_pool'); await q.click('#drAddTermGo'); let dr9 = await waitDraft(++dn);
+  await q.selectOption('#drAddTerm', 'std_keys'); await q.click('#drAddTermGo'); dr9 = await waitDraft(++dn);
+  const ftOf = dr => dr.placed.find(x => x.id === 'further_terms').terms;
+  expect(JSON.stringify(dr9.edits.added_terms) === JSON.stringify([{ id: 'add_std_pool_1', key: 'std_pool' }, { id: 'add_std_keys_1', key: 'std_keys' }]) && ftOf(dr9).some(t => t.id === 'add_std_pool_1' && /\[Tim to set the timing\]/.test(t.text)), 'two clauses added through the edits, the pool fence waiting for its timing');
+  expect(dr9.needs.some(n => n.id === 'timing_missing_add_std_pool_1' && n.blocking) && await q.isDisabled('#drApproveDraft'), 'and approval waits for it');
+  // the timing chip: after finance, 3 working days
+  await q.click('li[data-term="add_std_pool_1"] .dr-chip[data-chip="timing"]'); await q.waitForSelector('#drChipEd:not([hidden])');
+  await q.click('input[name="dr_cm"][value="after"] + .mark'); await q.selectOption('#drCmAfter', 'finance'); await q.fill('#drCmDays', '3'); await q.click('#drCmDone');
+  expect(/within 3 working days after Finance is satisfied or waived/.test(await q.textContent('li[data-term="add_std_pool_1"] .dr-chip[data-chip="timing"]')), 'the chip shows the new timing before the re-draft');
+  // a date written in the wording: its own chip
+  await q.click('li[data-term="add_std_keys_1"] .dr-chip[data-chip="lit"]'); await q.waitForSelector('#drChipEd:not([hidden])');
+  expect(await q.isHidden('#drCmModes label:has(input[value="after"])'), 'a date in the wording takes a date or working days only');
+  await q.fill('#drCmDate', '2026-12-18'); await q.click('#drCmDone');
+  // the order: keys up above the pool fence (the phone's buttons), then re-draft
+  await q.click('[data-tup="add_std_keys_1"]');
+  out.orderShown = await q.$$eval('#drTermList [data-term]', e => e.map(x => x.dataset.term)); expect(out.orderShown.indexOf('add_std_keys_1') < out.orderShown.indexOf('add_std_pool_1'), 'moved up on the screen');
+  await q.fill('#drNote', 'Timing and order'); await q.click('#drRedraft'); dr9 = await waitDraft(++dn);
+  const t9 = await pdfText(await blob(q, dr9.path)), terms9 = ftOf(dr9), pool = terms9.find(t => t.id === 'add_std_pool_1'), keys = terms9.find(t => t.id === 'add_std_keys_1');
+  expect(/pool fence compliance certificate within 3 working days of the date the finance condition in clause 9\.1 is satisfied or waived/.test(t9[2]) && !dr9.needs.some(n => n.id === 'timing_missing_add_std_pool_1'), 'the PDF: the timing set from its chip');
+  expect(/hand over all keys by 18 December 2026/.test(t9[2]) && dr9.edits.items.add_std_keys_1 === 'The Vendor shall hand over all keys by 18 December 2026.', 'the date chip changed the wording');
+  expect(keys.number < pool.number && dr9.edits.term_order.indexOf('add_std_keys_1') < dr9.edits.term_order.indexOf('add_std_pool_1'), 'the new order, numbered on the page in that order');
+  // remove a term Tim added: its number is never used again
+  const keysNo = keys.number; await q.click('[data-trm="add_std_keys_1"]'); dr9 = await waitDraft(++dn);
+  expect(!ftOf(dr9).some(t => t.id === 'add_std_keys_1') && dr9.edits.retired_numbers.includes(keysNo) && !ftOf(dr9).some(t => t.number === keysNo), `removed: number ${keysNo} retired, not reused`);
+  // the AI clause writer: a draft, ticked, then used in this offer only
+  await q.click('#drAi summary'); await q.fill('#drAiAsk', 'the vendor gets the spa pool serviced before settlement'); await q.click('#drAiGo'); await q.waitForSelector('#drAiOut:not([hidden])');
+  out.aiClause = await q.inputValue('#drAiWord'); expect(/\{timing\}/.test(out.aiClause) && await q.isDisabled('#drAiUse') && await q.isDisabled('#drAiSave'), 'a draft with {timing}; nothing can be used until Tim ticks it');
+  let dd9 = await db(q); expect((dd9.ai_calls || []).some(x => x.purpose === 'offer clause draft' && x.model === 'claude-sonnet-5-5'), 'logged in ai_calls as Sonnet');
+  await q.fill('#drAiTitle', 'Spa pool'); await q.click('label:has(#drAiTick) .mark'); expect(!(await q.isDisabled('#drAiUse')), 'ticked: it can be used');
+  await q.click('#drAiUse'); dr9 = await waitDraft(++dn);
+  const spa = ftOf(dr9).find(t => t.title === 'Spa pool'); expect(spa && spa.ai && /\[Tim to set the timing\]/.test(spa.text) && dr9.edits.extra_terms.some(x => typeof x === 'object' && x.title === 'Spa pool' && x.ai), 'used in this offer only, as a term with its timing still to set');
+  // marks: draw an initials box on page 1 with a finger-sized handle, resize it, move it; a text box; delete one
+  await q.waitForSelector('#drRvCanvas .dr-pg'); await q.selectOption('#drRvPick', '1'); await q.waitForSelector('#drRvCanvas .dr-pg[data-page="1"]');
+  const pgBox = async () => q.$eval('#drRvCanvas .dr-pg', e => { e.scrollIntoView({ block: 'center' }); const r = e.getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; });
+  const drag = async (x0, y0, x1, y1) => { await q.mouse.move(x0, y0); await q.mouse.down(); await q.mouse.move((x0 + x1) / 2, (y0 + y1) / 2, { steps: 3 }); await q.mouse.move(x1, y1, { steps: 3 }); await q.mouse.up(); await q.waitForTimeout(100); };
+  let g = await pgBox();
+  await q.selectOption('#drMkType', 'initials:purchasers'); await q.click('#drMkDraw'); expect((await q.getAttribute('#drMkDraw', 'aria-pressed')) === 'true', 'draw mode on'); g = await pgBox();
+  await drag(g.x + g.w * 0.55, g.y + g.h * 0.20, g.x + g.w * 0.75, g.y + g.h * 0.24);
+  out.mk1 = await q.$$eval('.dr-mark', e => e.length); expect(out.mk1 === 1 && /Initials: the purchasers/.test(await q.textContent('.dr-mark .dr-mk-lbl')), 'a box drawn by dragging, labelled with its kind');
+  out.handle = await q.$eval('.dr-mark.dr-sel .dr-h-se', e => { const r = e.getBoundingClientRect(); return [r.width, r.height]; }); expect(out.handle[0] >= 22 && out.handle[1] >= 22, 'handles big enough for a finger: ' + out.handle);
+  let hb = await q.$eval('.dr-mark.dr-sel .dr-h-se', e => { const r = e.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
+  await drag(hb.x, hb.y, hb.x + g.w * 0.05, hb.y + g.h * 0.02);
+  let mb = await q.$eval('.dr-mark.dr-sel', e => { const r = e.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
+  await drag(mb.x, mb.y, mb.x - g.w * 0.1, mb.y + g.h * 0.05);
+  await drag(mb.x - g.w * 0.1, mb.y + g.h * 0.05, mb.x + g.w, mb.y + g.h * 0.05);   // dragged off the page's edge: kept inside
+  await q.selectOption('#drMkType', 'text'); await q.click('#drMkDraw'); g = await pgBox(); await drag(g.x + g.w * 0.1, g.y + g.h * 0.30, g.x + g.w * 0.5, g.y + g.h * 0.33); await q.fill('#drMkText', 'Synthetic note typed by Tim.');
+  await q.selectOption('#drMkType', 'highlight'); await q.click('#drMkDraw'); g = await pgBox(); await drag(g.x + g.w * 0.1, g.y + g.h * 0.5, g.x + g.w * 0.3, g.y + g.h * 0.52);
+  expect((await q.$$('.dr-mark')).length === 3 && !(await q.isDisabled('#drMkDel')), 'three boxes; the selected one can be deleted'); await q.click('#drMkDel'); expect((await q.$$('.dr-mark')).length === 2, 'deleted');
+  // a filled place moved: the price
+  const priceEl = await q.$('#drRvCanvas .dr-box[data-id="price"]'); await priceEl.scrollIntoViewIfNeeded(); const pb = await priceEl.boundingBox(); await q.mouse.click(pb.x + pb.width / 2, pb.y + pb.height / 2);
+  await q.waitForSelector('.dr-mark.dr-moved.dr-sel'); const pm2 = await q.$eval('.dr-mark.dr-moved.dr-sel', e => { const r = e.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
+  await drag(pm2.x, pm2.y, pm2.x + 30, pm2.y + 6);
+  // zoom in and out: the page grows inside its own frame, never the screen
+  await q.click('#drZoomIn'); await q.waitForTimeout(400); out.zoomW = await q.$eval('#drRvCanvas .dr-pg', e => e.getBoundingClientRect().width);
+  expect(out.zoomW > g.w * 1.3 && !(await side(q)), 'zoomed: the page is wider, inside its frame, with no sideways scroll of the screen'); await q.click('#drZoomOut'); await q.waitForTimeout(400);
+  expect((await q.$$('.dr-mark')).length >= 2, 'marks kept through zoom');
+  await shot(q, 'review_marks'); await q.fill('#drNote', 'Marks and a move'); await q.click('#drRedraft'); dr9 = await waitDraft(++dn);
+  const mks = dr9.edits.marks; out.marks = mks.map(m => [m.type, m.who || '', m.page]);
+  expect(mks.length === 2 && mks[0].type === 'initials' && mks[0].who === 'purchasers' && mks[0].page === 1 && mks.every(m => m.x >= 0 && m.y >= 0 && m.w >= 10 && m.h >= 8 && m.x + m.w <= 595.4 && m.y + m.h <= 842.1), 'marks kept with the draft\'s edits, in page points, inside the page: ' + JSON.stringify(mks));
+  expect(Math.abs(mks[0].x + mks[0].w - 595.32) < 1, 'dragged past the edge: stopped at the edge');
+  expect(dr9.placed.some(x => x.id === 'mark_' + mks[0].id && x.kind === 'mark' && x.mark === 'initials' && x.who === 'purchasers') && dr9.placed.some(x => x.id === 'mark_' + mks[1].id && x.text === 'Synthetic note typed by Tim.'), 'they are placed items on the new draft');
+  const t9m = await pdfText(await blob(q, dr9.path)); expect(t9m[0].includes('Synthetic note typed by Tim.'), 'the typed text is on the page');
+  expect(dr9.edits.moves.price && dr9.edits.moves.price.to.x > dr9.edits.moves.price.from.x && dr9.placed.find(x => x.id === 'price').boxes[0].x > d.offer_drafts.find(x => x.id === e1.id).placed.find(x => x.id === 'price').boxes[0].x, 'the price moved on the new draft');
+  dd9 = await db(q); expect(JSON.stringify(dd9.offer_blank_maps.find(m => m.approved && m.blank_id === dr9.blank_id).places.find(x => x.id === 'price')) === JSON.stringify(d.offer_blank_maps.find(m => m.approved && m.blank_id === dr9.blank_id).places.find(x => x.id === 'price')), 'the place on the blank is unchanged');
+  expect(dr9.needs.some(n => n.id === 'sign_marks') && dr9.needs.some(n => n.id === 'moved_price'), 'Tim is told about the signing place and the move');
+  // the server checks marks: one on a page that isn't on the blank is refused
+  const bad = await rpc(q, 'agent_draft_add', { p_offer: off2, p_map: dr9.map_id, p_path: dr9.path, p_sha256: dr9.sha256, p_size: dr9.size_bytes, p_placed: dr9.placed, p_needs: dr9.needs, p_edits: Object.assign({}, dr9.edits, { marks: [{ id: 'x1', type: 'strike', page: 99, x: 1, y: 1, w: 20, h: 20 }] }), p_note: null });
+  expect(bad.error && /doesn't sit on a page of this blank/.test(bad.error.message), 'a mark off the blank is refused by the server');
+  // a re-draft after a change keeps the marks, the added clauses and the order
+  await q.click('#drRedraftChange'); dr9 = await waitDraft(++dn);
+  expect(dr9.edits.marks.length === 2 && dr9.edits.added_terms.some(a => a.id === 'add_std_pool_1') && dr9.edits.moves.price && dr9.edits.retired_numbers.includes(keysNo), 'kept through a re-draft after a change');
+  expect(!(await side(q)), 'review screen with all of it at 390 px: no sideways scroll');
+  // the clause library: the AI writer saves a clause that goes on only when Tim adds it
+  await q.click('#drRvBack'); await q.waitForSelector('#drOffer'); await q.click('#ofBackP'); await q.waitForSelector('#drLibBtn'); await q.click('#drLibBtn'); await q.waitForSelector('#drLib');
+  await q.click('#drAi summary'); await q.fill('#drAiAsk', 'the vendor removes the old car from the garage before settlement'); await q.click('#drAiGo'); await q.waitForSelector('#drAiOut:not([hidden])');
+  expect(!(await q.$('#drAiUse')), 'in the library: save only'); await q.fill('#drAiTitle', 'Old car'); await q.click('label:has(#drAiTick) .mark'); await q.click('#drAiSave'); await q.waitForSelector('#drLib');
+  dd9 = await db(q); const oc = dd9.offer_terms.find(t => t.title === 'Old car'); expect(oc && /^std_old_car/.test(oc.key) && JSON.stringify(oc.rule) === '{}' && /\{timing\}/.test(oc.wording), 'saved to the library, on no offer by itself');
+  expect(/Only when you add it to a draft/.test(await q.textContent(`[data-term="${oc.key}"]`)), 'and the library says so');
+  expect(!(await side(q)), 'library with the writer at 390 px: no sideways scroll');
+  // drag and drop on a computer reorders the terms too
+  const DK = await mk(1024, 'light'); const k = DK.p; await k.goto(BASE);
+  await k.evaluate(([dd, a]) => { localStorage.clear(); localStorage.setItem('mockAgents', JSON.stringify([a])); localStorage.setItem('mocksession', JSON.stringify({ user: { id: 'agent-1', email: a } })); localStorage.setItem('mockdb', JSON.stringify(dd)); }, [await db(q), AGENT]);
+  await k.goto(BASE); await k.waitForTimeout(600); await k.click('#navDash'); await k.waitForTimeout(400); await k.click('tr[data-prop="P1"]'); await k.waitForSelector('#offTile'); await k.click(`[data-offer="${off2}"]`); await k.waitForSelector('#drDrafts');
+  await k.click(`[data-draft="${(await latest()).id}"]`); await k.waitForSelector('#drTermList');
+  const ord0 = await k.$$eval('#drTermList [data-term]', e => e.map(x => x.dataset.term)), lastId = ord0[ord0.length - 1];
+  await k.$eval('#drTermList', e => e.scrollIntoView({ block: 'start' }));
+  const gb = await (await k.$(`li[data-term="${lastId}"] .dr-grip`)).boundingBox(), tb = await (await k.$(`li[data-term="${ord0[0]}"]`)).boundingBox();
+  await k.mouse.move(gb.x + gb.width / 2, gb.y + gb.height / 2); await k.mouse.down(); await k.mouse.move(gb.x + gb.width / 2, tb.y + 4, { steps: 8 }); await k.mouse.up();
+  const ord1 = await k.$$eval('#drTermList [data-term]', e => e.map(x => x.dataset.term)); out.dnd = [ord0, ord1];
+  expect(ord1[0] === lastId && ord1.length === ord0.length, 'dragged by its grip to the top: ' + JSON.stringify(out.dnd));
+  await DK.ctx.close();
+  // the daily cap stops the writer before any model call
+  const capBefore = await db(q);
+  await q.evaluate(() => { const dbx = JSON.parse(localStorage.getItem('mockdb')); dbx.offer_settings[0].ai_daily_cap = 1; localStorage.setItem('mockdb', JSON.stringify(dbx)); });
+  const reopen = async () => { await q.reload(); await q.waitForTimeout(600); await q.evaluate(async ([pth, b64]) => { const u = Uint8Array.from(atob(b64), c => c.charCodeAt(0)); (window.__repoBlobs ||= {})[pth] = new Blob([u], { type: 'application/pdf' }); }, [doc1.path, blank.toString('base64')]); await q.click('#navDash'); await q.waitForTimeout(400); await q.click('tr[data-prop="P1"]'); await q.waitForSelector('#offTile'); await q.click(`[data-offer="${off2}"]`); await q.waitForSelector('#drDrafts'); await q.click(`[data-draft="${(await latest()).id}"]`); await q.waitForSelector('#drTerms'); };
+  await reopen(); await q.click('#drAi summary'); await q.fill('#drAiAsk', 'another clause about the garden shed staying'); await q.click('#drAiGo'); await q.waitForFunction(() => /limit/.test(document.querySelector('#drAiMsg').textContent));
+  expect((await db(q)).ai_calls.filter(x => x.purpose === 'offer clause draft').length === (capBefore.ai_calls || []).filter(x => x.purpose === 'offer clause draft').length, 'at the daily cap: refused, and no call made');
   // a vendor's own phone, typed in another format, never goes on: left off and blocking
   const off3 = (await rpc(q, 'agent_offer_add', { p_property: 'P1', p_offer: offer({ conditions: [], chattels_add: ['Ring the vendor on +64 21 000 1111 about the spa'], chattels_exclude: [] }) })).data;
   await q.click('#drRvBack'); await q.waitForSelector('#drOffer'); await q.click('#ofBackP'); await q.waitForSelector('#offTile'); await q.click(`[data-offer="${off3}"]`); await q.waitForSelector('#drDraftBtn');

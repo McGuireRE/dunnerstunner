@@ -699,6 +699,7 @@ function draftRpc(name,a,me){ if(!me||!AGENTS.includes(me.email)) return bad('On
     if(!new RegExp('^properties/'+o.property_id+'/docs/offer-draft-'+o.id+'-[0-9]{1,4}-[0-9a-f]{12}\\.pdf$').test(a.p_path||'')) return bad('A draft is stored at its own place');
     const obj=SO()[a.p_path]; if(!obj) return bad("The draft hasn't arrived yet"); if(obj.size!==a.p_size||obj.mime!=='application/pdf') return bad("The stored draft doesn't match");
     if(!(DB.offer_file_hashes||[]).some(h=>h.path===a.p_path&&h.sha256===a.p_sha256&&h.size_bytes===a.p_size)) return bad("The draft's fingerprint hasn't been confirmed by the server yet. Try again");
+    if(!draftEditsOk(a.p_edits||{},b.sizes)) return bad("One of your marks or moved places doesn't sit on a page of this blank. Draw it again");   // migration 022
     const n=OD().filter(x=>x.offer_id===o.id).reduce((m_,x)=>Math.max(m_,x.number),0)+1;
     const d={id:uid(),offer_id:o.id,property_id:o.property_id,number:n,blank_id:b.id,blank_sha256:b.sha256,map_id:m.id,details:JSON.parse(JSON.stringify(o.details)),edits:a.p_edits||{},placed:a.p_placed||[],needs:a.p_needs||[],path:a.p_path,sha256:a.p_sha256,size_bytes:a.p_size,note:(a.p_note||'').trim()||null,created_by:me.email,created_at:now()};
     OD().push(d); ev(o.property_id,o.id,'drafted',{draft_id:d.id,number:n,sha256:d.sha256,blank_sha256:b.sha256,map_version:m.version,needs:d.needs.length,note:d.note}); return ok({id:d.id,number:n}); }
@@ -718,6 +719,17 @@ function draftRpc(name,a,me){ if(!me||!AGENTS.includes(me.email)) return bad('On
     if(l.firm&&!law.firm) law.firm=l.firm; if(l.person&&!law.person) law.person=l.person; const before=o.details; o.details=Object.assign({},o.details,{lawyer:law}); o.updated_at=now();
     ev(o.property_id,o.id,'corrected',{note:"Lawyer's contact details from the lookup, ticked by Tim",before,after:o.details,lookup:l.id,used}); return ok(law); }
   return bad('unknown rpc '+name); }
+// migration 022: offer_draft_edits_ok, what Tim did on the review screen (marks and moved places on the blank's own pages, and the shape of the rest)
+function draftEditsOk(e,sizes){ const num=(v,lo,hi)=>typeof v==='number'&&isFinite(v)&&v>=lo&&v<=hi;
+  const box=(v,min)=>{ if(!v||typeof v!=='object'||!Number.isInteger(v.page)||v.page<1||v.page>sizes.length) return false; const [w,h]=sizes[v.page-1]; return num(v.x,-1,w+1)&&num(v.y,-1,h+1)&&num(v.w,min,w+1)&&num(v.h,min,h+1)&&v.x+v.w<=w+1&&v.y+v.h<=h+1; };
+  if(!e||typeof e!=='object'||Array.isArray(e)||JSON.stringify(e).length>200000) return false;
+  if('marks' in e){ if(!Array.isArray(e.marks)||e.marks.length>100) return false; for(const m of e.marks){ if(!/^[A-Za-z0-9_-]{1,40}$/.test(String(m&&m.id||''))||!['initials','signature','strike','text','highlight'].includes(m.type)) return false; if(m.who!=null&&!['purchasers','vendors','both'].includes(m.who)) return false; if(String(m.text||'').length>500||!box(m,8)) return false; } }
+  if('moves' in e){ if(!e.moves||typeof e.moves!=='object'||Array.isArray(e.moves)||Object.keys(e.moves).length>200) return false; for(const [k,v] of Object.entries(e.moves)){ if(!/^[A-Za-z0-9_.:-]{1,80}$/.test(k)||!v||!box(v.from,0)||!box(v.to,4)||v.from.page!==v.to.page) return false; } }
+  if('added_terms' in e){ if(!Array.isArray(e.added_terms)||e.added_terms.length>30) return false; if(!e.added_terms.every(x=>x&&/^[A-Za-z0-9_]{1,80}$/.test(String(x.id||''))&&/^[a-z][a-z0-9_]{0,40}$/.test(String(x.key||'')))) return false; }
+  if('term_order' in e&&(!Array.isArray(e.term_order)||e.term_order.length>120)) return false;
+  if('retired_numbers' in e&&(!Array.isArray(e.retired_numbers)||e.retired_numbers.length>120||!e.retired_numbers.every(n=>num(n,1,999)))) return false;
+  if('term_timing' in e){ if(!e.term_timing||typeof e.term_timing!=='object'||Array.isArray(e.term_timing)) return false; for(const [k,x] of Object.entries(e.term_timing)){ if(!/^[A-Za-z0-9_]{1,80}$/.test(k)||!x||typeof x!=='object') return false; if(x.days!=null&&!num(x.days,1,250)) return false; if(x.date!=null&&!/^\d{4}-\d{2}-\d{2}$/.test(String(x.date))) return false; if(x.after!=null&&!/^[a-z_]{1,20}$/.test(String(x.after))) return false; } }
+  return true; }
 function draftInvoke(o){ const b=(o&&o.body)||{}; const me=S&&S.user; const res=(data,status)=>status&&status>=400?Promise.resolve({data:null,error:{message:String(status),context:{json:async()=>data}}}):ok(data);
   const calls=JSON.parse(localStorage.getItem('draftCalls')||'[]'); calls.push(b.action); localStorage.setItem('draftCalls',JSON.stringify(calls));
   if(!me) return res({error:'Sign in first'},401); if(!AGENTS.includes(me.email)) return res({error:'Only Tim can do this'},403);
@@ -727,6 +739,19 @@ function draftInvoke(o){ const b=(o&&o.body)||{}; const me=S&&S.user; const res=
     return bl.arrayBuffer().then(buf=>crypto.subtle.digest('SHA-256',buf).then(h=>{ const sha=Array.from(new Uint8Array(h),x=>x.toString(16).padStart(2,'0')).join(''); const H=(DB.offer_file_hashes||=[]); const ex=H.find(x=>x.path===pth);
       if(ex&&(ex.sha256!==sha||ex.size_bytes!==buf.byteLength)) return {data:null,error:{message:'409',context:{json:async()=>({ok:false,error:"The file's fingerprint couldn't be recorded."})}}};
       if(!ex) H.push({path:pth,sha256:sha,size_bytes:buf.byteLength,confirmed_by:me.email,confirmed_at:now()}); save(); return {data:{ok:true,sha256:sha,size:buf.byteLength},error:null}; })); }
+  // Tim's clause writer (fn/offer_draft_handler.ts write_clause): the daily cap from ai_calls, logged as Sonnet, {timing} for a condition.
+  // localStorage clauseAiMode = 'off' | 'fail' | 'unsuitable' | 'plain' (not a condition) changes the answer.
+  if(b.action==='write_clause'){ const m=localStorage.getItem('clauseAiMode'); const t=String(b.text||'').trim();
+    if(t.length<10||t.length>3000) return res({ok:false,error:t.length<10?'Describe the clause in a few more words.':'Please keep the description under 3000 characters.'},400);
+    if(m==='off') return ok({ok:false,reason:'off',message:"The clause writer isn't switched on yet."});
+    const today=new Date().toLocaleDateString('en-CA',{timeZone:'Pacific/Auckland'}), used=(DB.ai_calls||[]).filter(x=>x.purpose==='offer clause draft'&&new Date(x.at).toLocaleDateString('en-CA',{timeZone:'Pacific/Auckland'})===today).length;
+    if(used>=OSET().ai_daily_cap) return ok({ok:false,reason:'cap',message:"Today's AI help limit has been reached. It starts again tomorrow, or you can change the limit in the offer settings."});
+    ai({purpose:'offer clause draft',model:'claude-sonnet-5-5',ok:m!=='fail'}); save();
+    if(m==='fail') return ok({ok:false,reason:'failed',message:"The AI didn't answer. Try again in a minute."});
+    if(m==='unsuitable') return ok({ok:false,reason:'unsuitable',message:"That doesn't look like a clause for this agreement."});
+    const words=t.replace(/[<>]/g,'').slice(0,160);
+    if(m==='plain') return ok({ok:true,draft:true,title:'Your clause',wording:'The Vendor shall '+words+'.',summary:'As you described.',is_condition:false});
+    return ok({ok:true,draft:true,title:'Your clause',wording:'This agreement is conditional upon '+words+'. This condition is to be satisfied or waived {timing}.',summary:'As you described, by the time you choose.',is_condition:true}); }
   if(b.action==='read_pack'){ const m=localStorage.getItem('draftAiMode'); if(m==='off') return ok({ok:false,reason:'off',message:"Document reading isn't switched on yet."});
     if(!Array.isArray(b.pages)||!b.pages.length||b.pages.length>8) return res({error:'Send 1 to 8 pages at a time'},400);
     ai({purpose:'agreement pack read',ok:m!=='fail'}); if(m==='fail'){ save(); return ok({ok:false,reason:'failed',message:"The AI didn't answer. Try again in a minute."}); }

@@ -696,6 +696,36 @@ table.sum.of-sum td:first-child, table.sum.of-dates td:first-child { width: 40%;
 .dr-holder { margin: 8px 0; max-width: 100%; overflow: hidden; }
 .dr-pg { position: relative; max-width: 100%; background: #fff; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
 .dr-cv { display: block; width: 100%; height: 100%; }
+.dr-terms { list-style: none; padding: 0; margin: 8px 0; }
+.dr-term-i { border: 1px solid var(--line); border-radius: 8px; padding: 8px; margin: 0 0 8px; background: var(--card, transparent); }
+.dr-term-i.dr-dragging { opacity: .5; }
+.dr-thead { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-bottom: 4px; }
+.dr-grip { cursor: grab; color: var(--muted); letter-spacing: -3px; user-select: none; touch-action: none; padding: 6px 8px; margin: -6px 0 -6px -6px; font-size: 18px; }
+.dr-tno { flex: 1 1 160px; min-width: 0; overflow-wrap: anywhere; }
+.dr-tbtns { display: flex; gap: 6px; }
+.dr-rich { border: 1px solid var(--line); border-radius: 6px; padding: 8px; min-height: 3em; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 15px; }
+.dr-rich[contenteditable="true"]:focus { outline: 2px solid #1F5FBF; outline-offset: 1px; }
+.dr-chip { display: inline; padding: 1px 6px; border-radius: 10px; background: #FFE58A; color: #3A2A00; border: 1px solid #C99700; cursor: pointer; white-space: normal; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+.dr-chip:focus { outline: 2px solid #1F5FBF; }
+.dr-chiped { margin-top: 8px; }
+.dr-addt { margin-top: 8px; }
+.dr-addt select, .dr-mktools select { max-width: 100%; min-width: 0; flex: 1 1 180px; }
+.dr-zoom { display: inline-flex; align-items: center; gap: 6px; margin-left: 10px; }
+.dr-holder.dr-zoomed { overflow: auto; -webkit-overflow-scrolling: touch; }
+.dr-pg.dr-drawing { touch-action: none; cursor: crosshair; }
+.dr-mark { position: absolute; box-sizing: border-box; border: 2px dashed #D9432C; background: rgba(217, 67, 44, .10); touch-action: none; cursor: move; z-index: 2; }
+.dr-mark.dr-sel { border-style: solid; background: rgba(217, 67, 44, .16); }
+.dr-mark.dr-moved { border-color: #1E7A45; background: rgba(30, 122, 69, .12); }
+.dr-mk-lbl { position: absolute; left: 0; bottom: 100%; font-size: 11px; line-height: 1.2; color: #fff; background: #D9432C; padding: 0 4px; border-radius: 3px 3px 0 0; white-space: nowrap; max-width: 220px; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
+.dr-mark.dr-moved .dr-mk-lbl { background: #1E7A45; }
+/* handles sit just outside the box, so even a small box keeps its middle free to drag; finger-sized wherever touch is possible */
+.dr-h { position: absolute; width: 12px; height: 12px; border-radius: 50%; background: #fff; border: 2px solid #D9432C; box-sizing: border-box; touch-action: none; display: none; }
+@media (any-pointer: coarse) { .dr-h { width: 24px; height: 24px; } }
+.dr-touch .dr-h { width: 24px; height: 24px; }
+.dr-mark.dr-sel .dr-h { display: block; }
+.dr-h-nw { left: 0; top: 0; transform: translate(-100%, -100%); cursor: nwse-resize; } .dr-h-n { left: 50%; top: 0; transform: translate(-50%, -100%); cursor: ns-resize; } .dr-h-ne { left: 100%; top: 0; transform: translate(0, -100%); cursor: nesw-resize; } .dr-h-e { left: 100%; top: 50%; transform: translate(0, -50%); cursor: ew-resize; }
+.dr-h-se { left: 100%; top: 100%; cursor: nwse-resize; } .dr-h-s { left: 50%; top: 100%; transform: translate(-50%, 0); cursor: ns-resize; } .dr-h-sw { left: 0; top: 100%; transform: translate(-100%, 0); cursor: nesw-resize; } .dr-h-w { left: 0; top: 50%; transform: translate(-100%, -50%); cursor: ew-resize; }
+.dr-mark.dr-sel .dr-mk-lbl { left: 26px; }
 .dr-box { position: absolute; box-sizing: border-box; border: 1.5px solid #1F5FBF; background: rgba(31, 95, 191, .12); border-radius: 3px; padding: 0; margin: 0; min-width: 6px; min-height: 6px; cursor: pointer; font: inherit; }
 .dr-box.dr-ai { border-color: #B26A00; background: rgba(255, 170, 0, .18); }
 .dr-box.dr-ai.dr-undecided { border-style: dashed; }

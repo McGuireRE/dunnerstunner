@@ -73,5 +73,37 @@ begin
   execute 'reset role';
   out := out || 'public stored=' || (select (details -> 'conditions')::text || ' line_up=' || (details ->> 'line_up') from public.property_offers where property_id = pid and source = 'buyer' order by received_at desc limit 1) || '; ';
 
+  -- 7. the review screen's edits (022): marks and moved places must sit on a page of the blank; the rest checked for shape
+  x := '[[595.32,842.04],[595.32,842.04]]';
+  out := out || 'edits ok=' || public.offer_draft_edits_ok(jsonb_build_object('marks', jsonb_build_array(jsonb_build_object('id', 'm1', 'type', 'initials', 'who', 'both', 'page', 1, 'x', 300, 'y', 600, 'w', 80, 'h', 18), jsonb_build_object('id', 'm2', 'type', 'text', 'text', 'Tim', 'page', 2, 'x', 10, 'y', 10, 'w', 100, 'h', 20)),
+    'moves', jsonb_build_object('price', jsonb_build_object('from', jsonb_build_object('page', 1, 'x', 98, 'y', 340, 'w', 40, 'h', 11), 'to', jsonb_build_object('page', 1, 'x', 118, 'y', 345, 'w', 60, 'h', 11))),
+    'added_terms', jsonb_build_array(jsonb_build_object('id', 'add_std_pool_1', 'key', 'std_pool')), 'term_order', jsonb_build_array('add_std_pool_1'), 'retired_numbers', jsonb_build_array(24), 'term_timing', jsonb_build_object('add_std_pool_1', jsonb_build_object('after', 'finance', 'days', 3))), x::jsonb) || '; ';
+  if not public.offer_draft_edits_ok('{"date_format": "date", "items": {"price": "$1"}}'::jsonb, x::jsonb) then out := out || 'PHASE 2 EDITS REFUSED; '; end if;
+  if public.offer_draft_edits_ok(jsonb_build_object('marks', jsonb_build_array(jsonb_build_object('id', 'm1', 'type', 'initials', 'page', 3, 'x', 1, 'y', 1, 'w', 20, 'h', 20))), x::jsonb) then out := out || 'MARK ON A PAGE NOT ON THE BLANK; '; end if;
+  if public.offer_draft_edits_ok(jsonb_build_object('marks', jsonb_build_array(jsonb_build_object('id', 'm1', 'type', 'initials', 'page', 1, 'x', 580, 'y', 1, 'w', 40, 'h', 20))), x::jsonb) then out := out || 'MARK OFF THE PAGE EDGE; '; end if;
+  if public.offer_draft_edits_ok(jsonb_build_object('marks', jsonb_build_array(jsonb_build_object('id', 'm1', 'type', 'initials', 'page', 1, 'x', 1, 'y', 1, 'w', 4, 'h', 20))), x::jsonb) then out := out || 'MARK UNDER THE MINIMUM SIZE; '; end if;
+  if public.offer_draft_edits_ok(jsonb_build_object('marks', jsonb_build_array(jsonb_build_object('id', 'm1', 'type', 'erase', 'page', 1, 'x', 1, 'y', 1, 'w', 40, 'h', 20))), x::jsonb) then out := out || 'UNKNOWN MARK TYPE; '; end if;
+  if public.offer_draft_edits_ok(jsonb_build_object('marks', jsonb_build_array(jsonb_build_object('id', 'm1', 'type', 'initials', 'who', 'anyone', 'page', 1, 'x', 1, 'y', 1, 'w', 40, 'h', 20))), x::jsonb) then out := out || 'UNKNOWN SIGNER; '; end if;
+  if public.offer_draft_edits_ok(jsonb_build_object('moves', jsonb_build_object('price', jsonb_build_object('from', jsonb_build_object('page', 1, 'x', 1, 'y', 1, 'w', 9, 'h', 9), 'to', jsonb_build_object('page', 2, 'x', 1, 'y', 1, 'w', 9, 'h', 9)))), x::jsonb) then out := out || 'MOVE ACROSS PAGES; '; end if;
+  if public.offer_draft_edits_ok(jsonb_build_object('term_timing', jsonb_build_object('t1', jsonb_build_object('days', 400))), x::jsonb) then out := out || 'TIMING 400 DAYS; '; end if;
+  if public.offer_draft_edits_ok(jsonb_build_object('added_terms', jsonb_build_array(jsonb_build_object('id', 'a b', 'key', 'std_pool'))), x::jsonb) then out := out || 'BAD ADDED TERM ID; '; end if;
+  out := out || 'draft_add checks edits=' || (pg_get_functiondef('public.agent_draft_add(uuid, uuid, text, text, bigint, jsonb, jsonb, jsonb, text)'::regprocedure) ~ 'offer_draft_edits_ok\(coalesce\(nullif\(p_edits') || '; ';
+  begin execute 'set local role authenticated'; perform set_config('request.jwt.claims', agent, true); perform public.offer_draft_edits_ok('{}'::jsonb, '[]'::jsonb); out := out || 'EDITS CHECK CALLABLE BY A USER; '; exception when others then out := out || 'edits check: ' || sqlerrm || '; '; end;
+  execute 'reset role';
+
+  -- 8. the daily cap on Tim's clause writer, from ai_calls (service role only)
+  update public.offer_settings set ai_daily_cap = 2;
+  execute 'set local role service_role';
+  out := out || 'claim 0=' || (public.offer_agent_ai_claim('agent', 'offer clause draft') ->> 'ok') || '; ';
+  execute 'reset role';
+  insert into public.ai_calls (purpose, model, ok, agent) values ('offer clause draft', 'claude-sonnet-5-5', true, 'agent'), ('offer clause draft', 'claude-sonnet-5-5', false, 'agent'), ('offer condition draft', 'claude-sonnet-5-5', true, 'buyer form');
+  insert into public.ai_calls (at, purpose, model, ok, agent) values (now() - interval '2 days', 'offer clause draft', 'claude-sonnet-5-5', true, 'agent');
+  execute 'set local role service_role';
+  r := public.offer_agent_ai_claim('agent', 'offer clause draft'); out := out || 'claim at cap=' || (r ->> 'ok') || ' reason=' || coalesce(r ->> 'reason', '-') || ' used=' || (r ->> 'used') || '; ';
+  begin perform public.offer_agent_ai_claim('agent', 'something else'); out := out || 'OTHER PURPOSE CLAIMED; '; exception when others then out := out || 'other purpose: ' || sqlerrm || '; '; end;
+  execute 'reset role';
+  begin execute 'set local role authenticated'; perform set_config('request.jwt.claims', agent, true); perform public.offer_agent_ai_claim('agent', 'offer clause draft'); out := out || 'CLAIM CALLABLE BY A USER; '; exception when others then out := out || 'claim as a user: ' || sqlerrm || '; '; end;
+  execute 'reset role';
+
   raise exception 'ROLLBACK %', out;
 end $t$;
