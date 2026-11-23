@@ -1,5 +1,6 @@
 // Race test for migration 021, on a LOCAL PostgreSQL stand-in only (never the live project): requests arriving at the same moment on
-// separate connections. Makes a scratch database from a template that already has 020 applied (pg-standin with property_people.phone,
+// separate connections. Makes a scratch database from a template that already has 020 applied (pg-standin with property_people.phone
+// and agreement_people.email and phone,
 // 010, 016 part A, 018, 019, 020), applies 021 to it, then:
 //   1. Tim taps "Present to the vendors" twice at once: exactly one Round 2 signing, both taps answered;
 //   2. one vendor adds a change at the moment the other vendor finishes: never "everyone has signed" with a change someone hasn't
@@ -29,7 +30,7 @@ const AGENT = `set role authenticated; select set_config('request.jwt.claims', j
           out_ := out_ || jsonb_build_array(jsonb_build_object('id', 'block:' || case when v then 'vsig' else 'sig' end || s || ':s' || s, 'signer', s, 'kind', 'signature', 'why', 'block', 'ref', case when v then 'vsig' else 'sig' end || s, 'page', 3, 'x', case when v then 330 else 40 end, 'y', 530 - s * 70, 'w', 150, 'h', 22));
           foreach mk in array coalesce(marks, '{}') loop out_ := out_ || jsonb_build_array(jsonb_build_object('id', 'chg:' || mk || ':s' || s, 'signer', s, 'kind', 'initial', 'why', 'change', 'ref', mk::text, 'page', 1, 'x', 300 + s * 28, 'y', 400, 'w', 26, 'h', 13)); end loop;
         end loop; return out_; end $b$;
-      create function public.rc_cp(n int, mk uuid) returns jsonb language sql as $b$ select jsonb_agg(jsonb_build_object('id', 'chg:' || mk || ':s' || s, 'signer', s, 'kind', 'initial', 'why', 'change', 'ref', mk::text, 'page', 1, 'x', 200 + s * 28, 'y', 420, 'w', 26, 'h', 13)) from generate_series(1, n) s $b$;
+      create function public.rc_cp(n int, mk uuid) returns jsonb language sql as $b$ select jsonb_agg(jsonb_build_object('id', 'chg:' || mk || ':s' || s, 'signer', s, 'kind', 'initial', 'why', 'change', 'ref', mk::text, 'page', 1, 'x', 160 + s * 28, 'y', 341, 'w', 26, 'h', 13)) from generate_series(1, n) s $b$;
       create function public.rc_prep(g uuid, skip int default 0) returns void language plpgsql as $b$
         declare s public.offer_signers; gg public.offer_signings; png text := 'data:image/png;base64,' || repeat('iVBORw0KGgo', 30);
         begin select * into gg from public.offer_signings where id = g; if gg.status = 'ready' and gg.method = 'in_person' then perform public.agent_signing_start(g); end if;
@@ -61,7 +62,7 @@ const AGENT = `set role authenticated; select set_config('request.jwt.claims', j
         insert into public.property_people (property_id, position, legal_name, email, role) values (pid, 1, 'Vera Racer', 'vera@example.com', 'owner'), (pid, 2, 'Val Racer', 'val@example.com', 'owner');
         insert into public.property_documents (property_id, kind, name, path) values (pid, 'Other', 'b.pdf', 'rc') returning id into doc;
         insert into public.offer_blanks (property_id, document_id, sha256, size_bytes, file_name, pages, sizes, edition, edition_checked, created_by) values (pid, doc, repeat('ab', 32), 10, 'b.pdf', 3, '[[595,842],[595,842],[595,842]]', 'Eleventh Edition 2022 (4)', true, 't') returning id into bl;
-        insert into public.offer_blank_maps (blank_id, version, places, approved, created_by) values (bl, 1, '[]', true, 't') returning id into m;
+        insert into public.offer_blank_maps (blank_id, version, places, approved, created_by) values (bl, 1, '[{"id":"date","key":"date","kind":"date","page":1,"x":80,"y":730,"w":200,"h":10}]', true, 't') returning id into m;
         perform set_config('request.jwt.claims', agent, true);
         for k in 1..4 loop
           o := public.agent_offer_add(pid, good);
@@ -102,7 +103,7 @@ const AGENT = `set role authenticated; select set_config('request.jwt.claims', j
     const apath = await one(`select 'properties/' || property_id || '/docs/offer-agreement-' || id || '-' || repeat('a', 12) || '.pdf' from public.property_offers where id = '${o3}'`);
     await one(`insert into storage.objects (bucket_id, name, metadata) values ('property-files', '${apath}', '{"size": 6000, "mimetype": "application/pdf"}'); select public.offer_file_confirm('${apath}', repeat('ac', 32), 6000, 't')`);
     const acc = await one(`select now()::text`);
-    const lk = await Promise.all([1, 2].map(() => psql(`select public.offer_agreement_lock('${o3}', '${rid}', '${apath}', repeat('ac', 32), 6000, '${acc}', '${day}', '{}', 'agent')::text`)));
+    const lk = await Promise.all([1, 2].map(() => psql(`select public.offer_agreement_lock('${o3}', '${rid}', '${apath}', repeat('ac', 32), 6000, '${acc}', '${day}', jsonb_build_object('draw_version', 'nego-draw-1', 'base', jsonb_build_object('sha256', (select sha256 from public.offer_rounds where id = '${rid}'))), 'agent')::text`)));
     out.agree = { errors: lk.filter(r => r.c).map(r => r.e.split('\n')[0]), existing: lk.map(r => (JSON.parse(r.o.split('\n').pop() || '{}').existing)), rows: +(await one(`select count(*) from public.offer_agreements where offer_id = '${o3}'`)), events: +(await one(`select count(*) from public.offer_events where offer_id = '${o3}' and kind = 'agreement_formed'`)) };
     ok(!out.agree.errors.length && out.agree.rows === 1 && out.agree.events === 1 && out.agree.existing.filter(Boolean).length === 1, 'the agreed copy locked twice at once: one agreement, one event');
 

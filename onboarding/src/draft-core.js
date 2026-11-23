@@ -343,8 +343,11 @@
   // A New Zealand phone number as its national significant digits: +64 21 555 0199, 0064 21 555 0199, (021) 555-0199 and 21 555 0199
   // are all 215550199.
   const nsn = v => { let x = String(v || '').replace(/\D/g, ''); if (x.startsWith('0064')) x = x.slice(4); else if (x.startsWith('64') && x.length >= 10) x = x.slice(2); else if (x.startsWith('0')) x = x.slice(1); return x; };
-  // every run of digits in some text that could be a phone number, as national digits
-  const phoneRuns = t => (String(t || '').match(/[+(]?\d[\d\s().\-]{4,}\d/g) || []).map(nsn).filter(x => x.length >= 6);
+  // text made plain before it is compared: full-width digits and signs as ordinary ones, every kind of space (non-breaking, thin,
+  // full-width and so on) as a plain space, zero-width characters gone, and no spaces around an @ ("b @ example.com")
+  const plainText = t => String(t || '').normalize('NFKC').replace(/[\u200B-\u200D\u2060\uFEFF]/g, '').replace(/[\s\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]+/g, ' ').replace(/\s*@\s*/g, '@');
+  // every run of digits in some text that could be a phone number, as national digits (spaces, brackets, dots, dashes, / and _ between)
+  const phoneRuns = t => (plainText(t).match(/[+(]?\d[\d\s().\/_\-]{4,}\d/g) || []).map(nsn).filter(x => x.length >= 6);
   // the parties' own contact details, ready to compare: [{ who, email, phone }] -> { emails: [[email, who]], phones: [[digits, who]] }
   function ownContacts(list) {
     const emails = [], phones = [];
@@ -354,7 +357,7 @@
   }
   // whose own phone or email a piece of text holds ('' when none)
   function holdsOwn(text, own) {
-    const t = String(text || '').toLowerCase(); if (!t) return '';
+    const t = plainText(text).toLowerCase(); if (!t) return '';
     const e = own.emails.find(([v]) => t.includes(v)); if (e) return e[1];
     const runs = phoneRuns(t), ph = own.phones.find(([v]) => runs.some(r => r.includes(v))); return ph ? ph[1] : '';
   }
@@ -662,6 +665,6 @@
   }
 
   const DRAFT = { placedFrom, EDITIONS, EDITION_RE, editionOk, readPages, lines, xAt, matchAll, readEdition, editionPages, buildMap, parseChattels, numberIn, daysWords, FRONT_CONDITIONS, LABELS,
-    packText, packBatches, placeFromProposal, rectOf, nsn, phoneRuns, ownContacts, holdsOwn, pickVendorLawyer, PROPOSAL_KINDS, planDraft, ruleApplies, fullDate, PLACEHOLDERS, placeholderFor, isPlaceholder, winAnsi, renderDraft, wrap, INK, FONT_SIZE };
+    packText, packBatches, placeFromProposal, rectOf, nsn, phoneRuns, plainText, ownContacts, holdsOwn, pickVendorLawyer, PROPOSAL_KINDS, planDraft, ruleApplies, fullDate, PLACEHOLDERS, placeholderFor, isPlaceholder, winAnsi, renderDraft, wrap, INK, FONT_SIZE };
   if (typeof module !== 'undefined' && module.exports) module.exports = DRAFT; else root.DRAFT = DRAFT;
 })(typeof window !== 'undefined' ? window : globalThis);

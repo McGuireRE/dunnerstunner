@@ -154,6 +154,8 @@ const ok = (c, msg) => { if (!c) errs.push(msg); };
   eq(['+64 21 555 0199', '0064 21 555 0199', '21 555 0199', '(021) 555-0199', '021-555-0199', '+64 3 477 1234', '03 477 1234'].map(D.nsn), ['215550199', '215550199', '215550199', '215550199', '215550199', '34771234', '34771234'], 'NZ numbers reduced to national digits');
   const own1 = D.ownContacts([{ who: 'a purchaser', email: 'Ana.P@Buyer.Example', phone: '+64 21 555 0199' }]);
   ['Call 021 555 0199 after five', '+64 21 555 0199', '0064 21 555 0199', '21 555 0199', '(021) 555-0199', 'write to ANA.P@buyer.example today'].forEach(t => ok(D.holdsOwn(t, own1) === 'a purchaser', 'found in: ' + t));
+  // phase 4 review: spaces of every kind, full-width digits, / and _ between digits, and spaces around the @
+  ['Call 021\u00a0555\u00a00199', 'Call 021\u2009555\u20090199', 'Call 021\u3000555\u30000199', 'Call ０２１ ５５５ ０１９９', 'Call 021/555/0199', 'Call 021_555_0199', 'write to ana.p @ buyer.example', 'write to ana.p\u00a0@buyer.example'].forEach(t => ok(D.holdsOwn(t, own1) === 'a purchaser', 'found in: ' + JSON.stringify(t)));
   ok(!D.holdsOwn('$655,000, 8 December 2026 (10 working days)', own1) && !D.holdsOwn('03 477 1234', own1), 'prices, dates and other numbers are not mistaken for it');
   const pp = { purchasers: [{ first: 'Ana', last: 'Testbuyer', email: 'ana.p@buyer.example', phone: '+64 21 555 0199' }], email: 'own@buyer.example', phone: '022 333 4444' };
   const priv = D.planDraft({ details: Object.assign({}, base, pp, { conditions: [{ key: 'custom', days: 10, wording: 'Ring (021) 555-0199 to arrange it.' }], chattels_add: ['Ask OWN@buyer.example'],

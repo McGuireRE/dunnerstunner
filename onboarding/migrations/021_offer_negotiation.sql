@@ -48,7 +48,9 @@ alter table public.offer_signings add column round_no integer not null default 1
   add column document_id uuid references public.offer_documents(id), add column base_round_id uuid references public.offer_rounds(id);
 alter table public.offer_signings add constraint offer_signings_round_doc check ((round_no = 1 and document_id is null and base_round_id is null and side = 'purchaser') or (round_no > 1 and document_id is not null and base_round_id is not null));
 drop index public.offer_signings_draft_live;   -- one live signing per draft and round (round 1 as before)
-create unique index offer_signings_draft_round_live on public.offer_signings (draft_id, round_no) where status <> 'cancelled';
+create unique index offer_signings_draft_round_live on public.offer_signings (draft_id, round_no) where status not in ('cancelled', 'withdrawn');
+-- a signing stopped because a side withdrew (or the vendors declined) has its own status, distinct from Tim cancelling it (widened)
+alter table public.offer_signings drop constraint offer_signings_status_check, add constraint offer_signings_status_check check (status in ('ready', 'signing', 'held', 'complete', 'locked', 'replaced', 'cancelled', 'withdrawn'));
 alter table public.offer_signers add column person_id uuid references public.property_people(id);
 alter table public.offer_rounds add column document_id uuid references public.offer_documents(id), add column doc_round integer check (doc_round is null or doc_round >= 1),
   add column side text not null default 'purchaser' check (side in ('purchaser', 'vendor')), add column base_round_id uuid references public.offer_rounds(id),
@@ -57,6 +59,15 @@ alter table public.offer_rounds add column document_id uuid references public.of
 create unique index offer_rounds_doc_round on public.offer_rounds (document_id, doc_round) where document_id is not null;
 alter table public.offer_sign_marks drop constraint offer_sign_marks_kind_check, add constraint offer_sign_marks_kind_check check (kind in ('note', 'strike', 'cross', 'reinstate', 'insert'));
 alter table public.offer_sign_receipts drop constraint offer_sign_receipts_guide_check, add constraint offer_sign_receipts_guide_check check (guide in ('cca', 'sale_purchase', 'chattels'));
+-- offer_sign_reviews keeps two kinds of rows apart: Tim re-approving Round 1 marks (reviewed_by, as in 020) and the initials that come
+-- with a change in a counteroffer (changed_by: the signer who made it; nobody reviewed it)
+alter table public.offer_sign_reviews add column kind text not null default 'review' check (kind in ('review', 'change')), add column changed_by text, alter column reviewed_by drop not null;
+alter table public.offer_sign_reviews add constraint offer_sign_reviews_who check ((kind = 'review' and reviewed_by is not null and changed_by is null) or (kind = 'change' and reviewed_by is null and changed_by is not null));
+-- the per-network limit on changes from a link is kept with the others (widened, nothing removed)
+alter table public.offer_hits drop constraint offer_hits_kind_check, add constraint offer_hits_kind_check check (kind in ('info', 'bad', 'submit', 'ai', 'sign_code', 'sign_try', 'sign_change'));
+-- Tim's setting: does a side sign again every round, or only where its signature was lifted (the default)?
+alter table public.offer_settings add column resign_every_round boolean not null default false;
+grant select (resign_every_round) on public.offer_settings to authenticated;
 create table public.offer_agreements (
   id uuid primary key default gen_random_uuid(),
   offer_id uuid not null unique references public.property_offers(id),
@@ -69,6 +80,9 @@ create table public.offer_agreements (
   agreement_date date not null,
   date_text text not null check (length(date_text) between 10 and 20),
   accepted_at timestamptz not null,
+  round_sha256 text not null check (round_sha256 ~ '^[0-9a-f]{64}$'),   -- the round it was drawn from (its layers, again)
+  draw_version text not null check (length(draw_version) between 3 and 40),
+  terms jsonb not null check (jsonb_typeof(terms) = 'object'),           -- the agreed terms, for later phases to read from here
   record jsonb not null check (jsonb_typeof(record) = 'object'),
   chain_last text not null check (chain_last ~ '^[0-9a-f]{64}$'),
   confirmed_by text not null,
@@ -142,23 +156,75 @@ begin
   if x like '0064%' then x := substr(x, 5); elsif x like '64%' and length(x) >= 10 then x := substr(x, 3); elsif x like '0%' then x := substr(x, 2); end if;
   return x;
 end $$;
--- whose own phone or email (a purchaser's or a vendor's) some words hold, or null (phase 2's privacy rule, here for typed changes)
+-- text made plain before it is compared (as DRAFT.plainText): full-width digits and signs as ordinary ones, every kind of space as a
+-- plain space, zero-width characters gone, no spaces around an @
+create or replace function public.offer_plain(t text) returns text language sql immutable as $$
+  select regexp_replace(regexp_replace(regexp_replace(normalize(coalesce(t, ''), NFKC), '[​-‍⁠﻿]', '', 'g'), '[\s   -     　]+', ' ', 'g'), '\s*@\s*', '@', 'g') $$;
+-- whose own phone or email (a purchaser's or a vendor's) some words hold, or null (phase 2's privacy rule, here for typed changes).
+-- The vendors are everyone on the property file and everyone on its agency agreements.
 create or replace function public.offer_private_hit(p_offer uuid, p_text text) returns text language plpgsql stable security definer set search_path = public as $$
-declare o public.property_offers; t text := lower(coalesce(p_text, '')); runs text[]; r record; p jsonb; v text;
+declare o public.property_offers; t text := lower(public.offer_plain(p_text)); runs text[]; r record; v text;
 begin
   select * into o from public.property_offers where id = p_offer; if o.id is null or t = '' then return null; end if;
-  select coalesce(array_agg(public.offer_nsn(m[1])), '{}') into runs from regexp_matches(t, '([+(]?\d[\d\s().\-]{4,}\d)', 'g') m;
+  select coalesce(array_agg(public.offer_nsn(m[1])), '{}') into runs from regexp_matches(t, '([+(]?\d[\d\s().\/_\-]{4,}\d)', 'g') m;
   for r in
     select 'a purchaser' who, o.details->>'email' email, o.details->>'phone' phone
     union all select 'a purchaser', q->>'email', q->>'phone' from jsonb_array_elements(coalesce(o.details->'purchasers', '[]'::jsonb)) q
     union all select 'a vendor', pp.email, pp.phone from public.property_people pp where pp.property_id = o.property_id
+    union all select 'a vendor', ap.email, ap.phone from public.agreement_people ap join public.agreements a on a.id = ap.agreement_id where a.property_id = o.property_id
   loop
-    v := lower(trim(coalesce(r.email, '')));
+    v := lower(public.offer_plain(trim(coalesce(r.email, ''))));
     if length(v) >= 5 and position('@' in v) > 0 and position(v in t) > 0 then return r.who; end if;
-    v := public.offer_nsn(r.phone);
+    v := public.offer_nsn(public.offer_plain(r.phone));
     if length(v) >= 7 and exists (select 1 from unnest(runs) x where length(x) >= 6 and position(v in x) > 0) then return r.who; end if;
   end loop;
   return null;
+end $$;
+-- a change's rectangle on the page (as NEGO.changeRect; typed words allowed their widest, 0.62 of the size a letter)
+create or replace function public.offer_change_rect(p_kind text, g jsonb) returns jsonb language plpgsql immutable as $$
+declare xs numeric[]; ys numeric[];
+begin
+  if p_kind = 'strike' then return jsonb_build_object('x', least((g->>'x0')::numeric, (g->>'x1')::numeric), 'y', (g->>'y')::numeric - 4, 'w', abs((g->>'x1')::numeric - (g->>'x0')::numeric), 'h', 8);
+  elsif p_kind = 'cross' then return jsonb_build_object('x', (g->>'x')::numeric, 'y', (g->>'y')::numeric, 'w', (g->>'w')::numeric, 'h', (g->>'h')::numeric);
+  elsif p_kind = 'insert' then return jsonb_build_object('x', (g->>'x')::numeric, 'y', (g->>'y')::numeric - 2, 'w', greatest(8, length(g->>'text') * coalesce((g->>'size')::numeric, 9) * 0.62), 'h', coalesce((g->>'size')::numeric, 9) + 4);
+  elsif p_kind = 'note' then
+    select array_agg((pt->>0)::numeric), array_agg((pt->>1)::numeric) into xs, ys from jsonb_array_elements(g->'strokes') st, jsonb_array_elements(st) pt;
+    return jsonb_build_object('x', (select min(v) from unnest(xs) v), 'y', (select min(v) from unnest(ys) v), 'w', greatest(4, (select max(v) - min(v) from unnest(xs) v)), 'h', greatest(4, (select max(v) - min(v) from unnest(ys) v)));
+  end if;
+  return jsonb_build_object('x', (g->>'x')::numeric - 4, 'y', (g->>'y')::numeric - 4, 'w', 50, 'h', 10);   -- a reinstatement
+end $$;
+-- the gap between a place and a rectangle, in points (0 when they touch)
+create or replace function public.offer_gap(p jsonb, r jsonb) returns numeric language sql immutable as $$
+  select sqrt(power(greatest(0, (r->>'x')::numeric - ((p->>'x')::numeric + (p->>'w')::numeric), (p->>'x')::numeric - ((r->>'x')::numeric + (r->>'w')::numeric)), 2)
+            + power(greatest(0, (r->>'y')::numeric - ((p->>'y')::numeric + (p->>'h')::numeric), (p->>'y')::numeric - ((r->>'y')::numeric + (r->>'h')::numeric)), 2)) $$;
+-- the date place on the map a draft was made with ({ page, x, y, w, h } as the date is written there), or null
+create or replace function public.offer_date_place(p_draft uuid) returns jsonb language sql stable security definer set search_path = public as $$
+  select e from public.offer_drafts d join public.offer_blank_maps bm on bm.id = d.map_id, jsonb_array_elements(bm.places) e
+  where d.id = p_draft and (e->>'id' = 'date' or e->>'kind' = 'date') and jsonb_typeof(e->'x') = 'number' and jsonb_typeof(e->'y') = 'number' order by (e->>'id' = 'date') desc limit 1 $$;
+-- 020's guards on a signing and its signers, with 'withdrawn' (a side withdrew) as final as 'cancelled' is
+create or replace function public.guard_offer_signing() returns trigger language plpgsql set search_path = public as $$
+begin
+  if tg_op = 'DELETE' then raise exception 'Signing records are never removed'; end if;
+  if coalesce(current_setting('offers.fn', true), '') <> 'on' then raise exception 'Signing is changed only through the signing screens, so there is a record'; end if;
+  if (to_jsonb(new) - array['status', 'sent_at', 'held_at', 'completed_at', 'locked_at', 'replaced_at', 'replaced_by']) is distinct from (to_jsonb(old) - array['status', 'sent_at', 'held_at', 'completed_at', 'locked_at', 'replaced_at', 'replaced_by']) then
+    raise exception 'What was released for signing is kept as it was'; end if;
+  if old.status in ('locked', 'replaced', 'cancelled', 'withdrawn') then raise exception 'This signing is finished and kept as it was'; end if;
+  return new;
+end $$;
+create or replace function public.guard_offer_signer() returns trigger language plpgsql set search_path = public as $$
+begin
+  if tg_op = 'DELETE' then raise exception 'Signing records are never removed'; end if;
+  if coalesce(current_setting('offers.fn', true), '') <> 'on' then raise exception 'Signing is changed only through the signing screens, so there is a record'; end if;
+  if new.signing_id is distinct from old.signing_id or new.position is distinct from old.position or new.name is distinct from old.name or new.email is distinct from old.email then raise exception 'Who signs is kept as it was released'; end if;
+  if old.void_at is not null then raise exception 'These signatures were replaced, and are kept as they were'; end if;
+  if new.void_at is not null and new.token_hash is null and new.session_hash is null and new.code_hash is null
+     and (select status from public.offer_signings where id = old.signing_id) in ('ready', 'signing', 'held', 'complete')
+     and (to_jsonb(new) - array['void_at', 'token_hash', 'session_hash', 'code_hash']) is not distinct from (to_jsonb(old) - array['void_at', 'token_hash', 'session_hash', 'code_hash']) then return new; end if;
+  if (select status from public.offer_signings where id = old.signing_id) in ('complete', 'locked', 'replaced', 'cancelled', 'withdrawn') then raise exception 'Signing is finished, so the signers are kept as they were'; end if;
+  if old.finished_at is not null and new.finished_at is not null and (to_jsonb(new) - array['void_at', 'token_hash', 'session_hash', 'code_hash', 'session_expires_at', 'code_expires_at', 'code_tries'])
+     is distinct from (to_jsonb(old) - array['void_at', 'token_hash', 'session_hash', 'code_hash', 'session_expires_at', 'code_expires_at', 'code_tries']) then raise exception 'A finished signature is kept as it was'; end if;
+  if (new.sig_png is distinct from old.sig_png or new.init_png is distinct from old.init_png) and exists (select 1 from public.offer_sign_taps t where t.signer_id = old.id) then raise exception 'Your signature and initials are kept as you first used them'; end if;
+  return new;
 end $$;
 -- 020's check that a signing is still the one to sign, with the negotiation added: its document must be open, and no agreement made
 create or replace function public.offer_sign_current(g public.offer_signings) returns text language plpgsql stable set search_path = public as $$
@@ -168,7 +234,7 @@ begin
   if g.status = 'locked' then return 'Signing is finished, and the signed copy is locked.'; end if;
   if g.status = 'cancelled' then return 'This signing was stopped before anyone signed. Tim will send it to you again.'; end if;
   select * into d from public.offer_drafts where id = g.draft_id; select * into o from public.property_offers where id = g.offer_id;
-  if o.status in ('withdrawn', 'lapsed') then return 'This offer has been withdrawn or has lapsed.'; end if;
+  if g.status = 'withdrawn' or o.status in ('withdrawn', 'lapsed', 'declined') then return case when o.status = 'declined' then 'The vendors have declined this offer, so it is no longer being signed.' when o.status = 'lapsed' then 'This offer has lapsed, so it is no longer being signed.' else 'This offer has been withdrawn, so it is no longer being signed.' end; end if;
   if exists (select 1 from public.offer_agreements a where a.offer_id = g.offer_id) then return 'This agreement has been made, so nothing more is signed here.'; end if;
   if g.document_id is not null then
     select status into ds from public.offer_documents where id = g.document_id;
@@ -198,19 +264,30 @@ create or replace function public.offer_parties(p_offer uuid) returns jsonb lang
 -- the open document's newest locked round
 create or replace function public.offer_doc_last(p_document uuid) returns public.offer_rounds language sql stable set search_path = public as $$
   select * from public.offer_rounds where document_id = p_document order by doc_round desc limit 1 $$;
--- stop every signing of an offer still in progress (withdrawn, lapsed, a document closed): signers void, their links closed, recorded
-create or replace function public.offer_stop_signings(p_offer uuid, p_document uuid, p_actor text, p_reason text) returns int language plpgsql security definer set search_path = public as $$
+-- stop every signing of an offer still in progress: signers void, their links closed, recorded. 'withdrawn' when a side withdrew or
+-- declined (or the offer lapsed); 'cancelled' when Tim closed the document for a fresh copy.
+create or replace function public.offer_stop_signings(p_offer uuid, p_document uuid, p_actor text, p_reason text, p_status text default 'cancelled') returns int language plpgsql security definer set search_path = public as $$
 declare g public.offer_signings; n int := 0;
 begin
+  if p_status not in ('cancelled', 'withdrawn') then raise exception 'Unknown status'; end if;
   perform set_config('offers.fn', 'on', true);
   for g in select * from public.offer_signings where offer_id = p_offer and status in ('ready', 'signing', 'held', 'complete') and (p_document is null or document_id = p_document) order by released_at for update loop
     update public.offer_signers set void_at = now(), token_hash = null, session_hash = null, code_hash = null where signing_id = g.id and void_at is null;   -- before the status changes
-    update public.offer_signings set status = 'cancelled' where id = g.id;
-    insert into public.offer_events (property_id, offer_id, actor, kind, detail) values (g.property_id, g.offer_id, left(coalesce(p_actor, 'agent'), 254), 'sign_cancelled',
+    update public.offer_signings set status = p_status where id = g.id;
+    insert into public.offer_events (property_id, offer_id, actor, kind, detail) values (g.property_id, g.offer_id, left(coalesce(p_actor, 'agent'), 254), 'sign_' || case when p_status = 'withdrawn' then 'withdrawn' else 'cancelled' end,
       jsonb_build_object('signing_id', g.id, 'round', g.round_no, 'side', g.side, 'method', g.method, 'links_sent', g.sent_at is not null, 'reason', left(p_reason, 300)));
     n := n + 1;
   end loop;
   return n;
+end $$;
+-- close the offer's open document (a fresh copy, or the offer withdrawn, declined or lapsed): filed as history, every round kept
+create or replace function public.offer_doc_close(p_offer uuid, p_actor text, p_reason text) returns int language plpgsql security definer set search_path = public as $$
+declare doc public.offer_documents;
+begin
+  select * into doc from public.offer_documents where offer_id = p_offer and status = 'open' for update; if doc.id is null then return null; end if;
+  perform set_config('offers.fn', 'on', true);
+  update public.offer_documents set status = 'closed', closed_at = now(), closed_by = left(coalesce(p_actor, 'agent'), 254), close_reason = left(p_reason, 500) where id = doc.id;
+  return doc.number;
 end $$;
 
 -- ───── the signing steps, as in 020, with the negotiation rounds ─────
@@ -247,13 +324,14 @@ end $$;
 -- it (one place each, made by the core on the signer's screen and checked here) are kept as they are made. Anyone on that side who
 -- had finished initials it and finishes again. Typed words never hold a purchaser's or vendor's own phone or email.
 create or replace function public.offer_sign_do_change(p_signer uuid, p_id uuid, p_kind text, p_page int, p_geometry jsonb, p_target uuid, p_places jsonb) returns jsonb language plpgsql security definer set search_path = public as $$
-declare s public.offer_signers; g public.offer_signings; t public.offer_sign_marks; w numeric; h numeric; n int; x jsonb; who text; reopened int;
+declare s public.offer_signers; g public.offer_signings; t public.offer_sign_marks; w numeric; h numeric; n int; x jsonb; who text; reopened int; rc jsonb; dp jsonb; back jsonb;
 begin
   perform 1 from public.offer_signings where id = (select signing_id from public.offer_signers where id = p_signer) for update;   -- as finishing does: the signing, then the signer
   select * into s from public.offer_signers where id = p_signer for update; g := public.offer_sign_ready(s, true);
   if g.round_no < 2 then raise exception 'Changes are made when the offer is answered, from Round 2 on'; end if;
   if s.consent_at is null then raise exception 'Agree to sign electronically first'; end if;
   if p_id is null or exists (select 1 from public.offer_sign_marks where id = p_id) then raise exception 'Please try that again'; end if;
+  if (select count(*) from public.offer_sign_marks where signer_id = s.id and at > now() - interval '1 hour') >= 30 then raise exception 'You have made a lot of changes in the last hour. Please call Tim on 027 562 7207'; end if;
   if p_page is null or p_page < 1 or p_page > jsonb_array_length(g.pages) then raise exception 'That page isn''t in the document'; end if;
   w := (g.pages->(p_page - 1)->>0)::numeric; h := (g.pages->(p_page - 1)->>1)::numeric;
   if coalesce(p_kind, '') not in ('note', 'strike', 'cross', 'reinstate', 'insert') or not public.offer_change_ok(p_kind, p_geometry, w, h) then raise exception 'That change doesn''t sit on the page'; end if;
@@ -263,6 +341,12 @@ begin
     if exists (select 1 from public.offer_sign_marks where target = t.id and kind = 'reinstate') then raise exception 'That has already been reinstated'; end if;
   elsif p_target is not null then raise exception 'Only a reinstatement points at another change';
   end if;
+  -- the date at the top is Tim's alone, added once the agreement is made: no change may sit on its place
+  rc := public.offer_change_rect(p_kind, p_geometry); dp := public.offer_date_place(g.draft_id);
+  if dp is not null and (dp->>'page')::int = p_page and public.offer_gap(jsonb_build_object('x', (dp->>'x')::numeric, 'y', (dp->>'y')::numeric - 2, 'w', coalesce((dp->>'w')::numeric, 100), 'h', coalesce((dp->>'h')::numeric, 10) + 2), rc) = 0
+     and least((dp->>'x')::numeric + coalesce((dp->>'w')::numeric, 100), (rc->>'x')::numeric + (rc->>'w')::numeric) > greatest((dp->>'x')::numeric, (rc->>'x')::numeric)
+     and least((dp->>'y')::numeric + coalesce((dp->>'h')::numeric, 10), (rc->>'y')::numeric + (rc->>'h')::numeric) > greatest((dp->>'y')::numeric - 2, (rc->>'y')::numeric) then
+    raise exception 'That is where the date goes once the agreement is made. Make the change somewhere else'; end if;
   if p_kind = 'insert' then who := public.offer_private_hit(g.offer_id, p_geometry->>'text');
     if who is not null then raise exception 'Those words hold %''s own phone or email, so they can''t go on the agreement. Only the lawyers'' details go on it', who; end if; end if;
   -- the initials of everyone on this side, one each, beside the change
@@ -270,16 +354,21 @@ begin
   if not public.offer_sign_places_ok(p_places, g.pages, n, false) or jsonb_array_length(p_places) <> n then raise exception 'Everyone on your side initials each change once'; end if;
   for x in select * from jsonb_array_elements(p_places) loop
     if x->>'why' <> 'change' or x->>'kind' <> 'initial' or x->>'ref' is distinct from p_id::text or x->>'id' <> ('chg:' || p_id || ':s' || (x->>'signer')) then raise exception 'Everyone on your side initials each change once'; end if;
+    if (x->>'page')::int <> p_page or public.offer_gap(x, rc) > 60 then raise exception 'Each person''s initials go beside the change, on its page'; end if;
   end loop;
   insert into public.offer_sign_marks (id, signing_id, signer_id, by_name, kind, page, geometry, target) values (p_id, g.id, s.id, s.name, p_kind, p_page, p_geometry, case when p_kind = 'reinstate' then p_target end);
   perform set_config('offers.fn', 'on', true);
-  insert into public.offer_sign_reviews (signing_id, marks, places, places_sha256, reviewed_by) values (g.id, array[p_id], p_places, public.offer_sha(p_places::text), left(s.name, 254));
+  insert into public.offer_sign_reviews (signing_id, marks, places, places_sha256, kind, changed_by) values (g.id, array[p_id], p_places, public.offer_sha(p_places::text), 'change', left(s.name, 254));
+  -- anyone on this side who had finished initials the change and finishes again (told by email, for those signing by link)
+  select coalesce(jsonb_agg(jsonb_build_object('position', x2.position, 'name', x2.name, 'email', case when g.method = 'link' then x2.email end) order by x2.position), '[]'::jsonb) into back
+    from public.offer_signers x2 where x2.signing_id = g.id and x2.finished_at is not null and x2.void_at is null and x2.id <> s.id;
   update public.offer_signers set finished_at = null, seen_sha256 = null where signing_id = g.id and finished_at is not null and void_at is null;
   get diagnostics reopened = row_count;
   insert into public.offer_events (property_id, offer_id, actor, kind, detail) values (g.property_id, g.offer_id, s.name, 'round_change',
     jsonb_build_object('signing_id', g.id, 'round', g.round_no, 'side', g.side, 'mark_id', p_id, 'kind', p_kind, 'page', p_page, 'signer', s.position, 'target', p_target, 'text', case when p_kind = 'insert' then p_geometry->>'text' end, 'reopened', reopened));
   perform set_config('offers.fn', '', true);
-  return jsonb_build_object('id', p_id, 'reopened', reopened);
+  return jsonb_build_object('id', p_id, 'reopened', reopened, 'reopened_signers', back, 'by', s.name, 'method', g.method, 'side', g.side, 'round', g.round_no,
+    'address', (select address from public.properties where id = g.property_id));
 end $$;
 
 -- ───── Tim's side ─────
@@ -294,10 +383,10 @@ begin
   if not exists (select 1 from public.offer_draft_approvals a where a.draft_id = d.id and a.sha256 = d.sha256) then raise exception 'Approve the draft first'; end if;
   if d.number <> (select max(number) from public.offer_drafts where offer_id = d.offer_id) then raise exception 'There is a newer draft of this offer. Use that one'; end if;
   if o.details is distinct from d.details then raise exception 'The offer has changed since this draft. Re-draft and approve it first'; end if;
-  if o.status in ('withdrawn', 'lapsed') then raise exception 'This offer has been withdrawn or has lapsed'; end if;
+  if o.status in ('withdrawn', 'lapsed', 'declined') then raise exception 'This offer has been withdrawn, declined or has lapsed'; end if;
   if exists (select 1 from public.offer_documents x where x.offer_id = o.id and x.status in ('open', 'agreed')) then raise exception 'This offer already has a signed Round 1. For a fresh copy, close the current document first'; end if;
   if exists (select 1 from public.offer_documents x where x.draft_id = d.id) then raise exception 'That draft belongs to a closed document. Re-draft the offer for a fresh copy'; end if;
-  select id into sid from public.offer_signings where draft_id = d.id and round_no = 1 and status <> 'cancelled';
+  select id into sid from public.offer_signings where draft_id = d.id and round_no = 1 and status not in ('cancelled', 'withdrawn');
   if sid is not null then return jsonb_build_object('id', sid, 'existing', true); end if;
   ppl := coalesce(d.details->'purchasers', '[]'::jsonb); n := jsonb_array_length(ppl);
   if n < 1 or n > 12 then raise exception 'The offer needs 1 to 12 purchasers'; end if;
@@ -366,21 +455,34 @@ end $$;
 -- the other side made; everyone signs. Nothing is sent here.
 create or replace function public.agent_round_present(p_offer uuid, p_method text, p_places jsonb, p_checked boolean, p_note text default null) returns jsonb language plpgsql security definer set search_path = public as $$
 declare me text := public.offer_agent(); o public.property_offers; doc public.offer_documents; last public.offer_rounds; base public.offer_signings; side_ text; n int; sid uuid; ex uuid; em text; i int; x jsonb; first_ boolean; m record; ppl jsonb;
+  prev public.offer_rounds; owners uuid[]; resign boolean := coalesce((select resign_every_round from public.offer_settings limit 1), false); mk public.offer_sign_marks;
 begin
   if coalesce(p_method, '') not in ('in_person', 'link') then raise exception 'Choose in person or by link'; end if;
   select * into o from public.property_offers where id = p_offer for update; if o.id is null then raise exception 'No such offer'; end if;
   if o.status in ('withdrawn', 'lapsed', 'declined') then raise exception 'This offer has been withdrawn or has lapsed'; end if;
   if exists (select 1 from public.offer_agreements a where a.offer_id = o.id) then raise exception 'The agreement has been made'; end if;
-  select * into doc from public.offer_documents where offer_id = o.id and status = 'open'; if doc.id is null then raise exception 'Lock Round 1 first: the purchasers sign the offer before it goes to the vendors'; end if;
+  select * into doc from public.offer_documents where offer_id = o.id and status = 'open';
+  if doc.id is null and exists (select 1 from public.offer_documents x where x.offer_id = o.id and x.status = 'closed') then raise exception 'The last document was closed (withdrawn, declined or for a fresh copy). Correct the offer, re-draft it, and have the purchasers sign a fresh copy first'; end if;
+  if doc.id is null then raise exception 'Lock Round 1 first: the purchasers sign the offer before it goes to the vendors'; end if;
   last := public.offer_doc_last(doc.id);
   if p_checked is not true then raise exception 'Tick that you have looked at Round % first', last.doc_round; end if;
   if last.doc_round > 1 and last.changes = 0 and jsonb_array_length(last.outstanding) = 0 then raise exception 'Round % accepted everything with nothing changed. Confirm the agreement instead', last.doc_round; end if;
   side_ := case when last.side = 'purchaser' then 'vendor' else 'purchaser' end;
-  select id into ex from public.offer_signings where draft_id = doc.draft_id and round_no = last.doc_round + 1 and status <> 'cancelled';
+  select id into ex from public.offer_signings where draft_id = doc.draft_id and round_no = last.doc_round + 1 and status not in ('cancelled', 'withdrawn');
   if ex is not null then return jsonb_build_object('id', ex, 'existing', true); end if;
   select * into base from public.offer_signings where id = last.signing_id;
-  -- who signs: the vendors on the property (owners, by their legal names), or the purchasers as Round 1 had them (the same draft)
-  if side_ = 'vendor' then
+  -- who signs: a side's later round, the same people as its newest locked round (in the same order); the vendors' first round, the owners
+  -- on the property (by their legal names); the purchasers, as Round 1 had them (the same draft)
+  select * into prev from public.offer_rounds r where r.document_id = doc.id and r.side = side_ order by r.doc_round desc limit 1;
+  if prev.id is not null then
+    select coalesce(jsonb_agg(jsonb_build_object('name', x.name, 'email', coalesce(nullif(lower(trim(coalesce((select pp.email from public.property_people pp where pp.id = x.person_id), ''))), ''), x.email), 'person', x.person_id) order by x.position), '[]'::jsonb)
+      into ppl from public.offer_signers x where x.signing_id = prev.signing_id and x.void_at is null;
+    if side_ = 'vendor' then
+      select coalesce(array_agg(pp.id order by pp.id), '{}') into owners from public.property_people pp where pp.property_id = o.property_id and coalesce(pp.role, 'owner') = 'owner';
+      if owners is distinct from (select coalesce(array_agg((q->>'person')::uuid order by (q->>'person')::uuid), '{}') from jsonb_array_elements(ppl) q) then
+        raise exception 'The owners on the property have changed since Round %. Start a fresh copy, so the right people sign', prev.doc_round; end if;
+    end if;
+  elsif side_ = 'vendor' then
     select coalesce(jsonb_agg(jsonb_build_object('name', trim(regexp_replace(coalesce(pp.legal_name, ''), '\s+', ' ', 'g')), 'email', nullif(lower(trim(coalesce(pp.email, ''))), ''), 'person', pp.id) order by pp.position, pp.legal_name), '[]'::jsonb)
       into ppl from public.property_people pp where pp.property_id = o.property_id and coalesce(pp.role, 'owner') = 'owner';
     if exists (select 1 from jsonb_array_elements(ppl) q where q->>'name' = '') then raise exception 'Add each vendor''s legal name on the property first'; end if;
@@ -397,16 +499,24 @@ begin
     end loop;
     if (select count(distinct q->>'email') from jsonb_array_elements(ppl) q) <> n then raise exception 'Two people have the same email. Each needs their own to sign by link'; end if;
   end if;
-  -- the places: every signer signs; a side's first round has the foot of every page; every signer initials each change the other side made
-  first_ := not exists (select 1 from public.offer_rounds r where r.document_id = doc.id and r.side = side_);
+  -- the places: a side's first round signs and has the foot of every page; later, everyone signs again only where Tim's setting says
+  -- (every round) or the core found their signature lifted; every signer initials each change the other side made, beside it
+  first_ := prev.id is null;
   if not public.offer_sign_places_ok(p_places, base.pages, n, first_) then raise exception 'Please check the signing places: everyone signs%', case when first_ then ', and initials the foot of every page' else '' end; end if;
-  for i in 1..n loop
-    if not exists (select 1 from jsonb_array_elements(p_places) e where (e->>'signer')::int = i and e->>'kind' = 'signature') then raise exception 'Please check the signing places: everyone signs'; end if;
-  end loop;
+  if first_ or resign then
+    for i in 1..n loop
+      if not exists (select 1 from jsonb_array_elements(p_places) e where (e->>'signer')::int = i and e->>'kind' = 'signature') then raise exception 'Please check the signing places: everyone signs'; end if;
+    end loop;
+  end if;
   for m in select k.id from public.offer_sign_marks k where k.signing_id = last.signing_id loop
     for i in 1..n loop
       if not exists (select 1 from jsonb_array_elements(p_places) e where e->>'id' = 'chg:' || m.id || ':s' || i and e->>'why' = 'change' and e->>'kind' = 'initial') then raise exception 'Please check the signing places: everyone initials each change made in Round %', last.doc_round; end if;
     end loop;
+  end loop;
+  -- initials for a change sit on its page, within about 60 points of it
+  for x in select * from jsonb_array_elements(p_places) e where e->>'why' = 'change' loop
+    select * into mk from public.offer_sign_marks k where k.id::text = x->>'ref' and k.signing_id in (select r.signing_id from public.offer_rounds r where r.document_id = doc.id);
+    if mk.id is null or (x->>'page')::int <> mk.page or public.offer_gap(x, public.offer_change_rect(mk.kind, mk.geometry)) > 60 then raise exception 'Please check the signing places: initials for a change go beside it'; end if;
   end loop;
   perform set_config('offers.fn', 'on', true);
   insert into public.offer_signings (offer_id, property_id, draft_id, draft_sha256, method, pages, places, places_sha256, cca_pages, released_by, round_no, side, document_id, base_round_id)
@@ -439,17 +549,16 @@ begin
   select * into o from public.property_offers where id = p_offer for update; if o.id is null then raise exception 'No such offer'; end if;
   select * into doc from public.offer_documents where offer_id = o.id and status = 'open' for update; if doc.id is null then raise exception 'There is no open document to close'; end if;
   if why is null or length(why) < 3 or length(why) > 500 then raise exception 'Say why you are starting a fresh copy (3 to 500 characters)'; end if;
-  stopped := public.offer_stop_signings(o.id, doc.id, me, 'The document was closed for a fresh copy');
+  stopped := public.offer_stop_signings(o.id, doc.id, me, 'The document was closed for a fresh copy', 'cancelled');
   select count(*) into rounds from public.offer_rounds where document_id = doc.id;
-  perform set_config('offers.fn', 'on', true);
-  update public.offer_documents set status = 'closed', closed_at = now(), closed_by = me, close_reason = why where id = doc.id;
+  perform public.offer_doc_close(o.id, me, why);
   insert into public.offer_events (property_id, offer_id, actor, kind, detail) values (o.property_id, o.id, me, 'document_closed', jsonb_build_object('document_id', doc.id, 'document', doc.number, 'rounds', rounds, 'stopped', stopped, 'reason', why));
   perform set_config('offers.fn', '', true);
   return jsonb_build_object('ok', true, 'document', doc.number, 'rounds', rounds, 'stopped', stopped);
 end $$;
 -- 018's withdrawn or lapsed, now also stopping every signing in progress (any links sent stop working)
 create or replace function public.agent_offer_status(p_offer uuid, p_status text, p_at timestamptz, p_note text default null) returns void language plpgsql security definer set search_path = public as $$
-declare me text := public.offer_agent(); o public.property_offers; at_ timestamptz := coalesce(p_at, now()); stopped int := 0;
+declare me text := public.offer_agent(); o public.property_offers; at_ timestamptz := coalesce(p_at, now()); stopped int := 0; closed int;
 begin
   perform set_config('offers.fn', 'on', true);
   select * into o from public.property_offers where id = p_offer for update; if o.id is null or o.source = 'manual' then raise exception 'No such offer'; end if;
@@ -457,28 +566,31 @@ begin
   if exists (select 1 from public.offer_agreements a where a.offer_id = o.id) then raise exception 'The agreement has been made, so it can''t be marked here. Talk to the lawyers'; end if;
   if at_ > now() + interval '5 minutes' or at_ < o.received_at - interval '1 minute' then raise exception 'The time needs to be between when the offer came in and now'; end if;
   if length(coalesce(p_note, '')) > 500 then raise exception 'The note is too long'; end if;
-  if p_status in ('withdrawn', 'lapsed') then stopped := public.offer_stop_signings(o.id, null, me, 'The offer was marked ' || p_status); perform set_config('offers.fn', 'on', true); end if;
+  -- withdrawn or lapsed: every signing in progress stops and the open document is closed, so marking it current again needs a fresh copy
+  if p_status in ('withdrawn', 'lapsed') then stopped := public.offer_stop_signings(o.id, null, me, 'The offer was marked ' || p_status, 'withdrawn'); closed := public.offer_doc_close(o.id, me, 'The offer was marked ' || p_status); perform set_config('offers.fn', 'on', true); end if;
   update public.property_offers set status = p_status, status_at = case when p_status = 'received' then null else at_ end, status_by = me where id = p_offer;
-  insert into public.offer_events (property_id, offer_id, actor, kind, detail) values (o.property_id, p_offer, me, 'status', jsonb_build_object('from', o.status, 'to', p_status, 'at', at_, 'note', nullif(trim(coalesce(p_note, '')), ''), 'stopped', stopped));
+  insert into public.offer_events (property_id, offer_id, actor, kind, detail) values (o.property_id, p_offer, me, 'status', jsonb_build_object('from', o.status, 'to', p_status, 'at', at_, 'note', nullif(trim(coalesce(p_note, '')), ''), 'stopped', stopped, 'document_closed', closed));
   perform set_config('offers.fn', '', true);
 end $$;
--- either side tells Tim they withdraw (the purchasers their offer, the vendors their counteroffer): recorded with the time, the offer
--- marked withdrawn, and every signing in progress stopped
+-- either side tells Tim they are out: the purchasers withdraw their offer ('withdrawn'), or the vendors decline it or withdraw their
+-- counteroffer ('declined'). Recorded with the time and the side; every signing in progress stops (status 'withdrawn'), any links stop
+-- working, and the open document is closed, so marking the offer current again needs a fresh copy.
 create or replace function public.agent_negotiation_withdraw(p_offer uuid, p_side text, p_at timestamptz, p_note text default null) returns jsonb language plpgsql security definer set search_path = public as $$
-declare me text := public.offer_agent(); o public.property_offers; at_ timestamptz := coalesce(p_at, now()); stopped int;
+declare me text := public.offer_agent(); o public.property_offers; at_ timestamptz := coalesce(p_at, now()); stopped int; closed int; st text := case when p_side = 'vendor' then 'declined' else 'withdrawn' end;
 begin
   if coalesce(p_side, '') not in ('purchaser', 'vendor') then raise exception 'Choose who withdrew: the purchasers or the vendors'; end if;
   select * into o from public.property_offers where id = p_offer for update; if o.id is null or o.source = 'manual' then raise exception 'No such offer'; end if;
   if exists (select 1 from public.offer_agreements a where a.offer_id = o.id) then raise exception 'The agreement has been made, so it can''t be withdrawn here. Talk to the lawyers'; end if;
-  if o.status in ('withdrawn', 'lapsed') then raise exception 'This offer has already been withdrawn or has lapsed'; end if;
+  if o.status in ('withdrawn', 'lapsed', 'declined') then raise exception 'This offer has already been withdrawn, declined or has lapsed'; end if;
   if at_ > now() + interval '5 minutes' or at_ < o.received_at - interval '1 minute' then raise exception 'The time needs to be between when the offer came in and now'; end if;
   if length(coalesce(p_note, '')) > 500 then raise exception 'The note is too long'; end if;
-  stopped := public.offer_stop_signings(o.id, null, me, case when p_side = 'vendor' then 'The vendors withdrew' else 'The purchasers withdrew' end);
+  stopped := public.offer_stop_signings(o.id, null, me, case when p_side = 'vendor' then 'The vendors declined' else 'The purchasers withdrew' end, 'withdrawn');
+  closed := public.offer_doc_close(o.id, me, case when p_side = 'vendor' then 'The vendors declined' else 'The purchasers withdrew' end);
   perform set_config('offers.fn', 'on', true);
-  update public.property_offers set status = 'withdrawn', status_at = at_, status_by = me where id = o.id;
-  insert into public.offer_events (property_id, offer_id, actor, kind, detail) values (o.property_id, o.id, me, 'withdrawn', jsonb_build_object('side', p_side, 'from', o.status, 'at', at_, 'note', nullif(trim(coalesce(p_note, '')), ''), 'stopped', stopped));
+  update public.property_offers set status = st, status_at = at_, status_by = me where id = o.id;
+  insert into public.offer_events (property_id, offer_id, actor, kind, detail) values (o.property_id, o.id, me, 'withdrawn', jsonb_build_object('side', p_side, 'status', st, 'from', o.status, 'at', at_, 'note', nullif(trim(coalesce(p_note, '')), ''), 'stopped', stopped, 'document_closed', closed));
   perform set_config('offers.fn', '', true);
-  return jsonb_build_object('ok', true, 'stopped', stopped);
+  return jsonb_build_object('ok', true, 'stopped', stopped, 'status', st);
 end $$;
 
 -- ───── the offer-sign edge function (service role) ─────
@@ -539,8 +651,15 @@ begin
     'taps', (select coalesce(jsonb_agg(t.place_id order by t.id), '[]'::jsonb) from public.offer_sign_taps t where t.signer_id = s.id));
 end $$;
 -- a change from a link, by the signer themselves (Round 2 on)
-create or replace function public.offer_sign_change(p_token text, p_session text, p_id uuid, p_kind text, p_page int, p_geometry jsonb, p_target uuid, p_places jsonb) returns jsonb language plpgsql security definer set search_path = public as $$
-declare s public.offer_signers; begin s := public.offer_sign_me(p_token, p_session); return public.offer_sign_do_change(s.id, p_id, p_kind, p_page, p_geometry, p_target, p_places); end $$;
+-- (at most 60 changes an hour from one network, kept with the other limits; 30 an hour per signer is checked with the change)
+create or replace function public.offer_sign_change(p_token text, p_session text, p_net text, p_id uuid, p_kind text, p_page int, p_geometry jsonb, p_target uuid, p_places jsonb) returns jsonb language plpgsql security definer set search_path = public as $$
+declare s public.offer_signers; n text := public.offer_net(p_net);
+begin
+  s := public.offer_sign_me(p_token, p_session);
+  if public.offer_hit_count('sign_change', n, null, interval '1 hour') >= 60 then raise exception 'A lot of changes have been made from here in the last hour. Please call Tim on 027 562 7207'; end if;
+  insert into public.offer_hits (kind, net) values ('sign_change', n);
+  return public.offer_sign_do_change(s.id, p_id, p_kind, p_page, p_geometry, p_target, p_places);
+end $$;
 -- 020's material for the locked copy, for any round: its overall number, the document and round, and the earlier rounds' layers
 create or replace function public.offer_round_material(p_signing uuid) returns jsonb language plpgsql stable security definer set search_path = public as $$
 declare g public.offer_signings; d public.offer_drafts; o public.property_offers; addr text; why text; doc public.offer_documents; nxt int;
@@ -563,7 +682,7 @@ begin
         'places', (select count(*) from public.offer_sign_required(g.id, s.position) x)) order by s.position) from public.offer_signers s where s.signing_id = g.id and s.void_at is null),
     'taps', (select coalesce(jsonb_agg(jsonb_build_object('place_id', t.place_id, 'signer', s.position, 'at', t.at) order by t.id), '[]'::jsonb) from public.offer_sign_taps t join public.offer_signers s on s.id = t.signer_id where t.signing_id = g.id),
     'marks', (select coalesce(jsonb_agg(jsonb_build_object('id', m.id, 'kind', m.kind, 'page', m.page, 'geometry', m.geometry, 'target', m.target, 'by', m.by_name, 'at', m.at,
-        'reviewed_at', (select min(r.at) from public.offer_sign_reviews r where r.signing_id = g.id and m.id = any (r.marks))) order by m.at, m.id), '[]'::jsonb) from public.offer_sign_marks m where m.signing_id = g.id),
+        'reviewed_at', (select min(r.at) from public.offer_sign_reviews r where r.signing_id = g.id and r.kind = 'review' and m.id = any (r.marks))) order by m.at, m.id), '[]'::jsonb) from public.offer_sign_marks m where m.signing_id = g.id),
     'replaced', (select coalesce(jsonb_agg(jsonb_build_object('number', dd.number, 'at', x.replaced_at) order by x.replaced_at), '[]'::jsonb) from public.offer_signings x join public.offer_drafts dd on dd.id = x.draft_id where x.offer_id = g.offer_id and x.status = 'replaced'),
     'made_at', now());
 end $$;
@@ -630,10 +749,12 @@ begin
   m := regexp_match(t, '^([1-9]|[12][0-9]|3[01]) (January|February|March|April|May|June|July|August|September|October|November|December) (20[0-9]{2})$');
   if m is null then raise exception 'Type the date in full with the month name, for example 24 November 2026'; end if;
   begin dt := make_date(m[3]::int, array_position(mons, m[2]), m[1]::int); exception when others then raise exception 'That date isn''t a real day'; end;
-  select min(locked_at) into first_ from public.offer_rounds where document_id = doc.id;
-  if dt > public.offer_nz_today() or dt < (first_ at time zone 'Pacific/Auckland')::date then raise exception 'The agreement date needs to be between Round 1 and today'; end if;
   select max(finished_at) into fin from public.offer_signers where signing_id = last.signing_id;
   if p_accepted_at is null or p_accepted_at > now() + interval '5 minutes' or p_accepted_at < fin - interval '1 minute' then raise exception 'The time acceptance was communicated needs to be after the last signature and not in the future'; end if;
+  -- the date: no earlier than the day (in New Zealand) acceptance was communicated, and not after today
+  if dt > public.offer_nz_today() or dt < (p_accepted_at at time zone 'Pacific/Auckland')::date then raise exception 'The agreement date needs to be from the day acceptance was communicated to today'; end if;
+  -- the date goes only in the blank's own date place: no place, no date (and no agreement until the places are put right)
+  if public.offer_date_place(doc.draft_id) is null then raise exception 'The agreement blank has no date place, so the date can''t be added. Add it to the places on the blank first'; end if;
   return jsonb_build_object('document_id', doc.id, 'document', doc.number, 'round_id', last.id, 'round', last.doc_round, 'number', last.number, 'date', dt, 'date_text', t);
 end $$;
 -- what the edge function needs to make the agreed copy: every round's layers, the date place from the map, and the rounds' fingerprints
@@ -642,8 +763,8 @@ declare c jsonb := public.offer_agreement_check(p_offer, p_accepted_at, p_date_t
 begin
   select * into doc from public.offer_documents where id = (c->>'document_id')::uuid; select * into d from public.offer_drafts where id = doc.draft_id; select * into o from public.property_offers where id = p_offer;
   select address into addr from public.properties where id = o.property_id;
-  select e into dp from public.offer_blank_maps bm, jsonb_array_elements(bm.places) e where bm.id = d.map_id and (e->>'id' = 'date' or e->>'kind' = 'date') order by (e->>'id' = 'date') desc limit 1;
-  return c || jsonb_build_object('offer_id', o.id, 'property_id', o.property_id, 'address', addr, 'offer_ref', o.buyer_ref, 'draft', jsonb_build_object('id', d.id, 'number', d.number, 'path', d.path, 'sha256', d.sha256),
+  dp := public.offer_date_place(d.id);
+  return c || jsonb_build_object('round_sha256', (select sha256 from public.offer_rounds where id = (c->>'round_id')::uuid), 'offer_id', o.id, 'property_id', o.property_id, 'address', addr, 'offer_ref', o.buyer_ref, 'draft', jsonb_build_object('id', d.id, 'number', d.number, 'path', d.path, 'sha256', d.sha256),
     'pages', (select pages from public.offer_signings where id = (select signing_id from public.offer_rounds where id = (c->>'round_id')::uuid)), 'date_place', dp,
     'layers', public.offer_doc_layers(doc.id, (c->>'round')::int),
     'rounds', (select jsonb_agg(jsonb_build_object('number', r.number, 'document', x.number, 'round', r.doc_round, 'side', r.side, 'changes', r.changes, 'sha256', r.sha256, 'locked_at', r.locked_at) order by r.number) from public.offer_rounds r join public.offer_documents x on x.id = r.document_id where r.offer_id = o.id),
@@ -665,21 +786,61 @@ begin
   if obj is null or (obj->>'size')::bigint is distinct from p_size or (obj->>'mime') is distinct from 'application/pdf' then raise exception 'The stored agreement doesn''t match'; end if;
   if not exists (select 1 from public.offer_file_hashes f where f.path = p_path and f.sha256 = p_sha256 and f.size_bytes = p_size) then raise exception 'The agreement''s fingerprint hasn''t been confirmed by the server'; end if;
   if jsonb_typeof(p_record) is distinct from 'object' or length(p_record::text) > 200000 then raise exception 'Please check the record'; end if;
+  if coalesce(p_record->>'draw_version', '') !~ '^[A-Za-z0-9._-]{3,40}$' then raise exception 'Please check the record (drawing version)'; end if;
+  if (p_record->'base'->>'sha256') is distinct from (select sha256 from public.offer_rounds where id = p_round) then raise exception 'The agreed copy must be drawn from the newest round'; end if;
   perform set_config('offers.fn', 'on', true);
   insert into public.offer_events (property_id, offer_id, actor, kind, detail) values (o.property_id, o.id, left(coalesce(p_actor, 'agent'), 254), 'agreement_formed',
     jsonb_build_object('document', (c->>'document')::int, 'round', (c->>'round')::int, 'number', (c->>'number')::int, 'date', c->>'date_text', 'accepted_at', p_accepted_at, 'sha256', p_sha256, 'path', p_path)) returning hash into h;
-  insert into public.offer_agreements (offer_id, property_id, document_id, round_id, path, sha256, size_bytes, agreement_date, date_text, accepted_at, record, chain_last, confirmed_by)
-  values (o.id, o.property_id, (c->>'document_id')::uuid, p_round, p_path, p_sha256, p_size, (c->>'date')::date, c->>'date_text', p_accepted_at, p_record, h, left(coalesce(p_actor, 'agent'), 254)) returning id into aid;
+  insert into public.offer_agreements (offer_id, property_id, document_id, round_id, path, sha256, size_bytes, agreement_date, date_text, accepted_at, record, chain_last, confirmed_by, round_sha256, draw_version, terms)
+  values (o.id, o.property_id, (c->>'document_id')::uuid, p_round, p_path, p_sha256, p_size, (c->>'date')::date, c->>'date_text', p_accepted_at, p_record, h, left(coalesce(p_actor, 'agent'), 254),
+    (select sha256 from public.offer_rounds where id = p_round), p_record->>'draw_version', public.offer_agreed_terms((c->>'document_id')::uuid)) returning id into aid;
   update public.offer_documents set status = 'agreed', agreed_at = now() where id = (c->>'document_id')::uuid;
   update public.property_offers set status = 'accepted', status_at = p_accepted_at, status_by = left(coalesce(p_actor, 'agent'), 254) where id = o.id;
   perform set_config('offers.fn', '', true);
   return jsonb_build_object('id', aid, 'sha256', p_sha256, 'existing', false, 'property_id', o.property_id);
 end $$;
 
+-- the agreed terms, kept with the agreement for later phases (dates, reminders, roadmap emails) to read from here: the offer as drafted
+-- (price, settlement, conditions with their dates, the deposit as printed and where it is paid) and every change made in the negotiation,
+-- in order. Where a change alters a term, the change governs: it is on the signed rounds.
+create or replace function public.offer_agreed_terms(p_document uuid) returns jsonb language sql stable security definer set search_path = public as $$
+  select jsonb_build_object('price', d.details->'price', 'settlement', d.details->'settlement', 'conditions', d.details->'conditions', 'kiwisaver', d.details->'kiwisaver', 'lawyer_approval', d.details->'lawyer_approval',
+    'as_drafted', coalesce((select jsonb_object_agg(x->>'id', coalesce(x->'text', x->'value')) from jsonb_array_elements(d.placed) x where x->>'id' in ('price', 'deposit', 'settlement', 'purchaser') or x->>'id' ~ '^[cd]_'), '{}'::jsonb),
+    'deposit_printed', (select e->>'printed' from public.offer_blank_maps bm, jsonb_array_elements(bm.places) e where bm.id = d.map_id and e->>'id' = 'deposit' limit 1),
+    'deposit_paid_to', case when (d.details->>'kiwisaver')::boolean then 'the vendor''s lawyer''s trust account (clause 21.3)' else 'NZ Real Estate Trust' end,
+    'further_terms', (select x->'terms' from jsonb_array_elements(d.placed) x where x->>'id' = 'further_terms' limit 1),
+    'changes', coalesce((select jsonb_agg(jsonb_build_object('round', g.round_no, 'side', g.side, 'kind', m.kind, 'page', m.page, 'text', m.geometry->>'text', 'by', m.by_name, 'at', m.at) order by g.round_no, m.at, m.id)
+      from public.offer_sign_marks m join public.offer_signings g on g.id = m.signing_id where g.id in (select r.signing_id from public.offer_rounds r where r.document_id = p_document)), '[]'::jsonb),
+    'note', 'Where a change made in the negotiation alters a term above, the change governs. Read with the signed rounds.')
+  from public.offer_documents doc join public.offer_drafts d on d.id = doc.draft_id where doc.id = p_document $$;
+-- 018's correction of an offer, refused once its agreement is made (the agreed terms are kept with the agreement); otherwise as before
+create or replace function public.agent_offer_correct(p_offer uuid, p_details jsonb, p_note text) returns jsonb language plpgsql security definer set search_path = public as $$
+declare me text := public.offer_agent(); o public.property_offers; d jsonb;
+begin
+  perform set_config('offers.fn', 'on', true);
+  select * into o from public.property_offers where id = p_offer for update; if o.id is null or o.source = 'manual' then raise exception 'No such offer'; end if;
+  if exists (select 1 from public.offer_agreements a where a.offer_id = o.id) then raise exception 'The agreement has been made, so the offer can''t be corrected. The agreed terms are kept with the agreement'; end if;
+  if coalesce(length(trim(p_note)), 0) < 3 or length(p_note) > 500 then raise exception 'Say what changed and how you heard (3 to 500 characters)'; end if;
+  d := public.offer_clean(p_details, true) || jsonb_build_object('chattels_listed', coalesce(o.details -> 'chattels_listed', '[]'::jsonb));
+  update public.property_offers set details = d, amount = (d ->> 'price')::numeric, conditions = public.offer_cond_line(d), buyer_ref = public.offer_label(d), kiwisaver = (d ->> 'kiwisaver')::boolean,
+    lawyer_approval = (d ->> 'lawyer_approval')::boolean, needs_date_help = (d ->> 'date_help')::boolean, related_party = (d ->> 'related')::boolean where id = p_offer;
+  insert into public.offer_events (property_id, offer_id, actor, kind, detail) values (o.property_id, p_offer, me, 'corrected', jsonb_build_object('note', trim(p_note), 'before', o.details, 'after', d));
+  perform set_config('offers.fn', '', true);
+  return d;
+end $$;
+-- Tim's setting: false (the default) a side signs again only where its signature was lifted; true, every round
+create or replace function public.agent_offer_negotiation_setting(p_resign_every_round boolean) returns void language plpgsql security definer set search_path = public as $$
+declare me text := public.offer_agent();
+begin
+  if p_resign_every_round is null then raise exception 'Choose yes or no'; end if;
+  update public.offer_settings set resign_every_round = p_resign_every_round, updated_by = me, updated_at = now();
+end $$;
+
 -- ───── execute rights ─────
 revoke execute on function public.guard_offer_document(), public.offer_change_ok(text, jsonb, numeric, numeric), public.offer_nsn(text), public.offer_private_hit(uuid, text), public.offer_doc_layers(uuid, int), public.offer_parties(uuid),
-  public.offer_doc_last(uuid), public.offer_stop_signings(uuid, uuid, text, text), public.offer_sign_do_change(uuid, uuid, text, int, jsonb, uuid, jsonb), public.offer_agreement_check(uuid, timestamptz, text) from public, anon, authenticated;
-revoke execute on function public.offer_sign_change(text, text, uuid, text, int, jsonb, uuid, jsonb), public.offer_agreement_material(uuid, timestamptz, text), public.offer_agreement_lock(uuid, uuid, text, text, bigint, timestamptz, text, jsonb, text) from public, anon, authenticated;
-grant execute on function public.offer_sign_change(text, text, uuid, text, int, jsonb, uuid, jsonb), public.offer_agreement_material(uuid, timestamptz, text), public.offer_agreement_lock(uuid, uuid, text, text, bigint, timestamptz, text, jsonb, text) to service_role;
-revoke execute on function public.agent_round_present(uuid, text, jsonb, boolean, text), public.agent_round_change(uuid, uuid, text, int, jsonb, uuid, jsonb), public.agent_offer_layers(uuid, uuid), public.agent_document_close(uuid, text), public.agent_negotiation_withdraw(uuid, text, timestamptz, text) from public, anon;
-grant execute on function public.agent_round_present(uuid, text, jsonb, boolean, text), public.agent_round_change(uuid, uuid, text, int, jsonb, uuid, jsonb), public.agent_offer_layers(uuid, uuid), public.agent_document_close(uuid, text), public.agent_negotiation_withdraw(uuid, text, timestamptz, text) to authenticated;
+  public.offer_doc_last(uuid), public.offer_stop_signings(uuid, uuid, text, text, text), public.offer_doc_close(uuid, text, text), public.offer_sign_do_change(uuid, uuid, text, int, jsonb, uuid, jsonb), public.offer_agreement_check(uuid, timestamptz, text),
+  public.offer_plain(text), public.offer_change_rect(text, jsonb), public.offer_gap(jsonb, jsonb), public.offer_date_place(uuid), public.offer_agreed_terms(uuid) from public, anon, authenticated;
+revoke execute on function public.offer_sign_change(text, text, text, uuid, text, int, jsonb, uuid, jsonb), public.offer_agreement_material(uuid, timestamptz, text), public.offer_agreement_lock(uuid, uuid, text, text, bigint, timestamptz, text, jsonb, text) from public, anon, authenticated;
+grant execute on function public.offer_sign_change(text, text, text, uuid, text, int, jsonb, uuid, jsonb), public.offer_agreement_material(uuid, timestamptz, text), public.offer_agreement_lock(uuid, uuid, text, text, bigint, timestamptz, text, jsonb, text) to service_role;
+revoke execute on function public.agent_round_present(uuid, text, jsonb, boolean, text), public.agent_round_change(uuid, uuid, text, int, jsonb, uuid, jsonb), public.agent_offer_layers(uuid, uuid), public.agent_document_close(uuid, text), public.agent_negotiation_withdraw(uuid, text, timestamptz, text), public.agent_offer_negotiation_setting(boolean) from public, anon;
+grant execute on function public.agent_round_present(uuid, text, jsonb, boolean, text), public.agent_round_change(uuid, uuid, text, int, jsonb, uuid, jsonb), public.agent_offer_layers(uuid, uuid), public.agent_document_close(uuid, text), public.agent_negotiation_withdraw(uuid, text, timestamptz, text), public.agent_offer_negotiation_setting(boolean) to authenticated;

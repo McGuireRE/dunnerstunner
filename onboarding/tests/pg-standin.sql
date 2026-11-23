@@ -18,7 +18,7 @@ insert into public.agents (email) values ('agent@example.test');
 create table public.properties (id uuid primary key default gen_random_uuid(), address text, stage text default 'appraisal', cycle_at timestamptz, created_at timestamptz default now(), updated_at timestamptz default now());
 create table public.property_people (id uuid primary key default gen_random_uuid(), property_id uuid references public.properties(id), position int, legal_name text, email text, phone text not null default '', user_id uuid, role text default 'owner');
 create table public.agreements (id uuid primary key default gen_random_uuid(), property_id uuid, status text default 'draft', created_at timestamptz default now());
-create table public.agreement_people (id uuid primary key default gen_random_uuid(), agreement_id uuid, user_id uuid);
+create table public.agreement_people (id uuid primary key default gen_random_uuid(), agreement_id uuid, user_id uuid, legal_name text, email text, phone text);
 create table public.property_inspections (id uuid primary key default gen_random_uuid(), property_id uuid);
 create table public.property_documents (id uuid primary key default gen_random_uuid(), property_id uuid not null references public.properties(id) on delete cascade, kind text, name text not null, path text not null,
   source text not null default 'dropped' check (source in ('dropped','uploaded','generated')), read_result jsonb, created_by text, created_at timestamptz not null default now());
