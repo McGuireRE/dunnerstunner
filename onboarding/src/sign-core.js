@@ -137,14 +137,18 @@
     return [...groups.values()].map(g => Object.assign(g, { rect: union(g.boxes) }));
   }
   // input: { pages: [{ n, w, h, items? }], placed (the approved draft's placed items), mapPlaces (its map's places),
-  //   signers: [{ position, name }] } -> { places: [{ id, signer, kind, why, ref, page, x, y, w, h, label, name? }], warnings,
+  //   signers: [{ position, name }], side? ('vendor': the vendors' own signature block, no acknowledgements; phase 4), obstacles?
+  //   ([{ page, x, y, w, h }]: ink already on the page, kept clear) } -> { places: [{ id, signer, kind, why, ref, page, x, y, w, h, label, name? }], warnings,
   //   blocking: [{ id, label, why }] (places that couldn't be put clear of printed text near their box: release waits), counts }
   function makePlaces(input) {
     const pages = (input.pages || []).slice().sort((a, b) => a.n - b.n), placed = input.placed || [], map = input.mapPlaces || [];
     const signers = (input.signers || []).slice().sort((a, b) => a.position - b.position), n = signers.length, out = [], warnings = [], blocking = [];
+    // phase 4: the vendors sign the same way, at their own signature block; what is already on the page (the purchasers' ink) is kept clear
+    const vendor = input.side === 'vendor', SK = vendor ? 'sig_vendor' : 'sig_purchaser', NK = vendor ? 'name_vendor' : 'name_purchaser', RS = vendor ? 'vsig' : 'sig', RN = vendor ? 'vname' : 'name';
     const block = (id, label, why) => { if (!blocking.some(b => b.id === id)) blocking.push({ id, label, why }); };
     const P = no => pages.find(p => p.n === no);
     const obstacles = {}; const ob = no => (obstacles[no] ||= []);
+    (input.obstacles || []).forEach(b => { if (b && b.page) ob(b.page).push({ x: b.x, y: b.y, w: b.w, h: b.h }); });
     // what the draft wrote is kept clear; for the further terms, the lines of each term (the blank line after each is for initials)
     placed.forEach(it => (it.id === 'further_terms' && (it.term_boxes || []).length ? it.term_boxes : (it.boxes || [])).forEach(b => ob(b.page).push({ x: b.x, y: b.y, w: b.w, h: b.h })));
     map.filter(p => ['signature', 'name', 'witness'].includes(p.kind)).forEach(p => ob(p.page).push(rectOfMap(p)));
@@ -154,7 +158,9 @@
     const row = (why, ref, pageNo, target, label, opts) => { const pg = P(pageNo); if (!pg) { block(why + ':' + ref, label, `Page ${pageNo} isn't in the draft.`); return; }
       const res = placeRow(n, target, pg, ob(pageNo), text(pageNo), opts);
       if (!res.ok) block(why + ':' + ref, label, why === 'foot' ? `Page ${pageNo}: there is no clear space at the foot of the page for the initials.` : `Page ${pageNo}: there is no clear space within about ${NEAR} points of it for the initials without covering printed words.`);
-      res.boxes.forEach((b, i) => push(signers[i].position, 'initial', why, ref, pageNo, b, label)); };
+      // each initial remembers the box it belongs to ('for'), so a later change at that box lifts it from the working copy (phase 4)
+      const forBox = why === 'foot' ? null : { for: { x: r1(target.x), y: r1(target.y), w: r1(target.w), h: r1(target.h) } };
+      res.boxes.forEach((b, i) => push(signers[i].position, 'initial', why, ref, pageNo, b, label, forBox)); };
     // 1. every box the draft filled or marked, beside its own row: a condition's Yes/No and its date are one row; each group's
     // target takes in the blank part of the place it filled, so the initials can sit after the words written there
     const groups = filledGroups(placed);
@@ -176,27 +182,27 @@
     }
     // 3. the signature block: each purchaser's signature, and their name where the draft didn't type it
     const num = id => +(String(id).match(/(\d+)$/) || [0, 0])[1];
-    const sigs = map.filter(p => p.kind === 'signature' && p.key === 'sig_purchaser').sort((a, b) => num(a.id) - num(b.id));
-    const names = map.filter(p => p.kind === 'name' && p.key === 'name_purchaser').sort((a, b) => num(a.id) - num(b.id));
-    if (!sigs.length) block('sig', 'Signatures', 'The map has no purchaser signature places. Add them to the places on the blank first.');
+    const sigs = map.filter(p => p.kind === 'signature' && p.key === SK).sort((a, b) => num(a.id) - num(b.id));
+    const names = map.filter(p => p.kind === 'name' && p.key === NK).sort((a, b) => num(a.id) - num(b.id));
+    if (!sigs.length) block('sig', 'Signatures', `The map has no ${vendor ? 'vendor' : 'purchaser'} signature places. Add them to the places on the blank first.`);
     else {
       const dy = sigs.length > 1 ? sigs[0].y - sigs[1].y : 70, nameOff = names[0] ? sigs[0].y - names[0].y : 13, lastS = sigs[sigs.length - 1], lastN = names[names.length - 1];
       // a place added for a purchaser beyond the printed lines must sit clear of every printed word on that page
       const clear = (pg, r) => !textRects(P(pg)).some(b => overlap(r, inset(b, 0.3, 0.8)) > 0) && !ob(pg).some(b => overlap(r, inset(b, 0.5, 1)) > 0);
       signers.forEach((s, i) => {
         let sp = sigs[i], np = names[i], added = false;
-        const typed = placed.some(x => x.id === 'name_purchaser_' + (i + 1) && (x.boxes || []).length);
+        const typed = placed.some(x => x.id === NK + '_' + (i + 1) && (x.boxes || []).length) || !!(vendor && names[i] && names[i].printed);
         if (!sp) { const y = lastS.y - dy * (i + 1 - sigs.length);
           sp = { page: lastS.page, x: lastS.x, y, w: lastS.w, h: lastS.h }; np = lastN ? { page: lastN.page, x: lastN.x, y: y - nameOff, w: lastN.w, h: lastN.h } : { page: lastS.page, x: lastS.x, y: y - nameOff, w: lastS.w, h: 10 }; added = true;
           const nr = { x: np.x, y: np.y - 2, w: Math.max(np.w, 120), h: 12 };
           if (y < 40 || nr.y < 30 || !clear(sp.page, sp) || (!typed && !clear(np.page, nr))) { block('sig_room', 'Signatures', NO_ROOM); return; } }
-        push(s.position, 'signature', 'block', 'sig' + (i + 1), sp.page, { x: sp.x, y: sp.y, w: sp.w, h: sp.h }, `Signature of ${s.name}${added ? ' (added beneath the others)' : ''}`, added ? { added: true } : null);
-        if (!typed && np) push(s.position, 'name', 'block', 'name' + (i + 1), np.page, { x: np.x, y: np.y - 2, w: Math.max(np.w, 120), h: 12 }, `Name of ${s.name}`, { name: s.name });
+        push(s.position, 'signature', 'block', RS + (i + 1), sp.page, { x: sp.x, y: sp.y, w: sp.w, h: sp.h }, `Signature of ${s.name}${added ? ' (added beneath the others)' : ''}`, added ? { added: true } : null);
+        if (!typed && np) push(s.position, 'name', 'block', RN + (i + 1), np.page, { x: np.x, y: np.y - 2, w: Math.max(np.w, 120), h: 12 }, `Name of ${s.name}`, { name: s.name });
       });
     }
     // 4. acknowledgements, initials and signatures Tim kept on the map (not the date, not the vendors', not a witness): the first
     // purchaser exactly where Tim put each one; then the others beside it, or in rows below, wherever is clear
-    const acks = map.filter(p => P(p.page) && (['ack', 'initial'].includes(p.kind) || (p.kind === 'signature' && !['sig_purchaser', 'sig_vendor'].includes(p.key))));
+    const acks = vendor ? [] : map.filter(p => P(p.page) && (['ack', 'initial'].includes(p.kind) || (p.kind === 'signature' && !['sig_purchaser', 'sig_vendor'].includes(p.key))));
     const ackLabel = p => `${p.kind === 'ack' ? 'Acknowledge' : p.kind === 'signature' ? 'Sign' : 'Initial'}: ${p.label || 'page ' + p.page}${p.reason ? ' (' + p.reason + ')' : ''}`;
     const ackSize = p => { const b = rectOfMap(p); return { x: b.x, y: b.y, w: Math.max(b.w, IW), h: Math.max(b.h, IH) }; };
     const ackKind = p => p.kind === 'signature' ? 'signature' : 'initial';
