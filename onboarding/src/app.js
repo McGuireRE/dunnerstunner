@@ -50,7 +50,7 @@
   const trs = (s, v) => I18N.tr(s, v);   // wording built in pieces (for example a spoken label) goes through the same approved translations
   function toast(msg) { const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(toast._t); toast._t = setTimeout(() => t.hidden = true, 3200); }
   // signature pads: a "not saved yet" marker after drawing, and a strong confirmation once saved
-  function padUnsaved(cv, on) { const w = cv && cv.closest('.sig-wrap'); if (!w) return; let u = w.querySelector('.unsaved'); if (on && !u) { u = document.createElement('span'); u.className = 'unsaved'; u.textContent = 'Not saved yet'; w.appendChild(u); } if (!on && u) u.remove(); }
+  function padUnsaved(cv, on) { const w = cv && cv.closest('.sig-wrap'); if (!w) return; if (PORTAL && on) portalPadStarted(cv); let u = w.querySelector('.unsaved'); if (on && !u) { u = document.createElement('span'); u.className = 'unsaved'; u.textContent = 'Not saved yet'; w.appendChild(u); } if (!on && u) u.remove(); }
   function sigSaved(cv, title, sub) {
     const w = cv && cv.closest('.sig-wrap'); if (!w) return Promise.resolve();
     padUnsaved(cv, false);
@@ -2407,7 +2407,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       // can never open a blank and make a second draft
       if (PORTAL && okId(T.ag.property_id) && isCreation(CUR) && portalPath() === CUR) setAddr(`properties/${T.ag.property_id}/agreement/${T.id}/edit${T.page ? '/' + (T.page + 1) : ''}`, 'replace');
       return true;
-    } catch (e) { return false; }
+    } catch (e) { if (PORTAL) tErr('Couldn\'t save. You\'re offline or the connection dropped. Your work is kept on this page; try Save and close again when you have signal.'); return false; }
   }
 
   function tValidate(p) {
@@ -6485,6 +6485,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   let NAV_SEQ = 0;           // counts page openings, so a slow address lookup never overwrites a newer page's address
   let NAV_FRESH = null;      // 'push' or 'replace': how the first address of the page just opened goes into the history
   let ROUTE_OPENING = null;  // a page is being opened from its address (its own token): any page it moves on to replaces that address
+  let PAD_STARTED = null;    // the address where a vendor started signing on a pad on this device (a form waiting for signatures is not in person until then)
   let INPERSON_VIEW = false; // a page done together with the vendors on this device (the agreement appointment, signing together)
   const RAW = {};            // the view functions before wrapping, for opening a page from its address
   const PID_RE = /^[A-Za-z0-9_-]{1,64}$/;
@@ -6502,6 +6503,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   function setAddr(path, mode) {
     const url = PORTAL_BASE + path;
     if (location.pathname !== url || location.search || location.hash) { try { history[mode === 'push' && CUR !== null && CUR !== path ? 'pushState' : 'replaceState']({ portal: path }, '', url); } catch (_) { } }
+    if (path !== CUR) PAD_STARTED = null;
     CUR = path; portalChrome();
   }
   // a page sets its own address: the first time after it opens it goes into the history as that opening said; after that it replaces
@@ -6605,7 +6607,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   // open the page for an address (after sign-in, a typed or saved address, back and forward, the menu and links)
   async function portalOpen(path) {
     const hit = ROUTES.map(([re, view, open]) => [re.exec(path), view, open]).find(x => x[0]);
-    NAV_SEQ++; NAV_FRESH = null; CUR = path; portalView(hit ? hit[1] : '');
+    NAV_SEQ++; NAV_FRESH = null; CUR = path; PAD_STARTED = null; portalView(hit ? hit[1] : '');
     if (!hit) { portalChrome(); return viewPortalMissing(); }
     const tok = {}; ROUTE_OPENING = tok;
     try { portalChrome(); await hit[2](...hit[0].slice(1)); }
@@ -6615,16 +6617,16 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   // leaving a page: the appointment saves what's typed (as the old top bar did); inspection answers are saved as they're tapped;
   // anything else typed and not saved asks first (the same warning vendors see)
   const SIG_UNSAVED = 'A signature has been drawn here but not saved. If you leave this page it will be lost. Leave anyway?';
-  async function leaveOk() {
-    if ($('#main .sig-wrap .unsaved') && !confirm(SIG_UNSAVED)) return false;
+  async function leaveOk(sigAsked) {
+    if (!sigAsked && $('#main .sig-wrap .unsaved') && !confirm(SIG_UNSAVED)) return false;
     if (T && !T.locked && $('.ttabs') && T.ag && ($('#tAddr') ? $('#tAddr').value.trim() : T.ag.address)) { try { tCollect(); if (await tSave()) JDIRTY = false; } catch (_) { } }
     if ($('#main .insp')) { try { inspFlush(); } catch (_) { } JDIRTY = false; }
     if (JDIRTY && !confirm(trs('You have typed something on this page that is not saved yet. If you go to another page it will be lost. Go anyway?'))) return false;
     return true;
   }
   // the menu, the up link and every portal link: a new history entry, then the page
-  async function portalNav(path) {
-    if (!(await leaveOk())) return;
+  async function portalNav(path, sigAsked) {
+    if (!(await leaveOk(sigAsked))) return;
     try { if (path !== CUR) history.pushState({ portal: path }, '', PORTAL_BASE + path); } catch (_) { }
     return portalOpen(path);
   }
@@ -6648,7 +6650,11 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   // Vendors' pads (the appointment, a form signed on this device, a variation signed together) are in person; Tim's own pads
   // (countersigning, signing a variation to issue it) are not, but a drawn and unsaved signature is never dropped without asking.
   const VENDOR_PADS = '#main canvas[id^="pad_"], #main canvas[id^="fpad_"], #main canvas[data-vcv], #main #sig0, #main #vfSig, #main #vSigV';
-  const portalInPerson = () => INPERSON_VIEW || !!$(VENDOR_PADS) || PITCH_ON || !!($('#journey') && !$('#journey').hidden);
+  // A page with vendors' pads that Tim can open alone (a form waiting for signatures, which can sit for days while vendors sign on
+  // their own phones) is a normal page until a vendor pad is drawn on; from then until the address changes it is in person.
+  function portalPadStarted(cv) { if (PORTAL && cv && CUR !== null && cv.matches(VENDOR_PADS)) { PAD_STARTED = CUR; portalChrome(); } }
+  const padInPerson = () => PAD_STARTED !== null && PAD_STARTED === CUR && !!$(VENDOR_PADS);
+  const portalInPerson = () => INPERSON_VIEW || padInPerson() || PITCH_ON || !!($('#journey') && !$('#journey').hidden);
   function portalChrome() {
     if (!PORTAL) return;
     const on = !!IS_AGENT && !!SESSION, inp = on && portalInPerson();
@@ -6661,6 +6667,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     }
     const u = on && !inp ? upOf(CUR) : null;
     if (upRow && up) { upRow.hidden = !u; if (u) { up.href = PORTAL_BASE + u[0]; up.dataset.plink = u[0]; up.querySelector('span').textContent = u[1]; } }
+    const ex = $('#pExitRow'); if (ex) ex.hidden = !(on && !INPERSON_VIEW && padInPerson());   // signing a form in person: its own way out
     document.body.classList.toggle('pnav-on', !!nav && !nav.hidden);
     document.body.classList.toggle('pup-on', !!u);
   }
@@ -6668,6 +6675,15 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const up = document.createElement('div'); up.className = 'p-up-row no-print'; up.id = 'pUpRow'; up.hidden = true;
     up.innerHTML = '<a class="p-up" id="pUp" href="' + esc(PORTAL_BASE) + '" data-plink=""><b aria-hidden="true">‹</b><span></span></a>';   // the arrow, then the words
     main().parentNode.insertBefore(up, main());
+    const ex = document.createElement('div'); ex.className = 'p-up-row no-print'; ex.id = 'pExitRow'; ex.hidden = true;
+    ex.innerHTML = '<button class="btn ghost" type="button" id="pExit">Stop signing here</button>';
+    main().parentNode.insertBefore(ex, main());
+    ex.querySelector('button').addEventListener('click', () => {
+      if (!confirm('Stop signing on this device and go back to the property file? A signature drawn here and not saved is lost.')) return;
+      const to = (upOf(CUR) || ['properties'])[0]; PAD_STARTED = null; portalNav(to, true);
+    });
+    // a vendor starts signing on a pad: from now on this page is in person (Back, Forward, the logo and the menu stay away)
+    document.addEventListener('pointerdown', e => { const w = e.target.closest && e.target.closest('.sig-wrap'), cv = w && w.querySelector('canvas'); if (cv) portalPadStarted(cv); }, true);
     const nav = document.createElement('nav'); nav.className = 'pnav no-print'; nav.id = 'pNav'; nav.setAttribute('aria-label', 'Portal menu'); nav.hidden = true;
     nav.innerHTML = `<div class="pnav-in">${[['', 'Home'], ['properties', 'Properties'], ['people', 'People'], ['processes', 'Processes']].map(([p, t]) => plink(p, t)).join('')}</div>`;
     document.body.appendChild(nav);
