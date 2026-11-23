@@ -77,6 +77,7 @@ function q(table){ logCall('from:'+table);
     // migration 018: nobody but Tim reads the offer tables, nobody writes them directly, and an offer from the form changes only through the agent_offer_* functions
     if((OFFER_TABLES.includes(table)||table==='property_offers')&&!(S&&S.user)) throw new Error('permission denied for table '+table);
     if(OFFER_TABLES.includes(table)&&op!=='select') throw new Error('permission denied for table '+table);
+    if(table==='offer_signers'&&op==='select'&&(sel==='*'||/token_hash|code_hash|session_hash|code_tries|codes_window_at|session_expires_at/.test(sel))) throw new Error('permission denied for table offer_signers');   // column privileges (020)
     if(table==='offer_settings'&&op==='select') OSET();
     if(table==='offer_terms'&&op==='select') OTERMS();
     if(table==='property_offers'&&op==='insert'&&(Array.isArray(payload)?payload:[payload]).some(x=>x&&((x.source||'manual')!=='manual'||x.submission||x.details))) throw new Error('Offers from the form are only added through the form');
@@ -156,7 +157,7 @@ const DECL_TEXT=['faults','reno','internet','insulation','glazing'];
 const hasAnswer=(k,v)=>k==='tenanted'?['now','will','no'].includes(v):DECL_TEXT.includes(k)?isObj(v)&&String(v.d||'').trim()!=='':isObj(v)&&['yes','no','unknown'].includes(v.a);
 const needsAnswers=fm=>{ const d=fm.data||{}, pre=isObj(d.pre)?d.pre:{}, ans=isObj(d.answers)?d.answers:{}; return Object.keys(pre).some(k=>pre[k]==='inspection'&&!hasAnswer(k,k==='tenanted'?d.tenanted:ans[k])); };
 const NEED_ANSWER='Please answer each question Tim noted at the inspection';
-const AGENT_ONLY=['property_events','campaign_stats','buyer_feedback','property_offers','offer_links','offer_events','offer_settings','offer_clauses','offer_hits','offer_blanks','offer_blank_maps','offer_blank_reads','offer_terms','offer_term_changes','offer_drafts','offer_draft_approvals','offer_lawyer_lookups','offer_file_hashes'];
+const AGENT_ONLY=['property_events','campaign_stats','buyer_feedback','property_offers','offer_links','offer_events','offer_settings','offer_clauses','offer_hits','offer_blanks','offer_blank_maps','offer_blank_reads','offer_terms','offer_term_changes','offer_drafts','offer_draft_approvals','offer_lawyer_lookups','offer_file_hashes','offer_signings','offer_signers','offer_sign_taps','offer_sign_receipts','offer_sign_marks','offer_sign_reviews','offer_sign_asks','offer_rounds'];
 function mkNotices(ag){ if((ag.answers||{}).prior!=='yes') return; (DB.prior_agency_notices||=[]); (ag.answers.priorAgencies||[]).forEach((x,i)=>{ if(x.agency&&!DB.prior_agency_notices.some(n=>n.agreement_id===ag.id&&n.idx===i)) DB.prior_agency_notices.push({id:uid(),agreement_id:ag.id,idx:i,agency:x.agency,agent_name:x.agent||null,email:x.email||null,kind:x.kind,dated:x.dated||null,status:'to_send',created_at:now()}); }); }
 const ok=d=>Promise.resolve({data:d,error:null}); const bad=m=>Promise.resolve({data:null,error:{message:m}});
 function rpc(name,a){ logCall('rpc:'+name); if(['agent_repo_add','agent_repo_set','agent_repo_share','agent_repo_archive','vendor_repo_list','agent_property_export'].includes(name)) return repoRpc(name,a); if(localStorage.getItem('trHang')==='1'&&['get_translations','set_my_language'].includes(name)) return new Promise(()=>{}); const before=new Map((DB.agreements||[]).map(x=>[x.id,JSON.parse(JSON.stringify(x))]));
@@ -167,7 +168,9 @@ function rpcInner(name,a){
   const me=S&&S.user; const ag=a&&a.a?DB.agreements.find(x=>x.id===a.a):null;
   const mine=()=>DB.agreement_people.find(p=>p.agreement_id===a.a&&p.user_id===me.id);
   if(name.startsWith('agent_council_')) return councilRpc(name,a,me);
+  if(SIGN_RPCS.includes(name)) return signRpc(name,a,me);
   if(DRAFT_RPCS.includes(name)) return draftRpc(name,a,me);
+  if(name.startsWith('offer_sign_')||name.startsWith('offer_round_')) return bad('permission denied for function '+name);
   if(name.startsWith('agent_offer_')) return offerRpc(name,a,me);
   if(name.startsWith('offer_public_')) return bad('permission denied for function '+name);
   const V=()=>(DB.agreement_variations||=[]), VS=()=>(DB.variation_signatures||=[]);
@@ -334,8 +337,8 @@ function councilTable(op){ if(offline()) throw new Error('Failed to fetch'); if(
 // the rate limits); offerAiMode = 'off' | 'fail' | 'unsuitable' changes the helper's answer. No email is ever sent: the
 // notification is recorded in email_log with mock: true.
 const DRAFT_TABLES=['offer_blanks','offer_blank_maps','offer_blank_reads','offer_terms','offer_term_changes','offer_drafts','offer_draft_approvals','offer_lawyer_lookups','offer_file_hashes'];   // migration 019
-const OFFER_TABLES=['offer_links','offer_events','offer_settings','offer_clauses','offer_hits'].concat(DRAFT_TABLES);
-const OL=()=>(DB.offer_links||=[]), OE=()=>(DB.offer_events||=[]), OH=()=>(DB.offer_hits||=[]), PO=()=>(DB.property_offers||=[]);
+const OFFER_TABLES=['offer_links','offer_events','offer_settings','offer_clauses','offer_hits'].concat(DRAFT_TABLES,['offer_signings','offer_signers','offer_sign_taps','offer_sign_receipts','offer_sign_marks','offer_sign_reviews','offer_sign_asks','offer_rounds']);   // and migration 020
+const OL=()=>(DB.offer_links||=[]), OE=()=>chainArr(DB.offer_events||=[]), OH=()=>(DB.offer_hits||=[]), PO=()=>(DB.property_offers||=[]);
 const OSET=()=>{ DB.offer_settings||=[]; if(!DB.offer_settings.length) DB.offer_settings.push({id:true,ks_warn_working_days:15,ai_daily_cap:40,updated_at:now()}); return DB.offer_settings[0]; };
 const offerStageOk=s=>['signed','live','under_offer'].includes(s);
 const offerToken=()=>{ const b=new Uint8Array(32); crypto.getRandomValues(b); return btoa(String.fromCharCode(...b)).replace(/=+$/,'').replace(/\+/g,'-').replace(/\//g,'_'); };
@@ -567,7 +570,7 @@ function repoBucket(){ return {
     if(SO()[p]) return Promise.resolve({data:null,error:{message:'The resource already exists',statusCode:'409'}});
     const mime=(o&&o.contentType)||blob.type; if(!STORED_MIME.includes(mime)) return bad('mime type '+mime+' is not supported');
     if(blob.size>26214400) return bad('The object exceeded the maximum allowed size');
-    SO()[p]={size:blob.size,mime}; (window.__repoBlobs||={})[p]=blob; save(); return ok({path:p}); },
+    SO()[p]={size:blob.size,mime}; (window.__repoBlobs||={})[p]=blob; save(); return (mime==='application/pdf'?blobKeep(p,blob):Promise.resolve()).then(()=>({data:{path:p},error:null})); },
   createSignedUrl:(p)=>{ if(offline()) return netFail(); if(!isAgentMe()) return bad('Object not found');   // vendors have no storage policy: they use repo-link if(!SO()[p]) return bad('Object not found');
     const bl=(window.__repoBlobs||{})[p]; return ok({signedUrl:bl?URL.createObjectURL(bl):PNG1}); } }; }
 function repoRpc(name,a){
@@ -737,8 +740,175 @@ function draftInvoke(o){ const b=(o&&o.body)||{}; const me=S&&S.user; const res=
     const l={id:((DB.offer_lawyer_lookups||=[]).length+1),offer_id:b.offer_id,firm:b.firm,person:b.person,model:'claude-haiku-5-5',ok:true,result:{values,manual,fallback:m==='reception'},created_by:me.email,created_at:now()}; DB.offer_lawyer_lookups.push(l); save();
     return ok({ok:true,lookup_id:l.id,values,fallback:m==='reception',dropped:0,manual}); }
   return res({error:'Bad request'},400); }
+// ── purchaser signing (mirrors migrations/020_offer_signing.sql and fn/offer_sign_handler.ts) ──
+// Tim only for the tables; nobody writes them directly; vendors and anyone not signed in see nothing; offer_signers can't be read with
+// select('*') or for the link's fingerprints (column privileges). offer_events carry the hash chain, made as each is written. The
+// offer-sign edge function: purchasers by their own link (token, then the emailed code's session), Tim's send and lock. No email is
+// ever sent: each is kept in email_log (mock: true) and in localStorage mockSignMail ({kind, to, code?, link?}) for the tests to read.
+// localStorage mockMailFail = an address: email to it fails.
+const SIGN_TABLES=['offer_signings','offer_signers','offer_sign_taps','offer_sign_receipts','offer_sign_marks','offer_sign_reviews','offer_sign_asks','offer_rounds'];
+const SIGN_RPCS=['agent_signing_release','agent_signing_start','agent_signing_consent','agent_signing_receipt','agent_signing_marks','agent_signing_tap','agent_signing_finish','agent_signing_mark','agent_signing_review','agent_offer_chain_check'];
+const OSG=()=>(DB.offer_signings||=[]), OSR=()=>(DB.offer_signers||=[]), OST=()=>(DB.offer_sign_taps||=[]), OSC=()=>(DB.offer_sign_receipts||=[]), OSM=()=>(DB.offer_sign_marks||=[]), OSV=()=>(DB.offer_sign_reviews||=[]), OSA=()=>(DB.offer_sign_asks||=[]), ORN=()=>(DB.offer_rounds||=[]);
+const shaS=t=>window.SIGN.sha256Hex(String(t));
+const SIGN_ID_TYPES=['nz_driver_licence','passport','nz_firearms_licence','kiwi_access_card','other_photo_id'];
+// the hash chain: each new offer event carries the fingerprint of the one before it in its chain (offer_event_chain())
+function chainPush(arr,e){ const X=window.SIGN; if(!X) return; e.chain=e.offer_id||('p:'+e.property_id); const prev=arr.filter(x=>x.chain===e.chain&&x.hash).sort((a,b)=>b.seq-a.seq)[0];
+  e.seq=prev?prev.seq+1:1; e.prev_hash=prev?prev.hash:X.ZERO; e.at=e.at||now(); e.detail=e.detail||{}; e.body=X.chainBody(e); e.hash=X.chainHash(e.prev_hash,e.body); }
+function chainArr(a){ if(!a.__c){ Object.defineProperty(a,'push',{value:function(...xs){ xs.forEach(x=>chainPush(this,x)); return Array.prototype.push.apply(this,xs); },enumerable:false}); Object.defineProperty(a,'__c',{value:true,enumerable:false}); } return a; }
+function sgMail(kind,to,extra){ const l=JSON.parse(localStorage.getItem('mockSignMail')||'[]'); if(localStorage.getItem('mockMailFail')===to) throw new Error('SMTP down');
+  l.push(Object.assign({kind,to,at:now()},extra||{})); localStorage.setItem('mockSignMail',JSON.stringify(l)); (DB.email_log||=[]).push({id:DB.email_log.length+1,agreement_id:null,at:now(),kind,recipients:to,subject:(extra&&extra.subject)||kind,ok:true,mock:true}); }
+const sgEv=(g,actor,kind,detail)=>OE().push({id:OE().length+1,property_id:g.property_id,offer_id:g.offer_id,at:now(),actor,kind,detail:detail||{}});
+function sgCurrent(g){ if(g.status==='replaced') return 'This version has been replaced. Tim will send you the new one.'; if(g.status==='locked') return 'Signing is finished, and the signed copy is locked.';
+  const ds=(DB.offer_drafts||[]).filter(x=>x.offer_id===g.offer_id), d=ds.find(x=>x.id===g.draft_id), o=PO().find(x=>x.id===g.offer_id);
+  if(['withdrawn','lapsed'].includes(o.status)) return 'This offer has been withdrawn or has lapsed.';
+  if(d.number!==Math.max(...ds.map(x=>x.number))||!same(o.details,d.details)) return 'The offer has changed since it was sent for signing. Tim will send you the new version.'; return null; }
+function sgReady(s,allowFinished){ const g=OSG().find(x=>x.id===s.signing_id); if(s.void_at) throw new Error('This version has been replaced. Tim will send you the new one.'); const w=sgCurrent(g); if(w) throw new Error(w);
+  if(g.status==='ready') throw new Error("Signing hasn't started yet"); if(g.status==='held') throw new Error('Tim is checking a change to the document. Signing carries on once he has.');
+  if(g.status==='complete') throw new Error('Everyone has signed. The signed copy is being locked.'); if(s.finished_at&&!allowFinished) throw new Error('You have finished signing. Thank you.'); return g; }
+const sgRequired=(g,pos)=>[...new Set(g.places.filter(p=>p.signer===pos).map(p=>p.id).concat(OSV().filter(r=>r.signing_id===g.id).flatMap(r=>r.places.filter(p=>p.signer===pos).map(p=>p.id))))];
+function sgPlacesOk(pl,pages,n,needAll){ if(!Array.isArray(pl)||pl.length>6000) return false; const num=(v,lo,hi)=>typeof v==='number'&&v>=lo&&v<=hi;
+  for(const x of pl){ if(!x||!/^[a-z]{3,8}:[A-Za-z0-9_.:-]{1,110}:s[0-9]{1,2}$/.test(x.id||'')||!num(x.signer,1,n)||!['initial','signature','name'].includes(x.kind)||!['filled','foot','term','block','ack','mark'].includes(x.why)) return false;
+    if(!new RegExp(':s'+x.signer+'$').test(x.id)||!num(x.page,1,pages.length)) return false; const [w,h]=pages[x.page-1]; if(!(num(x.x,-1,w+1)&&num(x.y,-1,h+1)&&num(x.w,1,w+1)&&num(x.h,1,h+1))) return false; }
+  if(new Set(pl.map(x=>x.id)).size!==pl.length) return false;
+  if(needAll) for(let s=1;s<=n;s++){ if(!pl.some(p=>p.signer===s&&p.kind==='signature')) return false; if(new Set(pl.filter(p=>p.signer===s&&p.why==='foot').map(p=>p.page)).size!==pages.length) return false; }
+  return true; }
+const PNG_RE=/^data:image\/png;base64,[A-Za-z0-9+/=]+$/;
+function sgConsent(s,ua,net){ const g=sgReady(s); if(s.consent_at) return; s.consent_at=now(); s.user_agent=(ua||s.user_agent||'').slice(0,400); if(net) s.net_hash=net; sgEv(g,s.name,'sign_consent',{signing_id:g.id,signer:s.position}); }
+function sgReceipt(s,guide,version,file,sha,pages){ const g=sgReady(s); if(!s.consent_at) throw new Error('Agree to sign electronically first'); if(!['cca','sale_purchase'].includes(guide)) throw new Error('Unknown guide');
+  if(guide==='cca'&&(!g.cca_pages.length||JSON.stringify(pages||[])!==JSON.stringify(g.cca_pages))) throw new Error('Please read the Client and Customer Acknowledgement pages first');
+  if(guide==='sale_purchase'&&(!/^[A-Za-z0-9._-]{1,120}\.pdf$/.test(file||'')||!version||String(version).length>60||(sha!=null&&!/^[0-9a-f]{64}$/.test(sha)))) throw new Error('Please open the guide first');
+  if(OSC().some(r=>r.signer_id===s.id&&r.guide===guide)) return;
+  OSC().push({id:OSC().length+1,signing_id:g.id,signer_id:s.id,guide,version:guide==='cca'?null:version,file:guide==='cca'?null:file,sha256:guide==='cca'?null:(sha||null),pages:guide==='cca'?g.cca_pages.slice():[],at:now()}); sgEv(g,s.name,'sign_receipt',{signing_id:g.id,signer:s.position,guide,version:version||null}); }
+function sgMarks(s,sig,init){ const g=sgReady(s); if(!s.consent_at) throw new Error('Agree to sign electronically first'); if(!PNG_RE.test(sig||'')||sig.length>400000||sig.length<200) throw new Error('Please draw your signature');
+  if(!PNG_RE.test(init||'')||init.length>200000||init.length<150) throw new Error('Please draw your initials'); if(OST().some(t=>t.signer_id===s.id)) throw new Error('Your signature and initials are kept as you first used them');
+  s.sig_png=sig; s.init_png=init; s.marks_at=now(); }
+function sgTap(s,place){ const g=sgReady(s); if(!s.consent_at) throw new Error('Agree to sign electronically first');
+  if(!OSC().some(r=>r.signer_id===s.id&&r.guide==='sale_purchase')||(g.cca_pages.length&&!OSC().some(r=>r.signer_id===s.id&&r.guide==='cca'))) throw new Error('Please read and tick the guides first');
+  if(!s.sig_png||!s.init_png) throw new Error('Draw your signature and initials first'); const req=sgRequired(g,s.position); if(!req.includes(place)) throw new Error("That place isn't yours to sign");
+  if(!OST().some(t=>t.signer_id===s.id&&t.place_id===place)) OST().push({id:OST().length+1,signing_id:g.id,signer_id:s.id,place_id:place,at:now()});
+  return {done:OST().filter(t=>t.signer_id===s.id&&req.includes(t.place_id)).length,of:req.length}; }
+function sgFinish(s,ua,net,idType,witness){ const g=sgReady(s); if(!s.consent_at||!s.sig_png) throw new Error('Agree, read the guides and draw your signature and initials first');
+  const req=sgRequired(g,s.position), miss=req.filter(p=>!OST().some(t=>t.signer_id===s.id&&t.place_id===p)).length; if(miss) throw new Error(`There ${miss===1?'is':'are'} still ${miss===1?'1 place':miss+' places'} to do`);
+  const taps=OST().filter(t=>t.signer_id===s.id).map(t=>t.place_id+'@'+t.at).join('\n');
+  const seen=shaS(g.draft_sha256+':'+g.places_sha256+':'+OSV().filter(r=>r.signing_id===g.id).map(r=>r.places_sha256).join(',')+':'+s.position);
+  Object.assign(s,{finished_at:now(),seen_sha256:seen,id_sighted:idType||s.id_sighted||null,witnessed_by:witness||s.witnessed_by||null,user_agent:(ua||s.user_agent||'').slice(0,400),net_hash:net||s.net_hash||null});
+  sgEv(g,s.name,'sign_finished',{signing_id:g.id,signer:s.position,method:g.method,places:req.length,taps_sha256:shaS(taps),seen_sha256:seen,id_sighted:idType||s.id_sighted||null});
+  const left=OSR().filter(x=>x.signing_id===g.id&&!x.void_at&&!x.finished_at).length; if(!left){ g.status='complete'; g.completed_at=now(); sgEv(g,'system','sign_complete',{signing_id:g.id,signers:OSR().filter(x=>x.signing_id===g.id).length}); }
+  return {ok:true,complete:!left,signing_id:g.id}; }
+const sgTry=f=>{ try{ const r=f(); save(); return ok(r===undefined?null:r); }catch(e){ save(); return bad(e.message); } };
+function signRpc(name,a,me){ if(!me||!AGENTS.includes(me.email)) return bad('Only Tim can do this');
+  const person=id=>{ const s=OSR().find(x=>x.id===id); if(!s) throw new Error('No such signer'); if(OSG().find(g=>g.id===s.signing_id).method!=='in_person') throw new Error('This purchaser signs by their own link'); return s; };
+  if(name==='agent_offer_chain_check') return ok(window.SIGN.verifyChain(OE().filter(e=>e.offer_id===a.p_offer)));
+  if(name==='agent_signing_release') return sgTry(()=>{ if(!['in_person','link'].includes(a.p_method)) throw new Error('Choose in person or by link');
+    const d=(DB.offer_drafts||[]).find(x=>x.id===a.p_draft); if(!d) throw new Error('No such draft'); const o=PO().find(x=>x.id===d.offer_id);
+    if(!(DB.offer_draft_approvals||[]).some(x=>x.draft_id===d.id&&x.sha256===d.sha256)) throw new Error('Approve the draft first');
+    if(d.number!==Math.max(...DB.offer_drafts.filter(x=>x.offer_id===d.offer_id).map(x=>x.number))) throw new Error('There is a newer draft of this offer. Use that one');
+    if(!same(o.details,d.details)) throw new Error('The offer has changed since this draft. Re-draft and approve it first');
+    if(['withdrawn','lapsed'].includes(o.status)) throw new Error('This offer has been withdrawn or has lapsed'); if(ORN().some(r=>r.offer_id===o.id)) throw new Error('This offer already has a signed Round 1');
+    const ex=OSG().find(g=>g.draft_id===d.id); if(ex) return {id:ex.id,existing:true};
+    const ppl=d.details.purchasers||[], n=ppl.length; if(n<1||n>12) throw new Error('The offer needs 1 to 12 purchasers');
+    const pages=a.p_pages; if(!Array.isArray(pages)||!pages.length||pages.length>400||pages.some(s=>!Array.isArray(s)||s.length!==2||!(s[0]>=50&&s[0]<=5000)||!(s[1]>=50&&s[1]<=5000))) throw new Error('Please check the page sizes');
+    if(!sgPlacesOk(a.p_places,pages,n,true)) throw new Error('Please check the signing places: every purchaser needs a signature and initials at the foot of every page');
+    const cca=[...new Set((a.p_cca_pages||[]))].sort((x,y)=>x-y); if(cca.some(x=>x<1||x>pages.length)) throw new Error('Please check the acknowledgement pages');
+    if(a.p_method==='link') ppl.forEach((p,i)=>{ const em=String(p.email||'').trim().toLowerCase(); if(!em||!/^[^@\s<>"]+@[^@\s<>"]+\.[^@\s<>"]+$/.test(em)) throw new Error(`Purchaser ${i+1} has no email to send a link to. Add it with Correct details, or sign in person`);
+      if(ppl.filter(q=>String(q.email||'').trim().toLowerCase()===em).length>1) throw new Error('Two purchasers have the same email. Each needs their own to sign by link'); });
+    const g={id:uid(),offer_id:o.id,property_id:o.property_id,draft_id:d.id,draft_sha256:d.sha256,method:a.p_method,pages,places:JSON.parse(JSON.stringify(a.p_places)),places_sha256:shaS(JSON.stringify(a.p_places)),cca_pages:cca,status:'ready',released_by:me.email,released_at:now(),sent_at:null,held_at:null,completed_at:null,locked_at:null,replaced_at:null,replaced_by:null};
+    OSG().push(g); ppl.forEach((p,i)=>OSR().push({id:uid(),signing_id:g.id,position:i+1,name:([p.first,p.last].map(x=>String(x||'').trim()).filter(Boolean).join(' ')||'Purchaser '+(i+1)).slice(0,250),email:String(p.email||'').trim().toLowerCase()||null,
+      token_hash:null,link_sent_at:null,link_expires_at:null,code_hash:null,code_expires_at:null,code_tries:0,codes_sent:0,codes_window_at:null,session_hash:null,session_expires_at:null,opened_at:null,verified_at:null,consent_at:null,sig_png:null,init_png:null,marks_at:null,id_sighted:null,witnessed_by:null,finished_at:null,seen_sha256:null,user_agent:null,net_hash:null,void_at:null}));
+    OSG().filter(x=>x.offer_id===o.id&&x.id!==g.id&&['ready','signing','held','complete'].includes(x.status)).forEach(x=>{ const c=OSR().filter(s=>s.signing_id===x.id&&s.finished_at).length;
+      OSR().filter(s=>s.signing_id===x.id).forEach(s=>Object.assign(s,{void_at:now(),token_hash:null,session_hash:null,code_hash:null})); Object.assign(x,{status:'replaced',replaced_at:now(),replaced_by:g.id}); sgEv(x,me.email,'sign_replaced',{signing_id:x.id,replaced_by:g.id,finished:c}); });
+    sgEv(g,me.email,'sign_released',{signing_id:g.id,draft_id:d.id,number:d.number,sha256:d.sha256,method:g.method,signers:n,places:g.places.length,places_sha256:g.places_sha256,cca_pages:cca});
+    return {id:g.id,existing:false}; });
+  if(name==='agent_signing_start') return sgTry(()=>{ const g=OSG().find(x=>x.id===a.p_signing); if(!g) throw new Error('No such signing'); if(g.method!=='in_person') throw new Error('This signing is by link: use Send');
+    const w=sgCurrent(g); if(w) throw new Error(w); if(g.status!=='ready') return; g.status='signing'; g.sent_at=now(); sgEv(g,me.email,'sign_started',{signing_id:g.id,method:'in_person'}); });
+  if(name==='agent_signing_consent') return sgTry(()=>sgConsent(person(a.p_signer),a.p_ua,null));
+  if(name==='agent_signing_receipt') return sgTry(()=>sgReceipt(person(a.p_signer),a.p_guide,a.p_version,a.p_file,a.p_sha256,a.p_pages));
+  if(name==='agent_signing_marks') return sgTry(()=>sgMarks(person(a.p_signer),a.p_sig,a.p_init));
+  if(name==='agent_signing_tap') return sgTry(()=>sgTap(person(a.p_signer),a.p_place));
+  if(name==='agent_signing_finish') return sgTry(()=>{ const s=person(a.p_signer); if(!SIGN_ID_TYPES.includes(a.p_id_sighted)) throw new Error('Choose the photo ID you sighted'); return sgFinish(s,a.p_ua,null,a.p_id_sighted,'Tim McGuire'); });
+  if(name==='agent_signing_mark') return sgTry(()=>{ const s=person(a.p_signer), g=OSG().find(x=>x.id===s.signing_id); if(s.void_at) throw new Error('This version has been replaced'); const w=sgCurrent(g); if(w) throw new Error(w);
+    if(!['signing','held'].includes(g.status)) throw new Error("Signing isn't open"); if(!s.consent_at) throw new Error('Agree to sign electronically first');
+    if(!(a.p_page>=1&&a.p_page<=g.pages.length)) throw new Error("That page isn't in the document"); const [w_,h_]=g.pages[a.p_page-1];
+    const m={id:uid(),signing_id:g.id,signer_id:s.id,by_name:s.name,kind:a.p_kind,page:a.p_page,geometry:a.p_geometry,target:a.p_kind==='reinstate'?a.p_target:null,at:now()};
+    if(!window.SIGN.markOk(m,{w:w_,h:h_})) throw new Error("That mark doesn't sit on the page");
+    if(a.p_kind==='reinstate'){ const t=OSM().find(x=>x.id===a.p_target&&x.signing_id===g.id); if(!t||!['strike','cross'].includes(t.kind)) throw new Error('Choose a line or crossed-out box to reinstate'); if(OSM().some(x=>x.target===t.id&&x.kind==='reinstate')) throw new Error('That has already been reinstated'); }
+    else if(a.p_target) throw new Error('Only a reinstatement points at another mark');
+    OSM().push(m); g.status='held'; g.held_at=now(); sgEv(g,s.name,'sign_marked',{signing_id:g.id,mark_id:m.id,kind:m.kind,page:m.page,signer:s.position,target:a.p_target||null}); return {id:m.id}; });
+  if(name==='agent_signing_review') return sgTry(()=>{ const g=OSG().find(x=>x.id===a.p_signing); if(!g) throw new Error('No such signing'); if(g.status!=='held') throw new Error('Nothing is waiting for you to check'); const w=sgCurrent(g); if(w) throw new Error(w);
+    const ms=OSM().filter(m=>m.signing_id===g.id&&!OSV().some(r=>r.signing_id===g.id&&r.marks.includes(m.id))).map(m=>m.id), n=OSR().filter(s=>s.signing_id===g.id).length, pl=a.p_places||[];
+    if(!sgPlacesOk(pl,g.pages,n,false)) throw new Error('Please check the places for the initials');
+    if(pl.length!==ms.length*n||pl.some(x=>x.why!=='mark'||x.kind!=='initial'||!ms.includes(x.ref)||x.id!==`mark:${x.ref}:s${x.signer}`)) throw new Error('Each purchaser initials each mark once');
+    OSV().push({id:OSV().length+1,signing_id:g.id,marks:ms,places:JSON.parse(JSON.stringify(pl)),places_sha256:shaS(JSON.stringify(pl)),reviewed_by:me.email,at:now()});
+    let re=0; OSR().filter(s=>s.signing_id===g.id&&s.finished_at&&!s.void_at).forEach(s=>{ s.finished_at=null; s.seen_sha256=null; re++; }); g.status='signing';
+    sgEv(g,me.email,'sign_reviewed',{signing_id:g.id,marks:ms,places:pl.length,reopened:re}); return {ok:true,marks:ms.length,reopened:re}; });
+  return bad('unknown rpc '+name); }
+// the stored files survive a reload (a purchaser's link opens in a new page): kept in localStorage as base64
+function blobsLoad(){ try{ const m=JSON.parse(localStorage.getItem('mockBlobs')||'{}'); const B=(window.__repoBlobs||={}); Object.entries(m).forEach(([p,v])=>{ if(!B[p]){ const b=atob(v.b64), u=new Uint8Array(b.length); for(let i=0;i<b.length;i++) u[i]=b.charCodeAt(i); B[p]=new Blob([u],{type:v.mime}); } }); }catch(_){} }
+async function blobKeep(p,blob){ if(blob.size>3e6) return; const u=new Uint8Array(await blob.arrayBuffer()); let s=''; for(let i=0;i<u.length;i+=0x8000) s+=String.fromCharCode(...u.subarray(i,i+0x8000));
+  try{ const m=JSON.parse(localStorage.getItem('mockBlobs')||'{}'); m[p]={mime:blob.type||'application/pdf',b64:btoa(s)}; localStorage.setItem('mockBlobs',JSON.stringify(m)); }catch(_){} }
+blobsLoad();
+const hex=buf=>Array.from(new Uint8Array(buf),x=>x.toString(16).padStart(2,'0')).join('');
+const pdfLibLoad=()=>window.PDFLib?Promise.resolve(window.PDFLib):new Promise((res,rej)=>{ const s=document.createElement('script'); s.src='https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js'; s.onload=()=>res(window.PDFLib); s.onerror=rej; document.head.appendChild(s); });
+async function sgLock(sid,actor){ const g=OSG().find(x=>x.id===sid); if(!g) throw new Error('No such signing'); const ex=ORN().find(r=>r.signing_id===g.id); if(ex) return {number:ex.number,sha256:ex.sha256,existing:true};
+  if(g.status!=='complete') throw new Error('Not everyone has finished signing'); const w=sgCurrent(g); if(w) throw new Error(w);
+  const d=DB.offer_drafts.find(x=>x.id===g.draft_id), o=PO().find(x=>x.id===g.offer_id), p=PT().find(x=>x.id===g.property_id), bl=(window.__repoBlobs||{})[d.path]; if(!bl) throw new Error('The approved draft could not be read');
+  const draft=new Uint8Array(await bl.arrayBuffer()); if(hex(await crypto.subtle.digest('SHA-256',draft))!==d.sha256) throw new Error("The approved draft doesn't match its fingerprint, so Round 1 wasn't made. Tim will look into it.");
+  const signers=OSR().filter(s=>s.signing_id===g.id&&!s.void_at).sort((a,b)=>a.position-b.position), places=g.places.concat(OSV().filter(r=>r.signing_id===g.id).flatMap(r=>r.places));
+  const taps=OST().filter(t=>t.signing_id===g.id).map(t=>({place_id:t.place_id,signer:OSR().find(s=>s.id===t.signer_id).position,at:t.at}));
+  const marks=OSM().filter(m=>m.signing_id===g.id).map(m=>({id:m.id,kind:m.kind,page:m.page,geometry:m.geometry,target:m.target,by:m.by_name,at:m.at,reviewed_at:(OSV().find(r=>r.signing_id===g.id&&r.marks.includes(m.id))||{}).at||null}));
+  const record={address:p.address,offer_ref:o.buyer_ref,round:1,draft:{number:d.number,sha256:d.sha256},places_sha256:g.places_sha256,made_at:now(),
+    signers:signers.map(s=>({name:s.name,method:g.method,verified_at:s.verified_at,witnessed_by:s.witnessed_by,id_sighted:s.id_sighted,consent_at:s.consent_at,receipts:OSC().filter(r=>r.signer_id===s.id).map(r=>({guide:r.guide,version:r.version,sha256:r.sha256,pages:r.pages,at:r.at})),
+      first_tap:(OST().filter(t=>t.signer_id===s.id)[0]||{}).at,last_tap:(OST().filter(t=>t.signer_id===s.id).slice(-1)[0]||{}).at,finished_at:s.finished_at,places:sgRequired(g,s.position).length,ua:s.user_agent,net:s.net_hash,seen_sha256:s.seen_sha256})),
+    marks:marks.map(m=>({kind:m.kind,page:m.page,by:m.by,at:m.at,reviewed_at:m.reviewed_at})),replaced:OSG().filter(x=>x.offer_id===g.offer_id&&x.status==='replaced').map(x=>({number:DB.offer_drafts.find(y=>y.id===x.draft_id).number,at:x.replaced_at}))};
+  const L=await pdfLibLoad(); const r=await window.SIGN.renderRound(L,draft,{places,taps,signers,marks,record,title:'Round 1 (signed by the purchasers): '+p.address});
+  const sha=hex(await crypto.subtle.digest('SHA-256',r.bytes)), path=`properties/${g.property_id}/docs/offer-round-${g.offer_id}-1-${sha.slice(0,12)}.pdf`, blob=new Blob([r.bytes],{type:'application/pdf'});
+  SO()[path]={size:blob.size,mime:'application/pdf'}; (window.__repoBlobs||={})[path]=blob; await blobKeep(path,blob);
+  (DB.offer_file_hashes||=[]).push({path,sha256:sha,size_bytes:blob.size,confirmed_by:actor,confirmed_at:now()});
+  sgEv(g,actor,'round_locked',{signing_id:g.id,number:1,sha256:sha,draft_sha256:g.draft_sha256,places_sha256:g.places_sha256,path});
+  const ev=OE()[OE().length-1]; ORN().push({id:uid(),offer_id:g.offer_id,property_id:g.property_id,signing_id:g.id,number:1,draft_id:g.draft_id,draft_sha256:g.draft_sha256,places_sha256:g.places_sha256,path,sha256:sha,size_bytes:blob.size,execution:record,chain_last:ev.hash,locked_by:actor,locked_at:now()});
+  g.status='locked'; g.locked_at=now(); try{ sgMail('offer_round_locked','tim',{subject:'Round 1 signed and locked: '+p.address}); }catch(_){} save(); return {number:1,sha256:sha,existing:false}; }
+async function signInvoke(o){ const b=(o&&o.body)||{}, me=S&&S.user, net='h:'+mockNet(), ua=navigator.userAgent;
+  const res=(data,status)=>status&&status>=400?{data:null,error:{message:String(status),context:{json:async()=>data}}}:{data,error:null};
+  const calls=JSON.parse(localStorage.getItem('signCalls')||'[]'); calls.push(b.action); localStorage.setItem('signCalls',JSON.stringify(calls));
+  if(offline()) return {data:null,error:{message:'Failed to fetch'}};
+  const fail=e=>{ save(); return res({ok:false,error:e.message},400); };
+  if(b.action==='send'||b.action==='lock'){ if(!me||!AGENTS.includes(me.email)) return res({error:'Only Tim can do this'},403);
+    try{ if(b.action==='lock') return res({ok:true,round:await sgLock(b.signing_id,me.email)});
+      const g=OSG().find(x=>x.id===b.signing_id); if(!g) throw new Error('No such signing'); if(g.method!=='link') throw new Error('This signing is in person, on your device'); const w=sgCurrent(g); if(w) throw new Error(w);
+      if(!['ready','signing'].includes(g.status)) throw new Error('Signing is held or finished, so no link is sent'); const p=PT().find(x=>x.id===g.property_id); let sent=0; const failed=[];
+      OSR().filter(s=>s.signing_id===g.id&&!s.finished_at&&!s.void_at).forEach(s=>{ const tok=offerToken(); Object.assign(s,{token_hash:shaS(tok),link_sent_at:now(),link_expires_at:new Date(Date.now()+14*864e5).toISOString(),session_hash:null,code_hash:null,code_tries:0});
+        try{ sgMail('offer_sign_link',s.email,{link:location.origin+location.pathname+'?sign='+tok,subject:'Your offer to sign: '+p.address}); sent++; }catch(_){ failed.push(s.position); } });
+      const was=g.status; g.status='signing'; g.sent_at=g.sent_at||now(); sgEv(g,me.email,'sign_links_sent',{signing_id:g.id,signers:sent+failed.length,resent:was==='signing'}); save(); return res({ok:!failed.length,sent,failed}); }
+    catch(e){ return fail(e); } }
+  const tok=String(b.token||''); if(!TOKEN_RE.test(tok)) return res({ok:false});
+  const s=OSR().find(x=>x.token_hash&&x.token_hash===shaS(tok)&&x.link_expires_at>now());
+  if(!s){ if(b.action==='open'&&hits('bad',net,null,36e5)<30){ OH().push({at:now(),kind:'bad',net}); save(); } return res({ok:false}); }
+  const g=OSG().find(x=>x.id===s.signing_id), p=PT().find(x=>x.id===g.property_id);
+  const me_=()=>{ if(!/^[A-Za-z0-9_-]{40,64}$/.test(b.session||'')||s.session_hash!==shaS(b.session)||s.session_expires_at<now()) throw new Error('Please enter the code from your email again'); return s; };
+  try{
+    if(b.action==='open'){ if(!s.opened_at){ s.opened_at=now(); save(); } const e=s.email||''; return res({ok:true,first:s.name.split(' ')[0],address:p.address,finished:!!s.finished_at,stopped:s.void_at?'This version has been replaced. Tim will send you the new one.':sgCurrent(g),held:g.status==='held',email_hint:e.indexOf('@')>0?e[0]+'***@'+e.split('@')[1]:''}); }
+    if(b.action==='send_code'){ if(s.void_at||!s.email) return res({ok:false,reason:'stopped'}); const inWin=s.codes_window_at&&Date.parse(s.codes_window_at)>Date.now()-36e5; if(inWin&&s.codes_sent>=5) return res({ok:false,reason:'busy'});
+      const code=String(Math.floor(Math.random()*1e6)).padStart(6,'0'); Object.assign(s,{code_hash:shaS('mocksalt:'+s.id+':'+code),code_expires_at:new Date(Date.now()+9e5).toISOString(),code_tries:0,codes_sent:inWin?s.codes_sent+1:1,codes_window_at:inWin?s.codes_window_at:now()});
+      try{ sgMail('offer_sign_code',s.email,{code,subject:'Your code to sign: '+p.address}); }catch(_){ save(); return res({ok:false,reason:'mail'}); } save(); return res({ok:true}); }
+    if(b.action==='verify'){ if(!s.code_hash) return res({ok:false,reason:'no_code'}); if(s.code_expires_at<now()) return res({ok:false,reason:'expired'}); const c=String(b.code||'').replace(/\s+/g,'');
+      if(!/^[0-9]{6}$/.test(c)||s.code_hash!==shaS('mocksalt:'+s.id+':'+c)){ s.code_tries++; const t=s.code_tries>=5; if(t) s.code_hash=null; save(); return res({ok:false,reason:t?'tries':'wrong'}); }
+      const ses=offerToken(); Object.assign(s,{code_hash:null,code_expires_at:null,code_tries:0,session_hash:shaS(ses),session_expires_at:new Date(Date.now()+72e5).toISOString(),verified_at:now(),user_agent:ua.slice(0,400),net_hash:net}); sgEv(g,s.name,'sign_code_ok',{signing_id:g.id,signer:s.position}); save(); return res({ok:true,session:ses}); }
+    me_();
+    if(b.action==='state'){ const d=DB.offer_drafts.find(x=>x.id===g.draft_id), bl=(window.__repoBlobs||{})[d.path];
+      return res({ok:true,signer:{position:s.position,name:s.name,consent_at:s.consent_at,has_marks:!!s.sig_png,sig_png:s.sig_png,init_png:s.init_png,finished_at:s.finished_at,void:!!s.void_at,receipts:OSC().filter(r=>r.signer_id===s.id).map(r=>({guide:r.guide,version:r.version,at:r.at}))},
+        signing:{status:g.status,stopped:s.void_at?'This version has been replaced. Tim will send you the new one.':sgCurrent(g),pages:g.pages,cca_pages:g.cca_pages,draft_sha256:d.sha256,address:p.address,draft_url:bl?URL.createObjectURL(bl):null,
+          places:g.places.filter(x=>x.signer===s.position).concat(OSV().filter(r=>r.signing_id===g.id).flatMap(r=>r.places.filter(x=>x.signer===s.position)))},taps:OST().filter(t=>t.signer_id===s.id).map(t=>t.place_id)}); }
+    if(b.action==='consent'){ sgConsent(s,ua,net); save(); return res({ok:true}); }
+    if(b.action==='receipt'){ sgReceipt(s,b.guide,b.version,b.file,b.sha256==null?null:b.sha256,b.pages); save(); return res({ok:true}); }
+    if(b.action==='marks'){ sgMarks(s,b.sig,b.init); save(); return res({ok:true}); }
+    if(b.action==='tap'){ const r=sgTap(s,b.place); save(); return res(Object.assign({ok:true},r)); }
+    if(b.action==='ask'){ if(s.void_at||['locked','replaced'].includes(g.status)) throw new Error('This version is no longer being signed'); const t=String(b.text||'').trim(); if(t.length<3||t.length>1000) throw new Error('Please say what you would like changed (up to 1,000 characters)');
+      OSA().push({id:OSA().length+1,signing_id:g.id,signer_id:s.id,text:t,at:now()}); sgEv(g,s.name,'sign_change_asked',{signing_id:g.id,signer:s.position,length:t.length}); let emailed=true; try{ sgMail('offer_sign_ask','tim',{text:t,subject:'A buyer asks for a change: '+p.address}); }catch(_){ emailed=false; } save(); return res({ok:true,emailed}); }
+    if(b.action==='finish'){ const r=sgFinish(s,ua,net,null,null); save(); if(!r.complete) return res({ok:true,complete:false}); try{ const rd=await sgLock(r.signing_id,'system (last purchaser finished)'); return res({ok:true,complete:true,locked:true,round:rd.number}); }catch(_){ return res({ok:true,complete:true,locked:false}); } }
+  }catch(e){ return fail(e); }
+  return res({error:'Bad request'},400); }
 window.supabase={createClient(){ return {
-  from:q, rpc, functions:{invoke:(n,o)=>{ logCall('fn:'+n+(o&&o.body&&o.body.mode?':'+o.body.mode:'')); if(n==='property-lookup') return councilInvoke(o); if(n==='offer-public') return offerInvoke(o); if(n==='offer-draft') return draftInvoke(o); if(n==='repo-link') return repoLinkInvoke(o); if(n==='doc-prefill'&&o.body&&o.body.mode==='translate'){ const reqs=JSON.parse(localStorage.getItem('trReqs')||'[]'); reqs.push(o.body); localStorage.setItem('trReqs',JSON.stringify(reqs)); const m=localStorage.getItem('translateMode'); if(m==='off') return Promise.resolve({data:null,error:{message:'503',context:{json:async()=>({error:'not_set_up'})}}}); const src=o.body.sources; const rej=m==='rejectFirst'?[src[0]]:[]; let cutL=[]; let use=src.filter(x=>!rej.includes(x)); if(m==='cutOff'){ const h=src.length>1?Math.floor(src.length/2):0; cutL=src.slice(h); use=src.slice(0,h); } const resp={ok:true,model:o.body.kind==='screens'||o.body.kind==='guide'?'claude-sonnet-5-5':'claude-haiku-5-5',cut_off:m==='cutOff',translations:use.map(x=>({source:x,text:'<'+o.body.lang+'> '+x})),rejected:rej.map(x=>({source:x,reason:'number changed'})).concat(cutL.map(x=>({source:x,reason:'cut off'}))),usage:{input:10,output:10}}; const D=+localStorage.getItem('translateDelay')||0; return D?new Promise(r=>setTimeout(()=>r({data:resp,error:null}),D)):ok(resp); }
+  from:q, rpc, functions:{invoke:(n,o)=>{ logCall('fn:'+n+(o&&o.body&&o.body.mode?':'+o.body.mode:'')); if(n==='property-lookup') return councilInvoke(o); if(n==='offer-public') return offerInvoke(o); if(n==='offer-draft') return draftInvoke(o); if(n==='offer-sign') return signInvoke(o); if(n==='repo-link') return repoLinkInvoke(o); if(n==='doc-prefill'&&o.body&&o.body.mode==='translate'){ const reqs=JSON.parse(localStorage.getItem('trReqs')||'[]'); reqs.push(o.body); localStorage.setItem('trReqs',JSON.stringify(reqs)); const m=localStorage.getItem('translateMode'); if(m==='off') return Promise.resolve({data:null,error:{message:'503',context:{json:async()=>({error:'not_set_up'})}}}); const src=o.body.sources; const rej=m==='rejectFirst'?[src[0]]:[]; let cutL=[]; let use=src.filter(x=>!rej.includes(x)); if(m==='cutOff'){ const h=src.length>1?Math.floor(src.length/2):0; cutL=src.slice(h); use=src.slice(0,h); } const resp={ok:true,model:o.body.kind==='screens'||o.body.kind==='guide'?'claude-sonnet-5-5':'claude-haiku-5-5',cut_off:m==='cutOff',translations:use.map(x=>({source:x,text:'<'+o.body.lang+'> '+x})),rejected:rej.map(x=>({source:x,reason:'number changed'})).concat(cutL.map(x=>({source:x,reason:'cut off'}))),usage:{input:10,output:10}}; const D=+localStorage.getItem('translateDelay')||0; return D?new Promise(r=>setTimeout(()=>r({data:resp,error:null}),D)):ok(resp); }
     if(n==='doc-prefill'){ const mode=localStorage.getItem('prefillMode'); if(mode==='off') return Promise.resolve({data:null,error:{message:'503',context:{json:async()=>({error:'not_set_up'})}}}); return ok({ok:true,skipped:[],result:JSON.parse(localStorage.getItem('prefillResult'))}); }const a=JSON.parse(localStorage.getItem('inv')||'[]');a.push(n+':'+o.body.type);localStorage.setItem('inv',JSON.stringify(a));
     if(n==='notify'&&o.body.type==='form_signed'){ const fm=(DB.property_forms||[]).find(x=>x.id===o.body.form_id); if(fm&&fm.status==='signed'&&(fm.kind==='healthy_homes'||fm.countersigned_at)&&!fm.document_id&&fm.agreement_id===o.body.agreement_id){ const d={id:uid(),property_id:fm.property_id,kind:fm.kind==='healthy_homes'?'Healthy Homes checklist and statement':'Vendor Declaration',name:(fm.kind==='healthy_homes'?'Healthy-Homes-Checklist-and-Statement':'Vendor-Declaration')+'.pdf',path:'properties/'+fm.property_id+'/generated/'+fm.id+'.pdf',source:'generated',created_by:'system',created_at:now(),bucket:'private',folder:'agency'}; (DB.property_documents||=[]).push(d); fm.document_id=d.id; save(); } }
     return ok({ok:true});}},

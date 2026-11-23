@@ -2757,10 +2757,10 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       ${named.some(p => !p.signed_at) ? `<div class="card note"><h3>Or let them sign on their own phones</h3><p class="small">They'll get a link, check what you've filled in together, and sign in their own time. Anyone who's already signed here stays signed.</p><div class="toolbar"><button class="btn ghost" type="button" id="tSendPhones">Send to sign on their phones</button></div></div>` : ''}
       <div id="tDone"></div>`;
   }
-  function makePad(cv) {
+  function makePad(cv, hPx) {
     if (!cv) return null;
     const dpr = window.devicePixelRatio || 1, r = cv.getBoundingClientRect();
-    cv.width = Math.max(1, r.width * dpr); cv.height = 150 * dpr;
+    cv.width = Math.max(1, r.width * dpr); cv.height = (hPx || 150) * dpr;
     const ctx = cv.getContext('2d'); ctx.scale(dpr, dpr); ctx.lineWidth = 2.2; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = '#1a1a1a';
     let drawing = false, last = null, drawn = false;
     const pos = e => { const b = cv.getBoundingClientRect(); return { x: e.clientX - b.left, y: e.clientY - b.top }; };
@@ -6302,6 +6302,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <p class="small err" id="drDraftErr" role="alert"></p>
       ${drafts.length ? `<ul class="dr-list" id="drDrafts">${drafts.map((x, i) => { const ap = apps.find(a => a.draft_id === x.id); const nb = (x.needs || []).filter(n => n.blocking).length;
         return `<li><button class="of-row" type="button" data-draft="${x.id}"><span class="of-r1"><strong>Draft ${x.number}</strong>${i === 0 ? ' <span class="pill">Newest</span>' : ''}${ap ? ' <span class="pill okp">Approved</span>' : nb ? ` <span class="pill of-warnp">${nb} need${nb === 1 ? 's' : ''} you</span>` : ''}</span><span class="small">${esc(fmtDT(x.created_at))} · <span translate="no">${esc(drShort(x.sha256))}</span>${x.note ? ' · ' + esc(x.note) : ''}</span></button></li>`; }).join('')}</ul>` : ''}
+      ${await sgOfferHTML(o)}
       <label class="f" for="drAgDate">Date of the agreement</label><input type="text" id="drAgDate" disabled placeholder="Added once fully agreed" aria-describedby="drAgDateNote"><p class="small" id="drAgDateNote" style="margin:2px 0 0">Added once fully agreed. You type it in full, with the month name.</p>
       <h3 style="margin:14px 0 4px">The purchaser's lawyer</h3>
       <p class="small" style="margin:0">${law.firm || law.person ? esc([law.person, law.firm].filter(Boolean).join(', ')) : 'No lawyer named yet.'}${law.email ? ' · ' + esc(law.email) : ''}${law.phone ? ' · ' + esc(law.phone) : ''}</p>
@@ -6312,6 +6313,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const b = $('#drDraftBtn'); if (b) b.addEventListener('click', async () => { b.disabled = true; $('#drDraftErr').textContent = 'Drafting...'; try { const id = await drMakeDraft(o.id, null, null); viewDraftReview(id); } catch (e) { $('#drDraftErr').textContent = e.message || 'That didn\'t draft.'; b.disabled = false; } });
     $$('[data-draft]').forEach(x => x.addEventListener('click', () => viewDraftReview(x.dataset.draft)));
     const lb = $('#drLawBtn'); if (lb) lb.addEventListener('click', () => drLawLookup(o));
+    $$('[data-signing]').forEach(x => x.addEventListener('click', () => viewSigning(x.dataset.signing)));
   }
   async function drLawLookup(o) {
     const box = $('#drLaw'), law = (o.details || {}).lawyer || {}; box.innerHTML = '<p class="small">Looking on public pages (the firm\'s website and the Law Society)...</p>';
@@ -6352,8 +6354,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const up = await sb.storage.from('property-files').upload(pth, new Blob([r.bytes], { type: 'application/pdf' }), { contentType: 'application/pdf', upsert: false });
     if (up.error && !/exists/i.test(up.error.message || '')) throw new Error('The draft didn\'t save. Check you have signal, then try again.');
     await drConfirm(pth, sha);
-    const placed = plan.items.map(it => { const bx = r.boxes.filter(x => x.id === it.id || x.id.startsWith(it.id + '_cont'));
-      return { id: it.id, label: it.label, kind: it.kind, text: it.text || null, value: it.value || null, placeholder: !!it.placeholder, edited: !!it.edited, terms: it.terms, boxes: bx.map(x => ({ page: x.page, x: Math.round(x.x * 10) / 10, y: Math.round(x.y * 10) / 10, w: Math.round(x.w * 10) / 10, h: Math.round(x.h * 10) / 10 })) }; });
+    const placed = DR.placedFrom(plan, r);
     const res = await must(sb.rpc('agent_draft_add', { p_offer: oid, p_map: map.id, p_path: pth, p_sha256: sha, p_size: r.bytes.length, p_placed: placed, p_needs: plan.needs, p_edits: Object.assign({}, edits || {}, { date_format: plan.date_format }), p_note: note || null }));
     DR_CACHE['draft-' + res.id] = { bytes: r.bytes };
     return res.id;
@@ -6388,7 +6389,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <div class="toolbar no-print"><button class="btn ghost" type="button" id="drRvBack">Back to the offer</button></div><span class="agent-flag">Only you see this</span>
       <h1>Draft ${d.number} of the agreement</h1>
       <p class="lede">${nt(p.address)}</p><p class="small">For ${esc(o.buyer_ref || 'the buyer')}, ${esc(money(+o.amount))}. Made ${esc(fmtDT(d.created_at))}. Draft fingerprint <span translate="no">${esc(drShort(d.sha256))}</span>, on the blank <span translate="no">${esc(drShort(d.blank_sha256))}</span>.</p>
-      ${ap ? `<div class="card okc tight" id="drApproved"><p class="small" style="margin:0"><strong>Approved</strong> by ${esc(ap.approved_by)}, ${esc(fmtDT(ap.approved_at))}. Fingerprint <span translate="no">${esc(drShort(ap.sha256))}</span>. Signing comes next (not built yet).</p></div>` : ''}
+      ${ap ? `<div class="card okc tight" id="drApproved"><p class="small" style="margin:0"><strong>Approved</strong> by ${esc(ap.approved_by)}, ${esc(fmtDT(ap.approved_at))}. Fingerprint <span translate="no">${esc(drShort(ap.sha256))}</span>.</p>${newest && !stale ? `<div class="toolbar"><button class="btn primary" type="button" id="sgReady">Ready to sign</button></div>` : ''}</div>` : ''}
       ${!newest ? '<div class="card warnc tight" id="drNotNewest"><p class="small" style="margin:0">There is a newer draft of this offer. This one is kept as it was.</p></div>' : ''}
       ${changed && newest ? `<div class="card warnc tight" id="drChanged"><p class="small" style="margin:0">The offer has been corrected since this draft. Re-draft it so the agreement matches${ap ? '' : '; this draft can\'t be approved'}.</p></div>` : ''}
       ${(newerMap || newerBlank) && !ap ? `<div class="card warnc tight" id="drStaleBlank"><p class="small" style="margin:0">${newerBlank ? 'A newer agreement blank has been loaded' : 'The places on the blank have been approved again'} since this draft. ${newerBlank ? 'Approve its places, then re-draft' : 'Re-draft'}; this draft can't be approved.</p></div>` : ''}
@@ -6421,6 +6422,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       if (customT) { ed.custom_ok = $('#drCustomTick').checked; const ta = $(`[data-edit="${customT.id}"]`); if (ta) { ed.custom_wording = ta.value.trim(); delete ed.items[customT.id]; } }
       ed.extra_terms = $('#drExtra').value.split('\n').map(s => s.trim()).filter(Boolean); ed.date_format = $('#drFmt').value; return ed; };
     $('#drRvBack').addEventListener('click', () => viewOfferAgent(d.offer_id));
+    const sr = $('#sgReady'); if (sr) sr.addEventListener('click', () => viewSignRelease(did));
     $('#drRedraft').addEventListener('click', () => go(collect(), $('#drNote').value.trim() || 'Re-drafted with your changes'));
     const rc = $('#drRedraftChange'); if (rc) rc.addEventListener('click', () => go({ date_format: E.date_format, extra_terms: E.extra_terms, custom_ok: E.custom_ok, custom_wording: E.custom_wording }, $('#drNote').value.trim() || 'Re-drafted after a change'));
     const ackBoxes = $$('[data-ack]'), canApprove = () => !ap && newest && !block.length && !stale && ackBoxes.every(x => x.checked);
@@ -6432,8 +6434,382 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     top();
   }
 
+  // ── Purchaser signing (offers phase 3) ──
+  // Tim taps "Ready to sign" on an approved draft. The signing places are made from the draft and its map with no set-up
+  // (SIGN.makePlaces): each purchaser initials the foot of every page, every box the draft filled or marked and each further term,
+  // and signs in the signature block, plus any acknowledgement Tim kept; the date at the top stays blank. He chooses in person on
+  // his device, one purchaser at a time, or a personal link to each (nothing is sent until he taps Send). Each signer agrees to sign
+  // electronically, receipts the Client and Customer Acknowledgement and the REA sale and purchase guide, draws their signature and
+  // initials once, and taps every place themselves (no "apply to all"). On Tim's screen a purchaser may mark the page (a note, a line
+  // through text, a crossed-out box, a reinstatement); any mark holds signing until Tim re-approves, and every purchaser then
+  // initials it. Link signers ask Tim for a change instead. When the last purchaser finishes, the server makes Round 1 (the draft,
+  // the signatures, initials and marks on top, and the execution record on a page at the end) and locks it. Vendors see none of it.
+  const SG = window.SIGN;
+  const SG_ID = [['nz_driver_licence', 'NZ driver licence'], ['passport', 'Passport'], ['nz_firearms_licence', 'NZ firearms licence'], ['kiwi_access_card', 'Kiwi Access Card'], ['other_photo_id', 'Other photo ID']];
+  const SG_STATUS = { ready: 'Ready, nothing sent yet', signing: 'Signing', held: 'Waiting for you to check a change', complete: 'Everyone has signed', locked: 'Round 1 locked', replaced: 'Replaced by a newer draft' };
+  const SG_COLS = 'id,signing_id,position,name,email,link_sent_at,link_expires_at,opened_at,verified_at,consent_at,marks_at,id_sighted,witnessed_by,finished_at,seen_sha256,void_at';
+  const SG_WHY = { foot: 'the foot of each page', filled: 'beside each box filled or marked', term: 'beside each further term', block: 'the signature block', ack: 'acknowledgements you kept', mark: 'beside each mark' };
+  // a database call whose refusal is shown in plain words on the page (not as an error)
+  async function sgRpc(fn, args) { const { data, error } = await sb.rpc(fn, args); if (error) throw new Error(error.message || 'That didn\'t save.'); return data; }
+  const sgDot = s => s ? `<span class="pill ${s === 'locked' ? 'okp' : s === 'replaced' ? 'of-off' : s === 'held' ? 'of-warnp' : ''}">${esc(SG_STATUS[s] || s)}</span>` : '';
+  // the signer's drawing, cropped to what they drew, as a PNG
+  function sgPng(cv) {
+    const g = cv.getContext('2d'), w = cv.width, h = cv.height, px = g.getImageData(0, 0, w, h).data; let x0 = w, y0 = h, x1 = -1, y1 = -1;
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (px[(y * w + x) * 4 + 3] > 20) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+    if (x1 < 0) return null; const pad = 6, c = document.createElement('canvas'); c.width = x1 - x0 + 1 + pad * 2; c.height = y1 - y0 + 1 + pad * 2;
+    c.getContext('2d').drawImage(cv, x0 - pad, y0 - pad, c.width, c.height, 0, 0, c.width, c.height); return c.toDataURL('image/png');
+  }
+  // the offer page: its signings and Round 1
+  async function sgOfferHTML(o) {
+    const gs = (await ofSafe(sb.from('offer_signings').select('id,draft_id,method,status,released_at,locked_at,replaced_at').eq('offer_id', o.id).order('released_at', { ascending: false }))) || [];
+    const rd = ((await ofSafe(sb.from('offer_rounds').select('id,number,sha256,locked_at').eq('offer_id', o.id))) || [])[0];
+    if (!gs.length && !rd) return '';
+    const ds = (await ofSafe(sb.from('offer_drafts').select('id,number').eq('offer_id', o.id))) || [];
+    return `<h3 style="margin:14px 0 4px">Signing</h3>${rd ? `<div class="card okc tight" id="sgRoundTile"><p class="small" style="margin:0"><strong>Round ${rd.number} locked</strong> ${esc(fmtDT(rd.locked_at))}. Fingerprint <span translate="no">${esc(drShort(rd.sha256))}</span>.</p></div>` : ''}
+      <ul class="dr-list" id="sgList">${gs.map(g => `<li><button class="of-row" type="button" data-signing="${g.id}"><span class="of-r1"><strong>Draft ${esc((ds.find(x => x.id === g.draft_id) || {}).number || '')}</strong>, ${g.method === 'link' ? 'by link' : 'in person'} ${sgDot(g.status)}</span><span class="small">Released ${esc(fmtDT(g.released_at))}</span></button></li>`).join('')}</ul>`;
+  }
+  // the draft's bytes and pages (checked against its fingerprint)
+  async function sgDraftPages(d) { const bytes = await drDraftBytes(d); return { bytes, pages: await DR.readPages(await drPdfjs(), bytes, PDF_OPTS) }; }
+
+  // "Ready to sign": the places made from the draft and map, the method, and nothing sent
+  async function viewSignRelease(did) {
+    header('Ready to sign', '', 0); actions(false);
+    main().innerHTML = '<div class="loading">Loading...</div>';
+    const d = await must(sb.from('offer_drafts').select('*').eq('id', did).single());
+    const [o, p, mp, ex] = await Promise.all([must(sb.from('property_offers').select('*').eq('id', d.offer_id).single()), must(sb.from('properties').select('id,address').eq('id', d.property_id).single()),
+      must(sb.from('offer_blank_maps').select('id,places').eq('id', d.map_id).single()), ofSafe(sb.from('offer_signings').select('id').eq('draft_id', did))]);
+    if ((ex || [])[0]) return viewSigning(ex[0].id);
+    let D_; try { D_ = await sgDraftPages(d); } catch (e) { main().innerHTML = `<div class="view-pad"><p class="err">${esc(e.message === 'pdf-lib' ? drNoLib : e.message || drNoLib)}</p><div class="toolbar"><button class="btn ghost" type="button" id="sgBk">Back to the draft</button></div></div>`; $('#sgBk').addEventListener('click', () => viewDraftReview(did)); return; }
+    const pages = D_.pages, signers = ((d.details || {}).purchasers || []).map((x, i) => ({ position: i + 1, name: [x.first, x.last].map(v => String(v || '').trim()).filter(Boolean).join(' ') || 'Purchaser ' + (i + 1), email: String(x.email || '').trim() }));
+    const M = SG.makePlaces({ pages, placed: d.placed || [], mapPlaces: mp.places || [], signers }), cca = SG.ccaPages(pages);
+    const R = { method: (d.details || {}).sign === 'digital' ? 'link' : 'in_person', page: (M.places.find(x => x.kind === 'signature') || { page: 1 }).page };
+    const counts = pos => Object.keys(SG_WHY).map(k => [k, M.places.filter(x => x.signer === pos && x.why === k).length]).filter(x => x[1]);
+    const paint = () => {
+      const noEmail = signers.filter(s => !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(s.email));
+      main().innerHTML = `<div class="view-pad dr-page" id="sgRelease"><div class="toolbar no-print"><button class="btn ghost" type="button" id="sgBack">Back to the draft</button></div><span class="agent-flag">Only you see this</span>
+        <h1>Ready to sign</h1><p class="lede">${nt(p.address)}</p>
+        <p class="small">Draft ${d.number}, fingerprint <span translate="no">${esc(drShort(d.sha256))}</span>. The signing places are made for you from the draft. The date at the top stays blank: it is added once everything is agreed.</p>
+        <section class="card" id="sgPlacesSum"><h2>Signing places</h2>
+          ${signers.map(s => `<p class="small" style="margin:0 0 4px" data-sgsum="${s.position}"><strong>${nt(s.name)}</strong>: ${M.counts[s.position] || 0} places (${counts(s.position).map(([k, n]) => `${n} ${esc(SG_WHY[k])}`).join(', ')})</p>`).join('')}
+          ${M.warnings.length ? `<div class="card warnc tight" id="sgWarn">${M.warnings.map(w => `<p class="small" style="margin:0">${esc(w)}</p>`).join('')}</div>` : ''}
+          <div class="dr-nav"><label class="sr" for="sgPick">Page</label><select id="sgPick">${pages.map(pg => `<option value="${pg.n}" ${pg.n === R.page ? 'selected' : ''}>Page ${pg.n} (${M.places.filter(x => x.page === pg.n).length})</option>`).join('')}</select></div>
+          <div id="sgCanvas" class="dr-holder"></div></section>
+        <section class="card" id="sgGuidesSum"><h2>Read before signing</h2>
+          <p class="small">Each purchaser receipts the Client and Customer Acknowledgement and the Real Estate Authority guide to sale and purchase agreements before they sign.</p>
+          <label class="f" for="sgCca">Client and Customer Acknowledgement: page numbers in this document</label><input type="text" id="sgCca" inputmode="numeric" value="${esc(cca.join(', '))}">
+          <p class="small" style="margin:2px 0 0">${cca.length ? 'Found from its heading. Check it.' : 'It wasn\'t found in the pack. Type its page numbers, or leave it empty if this pack hasn\'t got one.'}</p></section>
+        <section class="card" id="sgHow"><h2>How they sign</h2><div class="choices">
+          <label class="choice"><input type="radio" name="sgMethod" value="in_person" ${R.method === 'in_person' ? 'checked' : ''}><span class="mark"></span><span><span class="ct">In person, on this device</span><span class="cd">One purchaser at a time. You record that you saw them sign and the photo ID you sighted (the type only).</span></span></label>
+          <label class="choice"><input type="radio" name="sgMethod" value="link" ${R.method === 'link' ? 'checked' : ''}><span class="mark"></span><span><span class="ct">By a personal link to each purchaser</span><span class="cd">Each gets their own link by email and a one-time code, also by email. Nothing is sent until you tap Send.</span></span></label></div>
+          ${R.method === 'link' && noEmail.length ? `<div class="card warnc tight" id="sgNoEmail"><p class="small" style="margin:0">${esc(noEmail.map(s => s.name).join(', '))} ${noEmail.length === 1 ? 'has' : 'have'} no email. Add it with Correct details (then re-draft), or sign in person.</p></div>` : ''}
+          ${R.method === 'link' ? `<p class="small" style="margin:6px 0 0">Links go to: ${signers.map(s => `${nt(s.name)} <span class="small" translate="no">(${esc(s.email || 'no email')})</span>`).join(', ')}</p>` : ''}</section>
+        <div class="err" id="sgRelErr" role="alert"></div>
+        <div class="toolbar"><button class="btn primary" type="button" id="sgRelease" ${M.places.length && !M.warnings.some(w => /no room|no purchaser signature/.test(w)) ? '' : 'disabled'}>Ready to sign</button></div>
+        <p class="small">${R.method === 'link' ? 'This gets the signing ready. You send the links on the next screen.' : 'Signing then happens on this device.'}</p></div>`;
+      $('#sgBack').addEventListener('click', () => viewDraftReview(did));
+      $$('input[name="sgMethod"]').forEach(x => x.addEventListener('change', () => { R.method = x.value; paint(); }));
+      $('#sgPick').addEventListener('change', e => { R.page = +e.target.value; canvas(); });
+      $('#sgRelease').addEventListener('click', async () => {
+        const btn = $('#sgRelease'); btn.disabled = true; $('#sgRelErr').textContent = '';
+        const cc = $('#sgCca').value.split(/[\s,]+/).filter(Boolean).map(Number);
+        if (cc.some(x => !Number.isInteger(x) || x < 1 || x > pages.length)) { $('#sgRelErr').textContent = 'Check the acknowledgement page numbers.'; btn.disabled = false; return; }
+        try { const r = await sgRpc('agent_signing_release', { p_draft: did, p_method: R.method, p_pages: pages.map(x => [x.w, x.h]), p_places: M.places, p_cca_pages: cc }); toast('Ready to sign'); viewSigning(r.id); }
+        catch (e) { $('#sgRelErr').textContent = e.message; btn.disabled = false; }
+      });
+      canvas();
+    };
+    const canvas = async () => { try { await drRender($('#sgCanvas'), R.page, M.places.map(x => Object.assign({}, x, { cls: 'sg-place sg-s' + ((x.signer - 1) % 4 + 1), badge: String(x.signer) })), { bytes: D_.bytes, key: 'draft-' + d.id }); } catch (_) { $('#sgCanvas').innerHTML = `<p class="small err">${drNoLib}</p>`; } };
+    paint(); top();
+  }
+
+  // Tim's view of one signing
+  async function viewSigning(sid, opts) {
+    header('Signing', '', 0); actions(false);
+    main().innerHTML = '<div class="loading">Loading...</div>';
+    const g = await must(sb.from('offer_signings').select('*').eq('id', sid).single());
+    const [o, p, d, signers, taps, marks, reviews, asks, rounds] = await Promise.all([must(sb.from('property_offers').select('*').eq('id', g.offer_id).single()), must(sb.from('properties').select('id,address').eq('id', g.property_id).single()),
+      must(sb.from('offer_drafts').select('*').eq('id', g.draft_id).single()), ofSafe(sb.from('offer_signers').select(SG_COLS).eq('signing_id', sid).order('position')), ofSafe(sb.from('offer_sign_taps').select('signer_id,place_id,at').eq('signing_id', sid)),
+      ofSafe(sb.from('offer_sign_marks').select('*').eq('signing_id', sid).order('at')), ofSafe(sb.from('offer_sign_reviews').select('*').eq('signing_id', sid).order('at')), ofSafe(sb.from('offer_sign_asks').select('*').eq('signing_id', sid).order('at')),
+      ofSafe(sb.from('offer_rounds').select('*').eq('signing_id', sid))]);
+    const allD = (await ofSafe(sb.from('offer_drafts').select('id,number').eq('offer_id', g.offer_id))) || [];
+    const stale = !['locked', 'replaced'].includes(g.status) && (d.number !== Math.max(...allD.map(x => x.number)) || JSON.stringify(drCanon(o.details)) !== JSON.stringify(drCanon(d.details)));
+    const rd = (rounds || [])[0], S_ = signers || [], T_ = taps || [], Mk = marks || [], Rv = reviews || [];
+    const places = (g.places || []).concat(Rv.flatMap(r => r.places || [])), need = pos => places.filter(x => x.signer === pos), doneOf = s => T_.filter(t => t.signer_id === s.id && need(s.position).some(x => x.id === t.place_id)).length;
+    const open = Mk.filter(m => !Rv.some(r => (r.marks || []).includes(m.id)));
+    // everyone has finished: Round 1 is made and locked by the server
+    if (g.status === 'complete' && !rd && !(opts && opts.tried)) { main().innerHTML = '<div class="loading" id="sgLocking">Everyone has signed. Making and locking Round 1...</div>'; await offerCall('offer-sign', { action: 'lock', signing_id: sid }); return viewSigning(sid, { tried: true }); }
+    const stateOf = s => s.void_at ? 'Replaced (kept, void)' : s.finished_at ? 'Finished ' + fmtDT(s.finished_at) : s.consent_at ? `Signing: ${doneOf(s)} of ${need(s.position).length} places` : g.method === 'link' ? (s.verified_at ? 'Code checked' : s.opened_at ? 'Opened the link' : s.link_sent_at ? 'Link sent ' + fmtDT(s.link_sent_at) : 'Not sent yet') : 'Not started';
+    main().innerHTML = `<div class="view-pad dr-page" id="sgView"><div class="toolbar no-print"><button class="btn ghost" type="button" id="sgBackO">Back to the offer</button></div><span class="agent-flag">Only you see this</span>
+      <h1>Signing</h1><p class="lede">${nt(p.address)}</p>
+      <p>${sgDot(g.status)} <span class="small">Draft ${d.number}, ${g.method === 'link' ? 'by personal link' : 'in person on this device'}. Fingerprint <span translate="no">${esc(drShort(g.draft_sha256))}</span>.</span></p>
+      ${g.status === 'replaced' ? `<div class="card warnc tight" id="sgReplaced"><p class="small" style="margin:0">Replaced by a newer draft ${esc(fmtDT(g.replaced_at))}. The signatures and initials given on this version are kept, but they are void. Everyone signs the new version.</p>${g.replaced_by ? '<div class="toolbar"><button class="btn ghost" type="button" id="sgNewer">Open the new signing</button></div>' : ''}</div>` : ''}
+      ${stale ? `<div class="card warnc tight" id="sgStale"><p class="small" style="margin:0">The offer has changed since this was released, so signing has stopped. Re-draft and approve it, then tap Ready to sign. Signatures already given on this version stay recorded, as replaced.</p></div>` : ''}
+      ${rd ? `<section class="card okc" id="sgRound"><h2>Round ${rd.number} locked</h2><p class="small">Locked ${esc(fmtDT(rd.locked_at))}. Fingerprint <span translate="no">${esc(rd.sha256)}</span>, worked out by the server from the stored file. The approved draft is unchanged, with every signature, initial and mark added on top, and the execution record on a page of its own at the end. It can't be changed or removed.</p>
+        <div class="toolbar"><button class="btn ghost" type="button" id="sgRoundDl">Download Round ${rd.number}</button><button class="btn ghost" type="button" id="sgChain">Check the timeline</button></div><p class="small" id="sgChainOut" role="status" aria-live="polite"></p></section>` : ''}
+      ${g.status === 'complete' && !rd ? `<div class="card warnc tight" id="sgLockFail"><p class="small" style="margin:0">Everyone has signed, but Round 1 wasn't locked yet.</p><div class="toolbar"><button class="btn primary" type="button" id="sgLockGo">Make and lock Round 1</button></div><p class="small err" id="sgLockErr" role="alert"></p></div>` : ''}
+      ${g.status === 'held' ? `<section class="card warnc" id="sgHeld"><h2>Check the change</h2><p class="small">A purchaser marked the document on this screen. Look at each mark. If it's fine, re-approve: every purchaser then initials beside it, and anyone who has finished signs again. If the offer itself needs changing, correct it and re-draft instead.</p>
+        <ul class="dr-list">${open.map(m => `<li class="small" data-mark="${m.id}"><strong>Page ${m.page}:</strong> ${esc(SG.MARK_NAMES[m.kind] || m.kind)} by ${nt(m.by_name)}, ${esc(fmtDT(m.at))}</li>`).join('')}</ul>
+        <div class="dr-nav"><label class="sr" for="sgHeldPick">Page</label><select id="sgHeldPick">${[...new Set(open.map(m => m.page))].map(n => `<option value="${n}">Page ${n}</option>`).join('')}</select></div><div id="sgHeldCanvas" class="dr-holder"></div>
+        <div class="toolbar"><button class="btn primary" type="button" id="sgReview">Re-approve and carry on</button></div><p class="small err" id="sgRevErr" role="alert"></p></section>` : ''}
+      <section class="card" id="sgSigners"><h2>Purchasers</h2>${S_.map(s => `<div class="fact" data-signer="${s.position}"><div class="k">${nt(s.name)}${g.method === 'link' && s.email ? ` <span class="small" translate="no">${esc(s.email)}</span>` : ''}</div><div class="v" style="font-weight:400;display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><span data-sgstate>${esc(stateOf(s))}</span>
+          ${g.method === 'in_person' && ['ready', 'signing'].includes(g.status) && !stale && !s.finished_at && !s.void_at ? `<button class="btn ${S_.find(x => !x.finished_at) === s ? 'primary' : 'ghost'}" type="button" data-turn="${s.id}">Start ${esc(s.name.split(' ')[0])}'s turn</button>` : ''}</div></div>`).join('')}</section>
+      ${g.method === 'link' && ['ready', 'signing'].includes(g.status) && !stale ? `<section class="card" id="sgSend"><h2>${g.status === 'ready' ? 'Send the links' : 'The links'}</h2><p class="small">${g.status === 'ready' ? 'Nothing has been sent yet. Send emails each purchaser their own link; they get a one-time code by email when they open it.' : 'Each purchaser has their own link. Sending again makes new links for anyone still to sign; their old ones stop working.'}</p>
+        <div class="toolbar"><button class="btn ${g.status === 'ready' ? 'primary' : 'ghost'}" type="button" id="sgSendGo">${g.status === 'ready' ? 'Send' : 'Send the links again'}</button></div><p class="small" id="sgSendOut" role="status" aria-live="polite"></p></section>` : ''}
+      ${(asks || []).length ? `<section class="card" id="sgAsks"><h2>Asked for a change</h2>${asks.map(a => { const s = S_.find(x => x.id === a.signer_id) || {}; return `<div class="fact"><div class="k">${nt(s.name || '')} · ${esc(fmtDT(a.at))}</div><div class="v" style="font-weight:400">${esc(a.text)}</div></div>`; }).join('')}<p class="small">If it needs a change, correct the offer, re-draft and approve it, and tap Ready to sign. Everyone then signs the new version.</p></section>` : ''}
+      ${Mk.length ? `<details class="card tight" id="sgMarks"><summary class="small">Marks (${Mk.length})</summary>${Mk.map(m => `<p class="small" style="margin:2px 0">Page ${m.page}: ${esc(SG.MARK_NAMES[m.kind] || m.kind)} by ${nt(m.by_name)}, ${esc(fmtDT(m.at))}${Rv.some(r => (r.marks || []).includes(m.id)) ? ', re-approved' : ''}</p>`).join('')}</details>` : ''}
+    </div>`;
+    $('#sgBackO').addEventListener('click', () => viewOfferAgent(g.offer_id));
+    const nw = $('#sgNewer'); if (nw) nw.addEventListener('click', () => viewSigning(g.replaced_by));
+    $$('[data-turn]').forEach(b => b.addEventListener('click', async () => { b.disabled = true; try { if (g.status === 'ready') await sgRpc('agent_signing_start', { p_signing: sid }); viewSignTurn(sid, b.dataset.turn); } catch (e) { toast(e.message); b.disabled = false; } }));
+    const sg_ = $('#sgSendGo'); if (sg_) sg_.addEventListener('click', async () => { sg_.disabled = true; $('#sgSendOut').textContent = 'Sending...';
+      const r = await offerCall('offer-sign', { action: 'send', signing_id: sid });
+      if (r && (r.ok || r.sent)) { toast(r.failed && r.failed.length ? 'Sent, but not to everyone' : 'Links sent'); return viewSigning(sid); }
+      $('#sgSendOut').textContent = (r && r.error) || 'The links didn\'t send. Check you have signal, then try again.'; sg_.disabled = false; });
+    const lg = $('#sgLockGo'); if (lg) lg.addEventListener('click', async () => { lg.disabled = true; const r = await offerCall('offer-sign', { action: 'lock', signing_id: sid }); if (r && r.ok) return viewSigning(sid, { tried: true }); $('#sgLockErr').textContent = (r && r.error) || 'That didn\'t work. Try again.'; lg.disabled = false; });
+    const dl = $('#sgRoundDl'); if (dl) dl.addEventListener('click', async () => { try { const { data, error } = await sb.storage.from('property-files').createSignedUrl(rd.path, 300); if (error || !data) throw new Error('Round 1 couldn\'t be opened. Check you have signal.');
+      const bytes = new Uint8Array(await (await fetch(data.signedUrl)).arrayBuffer()); if (await REPO.sha256(bytes) !== rd.sha256) throw new Error('The stored round doesn\'t match its fingerprint.');
+      const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' })); a.download = `Round-${rd.number}-${(p.address || 'agreement').replace(/[^A-Za-z0-9]+/g, '-').slice(0, 60)}.pdf`; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000); } catch (e) { toast(e.message); } });
+    const ch = $('#sgChain'); if (ch) ch.addEventListener('click', async () => { try { const r = await sgRpc('agent_offer_chain_check', { p_offer: g.offer_id });
+      $('#sgChainOut').textContent = r.ok ? `Timeline checked: ${r.events} events, each following on from the one before.${r.before ? ` (${r.before} from before the check began.)` : ''}` : 'The timeline doesn\'t check out: ' + ((r.problems || [])[0] || {}).why; } catch (e) { $('#sgChainOut').textContent = e.message; } });
+    if (g.status === 'held') {
+      const pg = $('#sgHeldPick'), bytesP = drDraftBytes(d);
+      const paintH = async () => { try { const r = await drRender($('#sgHeldCanvas'), +pg.value, [], { bytes: await bytesP, key: 'draft-' + d.id }); sgMarksLayer(r, Mk.filter(m => m.page === +pg.value), null); } catch (_) { $('#sgHeldCanvas').innerHTML = `<p class="small err">${drNoLib}</p>`; } };
+      if (pg) { pg.addEventListener('change', paintH); paintH(); }
+      $('#sgReview').addEventListener('click', async () => { const b = $('#sgReview'); b.disabled = true;
+        const live = S_.filter(s => !s.void_at).map(s => ({ position: s.position, name: s.name })), pgs = (g.pages || []).map((x, i) => ({ n: i + 1, w: x[0], h: x[1] }));
+        const add = SG.markPlaces(open, live, pgs, places);
+        try { await sgRpc('agent_signing_review', { p_signing: sid, p_places: add }); toast('Re-approved. Everyone initials the change'); viewSigning(sid); } catch (e) { $('#sgRevErr').textContent = e.message; b.disabled = false; } });
+    }
+    top();
+  }
+  // marks drawn over a rendered page (an overlay; the page itself is never changed)
+  function sgMarksLayer(r, marks, onPick) {
+    const NS = 'http://www.w3.org/2000/svg', svg = document.createElementNS(NS, 'svg'); svg.setAttribute('viewBox', `0 0 ${r.W} ${r.H}`); svg.setAttribute('class', 'sg-marks'); svg.setAttribute('preserveAspectRatio', 'none');
+    const Y = y => r.H - y, ln = (x1, y1, x2, y2, w) => { const l = document.createElementNS(NS, 'line'); Object.entries({ x1, y1: Y(y1), x2, y2: Y(y2), 'stroke-width': w || 1.2 }).forEach(([k, v]) => l.setAttribute(k, v)); return l; };
+    (marks || []).forEach(m => { const gEl = document.createElementNS(NS, 'g'); gEl.setAttribute('data-markid', m.id); gEl.setAttribute('class', 'sg-mark sg-k-' + m.kind); const geo = m.geometry || {};
+      if (m.kind === 'note') (geo.strokes || []).forEach(st => { const pl = document.createElementNS(NS, 'polyline'); pl.setAttribute('points', st.map(q => q[0] + ',' + Y(q[1])).join(' ')); gEl.appendChild(pl); });
+      else if (m.kind === 'strike') gEl.appendChild(ln(geo.x0, geo.y, geo.x1, geo.y, 1.4));
+      else if (m.kind === 'cross') { const rc = document.createElementNS(NS, 'rect'); Object.entries({ x: geo.x, y: Y(geo.y + geo.h), width: geo.w, height: geo.h }).forEach(([k, v]) => rc.setAttribute(k, v)); gEl.appendChild(rc); gEl.appendChild(ln(geo.x, geo.y, geo.x + geo.w, geo.y + geo.h)); gEl.appendChild(ln(geo.x, geo.y + geo.h, geo.x + geo.w, geo.y)); }
+      else if (m.kind === 'reinstate') { const t = document.createElementNS(NS, 'text'); t.setAttribute('x', geo.x); t.setAttribute('y', Y(geo.y + 2)); t.textContent = 'Reinstated'; gEl.appendChild(t); }
+      if (onPick && ['strike', 'cross'].includes(m.kind)) { gEl.style.cursor = 'pointer'; gEl.addEventListener('click', e => { e.stopPropagation(); onPick(m); }); }
+      svg.appendChild(gEl); });
+    r.wrapEl.appendChild(svg); return svg;
+  }
+
+  // ── the signing itself: the same screens in person (Tim's device) and by link ──
+  // ctx: { mode: 'person'|'link', address, name, position, places, taps (Set), consent_at, receipts ([guide]), sig_png, init_png,
+  //   status, stopped, cca_pages, pages ([[w, h]]), bytes, draftSha, marks, api: { consent, receipt, marks, tap, mark?, ask?, finish }, done(r), back? }
+  function signFlow(ctx) {
+    const F = { page: null, marking: null, draft: null, pick: null };
+    const req = () => ctx.places, done = () => req().filter(x => ctx.taps.has(x.id)).length;
+    const hasR = g => ctx.receipts.includes(g), guidesDone = () => hasR('sale_purchase') && (!(ctx.cca_pages || []).length || hasR('cca'));
+    const step = ctx.stopped ? 'stopped' : ctx.status === 'held' ? 'held' : !ctx.consent_at ? 'consent' : !guidesDone() ? 'guides' : !ctx.sig_png ? 'draw' : 'places';
+    const nextUndone = () => req().filter(x => !ctx.taps.has(x.id)).sort((a, b) => a.page - b.page || b.y - a.y)[0];
+    if (!F.page) F.page = (nextUndone() || req()[0] || { page: 1 }).page;
+    const err = t => { const e = $('#sgErr'); if (e) e.textContent = t || ''; };
+    const steps = [['consent', 'Agree'], ['guides', 'Read'], ['draw', 'Draw'], ['places', 'Sign']];
+    const stepBar = `<ol class="sg-steps" aria-label="Steps">${steps.map(([k, l], i) => `<li class="${k === step ? 'on' : steps.findIndex(x => x[0] === step) > i ? 'done' : ''}">${i + 1}. ${l}</li>`).join('')}</ol>`;
+    const g2 = GUIDES.sale_purchase;
+    let body = '';
+    if (step === 'stopped') body = `<div class="card warnc" id="sgStopped"><p style="margin:0">${esc(ctx.stopped)}</p></div>`;
+    else if (step === 'held') body = `<div class="card note" id="sgHeldMsg"><h2 style="margin-top:0">Sent to Tim to check</h2><p class="small" style="margin:0">${ctx.mode === 'person' ? 'A change was marked on the document. Tim checks it and re-approves before signing carries on. Everyone then initials beside it.' : 'Tim is checking a change to the document. Signing carries on once he has. Come back to this link then.'}</p>${ctx.back ? '<div class="toolbar"><button class="btn primary" type="button" id="sgToTim">Back to Tim\'s screen</button></div>' : ''}</div>`;
+    else if (step === 'consent') body = `<section class="card" id="sgConsent"><h2>Signing electronically</h2>
+      <p class="small">You're about to sign the agreement for ${nt(ctx.address)} on screen. Your drawn signature and initials, and each place you tap, have the same effect as signing on paper. A record of when and how you signed is kept with the signed copy.</p>
+      <p class="small">You can stop at any time, and you can ask for a paper copy instead.</p>
+      <label class="choice cb"><input type="checkbox" id="sgAgree"><span class="mark"></span><span><span class="ct">I agree to sign this agreement electronically</span></span></label>
+      <div class="toolbar"><button class="btn primary" type="button" id="sgAgreeGo">Continue</button></div></section>`;
+    else if (step === 'guides') body = `<section class="card" id="sgGuides"><h2>Before you sign</h2>
+      ${(ctx.cca_pages || []).length ? `<h3>Client and Customer Acknowledgement</h3><p class="small">This is in the agreement pack (page${ctx.cca_pages.length > 1 ? 's' : ''} ${ctx.cca_pages.join(', ')}). It explains who Tim acts for and what he must do for you. Read it here.</p><div id="sgCcaPages"></div>
+        ${hasR('cca') ? '<p class="small okc" id="sgCcaDone">Received.</p>' : `<label class="choice cb"><input type="checkbox" id="sgCcaOk"><span class="mark"></span><span><span class="ct">I've read the Client and Customer Acknowledgement</span><span class="cd">This is recorded with the time</span></span></label>`}` : ''}
+      <h3>Real Estate Authority guide to sale and purchase agreements</h3><p class="small">It explains the agreement you are about to sign.</p>${g2 ? guideViewer(g2) : `<p><a href="${REA_SP}" target="_blank" rel="noopener">Read the guide on the Real Estate Authority website</a></p>`}
+      ${hasR('sale_purchase') ? '<p class="small" id="sgSpDone">Received.</p>' : `<label class="choice cb"><input type="checkbox" id="sgSpOk"><span class="mark"></span><span><span class="ct">I've received the Real Estate Authority guide to sale and purchase agreements</span><span class="cd">This is recorded with the time</span></span></label>`}
+      <div class="toolbar"><button class="btn primary" type="button" id="sgGuidesGo">Continue</button></div></section>`;
+    else if (step === 'draw') body = `<section class="card" id="sgDraw"><h2>Your signature and initials</h2><p class="small">Draw them once with your finger or a stylus. You then put them in each place yourself, one tap at a time.</p>
+      <div style="display:flex;justify-content:space-between;align-items:baseline"><h3 style="margin:0">Signature</h3><button class="btn link" type="button" id="sgClrS">Clear</button></div>
+      <div class="sig-wrap"><canvas id="sgSig" aria-label="Signature pad"></canvas><div class="sig-line"></div><span class="hint">Sign here</span></div>
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:10px"><h3 style="margin:0">Initials</h3><button class="btn link" type="button" id="sgClrI">Clear</button></div>
+      <div class="sig-wrap sg-init"><canvas id="sgInit" aria-label="Initials pad"></canvas><span class="hint">Initials here</span></div>
+      ${saveNote('Save my signature and initials')}<div class="toolbar"><button class="btn primary" type="button" id="sgDrawGo">Save my signature and initials</button></div></section>`;
+    else {
+      const left = req().length - done(), pagesWith = [...new Set(req().map(x => x.page))].sort((a, b) => a - b);
+      body = `<section class="card" id="sgPlaces"><h2>Sign and initial each place</h2>
+        <p class="small">Your places are highlighted on each page. Tap each one yourself to put your ${'initials or signature'} there.</p>
+        <p class="sg-count" id="sgCount" role="status" aria-live="polite"><strong>${done()} of ${req().length}</strong> places done</p>
+        <div class="sg-bar"><span style="width:${req().length ? Math.round(done() / req().length * 100) : 0}%"></span></div>
+        <div class="dr-nav"><button class="btn ghost" type="button" id="sgPrev">Previous</button><label class="sr" for="sgPgPick">Page</label><select id="sgPgPick">${ctx.pages.map((x, i) => { const n = i + 1, t = req().filter(y => y.page === n).length, l = req().filter(y => y.page === n && !ctx.taps.has(y.id)).length; return `<option value="${n}" ${n === F.page ? 'selected' : ''}>Page ${n}${t ? ` (${l ? l + ' to do' : 'done'})` : ''}</option>`; }).join('')}</select><button class="btn ghost" type="button" id="sgNext">Next</button></div>
+        ${left ? '<div class="toolbar"><button class="btn link" type="button" id="sgGoNext">Go to the next place to do</button></div>' : ''}
+        ${ctx.mode === 'person' ? `<div class="sg-marktools" id="sgTools"><span class="small">Mark the page:</span> ${[['note', 'Note'], ['strike', 'Line through text'], ['cross', 'Cross out a box'], ['reinstate', 'Reinstate']].map(([k, l]) => `<button class="btn ${F.marking === k ? 'primary' : 'ghost'}" type="button" data-tool="${k}">${l}</button>`).join('')}</div>
+` : ''}
+        <div id="sgPage" class="dr-holder sg-holder"></div>
+        <p class="small">${pagesWith.length} page${pagesWith.length === 1 ? '' : 's'} have places for you.</p>
+        ${ctx.mode === 'link' ? `<details class="card tight" id="sgAskBox"><summary class="small">Ask Tim for a change</summary><p class="small">You can't change the document here. Tell Tim what you would like changed and he'll be in touch. If the offer changes, everyone signs the new version.</p>
+          <label class="sr" for="sgAskText">What you would like changed</label><textarea id="sgAskText" rows="3" maxlength="1000"></textarea><div class="toolbar"><button class="btn ghost" type="button" id="sgAskGo">Send to Tim</button></div><p class="small" id="sgAskOut" role="status"></p></details>` : ''}
+        </section>
+        <section class="card" id="sgFinish"><h2>Finish</h2>${left ? `<p class="small" id="sgLeft">${left} place${left === 1 ? '' : 's'} still to do. You can finish once every place is done.</p>` : '<p class="small" id="sgAllDone">Every place is done.</p>'}
+          ${ctx.mode === 'person' ? `<label class="choice cb"><input type="checkbox" id="sgSaw"><span class="mark"></span><span><span class="ct">Tim: I saw ${esc(ctx.name)} sign</span></span></label>
+            <label class="f" for="sgIdType">Photo ID sighted <span class="opt">(the type only; no number is kept)</span></label><select id="sgIdType"><option value="">Choose</option>${SG_ID.map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select>` : ''}
+          <div class="toolbar"><button class="btn primary" type="button" id="sgFinishGo" ${left ? 'disabled' : ''}>Finish signing</button></div></section>`;
+    }
+    main().innerHTML = `<div class="view-pad dr-page sg-flow" id="sgFlow"><h1>${ctx.mode === 'person' ? esc(ctx.name) + ' signs' : 'Your offer to sign'}</h1><p class="lede">${nt(ctx.address)}</p>
+      ${ctx.mode === 'person' ? `<p class="small">${esc(ctx.name)} uses this screen. Only their own places can be done here.</p>` : `<p class="small">Signing as ${nt(ctx.name)}. What you are signing has the fingerprint <span translate="no">${esc(drShort(ctx.draftSha))}</span>.</p>`}
+      ${step === 'stopped' ? '' : stepBar}${body}<p class="err" id="sgErr" role="alert"></p>
+      ${ctx.back ? '<div class="toolbar no-print"><button class="btn ghost" type="button" id="sgBackTim">Back to Tim\'s screen</button></div>' : ''}</div>`;
+    const on = (sel, f, ev) => { const el = $(sel); if (el) el.addEventListener(ev || 'click', f); };
+    const act = async (f, then) => { err(''); try { await f(); } catch (e) { return err(e.message); } return then ? then() : ctx.reload(); };
+    on('#sgBackTim', () => ctx.back()); on('#sgToTim', () => ctx.back());
+    on('#sgAgreeGo', () => { if (!$('#sgAgree').checked) return err('Tick the box to agree to sign electronically, or stop here and call Tim.'); act(() => ctx.api.consent()); });
+    if (step === 'guides') {
+      const box = $('#sgCcaPages'); if (box) (async () => { for (const n of ctx.cca_pages) { const h = document.createElement('div'); h.className = 'dr-holder'; box.appendChild(h); try { await drRender(h, n, [], { bytes: ctx.bytes, key: 'sg-' + ctx.draftSha }); } catch (_) { h.innerHTML = `<p class="small err">${drNoLib}</p>`; } } })();
+      reaFill();
+      on('#sgGuidesGo', () => act(async () => {
+        const cc = $('#sgCcaOk'), sp = $('#sgSpOk');
+        if (cc && !cc.checked) throw new Error('Tick that you\'ve read the Client and Customer Acknowledgement.'); if (sp && !sp.checked) throw new Error('Tick that you\'ve received the guide.');
+        if (cc) await ctx.api.receipt({ guide: 'cca', pages: ctx.cca_pages });
+        if (sp) await ctx.api.receipt(g2 ? { guide: 'sale_purchase', version: g2.version, file: g2.file, sha256: g2.sha256 } : { guide: 'sale_purchase', version: 'REA website', file: REA_SP.split('/').pop(), sha256: null });
+      }));
+    }
+    if (step === 'draw') {
+      const ps = makePad($('#sgSig')), pi = makePad($('#sgInit'), 90);
+      on('#sgClrS', () => ps.clear()); on('#sgClrI', () => pi.clear());
+      on('#sgDrawGo', () => act(async () => { if (!ps.drawn()) throw new Error('Please draw your signature.'); if (!pi.drawn()) throw new Error('Please draw your initials.');
+        const s = sgPng($('#sgSig')), i = sgPng($('#sgInit')); await ctx.api.marks(s, i); }));
+    }
+    if (step === 'places') {
+      const paint = async () => {
+        const holder = $('#sgPage'); if (!holder) return;
+        // each paint draws into its own holder and only the newest is shown, so a quick page change and tool change never mix
+        const my = (F.seq = (F.seq || 0) + 1), tmp = document.createElement('div'); tmp._docs = holder._docs || (holder._docs = {});
+        const mine = req().filter(x => x.page === F.page).map(x => Object.assign({}, x, { cls: 'sg-place ' + (ctx.taps.has(x.id) ? 'sg-done' : 'sg-todo'), label: x.label }));
+        let r; try { r = await drRender(tmp, F.page, mine, { bytes: ctx.bytes, key: 'sg-' + ctx.draftSha, button: !F.marking }); } catch (_) { holder.innerHTML = `<p class="small err">${drNoLib}</p>`; return; }
+        if (my !== F.seq) return; holder.innerHTML = ''; holder.appendChild(r.wrapEl);
+        // what has been done shows as the signer's own initials, signature or name
+        $$('.sg-place', r.wrapEl).forEach(b => fillBox(b, req().find(x => x.id === b.dataset.id)));
+        sgMarksLayer(r, (ctx.marks || []).filter(m => m.page === F.page), F.marking === 'reinstate' ? m => { F.pick = m; const s = $('#sgMarkSave'); if (s) s.disabled = false; toast('Tap Save this mark to reinstate it'); } : null);
+        if (!F.marking) r.wrapEl.addEventListener('click', async e => { const b = e.target.closest('.sg-place'); if (!b || ctx.taps.has(b.dataset.id) || b.dataset.busy) return; b.dataset.busy = '1'; err('');
+          try { await ctx.api.tap(b.dataset.id); ctx.taps.add(b.dataset.id); } catch (x) { delete b.dataset.busy; return err(x.message); }
+          delete b.dataset.busy; fillBox(b, req().find(x => x.id === b.dataset.id)); counts(); });
+        else if (F.marking !== 'reinstate') sgDrawLayer(r, F);
+      };
+      const fillBox = (b, pl) => { if (!b || !pl) return; const isDone = ctx.taps.has(pl.id); b.classList.toggle('sg-done', isDone); b.classList.toggle('sg-todo', !isDone); b.setAttribute('aria-pressed', isDone ? 'true' : 'false'); b.setAttribute('aria-label', (isDone ? 'Done: ' : '') + pl.label);
+        if (isDone && !b.querySelector('img,.sg-name')) { if (pl.kind === 'name') { const sp = document.createElement('span'); sp.className = 'sg-name'; sp.textContent = pl.name || ctx.name; b.appendChild(sp); } else { const im = document.createElement('img'); im.alt = ''; im.src = pl.kind === 'signature' ? ctx.sig_png : ctx.init_png; b.appendChild(im); } } };
+      // the count, the bar, the page list and Finish, kept up to date as each place is done (the page doesn't jump)
+      const counts = () => { const n = done(), t = req().length, left = t - n; $('#sgCount').innerHTML = `<strong>${n} of ${t}</strong> places done`; $('.sg-bar span').style.width = (t ? Math.round(n / t * 100) : 0) + '%';
+        $$('#sgPgPick option').forEach(op => { const pn = +op.value, tt = req().filter(y => y.page === pn).length, l = req().filter(y => y.page === pn && !ctx.taps.has(y.id)).length; op.textContent = `Page ${pn}${tt ? ` (${l ? l + ' to do' : 'done'})` : ''}`; });
+        const fin = $('#sgFinish p'); if (fin) { fin.id = left ? 'sgLeft' : 'sgAllDone'; fin.textContent = left ? `${left} place${left === 1 ? '' : 's'} still to do. You can finish once every place is done.` : 'Every place is done.'; }
+        $('#sgFinishGo').disabled = left > 0; const gn = $('#sgGoNext'); if (gn && !left) gn.remove(); };
+      if (ctx._page) F.page = ctx._page;
+      const sel = $('#sgPgPick'); if (sel) sel.value = String(F.page);
+      on('#sgPgPick', e => { F.page = +e.target.value; ctx._page = F.page; paint(); }, 'change');
+      on('#sgPrev', () => { if (F.page > 1) { F.page--; ctx._page = F.page; $('#sgPgPick').value = F.page; paint(); } });
+      on('#sgNext', () => { if (F.page < ctx.pages.length) { F.page++; ctx._page = F.page; $('#sgPgPick').value = F.page; paint(); } });
+      on('#sgGoNext', () => { const n = nextUndone(); if (!n) return; F.page = n.page; ctx._page = F.page; $('#sgPgPick').value = F.page; paint().then(() => { const b = $(`.sg-place[data-id="${CSS.escape(n.id)}"]`); if (b) { b.scrollIntoView({ block: 'center' }); b.focus({ preventScroll: true }); } }); });
+      $$('[data-tool]').forEach(b => b.addEventListener('click', () => { F.marking = F.marking === b.dataset.tool ? null : b.dataset.tool; F.draft = null; F.pick = null; signFlowTools(ctx, F, paint); }));
+      paint();
+      on('#sgAskGo', async () => { const t = $('#sgAskText').value.trim(); if (t.length < 3) return ($('#sgAskOut').textContent = 'Say what you would like changed.');
+        try { await ctx.api.ask(t); $('#sgAskText').value = ''; $('#sgAskOut').textContent = 'Sent to Tim. He\'ll be in touch.'; } catch (e) { $('#sgAskOut').textContent = e.message; } });
+      on('#sgFinishGo', () => act(async () => { let o = {};
+        if (ctx.mode === 'person') { if (!$('#sgSaw').checked) throw new Error('Tim: tick that you saw them sign.'); const id = $('#sgIdType').value; if (!id) throw new Error('Choose the photo ID you sighted.'); o = { id }; }
+        const r = await ctx.api.finish(o); ctx.finished = r; }, () => ctx.done(ctx.finished)));
+      F.rerender = paint;
+    }
+    top();
+  }
+  // switching a marking tool repaints the toolbar and the page in place
+  function signFlowTools(ctx, F, paint) {
+    const tools = $('#sgTools'); if (!tools) return;
+    $$('[data-tool]').forEach(b => { b.className = 'btn ' + (F.marking === b.dataset.tool ? 'primary' : 'ghost'); });
+    let hint = $('#sgMarkHint'); const tb = hint ? hint.nextElementSibling : null; if (hint) hint.remove(); if (tb) tb.remove();
+    if (F.marking) { tools.insertAdjacentHTML('afterend', `<p class="small" id="sgMarkHint">${{ note: 'Write or draw on the page with your finger or stylus.', strike: 'Drag along the line of text to strike it through.', cross: 'Drag from one corner of the passage or box to the other.', reinstate: 'Tap the line or crossed-out box to reinstate.' }[F.marking]} Any mark goes to Tim to check before signing carries on.</p><div class="toolbar"><button class="btn primary" type="button" id="sgMarkSave" disabled>Save this mark</button><button class="btn ghost" type="button" id="sgMarkCancel">Cancel</button></div>`);
+      $('#sgMarkCancel').addEventListener('click', () => { F.marking = null; F.draft = null; F.pick = null; signFlowTools(ctx, F, paint); });
+      $('#sgMarkSave').addEventListener('click', async () => { const e = $('#sgErr'); e.textContent = '';
+        const m = F.marking === 'reinstate' ? (F.pick ? { kind: 'reinstate', page: F.page, target: F.pick.id, geometry: { x: Math.round(SG.markRect(F.pick).x * 10) / 10, y: Math.round((SG.markRect(F.pick).y + SG.markRect(F.pick).h + 2) * 10) / 10 } } : null) : F.draft;
+        if (!m) return (e.textContent = 'Mark the page first.');
+        const pw = ctx.pages[F.page - 1]; if (!SG.markOk(m, { w: pw[0], h: pw[1] })) return (e.textContent = 'That mark doesn\'t sit on the page. Try again.');
+        try { await ctx.api.mark(m); toast('Sent to Tim to check'); ctx.reload(); } catch (x) { e.textContent = x.message; } }); }
+    paint();
+  }
+  // drawing a mark: a note (freehand), a line through text, or a crossed-out box, in page points
+  function sgDrawLayer(r, F) {
+    const cv = document.createElement('canvas'), wrap = r.wrapEl, rect0 = () => wrap.getBoundingClientRect(); cv.className = 'sg-draw'; wrap.appendChild(cv);
+    const b = rect0(), dpr = window.devicePixelRatio || 1; cv.width = b.width * dpr; cv.height = b.height * dpr; const g = cv.getContext('2d'); g.scale(dpr, dpr); g.strokeStyle = '#0d2973'; g.lineWidth = 2; g.lineCap = 'round';
+    const pt = e => { const q = rect0(); return [Math.round(Math.max(0, Math.min(r.W, (e.clientX - q.left) / q.width * r.W)) * 10) / 10, Math.round(Math.max(0, Math.min(r.H, r.H - (e.clientY - q.top) / q.height * r.H)) * 10) / 10]; };
+    const px = p => { const q = rect0(); return [p[0] / r.W * q.width, (r.H - p[1]) / r.H * q.height]; };
+    let down = null, strokes = F.draft && F.draft.kind === 'note' ? F.draft.geometry.strokes : [], cur = null;
+    const redraw = (a, z) => { g.clearRect(0, 0, cv.width, cv.height); strokes.forEach(st => { g.beginPath(); st.forEach((p, i) => { const [x, y] = px(p); i ? g.lineTo(x, y) : g.moveTo(x, y); }); g.stroke(); });
+      if (a && z) { const [x0, y0] = px(a), [x1, y1] = px(z); g.beginPath(); if (F.marking === 'strike') { g.moveTo(x0, y0); g.lineTo(x1, y0); } else { g.rect(Math.min(x0, x1), Math.min(y0, y1), Math.abs(x1 - x0), Math.abs(y1 - y0)); g.moveTo(x0, y0); g.lineTo(x1, y1); g.moveTo(x0, y1); g.lineTo(x1, y0); } g.stroke(); } };
+    redraw();
+    const ready = () => { const s = $('#sgMarkSave'); if (s) s.disabled = !F.draft; };
+    cv.addEventListener('pointerdown', e => { e.preventDefault(); cv.setPointerCapture(e.pointerId); down = pt(e); if (F.marking === 'note') { cur = [down]; strokes.push(cur); } });
+    cv.addEventListener('pointermove', e => { if (!down) return; const p = pt(e); if (F.marking === 'note') { cur.push(p); if (cur.length > 400) cur.shift(); redraw(); } else redraw(down, p); });
+    const end = e => { if (!down) return; const p = pt(e);
+      if (F.marking === 'note') { if (cur && cur.length < 2) cur.push(p); F.draft = { kind: 'note', page: F.page, geometry: { strokes: strokes.slice(-60) } }; }
+      else if (F.marking === 'strike') F.draft = { kind: 'strike', page: F.page, geometry: { x0: Math.min(down[0], p[0]), x1: Math.max(down[0], p[0]), y: down[1] } };
+      else F.draft = { kind: 'cross', page: F.page, geometry: { x: Math.min(down[0], p[0]), y: Math.min(down[1], p[1]), w: Math.abs(p[0] - down[0]), h: Math.abs(p[1] - down[1]) } };
+      down = null; cur = null; if (F.marking !== 'note') redraw(); ready(); };
+    cv.addEventListener('pointerup', end); cv.addEventListener('pointercancel', end);
+  }
+
+  // in person: one purchaser's turn on Tim's device
+  async function viewSignTurn(sid, signerId) {
+    header('Signing', '', 0); actions(false);
+    main().innerHTML = '<div class="loading">Loading...</div>';
+    const g = await must(sb.from('offer_signings').select('*').eq('id', sid).single());
+    const [d, p, s, taps, rcs, rvs, marks] = await Promise.all([must(sb.from('offer_drafts').select('*').eq('id', g.draft_id).single()), must(sb.from('properties').select('id,address').eq('id', g.property_id).single()),
+      must(sb.from('offer_signers').select(SG_COLS + ',sig_png,init_png').eq('id', signerId).single()), ofSafe(sb.from('offer_sign_taps').select('place_id').eq('signer_id', signerId)),
+      ofSafe(sb.from('offer_sign_receipts').select('guide').eq('signer_id', signerId)), ofSafe(sb.from('offer_sign_reviews').select('places').eq('signing_id', sid)), ofSafe(sb.from('offer_sign_marks').select('*').eq('signing_id', sid))]);
+    let bytes; try { bytes = await drDraftBytes(d); } catch (e) { main().innerHTML = `<div class="view-pad"><p class="err">${esc(e.message)}</p></div>`; return; }
+    const allD = (await ofSafe(sb.from('offer_drafts').select('id,number').eq('offer_id', g.offer_id))) || [], o = await must(sb.from('property_offers').select('details,status').eq('id', g.offer_id).single());
+    const stale = g.status === 'replaced' || s.void_at ? 'This version has been replaced.' : (d.number !== Math.max(...allD.map(x => x.number)) || JSON.stringify(drCanon(o.details)) !== JSON.stringify(drCanon(d.details))) ? 'The offer has changed since this was released. Re-draft and release it again.' : s.finished_at ? `${s.name} has finished signing.` : ['complete', 'locked'].includes(g.status) ? 'Everyone has signed.' : null;
+    const ua = navigator.userAgent, P_ = { p_signer: signerId };
+    signFlow({ mode: 'person', address: p.address, name: s.name, position: s.position, places: (g.places || []).concat((rvs || []).flatMap(r => r.places || [])).filter(x => x.signer === s.position), taps: new Set((taps || []).map(t => t.place_id)),
+      consent_at: s.consent_at, receipts: (rcs || []).map(r => r.guide), sig_png: s.sig_png, init_png: s.init_png, status: g.status, stopped: stale, cca_pages: g.cca_pages || [], pages: g.pages, bytes, draftSha: g.draft_sha256, marks: marks || [],
+      api: { consent: () => sgRpc('agent_signing_consent', Object.assign({ p_ua: ua }, P_)), receipt: r => sgRpc('agent_signing_receipt', Object.assign({ p_guide: r.guide, p_version: r.version || null, p_file: r.file || null, p_sha256: r.sha256 || null, p_pages: r.pages || null }, P_)),
+        marks: (a, b) => sgRpc('agent_signing_marks', Object.assign({ p_sig: a, p_init: b }, P_)), tap: pl => sgRpc('agent_signing_tap', Object.assign({ p_place: pl }, P_)),
+        mark: m => sgRpc('agent_signing_mark', Object.assign({ p_kind: m.kind, p_page: m.page, p_geometry: m.geometry, p_target: m.target || null }, P_)), finish: o2 => sgRpc('agent_signing_finish', Object.assign({ p_id_sighted: o2.id, p_ua: ua }, P_)) },
+      reload: () => viewSignTurn(sid, signerId), back: () => viewSigning(sid), done: r => { toast(`${s.name} has finished`); viewSigning(sid); } });
+  }
+
+  // by link: the purchaser's own page (no account; the token, then a one-time code by email)
+  async function viewSignRemote(token) {
+    document.title = 'Sign your offer · McGuire Real Estate';
+    header('Sign your offer', '', 0); actions(false); $('#signOut').hidden = true;
+    main().innerHTML = '<div class="loading">Loading...</div>';
+    const call = async (action, extra) => { const r = await offerCall('offer-sign', Object.assign({ action, token, session: sgSes() }, extra || {})); if (!r || r.ok === false) { const e = new Error((r && r.error) || (r && r.reason === 'network' ? 'We couldn\'t reach the signing page just now. Check your connection and try again.' : 'That didn\'t work. Please try again.')); e.r = r; throw e; } return r; };
+    const key = 'sgSes:' + token.slice(0, 12), sgSes = () => { try { return sessionStorage.getItem(key) || ''; } catch (_) { return ''; } }, setSes = v => { try { v ? sessionStorage.setItem(key, v) : sessionStorage.removeItem(key); } catch (_) { } };
+    const closed = (t, why) => { main().innerHTML = `<div class="login-card" id="sgClosed"><h1>${esc(t)}</h1><p class="lede">${esc(why)}</p><p>Please call or text Tim on <a href="tel:0275627207">027 562 7207</a>, or email <a href="mailto:tim@mcguire.co.nz">tim@mcguire.co.nz</a>.</p></div>`; };
+    const info = await offerCall('offer-sign', { action: 'open', token });
+    if (!info || info.ok !== true) return closed('This link isn\'t working', info && info.reason === 'network' ? 'We couldn\'t reach the signing page just now. Check your connection and try again.' : 'It may have been replaced by a newer link, or it has run out.');
+    if (info.finished) return closed('You\'ve signed', 'Thank you. Tim has your signed offer. Nothing goes to the sellers until everyone has signed and Tim has checked it.');
+    if (info.stopped) return closed('This version isn\'t being signed', info.stopped);
+    if (!Object.keys(GUIDES).length) await Promise.race([loadGuides(), new Promise(r => setTimeout(r, 4000))]);
+    const start = async () => {
+      let st; try { st = await call('state'); } catch (e) { if (/code from your email/.test(e.message)) { setSes(''); return codeStep(); } return closed('Something went wrong', e.message); }
+      let bytes; try { bytes = new Uint8Array(await (await fetch(st.signing.draft_url)).arrayBuffer()); if (await REPO.sha256(bytes) !== st.signing.draft_sha256) throw new Error('x'); } catch (_) { return closed('The document didn\'t open', 'Check your connection and open the link again.'); }
+      const S = st.signer, G = st.signing;
+      signFlow({ mode: 'link', address: G.address, name: S.name, position: S.position, places: G.places || [], taps: new Set(st.taps || []), consent_at: S.consent_at, receipts: (S.receipts || []).map(r => r.guide), sig_png: S.sig_png, init_png: S.init_png,
+        status: G.status, stopped: G.stopped, cca_pages: G.cca_pages || [], pages: G.pages, bytes, draftSha: G.draft_sha256, marks: [],
+        api: { consent: () => call('consent'), receipt: r => call('receipt', r), marks: (a, b) => call('marks', { sig: a, init: b }), tap: pl => call('tap', { place: pl }), ask: t => call('ask', { text: t }), finish: () => call('finish') },
+        reload: start, done: r => { setSes(''); main().innerHTML = `<div class="login-card" id="sgThanks"><h1>Thank you, ${esc(S.name.split(' ')[0])}</h1><p class="lede">You've signed every place.${r && r.complete ? ' Everyone has now signed, and the signed copy is locked.' : ' Tim will let you know once everyone has signed.'}</p><p class="small">Nothing goes to the sellers until Tim has checked it. Any questions, call or text Tim on <a href="tel:0275627207">027 562 7207</a>.</p></div>`; top(); } });
+    };
+    const codeStep = (msg) => {
+      main().innerHTML = `<div class="login-card" id="sgCode"><h1>Kia ora ${esc(info.first)}</h1><p class="lede">Your offer for ${nt(info.address)} is ready to sign.</p>
+        <p class="small">First, a quick check that it's you. We'll email a 6-digit code to <span translate="no">${esc(info.email_hint)}</span>.</p>
+        <div class="toolbar"><button class="btn primary" type="button" id="sgSendCode">Email me a code</button></div>
+        <label class="f" for="sgCodeIn">The code from your email</label><input type="text" id="sgCodeIn" inputmode="numeric" autocomplete="one-time-code" maxlength="8">
+        <div class="toolbar"><button class="btn primary" type="button" id="sgCodeGo">Continue</button></div><p class="small" id="sgCodeMsg" role="status" aria-live="polite">${esc(msg || '')}</p></div>`;
+      $('#sgSendCode').addEventListener('click', async () => { const r = await offerCall('offer-sign', { action: 'send_code', token }); $('#sgCodeMsg').textContent = r && r.ok ? 'Sent. Check your email (and your junk folder). The code works once, for 15 minutes.' : r && r.reason === 'busy' ? 'Several codes have been sent in the last hour. Please wait a little, or call Tim.' : 'The code didn\'t send. Please try again, or call Tim.'; });
+      $('#sgCodeGo').addEventListener('click', async () => { const c = $('#sgCodeIn').value.trim(); const r = await offerCall('offer-sign', { action: 'verify', token, code: c });
+        if (r && r.ok && r.session) { setSes(r.session); return start(); }
+        $('#sgCodeMsg').textContent = r && r.reason === 'expired' ? 'That code has run out. Email yourself a new one.' : r && r.reason === 'tries' ? 'That was wrong too many times. Email yourself a new code.' : r && r.reason === 'no_code' ? 'Email yourself a code first.' : 'That code isn\'t right. Check it and try again.'; });
+      top();
+    };
+    if (sgSes()) start(); else codeStep();
+  }
+
   const offerToken = new URLSearchParams(location.search).get('offer');
   if (offerToken) { const w = $('#langWrap'); if (w) w.hidden = true; viewOfferPublic(offerToken); return; }
+  const signToken = new URLSearchParams(location.search).get('sign');
+  if (signToken) { const w = $('#langWrap'); if (w) w.hidden = true; viewSignRemote(signToken); return; }
   const lawyerToken = new URLSearchParams(location.search).get('lawyer');
   if (lawyerToken) { const w = $('#langWrap'); if (w) w.hidden = true; viewLawyer(lawyerToken); return; }
   window.addEventListener('hashchange', e => {

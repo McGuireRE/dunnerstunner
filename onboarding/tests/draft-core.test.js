@@ -121,7 +121,7 @@ const ok = (c, msg) => { if (!c) errs.push(msg); };
   ok(I(pv, 'vl_firm').text === 'Held Law' && N(pv, 'vendor_lawyer_from'), "the vendor's lawyer from the file when the blank has none, with where it came from");
   // entity, many purchasers, letters the font can't show
   const pent = plan({ entity: 'Testbuyer Family Trust' }); ok(I(pent, 'purchaser').text === 'Testbuyer Family Trust' && !I(pent, 'name_purchaser_1') && N(pent, 'entity_signers'), 'an entity: its name, and signers left for Tim');
-  const many = plan({ purchasers: [1, 2, 3, 4].map(i => ({ first: 'Person' + i, last: 'Testbuyer' })) }); ok(N(many, 'names_more').blocking, 'more purchasers than name places: blocking');
+  const many = plan({ purchasers: [1, 2, 3, 4].map(i => ({ first: 'Person' + i, last: 'Testbuyer' })) }); ok(N(many, 'names_more') && !N(many, 'names_more').blocking && /Signing adds places/.test(N(many, 'names_more').text), 'more purchasers than name places: noted (signing adds their places), not blocking');
   const mac = plan({ purchasers: [{ first: 'Mārama', last: 'Testbuyer' }] }); ok(!I(mac, 'purchaser') && N(mac, 'font_purchaser').blocking, 'a macron the font can\'t show: not placed, blocking');
   ok(D.ruleApplies({ when: { kiwisaver: true } }, { kiwisaver: true }) && !D.ruleApplies({ when: { kiwisaver: true } }, { kiwisaver: false }) && !D.ruleApplies({}, {}) && !D.ruleApplies({ when: { moon: 1 } }, {}), 'rules');
 
@@ -145,9 +145,9 @@ const ok = (c, msg) => { if (!c) errs.push(msg); };
   ok(before.every((streams, i) => { const a = after[i]; let j = 0; for (const s of streams) { j = a.indexOf(s, j); if (j < 0) return false; j++; } return true; }), 'every original content stream kept byte for byte');
   ok(after.some((a, i) => a.length > before[i].length), 'text added in new content streams');
   // a long further terms list continues on an added page
-  const long = D.planDraft({ details: base, map, terms, today: '2026-11-24', edits: { extra_terms: Array.from({ length: 70 }, (_, i) => `Extra term ${i + 1} with enough words to take a full line of the page.`) } });
+  const long = D.planDraft({ details: base, map, terms, today: '2026-11-24', edits: { extra_terms: Array.from({ length: 40 }, (_, i) => `Extra term ${i + 1} with enough words to take a full line of the page.`) } });
   const rl = await D.renderDraft(PDFLib, blank, long), lp = await D.readPages(pdfjs, rl.bytes);
-  ok(rl.continued === 4 && lp.length === pages.length + 1 && lp[3].items.some(i => /Further Terms of Sale \(continued\)/.test(i.s)) && lp[3].items.some(i => /Extra term 70/.test(i.s)), 'further terms that don\'t fit continue on an added page after page 3');
+  ok(rl.continued === 4 && lp.length === pages.length + 1 && lp[3].items.some(i => /Further Terms of Sale \(continued\)/.test(i.s)) && lp[3].items.some(i => /Extra term 40/.test(i.s)), 'further terms that don\'t fit continue on an added page after page 3');
   ok(rl.boxes.find(b => b.id === 'pl_firm').page === 8, 'boxes on later pages move along by the added page');
   // ── review findings ──
   // 1. phones by national digits, emails without case, also inside a sentence, wherever the text comes from

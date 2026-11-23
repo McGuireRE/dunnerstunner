@@ -410,7 +410,8 @@
     const nameSlots = byKey('name_purchaser');
     const signers = entity ? [] : names;
     signers.forEach((n, i) => { if (nameSlots[i]) put('name_purchaser_' + (i + 1), nameSlots[i], n, { label: 'Purchaser name ' + (i + 1) }); });
-    if (signers.length > nameSlots.length) need('names_more', `There are ${signers.length} purchasers and ${nameSlots.length} name places under the signatures. Add the others by hand or on a separate page.`, true);
+    // signing (phase 3) adds a signature and name place for each purchaser beyond the printed lines, beneath the others
+    if (signers.length > nameSlots.length) need('names_more', `There are ${signers.length} purchasers and ${nameSlots.length} name places under the signatures. Signing adds places for the others beneath, with their names. Check there is room on that page.`, false);
     if (entity) need('entity_signers', `The purchaser is ${entity}. Fill in who signs for it, and which of Director, Trustee and so on applies, under the signatures.`, false);
     // GST: the front page asks about the vendor's registration: always yours. Schedule 1, 2(a) is the purchaser's: only if they said.
     need('gst_vendor', "GST on the front page is the vendor's registration: fill it in yourself.", false);
@@ -519,7 +520,7 @@
     if (ft.length) {
       const text = ft.map(x => { ftn++; const edited = Object.prototype.hasOwnProperty.call(edits, x.id) ? String(edits[x.id] || '') : null; const body = edited != null ? edited : x.text; x.number = ftn; x.text = body;
         return `${ftn}. ${x.title}${x.detail ? ' (' + x.detail + ')' : ''}: ${body}${x.date && !/\{date\}/.test(body) ? ' Condition date: ' + x.date + '.' : ''}`; });
-      const it = put('further_terms', ftp, text.join('\n'), { label: 'Further terms of sale', item: { terms: ft.map(x => ({ id: x.id, number: x.number, title: x.title, text: x.text, placeholder: isPlaceholder(x.text), custom: !!x.custom, request: x.request, wording: x.wording, ai: x.ai })) } });
+      const it = put('further_terms', ftp, text.join('\n'), { label: 'Further terms of sale', item: { term_texts: text, terms: ft.map(x => ({ id: x.id, number: x.number, title: x.title, text: x.text, placeholder: isPlaceholder(x.text), custom: !!x.custom, request: x.request, wording: x.wording, ai: x.ai })) } });
       ft.filter(x => isPlaceholder(x.text)).forEach(x => need('ph_' + x.id, `Further term ${x.number}, ${x.title}: ${x.text}`, true));
     }
     // the lawyers' details, and only theirs: never a purchaser's or vendor's own phone or email
@@ -592,14 +593,27 @@
         boxes.push({ id: it.id, page: it.page, x: it.x, y: it.y - (lines_.length - 1) * size * 1.2 - 2, w: Math.max(...lines_.map(l => font.widthOfTextAtSize(l, size))), h: lines_.length * size * 1.2 + 2, kind: 'text', label: it.label, placeholder: !!it.placeholder });
         continue;
       }
-      // an area: wrapped lines from the top down; any that don't fit continue on an added page (further terms only)
-      const all = wrap(font, it.text, size, it.w); let fit = Math.max(1, Math.floor((it.h - size) / lh) + 1);
+      // an area: wrapped lines from the top down; any that don't fit continue on an added page (further terms only). Further terms
+      // are written one term at a time with a blank line after each, where the parties initial it (signing, phase 3); each line
+      // remembers its term, so the term's place on the page is known.
+      const ftl = it.key === 'further_terms' && Array.isArray(it.term_texts) && it.terms && it.terms.length === it.term_texts.length;
+      const all = ftl ? it.term_texts.flatMap((tt, k) => wrap(font, tt, size, it.w).map(s => ({ s, term: it.terms[k].number })).concat([{ s: '', term: it.terms[k].number, gap: true }])) : wrap(font, it.text, size, it.w);
+      let fit = Math.max(1, Math.floor((it.h - size) / lh) + 1);
       if (it.key === 'further_terms' && all.length > fit) fit = Math.max(1, fit - 1);   // the last line is kept for the "continued" note
-      const here = all.slice(0, fit), rest = all.slice(fit);
-      const drawLines = (p, ls, x, y0, pageNo) => { ls.forEach((ln, i) => { const y = y0 - i * lh; const ph = /\[Tim to [^\]]*\]/.exec(ln);
+      const here = all.slice(0, fit); let rest = all.slice(fit);
+      if (ftl && rest.every(l => l.gap)) rest = [];   // only the blank line after the last term is left over: no page is added for it
+      const txt = l => typeof l === 'string' ? l : l.s;
+      // where each further term sits on a page: its lines, and the blank line after it (for the initials)
+      const termBoxes = (ls, x, y0, pageNo, w) => { const seen = new Map(); ls.forEach((l, i) => { if (typeof l === 'string') return; const y = y0 - i * lh;
+          if (!seen.has(l.term)) seen.set(l.term, { top: y + size, bottom: y - 2, gap: null });
+          const t = seen.get(l.term); if (l.gap) t.gap = { x, y: y - 2, w, h: lh }; else t.bottom = y - 2; });
+        seen.forEach((t, num) => boxes.push({ id: it.id + '#t' + num, page: pageNo, x, y: t.bottom, w, h: t.top - t.bottom, kind: 'term', number: num, gap: t.gap, label: it.label + ': term ' + num })); };
+      const drawLines = (p, ls, x, y0, pageNo) => { ls.forEach((l, i) => { const ln = txt(l); if (!ln) return; const y = y0 - i * lh; const ph = /\[Tim to [^\]]*\]/.exec(ln);
           if (ph) { const pre = ln.slice(0, ph.index); pg_hl(p, x + font.widthOfTextAtSize(pre, size) - 1, y - 2, font.widthOfTextAtSize(ph[0], size) + 2, size + 2); }
           p.drawText(ln, { x, y, size, font, color: ink }); });
-        boxes.push({ id: it.id, page: pageNo, x, y: y0 - (ls.length - 1) * lh - 2, w: it.w, h: (ls.length - 1) * lh + size + 4, kind: 'area', label: it.label, placeholder: ls.some(l => /\[Tim to /.test(l)) }); };
+        let n = ls.length; while (n > 1 && !txt(ls[n - 1])) n--;   // the box covers the written lines (not the trailing blank one)
+        boxes.push({ id: it.id, page: pageNo, x, y: y0 - (n - 1) * lh - 2, w: it.w, h: (n - 1) * lh + size + 4, kind: 'area', label: it.label, placeholder: ls.some(l => /\[Tim to /.test(txt(l))) });
+        if (ftl) termBoxes(ls, x, y0, pageNo, it.w); };
       const pg_hl = (p, x, y, w, h) => p.drawRectangle({ x, y, width: w, height: h, color: hl });
       drawLines(pg, here, it.x, it.y, it.page);
       if (rest.length) {
@@ -622,10 +636,13 @@
         np.drawText('Further Terms of Sale (continued)', { x: 40, y: h - 60, size: 13, font: bold, color: ink });
         np.drawText(`Continued from page ${it.page}.`, { x: 40, y: h - 76, size: 8, font, color: ink });
         const ls = left.slice(0, n); left = left.slice(n);
-        ls.forEach((ln, i) => { const y = h - 100 - i * lh, ph = /\[Tim to [^\]]*\]/.exec(ln);
+        const T = l => typeof l === 'string' ? l : l.s;
+        ls.forEach((l, i) => { const ln = T(l); if (!ln) return; const y = h - 100 - i * lh, ph = /\[Tim to [^\]]*\]/.exec(ln);
           if (ph) np.drawRectangle({ x: 40 + font.widthOfTextAtSize(ln.slice(0, ph.index), size) - 1, y: y - 2, width: font.widthOfTextAtSize(ph[0], size) + 2, height: size + 2, color: hl });
           np.drawText(ln, { x: 40, y, size, font, color: ink }); });
-        boxes.push({ id: it.id + '_cont' + added, page: -at, x: 40, y: h - 100 - (ls.length - 1) * lh - 2, w: w - 80, h: (ls.length - 1) * lh + size + 4, kind: 'area', label: it.label + ' (continued)', placeholder: ls.some(l => /\[Tim to /.test(l)) });
+        boxes.push({ id: it.id + '_cont' + added, page: -at, x: 40, y: h - 100 - (ls.length - 1) * lh - 2, w: w - 80, h: (ls.length - 1) * lh + size + 4, kind: 'area', label: it.label + ' (continued)', placeholder: ls.some(l => /\[Tim to /.test(T(l))) });
+        if (typeof ls[0] !== 'string') { const seen = new Map(); ls.forEach((l, i) => { const y = h - 100 - i * lh; if (!seen.has(l.term)) seen.set(l.term, { top: y + size, bottom: y - 2, gap: null }); const t = seen.get(l.term); if (l.gap) t.gap = { x: 40, y: y - 2, w: w - 80, h: lh }; else t.bottom = y - 2; });
+          seen.forEach((t, num) => boxes.push({ id: it.id + '#t' + num, page: -at, x: 40, y: t.bottom, w: w - 80, h: t.top - t.bottom, kind: 'term', number: num, gap: t.gap, label: it.label + ': term ' + num })); }
       }
       boxes.forEach(b => { if (b.page < 0) b.page = -b.page; else if (b.page > it.page) b.page += added; });
     }
@@ -634,7 +651,17 @@
     return { bytes, boxes, continued, overflow };
   }
 
-  const DRAFT = { EDITIONS, EDITION_RE, editionOk, readPages, lines, xAt, matchAll, readEdition, editionPages, buildMap, parseChattels, numberIn, daysWords, FRONT_CONDITIONS, LABELS,
+  // what a draft placed, where, as filed with it (offer_drafts.placed): each item with its boxes on the page, the map place it filled
+  // (so signing groups a struck line and the words beside it as one change), and for the further terms, where each term sits and
+  // the blank line after it (where each party initials it)
+  function placedFrom(plan, r) {
+    const rb = x => ({ page: x.page, x: Math.round(x.x * 10) / 10, y: Math.round(x.y * 10) / 10, w: Math.round(x.w * 10) / 10, h: Math.round(x.h * 10) / 10 });
+    return plan.items.map(it => { const bx = r.boxes.filter(x => x.id === it.id || x.id.startsWith(it.id + '_cont'));
+      const tb = it.id === 'further_terms' ? r.boxes.filter(x => x.kind === 'term').map(x => Object.assign(rb(x), { number: x.number, gap: x.gap ? rb(Object.assign({ page: x.page }, x.gap)) : null })) : undefined;
+      return { id: it.id, place: it.place || null, key: it.key || null, label: it.label, kind: it.kind, text: it.text || null, value: it.value || null, placeholder: !!it.placeholder, edited: !!it.edited, terms: it.terms, boxes: bx.map(rb), term_boxes: tb }; });
+  }
+
+  const DRAFT = { placedFrom, EDITIONS, EDITION_RE, editionOk, readPages, lines, xAt, matchAll, readEdition, editionPages, buildMap, parseChattels, numberIn, daysWords, FRONT_CONDITIONS, LABELS,
     packText, packBatches, placeFromProposal, rectOf, nsn, phoneRuns, ownContacts, holdsOwn, pickVendorLawyer, PROPOSAL_KINDS, planDraft, ruleApplies, fullDate, PLACEHOLDERS, placeholderFor, isPlaceholder, winAnsi, renderDraft, wrap, INK, FONT_SIZE };
   if (typeof module !== 'undefined' && module.exports) module.exports = DRAFT; else root.DRAFT = DRAFT;
 })(typeof window !== 'undefined' ? window : globalThis);

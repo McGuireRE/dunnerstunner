@@ -1,7 +1,8 @@
 // A made-up stand-in for a REINZ agreement blank, made at test time (the real form is copyright and holds real names, so it is
 // never copied into the repository). It puts the printed labels the drafting anchors on in the same relative places as the
 // Eleventh Edition 2022 (4) pack, with filler text and invented names around them. Nothing here is the form's wording.
-// make({ edition, clause22: false, filledDeposit, filledSettlement, twoLineSettlement, printedTerms, vendorLawyer: false })
+// make({ edition, clause22: false, filledDeposit, filledSettlement, twoLineSettlement, printedTerms, vendorLawyer: false, cca: true })
+// cca: a synthetic Client and Customer Acknowledgement page in the pack (page 10, before the inserted page), for signing (phase 3)
 // Only the short label words the anchor finder needs are used; everything else is made-up filler. -> Uint8Array
 const { PDFDocument, StandardFonts, rgb } = require('/opt/npm-tools/node_modules/pdf-lib');
 async function make(o) {
@@ -77,6 +78,7 @@ async function make(o) {
   // 9. a pack page: an acknowledgement with a witness block
   if (o.pack) { page(); t('Synthetic pack page', 120, 760, 13, true); t('Property Address: 1 Example Road, Testville', 30, 740);
     t('The purchaser acknowledges the synthetic LIM report filler has been received.', 30, 700); t('The purchaser acknowledges the synthetic as is where is filler.', 30, 680); t('Witnessed filler:', 30, 600); t('Date:', 330, 600);
+    if (o.cca) { page(); t('CLIENT AND CUSTOMER ACKNOWLEDGEMENT', 120, 760, 13, true); t('Synthetic filler about the agent acting for the vendor.', 30, 730); t('Synthetic filler about the guide.', 30, 715); }
     pg = doc.addPage([W, H]); n++; t('A synthetic inserted LIM page without the edition string.', 30, 760); }
   return await doc.save();
 }
