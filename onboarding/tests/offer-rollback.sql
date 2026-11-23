@@ -3,7 +3,7 @@
 -- The output is the exception message: refusals read in lower case; a line in CAPITALS means something that should have been
 -- refused was allowed, or a value was wrong. Roles: the agent and a vendor are simulated with request.jwt.claims and the
 -- authenticated role; the edge function with service_role; a buyer's browser with anon.
--- Last run: 23 November 2026, on a local PostgreSQL 16 with a minimal Supabase-like setup (roles anon, authenticated, service_role;
+-- Last run: 23 November 2026 (after the first review), on a local PostgreSQL 16 with a minimal Supabase-like setup (roles anon, authenticated, service_role;
 -- auth.jwt(); pgcrypto in extensions; agents, properties, property_people; migration 010 applied first): every line as expected, no
 -- CAPITALS. The run on the live project hwpwyjxhdvlqrjwzxzqz was refused at the confirmation step, so nothing ran there and it is
 -- still to do before the migration is applied.
@@ -91,8 +91,23 @@ begin
   -- 5. rate limits: 3 per network in 10 minutes, then a different network still gets through; 6 per link in 10 minutes
   n := 0; for i in 1..4 loop r := public.offer_public_submit(tok, good, '203.0.113.9'); if (r ->> 'ok')::boolean then n := n + 1; else x := r ->> 'reason'; end if; end loop;
   out := out || 'one network: ' || n || ' of 4 (then ' || x || '); ';
-  r := public.offer_public_submit(tok, good, '203.0.113.10'); out := out || 'per link after ' || public.offer_hit_count('submit', null, pid, interval '10 minutes') || ': ' || coalesce(r ->> 'reason', 'ok') || '; ';
-  r := public.offer_public_submit(tok, good, '203.0.113.11'); out := out || 'next: ' || coalesce(r ->> 'reason', 'ok') || '; ';
+  -- a busy day: ten buyers on ten networks, one property, within ten minutes: every one gets through
+  n := 0; for i in 1..10 loop r := public.offer_public_submit(tok, good, '198.18.0.' || i); if (r ->> 'ok')::boolean then n := n + 1; end if; end loop;
+  out := out || 'ten networks: ' || n || ' of 10 (property now at ' || public.offer_hit_count('submit', null, pid, interval '10 minutes') || '); ';
+  -- the property's own limit (60 in ten minutes), then the site's (1000 a day): each refusal says which
+  execute 'reset role';
+  insert into public.offer_hits (kind, net, property_id, at) select 'submit', 'filler', pid, now() from generate_series(1, 60 - public.offer_hit_count('submit', null, pid, interval '10 minutes'));
+  execute 'set local role service_role';
+  out := out || 'property cap: ' || (public.offer_public_submit(tok, good, '198.18.1.1') ->> 'reason');
+  execute 'reset role'; delete from public.offer_hits where net = 'filler';
+  insert into public.offer_hits (kind, net, property_id, at) select 'submit', 'filler', null, now() from generate_series(1, 1000);
+  execute 'set local role service_role';
+  out := out || ' site cap: ' || (public.offer_public_submit(tok, good, '198.18.1.2') ->> 'reason');
+  execute 'reset role'; delete from public.offer_hits where net = 'filler'; execute 'set local role service_role';
+  out := out || ' after: ' || coalesce(public.offer_public_submit(tok, good, '198.18.1.3') ->> 'reason', 'ok') || '; ';
+  -- the hidden field filled: kept, flagged, the buyer told the truth (received)
+  r := public.offer_public_submit(tok, good, '198.18.2.1', true);
+  out := out || 'spam: ok=' || (r ->> 'ok') || ' flagged=' || (select suspected_spam from public.property_offers where id = (r ->> 'id')::uuid) || '; ';
 
   -- 6. switched off, then a new token: the old one stops at once
   execute 'reset role'; execute 'set local role authenticated'; perform set_config('request.jwt.claims', agent, true);
@@ -116,7 +131,8 @@ begin
   execute 'reset role'; update public.offer_settings set ai_daily_cap = 40; execute 'set local role service_role';
   -- 8. a network trying many tokens is stopped, even with a good one
   for i in 1..30 loop perform public.offer_public_info('Z' || lpad(i::text, 42, 'q'), '192.0.2.99'); end loop;
-  out := out || 'guessing: ' || public.offer_public_info(tok2, '192.0.2.99')::text || ' other network ok=' || (public.offer_public_info(tok2, '192.0.2.98') ->> 'ok') || '; ';
+  for i in 1..5 loop perform public.offer_public_info('Y' || lpad(i::text, 42, 'q'), '192.0.2.99'); end loop;
+  out := out || 'guessing: bad recorded=' || public.offer_hit_count('bad', public.offer_net('192.0.2.99'), null, interval '1 hour') || ' good link from the same network ok=' || (public.offer_public_info(tok2, '192.0.2.99') ->> 'ok') || '; ';
 
   -- 9. the record can't be changed directly; Tim's functions keep a trail
   begin update public.property_offers set submission = '{}'::jsonb where id = oid; out := out || 'SUBMISSION CHANGED; '; exception when others then out := out || 'submission: ' || sqlerrm || '; '; end;
@@ -124,7 +140,16 @@ begin
   execute 'reset role'; execute 'set local role authenticated'; perform set_config('request.jwt.claims', agent, true);
   begin update public.property_offers set amount = 1, details = '{}'::jsonb where id = oid; out := out || 'DIRECT EDIT; '; exception when others then out := out || 'direct edit: ' || sqlerrm || '; '; end;
   begin insert into public.property_offers (property_id, source, submission) values (pid, 'buyer', '{}'); out := out || 'DIRECT FORM INSERT; '; exception when others then out := out || 'direct insert: ' || sqlerrm || '; '; end;
-  insert into public.property_offers (property_id, buyer_ref, amount) values (pid, 'manual row', 5); out := out || 'manual rows still fine; ';
+  insert into public.property_offers (property_id, buyer_ref, amount) values (pid, 'manual row', 5) returning id into oid; out := out || 'manual rows still fine; ';
+  update public.property_offers set amount = 6, notes = 'ok' where id = oid; out := out || 'manual row edited; ';
+  begin update public.property_offers set submission = '{"x":1}' where id = oid; out := out || 'SUBMISSION ATTACHED TO MANUAL; '; exception when others then out := out || 'attach: ' || sqlerrm || '; '; end;
+  begin update public.property_offers set details = '{"x":1}' where id = oid; out := out || 'DETAILS ATTACHED TO MANUAL; '; exception when others then out := out || 'attach details: ' || sqlerrm || '; '; end;
+  select id into oid from public.property_offers where source = 'buyer' and property_id = pid order by received_at limit 1;
+  update public.property_offers set notes = 'Called them', expires_at = now() + interval '1 day' where id = oid; out := out || 'form offer notes and expiry editable; ';
+  foreach x in array array['notified_at', 'notify_error', 'read_by', 'status_by', 'lawyer_approval', 'suspected_spam'] loop
+    begin execute format('update public.property_offers set %I = %s where id = %L', x, case when x like '%_at' then 'now()' when x in ('lawyer_approval', 'suspected_spam') then 'not coalesce(' || x || ', false)' else quote_literal('x') end, oid);
+      out := out || upper(x) || ' CHANGED DIRECTLY; '; exception when others then out := out || x || ' locked; '; end;
+  end loop;
   begin perform public.agent_offer_correct(oid, good, 'x'); out := out || 'NO NOTE OK; '; exception when others then out := out || 'note: ' || sqlerrm || '; '; end;
   perform public.agent_offer_correct(oid, good || jsonb_build_object('price', 660000, 'settlement', jsonb_build_object('kind', 'relative', 'days', 20)), 'Buyer rang: price up and 20 days');
   out := out || 'corrected: ' || (select concat_ws(' ', amount, details -> 'settlement' ->> 'days', submission ->> 'price', submission -> 'settlement' ->> 'days') from public.property_offers where id = oid)
@@ -167,9 +192,11 @@ begin
   begin perform public.offer_public_info(tok2, '1.1.1.1'); out := out || 'ANON INFO; '; exception when others then out := out || 'anon info: ' || sqlerrm || '; '; end;
   execute 'reset role';
   out := out || 'grants: anon clean=' || has_function_privilege('anon', 'public.offer_clean(jsonb, boolean)', 'execute') || ' auth clean=' || has_function_privilege('authenticated', 'public.offer_clean(jsonb, boolean)', 'execute')
-    || ' auth submit=' || has_function_privilege('authenticated', 'public.offer_public_submit(text, jsonb, text)', 'execute') || ' service submit=' || has_function_privilege('service_role', 'public.offer_public_submit(text, jsonb, text)', 'execute')
+    || ' auth submit=' || has_function_privilege('authenticated', 'public.offer_public_submit(text, jsonb, text, boolean)', 'execute') || ' service submit=' || has_function_privilege('service_role', 'public.offer_public_submit(text, jsonb, text, boolean)', 'execute')
     || ' anon agent fn=' || has_function_privilege('anon', 'public.agent_offer_add(uuid, jsonb)', 'execute') || ' rls=' || (select string_agg(relname || ':' || relrowsecurity, ',' order by relname) from pg_class where relname in ('offer_links', 'offer_settings', 'offer_clauses', 'offer_events', 'offer_hits') and relnamespace = 'public'::regnamespace)
     || ' event fixed=' || (select count(*) from pg_trigger where tgname = 'guard_offer_event') || '; ';
   begin update public.offer_events set actor = 'x' where offer_id = oid; out := out || 'EVENT CHANGED; '; exception when others then out := out || 'event: ' || sqlerrm || '; '; end;
+  begin truncate public.offer_events; out := out || 'EVENTS TRUNCATED; '; exception when others then out := out || 'truncate events: ' || sqlerrm || '; '; end;
+  begin truncate public.property_offers cascade; out := out || 'OFFERS TRUNCATED; '; exception when others then out := out || 'truncate offers: ' || sqlerrm || '; '; end;
   raise exception 'ROLLBACK %', out;
 end $t$;

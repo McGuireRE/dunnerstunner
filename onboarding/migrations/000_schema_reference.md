@@ -200,7 +200,7 @@ agreements/<agreement id>/signatures/... (vendors may upload their own signature
   `/wellbeing/`. `path` is `config/main` or `days/YYYY-MM-DD`. One policy, `wb_own`: the signed-in agent reads and writes
   only their own rows. Vendors and anon have no access. `wellbeing_touch` trigger sets `updated_at`.
 
-## 018 The offer form (offers phase 1, 23 November 2026; written and tested in a rollback block on the live project, to be applied with Tim's OK)
+## 018 The offer form (offers phase 1, 23 November 2026; written and tested in a rollback block on a local PostgreSQL stand-in, NOT yet on the live project. The live rollback run must happen, with Tim's approval, before 018 is applied)
 - `offer_links` (property_id, token 43 url-safe characters, open (default false), province (holidays for working days), chattels
   (the list Tim types; buyers see it), opened_at, closed_at, regenerated_at, updated_by). Agent reads; nobody writes directly.
 - `offer_settings` (one row: ks_warn_working_days default 15, ai_daily_cap default 40, net_salt never readable by signed-in users).
@@ -210,15 +210,20 @@ agreements/<agreement id>/signatures/... (vendors may upload their own signature
 - `offer_hits`: rate limiting for the public door (hashed network address only). No policy at all; kept two days.
 - `property_offers` gains source (manual, buyer, agent), submission (what was sent, never changed), details (as it stands),
   kiwisaver, lawyer_approval, needs_date_help, related_party, province, as_at, read_at/by, status_at/by, gap_override_reason/by/at,
-  net_hash, notified_at, notify_error. `guard_offer`: no offer is ever deleted; submission, source, property and net_hash never
-  change; a form offer changes only through the functions below. Rows from 010 ('manual') behave as before.
+  net_hash, notified_at, notify_error, suspected_spam (the form's hidden field was filled: kept, shown apart, nobody emailed).
+  `guard_offer`: no offer is ever deleted; submission, source, property and net_hash never change; outside the functions a form
+  offer may change only notes and expires_at; a 'manual' row (010) can't later be given a submission, details or the spam flag.
+  `offer_events` and `property_offers` can't be truncated (statement triggers).
+- Rate limits (offer_public_submit): 3 per network in 10 minutes and 10 a day; 60 per property in 10 minutes and 200 a day; 1000
+  a day across all properties. Refusals name the limit (busy_network, busy_property, busy_site). Tokens that aren't live are
+  counted per network (at most 30 an hour recorded) and never block a live token.
 - Offer details (jsonb, `offer_clean`): email, phone (the buyer's own, never on the agreement), seen_docs, sign, price, settlement
   ({kind relative, days} or {kind date, date}), conditions ([{key, days or date, detail, wording, request, ai}]), lawyer_approval,
   sale_address, kiwisaver, entity, nominee, purchasers ([{first, last, email, phone}], 1 to 12), comments, lawyer ({firm, person,
   email, phone}, kept apart from the buyer's details), related, date_help, privacy, chattels_add, chattels_exclude,
   chattels_listed (from the link, never the page), gst_registered, gst_number, v.
 - Public door, service role only (the offer-public edge function): `offer_public_info(token, net)`, `offer_public_submit(token,
-  offer, net)`, `offer_public_ai_claim(token, net)`, `offer_public_notified(offer, error)`. Anon and signed-in users can run none.
+  offer, net, spam)`, `offer_public_ai_claim(token, net)`, `offer_public_notified(offer, error)`. Anon and signed-in users can run none.
 - Tim: `agent_offer_link(property, action get|open|close|regenerate|province, province)` (open only at signed, live or under
   offer), `agent_offer_add`, `agent_offer_correct(offer, details, note)`, `agent_offer_status(offer, withdrawn|lapsed|received, at,
   note)`, `agent_offer_read`, `agent_offer_gap(offer, reason)`, `agent_offer_settings(ks_days)`, `agent_offer_clause(key, wording)`,

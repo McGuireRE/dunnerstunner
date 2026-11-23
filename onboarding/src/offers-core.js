@@ -53,6 +53,8 @@
 
   // Provincial anniversary days, as observed. Otago (Dunedin and the rest of Otago) is the usual one for Tim's listings.
   const PROVINCES = {
+    // Otago: the Monday nearest 23 March. When that Monday is Easter Monday (next in 2035), we take the Tuesday after. This is
+    // NOT confirmed: Tim decides (see OFFERS-PLAN.md). It affects only clash years such as 2035.
     otago: { name: 'Otago', day: y => { const d = mondayNearest(y, 3, 23); const em = addDays(easterSunday(y), 1); return d === em ? addDays(d, 1) : d; } },
     southland: { name: 'Southland', day: y => addDays(easterSunday(y), 2) },   // Easter Tuesday
     canterbury: { name: 'Canterbury (Christchurch Show Day)', day: y => addDays(nthWeekday(y, 11, 2, 1), 10) },   // the second Friday after the first Tuesday in November
@@ -162,10 +164,44 @@
   };
   const depositText = ks => ks === true ? DEPOSIT.yes : ks === false ? DEPOSIT.no : '';
 
+  /* ───── the price ───── */
+  // What the buyer typed, as a number: digits with optional $ and commas, or a short form such as 650k or $1.2m. NaN when it
+  // can't be read for certain (then the form asks for the full number).
+  function parsePrice(v) {
+    const t = String(v ?? '').trim().toLowerCase().replace(/[$,\s]/g, '').replace(/nzd$/, '');
+    const m = /^(\d+(?:\.\d+)?)(k|m)?$/.exec(t); if (!m) return NaN;
+    const n = +m[1] * (m[2] === 'k' ? 1e3 : m[2] === 'm' ? 1e6 : 1);
+    return Math.round(n * 100) / 100;
+  }
+  const ONES = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen'];
+  const TENS = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'];
+  function under1000(n) {
+    const h = Math.floor(n / 100), r = n % 100, parts = [];
+    if (h) parts.push(ONES[h] + ' hundred');
+    if (r) parts.push((h ? 'and ' : '') + (r < 20 ? ONES[r] : TENS[Math.floor(r / 10)] + (r % 10 ? '-' + ONES[r % 10] : '')));
+    return parts.join(' ');
+  }
+  // an amount in words, New Zealand style: 650000 -> "six hundred and fifty thousand dollars"
+  function priceWords(n) {
+    if (!(n >= 1) || n > 1e9) return '';
+    let d = Math.floor(n); const c = Math.round((n - d) * 100); const out = [];
+    [[1e9, 'billion'], [1e6, 'million'], [1e3, 'thousand']].forEach(([v, w]) => { const q = Math.floor(d / v); if (q) { out.push(under1000(q) + ' ' + w); d %= v; } });
+    if (d) out.push((out.length && d < 100 ? 'and ' : '') + under1000(d));
+    return out.join(' ') + (Math.floor(n) === 1 ? ' dollar' : ' dollars') + (c ? ' and ' + under1000(c) + (c === 1 ? ' cent' : ' cents') : '');
+  }
+
   /* ───── the date checks ───── */
   const GAP_DAYS = 7;          // the last condition date must be at least a week before settlement
   const KS_DAYS_DEFAULT = 15;  // KiwiSaver: warn when settlement is fewer working days than this after the agreement goes unconditional
   const SETTLE_DAYS_DEFAULT = 15;   // the blank's own settlement: fifteen working days from confirmation
+  // a chosen date inside the Christmas and New Year break: plain words and the first working day after it ('' otherwise)
+  function breakNote(iso, opts) {
+    if (!isDate(iso)) return ''; const [, m, dd] = iso.split('-').map(Number);
+    if (!((m === 12 && dd >= 24) || (m === 1 && dd <= (opts && opts.lim ? 15 : 5)))) return '';
+    let d = toN(iso); while (!isWorkingDay(toIso(d), opts)) d++;
+    const lim = opts && opts.lim;
+    return `${longDate(iso)} falls in the Christmas break (24 December to ${lim ? '15' : '5'} January${lim ? ' for the LIM date' : ''}), which doesn't count as working days. The first working day after it is ${longDate(toIso(d))}.`;
+  }
   // when a condition falls: { date, days, adjusted } from either a number of working days or a chosen date, counted from asAt
   function conditionDate(c, asAt, province) {
     const info = condInfo(c.key) || {}, o = { province, lim: !!info.lim };
@@ -182,7 +218,7 @@
       const r = conditionDate(c, asAt, province); const info = condInfo(c.key) || { label: c.key };
       out.conditions.push(Object.assign({ key: c.key, label: info.label }, r || {}));
       if (!r) out.problems.push({ key: c.key, kind: 'cond_missing', text: `Add the working days or a date for ${info.label}.` });
-      else if (r.date <= asAt) out.problems.push({ key: c.key, kind: 'cond_past', text: `The date for ${info.label} needs to be after today.` });
+      else if (r.date <= asAt) { const bn = c.date ? breakNote(c.date, { province, lim: !!info.lim }) : ''; out.problems.push({ key: c.key, kind: 'cond_past', text: bn ? `${info.label}: ${bn} Please pick that day or later.` : `The date for ${info.label} needs to be after today.` }); }
     });
     const dated = out.conditions.filter(c => c.date);
     if (dated.length) { out.lastCondition = dated.map(c => c.date).sort().pop(); out.confirmation = out.lastCondition; }
@@ -191,7 +227,7 @@
     else if (s.kind === 'relative' && Math.floor(+s.days) >= 1) out.settlement = addWorkingDays(out.confirmation, Math.floor(+s.days), { province });
     if (s.kind === 'date' && s.date && isDate(s.date) && out.settlement !== s.date) out.settlementAdjusted = true;
     if (!out.settlement) out.problems.push({ key: 'settlement', kind: 'settle_missing', text: 'Choose your settlement date.' });
-    else if (out.settlement <= asAt) out.problems.push({ key: 'settlement', kind: 'settle_past', text: 'Settlement needs to be after today.' });
+    else if (out.settlement <= asAt) { const bn = s.kind === 'date' ? breakNote(s.date, { province }) : ''; out.problems.push({ key: 'settlement', kind: 'settle_past', text: bn ? `Settlement: ${bn} Please pick that day or later.` : 'Settlement needs to be after today.' }); }
     if (out.settlement && out.lastCondition) {
       out.gapDays = daysBetween(out.lastCondition, out.settlement); out.gapOk = out.gapDays >= GAP_DAYS;
       if (!out.gapOk) out.problems.push({ key: 'gap', kind: 'gap', text: `Your last condition date (${longDate(out.lastCondition)}) needs to be at least a week before settlement (${longDate(out.settlement)}).` });
@@ -222,7 +258,8 @@
     need(PHONE_RE.test(s(f.phone)), 'phone', 'Add the best phone number for you.');
     need(f.seen_docs === 'yes' || f.seen_docs === 'no', 'seen_docs', 'Let us know whether you have seen the property documents.');
     need(f.sign === 'digital' || f.sign === 'in_person', 'sign', 'Choose how you would like to sign.');
-    const price = +String(f.price ?? '').replace(/[^0-9.]/g, ''); need(price >= 1 && price <= LIMITS.price, 'price', 'Add your offer price.');
+    const price = parsePrice(f.price); need(String(f.price ?? '').trim() === '' || !isNaN(price), 'price', 'Please type the price in numbers, for example 650000 or 650k.');
+    need(isNaN(price) || (price >= 1 && price <= LIMITS.price), 'price', 'Add your offer price.'); need(String(f.price ?? '').trim() !== '', 'price', 'Add your offer price.');
     need(f.kiwisaver === true || f.kiwisaver === false, 'kiwisaver', 'Let us know whether any KiwiSaver funds go into the deposit.');
     need(f.related === true || f.related === false, 'related', 'Let us know whether any purchaser is connected with Tim or McGuire Real Estate.');
     const ps = Array.isArray(f.purchasers) ? f.purchasers : [];
@@ -252,6 +289,6 @@
 
   const OFFERS = { ISO_RE, toN, toIso, addDays, daysBetween, isDate, nzToday, dow, easterSunday, mondayNearest, nthWeekday, MATARIKI, EXTRA_HOLIDAYS, FIRST_YEAR, LAST_YEAR, PROVINCES, DEFAULT_PROVINCE, provinceFor,
     holidays, notWorkingBecause, isWorkingDay, yearKnown, addWorkingDays, countWorkingDays, onOrBefore, CONDITIONS, CUSTOM, condInfo, wordingFor, NO_WORDING, DEPOSIT, depositText,
-    ADVICE, CHATTEL_NOTE, GAP_DAYS, KS_DAYS_DEFAULT, SETTLE_DAYS_DEFAULT, conditionDate, checkDates, longDate, LIMITS, EMAIL_RE, PHONE_RE, validate, conditionsLine };
+    ADVICE, CHATTEL_NOTE, parsePrice, priceWords, breakNote, GAP_DAYS, KS_DAYS_DEFAULT, SETTLE_DAYS_DEFAULT, conditionDate, checkDates, longDate, LIMITS, EMAIL_RE, PHONE_RE, validate, conditionsLine };
   if (typeof module !== 'undefined' && module.exports) module.exports = OFFERS; else root.OFFERS = OFFERS;
 })(typeof window !== 'undefined' ? window : globalThis);

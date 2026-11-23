@@ -118,7 +118,12 @@ expect(/purpose, model: request\.model/.test(branch), 'the log records the purpo
 expect(/buildTranslateRequest\(kind, lang, sources\)/.test(branch) && /readTranslateResult\(sources, out\)/.test(branch), 'the branch uses the shared builder and checker');
 expect(!/input_tokens: usage\.input_tokens[^}]*sources/.test(branch), 'the wording itself is not written to the log');
 const callers = fs.readdirSync(path.join(root, 'fn')).filter(f => f.endsWith('.ts') && /api\.anthropic\.com/.test(fs.readFileSync(path.join(root, 'fn', f), 'utf8')));
-expect(callers.join() === 'doc_prefill.ts', 'doc_prefill.ts is the only function that calls a model: ' + callers);
+// Model calls only through fn/doc_prefill.ts and fn/prefill_shared.ts (CLAUDE.md). doc_prefill.ts is unchanged from before the
+// offer form; the offer form's helper (fn/offer_public.ts) calls the model only through prefill_shared.ts's callAnthropic.
+expect(callers.sort().join() === 'doc_prefill.ts,prefill_shared.ts', 'only doc_prefill.ts and prefill_shared.ts call a model: ' + callers);
+{ const op = fs.readFileSync(path.join(root, 'fn', 'offer_public.ts'), 'utf8');
+  expect(/from "\.\/prefill_shared\.ts"/.test(op) && /callAnthropic\(/.test(op) && /logAiCall\(/.test(op), 'offer_public.ts calls the model through prefill_shared.ts and logs to ai_calls');
+  expect(/from "\.\/prefill_shared\.ts"/.test(fs.readFileSync(path.join(root, 'fn', 'doc_prefill.ts'), 'utf8')), 'doc_prefill.ts imports prefill_shared.ts'); }
 const src = fs.readdirSync(path.join(root, 'onboarding', 'src')).filter(f => /\.(js|html)$/.test(f) && /anthropic|ANTHROPIC/.test(fs.readFileSync(path.join(root, 'onboarding', 'src', f), 'utf8')));
 expect(src.length === 0, 'no screen calls a model directly: ' + src);
 const app = fs.readFileSync(path.join(root, 'onboarding', 'src', 'app.js'), 'utf8');

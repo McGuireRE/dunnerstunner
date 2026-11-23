@@ -111,7 +111,9 @@ const AGENT = 'agent-test@example.com';
   // the form
   await q.fill('#ofEmail', 'buyer@example.com'); await q.fill('#ofPhone', '021 555 0100');
   await q.click('input[name="of_seen_docs"][value="yes"] + .mark');
-  await q.fill('#ofPrice', '650000'); out.priceSay = await q.textContent('#ofPriceSay'); expect(out.priceSay === '$650,000', 'price read back');
+  await q.fill('#ofPrice', 'six fifty'); expect(/type the price in numbers/.test(await q.textContent('#ofPriceSay')), 'letters: asked for the full number');
+  await q.fill('#ofPrice', '$1.2m'); expect((await q.textContent('#ofPriceSay')) === '$1,200,000: one million two hundred thousand dollars', '$1.2m read back in figures and words');
+  await q.fill('#ofPrice', '650k'); out.priceSay = await q.textContent('#ofPriceSay'); expect(out.priceSay === '$650,000: six hundred and fifty thousand dollars', 'price read back in figures and words: ' + out.priceSay);
   await q.click('label:has([data-cond="finance"]) .mark'); await q.fill('#ofd_finance', '10'); await q.waitForTimeout(100);
   out.finCalc = await q.textContent('[data-ccalc="finance"]'); expect(/^That is \w{3}, \d+ \w+ \d{4}\.$/.test(out.finCalc), 'working days show the date: ' + out.finCalc);
   await q.click('label:has([data-cond="builders"]) .mark');
@@ -119,6 +121,12 @@ const AGENT = 'agent-test@example.com';
   const today = await q.evaluate(() => window.OFFERS.nzToday()); const addWD = (n) => q.evaluate(([t, n]) => window.OFFERS.addWorkingDays(t, n), [today, n]);
   const b12 = await addWD(12); await q.fill('#ofdt_builders', b12); await q.waitForTimeout(100);
   out.bCalc = await q.textContent('[data-ccalc="builders"]'); expect(/^12 working days from today/.test(out.bCalc), 'a date shows its working days: ' + out.bCalc);
+  // a date in the Christmas break: said plainly, with the first working day after it
+  const xmasYear = +today.slice(0, 4) + (today.slice(5) > '12-20' ? 1 : 0), xmas = `${xmasYear}-12-28`;
+  const after = await q.evaluate(d => window.OFFERS.longDate(window.OFFERS.addWorkingDays(d, 1)), xmas);
+  await q.fill('#ofdt_builders', xmas); await q.waitForTimeout(100); out.xmasCalc = await q.textContent('[data-ccalc="builders"]');
+  expect(/falls in the Christmas break \(24 December to 5 January\), which doesn't count as working days/.test(out.xmasCalc) && out.xmasCalc.includes('The first working day after it is ' + after), 'Christmas break date explained: ' + out.xmasCalc);
+  await q.fill('#ofdt_builders', b12); await q.waitForTimeout(100);
   // the dates panel and the one-week gap
   out.dates1 = await q.textContent('#ofDates'); expect(/Settlement/.test(out.dates1) && /15 working days after it goes unconditional/.test(out.dates1) && !(await q.$('[data-prob="gap"]')), 'usual settlement: no gap problem');
   await q.click('input[name="of_settle"][value="date"] + .mark'); const close = await q.evaluate(([d]) => window.OFFERS.addDays(d, 3), [b12]); await q.fill('#ofSetDate', close); await q.waitForTimeout(100);
@@ -157,7 +165,7 @@ const AGENT = 'agent-test@example.com';
   // save and come back later on the same device
   await q.reload(); await q.waitForTimeout(700);
   out.restored = { banner: await q.isVisible('#ofRestored'), price: await q.inputValue('#ofPrice'), people: await q.$$eval('.of-person', e => e.length), conds: await q.$$eval('[data-cond]:checked', e => e.map(x => x.dataset.cond)), word: await q.inputValue('#ofWord'), ks: await q.$eval('input[name="of_kiwisaver"][value="yes"]', e => e.checked) };
-  expect(out.restored.banner && out.restored.price === '650000' && out.restored.people === 4 && out.restored.conds.slice().sort().join() === 'builders,custom,finance,lawyer' && out.restored.word === out.aiWord && out.restored.ks, 'save and resume keeps everything');
+  expect(out.restored.banner && out.restored.price === '650k' && out.restored.people === 4 && out.restored.conds.slice().sort().join() === 'builders,custom,finance,lawyer' && out.restored.word === out.aiWord && out.restored.ks, 'save and resume keeps everything');
   // sending: the gap blocks until they change dates or ask for help, and the privacy tick is needed
   await q.click('#ofSend'); await q.waitForTimeout(200);
   out.blocked = { dates: await q.$eval('#ofSec_dates', e => e.classList.contains('of-bad')), privacy: await q.$eval('#ofSec_privacy', e => e.classList.contains('of-bad')), err: await q.textContent('#ofErr') };
@@ -261,13 +269,39 @@ const AGENT = 'agent-test@example.com';
   // the rate limit: three from one network in ten minutes
   await q.evaluate(() => localStorage.setItem('mockNet', 'net-busy'));
   const res = []; for (let i = 0; i < 4; i++) res.push(await inv(TOKEN2, { offer: goodOffer }));
-  out.rate = res.map(x => x.ok ? 'ok' : x.reason); expect(out.rate.join() === 'ok,ok,ok,busy', 'rate limited per network: ' + out.rate);
+  out.rate = res.map(x => x.ok ? 'ok' : x.reason); expect(out.rate.join() === 'ok,ok,ok,busy_network', 'rate limited per network, and says so: ' + out.rate);
+  // a busy day: ten buyers on ten networks, one property, within ten minutes: all get through
+  const ten = []; for (let i = 0; i < 10; i++) { await q.evaluate(i => localStorage.setItem('mockNet', 'buyer-' + i), i); ten.push((await inv(TOKEN2, { offer: goodOffer })).ok); }
+  expect(ten.every(Boolean), 'ten buyers on ten networks all get through: ' + ten);
+  // the refusal on screen names the limit and says to call or email Tim
+  await q.evaluate(() => localStorage.setItem('mockNet', 'net-busy')); await q.goto(BASE + '?offer=' + TOKEN2); await q.waitForTimeout(600);
+  await q.fill('#ofEmail', 'x@example.com'); await q.fill('#ofPhone', '021 000 1111'); await q.click('input[name="of_seen_docs"][value="yes"] + .mark'); await q.fill('#ofPrice', '500000');
+  await q.click('input[name="of_kiwisaver"][value="no"] + .mark'); await q.fill('#ofp0f', 'A'); await q.fill('#ofp0l', 'B'); await q.click('input[name="of_related"][value="no"] + .mark');
+  await q.click('input[name="of_sign"][value="digital"] + .mark'); await q.click('label:has([data-fb="privacy"]) .mark'); await q.click('#ofSend'); await q.waitForTimeout(400);
+  out.busyMsg = await q.textContent('#ofErr'); expect(/from your internet connection/.test(out.busyMsg) && /call Tim on 027 562 7207 or email tim@mcguire\.co\.nz/.test(out.busyMsg), 'the busy message names the limit and says to call or email Tim: ' + out.busyMsg);
+  // the hidden field filled: told it was received (it was), kept and flagged, nobody emailed
+  await q.evaluate(() => localStorage.setItem('mockNet', 'net-spam')); const mails0 = (await db(q)).email_log.length;
+  out.spam = await inv(TOKEN2, { offer: Object.assign({}, goodOffer, { price: '1' }), website: 'http://spam.example' });
+  d = await db(q); const sp = d.property_offers.find(x => x.suspected_spam);
+  expect(out.spam.ok && sp && sp.amount === 1 && d.email_log.length === mails0, 'honeypot: kept and flagged, no email');
   await q.evaluate(() => localStorage.setItem('mockNet', 'net-other')); out.otherNet = (await inv(TOKEN2, { offer: goodOffer })).ok; expect(out.otherNet, 'another network still gets through');
   out.bad = await q.evaluate(([t, o]) => window.supabase.createClient().functions.invoke('offer-public', { body: { action: 'submit', token: t, offer: Object.assign({}, o, { email: 'nope' }) } }).then(async r => r.data || await r.error.context.json()), [TOKEN2, goodOffer]);
   expect(out.bad.ok === false && /email/.test(out.bad.error), 'bad fields refused with a plain message');
   // anyone not signed in reads nothing directly
   out.anon = await q.evaluate(async () => { const c = window.supabase.createClient(); const a = await c.from('property_offers').select('*'); const b2 = await c.from('offer_links').select('*'); const r3 = await c.rpc('offer_public_submit', {}); return [!!a.error, !!b2.error, !!r3.error]; });
   expect(out.anon.every(Boolean), 'not signed in: no table or function access');
+  // Tim sees the possible spam apart, and it isn't in Needs you
+  await keepDb(q, p, { mockAgents: JSON.stringify([AGENT]), mocksession: JSON.stringify({ user: { id: 'agent-1', email: AGENT } }) }); await p.goto(BASE); await p.waitForTimeout(500);
+  await p.click('#navDash'); await p.waitForTimeout(500); out.needsAfter = await p.$$eval('.needs strong', e => e.map(x => x.textContent));
+  await p.click('tr[data-prop="P1"]'); await p.waitForTimeout(500);
+  out.spamFold = { summary: await p.textContent('#offSpam summary'), inMain: await p.$$eval('#offTile > .of-list .of-row', e => e.some(x => /\$1(\D|$)/.test(x.textContent))) };
+  expect(/Possible spam \(1\)/.test(out.spamFold.summary) && !out.spamFold.inMain && !(await p.$eval('#offSpam', e => e.open)), 'possible spam in its own closed fold');
+  const unread = (await db(p)).property_offers.filter(x => x.source === 'buyer' && !x.read_at);
+  expect(out.needsAfter.filter(t => /New offer/.test(t)).length === unread.filter(x => !x.suspected_spam).length && unread.some(x => x.suspected_spam), 'Needs you lists the real new offers, not the spam');
+  await p.click('#offSpam summary'); await p.click('#offSpam .of-row'); await p.waitForTimeout(500); expect(await p.isVisible('.of-spamflag'), 'the spam offer says so');
+  // a form offer: notes and expiry may change directly, nothing else
+  out.direct = await p.evaluate(async id => { const c = window.supabase.createClient(); const a = await c.from('property_offers').update({ notes: 'rang them' }).eq('id', id); const b2 = await c.from('property_offers').update({ read_by: 'x' }).eq('id', id); return [!a.error, !!b2.error]; }, sp.id);
+  expect(out.direct.every(Boolean), 'notes editable, other columns locked');
 
   process.stderr.write('step 6\n');
   // ── 6. the vendor sees nothing about offers ──
@@ -280,7 +314,8 @@ const AGENT = 'agent-test@example.com';
   expect(out.vendor.prop === 1 && [out.vendor.offers, out.vendor.links, out.vendor.events, out.vendor.settings, out.vendor.clauses].every(n => n === 0), 'vendor reads no offer rows, links, events, settings or wording');
   expect(/Only Tim/.test(out.vendor.link) && /Only Tim/.test(out.vendor.read) && /permission denied/.test(out.vendor.pub) && out.vendor.upd === 'refused', 'vendor can call no offer function');
   const vtxt = await v.innerText('body'); out.vendorHit = (vtxt.match(/.{0,60}(650,000|665,000|640,000|Offers|offer form|Aroha).{0,60}/) || [''])[0]; expect(!/650,000|665,000|640,000|Offers|offer form|Aroha/.test(vtxt), 'nothing about offers on the vendor\'s screens');
-  const jb = await v.$('#journeyBtn'); if (jb && await jb.isVisible()) { await jb.click(); await v.waitForTimeout(500); const jt = await v.innerText('#journey'); expect(!/650,000|665,000|Aroha|offer form/.test(jt), 'nothing about offers on the journey map'); }
+  const jb = await v.$('#journeyBtn'); expect(jb && await jb.isVisible(), 'the vendor has the Journey button');
+  if (jb && await jb.isVisible()) { await jb.click(); await v.waitForTimeout(500); const jt = await v.innerText('#journey'); out.journeyLen = jt.length; expect(jt.length > 100 && !/650,000|665,000|Aroha|offer form/.test(jt), 'nothing about offers on the journey map'); }
   await V.ctx.close(); await A.ctx.close(); await B.ctx.close();
   console.log(JSON.stringify(Object.assign(out, { errs }), null, 1)); await b.close();
 })().catch(e => console.log(JSON.stringify({ errs: ['crashed: ' + e.stack] })));

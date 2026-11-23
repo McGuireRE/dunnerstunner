@@ -2190,8 +2190,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const needs = [];
     const insps = await safe(sb.from('property_inspections').select('id,property_id,status,started_at').eq('status', 'in_progress'));
     // offers from the form that Tim hasn't opened yet (offers phase 1)
-    const fresh = await safe(sb.from('property_offers').select('id,property_id,amount,received_at,related_party,source').is('read_at', null).order('received_at', { ascending: false }));
-    fresh.filter(o => o.source === 'buyer').forEach(o => { const pr = props.find(p => p.id === o.property_id); needs.push({ what: o.related_party ? 'New offer: a purchaser is connected with you' : 'New offer to read', where: (pr && pr.address) || 'Property', sub: money(+o.amount) + ', ' + fmtDT(o.received_at), go: () => viewOfferAgent(o.id), hot: true, offer: o.id }); });
+    const fresh = await safe(sb.from('property_offers').select('id,property_id,amount,received_at,related_party,source,suspected_spam').is('read_at', null).order('received_at', { ascending: false }));
+    fresh.filter(o => o.source === 'buyer' && !o.suspected_spam).forEach(o => { const pr = props.find(p => p.id === o.property_id); needs.push({ what: o.related_party ? 'New offer: a purchaser is connected with you' : 'New offer to read', where: (pr && pr.address) || 'Property', sub: money(+o.amount) + ', ' + fmtDT(o.received_at), go: () => viewOfferAgent(o.id), hot: true, offer: o.id }); });
     insps.forEach(x => { const pr = props.find(p => p.id === x.property_id); needs.push({ what: 'Inspection started, not finished', where: (pr && pr.address) || 'Property', sub: 'Started ' + fmtDT(x.started_at), go: () => { INS = null; viewInspection(x.id); }, insp: x.id }); });
     crs.forEach(r => needs.push({ what: 'Call them about cancelling', where: addr(r.agreement_id), sub: 'Request from ' + r.requested_by, go: () => viewAgentDetail(r.agreement_id), hot: true }));
     pls.forEach(p => { if (p.status === 'submitted') needs.push({ what: 'Write their updated plan', where: p.address, sub: 'Questionnaire answers are in', go: () => viewPrelistingAgent(p.id) }); if (p.status === 'question') needs.push({ what: 'Answer their question', where: p.address, sub: 'About the updated plan', go: () => viewPrelistingAgent(p.id), hot: true }); if (p.status === 'accepted') { const a = rows.find(r => r.id === p.agreement_id); if (!a || a.status === 'draft') needs.push({ what: 'Add your fee and send the agreement', where: p.address, sub: 'They\'ve accepted the plan', go: () => viewPrelistingAgent(p.id) }); } });
@@ -5494,7 +5494,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   // what is sent: the fields the server takes, nothing else
   function ofPayload(F) {
     const s = F.settlement || {};
-    return { email: F.email.trim(), phone: F.phone.trim(), seen_docs: F.seen_docs, sign: F.sign, price: String(F.price || '').replace(/[^0-9.]/g, ''),
+    const pn = OF.parsePrice(F.price);   // 650k and $1.2m are read; anything else is sent as typed and refused with a plain message
+    return { email: F.email.trim(), phone: F.phone.trim(), seen_docs: F.seen_docs, sign: F.sign, price: isNaN(pn) ? String(F.price || '').trim() : String(pn),
       settlement: s.kind === 'date' ? { kind: 'date', date: s.date } : { kind: 'relative', days: s.days === '' ? null : +s.days },
       conditions: F.conditions.map(c => { const o = { key: c.key }; if (c.date) o.date = c.date; else o.days = c.days === '' || c.days == null ? null : +c.days; if (c.key === 'technical') o.detail = c.detail; if (c.key === 'custom') { o.request = c.request; o.wording = c.wording; o.ai = !!c.ai; } return o; }),
       sale_address: F.conditions.some(c => c.key === 'sale') ? F.sale_address : null, kiwisaver: F.kiwisaver, entity: F.entity, nominee: F.nominee !== false,
@@ -5512,13 +5513,17 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   function ofForget(ctx) { const k = ofKey(ctx); if (!k) return; try { localStorage.removeItem(k); } catch (_) { } }
 
   const ofRadio = (name, value, cur, title, desc) => `<label class="choice"><input type="radio" name="of_${name}" data-fr="${name}" value="${value}" ${cur === value ? 'checked' : ''}><span class="mark"></span><span><span class="ct">${title}</span>${desc ? `<span class="cd">${desc}</span>` : ''}</span></label>`;
+  // the price read back in figures and words before anything is sent (650k and $1.2m are read; letters otherwise are refused)
+  const ofPriceSay = v => { if (!String(v ?? '').trim()) return ''; const n = OF.parsePrice(v); if (isNaN(n) || !(n >= 1)) return 'Please type the price in numbers, for example 650000 or 650k.'; return `${money(n)}: ${OF.priceWords(n)}`; };
   const ofYes = v => v === true ? 'yes' : v === false ? 'no' : '';
   const ofMinDate = ctx => OF.addDays(ofOpts(ctx).asAt, 1);
   function ofCalcText(ctx, x) {
     const o = ofOpts(ctx), r = OF.conditionDate(x, o.asAt, o.province);
     if (!r) return 'Enter the working days, or pick a date.';
     const L = OF.longDate;
-    if (x.date) return `${r.days} working ${r.days === 1 ? 'day' : 'days'} from ${ctx.asAt ? 'the day the offer came in' : 'today'}, so ${L(r.date)}.` + (r.adjusted ? ` ${L(r.chosen)} isn't a working day, so the date becomes the working day before.` : '');
+    if (x.date) { const bn = r.adjusted ? OF.breakNote(r.chosen, { province: o.province, lim: !!(OF.condInfo(x.key) || {}).lim }) : '';
+      if (bn && r.date <= o.asAt) return bn + ' Please pick that day or later.';
+      return `${r.days} working ${r.days === 1 ? 'day' : 'days'} from ${ctx.asAt ? 'the day the offer came in' : 'today'}, so ${L(r.date)}.` + (bn ? ' ' + bn + ' Under the agreement the date becomes the last working day before the break.' : r.adjusted ? ` ${L(r.chosen)} isn't a working day, so the date becomes the working day before.` : ''); }
     return `That is ${L(r.date)}.`;
   }
   function ofCustomHTML(ctx, x) {
@@ -5602,7 +5607,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         <div><label class="f" for="ofPhone">Best phone</label><input type="tel" id="ofPhone" maxlength="40" autocomplete="tel" data-f="phone" value="${esc(F.phone)}"></div></div>
         <p class="small of-contactnote">${pub ? 'Your' : 'Their'} phone and email are used only by Tim, to talk about this offer. They never go on the agreement.</p>`)}
       ${sec('docs', 'The property documents', `<p class="small">Have you seen the property documents and information emailed to all enquirers?</p><div class="choices two">${ofRadio('seen_docs', 'yes', F.seen_docs, 'Yes')}${ofRadio('seen_docs', 'no', F.seen_docs, 'Not yet', 'Tim will send them to you.')}</div>`)}
-      ${sec('price', 'Your offer price', `<label class="f" for="ofPrice">Price</label><input type="text" id="ofPrice" inputmode="decimal" maxlength="20" autocomplete="off" data-f="price" value="${esc(F.price)}" placeholder="$"><p class="small" id="ofPriceSay" aria-live="polite">${+String(F.price).replace(/[^0-9.]/g, '') ? esc(money(+String(F.price).replace(/[^0-9.]/g, ''))) : ''}</p>`)}
+      ${sec('price', 'Your offer price', `<label class="f" for="ofPrice">Price</label><input type="text" id="ofPrice" maxlength="20" autocomplete="off" data-f="price" value="${esc(F.price)}" placeholder="$"><p class="small" id="ofPriceSay" aria-live="polite">${esc(ofPriceSay(F.price))}</p>`)}
       ${sec('conds', 'Conditions', `<p class="small">Nothing is added unless you tick it. Each condition needs its own date: a number of working days, or a date. Tap <em>What this means</em> for a plain explanation.</p>
         <p class="small of-advice" role="note">${esc(OF.ADVICE.conditions)}</p>
         <h3 class="of-gh">Typical conditions</h3><div id="ofCondsTypical">${ofGroup(ctx, F, 'typical')}</div>
@@ -5658,7 +5663,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const light = () => {   // the parts that follow every change
       $$('[data-ccalc]', root).forEach(p => { const x = F.conditions.find(c => c.key === p.dataset.ccalc); if (x) p.textContent = ofCalcText(ctx, x); });
       $('#ofDates').innerHTML = ofDatesHTML(ctx, F); $('#ofDeposit').innerHTML = ofDepositHTML(ctx, F);
-      const n = +String(F.price).replace(/[^0-9.]/g, ''); $('#ofPriceSay').textContent = n ? money(n) : '';
+      $('#ofPriceSay').textContent = ofPriceSay(F.price);
     };
     const redrawConds = () => { $('#ofCondsTypical').innerHTML = ofGroup(ctx, F, 'typical'); $('#ofCondsOther').innerHTML = ofGroup(ctx, F, 'other'); $('#ofCondsCustom').innerHTML = ofGroup(ctx, F, 'custom'); };
     const redrawPeople = () => { $('#ofPeople').innerHTML = ofPeopleHTML(F); };
@@ -5726,7 +5731,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const say = t => { msg.textContent = t; };
     if ((x.request || '').trim().length < 10) return say('Describe what you need in a few more words first.');
     btn.disabled = true; say('Working on a draft...');
-    const r = await offerCall('doc-prefill', { mode: 'offer_condition', token: ctx.token, text: x.request.trim() });
+    const r = await offerCall('offer-public', { action: 'draft', token: ctx.token, text: x.request.trim() });
     btn.disabled = false;
     if (r && r.ok && r.wording) {
       x.wording = r.wording; x.ai = true; $('#ofWord').value = r.wording; $('#ofAiBadge').hidden = false; save();
@@ -5750,7 +5755,11 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     if (ctx.mode === 'public') {
       btn.disabled = true; const r = await offerCall('offer-public', { action: 'submit', token: ctx.token, offer: payload, website: ($('#ofWebsite') || {}).value || '' }); btn.disabled = false;
       if (r && r.ok) { ofForget(ctx); return ofThanks(ctx, Object.assign({}, payload, { chattels_listed: ctx.chattels || [] }), r.ref); }
-      $('#ofErr').textContent = r && r.error ? r.error : r && r.reason === 'busy' ? 'A lot has been sent from your connection just now. Please wait a few minutes and try again, or call Tim on 027 562 7207. What you typed is kept.'
+      const callTim = ' Please call Tim on 027 562 7207 or email tim@mcguire.co.nz with your offer. What you typed is kept on this device.';
+      $('#ofErr').textContent = r && r.error ? r.error
+        : r && r.reason === 'busy_network' ? 'Several offers have already been sent from your internet connection in the last few minutes, so this one wasn\'t sent. Please try again in ten minutes.' + callTim
+        : r && r.reason === 'busy_property' ? 'This property has had a very large number of offers through the form in a short time, so the form is pausing.' + callTim
+        : r && r.reason === 'busy_site' ? 'The offer form has reached its limit for today, so this one wasn\'t sent.' + callTim
         : r && r.reason === 'closed' ? 'This offer form has just been closed. What you typed is kept on this device. Please call Tim on 027 562 7207.' : 'Your offer couldn\'t be sent just now. Please check your connection and try again. What you typed is kept.';
       return;
     }
@@ -5809,7 +5818,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const info = await offerCall('offer-public', { action: 'info', token });
     if (!info || info.ok !== true) {
       main().innerHTML = `<div class="login-card" id="ofClosed"><h1>This offer form isn't open</h1>
-        <p class="lede">${info && info.reason === 'busy' ? 'There have been a lot of requests from your connection. Please try again later.' : info && info.reason === 'network' ? 'We couldn\'t reach the form just now. Please check your connection and try again.' : 'The link may have changed, or offers on this property aren\'t open at the moment.'}</p>
+        <p class="lede">${info && info.reason === 'busy_network' ? 'There have been a lot of requests from your internet connection in the last hour. Please try again later.' : info && info.reason === 'network' ? 'We couldn\'t reach the form just now. Please check your connection and try again.' : 'The link may have changed, or offers on this property aren\'t open at the moment.'}</p>
         <p>Please call or text Tim on <a href="tel:0275627207">027 562 7207</a>, or email <a href="mailto:tim@mcguire.co.nz">tim@mcguire.co.nz</a>.</p></div>`;
       return;
     }
@@ -5851,6 +5860,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <h1>${esc(money(+o.amount))} offer</h1>
       <p>${nt(p.address)}<br><span class="small">${o.source === 'agent' ? 'Entered by you' : 'From the offer form'}, ${esc(fmtDT(o.received_at))}</span>${off ? ` <span class="pill of-off">${o.status === 'withdrawn' ? 'Withdrawn' : 'Lapsed'} ${esc(fmtDT(o.status_at))}</span>` : ''}</p>
       ${o.related_party ? `<div class="card warnc of-related" role="alert"><h3 style="margin:0 0 4px">Connected to you</h3><p class="small" style="margin:0">The buyer says a purchaser is related to, or connected with, you or McGuire Real Estate. Deal with this before you go any further with the offer.</p></div>` : ''}
+      ${o.suspected_spam ? '<div class="card warnc tight of-spamflag"><p class="small" style="margin:0"><strong>Possible spam.</strong> It was sent with the form\'s hidden field filled in, which is usually a robot. You weren\'t emailed about it.</p></div>' : ''}
       ${o.needs_date_help ? '<div class="card note tight of-helpflag"><p class="small" style="margin:0">They asked for your help with the dates.</p></div>' : ''}
       <h2>Dates</h2>
       <div class="card tight"><table class="sum of-dates">${chk.conditions.filter(c => c.date).map(c => `<tr><td>${esc(c.label)}</td><td>${esc(L(c.date))} <span class="small">(${c.days} working days)</span></td></tr>`).join('')}
@@ -5900,14 +5910,16 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   function offersTileHTML(p, X) {
     const okStage = OFFER_STAGES.includes(p.stage), l = X.link, on = !!(l && l.open && okStage);
     if (!okStage && !l && !X.offers.length) return '';
-    const fresh = X.offers.filter(o => !o.read_at).length, prov = l ? l.province : OF.provinceFor(p.address);
+    const real = X.offers.filter(o => !o.suspected_spam), spam = X.offers.filter(o => o.suspected_spam);
+    const fresh = real.filter(o => !o.read_at).length, prov = l ? l.province : OF.provinceFor(p.address);
     return `<div class="card ptile of-tile" id="offTile"><h3>Offers ${fresh ? `<span class="pill of-new">${fresh} new</span>` : ''}</h3>
       <p class="small" style="margin:0 0 6px" id="offState">${on ? 'The offer form is <strong>on</strong>. Anyone with the link or QR code can send you an offer. Nothing goes to the vendors.' : okStage ? 'The offer form is <strong>off</strong>. Switch it on when you want buyers to be able to send offers.' : 'The offer form opens once the agreement is signed and the property is on the market.'}</p>
       ${on ? `<div class="copybox of-link" id="offUrl" translate="no">${esc(offerUrl(l.token))}</div>` : ''}
       <div class="toolbar">${on ? '<button class="btn ghost" type="button" id="offCopy">Copy link</button><button class="btn ghost" type="button" id="offQrBtn">QR code</button><button class="btn ghost" type="button" id="offOff">Switch off</button>' : okStage ? '<button class="btn primary" type="button" id="offOn">Switch on</button>' : ''}
         <button class="btn ghost" type="button" id="offNew">Fill in an offer for a buyer</button></div>
       <div id="offQr" class="of-qr" hidden></div>
-      ${X.offers.length ? `<ul class="of-list">${X.offers.map(o => ofRowHTML(o, X)).join('')}</ul>` : '<p class="small" style="margin:6px 0 0">No offers yet.</p>'}
+      ${real.length ? `<ul class="of-list">${real.map(o => ofRowHTML(o, X)).join('')}</ul>` : '<p class="small" style="margin:6px 0 0">No offers yet.</p>'}
+      ${spam.length ? `<details class="of-more of-spam" id="offSpam"><summary class="small">Possible spam (${spam.length})</summary><p class="small" style="margin:4px 0">Sent with the form's hidden field filled in, which is usually a robot. Kept in case one is real. You weren't emailed about these.</p><ul class="of-list">${spam.map(o => ofRowHTML(o, X)).join('')}</ul></details>` : ''}
       <details class="of-more" id="offChD"><summary class="small">Chattels buyers see (${((l && l.chattels) || []).length || 'none yet'})</summary>
         <label class="f" for="offCh">One chattel per line. With none, buyers see "Tim will confirm the chattels list with you".</label><textarea id="offCh" rows="5">${esc(((l && l.chattels) || []).join('\n'))}</textarea>
         <div class="toolbar"><button class="btn ghost" type="button" id="offChSave">Save chattels</button></div></details>

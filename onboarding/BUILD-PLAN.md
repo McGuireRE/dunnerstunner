@@ -240,7 +240,8 @@ items belong to the sign-in that added them and carry on by themselves after sig
 ## Added 23 November 2026: offers and negotiation
 
 A new six-phase plan for the offer form, drafting onto the REINZ blank, signing, counteroffers, deadline day and
-after agreement lives in `OFFERS-PLAN.md`. Phase 1 (the offer form) built 23 November 2026 on branch `offers-phase1`: migration 018 (written and tested in a rollback
-block, not applied), edge function `offer-public` (new) and doc-prefill (new `offer_condition` mode). Awaiting review. Tests:
+after agreement lives in `OFFERS-PLAN.md`. Phase 1 (the offer form) built 23 November 2026 on branch `offers-phase1`: migration 018 (tested in a rollback block on a local
+PostgreSQL stand-in only; the live rollback run, with Tim's approval, comes before applying it), edge function `offer-public` (new;
+it also serves the AI condition helper). doc-prefill is unchanged. Awaiting review. Tests:
 `offers.test.js`, `offers-core.test.js`, `offer-qr.test.js`, `offer-public-fn.test.js`; database: `offer-rollback.sql` (via
 `offer-rollback.js`).

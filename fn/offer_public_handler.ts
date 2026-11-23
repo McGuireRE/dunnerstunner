@@ -5,14 +5,15 @@
 //           own clause wording, and the chattels list Tim typed for the property). Unknown, switched-off and wrong-stage links all answer {ok: false}.
 //   submit: one offer. The database (offer_public_submit, migration 018) checks the link, the rate limits and every field, and
 //           writes only the offer row. Tim is then emailed (never the buyer, never the vendors).
-// Help wording the buyer's own condition is makeDraft below. It is served by doc-prefill (fn/doc_prefill.ts, mode
-// "offer_condition"), because every model call goes through doc_prefill.ts and prefill_shared.ts: Sonnet, only on a live link and
-// within the rate limits and the daily cap (offer_public_ai_claim), logged in ai_calls, and failing soft (the buyer types their
-// own wording). Everything the caller sends is data. Tested by onboarding/tests/offer-public-fn.test.js with fakes for the database, the model and
+//   draft:  help wording the buyer's own condition (makeDraft below): the model call and its ai_calls log are prefill_shared.ts's
+//           (Sonnet), only on a live link and within the rate limits and the daily cap (offer_public_ai_claim), failing soft (the
+//           buyer types their own wording). Its body is capped at 4,000 characters before it is read.
+// Everything the caller sends is data. Tested by onboarding/tests/offer-public-fn.test.js with fakes for the database, the model and
 // email, so no test ever sends email or calls a model.
 import { buildOfferConditionRequest, MODEL_DRAFT, OFFER_CONDITION_PURPOSE, readOfferConditionResult } from "./prefill_shared.ts";
 
 export const MAX_BODY = 80000;
+export const MAX_DRAFT_BODY = 4000;
 export const TOKEN_RE = /^[A-Za-z0-9_-]{40,64}$/;
 
 type Rpc = (fn: string, args: Record<string, unknown>) => Promise<{ data: any; error: { message: string } | null }>;
@@ -20,6 +21,7 @@ type Deps = {
   cors: Record<string, string>;
   rpc: Rpc;                                                        // the offer_public_* functions, with the service role
   notifyTim: (offerId: string) => Promise<void>;                   // the email to Tim (throws on failure)
+  draft?: (body: any, net: string) => Promise<{ status: number; body: any }>;   // makeDraft(...), for action "draft"
 };
 type DraftDeps = {
   rpc: Rpc;
@@ -28,12 +30,17 @@ type DraftDeps = {
   logAi: (row: { purpose: string; model: string; ok: boolean; error: string | null; input_tokens: number; output_tokens: number }) => Promise<void>;
 };
 
-// the caller's network address, as the platform's proxy reports it (the first address in X-Forwarded-For)
+// the caller's network address: Cloudflare's CF-Connecting-IP when present (set by the edge, not the caller), otherwise the LAST
+// entry of X-Forwarded-For (added by the platform's own proxy). Earlier entries can be typed by the caller, so they are never used.
+// Check after deploy (OFFERS-PLAN.md): a request with a made-up X-Forwarded-For must record the real network.
 export function netOf(req: Request): string {
-  const xf = req.headers.get("x-forwarded-for") || "";
-  const first = xf.split(",")[0].trim();
-  return (first || req.headers.get("cf-connecting-ip") || req.headers.get("x-real-ip") || "unknown").slice(0, 100);
+  const cf = (req.headers.get("cf-connecting-ip") || "").trim();
+  if (cf) return cf.slice(0, 100);
+  const parts = (req.headers.get("x-forwarded-for") || "").split(",").map((x) => x.trim()).filter(Boolean);
+  const last = parts.length ? parts[parts.length - 1] : "";
+  return (last || (req.headers.get("x-real-ip") || "").trim() || "unknown").slice(0, 100);
 }
+const REASONS = ["busy_network", "busy_property", "busy_site", "closed"];
 
 export function makeHandler(d: Deps) {
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: Object.assign({ "Content-Type": "application/json", "Cache-Control": "no-store" }, d.cors) });
@@ -45,28 +52,39 @@ export function makeHandler(d: Deps) {
     let text = "";
     try { text = await req.text(); } catch (_) { return json({ error: "Bad request" }, 400); }
     if (text.length > MAX_BODY) return json({ ok: false, error: "That is more than the form can take." }, 413);
+    // the draft helper takes far less: cap it before reading anything
+    if (/"action"\s*:\s*"draft"/.test(text.slice(0, 200)) && text.length > MAX_DRAFT_BODY) return json({ ok: false, error: "That is more than the helper can take." }, 413);
     let body: any = null; try { body = JSON.parse(text); } catch (_) { body = null; }
     if (!body || typeof body !== "object" || Array.isArray(body)) return json({ error: "Bad request" }, 400);
     const action = String(body.action || ""), token = typeof body.token === "string" ? body.token : "";
-    if (!["info", "submit"].includes(action)) return json({ error: "Bad request" }, 400);
+    if (!["info", "submit", "draft"].includes(action)) return json({ error: "Bad request" }, 400);
+    if (action === "draft") {
+      if (text.length > MAX_DRAFT_BODY) return json({ ok: false, error: "That is more than the helper can take." }, 413);
+      if (!d.draft) return json({ ok: false, reason: "off" });
+      const r = await d.draft(body, netOf(req)); return json(r.body, r.status);
+    }
     if (!TOKEN_RE.test(token)) return json({ ok: false });   // not a token at all: nothing asked
     const net = netOf(req);
 
     if (action === "info") {
       const { data, error } = await d.rpc("offer_public_info", { p_token: token, p_net: net });
-      if (error || !data || data.ok !== true) return json({ ok: false, reason: data?.reason === "busy" ? "busy" : undefined });
+      if (error || !data || data.ok !== true) return json({ ok: false, reason: data?.reason === "busy_network" ? "busy_network" : undefined });
       return json({ ok: true, open: true, address: String(data.address || ""), province: String(data.province || "otago"), ks_days: +data.ks_days || 15, wording: data.wording && typeof data.wording === "object" ? data.wording : {}, chattels: Array.isArray(data.chattels) ? data.chattels.filter((x: unknown) => typeof x === "string").slice(0, 60) : [] });
     }
 
     if (action === "submit") {
-      if (typeof body.website === "string" && body.website.trim()) return json({ ok: true, ref: "RECEIVED" });   // a form-filling robot: looks fine, nothing kept
+      // the hidden field filled (often a form-filling robot, sometimes a browser's autofill): the offer is kept, flagged for Tim's
+      // "Possible spam" fold, and nobody is emailed. The buyer is told it was received, because it was.
+      const spam = typeof body.website === "string" && body.website.trim() !== "";
       if (!body.offer || typeof body.offer !== "object" || Array.isArray(body.offer)) return json({ ok: false, error: "Nothing was sent." }, 400);
-      const { data, error } = await d.rpc("offer_public_submit", { p_token: token, p_offer: body.offer, p_net: net });
+      const { data, error } = await d.rpc("offer_public_submit", { p_token: token, p_offer: body.offer, p_net: net, p_spam: spam });
       if (error) return json({ ok: false, error: plain(error.message || "") }, 400);
-      if (!data || data.ok !== true) return json({ ok: false, reason: data?.reason === "busy" ? "busy" : "closed" });
-      let notifyError: string | null = null;
-      try { await d.notifyTim(String(data.id)); } catch (e: any) { notifyError = String(e?.message || e).slice(0, 300); }
-      try { await d.rpc("offer_public_notified", { p_offer: data.id, p_error: notifyError }); } catch (_) { /* the Offers tile still shows it */ }
+      if (!data || data.ok !== true) return json({ ok: false, reason: REASONS.includes(data?.reason) ? data.reason : "closed" });
+      if (!spam) {
+        let notifyError: string | null = null;
+        try { await d.notifyTim(String(data.id)); } catch (e: any) { notifyError = String(e?.message || e).slice(0, 300); }
+        try { await d.rpc("offer_public_notified", { p_offer: data.id, p_error: notifyError }); } catch (_) { /* the Offers tile still shows it */ }
+      }
       return json({ ok: true, ref: String(data.ref || "") });   // never the offer's id
     }
 

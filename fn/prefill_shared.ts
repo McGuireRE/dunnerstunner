@@ -188,8 +188,9 @@ export function readTranslateResult(sources: string[], out: any): { ok: { source
 
 
 // ───────── offer form: help wording a buyer's own condition (offers phase 1) ─────────
-// Reached from the public offer form through the offer-public edge function (fn/offer_public.ts), which checks the property's
-// link, the rate limits and the daily cap first, and logs every call in ai_calls. Sonnet, because this is drafting. The buyer's
+// Reached from the public offer form through the offer-public edge function (fn/offer_public.ts, action "draft"), which checks the
+// property's link, the rate limits and the daily cap first. The model call itself and its ai_calls row are callAnthropic and
+// logAiCall below, so every model call stays in this file or doc_prefill.ts. Sonnet, because this is drafting. The buyer's
 // description is data, never instructions. The result is only ever a draft: the form marks it so, and Tim reads and approves the
 // wording before it goes on any agreement.
 export const MODEL_DRAFT = "claude-sonnet-5-5";
@@ -245,4 +246,17 @@ export function readOfferConditionResult(out: any): { ok: boolean; wording?: str
   const wording = tidy(r.wording, OFFER_CONDITION_OUT), summary = tidy(r.summary, 300);
   if (wording.length < 10) return { ok: false, why: "No wording came back. Please type your own wording." };
   return { ok: true, wording, summary };
+}
+
+// One call to Anthropic's messages API (25 second limit). { ok, status, body }; never throws for an HTTP error.
+export async function callAnthropic(key: string, request: unknown): Promise<{ ok: boolean; status: number; body: any }> {
+  const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 25000);
+  try {
+    const r = await fetch("https://api.anthropic.com/v1/messages", { method: "POST", signal: ctl.signal, headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" }, body: JSON.stringify(request) });
+    return { ok: r.ok, status: r.status, body: await r.json().catch(() => ({})) };
+  } finally { clearTimeout(t); }
+}
+// The ai_calls row for a call made with callAnthropic (db: a service-role client).
+export async function logAiCall(db: any, row: { purpose: string; model: string; ok: boolean; error: string | null; input_tokens: number; output_tokens: number }, agent: string) {
+  await db.from("ai_calls").insert({ ...row, files: 0, agent });
 }

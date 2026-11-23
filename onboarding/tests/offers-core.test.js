@@ -111,5 +111,16 @@ eq(O.validate(Object.assign({}, gap, { date_help: true }), { asAt }), [], "I nee
 eq(O.validate(Object.assign({}, good, { purchasers: Array.from({ length: 13 }, () => ({ first: 'A', last: 'B' })) }), { asAt }).map(e => e.field), ['purchasers'], 'purchaser cap');
 eq(O.validate(Object.assign({}, good, { privacy: false, kiwisaver: null }), { asAt }).map(e => e.field).sort(), ['kiwisaver', 'privacy'], 'KiwiSaver answer and privacy tick needed');
 eq(O.conditionsLine(good), 'Finance', 'conditions line'); eq(O.conditionsLine({ conditions: [] }), 'No conditions (unconditional)', 'unconditional line');
+// the price: digits, $ and commas, or 650k and $1.2m; anything else is refused; shown back in words
+eq(['650000', '$650,000', '650k', '650K', '$1.2m', '1.25M', ' 1 200 000 ', '650000.50', '6.5 hundred', 'lots', '1.2.3', ''].map(x => { const n = O.parsePrice(x); return isNaN(n) ? 'NaN' : n; }), [650000, 650000, 650000, 650000, 1200000, 1250000, 1200000, 650000.5, 'NaN', 'NaN', 'NaN', 'NaN'], 'price reading');
+eq([650000, 1200000, 1, 101, 1000001, 999999999, 650000.5].map(O.priceWords), ['six hundred and fifty thousand dollars', 'one million two hundred thousand dollars', 'one dollar', 'one hundred and one dollars', 'one million and one dollars', 'nine hundred and ninety-nine million nine hundred and ninety-nine thousand nine hundred and ninety-nine dollars', 'six hundred and fifty thousand dollars and fifty cents'], 'price in words');
+eq(O.validate(Object.assign({}, good, { price: '650k' }), { asAt }), [], '650k is read');
+eq(O.validate(Object.assign({}, good, { price: 'six fifty' }), { asAt }).map(e => e.text), ['Please type the price in numbers, for example 650000 or 650k.'], 'letters refused with a plain request');
+// a date in the Christmas break that moves back onto today or earlier
+ok(/falls in the Christmas break/.test(O.breakNote('2026-12-28')) && /Wed, 6 January 2027/.test(O.breakNote('2026-12-28')), 'break note names the first working day after');
+ok(/15 January for the LIM date/.test(O.breakNote('2027-01-10', { lim: true })) && /Mon, 18 January 2027/.test(O.breakNote('2027-01-10', { lim: true })), 'LIM break runs to 15 January');
+eq(O.breakNote('2026-12-22'), '', 'no note outside the break');
+d = O.checkDates({ conditions: [{ key: 'finance', date: '2026-12-29' }], settlement: { kind: 'relative', days: 15 } }, { asAt: '2026-12-23' });
+ok(d.problems.some(p => p.kind === 'cond_past' && /Christmas break/.test(p.text) && /Wed, 6 January 2027/.test(p.text)), 'a break date moving back onto today says so and suggests the first working day after');
 out.checked = 'done';
 console.log(JSON.stringify(Object.assign(out, { errs }), null, 1));

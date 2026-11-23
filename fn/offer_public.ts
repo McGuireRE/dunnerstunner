@@ -4,16 +4,23 @@
 // database checks it, the link being on, the property's stage and the rate limits. The database functions it calls
 // (offer_public_info, offer_public_submit, offer_public_ai_claim, offer_public_notified) can only be run by the service role.
 // Deployed like the others: a tiny index.ts imports this file's raw GitHub URL pinned to a commit, as `offer-public`.
-// Help wording a buyer's own condition is not here: it is doc-prefill's "offer_condition" mode (every model call goes through
-// doc_prefill.ts), using makeDraft from offer_public_handler.ts. Email goes to Tim only.
+// Action "draft" (help wording a buyer's own condition) uses makeDraft with prefill_shared.ts's callAnthropic and logAiCall, so the
+// model call and its ai_calls row live in the shared module. Email goes to Tim only.
 import { admin, APP_URL, cors, esc, money, sendMail, TIM_EMAIL, wrap } from "./shared.ts";
-import { makeHandler } from "./offer_public_handler.ts";
+import { makeDraft, makeHandler } from "./offer_public_handler.ts";
+import { callAnthropic, logAiCall } from "./prefill_shared.ts";
 
 const CONDITION_NAMES: Record<string, string> = { builders: "Builder's report", finance: "Finance", lim: "LIM", lawyer: "Lawyer's approval", electrical: "Electrical report", technical: "Specified technical report", toxicology: "Toxicology report", oia: "OIA consent", land_act: "Land Act consent", sale: "Sale of another property", sdd: "Specified Due Diligence", custom: "Their own condition (to approve)" };
 
 Deno.serve(makeHandler({
   cors,
   rpc: async (fn, args) => { const { data, error } = await admin().rpc(fn, args); return { data, error: error ? { message: error.message } : null }; },
+  draft: makeDraft({
+    rpc: async (fn, args) => { const { data, error } = await admin().rpc(fn, args); return { data, error: error ? { message: error.message } : null }; },
+    aiKey: () => (Deno.env.get("ANTHROPIC_API_KEY") || "").trim(),
+    callModel: (request) => callAnthropic((Deno.env.get("ANTHROPIC_API_KEY") || "").trim(), request),
+    logAi: (row) => logAiCall(admin(), row, "buyer form"),
+  }),
   notifyTim: async (offerId) => {
     const db = admin();
     const { data: o }: any = await db.from("property_offers").select("id,property_id,amount,details,related_party,needs_date_help,kiwisaver,received_at").eq("id", offerId).single();

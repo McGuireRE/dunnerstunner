@@ -67,9 +67,25 @@ Database changes are additive. Tests never email real buyers or vendors.
 
 ## Phase 1 detail: the offer form (Tim, 23 November 2026)
 
-Status: built 23 November 2026 on branch `offers-phase1` (migration 018, written and tested in a rollback block on the live
-project; not applied). Not yet reviewed, pushed or deployed. New edge function `offer-public` (fn/offer_public.ts, JWT
-verification off); doc-prefill gains the `offer_condition` mode and must be redeployed with JWT verification off.
+Status: built 23 November 2026 on branch `offers-phase1`, revised after the first review. Migration 018 is written and was
+tested in a rollback block on a local PostgreSQL 16 stand-in (a minimal Supabase-like setup), NOT on the live project: the live
+run was refused at the confirmation step. Before 018 is applied, the rollback block (`node onboarding/tests/offer-rollback.js`)
+must be run on the live project with Tim's approval and come back with no CAPITALS lines. Not yet reviewed again, pushed or
+deployed.
+
+Deploy steps (phase 1):
+
+1. With Tim's approval, run the rollback block on the live project; then apply 018.
+2. Push, then deploy `offer-public` (fn/offer_public.ts) pinned to that commit, with the gateway's JWT verification OFF (buyers have
+   no account; every action needs a live link token). doc-prefill is unchanged and keeps JWT verification on.
+3. Check the network address can't be faked: send one `info` request to offer-public with a made-up `X-Forwarded-For` header (for
+   example `X-Forwarded-For: 192.0.2.123`), then look at the newest `offer_hits` row's `net` and confirm it is the hash of the
+   real address (send a second request without the header from the same machine: the two `net` values must match). If they
+   differ, the platform passes the caller's header through and netOf must be changed before the form goes live.
+4. Check the notification email reaches Tim, and run the Jotform in parallel for a while.
+
+Unconfirmed, for Tim: when Otago Anniversary Day (the Monday nearest 23 March) is also Easter Monday, the working-day count takes the
+Tuesday after as the anniversary day. That is not confirmed; it affects only clash years, the next being 2035.
 
 Fields carried over from the Jotform: contact email and phone; seen the property documents (yes/no, with the link);
 sign digitally or meet in person (first-time buyers steered to in person); settlement date; price; conditions;

@@ -81,26 +81,28 @@ alter table public.property_offers
   add column gap_override_reason text check (gap_override_reason is null or length(gap_override_reason) between 5 and 500),
   add column gap_override_by text, add column gap_override_at timestamptz,
   add column net_hash text,
-  add column notified_at timestamptz, add column notify_error text;
+  add column notified_at timestamptz, add column notify_error text,
+  add column suspected_spam boolean not null default false;   -- the form's hidden field was filled: kept for Tim to look at, no email
 create index on public.property_offers (read_at) where read_at is null;
 
 -- The form's rows change only through the functions below (each sets offers.fn while it works and clears it before it returns). What was sent never
 -- changes, and no offer is ever removed. Rows Tim adds directly under migration 010 ('manual') work as before.
 create or replace function public.guard_offer() returns trigger language plpgsql set search_path = public as $$
-declare fn boolean := coalesce(current_setting('offers.fn', true), '') = 'on';
+declare fn boolean := coalesce(current_setting('offers.fn', true), '') = 'on'; free text[] := array['notes', 'expires_at', 'updated_at'];
 begin
   if tg_op = 'DELETE' then raise exception 'Offers are never removed. Mark it withdrawn or lapsed instead.'; end if;
   if tg_op = 'INSERT' then
-    if (new.source <> 'manual' or new.submission is not null or new.details is not null) and not fn then raise exception 'Offers from the form are only added through the form'; end if;
+    if (new.source <> 'manual' or new.submission is not null or new.details is not null or new.suspected_spam) and not fn then raise exception 'Offers from the form are only added through the form'; end if;
     return new;
   end if;
   if new.submission is distinct from old.submission and old.submission is not null then raise exception 'What the buyer sent is kept as it was'; end if;
   if new.source is distinct from old.source or new.property_id is distinct from old.property_id or new.net_hash is distinct from old.net_hash then raise exception 'That cannot be changed'; end if;
-  if old.source <> 'manual' and not fn and (new.details is distinct from old.details or new.amount is distinct from old.amount or new.status is distinct from old.status
-      or new.status_at is distinct from old.status_at or new.read_at is distinct from old.read_at or new.gap_override_reason is distinct from old.gap_override_reason
-      or new.kiwisaver is distinct from old.kiwisaver or new.related_party is distinct from old.related_party or new.needs_date_help is distinct from old.needs_date_help
-      or new.lawyer_approval is distinct from old.lawyer_approval or new.conditions is distinct from old.conditions or new.buyer_ref is distinct from old.buyer_ref
-      or new.received_at is distinct from old.received_at or new.as_at is distinct from old.as_at or new.province is distinct from old.province) then
+  -- a row Tim added under migration 010 can't later be given a form submission
+  if old.source = 'manual' and (new.submission is distinct from old.submission or new.details is distinct from old.details or new.suspected_spam is distinct from old.suspected_spam) then
+    raise exception 'Offers from the form are only added through the form';
+  end if;
+  -- a form offer: outside the functions, only notes and expires_at may change
+  if old.source <> 'manual' and not fn and (to_jsonb(new) - free) is distinct from (to_jsonb(old) - free) then
     raise exception 'Offers from the form are changed through the Offers tile, so there is a record';
   end if;
   return new;
@@ -109,6 +111,11 @@ create trigger guard_offer before insert or update or delete on public.property_
 create or replace function public.guard_offer_event() returns trigger language plpgsql set search_path = public as $$
 begin raise exception 'Offer records cannot be changed or removed'; end $$;
 create trigger guard_offer_event before update or delete on public.offer_events for each row execute function public.guard_offer_event();
+-- nor emptied wholesale
+create or replace function public.guard_offer_truncate() returns trigger language plpgsql set search_path = public as $$
+begin raise exception 'Offer records cannot be emptied'; end $$;
+create trigger offer_events_no_truncate before truncate on public.offer_events for each statement execute function public.guard_offer_truncate();
+create trigger property_offers_no_truncate before truncate on public.property_offers for each statement execute function public.guard_offer_truncate();
 create trigger touch_offer_links before update on public.offer_links for each row execute function public.touch_updated();
 
 -- ───── who sees what ─────
@@ -281,9 +288,15 @@ create or replace function public.offer_link_live(p_token text) returns public.o
 create or replace function public.offer_public_info(p_token text, p_net text) returns jsonb language plpgsql security definer set search_path = public as $$
 declare n text := public.offer_net(p_net); l public.offer_links; addr text; w jsonb;
 begin
-  if public.offer_hit_count('bad', n, null, interval '1 hour') >= 30 or public.offer_hit_count('info', n, null, interval '1 hour') >= 120 then return jsonb_build_object('ok', false, 'reason', 'busy'); end if;
+  delete from public.offer_hits where at < now() - interval '2 days';
   l := public.offer_link_live(p_token);
-  if l.property_id is null then insert into public.offer_hits (kind, net) values ('bad', n); return jsonb_build_object('ok', false); end if;
+  -- a token that isn't live: counted per network, and once a network has tried 30 in an hour its further guesses aren't even
+  -- recorded. A live token is never refused because of guesses made from the same (perhaps shared) network.
+  if l.property_id is null then
+    if public.offer_hit_count('bad', n, null, interval '1 hour') < 30 then insert into public.offer_hits (kind, net) values ('bad', n); end if;
+    return jsonb_build_object('ok', false);
+  end if;
+  if public.offer_hit_count('info', n, l.property_id, interval '1 hour') >= 120 then return jsonb_build_object('ok', false, 'reason', 'busy_network'); end if;
   insert into public.offer_hits (kind, net, property_id) values ('info', n, l.property_id);
   select address into addr from public.properties where id = l.property_id;
   select coalesce(jsonb_object_agg(key, wording) filter (where wording is not null), '{}'::jsonb) into w from public.offer_clauses;
@@ -291,26 +304,28 @@ begin
 end $$;
 
 -- An offer from the buyer's form. Returns {ok, id, ref, address} or {ok: false, reason}. Bad input raises with a plain message.
-create or replace function public.offer_public_submit(p_token text, p_offer jsonb, p_net text) returns jsonb language plpgsql security definer set search_path = public as $$
+-- p_spam: the form's hidden field was filled. The offer is still checked and kept, flagged for Tim, and nobody is emailed.
+-- Refusals name the limit: busy_network (this connection), busy_property (this property), busy_site (every property today).
+create or replace function public.offer_public_submit(p_token text, p_offer jsonb, p_net text, p_spam boolean default false) returns jsonb language plpgsql security definer set search_path = public as $$
 declare n text := public.offer_net(p_net); l public.offer_links; d jsonb; oid uuid; addr text;
 begin
   delete from public.offer_hits where at < now() - interval '2 days';
-  if public.offer_hit_count('bad', n, null, interval '1 hour') >= 30 then return jsonb_build_object('ok', false, 'reason', 'busy'); end if;
   l := public.offer_link_live(p_token);
-  if l.property_id is null then insert into public.offer_hits (kind, net) values ('bad', n); return jsonb_build_object('ok', false, 'reason', 'closed'); end if;
-  if public.offer_hit_count('submit', n, null, interval '10 minutes') >= 3 or public.offer_hit_count('submit', n, null, interval '1 day') >= 10
-     or public.offer_hit_count('submit', null, l.property_id, interval '10 minutes') >= 6 or public.offer_hit_count('submit', null, l.property_id, interval '1 day') >= 30
-     or public.offer_hit_count('submit', null, null, interval '1 day') >= 150 then
-    return jsonb_build_object('ok', false, 'reason', 'busy');
+  if l.property_id is null then
+    if public.offer_hit_count('bad', n, null, interval '1 hour') < 30 then insert into public.offer_hits (kind, net) values ('bad', n); end if;
+    return jsonb_build_object('ok', false, 'reason', 'closed');
   end if;
+  if public.offer_hit_count('submit', n, null, interval '10 minutes') >= 3 or public.offer_hit_count('submit', n, null, interval '1 day') >= 10 then return jsonb_build_object('ok', false, 'reason', 'busy_network'); end if;
+  if public.offer_hit_count('submit', null, l.property_id, interval '10 minutes') >= 60 or public.offer_hit_count('submit', null, l.property_id, interval '1 day') >= 200 then return jsonb_build_object('ok', false, 'reason', 'busy_property'); end if;
+  if public.offer_hit_count('submit', null, null, interval '1 day') >= 1000 then return jsonb_build_object('ok', false, 'reason', 'busy_site'); end if;
   d := public.offer_clean(p_offer, false) || jsonb_build_object('chattels_listed', l.chattels);   -- raises on anything wrong; the chattels list shown comes from the link, never the page
   insert into public.offer_hits (kind, net, property_id) values ('submit', n, l.property_id);
   perform set_config('offers.fn', 'on', true);
-  insert into public.property_offers (property_id, buyer_ref, amount, conditions, status, entered_by, source, submission, details, kiwisaver, lawyer_approval, needs_date_help, related_party, province, as_at, net_hash)
+  insert into public.property_offers (property_id, buyer_ref, amount, conditions, status, entered_by, source, submission, details, kiwisaver, lawyer_approval, needs_date_help, related_party, province, as_at, net_hash, suspected_spam)
   values (l.property_id, public.offer_label(d), (d ->> 'price')::numeric, public.offer_cond_line(d), 'received', 'buyer form', 'buyer', d, d, (d ->> 'kiwisaver')::boolean, (d ->> 'lawyer_approval')::boolean,
-          (d ->> 'date_help')::boolean, (d ->> 'related')::boolean, l.province, public.offer_nz_today(), n)
+          (d ->> 'date_help')::boolean, (d ->> 'related')::boolean, l.province, public.offer_nz_today(), n, coalesce(p_spam, false))
   returning id into oid;
-  insert into public.offer_events (property_id, offer_id, actor, kind, detail) values (l.property_id, oid, 'buyer form', 'submitted', jsonb_build_object('source', 'buyer'));
+  insert into public.offer_events (property_id, offer_id, actor, kind, detail) values (l.property_id, oid, 'buyer form', 'submitted', jsonb_build_object('source', 'buyer', 'suspected_spam', coalesce(p_spam, false)));
   select address into addr from public.properties where id = l.property_id;
   perform set_config('offers.fn', '', true);
   return jsonb_build_object('ok', true, 'id', oid, 'ref', upper(left(replace(oid::text, '-', ''), 8)), 'address', addr);
@@ -320,9 +335,11 @@ end $$;
 create or replace function public.offer_public_ai_claim(p_token text, p_net text) returns jsonb language plpgsql security definer set search_path = public as $$
 declare n text := public.offer_net(p_net); l public.offer_links; cap int;
 begin
-  if public.offer_hit_count('bad', n, null, interval '1 hour') >= 30 then return jsonb_build_object('ok', false, 'reason', 'busy'); end if;
   l := public.offer_link_live(p_token);
-  if l.property_id is null then insert into public.offer_hits (kind, net) values ('bad', n); return jsonb_build_object('ok', false, 'reason', 'closed'); end if;
+  if l.property_id is null then
+    if public.offer_hit_count('bad', n, null, interval '1 hour') < 30 then insert into public.offer_hits (kind, net) values ('bad', n); end if;
+    return jsonb_build_object('ok', false, 'reason', 'closed');
+  end if;
   select ai_daily_cap into cap from public.offer_settings;
   if public.offer_hit_count('ai', null, null, interval '1 day') >= cap then return jsonb_build_object('ok', false, 'reason', 'cap'); end if;
   if public.offer_hit_count('ai', n, null, interval '1 hour') >= 5 or public.offer_hit_count('ai', n, null, interval '1 day') >= 12
@@ -334,8 +351,12 @@ begin
 end $$;
 
 -- after the email to Tim
-create or replace function public.offer_public_notified(p_offer uuid, p_error text) returns void language sql security definer set search_path = public as $$
-  update public.property_offers set notified_at = case when p_error is null then now() end, notify_error = left(p_error, 500) where id = p_offer and source = 'buyer' $$;
+create or replace function public.offer_public_notified(p_offer uuid, p_error text) returns void language plpgsql security definer set search_path = public as $$
+begin
+  perform set_config('offers.fn', 'on', true);
+  update public.property_offers set notified_at = case when p_error is null then now() end, notify_error = left(p_error, 500) where id = p_offer and source = 'buyer';
+  perform set_config('offers.fn', '', true);
+end $$;
 
 -- ───── Tim's side ─────
 create or replace function public.offer_agent() returns text language plpgsql stable security definer set search_path = public as $$
@@ -470,9 +491,9 @@ end $$;
 -- ───── execute rights ─────
 revoke execute on function public.offer_token(), public.offer_stage_ok(text), public.offer_net(text), public.offer_nz_today(), public.offer_txt(jsonb, text, int, boolean, text), public.offer_bool(jsonb, text),
   public.offer_email_ok(text), public.offer_phone_ok(text), public.offer_date(text, text, boolean), public.offer_int(jsonb, text, int, int, text), public.offer_clean(jsonb, boolean), public.offer_label(jsonb),
-  public.offer_cond_line(jsonb), public.offer_hit_count(text, text, uuid, interval), public.offer_link_live(text), public.offer_agent(), public.guard_offer(), public.guard_offer_event() from public, anon, authenticated;
-revoke execute on function public.offer_public_info(text, text), public.offer_public_submit(text, jsonb, text), public.offer_public_ai_claim(text, text), public.offer_public_notified(uuid, text) from public, anon, authenticated;
-grant execute on function public.offer_public_info(text, text), public.offer_public_submit(text, jsonb, text), public.offer_public_ai_claim(text, text), public.offer_public_notified(uuid, text) to service_role;
+  public.offer_cond_line(jsonb), public.offer_hit_count(text, text, uuid, interval), public.offer_link_live(text), public.offer_agent(), public.guard_offer(), public.guard_offer_event(), public.guard_offer_truncate() from public, anon, authenticated;
+revoke execute on function public.offer_public_info(text, text), public.offer_public_submit(text, jsonb, text, boolean), public.offer_public_ai_claim(text, text), public.offer_public_notified(uuid, text) from public, anon, authenticated;
+grant execute on function public.offer_public_info(text, text), public.offer_public_submit(text, jsonb, text, boolean), public.offer_public_ai_claim(text, text), public.offer_public_notified(uuid, text) to service_role;
 revoke execute on function public.agent_offer_link(uuid, text, text), public.agent_offer_add(uuid, jsonb), public.agent_offer_correct(uuid, jsonb, text), public.agent_offer_status(uuid, text, timestamptz, text),
   public.agent_offer_read(uuid), public.agent_offer_gap(uuid, text), public.agent_offer_settings(int), public.agent_offer_clause(text, text), public.agent_offer_chattels(uuid, jsonb) from public, anon;
 grant execute on function public.agent_offer_link(uuid, text, text), public.agent_offer_add(uuid, jsonb), public.agent_offer_correct(uuid, jsonb, text), public.agent_offer_status(uuid, text, timestamptz, text),

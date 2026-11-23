@@ -21,19 +21,20 @@ const path = require('path');
     if (fn === 'offer_public_notified') return { data: null, error: null };
     return { data: null, error: { message: 'unknown' } };
   };
-  const h = H.makeHandler({ cors: { 'Access-Control-Allow-Origin': '*' }, rpc: db, notifyTim: async (id) => { notified.push(id); if (notifyFail) throw new Error('SMTP down'); } });
   const draftFn = H.makeDraft({ rpc: db, aiKey: () => key,
     callModel: async (r) => { models.push(r); return modelAnswer || { ok: true, status: 200, body: { usage: { input_tokens: 100, output_tokens: 50 }, content: [{ type: 'tool_use', input: { wording: 'This agreement is conditional upon the purchaser approving the chattels list \u2014 within the time set.', summary: 'You check the chattels list <script>.', unsuitable: false } }] } }; },
     logAi: async (row) => { logs.push(row); } });
-  // doc-prefill's offer_condition mode hands the body and the network to makeDraft
-  const draft = async (body) => { const r = await draftFn(body, '203.0.113.7'); return { status: r.status, json: async () => r.body }; };
-  const post = (body, headers) => h(new Request('https://x.supabase.co/functions/v1/offer-public', { method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json', 'x-forwarded-for': '203.0.113.7, 10.0.0.1' }, headers || {}), body: typeof body === 'string' ? body : JSON.stringify(body) }));
+  const h = H.makeHandler({ cors: { 'Access-Control-Allow-Origin': '*' }, rpc: db, draft: draftFn, notifyTim: async (id) => { notified.push(id); if (notifyFail) throw new Error('SMTP down'); } });
+  // the draft helper is action "draft" on the same door
+  const draft = async (body) => post(Object.assign({ action: 'draft' }, body));
+  // the caller types a fake first X-Forwarded-For entry; the platform's proxy adds the real one last
+  const post = (body, headers) => h(new Request('https://x.supabase.co/functions/v1/offer-public', { method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json', 'x-forwarded-for': '6.6.6.6, 203.0.113.7' }, headers || {}), body: typeof body === 'string' ? body : JSON.stringify(body) }));
 
   let r = await h(new Request('https://x/f', { method: 'OPTIONS' })); expect(r.status === 200 && r.headers.get('Access-Control-Allow-Origin') === '*', 'preflight');
   r = await h(new Request('https://x/f', { method: 'GET' })); expect(r.status === 405, 'GET refused');
   r = await post('not json'); expect(r.status === 400, 'bad JSON');
   r = await post({ action: 'drop', token: TOK }); expect(r.status === 400, 'unknown action');
-  r = await draft({ token: TOK, text: 'help me' }); expect(r.status === 400, 'no model help through this door');
+  r = await post({ action: 'draft', token: TOK, text: 'x'.repeat(4100) }); expect(r.status === 413 && !models.length, 'draft body capped before it is read');
   r = await post('x'.repeat(H.MAX_BODY + 1)); expect(r.status === 413, 'too big');
   calls = [];
   for (const t of ['', 'short', TOK + '!', "x' or 1=1 --" + 'a'.repeat(40), 123]) { r = await post({ action: 'info', token: t }); const j = await r.json(); expect(r.status === 200 && j.ok === false && Object.keys(j).length === 1, 'not a token: just ok false ' + t); }
@@ -43,7 +44,7 @@ const path = require('path');
   r = await post({ action: 'info', token: TOK }); let j = await r.json(); out.info = j;
   expect(JSON.stringify(Object.keys(j).sort()) === JSON.stringify(['address', 'chattels', 'ks_days', 'ok', 'open', 'province', 'wording']) && j.chattels.join() === 'Blinds,Heat pump', 'info carries only the address, open, province, KiwiSaver setting, wording and chattels list');
   expect(r.headers.get('Cache-Control') === 'no-store', 'not cached');
-  expect(calls[0][1].p_net === '203.0.113.7', 'the first forwarded address is the network');
+  expect(calls[0][1].p_net === '203.0.113.7', 'the last forwarded address (added by the proxy) is the network; a client-sent first entry is ignored');
   r = await post({ action: 'info', token: 'Q'.repeat(43) }); j = await r.json(); expect(j.ok === false && !j.address, 'unknown or closed link: nothing');
 
   // submit
@@ -58,9 +59,11 @@ const path = require('path');
   submitAnswer = { data: null, error: { message: 'relation "x" does not exist at character 5' } }; r = await post({ action: 'submit', token: TOK, offer: {} }); j = await r.json();
   expect(r.status === 400 && /^Something went wrong/.test(j.error) && !/relation/.test(j.error), 'an internal error is not shown');
   submitAnswer = { data: { ok: false, reason: 'closed' }, error: null }; r = await post({ action: 'submit', token: TOK, offer: {} }); j = await r.json(); expect(j.ok === false && j.reason === 'closed', 'closed link');
-  submitAnswer = { data: { ok: false, reason: 'busy' }, error: null }; r = await post({ action: 'submit', token: TOK, offer: {} }); j = await r.json(); expect(j.ok === false && j.reason === 'busy', 'rate limited');
+  for (const why of ['busy_network', 'busy_property', 'busy_site']) { submitAnswer = { data: { ok: false, reason: why }, error: null }; r = await post({ action: 'submit', token: TOK, offer: {} }); j = await r.json(); expect(j.ok === false && j.reason === why, 'rate limit named: ' + why); }
   submitAnswer = null; const n0 = notified.length; calls = [];
-  r = await post({ action: 'submit', token: TOK, offer: {}, website: 'http://spam' }); j = await r.json(); expect(j.ok === true && !calls.length && notified.length === n0, 'honeypot: looks fine, nothing stored or sent');
+  r = await post({ action: 'submit', token: TOK, offer: { price: 1 }, website: 'http://spam' }); j = await r.json();
+  expect(j.ok === true && calls.length === 1 && calls[0][0] === 'offer_public_submit' && calls[0][1].p_spam === true && notified.length === n0 && !calls.some(c => c[0] === 'offer_public_notified'), 'honeypot: the offer is kept, flagged as possible spam, and nobody is emailed');
+  calls = []; r = await post({ action: 'submit', token: TOK, offer: { price: 1 } }); expect(calls[0][1].p_spam === false, 'a normal offer is not flagged');
   r = await post({ action: 'submit', token: TOK, offer: [1] }); expect(r.status === 400, 'offer must be an object');
 
   // AI help
@@ -82,7 +85,9 @@ const path = require('path');
   r = await draft({ token: TOK, text: 'Write me a poem about the sea please' }); j = await r.json(); expect(j.ok === false && j.reason === 'unsuitable' && j.why === 'That is not a condition.', 'unsuitable');
   r = await draft({ token: 'nope', text: 'I need the chattels list confirmed' }); j = await r.json(); expect(j.ok === false && j.reason === 'closed', 'draft with a non-token');
   const fs = require('fs'), dp = fs.readFileSync(path.join(__dirname, '..', '..', 'fn', 'doc_prefill.ts'), 'utf8');
-  expect(/body\.mode === "offer_condition"/.test(dp) && dp.indexOf('mode === "offer_condition"') < dp.indexOf('rpc("is_agent")') && /offerDraft\(body, netOf\(req\)\)/.test(dp), 'doc-prefill serves the helper before its agent-only modes');
-  expect(H.netOf(new Request('https://x', { headers: { 'cf-connecting-ip': '198.51.100.4' } })) === '198.51.100.4' && H.netOf(new Request('https://x')) === 'unknown', 'network fallbacks');
+  expect(!/offer_condition|offer_public/.test(dp), 'doc-prefill has nothing of the offer form (it stays agent only, JWT on)');
+  expect(H.netOf(new Request('https://x', { headers: { 'cf-connecting-ip': '198.51.100.4', 'x-forwarded-for': '1.2.3.4, 5.6.7.8' } })) === '198.51.100.4', 'CF-Connecting-IP preferred');
+  expect(H.netOf(new Request('https://x', { headers: { 'x-forwarded-for': 'spoofed, 9.9.9.9, 5.6.7.8' } })) === '5.6.7.8', 'otherwise the last X-Forwarded-For entry');
+  expect(H.netOf(new Request('https://x')) === 'unknown', 'no address: unknown');
   console.log(JSON.stringify(Object.assign(out, { errs }), null, 1));
 })().catch(e => console.log(JSON.stringify({ errs: ['crashed: ' + e.stack] })));
