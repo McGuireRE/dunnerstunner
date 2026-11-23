@@ -122,5 +122,63 @@ ok(/15 January for the LIM date/.test(O.breakNote('2027-01-10', { lim: true })) 
 eq(O.breakNote('2026-12-22'), '', 'no note outside the break');
 d = O.checkDates({ conditions: [{ key: 'finance', date: '2026-12-29' }], settlement: { kind: 'relative', days: 15 } }, { asAt: '2026-12-23' });
 ok(d.problems.some(p => p.kind === 'cond_past' && /Christmas break/.test(p.text) && /Wed, 6 January 2027/.test(p.text)), 'a break date moving back onto today says so and suggests the first working day after');
+// ── condition timing (Tim, 24 November 2026): working days, a date, or working days after another condition ──
+// old offers ({days} and {date}) read exactly as before
+eq(['days', 'date', 'after', 'days'].map((m, i) => O.condMode([{ key: 'finance', days: 10 }, { key: 'lim', date: '2026-12-11' }, { key: 'lim', after: 'finance', days: 3 }, { key: 'x', after: '', days: 2 }][i])), ['days', 'date', 'after', 'days'], 'the three modes (an empty after is working days)');
+eq(O.conditionDate({ key: 'finance', days: 10 }, asAt, 'otago'), { date: '2026-12-07', days: 10, adjusted: false }, 'old {days}: unchanged');
+eq(O.conditionDate({ key: 'lim', date: '2026-12-11' }, asAt, 'otago'), { date: '2026-12-11', days: 14, adjusted: false, chosen: '2026-12-11' }, 'old {date}: unchanged');
+eq(O.conditionDate({ key: 'lim', after: 'finance', days: 3 }, asAt, 'otago'), null, 'after, without the other conditions: no date guessed');
+// a chain: builders 10 working days, finance 5 after builders, LIM 3 after finance (the LIM rule runs to 15 January)
+const chain = [{ key: 'builders', days: 10 }, { key: 'finance', after: 'builders', days: 5 }, { key: 'lim', after: 'finance', days: 3 }];
+d = O.checkDates({ conditions: chain, settlement: { kind: 'relative', days: 15 }, kiwisaver: false }, { asAt: '2026-12-01' });
+eq(d.conditions.map(c => [c.key, c.mode, c.date, !!c.latest]), [['builders', 'days', '2026-12-15', false], ['finance', 'after', '2026-12-22', true], ['lim', 'after', '2027-01-19', true]], 'after: the other condition\'s date (worst case) plus its own working days');
+eq([d.conditions[2].n, d.conditions[2].after, d.conditions[2].from], [3, 'finance', '2026-12-22'], 'what it waits for, and from when');
+eq([d.lastCondition, d.confirmation, d.settlement, d.problems.length], ['2027-01-19', '2027-01-19', '2027-02-10', 0], 'the last condition is the chain\'s end, and settlement counts from it');
+// the LIM's own rule in a chain: 3 LIM working days after 22 December are 23 December, 18 and 19 January; finance after the LIM uses its own rule
+eq(O.conditionDate({ key: 'lim', after: 'finance', days: 3 }, '2026-12-01', 'otago', [{ key: 'finance', date: '2026-12-22' }, { key: 'lim', after: 'finance', days: 3 }]).date, '2027-01-19', 'LIM after another: its working days run to 15 January');
+eq(O.conditionDate({ key: 'finance', after: 'lim', days: 3 }, '2026-12-01', 'otago', [{ key: 'lim', date: '2026-12-22' }, { key: 'finance', after: 'lim', days: 3 }]).date, '2027-01-07', 'finance after the LIM: its own rule (23 December, then 6 and 7 January)');
+// the one-week gap and the KiwiSaver warning follow the chain's end
+d = O.checkDates({ conditions: chain, settlement: { kind: 'date', date: '2027-01-22' }, kiwisaver: true }, { asAt: '2026-12-01' });
+eq([d.gapDays, d.gapOk, d.problems.some(p => p.kind === 'gap')], [3, false, true], 'the gap is measured from the latest date in the chain');
+ok(d.ksWarnSettle && d.ksSettleDays === 3, 'KiwiSaver: settlement counted from the chain\'s end');
+d = O.checkDates({ conditions: chain, settlement: { kind: 'date', date: '2027-01-26' } }, { asAt: '2026-12-01' }); eq([d.gapDays, d.gapOk], [7, true], 'a week after the chain\'s end is fine');
+// chains that can't be: itself, not on the offer, loops, too long, no days
+const kinds = cs => cs.map(c => (O.chainProblem(cs, c.key) || {}).kind || '');
+eq(kinds([{ key: 'finance', after: 'finance', days: 2 }]), ['self'], 'waits for itself');
+eq(kinds([{ key: 'finance', after: 'lim', days: 2 }]), ['missing'], 'waits for a condition not on the offer');
+eq(kinds([{ key: 'finance', after: 'lim', days: 2 }, { key: 'lim', after: 'finance', days: 2 }]), ['loop', 'loop'], 'two waiting for each other');
+eq(kinds([{ key: 'finance', after: 'lim', days: 2 }, { key: 'lim', after: 'builders', days: 2 }, { key: 'builders', after: 'finance', days: 2 }]), ['loop', 'loop', 'loop'], 'three in a ring');
+ok(/Finance, LIM \(council report\) and Builder's report wait for each other/.test(O.chainProblem([{ key: 'finance', after: 'lim', days: 2 }, { key: 'lim', after: 'builders', days: 2 }, { key: 'builders', after: 'finance', days: 2 }], 'finance').text), 'a loop is named plainly');
+const four = [{ key: 'builders', days: 4 }, { key: 'finance', after: 'builders', days: 1 }, { key: 'lim', after: 'finance', days: 1 }, { key: 'electrical', after: 'lim', days: 1 }, { key: 'technical', after: 'electrical', days: 1 }];
+eq(kinds(four), ['', '', '', '', 'deep'], 'three steps in a row are fine, four are too many');
+eq(O.MAX_CHAIN, 3, 'the longest chain');
+d = O.checkDates({ conditions: [{ key: 'finance', after: 'lim', days: 2 }, { key: 'lim', after: 'finance', days: 2 }], settlement: { kind: 'relative', days: 15 } }, { asAt });
+ok(d.problems.filter(p => p.kind === 'cond_chain' && p.chain === 'loop').length === 2 && d.conditions.every(c => !c.date), 'a loop: a problem for each, and no dates');
+d = O.checkDates({ conditions: [{ key: 'builders' }, { key: 'finance', after: 'builders', days: 2 }], settlement: { kind: 'relative', days: 15 } }, { asAt });
+ok(d.problems.some(p => p.key === 'finance' && p.kind === 'cond_chain' && /needs its own working days or a date first/.test(p.text)), 'waiting for a condition with no timing yet');
+d = O.checkDates({ conditions: [{ key: 'builders', days: 3 }, { key: 'finance', after: 'builders' }], settlement: { kind: 'relative', days: 15 } }, { asAt });
+ok(d.problems.some(p => p.key === 'finance' && p.kind === 'cond_missing' && /Add the working days for Finance/.test(p.text)), 'after needs its working days');
+// validation: the chain is checked even when dates are skipped (the server's own check)
+eq(O.validate(Object.assign({}, good, { conditions: chain }), { asAt }), [], 'a good chain passes');
+eq(O.validate(Object.assign({}, good, { conditions: [{ key: 'finance', after: 'lim', days: 2 }, { key: 'lim', after: 'finance', days: 2 }] }), { asAt }).map(e => e.field), ['c_finance', 'c_lim'], 'a loop stops sending');
+eq(O.validate(Object.assign({}, good, { conditions: [{ key: 'finance', after: 'lim', days: 2 }] }), { asAt, skipDates: true }).map(e => e.field), ['c_finance'], 'a missing target is refused without the dates');
+eq(O.validate(Object.assign({}, good, { conditions: [{ key: 'builders', days: 3 }, { key: 'finance', after: 'builders' }] }), { asAt, skipDates: true }).map(e => e.text), ['Add the working days for Finance.'], 'after without days, without the dates');
+eq(O.validate(Object.assign({}, good, { line_up: 'yes' }), { asAt }).map(e => e.field), ['conditions'], 'line_up is true or false');
+// "Confirm all conditions on the same day": one timing for all, nothing else changed, and not forced
+const mixed = [{ key: 'builders', days: 10, detail: '' }, { key: 'finance', after: 'builders', days: 5 }, { key: 'technical', date: '2026-12-11', detail: 'Roof' }];
+const lu = O.lineUp(mixed, { days: 10 });
+eq(lu.map(c => [c.key, c.days, c.date, 'after' in c]), [['builders', 10, '', false], ['finance', 10, '', false], ['technical', 10, '', false]], 'lined up on working days (a waiting condition no longer waits)');
+eq(lu[2].detail, 'Roof', 'other details kept');
+eq(O.lineUp(mixed, { date: '2026-12-18' }).map(c => c.date + '/' + c.days), ['2026-12-18/', '2026-12-18/', '2026-12-18/'], 'lined up on a date');
+eq(mixed[1].after, 'builders', 'the offer given is not changed');
+eq([O.sameTiming(lu), O.sameTiming(O.lineUp(mixed, { date: '2026-12-18' })), O.sameTiming(mixed), O.sameTiming([])], ['days:10', 'date:2026-12-18', '', ''], 'whether they are all on one timing');
+const lu2 = O.lineUp(mixed, { days: 10 }); lu2[0].days = 12; eq(O.sameTiming(lu2), '', 'each can still be changed afterwards');
+d = O.checkDates({ conditions: O.lineUp([{ key: 'finance' }, { key: 'lim' }], { days: 10 }), settlement: { kind: 'relative', days: 15 } }, { asAt: '2026-12-10' });
+eq(d.conditions.map(c => c.date), ['2027-01-06', '2027-01-18'], 'same working days over summer: the LIM date is later (its rule runs to 15 January)');
+// the plain timing for the buyer, and the words for a condition in a sentence
+eq([O.timingPlain({ key: 'finance', days: 10 }), O.timingPlain({ key: 'finance', days: 1 }), O.timingPlain({ key: 'finance', date: '2026-12-11' }), O.timingPlain({ key: 'lim', after: 'finance', days: 3 })],
+  ['within 10 working days of the date of the agreement', 'within 1 working day of the date of the agreement', 'by Fri, 11 December 2026', 'within 3 working days after Finance is satisfied or waived'], 'timing in plain words');
+eq([O.nounFor('finance'), O.nounFor('builders'), O.nounFor('custom')], ['finance condition', 'building report condition', "purchaser's own condition"], 'a condition named in a sentence');
+ok(Object.values(O.NOUNS).concat(O.CONDITIONS.map(c => O.timingPlain({ key: 'x', after: c.key, days: 2 }))).every(t => !/[–—]/.test(t)), 'no dashes in the timing words');
 out.checked = 'done';
 console.log(JSON.stringify(Object.assign(out, { errs }), null, 1));

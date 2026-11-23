@@ -5493,7 +5493,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   }
   const ofBlank = () => ({ email: '', phone: '', seen_docs: '', sign: '', price: '', settlement: { kind: 'relative', days: OF.SETTLE_DAYS_DEFAULT, date: '' }, conditions: [], sale_address: '', kiwisaver: null, entity: '', nominee: true,
     purchasers: [{ first: '', last: '', email: '', phone: '' }], comments: '', lawyer: { firm: '', person: '', email: '', phone: '' }, related: null, date_help: false, privacy: false,
-    chattels_add: [], chattels_exclude: [], gst_registered: null, gst_number: '' });
+    chattels_add: [], chattels_exclude: [], gst_registered: null, gst_number: '', line_up: false, lu: { days: '', date: '' } });
   // a saved or stored offer back into the form's shape (anything odd is dropped)
   function ofShape(x) {
     const F = ofBlank(); if (!x || typeof x !== 'object') return F;
@@ -5502,7 +5502,9 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     ['kiwisaver', 'related'].forEach(k => { if (typeof x[k] === 'boolean') F[k] = x[k]; });
     F.nominee = x.nominee !== false; F.date_help = x.date_help === true; F.privacy = x.privacy === true;
     const s = x.settlement || {}; F.settlement = { kind: s.kind === 'date' ? 'date' : 'relative', days: s.kind === 'date' ? OF.SETTLE_DAYS_DEFAULT : (s.days ?? OF.SETTLE_DAYS_DEFAULT), date: s.date || '' };
-    if (Array.isArray(x.conditions)) F.conditions = x.conditions.filter(c => c && OF.condInfo(c.key)).map(c => ({ key: c.key, days: c.date ? '' : (c.days ?? ''), date: c.date || '', detail: c.detail || '', request: c.request || '', wording: c.wording || '', ai: c.ai === true }));
+    if (Array.isArray(x.conditions)) F.conditions = x.conditions.filter(c => c && OF.condInfo(c.key)).map(c => ({ key: c.key, days: c.date && !c.after ? '' : (c.days ?? ''), date: c.after ? '' : c.date || '', after: typeof c.after === 'string' ? c.after : '', detail: c.detail || '', request: c.request || '', wording: c.wording || '', ai: c.ai === true }));
+    F.line_up = x.line_up === true; if (x.lu && typeof x.lu === 'object') F.lu = { days: String(x.lu.days ?? ''), date: String(x.lu.date || '') };
+    else if (F.line_up) { const st = OF.sameTiming(F.conditions); F.lu = { days: st.startsWith('days:') ? st.slice(5) : '', date: st.startsWith('date:') ? st.slice(5) : '' }; }
     if (Array.isArray(x.purchasers) && x.purchasers.length) F.purchasers = x.purchasers.map(p => ({ first: (p && p.first) || '', last: (p && p.last) || '', email: (p && p.email) || '', phone: (p && p.phone) || '' }));
     if (x.lawyer && typeof x.lawyer === 'object') ['firm', 'person', 'email', 'phone'].forEach(k => { F.lawyer[k] = x.lawyer[k] || ''; });
     ['chattels_add', 'chattels_exclude'].forEach(k => { if (Array.isArray(x[k])) F[k] = x[k].filter(v => typeof v === 'string'); });
@@ -5515,7 +5517,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const pn = OF.parsePrice(F.price);   // 650k and $1.2m are read; anything else is sent as typed and refused with a plain message
     return { email: F.email.trim(), phone: F.phone.trim(), seen_docs: F.seen_docs, sign: F.sign, price: isNaN(pn) ? String(F.price || '').trim() : String(pn),
       settlement: s.kind === 'date' ? { kind: 'date', date: s.date } : { kind: 'relative', days: s.days === '' ? null : +s.days },
-      conditions: F.conditions.map(c => { const o = { key: c.key }; if (c.date) o.date = c.date; else o.days = c.days === '' || c.days == null ? null : +c.days; if (c.key === 'technical') o.detail = c.detail; if (c.key === 'custom') { o.request = c.request; o.wording = c.wording; o.ai = !!c.ai; } return o; }),
+      conditions: F.conditions.map(c => { const o = { key: c.key }; if (c.after) { o.after = c.after; o.days = c.days === '' || c.days == null ? null : +c.days; } else if (c.date) o.date = c.date; else o.days = c.days === '' || c.days == null ? null : +c.days; if (c.key === 'technical') o.detail = c.detail; if (c.key === 'custom') { o.request = c.request; o.wording = c.wording; o.ai = !!c.ai; } return o; }),
+      line_up: !!F.line_up,
       sale_address: F.conditions.some(c => c.key === 'sale') ? F.sale_address : null, kiwisaver: F.kiwisaver, entity: F.entity, nominee: F.nominee !== false,
       purchasers: F.purchasers.map(p => ({ first: p.first, last: p.last, email: p.email, phone: p.phone })), comments: F.comments, lawyer: Object.assign({}, F.lawyer),
       related: F.related, date_help: !!F.date_help, privacy: !!F.privacy,
@@ -5535,10 +5538,17 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   const ofPriceSay = v => { if (!String(v ?? '').trim()) return ''; const n = OF.parsePrice(v); if (isNaN(n) || !(n >= 1)) return 'Please type the price in numbers, for example 650000 or 650k.'; return `${money(n)}: ${OF.priceWords(n)}`; };
   const ofYes = v => v === true ? 'yes' : v === false ? 'no' : '';
   const ofMinDate = ctx => OF.addDays(ofOpts(ctx).asAt, 1);
-  function ofCalcText(ctx, x) {
-    const o = ofOpts(ctx), r = OF.conditionDate(x, o.asAt, o.province);
+  function ofCalcText(ctx, x, F) {
+    const o = ofOpts(ctx), all = (F && F.conditions) || [x], L = OF.longDate;
+    if (OF.condMode(x) === 'after') {   // waits for another condition: the latest it could be
+      const cp = OF.chainProblem(all, x.key); if (cp) return cp.text;
+      const tl = (OF.condInfo(x.after) || { label: 'the other condition' }).label, r = OF.conditionDate(x, o.asAt, o.province, all);
+      if (!(Math.floor(+x.days) >= 1)) return `Enter the working days. They count from the day ${tl} is satisfied or waived.`;
+      if (!r) return `${tl} needs its own working days or a date first.`;
+      return `${r.n} working ${r.n === 1 ? 'day' : 'days'} after ${tl} is satisfied or waived. At the latest that is ${L(r.date)}, if ${tl} takes all its time; sooner if it is met sooner.`;
+    }
+    const r = OF.conditionDate(x, o.asAt, o.province);
     if (!r) return 'Enter the working days, or pick a date.';
-    const L = OF.longDate;
     if (x.date) { const bn = r.adjusted ? OF.breakNote(r.chosen, { province: o.province, lim: !!(OF.condInfo(x.key) || {}).lim }) : '';
       if (bn && r.date <= o.asAt) return bn + ' Please pick that day or later.';
       return `${r.days} working ${r.days === 1 ? 'day' : 'days'} from ${ctx.asAt ? 'the day the offer came in' : 'today'}, so ${L(r.date)}.` + (bn ? ' ' + bn + ' Under the agreement the date becomes the last working day before the break.' : r.adjusted ? ` ${L(r.chosen)} isn't a working day, so the date becomes the working day before.` : ''); }
@@ -5549,13 +5559,23 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       ${ctx.token ? `<div class="toolbar"><button class="btn ghost" type="button" id="ofAi">Help me word it</button></div><p class="small" id="ofAiMsg" role="status" aria-live="polite"></p>` : ''}
       <label class="f" for="ofWord">Wording for the agreement <span class="opt">(a draft: Tim reads it and approves it before it goes on any agreement)</span></label>
       <textarea id="ofWord" rows="4" maxlength="2000" data-fc="custom:wording">${esc(x.wording)}</textarea>
+      <p class="small" id="ofTimingSay" aria-live="polite">${esc(ofTimingSay(x))}</p>
       <p class="small" id="ofAiBadge" ${x.ai ? '' : 'hidden'}><span class="pill of-draft">Draft</span> Suggested with AI help from your description. Tim will check it with you.</p>`;
+  }
+  // "{timing}" in the buyer's own wording (the helper writes it so): what it stands for
+  const ofTimingSay = x => /\{timing\}/.test(x.wording || '') ? `"{timing}" in the wording stands for the time you chose above${OF.timingPlain(x) ? ': ' + OF.timingPlain(x) : ''}. Tim fills it in on the agreement.` : '';
+  // working days can count from the agreement, or from when another of the offer's conditions is satisfied or waived
+  function ofFromHTML(F, c, x) {
+    const others = F.conditions.filter(y => y.key !== c.key); if (!others.length && !x.after) return '';
+    return `<label class="f" for="ofa_${c.key}">Working days counted from</label><select id="ofa_${c.key}" data-fc="${c.key}:after">
+      <option value="">the date of the agreement</option>${others.map(y => `<option value="${y.key}" ${x.after === y.key ? 'selected' : ''}>when ${esc((OF.condInfo(y.key) || { label: y.key }).label)} is satisfied or waived</option>`).join('')}</select>`;
   }
   function ofCondSub(ctx, F, c, x) {
     return `<div class="of-csub">
       <div class="of-when"><div><label class="f" for="ofd_${c.key}">Working days</label><input type="number" id="ofd_${c.key}" min="1" max="250" inputmode="numeric" data-fc="${c.key}:days" value="${esc(x.days ?? '')}"></div>
         <span class="of-or">or</span><div><label class="f" for="ofdt_${c.key}">A date</label><input type="date" id="ofdt_${c.key}" min="${ofMinDate(ctx)}" data-fc="${c.key}:date" value="${esc(x.date || '')}"></div></div>
-      <p class="small of-calc" data-ccalc="${c.key}" aria-live="polite">${esc(ofCalcText(ctx, x))}</p>
+      <div class="of-from">${ofFromHTML(F, c, x)}</div>
+      <p class="small of-calc" data-ccalc="${c.key}" aria-live="polite">${esc(ofCalcText(ctx, x, F))}</p>
       ${c.needs === 'detail' ? `<label class="f" for="ofdet_${c.key}">${esc(c.detailLabel)}</label><input type="text" id="ofdet_${c.key}" maxlength="300" data-fc="${c.key}:detail" value="${esc(x.detail)}" placeholder="${esc(c.detailHint || '')}">` : ''}
       ${c.needs === 'address' ? `<label class="f" for="ofSale">${esc(c.detailLabel)}</label><input type="text" id="ofSale" maxlength="300" data-f="sale_address" value="${esc(F.sale_address)}">` : ''}
       ${c.key === 'lawyer' ? `<p class="small of-lawnote" role="note">${esc(c.note)}</p>` : ''}
@@ -5570,6 +5590,22 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <button class="btn link of-cinfo" type="button" data-cinfo="${c.key}" aria-haspopup="dialog">What this means</button></div>
       ${x ? ofCondSub(ctx, F, c, x) : ''}</div>`;
   }
+  // "Confirm all conditions on the same day" (Tim, 24 November 2026): off by default, shown once two or more are chosen. It sets every
+  // condition to one timing (a number of working days, or a date); each can still be changed afterwards.
+  function ofLuNote(ctx, F) {
+    if (!F.line_up) return '';
+    const st = OF.sameTiming(F.conditions); if (!st) return F.lu.days || F.lu.date ? 'Some conditions now have their own timing. Change the days or date here to line them all up again.' : 'Enter the working days or a date for all of them.';
+    const d = OF.checkDates(ofPayload(F), ofOpts(ctx)), dates = [...new Set(d.conditions.map(c => c.date).filter(Boolean))];
+    if (dates.length > 1 && F.conditions.some(c => c.key === 'lim')) return `All your conditions are on the same timing. Over summer the LIM's working days run to 15 January, so its date (${OF.longDate(d.conditions.find(c => c.key === 'lim').date)}) is later than the others.`;
+    return dates.length ? `All your conditions are to be satisfied or waived by ${OF.longDate(dates[0])}.` : '';
+  }
+  function ofLineUpHTML(ctx, F) {
+    if (F.conditions.length < 2 && !F.line_up) return '';
+    return `<label class="choice cb of-lineup"><input type="checkbox" data-fb="line_up" ${F.line_up ? 'checked' : ''}><span class="mark"></span><span><span class="ct">Confirm all conditions on the same day</span><span class="cd">Sets every condition to the same timing. You can still change any of them.</span></span></label>
+      ${F.line_up ? `<div class="of-csub"><div class="of-when"><div><label class="f" for="ofLuDays">Working days, for all</label><input type="number" id="ofLuDays" min="1" max="250" inputmode="numeric" data-lu="days" value="${esc(F.lu.days)}"></div>
+        <span class="of-or">or</span><div><label class="f" for="ofLuDate">A date, for all</label><input type="date" id="ofLuDate" min="${ofMinDate(ctx)}" data-lu="date" value="${esc(F.lu.date)}"></div></div>
+        <p class="small of-calc" id="ofLuNote" aria-live="polite">${esc(ofLuNote(ctx, F))}</p></div>` : ''}`;
+  }
   const ofGroup = (ctx, F, g) => (g === 'custom' ? [OF.CUSTOM] : OF.CONDITIONS.filter(c => c.group === g)).map(c => ofCondRow(ctx, F, c)).join('');
   function ofOverlayHTML(ctx, key) {
     const c = OF.condInfo(key); if (!c) return '';
@@ -5583,9 +5619,10 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   }
   function ofDatesHTML(ctx, F) {
     const d = OF.checkDates(ofPayload(F), ofOpts(ctx)), L = OF.longDate, gap = d.problems.find(p => p.kind === 'gap');
-    const rows = d.conditions.filter(c => c.date).map(c => `<tr><td>${esc(c.label)}</td><td>${esc(L(c.date))}<br><span class="small">${c.days} working ${c.days === 1 ? 'day' : 'days'}</span></td></tr>`).join('');
+    const latest = d.conditions.some(c => c.latest), tl = k => (OF.condInfo(k) || { label: k }).label;
+    const rows = d.conditions.filter(c => c.date).map(c => `<tr><td>${esc(c.label)}</td><td>${c.latest ? 'At the latest ' : ''}${esc(L(c.date))}<br><span class="small">${c.latest ? `${c.n} working ${c.n === 1 ? 'day' : 'days'} after ${esc(tl(c.after))} is satisfied or waived` : `${c.days} working ${c.days === 1 ? 'day' : 'days'}`}</span></td></tr>`).join('');
     return `<table class="sum of-dates">${rows}
-      ${d.lastCondition ? `<tr><td>Unconditional, if every condition is met by its date</td><td>${esc(L(d.confirmation))}</td></tr>` : ''}
+      ${d.lastCondition ? `<tr><td>${latest ? 'Unconditional at the latest, if each condition takes all its time' : 'Unconditional, if every condition is met by its date'}</td><td>${esc(L(d.confirmation))}</td></tr>` : ''}
       <tr><td>Settlement</td><td>${d.settlement ? esc(L(d.settlement)) + (F.settlement.kind === 'relative' ? `<br><span class="small">${esc(F.settlement.days)} working days after it goes unconditional</span>` : d.settlementAdjusted ? '<br><span class="small">The date you picked isn\'t a working day, so it becomes the working day before.</span>' : '') : 'Choose below'}</td></tr></table>
       <p class="small">Counted from ${ctx.asAt ? 'the day the offer came in' : 'today'}, in working days as the agreement defines them (weekends, public holidays, ${esc((OF.PROVINCES[ofOpts(ctx).province] || { name: 'the province\'s' }).name)} Anniversary Day, and 24 December to 5 January). On the agreement they count from the day everyone signs, so they may move a little.</p>
       ${d.unknownYear ? '<p class="small">Some of these dates are too far ahead for the holiday list. Tim will check them.</p>' : ''}
@@ -5630,7 +5667,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         <p class="small of-advice" role="note">${esc(OF.ADVICE.conditions)}</p>
         <h3 class="of-gh">Typical conditions</h3><div id="ofCondsTypical">${ofGroup(ctx, F, 'typical')}</div>
         <details class="of-other" id="ofOther"${F.conditions.some(c => (OF.condInfo(c.key) || {}).group === 'other') ? ' open' : ''}><summary>Other conditions <span class="opt">(less common)</span></summary><div id="ofCondsOther">${ofGroup(ctx, F, 'other')}</div></details>
-        <h3 class="of-gh">Something else</h3><div id="ofCondsCustom">${ofGroup(ctx, F, 'custom')}</div>`)}
+        <h3 class="of-gh">Something else</h3><div id="ofCondsCustom">${ofGroup(ctx, F, 'custom')}</div>
+        <div id="ofLineUp">${ofLineUpHTML(ctx, F)}</div>`)}
       ${sec('settle', 'Settlement date', `<p class="small">The day you pay the balance and get the keys.</p><div class="choices">
         ${ofRadio('settle', 'relative', S.kind, 'A number of working days after the agreement goes unconditional', 'The usual is 15 working days.')}
         ${ofRadio('settle', 'date', S.kind, 'A set date')}</div>
@@ -5679,11 +5717,16 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     let pinned = false;
     const save = () => ofStore(ctx, F);
     const light = () => {   // the parts that follow every change
-      $$('[data-ccalc]', root).forEach(p => { const x = F.conditions.find(c => c.key === p.dataset.ccalc); if (x) p.textContent = ofCalcText(ctx, x); });
+      $$('[data-ccalc]', root).forEach(p => { const x = F.conditions.find(c => c.key === p.dataset.ccalc); if (x) p.textContent = ofCalcText(ctx, x, F); });
+      const lu = $('#ofLuNote'); if (lu) lu.textContent = ofLuNote(ctx, F);
+      const ts = $('#ofTimingSay'), cx = F.conditions.find(c => c.key === 'custom'); if (ts && cx) ts.textContent = ofTimingSay(cx);
       $('#ofDates').innerHTML = ofDatesHTML(ctx, F); $('#ofDeposit').innerHTML = ofDepositHTML(ctx, F);
       $('#ofPriceSay').textContent = ofPriceSay(F.price);
     };
-    const redrawConds = () => { $('#ofCondsTypical').innerHTML = ofGroup(ctx, F, 'typical'); $('#ofCondsOther').innerHTML = ofGroup(ctx, F, 'other'); $('#ofCondsCustom').innerHTML = ofGroup(ctx, F, 'custom'); };
+    const redrawConds = () => { $('#ofCondsTypical').innerHTML = ofGroup(ctx, F, 'typical'); $('#ofCondsOther').innerHTML = ofGroup(ctx, F, 'other'); $('#ofCondsCustom').innerHTML = ofGroup(ctx, F, 'custom'); $('#ofLineUp').innerHTML = ofLineUpHTML(ctx, F); };
+    // every condition on the shared timing (it isn't forced: each can still be changed afterwards)
+    const applyLineUp = () => { const t = F.lu.date ? { date: F.lu.date } : { days: F.lu.days }; if (!F.lu.date && !(Math.floor(+F.lu.days) >= 1)) return false;
+      const by = new Map(OF.lineUp(F.conditions, t).map(c => [c.key, c])); F.conditions.forEach(c => { const n = by.get(c.key); c.days = n.days; c.date = n.date; c.after = ''; }); return true; };
     const redrawPeople = () => { $('#ofPeople').innerHTML = ofPeopleHTML(F); };
     const showOv = (key, pin) => { ov.innerHTML = ofOverlayHTML(ctx, key); ov.hidden = false; ov.dataset.key = key; pinned = !!pin; const x = $('#ofOvX'); if (x) x.addEventListener('click', hideOv); if (pin) x && x.focus(); };
     const hideOv = () => { ov.hidden = true; ov.innerHTML = ''; ov.dataset.key = ''; pinned = false; };
@@ -5693,12 +5736,17 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       else if (t.dataset.fl) F.lawyer[t.dataset.fl] = v;
       else if (t.dataset.fp) { const [i, k] = t.dataset.fp.split(':'); if (F.purchasers[+i]) F.purchasers[+i][k] = v; }
       else if (t.dataset.fs) { F.settlement[t.dataset.fs] = v; }
+      else if (t.dataset.lu) {   // the shared timing for "Confirm all conditions on the same day"
+        const k = t.dataset.lu; F.lu[k] = v; if (v) { const other = k === 'days' ? 'date' : 'days'; F.lu[other] = ''; const o2 = $(other === 'days' ? '#ofLuDays' : '#ofLuDate'); if (o2) o2.value = ''; }
+        if (applyLineUp()) { $('#ofCondsTypical').innerHTML = ofGroup(ctx, F, 'typical'); $('#ofCondsOther').innerHTML = ofGroup(ctx, F, 'other'); $('#ofCondsCustom').innerHTML = ofGroup(ctx, F, 'custom'); }
+      }
       else if (t.dataset.ch) { const [kind, i] = t.dataset.ch.split(':'), a = F[kind === 'add' ? 'chattels_add' : 'chattels_exclude']; if (+i < a.length) a[+i] = v; }
       else if (t.dataset.fc) {
         const [key, k] = t.dataset.fc.split(':'), x = F.conditions.find(c => c.key === key); if (!x) return;
         x[k] = v;
         if (k === 'days' && v !== '') { x.date = ''; const d = $(`#ofdt_${key}`); if (d) d.value = ''; }
-        if (k === 'date' && v) { x.days = ''; const d = $(`#ofd_${key}`); if (d) d.value = ''; }
+        if (k === 'date' && v) { x.days = ''; x.after = ''; const d = $(`#ofd_${key}`); if (d) d.value = ''; const a = $(`#ofa_${key}`); if (a) a.value = ''; }
+        if (k === 'after' && v) { x.date = ''; const d = $(`#ofdt_${key}`); if (d) d.value = ''; }
       } else return;
       light(); save();
     });
@@ -5712,10 +5760,15 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         else F[k] = v;
       } else if (t.dataset.cond) {
         const key = t.dataset.cond;
-        if (t.checked) { if (!F.conditions.some(c => c.key === key)) F.conditions.push({ key, days: '', date: '', detail: '', request: '', wording: '', ai: false }); }
-        else F.conditions = F.conditions.filter(c => c.key !== key);
+        if (t.checked) { if (!F.conditions.some(c => c.key === key)) F.conditions.push({ key, days: '', date: '', after: '', detail: '', request: '', wording: '', ai: false });
+          // lined up: the new condition takes the shared timing; the others keep any change made to them
+          const nc = F.conditions.find(c => c.key === key); if (F.line_up && !nc.days && !nc.date) { if (F.lu.date) nc.date = F.lu.date; else if (Math.floor(+F.lu.days) >= 1) nc.days = Math.floor(+F.lu.days); } }
+        else { F.conditions = F.conditions.filter(c => c.key !== key); F.conditions.forEach(c => { if (c.after === key) c.after = ''; }); }   // one that waited for it now counts from the agreement
+        if (F.conditions.length < 2) F.line_up = false;
         redrawConds(); const first = $(`#ofd_${key}`); if (t.checked && first) first.focus();
-      } else if (t.dataset.fb) F[t.dataset.fb] = t.checked;
+      } else if (t.dataset.fb) { F[t.dataset.fb] = t.checked;
+        if (t.dataset.fb === 'line_up') { if (t.checked) { const st = OF.sameTiming(F.conditions); if (st && !F.lu.days && !F.lu.date) F.lu = { days: st.startsWith('days:') ? st.slice(5) : '', date: st.startsWith('date:') ? st.slice(5) : '' }; else if (applyLineUp()) redrawConds(); }
+          $('#ofLineUp').innerHTML = ofLineUpHTML(ctx, F); const f = t.checked && $('#ofLuDays'); if (f) f.focus(); } }
       else return;
       light(); save();
     });
@@ -5752,7 +5805,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const r = await offerCall('offer-public', { action: 'draft', token: ctx.token, text: x.request.trim() });
     btn.disabled = false;
     if (r && r.ok && r.wording) {
-      x.wording = r.wording; x.ai = true; $('#ofWord').value = r.wording; $('#ofAiBadge').hidden = false; save();
+      x.wording = r.wording; x.ai = true; $('#ofWord').value = r.wording; $('#ofAiBadge').hidden = false; const ts = $('#ofTimingSay'); if (ts) ts.textContent = ofTimingSay(x); save();
       return say((r.summary ? r.summary + ' ' : '') + 'This is a draft. Change it if you like. Tim reads it and approves the wording before it goes on any agreement.');
     }
     if (r && r.reason === 'unsuitable') return say((r.why || 'That doesn\'t look like a condition Tim can put on an offer.') + ' You can type your own wording below.');
@@ -5793,13 +5846,14 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const L = OF.longDate, o = Object.assign(ofOpts(ctx), asAt ? { asAt } : {}), chk = OF.checkDates(d, o), row = (k, v) => v ? `<tr><td>${esc(k)}</td><td>${v}</td></tr>` : '';
     const price = +String(d.price ?? '').replace(/[^0-9.]/g, '');
     const conds = (d.conditions || []).map(c => { const i = OF.condInfo(c.key) || { label: c.key }, r = chk.conditions.find(x => x.key === c.key) || {};
-      return `<li><strong>${esc(i.label)}</strong>${r.date ? `: ${esc(L(r.date))} <span class="small">(${r.days} working ${r.days === 1 ? 'day' : 'days'})</span>` : ''}${c.detail ? `<br><span class="small">Report: ${esc(c.detail)}</span>` : ''}${c.key === 'custom' ? `${c.request ? `<br><span class="small">In their words: ${esc(c.request)}</span>` : ''}${c.wording ? `<br><span class="small">Wording${c.ai ? ' (drafted with AI help, for Tim to approve)' : ' (for Tim to approve)'}: ${esc(c.wording)}</span>` : ''}` : ''}</li>`; }).join('');
+      return `<li><strong>${esc(i.label)}</strong>${r.date ? (r.latest ? `: at the latest ${esc(L(r.date))} <span class="small">(${esc(OF.timingPlain(c))})</span>` : `: ${esc(L(r.date))} <span class="small">(${r.days} working ${r.days === 1 ? 'day' : 'days'})</span>`) : ''}${c.detail ? `<br><span class="small">Report: ${esc(c.detail)}</span>` : ''}${c.key === 'custom' ? `${c.request ? `<br><span class="small">In their words: ${esc(c.request)}</span>` : ''}${c.wording ? `<br><span class="small">Wording${c.ai ? ' (drafted with AI help, for Tim to approve)' : ' (for Tim to approve)'}: ${esc(c.wording)}</span>` : ''}` : ''}</li>`; }).join('');
     const S = d.settlement || {}, lw = d.lawyer || {};
     return `<table class="sum of-sum">
       ${row('Property', nt(ctx.address || ''))}
       ${row('Price', price ? esc(money(price)) : '')}
       <tr><td>Conditions</td><td>${conds ? `<ul class="of-ul">${conds}</ul>` : 'None (unconditional)'}${d.sale_address ? `<span class="small">Property to sell: ${esc(d.sale_address)}</span>` : ''}</td></tr>
       ${row('Lawyer\'s approval', (d.conditions || []).some(c => c.key === 'lawyer') ? 'Chosen' : 'Not chosen')}
+      ${row('Conditions', d.line_up ? 'All to be confirmed on the same day' : '')}
       ${row('Settlement', (S.kind === 'date' ? esc(L(S.date)) : esc(`${S.days} working days after the agreement goes unconditional`)) + (chk.settlement && S.kind !== 'date' ? `<br><span class="small">About ${esc(L(chk.settlement))}</span>` : ''))}
       ${row('Help with dates', d.date_help ? 'Asked for Tim\'s help with the dates' : '')}
       ${row('KiwiSaver in the deposit', d.kiwisaver === true ? 'Yes' : d.kiwisaver === false ? 'No' : '')}
@@ -5903,8 +5957,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       ${o.suspected_spam ? '<div class="card warnc tight of-spamflag"><p class="small" style="margin:0"><strong>Possible spam.</strong> It was sent with the form\'s hidden field filled in, which is usually a robot. You weren\'t emailed about it.</p><div class="toolbar"><button class="btn ghost" type="button" id="ofNotSpam">Not spam: treat it as a real offer</button></div></div>' : ''}
       ${o.needs_date_help ? '<div class="card note tight of-helpflag"><p class="small" style="margin:0">They asked for your help with the dates.</p></div>' : ''}
       <h2>Dates</h2>
-      <div class="card tight"><table class="sum of-dates">${chk.conditions.filter(c => c.date).map(c => `<tr><td>${esc(c.label)}</td><td>${esc(L(c.date))} <span class="small">(${c.days} working days)</span></td></tr>`).join('')}
-        ${chk.lastCondition ? `<tr><td>Unconditional</td><td>${esc(L(chk.confirmation))}</td></tr>` : ''}<tr><td>Settlement</td><td>${chk.settlement ? esc(L(chk.settlement)) : 'Not set'}</td></tr></table>
+      <div class="card tight"><table class="sum of-dates">${chk.conditions.filter(c => c.date).map(c => `<tr><td>${esc(c.label)}</td><td>${c.latest ? 'At the latest ' : ''}${esc(L(c.date))} <span class="small">(${c.latest ? `${c.n} working ${c.n === 1 ? 'day' : 'days'} after ${esc((OF.condInfo(c.after) || { label: c.after }).label)} is satisfied or waived` : `${c.days} working days`})</span></td></tr>`).join('')}
+        ${chk.lastCondition ? `<tr><td>Unconditional${chk.conditions.some(c => c.latest) ? ' at the latest' : ''}</td><td>${esc(L(chk.confirmation))}</td></tr>` : ''}<tr><td>Settlement</td><td>${chk.settlement ? esc(L(chk.settlement)) : 'Not set'}</td></tr></table>
         <p class="small" style="margin:6px 0 0">Counted from ${esc(L(o.as_at))}, the day it came in, with ${esc((OF.PROVINCES[ctx.province] || { name: ctx.province }).name)} holidays.</p></div>
       ${gap || o.gap_override_reason ? (o.gap_override_reason
         ? `<div class="card note tight" id="ofGapDone"><p class="small" style="margin:0">You accepted these dates: "${esc(o.gap_override_reason)}" (${esc(fmtDT(o.gap_override_at))}).</p><div class="toolbar"><button class="btn link" type="button" id="ofGapClear">Clear this</button></div></div>`
@@ -5946,7 +6000,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       !chk.gapOk && !o.gap_override_reason ? ['Dates under a week apart', 'of-warnp'] : null, o.gap_override_reason ? ['Short gap accepted', ''] : null, o.kiwisaver ? ['KiwiSaver', ''] : null,
       ['withdrawn', 'lapsed'].includes(o.status) ? [o.status === 'withdrawn' ? 'Withdrawn' : 'Lapsed', 'of-off'] : null].filter(Boolean);
     return `<li><button class="of-row" type="button" data-offer="${o.id}"><span class="of-r1"><strong>${esc(money(+o.amount))}</strong> <span>${esc(o.buyer_ref || 'Buyer')}</span></span>
-      <span class="small of-r2">${esc(OF.conditionsLine(d))}${chk.lastCondition ? ' · conditions to ' + esc(L(chk.lastCondition)) : ''}${chk.settlement ? ' · settles ' + esc(L(chk.settlement)) : ''}</span>
+      <span class="small of-r2">${esc(OF.conditionsLine(d))}${chk.lastCondition ? ' · conditions to ' + (chk.conditions.some(c => c.latest) ? 'at the latest ' : '') + esc(L(chk.lastCondition)) : ''}${chk.settlement ? ' · settles ' + esc(L(chk.settlement)) : ''}</span>
       <span class="small">${esc(fmtDT(o.received_at))}${o.source === 'agent' ? ' · entered by you' : ''}</span>
       ${flags.length ? `<span class="of-flags">${flags.map(([t, c]) => `<span class="pill ${c}">${esc(t)}</span>`).join('')}</span>` : ''}</button></li>`;
   }
@@ -6407,6 +6461,10 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         ${customT ? `<label class="choice cb" id="drCustomOk"><input type="checkbox" id="drCustomTick" ${E.custom_ok ? 'checked' : ''}><span class="mark"></span><span><span class="ct">Use the wording above for the buyer's own condition</span><span class="cd">It goes on the agreement only once you tick this and re-draft.</span></span></label>` : ''}
         <label class="f" for="drExtra">Add a further term <span class="opt">(your own wording, one per line)</span></label><textarea id="drExtra" rows="2">${esc((E.extra_terms || []).join('\n'))}</textarea>
         <label class="f" for="drFmt">Condition dates</label><select id="drFmt"><option value="date" ${E.date_format !== 'date_days' ? 'selected' : ''}>The date, for example 8 December 2026</option><option value="date_days" ${E.date_format === 'date_days' ? 'selected' : ''}>The date and the working days, for example 8 December 2026 (10 working days)</option></select>
+        ${newest && !ap && ((o.details || {}).conditions || []).length > 1 ? `<details class="of-more" id="drLineUp"><summary class="small">Confirm all conditions on the same day</summary>
+          <p class="small" style="margin:4px 0">Sets every condition on the offer to the same timing, records it as a correction (the buyer's original is kept), and re-drafts. Each can still be changed with Correct details.</p>
+          <div class="of-when"><div><label class="f" for="drLuDays">Working days, for all</label><input type="number" id="drLuDays" min="1" max="250" inputmode="numeric"></div><span class="of-or">or</span><div><label class="f" for="drLuDate">A date, for all</label><input type="date" id="drLuDate"></div></div>
+          <div class="toolbar"><button class="btn ghost" type="button" id="drLuGo">Line up and re-draft</button></div><p class="small err" id="drLuErr" role="alert"></p></details>` : ''}
         <label class="f" for="drRvDate">Date of the agreement</label><input type="text" id="drRvDate" disabled placeholder="Added once fully agreed"><p class="small" style="margin:2px 0 0">Added once fully agreed, in full with the month name.</p>
         <label class="f" for="drNote">What changed <span class="opt">(kept with the new draft)</span></label><input type="text" id="drNote" maxlength="500">
         <div class="toolbar"><button class="btn ghost" type="button" id="drRedraft">Re-draft with my changes</button></div></section>
@@ -6423,6 +6481,15 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     $('#drRvBack').addEventListener('click', () => viewOfferAgent(d.offer_id));
     $('#drRedraft').addEventListener('click', () => go(collect(), $('#drNote').value.trim() || 'Re-drafted with your changes'));
     const rc = $('#drRedraftChange'); if (rc) rc.addEventListener('click', () => go({ date_format: E.date_format, extra_terms: E.extra_terms, custom_ok: E.custom_ok, custom_wording: E.custom_wording }, $('#drNote').value.trim() || 'Re-drafted after a change'));
+    // line the conditions up from here: a correction to the offer (so the checks and the record follow), then a new draft
+    const lg = $('#drLuGo'); if (lg) lg.addEventListener('click', async () => {
+      const days = $('#drLuDays').value.trim(), date = $('#drLuDate').value, t = date ? { date } : { days };
+      if (!date && !(Math.floor(+days) >= 1)) return $('#drLuErr').textContent = 'Enter the working days or a date.';
+      const det = Object.assign({}, o.details, { conditions: OF.lineUp((o.details || {}).conditions, t), line_up: true }), say = date ? 'by ' + OF.longDate(date) : `within ${Math.floor(+days)} working days`;
+      lg.disabled = true; $('#drLuErr').textContent = '';
+      try { await must(sb.rpc('agent_offer_correct', { p_offer: d.offer_id, p_details: ofPayload(ofShape(det)), p_note: 'Lined up the conditions: all ' + say }));
+        await go({ date_format: E.date_format, extra_terms: E.extra_terms, custom_ok: E.custom_ok, custom_wording: E.custom_wording }, 'Conditions lined up: all ' + say); }
+      catch (e) { lg.disabled = false; $('#drLuErr').textContent = e.message || 'That didn\'t save.'; } });
     const ackBoxes = $$('[data-ack]'), canApprove = () => !ap && newest && !block.length && !stale && ackBoxes.every(x => x.checked);
     ackBoxes.forEach(x => x.addEventListener('change', () => { $('#drApproveDraft').disabled = !canApprove(); }));
     $('#drApproveDraft').addEventListener('click', async () => { try { await must(sb.rpc('agent_draft_approve', { p_draft: did, p_sha256: d.sha256, p_checked: ackBoxes.filter(x => x.checked).map(x => x.dataset.ack) })); toast('Draft approved'); viewDraftReview(did); } catch (e) { $('#drRvErr').textContent = e.message || 'That didn\'t save.'; } });

@@ -348,13 +348,20 @@ const nzToday0=()=>new Date().toLocaleDateString('en-CA',{timeZone:'Pacific/Auck
 function offerClean(p,agent){ const O=window.OFFERS; if(!p||typeof p!=='object'||Array.isArray(p)) throw new Error('Nothing was sent'); if(JSON.stringify(p).length>60000) throw new Error('That is more than the form can take');
   const t=v=>{ const s=String(v??'').replace(/[\u0001-\u0008\u000B\u000C\u000E-\u001F\u007F]/g,'').trim(); return s||null; };
   const cap=(v,n,what)=>{ const s=t(v); if(s&&s.length>n) throw new Error(`Please shorten ${what}: ${n} characters at most`); return s; };
+  // migration 022: a condition may wait for another on the same offer ({key, after, days}); refused as the database refuses it
+  if(Array.isArray(p.conditions)){ const ks=p.conditions.map(c=>c&&c.key);
+    for(const c of p.conditions){ if(!c||c.after==null||c.after==='') continue; const n=c.days===''||c.days==null?null:Math.floor(+c.days);
+      if(typeof c.after!=='string'||c.after===c.key||!ks.includes(c.after)) throw new Error("Please check the conditions: a condition waits for one that isn't on the offer");
+      if(!(n>=1&&n<=250)) throw new Error('Please add the working days for each condition'); }
+    for(const c of p.conditions){ const cp=c&&c.after?O.chainProblem(p.conditions,c.key):null; if(cp&&cp.kind==='loop') throw new Error('Please check the conditions: they wait for each other in a loop'); if(cp&&cp.kind==='deep') throw new Error('Please check the conditions: too many wait for one another in a row'); } }
+  if(p.line_up!=null&&typeof p.line_up!=='boolean') throw new Error('Please check the conditions');
   const errs=O.validate(Object.assign({},p,{email:agent&&!t(p.email)?'x@x.nz':p.email}),{skipDates:true});
   if(errs.length) throw new Error(errs[0].text.replace(/\.$/,''));
   const today=nzToday0(), minDay=agent?O.addDays(today,-90):today, maxDay=O.addDays(today,1100), dOk=d=>{ if(!d) return null; if(!O.isDate(d)||d<minDay||d>maxDay) throw new Error('The date for a condition needs to be from today to three years ahead'); return d; };
   const keys=O.CONDITIONS.map(c=>c.key).concat('custom'), seen=[];
   const conds=(p.conditions||[]).map(c=>{ if(!keys.includes(c.key)||seen.includes(c.key)) throw new Error('Please check the conditions'); seen.push(c.key);
-    const n=c.days===''||c.days==null?null:Math.floor(+c.days); const d=dOk(t(c.date)); if(!d&&!(n>=1&&n<=250)) throw new Error('Please add the working days or a date for each condition');
-    const o={key:c.key}; if(d) o.date=d; else o.days=n; if(c.key==='technical') o.detail=cap(c.detail,300,'the kind of technical report'); if(c.key==='custom'){ const w=cap(c.wording,2000,'your condition'), r=cap(c.request,600,'your description'); if(w) o.wording=w; if(r) o.request=r; o.ai=c.ai===true; } return o; });
+    const n=c.days===''||c.days==null?null:Math.floor(+c.days); const a=t(c.after); const d=a?null:dOk(t(c.date)); if(!d&&!(n>=1&&n<=250)) throw new Error('Please add the working days or a date for each condition');
+    const o={key:c.key}; if(a){ o.after=a; o.days=n; } else if(d) o.date=d; else o.days=n; if(c.key==='technical') o.detail=cap(c.detail,300,'the kind of technical report'); if(c.key==='custom'){ const w=cap(c.wording,2000,'your condition'), r=cap(c.request,600,'your description'); if(w) o.wording=w; if(r) o.request=r; o.ai=c.ai===true; } return o; });
   const s=p.settlement||{}; const settlement=s.kind==='date'?{kind:'date',date:dOk(t(s.date))}:{kind:'relative',days:Math.floor(+s.days)};
   if(settlement.kind==='relative'&&!(settlement.days>=1&&settlement.days<=250)) throw new Error('Please add the settlement working days');
   const lw=p.lawyer||{};
@@ -364,7 +371,7 @@ function offerClean(p,agent){ const O=window.OFFERS; if(!p||typeof p!=='object'|
     chattels_add:(p.chattels_add||[]).map(x=>cap(x,200,'each chattel')).filter(Boolean),chattels_exclude:(p.chattels_exclude||[]).map(x=>cap(x,200,'each chattel')).filter(Boolean),
     gst_registered:typeof p.gst_registered==='boolean'?p.gst_registered:null,gst_number:p.gst_registered===true?cap(p.gst_number,40,'the GST number'):null,
     comments:cap(p.comments,3000,'your comments'),lawyer:{firm:cap(lw.firm,200,'the law firm'),person:cap(lw.person,200,'the lawyer'),email:(cap(lw.email,254,'email')||'').toLowerCase()||null,phone:cap(lw.phone,40,'phone')},
-    related:p.related,date_help:p.date_help===true,privacy:true,v:1}; }
+    related:p.related,date_help:p.date_help===true,privacy:true,v:1,...(p.line_up===true?{line_up:true}:{})}; }
 const offerLabel=d=>(d.entity||(d.purchasers||[]).map(x=>((x.first||'')+' '+(x.last||'')).trim()).join(', ')).slice(0,200);
 function offerRow(pid,d,source,by,prov){ const r={id:uid(),property_id:pid,agreement_id:null,received_at:now(),buyer_ref:offerLabel(d),amount:d.price,conditions:d.conditions.map(c=>c.key).join(', '),expires_at:null,status:'received',notes:null,entered_by:by,created_at:now(),updated_at:now(),
   source,submission:JSON.parse(JSON.stringify(d)),details:d,kiwisaver:d.kiwisaver,lawyer_approval:d.lawyer_approval,needs_date_help:d.date_help,related_party:d.related,province:prov||'otago',as_at:nzToday0(),read_at:source==='agent'?now():null,read_by:source==='agent'?by:null,
@@ -397,7 +404,8 @@ function offerDraftInvoke(o){ const b=(o&&o.body)||{}, net=mockNet(), m=localSto
   OH().push({at:now(),kind:'ai',net,property_id:l.property_id}); (DB.ai_calls||=[]).push({id:(DB.ai_calls.length+1),at:now(),purpose:'offer condition draft',model:'claude-sonnet-5-5',ok:m!=='fail',agent:'buyer form'}); save();
   if(m==='fail') return ok({ok:false,reason:'failed'});
   if(m==='unsuitable') return ok({ok:false,reason:'unsuitable',why:'That does not look like a condition for buying this property.'});
-  return ok({ok:true,draft:true,wording:'This agreement is conditional upon the purchaser being satisfied that '+t.replace(/[<>]/g,'').slice(0,120)+', by the condition date.',summary:'You check this before the agreement goes ahead.'}); }
+  // the helper writes the time as {timing} (fn/prefill_shared.ts), filled in from the buyer's chosen timing on the agreement
+  return ok({ok:true,draft:true,wording:'This agreement is conditional upon the purchaser being satisfied that '+t.replace(/[<>]/g,'').slice(0,120)+' {timing}.',summary:'You check this before the agreement goes ahead.'}); }
 function offerRpc(name,a,me){ if(!me||!AGENTS.includes(me.email)) return bad('Only Tim can do this');
   const fnd=id=>PO().find(x=>x.id===id&&x.source!=='manual'); const ev=(pid,oid,kind,detail)=>OE().push({id:OE().length+1,property_id:pid,offer_id:oid||null,at:now(),actor:me.email,kind,detail:detail||{}});
   if(name==='agent_offer_link'){ const p=PT().find(x=>x.id===a.p_property); if(!p) return bad('No such property'); let l=OL().find(x=>x.property_id===p.id);

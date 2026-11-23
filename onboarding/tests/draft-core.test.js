@@ -208,6 +208,67 @@ const ok = (c, msg) => { if (!c) errs.push(msg); };
   ok(N(psale, 'sale_address_seen') && !N(psale, 'sale_address_seen').blocking && /9 Filler Street/.test(N(psale, 'sale_address_seen').text) && /9 Filler Street/.test(I(psale, 'further_terms').text), "the buyer's address stays in the term, with a To check note that the vendors will see it");
   ok(!Object.values(D.EDITIONS).some(e => /Pine Hill/.test(JSON.stringify(e))), 'no real address in the editions list');
 
+  // ── condition timing (Tim, 24 November 2026): {timing}, {date}, "after" on the front page and clause 22.0 ──
+  const tterms = terms.concat({ key: 'sale', kind: 'further_term', title: 'Sale of another property', wording_from: 'sale', rule: { when: { condition: 'sale' } }, position: 22 });
+  const tplan = (conds, clauses, extra) => D.planDraft(Object.assign({ details: Object.assign({}, base, { conditions: conds, sale_address: '9 Filler Street, Testville' }), map, terms: tterms, clauses: clauses || {}, today: '2026-11-24', province: 'otago' }, extra || {}));
+  const FT = pp => (I(pp, 'further_terms') || {}).text || '';
+  // {timing} in each mode, in plain legal wording with full dates and the month name
+  const elec = { electrical: 'The Purchaser(s) being satisfied with an electrical report in all respects {timing} (by 4pm on the final day) AND notifying the Vendor.' };
+  ok(/Electrical report: The Purchaser\(s\) being satisfied with an electrical report in all respects within 10 working days of the date of this agreement \(by 4pm on the final day\) AND notifying the Vendor\.$/m.test(FT(tplan([{ key: 'electrical', days: 10 }], elec))), '{timing}, working days: within 10 working days of the date of this agreement');
+  const tdate = tplan([{ key: 'electrical', date: '2026-12-05' }], elec);
+  ok(/in all respects on or before Friday 4 December 2026 \(by 4pm/.test(FT(tdate)) && N(tdate, 'moved_electrical'), '{timing}, a date: on or before, with the weekday (a Saturday becomes the Friday before, noted)');
+  ok(/in all respects on or before Friday 11 December 2026 \(by 4pm/.test(FT(tplan([{ key: 'electrical', date: '2026-12-11' }], elec))), '{timing}: "on or before Friday 11 December 2026"');
+  const tafter = tplan([{ key: 'finance', days: 10 }, { key: 'electrical', after: 'finance', days: 5 }], elec);
+  ok(/in all respects within 5 working days of the date the finance condition in clause 9\.1 is satisfied or waived \(by 4pm/.test(FT(tafter)), '{timing}, after a printed condition: named by its REINZ clause number');
+  ok(!/Condition date:/.test(FT(tafter)) && !/Condition date:/.test(FT(tplan([{ key: 'electrical', days: 10 }], elec))), 'wording that names its time gets nothing added after it');
+  // a further term named by its number in the further terms
+  const tft = tplan([{ key: 'electrical', days: 10 }, { key: 'sale', days: 20 }, { key: 'technical', after: 'electrical', days: 3, detail: 'Drainage' }], Object.assign({ technical: 'A {detail} report {timing}.', sale: 'Sale of {address} {timing}.' }, elec));
+  ok(/1\. Electrical report:/.test(FT(tft)) && /2\. Specified technical report \(Drainage\): A Drainage report within 3 working days of the date the electrical report condition in further term 1 is satisfied or waived\./.test(FT(tft)), 'after a further term: "the electrical report condition in further term 1"');
+  ok(/3\. Sale of another property \(9 Filler Street, Testville\): Sale of 9 Filler Street, Testville within 20 working days of the date of this agreement\./.test(FT(tft)), 'the sale clause with {address} and {timing}');
+  // {date} keeps working: a date as before; for "after", the timing phrase and a check for Tim
+  const tdd = tplan([{ key: 'technical', days: 10, detail: 'Roof' }], { technical: 'The date for the satisfying of this condition is {date}.' });
+  ok(/Specified technical report \(Roof\): The date for the satisfying of this condition is 8 December 2026\.$/m.test(FT(tdd)), '{date} as before, and the date is no longer repeated after it');
+  const tda = tplan([{ key: 'finance', days: 10 }, { key: 'technical', after: 'finance', days: 2, detail: 'Roof' }], { technical: 'The date for the satisfying of this condition is {date}.' });
+  ok(/is within 2 working days of the date the finance condition in clause 9\.1 is satisfied or waived\.$/m.test(FT(tda)), '{date} for "after": the timing phrase, never a guessed date');
+  ok(N(tda, 'date_after_technical') && !N(tda, 'date_after_technical').blocking && /Check the sentence still reads right/.test(N(tda, 'date_after_technical').text), 'and Tim is asked to check the sentence');
+  // wording with no time in it: the date as before, or for "after" the timing
+  ok(/1\. Electrical report: Tim's words\. Condition date: 8 December 2026\./.test(FT(tplan([{ key: 'electrical', days: 10 }], { electrical: "Tim's words." }))), 'no token, working days: "Condition date" as before');
+  ok(/1\. Electrical report: Tim's words\. This condition is to be satisfied or waived within 5 working days of the date the finance condition in clause 9\.1 is satisfied or waived\./.test(FT(tplan([{ key: 'finance', days: 10 }, { key: 'electrical', after: 'finance', days: 5 }], { electrical: "Tim's words." }))), 'no token, after: the timing added');
+  // the buyer's own condition: {timing} (as the helper writes it) filled in once Tim ticks it
+  const tcu = tplan([{ key: 'lim', date: '2026-12-18' }, { key: 'custom', after: 'lim', days: 4, wording: 'Subject to the purchaser approving the pool fence {timing}.' }], {}, { edits: { custom_ok: true } });
+  ok(/Purchaser's condition: Subject to the purchaser approving the pool fence within 4 working days of the date the LIM condition in clause 9\.3 is satisfied or waived\.$/m.test(FT(tcu)), "the buyer's own wording with {timing}");
+  ok(/Purchaser's condition: \[Tim to tick/.test(FT(tplan([{ key: 'custom', days: 4, wording: 'X {timing}.' }]))), 'and not before Tim ticks it');
+  // printed front-page lines: the short phrase when it fits, with a check
+  const tfront = tplan([{ key: 'builders', days: 10 }, { key: 'finance', after: 'builders', days: 5 }, { key: 'lim', after: 'electrical', days: 3 }, { key: 'electrical', days: 10 }], elec);
+  eq(I(tfront, 'd_finance').text, '5 working days after clause 9.4 is satisfied or waived', 'front line: the short phrase, naming the REINZ clause');
+  eq(I(tfront, 'd_lim').text, '3 working days after further term 1 is satisfied or waived', 'front line after a further term: its number');
+  eq(I(tfront, 'd_builders').text, '8 December 2026', 'a condition by working days still shows its date');
+  ok(N(tfront, 'front_after_finance') && N(tfront, 'after_check') && !N(tfront, 'front_after_finance').blocking, 'Tim checks the line');
+  ok(!tfront.items.some(i => /\[\[|\]\]/.test(i.text || '')) && !tfront.needs.some(n => /\[\[/.test(n.text)), 'no reference is left unnumbered');
+  // too long for its line: "see further term N" and a further term setting out that condition's date (the REINZ text never edited)
+  const narrow = Object.assign({}, map, { places: map.places.map(pl => pl.id === 'd_finance' ? Object.assign({}, pl, { w: 120 }) : pl) });
+  const tnar = D.planDraft({ details: Object.assign({}, base, { conditions: [{ key: 'builders', days: 10 }, { key: 'finance', after: 'builders', days: 5 }, { key: 'electrical', days: 10 }] }), map: narrow, terms: tterms, clauses: elec, today: '2026-11-24' });
+  eq(I(tnar, 'd_finance').text, 'see further term 2', 'too long for the line: "see further term 2"');
+  ok(/\n2\. Finance date \(clause 9\.1\): The finance date is the date that is 5 working days after the date the building report condition in clause 9\.4 is satisfied or waived\./.test(FT(tnar)), 'and further term 2 sets out the finance date');
+  ok(N(tnar, 'front_after_finance') && /see further term 2/.test(N(tnar, 'front_after_finance').text), 'Tim checks both');
+  ok(!tnar.items.some(i => i.place === 'c_finance' && i.kind !== 'strike'), 'only Yes/No struck on the printed line, nothing rewritten');
+  // clause 22.0 waiting for another condition: the printed count struck, "see further term N" beside it, the time in a further term
+  const t22 = tplan([{ key: 'finance', days: 10 }, { key: 'lawyer', after: 'finance', days: 3 }]);
+  ok(I(t22, 'clause22_days_struck') && I(t22, 'clause22_days').text === 'see further term 1' && I(t22, 'clause22_days').size === 6, 'clause 22.0: struck, "see further term 1" small beside it');
+  ok(/1\. Lawyer's approval \(clause 22\.0\): The time for the purchaser's lawyer's approval under clause 22\.0 is within 3 working days of the date the finance condition in clause 9\.1 is satisfied or waived\./.test(FT(t22)) && N(t22, 'clause22_after'), 'and a further term sets out its time, for Tim to check');
+  ok(!I(t22, 'clause22'), 'clause 22.0 itself is not struck through');
+  // a condition after the buyer's own: referred to by its further term number
+  ok(/2\. Purchaser's condition: X within 2 working days of the date the electrical report condition in further term 1 is satisfied or waived\./.test(FT(tplan([{ key: 'electrical', days: 5 }, { key: 'custom', after: 'electrical', days: 2, wording: 'X {timing}.' }], elec, { edits: { custom_ok: true } }))), 'the buyer\'s own after a further term');
+  // a reference to a further term that isn't there: "?" and blocking
+  const tmiss = D.planDraft({ details: Object.assign({}, base, { conditions: [{ key: 'sdd', days: 10 }, { key: 'finance', after: 'sdd', days: 2 }] }), map, terms, clauses: {}, today: '2026-11-24' });
+  ok(I(tmiss, 'd_finance').text === '2 working days after further term ? is satisfied or waived' && N(tmiss, 'ref_missing_sdd').blocking, 'a missing further term blocks approval');
+  // old offers: exactly the same front page as before
+  eq([I(p, 'd_finance').text, I(p, 'd_lim').text, I(p, 'd_builders').text], ['8 December 2026', '18 December 2026', '8 December 2026'], 'an old {days}/{date} offer drafts as before');
+  ok(!N(p, 'after_check') && !p.needs.some(n => /^front_after_|^date_after_/.test(n.id)), 'and raises none of the new checks');
+  // the drafted PDF carries it all
+  const rt = await D.renderDraft(PDFLib, blank, tnar), tp = await D.readPages(pdfjs, rt.bytes), tx = n => tp[n - 1].items.map(i => i.s).join(' ');
+  ok(tx(1).includes('see further term 2') && /Finance date \(clause 9\.1\)/.test(tx(3)), 'the PDF: "see further term 2" on the front page, the term on the Further Terms page');
+
   // AI proposals onto the page, and the pack's text for the reader
   const pt = D.packText(pages); ok(pt.length === pages.length && pt[0].lines[0].i === 0, 'the pack as numbered lines per page');
   const bt = D.packBatches(pt, 3, 100000); eq(bt.map(b => b.length), [3, 3, 3, 1], 'batches of at most 3 pages');

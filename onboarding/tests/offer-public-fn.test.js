@@ -84,6 +84,18 @@ const path = require('path');
   modelAnswer = { ok: true, status: 200, body: { content: [{ type: 'tool_use', input: { wording: '', summary: '', unsuitable: true, why: 'That is not a condition.' } }] } };
   r = await draft({ token: TOK, text: 'Write me a poem about the sea please' }); j = await r.json(); expect(j.ok === false && j.reason === 'unsuitable' && j.why === 'That is not a condition.', 'unsuitable');
   r = await draft({ token: 'nope', text: 'I need the chattels list confirmed' }); j = await r.json(); expect(j.ok === false && j.reason === 'closed', 'draft with a non-token');
+  // condition timing (Tim, 24 November 2026): the helper writes the time as {timing}, filled in from the buyer's chosen timing
+  expect(/\{timing\} exactly once/.test(m.system) && /working days of the date of the agreement/.test(m.system) && /on or before a date/.test(m.system) && /another condition is satisfied or waived/.test(m.system) && /Never write a date, a number of days/.test(m.system), 'the prompt asks for {timing}, covering all three ways of timing a condition');
+  expect(!/by the condition date in the offer/.test(m.system), 'the old "by the condition date" instruction is gone');
+  modelAnswer = null; claimAnswer = { ok: true }; r = await draft({ token: TOK, text: 'I need the pool fence checked by the council' }); j = await r.json();
+  expect(j.ok && /\{timing\}/.test(j.wording) && (j.wording.match(/\{timing\}/g) || []).length === 1 && /This condition is to be satisfied or waived \{timing\}\.$/.test(j.wording), 'no {timing} from the model: added once at the end: ' + j.wording);
+  modelAnswer = { ok: true, status: 200, body: { usage: { input_tokens: 9, output_tokens: 9 }, content: [{ type: 'tool_use', input: { wording: 'This agreement is conditional on the purchaser approving the pool fence {timing}, failing which either party may cancel.', summary: 'You check the fence.', unsuitable: false } }] } };
+  r = await draft({ token: TOK, text: 'I need the pool fence checked by the council' }); j = await r.json();
+  expect(j.ok && j.wording === 'This agreement is conditional on the purchaser approving the pool fence {timing}, failing which either party may cancel.', 'a draft with {timing} is kept as written');
+  expect(logs.at(-1).purpose === 'offer condition draft' && logs.at(-1).model === 'claude-sonnet-5-5' && logs.at(-1).ok, 'still logged in ai_calls');
+  const rd = S.readOfferConditionResult({ content: [{ type: 'tool_use', input: { wording: 'Conditional on a pool fence report.   ', summary: 's', unsuitable: false } }] });
+  expect(rd.wording === 'Conditional on a pool fence report. This condition is to be satisfied or waived {timing}.', 'trailing full stop and spaces tidied before {timing} is added: ' + rd.wording);
+  modelAnswer = null;
   const fs = require('fs'), dp = fs.readFileSync(path.join(__dirname, '..', '..', 'fn', 'doc_prefill.ts'), 'utf8');
   expect(!/offer_condition|offer_public/.test(dp), 'doc-prefill has nothing of the offer form (it stays agent only, JWT on)');
   expect(H.netOf(new Request('https://x', { headers: { 'cf-connecting-ip': '198.51.100.4', 'x-forwarded-for': '1.2.3.4, 5.6.7.8' } })) === '198.51.100.4', 'CF-Connecting-IP preferred');

@@ -313,7 +313,15 @@
   /* ───── the drafting rules ───── */
   const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
   const fullDate = iso => { const [y, m, d] = String(iso).split('-').map(Number); return `${d} ${MONTHS[m - 1]} ${y}`; };
-  const money = n => '$' + Number(n).toLocaleString('en-NZ', { minimumFractionDigits: n % 1 ? 2 : 0, maximumFractionDigits: 2 });
+  const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  // "Friday 5 December 2026"
+  const dayDate = iso => { const [y, m, d] = String(iso).split('-').map(Number); return `${WEEKDAYS[new Date(Date.UTC(y, m - 1, d)).getUTCDay()]} ${fullDate(iso)}`; };
+  // what each printed condition's date is called on the front page
+  const DATE_NAMES = { finance: 'finance date', lim: 'LIM date', builders: 'building report date', toxicology: 'toxicology report date', oia: 'OIA date', land_act: 'Land Act date' };
+  // Helvetica's widths (the typed font), per 1000 points, for the characters 32 to 126: how wide a line will be before it is drawn
+  const HELV = [278,278,355,556,556,889,667,191,333,333,389,584,278,333,278,278,556,556,556,556,556,556,556,556,556,556,278,278,584,584,584,556,1015,667,667,722,722,667,611,778,722,278,500,667,556,833,722,778,667,778,722,667,611,722,667,944,667,667,611,278,278,278,469,556,333,556,556,500,556,556,278,556,556,222,222,500,222,833,556,556,556,556,333,500,278,556,500,722,500,500,500,334,260,334,584];
+  const textWidth = (t, size) => { let w = 0; for (const ch of String(t || '')) { const c = ch.charCodeAt(0); w += HELV[c - 32] || 556; } return w * (size || FONT_SIZE) / 1000; };
+  const money = n => '$' +Number(n).toLocaleString('en-NZ', { minimumFractionDigits: n % 1 ? 2 : 0, maximumFractionDigits: 2 });
   const PLACEHOLDERS = { electrical: '[Tim to add his electrical report clause]', technical: '[Tim to add his specified technical report clause]', sale: '[Tim to add his sale of another property clause]', sdd: '[Tim to add his Specified Due Diligence clause]', custom: "[Tim to tick the buyer's own condition wording]" };
   const placeholderFor = (key, title) => PLACEHOLDERS[key] || `[Tim to add his ${String(title || key).toLowerCase()} clause]`;
   const isPlaceholder = s => /^\[Tim to /.test(String(s || ''));
@@ -440,17 +448,55 @@
         need('settlement_changed', `Settlement: the blank already said "${sp.printed.slice(0, 120)}". It is struck out and the offer's settlement written under it. Check it.`, false); }
     } else if (settleText) put('settlement', sp, settleText, { label: 'Settlement date' });
     // the six front-page conditions: Yes or No, and the date
-    const cond = k => (d.conditions || []).find(c => c.key === k);
-    const dateText = c => { if (!OF) return c.date || `${c.days} working days`; const r = OF.conditionDate(c, today, province); if (!r) return '';
-      if (r.adjusted) need('moved_' + c.key, `${(OF.condInfo(c.key) || { label: c.key }).label}: the buyer chose ${fullDate(r.chosen)}, which isn't a working day, so the agreement says ${fullDate(r.date)} (the working day before). Check it with them.`, false);
+    const conds = d.conditions || [], cond = k => conds.find(c => c.key === k), mode = c => OF ? OF.condMode(c) : (c.date ? 'date' : 'days');
+    const labelOf = k => (OF && OF.condInfo(k) || { label: k }).label;
+    // How a condition is referred to in a sentence: a printed condition by its clause number, one of the further terms by its number
+    // there. Further term numbers are only known once the terms are listed, so a marker stands in until then (resolved below).
+    const FRONT = Object.fromEntries(FRONT_CONDITIONS), noun = k => OF ? OF.nounFor(k) : k + ' condition';
+    const refOf = k => FRONT[k] ? `the ${noun(k)} in clause ${FRONT[k]}` : k === 'lawyer' ? `the ${noun(k)} in clause 22.0` : `the ${noun(k)} in further term [[FT:${k}]]`;
+    const shortRef = k => FRONT[k] ? `clause ${FRONT[k]}` : k === 'lawyer' ? 'clause 22.0' : `further term [[FT:${k}]]`;
+    const wdays = n => `${n} working ${+n === 1 ? 'day' : 'days'}`;
+    const movedNeed = (c, r) => { if (r && r.adjusted) need('moved_' + c.key, `${labelOf(c.key)}: the buyer chose ${fullDate(r.chosen)}, which isn't a working day, so the agreement says ${fullDate(r.date)} (the working day before). Check it with them.`, false); };
+    // {timing}: the phrase for each way of satisfying a condition, in full
+    const timingPhrase = c => { const m = mode(c), n = Math.floor(+c.days);
+      if (m === 'after') return `within ${wdays(n)} of the date ${refOf(c.after)} is satisfied or waived`;
+      if (m === 'date') { const r = OF ? OF.conditionDate(c, today, province, conds) : null; movedNeed(c, r); return `on or before ${dayDate(r ? r.date : c.date)}`; }
+      return `within ${wdays(n)} of the date of this agreement`; };
+    // {date} and the printed date lines: a full date (from working days counted from today, or the date chosen). For a condition that
+    // waits for another there is no date to give, so {date} becomes the timing phrase and Tim checks the sentence still reads right.
+    const dateText = c => { if (!OF) return c.date || `${c.days} working days`;
+      if (mode(c) === 'after') { need('date_after_' + c.key, `${labelOf(c.key)} waits for ${labelOf(c.after)}, so where its wording has {date} it now reads "${timingPhrase(c)}". Check the sentence still reads right.`, false); return timingPhrase(c); }
+      const r = OF.conditionDate(c, today, province, conds); if (!r) return ''; movedNeed(c, r);
       return fmt === 'date_days' ? `${fullDate(r.date)} (${r.days} working ${r.days === 1 ? 'day' : 'days'})` : fullDate(r.date); };
+    // a clause's wording with its tokens filled in; tokens: whether {date} or {timing} was used (then nothing is added after it)
+    const fill = (w, c, extra) => { const tokens = /\{(date|timing)\}/.test(w);
+      let s = w; Object.entries(extra || {}).forEach(([k, v]) => { s = s.split('{' + k + '}').join(v); });
+      if (c) { if (s.includes('{timing}')) s = s.split('{timing}').join(timingPhrase(c)); if (s.includes('{date}')) s = s.split('{date}').join(dateText(c)); }
+      return { text: s, tokens }; };
+    // what goes after a condition's wording that names no time: the date as before, or for a condition that waits for another, the timing
+    const suffixFor = c => !c ? '' : mode(c) === 'after' ? ` This condition is to be satisfied or waived ${timingPhrase(c)}.` : ` Condition date: ${dateText(c)}.`;
+    const timeTerms = [];   // further terms that set out a printed condition's date when its line can't (added after the library's terms)
     for (const [k, clause] of FRONT_CONDITIONS) {
-      const c = cond(k), yn = P('c_' + k), label = `${(OF && OF.condInfo(k) || { label: k }).label} (clause ${clause})`;
+      const c = cond(k), yn = P('c_' + k), label = `${labelOf(k)} (clause ${clause})`;
       if (!yn) { if (c) need('missing_c_' + k, `There is no Yes/No for ${label} on this blank. Add it to the places on the blank.`, true); continue; }
       strikeYesNo('c_' + k, yn, !!c, label);
-      if (c) put('d_' + k, P('d_' + k), dateText(c), { label: label + ': date' });
+      if (!c) continue;
+      if (mode(c) !== 'after') { put('d_' + k, P('d_' + k), dateText(c), { label: label + ': date' }); continue; }
+      // waits for another condition: the short phrase on the line if it fits there, otherwise "see further term N" and a further term
+      // that sets out this condition's date. The REINZ text is never changed, only added to.
+      const n = Math.floor(+c.days), short = `${wdays(n)} after ${shortRef(c.after)} is satisfied or waived`, dp = P('d_' + k), dn = DATE_NAMES[k] || labelOf(k).toLowerCase() + ' date';
+      if (dp && textWidth(short.replace(/\[\[FT:\w+\]\]/g, '99'), 7.5) <= dp.w) {
+        put('d_' + k, dp, short, { label: label + ': date' });
+        need('front_after_' + k, `${label}: the date line says "${short}" because it waits for ${labelOf(c.after)}. Check it reads clearly on the page.`, false);
+      } else {
+        const id = 'ft_time_' + k;
+        timeTerms.push({ id, title: `${dn.charAt(0).toUpperCase() + dn.slice(1)} (clause ${clause})`, text: `The ${dn} is the date that is ${wdays(n)} after the date ${refOf(c.after)} is satisfied or waived.`, cond: null, timing: true });
+        put('d_' + k, dp, `see further term [[TERM:${id}]]`, { label: label + ': date' });
+        need('front_after_' + k, `${label}: it waits for ${labelOf(c.after)}, which doesn't fit on the date line, so the line says "see further term [[TERM:${id}]]" and further term [[TERM:${id}]] sets out the date. Check both.`, false);
+      }
     }
-    if ((d.conditions || []).some(c => c.days && !c.date)) need('days_from', `Condition dates given as working days are counted from today (${fullDate(today)}). On the agreement they run from the day everyone signs, so check them on the day.`, false);
+    if (conds.some(c => mode(c) === 'days' && c.days && !c.date)) need('days_from', `Condition dates given as working days are counted from today (${fullDate(today)}). On the agreement they run from the day everyone signs, so check them on the day.`, false);
+    if (conds.some(c => mode(c) === 'after')) need('after_check', 'Some conditions wait for another to be satisfied or waived. Each is worded "within so many working days of the date" the other is satisfied or waived. Check each one names the right condition.', false);
     // tenancies: not on the offer form
     need('tenancies', 'Tenancies: Yes or No is for you to fill in.', false);
     // the clause library
@@ -464,7 +510,17 @@
     const law = cond('lawyer'), c22 = P('clause22'), t22 = T('lawyer_approval');
     if (law) {
       if (!c22) need('missing_clause22', "The buyer chose lawyer's approval, but this blank has no clause 22.0. Add it as a further term.", true);
-      else { const r = OF ? OF.conditionDate(law, today, province) : null, n = law.days ? +law.days : r ? r.days : null, dp22 = P('clause22_days');
+      else if (mode(law) === 'after') {
+        // waits for another condition: clause 22.0 counts working days from the agreement, so the printed count is struck out (if there
+        // is one), "see further term N" is written beside it, and a further term sets out the time. The printed text is never changed.
+        const dp22 = P('clause22_days'), id = 'ft_time_lawyer';
+        timeTerms.push({ id, title: "Lawyer's approval (clause 22.0)", text: `The time for the purchaser's lawyer's approval under clause 22.0 is ${timingPhrase(law)}.`, cond: null, timing: true });
+        if (dp22 && dp22.printed) { strike('clause22_days_struck', dp22, 'Clause 22.0: the working days already on the blank, struck out');
+          put('clause22_days', Object.assign({}, dp22, { x: dp22.x + dp22.w / 2 - 2, y: dp22.y + dp22.h * 0.62, w: 80 }), `see further term [[TERM:${id}]]`, { label: 'Clause 22.0: working days', item: { size: 6 } }); }
+        else if (dp22) put('clause22_days', dp22, `see further term [[TERM:${id}]]`, { label: 'Clause 22.0: working days' });
+        need('clause22_after', `Lawyer's approval waits for ${labelOf(law.after)}. ${dp22 && dp22.printed ? 'The working days printed in clause 22.0 are struck out and' : 'Clause 22.0'} "see further term [[TERM:${id}]]" is written there; further term [[TERM:${id}]] sets out the time. Check both.`, false);
+      }
+      else { const r = OF ? OF.conditionDate(law, today, province, conds) : null, n = law.days ? +law.days : r ? r.days : null, dp22 = P('clause22_days');
         if (n && dp22) { if (dp22.printed) { if (numberIn(dp22.printed) !== n) { strike('clause22_days_struck', dp22, "Clause 22.0: the working days already on the blank, struck out");
               // the new count goes in the margin at the end of that line, with a caret under the struck word, so it never touches the line above;
               // only with no margin does it go just above the struck word, small
@@ -477,22 +533,27 @@
         if (law.date) need('clause22_date', `Lawyer's approval: the buyer gave a date (${fullDate(law.date)}); clause 22.0 counts working days, so ${n} working days from today is used. Check it.`, false); }
     } else if (c22 && (!t22 || (t22.rule || {}).strike_when_unused !== false)) strike('clause22', c22, "Clause 22.0 (lawyer's approval): struck through, not chosen", { kind: 'lines', lines: c22.lines });
     // further terms: Tim's clauses by rule, from the library, in its order
+    // a reference to a further term that isn't there has no number to take: "?", and Tim must deal with it
+    const refMissing = k => { need('ref_missing_' + k, `A condition waits for ${labelOf(k)}, but ${labelOf(k)} isn't in the further terms, so its number is shown as "?". Add it, or change the timing.`, true); return '?'; };
+    let resolveRefs = t => String(t).replace(/\[\[FT:(\w+)\]\]/g, (m, k) => refMissing(k)).replace(/\[\[TERM:\w+\]\]/g, '?');
     let ftn = 0; const term = (id, title, text, extra) => { ft.push(Object.assign({ id, title, text }, extra || {})); };
     for (const t of terms) {
       if (t.kind !== 'further_term' || t.key === 'chattels' || !ruleApplies(t.rule, d)) continue;
       if (t.wording_from === 'custom') {
         const c = cond('custom'); if (!c) continue;
-        const w = String(E.custom_wording || c.wording || '').trim();
-        if (E.custom_ok && w) term('ft_custom', "Purchaser's condition", w, { custom: true, request: c.request || '', wording: c.wording || '', ai: !!c.ai, date: dateText(c) });
-        else term('ft_custom', "Purchaser's condition", PLACEHOLDERS.custom, { custom: true, request: c.request || '', wording: c.wording || '', ai: !!c.ai, date: dateText(c) });
+        // the buyer's own wording may hold {timing} (the helper writes it so) or {date}: filled in like Tim's own clauses
+        const w = String(E.custom_wording || c.wording || '').trim(), f = E.custom_ok && w ? fill(w, c) : null;
+        term('ft_custom', "Purchaser's condition", f ? f.text : PLACEHOLDERS.custom, { custom: true, cond: 'custom', request: c.request || '', wording: c.wording || '', ai: !!c.ai, suffix: f && f.tokens ? '' : suffixFor(c) });
         continue;
       }
       let w = t.wording_from ? String((input.clauses || {})[t.wording_from] || '').trim() : String(t.wording || '').trim();
-      const c = t.wording_from ? cond(t.wording_from) : null;
+      const c = t.wording_from ? cond(t.wording_from) : null; let tokens = false;
       if (!w) w = placeholderFor(t.wording_from || t.key, t.title);
-      else if (c) w = w.replace(/\{detail\}/g, c.detail || '').replace(/\{address\}/g, d.sale_address || '').replace(/\{date\}/g, dateText(c));
-      term('ft_' + t.key, t.title, w, c ? { date: dateText(c), detail: c.detail || (t.wording_from === 'sale' ? d.sale_address : '') } : {});
+      else if (c) { const f = fill(w, c, { detail: c.detail || '', address: d.sale_address || '' }); w = f.text; tokens = f.tokens; }
+      term('ft_' + t.key, t.title, w, c ? { cond: c.key, suffix: tokens ? '' : suffixFor(c), detail: c.detail || (t.wording_from === 'sale' ? d.sale_address : '') } : {});
     }
+    // the dates of printed conditions that wait for another, where their own line couldn't hold them
+    timeTerms.forEach(x => term(x.id, x.title, x.text, { timing: true }));
     if (cond('sale')) need('sale_address_seen', `Sale of another property: the buyer's own address (${d.sale_address || 'not given'}) is named in that further term, so the vendors will see it on the agreement. Check the buyer is happy with that.`, false);
     (E.extra_terms || []).map(x => String(x || '').trim()).filter(Boolean).forEach((x, i) => term('ft_extra_' + (i + 1), 'Your further term', x));
     // chattels: on the schedule (strike out or add), or as a further term, as the library says
@@ -517,11 +578,19 @@
       need('further_printed', `The Further Terms page already has ${ftp.printed_count} printed line${ftp.printed_count === 1 ? '' : 's'}${ftp.printed_last ? `, numbered to ${ftp.printed_last}` : ''}. The offer's terms start below the lowest of them, numbered from ${ftn + 1}. This layout hasn't been checked on a real blank yet: look at the page before you approve.`, true, true);
     }
     if (ft.length) {
-      const text = ft.map(x => { ftn++; const edited = Object.prototype.hasOwnProperty.call(edits, x.id) ? String(edits[x.id] || '') : null; const body = edited != null ? edited : x.text; x.number = ftn; x.text = body;
-        return `${ftn}. ${x.title}${x.detail ? ' (' + x.detail + ')' : ''}: ${body}${x.date && !/\{date\}/.test(body) ? ' Condition date: ' + x.date + '.' : ''}`; });
+      ft.forEach(x => { ftn++; x.number = ftn; });
+      // the further term numbers are known now: fill in every reference to one ("further term 3"), in the terms and on the page
+      const numOf = new Map(), byId = new Map(ft.map(x => [x.id, x.number])); ft.forEach(x => { if (x.cond && !numOf.has(x.cond)) numOf.set(x.cond, x.number); });
+      resolveRefs = t => String(t).replace(/\[\[FT:(\w+)\]\]/g, (m, k) => numOf.has(k) ? String(numOf.get(k)) : refMissing(k))
+        .replace(/\[\[TERM:(\w+)\]\]/g, (m, id) => byId.has(id) ? String(byId.get(id)) : '?');
+      const text = ft.map(x => { const edited = Object.prototype.hasOwnProperty.call(edits, x.id) ? String(edits[x.id] || '') : null; const body = resolveRefs(edited != null ? edited : x.text); x.text = body;
+        return `${x.number}. ${x.title}${x.detail ? ' (' + x.detail + ')' : ''}: ${body}${resolveRefs(x.suffix || '')}`; });
       const it = put('further_terms', ftp, text.join('\n'), { label: 'Further terms of sale', item: { terms: ft.map(x => ({ id: x.id, number: x.number, title: x.title, text: x.text, placeholder: isPlaceholder(x.text), custom: !!x.custom, request: x.request, wording: x.wording, ai: x.ai })) } });
       ft.filter(x => isPlaceholder(x.text)).forEach(x => need('ph_' + x.id, `Further term ${x.number}, ${x.title}: ${x.text}`, true));
     }
+    // any reference still waiting for its number (on the front page, beside clause 22.0, and in Tim's list of things to check)
+    items.forEach(it => { if (it.text && /\[\[(FT|TERM):/.test(it.text)) it.text = resolveRefs(it.text); });
+    needs.forEach(n => { if (/\[\[(FT|TERM):/.test(n.text)) n.text = resolveRefs(n.text); });
     // the lawyers' details, and only theirs: never a purchaser's or vendor's own phone or email
     const L = d.lawyer || {};
     put('pl_firm', P('pl_firm'), L.firm, { label: "Purchaser's lawyers: firm", optional: true });

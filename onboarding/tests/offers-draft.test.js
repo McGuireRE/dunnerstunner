@@ -261,6 +261,15 @@ const sha = b => crypto.createHash('sha256').update(Buffer.from(b)).digest('hex'
   d = await db(q); const te2 = await pdfText(await blob(q, d.offer_drafts.find(x => x.offer_id === off2 && x.number === 2).path));
   expect(/Purchaser's condition: Synthetic custom condition wording from the buyer\./.test(te2[2]), "ticked: the buyer's wording goes on");
   expect(te2[6].includes('lee@otherlaw.example') && !/buyer\.own@|999 8888/.test(te2.join('\n')), 'lawyer details on; the buyer\'s own never');
+  // "Confirm all conditions on the same day" from the review screen: a recorded correction, then a new draft (Tim, 24 November 2026)
+  expect(await q.isVisible('#drLineUp summary') && !(await q.$eval('#drLineUp', e => e.open)), 'line-up on the review screen, folded away');
+  await q.click('#drLineUp summary'); await q.click('#drLuGo'); expect(/Enter the working days or a date/.test(await q.textContent('#drLuErr')), 'it needs the days or a date');
+  await q.fill('#drLuDays', '7'); await q.click('#drLuGo'); await q.waitForSelector('#drReview h1:has-text("Draft 3")', { timeout: 30000 });
+  d = await db(q); const o2 = d.property_offers.find(x => x.id === off2), dl3 = d.offer_drafts.find(x => x.offer_id === off2 && x.number === 3);
+  expect(o2.details.line_up === true && o2.details.conditions.every(c => c.days === 7 && !c.date && !c.after) && o2.submission.conditions.find(c => c.key === 'finance').days === 10, 'every condition set to 7 working days; the buyer\'s original kept');
+  expect(d.offer_events.some(e => e.offer_id === off2 && e.kind === 'corrected' && /Lined up the conditions: all within 7 working days/.test(e.detail.note)) && /Conditions lined up/.test(dl3.note), 'recorded as a correction, with the new draft\'s note');
+  expect(dl3.placed.find(x => x.id === 'd_finance').text === D.fullDate(O.addWorkingDays(O.nzToday(), 7, { province: 'otago' })) && dl3.placed.find(x => x.id === 'clause22_days').text === '7' && dl3.edits.custom_ok === true, 'the new draft: finance and clause 22.0 on 7 working days, Tim\'s tick kept');
+  expect(!(await side(q)), 'review with line-up at 390 px: no sideways scroll');
   await shot(q, 'review_dark');
   // a vendor's own phone, typed in another format, never goes on: left off and blocking
   const off3 = (await rpc(q, 'agent_offer_add', { p_property: 'P1', p_offer: offer({ conditions: [], chattels_add: ['Ring the vendor on +64 21 000 1111 about the spa'], chattels_exclude: [] }) })).data;
