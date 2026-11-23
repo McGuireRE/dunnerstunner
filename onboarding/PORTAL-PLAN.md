@@ -71,6 +71,13 @@ Ids in addresses are the database ids. Addresses never contain a name, email or 
 
 ### P1. Shell and addresses
 
+Status: built 24 November 2026 on main (not pushed, awaiting review). No migration. `build.py` also writes `onboarding/portal.js` (the
+app in one script), `portal/index.html` (the shell) and a root `404.html` (the same shell; on GitHub Pages it opens deep `/portal/...`
+addresses and says "Page not found" for any other missing address). The shell loads its script from absolute
+packages.dunnerstunner.co.nz addresses, so the same file goes into `McGuireRE/portal` as `index.html` and `404.html`. Test:
+`portal-routes.test.js`. Before going live: add `https://packages.dunnerstunner.co.nz/portal/` (and later
+`https://portal.dunnerstunner.co.nz/`) to Supabase's allowed sign-in redirect addresses.
+
 - A small router in `app.js`: one table of address patterns to view functions. Opening a view sets its address
   with `history.pushState`; back and forward (`popstate`) open the view for that address; loading any address
   directly opens the right page after sign-in. The existing unsaved-work warning (`JDIRTY`) applies to every move.
