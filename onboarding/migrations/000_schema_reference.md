@@ -261,6 +261,10 @@ agreements/<agreement id>/signatures/... (vendors may upload their own signature
 - `offer_box_ok(box, sizes, min)`, `offer_draft_edits_ok(edits, sizes)`: the shape of Tim's review-screen edits (marks, moves,
   added_terms, term_order, retired_numbers, term_timing); marks and moved places on a page of the blank. Not callable by users.
 - `agent_draft_add` replaced: 019's, plus `offer_draft_edits_ok`.
-- `offer_agent_ai_claim(actor, purpose)`: the daily cap (offer_settings.ai_daily_cap) for Tim's clause writer, counted from ai_calls
-  ('offer clause draft') since midnight NZ. Service role only.
+- `offer_agent_ai_claim(actor, purpose)`: the daily cap (offer_settings.ai_daily_cap) for Tim's clause writer. One claim at a time
+  (advisory transaction lock); counts ai_calls ('offer clause draft') since midnight NZ and, under the cap, inserts a reservation row
+  (ok false, error 'pending') and returns its id. `offer_agent_ai_done(id, ok, error, in, out)` finishes that row after the model call.
+  Both service role only.
+- `offer_draft_edits_ok` also checks extra_terms (at most 60; a string up to 4,000, or {id, title up to 200, text up to 4,000, ai}),
+  term_order entries (ids), items (id keys, text up to 4,000) and custom_wording.
 

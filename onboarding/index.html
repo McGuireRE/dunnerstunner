@@ -727,14 +727,21 @@ table.sum.of-sum td:first-child, table.sum.of-dates td:first-child { width: 40%;
 .dr-mark.dr-moved { border-color: #1E7A45; background: rgba(30, 122, 69, .12); }
 .dr-mk-lbl { position: absolute; left: 0; bottom: 100%; font-size: 11px; line-height: 1.2; color: #fff; background: #D9432C; padding: 0 4px; border-radius: 3px 3px 0 0; white-space: nowrap; max-width: 220px; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
 .dr-mark.dr-moved .dr-mk-lbl { background: #1E7A45; }
-/* handles sit just outside the box, so even a small box keeps its middle free to drag; finger-sized wherever touch is possible */
-.dr-h { position: absolute; width: 12px; height: 12px; border-radius: 50%; background: #fff; border: 2px solid #D9432C; box-sizing: border-box; touch-action: none; display: none; }
+/* handles sit just outside the box, so even a small box keeps its middle free to drag; near the page's edge they turn inwards, so
+   they are never cut off. Finger-sized wherever touch is possible. */
+.dr-h { position: absolute; width: 12px; height: 12px; border-radius: 50%; background: #fff; border: 2px solid #D9432C; box-sizing: border-box; touch-action: none; display: none; transform: translate(var(--hx, 0), var(--hy, 0)); }
 @media (any-pointer: coarse) { .dr-h { width: 24px; height: 24px; } }
 .dr-touch .dr-h { width: 24px; height: 24px; }
 .dr-mark.dr-sel .dr-h { display: block; }
-.dr-h-nw { left: 0; top: 0; transform: translate(-100%, -100%); cursor: nwse-resize; } .dr-h-n { left: 50%; top: 0; transform: translate(-50%, -100%); cursor: ns-resize; } .dr-h-ne { left: 100%; top: 0; transform: translate(0, -100%); cursor: nesw-resize; } .dr-h-e { left: 100%; top: 50%; transform: translate(0, -50%); cursor: ew-resize; }
-.dr-h-se { left: 100%; top: 100%; cursor: nwse-resize; } .dr-h-s { left: 50%; top: 100%; transform: translate(-50%, 0); cursor: ns-resize; } .dr-h-sw { left: 0; top: 100%; transform: translate(-100%, 0); cursor: nesw-resize; } .dr-h-w { left: 0; top: 50%; transform: translate(-100%, -50%); cursor: ew-resize; }
+.dr-h-nw { left: 0; top: 0; --hx: -100%; --hy: -100%; cursor: nwse-resize; } .dr-h-n { left: 50%; top: 0; --hx: -50%; --hy: -100%; cursor: ns-resize; } .dr-h-ne { left: 100%; top: 0; --hx: 0; --hy: -100%; cursor: nesw-resize; } .dr-h-e { left: 100%; top: 50%; --hx: 0; --hy: -50%; cursor: ew-resize; }
+.dr-h-se { left: 100%; top: 100%; --hx: 0; --hy: 0; cursor: nwse-resize; } .dr-h-s { left: 50%; top: 100%; --hx: -50%; --hy: 0; cursor: ns-resize; } .dr-h-sw { left: 0; top: 100%; --hx: -100%; --hy: 0; cursor: nesw-resize; } .dr-h-w { left: 0; top: 50%; --hx: -100%; --hy: -50%; cursor: ew-resize; }
+.dr-at-l .dr-h-nw, .dr-at-l .dr-h-w, .dr-at-l .dr-h-sw { --hx: 0; }
+.dr-at-r .dr-h-ne, .dr-at-r .dr-h-e, .dr-at-r .dr-h-se { --hx: -100%; }
+.dr-at-t .dr-h-nw, .dr-at-t .dr-h-n, .dr-at-t .dr-h-ne { --hy: 0; }
+.dr-at-b .dr-h-sw, .dr-at-b .dr-h-s, .dr-at-b .dr-h-se { --hy: -100%; }
 .dr-mark.dr-sel .dr-mk-lbl { left: 26px; }
+.dr-mark.dr-at-t .dr-mk-lbl { bottom: auto; top: 100%; border-radius: 0 0 3px 3px; }
+.dr-pg.dr-editing { touch-action: none; }
 .dr-box { position: absolute; box-sizing: border-box; border: 1.5px solid #1F5FBF; background: rgba(31, 95, 191, .12); border-radius: 3px; padding: 0; margin: 0; min-width: 6px; min-height: 6px; cursor: pointer; font: inherit; }
 .dr-box.dr-ai { border-color: #B26A00; background: rgba(255, 170, 0, .18); }
 .dr-box.dr-ai.dr-undecided { border-style: dashed; }
@@ -4503,7 +4510,10 @@ window.JOURNEY_MEDIA_HINTS = {
       const anchor = apH || h;
       if (hasCopy && below) numbering.cont = { page: page.n, w: page.w, h: page.h, header: [headerBottom, r1(page.h)], footer: [0, r1(footTop + 1)],
         head: { x1: r1(anchor.x1), y: r1(anchor.y), h: r1(anchor.h), text: anchor.text.trim().slice(0, 40) },
-        page_no: pn ? { text: pn.s.trim(), value: +(/(\d{1,3})/.exec(pn.s)[1]), x: r1(pn.x), y: r1(pn.y), w: r1(pn.w), h: r1(pn.h) } : null };
+        page_no: pn ? { text: pn.s.trim(), value: +(/(\d{1,3})/.exec(pn.s)[1]), x: r1(pn.x), y: r1(pn.y), w: r1(pn.w), h: r1(pn.h) } : null,
+        // the bare page numbers printed on the agreement's later pages (a clash with an added page's number is checked when drafting)
+        later_numbers: pages.filter(pg => pg.n > page.n && agp.includes(pg.n)).map(pg => { const it2 = pg.items.find(x => /^\s*(?:page\s+)?\d{1,3}(?:\s+of\s+\d{1,3})?\s*$/i.test(x.s) && (x.y < 60 || x.y > pg.h - 60));
+          return it2 ? { page: pg.n, value: +(/(\d{1,3})/.exec(it2.s)[1]) } : null; }).filter(Boolean) };
     }
     // Schedule 1, 2(a): the purchaser's GST registration
     const s1 = pageOf(/^SCHEDULE 1\b|\bSCHEDULE 1\b.*Edition/);
@@ -4603,6 +4613,8 @@ window.JOURNEY_MEDIA_HINTS = {
   const PLACEHOLDERS = { electrical: '[Tim to add his electrical report clause]', technical: '[Tim to add his specified technical report clause]', sale: '[Tim to add his sale of another property clause]', sdd: '[Tim to add his Specified Due Diligence clause]', custom: "[Tim to tick the buyer's own condition wording]" };
   const placeholderFor = (key, title) => PLACEHOLDERS[key] || `[Tim to add his ${String(title || key).toLowerCase()} clause]`;
   const isPlaceholder = s => /^\[Tim to /.test(String(s || ''));
+  // the drafting's own reference markers ([[FT:x]], [[TERM:x]]) taken out of any text it didn't write itself (a buyer's, the AI's, a paste)
+  const noRefs = s => String(s == null ? '' : s).replace(/\[\[|\]\]/g, '');
   // does a library rule apply to this offer?
   function ruleApplies(rule, d) {
     const w = (rule && rule.when) || {}, keys = (d.conditions || []).map(c => c.key);
@@ -4730,9 +4742,11 @@ window.JOURNEY_MEDIA_HINTS = {
     const labelOf = k => (OF && OF.condInfo(k) || { label: k }).label;
     // How a condition is referred to in a sentence: a printed condition by its clause number, one of the further terms by its number
     // there. Further term numbers are only known once the terms are listed, so a marker stands in until then (resolved below).
+    // the markers carry a key made for this draft only, so no text from outside (a buyer, the AI, a paste) can make one
+    const RK = 'k' + Math.random().toString(36).slice(2, 10), REF = kind => new RegExp('\\[\\[' + kind + '\\.' + RK + ':(\\w+)\\]\\]', 'g'), hasRef = t => String(t).includes('.' + RK + ':');
     const FRONT = Object.fromEntries(FRONT_CONDITIONS), noun = k => OF ? OF.nounFor(k) : k + ' condition';
-    const refOf = k => FRONT[k] ? `the ${noun(k)} in clause ${FRONT[k]}` : k === 'lawyer' ? `the ${noun(k)} in clause 22.0` : `the ${noun(k)} in further term [[FT:${k}]]`;
-    const shortRef = k => FRONT[k] ? `clause ${FRONT[k]}` : k === 'lawyer' ? 'clause 22.0' : `further term [[FT:${k}]]`;
+    const refOf = k => FRONT[k] ? `the ${noun(k)} in clause ${FRONT[k]}` : k === 'lawyer' ? `the ${noun(k)} in clause 22.0` : `the ${noun(k)} in further term [[FT.${RK}:${k}]]`;
+    const shortRef = k => FRONT[k] ? `clause ${FRONT[k]}` : k === 'lawyer' ? 'clause 22.0' : `further term [[FT.${RK}:${k}]]`;
     const wdays = n => `${n} working ${+n === 1 ? 'day' : 'days'}`;
     const movedNeed = (c, r) => { if (r && r.adjusted) need('moved_' + c.key, `${labelOf(c.key)}: the buyer chose ${fullDate(r.chosen)}, which isn't a working day, so the agreement says ${fullDate(r.date)} (the working day before). Check it with them.`, false); };
     // {timing}: the phrase for each way of satisfying a condition, in full
@@ -4763,14 +4777,14 @@ window.JOURNEY_MEDIA_HINTS = {
       // waits for another condition: the short phrase on the line if it fits there, otherwise "see further term N" and a further term
       // that sets out this condition's date. The REINZ text is never changed, only added to.
       const n = Math.floor(+c.days), short = `${wdays(n)} after ${shortRef(c.after)} is satisfied or waived`, dp = P('d_' + k), dn = DATE_NAMES[k] || labelOf(k).toLowerCase() + ' date';
-      if (dp && textWidth(short.replace(/\[\[FT:\w+\]\]/g, '99'), 7.5) <= dp.w) {
+      if (dp && textWidth(short.replace(REF('FT'), '99'), 7.5) <= dp.w) {
         put('d_' + k, dp, short, { label: label + ': date' });
         need('front_after_' + k, `${label}: the date line says "${short}" because it waits for ${labelOf(c.after)}. Check it reads clearly on the page.`, false);
       } else {
         const id = 'ft_time_' + k;
         timeTerms.push({ id, title: `${dn.charAt(0).toUpperCase() + dn.slice(1)} (clause ${clause})`, text: `The ${dn} is the date that is ${wdays(n)} after the date ${refOf(c.after)} is satisfied or waived.`, cond: null, timing: true });
-        put('d_' + k, dp, `see further term [[TERM:${id}]]`, { label: label + ': date' });
-        need('front_after_' + k, `${label}: it waits for ${labelOf(c.after)}, which doesn't fit on the date line, so the line says "see further term [[TERM:${id}]]" and further term [[TERM:${id}]] sets out the date. Check both.`, false);
+        put('d_' + k, dp, `see further term [[TERM.${RK}:${id}]]`, { label: label + ': date' });
+        need('front_after_' + k, `${label}: it waits for ${labelOf(c.after)}, which doesn't fit on the date line, so the line says "see further term [[TERM.${RK}:${id}]]" and further term [[TERM.${RK}:${id}]] sets out the date. Check both.`, false);
       }
     }
     if (conds.some(c => mode(c) === 'days' && c.days && !c.date)) need('days_from', `Condition dates given as working days are counted from today (${fullDate(today)}). On the agreement they run from the day everyone signs, so check them on the day.`, false);
@@ -4794,9 +4808,9 @@ window.JOURNEY_MEDIA_HINTS = {
         const dp22 = P('clause22_days'), id = 'ft_time_lawyer';
         timeTerms.push({ id, title: "Lawyer's approval (clause 22.0)", text: `The time for the purchaser's lawyer's approval under clause 22.0 is ${timingPhrase(law)}.`, cond: null, timing: true });
         if (dp22 && dp22.printed) { strike('clause22_days_struck', dp22, 'Clause 22.0: the working days already on the blank, struck out');
-          put('clause22_days', Object.assign({}, dp22, { x: dp22.x + dp22.w / 2 - 2, y: dp22.y + dp22.h * 0.62, w: 80 }), `see further term [[TERM:${id}]]`, { label: 'Clause 22.0: working days', item: { size: 6 } }); }
-        else if (dp22) put('clause22_days', dp22, `see further term [[TERM:${id}]]`, { label: 'Clause 22.0: working days' });
-        need('clause22_after', `Lawyer's approval waits for ${labelOf(law.after)}. ${dp22 && dp22.printed ? 'The working days printed in clause 22.0 are struck out and' : 'Clause 22.0'} "see further term [[TERM:${id}]]" is written there; further term [[TERM:${id}]] sets out the time. Check both.`, false);
+          put('clause22_days', Object.assign({}, dp22, { x: dp22.x + dp22.w / 2 - 2, y: dp22.y + dp22.h * 0.62, w: 80 }), `see further term [[TERM.${RK}:${id}]]`, { label: 'Clause 22.0: working days', item: { size: 6 } }); }
+        else if (dp22) put('clause22_days', dp22, `see further term [[TERM.${RK}:${id}]]`, { label: 'Clause 22.0: working days' });
+        need('clause22_after', `Lawyer's approval waits for ${labelOf(law.after)}. ${dp22 && dp22.printed ? 'The working days printed in clause 22.0 are struck out and' : 'Clause 22.0'} "see further term [[TERM.${RK}:${id}]]" is written there; further term [[TERM.${RK}:${id}]] sets out the time. Check both.`, false);
       }
       else { const r = OF ? OF.conditionDate(law, today, province, conds) : null, n = law.days ? +law.days : r ? r.days : null, dp22 = P('clause22_days');
         if (n && dp22) { if (dp22.printed) { if (numberIn(dp22.printed) !== n) { strike('clause22_days_struck', dp22, "Clause 22.0: the working days already on the blank, struck out");
@@ -4813,7 +4827,7 @@ window.JOURNEY_MEDIA_HINTS = {
     // further terms: Tim's clauses by rule, from the library, in its order
     // a reference to a further term that isn't there has no number to take: "?", and Tim must deal with it
     const refMissing = k => { need('ref_missing_' + k, `A condition waits for ${labelOf(k)}, but ${labelOf(k)} isn't in the further terms, so its number is shown as "?". Add it, or change the timing.`, true); return '?'; };
-    let resolveRefs = t => String(t).replace(/\[\[FT:(\w+)\]\]/g, (m, k) => refMissing(k)).replace(/\[\[TERM:\w+\]\]/g, '?');
+    let resolveRefs = t => String(t).replace(REF('FT'), (m, k) => refMissing(k)).replace(REF('TERM'), '?');
     let ftn = 0; const term = (id, title, text, extra) => { ft.push(Object.assign({ id, title, text }, extra || {})); };
     // A term's timing: the condition it belongs to, unless Tim set the timing of this term on the review screen (edits.term_timing,
     // working days, a date, or after one of the offer's conditions). That changes the draft only: the offer's own dates stay as they are.
@@ -4829,7 +4843,7 @@ window.JOURNEY_MEDIA_HINTS = {
     // a term's wording with its tokens filled: { text, template (the wording with {timing} and {date} kept), tokens, timing }.
     // {timing} with no timing to give: a highlighted gap, and Tim must set it.
     const NO_TIMING = '[Tim to set the timing]';
-    const fillTerm = (id, title, w, tm, extra) => { let tpl = w; Object.entries(extra || {}).forEach(([k, v]) => { tpl = tpl.split('{' + k + '}').join(v); });
+    const fillTerm = (id, title, w, tm, extra) => { let tpl = noRefs(w); Object.entries(extra || {}).forEach(([k, v]) => { tpl = tpl.split('{' + k + '}').join(noRefs(v)); });
       if (tm) { const f = fill(tpl, tm); return { text: f.text, template: tpl, tokens: f.tokens, timing: tm }; }
       const tokens = /\{(date|timing)\}/.test(tpl); if (tokens) need('timing_missing_' + id, `${title}: its wording has {timing} but no timing yet. Tap the timing in the term to set it.`, true);
       return { text: tpl.replace(/\{(date|timing)\}/g, NO_TIMING), template: tpl, tokens, timing: null }; };
@@ -4891,6 +4905,7 @@ window.JOURNEY_MEDIA_HINTS = {
     const NB = Object.assign({}, map.numbering || {}, input.numbering || {}), retired = new Set((E.retired_numbers || []).map(Number).filter(n => n >= 1));
     const base = Math.max(+NB.general_last || +(ftp || {}).general_last || 0, +NB.appendix_last || +(ftp || {}).appendix_last || 0, +(ftp || {}).printed_last || 0);
     ftn = base;
+    if (base) need('term_start', `Further terms start at ${base + 1} (general terms to ${NB.general_last || (ftp || {}).general_last || 'none found'}, appendix to ${NB.appendix_last || (ftp || {}).appendix_last || 'none found'}${(ftp || {}).printed_last ? `, printed on the further terms page to ${ftp.printed_last}` : ''}).`, false);
     if (ft.length && !base) need('numbering_unknown', "The last general terms clause number couldn't be read from the blank, so the further terms are numbered from 1. Check the numbering.", false);
     if (ft.length && ftp && ftp.printed_bottom != null) {
       // terms already printed on the page: ours start below the lowest printed line, numbered on from the highest printed number
@@ -4902,21 +4917,21 @@ window.JOURNEY_MEDIA_HINTS = {
       ft.forEach(x => { ftn++; while (retired.has(ftn)) ftn++; x.number = ftn; });
       // the further term numbers are known now: fill in every reference to one ("further term 3"), in the terms and on the page
       const numOf = new Map(), byId = new Map(ft.map(x => [x.id, x.number])); ft.forEach(x => { if (x.cond && !numOf.has(x.cond)) numOf.set(x.cond, x.number); });
-      resolveRefs = t => String(t).replace(/\[\[FT:(\w+)\]\]/g, (m, k) => numOf.has(k) ? String(numOf.get(k)) : refMissing(k))
-        .replace(/\[\[TERM:(\w+)\]\]/g, (m, id) => byId.has(id) ? String(byId.get(id)) : '?');
+      resolveRefs = t => String(t).replace(REF('FT'), (m, k) => numOf.has(k) ? String(numOf.get(k)) : refMissing(k))
+        .replace(REF('TERM'), (m, id) => byId.has(id) ? String(byId.get(id)) : '?');
       // Tim's edit of a term is its wording as he left it: {timing} and {date} in it are filled in like any other
       const text = ft.map(x => { const edited = Object.prototype.hasOwnProperty.call(edits, x.id) ? String(edits[x.id] || '') : null;
-        let body = edited != null ? edited : x.text; if (edited != null) { x.template = edited; if (/\{(date|timing)\}/.test(edited)) { const f = fillTerm(x.id, x.title, edited, x.timing); body = f.text; x.suffix = ''; } }
+        let body = edited != null ? noRefs(edited) : x.text; if (edited != null) { x.template = edited; if (/\{(date|timing)\}/.test(edited)) { const f = fillTerm(x.id, x.title, edited, x.timing); body = f.text; x.suffix = ''; } }
         body = resolveRefs(body); x.text = body;
-        return `${x.number}. ${x.title}${x.detail ? ' (' + x.detail + ')' : ''}: ${body}${resolveRefs(x.suffix || '')}`; });
+        return `${x.number}. ${noRefs(x.title)}${x.detail ? ' (' + noRefs(x.detail) + ')' : ''}: ${body}${resolveRefs(x.suffix || '')}`; });
       const it = put('further_terms', ftp, text.join('\n'), { label: 'Further terms of sale', item: { cont: NB.cont || null, number_base: base, terms: ft.map(x => ({ id: x.id, number: x.number, title: x.title, text: x.text, placeholder: isPlaceholder(x.text), custom: !!x.custom, request: x.request, wording: x.wording, ai: x.ai,
         template: x.template != null ? resolveRefs(x.template) : null, timing: x.timing ? { key: x.timing.key, days: x.timing.days, date: x.timing.date, after: x.timing.after } : null, timing_text: x.timing ? resolveRefs(timingPhrase(x.timing)) : '',
         date_text: x.timing ? resolveRefs(dateText(x.timing)) : '', removable: !!x.removable, added: !!x.added, library: x.library || null, extra: !!x.extra })) } });
       ft.filter(x => isPlaceholder(x.text)).forEach(x => need('ph_' + x.id, `Further term ${x.number}, ${x.title}: ${x.text}`, true));
     }
     // any reference still waiting for its number (on the front page, beside clause 22.0, and in Tim's list of things to check)
-    items.forEach(it => { if (it.text && /\[\[(FT|TERM):/.test(it.text)) it.text = resolveRefs(it.text); });
-    needs.forEach(n => { if (/\[\[(FT|TERM):/.test(n.text)) n.text = resolveRefs(n.text); });
+    items.forEach(it => { if (it.text && hasRef(it.text)) it.text = resolveRefs(it.text); });
+    needs.forEach(n => { if (hasRef(n.text)) n.text = resolveRefs(n.text); });
     // the lawyers' details, and only theirs: never a purchaser's or vendor's own phone or email
     const L = d.lawyer || {};
     put('pl_firm', P('pl_firm'), L.firm, { label: "Purchaser's lawyers: firm", optional: true });
@@ -4941,7 +4956,7 @@ window.JOURNEY_MEDIA_HINTS = {
     (Array.isArray(E.marks) ? E.marks : []).forEach((m, i) => { if (!m || !MARK_WORDS[m.type] || !/^[A-Za-z0-9_-]{1,40}$/.test(String(m.id || ''))) return;
       const id = 'mark_' + m.id, b = { page: +m.page, x: +m.x, y: +m.y, w: +m.w, h: +m.h };
       const lbl = `${MARK_WORDS[m.type]}${m.type === 'initials' || m.type === 'signature' ? ' for ' + (WHO[m.who] || WHO.both) : ''} (page ${b.page}, marked by you)`;
-      if (m.type === 'text') { put(id, Object.assign({ id, key: 'mark', kind: 'area', page: b.page }, { x: b.x + 2, y: b.y + b.h - FONT_SIZE - 1, w: Math.max(8, b.w - 4), h: Math.max(FONT_SIZE, b.h - 2) }), String(m.text || '').trim().slice(0, 500), { label: lbl, item: { mark: 'text' } });
+      if (m.type === 'text') { put(id, Object.assign({ id, key: 'mark', kind: 'area', page: b.page }, { x: b.x + 2, y: b.y + b.h - FONT_SIZE - 1, w: Math.max(8, b.w - 4), h: Math.max(FONT_SIZE, b.h - 2) }), noRefs(String(m.text || '').trim().slice(0, 500)), { label: lbl, item: { mark: 'text' } });
         if (!String(m.text || '').trim()) need('mark_empty_' + m.id, `${lbl}: there is no text in it yet. Type it, or delete the box.`, true); return; }
       if (m.type === 'initials' || m.type === 'signature') signMarks++;
       items.push(Object.assign({ id, key: 'mark', place: null, kind: 'mark', mark: m.type === 'strike' && b.h > 16 ? 'cross' : m.type, who: m.type === 'initials' || m.type === 'signature' ? (WHO[m.who] ? m.who : 'both') : null, label: lbl }, b)); });
@@ -5046,18 +5061,28 @@ window.JOURNEY_MEDIA_HINTS = {
       // say so at the foot of the Further Terms page itself
       const note = 'Continued on the next page.', ny = noteY;
       pg.drawText(note, { x: it.x, y: ny, size: 8, font: bold, color: ink }); boxes.push({ id: it.id + '_contnote', page: it.page, x: it.x, y: ny - 2, w: bold.widthOfTextAtSize(note, 8), h: 10, kind: 'text', label: it.label + ': continued on the next page' });
-      const head = C ? await doc.embedPage(pg, { left: 0, bottom: C.header[0], right: w, top: h }) : null, foot = C ? await doc.embedPage(pg, { left: 0, bottom: 0, right: w, top: C.footer[1] }) : null;
-      const top0 = C ? C.header[0] - 22 : h - 100, bottom0 = C ? C.footer[1] + 14 : 40, n = Math.max(1, Math.floor((top0 - bottom0) / lh) + 1);
+      // The header and footer bands are pictures of the blank's own page (o.bandImage gives PNG bytes for a band: Tim's screen renders
+      // the page with pdf.js, the tests with pdftoppm). Never the page itself embedded: that would carry its whole text, clauses and
+      // all, into every added page. Without pictures, a plain page and a check for Tim.
+      let headImg = null, footImg = null;
+      if (C && typeof o.bandImage === 'function') {
+        try { const hb = await o.bandImage(it.page, { bottom: C.header[0], top: h, width: w, height: h - C.header[0] }), fb = await o.bandImage(it.page, { bottom: 0, top: C.footer[1], width: w, height: C.footer[1] });
+          if (hb && fb && hb.length && fb.length) { headImg = await doc.embedPng(hb); footImg = await doc.embedPng(fb); } } catch (_) { headImg = footImg = null; }
+      }
+      const B = headImg && footImg ? C : null;
+      const top0 = B ? B.header[0] - 22 : h - 100, bottom0 = B ? B.footer[1] + 14 : 40, n = Math.max(1, Math.floor((top0 - bottom0) / lh) + 1);
+      const willAdd = Math.max(1, Math.ceil(rest.length / n));
       const added_pages = [];
       while (left.length) {
         const np = doc.insertPage(at, [w, h]); at++; added++;
         let number = null;
-        if (C) {
-          np.drawPage(head, { x: 0, y: C.header[0] }); np.drawPage(foot, { x: 0, y: 0 });
+        if (B) { const C = B;
+          np.drawImage(headImg, { x: 0, y: C.header[0], width: w, height: h - C.header[0] }); np.drawImage(footImg, { x: 0, y: 0, width: w, height: C.footer[1] });
           const hs = Math.max(8, Math.min(14, C.head.h || 12)), ct = '(continued)';
           np.drawText(ct, { x: C.head.x1 + 6, y: C.head.y, size: hs, font: bold, color: ink });
           boxes.push({ id: it.id + '_conthead' + added, page: -at, x: C.head.x1 + 6, y: C.head.y - 2, w: bold.widthOfTextAtSize(ct, hs), h: hs + 2, kind: 'text', label: it.label + ': (continued) after the heading' });
-          if (C.page_no) { const pn = C.page_no, nv = pn.value + added, nt = pn.text.replace(String(pn.value), String(nv)), ps = Math.max(6, Math.min(10, pn.h || 8));
+          // the page number: "22" becomes 23, then 24; "22 of 22" becomes "23 of 24" when two pages are added (the total grows too)
+          if (C.page_no) { const pn = C.page_no, nv = pn.value + added, of = /(\d{1,3})\D+(\d{1,3})/.test(pn.text), nt = of ? pn.text.replace(/(\d{1,3})(\D+)(\d{1,3})/, (m, a, sep, t) => `${nv}${sep}${+t + willAdd}`) : pn.text.replace(String(pn.value), String(nv)), ps = Math.max(6, Math.min(10, pn.h || 8));
             np.drawLine({ start: { x: pn.x - 1, y: pn.y + pn.h * 0.32 }, end: { x: pn.x + pn.w + 1, y: pn.y + pn.h * 0.32 }, thickness: 0.9, color: ink });
             np.drawText(nt, { x: pn.x + pn.w + 4, y: pn.y, size: ps, font, color: ink });
             boxes.push({ id: it.id + '_contpage' + added, page: -at, x: pn.x - 1, y: pn.y - 2, w: pn.w + 6 + font.widthOfTextAtSize(nt, ps), h: ps + 3, kind: 'text', label: `${it.label}: page number ${pn.text} struck, ${nt} written beside it` });
@@ -5066,20 +5091,23 @@ window.JOURNEY_MEDIA_HINTS = {
           np.drawText('Further Terms of Sale (continued)', { x: 40, y: h - 60, size: 13, font: bold, color: ink });
           np.drawText(`Continued from page ${it.page}.`, { x: 40, y: h - 76, size: 8, font, color: ink });
         }
-        const x0 = C ? it.x : 40, ww = C ? it.w : w - 80;
+        const x0 = B ? it.x : 40, ww = B ? it.w : w - 80;
         const T = l => typeof l === 'string' ? l : l.s;
         const ls = left.slice(0, n); left = left.slice(n);
         ls.forEach((l, i) => { const ln = T(l); if (!ln) return; const y = top0 - i * lh, ph = /\[Tim to [^\]]*\]/.exec(ln);
           if (ph) np.drawRectangle({ x: x0 + font.widthOfTextAtSize(ln.slice(0, ph.index), size) - 1, y: y - 2, width: font.widthOfTextAtSize(ph[0], size) + 2, height: size + 2, color: hl });
           np.drawText(ln, { x: x0, y, size, font, color: ink }); });
         boxes.push({ id: it.id + '_cont' + added, page: -at, x: x0, y: top0 - (ls.length - 1) * lh - 2, w: ww, h: (ls.length - 1) * lh + size + 4, kind: 'area', label: it.label + ' (continued)', placeholder: ls.some(l => /\[Tim to /.test(T(l))) });
-        added_pages.push({ page: at, source_page: it.page, bands: C ? { header: C.header, footer: C.footer } : null, plain: !C, number });
+        added_pages.push({ page: at, source_page: it.page, bands: B ? { header: B.header, footer: B.footer, as: 'image' } : null, plain: !B, number });
       }
       boxes.forEach(b => { if (b.page < 0) b.page = -b.page; else if (b.page > it.page) b.page += added; });
       addedPages = added_pages;
+      // a later page of the agreement that already prints a number an added page now takes: Tim checks the numbering
+      const top = B && B.page_no && added_pages.length ? B.page_no.value + added : null, clash = top ? (B.later_numbers || []).filter(x => x.value > B.page_no.value && x.value <= top) : [];
+      if (plan.needs && clash.length) plan.needs.push({ id: 'continuation_page_clash', text: `The added page${added === 1 ? ' is' : 's are'} numbered up to ${top}, but ${clash.map(x => `page ${x.page} of the blank already prints ${x.value}`).join(', ')}. Check the page numbering before you approve.`, blocking: true, ackable: true });
       if (plan.needs) {
-        if (C) plan.needs.push({ id: 'continuation_check', text: `The further terms run onto ${added} added page${added === 1 ? '' : 's'} straight after page ${it.page}, made from that page's own header and footer, headed "(continued)"${added_pages[0].number ? `, numbered ${added_pages.map(x => x.number.written).join(', ')}` : ''}. Check ${added === 1 ? 'it' : 'them'} before you approve.`, blocking: true, ackable: true });
-        else plan.needs.push({ id: 'continuation_plain', text: `The further terms run onto ${added} added page${added === 1 ? '' : 's'}, but the Further Terms page's header and footer couldn't be found, so ${added === 1 ? 'it is a plain page' : 'they are plain pages'}. Check ${added === 1 ? 'it' : 'them'} before you approve.`, blocking: true, ackable: true });
+        if (B) plan.needs.push({ id: 'continuation_check', text: `The further terms run onto ${added} added page${added === 1 ? '' : 's'} straight after page ${it.page}, made from that page's own header and footer, headed "(continued)"${added_pages[0].number ? `, numbered ${added_pages.map(x => x.number.written).join(', ')}` : ''}. Check ${added === 1 ? 'it' : 'them'} before you approve.`, blocking: true, ackable: true });
+        else plan.needs.push({ id: 'continuation_plain', text: `The further terms run onto ${added} added page${added === 1 ? '' : 's'}, but the Further Terms page's header and footer couldn't be ${C ? 'copied' : 'found'}, so ${added === 1 ? 'it is a plain page' : 'they are plain pages'}. Check ${added === 1 ? 'it' : 'them'} before you approve.`, blocking: true, ackable: true });
       }
     }
     if (o.title) doc.setTitle(o.title, { showInWindowTitleBar: false });
@@ -11501,7 +11529,17 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     // read from the blank itself each time: the chattels, and the further terms numbering and continuation bands
     const fresh = DR.buildMap(DR_CACHE[b.id] && DR_CACHE[b.id].pages ? DR_CACHE[b.id].pages : await drBlankPages(b));
     const plan = DR.planDraft({ details: o.details || {}, map: { places: map.places, chattels: fresh.chattels }, numbering: fresh.numbering, terms: terms || [], clauses, edits: edits || {}, today: OF.nzToday(), province: o.province || OF.DEFAULT_PROVINCE, vendorLawyer, parties });
-    const r = await DR.renderDraft(PDFLib, bytes, plan, { title: 'Draft agreement: ' + (o.buyer_ref || 'offer') });
+    // the header and footer bands of a continuation page are pictures of the blank's page: rendered with pdf.js at scale 4, cropped
+    const bandCache = {}, bandImage = async (pageNo, b) => {
+      const pdfjs = await drPdfjs(), S = 4;
+      bandCache[pageNo] ||= (async () => { const doc = await pdfjs.getDocument(Object.assign({ data: bytes.slice(0), isEvalSupported: false }, PDF_OPTS)).promise;
+        try { const pg = await doc.getPage(pageNo), vp = pg.getViewport({ scale: S }), cv = document.createElement('canvas'); cv.width = Math.round(vp.width); cv.height = Math.round(vp.height);
+          const cx = cv.getContext('2d'); cx.fillStyle = '#fff'; cx.fillRect(0, 0, cv.width, cv.height); await pg.render({ canvasContext: cx, canvas: cv, viewport: vp }).promise; return { cv, H: vp.height / S }; } finally { try { await doc.destroy(); } catch (_) { } } })();
+      const { cv, H } = await bandCache[pageNo], out = document.createElement('canvas'); out.width = Math.max(1, Math.round(b.width * S)); out.height = Math.max(1, Math.round(b.height * S));
+      out.getContext('2d').drawImage(cv, 0, Math.round((H - b.top) * S), out.width, out.height, 0, 0, out.width, out.height);
+      const blob = await new Promise(res => out.toBlob(res, 'image/png')); if (!blob) throw new Error('No band picture');
+      return new Uint8Array(await blob.arrayBuffer()); };
+    const r = await DR.renderDraft(PDFLib, bytes, plan, { title: 'Draft agreement: ' + (o.buyer_ref || 'offer'), bandImage });
     const sha = await REPO.sha256(r.bytes), prev = (await ofSafe(sb.from('offer_drafts').select('number').eq('offer_id', oid).order('number', { ascending: false }))) || [], n = ((prev[0] || {}).number || 0) + 1;
     const pth = `properties/${o.property_id}/docs/offer-draft-${oid}-${n}-${sha.slice(0, 12)}.pdf`;
     const up = await sb.storage.from('property-files').upload(pth, new Blob([r.bytes], { type: 'application/pdf' }), { contentType: 'application/pdf', upsert: false });
@@ -11652,7 +11690,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       try { const id = await drMakeDraft(d.offer_id, edits, note); toast('New draft made; the earlier one is kept'); viewDraftReview(id); } catch (e) { $('#drRvErr').textContent = e.message || 'That didn\'t draft.'; btns.forEach(x => { x.disabled = false; }); } };
     // what "Re-draft after a change" carries over: everything but Tim's edits to single values (phase 2, choice 10)
     const carry = () => { const c = { date_format: E.date_format, extra_terms: E.extra_terms, custom_ok: E.custom_ok, custom_wording: E.custom_wording, retired_numbers: E.retired_numbers };
-      ['added_terms', 'term_order', 'term_timing', 'marks', 'moves'].forEach(k => { if (E[k] != null) c[k] = E[k]; }); return c; };
+      ['added_terms', 'term_order', 'term_timing', 'marks', 'moves'].forEach(k => { if (E[k] != null) c[k] = E[k]; }); Object.keys(c).forEach(k => { if (c[k] === undefined) delete c[k]; }); return c; };
     const TT = Object.assign({}, E.term_timing || {}), MK = { marks: JSON.parse(JSON.stringify(E.marks || [])), moves: JSON.parse(JSON.stringify(E.moves || {})) };
     const collect = () => { const ed = { items: Object.assign({}, E.items || {}), retired_numbers: (E.retired_numbers || []).slice() };
       $$('[data-edit]').forEach(x => { const v = x.value.trim(); if (v !== x.dataset.orig) ed.items[x.dataset.edit] = v; });
@@ -11730,7 +11768,9 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const placedBox = id => { const x = d.placed.find(p => p.id === id); return x && (x.boxes || [])[0]; };
     const markEl = (k, b, label, cls) => { const el = document.createElement('div'); el.className = 'dr-mark ' + (cls || ''); el.dataset.mk = k; el.setAttribute('role', 'group'); el.setAttribute('aria-label', label);
       el.innerHTML = `<span class="dr-mk-lbl">${esc(label)}</span>` + ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'].map(h => `<span class="dr-h dr-h-${h}" data-h="${h}"></span>`).join(''); place(el, b); cur.wrapEl.appendChild(el); return el; };
-    const place = (el, b) => { const { W, H } = cur; el.style.left = (b.x / W * 100) + '%'; el.style.width = (b.w / W * 100) + '%'; el.style.top = ((H - b.y - b.h) / H * 100) + '%'; el.style.height = (b.h / H * 100) + '%'; };
+    // a box on the page; near an edge of the page its handles turn inwards, so they are never cut off
+    const place = (el, b) => { const { W, H } = cur, m = 26 * W / Math.max(1, cur.wrapEl.clientWidth); el.style.left = (b.x / W * 100) + '%'; el.style.width = (b.w / W * 100) + '%'; el.style.top = ((H - b.y - b.h) / H * 100) + '%'; el.style.height = (b.h / H * 100) + '%';
+      el.classList.toggle('dr-at-l', b.x < m); el.classList.toggle('dr-at-r', b.x + b.w > W - m); el.classList.toggle('dr-at-t', H - b.y - b.h < m); el.classList.toggle('dr-at-b', b.y < m); };
     const markLabel = m => (DR_MARK[m.type + (m.who ? ':' + m.who : '')] || DR_MARK[m.type] || m.type) + (m.type === 'text' && m.text ? ': ' + m.text.slice(0, 30) : '');
     // a device that can be touched gets finger-sized handles (some phones don't report a coarse pointer to CSS)
     if (navigator.maxTouchPoints > 0 || 'ontouchstart' in window) document.documentElement.classList.add('dr-touch');
@@ -11738,11 +11778,15 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       if (bp != null) MK.marks.filter(m => m.page === bp).forEach(m => markEl('m:' + m.id, m, markLabel(m), sel === 'm:' + m.id ? 'dr-sel' : ''));
       if (bp != null) Object.entries(MK.moves).forEach(([id, mv]) => { if (+mv.to.page === bp && sel !== 'p:' + id) markEl('p:' + id, mv.to, 'Moved: ' + ((d.placed.find(x => x.id === id) || {}).label || id), 'dr-moved'); });
       if (sel && sel.startsWith('p:')) { const id = sel.slice(2), b = MK.moves[id] ? MK.moves[id].to : Object.assign({ page: bp }, placedBox(id)); if (b) markEl(sel, b, 'Move or resize: ' + ((d.placed.find(x => x.id === id) || {}).label || id), 'dr-sel dr-moved'); }
-      const del = $('#drMkDel'), rs = $('#drMkReset'), tw = $('#drMkTextW'), m = sel && sel.startsWith('m:') ? MK.marks.find(x => 'm:' + x.id === sel) : null;
-      if (del) del.disabled = !m; if (rs) rs.hidden = !(sel && sel.startsWith('p:') && MK.moves[sel.slice(2)]); if (tw) { tw.hidden = !(m && m.type === 'text'); if (m && m.type === 'text') $('#drMkText').value = m.text || ''; } };
+      syncTools(); };
+    // the toolbar and the page follow the selection (touch scrolling is off on the page while drawing or editing a box)
+    const syncTools = () => { const del = $('#drMkDel'), rs = $('#drMkReset'), tw = $('#drMkTextW'), m = sel && sel.startsWith('m:') ? MK.marks.find(x => 'm:' + x.id === sel) : null;
+      if (del) del.disabled = !m; if (rs) rs.hidden = !(sel && sel.startsWith('p:') && MK.moves[sel.slice(2)]); if (tw) { tw.hidden = !(m && m.type === 'text'); if (m && m.type === 'text') $('#drMkText').value = m.text || ''; }
+      if (cur) { cur.wrapEl.classList.toggle('dr-drawing', drawOn); cur.wrapEl.classList.toggle('dr-editing', !!sel); } };
+    const selectEl = el => { $$('.dr-mark.dr-sel', cur.wrapEl).forEach(x => { if (x !== el) x.classList.remove('dr-sel'); }); if (el) el.classList.add('dr-sel'); syncTools(); };
     const paint = async n => { try { holder.classList.toggle('dr-zoomed', zoom > 1); const r = await drRender(holder, n, boxes, { bytes: await drDraftBytes(d), key: 'draft-' + d.id }); r.wrapEl.dataset.draft = d.id;
         if (zoom > 1) { r.wrapEl.style.width = (parseFloat(r.wrapEl.style.width) * zoom) + 'px'; r.wrapEl.style.maxWidth = 'none'; }
-        cur = Object.assign(r, { n }); drawLayer(); if (editable) wirePage(r.wrapEl);
+        cur = Object.assign(r, { n }); r.wrapEl.classList.toggle('dr-drawing', drawOn); drawLayer(); if (editable) wirePage(r.wrapEl);
         const doc = holder._docs && holder._docs['draft-' + d.id], pk = $('#drRvPick');
         if (doc && pk.options.length < doc.numPages) { const cnt = k => boxes.filter(x => x.page === k).length; pk.innerHTML = Array.from({ length: doc.numPages }, (_, i) => i + 1).map(k => `<option value="${k}" ${k === n ? 'selected' : ''}>Page ${k}${cnt(k) ? ` (${cnt(k)})` : ''}${PM.added.includes(k) ? ', added' : ''}</option>`).join(''); }
       } catch (e) { holder.innerHTML = `<p class="small err">${esc(e.message || drNoLib)}</p>`; } };
@@ -11761,22 +11805,28 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       wrap.addEventListener('pointerdown', e => {
         if (e.button > 0) return; const bp = PM.blankOf(cur.n), h = e.target.closest('.dr-h'), mk = e.target.closest('.dr-mark'), bx = e.target.closest('.dr-box');
         let target = null, kind = null, start = pt(e);
-        if (mk) { sel = mk.dataset.mk; target = sel; kind = h ? h.dataset.h : 'move'; }
+        // the gesture keeps the element it started on: the layer is never rebuilt until the finger, mouse or pen lifts
+        let el = null;
+        if (mk) { sel = mk.dataset.mk; target = sel; kind = h ? h.dataset.h : 'move'; el = mk; selectEl(el); }
         else if (drawOn && bp != null) { const [ty, who] = $('#drMkType').value.split(':'), m = { id: 'k' + Date.now().toString(36) + Math.floor(Math.random() * 1e4), page: bp, x: start.x, y: start.y, w: MIN_W, h: MIN_H, type: ty }; if (who) m.who = who; if (ty === 'text') m.text = '';
-          MK.marks.push(m); sel = 'm:' + m.id; target = sel; kind = 'new'; }
+          MK.marks.push(m); sel = 'm:' + m.id; target = sel; kind = 'new'; el = markEl(sel, m, markLabel(m), 'dr-sel'); selectEl(el); }
         else if (bx && bp != null) { const it = d.placed.find(x => x.id === bx.dataset.id); if (!it || !DR_MOVABLE.includes(it.kind)) { say('That place can\'t be moved here.'); return; } sel = 'p:' + it.id; drawLayer(); say('Drag it to move it, or its handles to resize it. Re-draft to apply it.'); return; }
-        else return;
-        e.preventDefault(); drawLayer(); const el = $(`.dr-mark[data-mk="${target}"]`, wrap); if (!el) return; try { el.setPointerCapture(e.pointerId); } catch (_) { }
+        else { if (sel) { sel = null; drawLayer(); } return; }
+        e.preventDefault(); try { el.setPointerCapture(e.pointerId); } catch (_) { }
         const isMark = target.startsWith('m:'), m = isMark ? MK.marks.find(x => 'm:' + x.id === target) : null, pid = isMark ? null : target.slice(2);
-        const b0 = isMark ? Object.assign({}, m) : Object.assign({ page: bp }, MK.moves[pid] ? MK.moves[pid].to : placedBox(pid));
+        const b0 = isMark ? Object.assign({}, m) : Object.assign({ page: bp }, MK.moves[pid] ? MK.moves[pid].to : placedBox(pid)), mv0 = isMark ? null : MK.moves[pid] ? JSON.parse(JSON.stringify(MK.moves[pid])) : null;
         const onMove = ev => { const p = pt(ev), dx = p.x - start.x, dy = p.y - start.y; let b = Object.assign({}, b0);
           if (kind === 'new') b = { x: Math.min(start.x, p.x), y: Math.min(start.y, p.y), w: Math.abs(p.x - start.x), h: Math.abs(p.y - start.y) };
           else if (kind === 'move') { b.x = b0.x + dx; b.y = b0.y + dy; }
           else { if (/w/.test(kind)) { b.x = Math.min(b0.x + dx, b0.x + b0.w - MIN_W); b.w = b0.w - (b.x - b0.x); } if (/e/.test(kind)) b.w = b0.w + dx;
             if (/s/.test(kind)) { b.y = Math.min(b0.y + dy, b0.y + b0.h - MIN_H); b.h = b0.h - (b.y - b0.y); } if (/n/.test(kind)) b.h = b0.h + dy; }
           b = clamp(Object.assign({ page: b0.page }, b)); if (isMark) Object.assign(m, { x: b.x, y: b.y, w: b.w, h: b.h }); else MK.moves[pid] = { from: MK.moves[pid] ? MK.moves[pid].from : Object.assign({ page: bp }, placedBox(pid)), to: Object.assign({ page: bp }, b) }; place(el, b); };
-        const onUp = () => { el.removeEventListener('pointermove', onMove); el.removeEventListener('pointerup', onUp); el.removeEventListener('pointercancel', onUp); drawLayer();
-          if (kind === 'new') { drawOn = false; if (dw) { dw.setAttribute('aria-pressed', 'false'); dw.textContent = 'Draw a box'; } wrap.classList.remove('dr-drawing'); say(m.type === 'text' ? 'Type the text for the box below, then re-draft.' : 'Box added. Drag it or its handles to adjust it, then re-draft.'); if (m.type === 'text') { const t = $('#drMkText'); if (t) t.focus(); } }
+        const onUp = ev => { el.removeEventListener('pointermove', onMove); el.removeEventListener('pointerup', onUp); el.removeEventListener('pointercancel', onUp);
+          // a gesture the device cancelled (a scroll, a second finger): a new box goes; anything else goes back where it was
+          if (ev && ev.type === 'pointercancel') { if (kind === 'new') { MK.marks = MK.marks.filter(x => x !== m); sel = null; } else if (isMark) Object.assign(m, { x: b0.x, y: b0.y, w: b0.w, h: b0.h }); else if (mv0) MK.moves[pid] = mv0; else delete MK.moves[pid];
+            drawLayer(); return say(kind === 'new' ? 'The box was cancelled. Draw it again.' : 'Cancelled.'); }
+          drawLayer();
+          if (kind === 'new') { drawOn = false; if (dw) { dw.setAttribute('aria-pressed', 'false'); dw.textContent = 'Draw a box'; } syncTools(); say(m.type === 'text' ? 'Type the text for the box below, then re-draft.' : 'Box added. Drag it or its handles to adjust it, then re-draft.'); if (m.type === 'text') { const t = $('#drMkText'); if (t) t.focus(); } }
           else say('Re-draft to apply it.'); };
         el.addEventListener('pointermove', onMove); el.addEventListener('pointerup', onUp); el.addEventListener('pointercancel', onUp);
       });

@@ -7,7 +7,7 @@
 -- Local run: 24 November 2026, on a local PostgreSQL 16 stand-in (tests/pg-standin.sql, then 010, 016 part A, 018 and 019): every
 -- line as expected, no CAPITALS. NOT yet run on the live project: that run, with Tim's approval, comes before 022 is applied.
 do $t$
-declare out text := ''; r jsonb; pid uuid; tok text; oid uuid; x text; good jsonb; before_days jsonb; before_date jsonb; after_days jsonb; after_date jsonb; cs jsonb;
+declare out text := ''; r jsonb; pid uuid; tok text; oid uuid; x text; n bigint; good jsonb; before_days jsonb; before_date jsonb; after_days jsonb; after_date jsonb; cs jsonb;
   agent text := json_build_object('email', (select email from public.agents order by created_at limit 1), 'sub', '22222222-2222-2222-2222-222222222222', 'role', 'authenticated')::text;
   nz date := (now() at time zone 'Pacific/Auckland')::date;
 begin
@@ -87,23 +87,46 @@ begin
   if public.offer_draft_edits_ok(jsonb_build_object('moves', jsonb_build_object('price', jsonb_build_object('from', jsonb_build_object('page', 1, 'x', 1, 'y', 1, 'w', 9, 'h', 9), 'to', jsonb_build_object('page', 2, 'x', 1, 'y', 1, 'w', 9, 'h', 9)))), x::jsonb) then out := out || 'MOVE ACROSS PAGES; '; end if;
   if public.offer_draft_edits_ok(jsonb_build_object('term_timing', jsonb_build_object('t1', jsonb_build_object('days', 400))), x::jsonb) then out := out || 'TIMING 400 DAYS; '; end if;
   if public.offer_draft_edits_ok(jsonb_build_object('added_terms', jsonb_build_array(jsonb_build_object('id', 'a b', 'key', 'std_pool'))), x::jsonb) then out := out || 'BAD ADDED TERM ID; '; end if;
+  if not public.offer_draft_edits_ok(jsonb_build_object('extra_terms', jsonb_build_array('Tim typed this.', jsonb_build_object('id', 'ft_ai_k1', 'title', 'Spa pool', 'text', 'The Vendor shall {timing}.', 'ai', true)), 'term_order', jsonb_build_array('ft_ai_k1', 'ft_extra_1'), 'items', jsonb_build_object('price', '$1', 'ft_electrical', 'Words {timing}.'), 'custom_wording', 'Buyer words'), x::jsonb) then out := out || 'GOOD SHAPES REFUSED; '; end if;
+  if public.offer_draft_edits_ok(jsonb_build_object('extra_terms', jsonb_build_array(jsonb_build_object('id', 'bad id', 'title', 'T', 'text', 'X'))), x::jsonb) then out := out || 'EXTRA TERM BAD ID; '; end if;
+  if public.offer_draft_edits_ok(jsonb_build_object('extra_terms', jsonb_build_array(jsonb_build_object('id', 'ft_ai_1', 'title', 'T', 'text', 'X', 'ai', 'yes'))), x::jsonb) then out := out || 'EXTRA TERM AI NOT BOOLEAN; '; end if;
+  if public.offer_draft_edits_ok(jsonb_build_object('extra_terms', jsonb_build_array(jsonb_build_object('id', 'ft_ai_1', 'title', 'T', 'text', repeat('x', 4001)))), x::jsonb) then out := out || 'EXTRA TERM TOO LONG; '; end if;
+  if public.offer_draft_edits_ok(jsonb_build_object('extra_terms', jsonb_build_array(42)), x::jsonb) then out := out || 'EXTRA TERM A NUMBER; '; end if;
+  if public.offer_draft_edits_ok(jsonb_build_object('extra_terms', (select jsonb_agg('t'::text) from generate_series(1, 61))), x::jsonb) then out := out || '61 EXTRA TERMS; '; end if;
+  if public.offer_draft_edits_ok(jsonb_build_object('term_order', jsonb_build_array(1, 'ft_x')), x::jsonb) then out := out || 'TERM ORDER A NUMBER; '; end if;
+  if public.offer_draft_edits_ok(jsonb_build_object('term_order', jsonb_build_array('a b')), x::jsonb) then out := out || 'TERM ORDER BAD ID; '; end if;
+  if public.offer_draft_edits_ok(jsonb_build_object('items', jsonb_build_object('price', 5)), x::jsonb) then out := out || 'ITEM NOT TEXT; '; end if;
+  if public.offer_draft_edits_ok(jsonb_build_object('items', jsonb_build_object('bad key!', 'x')), x::jsonb) then out := out || 'ITEM BAD KEY; '; end if;
+  if public.offer_draft_edits_ok(jsonb_build_object('items', '[]'::jsonb), x::jsonb) then out := out || 'ITEMS AN ARRAY; '; end if;
+  out := out || 'shapes checked; ';
   out := out || 'draft_add checks edits=' || (pg_get_functiondef('public.agent_draft_add(uuid, uuid, text, text, bigint, jsonb, jsonb, jsonb, text)'::regprocedure) ~ 'offer_draft_edits_ok\(coalesce\(nullif\(p_edits') || '; ';
   begin execute 'set local role authenticated'; perform set_config('request.jwt.claims', agent, true); perform public.offer_draft_edits_ok('{}'::jsonb, '[]'::jsonb); out := out || 'EDITS CHECK CALLABLE BY A USER; '; exception when others then out := out || 'edits check: ' || sqlerrm || '; '; end;
   execute 'reset role';
 
-  -- 8. the daily cap on Tim's clause writer, from ai_calls (service role only)
-  update public.offer_settings set ai_daily_cap = 2;
-  execute 'set local role service_role';
-  out := out || 'claim 0=' || (public.offer_agent_ai_claim('agent', 'offer clause draft') ->> 'ok') || '; ';
-  execute 'reset role';
-  insert into public.ai_calls (purpose, model, ok, agent) values ('offer clause draft', 'claude-sonnet-5-5', true, 'agent'), ('offer clause draft', 'claude-sonnet-5-5', false, 'agent'), ('offer condition draft', 'claude-sonnet-5-5', true, 'buyer form');
+  -- 8. the daily cap on Tim's clause writer: each claim reserves its row in ai_calls (service role only), so with the cap at 3 the
+  --    fourth claim is refused even though no log was ever finished; a row from two days ago and another purpose don't count
+  update public.offer_settings set ai_daily_cap = 3;
   insert into public.ai_calls (at, purpose, model, ok, agent) values (now() - interval '2 days', 'offer clause draft', 'claude-sonnet-5-5', true, 'agent');
+  insert into public.ai_calls (purpose, model, ok, agent) values ('offer condition draft', 'claude-sonnet-5-5', true, 'buyer form');
   execute 'set local role service_role';
-  r := public.offer_agent_ai_claim('agent', 'offer clause draft'); out := out || 'claim at cap=' || (r ->> 'ok') || ' reason=' || coalesce(r ->> 'reason', '-') || ' used=' || (r ->> 'used') || '; ';
+  r := public.offer_agent_ai_claim('agent', 'offer clause draft'); out := out || 'claim 1=' || (r ->> 'ok') || ' id=' || ((r ->> 'id') is not null) || '; ';
+  n := (r ->> 'id')::bigint;
+  r := public.offer_agent_ai_claim('agent', 'offer clause draft'); out := out || 'claim 2=' || (r ->> 'ok') || '; ';
+  r := public.offer_agent_ai_claim('agent', 'offer clause draft'); out := out || 'claim 3=' || (r ->> 'ok') || '; ';
+  r := public.offer_agent_ai_claim('agent', 'offer clause draft'); out := out || 'claim 4 (no logs finished)=' || (r ->> 'ok') || ' reason=' || coalesce(r ->> 'reason', '-') || ' used=' || (r ->> 'used') || '; ';
+  if (r ->> 'ok')::boolean then out := out || 'CLAIM OVER THE CAP; '; end if;
+  perform public.offer_agent_ai_done(n, true, null, 400, 90);
+  execute 'reset role';
+  out := out || 'pending rows=' || (select count(*) from public.ai_calls where purpose = 'offer clause draft' and error = 'pending') || ' finished=' || (select ok::text || '/' || input_tokens || '/' || coalesce(error, 'null') from public.ai_calls where id = n) || '; ';
+  execute 'set local role service_role';
+  begin perform public.offer_agent_ai_done(n, false, 'again', 0, 0); out := out || 'FINISHED TWICE; '; exception when others then out := out || 'finish twice: ' || sqlerrm || '; '; end;
   begin perform public.offer_agent_ai_claim('agent', 'something else'); out := out || 'OTHER PURPOSE CLAIMED; '; exception when others then out := out || 'other purpose: ' || sqlerrm || '; '; end;
   execute 'reset role';
   begin execute 'set local role authenticated'; perform set_config('request.jwt.claims', agent, true); perform public.offer_agent_ai_claim('agent', 'offer clause draft'); out := out || 'CLAIM CALLABLE BY A USER; '; exception when others then out := out || 'claim as a user: ' || sqlerrm || '; '; end;
   execute 'reset role';
+  begin execute 'set local role authenticated'; perform set_config('request.jwt.claims', agent, true); perform public.offer_agent_ai_done(n, true, null, 1, 1); out := out || 'DONE CALLABLE BY A USER; '; exception when others then out := out || 'done as a user: ' || sqlerrm || '; '; end;
+  execute 'reset role';
+  out := out || 'claim takes a lock=' || (pg_get_functiondef('public.offer_agent_ai_claim(text, text)'::regprocedure) ~ 'pg_advisory_xact_lock') || '; ';
 
   raise exception 'ROLLBACK %', out;
 end $t$;

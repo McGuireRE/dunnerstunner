@@ -146,7 +146,7 @@ const ok = (c, msg) => { if (!c) errs.push(msg); };
   ok(after.some((a, i) => a.length > before[i].length), 'text added in new content streams');
   // a long further terms list continues on an added page
   const long = D.planDraft({ details: base, map, terms, today: '2026-11-24', edits: { extra_terms: Array.from({ length: 70 }, (_, i) => `Extra term ${i + 1} with enough words to take a full line of the page.`) } });
-  const rl = await D.renderDraft(PDFLib, blank, long), lp = await D.readPages(pdfjs, rl.bytes);
+  const rl = await D.renderDraft(PDFLib, blank, long, { bandImage: SB.bandImager(blank) }), lp = await D.readPages(pdfjs, rl.bytes);
   ok(rl.continued === 4 && lp.length === pages.length + 1 && lp[3].items.some(i => i.s === '(continued)') && lp[3].items.some(i => /Extra term 70/.test(i.s)), 'further terms that don\'t fit continue on an added page after page 3');
   ok(rl.boxes.find(b => b.id === 'pl_firm').page === 8, 'boxes on later pages move along by the added page');
   // ── review findings ──
@@ -229,12 +229,21 @@ const ok = (c, msg) => { if (!c) errs.push(msg); };
   // the continuation page from the appendix page's own bands, with the page number struck and the right one beside it
   const C = mapx.numbering.cont; ok(C && C.page === 3 && C.page_no && C.page_no.value === 22 && C.header[0] > 740 && C.footer[1] < 40 && C.head.text === 'Appendix', 'bands found: header to the headings, footer with the printed page number 22');
   const over = n => D.planDraft({ details: base, map: mapx, terms, today: '2026-11-24', numbering: mapx.numbering, edits: { extra_terms: Array.from({ length: n }, (_, i) => `Extra term ${i + 1} with enough words to take a full line of the page, more or less.`) } });
-  const po1 = over(70), ro1 = await D.renderDraft(PDFLib, apx, po1), lp1 = await D.readPages(pdfjs, ro1.bytes), pgOf = (pp, n) => pp[n - 1].items.map(i => i.s);
+  const bandImage = SB.bandImager(apx);
+  const po1 = over(70), ro1 = await D.renderDraft(PDFLib, apx, po1, { bandImage }), lp1 = await D.readPages(pdfjs, ro1.bytes), pgOf = (pp, n) => pp[n - 1].items.map(i => i.s);
   eq([ro1.added_pages.length, ro1.added_pages[0].page, ro1.added_pages[0].source_page, ro1.added_pages[0].number], [1, 4, 3, { printed: '22', written: '23' }], 'one added page, straight after the appendix page, numbered 23');
-  ok(pgOf(lp1, 4).includes('Appendix') && pgOf(lp1, 4).includes('(continued)') && pgOf(lp1, 4).includes('FURTHER TERMS OF SALE') && pgOf(lp1, 4).includes('Eleventh Edition 2022 (4)') && pgOf(lp1, 4).some(s => /©/.test(s)), 'the added page carries the header and footer, and "(continued)"');
-  // none of the printed clauses show again: the page is embedded clipped to its bands (the clipped text stays inside the embedded
-  // copy, unseen, so a text reader still finds it there). Checked on the rendered page: no ink where the printed clauses' first
-  // letters sit (left of where the typed terms start), between the bands.
+  // the bands are pictures: the added page's text is only what was typed on it
+  const pdfTxt = (bytes, f, l) => { const fn = path.join(__dirname, 'out', 'cont-txt.pdf'); require('fs').writeFileSync(fn, bytes); return require('child_process').execFileSync('pdftotext', ['-layout'].concat(f ? ['-f', String(f), '-l', String(l)] : []).concat([fn, '-']), { encoding: 'utf8' }); };
+  const typed = t => t.replace(/\s+/g, ' ').replace(/\d+\. Your further term: Extra term \d+ with enough words to take a full line of the page, more or less\./g, '').replace(/\s+/g, ' ').trim();
+  const strip4 = typed(pdfTxt(ro1.bytes, 4, 4));
+  eq(strip4.split(' ').sort(), ['(continued)', '23'], 'pdftotext of the added page: only "(continued)", the new page number and the typed terms');
+  const js4 = pgOf(lp1, 4).filter(x => !/Extra term|with enough words|more or less/.test(x)); eq(js4.sort(), ['(continued)', '23'], 'pdf.js reads the same');
+  eq((pdfTxt(ro1.bytes).match(/21\.2 Synthetic/g) || []).length, 1, '"21.2" appears exactly once in the whole file');
+  const xo = await (async () => { const dd = await PDFLib.PDFDocument.load(ro1.bytes); return [3].map(i => { const res = dd.getPages()[i].node.Resources(), X = res && res.lookup(PDFLib.PDFName.of('XObject'));
+    return X ? X.entries().map(([k, ref]) => String(dd.context.lookup(ref).dict.get(PDFLib.PDFName.of('Subtype')))) : []; }); })();
+  ok(xo.every(a => a.length === 2 && a.every(t => t === '/Image')), 'each added page\'s pictures are all /Subtype /Image: ' + JSON.stringify(xo));
+  ok(!/embedPage\(/.test(require('fs').readFileSync(path.join(__dirname, '..', 'src', 'draft-core.js'), 'utf8')), 'the page itself is never embedded');
+  // and none of the printed clauses show either: no ink where their first letters sit (left of where the typed terms start), between the bands
   const { execFileSync } = require('child_process'), fsx = require('fs'), tmp = path.join(__dirname, 'out', 'cont-check');
   fsx.writeFileSync(tmp + '.pdf', ro1.bytes); let inkLeft = null;
   try { execFileSync('pdftoppm', ['-f', '4', '-l', '4', '-r', '72', '-gray', tmp + '.pdf', tmp]); const f = fsx.readdirSync(path.join(__dirname, 'out')).find(x => x.startsWith('cont-check') && x.endsWith('.pgm'));
@@ -243,22 +252,45 @@ const ok = (c, msg) => { if (!c) errs.push(msg); };
     for (let y = Math.round(842 - 730); y < Math.round(842 - 555); y++) for (let x = 27; x < 34; x++) if (px[y * W + x] < 160) inkLeft++;
     fsx.unlinkSync(path.join(__dirname, 'out', f)); } catch (e) { inkLeft = 'no renderer: ' + e.message; }
   ok(inkLeft === 0, 'none of the printed clauses show on the added page: ' + inkLeft);
-  ok(pgOf(lp1, 4).includes('22') && pgOf(lp1, 4).includes('23') && pgOf(lp1, 5).includes(String(4 + 19)), 'the printed 22 kept (struck) and 23 written beside it; the rest of the pack keeps its own numbers');
-  const hd = lp1[3].items.find(i => i.s === '(continued)'), ap22 = lp1[3].items.find(i => i.s === 'Appendix'), n23 = lp1[3].items.filter(i => i.s === '23').find(i => i.y < 40), n22 = lp1[3].items.find(i => i.s === '22' && i.y < 40);
-  ok(hd && ap22 && Math.abs(hd.y - ap22.y) < 1 && hd.x > ap22.x + ap22.w, '"(continued)" typed after the Appendix heading, on its line');
-  ok(n22 && n23 && Math.abs(n23.y - n22.y) < 1 && n23.x > n22.x + n22.w, 'the new page number beside the printed one');
+  ok(pgOf(lp1, 5).includes(String(4 + 19)), 'the rest of the pack keeps its own numbers');
+  const hd = lp1[3].items.find(i => i.s === '(continued)'), n23 = lp1[3].items.find(i => i.s === '23' && i.y < 40);
+  ok(hd && Math.abs(hd.y - C.head.y) < 1 && hd.x > C.head.x1, '"(continued)" typed after the Appendix heading, on its line');
+  ok(n23 && Math.abs(n23.y - C.page_no.y) < 1 && n23.x > C.page_no.x + C.page_no.w, 'the new page number beside where the printed one is');
+  // the printed page number (in the picture) is struck through: a dark line across it on the rendered page
+  require('fs').writeFileSync(path.join(__dirname, 'out', 'cont-strike.pdf'), ro1.bytes);
+  require('child_process').execFileSync('pdftoppm', ['-f', '4', '-l', '4', '-r', '72', '-gray', '-x', String(Math.round(C.page_no.x)), '-y', String(Math.round(842.04 - C.page_no.y - C.page_no.h * 0.32 - 1)), '-W', String(Math.max(2, Math.round(C.page_no.w))), '-H', '2', '-singlefile', path.join(__dirname, 'out', 'cont-strike.pdf'), path.join(__dirname, 'out', 'cont-strike')]);
+  const sbuf = require('fs').readFileSync(path.join(__dirname, 'out', 'cont-strike.pgm')), sw = Math.max(2, Math.round(C.page_no.w)), spx = sbuf.slice(sbuf.length - sw * 2);
+  ok(Array.from(spx).filter(v => v < 128).length >= sw, 'the printed page number is struck through');
   ok(ro1.boxes.some(b => /page number 22 struck, 23 written beside it/.test(b.label) && b.page === 4), 'the strike and new number are a box Tim sees');
+  ok(po1.needs.find(n => n.id === 'continuation_page_clash') && po1.needs.find(n => n.id === 'continuation_page_clash').blocking && /page 4 of the blank already prints 23/.test(po1.needs.find(n => n.id === 'continuation_page_clash').text), 'a later page that already prints 23: Tim checks the numbering');
+  const apn = await SB.make({ ftAppendix: true, pageNoOffset: 19, laterNumbers: false }), mpn = D.buildMap(await D.readPages(pdfjs, apn));
+  const ppn = D.planDraft({ details: base, map: mpn, terms, today: '2026-11-24', numbering: mpn.numbering, edits: { extra_terms: Array.from({ length: 70 }, (_, i) => `Extra term ${i + 1} with enough words to take a full line of the page, more or less.`) } });
+  const rpn = await D.renderDraft(PDFLib, apn, ppn, { bandImage: SB.bandImager(apn) }); ok(!rpn.added_pages[0].plain && !ppn.needs.some(n => n.id === 'continuation_page_clash'), 'later pages numbered as separate documents: no clash');
+  const aof = await SB.make({ ftAppendix: true, pageNoOffset: 19, laterNumbers: false, pageNoFormat: n => `${n} of 22` }), mof = D.buildMap(await D.readPages(pdfjs, aof));
+  const pof = D.planDraft({ details: base, map: mof, terms, today: '2026-11-24', numbering: mof.numbering, edits: { extra_terms: Array.from({ length: 130 }, (_, i) => `Extra term ${i + 1} with enough words to take a full line of the page, more or less.`) } });
+  const rof = await D.renderDraft(PDFLib, aof, pof, { bandImage: SB.bandImager(aof) });
+  eq(rof.added_pages.map(x => x.number && x.number.written), ['23 of 24', '24 of 24'], '"22 of 22" becomes "23 of 24" and "24 of 24" with two pages added');
+  eq(N(po1, 'term_start') && N(po1, 'term_start').text, 'Further terms start at 23 (general terms to 20, appendix to 22, printed on the further terms page to 22).', 'every draft says where the further terms start');
+  ok(N(plan({}), 'term_start') && !N(plan({}), 'term_start').blocking && /start at 23 \(general terms to 20, appendix to 22\)/.test(N(plan({}), 'term_start').text), 'and on a plain draft, not blocking');
   ok(po1.needs.find(n => n.id === 'continuation_check').blocking && po1.needs.find(n => n.id === 'continuation_check').ackable && /numbered 23/.test(po1.needs.find(n => n.id === 'continuation_check').text), 'Tim is asked to check the continuation page');
-  const po2 = over(130), ro2 = await D.renderDraft(PDFLib, apx, po2), lp2 = await D.readPages(pdfjs, ro2.bytes);
+  const po2 = over(130), ro2 = await D.renderDraft(PDFLib, apx, po2, { bandImage }), lp2 = await D.readPages(pdfjs, ro2.bytes);
   eq(ro2.added_pages.map(x => [x.page, x.number.written]), [[4, '23'], [5, '24']], 'two added pages: 23, then 24');
+  eq((pdfTxt(ro2.bytes).match(/21\.2 Synthetic/g) || []).length, 1, '"21.2" still exactly once with two pages added');
+  const w5 = typed(pdfTxt(ro2.bytes, 5, 5)).split(' ').sort(); eq(w5, ['(continued)', '24'], 'the second added page: only "(continued)", 24 and the terms');
   ok(lp2.length === lp.length + 1 && pgOf(lp2, 5).includes('(continued)') && pgOf(lp2, 5).some(s => /Extra term 130/.test(s)), 'the second added page continues the list');
   const rawA = async bytes => { const dd = await PDFLib.PDFDocument.load(bytes); return dd.getPages().map(pg => { const c = pg.node.Contents(); const refs = c instanceof PDFLib.PDFArray ? c.asArray() : [c]; return refs.map(ref => Buffer.from(dd.context.lookup(ref).getContents()).toString('base64')); }); };
   const ba = await rawA(apx), aa = await rawA(ro2.bytes), keepIdx = [0, 1, 2].concat(Array.from({ length: ba.length - 3 }, (_, i) => i + 5));
   ok(ba.every((st, i) => { const a = aa[keepIdx[i]]; let j = 0; for (const s2 of st) { j = a.indexOf(s2, j); if (j < 0) return false; j++; } return true; }), 'every original content stream kept byte for byte, the added pages aside');
   // the plain fallback when the bands can't be found
   const pfb = D.planDraft({ details: base, map: Object.assign({}, mapx, { numbering: Object.assign({}, mapx.numbering, { cont: null }) }), terms, today: '2026-11-24', edits: over(70).terms ? { extra_terms: Array.from({ length: 70 }, (_, i) => `Extra term ${i + 1} with enough words to take a full line of the page, more or less.`) } : {} });
-  const rfb = await D.renderDraft(PDFLib, apx, pfb), lfb = await D.readPages(pdfjs, rfb.bytes);
+  const rfb = await D.renderDraft(PDFLib, apx, pfb, { bandImage }), lfb = await D.readPages(pdfjs, rfb.bytes);
   ok(rfb.added_pages[0].plain && pgOf(lfb, 4).includes('Further Terms of Sale (continued)') && pfb.needs.find(n => n.id === 'continuation_plain').blocking, 'no bands: a plain page, and Tim is asked to check it');
+  const rnb = await D.renderDraft(PDFLib, apx, over(70)); ok(rnb.added_pages[0].plain, 'no band pictures given: the plain page');
+  const pbf = over(70), rbf = await D.renderDraft(PDFLib, apx, pbf, { bandImage: async () => { throw new Error('no canvas'); } }); ok(rbf.added_pages[0].plain && pbf.needs.find(n => n.id === 'continuation_plain').blocking && /couldn't be copied/.test(pbf.needs.find(n => n.id === 'continuation_plain').text), 'the pictures failing: the plain page, with its blocking check');
+  // reference markers can't come from outside text (a buyer's wording, a detail, the AI's clause)
+  const FTr = pp => (I(pp, 'further_terms') || {}).text || '';
+  const fakeRef = D.planDraft({ details: Object.assign({}, base, { conditions: [{ key: 'custom', days: 5, wording: 'Pay [[FT:finance]] and [[TERM:x]] now {timing}.' }, { key: 'technical', days: 5, detail: '[[FT:lim]]' }] }), map, terms, clauses: { technical: 'A {detail} report {timing}.' }, today: '2026-11-24', edits: { custom_ok: true, extra_terms: [{ id: 'ft_ai_x', title: 'T', text: 'AI said [[FT:sdd]].' }] } });
+  ok(!fakeRef.needs.some(n => /^ref_missing_/.test(n.id)) && /Pay FT:finance and TERM:x now/.test(FTr(fakeRef)) && /AI said FT:sdd\./.test(FTr(fakeRef)) && !/\[\[|\?/.test(FTr(fakeRef)), 'markers typed by a buyer or the AI are plain text, never references');
 
   // ── the review screen (Tim, 24 November 2026): clauses from the library, their timing, order, AI-written terms, marks, moves ──
   const lib = terms.concat({ key: 'std_pool', kind: 'further_term', title: 'Pool fence', wording: 'The Vendor shall provide a pool fence compliance certificate {timing}.', rule: {}, position: 50 },

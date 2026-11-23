@@ -9,7 +9,7 @@
 -- and the offer may carry line_up: true (the buyer ticked "Confirm all conditions on the same day"; kept only when true).
 -- Also (Tim, 24 November 2026, the review screen): agent_draft_add (019) replaced to check what Tim did on the review screen
 -- (offer_draft_edits_ok: marks and moved places on the blank's own pages, clauses from his library, order, timing, removed numbers),
--- and offer_agent_ai_claim, the daily cap for his clause writer (service role only).
+-- and offer_agent_ai_claim / offer_agent_ai_done, the daily cap for his clause writer with a reservation row in ai_calls (service role only).
 -- Before 022 the live offer_clean silently drops `after` (the condition would then count from the agreement): apply 022 before the
 -- page that sends it goes live. Everything else in offer_clean is exactly as in 018. offer_public_submit, agent_offer_add and
 -- agent_offer_correct call it and are unchanged. Nothing here touches agreements, signatures, signed records or their triggers.
@@ -170,7 +170,30 @@ begin
       if coalesce(x->>'id', '') !~ '^[A-Za-z0-9_]{1,80}$' or coalesce(x->>'key', '') !~ '^[a-z][a-z0-9_]{0,40}$' then return false; end if;
     end loop;
   end if;
-  if e ? 'term_order' and (jsonb_typeof(e->'term_order') <> 'array' or jsonb_array_length(e->'term_order') > 120) then return false; end if;
+  if e ? 'term_order' then
+    if jsonb_typeof(e->'term_order') <> 'array' or jsonb_array_length(e->'term_order') > 120 then return false; end if;
+    if exists (select 1 from jsonb_array_elements(e->'term_order') t where jsonb_typeof(t) <> 'string' or (t #>> '{}') !~ '^[A-Za-z0-9_]{1,80}$') then return false; end if;
+  end if;
+  -- Tim's own terms: a line he typed, or a clause written with AI help for this offer only
+  if e ? 'extra_terms' then
+    if jsonb_typeof(e->'extra_terms') <> 'array' or jsonb_array_length(e->'extra_terms') > 60 then return false; end if;
+    for x in select * from jsonb_array_elements(e->'extra_terms') loop
+      if jsonb_typeof(x) = 'string' then if length(x #>> '{}') > 4000 then return false; end if;
+      elsif jsonb_typeof(x) = 'object' then
+        if coalesce(x->>'id', '') !~ '^[A-Za-z0-9_]{1,80}$' or jsonb_typeof(x->'title') is distinct from 'string' or length(x->>'title') > 200 or jsonb_typeof(x->'text') is distinct from 'string' or length(x->>'text') > 4000 then return false; end if;
+        if x ? 'ai' and jsonb_typeof(x->'ai') <> 'boolean' then return false; end if;
+        if exists (select 1 from jsonb_object_keys(x) kk where kk not in ('id', 'title', 'text', 'ai')) then return false; end if;
+      else return false; end if;
+    end loop;
+  end if;
+  -- his edits to single values: a place or term id, and text
+  if e ? 'items' then
+    if jsonb_typeof(e->'items') <> 'object' or (select count(*) from jsonb_object_keys(e->'items')) > 300 then return false; end if;
+    for k, x in select * from jsonb_each(e->'items') loop
+      if k !~ '^[A-Za-z0-9_.:-]{1,80}$' or jsonb_typeof(x) <> 'string' or length(x #>> '{}') > 4000 then return false; end if;
+    end loop;
+  end if;
+  if e ? 'custom_wording' and jsonb_typeof(e->'custom_wording') <> 'null' and (jsonb_typeof(e->'custom_wording') <> 'string' or length(e->>'custom_wording') > 4000) then return false; end if;
   if e ? 'retired_numbers' then
     if jsonb_typeof(e->'retired_numbers') <> 'array' or jsonb_array_length(e->'retired_numbers') > 120 then return false; end if;
     for x in select * from jsonb_array_elements(e->'retired_numbers') loop if not public.offer_num_ok(x, 1, 999) then return false; end if; end loop;
@@ -211,7 +234,7 @@ begin
   end if;
   if length(coalesce(p_note, '')) > 500 then raise exception 'The note is too long'; end if;
   -- 022: what Tim did on the review screen is checked before it is kept (marks and moved places sit on the blank's own pages)
-  if not public.offer_draft_edits_ok(coalesce(nullif(p_edits, 'null'::jsonb), '{}'::jsonb), b.sizes) then raise exception 'One of your marks or moved places doesn''t sit on a page of this blank. Draw it again'; end if;
+  if not public.offer_draft_edits_ok(coalesce(nullif(p_edits, 'null'::jsonb), '{}'::jsonb), b.sizes) then raise exception 'One of your changes on the review screen couldn''t be kept: a mark or moved place off the page, too many terms, or text too long. Check them and draft again'; end if;
   select coalesce(max(number), 0) + 1 into n from public.offer_drafts where offer_id = p_offer;
   insert into public.offer_drafts (offer_id, property_id, number, blank_id, blank_sha256, map_id, details, edits, placed, needs, path, sha256, size_bytes, note, created_by)
   values (p_offer, o.property_id, n, b.id, b.sha256, m.id, o.details, coalesce(nullif(p_edits, 'null'::jsonb), '{}'::jsonb), public.offer_json_list(p_placed, 600, 600000, 'places filled'), public.offer_json_list(p_needs, 200, 100000, 'items that need you'),
@@ -222,20 +245,33 @@ begin
 end $$;
 
 -- The daily cap on Tim's own AI help (the clause writer on the review screen and in his clause library), the same setting as the
--- buyers' helper (offer_settings.ai_daily_cap). Counted from ai_calls for that purpose since midnight in New Zealand. Called by the
--- offer-draft edge function with the service role before each model call. {ok} or {ok: false, reason: 'cap'}.
+-- buyers' helper (offer_settings.ai_daily_cap). Called by the offer-draft edge function with the service role before each model
+-- call. One claim at a time (an advisory lock for the transaction), so requests sent together can't all slip under the cap: the
+-- claim counts today's rows for the purpose (since midnight in New Zealand) and, under the cap, writes a reservation row in ai_calls
+-- (ok false, error 'pending') whose id it returns. The call counts from that moment, whether or not its log is ever finished.
+-- {ok, id} or {ok: false, reason: 'cap'}. The edge function finishes the row with offer_agent_ai_done.
 create or replace function public.offer_agent_ai_claim(p_actor text, p_purpose text) returns jsonb language plpgsql security definer set search_path = public as $$
-declare used int; cap int;
+declare used int; cap int; rid bigint;
 begin
   if coalesce(p_purpose, '') not in ('offer clause draft') then raise exception 'Not a purpose this checks'; end if;
+  perform pg_advisory_xact_lock(hashtext('offer clause draft'));
   select ai_daily_cap into cap from public.offer_settings limit 1;
   select count(*) into used from public.ai_calls where purpose = p_purpose and at >= ((now() at time zone 'Pacific/Auckland')::date)::timestamp at time zone 'Pacific/Auckland';
   if used >= coalesce(cap, 40) then return jsonb_build_object('ok', false, 'reason', 'cap', 'used', used, 'cap', cap); end if;
-  return jsonb_build_object('ok', true, 'used', used, 'cap', cap);
+  insert into public.ai_calls (purpose, model, ok, error, input_tokens, output_tokens, agent) values (p_purpose, 'claude-sonnet-5-5', false, 'pending', 0, 0, left(coalesce(p_actor, 'agent'), 254)) returning id into rid;
+  if rid is null then raise exception 'The AI call couldn''t be recorded'; end if;
+  return jsonb_build_object('ok', true, 'id', rid, 'used', used + 1, 'cap', cap);
+end $$;
+-- Finish a reservation row after the model call: whether it worked, the error and the tokens. Only a pending row of this purpose.
+create or replace function public.offer_agent_ai_done(p_id bigint, p_ok boolean, p_error text, p_in int, p_out int) returns void language plpgsql security definer set search_path = public as $$
+begin
+  update public.ai_calls set ok = coalesce(p_ok, false), error = case when coalesce(p_ok, false) then null else left(coalesce(p_error, 'failed'), 300) end,
+    input_tokens = greatest(0, coalesce(p_in, 0)), output_tokens = greatest(0, coalesce(p_out, 0)) where id = p_id and purpose = 'offer clause draft' and error = 'pending';
+  if not found then raise exception 'No such pending AI call'; end if;
 end $$;
 
 revoke execute on function public.offer_box_ok(jsonb, jsonb, numeric), public.offer_draft_edits_ok(jsonb, jsonb) from public, anon, authenticated;
-revoke execute on function public.offer_agent_ai_claim(text, text) from public, anon, authenticated;
-grant execute on function public.offer_agent_ai_claim(text, text) to service_role;
+revoke execute on function public.offer_agent_ai_claim(text, text), public.offer_agent_ai_done(bigint, boolean, text, int, int) from public, anon, authenticated;
+grant execute on function public.offer_agent_ai_claim(text, text), public.offer_agent_ai_done(bigint, boolean, text, int, int) to service_role;
 revoke execute on function public.agent_draft_add(uuid, uuid, text, text, bigint, jsonb, jsonb, jsonb, text) from public, anon;
 grant execute on function public.agent_draft_add(uuid, uuid, text, text, bigint, jsonb, jsonb, jsonb, text) to authenticated;

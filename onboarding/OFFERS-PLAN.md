@@ -281,14 +281,19 @@ Built locally on `offers-timing` from main. Migration 022 is written and passed 
 - Further terms numbering: on from the last general terms clause and the highest clause printed on the appendix, both read from the
   blank (buildMap `numbering`), so 23 on Tim's packs. A removed term's number is retired (`edits.retired_numbers`) and never reused;
   `term_last` on each plan is where the sequence is up to (phase 4 continues from it).
-- Overflow: pages added straight after the further terms page, made from that page's own header and footer bands (the page embedded,
-  clipped to the bands), "(continued)" after the Appendix heading, the printed page number struck and the right one beside it (22 to
-  23, 24). Each added page is a `kind: 'page'` item in placed with its source page and bands; a blocking, tickable check for Tim. No
-  bands found: the old plain page, with its own check. Known limit: text clipped out of the bands stays inside the embedded copy (not
-  visible or printed, but a PDF text search can find it).
+- Overflow: pages added straight after the further terms page, made from pictures of that page's own header and footer bands (PNG,
+  rendered from the blank: pdf.js at scale 4 on Tim's screen, pdftoppm at 300 dpi in the tests; the page itself is never embedded, so
+  none of its text or clauses is carried over), "(continued)" after the Appendix heading, the printed page number struck and the
+  right one beside it (22 to 23, 24; "22 of 22" to "23 of 24", "24 of 24"). Each added page is a `kind: 'page'` item in placed with
+  its source page and bands; a blocking, tickable check for Tim, and another when a later page of the agreement already prints a
+  bare number the added pages now take. No bands, or no picture: the plain page, with its own blocking check. Every draft also says
+  where the further terms start ("Further terms start at 23 (general terms to 20, appendix to 22)").
+  Known limit: the bands are pictures, so their words (the heading, the edition line, the footer) can't be selected or searched on
+  an added page; the struck page number is part of the picture, the new one is text.
 - Review screen: clauses from the library (`edits.added_terms`), reorder (grip drag with pointer events, and Up and Down buttons;
   `edits.term_order`), remove a term Tim added, timing and date chips in each term's text (`edits.term_timing`, the draft only, with a
-  note when it differs from the offer), "Ask AI to write a clause" (offer-draft `write_clause`, Sonnet, daily cap, ai_calls; Tim edits
+  note when it differs from the offer), "Ask AI to write a clause" (offer-draft `write_clause`, Sonnet, daily cap with a reserved
+  ai_calls row per call, `offer_agent_ai_claim` then `offer_agent_ai_done`; Tim edits
   and ticks; "Use in this offer only" or "Save to my clause library"), also in the clause library. Library terms can be "Only when I
   add it to a draft" (rule `{}`).
 - Marks: Tim draws boxes on any page of the blank (initials or signature for the purchasers, the vendors or both; strike-out, a
@@ -309,3 +314,10 @@ For phases 3 and 4 (not changed here):
 Deploy steps, with Tim's approval: run the rollback block on the live project (no CAPITALS), apply 022; push; deploy `offer-draft`
 (write_clause) and `offer-public` (helper prompt) pinned to that commit. 022 must be applied before the page goes live, or `after` is
 dropped by the live `offer_clean` without a word.
+
+Before relying on the cap, confirm signed-in users can't write ai_calls on the live project (read only; every row should say false):
+
+```sql
+select r.rolname, p.priv, has_table_privilege(r.rolname, 'public.ai_calls', p.priv) as allowed
+from (values ('anon'), ('authenticated')) r(rolname), (values ('INSERT'), ('UPDATE'), ('DELETE'), ('TRUNCATE')) p(priv) order by 1, 2;
+```

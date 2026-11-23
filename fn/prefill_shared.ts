@@ -243,7 +243,8 @@ export function readOfferConditionResult(out: any): { ok: boolean; wording?: str
   const use = (out?.content || []).find((c: any) => c.type === "tool_use");
   const r = use?.input || {};
   if (r.unsuitable === true) return { ok: false, why: tidy(r.why || "That doesn't look like a condition Tim can put on an offer. Please type your own wording.", 300) };
-  let wording = tidy(r.wording, OFFER_CONDITION_OUT); const summary = tidy(r.summary, 300);
+  // the drafting's reference markers ([[...]]) are never taken from the model
+  let wording = tidy(r.wording, OFFER_CONDITION_OUT).replace(/\[\[|\]\]/g, ""); const summary = tidy(r.summary, 300);
   if (wording.length < 10) return { ok: false, why: "No wording came back. Please type your own wording." };
   // the time is always {timing}, filled in from the buyer's chosen timing: added when the model left it out
   if (!wording.includes("{timing}")) wording = (wording.replace(/[\s.]+$/, "") + ". This condition is to be satisfied or waived {timing}.").slice(0, OFFER_CONDITION_OUT + 60);
@@ -305,7 +306,8 @@ export function readClauseWriteResult(out: any): { ok: boolean; title?: string; 
   const use = (out?.content || []).find((c: any) => c.type === "tool_use");
   const r = use?.input || {};
   if (r.unsuitable === true) return { ok: false, why: tidy(r.why || "That doesn't look like a clause for this agreement.", 300) };
-  let wording = tidy(r.wording, CLAUSE_WRITE_OUT); const title = tidy(r.title, 120) || "Further term", summary = tidy(r.summary, 300);
+  // the drafting's reference markers ([[...]]) are never taken from the model
+  let wording = tidy(r.wording, CLAUSE_WRITE_OUT).replace(/\[\[|\]\]/g, ""); const title = tidy(r.title, 120).replace(/\[\[|\]\]/g, "") || "Further term", summary = tidy(r.summary, 300);
   if (wording.length < 10) return { ok: false, why: "No wording came back. Try describing it again." };
   wording = wording.replace(/\{(?!timing\})[a-z_]+\}/gi, "").replace(/ {2,}/g, " ").replace(/ ([,.])/g, "$1");   // only {timing} is filled in
   const isCond = r.is_condition === true || wording.includes("{timing}");

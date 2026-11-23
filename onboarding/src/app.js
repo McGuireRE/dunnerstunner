@@ -6405,7 +6405,17 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     // read from the blank itself each time: the chattels, and the further terms numbering and continuation bands
     const fresh = DR.buildMap(DR_CACHE[b.id] && DR_CACHE[b.id].pages ? DR_CACHE[b.id].pages : await drBlankPages(b));
     const plan = DR.planDraft({ details: o.details || {}, map: { places: map.places, chattels: fresh.chattels }, numbering: fresh.numbering, terms: terms || [], clauses, edits: edits || {}, today: OF.nzToday(), province: o.province || OF.DEFAULT_PROVINCE, vendorLawyer, parties });
-    const r = await DR.renderDraft(PDFLib, bytes, plan, { title: 'Draft agreement: ' + (o.buyer_ref || 'offer') });
+    // the header and footer bands of a continuation page are pictures of the blank's page: rendered with pdf.js at scale 4, cropped
+    const bandCache = {}, bandImage = async (pageNo, b) => {
+      const pdfjs = await drPdfjs(), S = 4;
+      bandCache[pageNo] ||= (async () => { const doc = await pdfjs.getDocument(Object.assign({ data: bytes.slice(0), isEvalSupported: false }, PDF_OPTS)).promise;
+        try { const pg = await doc.getPage(pageNo), vp = pg.getViewport({ scale: S }), cv = document.createElement('canvas'); cv.width = Math.round(vp.width); cv.height = Math.round(vp.height);
+          const cx = cv.getContext('2d'); cx.fillStyle = '#fff'; cx.fillRect(0, 0, cv.width, cv.height); await pg.render({ canvasContext: cx, canvas: cv, viewport: vp }).promise; return { cv, H: vp.height / S }; } finally { try { await doc.destroy(); } catch (_) { } } })();
+      const { cv, H } = await bandCache[pageNo], out = document.createElement('canvas'); out.width = Math.max(1, Math.round(b.width * S)); out.height = Math.max(1, Math.round(b.height * S));
+      out.getContext('2d').drawImage(cv, 0, Math.round((H - b.top) * S), out.width, out.height, 0, 0, out.width, out.height);
+      const blob = await new Promise(res => out.toBlob(res, 'image/png')); if (!blob) throw new Error('No band picture');
+      return new Uint8Array(await blob.arrayBuffer()); };
+    const r = await DR.renderDraft(PDFLib, bytes, plan, { title: 'Draft agreement: ' + (o.buyer_ref || 'offer'), bandImage });
     const sha = await REPO.sha256(r.bytes), prev = (await ofSafe(sb.from('offer_drafts').select('number').eq('offer_id', oid).order('number', { ascending: false }))) || [], n = ((prev[0] || {}).number || 0) + 1;
     const pth = `properties/${o.property_id}/docs/offer-draft-${oid}-${n}-${sha.slice(0, 12)}.pdf`;
     const up = await sb.storage.from('property-files').upload(pth, new Blob([r.bytes], { type: 'application/pdf' }), { contentType: 'application/pdf', upsert: false });
@@ -6556,7 +6566,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       try { const id = await drMakeDraft(d.offer_id, edits, note); toast('New draft made; the earlier one is kept'); viewDraftReview(id); } catch (e) { $('#drRvErr').textContent = e.message || 'That didn\'t draft.'; btns.forEach(x => { x.disabled = false; }); } };
     // what "Re-draft after a change" carries over: everything but Tim's edits to single values (phase 2, choice 10)
     const carry = () => { const c = { date_format: E.date_format, extra_terms: E.extra_terms, custom_ok: E.custom_ok, custom_wording: E.custom_wording, retired_numbers: E.retired_numbers };
-      ['added_terms', 'term_order', 'term_timing', 'marks', 'moves'].forEach(k => { if (E[k] != null) c[k] = E[k]; }); return c; };
+      ['added_terms', 'term_order', 'term_timing', 'marks', 'moves'].forEach(k => { if (E[k] != null) c[k] = E[k]; }); Object.keys(c).forEach(k => { if (c[k] === undefined) delete c[k]; }); return c; };
     const TT = Object.assign({}, E.term_timing || {}), MK = { marks: JSON.parse(JSON.stringify(E.marks || [])), moves: JSON.parse(JSON.stringify(E.moves || {})) };
     const collect = () => { const ed = { items: Object.assign({}, E.items || {}), retired_numbers: (E.retired_numbers || []).slice() };
       $$('[data-edit]').forEach(x => { const v = x.value.trim(); if (v !== x.dataset.orig) ed.items[x.dataset.edit] = v; });
@@ -6634,7 +6644,9 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const placedBox = id => { const x = d.placed.find(p => p.id === id); return x && (x.boxes || [])[0]; };
     const markEl = (k, b, label, cls) => { const el = document.createElement('div'); el.className = 'dr-mark ' + (cls || ''); el.dataset.mk = k; el.setAttribute('role', 'group'); el.setAttribute('aria-label', label);
       el.innerHTML = `<span class="dr-mk-lbl">${esc(label)}</span>` + ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'].map(h => `<span class="dr-h dr-h-${h}" data-h="${h}"></span>`).join(''); place(el, b); cur.wrapEl.appendChild(el); return el; };
-    const place = (el, b) => { const { W, H } = cur; el.style.left = (b.x / W * 100) + '%'; el.style.width = (b.w / W * 100) + '%'; el.style.top = ((H - b.y - b.h) / H * 100) + '%'; el.style.height = (b.h / H * 100) + '%'; };
+    // a box on the page; near an edge of the page its handles turn inwards, so they are never cut off
+    const place = (el, b) => { const { W, H } = cur, m = 26 * W / Math.max(1, cur.wrapEl.clientWidth); el.style.left = (b.x / W * 100) + '%'; el.style.width = (b.w / W * 100) + '%'; el.style.top = ((H - b.y - b.h) / H * 100) + '%'; el.style.height = (b.h / H * 100) + '%';
+      el.classList.toggle('dr-at-l', b.x < m); el.classList.toggle('dr-at-r', b.x + b.w > W - m); el.classList.toggle('dr-at-t', H - b.y - b.h < m); el.classList.toggle('dr-at-b', b.y < m); };
     const markLabel = m => (DR_MARK[m.type + (m.who ? ':' + m.who : '')] || DR_MARK[m.type] || m.type) + (m.type === 'text' && m.text ? ': ' + m.text.slice(0, 30) : '');
     // a device that can be touched gets finger-sized handles (some phones don't report a coarse pointer to CSS)
     if (navigator.maxTouchPoints > 0 || 'ontouchstart' in window) document.documentElement.classList.add('dr-touch');
@@ -6642,11 +6654,15 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       if (bp != null) MK.marks.filter(m => m.page === bp).forEach(m => markEl('m:' + m.id, m, markLabel(m), sel === 'm:' + m.id ? 'dr-sel' : ''));
       if (bp != null) Object.entries(MK.moves).forEach(([id, mv]) => { if (+mv.to.page === bp && sel !== 'p:' + id) markEl('p:' + id, mv.to, 'Moved: ' + ((d.placed.find(x => x.id === id) || {}).label || id), 'dr-moved'); });
       if (sel && sel.startsWith('p:')) { const id = sel.slice(2), b = MK.moves[id] ? MK.moves[id].to : Object.assign({ page: bp }, placedBox(id)); if (b) markEl(sel, b, 'Move or resize: ' + ((d.placed.find(x => x.id === id) || {}).label || id), 'dr-sel dr-moved'); }
-      const del = $('#drMkDel'), rs = $('#drMkReset'), tw = $('#drMkTextW'), m = sel && sel.startsWith('m:') ? MK.marks.find(x => 'm:' + x.id === sel) : null;
-      if (del) del.disabled = !m; if (rs) rs.hidden = !(sel && sel.startsWith('p:') && MK.moves[sel.slice(2)]); if (tw) { tw.hidden = !(m && m.type === 'text'); if (m && m.type === 'text') $('#drMkText').value = m.text || ''; } };
+      syncTools(); };
+    // the toolbar and the page follow the selection (touch scrolling is off on the page while drawing or editing a box)
+    const syncTools = () => { const del = $('#drMkDel'), rs = $('#drMkReset'), tw = $('#drMkTextW'), m = sel && sel.startsWith('m:') ? MK.marks.find(x => 'm:' + x.id === sel) : null;
+      if (del) del.disabled = !m; if (rs) rs.hidden = !(sel && sel.startsWith('p:') && MK.moves[sel.slice(2)]); if (tw) { tw.hidden = !(m && m.type === 'text'); if (m && m.type === 'text') $('#drMkText').value = m.text || ''; }
+      if (cur) { cur.wrapEl.classList.toggle('dr-drawing', drawOn); cur.wrapEl.classList.toggle('dr-editing', !!sel); } };
+    const selectEl = el => { $$('.dr-mark.dr-sel', cur.wrapEl).forEach(x => { if (x !== el) x.classList.remove('dr-sel'); }); if (el) el.classList.add('dr-sel'); syncTools(); };
     const paint = async n => { try { holder.classList.toggle('dr-zoomed', zoom > 1); const r = await drRender(holder, n, boxes, { bytes: await drDraftBytes(d), key: 'draft-' + d.id }); r.wrapEl.dataset.draft = d.id;
         if (zoom > 1) { r.wrapEl.style.width = (parseFloat(r.wrapEl.style.width) * zoom) + 'px'; r.wrapEl.style.maxWidth = 'none'; }
-        cur = Object.assign(r, { n }); drawLayer(); if (editable) wirePage(r.wrapEl);
+        cur = Object.assign(r, { n }); r.wrapEl.classList.toggle('dr-drawing', drawOn); drawLayer(); if (editable) wirePage(r.wrapEl);
         const doc = holder._docs && holder._docs['draft-' + d.id], pk = $('#drRvPick');
         if (doc && pk.options.length < doc.numPages) { const cnt = k => boxes.filter(x => x.page === k).length; pk.innerHTML = Array.from({ length: doc.numPages }, (_, i) => i + 1).map(k => `<option value="${k}" ${k === n ? 'selected' : ''}>Page ${k}${cnt(k) ? ` (${cnt(k)})` : ''}${PM.added.includes(k) ? ', added' : ''}</option>`).join(''); }
       } catch (e) { holder.innerHTML = `<p class="small err">${esc(e.message || drNoLib)}</p>`; } };
@@ -6665,22 +6681,28 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       wrap.addEventListener('pointerdown', e => {
         if (e.button > 0) return; const bp = PM.blankOf(cur.n), h = e.target.closest('.dr-h'), mk = e.target.closest('.dr-mark'), bx = e.target.closest('.dr-box');
         let target = null, kind = null, start = pt(e);
-        if (mk) { sel = mk.dataset.mk; target = sel; kind = h ? h.dataset.h : 'move'; }
+        // the gesture keeps the element it started on: the layer is never rebuilt until the finger, mouse or pen lifts
+        let el = null;
+        if (mk) { sel = mk.dataset.mk; target = sel; kind = h ? h.dataset.h : 'move'; el = mk; selectEl(el); }
         else if (drawOn && bp != null) { const [ty, who] = $('#drMkType').value.split(':'), m = { id: 'k' + Date.now().toString(36) + Math.floor(Math.random() * 1e4), page: bp, x: start.x, y: start.y, w: MIN_W, h: MIN_H, type: ty }; if (who) m.who = who; if (ty === 'text') m.text = '';
-          MK.marks.push(m); sel = 'm:' + m.id; target = sel; kind = 'new'; }
+          MK.marks.push(m); sel = 'm:' + m.id; target = sel; kind = 'new'; el = markEl(sel, m, markLabel(m), 'dr-sel'); selectEl(el); }
         else if (bx && bp != null) { const it = d.placed.find(x => x.id === bx.dataset.id); if (!it || !DR_MOVABLE.includes(it.kind)) { say('That place can\'t be moved here.'); return; } sel = 'p:' + it.id; drawLayer(); say('Drag it to move it, or its handles to resize it. Re-draft to apply it.'); return; }
-        else return;
-        e.preventDefault(); drawLayer(); const el = $(`.dr-mark[data-mk="${target}"]`, wrap); if (!el) return; try { el.setPointerCapture(e.pointerId); } catch (_) { }
+        else { if (sel) { sel = null; drawLayer(); } return; }
+        e.preventDefault(); try { el.setPointerCapture(e.pointerId); } catch (_) { }
         const isMark = target.startsWith('m:'), m = isMark ? MK.marks.find(x => 'm:' + x.id === target) : null, pid = isMark ? null : target.slice(2);
-        const b0 = isMark ? Object.assign({}, m) : Object.assign({ page: bp }, MK.moves[pid] ? MK.moves[pid].to : placedBox(pid));
+        const b0 = isMark ? Object.assign({}, m) : Object.assign({ page: bp }, MK.moves[pid] ? MK.moves[pid].to : placedBox(pid)), mv0 = isMark ? null : MK.moves[pid] ? JSON.parse(JSON.stringify(MK.moves[pid])) : null;
         const onMove = ev => { const p = pt(ev), dx = p.x - start.x, dy = p.y - start.y; let b = Object.assign({}, b0);
           if (kind === 'new') b = { x: Math.min(start.x, p.x), y: Math.min(start.y, p.y), w: Math.abs(p.x - start.x), h: Math.abs(p.y - start.y) };
           else if (kind === 'move') { b.x = b0.x + dx; b.y = b0.y + dy; }
           else { if (/w/.test(kind)) { b.x = Math.min(b0.x + dx, b0.x + b0.w - MIN_W); b.w = b0.w - (b.x - b0.x); } if (/e/.test(kind)) b.w = b0.w + dx;
             if (/s/.test(kind)) { b.y = Math.min(b0.y + dy, b0.y + b0.h - MIN_H); b.h = b0.h - (b.y - b0.y); } if (/n/.test(kind)) b.h = b0.h + dy; }
           b = clamp(Object.assign({ page: b0.page }, b)); if (isMark) Object.assign(m, { x: b.x, y: b.y, w: b.w, h: b.h }); else MK.moves[pid] = { from: MK.moves[pid] ? MK.moves[pid].from : Object.assign({ page: bp }, placedBox(pid)), to: Object.assign({ page: bp }, b) }; place(el, b); };
-        const onUp = () => { el.removeEventListener('pointermove', onMove); el.removeEventListener('pointerup', onUp); el.removeEventListener('pointercancel', onUp); drawLayer();
-          if (kind === 'new') { drawOn = false; if (dw) { dw.setAttribute('aria-pressed', 'false'); dw.textContent = 'Draw a box'; } wrap.classList.remove('dr-drawing'); say(m.type === 'text' ? 'Type the text for the box below, then re-draft.' : 'Box added. Drag it or its handles to adjust it, then re-draft.'); if (m.type === 'text') { const t = $('#drMkText'); if (t) t.focus(); } }
+        const onUp = ev => { el.removeEventListener('pointermove', onMove); el.removeEventListener('pointerup', onUp); el.removeEventListener('pointercancel', onUp);
+          // a gesture the device cancelled (a scroll, a second finger): a new box goes; anything else goes back where it was
+          if (ev && ev.type === 'pointercancel') { if (kind === 'new') { MK.marks = MK.marks.filter(x => x !== m); sel = null; } else if (isMark) Object.assign(m, { x: b0.x, y: b0.y, w: b0.w, h: b0.h }); else if (mv0) MK.moves[pid] = mv0; else delete MK.moves[pid];
+            drawLayer(); return say(kind === 'new' ? 'The box was cancelled. Draw it again.' : 'Cancelled.'); }
+          drawLayer();
+          if (kind === 'new') { drawOn = false; if (dw) { dw.setAttribute('aria-pressed', 'false'); dw.textContent = 'Draw a box'; } syncTools(); say(m.type === 'text' ? 'Type the text for the box below, then re-draft.' : 'Box added. Drag it or its handles to adjust it, then re-draft.'); if (m.type === 'text') { const t = $('#drMkText'); if (t) t.focus(); } }
           else say('Re-draft to apply it.'); };
         el.addEventListener('pointermove', onMove); el.addEventListener('pointerup', onUp); el.addEventListener('pointercancel', onUp);
       });

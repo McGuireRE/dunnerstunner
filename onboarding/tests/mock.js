@@ -699,7 +699,7 @@ function draftRpc(name,a,me){ if(!me||!AGENTS.includes(me.email)) return bad('On
     if(!new RegExp('^properties/'+o.property_id+'/docs/offer-draft-'+o.id+'-[0-9]{1,4}-[0-9a-f]{12}\\.pdf$').test(a.p_path||'')) return bad('A draft is stored at its own place');
     const obj=SO()[a.p_path]; if(!obj) return bad("The draft hasn't arrived yet"); if(obj.size!==a.p_size||obj.mime!=='application/pdf') return bad("The stored draft doesn't match");
     if(!(DB.offer_file_hashes||[]).some(h=>h.path===a.p_path&&h.sha256===a.p_sha256&&h.size_bytes===a.p_size)) return bad("The draft's fingerprint hasn't been confirmed by the server yet. Try again");
-    if(!draftEditsOk(a.p_edits||{},b.sizes)) return bad("One of your marks or moved places doesn't sit on a page of this blank. Draw it again");   // migration 022
+    if(!draftEditsOk(a.p_edits||{},b.sizes)) return bad("One of your changes on the review screen couldn't be kept: a mark or moved place off the page, too many terms, or text too long. Check them and draft again");   // migration 022
     const n=OD().filter(x=>x.offer_id===o.id).reduce((m_,x)=>Math.max(m_,x.number),0)+1;
     const d={id:uid(),offer_id:o.id,property_id:o.property_id,number:n,blank_id:b.id,blank_sha256:b.sha256,map_id:m.id,details:JSON.parse(JSON.stringify(o.details)),edits:a.p_edits||{},placed:a.p_placed||[],needs:a.p_needs||[],path:a.p_path,sha256:a.p_sha256,size_bytes:a.p_size,note:(a.p_note||'').trim()||null,created_by:me.email,created_at:now()};
     OD().push(d); ev(o.property_id,o.id,'drafted',{draft_id:d.id,number:n,sha256:d.sha256,blank_sha256:b.sha256,map_version:m.version,needs:d.needs.length,note:d.note}); return ok({id:d.id,number:n}); }
@@ -722,11 +722,16 @@ function draftRpc(name,a,me){ if(!me||!AGENTS.includes(me.email)) return bad('On
 // migration 022: offer_draft_edits_ok, what Tim did on the review screen (marks and moved places on the blank's own pages, and the shape of the rest)
 function draftEditsOk(e,sizes){ const num=(v,lo,hi)=>typeof v==='number'&&isFinite(v)&&v>=lo&&v<=hi;
   const box=(v,min)=>{ if(!v||typeof v!=='object'||!Number.isInteger(v.page)||v.page<1||v.page>sizes.length) return false; const [w,h]=sizes[v.page-1]; return num(v.x,-1,w+1)&&num(v.y,-1,h+1)&&num(v.w,min,w+1)&&num(v.h,min,h+1)&&v.x+v.w<=w+1&&v.y+v.h<=h+1; };
-  if(!e||typeof e!=='object'||Array.isArray(e)||JSON.stringify(e).length>200000) return false;
+  if(!e||typeof e!=='object'||Array.isArray(e)||JSON.stringify(e).length>200000) return false; e=JSON.parse(JSON.stringify(e));
   if('marks' in e){ if(!Array.isArray(e.marks)||e.marks.length>100) return false; for(const m of e.marks){ if(!/^[A-Za-z0-9_-]{1,40}$/.test(String(m&&m.id||''))||!['initials','signature','strike','text','highlight'].includes(m.type)) return false; if(m.who!=null&&!['purchasers','vendors','both'].includes(m.who)) return false; if(String(m.text||'').length>500||!box(m,8)) return false; } }
   if('moves' in e){ if(!e.moves||typeof e.moves!=='object'||Array.isArray(e.moves)||Object.keys(e.moves).length>200) return false; for(const [k,v] of Object.entries(e.moves)){ if(!/^[A-Za-z0-9_.:-]{1,80}$/.test(k)||!v||!box(v.from,0)||!box(v.to,4)||v.from.page!==v.to.page) return false; } }
   if('added_terms' in e){ if(!Array.isArray(e.added_terms)||e.added_terms.length>30) return false; if(!e.added_terms.every(x=>x&&/^[A-Za-z0-9_]{1,80}$/.test(String(x.id||''))&&/^[a-z][a-z0-9_]{0,40}$/.test(String(x.key||'')))) return false; }
-  if('term_order' in e&&(!Array.isArray(e.term_order)||e.term_order.length>120)) return false;
+  if('term_order' in e&&(!Array.isArray(e.term_order)||e.term_order.length>120||!e.term_order.every(x=>typeof x==='string'&&/^[A-Za-z0-9_]{1,80}$/.test(x)))) return false;
+  if('extra_terms' in e){ if(!Array.isArray(e.extra_terms)||e.extra_terms.length>60) return false; for(const x of e.extra_terms){ if(typeof x==='string'){ if(x.length>4000) return false; continue; }
+    if(!x||typeof x!=='object'||Array.isArray(x)||!/^[A-Za-z0-9_]{1,80}$/.test(String(x.id||''))||typeof x.title!=='string'||x.title.length>200||typeof x.text!=='string'||x.text.length>4000) return false;
+    if('ai' in x&&typeof x.ai!=='boolean') return false; if(Object.keys(x).some(k=>!['id','title','text','ai'].includes(k))) return false; } }
+  if('items' in e){ if(!e.items||typeof e.items!=='object'||Array.isArray(e.items)||Object.keys(e.items).length>300) return false; for(const [k,v] of Object.entries(e.items)) if(!/^[A-Za-z0-9_.:-]{1,80}$/.test(k)||typeof v!=='string'||v.length>4000) return false; }
+  if(e.custom_wording!=null&&(typeof e.custom_wording!=='string'||e.custom_wording.length>4000)) return false;
   if('retired_numbers' in e&&(!Array.isArray(e.retired_numbers)||e.retired_numbers.length>120||!e.retired_numbers.every(n=>num(n,1,999)))) return false;
   if('term_timing' in e){ if(!e.term_timing||typeof e.term_timing!=='object'||Array.isArray(e.term_timing)) return false; for(const [k,x] of Object.entries(e.term_timing)){ if(!/^[A-Za-z0-9_]{1,80}$/.test(k)||!x||typeof x!=='object') return false; if(x.days!=null&&!num(x.days,1,250)) return false; if(x.date!=null&&!/^\d{4}-\d{2}-\d{2}$/.test(String(x.date))) return false; if(x.after!=null&&!/^[a-z_]{1,20}$/.test(String(x.after))) return false; } }
   return true; }

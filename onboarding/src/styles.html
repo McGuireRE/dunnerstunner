@@ -718,14 +718,21 @@ table.sum.of-sum td:first-child, table.sum.of-dates td:first-child { width: 40%;
 .dr-mark.dr-moved { border-color: #1E7A45; background: rgba(30, 122, 69, .12); }
 .dr-mk-lbl { position: absolute; left: 0; bottom: 100%; font-size: 11px; line-height: 1.2; color: #fff; background: #D9432C; padding: 0 4px; border-radius: 3px 3px 0 0; white-space: nowrap; max-width: 220px; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
 .dr-mark.dr-moved .dr-mk-lbl { background: #1E7A45; }
-/* handles sit just outside the box, so even a small box keeps its middle free to drag; finger-sized wherever touch is possible */
-.dr-h { position: absolute; width: 12px; height: 12px; border-radius: 50%; background: #fff; border: 2px solid #D9432C; box-sizing: border-box; touch-action: none; display: none; }
+/* handles sit just outside the box, so even a small box keeps its middle free to drag; near the page's edge they turn inwards, so
+   they are never cut off. Finger-sized wherever touch is possible. */
+.dr-h { position: absolute; width: 12px; height: 12px; border-radius: 50%; background: #fff; border: 2px solid #D9432C; box-sizing: border-box; touch-action: none; display: none; transform: translate(var(--hx, 0), var(--hy, 0)); }
 @media (any-pointer: coarse) { .dr-h { width: 24px; height: 24px; } }
 .dr-touch .dr-h { width: 24px; height: 24px; }
 .dr-mark.dr-sel .dr-h { display: block; }
-.dr-h-nw { left: 0; top: 0; transform: translate(-100%, -100%); cursor: nwse-resize; } .dr-h-n { left: 50%; top: 0; transform: translate(-50%, -100%); cursor: ns-resize; } .dr-h-ne { left: 100%; top: 0; transform: translate(0, -100%); cursor: nesw-resize; } .dr-h-e { left: 100%; top: 50%; transform: translate(0, -50%); cursor: ew-resize; }
-.dr-h-se { left: 100%; top: 100%; cursor: nwse-resize; } .dr-h-s { left: 50%; top: 100%; transform: translate(-50%, 0); cursor: ns-resize; } .dr-h-sw { left: 0; top: 100%; transform: translate(-100%, 0); cursor: nesw-resize; } .dr-h-w { left: 0; top: 50%; transform: translate(-100%, -50%); cursor: ew-resize; }
+.dr-h-nw { left: 0; top: 0; --hx: -100%; --hy: -100%; cursor: nwse-resize; } .dr-h-n { left: 50%; top: 0; --hx: -50%; --hy: -100%; cursor: ns-resize; } .dr-h-ne { left: 100%; top: 0; --hx: 0; --hy: -100%; cursor: nesw-resize; } .dr-h-e { left: 100%; top: 50%; --hx: 0; --hy: -50%; cursor: ew-resize; }
+.dr-h-se { left: 100%; top: 100%; --hx: 0; --hy: 0; cursor: nwse-resize; } .dr-h-s { left: 50%; top: 100%; --hx: -50%; --hy: 0; cursor: ns-resize; } .dr-h-sw { left: 0; top: 100%; --hx: -100%; --hy: 0; cursor: nesw-resize; } .dr-h-w { left: 0; top: 50%; --hx: -100%; --hy: -50%; cursor: ew-resize; }
+.dr-at-l .dr-h-nw, .dr-at-l .dr-h-w, .dr-at-l .dr-h-sw { --hx: 0; }
+.dr-at-r .dr-h-ne, .dr-at-r .dr-h-e, .dr-at-r .dr-h-se { --hx: -100%; }
+.dr-at-t .dr-h-nw, .dr-at-t .dr-h-n, .dr-at-t .dr-h-ne { --hy: 0; }
+.dr-at-b .dr-h-sw, .dr-at-b .dr-h-s, .dr-at-b .dr-h-se { --hy: -100%; }
 .dr-mark.dr-sel .dr-mk-lbl { left: 26px; }
+.dr-mark.dr-at-t .dr-mk-lbl { bottom: auto; top: 100%; border-radius: 0 0 3px 3px; }
+.dr-pg.dr-editing { touch-action: none; }
 .dr-box { position: absolute; box-sizing: border-box; border: 1.5px solid #1F5FBF; background: rgba(31, 95, 191, .12); border-radius: 3px; padding: 0; margin: 0; min-width: 6px; min-height: 6px; cursor: pointer; font: inherit; }
 .dr-box.dr-ai { border-color: #B26A00; background: rgba(255, 170, 0, .18); }
 .dr-box.dr-ai.dr-undecided { border-style: dashed; }

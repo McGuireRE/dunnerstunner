@@ -2,15 +2,16 @@
 // never copied into the repository). It puts the printed labels the drafting anchors on in the same relative places as the
 // Eleventh Edition 2022 (4) pack, with filler text and invented names around them. Nothing here is the form's wording.
 // make({ edition, clause22: false, filledDeposit, filledSettlement, twoLineSettlement, printedTerms, vendorLawyer: false, generalTerms (20),
-//   ftAppendix (the further terms page is the appendix, with 21.x and 22.0 printed on it, as the portal does), pageNoOffset (printed page numbers) })
+//   ftAppendix (the further terms page is the appendix, with 21.x and 22.0 printed on it, as the portal does), pageNoOffset (printed page numbers),
+//   pageNoFormat (n => the printed page number, e.g. '22 of 22'), laterNumbers (false: no page number after page 3, as the separate documents in a real pack) })
 // Only the short label words the anchor finder needs are used; everything else is made-up filler. -> Uint8Array
 const { PDFDocument, StandardFonts, rgb } = require('/opt/npm-tools/node_modules/pdf-lib');
 async function make(o) {
-  o = Object.assign({ edition: 'Eleventh Edition 2022 (4)', clause22: true, filledDeposit: true, filledSettlement: true, vendorLawyer: true, pack: true, generalTerms: 20, pageNoOffset: 0 }, o || {});
+  o = Object.assign({ edition: 'Eleventh Edition 2022 (4)', clause22: true, filledDeposit: true, filledSettlement: true, vendorLawyer: true, pack: true, generalTerms: 20, pageNoOffset: 0, pageNoFormat: null, laterNumbers: true }, o || {});
   const doc = await PDFDocument.create(); doc.setProducer('synthetic test blank'); doc.setTitle('Synthetic blank for tests');
   const F = await doc.embedFont(StandardFonts.Helvetica), B = await doc.embedFont(StandardFonts.HelveticaBold);
   const W = 595.32, H = 842.04; let pg, n = 0;
-  const page = () => { pg = doc.addPage([W, H]); n++; t(o.edition, 467.4, 790.4, 9); t('\u00a9 Synthetic test form. All rights reserved.', 28.3, 25.2, 9); t(String(n + o.pageNoOffset), 293.2, 25.2, 8); };
+  const page = () => { pg = doc.addPage([W, H]); n++; t(o.edition, 467.4, 790.4, 9); t('\u00a9 Synthetic test form. All rights reserved.', 28.3, 25.2, 9); if (o.laterNumbers || n <= 3) t(o.pageNoFormat ? o.pageNoFormat(n + o.pageNoOffset) : String(n + o.pageNoOffset), 293.2, 25.2, 8); };
   const t = (s, x, y, size, bold) => pg.drawText(s, { x, y, size: size || 9.5, font: bold ? B : F, color: rgb(0, 0, 0) });
   const fill = (s, x, y) => pg.drawText(s, { x, y, size: 8, font: F, color: rgb(0.1, 0.1, 0.1) });
   // 1. the front page
@@ -85,4 +86,14 @@ async function make(o) {
     pg = doc.addPage([W, H]); n++; t('A synthetic inserted LIM page without the edition string.', 30, 760); }
   return await doc.save();
 }
-module.exports = { make };
+// The band picture the drafting needs for a continuation page (renderDraft's opts.bandImage), as Tim's screen makes it with pdf.js:
+// here with pdftoppm at 300 dpi, cropped to the band. -> PNG bytes
+function bandImager(pdfBytes) {
+  const { execFileSync } = require('child_process'), fs = require('fs'), os = require('os'), path = require('path');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'band-')), src = path.join(dir, 'blank.pdf'); fs.writeFileSync(src, pdfBytes); let n = 0;
+  return async (pageNo, b) => { const R = 300, k = R / 72, out = path.join(dir, 'b' + (++n));
+    const H = 842.04;   // the synthetic blank's page height
+    execFileSync('pdftoppm', ['-f', String(pageNo), '-l', String(pageNo), '-r', String(R), '-x', '0', '-y', String(Math.round((H - b.top) * k)), '-W', String(Math.round(b.width * k)), '-H', String(Math.round(b.height * k)), '-png', '-singlefile', src, out]);
+    return new Uint8Array(fs.readFileSync(out + '.png')); };
+}
+module.exports = { make, bandImager };

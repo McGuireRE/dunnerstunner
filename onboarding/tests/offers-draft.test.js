@@ -273,7 +273,7 @@ const sha = b => crypto.createHash('sha256').update(Buffer.from(b)).digest('hex'
   await shot(q, 'review_dark');
 
   // ── 9b. the review screen (Tim, 24 November 2026): clauses from the library, timing chips, order, removing, the AI clause writer,
-  //    marks on the pages and moving a place (dark, 390 px, touch) ──
+  //    marks on the pages and moving a place (dark, 390 px, a touch screen: first with the mouse, then with real touch events) ──
   process.stderr.write('step 9b\n');
   const latest = async () => { const dd = await db(q); return dd.offer_drafts.filter(x => x.offer_id === off2).sort((a, b2) => b2.number - a.number)[0]; };
   const waitDraft = async n => { await q.waitForSelector(`#drReview h1:has-text("Draft ${n}")`, { timeout: 30000 }); return latest(); };
@@ -320,7 +320,7 @@ const sha = b => crypto.createHash('sha256').update(Buffer.from(b)).digest('hex'
   await q.selectOption('#drMkType', 'initials:purchasers'); await q.click('#drMkDraw'); expect((await q.getAttribute('#drMkDraw', 'aria-pressed')) === 'true', 'draw mode on'); g = await pgBox();
   await drag(g.x + g.w * 0.55, g.y + g.h * 0.20, g.x + g.w * 0.75, g.y + g.h * 0.24);
   out.mk1 = await q.$$eval('.dr-mark', e => e.length); expect(out.mk1 === 1 && /Initials: the purchasers/.test(await q.textContent('.dr-mark .dr-mk-lbl')), 'a box drawn by dragging, labelled with its kind');
-  out.handle = await q.$eval('.dr-mark.dr-sel .dr-h-se', e => { const r = e.getBoundingClientRect(); return [r.width, r.height]; }); expect(out.handle[0] >= 22 && out.handle[1] >= 22, 'handles big enough for a finger: ' + out.handle);
+  out.handle = await q.$eval('.dr-mark.dr-sel .dr-h-se', e => { const r = e.getBoundingClientRect(); return [r.width, r.height]; }); expect(out.handle[0] >= 22 && out.handle[1] >= 22, 'on a touch screen the handles are finger-sized: ' + out.handle);
   let hb = await q.$eval('.dr-mark.dr-sel .dr-h-se', e => { const r = e.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
   await drag(hb.x, hb.y, hb.x + g.w * 0.05, hb.y + g.h * 0.02);
   let mb = await q.$eval('.dr-mark.dr-sel', e => { const r = e.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
@@ -333,6 +333,40 @@ const sha = b => crypto.createHash('sha256').update(Buffer.from(b)).digest('hex'
   const priceEl = await q.$('#drRvCanvas .dr-box[data-id="price"]'); await priceEl.scrollIntoViewIfNeeded(); const pb = await priceEl.boundingBox(); await q.mouse.click(pb.x + pb.width / 2, pb.y + pb.height / 2);
   await q.waitForSelector('.dr-mark.dr-moved.dr-sel'); const pm2 = await q.$eval('.dr-mark.dr-moved.dr-sel', e => { const r = e.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
   await drag(pm2.x, pm2.y, pm2.x + 30, pm2.y + 6);
+  // the same with a finger: real touch events (CDP Input.dispatchTouchEvent), which the page sees as pointerType "touch"
+  const cdp = await q.context().newCDPSession(q);
+  await q.evaluate(() => { window.__pt = []; document.addEventListener('pointerdown', e => window.__pt.push(e.pointerType), true); });
+  const touchPath = async (pts, cancel) => { await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: pts[0][0], y: pts[0][1] }] });
+    for (const [x, y] of pts.slice(1)) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x, y }] });
+    await cdp.send('Input.dispatchTouchEvent', { type: cancel ? 'touchCancel' : 'touchEnd', touchPoints: [] }); await q.waitForTimeout(150); };
+  const line = (x0, y0, x1, y1, n) => Array.from({ length: (n || 6) + 1 }, (_, i) => [x0 + (x1 - x0) * i / (n || 6), y0 + (y1 - y0) * i / (n || 6)]);
+  const elBox = async sel_ => q.$eval(sel_, e => { const r = e.getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height, cx: r.left + r.width / 2, cy: r.top + r.height / 2 }; });
+  const nMarks0 = (await q.$$('.dr-mark')).length;
+  await q.selectOption('#drMkType', 'strike'); await q.click('#drMkDraw'); g = await pgBox();
+  await touchPath(line(g.x + g.w * 0.15, g.y + g.h * 0.60, g.x + g.w * 0.45, g.y + g.h * 0.63));
+  out.touchTypes = await q.evaluate(() => window.__pt.slice()); expect(out.touchTypes.includes('touch'), 'the page saw touch pointers: ' + out.touchTypes);
+  expect((await q.$$('.dr-mark')).length === nMarks0 + 1 && /Strike-out/.test(await q.textContent('.dr-mark.dr-sel .dr-mk-lbl')), 'touch: a box drawn with a finger');
+  let tb0 = await elBox('.dr-mark.dr-sel'), hc = await elBox('.dr-mark.dr-sel .dr-h-se');
+  await touchPath(line(hc.cx, hc.cy, hc.cx + 30, hc.cy + 12)); let tb1 = await elBox('.dr-mark.dr-sel');
+  expect(tb1.w > tb0.w + 20 && tb1.h > tb0.h + 6, 'touch: resized by a corner');
+  const he = await elBox('.dr-mark.dr-sel .dr-h-e'); await touchPath(line(he.cx, he.cy, he.cx + 20, he.cy)); let tb2 = await elBox('.dr-mark.dr-sel');
+  expect(tb2.w > tb1.w + 12 && Math.abs(tb2.h - tb1.h) < 1, 'touch: resized by an edge (wider, same height)');
+  await touchPath(line(tb2.cx, tb2.cy, tb2.cx - 25, tb2.cy + 15)); let tb3 = await elBox('.dr-mark.dr-sel');
+  expect(tb3.x < tb2.x - 15 && tb3.y > tb2.y + 8 && Math.abs(tb3.w - tb2.w) < 1, 'touch: moved by its middle');
+  await q.click('#drMkDel'); expect((await q.$$('.dr-mark')).length === nMarks0, 'touch: deleted');
+  // a gesture the phone cancels: the new box goes
+  await q.click('#drMkDraw'); g = await pgBox(); await touchPath(line(g.x + g.w * 0.2, g.y + g.h * 0.7, g.x + g.w * 0.4, g.y + g.h * 0.72), true);
+  expect((await q.$$('.dr-mark')).length === nMarks0, 'a cancelled touch leaves no box');
+  // draw mode stays on through a repaint (zoom), with touch scrolling off on the page while drawing
+  expect((await q.getAttribute('#drMkDraw', 'aria-pressed')) === 'true', 'still drawing after the cancelled gesture');
+  await q.click('#drZoomIn'); await q.waitForTimeout(500);
+  expect(await q.$eval('#drRvCanvas .dr-pg', e => e.classList.contains('dr-drawing') && getComputedStyle(e).touchAction === 'none') && (await q.getAttribute('#drMkDraw', 'aria-pressed')) === 'true', 'draw mode kept through a repaint, with touch-action none');
+  await q.click('#drZoomOut'); await q.waitForTimeout(500); await q.click('#drMkDraw');
+  // a box against the page's right edge: its handles turn inwards, inside the page
+  const edgeMk = await q.$('.dr-mark:not(.dr-moved)'); const eb = await edgeMk.boundingBox(); await touchPath([[eb.x + eb.width / 2, eb.y + eb.height / 2]]);
+  const pr = await elBox('#drRvCanvas .dr-pg'), hs = await q.$$eval('.dr-mark.dr-sel .dr-h', e => e.map(x => { const r = x.getBoundingClientRect(); return [r.left, r.right, r.top, r.bottom]; }));
+  expect(hs.length === 8 && hs.every(([l, r2, t, b2]) => l >= pr.x - 0.5 && r2 <= pr.x + pr.w + 0.5 && t >= pr.y - 0.5 && b2 <= pr.y + pr.h + 0.5), 'at the page edge every handle stays inside the page');
+  expect(await q.$eval('#drRvCanvas .dr-pg', e => e.classList.contains('dr-editing') && getComputedStyle(e).touchAction === 'none'), 'editing a box: touch scrolling off on the page');
   // zoom in and out: the page grows inside its own frame, never the screen
   await q.click('#drZoomIn'); await q.waitForTimeout(400); out.zoomW = await q.$eval('#drRvCanvas .dr-pg', e => e.getBoundingClientRect().width);
   expect(out.zoomW > g.w * 1.3 && !(await side(q)), 'zoomed: the page is wider, inside its frame, with no sideways scroll of the screen'); await q.click('#drZoomOut'); await q.waitForTimeout(400);
@@ -348,10 +382,20 @@ const sha = b => crypto.createHash('sha256').update(Buffer.from(b)).digest('hex'
   expect(dr9.needs.some(n => n.id === 'sign_marks') && dr9.needs.some(n => n.id === 'moved_price'), 'Tim is told about the signing place and the move');
   // the server checks marks: one on a page that isn't on the blank is refused
   const bad = await rpc(q, 'agent_draft_add', { p_offer: off2, p_map: dr9.map_id, p_path: dr9.path, p_sha256: dr9.sha256, p_size: dr9.size_bytes, p_placed: dr9.placed, p_needs: dr9.needs, p_edits: Object.assign({}, dr9.edits, { marks: [{ id: 'x1', type: 'strike', page: 99, x: 1, y: 1, w: 20, h: 20 }] }), p_note: null });
-  expect(bad.error && /doesn't sit on a page of this blank/.test(bad.error.message), 'a mark off the blank is refused by the server');
+  expect(bad.error && /couldn't be kept: a mark or moved place off the page/.test(bad.error.message), 'a mark off the blank is refused by the server');
   // a re-draft after a change keeps the marks, the added clauses and the order
   await q.click('#drRedraftChange'); dr9 = await waitDraft(++dn);
   expect(dr9.edits.marks.length === 2 && dr9.edits.added_terms.some(a => a.id === 'add_std_pool_1') && dr9.edits.moves.price && dr9.edits.retired_numbers.includes(keysNo), 'kept through a re-draft after a change');
+
+  // too many further terms for the page: the continuation page made on Tim's screen, its bands pictures rendered with pdf.js
+  const longT = i => `Extra term ${i + 1} with enough words to take a full line of the page, more or less, and then some more words so that it wraps.`;
+  await q.fill('#drExtra', Array.from({ length: 50 }, (_, i) => longT(i)).join('\n')); await q.click('#drRedraft'); dr9 = await waitDraft(++dn);
+  const apg = dr9.placed.filter(x => x.kind === 'page'); out.addedPages = apg.map(x => [x.page, x.source_page, x.bands && x.bands.as, x.plain]);
+  expect(apg.length >= 1 && apg.every(x => x.bands && x.bands.as === 'image' && !x.plain) && dr9.needs.some(n => n.id === 'continuation_check' && n.blocking && n.ackable), 'the added page is made from pictures of the bands, with Tim\'s check: ' + JSON.stringify(out.addedPages));
+  const cpdf = await blob(q, dr9.path), cfn = path.join(__dirname, 'out', 'review-cont.pdf'); fs.writeFileSync(cfn, Buffer.from(cpdf));
+  const ctxt = require('child_process').execFileSync('pdftotext', ['-f', String(apg[0].page), '-l', String(apg[0].page), cfn, '-'], { encoding: 'utf8' }).replace(/\s+/g, ' ').replace(/\d+\. Your further term: Extra term \d+ with enough words to take a full line of the page, more or less, and then some more words so that it wraps\./g, '').trim();
+  expect(/\(continued\)/.test(ctxt) && /\b4\b/.test(ctxt) && !/FURTHER TERMS OF SALE|Further Terms continued|Eleventh Edition|Synthetic test form|©|\b3\b/.test(ctxt), 'the added page holds as text only "(continued)", its new number and the typed terms (the bands are pictures): ' + JSON.stringify(ctxt.slice(0, 120)));
+  await q.fill('#drExtra', ''); await q.click('#drRedraft'); dr9 = await waitDraft(++dn);
   expect(!(await side(q)), 'review screen with all of it at 390 px: no sideways scroll');
   // the clause library: the AI writer saves a clause that goes on only when Tim adds it
   await q.click('#drRvBack'); await q.waitForSelector('#drOffer'); await q.click('#ofBackP'); await q.waitForSelector('#drLibBtn'); await q.click('#drLibBtn'); await q.waitForSelector('#drLib');
