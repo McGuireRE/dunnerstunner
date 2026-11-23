@@ -87,6 +87,17 @@ const D = require(path.join(__dirname, '..', 'src', 'draft-core.js'));
   r = await J(await post({ action: 'open', token: TOK }));
   expect(r.j.side === 'vendor' && r.j.round === 2 && !JSON.stringify(r.j).includes('vera@example.com'), 'opening a vendor\'s link says it is the vendors\' round, never the email');
 
+  // ── Ask Tim for a change and Decline, worded by side ──
+  { const H3 = H.makeHandler({ cors: {}, appUrl: 'x', timEmail: 'tim@example.test', whoIsAgent: async () => null,
+      rpc: async (fn) => fn === 'offer_sign_ask' ? { data: { ok: true, name: 'Vera Vendor', address: '1 Example Road', side: 'vendor', round: 2 }, error: null } : { data: null, error: { message: 'unknown' } },
+      signedUrl: async () => null, download: async () => null, upload: async () => ({ ok: true }), sendMail: async (kind, m) => { mails.push(Object.assign({ kind }, m)); }, renderRound: () => null, renderWorking: () => null, nego: N, net: netOf });
+    mails = [];
+    const ask = b_ => H3(new Request('https://x/f', { method: 'POST', body: JSON.stringify(Object.assign({ action: 'ask', token: TOK, session: SES }, b_)) }));
+    await ask({ text: 'We decline the offer as it stands.', decline: true }); await ask({ text: 'Could settlement be later?' });
+    expect(mails[0] && mails[0].kind === 'offer_sign_decline' && mails[0].subject === 'The vendors have declined the offer for 1 Example Road' && /a vendor/.test(mails[0].html), 'a vendor\'s decline has its own subject and wording');
+    expect(mails[1] && mails[1].kind === 'offer_sign_ask' && mails[1].subject === 'A vendor asks for a change: 1 Example Road' && !/buyer/.test(mails[1].subject), 'a vendor\'s ask is worded for a vendor, not a buyer');
+    mails = []; }
+
   // ── Send to the vendors: worded for them ──
   r = await J(await post({ action: 'send', signing_id: SID }));
   expect(r.status === 403, 'Send needs Tim');

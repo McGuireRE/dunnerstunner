@@ -351,7 +351,9 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
     const rc = await invoke(v, { action: 'change', token: cLink.split('sign=')[1], session: sesV, id: '7a7a7a7a-0000-4000-8000-000000000001', kind: 'strike', page: 1, geometry: { x0: 100, x1: 180, y: 300 }, places: [] });
     expect(rc.ok === false && /hasn't switched on changes from this link/.test(rc.error), 'a change from the link is refused, and said plainly');
     await v.click('#ngDecline'); await v.waitForFunction(() => /Sent to Tim/.test(document.querySelector('#ngDeclineOut').textContent));
-    expect((await mails(v)).some(m => m.kind === 'offer_sign_ask' && m.to === 'tim' && /decline/.test(m.text)), 'Decline tells Tim');
+    expect((await mails(v)).some(m => m.kind === 'offer_sign_decline' && m.to === 'tim' && /^The vendors have declined the offer for 1 Example Road/.test(m.subject) && /decline/.test(m.text)), 'Decline tells Tim, with its own subject worded for the vendors');
+    await v.click('#sgAskBox summary'); await v.fill('#sgAskText', 'Could the settlement be a week later?'); await v.click('#sgAskGo'); await v.waitForFunction(() => /Sent to Tim/.test(document.querySelector('#sgAskOut').textContent));
+    expect((await mails(v)).some(m => m.kind === 'offer_sign_ask' && /^A vendor asks for a change/.test(m.subject)), 'Ask Tim for a change from a vendor is worded for a vendor');
     expect(!(await side(v)), 'the accept-or-decline link screen at 390 px: no sideways scroll');
     await v.close(); await p.evaluate(s => localStorage.setItem('mocksession', s), ses0); }
   await toOffer(p, offC); await p.waitForSelector('#ngWithdraw'); await p.click('#ngWithdraw summary');

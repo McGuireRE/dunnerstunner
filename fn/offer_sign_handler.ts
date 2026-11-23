@@ -223,7 +223,13 @@ export function makeHandler(d: Deps) {
       if (action === "ask") {
         const r = await call("offer_sign_ask", { p_token: token, p_session: session, p_text: String(body.text || "").slice(0, 1200) });
         let emailed = true;
-        try { await d.sendMail("offer_sign_ask", { to: d.timEmail, subject: `A buyer asks for a change: ${r.address || "an offer"}`, html: wrap(`<p><strong>${esc(r.name)}</strong> is signing their offer for <strong>${esc(r.address || "")}</strong> and asks for a change:</p><blockquote style="border-left:3px solid #C9C4BD;margin:0;padding:4px 12px">${esc(String(body.text || "").slice(0, 1000))}</blockquote><p>If it needs changing, correct the offer, re-draft and approve it, and release it again. Everyone then signs the new version.</p>`) }); } catch (_) { emailed = false; }
+        // worded by side: a vendor or a purchaser; a decline (from Round 2 on) has its own subject
+        const v = r.side === "vendor", later = (r.round || 1) > 1, decline = body.decline === true && later, who = v ? "vendor" : later ? "purchaser" : "buyer", quoted = `<blockquote style="border-left:3px solid #C9C4BD;margin:0;padding:4px 12px">${esc(String(body.text || "").slice(0, 1000))}</blockquote>`;
+        const subject = decline ? `${v ? "The vendors have declined the offer" : "The purchasers have declined the vendors' counteroffer"} for ${r.address || "the property"}` : `A ${who} asks for a change: ${r.address || "an offer"}`;
+        const html = decline ? `<p><strong>${esc(r.name)}</strong> (${v ? "a vendor" : "a purchaser"}) has declined Round ${esc(r.round)} for <strong>${esc(r.address || "")}</strong> as it stands:</p>${quoted}<p>If that is final, record it on the offer page (A side has withdrawn). Nothing has been sent to the ${v ? "purchasers" : "vendors"}.</p>`
+          : later ? `<p><strong>${esc(r.name)}</strong> (${v ? "a vendor" : "a purchaser"}) is answering Round ${esc(r.round)} for <strong>${esc(r.address || "")}</strong> and asks for a change:</p>${quoted}<p>You can switch on changes from their link for this round by presenting it again, or make the change with them in person.</p>`
+          : `<p><strong>${esc(r.name)}</strong> is signing their offer for <strong>${esc(r.address || "")}</strong> and asks for a change:</p>${quoted}<p>If it needs changing, correct the offer, re-draft and approve it, and release it again. Everyone then signs the new version.</p>`;
+        try { await d.sendMail(decline ? "offer_sign_decline" : "offer_sign_ask", { to: d.timEmail, subject, html: wrap(html) }); } catch (_) { emailed = false; }
         return json({ ok: true, emailed });
       }
       if (action === "finish") {

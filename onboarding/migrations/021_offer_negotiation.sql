@@ -655,6 +655,19 @@ begin
       'side_places', case when g.round_no > 1 then (select coalesce(jsonb_agg(e), '[]'::jsonb) from (select e from jsonb_array_elements(g.places) e union all select e from public.offer_sign_reviews r, jsonb_array_elements(r.places) e where r.signing_id = g.id) z) else '[]'::jsonb end),
     'taps', (select coalesce(jsonb_agg(t.place_id order by t.id), '[]'::jsonb) from public.offer_sign_taps t where t.signer_id = s.id));
 end $$;
+-- 020's "Ask Tim for a change" (and, from Round 2 on, "Decline it as it stands"), also saying which side and round, for the email's wording
+create or replace function public.offer_sign_ask(p_token text, p_session text, p_text text) returns jsonb language plpgsql security definer set search_path = public as $$
+declare s public.offer_signers; g public.offer_signings; t text := nullif(trim(regexp_replace(coalesce(p_text, ''), '[\u0001-\u0008\u000B\u000C\u000E-\u001F\u007F]', '', 'g')), ''); addr text;
+begin
+  s := public.offer_sign_me(p_token, p_session); select * into g from public.offer_signings where id = s.signing_id;
+  if s.void_at is not null or g.status in ('locked', 'replaced') then raise exception 'This version is no longer being signed'; end if;
+  if t is null or length(t) < 3 or length(t) > 1000 then raise exception 'Please say what you would like changed (up to 1,000 characters)'; end if;
+  if (select count(*) from public.offer_sign_asks where signer_id = s.id and at > now() - interval '1 day') >= 10 then raise exception 'You have sent several requests today. Tim will be in touch'; end if;
+  insert into public.offer_sign_asks (signing_id, signer_id, text) values (g.id, s.id, t);
+  insert into public.offer_events (property_id, offer_id, actor, kind, detail) values (g.property_id, g.offer_id, s.name, 'sign_change_asked', jsonb_build_object('signing_id', g.id, 'signer', s.position, 'length', length(t), 'round', g.round_no, 'side', g.side));
+  select address into addr from public.properties where id = g.property_id;
+  return jsonb_build_object('ok', true, 'name', s.name, 'address', addr, 'offer_id', g.offer_id, 'side', g.side, 'round', g.round_no);
+end $$;
 -- a change from a link, by the signer themselves (Round 2 on)
 -- (at most 60 changes an hour from one network, kept with the other limits; 30 an hour per signer is checked with the change)
 create or replace function public.offer_sign_change(p_token text, p_session text, p_net text, p_id uuid, p_kind text, p_page int, p_geometry jsonb, p_target uuid, p_places jsonb) returns jsonb language plpgsql security definer set search_path = public as $$

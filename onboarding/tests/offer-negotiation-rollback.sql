@@ -263,6 +263,11 @@ begin
 
   -- item 11: a map with no date place: no agreement until the places are put right
   g1 := (public.agent_signing_release(d4, 'in_person', sizes, pg_temp.rb_places(2, true, null, false), '{}') ->> 'id')::uuid; perform pg_temp.rb_prep(g1); perform pg_temp.rb_finish(g1); perform pg_temp.rb_lock(g1, '{}');
+  -- an in-person change in a round whose link switch is off: allowed (the switch is only about links); tried, then undone
+  begin g4 := (public.agent_round_present(o4, 'in_person', pg_temp.rb_places(2, true, null, true), true, null, false)->>'id')::uuid; perform pg_temp.rb_prep(g4);
+    r := public.agent_round_change((select id from public.offer_signers where signing_id = g4 and position = 1), '11111111-aaaa-4aaa-8aaa-000000000005', 'strike', 1, '{"x0":100,"x1":180,"y":200}', null, pg_temp.rb_change_places(2, '11111111-aaaa-4aaa-8aaa-000000000005', 'strike', '{"x0":100,"x1":180,"y":200}'));
+    raise exception 'saved=% with the link switch off=%', (r->>'id') = '11111111-aaaa-4aaa-8aaa-000000000005', (select link_changes from public.offer_signings where id = g4) = false;
+  exception when others then out := out || 'in-person change: ' || sqlerrm || '; '; end;
   g4 := (public.agent_round_present(o4, 'in_person', pg_temp.rb_places(2, true, null, true), true, null, true)->>'id')::uuid;
   out := out || 'switched on for this round despite the default=' || (select link_changes from public.offer_signings where id = g4) || '; '; perform pg_temp.rb_prep(g4); perform pg_temp.rb_finish(g4); perform pg_temp.rb_lock(g4, '{"lifted":[],"outstanding":[]}');
   begin perform public.offer_agreement_check(o4, now(), to_char(public.offer_nz_today(), 'FMDD FMMonth YYYY')); out := out || 'AGREED WITH NO DATE PLACE; '; exception when others then out := out || 'no date place: ' || sqlerrm || '; '; end;
