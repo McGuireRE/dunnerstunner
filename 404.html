@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<title>Portal · McGuire Real Estate</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;1,400&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  html { color-scheme: light dark; }
+  body { margin: 0; font-family: Barlow, system-ui, sans-serif; background: #FAF8F5; color: #1A1A18; }
+  @media (prefers-color-scheme: dark) { body { background: #181716; color: #F2EEE9; } }
+  .shell-msg { max-width: 440px; margin: 12vh auto 0; padding: 0 16px; font-size: 17px; line-height: 1.5; }
+  .shell-msg h1 { font-family: "Cormorant Garamond", Georgia, serif; font-weight: 500; font-size: 34px; margin: 0 0 10px; }
+  .shell-msg a { color: inherit; }
+</style>
+</head>
+<body>
+<noscript><div class="shell-msg"><h1>Please switch on JavaScript</h1><p>This page needs JavaScript to run.</p></div></noscript>
+<script>
+(function () {
+  var host = location.hostname, path = location.pathname;
+  var portal = host.indexOf('portal.') === 0 || /^\/portal(\/|$)/.test(path);
+  if (!portal) {
+    document.title = 'Page not found';
+    document.body.insertAdjacentHTML('beforeend', '<div class="shell-msg"><h1>Page not found</h1><p>There is no page at this address.</p><p><a href="/">Go to the home page</a></p></div>');
+    return;
+  }
+  window.MRE_PORTAL = true;
+  var src = ['https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js',
+    'https://packages.dunnerstunner.co.nz/catalogue.js',
+    'https://packages.dunnerstunner.co.nz/onboarding/portal.js'];
+  src.forEach(function (s) { var e = document.createElement('script'); e.src = s; e.async = false; document.body.appendChild(e); });
+})();
+</script>
+</body>
+</html>
