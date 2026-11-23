@@ -67,6 +67,8 @@ function q(table){ logCall('from:'+table);
     then(res,rej){ if(localStorage.getItem('trHang')==='1'&&table==='user_language') return; try{ res(run()); }catch(e){ res({data:null,error:{message:e.message}}); } }
   };
   function run(){
+    // localStorage mockFailTable = a table name: reading it fails, as with a dropped connection or a database error
+    if(op==='select'&&localStorage.getItem('mockFailTable')===table) throw new Error('Failed to fetch');
     const T=(DB[table]||=[]);
     // photos and documents (migration 016): vendors see none of it; guard_property_document() on every write
     if(['property_documents','property_document_events','repo_kinds'].includes(table)){ const r0=repoTable(table,op,payload,op==='update'?T.filter(r=>filters.every(f=>f(r))):[],single); if(r0) return r0; }

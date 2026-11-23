@@ -11132,9 +11132,13 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const bytes = await drBlankBytes(b);
     // whose own phone and email must never go on: the property's people (owners, contacts, earlier owners) and the agreements' people
     const prop = await must(sb.from('properties').select('id,cycle_at').eq('id', o.property_id).single());
-    const ags = (await ofSafe(sb.from('agreements').select('id,status,created_at').eq('property_id', o.property_id))) || [];
-    const ppl = (await ofSafe(sb.from('property_people').select('email,phone,role').eq('property_id', o.property_id))) || [];
-    const apl = ags.length ? ((await ofSafe(sb.from('agreement_people').select('email,phone').in('agreement_id', ags.map(x => x.id)))) || []) : [];
+    // these must load: with no list, the check that keeps the vendors' own details off the agreement would have nothing to check
+    let ags, ppl, apl;
+    try {
+      ags = (await must(sb.from('agreements').select('id,status,created_at').eq('property_id', o.property_id))) || [];
+      ppl = (await must(sb.from('property_people').select('email,phone,role').eq('property_id', o.property_id))) || [];
+      apl = ags.length ? ((await must(sb.from('agreement_people').select('email,phone').in('agreement_id', ags.map(x => x.id)))) || []) : [];
+    } catch (_) { throw new Error('The owners\' details couldn\'t be loaded, so nothing was drafted. Check you have signal, then try again.'); }
     const parties = ppl.map(x => ({ who: 'a vendor', email: x.email, phone: x.phone })).concat(apl.map(x => ({ who: 'a vendor', email: x.email, phone: x.phone })));
     // the vendor's lawyer, if the file holds one: only from a signed agreement of the current owners
     const links = ags.length ? ((await ofSafe(sb.from('lawyer_links').select('agreement_id,lawyer_name,firm,email,sent_at').in('agreement_id', ags.map(x => x.id)))) || []) : [];

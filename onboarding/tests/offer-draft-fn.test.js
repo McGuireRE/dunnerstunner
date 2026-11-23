@@ -95,13 +95,15 @@ const path = require('path');
   r = await post({ action: 'lawyer_lookup', offer_id: OFFER, firm: 'Synthetic Law', person: 'Pat Solicitor' }); j = await r.json();
   expect(j.ok && j.values.length === 0 && j.dropped === 2, 'values not in a cited quote are dropped');
   // a search that pauses is continued, a few times at most, and every block is read
-  let seq = [], callsN = 0; const pause = (content) => ({ ok: true, status: 200, body: { stop_reason: 'pause_turn', usage: {}, content } });
+  let seq = [], callsN = 0; const reqs = []; const pause = (content) => ({ ok: true, status: 200, body: { stop_reason: 'pause_turn', usage: {}, content } });
   const done = found([{ field: 'phone', kind: 'direct', value: '+64 3 477 1234', source_url: 'https://www.synthlaw.example/our-people/pat-solicitor/' }]);
   const h2 = H.makeHandler({ cors: {}, whoIsAgent: async () => agent, rpc: async () => ({ data: 33, error: null }), download: async () => null, aiKey: () => 'k',
-    callModel: async (req) => { callsN++; seq.push(req.messages.length); return seq.length < 3 ? pause([{ type: 'server_tool_use', name: 'web_search', input: { query: 'q' + seq.length } }]) : done; }, logAi: async () => { } });
+    callModel: async (req) => { callsN++; seq.push(req.messages.length); reqs.push(JSON.parse(JSON.stringify(req))); return seq.length < 3 ? pause([{ type: 'server_tool_use', name: 'web_search', input: { query: 'q' + seq.length } }]) : done; }, logAi: async () => { } });
   const post2 = (h_, body) => h_(new Request('https://x/f', { method: 'POST', headers: { Authorization: 'Bearer good', 'Content-Type': 'application/json' }, body: JSON.stringify(body) }));
   r = await post2(h2, { action: 'lawyer_lookup', offer_id: OFFER, firm: 'Synthetic Law', person: 'Pat Solicitor' }); j = await r.json();
   expect(j.ok && callsN === 3 && JSON.stringify(seq) === '[1,2,2]' && j.values.length === 1 && j.values[0].kind === 'direct', 'pause_turn: carried on with the paused turn, then the answer read');
+  const third = reqs[2].messages[1].content.map(b => b.input && b.input.query);
+  expect(reqs[2].messages[1].role === 'assistant' && JSON.stringify(third) === '["q1","q2"]' && JSON.stringify(reqs[1].messages[1].content.map(b => b.input.query)) === '["q1"]', 'after two pauses the next request carries both earlier replies, in order');
   callsN = 0; const h3 = H.makeHandler({ cors: {}, whoIsAgent: async () => agent, rpc: async () => ({ data: 34, error: null }), download: async () => null, aiKey: () => 'k', callModel: async () => { callsN++; return pause([]); }, logAi: async () => { } });
   r = await post2(h3, { action: 'lawyer_lookup', offer_id: OFFER, firm: 'Synthetic Law', person: 'Pat Solicitor' }); j = await r.json();
   expect(callsN === H.MAX_CONTINUE + 1 && j.ok && j.values.length === 0, 'a search that keeps pausing stops after a few turns');

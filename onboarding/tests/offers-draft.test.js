@@ -147,6 +147,15 @@ const sha = b => crypto.createHash('sha256').update(Buffer.from(b)).digest('hex'
   process.stderr.write('step 5\n');
   await p.click(`[data-offer="${off1}"]`); await p.waitForSelector('#drOffer');
   expect(await p.isDisabled('#drAgDate') && /Added once fully agreed/.test(await p.textContent('#drOffer')), 'the date field is there, disabled, added once fully agreed');
+  // the owners' or agreement people's details fail to load: nothing is drafted, and Tim is told plainly
+  for (const t of ['property_people', 'agreement_people']) {
+    await p.evaluate(t => localStorage.setItem('mockFailTable', t), t); const e0 = errs.length;
+    await p.click('#drDraftBtn'); await p.waitForFunction(() => /nothing was drafted/.test(document.querySelector('#drDraftErr').textContent), null, { timeout: 30000 });
+    errs.splice(e0, errs.length - e0, ...errs.slice(e0).filter(e => !/Failed to fetch/.test(e)));   // must() logs the failed read on purpose
+    expect(!((await db(p)).offer_drafts || []).length && /owners' details couldn't be loaded/.test(await p.textContent('#drDraftErr')), `when ${t} can't be read, no draft is made`);
+    await p.evaluate(() => localStorage.removeItem('mockFailTable'));
+    await p.click('#ofBackP').catch(() => null); await p.waitForSelector('#offTile'); await p.click(`[data-offer="${off1}"]`); await p.waitForSelector('#drDraftBtn');
+  }
   await p.click('#drDraftBtn'); await p.waitForSelector('#drReview', { timeout: 30000 }); await p.waitForSelector('#drRvCanvas .dr-box');
   d = await db(p); const dr1 = d.offer_drafts[0];
   expect(dr1.blank_sha256 === blankSha && dr1.map_id === m1.id && dr1.number === 1, 'the draft records the blank\'s fingerprint and the map');

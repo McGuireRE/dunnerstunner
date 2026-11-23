@@ -81,7 +81,7 @@ export function makeHandler(d: Deps) {
     let request; try { request = buildLawyerLookupRequest(firm, person); } catch (e: any) { return json({ ok: false, reason: "need_name", message: String(e?.message || e), manual }); }
     if (!key) return json({ ok: false, reason: "off", message: "The lookup isn't switched on yet. Use the links to look the lawyer up yourself.", manual });
     // a long search can pause (stop_reason pause_turn): it is sent back to carry on, a few times at most, and every block kept
-    let r: { ok: boolean; status: number; body: any } = { ok: false, status: 0, body: {} }; const content: any[] = []; let turnReq: any = request;
+    let r: { ok: boolean; status: number; body: any } = { ok: false, status: 0, body: {} }; const content: any[] = [], paused: any[] = []; let turnReq: any = request;
     for (let turn = 0; turn <= MAX_CONTINUE; turn++) {
       try { r = await d.callModel(turnReq, 55000); } catch (e: any) { r = { ok: false, status: 0, body: { error: { message: String(e?.message || e) } } }; }
       const usage = r.body?.usage || {}, e1 = r.ok ? null : String(r.body?.error?.message || r.status).slice(0, 300);
@@ -89,7 +89,9 @@ export function makeHandler(d: Deps) {
       if (!r.ok) break;
       content.push(...(r.body?.content || []));
       if (r.body?.stop_reason !== "pause_turn") break;
-      turnReq = Object.assign({}, request, { messages: request.messages.concat({ role: "assistant", content: r.body.content || [] }) });
+      // every paused reply so far, in order, as the assistant's turn: the next continuation carries all the earlier searches
+      paused.push(...(r.body.content || []));
+      turnReq = Object.assign({}, request, { messages: request.messages.concat({ role: "assistant", content: paused.slice() }) });
     }
     const err = r.ok ? null : String(r.body?.error?.message || r.status).slice(0, 300);
     if (!r.ok) {
