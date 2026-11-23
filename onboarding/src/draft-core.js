@@ -350,6 +350,8 @@
   const placeholderFor = (key, title) => PLACEHOLDERS[key] || `[Tim to add his ${String(title || key).toLowerCase()} clause]`;
   const isPlaceholder = s => /^\[Tim to /.test(String(s || ''));
   // the drafting's own reference markers ([[FT:x]], [[TERM:x]]) taken out of any text it didn't write itself (a buyer's, the AI's, a paste)
+  // a further term's number as the agreement writes its clauses: 23.0, matching the printed 22.0
+  const termNo = n => `${n}.0`;
   const noRefs = s => String(s == null ? '' : s).replace(/\[\[|\]\]/g, '');
   // does a library rule apply to this offer?
   function ruleApplies(rule, d) {
@@ -513,7 +515,7 @@
       // waits for another condition: the short phrase on the line if it fits there, otherwise "see further term N" and a further term
       // that sets out this condition's date. The REINZ text is never changed, only added to.
       const n = Math.floor(+c.days), short = `${wdays(n)} after ${shortRef(c.after)} is satisfied or waived`, dp = P('d_' + k), dn = DATE_NAMES[k] || labelOf(k).toLowerCase() + ' date';
-      if (dp && textWidth(short.replace(REF('FT'), '99'), 7.5) <= dp.w) {
+      if (dp && textWidth(short.replace(REF('FT'), '99.0'), 7.5) <= dp.w) {
         put('d_' + k, dp, short, { label: label + ': date' });
         need('front_after_' + k, `${label}: the date line says "${short}" because it waits for ${labelOf(c.after)}. Check it reads clearly on the page.`, false);
       } else {
@@ -565,16 +567,15 @@
     const refMissing = k => { need('ref_missing_' + k, `A condition waits for ${labelOf(k)}, but ${labelOf(k)} isn't in the further terms, so its number is shown as "?". Add it, or change the timing.`, true); return '?'; };
     let resolveRefs = t => String(t).replace(REF('FT'), (m, k) => refMissing(k)).replace(REF('TERM'), '?');
     let ftn = 0; const term = (id, title, text, extra) => { ft.push(Object.assign({ id, title, text }, extra || {})); };
-    // A term's timing: the condition it belongs to, unless Tim set the timing of this term on the review screen (edits.term_timing,
-    // working days, a date, or after one of the offer's conditions). That changes the draft only: the offer's own dates stay as they are.
+    // A term's timing: the condition it belongs to (always the offer's own: Tim changes that on the review screen as a correction to the
+    // offer, so the date checks follow), or, for a term tied to no condition, the timing Tim set on the review screen (edits.term_timing:
+    // working days, a date, or after one of the offer's conditions)
     const TT = E.term_timing && typeof E.term_timing === 'object' ? E.term_timing : {};
-    const timedFor = (id, c, title) => { const ov = TT[id]; if (!ov || typeof ov !== 'object') return c || null;
+    const timedFor = (id, c, title) => { const ov = TT[id]; if (c || !ov || typeof ov !== 'object') return c || null;
       const t = { key: c ? c.key : 'term_' + id };
       if (ov.after) { if (!(cond(ov.after) && ov.after !== t.key && Math.floor(+ov.days) >= 1)) { need('term_timing_bad_' + id, `${title}: the timing you set waits for a condition that isn't on this offer, so it wasn't used. Set it again.`, !c); return c || null; }
         Object.assign(t, { after: ov.after, days: Math.floor(+ov.days) }); }
       else if (ov.date && OF && OF.isDate(ov.date)) t.date = ov.date; else if (Math.floor(+ov.days) >= 1) t.days = Math.floor(+ov.days); else return c || null;
-      if (c && JSON.stringify([c.after || '', c.date || '', c.after || c.date ? '' : +c.days]) !== JSON.stringify([t.after || '', t.date || '', t.after || t.date ? '' : +t.days]))
-        need('term_timing_' + id, `${title}: you set its timing on the draft to "${timingPhrase(t)}". The offer itself still says ${OF ? OF.timingPlain(c) : 'otherwise'}, so the date checks follow the offer. Correct the offer too if they should match.`, false);
       return t; };
     // a term's wording with its tokens filled: { text, template (the wording with {timing} and {date} kept), tokens, timing }.
     // {timing} with no timing to give: a highlighted gap, and Tim must set it.
@@ -641,29 +642,29 @@
     const NB = Object.assign({}, map.numbering || {}, input.numbering || {}), retired = new Set((E.retired_numbers || []).map(Number).filter(n => n >= 1));
     const base = Math.max(+NB.general_last || +(ftp || {}).general_last || 0, +NB.appendix_last || +(ftp || {}).appendix_last || 0, +(ftp || {}).printed_last || 0);
     ftn = base;
-    if (base) need('term_start', `Further terms start at ${base + 1} (general terms to ${NB.general_last || (ftp || {}).general_last || 'none found'}, appendix to ${NB.appendix_last || (ftp || {}).appendix_last || 'none found'}${(ftp || {}).printed_last ? `, printed on the further terms page to ${ftp.printed_last}` : ''}).`, false);
+    if (base) need('term_start', `Further terms start at ${termNo(base + 1)} (general terms to ${NB.general_last || (ftp || {}).general_last || 'none found'}, appendix to ${NB.appendix_last || (ftp || {}).appendix_last || 'none found'}${(ftp || {}).printed_last ? `, printed on the further terms page to ${ftp.printed_last}` : ''}).`, false);
     if (ft.length && !base) need('numbering_unknown', "The last general terms clause number couldn't be read from the blank, so the further terms are numbered from 1. Check the numbering.", false);
     if (ft.length && ftp && ftp.printed_bottom != null) {
       // terms already printed on the page: ours start below the lowest printed line, numbered on from the highest printed number
       const top = ftp.printed_bottom - 14, cut = ftp.y - top; ftp = Object.assign({}, ftp, { y: top, h: ftp.h - cut });
       let first = ftn + 1; while (retired.has(first)) first++;
-      need('further_printed', `The Further Terms page already has ${ftp.printed_count} printed line${ftp.printed_count === 1 ? '' : 's'}${ftp.printed_last ? `, numbered to ${ftp.printed_last}` : ''}. The offer's terms start below the lowest of them, numbered from ${first}. This layout hasn't been checked on a real blank yet: look at the page before you approve.`, true, true);
+      need('further_printed', `The Further Terms page already has ${ftp.printed_count} printed line${ftp.printed_count === 1 ? '' : 's'}${ftp.printed_last ? `, numbered to ${ftp.printed_last}` : ''}. The offer's terms start below the lowest of them, numbered from ${termNo(first)}. This layout hasn't been checked on a real blank yet: look at the page before you approve.`, true, true);
     }
     if (ft.length) {
       ft.forEach(x => { ftn++; while (retired.has(ftn)) ftn++; x.number = ftn; });
       // the further term numbers are known now: fill in every reference to one ("further term 3"), in the terms and on the page
       const numOf = new Map(), byId = new Map(ft.map(x => [x.id, x.number])); ft.forEach(x => { if (x.cond && !numOf.has(x.cond)) numOf.set(x.cond, x.number); });
-      resolveRefs = t => String(t).replace(REF('FT'), (m, k) => numOf.has(k) ? String(numOf.get(k)) : refMissing(k))
-        .replace(REF('TERM'), (m, id) => byId.has(id) ? String(byId.get(id)) : '?');
+      resolveRefs = t => String(t).replace(REF('FT'), (m, k) => numOf.has(k) ? termNo(numOf.get(k)) : refMissing(k))
+        .replace(REF('TERM'), (m, id) => byId.has(id) ? termNo(byId.get(id)) : '?');
       // Tim's edit of a term is its wording as he left it: {timing} and {date} in it are filled in like any other
       const text = ft.map(x => { const edited = Object.prototype.hasOwnProperty.call(edits, x.id) ? String(edits[x.id] || '') : null;
         let body = edited != null ? noRefs(edited) : x.text; if (edited != null) { x.template = edited; if (/\{(date|timing)\}/.test(edited)) { const f = fillTerm(x.id, x.title, edited, x.timing); body = f.text; x.suffix = ''; } }
         body = resolveRefs(body); x.text = body;
-        return `${x.number}. ${noRefs(x.title)}${x.detail ? ' (' + noRefs(x.detail) + ')' : ''}: ${body}${resolveRefs(x.suffix || '')}`; });
+        return `${termNo(x.number)} ${noRefs(x.title)}${x.detail ? ' (' + noRefs(x.detail) + ')' : ''}: ${body}${resolveRefs(x.suffix || '')}`; });
       const it = put('further_terms', ftp, text.join('\n'), { label: 'Further terms of sale', item: { cont: NB.cont || null, number_base: base, terms: ft.map(x => ({ id: x.id, number: x.number, title: x.title, text: x.text, placeholder: isPlaceholder(x.text), custom: !!x.custom, request: x.request, wording: x.wording, ai: x.ai,
         template: x.template != null ? resolveRefs(x.template) : null, timing: x.timing ? { key: x.timing.key, days: x.timing.days, date: x.timing.date, after: x.timing.after } : null, timing_text: x.timing ? resolveRefs(timingPhrase(x.timing)) : '',
         date_text: x.timing ? resolveRefs(dateText(x.timing)) : '', removable: !!x.removable, added: !!x.added, library: x.library || null, extra: !!x.extra })) } });
-      ft.filter(x => isPlaceholder(x.text)).forEach(x => need('ph_' + x.id, `Further term ${x.number}, ${x.title}: ${x.text}`, true));
+      ft.filter(x => isPlaceholder(x.text)).forEach(x => need('ph_' + x.id, `Further term ${termNo(x.number)}, ${x.title}: ${x.text}`, true));
     }
     // any reference still waiting for its number (on the front page, beside clause 22.0, and in Tim's list of things to check)
     items.forEach(it => { if (it.text && hasRef(it.text)) it.text = resolveRefs(it.text); });
@@ -851,7 +852,7 @@
     return { bytes, boxes, continued, overflow, added_pages: addedPages };
   }
 
-  const DRAFT = { EDITIONS, EDITION_RE, editionOk, readPages, lines, xAt, matchAll, readEdition, editionPages, buildMap, parseChattels, numberIn, daysWords, FRONT_CONDITIONS, LABELS,
+  const DRAFT = { termNo, EDITIONS, EDITION_RE, editionOk, readPages, lines, xAt, matchAll, readEdition, editionPages, buildMap, parseChattels, numberIn, daysWords, FRONT_CONDITIONS, LABELS,
     packText, packBatches, placeFromProposal, rectOf, nsn, phoneRuns, ownContacts, holdsOwn, pickVendorLawyer, PROPOSAL_KINDS, planDraft, ruleApplies, fullDate, PLACEHOLDERS, placeholderFor, isPlaceholder, winAnsi, renderDraft, wrap, INK, FONT_SIZE };
   if (typeof module !== 'undefined' && module.exports) module.exports = DRAFT; else root.DRAFT = DRAFT;
 })(typeof window !== 'undefined' ? window : globalThis);

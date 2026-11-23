@@ -164,7 +164,7 @@ const sha = b => crypto.createHash('sha256').update(Buffer.from(b)).digest('hex'
   const today = O.nzToday(), cd = n => D.fullDate(O.addWorkingDays(today, n, { province: 'otago' }));
   out.expected = ['Ana Maria Testbuyer and Bo Testbuyer', '$655,000', cd(10)];
   ['Ana Maria Testbuyer and Bo Testbuyer', '$655,000', cd(10)].forEach(v => expect(t1[0].includes(v), 'front page has ' + v));
-  expect(/23\. Electrical report: \[Tim to add his electrical report clause\]/.test(t1[2]) && /24\. Pets: Synthetic pets wording from Tim\./.test(t1[2]), 'further terms: the placeholder and Tim\'s standard term, numbered');
+  expect(/23\.0 Electrical report: \[Tim to add his electrical report clause\]/.test(t1[2]) && /24\.0 Pets: Synthetic pets wording from Tim\./.test(t1[2]), 'further terms: the placeholder and Tim\'s standard term, numbered');
   expect(t1[4].includes('Also included: Outdoor table'), 'chattels added on Schedule 2');
   ['Synthetic Law', 'Pat Solicitor'].forEach(v => expect(t1[6].includes(v), 'the purchaser\'s lawyer: ' + v));
   expect(t1[5].includes('Ana Maria Testbuyer') && t1[5].includes('Bo Testbuyer'), 'names under the purchasers\' signatures');
@@ -190,7 +190,7 @@ const sha = b => crypto.createHash('sha256').update(Buffer.from(b)).digest('hex'
   d = await db(p); const dr2 = d.offer_drafts.find(x => x.number === 2);
   expect(d.offer_drafts.length === 2 && JSON.stringify(d.offer_drafts.find(x => x.number === 1)) === keep1, 're-draft keeps the old draft, unchanged');
   const pdf2 = await blob(p, dr2.path); const t2 = await pdfText(pdf2);
-  expect(/23\. Electrical report: Synthetic electrical wording typed by Tim on the draft\./.test(t2[2]) && dr2.edits.items.ft_electrical && dr2.note === 'Electrical wording added', 'Tim\'s wording on the new draft, with his note');
+  expect(/23\.0 Electrical report: Synthetic electrical wording typed by Tim on the draft\./.test(t2[2]) && dr2.edits.items.ft_electrical && dr2.note === 'Electrical wording added', 'Tim\'s wording on the new draft, with his note');
   expect(await p.$('#drNoNeeds') && !(await p.isDisabled('#drApproveDraft')), 'nothing needs Tim: approve is available');
   await p.click('#drApproveDraft'); await p.waitForSelector('#drApproved');
   d = await db(p); const ap = d.offer_draft_approvals[0];
@@ -207,7 +207,7 @@ const sha = b => crypto.createHash('sha256').update(Buffer.from(b)).digest('hex'
   await p.click('#drRedraftChange'); await p.waitForSelector('#drReview h1:has-text("Draft 3")', { timeout: 30000 });
   d = await db(p); const dr3 = d.offer_drafts.find(x => x.number === 3); const t3 = await pdfText(await blob(p, dr3.path));
   expect(t3[0].includes('$670,000') && !t3[0].includes('$655,000') && d.offer_drafts.length === 3 && d.offer_draft_approvals.length === 1, 'the new draft has the corrected price; earlier drafts and the approval are kept');
-  expect(/23\. Electrical report: \[Tim to add his electrical report clause\]/.test(t3[2]), 'item edits are not carried into a re-draft after a change (the placeholder is back for Tim)');
+  expect(/23\.0 Electrical report: \[Tim to add his electrical report clause\]/.test(t3[2]), 'item edits are not carried into a re-draft after a change (the placeholder is back for Tim)');
   const r72 = await rpc(p, 'agent_draft_approve', { p_draft: dr2.id, p_sha256: dr2.sha256 }); expect(r72.data && r72.data.existing && (await db(p)).offer_draft_approvals.length === 1, 'approving draft 2 again changes nothing: its approval stays on record');
   const r7 = await rpc(p, 'agent_draft_approve', { p_draft: d.offer_drafts.find(x => x.number === 1).id, p_sha256: dr1.sha256 }); expect(r7.error && /newer draft/.test(r7.error.message), 'an older draft cannot be approved');
 
@@ -393,9 +393,42 @@ const sha = b => crypto.createHash('sha256').update(Buffer.from(b)).digest('hex'
   const apg = dr9.placed.filter(x => x.kind === 'page'); out.addedPages = apg.map(x => [x.page, x.source_page, x.bands && x.bands.as, x.plain]);
   expect(apg.length >= 1 && apg.every(x => x.bands && x.bands.as === 'image' && !x.plain) && dr9.needs.some(n => n.id === 'continuation_check' && n.blocking && n.ackable), 'the added page is made from pictures of the bands, with Tim\'s check: ' + JSON.stringify(out.addedPages));
   const cpdf = await blob(q, dr9.path), cfn = path.join(__dirname, 'out', 'review-cont.pdf'); fs.writeFileSync(cfn, Buffer.from(cpdf));
-  const ctxt = require('child_process').execFileSync('pdftotext', ['-f', String(apg[0].page), '-l', String(apg[0].page), cfn, '-'], { encoding: 'utf8' }).replace(/\s+/g, ' ').replace(/\d+\. Your further term: Extra term \d+ with enough words to take a full line of the page, more or less, and then some more words so that it wraps\./g, '').trim();
+  const ctxt = require('child_process').execFileSync('pdftotext', ['-f', String(apg[0].page), '-l', String(apg[0].page), cfn, '-'], { encoding: 'utf8' }).replace(/\s+/g, ' ').replace(/\d+\.0 Your further term: Extra term \d+ with enough words to take a full line of the page, more or less, and then some more words so that it wraps\./g, '').trim();
   expect(/\(continued\)/.test(ctxt) && /\b4\b/.test(ctxt) && !/FURTHER TERMS OF SALE|Further Terms continued|Eleventh Edition|Synthetic test form|©|\b3\b/.test(ctxt), 'the added page holds as text only "(continued)", its new number and the typed terms (the bands are pictures): ' + JSON.stringify(ctxt.slice(0, 120)));
   await q.fill('#drExtra', ''); await q.click('#drRedraft'); dr9 = await waitDraft(++dn);
+  // the numbering on the agreement and on the screen: 23.0, 24.0 ...
+  const t9n = await pdfText(await blob(q, dr9.path)); expect(/23\.0 Purchaser's condition:/.test(t9n[2]) && !/(^|\s)23\. /.test(t9n[2]), 'further terms written 23.0, 24.0 on the agreement');
+  expect(/^23\.0 /.test((await q.textContent('#drTermList li .dr-tno')).trim()), 'and on the review screen');
+  expect(dr9.needs.some(n => n.id === 'term_start' && /^Further terms start at 23\.0 /.test(n.text)), 'the starting number in the same style');
+  // a timing chip tied to one of the offer's conditions: a recorded correction to the offer, then a new draft (Tim, 24 November 2026)
+  const o2c = (await db(q)).property_offers.find(x => x.id === off2), cw = 'Synthetic custom condition wording from the buyer, to be satisfied or waived {timing}.';
+  await q.fill('[data-rich="ft_custom"]', cw); await q.click('#drRedraft'); dr9 = await waitDraft(++dn);   // Tim words it with {timing}, ticked earlier
+  await q.click('li[data-term="ft_custom"] .dr-chip[data-chip="timing"]'); await q.waitForSelector('#drChipEd:not([hidden])');
+  expect(/changes it on the offer/.test(await q.textContent('#drChipFor')) && await q.isVisible('#drCmModes label:has(input[value="after"])'), 'a condition-tied chip says it changes the offer, and offers "after another condition"');
+  expect(await q.$eval('#drCmAfter option[value="custom"]', e => e.disabled), 'it can\'t wait for itself');
+  await q.click('input[name="dr_cm"][value="after"] + .mark'); await q.selectOption('#drCmAfter', 'finance'); await q.fill('#drCmDays', '2'); await q.click('#drCmDone'); dr9 = await waitDraft(++dn);
+  const dd2 = await db(q), o2a = dd2.property_offers.find(x => x.id === off2), cc = o2a.details.conditions.find(c => c.key === 'custom');
+  expect(cc.after === 'finance' && cc.days === 2 && !cc.date && o2a.submission.conditions.find(c => c.key === 'custom').days === 10, 'the offer now has the custom condition 2 working days after finance; the buyer\'s original kept');
+  expect(dd2.offer_events.some(e => e.offer_id === off2 && e.kind === 'corrected' && /Changed the timing of Your own condition on the draft: within 2 working days after Finance is satisfied or waived/.test(e.detail.note)), 'recorded as a correction, with the change in the note');
+  expect(!(dr9.edits.term_timing || {}).ft_custom && /Timing of Your own condition changed/.test(dr9.note), 'nothing draft-only kept for it; the new draft says why it was made');
+  const t9c = await pdfText(await blob(q, dr9.path)); expect(/to be satisfied or waived within 2 working days of the date the finance condition in clause 9\.1 is satisfied or waived\./.test(t9c[2]), 'the new draft says so on the agreement');
+  expect(!dr9.needs.some(n => /^term_timing_/.test(n.id)), 'no "draft only, differs from the offer" note');
+  // the date checks run again: shown on the review screen with the KiwiSaver warnings (KiwiSaver funds this deposit)
+  out.drDates = await q.textContent('#drDates');
+  expect(/At the latest/.test(out.drDates) && /2 working days after Finance is satisfied or waived/.test(out.drDates) && await q.isVisible('#drDates [data-drwarn="ks_deposit"]'), 'the offer\'s dates checked again, with the warnings shown');
+  // an older draft, approved before the change, is stale now
+  const old2 = await rpc(q, 'agent_draft_approve', { p_draft: dd2.offer_drafts.find(x => x.offer_id === off2 && x.number === dn - 1).id, p_sha256: dd2.offer_drafts.find(x => x.offer_id === off2 && x.number === dn - 1).sha256, p_checked: [] });
+  expect(old2.error && /newer draft/.test(old2.error.message), 'the draft before the change can no longer be approved');
+  // a loop is refused before anything is saved
+  await q.click('li[data-term="ft_custom"] .dr-chip[data-chip="timing"]'); await q.waitForSelector('#drChipEd:not([hidden])');
+  const nEv = (await db(q)).offer_events.length; await q.click('input[name="dr_cm"][value="after"] + .mark'); await q.selectOption('#drCmAfter', 'finance'); await q.fill('#drCmDays', '3');
+  // finance waits for nothing, so this is fine; set finance to wait for the custom condition through the offer and try again
+  await q.click('#drCmCancel');
+  const o2b = (await db(q)).property_offers.find(x => x.id === off2);
+  const loopTry = await rpc(q, 'agent_offer_correct', { p_offer: off2, p_details: Object.assign({}, o2b.details, { conditions: o2b.details.conditions.map(c => c.key === 'finance' ? { key: 'finance', after: 'custom', days: 1 } : c), chattels_listed: undefined }), p_note: 'loop' });
+  expect(loopTry.error && /wait for each other in a loop/.test(loopTry.error.message) && (await db(q)).offer_events.length === nEv, 'a loop is refused by the server, and nothing is recorded');
+  // the date in the Keys wording (tied to no condition) was a draft-only edit: the offer was never corrected for it
+  expect(!(await db(q)).offer_events.some(e => e.offer_id === off2 && e.kind === 'corrected' && /Keys|keys/.test((e.detail || {}).note || '')), 'a date chip not tied to a condition changes the draft only');
   expect(!(await side(q)), 'review screen with all of it at 390 px: no sideways scroll');
   // the clause library: the AI writer saves a clause that goes on only when Tim adds it
   await q.click('#drRvBack'); await q.waitForSelector('#drOffer'); await q.click('#ofBackP'); await q.waitForSelector('#drLibBtn'); await q.click('#drLibBtn'); await q.waitForSelector('#drLib');

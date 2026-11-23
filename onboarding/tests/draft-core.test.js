@@ -92,16 +92,16 @@ const ok = (c, msg) => { if (!c) errs.push(msg); };
   ok(I(ks2, 'strike_clause21_2') && I(ks2, 'strike_clause21_2').lines.length === 2, 'with strike_when_unused, 21.2 is struck through when KiwiSaver funds the deposit');
   // Tim's clauses: wording or a placeholder; the buyer's own only once ticked
   const pe = plan({ conditions: [{ key: 'electrical', days: 10 }, { key: 'custom', days: 10, wording: 'Buyer typed wording.', ai: true }] });
-  const ft = I(pe, 'further_terms'); ok(ft && /^23\. Electrical report: \[Tim to add his electrical report clause\]/.test(ft.text), 'electrical without wording: highlighted placeholder');
+  const ft = I(pe, 'further_terms'); ok(ft && /^23\.0 Electrical report: \[Tim to add his electrical report clause\]/.test(ft.text), 'electrical without wording: highlighted placeholder');
   ok(N(pe, 'ph_ft_electrical').blocking && N(pe, 'ph_ft_custom').blocking, 'placeholders listed as Needs you, blocking');
-  ok(/24\. Purchaser's condition: \[Tim to tick the buyer's own condition wording\]/.test(ft.text) && !/Buyer typed wording/.test(ft.text), "the buyer's own wording is not used until ticked");
+  ok(/24\.0 Purchaser's condition: \[Tim to tick the buyer's own condition wording\]/.test(ft.text) && !/Buyer typed wording/.test(ft.text), "the buyer's own wording is not used until ticked");
   const pe2 = D.planDraft({ details: pe.terms && Object.assign({}, base, { conditions: [{ key: 'electrical', days: 10 }, { key: 'custom', days: 10, wording: 'Buyer typed wording.' }] }), map, terms, clauses: { electrical: "Tim's electrical words." }, edits: { custom_ok: true }, today: '2026-11-24' });
-  ok(/23\. Electrical report: Tim's electrical words\. Condition date: 8 December 2026\./.test(I(pe2, 'further_terms').text) && /24\. Purchaser's condition: Buyer typed wording\./.test(I(pe2, 'further_terms').text) && !pe2.needs.some(n => n.blocking), "Tim's wording and the ticked condition: no placeholders");
+  ok(/23\.0 Electrical report: Tim's electrical words\. Condition date: 8 December 2026\./.test(I(pe2, 'further_terms').text) && /24\.0 Purchaser's condition: Buyer typed wording\./.test(I(pe2, 'further_terms').text) && !pe2.needs.some(n => n.blocking), "Tim's wording and the ticked condition: no placeholders");
   ok(!/Never placed/.test(I(pe2, 'further_terms').text), 'a switched-off clause is never placed');
   const ptech = D.planDraft({ details: Object.assign({}, base, { conditions: [{ key: 'technical', days: 10, detail: 'Drainage' }] }), map, terms, clauses: { technical: 'A {detail} report by {date}.' }, today: '2026-11-24' });
   ok(/Specified technical report \(Drainage\): A Drainage report by 8 December 2026\./.test(I(ptech, 'further_terms').text), 'a clause can name the detail and the date');
   const pex = plan({}, { extra_terms: ['Tim typed this extra term.'], items: { price: '$656,000' } });
-  ok(/23\. Your further term: Tim typed this extra term\./.test(I(pex, 'further_terms').text) && I(pex, 'price').text === '$656,000' && I(pex, 'price').edited, 'an extra term and an edited value');
+  ok(/23\.0 Your further term: Tim typed this extra term\./.test(I(pex, 'further_terms').text) && I(pex, 'price').text === '$656,000' && I(pex, 'price').edited, 'an extra term and an edited value');
   // GST: only when the buyer said so
   ok(!I(p, 'gst_purchaser') && N(p, 'gst_unknown') && N(p, 'gst_vendor'), 'GST not said: nothing placed; the vendor\'s GST is Tim\'s');
   eq(I(plan({ gst_registered: true, gst_number: '123-456-789' }), 'gst_purchaser').value, 'Yes', "said yes: Schedule 1 2(a) No struck"); eq(I(plan({ gst_registered: false }), 'gst_purchaser').value, 'No', 'said no');
@@ -132,7 +132,7 @@ const ok = (c, msg) => { if (!c) errs.push(msg); };
   const dpages = await D.readPages(pdfjs, r.bytes), text = n => dpages[n - 1].items.map(i => i.s).join(' '), whole = dpages.map(pg => pg.items.map(i => i.s).join(' ')).join('\n');
   eq(dpages.length, pages.length, 'same number of pages');
   ['Ana Maria Testbuyer and Bo Testbuyer', '$655,000', '8 December 2026', '18 December 2026'].forEach(v => ok(text(1).includes(v), 'front page has ' + v));
-  ok(/23\. Electrical report: \[Tim to add his electrical report clause\]/.test(text(3)), 'further terms on their page, with the placeholder');
+  ok(/23\.0 Electrical report: \[Tim to add his electrical report clause\]/.test(text(3)), 'further terms on their page, with the placeholder');
   ok(text(5).includes('Also included: Outdoor table'), 'chattels added on Schedule 2');
   ['Synthetic Law', 'Pat Solicitor', 'pat@synthlaw.example', '03 477 1234'].forEach(v => ok(text(7).includes(v), 'back page has the lawyer\'s ' + v));
   ok(text(6).includes('Ana Maria Testbuyer') && text(6).includes('Bo Testbuyer'), 'names under the signatures');
@@ -183,8 +183,8 @@ const ok = (c, msg) => { if (!c) errs.push(msg); };
   const pmap = D.buildMap(await D.readPages(pdfjs, await SB.make({ printedTerms: true }))), pf = pmap.places.find(x => x.id === 'further_terms');
   ok(pf.printed_count === 3 && pf.printed_last === 2 && Math.abs(pf.printed_bottom - 706) < 0.5, 'printed terms on the Further Terms page read: three lines, numbered to 2');
   const ppt = D.planDraft({ details: Object.assign({}, base, { conditions: [{ key: 'electrical', days: 10 }] }), map: pmap, terms, clauses: { electrical: 'Words.' }, today: '2026-11-24', edits: { extra_terms: ['Extra.'] } });
-  const pit = I(ppt, 'further_terms'); ok(pit.y < 706 - 10 && /^23\. Electrical report/.test(pit.text) && /\n24\. Your further term: Extra\./.test(pit.text), 'our terms start below the lowest printed line, numbered from 3');
-  const fpn = N(ppt, 'further_printed'); ok(fpn && fpn.blocking && fpn.ackable && /3 printed lines, numbered to 2/.test(fpn.text) && /numbered from 23/.test(fpn.text), 'and Tim must tick that he has checked the page');
+  const pit = I(ppt, 'further_terms'); ok(pit.y < 706 - 10 && /^23\.0 Electrical report/.test(pit.text) && /\n24\.0 Your further term: Extra\./.test(pit.text), 'our terms start below the lowest printed line, numbered from 3');
+  const fpn = N(ppt, 'further_printed'); ok(fpn && fpn.blocking && fpn.ackable && /3 printed lines, numbered to 2/.test(fpn.text) && /numbered from 23\.0/.test(fpn.text), 'and Tim must tick that he has checked the page');
   ok(!N(p, 'further_printed'), 'no such check on a page with no printed terms');
   // 10. settlement: every printed line struck, within the text, the new text below the last
   const m2 = D.buildMap(await D.readPages(pdfjs, await SB.make({ twoLineSettlement: true }))), sp2 = m2.places.find(x => x.id === 'settlement');
@@ -221,10 +221,14 @@ const ok = (c, msg) => { if (!c) errs.push(msg); };
   const apx = await SB.make({ ftAppendix: true, pageNoOffset: 19 }), mapx = D.buildMap(await D.readPages(pdfjs, apx)), fpx = mapx.places.find(x => x.id === 'further_terms');
   ok(fpx.printed_last === 22 && fpx.printed_bottom < 560 && mapx.numbering.appendix_page === 3 && mapx.places.find(x => x.id === 'clause22').page === 3, 'the appendix on the Further Terms page: 21.x and 22.0 read as printed there');
   const ppx = D.planDraft({ details: base, map: mapx, terms, today: '2026-11-24', edits: ext(2) }), ipx = I(ppx, 'further_terms');
-  ok(eq(nums(ppx), [23, 24]) === undefined && ipx.y < fpx.printed_bottom - 10 && /^23\. Your further term: Extra term 1\./.test(ipx.text) && /numbered from 23/.test(N(ppx, 'further_printed').text), 'new terms below 22.0, numbered 23 and 24');
+  ok(eq(nums(ppx), [23, 24]) === undefined && ipx.y < fpx.printed_bottom - 10 && /^23\.0 Your further term: Extra term 1\./.test(ipx.text) && /numbered from 23\.0/.test(N(ppx, 'further_printed').text), 'new terms below 22.0, numbered 23 and 24');
   // a removed term's number is never used again
   const prm = plan({}, Object.assign(ext(2), { retired_numbers: [24] }));
   eq(nums(prm), [23, 25], 'a removed term (24) is skipped: the next is 25'); eq([prm.term_base, prm.term_last, prm.retired_numbers], [22, 25, [24]], 'and the plan says where the sequence is up to');
+  // Tim, 24 November 2026: added further terms are written 23.0, 24.0 and so on, like the printed 22.0
+  eq(D.termNo(23), '23.0', 'a term number as the agreement writes it');
+  const prmT = (I(prm, 'further_terms') || {}).text || ''; ok(/^23\.0 Your further term: Extra term 1\./m.test(prmT) && /^25\.0 Your further term: Extra term 2\./m.test(prmT) && !/^24\.0 /m.test(prmT), 'the list numbered 23.0 and 25.0: the retired 24.0 is not used');
+  ok(N(prm, 'term_start') && /^Further terms start at 23\.0 /.test(N(prm, 'term_start').text), 'the starting-number note in the same style');
   eq(plan({}, { retired_numbers: [26] }).term_last, 26, 'a retired number counts even with nothing after it');
   // the continuation page from the appendix page's own bands, with the page number struck and the right one beside it
   const C = mapx.numbering.cont; ok(C && C.page === 3 && C.page_no && C.page_no.value === 22 && C.header[0] > 740 && C.footer[1] < 40 && C.head.text === 'Appendix', 'bands found: header to the headings, footer with the printed page number 22');
@@ -234,7 +238,7 @@ const ok = (c, msg) => { if (!c) errs.push(msg); };
   eq([ro1.added_pages.length, ro1.added_pages[0].page, ro1.added_pages[0].source_page, ro1.added_pages[0].number], [1, 4, 3, { printed: '22', written: '23' }], 'one added page, straight after the appendix page, numbered 23');
   // the bands are pictures: the added page's text is only what was typed on it
   const pdfTxt = (bytes, f, l) => { const fn = path.join(__dirname, 'out', 'cont-txt.pdf'); require('fs').writeFileSync(fn, bytes); return require('child_process').execFileSync('pdftotext', ['-layout'].concat(f ? ['-f', String(f), '-l', String(l)] : []).concat([fn, '-']), { encoding: 'utf8' }); };
-  const typed = t => t.replace(/\s+/g, ' ').replace(/\d+\. Your further term: Extra term \d+ with enough words to take a full line of the page, more or less\./g, '').replace(/\s+/g, ' ').trim();
+  const typed = t => t.replace(/\s+/g, ' ').replace(/\d+\.0 Your further term: Extra term \d+ with enough words to take a full line of the page, more or less\./g, '').replace(/\s+/g, ' ').trim();
   const strip4 = typed(pdfTxt(ro1.bytes, 4, 4));
   eq(strip4.split(' ').sort(), ['(continued)', '23'], 'pdftotext of the added page: only "(continued)", the new page number and the typed terms');
   const js4 = pgOf(lp1, 4).filter(x => !/Extra term|with enough words|more or less/.test(x)); eq(js4.sort(), ['(continued)', '23'], 'pdf.js reads the same');
@@ -270,8 +274,8 @@ const ok = (c, msg) => { if (!c) errs.push(msg); };
   const pof = D.planDraft({ details: base, map: mof, terms, today: '2026-11-24', numbering: mof.numbering, edits: { extra_terms: Array.from({ length: 130 }, (_, i) => `Extra term ${i + 1} with enough words to take a full line of the page, more or less.`) } });
   const rof = await D.renderDraft(PDFLib, aof, pof, { bandImage: SB.bandImager(aof) });
   eq(rof.added_pages.map(x => x.number && x.number.written), ['23 of 24', '24 of 24'], '"22 of 22" becomes "23 of 24" and "24 of 24" with two pages added');
-  eq(N(po1, 'term_start') && N(po1, 'term_start').text, 'Further terms start at 23 (general terms to 20, appendix to 22, printed on the further terms page to 22).', 'every draft says where the further terms start');
-  ok(N(plan({}), 'term_start') && !N(plan({}), 'term_start').blocking && /start at 23 \(general terms to 20, appendix to 22\)/.test(N(plan({}), 'term_start').text), 'and on a plain draft, not blocking');
+  eq(N(po1, 'term_start') && N(po1, 'term_start').text, 'Further terms start at 23.0 (general terms to 20, appendix to 22, printed on the further terms page to 22).', 'every draft says where the further terms start');
+  ok(N(plan({}), 'term_start') && !N(plan({}), 'term_start').blocking && /start at 23\.0 \(general terms to 20, appendix to 22\)/.test(N(plan({}), 'term_start').text), 'and on a plain draft, not blocking');
   ok(po1.needs.find(n => n.id === 'continuation_check').blocking && po1.needs.find(n => n.id === 'continuation_check').ackable && /numbered 23/.test(po1.needs.find(n => n.id === 'continuation_check').text), 'Tim is asked to check the continuation page');
   const po2 = over(130), ro2 = await D.renderDraft(PDFLib, apx, po2, { bandImage }), lp2 = await D.readPages(pdfjs, ro2.bytes);
   eq(ro2.added_pages.map(x => [x.page, x.number.written]), [[4, '23'], [5, '24']], 'two added pages: 23, then 24');
@@ -301,29 +305,29 @@ const ok = (c, msg) => { if (!c) errs.push(msg); };
   const TS = pp => (I(pp, 'further_terms') || { terms: [] }).terms;
   // a clause with {timing} and no condition of its own: a gap for Tim, blocking, until he sets its timing
   let rv = rp([{ key: 'finance', days: 10 }], { added_terms: [{ id: 'add_std_pool_1', key: 'std_pool' }, { id: 'add_std_keys_1', key: 'std_keys' }] });
-  ok(/23\. Pool fence: The Vendor shall provide a pool fence compliance certificate \[Tim to set the timing\]\./.test(FTx(rv)) && N(rv, 'timing_missing_add_std_pool_1').blocking, 'an added clause with {timing} and no timing: highlighted, blocking');
-  ok(/24\. Keys: The Vendor shall hand over all keys at settlement\.$/m.test(FTx(rv)), 'an added clause with no timing words: as written');
+  ok(/23\.0 Pool fence: The Vendor shall provide a pool fence compliance certificate \[Tim to set the timing\]\./.test(FTx(rv)) && N(rv, 'timing_missing_add_std_pool_1').blocking, 'an added clause with {timing} and no timing: highlighted, blocking');
+  ok(/24\.0 Keys: The Vendor shall hand over all keys at settlement\.$/m.test(FTx(rv)), 'an added clause with no timing words: as written');
   const tPool = TS(rv).find(t => t.id === 'add_std_pool_1'); ok(tPool.removable && tPool.added && tPool.library === 'std_pool' && tPool.template === 'The Vendor shall provide a pool fence compliance certificate {timing}.', 'its wording kept with {timing} for the review screen, and removable');
   rv = rp([{ key: 'finance', days: 10 }], { added_terms: [{ id: 'add_std_pool_1', key: 'std_pool' }], term_timing: { add_std_pool_1: { after: 'finance', days: 3 } } });
-  ok(/23\. Pool fence: The Vendor shall provide a pool fence compliance certificate within 3 working days of the date the finance condition in clause 9\.1 is satisfied or waived\./.test(FTx(rv)) && !N(rv, 'timing_missing_add_std_pool_1'), 'its timing set on the review screen: after finance');
+  ok(/23\.0 Pool fence: The Vendor shall provide a pool fence compliance certificate within 3 working days of the date the finance condition in clause 9\.1 is satisfied or waived\./.test(FTx(rv)) && !N(rv, 'timing_missing_add_std_pool_1'), 'its timing set on the review screen: after finance');
   eq(TS(rv)[0].timing_text, 'within 3 working days of the date the finance condition in clause 9.1 is satisfied or waived', 'the timing shown as its chip');
   rv = rp([{ key: 'finance', days: 10 }], { added_terms: [{ id: 'add_std_pool_1', key: 'std_pool' }], term_timing: { add_std_pool_1: { date: '2026-12-11' } } });
   ok(/certificate on or before Friday 11 December 2026\./.test(FTx(rv)), 'or a date');
   ok(/certificate within 7 working days of the date of this agreement\./.test(FTx(rp([], { added_terms: [{ id: 'add_std_pool_1', key: 'std_pool' }], term_timing: { add_std_pool_1: { days: 7 } } }))), 'or working days');
   ok(!/certificate within 3 working days/.test(FTx(rp([], { added_terms: [{ id: 'add_std_pool_1', key: 'std_pool' }], term_timing: { add_std_pool_1: { after: 'finance', days: 3 } } }))) , 'after a condition not on the offer: not used');
-  // a condition's own clause re-timed on the draft: the offer's dates stay, and Tim is told
+  // a condition's own clause takes its timing from the offer: a draft-only timing for it (from an older draft) is not used, and no note
   rv = rp([{ key: 'electrical', days: 10 }], { term_timing: { ft_electrical: { days: 5 } } });
-  ok(/in all respects within 5 working days of the date of this agreement/.test(FTx(rv)) && N(rv, 'term_timing_ft_electrical') && /still says within 10 working days/.test(N(rv, 'term_timing_ft_electrical').text), 'a clause re-timed on the draft, with a note that the offer still says otherwise');
+  ok(/in all respects within 10 working days of the date of this agreement/.test(FTx(rv)) && !N(rv, 'term_timing_ft_electrical'), 'a condition-tied clause follows the offer, never a draft-only timing');
   ok(!N(rp([{ key: 'electrical', days: 10 }], { term_timing: { ft_electrical: { days: 10 } } }), 'term_timing_ft_electrical'), 'the same timing: no note');
   // Tim's edit of a term keeps {timing}, filled in from its timing
   rv = rp([{ key: 'electrical', days: 10 }], { items: { ft_electrical: 'Tim reworded this, to be satisfied {timing}.' } });
-  ok(/23\. Electrical report: Tim reworded this, to be satisfied within 10 working days of the date of this agreement\.$/m.test(FTx(rv)) && TS(rv)[0].template === 'Tim reworded this, to be satisfied {timing}.', 'an edited term with {timing}: filled, and kept as written for the next edit');
+  ok(/23\.0 Electrical report: Tim reworded this, to be satisfied within 10 working days of the date of this agreement\.$/m.test(FTx(rv)) && TS(rv)[0].template === 'Tim reworded this, to be satisfied {timing}.', 'an edited term with {timing}: filled, and kept as written for the next edit');
   // the order Tim chose; numbers follow the order on the page
   rv = rp([{ key: 'electrical', days: 10 }], { extra_terms: ['Tim extra.'], added_terms: [{ id: 'add_std_keys_1', key: 'std_keys' }], term_order: ['add_std_keys_1', 'ft_extra_1', 'ft_electrical'] });
   eq(TS(rv).map(t => t.number + ' ' + t.id), ['23 add_std_keys_1', '24 ft_extra_1', '25 ft_electrical'], 'terms in the order Tim chose');
   // a clause written with AI help, for this offer only (an object in extra_terms)
   rv = rp([{ key: 'builders', days: 10 }], { extra_terms: [{ id: 'ft_ai_k1', title: 'Spa pool', text: 'The Vendor shall have the spa pool serviced {timing}.', ai: true }], term_timing: { ft_ai_k1: { after: 'builders', days: 2 } } });
-  ok(/23\. Spa pool: The Vendor shall have the spa pool serviced within 2 working days of the date the building report condition in clause 9\.4 is satisfied or waived\./.test(FTx(rv)) && TS(rv)[0].ai && TS(rv)[0].removable, 'an AI-written term for this offer, with its timing');
+  ok(/23\.0 Spa pool: The Vendor shall have the spa pool serviced within 2 working days of the date the building report condition in clause 9\.4 is satisfied or waived\./.test(FTx(rv)) && TS(rv)[0].ai && TS(rv)[0].removable, 'an AI-written term for this offer, with its timing');
   // marks Tim drew: in PDF points on the blank's pages
   const marks = [{ id: 'm1', page: 1, x: 300, y: 600, w: 80, h: 18, type: 'initials', who: 'purchasers' }, { id: 'm2', page: 6, x: 330, y: 300, w: 150, h: 24, type: 'signature', who: 'vendors' },
     { id: 'm3', page: 8, x: 28, y: 640, w: 260, h: 10, type: 'strike' }, { id: 'm4', page: 8, x: 28, y: 560, w: 260, h: 60, type: 'strike' }, { id: 'm5', page: 5, x: 34, y: 640, w: 300, h: 24, type: 'text', text: 'Tim typed this note.' },
@@ -363,8 +367,8 @@ const ok = (c, msg) => { if (!c) errs.push(msg); };
   ok(!/Condition date:/.test(FT(tafter)) && !/Condition date:/.test(FT(tplan([{ key: 'electrical', days: 10 }], elec))), 'wording that names its time gets nothing added after it');
   // a further term named by its number in the further terms
   const tft = tplan([{ key: 'electrical', days: 10 }, { key: 'sale', days: 20 }, { key: 'technical', after: 'electrical', days: 3, detail: 'Drainage' }], Object.assign({ technical: 'A {detail} report {timing}.', sale: 'Sale of {address} {timing}.' }, elec));
-  ok(/23\. Electrical report:/.test(FT(tft)) && /24\. Specified technical report \(Drainage\): A Drainage report within 3 working days of the date the electrical report condition in further term 23 is satisfied or waived\./.test(FT(tft)), 'after a further term: "the electrical report condition in further term 23"');
-  ok(/25\. Sale of another property \(9 Filler Street, Testville\): Sale of 9 Filler Street, Testville within 20 working days of the date of this agreement\./.test(FT(tft)), 'the sale clause with {address} and {timing}');
+  ok(/23\.0 Electrical report:/.test(FT(tft)) && /24\.0 Specified technical report \(Drainage\): A Drainage report within 3 working days of the date the electrical report condition in further term 23\.0 is satisfied or waived\./.test(FT(tft)), 'after a further term: "the electrical report condition in further term 23\.0"');
+  ok(/25\.0 Sale of another property \(9 Filler Street, Testville\): Sale of 9 Filler Street, Testville within 20 working days of the date of this agreement\./.test(FT(tft)), 'the sale clause with {address} and {timing}');
   // {date} keeps working: a date as before; for "after", the timing phrase and a check for Tim
   const tdd = tplan([{ key: 'technical', days: 10, detail: 'Roof' }], { technical: 'The date for the satisfying of this condition is {date}.' });
   ok(/Specified technical report \(Roof\): The date for the satisfying of this condition is 8 December 2026\.$/m.test(FT(tdd)), '{date} as before, and the date is no longer repeated after it');
@@ -372,8 +376,8 @@ const ok = (c, msg) => { if (!c) errs.push(msg); };
   ok(/is within 2 working days of the date the finance condition in clause 9\.1 is satisfied or waived\.$/m.test(FT(tda)), '{date} for "after": the timing phrase, never a guessed date');
   ok(N(tda, 'date_after_technical') && !N(tda, 'date_after_technical').blocking && /Check the sentence still reads right/.test(N(tda, 'date_after_technical').text), 'and Tim is asked to check the sentence');
   // wording with no time in it: the date as before, or for "after" the timing
-  ok(/23\. Electrical report: Tim's words\. Condition date: 8 December 2026\./.test(FT(tplan([{ key: 'electrical', days: 10 }], { electrical: "Tim's words." }))), 'no token, working days: "Condition date" as before');
-  ok(/23\. Electrical report: Tim's words\. This condition is to be satisfied or waived within 5 working days of the date the finance condition in clause 9\.1 is satisfied or waived\./.test(FT(tplan([{ key: 'finance', days: 10 }, { key: 'electrical', after: 'finance', days: 5 }], { electrical: "Tim's words." }))), 'no token, after: the timing added');
+  ok(/23\.0 Electrical report: Tim's words\. Condition date: 8 December 2026\./.test(FT(tplan([{ key: 'electrical', days: 10 }], { electrical: "Tim's words." }))), 'no token, working days: "Condition date" as before');
+  ok(/23\.0 Electrical report: Tim's words\. This condition is to be satisfied or waived within 5 working days of the date the finance condition in clause 9\.1 is satisfied or waived\./.test(FT(tplan([{ key: 'finance', days: 10 }, { key: 'electrical', after: 'finance', days: 5 }], { electrical: "Tim's words." }))), 'no token, after: the timing added');
   // the buyer's own condition: {timing} (as the helper writes it) filled in once Tim ticks it
   const tcu = tplan([{ key: 'lim', date: '2026-12-18' }, { key: 'custom', after: 'lim', days: 4, wording: 'Subject to the purchaser approving the pool fence {timing}.' }], {}, { edits: { custom_ok: true } });
   ok(/Purchaser's condition: Subject to the purchaser approving the pool fence within 4 working days of the date the LIM condition in clause 9\.3 is satisfied or waived\.$/m.test(FT(tcu)), "the buyer's own wording with {timing}");
@@ -381,24 +385,24 @@ const ok = (c, msg) => { if (!c) errs.push(msg); };
   // printed front-page lines: the short phrase when it fits, with a check
   const tfront = tplan([{ key: 'builders', days: 10 }, { key: 'finance', after: 'builders', days: 5 }, { key: 'lim', after: 'electrical', days: 3 }, { key: 'electrical', days: 10 }], elec);
   eq(I(tfront, 'd_finance').text, '5 working days after clause 9.4 is satisfied or waived', 'front line: the short phrase, naming the REINZ clause');
-  eq(I(tfront, 'd_lim').text, '3 working days after further term 23 is satisfied or waived', 'front line after a further term: its number');
+  eq(I(tfront, 'd_lim').text, '3 working days after further term 23.0 is satisfied or waived', 'front line after a further term: its number');
   eq(I(tfront, 'd_builders').text, '8 December 2026', 'a condition by working days still shows its date');
   ok(N(tfront, 'front_after_finance') && N(tfront, 'after_check') && !N(tfront, 'front_after_finance').blocking, 'Tim checks the line');
   ok(!tfront.items.some(i => /\[\[|\]\]/.test(i.text || '')) && !tfront.needs.some(n => /\[\[/.test(n.text)), 'no reference is left unnumbered');
   // too long for its line: "see further term N" and a further term setting out that condition's date (the REINZ text never edited)
   const narrow = Object.assign({}, map, { places: map.places.map(pl => pl.id === 'd_finance' ? Object.assign({}, pl, { w: 120 }) : pl) });
   const tnar = D.planDraft({ details: Object.assign({}, base, { conditions: [{ key: 'builders', days: 10 }, { key: 'finance', after: 'builders', days: 5 }, { key: 'electrical', days: 10 }] }), map: narrow, terms: tterms, clauses: elec, today: '2026-11-24' });
-  eq(I(tnar, 'd_finance').text, 'see further term 24', 'too long for the line: "see further term 24"');
-  ok(/\n24\. Finance date \(clause 9\.1\): The finance date is the date that is 5 working days after the date the building report condition in clause 9\.4 is satisfied or waived\./.test(FT(tnar)), 'and further term 24 sets out the finance date');
-  ok(N(tnar, 'front_after_finance') && /see further term 24/.test(N(tnar, 'front_after_finance').text), 'Tim checks both');
+  eq(I(tnar, 'd_finance').text, 'see further term 24.0', 'too long for the line: "see further term 24.0"');
+  ok(/\n24\.0 Finance date \(clause 9\.1\): The finance date is the date that is 5 working days after the date the building report condition in clause 9\.4 is satisfied or waived\./.test(FT(tnar)), 'and further term 24.0 sets out the finance date');
+  ok(N(tnar, 'front_after_finance') && /see further term 24\.0/.test(N(tnar, 'front_after_finance').text), 'Tim checks both');
   ok(!tnar.items.some(i => i.place === 'c_finance' && i.kind !== 'strike'), 'only Yes/No struck on the printed line, nothing rewritten');
   // clause 22.0 waiting for another condition: the printed count struck, "see further term N" beside it, the time in a further term
   const t22 = tplan([{ key: 'finance', days: 10 }, { key: 'lawyer', after: 'finance', days: 3 }]);
-  ok(I(t22, 'clause22_days_struck') && I(t22, 'clause22_days').text === 'see further term 23' && I(t22, 'clause22_days').size === 6, 'clause 22.0: struck, "see further term 23" small beside it');
-  ok(/23\. Lawyer's approval \(clause 22\.0\): The time for the purchaser's lawyer's approval under clause 22\.0 is within 3 working days of the date the finance condition in clause 9\.1 is satisfied or waived\./.test(FT(t22)) && N(t22, 'clause22_after'), 'and a further term sets out its time, for Tim to check');
+  ok(I(t22, 'clause22_days_struck') && I(t22, 'clause22_days').text === 'see further term 23.0' && I(t22, 'clause22_days').size === 6, 'clause 22.0: struck, "see further term 23.0" small beside it');
+  ok(/23\.0 Lawyer's approval \(clause 22\.0\): The time for the purchaser's lawyer's approval under clause 22\.0 is within 3 working days of the date the finance condition in clause 9\.1 is satisfied or waived\./.test(FT(t22)) && N(t22, 'clause22_after'), 'and a further term sets out its time, for Tim to check');
   ok(!I(t22, 'clause22'), 'clause 22.0 itself is not struck through');
   // a condition after the buyer's own: referred to by its further term number
-  ok(/24\. Purchaser's condition: X within 2 working days of the date the electrical report condition in further term 23 is satisfied or waived\./.test(FT(tplan([{ key: 'electrical', days: 5 }, { key: 'custom', after: 'electrical', days: 2, wording: 'X {timing}.' }], elec, { edits: { custom_ok: true } }))), 'the buyer\'s own after a further term');
+  ok(/24\.0 Purchaser's condition: X within 2 working days of the date the electrical report condition in further term 23\.0 is satisfied or waived\./.test(FT(tplan([{ key: 'electrical', days: 5 }, { key: 'custom', after: 'electrical', days: 2, wording: 'X {timing}.' }], elec, { edits: { custom_ok: true } }))), 'the buyer\'s own after a further term');
   // a reference to a further term that isn't there: "?" and blocking
   const tmiss = D.planDraft({ details: Object.assign({}, base, { conditions: [{ key: 'sdd', days: 10 }, { key: 'finance', after: 'sdd', days: 2 }] }), map, terms, clauses: {}, today: '2026-11-24' });
   ok(I(tmiss, 'd_finance').text === '2 working days after further term ? is satisfied or waived' && N(tmiss, 'ref_missing_sdd').blocking, 'a missing further term blocks approval');
@@ -407,7 +411,7 @@ const ok = (c, msg) => { if (!c) errs.push(msg); };
   ok(!N(p, 'after_check') && !p.needs.some(n => /^front_after_|^date_after_/.test(n.id)), 'and raises none of the new checks');
   // the drafted PDF carries it all
   const rt = await D.renderDraft(PDFLib, blank, tnar), tp = await D.readPages(pdfjs, rt.bytes), tx = n => tp[n - 1].items.map(i => i.s).join(' ');
-  ok(tx(1).includes('see further term 24') && /Finance date \(clause 9\.1\)/.test(tx(3)), 'the PDF: "see further term 24" on the front page, the term on the Further Terms page');
+  ok(tx(1).includes('see further term 24.0') && /Finance date \(clause 9\.1\)/.test(tx(3)), 'the PDF: "see further term 24.0" on the front page, the term on the Further Terms page');
 
   // AI proposals onto the page, and the pack's text for the reader
   const pt = D.packText(pages); ok(pt.length === pages.length && pt[0].lines[0].i === 0, 'the pack as numbered lines per page');

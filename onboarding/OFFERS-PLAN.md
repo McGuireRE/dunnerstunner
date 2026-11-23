@@ -279,7 +279,8 @@ Built locally on `offers-timing` from main. Migration 022 is written and passed 
   token no longer has "Condition date: ..." added after it (before, Tim's live wording printed the date twice).
 - The AI condition helper writes `{timing}`; the form says what it stands for.
 - Further terms numbering: on from the last general terms clause and the highest clause printed on the appendix, both read from the
-  blank (buildMap `numbering`), so 23 on Tim's packs. A removed term's number is retired (`edits.retired_numbers`) and never reused;
+  blank (buildMap `numbering`), so 23.0 on Tim's packs. Written 23.0, 24.0 and so on, like the printed 22.0 (Tim, 24 November 2026):
+  in the list, in references ("further term 23.0"), on front-page lines ("see further term 24.0") and in the starting-number note. A removed term's number is retired (`edits.retired_numbers`) and never reused;
   `term_last` on each plan is where the sequence is up to (phase 4 continues from it).
 - Overflow: pages added straight after the further terms page, made from pictures of that page's own header and footer bands (PNG,
   rendered from the blank: pdf.js at scale 4 on Tim's screen, pdftoppm at 300 dpi in the tests; the page itself is never embedded, so
@@ -291,8 +292,11 @@ Built locally on `offers-timing` from main. Migration 022 is written and passed 
   Known limit: the bands are pictures, so their words (the heading, the edition line, the footer) can't be selected or searched on
   an added page; the struck page number is part of the picture, the new one is text.
 - Review screen: clauses from the library (`edits.added_terms`), reorder (grip drag with pointer events, and Up and Down buttons;
-  `edits.term_order`), remove a term Tim added, timing and date chips in each term's text (`edits.term_timing`, the draft only, with a
-  note when it differs from the offer), "Ask AI to write a clause" (offer-draft `write_clause`, Sonnet, daily cap with a reserved
+  `edits.term_order`), remove a term Tim added, timing and date chips in each term's text. A timing chip in a term tied to one of the
+  offer's conditions changes that condition on the offer (Tim, 24 November 2026): a recorded correction (agent_offer_correct, the
+  buyer's original kept, loops refused), then a new draft, so the date checks (shown on the review screen, with the gap and KiwiSaver
+  warnings) follow and older drafts can't be approved. "After another condition" is offered (never itself). A chip in a term tied to no
+  condition, and a date or working-day count written in the wording, stay draft-only edits (`edits.term_timing`, `edits.items`), "Ask AI to write a clause" (offer-draft `write_clause`, Sonnet, daily cap with a reserved
   ai_calls row per call, `offer_agent_ai_claim` then `offer_agent_ai_done`; Tim edits
   and ticks; "Use in this offer only" or "Save to my clause library"), also in the clause library. Library terms can be "Only when I
   add it to a draft" (rule `{}`).
