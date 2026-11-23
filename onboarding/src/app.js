@@ -5,7 +5,19 @@
   const SB_KEY = 'sb_publishable_luFnpeEPhaXWotpQiwVcVw_Yhkii6-1';
   const APP_URL = location.origin + location.pathname;
   const AGREEMENT_VERSION = 'v3.15-26102026';
-  const sb = window.supabase.createClient(SB_URL, SB_KEY, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
+  // Sign-in lock that can't hang. Chrome (above all on Android) freezes background tabs; a frozen tab of this site can hold the
+  // sign-in lock forever, and the page then sits on "Loading..." (23 November 2026). Wait up to 5 seconds for the lock, then go on.
+  const sbLock = (name, _timeout, fn) => {
+    if (!(navigator.locks && navigator.locks.request)) return fn();
+    return new Promise((resolve, reject) => {
+      const ac = new AbortController(); let got = false, gaveUp = false;
+      const t = setTimeout(() => { if (got) return; gaveUp = true; ac.abort(); Promise.resolve().then(fn).then(resolve, reject); }, 5000);
+      navigator.locks.request(name, { mode: 'exclusive', signal: ac.signal }, async () => { if (gaveUp) return; got = true; clearTimeout(t); return await fn(); })
+        .then(v => { if (!gaveUp) resolve(v); }, e => { if (!gaveUp) { clearTimeout(t); reject(e); } });
+    });
+  };
+  window.__sbLock = sbLock;
+  const sb = window.supabase.createClient(SB_URL, SB_KEY, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, lock: sbLock } });
 
   /* ───────── helpers ───────── */
   const $ = (s, el = document) => el.querySelector(s);
@@ -5993,5 +6005,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   I18N.init(); I18N.setHooks({ pick: c => chooseLang(c) });
   if (APP_TRANSLATION) { const l0 = readLocalLang(); if (l0 && l0 !== 'en') chooseLang(l0, { fromRecord: true }); }
 
+  // still "Loading..." after 20 seconds: say so, with a way out, rather than a blank wait
+  setTimeout(() => { const m = main(); const l = m && m.querySelector(':scope > .loading'); if (l && m.children.length === 1) m.innerHTML = `<div class="login-card" id="slowBoot"><h1>Still loading</h1><p class="lede">This is taking longer than it should. Check you have signal, then reload. If it keeps happening, close the other tabs of this site and try again.</p><div class="toolbar"><button class="btn primary" type="button" id="slowReload">Reload</button></div></div>`; const b = $('#slowReload'); if (b) b.addEventListener('click', () => location.reload()); }, 20000);
   boot().catch(e => { console.error(e); main().innerHTML = `<div class="login-card"><h1>Something went wrong</h1><p class="lede">Please refresh the page. If it keeps happening, call Tim on 027 562 7207.</p></div>`; });
 })();

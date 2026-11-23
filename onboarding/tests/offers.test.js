@@ -343,6 +343,9 @@ const AGENT = 'agent-test@example.com';
   await h.click('#navHome'); await h.waitForTimeout(400); await h.click('#homeOffer'); await h.waitForTimeout(500);
   await h.click('[data-pick-see="P1"]'); await h.waitForTimeout(700);
   expect(!!(await h.$('#offTile')), 'Offers and link opens the property with its Offers tile');
+  // the sign-in lock never hangs: with the browser's lock held forever (a frozen tab), it goes on after 5 seconds
+  out.lock = await h.evaluate(async () => { navigator.locks.request = () => new Promise(() => {}); const t0 = Date.now(); const v = await window.__sbLock('x', -1, async () => 42); return { v, s: Math.round((Date.now() - t0) / 1000) }; }).catch(e => ({ err: String(e) }));
+  expect(out.lock && out.lock.v === 42 && out.lock.s <= 7, 'a held lock does not hang sign-in: ' + JSON.stringify(out.lock));
   await H.ctx.close();
   await V.ctx.close(); await A.ctx.close(); await B.ctx.close();
   console.log(JSON.stringify(Object.assign(out, { errs }), null, 1)); await b.close();
