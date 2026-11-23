@@ -330,6 +330,20 @@ const AGENT = 'agent-test@example.com';
   const vtxt = await v.innerText('body'); out.vendorHit = (vtxt.match(/.{0,60}(650,000|665,000|640,000|Offers|offer form|Aroha).{0,60}/) || [''])[0]; expect(!/650,000|665,000|640,000|Offers|offer form|Aroha/.test(vtxt), 'nothing about offers on the vendor\'s screens');
   const jb = await v.$('#journeyBtn'); expect(jb && await jb.isVisible(), 'the vendor has the Journey button');
   if (jb && await jb.isVisible()) { await jb.click(); await v.waitForTimeout(500); const jt = await v.innerText('#journey'); out.journeyLen = jt.length; expect(jt.length > 100 && !/650,000|665,000|Aroha|offer form/.test(jt), 'nothing about offers on the journey map'); }
+  // ── 7. Home's "Draft an offer" tile: choose the property, then fill in an offer or open its Offers tile (phone width) ──
+  const H = await mk(390, 'dark'); const h = H.p; await asAgent(h);
+  expect(await h.isVisible('#homeOffer') && /Draft an offer/.test(await h.textContent('#homeOffer')), 'Home has a Draft an offer tile');
+  expect(!(await side(h)), 'home has no sideways scroll at 390 px');
+  await h.click('#homeOffer'); await h.waitForTimeout(500);
+  out.pick = { h1: await h.textContent('main h1'), ready: await h.$$eval('.view-pad > .of-picklist [data-pick-new]', e => e.map(x => x.dataset.pickNew)), later: await h.$$eval('details .of-picklist [data-pick-new]', e => e.map(x => x.dataset.pickNew)) };
+  expect(out.pick.h1 === 'Draft an offer' && out.pick.ready.join() === 'P1' && out.pick.later.join() === 'P2', 'the chooser lists P1 ready and P2 folded away: ' + JSON.stringify(out.pick));
+  expect(!(await side(h)), 'the chooser has no sideways scroll at 390 px');
+  await h.click('[data-pick-new="P1"]'); await h.waitForTimeout(600);
+  expect(/12 Pine Hill Road/.test(await h.innerText('main')) && !!(await h.$('[data-cond="finance"]')), 'Draft an offer opens the offer form for that property');
+  await h.click('#navHome'); await h.waitForTimeout(400); await h.click('#homeOffer'); await h.waitForTimeout(500);
+  await h.click('[data-pick-see="P1"]'); await h.waitForTimeout(700);
+  expect(!!(await h.$('#offTile')), 'Offers and link opens the property with its Offers tile');
+  await H.ctx.close();
   await V.ctx.close(); await A.ctx.close(); await B.ctx.close();
   console.log(JSON.stringify(Object.assign(out, { errs }), null, 1)); await b.close();
 })().catch(e => console.log(JSON.stringify({ errs: ['crashed: ' + e.stack] })));

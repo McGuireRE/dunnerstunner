@@ -2163,12 +2163,14 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         <button class="home-tile" type="button" id="homeBegin"><span class="kick">After an appraisal</span><span class="ttl">Let's begin</span><span class="txt">Set up their appraisal page. They answer a few questions, you send back an updated plan, and they're ready to sign.</span><span class="go">Start an appraisal page →</span></button>
         <button class="home-tile" type="button" id="homeInspect"><span class="kick">At the property</span><span class="ttl">Inspect a property</span><span class="txt">Walk round with your phone and note the property facts and the Vendor Declaration answers. Only the address is needed.</span><span class="go">Start an inspection →</span></button>
         <button class="home-tile primary" type="button" id="homeAgree"><span class="kick">At the listing appointment</span><span class="ttl">Let's agree</span><span class="txt">Go through the agency agreement together, then sign here or send it to their phones.</span><span class="go">Start the agreement →</span></button>
+        <button class="home-tile" type="button" id="homeOffer"><span class="kick">When a buyer is ready</span><span class="ttl">Draft an offer</span><span class="txt">Fill in an offer for a buyer, see the offers received, or share a property's offer link and QR code.</span><span class="go">Choose the property →</span></button>
       </div>
       <p class="small" id="homeNeeds">Your agreements and pre-listings are on the <a href="#" id="homeDash">Dashboard</a>.</p>
     </div>`;
     $('#homeBegin').addEventListener('click', () => viewPrelistingAgent(null));
     $('#homeAgree').addEventListener('click', () => viewTable(null));
     $('#homeInspect').addEventListener('click', viewInspectStart);
+    $('#homeOffer').addEventListener('click', viewOfferPick);
     $('#homeDash').addEventListener('click', e => { e.preventDefault(); viewAgentDashboard(); });
     dashData().then(d => { const n = d.needs.length; if (n && $('#homeNeeds')) $('#homeNeeds').innerHTML = `<strong>${n} ${n === 1 ? 'thing needs' : 'things need'} you.</strong> See them on the <a href="#" id="homeDash2">Dashboard</a>.`; const l = $('#homeDash2'); if (l) l.addEventListener('click', e => { e.preventDefault(); viewAgentDashboard(); }); }).catch(() => null);
     top();
@@ -5838,6 +5840,27 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const p = await must(sb.from('properties').select('id,address,stage').eq('id', pid).single());
     const l = ((await ofSafe(sb.from('offer_links').select('province,chattels').eq('property_id', pid))) || [])[0];
     ofOpen({ mode: 'agent', pid, address: p.address, province: (l && l.province) || OF.provinceFor(p.address), ksDays: await ofKs(), wording: await ofWording(), chattels: (l && l.chattels) || [] });
+  }
+  // Home's "Draft an offer": choose the property. Properties that can take offers come first; the rest are listed quietly with why.
+  async function viewOfferPick() {
+    header('Draft an offer', '', 0); actions(false); setAgentNav('home');
+    main().innerHTML = '<div class="loading">Loading...</div>';
+    const props = (await ofSafe(sb.from('properties').select('id,address,stage').order('updated_at', { ascending: false }))) || [];
+    const offs = (await ofSafe(sb.from('property_offers').select('property_id,read_at,source,suspected_spam'))) || [];
+    const count = pid => offs.filter(o => o.property_id === pid && o.source && o.source !== 'manual' && !o.suspected_spam);
+    const stageName = st => (STAGES.find(x => x[0] === st) || [st, st || 'No stage'])[1];
+    const ready = props.filter(p => OFFER_STAGES.includes(p.stage)), other = props.filter(p => !OFFER_STAGES.includes(p.stage) && !['sold', 'settled', 'withdrawn'].includes(p.stage));
+    const row = p => { const c = count(p.id), n = c.filter(o => !o.read_at).length;
+      return `<li class="of-pick"><div><strong translate="no">${esc(p.address || 'Property')}</strong><span class="small"> · ${esc(stageName(p.stage))}${c.length ? ' · ' + c.length + (c.length === 1 ? ' offer' : ' offers') : ''}</span>${n ? ` <span class="pill of-new">${n} new</span>` : ''}</div>
+        <div class="toolbar"><button class="btn primary" type="button" data-pick-new="${p.id}">Draft an offer</button><button class="btn ghost" type="button" data-pick-see="${p.id}">Offers and link</button></div></li>`; };
+    main().innerHTML = `<div class="view-pad"><h1>Draft an offer</h1>
+      <p class="small">Choose the property. You can fill in the offer for the buyer here, or open the property's Offers tile to see what's come in and share its link or QR code.</p>
+      ${ready.length ? `<ul class="of-picklist">${ready.map(row).join('')}</ul>` : '<p class="small"><strong>No property is ready for offers yet.</strong> Offers open once the agency agreement is signed and the property is on the market.</p>'}
+      ${other.length ? `<details class="of-more"><summary class="small">Not ready for offers yet (${other.length})</summary><p class="small" style="margin:4px 0">These open for offers once the agreement is signed. You can still fill one in for a buyer.</p><ul class="of-picklist">${other.map(row).join('')}</ul></details>` : ''}
+    </div>`;
+    $$('[data-pick-new]').forEach(b => b.addEventListener('click', () => viewOfferNew(b.dataset.pickNew)));
+    $$('[data-pick-see]').forEach(b => b.addEventListener('click', async () => { await viewProperty(b.dataset.pickSee); const t = $('#offTile'); if (t) t.scrollIntoView({ block: 'start' }); }));
+    top();
   }
   async function viewOfferCorrect(oid) {
     header('Correct an offer', '', 0); actions(false);
