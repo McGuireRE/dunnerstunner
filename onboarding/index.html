@@ -4517,8 +4517,11 @@ window.JOURNEY_MEDIA_HINTS = {
   // A New Zealand phone number as its national significant digits: +64 21 555 0199, 0064 21 555 0199, (021) 555-0199 and 21 555 0199
   // are all 215550199.
   const nsn = v => { let x = String(v || '').replace(/\D/g, ''); if (x.startsWith('0064')) x = x.slice(4); else if (x.startsWith('64') && x.length >= 10) x = x.slice(2); else if (x.startsWith('0')) x = x.slice(1); return x; };
-  // every run of digits in some text that could be a phone number, as national digits
-  const phoneRuns = t => (String(t || '').match(/[+(]?\d[\d\s().\-]{4,}\d/g) || []).map(nsn).filter(x => x.length >= 6);
+  // text made plain before it is compared: full-width digits and signs as ordinary ones, every kind of space (non-breaking, thin,
+  // full-width and so on) as a plain space, zero-width characters gone, and no spaces around an @ ("b @ example.com")
+  const plainText = t => String(t || '').normalize('NFKC').replace(/[\u200B-\u200D\u2060\uFEFF]/g, '').replace(/[\s\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]+/g, ' ').replace(/\s*@\s*/g, '@');
+  // every run of digits in some text that could be a phone number, as national digits (spaces, brackets, dots, dashes, / and _ between)
+  const phoneRuns = t => (plainText(t).match(/[+(]?\d[\d\s().\/_\-]{4,}\d/g) || []).map(nsn).filter(x => x.length >= 6);
   // the parties' own contact details, ready to compare: [{ who, email, phone }] -> { emails: [[email, who]], phones: [[digits, who]] }
   function ownContacts(list) {
     const emails = [], phones = [];
@@ -4528,7 +4531,7 @@ window.JOURNEY_MEDIA_HINTS = {
   }
   // whose own phone or email a piece of text holds ('' when none)
   function holdsOwn(text, own) {
-    const t = String(text || '').toLowerCase(); if (!t) return '';
+    const t = plainText(text).toLowerCase(); if (!t) return '';
     const e = own.emails.find(([v]) => t.includes(v)); if (e) return e[1];
     const runs = phoneRuns(t), ph = own.phones.find(([v]) => runs.some(r => r.includes(v))); return ph ? ph[1] : '';
   }
@@ -4836,7 +4839,7 @@ window.JOURNEY_MEDIA_HINTS = {
   }
 
   const DRAFT = { placedFrom, EDITIONS, EDITION_RE, editionOk, readPages, lines, xAt, matchAll, readEdition, editionPages, buildMap, parseChattels, numberIn, daysWords, FRONT_CONDITIONS, LABELS,
-    packText, packBatches, placeFromProposal, rectOf, nsn, phoneRuns, ownContacts, holdsOwn, pickVendorLawyer, PROPOSAL_KINDS, planDraft, ruleApplies, fullDate, PLACEHOLDERS, placeholderFor, isPlaceholder, winAnsi, renderDraft, wrap, INK, FONT_SIZE };
+    packText, packBatches, placeFromProposal, rectOf, nsn, phoneRuns, plainText, ownContacts, holdsOwn, pickVendorLawyer, PROPOSAL_KINDS, planDraft, ruleApplies, fullDate, PLACEHOLDERS, placeholderFor, isPlaceholder, winAnsi, renderDraft, wrap, INK, FONT_SIZE };
   if (typeof module !== 'undefined' && module.exports) module.exports = DRAFT; else root.DRAFT = DRAFT;
 })(typeof window !== 'undefined' ? window : globalThis);
 
@@ -5205,12 +5208,20 @@ window.JOURNEY_MEDIA_HINTS = {
   const SIDE = { purchaser: 'purchasers', vendor: 'vendors' };
   const sideName = s => SIDE[s] || s;
   const other = s => s === 'vendor' ? 'purchaser' : 'vendor';
+  const ansi = s => String(s == null ? '' : s).normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^\x20-\x7e]/g, '?');
+  // the version of the drawing code: a locked round can be drawn again from its layers and record and come out byte for byte the same
+  const DRAW_VERSION = 'nego-draw-1';
+  // initials beside a change: from Round 2 on 'change'; in Round 1 a mark Tim re-approved was initialled as 'mark' (phase 3)
+  const initialsFor = (k, id) => (k.why === 'change' || k.why === 'mark') && k.ref === id;
 
   /* ───── shapes ───── */
-  // a change's rectangle on the page (typed words: about half a point per point of size per letter)
+  // Helvetica's widths (the font typed words are drawn in), per 1000 points, for the characters 32 to 126 (pdf-lib's own metrics)
+  const HELV = [278,278,355,556,556,889,667,191,333,333,389,584,278,333,278,278,556,556,556,556,556,556,556,556,556,556,278,278,584,584,584,556,1015,667,667,722,722,667,611,778,722,278,500,667,556,833,722,778,667,778,722,667,611,722,667,944,667,667,611,278,278,278,469,556,333,556,556,500,556,556,278,556,556,222,222,500,222,833,556,556,556,556,333,500,278,556,500,722,500,500,500,334,260,334,584];
+  const textWidth = (t, size) => { let w = 0; for (const ch of ansi(t)) { const c = ch.charCodeAt(0); w += HELV[c - 32] || 556; } return w * (size || 9) / 1000; };
+  // a change's rectangle on the page (typed words measured as Helvetica draws them)
   function changeRect(c) {
     const g = (c && c.geometry) || {};
-    if (c && c.kind === 'insert') { const size = g.size || 9; return { x: g.x, y: g.y - 2, w: Math.max(8, String(g.text || '').length * size * 0.5), h: size + 4 }; }
+    if (c && c.kind === 'insert') { const size = g.size || 9; return { x: g.x, y: g.y - 2, w: Math.max(8, textWidth(g.text, size)), h: size + 4 }; }
     return SIGN.markRect(c || {});
   }
   // is a piece of ink at the place of a change? It touches the change (allowing 4 points), or it sits on the change's own line within
@@ -5257,7 +5268,7 @@ window.JOURNEY_MEDIA_HINTS = {
     const out = [], has = (side, pos, f) => st.ink.some(k => k.side === side && k.signer === pos && f(k));
     Object.entries(sides || {}).forEach(([side, list]) => (list || []).forEach(s => {
       if (!has(side, s.position, k => k.kind === 'signature')) out.push({ side, signer: s.position, who: s.name || '', what: 'signature' });
-      st.changes.forEach(c => { if (!has(side, s.position, k => k.why === 'change' && k.ref === c.id)) out.push({ side, signer: s.position, who: s.name || '', what: 'change', ref: c.id, page: c.page }); });
+      st.changes.forEach(c => { if (!has(side, s.position, k => initialsFor(k, c.id))) out.push({ side, signer: s.position, who: s.name || '', what: 'change', ref: c.id, page: c.page }); });
     }));
     return out;
   }
@@ -5279,8 +5290,9 @@ window.JOURNEY_MEDIA_HINTS = {
     const page = (pages || []).find(p => p.n === c.page), obs = rectsOf(st).concat(current || []);
     return initialsBeside(c, signers, page, obs);
   }
-  // input: { pages: [{ n, w, h, items? }], placed, mapPlaces, side, signers: [{ position, name }], layers (the document's locked rounds) }
-  // -> { places, blocking, counts, first }: what the side the newest round goes to does
+  // input: { pages: [{ n, w, h, items? }], placed, mapPlaces, side, signers: [{ position, name }] (for a later round: the side's newest
+  //   round's signers), layers (the document's locked rounds), resignEvery (false: a side signs again only where its signature was
+  //   lifted; true: every round) } -> { places, blocking, counts, first }: what the side the newest round goes to does
   function presentPlaces(input) {
     const side = input.side, signers = (input.signers || []).slice().sort((a, b) => a.position - b.position), layers = input.layers || [];
     const st = standing(layers), first = !layers.some(L => L.side === side), pages = input.pages || [];
@@ -5289,15 +5301,17 @@ window.JOURNEY_MEDIA_HINTS = {
       const M = SIGN.makePlaces({ pages, placed: input.placed || [], mapPlaces: input.mapPlaces || [], signers, side, obstacles: rectsOf(st) });
       places = M.places; blocking = M.blocking;
     } else {
-      // everyone signs again where they signed before (the newer signature replaces the older on the working copy)
+      // a signer signs again where they signed before when their signature was lifted (or, with resignEvery, every round); the newer
+      // signature replaces the older on the working copy. Otherwise their signature stands and they initial the changes.
       const mine = layers.filter(L => L.side === side).sort((a, b) => b.doc_round - a.doc_round)[0];
-      signers.forEach(s => { (mine.places || []).filter(p => p.signer === s.position && p.why === 'block').forEach(p => places.push(Object.assign({}, p))); });
-      signers.forEach(s => { if (!places.some(p => p.signer === s.position && p.kind === 'signature')) blocking.push({ id: 'sig:' + s.position, label: 'Signatures', why: `${s.name} has no signature place from an earlier round.` }); });
+      signers.forEach(s => { const standingSig = st.ink.some(k => k.side === side && k.signer === s.position && k.kind === 'signature'); if (standingSig && !input.resignEvery) return;
+        const blockPl = (mine.places || []).filter(p => p.signer === s.position && p.why === 'block'); blockPl.forEach(p => places.push(Object.assign({}, p)));
+        if (!blockPl.some(p => p.kind === 'signature')) blocking.push({ id: 'sig:' + s.position, label: 'Signatures', why: `${s.name} has no signature place from an earlier round.` }); });
     }
     // everyone initials each change not yet initialled by them (the other side's, and their own where the other side lifted them)
     const obs = rectsOf(st).concat(places);
     st.changes.forEach(c => {
-      const need = signers.filter(s => !st.ink.some(k => k.side === side && k.signer === s.position && k.why === 'change' && k.ref === c.id));
+      const need = signers.filter(s => !st.ink.some(k => k.side === side && k.signer === s.position && initialsFor(k, c.id)));
       if (!need.length) return;
       const page = pages.find(p => p.n === c.page); if (!page) { blocking.push({ id: 'chg:' + c.id, label: 'A change', why: `Page ${c.page} isn't in the document.` }); return; }
       const add = initialsBeside(c, need, page, obs); add.forEach(p => { places.push(p); obs.push(p); });
@@ -5317,7 +5331,7 @@ window.JOURNEY_MEDIA_HINTS = {
     const mo = MONTHS.indexOf(m[2]) + 1, d = new Date(Date.UTC(+m[3], mo - 1, +m[1])); if (d.getUTCMonth() !== mo - 1) return null;
     return `${m[3]}-${String(mo).padStart(2, '0')}-${String(+m[1]).padStart(2, '0')}`;
   }
-  const NZ = SIGN.NZ, ansi = s => String(s == null ? '' : s).normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/[^\x20-\x7e]/g, '?');
+  const NZ = SIGN.NZ;
   // the record for a locked round from Round 2 on. rec: { address, offer_ref, number, document, round, side, base: { number, sha256 },
   //   draft: { number, sha256 }, places_sha256, made_at, signers (as SIGN.executionLines), changes: [{ kind, page, by, at, text? }],
   //   lifted: [{ side, who, kind, page, by_round }], outstanding }
@@ -5357,7 +5371,8 @@ window.JOURNEY_MEDIA_HINTS = {
     add(`Property: ${rec.address || ''}`, { gap: 6 }); add(`Offer: ${rec.offer_ref || ''}`);
     add(`Agreed as Document ${rec.document}, Round ${rec.round}: both sides signed and initialled the same version, with nothing outstanding.`);
     add(`Acceptance was communicated: ${NZ(rec.accepted_at)}. Confirmed by ${rec.confirmed_by || 'Tim McGuire'}.`);
-    add(`The date at the top, "${rec.date_text}", was typed by Tim McGuire once the agreement was agreed. It is the only thing added to this copy after the last signature.`);
+    add(`The date at the top, "${rec.date_text}", was typed by Tim McGuire once the agreement was agreed. The date and this record page are the only things added after the last signature.`);
+    if (rec.base) add(`Everything else is Round ${rec.base.round} as locked (SHA-256 ${rec.base.sha256}), drawn again from the same signatures, initials and changes with drawing version ${rec.draw_version || DRAW_VERSION}.`, { size: 8.5 });
     add(`This copy was made and locked by the server on ${NZ(rec.made_at)}.`, { size: 8.5 });
     add('Every locked round of this offer', { bold: true, gap: 8 });
     (rec.rounds || []).forEach(r => add(`Document ${r.document}, Round ${r.round} (number ${r.number}): signed by the ${sideName(r.side)}, ${r.changes ? r.changes + (r.changes === 1 ? ' change' : ' changes') : 'no changes'}, locked ${NZ(r.locked_at)}. SHA-256 ${r.sha256}`, { size: 8 }));
@@ -5390,14 +5405,20 @@ window.JOURNEY_MEDIA_HINTS = {
       else if (c.kind === 'reinstate') { pg.drawText('Reinstated', { x: g.x, y: g.y + 2, size: 7, font: bold, color: ink }); pg.drawCircle({ x: g.x - 3, y: g.y + 4.5, size: 1.6, color: ink }); }
       else if (c.kind === 'insert') pg.drawText(ansi(g.text), { x: g.x, y: g.y, size: g.size || 9, font, color: ink });
     }
-    if (m.date && m.date.text) { const p = m.date.place || {}, pg = pages[(p.page || 1) - 1] || pages[0], H = pg.getHeight();
-      pg.drawText(ansi(m.date.text), { x: p.x != null ? p.x : 60, y: p.y != null ? p.y : H - 40, size: 10, font, color: ink }); }
+    if (m.date && m.date.text) { const p = m.date.place, pg = p && pages[p.page - 1];
+      if (!pg || typeof p.x !== 'number' || typeof p.y !== 'number') throw new Error('The agreement blank has no date place, so the date can\'t be added. Add it to the places on the blank first.');
+      pg.drawText(ansi(m.date.text), { x: p.x, y: p.y, size: 10, font, color: ink }); }
     const W = 595.32, H = 841.92; let pg = doc.addPage([W, H]), y = H - 56;
     for (const l of m.lines || []) { const size = l.size || 9.5, f = l.bold ? bold : font; y -= (l.gap || 0);
       for (const t of wrapText(f, l.t, size, W - 96)) { if (y < 50) { pg = doc.addPage([W, H]); y = H - 56; } pg.drawText(t, { x: 48, y, size, font: f, color: PDFLib.rgb(0.1, 0.1, 0.1) }); y -= size * 1.35; } }
     if (m.title) doc.setTitle(ansi(m.title), { showInWindowTitleBar: false });
     const bytes = await doc.save({ useObjectStreams: false, addDefaultPage: false });
     return { bytes, pages: doc.getPageCount(), recordPages: doc.getPageCount() - pages.length };
+  }
+
+  // a locked round drawn again from the layers up to it and its stored execution record: the same bytes, if nothing has changed
+  async function redrawRound(PDFLib, draftBytes, layers, execution) {
+    const st = standing(layers); return renderWorking(PDFLib, draftBytes, { ink: st.ink, changes: st.changes, lines: roundLines(execution), title: execution.title });
   }
 
   /* ───── the lawyers' pack ───── */
@@ -5424,7 +5445,9 @@ window.JOURNEY_MEDIA_HINTS = {
   // the timeline as a page a lawyer can read: every event in order, each with its fingerprint and the one before it
   function timelineHtml(events, meta) {
     const ev = (events || []).filter(e => e.hash).slice().sort((a, b) => a.seq - b.seq), m = meta || {};
-    const rows = ev.map(e => `<tr><td>${e.seq}</td><td>${escH(NZ(e.at))}</td><td>${escH(e.actor)}</td><td>${escH(eventWords(e))}</td><td class="h">${escH(String(e.hash).slice(0, 16))}<br><span>after ${escH(String(e.prev_hash).slice(0, 16))}</span></td></tr>`).join('');
+    // Tim's own sign-in (an email) shows as his name; buyers and vendors are named as they signed; never anyone's contact details
+    const who = a => /@/.test(String(a || '')) ? 'Tim McGuire' : a;
+    const rows = ev.map(e => `<tr><td>${e.seq}</td><td>${escH(NZ(e.at))}</td><td>${escH(who(e.actor))}</td><td>${escH(eventWords(e))}</td><td class="h">${escH(String(e.hash).slice(0, 16))}<br><span>after ${escH(String(e.prev_hash).slice(0, 16))}</span></td></tr>`).join('');
     return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Timeline: ${escH(m.address || 'offer')}</title><style>body{font-family:Helvetica,Arial,sans-serif;font-size:13px;color:#1f1d1a;margin:24px}table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid #ddd;padding:5px;text-align:left;vertical-align:top}.h{font-family:monospace;font-size:11px}.h span{color:#777}</style></head><body>
 <h1>Timeline of the offer</h1><p>${escH(m.address || '')}<br>Offer: ${escH(m.offer_ref || '')}<br>Made ${escH(NZ(m.made_at))} by McGuire Real Estate for the parties' lawyers.</p>
 <p>Each event carries the fingerprint (SHA-256) of the one before it, so a missing or changed event shows. ${m.check ? escH(m.check.ok ? `Checked: ${m.check.events} events, each following on from the one before.` : 'The check found a problem: ' + (((m.check.problems || [])[0] || {}).why || '')) : ''}</p>
@@ -5449,7 +5472,7 @@ window.JOURNEY_MEDIA_HINTS = {
   }
 
   const NEGO = { changeRect, atPlace, ROW_REACH, inkOf, standing, outstanding, formed, presentPlaces, changePlaces, initialsBeside, rectsOf, KIND_WORDS, fullDate, parseFullDate, roundLines, agreementLines,
-    renderWorking, timelineHtml, eventWords, zip, crc32, sideName, other, MONTHS };
+    renderWorking, redrawRound, timelineHtml, eventWords, zip, crc32, sideName, other, MONTHS, DRAW_VERSION, textWidth, initialsFor };
   if (typeof module !== 'undefined' && module.exports) module.exports = NEGO; else root.NEGO = NEGO;
 })(typeof window !== 'undefined' ? window : globalThis);
 
@@ -11355,7 +11378,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <div class="toolbar no-print"><button class="btn ghost" type="button" id="ofBackP">Back to the property</button></div>
       <span class="agent-flag">Only you see this</span>
       <h1>${esc(money(+o.amount))} offer</h1>
-      <p>${nt(p.address)}<br><span class="small">${o.source === 'agent' ? 'Entered by you' : 'From the offer form'}, ${esc(fmtDT(o.received_at))}</span>${off ? ` <span class="pill of-off">${o.status === 'withdrawn' ? 'Withdrawn' : 'Lapsed'} ${esc(fmtDT(o.status_at))}</span>` : ''}</p>
+      <p>${nt(p.address)}<br><span class="small">${o.source === 'agent' ? 'Entered by you' : 'From the offer form'}, ${esc(fmtDT(o.received_at))}</span>${off ? ` <span class="pill of-off">${o.status === 'withdrawn' ? 'Withdrawn' : 'Lapsed'} ${esc(fmtDT(o.status_at))}</span>` : o.status === 'declined' ? ` <span class="pill of-off">Declined by the vendors ${esc(fmtDT(o.status_at))}</span>` : ''}</p>
       ${o.related_party ? `<div class="card warnc of-related" role="alert"><h3 style="margin:0 0 4px">Connected to you</h3><p class="small" style="margin:0">The buyer says a purchaser is related to, or connected with, you or McGuire Real Estate. Deal with this before you go any further with the offer.</p></div>` : ''}
       ${o.suspected_spam ? '<div class="card warnc tight of-spamflag"><p class="small" style="margin:0"><strong>Possible spam.</strong> It was sent with the form\'s hidden field filled in, which is usually a robot. You weren\'t emailed about it.</p><div class="toolbar"><button class="btn ghost" type="button" id="ofNotSpam">Not spam: treat it as a real offer</button></div></div>' : ''}
       ${o.needs_date_help ? '<div class="card note tight of-helpflag"><p class="small" style="margin:0">They asked for your help with the dates.</p></div>' : ''}
@@ -11904,12 +11927,12 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   // the signatures, initials and marks on top, and the execution record on a page at the end) and locks it. Vendors see none of it.
   const SG = window.SIGN;
   const SG_ID = [['nz_driver_licence', 'NZ driver licence'], ['passport', 'Passport'], ['nz_firearms_licence', 'NZ firearms licence'], ['kiwi_access_card', 'Kiwi Access Card'], ['other_photo_id', 'Other photo ID'], ['known_to_tim', 'Known to Tim personally']];
-  const SG_STATUS = { ready: 'Ready, nothing sent yet', signing: 'Signing', held: 'Waiting for you to check a change', complete: 'Everyone has signed', locked: 'Round 1 locked', replaced: 'Replaced by a newer draft', cancelled: 'Stopped before anyone signed' };
+  const SG_STATUS = { ready: 'Ready, nothing sent yet', signing: 'Signing', held: 'Waiting for you to check a change', complete: 'Everyone has signed', locked: 'Locked', replaced: 'Replaced by a newer draft', cancelled: 'Stopped', withdrawn: 'Stopped: withdrawn or declined' };
   const SG_COLS = 'id,signing_id,position,name,email,link_sent_at,link_expires_at,opened_at,verified_at,consent_at,marks_at,id_sighted,witnessed_by,finished_at,seen_sha256,void_at';
   const SG_WHY = { foot: 'the foot of each page', filled: 'beside each box filled or marked', term: 'beside each further term', block: 'the signature block', ack: 'acknowledgements you kept', mark: 'beside each mark' };
   // a database call whose refusal is shown in plain words on the page (not as an error)
   async function sgRpc(fn, args) { const { data, error } = await sb.rpc(fn, args); if (error) throw new Error(error.message || 'That didn\'t save.'); return data; }
-  const sgDot = s => s ? `<span class="pill ${s === 'locked' ? 'okp' : ['replaced', 'cancelled'].includes(s) ? 'of-off' : s === 'held' ? 'of-warnp' : ''}">${esc(SG_STATUS[s] || s)}</span>` : '';
+  const sgDot = s => s ? `<span class="pill ${s === 'locked' ? 'okp' : ['replaced', 'cancelled', 'withdrawn'].includes(s) ? 'of-off' : s === 'held' ? 'of-warnp' : ''}">${esc(SG_STATUS[s] || s)}</span>` : '';
   // the signer's drawing, cropped to what they drew, as a PNG
   function sgPng(cv) {
     const g = cv.getContext('2d'), w = cv.width, h = cv.height, px = g.getImageData(0, 0, w, h).data; let x0 = w, y0 = h, x1 = -1, y1 = -1;
@@ -11998,13 +12021,14 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const open = Mk.filter(m => !Rv.some(r => (r.marks || []).includes(m.id)));
     // everyone has finished: Round 1 is made and locked by the server
     if (g.status === 'complete' && !rd && !(opts && opts.tried)) { main().innerHTML = '<div class="loading" id="sgLocking">Everyone has signed. Making and locking Round 1...</div>'; await offerCall('offer-sign', { action: 'lock', signing_id: sid }); return viewSigning(sid, { tried: true }); }
-    const stateOf = s => s.void_at ? (g.status === 'cancelled' ? 'Stopped' : 'Replaced (kept, void)') : s.finished_at ? 'Finished ' + fmtDT(s.finished_at) : s.consent_at ? `Signing: ${doneOf(s)} of ${need(s.position).length} places` : g.method === 'link' ? (s.verified_at ? 'Code checked' : s.opened_at ? 'Opened the link' : s.link_sent_at ? 'Link sent ' + fmtDT(s.link_sent_at) : 'Not sent yet') : 'Not started';
+    const stateOf = s => s.void_at ? (['cancelled', 'withdrawn'].includes(g.status) ? 'Stopped' : 'Replaced (kept, void)') : s.finished_at ? 'Finished ' + fmtDT(s.finished_at) : s.consent_at ? `Signing: ${doneOf(s)} of ${need(s.position).length} places` : g.method === 'link' ? (s.verified_at ? 'Code checked' : s.opened_at ? 'Opened the link' : s.link_sent_at ? 'Link sent ' + fmtDT(s.link_sent_at) : 'Not sent yet') : 'Not started';
     main().innerHTML = `<div class="view-pad dr-page" id="sgView"><div class="toolbar no-print"><button class="btn ghost" type="button" id="sgBackO">Back to the offer</button></div><span class="agent-flag">Only you see this</span>
       <h1>${RN > 1 ? `Round ${RN}: the ${ngSide(g.side)} sign` : 'Signing'}</h1><p class="lede">${nt(p.address)}</p>
       <p>${sgDot(g.status)} <span class="small">${RN > 1 ? `Answering Round ${RN - 1}` : `Draft ${d.number}`}, ${g.method === 'link' ? 'by personal link' : 'in person on this device'}. Fingerprint <span translate="no">${esc(drShort(g.draft_sha256))}</span>.</span></p>
       ${RN > 1 && Mk.length ? `<p class="small" id="ngChanges">${Mk.length} change${Mk.length === 1 ? '' : 's'} made so far in this round.</p>` : ''}
       ${g.status === 'replaced' ? `<div class="card warnc tight" id="sgReplaced"><p class="small" style="margin:0">Replaced by a newer draft ${esc(fmtDT(g.replaced_at))}. The signatures and initials given on this version are kept, but they are void. Everyone signs the new version.</p>${g.replaced_by ? '<div class="toolbar"><button class="btn ghost" type="button" id="sgNewer">Open the new signing</button></div>' : ''}</div>` : ''}
-      ${g.status === 'cancelled' ? `<div class="card note tight" id="sgCancelled"><p class="small" style="margin:0">${S_.some(s => s.consent_at) ? 'Stopped (the offer was withdrawn, or the document closed for a fresh copy). What was signed is kept.' : 'Stopped before anyone signed, so it could be released again another way.'} Any links sent no longer work.</p></div>` : ''}
+      ${g.status === 'withdrawn' ? `<div class="card note tight" id="sgWithdrawn"><p class="small" style="margin:0">Stopped because ${o.status === 'declined' ? 'the vendors declined the offer (or withdrew their counteroffer)' : o.status === 'lapsed' ? 'the offer lapsed' : 'the offer was withdrawn'}. What was signed is kept. Any links sent no longer work.</p></div>` : ''}
+      ${g.status === 'cancelled' ? `<div class="card note tight" id="sgCancelled"><p class="small" style="margin:0">${S_.some(s => s.consent_at) ? 'Stopped: the document was closed for a fresh copy. What was signed is kept.' : 'Stopped before anyone signed, so it could be released again another way.'} Any links sent no longer work.</p></div>` : ''}
       ${stale ? `<div class="card warnc tight" id="sgStale"><p class="small" style="margin:0">The offer has changed since this was released, so signing has stopped. Re-draft and approve it, then tap Ready to sign. Signatures already given on this version stay recorded, as replaced.</p></div>` : ''}
       ${rd ? `<section class="card okc" id="sgRound"><h2>Round ${rd.doc_round || 1} locked</h2><p class="small">Locked ${esc(fmtDT(rd.locked_at))}. Fingerprint <span translate="no">${esc(rd.sha256)}</span>, worked out by the server from the stored file. The approved draft is unchanged, with every signature, initial and mark added on top, and the execution record on a page of its own at the end. It can't be changed or removed.</p>
         <div class="toolbar"><button class="btn ghost" type="button" id="sgRoundDl">Download Round ${rd.doc_round || 1}</button><button class="btn ghost" type="button" id="sgChain">Check the timeline</button></div><p class="small" id="sgChainOut" role="status" aria-live="polite"></p></section>` : ''}
@@ -12240,7 +12264,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       ofSafe(sb.from('offer_sign_receipts').select('guide').eq('signer_id', signerId)), ofSafe(sb.from('offer_sign_reviews').select('places').eq('signing_id', sid)), ofSafe(sb.from('offer_sign_marks').select('*').eq('signing_id', sid))]);
     let bytes; try { bytes = await drDraftBytes(d); } catch (e) { main().innerHTML = `<div class="view-pad"><p class="err">${esc(e.message)}</p></div>`; return; }
     const allD = (await ofSafe(sb.from('offer_drafts').select('id,number').eq('offer_id', g.offer_id))) || [], o = await must(sb.from('property_offers').select('details,status').eq('id', g.offer_id).single());
-    const stale = g.status === 'replaced' || s.void_at ? 'This version has been replaced.' : (d.number !== Math.max(...allD.map(x => x.number)) || JSON.stringify(drCanon(o.details)) !== JSON.stringify(drCanon(d.details))) ? 'The offer has changed since this was released. Re-draft and release it again.' : s.finished_at ? `${s.name} has finished signing.` : ['complete', 'locked'].includes(g.status) ? 'Everyone has signed.' : g.status === 'cancelled' ? 'This round was stopped. Any links sent no longer work.' : null;
+    const stale = g.status === 'replaced' || s.void_at ? 'This version has been replaced.' : (d.number !== Math.max(...allD.map(x => x.number)) || JSON.stringify(drCanon(o.details)) !== JSON.stringify(drCanon(d.details))) ? 'The offer has changed since this was released. Re-draft and release it again.' : s.finished_at ? `${s.name} has finished signing.` : ['complete', 'locked'].includes(g.status) ? 'Everyone has signed.' : ['cancelled', 'withdrawn'].includes(g.status) ? 'This round was stopped. Any links sent no longer work.' : null;
     const ua = navigator.userAgent, P_ = { p_signer: signerId }, RN = g.round_no || 1;
     // from Round 2 on: the earlier rounds of the document (the working copy), the parties as on the agreement, and everyone on this side
     const R2x = RN > 1 ? { layers: ((await sgRpc('agent_offer_layers', { p_offer: g.offer_id, p_document: g.document_id })).layers || []).filter(L => L.doc_round < RN), parties: g.side === 'vendor' ? ngParties(o.details) : null,
@@ -12306,7 +12330,10 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     $('#sgMarkSave').addEventListener('click', async () => { const e = $('#sgErr'); e.textContent = '';
       let m = F.marking === 'reinstate' ? (F.pick ? { kind: 'reinstate', page: F.page, target: F.pick.id, geometry: { x: Math.round(SG.markRect(F.pick).x * 10) / 10, y: Math.round((SG.markRect(F.pick).y + SG.markRect(F.pick).h + 2) * 10) / 10 } } : null) : F.draft;
       if (!m) return (e.textContent = 'Change the page first.');
-      if (m.kind === 'insert') { const t = ($('#ngInsText') || {}).value || ''; if (!t.trim()) return (e.textContent = 'Type the words to add.'); m = Object.assign({}, m, { geometry: Object.assign({}, m.geometry, { text: t.trim().replace(/\s+/g, ' ') }) }); }
+      if (m.kind === 'insert') { const t = ($('#ngInsText') || {}).value || ''; if (!t.trim()) return (e.textContent = 'Type the words to add.');
+        // straight away, before anything is sent: no phone number or email address goes on the agreement (the database checks the parties' own too)
+        const pt = DR.plainText(t); if (/[^\s@]+@[^\s@]+\.[^\s@]+/.test(pt) || DR.phoneRuns(pt).some(x => x.length >= 7)) return (e.textContent = 'Phone numbers and email addresses can\'t be typed onto the agreement here. Only the lawyers\' details go on it, and Tim adds those.');
+        m = Object.assign({}, m, { geometry: Object.assign({}, m.geometry, { text: t.trim().replace(/\s+/g, ' ') }) }); }
       const pw = ctx.pages[F.page - 1]; if (m.kind !== 'insert' && !SG.markOk(Object.assign({}, m, { target: m.target || (m.kind === 'reinstate' ? 'x' : null) }), { w: pw[0], h: pw[1] })) return (e.textContent = 'That change doesn\'t sit on the page. Try again.');
       const btn = $('#sgMarkSave'); btn.disabled = true;
       try { const c = Object.assign({ id: ngUuid() }, m), items = await ngPageItems(ctx);
@@ -12322,7 +12349,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     if (!docs.length) return '';
     const [rounds, gs, ags] = await Promise.all([ofSafe(sb.from('offer_rounds').select('id,number,document_id,doc_round,side,changes,outstanding,lifted,sha256,locked_at,signing_id,path').eq('offer_id', o.id).order('number')),
       ofSafe(sb.from('offer_signings').select('id,round_no,side,status,method,document_id,released_at').eq('offer_id', o.id).gt('round_no', 1)), ofSafe(sb.from('offer_agreements').select('*').eq('offer_id', o.id))]);
-    const R_ = rounds || [], ag = (ags || [])[0], open = docs.find(x => x.status === 'open'), off = ['withdrawn', 'lapsed'].includes(o.status);
+    const R_ = rounds || [], ag = (ags || [])[0], open = docs.find(x => x.status === 'open'), off = ['withdrawn', 'lapsed', 'declined'].includes(o.status);
     const last = open ? R_.filter(r => r.document_id === open.id).sort((a, z) => z.doc_round - a.doc_round)[0] : null;
     const live = open ? (gs || []).find(g => g.document_id === open.id && ['ready', 'signing', 'held', 'complete'].includes(g.status)) : null;
     const formed = last && last.doc_round > 1 && !last.changes && !(last.outstanding || []).length && !live;
@@ -12339,15 +12366,15 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         : formed ? `<div class="card okc" id="ngFormed"><h3 style="margin:0 0 4px">The agreement is formed</h3><p class="small" style="margin:0">Both sides have signed the same version (Round ${last.doc_round}), every change initialled by everyone, every signature there. Check it, then confirm.</p>
           <label class="f" for="ngAccAt">When acceptance was communicated</label><input type="datetime-local" id="ngAccAt" value="${nowLocal}">
           <label class="f" for="ngDate">The date at the top of the agreement <span class="opt">(in full, with the month name)</span></label><input type="text" id="ngDate" value="${esc(today)}" maxlength="20">
-          <p class="small" style="margin:2px 0 0">This is the only time the date is added. It goes on as an overlay; the signed rounds are unchanged.</p>
+          <p class="small" style="margin:2px 0 0">The day acceptance was communicated, filled in for you; it can be no earlier than that, and not after today. This is the only time the date is added. It goes on as an overlay; the signed rounds are unchanged.</p>
           <label class="choice cb"><input type="checkbox" id="ngAgCheck"><span class="mark"></span><span><span class="ct">I've looked at Round ${last.doc_round} and it is fully agreed</span></span></label>
           <div class="toolbar"><button class="btn primary" type="button" id="ngAgree">Confirm the agreement</button></div><p class="small err" id="ngAgErr" role="alert"></p></div>`
         : `<div class="card tight" id="ngNext"><p class="small" style="margin:0">Round ${last.doc_round} is locked. Nothing has gone to the ${ngSide(last.side === 'purchaser' ? 'vendor' : 'purchaser')} yet.</p>
           <div class="toolbar"><button class="btn primary" type="button" id="ngPresent">${last.side === 'purchaser' ? (last.doc_round === 1 ? 'Present to the vendors' : 'Present back to the vendors') : 'Present back to the purchasers'}</button></div></div>`) : ''}
       ${open && !ag ? `<details class="card tight" id="ngFresh"><summary class="small">Start a fresh copy</summary><p class="small">For when the document has become hard to read. It is closed and filed as negotiation history, with every round kept. Then correct the offer to the terms as they stand, re-draft and approve it, and the purchasers sign Round 1 of a new document.</p>
         <label class="f" for="ngFreshWhy">Why</label><textarea id="ngFreshWhy" rows="2" maxlength="500"></textarea><div class="toolbar"><button class="btn ghost" type="button" id="ngClose">Close this document</button></div><p class="small err" id="ngFreshErr" role="alert"></p></details>` : ''}
-      ${!off && !ag ? `<details class="card tight" id="ngWithdraw"><summary class="small">A side has withdrawn</summary><p class="small">Record who told you and when. Anything out for signing stops, and any links sent stop working.</p>
-        <div class="choices"><label class="choice"><input type="radio" name="ngWdSide" value="purchaser"><span class="mark"></span><span><span class="ct">The purchasers withdrew their offer</span></span></label><label class="choice"><input type="radio" name="ngWdSide" value="vendor"><span class="mark"></span><span><span class="ct">The vendors withdrew their counteroffer</span></span></label></div>
+      ${!off && !ag ? `<details class="card tight" id="ngWithdraw"><summary class="small">A side has withdrawn</summary><p class="small">Record who told you and when. Anything out for signing stops, any links sent stop working, and this document is filed as history: if it comes back to life, it starts again with a fresh copy.</p>
+        <div class="choices"><label class="choice"><input type="radio" name="ngWdSide" value="purchaser"><span class="mark"></span><span><span class="ct">The purchasers withdrew their offer</span></span></label><label class="choice"><input type="radio" name="ngWdSide" value="vendor"><span class="mark"></span><span><span class="ct">The vendors declined the offer, or withdrew their counteroffer</span></span></label></div>
         <label class="f" for="ngWdAt">When</label><input type="datetime-local" id="ngWdAt" value="${nowLocal}"><label class="f" for="ngWdNote">Note <span class="opt">(optional)</span></label><input type="text" id="ngWdNote" maxlength="500">
         <div class="toolbar"><button class="btn ghost" type="button" id="ngWdGo">Record the withdrawal</button></div><p class="small err" id="ngWdErr" role="alert"></p></details>` : ''}
       ${R_.length ? `<div class="toolbar"><button class="btn ghost" type="button" id="ngPack">Lawyers' pack (every round and the timeline)</button></div><p class="small" id="ngPackOut" role="status" aria-live="polite"></p>` : ''}</div>`;
@@ -12367,6 +12394,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const wd = $('#ngWdGo'); if (wd) wd.addEventListener('click', async () => { const side = ($('input[name="ngWdSide"]:checked') || {}).value; if (!side) return ($('#ngWdErr').textContent = 'Choose who withdrew.');
       const at = new Date($('#ngWdAt').value); if (isNaN(at)) return ($('#ngWdErr').textContent = 'Check the time.'); wd.disabled = true;
       try { await sgRpc('agent_negotiation_withdraw', { p_offer: o.id, p_side: side, p_at: at.toISOString(), p_note: $('#ngWdNote').value.trim() || null }); toast('Withdrawal recorded'); reload(); } catch (e) { $('#ngWdErr').textContent = e.message; wd.disabled = false; } });
+    const acc_ = $('#ngAccAt'); if (acc_) { let edited = false; $('#ngDate').addEventListener('input', () => { edited = true; });
+      acc_.addEventListener('change', () => { const t = new Date(acc_.value); if (!edited && !isNaN(t)) $('#ngDate').value = NG.fullDate(t.toLocaleDateString('en-CA', { timeZone: 'Pacific/Auckland' })); }); }
     const ag = $('#ngAgree'); if (ag) ag.addEventListener('click', async () => { const er = $('#ngAgErr'); er.textContent = '';
       if (!$('#ngAgCheck').checked) return (er.textContent = 'Tick that you have looked at the final round.');
       const dt = $('#ngDate').value.trim().replace(/\s+/g, ' '); if (!NG.parseFullDate(dt)) return (er.textContent = 'Type the date in full with the month name, for example 24 November 2026.');
@@ -12406,12 +12435,18 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const last = layers[layers.length - 1], side = last.side === 'purchaser' ? 'vendor' : 'purchaser';
     const d = await must(sb.from('offer_drafts').select('*').eq('id', doc.draft_id).single()), mp = await must(sb.from('offer_blank_maps').select('id,places').eq('id', d.map_id).single());
     let D_; try { D_ = await sgDraftPages(d); } catch (e) { main().innerHTML = `<div class="view-pad"><p class="err">${esc(e.message === 'pdf-lib' ? drNoLib : e.message || drNoLib)}</p></div>`; return; }
-    const people = side === 'vendor' ? ((await ofSafe(sb.from('property_people').select('id,position,legal_name,email,role').eq('property_id', o.property_id))) || []).filter(x => (x.role || 'owner') === 'owner').sort((a, z) => (a.position || 0) - (z.position || 0)).map((x, i) => ({ position: i + 1, name: String(x.legal_name || '').trim(), email: String(x.email || '').trim() }))
-      : ((await ofSafe(sb.from('offer_signers').select(SG_COLS).eq('signing_id', layers[0].signing_id).order('position'))) || []).filter(x => !x.void_at).map(x => ({ position: x.position, name: x.name, email: x.email || '' }));
+    // who signs: a side's later round is the same people as its newest locked round (the database refuses if the owners have changed since);
+    // the vendors' first round, the owners on the property
+    const prevL = layers.filter(L => L.side === side).sort((a, z) => z.doc_round - a.doc_round)[0];
+    const owners = ((await ofSafe(sb.from('property_people').select('id,position,legal_name,email,role').eq('property_id', o.property_id))) || []).filter(x => (x.role || 'owner') === 'owner').sort((a, z) => (a.position || 0) - (z.position || 0));
+    const people = prevL ? ((await ofSafe(sb.from('offer_signers').select(SG_COLS + ',person_id').eq('signing_id', prevL.signing_id).order('position'))) || []).filter(x => !x.void_at).map(x => { const pp = owners.find(q => q.id === x.person_id); return { position: x.position, name: x.name, email: String((pp && pp.email) || x.email || '').trim(), person: x.person_id }; })
+      : side === 'vendor' ? owners.map((x, i) => ({ position: i + 1, name: String(x.legal_name || '').trim(), email: String(x.email || '').trim(), person: x.id })) : [];
+    const ownersChanged = !!(prevL && side === 'vendor' && owners.map(x => x.id).sort().join() !== people.map(x => x.person).sort().join());
+    const resignEvery = !!(((await ofSafe(sb.from('offer_settings').select('resign_every_round'))) || [])[0] || {}).resign_every_round;
     const pages = D_.pages.map(x => ({ n: x.n, w: x.w, h: x.h, items: x.items }));
-    const M = NG.presentPlaces({ pages, placed: d.placed || [], mapPlaces: mp.places || [], side, signers: people, layers });
+    const M = NG.presentPlaces({ pages, placed: d.placed || [], mapPlaces: mp.places || [], side, signers: people, layers, resignEvery });
     const st = NG.standing(layers), changedPages = [...new Set(last.marks.map(m => m.page))];
-    const R = { method: (opt && opt.method) || 'link', page: changedPages[0] || 1 };
+    const R = { method: (opt && opt.method) || 'in_person', page: changedPages[0] || 1 };   // Tim presents: in person unless he chooses a link
     const paint = () => {
       const noEmail = people.filter(x => !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x.email)), noName = people.filter(x => !x.name);
       main().innerHTML = `<div class="view-pad dr-page" id="ngPresentView"><div class="toolbar no-print"><button class="btn ghost" type="button" id="ngBack">Back to the offer</button></div><span class="agent-flag">Only you see this</span>
@@ -12422,7 +12457,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
           <div id="ngCanvas" class="dr-holder"></div>
           <label class="choice cb"><input type="checkbox" id="ngChecked"><span class="mark"></span><span><span class="ct">I've looked at Round ${last.doc_round} and it can go to the ${ngSide(side)}</span></span></label></section>
         <section class="card" id="ngWho"><h2>Who signs</h2>${people.map(x => `<p class="small" style="margin:0 0 4px" data-ngwho="${x.position}"><strong>${nt(x.name || 'No legal name yet')}</strong>: ${M.counts[x.position] || 0} places${R.method === 'link' ? ` <span translate="no">(${esc(x.email || 'no email')})</span>` : ''}</p>`).join('')}
-          <p class="small">${M.first ? `It's their first round, so each initials the foot of every page and every filled box, and signs.` : 'Each initials every change not yet initialled, and signs.'}${side === 'vendor' ? ' Before signing, the vendors read the reminder that every chattel must be in full working order at settlement, and are told they can talk to their lawyer at any time. They see the purchasers\' names and lawyer, as on the agreement, never their own contact details.' : ''}</p>
+          ${ownersChanged ? `<div class="card warnc tight" id="ngOwners"><p class="small" style="margin:0">The owners on the property have changed since Round ${prevL.doc_round}. Start a fresh copy, so the right people sign.</p></div>` : ''}
+          <p class="small">${M.first ? `It's their first round, so each initials the foot of every page and every filled box, and signs.` : `Each initials every change not yet initialled${resignEvery ? ', and signs again' : '. Their signatures from before stand, unless a change lifted one: then they sign again'}.`}${side === 'vendor' ? ' Before signing, the vendors read the reminder that every chattel must be in full working order at settlement, and are told they can talk to their lawyer at any time. They see the purchasers\' names and lawyer, as on the agreement, never their own contact details.' : ''}</p>
           ${noName.length ? `<div class="card warnc tight"><p class="small" style="margin:0">Add each vendor's legal name on the property first.</p></div>` : ''}
           ${M.blocking.length ? `<div class="card warnc tight" id="ngBlock"><ul class="dr-list">${M.blocking.map(b => `<li class="small"><strong>${esc(b.label)}</strong>: ${esc(b.why)}</li>`).join('')}</ul></div>` : ''}</section>
         <section class="card" id="ngHow"><h2>How they sign</h2><div class="choices">
@@ -12430,7 +12466,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
           <label class="choice"><input type="radio" name="ngMethod" value="link" ${R.method === 'link' ? 'checked' : ''}><span class="mark"></span><span><span class="ct">By a personal link to each</span><span class="cd">Each gets their own link and a one-time code by email. Nothing is sent until you tap Send.</span></span></label></div>
           ${R.method === 'link' && noEmail.length ? `<div class="card warnc tight" id="ngNoEmail"><p class="small" style="margin:0">${esc(noEmail.map(x => x.name || 'A vendor').join(', '))} ${noEmail.length === 1 ? 'has' : 'have'} no email. Add it on the property, or sign in person.</p></div>` : ''}</section>
         <div class="err" id="ngErr" role="alert"></div>
-        <div class="toolbar"><button class="btn primary" type="button" id="ngGo" ${M.blocking.length || noName.length ? 'disabled' : ''}>Present to the ${ngSide(side)}</button></div>
+        <div class="toolbar"><button class="btn primary" type="button" id="ngGo" ${M.blocking.length || noName.length || ownersChanged ? 'disabled' : ''}>Present to the ${ngSide(side)}</button></div>
         <p class="small">${R.method === 'link' ? 'This authorises it. You send the links on the next screen.' : 'Signing then happens on this device.'}</p></div>`;
       $('#ngBack').addEventListener('click', () => viewOfferAgent(oid));
       $$('input[name="ngMethod"]').forEach(x => x.addEventListener('change', () => { R.method = x.value; paint(); }));

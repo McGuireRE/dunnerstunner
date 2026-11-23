@@ -186,8 +186,14 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   expect(!(await q.$(`#sgPage [data-ink="${priceInk}"]`)) && !(await q.$(`#sgPage [data-ink="${rA1.signing_id}/filled:price:s2"]`)), 'after the strike, both purchasers\' price initials are lifted from the working copy');
   await q.click('[data-tool="insert"]'); await q.waitForSelector('#sgPage .sg-draw', { state: 'attached' });
   { const el = await q.$('#sgPage .sg-draw'); await el.scrollIntoViewIfNeeded(); const bx = await el.boundingBox(); await q.mouse.click(bx.x + bx.width * (priceBox.x / W), bx.y + bx.height * fy(priceBox.y - 10)); }
-  await q.fill('#ngInsText', 'Call me on 021 000 1111'); await q.click('#sgMarkSave'); await q.waitForFunction(() => /own phone or email/.test(document.querySelector('#sgErr').textContent));
-  expect(true, 'a vendor\'s own phone is refused in typed words');
+  for (const bad of ['Call me on 021 000 1111', 'Call me on 021\u00a0000\u00a01111', 'Call me on 021/000/1111', 'Call me on ０２１ ０００ １１１１', 'email vendor @ example.com']) {
+    await q.fill('#ngInsText', bad); await q.click('#sgMarkSave'); await q.waitForFunction(() => /Phone numbers and email addresses can't be typed/.test(document.querySelector('#sgErr').textContent));
+    await q.evaluate(() => { document.querySelector('#sgErr').textContent = ''; }); }
+  d = await db(q); expect(!d.offer_sign_marks.some(m => m.kind === 'insert'), 'a phone or email in typed words (any spacing, full-width digits, slashes, a spaced @) is refused in the browser, before anything is sent');
+  // and by the database too, for a vendor's own phone that is only on the agency agreement, and for a phone written with underscores
+  { const ses_ = await q.evaluate(() => Object.keys(sessionStorage).filter(k => /^sgSes:/.test(k)).map(k => sessionStorage.getItem(k))[0]);
+    for (const t of ['Ring 021 000 2222', 'Ring 021_000_2222']) { const rr = await invoke(q, { action: 'change', token: linkV1.split('sign=')[1], session: ses_, id: '9f9f9f9f-0000-4000-8000-00000000000' + (t.length % 10), kind: 'insert', page: priceBox.page, geometry: { x: priceBox.x, y: priceBox.y - 10, text: t, size: 9 }, places: [] });
+      expect(rr.ok === false && /a vendor's own phone or email/.test(rr.error), 'the database refuses a vendor\'s own phone: ' + t); } }
   await q.fill('#ngInsText', '$690,000'); await q.click('#sgMarkSave'); await q.waitForSelector('#sgPlaces'); await q.waitForSelector('#sgPage .dr-pg canvas');
   d = await db(q); const ch2 = d.offer_sign_marks.filter(m => m.signing_id === g2.id);
   expect(ch2.length === 2 && ch2.some(m => m.kind === 'strike') && ch2.some(m => m.kind === 'insert' && m.geometry.text === '$690,000') && ch2.every(m => m.by_name === 'Testy Vendorperson'), 'two changes saved, with who made them');
@@ -226,12 +232,13 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   d = await db(p); expect(!d.offer_signings.some(g => g.offer_id === offA && g.round_no === 3), 'nothing presented back on its own');
   await p.click('#ngPresent'); await p.waitForSelector('#ngPresentView'); await p.waitForSelector('#ngLifted');
   expect(/2 initials or signatures lifted/.test(await p.textContent('#ngLifted')) || /lifted/.test(await p.textContent('#ngLifted')), 'Tim sees what was lifted');
-  expect(/initials every change not yet initialled/.test(await p.textContent('#ngWho')), 'the purchasers initial the changes and sign');
+  expect(/initials every change not yet initialled/.test(await p.textContent('#ngWho')) && /signatures from before stand/.test(await p.textContent('#ngWho')), 'the purchasers initial the changes; their signatures stand');
+  expect(await p.isChecked('input[name="ngMethod"][value="in_person"]'), 'presenting defaults to in person');
   await tick(p, 'input[name="ngMethod"][value="in_person"]'); await p.waitForSelector('#ngChecked'); await tick(p, '#ngChecked'); await p.click('#ngGo'); await p.waitForSelector('#sgView');
   for (const n of [1, 2]) { await turnStart(p, n); await consentDraw(p, n + 10);
     expect(!(await p.$('#sgGuides')) && !(await p.$('#ngChattels')), 'no guides again for the purchasers');
     out['need3_' + n] = +(await p.textContent('#sgCount')).match(/of (\d+)/)[1];
-    expect(out['need3_' + n] === 3, 'each purchaser: their initials beside the two changes, and their signature');
+    expect(out['need3_' + n] === 2, 'each purchaser: their initials beside the two changes (their Round 1 signature stands: nothing lifted it)');
     await tapAll(p); await finishInPerson(p); }
   await p.waitForSelector('#sgRound', { timeout: 30000 });
   d = await db(p); const rA3 = d.offer_rounds.find(r => r.offer_id === offA && r.doc_round === 3);
@@ -241,8 +248,12 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   // ── 7. the agreement: Tim confirms, the date typed in full; the agreed copy locked; Under offer; other offers untouched ──
   process.stderr.write('step 7\n');
   expect(!(await side(p)), 'agreement formed at 390 px: no sideways scroll'); await shot(p, 'formed');
-  await p.fill('#ngDate', '24/11/2026'); await tick(p, '#ngAgCheck'); await p.click('#ngAgree'); expect(/in full with the month name/.test(await p.textContent('#ngAgErr')), 'the date must be in full with the month name');
   const today = await p.evaluate(() => window.NEGO.fullDate(new Date().toLocaleDateString('en-CA', { timeZone: 'Pacific/Auckland' })));
+  expect(await p.inputValue('#ngDate') === today, 'the date is filled in with the day acceptance was communicated');
+  await p.fill('#ngDate', '24/11/2026'); await tick(p, '#ngAgCheck'); await p.click('#ngAgree'); expect(/in full with the month name/.test(await p.textContent('#ngAgErr')), 'the date must be in full with the month name');
+  const yesterday = await p.evaluate(() => window.NEGO.fullDate(new Date(Date.now() - 864e5).toLocaleDateString('en-CA', { timeZone: 'Pacific/Auckland' })));
+  await p.fill('#ngDate', yesterday); await p.click('#ngAgree'); await p.waitForFunction(() => /from the day acceptance was communicated/.test(document.querySelector('#ngAgErr').textContent));
+  expect(true, 'a date before acceptance was communicated is refused');
   await p.fill('#ngDate', today); await p.click('#ngAgree'); await p.waitForSelector('#ngAgreed', { timeout: 30000 });
   d = await db(p); const ag = d.offer_agreements.find(x => x.offer_id === offA);
   expect(ag && ag.date_text === today && ag.round_id === rA3.id && d.offer_documents.find(x => x.id === ag.document_id).status === 'agreed' && d.property_offers.find(o => o.id === offA).status === 'accepted', 'the agreement is locked against Round 3, dated as typed');
@@ -254,6 +265,9 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   expect(d.properties.find(x => x.id === 'P1').stage === 'under_offer', 'the property is now under offer');
   expect(['received'].includes(d.property_offers.find(o => o.id === offB).status) && d.property_offers.find(o => o.id === offC).status === 'received', 'other offers on the property are untouched');
   r = await rpc(p, 'agent_round_present', { p_offer: offA, p_method: 'link', p_places: [], p_checked: true }); expect(r.error && /agreement has been made/.test(r.error.message), 'nothing more is presented once agreed');
+  r = await rpc(p, 'agent_offer_correct', { p_offer: offA, p_details: offer({ price: '1' }), p_note: 'Trying to change an agreed offer' }); expect(r.error && /can't be corrected/.test(r.error.message), 'an agreed offer can\'t be corrected');
+  out.terms = { price: ag.terms.price, changes: ag.terms.changes.map(c => c.kind + (c.text ? ':' + c.text : '')) };
+  expect(ag.terms.price && ag.terms.changes.length === 2 && ag.terms.changes.some(c => c.text === '$690,000') && ag.round_sha256 === rA3.sha256 && ag.draw_version === 'nego-draw-1', 'the agreed terms and the round it was drawn from are kept with the agreement');
 
   // ── 8. a five-round negotiation with one fresh copy (offer B): R1, R2 vendors counter, R3 purchaser counters, a fresh copy, R1, R2 ──
   process.stderr.write('step 8\n');
@@ -293,7 +307,7 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   expect(names.length === 6 && names.includes('Timeline.html') && names.includes('Document-2-Round-2.pdf'), 'five rounds and the timeline');
   expect(bRounds.every(x => sha(fs.readFileSync(path.join(dir, `Document-${d.offer_documents.find(y => y.id === x.document_id).number}-Round-${x.doc_round}.pdf`))) === x.sha256), 'each round in the pack is the locked copy, byte for byte');
   const tl = fs.readFileSync(path.join(dir, 'Timeline.html'), 'utf8');
-  expect(/Checked: \d+ events/.test(tl) && /Document closed for a fresh copy/.test(tl) && /Tim authorised presentation/.test(tl) && !/cy\.o@|027 100 2000/.test(tl), 'the timeline reads plainly, checked, with no contact details');
+  expect(!/agent-nego@example\.com/.test(tl) && /Tim McGuire/.test(tl) && /Checked: \d+ events/.test(tl) && /Document closed for a fresh copy/.test(tl) && /Tim authorised presentation/.test(tl) && !/cy\.o@|027 100 2000/.test(tl), 'the timeline reads plainly, checked, with no contact details');
   fs.rmSync(dir, { recursive: true, force: true });
 
   // ── 10. withdrawal (offer C): the vendors withdraw while their round is out by link; the link stops working ──
@@ -306,7 +320,9 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   await toOffer(p, offC); await p.waitForSelector('#ngWithdraw'); await p.click('#ngWithdraw summary');
   await p.click('#ngWdGo'); expect(/Choose who withdrew/.test(await p.textContent('#ngWdErr')), 'who withdrew must be chosen');
   await tick(p, 'input[name="ngWdSide"][value="vendor"]'); await p.fill('#ngWdNote', 'Testy rang: they are keeping the house'); await p.click('#ngWdGo'); await p.waitForSelector('#ofView');
-  d = await db(p); expect(d.property_offers.find(o => o.id === offC).status === 'withdrawn' && d.offer_signings.find(g => g.id === pr.id).status === 'cancelled' && d.offer_events.some(e => e.kind === 'withdrawn' && e.detail.side === 'vendor' && e.detail.stopped === 1), 'the withdrawal recorded with the time, the round stopped');
+  d = await db(p); expect(d.property_offers.find(o => o.id === offC).status === 'declined' && d.offer_signings.find(g => g.id === pr.id).status === 'withdrawn' && d.offer_events.some(e => e.kind === 'withdrawn' && e.detail.side === 'vendor' && e.detail.status === 'declined' && e.detail.stopped === 1) && d.offer_documents.find(x => x.offer_id === offC).status === 'closed', 'the vendors declined: recorded with the time and side, the round stopped as withdrawn, the document filed');
+  await rpc(p, 'agent_offer_status', { p_offer: offC, p_status: 'received', p_at: new Date().toISOString(), p_note: 'They changed their minds' });
+  r = await rpc(p, 'agent_round_present', { p_offer: offC, p_method: 'in_person', p_places: [], p_checked: true }); expect(r.error && /fresh copy/.test(r.error.message), 'marked current again: the old document can\'t be presented; a fresh copy is needed');
   await p.evaluate(() => localStorage.removeItem('mocksession')); await p.close();
   q = await page(); await q.goto(cLink); await q.waitForSelector('#sgClosed');
   expect(/isn't being signed|isn't working/.test(await q.textContent('#sgClosed')), 'the vendors\' open link stops working');

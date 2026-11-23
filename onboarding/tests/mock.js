@@ -416,12 +416,12 @@ function offerRpc(name,a,me){ if(!me||!AGENTS.includes(me.email)) return bad('On
     if(a.p_items.some(x=>String(x??'').trim().length>200)) return bad('Please shorten each chattel: 200 characters at most'); const items=a.p_items.map(x=>String(x??'').trim()).filter(Boolean);
     offerRpc('agent_offer_link',{p_property:p.id,p_action:'get'},me); const l=OL().find(x=>x.property_id===p.id); const before=l.chattels||[]; l.chattels=items; ev(p.id,null,'chattels',{before,after:items}); return ok(items); }
   if(name==='agent_offer_add'){ const p=PT().find(x=>x.id===a.p_property); if(!p) return bad('No such property'); let d; try{ d=offerClean(a.p_offer,true); }catch(e){ return bad(e.message); } const l=OL().find(x=>x.property_id===p.id); d.chattels_listed=((l&&l.chattels)||[]).slice(); return ok(offerRow(p.id,d,'agent',me.email,l&&l.province).id); }
-  if(name==='agent_offer_correct'){ const o=fnd(a.p_offer); if(!o) return bad('No such offer'); const note=String(a.p_note||'').trim(); if(note.length<3||note.length>500) return bad('Say what changed and how you heard (3 to 500 characters)');
+  if(name==='agent_offer_correct'){ const o=fnd(a.p_offer); if(!o) return bad('No such offer'); if((DB.offer_agreements||[]).some(x=>x.offer_id===o.id)) return bad("The agreement has been made, so the offer can't be corrected. The agreed terms are kept with the agreement"); const note=String(a.p_note||'').trim(); if(note.length<3||note.length>500) return bad('Say what changed and how you heard (3 to 500 characters)');
     let d; try{ d=offerClean(a.p_details,true); }catch(e){ return bad(e.message); } d.chattels_listed=(o.details.chattels_listed||[]).slice(); const before=o.details; Object.assign(o,{details:d,amount:d.price,conditions:d.conditions.map(c=>c.key).join(', '),buyer_ref:offerLabel(d),kiwisaver:d.kiwisaver,lawyer_approval:d.lawyer_approval,needs_date_help:d.date_help,related_party:d.related,updated_at:now()}); ev(o.property_id,o.id,'corrected',{note,before,after:d}); return ok(d); }
   if(name==='agent_offer_status'){ const o=fnd(a.p_offer); if(!o) return bad('No such offer'); if(!['withdrawn','lapsed','received'].includes(a.p_status)) return bad('Choose withdrawn or lapsed'); const at=a.p_at||now();
     if((DB.offer_agreements||[]).some(x=>x.offer_id===o.id)) return bad("The agreement has been made, so it can't be marked here. Talk to the lawyers");
     if(Date.parse(at)>Date.now()+3e5||Date.parse(at)<Date.parse(o.received_at)-6e4) return bad('The time needs to be between when the offer came in and now'); const from=o.status;
-    const stopped=['withdrawn','lapsed'].includes(a.p_status)?stopSignings(o.id,null,me.email,'The offer was marked '+a.p_status):0;   // migration 021: open links stop working
+    const off_=['withdrawn','lapsed'].includes(a.p_status), stopped=off_?stopSignings(o.id,null,me.email,'The offer was marked '+a.p_status,'withdrawn'):0; if(off_) docClose(o.id,me.email,'The offer was marked '+a.p_status);   // migration 021: open links stop working; a fresh copy is needed
     o.status=a.p_status; o.status_at=a.p_status==='received'?null:at; o.status_by=me.email; ev(o.property_id,o.id,'status',{from,to:a.p_status,at,note:(a.p_note||'').trim()||null,stopped}); return ok(null); }
   if(name==='agent_offer_read'){ const o=PO().find(x=>x.id===a.p_offer); if(!o) return bad('No such offer'); if(!o.read_at){ o.read_at=now(); o.read_by=me.email; ev(o.property_id,o.id,'read'); } return ok(null); }
   if(name==='agent_offer_gap'){ const o=fnd(a.p_offer); if(!o) return bad('No such offer'); const r=String(a.p_reason||'').trim()||null; if(r&&(r.length<5||r.length>500)) return bad('Give your reason (5 to 500 characters)');
@@ -750,7 +750,7 @@ function draftInvoke(o){ const b=(o&&o.body)||{}; const me=S&&S.user; const res=
 // ever sent: each is kept in email_log (mock: true) and in localStorage mockSignMail ({kind, to, code?, link?}) for the tests to read.
 // localStorage mockMailFail = an address: email to it fails.
 const SIGN_TABLES=['offer_signings','offer_signers','offer_sign_taps','offer_sign_receipts','offer_sign_marks','offer_sign_reviews','offer_sign_asks','offer_rounds','offer_documents','offer_agreements'];
-const SIGN_RPCS=['agent_signing_cancel','agent_signing_release','agent_signing_start','agent_signing_consent','agent_signing_receipt','agent_signing_marks','agent_signing_tap','agent_signing_finish','agent_signing_mark','agent_signing_review','agent_offer_chain_check','agent_round_present','agent_round_change','agent_offer_layers','agent_document_close','agent_negotiation_withdraw'];
+const SIGN_RPCS=['agent_signing_cancel','agent_signing_release','agent_signing_start','agent_signing_consent','agent_signing_receipt','agent_signing_marks','agent_signing_tap','agent_signing_finish','agent_signing_mark','agent_signing_review','agent_offer_chain_check','agent_round_present','agent_round_change','agent_offer_layers','agent_document_close','agent_negotiation_withdraw','agent_offer_negotiation_setting'];
 const OSG=()=>(DB.offer_signings||=[]), OSR=()=>(DB.offer_signers||=[]), OST=()=>(DB.offer_sign_taps||=[]), OSC=()=>(DB.offer_sign_receipts||=[]), OSM=()=>(DB.offer_sign_marks||=[]), OSV=()=>(DB.offer_sign_reviews||=[]), OSA=()=>(DB.offer_sign_asks||=[]), ORN=()=>(DB.offer_rounds||=[]);
 const shaS=t=>window.SIGN.sha256Hex(String(t));
 const SIGN_ID_TYPES=['nz_driver_licence','passport','nz_firearms_licence','kiwi_access_card','other_photo_id','known_to_tim'];
@@ -763,7 +763,7 @@ function sgMail(kind,to,extra){ const l=JSON.parse(localStorage.getItem('mockSig
 const sgEv=(g,actor,kind,detail)=>OE().push({id:OE().length+1,property_id:g.property_id,offer_id:g.offer_id,at:now(),actor,kind,detail:detail||{}});
 function sgCurrent(g){ if(g.status==='replaced') return 'This version has been replaced. Tim will send you the new one.'; if(g.status==='locked') return 'Signing is finished, and the signed copy is locked.'; if(g.status==='cancelled') return 'This signing was stopped before anyone signed. Tim will send it to you again.';
   const ds=(DB.offer_drafts||[]).filter(x=>x.offer_id===g.offer_id), d=ds.find(x=>x.id===g.draft_id), o=PO().find(x=>x.id===g.offer_id);
-  if(['withdrawn','lapsed'].includes(o.status)) return 'This offer has been withdrawn or has lapsed.';
+  if(g.status==='withdrawn'||['withdrawn','lapsed','declined'].includes(o.status)) return o.status==='declined'?'The vendors have declined this offer, so it is no longer being signed.':o.status==='lapsed'?'This offer has lapsed, so it is no longer being signed.':'This offer has been withdrawn, so it is no longer being signed.';
   if(OAG().some(x=>x.offer_id===g.offer_id)) return 'This agreement has been made, so nothing more is signed here.';
   if(g.document_id&&(ODC().find(x=>x.id===g.document_id)||{}).status!=='open') return 'This version is no longer being signed. Tim will be in touch.';
   if(d.number!==Math.max(...ds.map(x=>x.number))||!same(o.details,d.details)) return 'The offer has changed since it was sent for signing. Tim will send you the new version.'; return null; }
@@ -810,10 +810,10 @@ function signRpc(name,a,me){ if(!me||!AGENTS.includes(me.email)) return bad('Onl
     if(!(DB.offer_draft_approvals||[]).some(x=>x.draft_id===d.id&&x.sha256===d.sha256)) throw new Error('Approve the draft first');
     if(d.number!==Math.max(...DB.offer_drafts.filter(x=>x.offer_id===d.offer_id).map(x=>x.number))) throw new Error('There is a newer draft of this offer. Use that one');
     if(!same(o.details,d.details)) throw new Error('The offer has changed since this draft. Re-draft and approve it first');
-    if(['withdrawn','lapsed'].includes(o.status)) throw new Error('This offer has been withdrawn or has lapsed');
+    if(['withdrawn','lapsed','declined'].includes(o.status)) throw new Error('This offer has been withdrawn, declined or has lapsed');
     if(ODC().some(x=>x.offer_id===o.id&&['open','agreed'].includes(x.status))) throw new Error('This offer already has a signed Round 1. For a fresh copy, close the current document first');
     if(ODC().some(x=>x.draft_id===d.id)) throw new Error('That draft belongs to a closed document. Re-draft the offer for a fresh copy');
-    const ex=OSG().find(g=>g.draft_id===d.id&&(g.round_no||1)===1&&g.status!=='cancelled'); if(ex) return {id:ex.id,existing:true};
+    const ex=OSG().find(g=>g.draft_id===d.id&&(g.round_no||1)===1&&!['cancelled','withdrawn'].includes(g.status)); if(ex) return {id:ex.id,existing:true};
     const ppl=d.details.purchasers||[], n=ppl.length; if(n<1||n>12) throw new Error('The offer needs 1 to 12 purchasers');
     const pages=a.p_pages; if(!Array.isArray(pages)||!pages.length||pages.length>400||pages.some(s=>!Array.isArray(s)||s.length!==2||!(s[0]>=50&&s[0]<=5000)||!(s[1]>=50&&s[1]<=5000))) throw new Error('Please check the page sizes');
     if(!sgPlacesOk(a.p_places,pages,n,true)) throw new Error('Please check the signing places: every purchaser needs a signature and initials at the foot of every page');
@@ -858,13 +858,14 @@ function signRpc(name,a,me){ if(!me||!AGENTS.includes(me.email)) return bad('Onl
   if(name==='agent_offer_layers') return sgTry(()=>{ const doc=ODC().filter(x=>x.offer_id===a.p_offer&&(a.p_document?x.id===a.p_document:['open','agreed'].includes(x.status))).sort((x,y)=>y.number-x.number)[0]; return doc?{document:doc,layers:docLayers(doc.id,1e5)}:{document:null,layers:[]}; });
   if(name==='agent_document_close') return sgTry(()=>{ const o=PO().find(x=>x.id===a.p_offer); if(!o) throw new Error('No such offer'); const doc=ODC().find(x=>x.offer_id===o.id&&x.status==='open'); if(!doc) throw new Error('There is no open document to close');
     const why=String(a.p_reason||'').trim(); if(why.length<3||why.length>500) throw new Error('Say why you are starting a fresh copy (3 to 500 characters)');
-    const stopped=stopSignings(o.id,doc.id,me.email,'The document was closed for a fresh copy'), rounds=ORN().filter(r=>r.document_id===doc.id).length; Object.assign(doc,{status:'closed',closed_at:now(),closed_by:me.email,close_reason:why});
+    const stopped=stopSignings(o.id,doc.id,me.email,'The document was closed for a fresh copy','cancelled'), rounds=ORN().filter(r=>r.document_id===doc.id).length; docClose(o.id,me.email,why);
     sgEv({property_id:o.property_id,offer_id:o.id},me.email,'document_closed',{document_id:doc.id,document:doc.number,rounds,stopped,reason:why}); return {ok:true,document:doc.number,rounds,stopped}; });
   if(name==='agent_negotiation_withdraw') return sgTry(()=>{ if(!['purchaser','vendor'].includes(a.p_side)) throw new Error('Choose who withdrew: the purchasers or the vendors'); const o=PO().find(x=>x.id===a.p_offer&&x.source!=='manual'); if(!o) throw new Error('No such offer');
-    if(OAG().some(x=>x.offer_id===o.id)) throw new Error("The agreement has been made, so it can't be withdrawn here. Talk to the lawyers"); if(['withdrawn','lapsed'].includes(o.status)) throw new Error('This offer has already been withdrawn or has lapsed');
+    if(OAG().some(x=>x.offer_id===o.id)) throw new Error("The agreement has been made, so it can't be withdrawn here. Talk to the lawyers"); if(['withdrawn','lapsed','declined'].includes(o.status)) throw new Error('This offer has already been withdrawn, declined or has lapsed');
     const at=a.p_at||now(); if(Date.parse(at)>Date.now()+3e5||Date.parse(at)<Date.parse(o.received_at)-6e4) throw new Error('The time needs to be between when the offer came in and now'); if(String(a.p_note||'').length>500) throw new Error('The note is too long');
-    const stopped=stopSignings(o.id,null,me.email,a.p_side==='vendor'?'The vendors withdrew':'The purchasers withdrew'); const from=o.status; Object.assign(o,{status:'withdrawn',status_at:at,status_by:me.email});
-    sgEv({property_id:o.property_id,offer_id:o.id},me.email,'withdrawn',{side:a.p_side,from,at,note:String(a.p_note||'').trim()||null,stopped}); return {ok:true,stopped}; });
+    const why=a.p_side==='vendor'?'The vendors declined':'The purchasers withdrew', st=a.p_side==='vendor'?'declined':'withdrawn', stopped=stopSignings(o.id,null,me.email,why,'withdrawn'), closed=docClose(o.id,me.email,why); const from=o.status; Object.assign(o,{status:st,status_at:at,status_by:me.email});
+    sgEv({property_id:o.property_id,offer_id:o.id},me.email,'withdrawn',{side:a.p_side,status:st,from,at,note:String(a.p_note||'').trim()||null,stopped,document_closed:closed}); return {ok:true,stopped,status:st}; });
+  if(name==='agent_offer_negotiation_setting') return sgTry(()=>{ if(typeof a.p_resign_every_round!=='boolean') throw new Error('Choose yes or no'); OSET().resign_every_round=a.p_resign_every_round; OSET().updated_by=me.email; return null; });
   return bad('unknown rpc '+name); }
 // ── presentation and counteroffers (mirrors migrations/021_offer_negotiation.sql) ──
 const ODC=()=>(DB.offer_documents||=[]), OAG=()=>(DB.offer_agreements||=[]);
@@ -875,28 +876,41 @@ function docLayers(docId,upto){ return ORN().filter(r=>r.document_id===docId&&r.
   return {round_id:r.id,number:r.number,doc_round:r.doc_round,side:r.side,signing_id:g.id,sha256:r.sha256,locked_at:r.locked_at,changes:r.changes,places:sgAllPlaces(g),
     taps:OST().filter(t=>t.signing_id===g.id).map(t=>({place_id:t.place_id,signer:OSR().find(s=>s.id===t.signer_id).position})),
     signers:OSR().filter(s=>s.signing_id===g.id&&!s.void_at).sort((x,y)=>x.position-y.position).map(s=>({position:s.position,name:s.name,sig_png:s.sig_png,init_png:s.init_png})),marks:sgMarksOf(g.id)}; }); }
-function stopSignings(oid,docId,actor,reason){ let n=0; OSG().filter(g=>g.offer_id===oid&&['ready','signing','held','complete'].includes(g.status)&&(!docId||g.document_id===docId)).forEach(g=>{
-  OSR().filter(s=>s.signing_id===g.id&&!s.void_at).forEach(s=>Object.assign(s,{void_at:now(),token_hash:null,session_hash:null,code_hash:null})); g.status='cancelled';
-  sgEv(g,actor,'sign_cancelled',{signing_id:g.id,round:g.round_no||1,side:g.side||'purchaser',method:g.method,links_sent:!!g.sent_at,reason}); n++; }); return n; }
+function stopSignings(oid,docId,actor,reason,status){ let n=0; const st=status||'cancelled'; OSG().filter(g=>g.offer_id===oid&&['ready','signing','held','complete'].includes(g.status)&&(!docId||g.document_id===docId)).forEach(g=>{
+  OSR().filter(s=>s.signing_id===g.id&&!s.void_at).forEach(s=>Object.assign(s,{void_at:now(),token_hash:null,session_hash:null,code_hash:null})); g.status=st;
+  sgEv(g,actor,st==='withdrawn'?'sign_withdrawn':'sign_cancelled',{signing_id:g.id,round:g.round_no||1,side:g.side||'purchaser',method:g.method,links_sent:!!g.sent_at,reason}); n++; }); return n; }
+function docClose(oid,actor,reason){ const doc=ODC().find(x=>x.offer_id===oid&&x.status==='open'); if(!doc) return null; Object.assign(doc,{status:'closed',closed_at:now(),closed_by:actor,close_reason:String(reason).slice(0,500)}); return doc.number; }
+// the change's rectangle as the database works it out (typed words allowed 0.62 of the size a letter), and the gap to a place
+function chgRect(kind,g){ if(kind==='insert') return {x:g.x,y:g.y-2,w:Math.max(8,String(g.text||'').length*(g.size||9)*0.62),h:(g.size||9)+4}; return window.SIGN.markRect({kind,geometry:g}); }
+const gapOf=(p,r)=>Math.hypot(Math.max(0,r.x-(p.x+p.w),p.x-(r.x+r.w)),Math.max(0,r.y-(p.y+p.h),p.y-(r.y+r.h)));
+function datePlaceOf(draftId){ const d=(DB.offer_drafts||[]).find(x=>x.id===draftId), m=d&&(DB.offer_blank_maps||[]).find(x=>x.id===d.map_id); return m?((m.places||[]).find(x=>x.id==='date')||(m.places||[]).find(x=>x.kind==='date')||null):null; }
 // whose own phone or email some typed words hold (offer_private_hit)
 // the parties as the agreement names them, for the vendors' screen (offer_parties)
 function offerParties(o){ const d=(o&&o.details)||{}, lw=d.lawyer||{}; return {purchasers:(d.purchasers||[]).map(q=>[q.first,q.last].map(x=>String(x||'').trim()).join(' ').trim()),entity:String(d.entity||'').trim()||null,lawyer:{firm:lw.firm||null,person:lw.person||null,email:lw.email||null,phone:lw.phone||null},chattels:d.chattels_listed||[],chattels_add:d.chattels_add||[],chattels_exclude:d.chattels_exclude||[]}; }
-function privateHit(o,text){ const X=window.DRAFT, list=[{who:'a purchaser',email:(o.details||{}).email,phone:(o.details||{}).phone}].concat(((o.details||{}).purchasers||[]).map(q=>({who:'a purchaser',email:q.email,phone:q.phone})),
-  (DB.property_people||[]).filter(pp=>pp.property_id===o.property_id).map(pp=>({who:'a vendor',email:pp.email,phone:pp.phone}))); return X.holdsOwn(text,X.ownContacts(list)); }
+function privateHit(o,text){ const X=window.DRAFT, ags=(DB.agreements||[]).filter(g=>g.property_id===o.property_id).map(g=>g.id), list=[{who:'a purchaser',email:(o.details||{}).email,phone:(o.details||{}).phone}].concat(((o.details||{}).purchasers||[]).map(q=>({who:'a purchaser',email:q.email,phone:q.phone})),
+  (DB.property_people||[]).filter(pp=>pp.property_id===o.property_id).map(pp=>({who:'a vendor',email:pp.email,phone:pp.phone})), (DB.agreement_people||[]).filter(ap=>ags.includes(ap.agreement_id)).map(ap=>({who:'a vendor',email:ap.email,phone:ap.phone}))); return X.holdsOwn(text,X.ownContacts(list)); }
 const SIDE_PEOPLE=(o,doc)=>doc&&docLast(doc.id).side==='purchaser'?(DB.property_people||[]).filter(pp=>pp.property_id===o.property_id&&(pp.role||'owner')==='owner').sort((x,y)=>(x.position||0)-(y.position||0)).map(pp=>({name:String(pp.legal_name||'').replace(/\s+/g,' ').trim(),email:String(pp.email||'').trim().toLowerCase()||null,person:pp.id}))
   :OSR().filter(s=>s.signing_id===ORN().find(r=>r.document_id===doc.id&&r.doc_round===1).signing_id&&!s.void_at).sort((x,y)=>x.position-y.position).map(s=>({name:s.name,email:s.email,person:null}));
 function roundPresent(a,me){ if(!['in_person','link'].includes(a.p_method)) throw new Error('Choose in person or by link'); const o=PO().find(x=>x.id===a.p_offer); if(!o) throw new Error('No such offer');
   if(['withdrawn','lapsed','declined'].includes(o.status)) throw new Error('This offer has been withdrawn or has lapsed'); if(OAG().some(x=>x.offer_id===o.id)) throw new Error('The agreement has been made');
-  const doc=ODC().find(x=>x.offer_id===o.id&&x.status==='open'); if(!doc) throw new Error('Lock Round 1 first: the purchasers sign the offer before it goes to the vendors'); const last=docLast(doc.id);
+  const doc=ODC().find(x=>x.offer_id===o.id&&x.status==='open'); if(!doc&&ODC().some(x=>x.offer_id===o.id&&x.status==='closed')) throw new Error('The last document was closed (withdrawn, declined or for a fresh copy). Correct the offer, re-draft it, and have the purchasers sign a fresh copy first');
+  if(!doc) throw new Error('Lock Round 1 first: the purchasers sign the offer before it goes to the vendors'); const last=docLast(doc.id);
   if(a.p_checked!==true) throw new Error(`Tick that you have looked at Round ${last.doc_round} first`);
   if(last.doc_round>1&&!last.changes&&!last.outstanding.length) throw new Error(`Round ${last.doc_round} accepted everything with nothing changed. Confirm the agreement instead`);
-  const side=last.side==='purchaser'?'vendor':'purchaser', ex=OSG().find(g=>g.draft_id===doc.draft_id&&g.round_no===last.doc_round+1&&g.status!=='cancelled'); if(ex) return {id:ex.id,existing:true};
-  const base=OSG().find(g=>g.id===last.signing_id), ppl=SIDE_PEOPLE(o,doc), n=ppl.length; if(ppl.some(x=>!x.name)) throw new Error("Add each vendor's legal name on the property first");
+  const side=last.side==='purchaser'?'vendor':'purchaser', ex=OSG().find(g=>g.draft_id===doc.draft_id&&g.round_no===last.doc_round+1&&!['cancelled','withdrawn'].includes(g.status)); if(ex) return {id:ex.id,existing:true};
+  // a side's later round: the same people as its newest locked round, in the same order; the vendors refused if the owners changed
+  const prev=ORN().filter(r=>r.document_id===doc.id&&r.side===side).sort((x,y)=>y.doc_round-x.doc_round)[0];
+  let ppl; if(prev){ ppl=OSR().filter(x=>x.signing_id===prev.signing_id&&!x.void_at).sort((x,y)=>x.position-y.position).map(x=>{ const pp=(DB.property_people||[]).find(q=>q.id===x.person_id); return {name:x.name,email:(pp&&String(pp.email||'').trim().toLowerCase())||x.email,person:x.person_id}; });
+    if(side==='vendor'){ const own=(DB.property_people||[]).filter(pp=>pp.property_id===o.property_id&&(pp.role||'owner')==='owner').map(pp=>pp.id).sort().join(), was=ppl.map(x=>x.person).sort().join(); if(own!==was) throw new Error(`The owners on the property have changed since Round ${prev.doc_round}. Start a fresh copy, so the right people sign`); } }
+  else ppl=SIDE_PEOPLE(o,doc);
+  const base=OSG().find(g=>g.id===last.signing_id), n=ppl.length; if(ppl.some(x=>!x.name)) throw new Error("Add each vendor's legal name on the property first");
   if(n<1||n>12) throw new Error(`There need to be 1 to 12 people to sign (now ${n})`);
   if(a.p_method==='link'){ ppl.forEach(x=>{ if(!x.email||!/^[^@\s<>"]+@[^@\s<>"]+\.[^@\s<>"]+$/.test(x.email)) throw new Error(`${x.name} has no email to send a link to. Add it, or sign in person`); }); if(new Set(ppl.map(x=>x.email)).size!==n) throw new Error('Two people have the same email. Each needs their own to sign by link'); }
-  const first=!ORN().some(r=>r.document_id===doc.id&&r.side===side), pl=a.p_places||[];
-  if(!sgPlacesOk(pl,base.pages,n,first)||ppl.some((_,i)=>!pl.some(p=>p.signer===i+1&&p.kind==='signature'))) throw new Error('Please check the signing places: everyone signs'+(first?', and initials the foot of every page':''));
+  const first=!prev, pl=a.p_places||[], resign=!!OSET().resign_every_round;
+  if(!sgPlacesOk(pl,base.pages,n,first)||((first||resign)&&ppl.some((_,i)=>!pl.some(p=>p.signer===i+1&&p.kind==='signature')))) throw new Error('Please check the signing places: everyone signs'+(first?', and initials the foot of every page':''));
   OSM().filter(m=>m.signing_id===last.signing_id).forEach(m=>ppl.forEach((_,i)=>{ if(!pl.some(p=>p.id===`chg:${m.id}:s${i+1}`&&p.why==='change'&&p.kind==='initial')) throw new Error(`Please check the signing places: everyone initials each change made in Round ${last.doc_round}`); }));
+  const docSigns=ORN().filter(r=>r.document_id===doc.id).map(r=>r.signing_id);
+  pl.filter(p=>p.why==='change').forEach(p=>{ const m=OSM().find(k=>k.id===p.ref&&docSigns.includes(k.signing_id)); if(!m||p.page!==m.page||gapOf(p,chgRect(m.kind,m.geometry))>60) throw new Error('Please check the signing places: initials for a change go beside it'); });
   const g={id:uid(),offer_id:o.id,property_id:o.property_id,draft_id:doc.draft_id,draft_sha256:doc.draft_sha256,method:a.p_method,pages:base.pages,places:JSON.parse(JSON.stringify(pl)),places_sha256:shaS(JSON.stringify(pl)),cca_pages:[],status:'ready',round_no:last.doc_round+1,side,document_id:doc.id,base_round_id:last.id,released_by:me.email,released_at:now(),sent_at:null,held_at:null,completed_at:null,locked_at:null,replaced_at:null,replaced_by:null};
   OSG().push(g); ppl.forEach((x,i)=>OSR().push({id:uid(),signing_id:g.id,position:i+1,name:x.name.slice(0,250),email:x.email,person_id:x.person,token_hash:null,link_sent_at:null,link_expires_at:null,code_hash:null,code_expires_at:null,code_tries:0,codes_sent:0,codes_window_at:null,session_hash:null,session_expires_at:null,opened_at:null,verified_at:null,consent_at:null,sig_png:null,init_png:null,marks_at:null,id_sighted:null,witnessed_by:null,finished_at:null,seen_sha256:null,user_agent:null,net_hash:null,void_at:null}));
   sgEv(g,me.email,'round_presented',{signing_id:g.id,document:doc.number,round:g.round_no,side,method:a.p_method,checked_round:last.doc_round,checked_sha256:last.sha256,signers:n,places:pl.length,places_sha256:g.places_sha256,note:String(a.p_note||'').trim().slice(0,300)||null});
@@ -904,6 +918,7 @@ function roundPresent(a,me){ if(!['in_person','link'].includes(a.p_method)) thro
 // a change (offer_sign_do_change): Round 2 on, by a signer of the countering side, with everyone's initials beside it
 function sgChange(s,a){ const g=sgReady(s,true); if((g.round_no||1)<2) throw new Error('Changes are made when the offer is answered, from Round 2 on'); if(!s.consent_at) throw new Error('Agree to sign electronically first');
   const id=a.p_id; if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id||'')||OSM().some(m=>m.id===id)) throw new Error('Please try that again');
+  if(OSM().filter(m=>m.signer_id===s.id&&Date.parse(m.at)>Date.now()-36e5).length>=30) throw new Error('You have made a lot of changes in the last hour. Please call Tim on 027 562 7207');
   if(!(a.p_page>=1&&a.p_page<=g.pages.length)) throw new Error("That page isn't in the document"); const [w,h]=g.pages[a.p_page-1], geo=a.p_geometry||{};
   const shapeOk=a.p_kind==='insert'?(typeof geo.text==='string'&&geo.text.trim().length>=1&&geo.text.length<=300&&geo.text===geo.text.trim()&&!/[\u0001-\u001F\u007F]/.test(geo.text)&&geo.x>=0&&geo.x<=w&&geo.y>=0&&geo.y<=h&&geo.size>=6&&geo.size<=14)
     :['note','strike','cross','reinstate'].includes(a.p_kind)&&window.SIGN.markOk({kind:a.p_kind,geometry:geo,target:a.p_kind==='reinstate'?a.p_target||'x':null},{w,h});
@@ -911,13 +926,17 @@ function sgChange(s,a){ const g=sgReady(s,true); if((g.round_no||1)<2) throw new
   if(a.p_kind==='reinstate'){ const docSigns=ORN().filter(r=>r.document_id===g.document_id).map(r=>r.signing_id).concat(g.id), t=OSM().find(m=>m.id===a.p_target&&docSigns.includes(m.signing_id));
     if(!t||!['strike','cross'].includes(t.kind)) throw new Error('Choose a line or crossed-out box to reinstate'); if(OSM().some(m=>m.target===t.id&&m.kind==='reinstate')) throw new Error('That has already been reinstated'); }
   else if(a.p_target) throw new Error('Only a reinstatement points at another change');
+  const rc=chgRect(a.p_kind,geo), dp=datePlaceOf(g.draft_id);
+  if(dp&&dp.page===a.p_page&&window.SIGN.overlap({x:dp.x,y:dp.y-2,w:dp.w||100,h:(dp.h||10)+2},rc)>0) throw new Error('That is where the date goes once the agreement is made. Make the change somewhere else');
   if(a.p_kind==='insert'){ const who=privateHit(PO().find(x=>x.id===g.offer_id),geo.text); if(who) throw new Error(`Those words hold ${who}'s own phone or email, so they can't go on the agreement. Only the lawyers' details go on it`); }
   const n=OSR().filter(x=>x.signing_id===g.id&&!x.void_at).length, pl=a.p_places||[];
   if(!sgPlacesOk(pl,g.pages,n,false)||pl.length!==n||pl.some(x=>x.why!=='change'||x.kind!=='initial'||x.ref!==id||x.id!==`chg:${id}:s${x.signer}`)) throw new Error('Everyone on your side initials each change once');
+  if(pl.some(x=>x.page!==a.p_page||gapOf(x,rc)>60)) throw new Error("Each person's initials go beside the change, on its page");
   OSM().push({id,signing_id:g.id,signer_id:s.id,by_name:s.name,kind:a.p_kind,page:a.p_page,geometry:geo,target:a.p_kind==='reinstate'?a.p_target:null,at:now()});
-  OSV().push({id:OSV().length+1,signing_id:g.id,marks:[id],places:JSON.parse(JSON.stringify(pl)),places_sha256:shaS(JSON.stringify(pl)),reviewed_by:s.name,at:now()});
+  OSV().push({id:OSV().length+1,signing_id:g.id,marks:[id],places:JSON.parse(JSON.stringify(pl)),places_sha256:shaS(JSON.stringify(pl)),kind:'change',reviewed_by:null,changed_by:s.name,at:now()});
+  const back=OSR().filter(x=>x.signing_id===g.id&&x.finished_at&&!x.void_at&&x.id!==s.id).sort((x,y)=>x.position-y.position).map(x=>({position:x.position,name:x.name,email:g.method==='link'?x.email:null}));
   let re=0; OSR().filter(x=>x.signing_id===g.id&&x.finished_at&&!x.void_at).forEach(x=>{ x.finished_at=null; x.seen_sha256=null; re++; });
-  sgEv(g,s.name,'round_change',{signing_id:g.id,round:g.round_no,side:g.side,mark_id:id,kind:a.p_kind,page:a.p_page,signer:s.position,target:a.p_target||null,text:a.p_kind==='insert'?geo.text:null,reopened:re}); return {id,reopened:re}; }
+  sgEv(g,s.name,'round_change',{signing_id:g.id,round:g.round_no,side:g.side,mark_id:id,kind:a.p_kind,page:a.p_page,signer:s.position,target:a.p_target||null,text:a.p_kind==='insert'?geo.text:null,reopened:re}); return {id,reopened:re,reopened_signers:back,by:s.name,method:g.method,side:g.side,round:g.round_no,address:(PT().find(x=>x.id===g.property_id)||{}).address}; }
 // offer_agreement_check
 function agreementCheck(oid,acc,dateText){ const o=PO().find(x=>x.id===oid); if(!o) throw new Error('No such offer'); if(OAG().some(x=>x.offer_id===oid)) throw new Error('The agreement has already been made');
   if(['withdrawn','lapsed','declined'].includes(o.status)) throw new Error('This offer has been withdrawn or has lapsed'); const doc=ODC().find(x=>x.offer_id===oid&&x.status==='open'); if(!doc) throw new Error('There is no open document');
@@ -926,8 +945,10 @@ function agreementCheck(oid,acc,dateText){ const o=PO().find(x=>x.id===oid); if(
   if(OSG().some(g=>g.document_id===doc.id&&g.round_no>last.doc_round&&['ready','signing','held','complete'].includes(g.status))) throw new Error('A newer round is out for signing. Stop it first');
   const iso=window.NEGO.parseFullDate(String(dateText||'').trim()); if(!/^([1-9]|[12][0-9]|3[01]) [A-Z][a-z]+ 20[0-9]{2}$/.test(String(dateText||'').trim())||!window.NEGO.MONTHS.includes(String(dateText).trim().split(' ')[1])) throw new Error('Type the date in full with the month name, for example 24 November 2026');
   if(!iso) throw new Error("That date isn't a real day"); const first=ORN().filter(r=>r.document_id===doc.id).map(r=>r.locked_at).sort()[0];
-  const nzDay=t=>new Date(t).toLocaleDateString('en-CA',{timeZone:'Pacific/Auckland'}); if(iso>nzDay(Date.now())||iso<nzDay(first)) throw new Error('The agreement date needs to be between Round 1 and today');
+  const nzDay=t=>new Date(t).toLocaleDateString('en-CA',{timeZone:'Pacific/Auckland'});
   const fin=OSR().filter(s=>s.signing_id===last.signing_id&&s.finished_at).map(s=>s.finished_at).sort().pop(); if(!acc||Date.parse(acc)>Date.now()+3e5||Date.parse(acc)<Date.parse(fin)-6e4) throw new Error('The time acceptance was communicated needs to be after the last signature and not in the future');
+  if(iso>nzDay(Date.now())||iso<nzDay(acc)) throw new Error('The agreement date needs to be from the day acceptance was communicated to today'); void first;
+  if(!datePlaceOf(doc.draft_id)) throw new Error("The agreement blank has no date place, so the date can't be added. Add it to the places on the blank first");
   return {doc,last,iso,date_text:String(dateText).trim()}; }
 // the stored files survive a reload (a purchaser's link opens in a new page): kept in localStorage as base64
 function blobsLoad(){ try{ const m=JSON.parse(localStorage.getItem('mockBlobs')||'{}'); const B=(window.__repoBlobs||={}); Object.entries(m).forEach(([p,v])=>{ if(!B[p]){ const b=atob(v.b64), u=new Uint8Array(b.length); for(let i=0;i<b.length;i++) u[i]=b.charCodeAt(i); B[p]=new Blob([u],{type:v.mime}); } }); }catch(_){} }
@@ -946,7 +967,7 @@ async function sgLock(sid,actor){ if(localStorage.getItem('mockLockFail')==='1')
   const draft=new Uint8Array(await bl.arrayBuffer()); if(hex(await crypto.subtle.digest('SHA-256',draft))!==d.sha256) throw new Error("The approved draft doesn't match its fingerprint, so the round wasn't made. Tim will look into it.");
   const signers=OSR().filter(s=>s.signing_id===g.id&&!s.void_at).sort((a,b)=>a.position-b.position), places=sgAllPlaces(g);
   const taps=OST().filter(t=>t.signing_id===g.id).map(t=>({place_id:t.place_id,signer:OSR().find(s=>s.id===t.signer_id).position,at:t.at}));
-  const marks=OSM().filter(m=>m.signing_id===g.id).map(m=>({id:m.id,kind:m.kind,page:m.page,geometry:m.geometry,target:m.target,by:m.by_name,at:m.at,reviewed_at:(OSV().find(r=>r.signing_id===g.id&&r.marks.includes(m.id))||{}).at||null}));
+  const marks=OSM().filter(m=>m.signing_id===g.id).map(m=>({id:m.id,kind:m.kind,page:m.page,geometry:m.geometry,target:m.target,by:m.by_name,at:m.at,reviewed_at:(OSV().find(r=>r.signing_id===g.id&&(r.kind||'review')==='review'&&r.marks.includes(m.id))||{}).at||null}));
   const n=(ORN().filter(r=>r.offer_id===g.offer_id).map(r=>r.number).sort((a,b)=>b-a)[0]||0)+1;
   const record={address:p.address,offer_ref:o.buyer_ref,round,draft:{number:d.number,sha256:d.sha256},places_sha256:g.places_sha256,made_at:now(),
     signers:signers.map(s=>({name:s.name,method:g.method,verified_at:s.verified_at,witnessed_by:s.witnessed_by,id_sighted:s.id_sighted,consent_at:s.consent_at,receipts:OSC().filter(r=>r.signer_id===s.id).map(r=>({guide:r.guide,version:r.version,sha256:r.sha256,pages:r.pages,at:r.at})),
@@ -958,8 +979,9 @@ async function sgLock(sid,actor){ if(localStorage.getItem('mockLockFail')==='1')
     const all=earlier.concat([cur]), st=NG.standing(all), sides={}; all.forEach(x=>{ sides[x.side]=x.signers.map(s=>({position:s.position,name:s.name})); });
     lifted=st.lifted.filter(x=>x.by_round===round).map(x=>({side:x.side,signer:x.signer,who:x.who,kind:x.kind,why:x.why,page:x.page,round:x.round,by:x.by})); outstanding=NG.outstanding(st,sides);
     formed=!marks.length&&!outstanding.length&&Object.keys(sides).length===2; const base=earlier[earlier.length-1];
-    Object.assign(record,{number:n,document:doc.number,side,base:{round:base.doc_round,sha256:base.sha256},changes:marks.map(m=>({kind:m.kind,page:m.page,by:m.by,at:m.at,text:m.kind==='insert'?m.geometry.text:undefined})),lifted,outstanding:outstanding.length,check:{lifted,outstanding}});
-    r=await NG.renderWorking(L,draft,{ink:st.ink,changes:st.changes,lines:NG.roundLines(record),title:`Round ${round}: `+p.address}); }
+    const title=`Round ${round} (signed by the ${side==='vendor'?'vendors':'purchasers'}): `+p.address;
+    Object.assign(record,{number:n,document:doc.number,side,base:{round:base.doc_round,sha256:base.sha256},changes:marks.map(m=>({kind:m.kind,page:m.page,by:m.by,at:m.at,text:m.kind==='insert'?m.geometry.text:undefined})),lifted,outstanding:outstanding.length});
+    r=await NG.renderWorking(L,draft,{ink:st.ink,changes:st.changes,lines:NG.roundLines(record),title}); Object.assign(record,{title,draw_version:NG.DRAW_VERSION,check:{lifted,outstanding}}); }
   const sha=hex(await crypto.subtle.digest('SHA-256',r.bytes)), path=`properties/${g.property_id}/docs/offer-round-${g.offer_id}-${n}-${sha.slice(0,12)}.pdf`, blob=new Blob([r.bytes],{type:'application/pdf'});
   SO()[path]={size:blob.size,mime:'application/pdf'}; (window.__repoBlobs||={})[path]=blob; await blobKeep(path,blob);
   (DB.offer_file_hashes||=[]).push({path,sha256:sha,size_bytes:blob.size,confirmed_by:actor,confirmed_at:now()});
@@ -976,12 +998,20 @@ async function sgAgree(b,me){ const c=agreementCheck(b.offer_id,b.accepted_at,b.
   const d=DB.offer_drafts.find(x=>x.id===c.doc.draft_id), bl=(window.__repoBlobs||{})[d.path], draft=new Uint8Array(await bl.arrayBuffer());
   const map=(DB.offer_blank_maps||[]).find(x=>x.id===d.map_id)||{}, dp=(map.places||[]).find(x=>x.id==='date')||(map.places||[]).find(x=>x.kind==='date')||null;
   const rounds=ORN().filter(r=>r.offer_id===o.id).sort((a,z)=>a.number-z.number).map(r=>({number:r.number,document:(ODC().find(x=>x.id===r.document_id)||{}).number,round:r.doc_round,side:r.side,changes:r.changes,sha256:r.sha256,locked_at:r.locked_at}));
-  const record={address:p.address,offer_ref:o.buyer_ref,date_text:c.date_text,accepted_at:b.accepted_at,confirmed_by:'Tim McGuire',made_at:now(),document:c.doc.number,round:c.last.doc_round,rounds};
+  if(!dp) throw new Error("The agreement blank has no date place, so the date can't be added. Add it to the places on the blank first.");
+  const record={address:p.address,offer_ref:o.buyer_ref,date_text:c.date_text,accepted_at:b.accepted_at,confirmed_by:'Tim McGuire',made_at:now(),document:c.doc.number,round:c.last.doc_round,rounds,base:{round:c.last.doc_round,sha256:c.last.sha256},draw_version:NG.DRAW_VERSION};
   const L=await pdfLibLoad(), r=await NG.renderWorking(L,draft,{ink:st.ink,changes:st.changes,lines:NG.agreementLines(record),date:{text:c.date_text,place:dp},title:'Agreement: '+p.address});
   const sha=hex(await crypto.subtle.digest('SHA-256',r.bytes)), path=`properties/${o.property_id}/docs/offer-agreement-${o.id}-${sha.slice(0,12)}.pdf`, blob=new Blob([r.bytes],{type:'application/pdf'});
   SO()[path]={size:blob.size,mime:'application/pdf'}; (window.__repoBlobs||={})[path]=blob; await blobKeep(path,blob); (DB.offer_file_hashes||=[]).push({path,sha256:sha,size_bytes:blob.size,confirmed_by:me.email,confirmed_at:now()});
   sgEv({property_id:o.property_id,offer_id:o.id},me.email,'agreement_formed',{document:c.doc.number,round:c.last.doc_round,number:c.last.number,date:c.date_text,accepted_at:b.accepted_at,sha256:sha,path});
-  const ev=OE()[OE().length-1]; OAG().push({id:uid(),offer_id:o.id,property_id:o.property_id,document_id:c.doc.id,round_id:c.last.id,path,sha256:sha,size_bytes:blob.size,agreement_date:c.iso,date_text:c.date_text,accepted_at:b.accepted_at,record,chain_last:ev.hash,confirmed_by:me.email,locked_at:now()});
+  // the agreed terms (offer_agreed_terms): the offer as drafted and every change made, for later phases to read from here
+  const pl=d.placed||[], docSigns=ORN().filter(r=>r.document_id===c.doc.id).map(r=>r.signing_id), dep=(map.places||[]).find(x=>x.id==='deposit');
+  const terms={price:d.details.price,settlement:d.details.settlement,conditions:d.details.conditions,kiwisaver:d.details.kiwisaver,lawyer_approval:d.details.lawyer_approval,
+    as_drafted:Object.fromEntries(pl.filter(x=>['price','deposit','settlement','purchaser'].includes(x.id)||/^[cd]_/.test(x.id)).map(x=>[x.id,x.text!=null?x.text:x.value!=null?x.value:null])),deposit_printed:dep?dep.printed||null:null,
+    deposit_paid_to:d.details.kiwisaver?"the vendor's lawyer's trust account (clause 21.3)":'NZ Real Estate Trust',further_terms:(pl.find(x=>x.id==='further_terms')||{}).terms||null,
+    changes:OSM().filter(m=>docSigns.includes(m.signing_id)).map(m=>{ const g=OSG().find(x=>x.id===m.signing_id); return {round:g.round_no,side:g.side,kind:m.kind,page:m.page,text:m.geometry.text||null,by:m.by_name,at:m.at}; }).sort((x,y)=>x.round-y.round||(x.at<y.at?-1:1)),
+    note:'Where a change made in the negotiation alters a term above, the change governs. Read with the signed rounds.'};
+  const ev=OE()[OE().length-1]; OAG().push({id:uid(),offer_id:o.id,property_id:o.property_id,document_id:c.doc.id,round_id:c.last.id,path,sha256:sha,size_bytes:blob.size,agreement_date:c.iso,date_text:c.date_text,accepted_at:b.accepted_at,record,chain_last:ev.hash,confirmed_by:me.email,locked_at:now(),round_sha256:c.last.sha256,draw_version:NG.DRAW_VERSION,terms});
   Object.assign(c.doc,{status:'agreed',agreed_at:now()}); Object.assign(o,{status:'accepted',status_at:b.accepted_at,status_by:me.email}); save(); return {sha256:sha,existing:false,property_id:o.property_id}; }
 async function signInvoke(o){ const b=(o&&o.body)||{}, me=S&&S.user, net='h:'+mockNet(), ua=navigator.userAgent;
   const res=(data,status)=>status&&status>=400?{data:null,error:{message:String(status),context:{json:async()=>data}}}:{data,error:null};
@@ -1023,7 +1053,10 @@ async function signInvoke(o){ const b=(o&&o.body)||{}, me=S&&S.user, net='h:'+mo
     if(b.action==='marks'){ sgMarks(s,b.sig,b.init); save(); return res({ok:true}); }
     if(b.action==='tap'){ const r=sgTap(s,b.place); save(); return res(Object.assign({ok:true},r)); }
     if(b.action==='change'){ if(!/^[0-9a-f-]{36}$/i.test(String(b.id||''))||!Number.isInteger(b.page)||!b.geometry||typeof b.geometry!=='object'||!Array.isArray(b.places)) return res({ok:false,error:"That change didn't save. Please try again."},400);
-      const r=sgChange(s,{p_id:b.id,p_kind:b.kind,p_page:b.page,p_geometry:b.geometry,p_target:b.target||null,p_places:b.places}); save(); return res({ok:true,id:r.id,reopened:r.reopened}); }
+      if(hits('sign_change',net,null,36e5)>=60) throw new Error('A lot of changes have been made from here in the last hour. Please call Tim on 027 562 7207'); OH().push({at:now(),kind:'sign_change',net});
+      const r=sgChange(s,{p_id:b.id,p_kind:b.kind,p_page:b.page,p_geometry:b.geometry,p_target:b.target||null,p_places:b.places}); save();
+      if(r.reopened>0){ (r.reopened_signers||[]).forEach(x=>{ if(x.email) try{ sgMail('offer_change_reopened',x.email,{subject:'A change to initial: '+r.address}); }catch(_){} }); try{ sgMail('offer_change_reopened','tim',{subject:'A change reopened signing: '+r.address,names:(r.reopened_signers||[]).map(x=>x.name)}); }catch(_){} }
+      return res({ok:true,id:r.id,reopened:r.reopened}); }
     if(b.action==='ask'){ if(s.void_at||['locked','replaced'].includes(g.status)) throw new Error('This version is no longer being signed'); const t=String(b.text||'').trim(); if(t.length<3||t.length>1000) throw new Error('Please say what you would like changed (up to 1,000 characters)');
       OSA().push({id:OSA().length+1,signing_id:g.id,signer_id:s.id,text:t,at:now()}); sgEv(g,s.name,'sign_change_asked',{signing_id:g.id,signer:s.position,length:t.length}); let emailed=true; try{ sgMail('offer_sign_ask','tim',{text:t,subject:'A buyer asks for a change: '+p.address}); }catch(_){ emailed=false; } save(); return res({ok:true,emailed}); }
     if(b.action==='finish'){ const r=sgFinish(s,ua,net,null,null); save(); if(!r.complete) return res({ok:true,complete:false}); try{ const rd=await sgLock(r.signing_id,'system (last signer finished)'); return res({ok:true,complete:true,locked:true,round:rd.round}); }catch(_){ return res({ok:true,complete:true,locked:false}); } }
