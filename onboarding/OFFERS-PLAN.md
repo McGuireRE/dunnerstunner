@@ -328,6 +328,116 @@ Known limits: text that is drawn as lines or shapes (box borders, the portal's s
 initials may touch a box border. Pages of the real pack were checked by eye at pages 1 and 20 only. Marking and the place taps were tested with a mouse on a phone-sized screen,
 not on a real phone or stylus.
 
+## Phase 4 detail: presentation and counteroffers (built 24 November 2026, branch `offers-phase4`, on top of `offers-phase3`; not applied, pushed or deployed)
+
+Status: built and tested locally only (Tim was asleep). Migration 021 passed its rollback block on a local PostgreSQL 16 stand-in
+(`tests/pg-standin.sql`, then 010, 016 part A, 018, 019 and 020), NOT the live project. Phases 2, 3 and 4 go live together, in order
+(019, 020, then 021).
+
+How it works (Tim's words, 24 November 2026: "I present the offer to the seller (never automated - I view each step and authorise
+presentation), they make tweaks ... each time a change is made, I delete the other party's initials or signature at that location ...
+The foundational REINZ document is never edited, text or marks are only ever added."):
+- Documents and rounds: Round 1 (the purchasers signing, phase 3) opens Document 1. Each later round answers the one before. A round's
+  overall number keeps counting for the offer (so it stays unique); the screens say "Document 2, Round 1".
+- Present: once a round is locked, the offer page says nothing has gone to the other side and shows "Present to the vendors" (or "Present
+  back to the purchasers"). Tim's present screen shows the working copy of the newest round (page by page, with what was lifted), who
+  signs and how many places each has, and the method (in person on his device, or a personal link to each). He ticks that he has looked
+  at it, then taps Present. Nothing is sent: by link he taps Send next, as in phase 3. Every trip needs his tap.
+- The vendors: taken from the property's owners (legal names; their own emails for the link and code only, never printed). Identity as
+  phase 3: a personal link and an emailed code, or in person with Tim recording he saw them sign and the ID type. Before they sign they
+  read the reminder that every chattel must be in full working order at settlement (elements, bulbs and so on), with the chattels in this
+  offer listed, and tick it (receipted with the time); every step tells them they can talk to their lawyer at any time. They see the
+  purchasers' names and their lawyer, as on the agreement, never the purchasers' own phone, email or address. Their dashboard and journey
+  map are untouched: the only door is the link, or Tim's device, for that one offer.
+- Accept or counter, on the same signing screens as Round 1: the working copy is the approved draft with every round's ink on top.
+  To accept, they initial and sign each place. To counter, they change the document first with the tools: line through text, cross out
+  a passage, type words, write by hand, reinstate (an earlier line or crossed-out passage, from any round of the document). Each change
+  is saved with everyone on that side's initials beside it (one place each, made by the core and checked by the database). Anyone on that
+  side who had finished initials the new change and finishes again. Typed words are checked for any purchaser's or vendor's own phone or
+  email (phase 2's rule, done in the database, so a link can't get round it).
+- Lifting: where a change is made, the OTHER side's initials or signature at that place are lifted from the working copy (the ink touches
+  the change, or belongs to the box the change is in, such as the price's whole line, or sits on the change's own line within 60 points).
+  Every earlier locked round still shows them; nothing locked is ever changed. The round's record lists what was lifted.
+- What each side does in a round: a side's first round (the vendors' Round 2) initials the foot of every page and every filled box and
+  signs at its own signature block, as the purchasers did in Round 1. Every later round: initial each change not yet initialled by
+  them (the other side's changes, and their own if the other side's later change lifted their initials there), and sign again where they
+  signed before (the newer signature replaces the older on the working copy). The purchasers don't receipt the guides again.
+- Locking: when the last signer finishes, the offer-sign edge function makes the round from the draft and every round's layers (the
+  negotiation core, `src/nego-core.js`), with the round's record on pages of its own at the end (who signed, how, ID type or code check,
+  times, device, network fingerprint, each change with who and when, what was lifted, how much is still outstanding, the fingerprint of the
+  round it answers), stores it, fingerprints it from the stored file and locks it. Tim is emailed that nothing has gone back yet.
+- Agreement formed: when the newest round changed nothing and nothing is outstanding (every change initialled by every party, everyone's
+  signature there), the offer page says so. Tim records when acceptance was communicated and types the date in full with the month name
+  ("24 November 2026"; today, in New Zealand, is filled in for him). He ticks that he has looked, and confirms. The edge function makes the
+  agreed copy (the same layers, the date as an overlay in the DATE place: the only time the date is added; a record page at the end
+  listing every round's fingerprint), stores, fingerprints and locks it. The document is "agreed" and the offer "accepted". Tim's screen
+  then moves the property to Under offer with the existing stage function (agent_set_stage). Other offers are left for Tim.
+- Fresh copy: "Start a fresh copy" on the offer page, with a reason. The document is closed and filed as history (every round kept and
+  listed on the offer page); anything out for signing on it stops. Tim corrects the offer to the terms as they stand (phase 1), re-drafts
+  and approves (phase 2), and the purchasers sign Round 1 of the new document (phase 3). A closed document's draft can't be released again.
+- Lawyers' pack: one button on the offer page. One zip holding every locked round of every document, the agreed copy if there is one,
+  and Timeline.html: every event in order, each with its fingerprint and the one before it, checked, in plain words, with no contact
+  details. Each file inside is the locked copy byte for byte (checked against its fingerprint first). Agent only.
+- Withdrawal: "A side has withdrawn" on the offer page: the purchasers (their offer) or the vendors (their counteroffer), the time and a
+  note. The offer is marked withdrawn and every signing in progress stops, links included. Phase 1's own "Withdrawn" or "Lapsed" now
+  stops them too. Neither is possible once the agreement is made.
+
+Migration 021 (`021_offer_negotiation.sql`), additive: offer_documents; offer_agreements; columns on offer_signings (round_no, side,
+document_id, base_round_id), offer_signers (person_id) and offer_rounds (document_id, doc_round, side, base_round_id, changes, lifted,
+outstanding); kind 'insert' on offer_sign_marks and guide 'chattels' on offer_sign_receipts (check constraints widened, nothing removed);
+the one-live-signing-per-draft index becomes per draft and round. It replaces some 020 functions with the same names and arguments,
+keeping Round 1 as it was: offer_sign_places_ok (adds 'change'), offer_sign_current (adds: document open, no agreement), the receipt and
+tap steps (the chattels reminder; no guides in later rounds), agent_signing_release (a fresh copy), agent_signing_mark (Round 1 only),
+offer_sign_issue/open/state (side, round, layers, parties), offer_round_material and offer_round_lock (any round), and 018's
+agent_offer_status (stops signings). New: agent_round_present, agent_round_change, agent_offer_layers, agent_document_close,
+agent_negotiation_withdraw (Tim); offer_sign_change, offer_agreement_material, offer_agreement_lock (service role). Everything locked is
+immutable with no TRUNCATE; a document changes only from open, through the functions. Row locks: the offer, then its document, then
+the signing (presenting, closing, locking and agreeing all take them in that order; a change and a finish both lock the signing first).
+Race test: `tests/offer-negotiation-race.js` (local stand-in only).
+
+Edge function: `offer-sign` is extended (fn/offer_sign.ts, fn/offer_sign_handler.ts), JWT verification still OFF (vendors and buyers
+have no account; every action by them needs their token, then their session; Tim's send, lock and the new "agree" check is_agent with
+his own token). New actions: change (from a link) and agree (Tim). CORS stays `corsApp`. It now also imports `onboarding/src/nego-core.js`
+by its relative path (`deno check` passes).
+
+Checked on the real 40-page pack locally (nothing copied): the vendors' places for their first round, beside one, two or three
+purchasers' Round 1: 54 each, none over printed words or over a purchaser's place, nothing blocking.
+
+Choices made while Tim was asleep (each easy to change):
+1. A countering side signs again every round at its signature block; the newer signature replaces the older on the working copy (both
+   stay on their own locked rounds). The alternative is that only changes are initialled and the first signature stands.
+2. Lifting reaches the box a change is in and 60 points either side on its line. A change elsewhere lifts nothing.
+3. The vendors' first round initials the foot of every page and every filled box, as the purchasers did (Tim's rule "each signer").
+   That is 54 places each on the real pack.
+4. Vendors are the property's owners on its file (role owner), in their order there, by legal name.
+5. Changes can be made from a link as well as on Tim's device (phase 3 kept marking to Tim's screen). Tim still looks at every round
+   before it goes anywhere.
+6. A change can't be undone once saved (it is a record); strike it or reinstate it instead, as on paper.
+7. Present defaults to "by link"; Tim can choose in person.
+8. "Withdrawn" is the offer's status whichever side withdrew; the side is recorded on the timeline.
+9. The agreed copy carries the date and a record page; it isn't emailed to anyone yet (phase 6's roadmap emails).
+10. The lawyers' pack is a zip of the original files rather than one merged PDF, so each round inside is exactly the locked copy.
+11. A round's PDF holds only its own record; earlier rounds' records are in their own files (and listed by fingerprint).
+
+Questions for Tim:
+- Choice 1: should the countering side sign again each round, or only initial the changes after their first signature?
+- Choice 3: do the vendors initial every page foot and every filled box in their first round, or only sign and initial the changes?
+- Should the vendors be able to make changes from their own link, or only with you in person (choice 5)?
+- Is 60 points along the line the right reach for lifting the other side's initials (choice 2)?
+- When the vendors decline outright (no counter), should that be its own status ("declined") rather than "withdrawn"?
+- Should both sides get a copy of each locked round, and of the agreed copy, by email (and to the lawyers)?
+- Your solicitor confirms the method (phases 3 and 4) before first live use.
+
+Deploy steps (phase 4), after review and with Tim's approval, after phases 2 and 3:
+1. Run the rollback block on the live project (`node onboarding/tests/offer-negotiation-rollback.js`): no CAPITALS. Then apply 021.
+   (The race test is for a local stand-in only.)
+2. Push, then deploy `offer-sign` pinned to that commit, JWT verification OFF.
+3. A test negotiation with Tim's own addresses as vendor and purchaser: Round 1, a counter, an acceptance, the agreed copy, the pack.
+
+Known limits: lifting and initials are placed by shape, so a change drawn across a whole page lifts everything of the other side's on
+it (as on paper). The working copy on screen draws ink as an overlay of images, so very small screens show initials small. Tested with a
+mouse on a phone-sized screen, not a real phone or stylus. The agreed copy isn't sealed (see phase 3's question).
+
 ## Rules for later phases (Tim, 23 November 2026)
 
 Phase 2 (drafting):

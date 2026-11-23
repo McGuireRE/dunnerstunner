@@ -271,3 +271,16 @@ agreements/<agreement id>/signatures/... (vendors may upload their own signature
   Service role (offer-sign): `offer_sign_issue`, `offer_sign_open`, `offer_sign_code`, `offer_sign_verify`, `offer_sign_state`,
   `offer_sign_consent`, `offer_sign_receipt`, `offer_sign_marks`, `offer_sign_tap`, `offer_sign_ask`, `offer_sign_finish`,
   `offer_round_material`, `offer_round_lock`.
+
+## 021 Presentation and counteroffers (offers phase 4, 24 November 2026; tested in a rollback block on a local PostgreSQL stand-in, NOT yet on the live project)
+- `offer_documents` (offer, number, draft and its sha256, status open, closed or agreed, closed_at/by/reason, agreed_at; one open per
+  offer; changed only from open through the functions). Made when a Round 1 locks. `offer_agreements` (offer unique, document, round,
+  path, sha256, size, agreement_date, date_text, accepted_at, record, chain_last, confirmed_by): never changed or removed.
+- `offer_signings` gain round_no, side (purchaser or vendor), document_id, base_round_id (one live signing per draft and round).
+  `offer_signers` gain person_id. `offer_rounds` gain document_id, doc_round, side, base_round_id, changes, lifted, outstanding (number
+  keeps counting for the offer). `offer_sign_marks.kind` may be 'insert'; `offer_sign_receipts.guide` may be 'chattels'.
+- Tim: `agent_round_present(offer, method, places, checked, note)`, `agent_round_change(signer, id, kind, page, geometry, target, places)`,
+  `agent_offer_layers(offer, document)`, `agent_document_close(offer, reason)`, `agent_negotiation_withdraw(offer, side, at, note)`;
+  `agent_offer_status` now stops signings in progress. Service role (offer-sign): `offer_sign_change`, `offer_agreement_material`,
+  `offer_agreement_lock`; `offer_round_material` and `offer_round_lock` serve every round. Vendors: no policy and no agent function.
+
