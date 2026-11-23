@@ -11,6 +11,9 @@ export const cors = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
 };
+// for functions only the onboarding pages call (offer-public, offer-sign): browsers on any other site are refused
+export const APP_ORIGIN = "https://packages.dunnerstunner.co.nz";
+export const corsApp = Object.assign({}, cors, { "Access-Control-Allow-Origin": APP_ORIGIN, "Vary": "Origin" });
 export const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { ...cors, "Content-Type": "application/json" } });
 

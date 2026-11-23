@@ -7,7 +7,7 @@
 // links and codes to each purchaser's own address, a note to Tim when a purchaser asks for a change, and to Tim when Round 1 locks.
 // Codes are emailed as their own message; there is no text-message provider yet (see OFFERS-PLAN.md, phase 3 questions).
 // Round 1 is drawn with pdf-lib and the same signing core the browser uses (onboarding/src/sign-core.js, at the same commit).
-import { admin, APP_URL, cors, sendMail, TIM_EMAIL } from "./shared.ts";
+import { admin, APP_URL, corsApp, sendMail, TIM_EMAIL } from "./shared.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
 import * as PDFLib from "npm:pdf-lib@1.17.1";
 import "../onboarding/src/sign-core.js";
@@ -16,7 +16,7 @@ import { netOf } from "./offer_public_handler.ts";
 
 const SIGN = (globalThis as any).SIGN;
 Deno.serve(makeHandler({
-  cors,
+  cors: corsApp,   // only the onboarding pages at packages.dunnerstunner.co.nz call this
   appUrl: APP_URL,
   timEmail: TIM_EMAIL,
   whoIsAgent: async (authorization) => {
@@ -29,7 +29,7 @@ Deno.serve(makeHandler({
   rpc: async (fn, args) => { const { data, error } = await admin().rpc(fn, args); return { data, error: error ? { message: error.message } : null }; },
   signedUrl: async (path) => { const { data, error } = await admin().storage.from("property-files").createSignedUrl(path, 600); return error || !data ? null : data.signedUrl; },
   download: async (path) => { const { data, error } = await admin().storage.from("property-files").download(path); return error || !data ? null : new Uint8Array(await data.arrayBuffer()); },
-  upload: async (path, bytes) => { const { error } = await admin().storage.from("property-files").upload(path, new Blob([bytes], { type: "application/pdf" }), { contentType: "application/pdf", upsert: false });
+  upload: async (path, bytes) => { const { error } = await admin().storage.from("property-files").upload(path, new Blob([bytes as BlobPart], { type: "application/pdf" }), { contentType: "application/pdf", upsert: false });
     return error ? { ok: false, exists: /exists/i.test(error.message || "") } : { ok: true }; },
   sendMail: (kind, msg) => sendMail(admin(), null, kind, msg),
   renderRound: (draft, m) => SIGN.renderRound(PDFLib, draft, m),

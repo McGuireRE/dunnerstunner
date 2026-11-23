@@ -20,6 +20,8 @@
 --     re-approving after marks, with the initials each signer then adds), offer_sign_asks ("Ask Tim for a change" from a link).
 --   * offer_rounds: Round 1 as locked: the PDF's path and SHA-256 (worked out by the server from the stored file, as 019's
 --     confirm_file does), the execution record, and the last fingerprint of the offer's timeline when it was locked.
+-- offer_hits (018) may also hold 'sign_code' and 'sign_try' rows: the per-network limits on emailing codes and typing them (its check is
+-- widened, nothing removed).
 -- Signers by link never touch a table or function: the offer-sign edge function (JWT verification OFF, like offer-public) calls the
 -- offer_sign_* functions below with the service role, passing the token from the link (and the session from the code check).
 -- Tim works through agent_signing_*; in person, every signer's step is his device calling these. Vendors have no policy on any of
@@ -47,26 +49,29 @@ begin
   return new;
 end $$;
 create trigger offer_event_chain before insert on public.offer_events for each row execute function public.offer_event_chain();
+-- the per-network limits for the signing codes are kept with the offer form's (widened, nothing removed)
+alter table public.offer_hits drop constraint offer_hits_kind_check, add constraint offer_hits_kind_check check (kind in ('info', 'bad', 'submit', 'ai', 'sign_code', 'sign_try'));
 
 -- ───── tables ─────
 create table public.offer_signings (
   id uuid primary key default gen_random_uuid(),
   offer_id uuid not null references public.property_offers(id),
   property_id uuid not null references public.properties(id),
-  draft_id uuid not null unique references public.offer_drafts(id),
+  draft_id uuid not null references public.offer_drafts(id),   -- one live signing per draft (a cancelled one can be released again)
   draft_sha256 text not null check (draft_sha256 ~ '^[0-9a-f]{64}$'),
   method text not null check (method in ('in_person', 'link')),
   pages jsonb not null check (jsonb_typeof(pages) = 'array'),       -- [[width, height], ...] of the approved draft, in PDF points
   places jsonb not null check (jsonb_typeof(places) = 'array'),     -- [{id, signer, kind, why, ref, page, x, y, w, h, label, name?}]
   places_sha256 text not null check (places_sha256 ~ '^[0-9a-f]{64}$'),
   cca_pages integer[] not null default '{}',                        -- the Client and Customer Acknowledgement's pages in the draft
-  status text not null default 'ready' check (status in ('ready', 'signing', 'held', 'complete', 'locked', 'replaced')),
+  status text not null default 'ready' check (status in ('ready', 'signing', 'held', 'complete', 'locked', 'replaced', 'cancelled')),
   released_by text not null,
   released_at timestamptz not null default now(),
   sent_at timestamptz, held_at timestamptz, completed_at timestamptz, locked_at timestamptz,
   replaced_at timestamptz, replaced_by uuid references public.offer_signings(id)
 );
 create index on public.offer_signings (offer_id, released_at desc);
+create unique index offer_signings_draft_live on public.offer_signings (draft_id) where status <> 'cancelled';
 create table public.offer_signers (
   id uuid primary key default gen_random_uuid(),
   signing_id uuid not null references public.offer_signings(id),
@@ -80,7 +85,7 @@ create table public.offer_signers (
   sig_png text check (sig_png is null or (length(sig_png) <= 400000 and sig_png ~ '^data:image/png;base64,[A-Za-z0-9+/=]+$')),
   init_png text check (init_png is null or (length(init_png) <= 200000 and init_png ~ '^data:image/png;base64,[A-Za-z0-9+/=]+$')),
   marks_at timestamptz,
-  id_sighted text check (id_sighted is null or id_sighted in ('nz_driver_licence', 'passport', 'nz_firearms_licence', 'kiwi_access_card', 'other_photo_id')),
+  id_sighted text check (id_sighted is null or id_sighted in ('nz_driver_licence', 'passport', 'nz_firearms_licence', 'kiwi_access_card', 'other_photo_id', 'known_to_tim')),
   witnessed_by text,
   finished_at timestamptz, seen_sha256 text check (seen_sha256 is null or seen_sha256 ~ '^[0-9a-f]{64}$'),
   user_agent text, net_hash text,
@@ -169,7 +174,7 @@ begin
   if coalesce(current_setting('offers.fn', true), '') <> 'on' then raise exception 'Signing is changed only through the signing screens, so there is a record'; end if;
   if (to_jsonb(new) - array['status', 'sent_at', 'held_at', 'completed_at', 'locked_at', 'replaced_at', 'replaced_by']) is distinct from (to_jsonb(old) - array['status', 'sent_at', 'held_at', 'completed_at', 'locked_at', 'replaced_at', 'replaced_by']) then
     raise exception 'What was released for signing is kept as it was'; end if;
-  if old.status in ('locked', 'replaced') then raise exception 'This signing is finished and kept as it was'; end if;
+  if old.status in ('locked', 'replaced', 'cancelled') then raise exception 'This signing is finished and kept as it was'; end if;
   return new;
 end $$;
 create trigger guard_offer_signing before update or delete on public.offer_signings for each row execute function public.guard_offer_signing();
@@ -179,6 +184,11 @@ begin
   if coalesce(current_setting('offers.fn', true), '') <> 'on' then raise exception 'Signing is changed only through the signing screens, so there is a record'; end if;
   if new.signing_id is distinct from old.signing_id or new.position is distinct from old.position or new.name is distinct from old.name or new.email is distinct from old.email then raise exception 'Who signs is kept as it was released'; end if;
   if old.void_at is not null then raise exception 'These signatures were replaced, and are kept as they were'; end if;
+  -- once everyone has signed, nothing about any signer changes
+  if (select status from public.offer_signings where id = old.signing_id) in ('complete', 'locked', 'replaced', 'cancelled') then raise exception 'Signing is finished, so the signers are kept as they were'; end if;
+  -- a finished signer's record stays as it was: only Tim re-approving a mark reopens it, and replacing it voids it
+  if old.finished_at is not null and new.finished_at is not null and (to_jsonb(new) - array['void_at', 'token_hash', 'session_hash', 'code_hash', 'session_expires_at', 'code_expires_at', 'code_tries'])
+     is distinct from (to_jsonb(old) - array['void_at', 'token_hash', 'session_hash', 'code_hash', 'session_expires_at', 'code_expires_at', 'code_tries']) then raise exception 'A finished signature is kept as it was'; end if;
   if (new.sig_png is distinct from old.sig_png or new.init_png is distinct from old.init_png) and exists (select 1 from public.offer_sign_taps t where t.signer_id = old.id) then raise exception 'Your signature and initials are kept as you first used them'; end if;
   return new;
 end $$;
@@ -278,6 +288,7 @@ declare d public.offer_drafts; o public.property_offers;
 begin
   if g.status = 'replaced' then return 'This version has been replaced. Tim will send you the new one.'; end if;
   if g.status = 'locked' then return 'Signing is finished, and the signed copy is locked.'; end if;
+  if g.status = 'cancelled' then return 'This signing was stopped before anyone signed. Tim will send it to you again.'; end if;
   select * into d from public.offer_drafts where id = g.draft_id; select * into o from public.property_offers where id = g.offer_id;
   if o.status in ('withdrawn', 'lapsed') then return 'This offer has been withdrawn or has lapsed.'; end if;
   if d.number <> (select max(number) from public.offer_drafts where offer_id = g.offer_id) or o.details is distinct from d.details then
@@ -351,8 +362,9 @@ end $$;
 create or replace function public.offer_sign_do_finish(p_signer uuid, p_ua text, p_net text, p_id text, p_witness text) returns jsonb language plpgsql security definer set search_path = public as $$
 declare s public.offer_signers; g public.offer_signings; missing int; seen text; taps text; left_ int;
 begin
+  -- one finish at a time per signing: the signing is locked first, then the signer, and both are read again under the lock
+  perform 1 from public.offer_signings where id = (select signing_id from public.offer_signers where id = p_signer) for update;
   select * into s from public.offer_signers where id = p_signer for update; g := public.offer_sign_ready(s);
-  perform 1 from public.offer_signings where id = g.id for update;   -- one finish at a time per signing
   if s.consent_at is null or s.sig_png is null then raise exception 'Agree, read the guides and draw your signature and initials first'; end if;
   select count(*) into missing from public.offer_sign_required(g.id, s.position) r where r not in (select place_id from public.offer_sign_taps where signer_id = s.id);
   if missing > 0 then raise exception 'There % still % to do', case when missing = 1 then 'is' else 'are' end, case when missing = 1 then '1 place' else missing || ' places' end; end if;
@@ -386,7 +398,7 @@ begin
   if o.details is distinct from d.details then raise exception 'The offer has changed since this draft. Re-draft and approve it first'; end if;
   if o.status in ('withdrawn', 'lapsed') then raise exception 'This offer has been withdrawn or has lapsed'; end if;
   if exists (select 1 from public.offer_rounds where offer_id = o.id) then raise exception 'This offer already has a signed Round 1'; end if;
-  select id into sid from public.offer_signings where draft_id = d.id;
+  select id into sid from public.offer_signings where draft_id = d.id and status <> 'cancelled';
   if sid is not null then return jsonb_build_object('id', sid, 'existing', true); end if;
   ppl := coalesce(d.details->'purchasers', '[]'::jsonb); n := jsonb_array_length(ppl);
   if n < 1 or n > 12 then raise exception 'The offer needs 1 to 12 purchasers'; end if;
@@ -414,7 +426,7 @@ begin
   end loop;
   for prev in select * from public.offer_signings where offer_id = o.id and id <> sid and status in ('ready', 'signing', 'held', 'complete') loop
     select count(*) into c from public.offer_signers where signing_id = prev.id and finished_at is not null;
-    update public.offer_signers set void_at = now(), token_hash = null, session_hash = null, code_hash = null where signing_id = prev.id;
+    if prev.status <> 'complete' then update public.offer_signers set void_at = now(), token_hash = null, session_hash = null, code_hash = null where signing_id = prev.id; end if;
     update public.offer_signings set status = 'replaced', replaced_at = now(), replaced_by = sid where id = prev.id;
     insert into public.offer_events (property_id, offer_id, actor, kind, detail) values (o.property_id, o.id, me, 'sign_replaced', jsonb_build_object('signing_id', prev.id, 'replaced_by', sid, 'finished', c));
   end loop;
@@ -435,6 +447,22 @@ begin
   update public.offer_signings set status = 'signing', sent_at = now() where id = g.id;
   insert into public.offer_events (property_id, offer_id, actor, kind, detail) values (g.property_id, g.offer_id, me, 'sign_started', jsonb_build_object('signing_id', g.id, 'method', 'in_person'));
   perform set_config('offers.fn', '', true);
+end $$;
+-- Tim changes how they sign (in person or by link): only while nobody has started signing (agreed to sign, or tapped a place). The
+-- release is cancelled, recorded, and any links sent stop working; the same draft can then be released again the other way.
+create or replace function public.agent_signing_cancel(p_signing uuid, p_reason text) returns jsonb language plpgsql security definer set search_path = public as $$
+declare me text := public.offer_agent(); g public.offer_signings; who text;
+begin
+  select * into g from public.offer_signings where id = p_signing for update; if g.id is null then raise exception 'No such signing'; end if;
+  if g.status not in ('ready', 'signing') then raise exception 'This signing can''t be changed now (%)', g.status; end if;
+  select string_agg(name, ', ' order by position) into who from public.offer_signers s where s.signing_id = g.id and (s.consent_at is not null or exists (select 1 from public.offer_sign_taps t where t.signer_id = s.id));
+  if who is not null then raise exception '% % started signing, so how they sign can''t be changed. To start again, correct the offer and re-draft it', who, case when position(',' in who) > 0 then 'have' else 'has' end; end if;
+  perform set_config('offers.fn', 'on', true);
+  update public.offer_signers set void_at = now(), token_hash = null, session_hash = null, code_hash = null where signing_id = g.id;
+  update public.offer_signings set status = 'cancelled' where id = g.id;
+  insert into public.offer_events (property_id, offer_id, actor, kind, detail) values (g.property_id, g.offer_id, me, 'sign_cancelled', jsonb_build_object('signing_id', g.id, 'method', g.method, 'links_sent', g.sent_at is not null, 'reason', left(nullif(trim(coalesce(p_reason, '')), ''), 300)));
+  perform set_config('offers.fn', '', true);
+  return jsonb_build_object('ok', true, 'draft_id', g.draft_id);
 end $$;
 -- the in-person signer on Tim's device: each signer's own steps
 create or replace function public.offer_sign_person(p_signer uuid) returns public.offer_signers language plpgsql stable security definer set search_path = public as $$
@@ -458,7 +486,7 @@ create or replace function public.agent_signing_finish(p_signer uuid, p_id_sight
 declare me text := public.offer_agent();
 begin
   perform public.offer_sign_person(p_signer);
-  if coalesce(p_id_sighted, '') not in ('nz_driver_licence', 'passport', 'nz_firearms_licence', 'kiwi_access_card', 'other_photo_id') then raise exception 'Choose the photo ID you sighted'; end if;
+  if coalesce(p_id_sighted, '') not in ('nz_driver_licence', 'passport', 'nz_firearms_licence', 'kiwi_access_card', 'other_photo_id', 'known_to_tim') then raise exception 'Choose the photo ID you sighted, or that you know them personally'; end if;
   return public.offer_sign_do_finish(p_signer, p_ua, null, p_id_sighted, coalesce((select name from public.agents where lower(email) = lower(me) limit 1), me));
 end $$;
 -- a mark made with a finger or stylus on Tim's screen (in person only): an overlay, never a change to the REINZ content. Any mark
@@ -467,7 +495,7 @@ create or replace function public.agent_signing_mark(p_signer uuid, p_kind text,
 declare me text := public.offer_agent(); s public.offer_signers; g public.offer_signings; t public.offer_sign_marks; mid uuid; w numeric; h numeric; why text;
 begin
   s := public.offer_sign_person(p_signer);
-  select * into s from public.offer_signers where id = p_signer for update; select * into g from public.offer_signings where id = s.signing_id for update;
+  select * into g from public.offer_signings where id = s.signing_id for update; select * into s from public.offer_signers where id = p_signer for update;
   -- several marks may be made before Tim looks at them, so a held signing still takes marks
   if s.void_at is not null then raise exception 'This version has been replaced'; end if;
   why := public.offer_sign_current(g); if why is not null then raise exception '%', why; end if;
@@ -552,9 +580,12 @@ begin
   perform set_config('offers.fn', '', true);
   return jsonb_build_object('address', addr, 'links', out_);
 end $$;
--- the signer the token belongs to (a live, unexpired link), or null
-create or replace function public.offer_sign_by_token(p_token text) returns public.offer_signers language sql stable security definer set search_path = public as $$
+-- the signer a token belongs to (a live, unexpired link), or null, whatever their state (opening the link says what it is)
+create or replace function public.offer_sign_find(p_token text) returns public.offer_signers language sql stable security definer set search_path = public as $$
   select s.* from public.offer_signers s where p_token ~ '^[A-Za-z0-9_-]{40,64}$' and s.token_hash = public.offer_sha(p_token) and s.link_expires_at > now() limit 1 $$;
+-- the same, only while they may still act: not finished, not void, and the signing open (signing, or held for Tim)
+create or replace function public.offer_sign_by_token(p_token text) returns public.offer_signers language sql stable security definer set search_path = public as $$
+  select s.* from public.offer_sign_find(p_token) s join public.offer_signings g on g.id = s.signing_id where s.id is not null and s.finished_at is null and s.void_at is null and g.status in ('signing', 'held') $$;
 -- and with a session from the code check
 create or replace function public.offer_sign_me(p_token text, p_session text) returns public.offer_signers language plpgsql stable security definer set search_path = public as $$
 declare s public.offer_signers;
@@ -567,13 +598,13 @@ end $$;
 create or replace function public.offer_sign_open(p_token text, p_net text, p_ua text) returns jsonb language plpgsql security definer set search_path = public as $$
 declare n text := public.offer_net(p_net); s public.offer_signers; g public.offer_signings; why text; addr text; e text;
 begin
-  s := public.offer_sign_by_token(p_token);
+  s := public.offer_sign_find(p_token);
   if s.id is null then
     if public.offer_hit_count('bad', n, null, interval '1 hour') < 30 then insert into public.offer_hits (kind, net) values ('bad', n); end if;
     return jsonb_build_object('ok', false);
   end if;
   select * into g from public.offer_signings where id = s.signing_id; select address into addr from public.properties where id = g.property_id;
-  if s.opened_at is null then perform set_config('offers.fn', 'on', true); update public.offer_signers set opened_at = now() where id = s.id; perform set_config('offers.fn', '', true); end if;
+  if s.opened_at is null and s.void_at is null and s.finished_at is null and g.status in ('ready', 'signing', 'held') then perform set_config('offers.fn', 'on', true); update public.offer_signers set opened_at = now() where id = s.id; perform set_config('offers.fn', '', true); end if;
   why := case when s.void_at is not null then 'This version has been replaced. Tim will send you the new one.' else public.offer_sign_current(g) end;
   e := coalesce(s.email, '');
   return jsonb_build_object('ok', true, 'first', split_part(s.name, ' ', 1), 'address', addr, 'finished', s.finished_at is not null, 'stopped', why, 'held', g.status = 'held',
@@ -581,10 +612,15 @@ begin
 end $$;
 -- a one-time code, for the edge function to email to the signer's own address: 6 digits, 15 minutes, at most 5 an hour
 create or replace function public.offer_sign_code(p_token text, p_net text) returns jsonb language plpgsql security definer set search_path = public as $$
-declare s public.offer_signers; b bytea; code text; addr text;
+declare n text := public.offer_net(p_net); s public.offer_signers; b bytea; code text; addr text;
 begin
-  s := public.offer_sign_by_token(p_token); if s.id is null then return jsonb_build_object('ok', false); end if;
-  if s.void_at is not null or s.email is null then return jsonb_build_object('ok', false, 'reason', 'stopped'); end if;
+  s := public.offer_sign_find(p_token);
+  if s.id is null then if public.offer_hit_count('bad', n, null, interval '1 hour') < 30 then insert into public.offer_hits (kind, net) values ('bad', n); end if; return jsonb_build_object('ok', false); end if;
+  if public.offer_hit_count('sign_code', n, null, interval '1 hour') >= 20 then return jsonb_build_object('ok', false, 'reason', 'busy'); end if;
+  insert into public.offer_hits (kind, net) values ('sign_code', n);
+  -- the row is locked, so two requests at once can't both get under the limit
+  select * into s from public.offer_signers where id = s.id for update;
+  if s.void_at is not null or s.finished_at is not null or s.email is null or (select status from public.offer_signings where id = s.signing_id) not in ('signing', 'held') then return jsonb_build_object('ok', false, 'reason', 'stopped'); end if;
   if s.codes_window_at is not null and s.codes_window_at > now() - interval '1 hour' and s.codes_sent >= 5 then return jsonb_build_object('ok', false, 'reason', 'busy'); end if;
   b := extensions.gen_random_bytes(4); code := lpad(((get_byte(b, 0)::bigint * 16777216 + get_byte(b, 1) * 65536 + get_byte(b, 2) * 256 + get_byte(b, 3)) % 1000000)::text, 6, '0');
   perform set_config('offers.fn', 'on', true);
@@ -597,9 +633,14 @@ begin
 end $$;
 -- the code typed back: a session for this signer (2 hours). Five wrong tries and the code stops working.
 create or replace function public.offer_sign_verify(p_token text, p_code text, p_net text, p_ua text) returns jsonb language plpgsql security definer set search_path = public as $$
-declare s public.offer_signers; g public.offer_signings; ses text;
+declare n text := public.offer_net(p_net); s public.offer_signers; g public.offer_signings; ses text;
 begin
-  s := public.offer_sign_by_token(p_token); if s.id is null then return jsonb_build_object('ok', false); end if;
+  s := public.offer_sign_find(p_token);
+  if s.id is null then if public.offer_hit_count('bad', n, null, interval '1 hour') < 30 then insert into public.offer_hits (kind, net) values ('bad', n); end if; return jsonb_build_object('ok', false); end if;
+  if public.offer_hit_count('sign_try', n, null, interval '1 hour') >= 30 then return jsonb_build_object('ok', false, 'reason', 'busy'); end if;
+  insert into public.offer_hits (kind, net) values ('sign_try', n);
+  select * into s from public.offer_signers where id = s.id for update;   -- one try at a time, so five tries really is five
+  if s.void_at is not null or s.finished_at is not null or (select status from public.offer_signings where id = s.signing_id) not in ('signing', 'held') then return jsonb_build_object('ok', false, 'reason', 'stopped'); end if;
   if s.code_hash is null then return jsonb_build_object('ok', false, 'reason', 'no_code'); end if;
   if s.code_expires_at < now() then return jsonb_build_object('ok', false, 'reason', 'expired'); end if;
   perform set_config('offers.fn', 'on', true);
@@ -610,7 +651,7 @@ begin
   end if;
   ses := public.offer_token();
   update public.offer_signers set code_hash = null, code_expires_at = null, code_tries = 0, session_hash = public.offer_sha(ses), session_expires_at = now() + interval '2 hours',
-    verified_at = now(), user_agent = left(coalesce(p_ua, user_agent), 400), net_hash = public.offer_net(p_net) where id = s.id;
+    verified_at = now(), user_agent = left(coalesce(p_ua, user_agent), 400), net_hash = n where id = s.id;
   select * into g from public.offer_signings where id = s.signing_id;
   insert into public.offer_events (property_id, offer_id, actor, kind, detail) values (g.property_id, g.offer_id, s.name, 'sign_code_ok', jsonb_build_object('signing_id', g.id, 'signer', s.position));
   perform set_config('offers.fn', '', true);
@@ -626,7 +667,7 @@ begin
   return jsonb_build_object('signer', jsonb_build_object('position', s.position, 'name', s.name, 'consent_at', s.consent_at, 'has_marks', s.sig_png is not null, 'sig_png', s.sig_png, 'init_png', s.init_png, 'finished_at', s.finished_at, 'void', s.void_at is not null,
       'receipts', (select coalesce(jsonb_agg(jsonb_build_object('guide', r.guide, 'version', r.version, 'at', r.at)), '[]'::jsonb) from public.offer_sign_receipts r where r.signer_id = s.id)),
     'signing', jsonb_build_object('status', g.status, 'stopped', case when s.void_at is not null then 'This version has been replaced. Tim will send you the new one.' else public.offer_sign_current(g) end, 'pages', g.pages, 'cca_pages', to_jsonb(g.cca_pages),
-      'draft_path', d.path, 'draft_sha256', d.sha256, 'address', addr,
+      'draft_path', case when s.consent_at is not null then d.path end, 'draft_sha256', d.sha256, 'address', addr,   -- the document only once they agree to sign electronically
       'places', (select coalesce(jsonb_agg(e), '[]'::jsonb) from (select e from jsonb_array_elements(g.places) e where (e->>'signer')::int = s.position
         union all select e from public.offer_sign_reviews r, jsonb_array_elements(r.places) e where r.signing_id = g.id and (e->>'signer')::int = s.position) z)),
     'taps', (select coalesce(jsonb_agg(t.place_id order by t.id), '[]'::jsonb) from public.offer_sign_taps t where t.signer_id = s.id));
@@ -706,7 +747,7 @@ end $$;
 revoke execute on function public.offer_event_body(text, bigint, timestamptz, text, text, uuid, uuid, jsonb), public.offer_event_chain(), public.guard_offer_signing(), public.guard_offer_signer(), public.offer_sha(text),
   public.offer_sign_places_ok(jsonb, jsonb, int, boolean), public.offer_mark_ok(text, jsonb, numeric, numeric), public.offer_sign_required(uuid, int), public.offer_sign_current(public.offer_signings), public.offer_sign_ready(public.offer_signers, boolean),
   public.offer_sign_do_consent(uuid, text, text), public.offer_sign_do_receipt(uuid, text, text, text, text, int[]), public.offer_sign_do_marks(uuid, text, text), public.offer_sign_do_tap(uuid, text), public.offer_sign_do_finish(uuid, text, text, text, text),
-  public.offer_sign_person(uuid), public.offer_chain_verify(text), public.offer_sign_by_token(text), public.offer_sign_me(text, text) from public, anon, authenticated;
+  public.offer_sign_person(uuid), public.offer_chain_verify(text), public.offer_sign_find(text), public.offer_sign_by_token(text), public.offer_sign_me(text, text) from public, anon, authenticated;
 revoke execute on function public.offer_sign_issue(uuid, text), public.offer_sign_open(text, text, text), public.offer_sign_code(text, text), public.offer_sign_verify(text, text, text, text), public.offer_sign_state(text, text),
   public.offer_sign_consent(text, text, text, text), public.offer_sign_receipt(text, text, text, text, text, text, int[]), public.offer_sign_marks(text, text, text, text), public.offer_sign_tap(text, text, text), public.offer_sign_finish(text, text, text, text),
   public.offer_sign_ask(text, text, text), public.offer_round_material(uuid), public.offer_round_lock(uuid, text, text, bigint, jsonb, text) from public, anon, authenticated;
@@ -714,6 +755,6 @@ grant execute on function public.offer_sign_issue(uuid, text), public.offer_sign
   public.offer_sign_consent(text, text, text, text), public.offer_sign_receipt(text, text, text, text, text, text, int[]), public.offer_sign_marks(text, text, text, text), public.offer_sign_tap(text, text, text), public.offer_sign_finish(text, text, text, text),
   public.offer_sign_ask(text, text, text), public.offer_round_material(uuid), public.offer_round_lock(uuid, text, text, bigint, jsonb, text) to service_role;
 revoke execute on function public.agent_signing_release(uuid, text, jsonb, jsonb, int[]), public.agent_signing_start(uuid), public.agent_signing_consent(uuid, text), public.agent_signing_receipt(uuid, text, text, text, text, int[]), public.agent_signing_marks(uuid, text, text),
-  public.agent_signing_tap(uuid, text), public.agent_signing_finish(uuid, text, text), public.agent_signing_mark(uuid, text, int, jsonb, uuid), public.agent_signing_review(uuid, jsonb), public.agent_offer_chain_check(uuid) from public, anon;
+  public.agent_signing_tap(uuid, text), public.agent_signing_finish(uuid, text, text), public.agent_signing_mark(uuid, text, int, jsonb, uuid), public.agent_signing_review(uuid, jsonb), public.agent_signing_cancel(uuid, text), public.agent_offer_chain_check(uuid) from public, anon;
 grant execute on function public.agent_signing_release(uuid, text, jsonb, jsonb, int[]), public.agent_signing_start(uuid), public.agent_signing_consent(uuid, text), public.agent_signing_receipt(uuid, text, text, text, text, int[]), public.agent_signing_marks(uuid, text, text),
-  public.agent_signing_tap(uuid, text), public.agent_signing_finish(uuid, text, text), public.agent_signing_mark(uuid, text, int, jsonb, uuid), public.agent_signing_review(uuid, jsonb), public.agent_offer_chain_check(uuid) to authenticated;
+  public.agent_signing_tap(uuid, text), public.agent_signing_finish(uuid, text, text), public.agent_signing_mark(uuid, text, int, jsonb, uuid), public.agent_signing_review(uuid, jsonb), public.agent_signing_cancel(uuid, text), public.agent_offer_chain_check(uuid) to authenticated;

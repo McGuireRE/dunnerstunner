@@ -85,29 +85,43 @@
   const overlap = (a, b) => Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x)) * Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y));
   const union = rs => { const x = Math.min(...rs.map(r => r.x)), y = Math.min(...rs.map(r => r.y)); return { x, y, w: Math.max(...rs.map(r => r.x + r.w)) - x, h: Math.max(...rs.map(r => r.y + r.h)) - y }; };
   const r1 = v => Math.round(v * 10) / 10;
-  // a row of n initial boxes near a rectangle, keeping clear of other places (never overlapped) and printed text (overlapped as little
-  // as possible), inside the page and above the foot row
+  // Initials near a rectangle: never over another place, never over printed text, and within about NEAR points of the box they
+  // belong to. Tried at full size first, then smaller, as a row, a column or two rows. { ok, boxes: [{ x, y, w, h }] (one per signer),
+  // small } - when nothing fits, ok is false and the boxes are only a suggestion (Tim is told, and release waits).
+  const SIZES = [[26, 13], [20, 10], [16, 8]], NEAR = 40;
+  const inset = (b, dx, dy) => ({ x: b.x + dx, y: b.y + dy, w: Math.max(0, b.w - 2 * dx), h: Math.max(0, b.h - 2 * dy) });
+  const apart = (a, b) => Math.hypot(Math.max(0, a.x - (b.x + b.w), b.x - (a.x + a.w)), Math.max(0, a.y - (b.y + b.h), b.y - (a.y + a.h)));
+  function layouts(n, iw, ih, rowsOnly) { const L = [[n, 1]]; if (n > 2) L.push([Math.ceil(n / 2), 2]); if (n > 1 && !rowsOnly) L.push([1, n]);
+    return L.map(([c, rws]) => ({ c, rws, iw, ih, w: c * iw + (c - 1) * 2, h: rws * ih + (rws - 1) * 2 })); }
+  const gridBoxes = (n, at, lay) => Array.from({ length: n }, (_, i) => { const col = i % lay.c, row = Math.floor(i / lay.c); return { x: r1(at.x + col * (lay.iw + 2)), y: r1(at.y + at.h - (row + 1) * lay.ih - row * 2), w: lay.iw, h: lay.ih }; });
   function placeRow(n, target, page, obstacles, text, opts) {
-    const o = opts || {}, gw = n * IW + (n - 1) * 2, W = page.w, H = page.h, minY = o.minY != null ? o.minY : FOOT_Y + IH + 6;
-    const cands = [];
-    const add = (x, y, pen) => { x = Math.max(MARGIN, Math.min(W - MARGIN - gw, x)); y = Math.max(minY, Math.min(H - MARGIN - IH, y)); cands.push({ x, y, pen }); };
-    const midY = target.y + (target.h - IH) / 2;
-    if (o.prefer) add(o.prefer.x, o.prefer.y, 0);
-    add(target.x + target.w + GAP, midY, 1);
-    add(target.x - GAP - gw, midY, 2);
-    add(target.x + target.w - gw, target.y - IH - 2, 3);
-    add(target.x + target.w - gw, target.y + target.h + 2, 4);
-    for (let k = 1; k <= 8; k++) { add(target.x + target.w - gw, target.y - IH - 2 - k * (IH + 3), 4 + k); add(target.x + target.w + GAP, midY - k * (IH + 3), 5 + k); }
-    let best = null;
-    for (const c of cands) {
-      const r = { x: c.x, y: c.y, w: gw, h: IH };
-      const hit = obstacles.reduce((a, b) => a + overlap(r, { x: b.x + 0.5, y: b.y + 1, w: Math.max(0, b.w - 1), h: Math.max(0, b.h - 2) }), 0), txt = (text || []).reduce((a, b) => a + overlap(r, b), 0);
-      const score = hit * 1000 + txt + c.pen * 4 + Math.abs(c.y - midY) * 0.05;
-      if (!best || score < best.score) best = { r, score, hit };
+    const o = opts || {}, W = page.w, H = page.h, near = o.near != null ? o.near : NEAR, minY = o.minY != null ? o.minY : FOOT_Y + IH + 6, maxY = o.maxY != null ? o.maxY : H - MARGIN;
+    const obs = (obstacles || []).map(b => inset(b, 0.5, 1)), txt = (text || []).map(b => inset(b, 0.3, 0.8)), t = target;
+    let fallback = null;
+    // first, anything on the box's own row (any size); only then above or below it
+    for (const pass of o.foot ? ['all'] : ['row', 'near']) for (const [iw, ih] of SIZES) for (const lay of layouts(n, iw, ih, o.foot || pass === 'row')) {
+      const cands = [], add = (x, y, pen) => { if (x < 4 || y < minY || x + lay.w > W - 4 || y + lay.h > maxY) return; cands.push({ x, y, pen }); };
+      const midY = t.y + (t.h - lay.h) / 2;
+      if (o.foot) { for (const y of [4, 7, 10, 13, 16]) for (let x = W - 6 - lay.w; x >= 4; x -= 4) add(x, y, (W - 6 - lay.w - x) / 8 + y); }
+      else if (pass === 'row') {
+        if (o.prefer) { const pf = o.prefer(lay); if (pf) add(pf.x, pf.y, -1); }
+        // inside the box's own band (the blank part of the place on the blank, after a name, a price or a date), then either side
+        for (let x = t.x + t.w - lay.w; x >= t.x; x -= 4) for (const yy of [midY, t.y + 1]) add(x, yy, 0.5 + (t.x + t.w - lay.w - x) / 40);
+        for (let dx = 0; dx <= near; dx += 3) for (const dy of [0, -2, 2]) { add(t.x + t.w + 2 + dx, midY + dy, dx + Math.abs(dy)); add(t.x - 2 - lay.w - dx, midY + dy, dx + Math.abs(dy) + 1); }
+      } else {
+        for (let dx = 0; dx <= near; dx += 3) for (const dy of [-4, 4, -6, 6]) { add(t.x + t.w + 2 + dx, midY + dy, dx + Math.abs(dy)); add(t.x - 2 - lay.w - dx, midY + dy, dx + Math.abs(dy) + 1); }
+        for (let dy = 0; dy <= near; dy += 2) for (let k = 0; k <= 8; k++) { const x = t.x + t.w - lay.w - (t.w - lay.w) * k / 8; add(x, t.y - 1 - lay.h - dy, dy + 2 + k / 2); add(x, t.y + t.h + 1 + dy, dy + 3 + k / 2); }
+      }
+      let best = null;
+      for (const c of cands) { if (best && c.pen >= best.pen) continue; const r = { x: c.x, y: c.y, w: lay.w, h: lay.h };
+        if (!o.foot && apart(r, t) > near) continue; if (obs.some(b => overlap(r, b) > 0)) continue;
+        if (!fallback) fallback = { at: r, lay };
+        if (txt.some(b => overlap(r, b) > 0)) continue; best = { at: r, pen: c.pen }; }
+      if (best) return { ok: true, boxes: gridBoxes(n, best.at, lay), small: iw < SIZES[0][0], row: pass === 'row' };
     }
-    return best;
+    const lay = layouts(n, IW, IH)[0], at = fallback || { at: { x: Math.max(4, Math.min(W - 4 - lay.w, t.x + t.w + 2)), y: Math.max(minY, t.y), w: lay.w, h: lay.h }, lay };
+    return { ok: false, boxes: gridBoxes(n, at.at, at.lay) };
   }
-  const rowBoxes = (n, r) => Array.from({ length: n }, (_, i) => ({ x: r1(r.x + i * (IW + 2)), y: r1(r.y), w: IW, h: IH }));
   // the text items of a page (pdf.js, as DRAFT.readPages gives them) as rectangles
   const textRects = pg => (pg && pg.items ? pg.items : []).map(t => ({ x: t.x, y: t.y - 1.5, w: Math.max(t.w, 2), h: Math.max(t.h, 6) + 1 }));
   // the draft's filled or marked boxes, grouped: one group per place on the map (a struck line and the new words beside it are one
@@ -123,10 +137,12 @@
     return [...groups.values()].map(g => Object.assign(g, { rect: union(g.boxes) }));
   }
   // input: { pages: [{ n, w, h, items? }], placed (the approved draft's placed items), mapPlaces (its map's places),
-  //   signers: [{ position, name }] } -> { places: [{ id, signer, kind, why, ref, page, x, y, w, h, label, name? }], warnings, counts }
+  //   signers: [{ position, name }] } -> { places: [{ id, signer, kind, why, ref, page, x, y, w, h, label, name? }], warnings,
+  //   blocking: [{ id, label, why }] (places that couldn't be put clear of printed text near their box: release waits), counts }
   function makePlaces(input) {
     const pages = (input.pages || []).slice().sort((a, b) => a.n - b.n), placed = input.placed || [], map = input.mapPlaces || [];
-    const signers = (input.signers || []).slice().sort((a, b) => a.position - b.position), n = signers.length, out = [], warnings = [];
+    const signers = (input.signers || []).slice().sort((a, b) => a.position - b.position), n = signers.length, out = [], warnings = [], blocking = [];
+    const block = (id, label, why) => { if (!blocking.some(b => b.id === id)) blocking.push({ id, label, why }); };
     const P = no => pages.find(p => p.n === no);
     const obstacles = {}; const ob = no => (obstacles[no] ||= []);
     // what the draft wrote is kept clear; for the further terms, the lines of each term (the blank line after each is for initials)
@@ -134,12 +150,19 @@
     map.filter(p => ['signature', 'name', 'witness'].includes(p.kind)).forEach(p => ob(p.page).push(rectOfMap(p)));
     const text = no => textRects(P(no));
     const push = (signer, kind, why, ref, page, r, label, extra) => { const pl = Object.assign({ id: `${why}:${ref}:s${signer}`, signer, kind, why, ref, page, x: r1(r.x), y: r1(r.y), w: r1(r.w), h: r1(r.h), label }, extra || {}); out.push(pl); ob(page).push(pl); return pl; };
-    if (!n) return { places: [], warnings: ['There are no purchasers to sign.'], counts: {} };
-    const row = (why, ref, pageNo, target, label, opts) => { const pg = P(pageNo); if (!pg) { warnings.push(`${label}: page ${pageNo} isn't in the draft.`); return; }
-      const best = placeRow(n, target, pg, ob(pageNo), text(pageNo), opts); if (best.hit > 0) warnings.push(`${label} (page ${pageNo}): the initials had to go close to another place. Check them on the page.`);
-      rowBoxes(n, best.r).forEach((b, i) => push(signers[i].position, 'initial', why, ref, pageNo, b, label)); };
-    // 1. every box the draft filled or marked
-    filledGroups(placed).forEach(g => row('filled', g.ref, g.page, g.rect, 'Initial: ' + g.labels.join('; ')));
+    if (!n) return { places: [], warnings: [], blocking: [{ id: 'signers', label: 'Purchasers', why: 'There are no purchasers to sign.' }], counts: {} };
+    const row = (why, ref, pageNo, target, label, opts) => { const pg = P(pageNo); if (!pg) { block(why + ':' + ref, label, `Page ${pageNo} isn't in the draft.`); return; }
+      const res = placeRow(n, target, pg, ob(pageNo), text(pageNo), opts);
+      if (!res.ok) block(why + ':' + ref, label, why === 'foot' ? `Page ${pageNo}: there is no clear space at the foot of the page for the initials.` : `Page ${pageNo}: there is no clear space within about ${NEAR} points of it for the initials without covering printed words.`);
+      res.boxes.forEach((b, i) => push(signers[i].position, 'initial', why, ref, pageNo, b, label)); };
+    // 1. every box the draft filled or marked, beside its own row: a condition's Yes/No and its date are one row; each group's
+    // target takes in the blank part of the place it filled, so the initials can sit after the words written there
+    const groups = filledGroups(placed);
+    groups.filter(g => /^d_/.test(g.ref)).forEach(g => { const c = groups.find(x => x.ref === 'c_' + g.ref.slice(2) && x.page === g.page);
+      if (c) { c.boxes.push(...g.boxes); g.labels.forEach(l => { if (!c.labels.includes(l)) c.labels.push(l); }); c.rect = union(c.boxes); g.merged = true; } });
+    groups.filter(g => !g.merged).forEach(g => { const mp = /^c_/.test(g.ref) ? map.find(x => x.id === 'd_' + g.ref.slice(2) && x.page === g.page) : map.find(x => x.id === g.ref && x.page === g.page);
+      const tgt = mp && ['text', 'date', 'area', 'name'].includes(mp.kind) ? union([g.rect, rectOfMap(mp)]) : g.rect;
+      row('filled', g.ref, g.page, tgt, 'Initial: ' + g.labels.join('; ')); });
     // 2. each further term, in the space left after it
     const ft = placed.find(x => x.id === 'further_terms');
     if (ft) {
@@ -147,7 +170,7 @@
       if (tb.length) {
         const byTerm = new Map(); tb.forEach(b => { if (!byTerm.has(b.number)) byTerm.set(b.number, []); byTerm.get(b.number).push(b); });
         [...byTerm.entries()].sort((a, b) => a[0] - b[0]).forEach(([num, bs]) => { const last = bs[bs.length - 1], title = (((ft.terms || []).find(t => t.number === num)) || {}).title || '';
-          const gw = n * IW + (n - 1) * 2, pref = last.gap ? { x: last.gap.x + last.gap.w - gw, y: last.gap.y + (last.gap.h - IH) / 2 } : null;
+          const pref = last.gap ? lay => (lay.h <= last.gap.h + 2.5 ? { x: last.gap.x + last.gap.w - lay.w, y: last.gap.y + (last.gap.h - lay.h) / 2 } : null) : null;
           row('term', 't' + num, last.page, last, `Initial further term ${num}${title ? ' (' + title + ')' : ''}`, { prefer: pref }); });
       } else (ft.terms || []).forEach(t => { const b = (ft.boxes || [])[0]; if (b) row('term', 't' + t.number, b.page, { x: b.x, y: b.y + b.h - (t.number) * 14, w: b.w, h: 12 }, `Initial further term ${t.number}${t.title ? ' (' + t.title + ')' : ''}`); });
     }
@@ -155,15 +178,19 @@
     const num = id => +(String(id).match(/(\d+)$/) || [0, 0])[1];
     const sigs = map.filter(p => p.kind === 'signature' && p.key === 'sig_purchaser').sort((a, b) => num(a.id) - num(b.id));
     const names = map.filter(p => p.kind === 'name' && p.key === 'name_purchaser').sort((a, b) => num(a.id) - num(b.id));
-    if (!sigs.length) warnings.push('The map has no purchaser signature places. Add them to the places on the blank first.');
+    if (!sigs.length) block('sig', 'Signatures', 'The map has no purchaser signature places. Add them to the places on the blank first.');
     else {
       const dy = sigs.length > 1 ? sigs[0].y - sigs[1].y : 70, nameOff = names[0] ? sigs[0].y - names[0].y : 13, lastS = sigs[sigs.length - 1], lastN = names[names.length - 1];
+      // a place added for a purchaser beyond the printed lines must sit clear of every printed word on that page
+      const clear = (pg, r) => !textRects(P(pg)).some(b => overlap(r, inset(b, 0.3, 0.8)) > 0) && !ob(pg).some(b => overlap(r, inset(b, 0.5, 1)) > 0);
       signers.forEach((s, i) => {
         let sp = sigs[i], np = names[i], added = false;
-        if (!sp) { const y = lastS.y - dy * (i + 1 - sigs.length); if (y < 40) { warnings.push(`There's no room on the signature page for purchaser ${i + 1}. Add another signature page to the pack in the portal.`); return; }
-          sp = { page: lastS.page, x: lastS.x, y, w: lastS.w, h: lastS.h }; np = lastN ? { page: lastN.page, x: lastN.x, y: y - nameOff, w: lastN.w, h: lastN.h } : { page: lastS.page, x: lastS.x, y: y - nameOff, w: lastS.w, h: 10 }; added = true; }
-        push(s.position, 'signature', 'block', 'sig' + (i + 1), sp.page, { x: sp.x, y: sp.y, w: sp.w, h: sp.h }, `Signature of ${s.name}${added ? ' (added beneath the others)' : ''}`, added ? { added: true } : null);
         const typed = placed.some(x => x.id === 'name_purchaser_' + (i + 1) && (x.boxes || []).length);
+        if (!sp) { const y = lastS.y - dy * (i + 1 - sigs.length);
+          sp = { page: lastS.page, x: lastS.x, y, w: lastS.w, h: lastS.h }; np = lastN ? { page: lastN.page, x: lastN.x, y: y - nameOff, w: lastN.w, h: lastN.h } : { page: lastS.page, x: lastS.x, y: y - nameOff, w: lastS.w, h: 10 }; added = true;
+          const nr = { x: np.x, y: np.y - 2, w: Math.max(np.w, 120), h: 12 };
+          if (y < 40 || nr.y < 30 || !clear(sp.page, sp) || (!typed && !clear(np.page, nr))) { block('sig_room', 'Signatures', NO_ROOM); return; } }
+        push(s.position, 'signature', 'block', 'sig' + (i + 1), sp.page, { x: sp.x, y: sp.y, w: sp.w, h: sp.h }, `Signature of ${s.name}${added ? ' (added beneath the others)' : ''}`, added ? { added: true } : null);
         if (!typed && np) push(s.position, 'name', 'block', 'name' + (i + 1), np.page, { x: np.x, y: np.y - 2, w: Math.max(np.w, 120), h: 12 }, `Name of ${s.name}`, { name: s.name });
       });
     }
@@ -174,17 +201,18 @@
     const ackSize = p => { const b = rectOfMap(p); return { x: b.x, y: b.y, w: Math.max(b.w, IW), h: Math.max(b.h, IH) }; };
     const ackKind = p => p.kind === 'signature' ? 'signature' : 'initial';
     acks.forEach(p => push(signers[0].position, ackKind(p), 'ack', p.id, p.page, ackSize(p), ackLabel(p)));
-    acks.forEach(p => { const base = ackSize(p), pg = P(p.page), perRow = Math.max(1, Math.floor((pg.w - MARGIN - base.x) / (base.w + 3)));
+    acks.forEach(p => { const base = ackSize(p), pg = P(p.page), spots = [];
+      // beside it on either side, then above and below, nearest first
+      for (let kx = -6; kx <= 6; kx++) for (let ky = -4; ky <= 4; ky++) if (kx || ky) spots.push({ x: base.x + kx * (base.w + 3), y: base.y + ky * (base.h + 3), w: base.w, h: base.h, d: Math.abs(kx) * base.w + Math.abs(ky) * base.h * 1.5 + (ky ? 4 : 0) });
+      spots.sort((a, b) => a.d - b.d);
       signers.slice(1).forEach(s => { let spot = null;
-        for (let k = 1; k < 80 && !spot; k++) { const r = { x: base.x + (k % perRow) * (base.w + 3), y: base.y - Math.floor(k / perRow) * (base.h + 3), w: base.w, h: base.h };
-          if (r.y > FOOT_Y + IH + 4 && r.x + r.w <= pg.w - MARGIN && !ob(p.page).some(b => overlap(r, b) > 0.5)) spot = r; }
-        if (!spot) { spot = base; warnings.push(`${p.label || 'A place'} (page ${p.page}): no clear space for every purchaser. Check it on the page.`); }
+        for (const r of spots) { if (r.x >= 4 && r.y > FOOT_Y + IH + 4 && r.x + r.w <= pg.w - 4 && r.y + r.h <= pg.h - 4 && apart(r, base) <= NEAR && !ob(p.page).some(b => overlap(r, b) > 0.5) && !text(p.page).some(b => overlap(r, inset(b, 0.3, 0.8)) > 0)) { spot = { x: r.x, y: r.y, w: r.w, h: r.h }; break; } }
+        if (!spot) { spot = base; block('ack:' + p.id, ackLabel(p), `Page ${p.page}: there is no clear space within about ${NEAR} points of it for every purchaser without covering printed words.`); }
         push(s.position, ackKind(p), 'ack', p.id, p.page, spot, ackLabel(p)); }); });
     // 5. the foot of every page, outside any box (last, so it keeps clear of everything above)
-    pages.forEach(pg => { const gw = n * IW + (n - 1) * 2, best = placeRow(n, { x: pg.w - MARGIN - gw, y: FOOT_Y, w: gw, h: IH }, pg, ob(pg.n), text(pg.n), { minY: FOOT_Y - 1, prefer: { x: pg.w - MARGIN - gw - 4, y: FOOT_Y } });
-      rowBoxes(n, best.r).forEach((b, i) => push(signers[i].position, 'initial', 'foot', 'p' + pg.n, pg.n, b, `Initial the foot of page ${pg.n}`)); });
+    pages.forEach(pg => row('foot', 'p' + pg.n, pg.n, { x: pg.w - MARGIN, y: FOOT_Y, w: 1, h: IH }, `Initial the foot of page ${pg.n}`, { foot: true, minY: 2, maxY: 28 }));
     const counts = {}; signers.forEach(s => { counts[s.position] = out.filter(p => p.signer === s.position).length; });
-    return { places: out, warnings, counts };
+    return { places: out, warnings, blocking, counts };
   }
   // the places one signer must do
   const placesFor = (places, position) => (places || []).filter(p => p.signer === position);
@@ -193,10 +221,11 @@
     const n = (signers || []).length, ps = (pages || []), out = [], obs = {};
     (existing || []).forEach(p => (obs[p.page] ||= []).push(p));
     (marks || []).forEach(m => { const pg = ps.find(p => p.n === m.page); if (!pg || !n) return; const target = markRect(m);
-      const best = placeRow(n, target, pg, obs[m.page] ||= [], null);
-      rowBoxes(n, best.r).forEach((b, i) => { const pl = { id: `mark:${m.id}:s${signers[i].position}`, signer: signers[i].position, kind: 'initial', why: 'mark', ref: m.id, page: m.page, x: b.x, y: b.y, w: b.w, h: b.h, label: `Initial the ${MARK_NAMES[m.kind] || 'mark'} on page ${m.page}` }; out.push(pl); obs[m.page].push(pl); }); });
+      const res = placeRow(n, target, pg, obs[m.page] ||= [], null);
+      res.boxes.forEach((b, i) => { const pl = { id: `mark:${m.id}:s${signers[i].position}`, signer: signers[i].position, kind: 'initial', why: 'mark', ref: m.id, page: m.page, x: b.x, y: b.y, w: b.w, h: b.h, label: `Initial the ${MARK_NAMES[m.kind] || 'mark'} on page ${m.page}` }; out.push(pl); obs[m.page].push(pl); }); });
     return out;
   }
+  const NO_ROOM = 'No room on the signature page for every purchaser. Add a signature page in the portal, then load the blank again.';
   const MARK_NAMES = { note: 'note', strike: 'line through text', cross: 'crossed-out box', reinstate: 'reinstatement' };
   // a mark's rectangle: { note: { strokes: [[[x, y], ...], ...] }, strike: { x0, x1, y }, cross: { x, y, w, h }, reinstate: { x, y } }
   function markRect(m) {
@@ -220,7 +249,7 @@
   const NZ = (iso, withSeconds) => { if (!iso) return ''; const d = new Date(iso); if (isNaN(d)) return '';
     const parts = new Intl.DateTimeFormat('en-NZ', { timeZone: 'Pacific/Auckland', day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit', second: withSeconds === false ? undefined : '2-digit', hour12: false }).formatToParts(d);
     const g = t => (parts.find(p => p.type === t) || {}).value || ''; return `${g('day')} ${g('month')} ${g('year')}, ${g('hour')}:${g('minute')}${withSeconds === false ? '' : ':' + g('second')} New Zealand time`; };
-  const ID_TYPES = { nz_driver_licence: 'NZ driver licence', passport: 'Passport', nz_firearms_licence: 'NZ firearms licence', kiwi_access_card: 'Kiwi Access Card', other_photo_id: 'Other photo ID', known_to_tim: 'Known to Tim (no ID needed)' };
+  const ID_TYPES = { nz_driver_licence: 'NZ driver licence', passport: 'Passport', nz_firearms_licence: 'NZ firearms licence', kiwi_access_card: 'Kiwi Access Card', other_photo_id: 'Other photo ID', known_to_tim: 'Known to Tim personally' };
   const GUIDE_NAMES = { cca: 'Client and Customer Acknowledgement', sale_purchase: 'Real Estate Authority guide to sale and purchase agreements' };
   // only what the printed font can show (names with macrons are refused at drafting; this is a last safety net)
   const ansi = s => String(s == null ? '' : s).normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/[^\x20-\x7e]/g, '?');
@@ -237,7 +266,7 @@
     add(`This copy was made and locked by the server on ${NZ(rec.made_at)}. Its own fingerprint is recorded by the server when it is locked, and it is never changed.`, { size: 8.5 });
     (rec.signers || []).forEach((s, i) => {
       add(`Purchaser ${i + 1}: ${s.name}`, { bold: true, gap: 8 });
-      if (s.method === 'in_person') { add(`Signed in person on Tim McGuire's device. ${s.witnessed_by || 'Tim McGuire'} saw them sign.`); add(`Photo ID sighted: ${ID_TYPES[s.id_sighted] || s.id_sighted || 'not recorded'} (the type only; no ID number is kept).`); }
+      if (s.method === 'in_person') { add(`Signed in person on Tim McGuire's device. ${s.witnessed_by || 'Tim McGuire'} saw them sign.`); add(s.id_sighted === 'known_to_tim' ? 'Identity: known to Tim McGuire personally (no photo ID was needed).' : `Photo ID sighted: ${ID_TYPES[s.id_sighted] || s.id_sighted || 'not recorded'} (the type only; no ID number is kept).`); }
       else { add('Signed by a personal link sent only to them.'); add(`Email verified with a one-time code on ${NZ(s.verified_at)}.`); }
       add(`Agreed to sign electronically: ${NZ(s.consent_at)}.`);
       (s.receipts || []).forEach(r => add(`Received the ${GUIDE_NAMES[r.guide] || r.guide}${r.version ? ', version ' + r.version : ''}${r.pages && r.pages.length ? ' (page' + (r.pages.length > 1 ? 's ' : ' ') + r.pages.join(', ') + ' of this document)' : ''}: ${NZ(r.at)}.`, { size: 8.5 }));
@@ -292,6 +321,6 @@
   const ccaPages = pages => (pages || []).filter(p => (p.items || []).map(i => i.s).join(' ').replace(/\s+/g, ' ').match(/client and customer acknowledg/i)).map(p => p.n);
 
   const SIGN = { sha256Hex, sha256Bytes, ZERO, chainHash, chainBody, verifyChain, canon, makePlaces, placesFor, markPlaces, markRect, markOk, MARK_NAMES, filledGroups, rectOfMap, overlap,
-    executionLines, renderRound, ID_TYPES, GUIDE_NAMES, ccaPages, NZ, IW, IH };
+    executionLines, renderRound, ID_TYPES, NO_ROOM, NEAR, textRects, placeRow, GUIDE_NAMES, ccaPages, NZ, IW, IH };
   if (typeof module !== 'undefined' && module.exports) module.exports = SIGN; else root.SIGN = SIGN;
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -2,6 +2,7 @@
 // never copied into the repository). It puts the printed labels the drafting anchors on in the same relative places as the
 // Eleventh Edition 2022 (4) pack, with filler text and invented names around them. Nothing here is the form's wording.
 // make({ edition, clause22: false, filledDeposit, filledSettlement, twoLineSettlement, printedTerms, vendorLawyer: false, cca: true })
+// footnote: printed text beneath the third purchaser signature line (no room for a fourth)
 // cca: a synthetic Client and Customer Acknowledgement page in the pack (page 10, before the inserted page), for signing (phase 3)
 // Only the short label words the anchor finder needs are used; everything else is made-up filler. -> Uint8Array
 const { PDFDocument, StandardFonts, rgb } = require('/opt/npm-tools/node_modules/pdf-lib');
@@ -58,6 +59,7 @@ async function make(o) {
   t('Signature of Purchaser(s):', 40, 560); t('Signature of Vendor(s):', 330, 560);
   for (let i = 0; i < 3; i++) { const y = 530 - i * 70; t('_'.repeat(40), 40, y); t('_'.repeat(40), 330, y); t('Name:', 42, y - 12); t('Name:', 332, y - 12); if (i < 2) fill(['Testy Vendorperson', 'Otherly Vendorperson'][i], 362, y - 12);
     t('Filler capacity line', 42, y - 24, 8); t('Filler capacity line', 332, y - 24, 8); }
+  if (o.footnote) t('Synthetic footnote printed beneath the third signature line.', 42, 330, 8);
   // 7. the back page
   page(); t('SYNTHETIC BACK PAGE', 112.7, 762.4, 16, true);
   t('VENDOR:', 31.4, 743.5, 10, true); fill('Testy Vendorperson & Otherly Vendorperson', 34, 730); t('Contact Details:', 31.4, 695.1);

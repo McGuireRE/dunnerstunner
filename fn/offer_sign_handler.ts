@@ -35,7 +35,7 @@ export type Deps = {
   net: (req: Request) => string;
 };
 const esc = (s: unknown) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
-async function sha256(bytes: Uint8Array) { const h = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)); return Array.from(h, (x) => x.toString(16).padStart(2, "0")).join(""); }
+async function sha256(bytes: Uint8Array) { const h = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes as BufferSource)); return Array.from(h, (x) => x.toString(16).padStart(2, "0")).join(""); }
 // a refusal from the database written for people passes through; anything that looks internal stays hidden
 export const plain = (m: string) => /^[A-Z][^\n]{3,240}$/.test(m || "") && !/permission|function|relation|column|syntax|violates|constraint|null value|uuid|jsonb|operator/i.test(m) ? m : "Something went wrong. Please try again, or call Tim on 027 562 7207.";
 // the execution record, from what the database holds (never from the page)
@@ -63,9 +63,10 @@ export function makeHandler(d: Deps) {
     const { bytes } = await d.renderRound(draft, { places: m.places, taps: m.taps, signers: m.signers, marks: m.marks, record, title: `Round 1 (signed by the purchasers): ${m.address || "agreement"}` });
     const sha = await sha256(bytes), path = `properties/${m.property_id}/docs/offer-round-${m.offer_id}-1-${sha.slice(0, 12)}.pdf`;
     const up = await d.upload(path, bytes); if (!up.ok && !up.exists) throw new Error("Round 1 couldn't be stored. Try again.");
-    // the fingerprint from the file as stored, not as made
+    // the fingerprint from the file as stored, not as made; a file already at that place must be exactly the one just made
     const stored = await d.download(path); if (!stored) throw new Error("Round 1 couldn't be read back. Try again.");
     const ssha = await sha256(stored);
+    if (ssha !== sha) throw new Error("A different file is already stored where Round 1 goes, so it wasn't locked. Tim will look into it.");
     await call("offer_file_confirm", { p_path: path, p_sha256: ssha, p_size: stored.length, p_actor: actor });
     const lk = await call("offer_round_lock", { p_signing: signingId, p_path: path, p_sha256: ssha, p_size: stored.length, p_execution: record, p_actor: actor });
     try { await d.sendMail("offer_round_locked", { to: d.timEmail, subject: `Round 1 signed and locked: ${m.address || "an offer"}`, html: wrap(`<p>Every purchaser has signed ${esc(m.offer_ref || "the offer")} for <strong>${esc(m.address || "")}</strong>.</p><p>Round 1 is locked with its execution record. Fingerprint: <code>${esc(ssha.slice(0, 16))}</code>.</p><p>Nothing has gone to the vendors. Open the offer to see it: <a href="${esc(d.appUrl)}">${esc(d.appUrl)}</a></p>`) }); } catch (_) { /* the round is locked either way */ }
@@ -131,7 +132,7 @@ export function makeHandler(d: Deps) {
       }
       if (action === "state") {
         const r = await call("offer_sign_state", { p_token: token, p_session: session });
-        const g = Object.assign({}, r.signing); const url = g.draft_path ? await d.signedUrl(g.draft_path) : null; delete g.draft_path;
+        const g = Object.assign({}, r.signing); const url = g.draft_path ? await d.signedUrl(g.draft_path) : null; delete g.draft_path;   // the database gives the path only once they have agreed to sign electronically
         return json({ ok: true, signer: r.signer, signing: Object.assign(g, { draft_url: url }), taps: r.taps || [] });
       }
       if (action === "consent") { await call("offer_sign_consent", { p_token: token, p_session: session, p_net: net, p_ua: ua }); return json({ ok: true }); }

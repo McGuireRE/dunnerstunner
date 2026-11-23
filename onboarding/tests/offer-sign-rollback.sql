@@ -125,9 +125,15 @@ begin
   perform public.agent_signing_finish(s1, 'passport', 'Tim''s tablet');
   perform public.agent_signing_receipt(s2, 'cca', null, null, null, '{3}'); perform public.agent_signing_receipt(s2, 'sale_purchase', 'August 2022', 'rea-sale-purchase-guide-2022-en.pdf', null, null); perform public.agent_signing_marks(s2, png, png);
   perform public.agent_signing_tap(s2, z.pid_) from (select e->>'id' pid_ from jsonb_array_elements(places) e where (e->>'signer')::int = 2 union select 'mark:' || mm.id || ':s2' from public.offer_sign_marks mm where mm.signing_id = sg) z;
-  r := public.agent_signing_finish(s2, 'nz_driver_licence', 'Tim''s tablet');
+  r := public.agent_signing_finish(s2, 'known_to_tim', 'Tim''s tablet');
+  out := out || 'signer 2 known to Tim=' || (select id_sighted from public.offer_signers where id = s2) || '; ';
   out := out || 'signer 2 finished complete=' || (r ->> 'complete') || ' status=' || (select status from public.offer_signings where id = sg) || ' taps=' || (select count(*) from public.offer_sign_taps where signing_id = sg) || '; ';
   begin perform public.agent_signing_tap(s2, 'foot:p1:s2'); out := out || 'TAPPED AFTER COMPLETE; '; exception when others then out := out || 'after complete: ' || sqlerrm || '; '; end;
+  begin perform public.agent_signing_cancel(sg, 'x'); out := out || 'A FINISHED SIGNING CANCELLED; '; exception when others then out := out || 'cancel after complete: ' || sqlerrm || '; '; end;
+  execute 'reset role';
+  begin perform set_config('offers.fn', 'on', true); update public.offer_signers set user_agent = 'changed' where id = s1; out := out || 'SIGNER CHANGED AFTER COMPLETE; '; exception when others then out := out || 'signer after complete: ' || sqlerrm || '; '; end;
+  perform set_config('offers.fn', '', true);
+  execute 'set local role authenticated'; perform set_config('request.jwt.claims', agent, true);
 
   -- 5. Round 1: made by the edge function from the material, its fingerprint confirmed from the stored file, then locked
   begin perform public.offer_round_material(sg); out := out || 'AGENT READ THE ROUND MATERIAL; '; exception when others then out := out || 'material as agent: ' || sqlerrm || '; '; end;
@@ -155,8 +161,17 @@ begin
   r := public.agent_offer_chain_check(oid); out := out || 'chain ok=' || (r ->> 'ok') || ' events=' || (r ->> 'events') || '; ';
 
   -- 6. by link, on the second offer: a personal link and a one-time code by email
+  -- Tim changes his mind about how they sign before anyone has started: cancelled, recorded, and released again the other way
   perform public.agent_signing_release(d2, 'link', sizes, places, '{3}');
   select id into sg2 from public.offer_signings where draft_id = d2;
+  r := public.agent_signing_cancel(sg2, 'They would rather sign with me');
+  out := out || 'cancelled=' || (select status from public.offer_signings where id = sg2) || ' recorded=' || exists (select 1 from public.offer_events where kind = 'sign_cancelled' and detail->>'signing_id' = sg2::text) || '; ';
+  perform public.agent_signing_release(d2, 'in_person', sizes, places, '{3}');
+  select id into sg3 from public.offer_signings where draft_id = d2 and status <> 'cancelled';
+  out := out || 'released again=' || (select method from public.offer_signings where id = sg3) || '; ';
+  perform public.agent_signing_cancel(sg3, 'Back to links after all');
+  perform public.agent_signing_release(d2, 'link', sizes, places, '{3}');
+  select id into sg2 from public.offer_signings where draft_id = d2 and status <> 'cancelled';
   out := out || 'link status=' || (select status from public.offer_signings where id = sg2) || ' tokens before send=' || (select count(*) from (select 1 from public.offer_signers where signing_id = sg2 and link_sent_at is not null) z) || '; ';
   begin perform public.offer_sign_issue(sg2, 'x'); out := out || 'AGENT ISSUED LINKS DIRECTLY; '; exception when others then out := out || 'issue as agent: ' || sqlerrm || '; '; end;
   execute 'reset role'; execute 'set local role service_role';
@@ -171,7 +186,7 @@ begin
   r := public.offer_sign_verify(tok2, code, '203.0.113.9', 'ua'); out := out || 'code on the other link=' || coalesce(r ->> 'reason', r ->> 'ok') || '; ';
   r := public.offer_sign_verify(tok1, code, '203.0.113.9', 'Phone browser'); ses := r ->> 'session'; out := out || 'right code ok=' || (r ->> 'ok') || ' verified=' || ((select verified_at from public.offer_signers where id = l1) is not null) || '; ';
   r := public.offer_sign_verify(tok1, code, '203.0.113.9', 'ua'); out := out || 'code used twice=' || coalesce(r ->> 'reason', 'ACCEPTED') || '; ';
-  r := public.offer_sign_state(tok1, ses);
+  r := public.offer_sign_state(tok1, ses); out := out || 'draft before consent=' || coalesce(r->'signing'->>'draft_path', 'not given') || '; ';
   out := out || 'state own places only=' || (select bool_and((e->>'signer')::int = 1) from jsonb_array_elements(r->'signing'->'places') e) || ' count=' || jsonb_array_length(r->'signing'->'places') || ' no emails=' || (position('@' in r::text) = 0) || ' no other name=' || (position('Bo Testbuyer' in r::text) = 0) || '; ';
   begin perform public.offer_sign_state(tok2, ses); out := out || 'A SESSION OPENED ANOTHER SIGNER; '; exception when others then out := out || 'session on other link: ' || sqlerrm || '; '; end;
   perform public.offer_sign_consent(tok1, ses, '203.0.113.9', 'Phone browser');
@@ -183,6 +198,27 @@ begin
   execute 'reset role'; execute 'set local role authenticated'; perform set_config('request.jwt.claims', agent, true);
   begin perform public.agent_signing_mark(l1, 'strike', 1, '{"x0": 40, "x1": 200, "y": 450}', null); out := out || 'A LINK SIGNER''S DOCUMENT MARKED; '; exception when others then out := out || 'no marks by link: ' || sqlerrm || '; '; end;
   begin perform public.agent_signing_tap(l1, 'foot:p2:s1'); out := out || 'TIM TAPPED FOR A LINK SIGNER; '; exception when others then out := out || 'tim taps for link: ' || sqlerrm || '; '; end;
+  begin perform public.agent_signing_cancel(sg2, 'x'); out := out || 'CANCELLED AFTER SOMEONE STARTED; '; exception when others then out := out || 'cancel after start: ' || sqlerrm || '; '; end;
+  -- Fin signs every place by link and finishes: his link then opens nothing further, and his device and network stay as recorded
+  execute 'reset role'; execute 'set local role service_role';
+  r := public.offer_sign_state(tok1, ses); out := out || 'draft after consent=' || ((r->'signing'->>'draft_path') is not null) || '; ';
+  r := public.offer_sign_code(tok2, '203.0.113.20'); x := public.offer_sign_verify(tok2, r ->> 'code', '203.0.113.20', 'Fin phone') ->> 'session';
+  perform public.offer_sign_consent(tok2, x, '203.0.113.20', 'Fin phone'); perform public.offer_sign_receipt(tok2, x, 'cca', null, null, null, '{3}'); perform public.offer_sign_receipt(tok2, x, 'sale_purchase', 'August 2022', 'rea-sale-purchase-guide-2022-en.pdf', null, null);
+  perform public.offer_sign_marks(tok2, x, png, png);
+  perform public.offer_sign_tap(tok2, x, z.pid_) from (select e->>'id' pid_ from jsonb_array_elements(places) e where (e->>'signer')::int = 2) z;
+  r := public.offer_sign_finish(tok2, x, '203.0.113.20', 'Fin phone'); out := out || 'fin finished complete=' || (r ->> 'complete') || '; ';
+  rpath := (select user_agent || '|' || net_hash from public.offer_signers where id = l2);
+  r := public.offer_sign_code(tok2, '203.0.113.99'); out := out || 'code after finishing=' || coalesce(r ->> 'reason', r ->> 'ok') || '; ';
+  r := public.offer_sign_verify(tok2, '123456', '203.0.113.99', 'Someone else'); out := out || 'verify after finishing=' || coalesce(r ->> 'reason', r ->> 'ok') || '; ';
+  begin perform public.offer_sign_state(tok2, x); out := out || 'A FINISHED SIGNER RE-ENTERED; '; exception when others then out := out || 're-entry after finishing: ' || sqlerrm || '; '; end;
+  r := public.offer_sign_open(tok2, '203.0.113.99', 'Someone else'); out := out || 'open after finishing finished=' || (r ->> 'finished') || ' device kept=' || ((select user_agent || '|' || net_hash from public.offer_signers where id = l2) = rpath) || '; ';
+  -- the per-network limits: 30 code tries and 20 code emails an hour from one network, whoever the link is for
+  for n in 1..30 loop perform public.offer_sign_verify(tok1, '999999', '198.51.100.7', 'ua'); end loop;
+  r := public.offer_sign_verify(tok1, '999999', '198.51.100.7', 'ua'); out := out || '31st try from one network=' || coalesce(r ->> 'reason', 'ALLOWED') || '; ';
+  for n in 1..20 loop perform public.offer_sign_code(tok1, '198.51.100.8'); end loop;
+  r := public.offer_sign_code(tok1, '198.51.100.8'); out := out || '21st code from one network=' || coalesce(r ->> 'reason', 'SENT') || ' hits kept=' || (select count(*) from public.offer_hits where kind = 'sign_code' and net = public.offer_net('198.51.100.8')) || '; ';
+  out := out || 'codes for one signer capped=' || (select codes_sent from public.offer_signers where id = l1) || '; ';
+  execute 'reset role'; execute 'set local role authenticated'; perform set_config('request.jwt.claims', agent, true);
 
   -- 7. tweak and re-sign: Tim corrects the offer; the signing stops; a new draft is released; the old signatures stay, void
   perform public.agent_offer_correct(oid2, good || '{"price": "655000"}', 'Buyer rang: a little more');

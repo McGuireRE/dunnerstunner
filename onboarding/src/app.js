@@ -6445,13 +6445,13 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   // initials it. Link signers ask Tim for a change instead. When the last purchaser finishes, the server makes Round 1 (the draft,
   // the signatures, initials and marks on top, and the execution record on a page at the end) and locks it. Vendors see none of it.
   const SG = window.SIGN;
-  const SG_ID = [['nz_driver_licence', 'NZ driver licence'], ['passport', 'Passport'], ['nz_firearms_licence', 'NZ firearms licence'], ['kiwi_access_card', 'Kiwi Access Card'], ['other_photo_id', 'Other photo ID']];
-  const SG_STATUS = { ready: 'Ready, nothing sent yet', signing: 'Signing', held: 'Waiting for you to check a change', complete: 'Everyone has signed', locked: 'Round 1 locked', replaced: 'Replaced by a newer draft' };
+  const SG_ID = [['nz_driver_licence', 'NZ driver licence'], ['passport', 'Passport'], ['nz_firearms_licence', 'NZ firearms licence'], ['kiwi_access_card', 'Kiwi Access Card'], ['other_photo_id', 'Other photo ID'], ['known_to_tim', 'Known to Tim personally']];
+  const SG_STATUS = { ready: 'Ready, nothing sent yet', signing: 'Signing', held: 'Waiting for you to check a change', complete: 'Everyone has signed', locked: 'Round 1 locked', replaced: 'Replaced by a newer draft', cancelled: 'Stopped before anyone signed' };
   const SG_COLS = 'id,signing_id,position,name,email,link_sent_at,link_expires_at,opened_at,verified_at,consent_at,marks_at,id_sighted,witnessed_by,finished_at,seen_sha256,void_at';
   const SG_WHY = { foot: 'the foot of each page', filled: 'beside each box filled or marked', term: 'beside each further term', block: 'the signature block', ack: 'acknowledgements you kept', mark: 'beside each mark' };
   // a database call whose refusal is shown in plain words on the page (not as an error)
   async function sgRpc(fn, args) { const { data, error } = await sb.rpc(fn, args); if (error) throw new Error(error.message || 'That didn\'t save.'); return data; }
-  const sgDot = s => s ? `<span class="pill ${s === 'locked' ? 'okp' : s === 'replaced' ? 'of-off' : s === 'held' ? 'of-warnp' : ''}">${esc(SG_STATUS[s] || s)}</span>` : '';
+  const sgDot = s => s ? `<span class="pill ${s === 'locked' ? 'okp' : ['replaced', 'cancelled'].includes(s) ? 'of-off' : s === 'held' ? 'of-warnp' : ''}">${esc(SG_STATUS[s] || s)}</span>` : '';
   // the signer's drawing, cropped to what they drew, as a PNG
   function sgPng(cv) {
     const g = cv.getContext('2d'), w = cv.width, h = cv.height, px = g.getImageData(0, 0, w, h).data; let x0 = w, y0 = h, x1 = -1, y1 = -1;
@@ -6472,26 +6472,27 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   async function sgDraftPages(d) { const bytes = await drDraftBytes(d); return { bytes, pages: await DR.readPages(await drPdfjs(), bytes, PDF_OPTS) }; }
 
   // "Ready to sign": the places made from the draft and map, the method, and nothing sent
-  async function viewSignRelease(did) {
+  async function viewSignRelease(did, opt) {
     header('Ready to sign', '', 0); actions(false);
     main().innerHTML = '<div class="loading">Loading...</div>';
     const d = await must(sb.from('offer_drafts').select('*').eq('id', did).single());
     const [o, p, mp, ex] = await Promise.all([must(sb.from('property_offers').select('*').eq('id', d.offer_id).single()), must(sb.from('properties').select('id,address').eq('id', d.property_id).single()),
-      must(sb.from('offer_blank_maps').select('id,places').eq('id', d.map_id).single()), ofSafe(sb.from('offer_signings').select('id').eq('draft_id', did))]);
-    if ((ex || [])[0]) return viewSigning(ex[0].id);
+      must(sb.from('offer_blank_maps').select('id,places').eq('id', d.map_id).single()), ofSafe(sb.from('offer_signings').select('id,status').eq('draft_id', did))]);
+    const live = (ex || []).find(x => x.status !== 'cancelled'); if (live) return viewSigning(live.id);
     let D_; try { D_ = await sgDraftPages(d); } catch (e) { main().innerHTML = `<div class="view-pad"><p class="err">${esc(e.message === 'pdf-lib' ? drNoLib : e.message || drNoLib)}</p><div class="toolbar"><button class="btn ghost" type="button" id="sgBk">Back to the draft</button></div></div>`; $('#sgBk').addEventListener('click', () => viewDraftReview(did)); return; }
     const pages = D_.pages, signers = ((d.details || {}).purchasers || []).map((x, i) => ({ position: i + 1, name: [x.first, x.last].map(v => String(v || '').trim()).filter(Boolean).join(' ') || 'Purchaser ' + (i + 1), email: String(x.email || '').trim() }));
     const M = SG.makePlaces({ pages, placed: d.placed || [], mapPlaces: mp.places || [], signers }), cca = SG.ccaPages(pages);
-    const R = { method: (d.details || {}).sign === 'digital' ? 'link' : 'in_person', page: (M.places.find(x => x.kind === 'signature') || { page: 1 }).page };
+    const R = { method: (opt && opt.method) || ((d.details || {}).sign === 'digital' ? 'link' : 'in_person'), page: (M.places.find(x => x.kind === 'signature') || { page: 1 }).page };
     const counts = pos => Object.keys(SG_WHY).map(k => [k, M.places.filter(x => x.signer === pos && x.why === k).length]).filter(x => x[1]);
     const paint = () => {
       const noEmail = signers.filter(s => !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(s.email));
-      main().innerHTML = `<div class="view-pad dr-page" id="sgRelease"><div class="toolbar no-print"><button class="btn ghost" type="button" id="sgBack">Back to the draft</button></div><span class="agent-flag">Only you see this</span>
+      main().innerHTML = `<div class="view-pad dr-page" id="sgReleaseView"><div class="toolbar no-print"><button class="btn ghost" type="button" id="sgBack">Back to the draft</button></div><span class="agent-flag">Only you see this</span>
         <h1>Ready to sign</h1><p class="lede">${nt(p.address)}</p>
         <p class="small">Draft ${d.number}, fingerprint <span translate="no">${esc(drShort(d.sha256))}</span>. The signing places are made for you from the draft. The date at the top stays blank: it is added once everything is agreed.</p>
         <section class="card" id="sgPlacesSum"><h2>Signing places</h2>
           ${signers.map(s => `<p class="small" style="margin:0 0 4px" data-sgsum="${s.position}"><strong>${nt(s.name)}</strong>: ${M.counts[s.position] || 0} places (${counts(s.position).map(([k, n]) => `${n} ${esc(SG_WHY[k])}`).join(', ')})</p>`).join('')}
-          ${M.warnings.length ? `<div class="card warnc tight" id="sgWarn">${M.warnings.map(w => `<p class="small" style="margin:0">${esc(w)}</p>`).join('')}</div>` : ''}
+          ${M.blocking.length ? `<div class="card warnc tight" id="sgBlock"><p class="small" style="margin:0 0 4px"><strong>Signing can't be released yet</strong></p><ul class="dr-list">${M.blocking.map(b => `<li class="small dr-need" data-block="${esc(b.id)}"><strong>${esc(b.label)}</strong>: ${esc(b.why)}</li>`).join('')}</ul></div>` : ''}
+          ${M.warnings.length ? `<div class="card note tight" id="sgWarn">${M.warnings.map(w => `<p class="small" style="margin:0">${esc(w)}</p>`).join('')}</div>` : ''}
           <div class="dr-nav"><label class="sr" for="sgPick">Page</label><select id="sgPick">${pages.map(pg => `<option value="${pg.n}" ${pg.n === R.page ? 'selected' : ''}>Page ${pg.n} (${M.places.filter(x => x.page === pg.n).length})</option>`).join('')}</select></div>
           <div id="sgCanvas" class="dr-holder"></div></section>
         <section class="card" id="sgGuidesSum"><h2>Read before signing</h2>
@@ -6504,7 +6505,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
           ${R.method === 'link' && noEmail.length ? `<div class="card warnc tight" id="sgNoEmail"><p class="small" style="margin:0">${esc(noEmail.map(s => s.name).join(', '))} ${noEmail.length === 1 ? 'has' : 'have'} no email. Add it with Correct details (then re-draft), or sign in person.</p></div>` : ''}
           ${R.method === 'link' ? `<p class="small" style="margin:6px 0 0">Links go to: ${signers.map(s => `${nt(s.name)} <span class="small" translate="no">(${esc(s.email || 'no email')})</span>`).join(', ')}</p>` : ''}</section>
         <div class="err" id="sgRelErr" role="alert"></div>
-        <div class="toolbar"><button class="btn primary" type="button" id="sgRelease" ${M.places.length && !M.warnings.some(w => /no room|no purchaser signature/.test(w)) ? '' : 'disabled'}>Ready to sign</button></div>
+        <div class="toolbar"><button class="btn primary" type="button" id="sgRelease" ${M.places.length && !M.blocking.length ? '' : 'disabled'}>Ready to sign</button></div>
         <p class="small">${R.method === 'link' ? 'This gets the signing ready. You send the links on the next screen.' : 'Signing then happens on this device.'}</p></div>`;
       $('#sgBack').addEventListener('click', () => viewDraftReview(did));
       $$('input[name="sgMethod"]').forEach(x => x.addEventListener('change', () => { R.method = x.value; paint(); }));
@@ -6532,7 +6533,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       ofSafe(sb.from('offer_sign_marks').select('*').eq('signing_id', sid).order('at')), ofSafe(sb.from('offer_sign_reviews').select('*').eq('signing_id', sid).order('at')), ofSafe(sb.from('offer_sign_asks').select('*').eq('signing_id', sid).order('at')),
       ofSafe(sb.from('offer_rounds').select('*').eq('signing_id', sid))]);
     const allD = (await ofSafe(sb.from('offer_drafts').select('id,number').eq('offer_id', g.offer_id))) || [];
-    const stale = !['locked', 'replaced'].includes(g.status) && (d.number !== Math.max(...allD.map(x => x.number)) || JSON.stringify(drCanon(o.details)) !== JSON.stringify(drCanon(d.details)));
+    const stale = !['locked', 'replaced', 'cancelled'].includes(g.status) && (d.number !== Math.max(...allD.map(x => x.number)) || JSON.stringify(drCanon(o.details)) !== JSON.stringify(drCanon(d.details)));
     const rd = (rounds || [])[0], S_ = signers || [], T_ = taps || [], Mk = marks || [], Rv = reviews || [];
     const places = (g.places || []).concat(Rv.flatMap(r => r.places || [])), need = pos => places.filter(x => x.signer === pos), doneOf = s => T_.filter(t => t.signer_id === s.id && need(s.position).some(x => x.id === t.place_id)).length;
     const open = Mk.filter(m => !Rv.some(r => (r.marks || []).includes(m.id)));
@@ -6543,6 +6544,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <h1>Signing</h1><p class="lede">${nt(p.address)}</p>
       <p>${sgDot(g.status)} <span class="small">Draft ${d.number}, ${g.method === 'link' ? 'by personal link' : 'in person on this device'}. Fingerprint <span translate="no">${esc(drShort(g.draft_sha256))}</span>.</span></p>
       ${g.status === 'replaced' ? `<div class="card warnc tight" id="sgReplaced"><p class="small" style="margin:0">Replaced by a newer draft ${esc(fmtDT(g.replaced_at))}. The signatures and initials given on this version are kept, but they are void. Everyone signs the new version.</p>${g.replaced_by ? '<div class="toolbar"><button class="btn ghost" type="button" id="sgNewer">Open the new signing</button></div>' : ''}</div>` : ''}
+      ${g.status === 'cancelled' ? '<div class="card note tight" id="sgCancelled"><p class="small" style="margin:0">Stopped before anyone signed, so it could be released again another way. Any links sent no longer work.</p></div>' : ''}
       ${stale ? `<div class="card warnc tight" id="sgStale"><p class="small" style="margin:0">The offer has changed since this was released, so signing has stopped. Re-draft and approve it, then tap Ready to sign. Signatures already given on this version stay recorded, as replaced.</p></div>` : ''}
       ${rd ? `<section class="card okc" id="sgRound"><h2>Round ${rd.number} locked</h2><p class="small">Locked ${esc(fmtDT(rd.locked_at))}. Fingerprint <span translate="no">${esc(rd.sha256)}</span>, worked out by the server from the stored file. The approved draft is unchanged, with every signature, initial and mark added on top, and the execution record on a page of its own at the end. It can't be changed or removed.</p>
         <div class="toolbar"><button class="btn ghost" type="button" id="sgRoundDl">Download Round ${rd.number}</button><button class="btn ghost" type="button" id="sgChain">Check the timeline</button></div><p class="small" id="sgChainOut" role="status" aria-live="polite"></p></section>` : ''}
@@ -6555,11 +6557,17 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
           ${g.method === 'in_person' && ['ready', 'signing'].includes(g.status) && !stale && !s.finished_at && !s.void_at ? `<button class="btn ${S_.find(x => !x.finished_at) === s ? 'primary' : 'ghost'}" type="button" data-turn="${s.id}">Start ${esc(s.name.split(' ')[0])}'s turn</button>` : ''}</div></div>`).join('')}</section>
       ${g.method === 'link' && ['ready', 'signing'].includes(g.status) && !stale ? `<section class="card" id="sgSend"><h2>${g.status === 'ready' ? 'Send the links' : 'The links'}</h2><p class="small">${g.status === 'ready' ? 'Nothing has been sent yet. Send emails each purchaser their own link; they get a one-time code by email when they open it.' : 'Each purchaser has their own link. Sending again makes new links for anyone still to sign; their old ones stop working.'}</p>
         <div class="toolbar"><button class="btn ${g.status === 'ready' ? 'primary' : 'ghost'}" type="button" id="sgSendGo">${g.status === 'ready' ? 'Send' : 'Send the links again'}</button></div><p class="small" id="sgSendOut" role="status" aria-live="polite"></p></section>` : ''}
+      ${['ready', 'signing'].includes(g.status) && !stale ? (() => { const begun = S_.filter(s => s.consent_at || T_.some(t => t.signer_id === s.id));
+        return `<section class="card" id="sgMethod"><h2>How they sign</h2>${begun.length ? `<p class="small" style="margin:0" id="sgMethodNo">${esc(begun.map(s => s.name).join(', '))} ${begun.length > 1 ? 'have' : 'has'} started signing, so this can't be changed to ${g.method === 'link' ? 'in person' : 'by link'} now. To start again, correct the offer and re-draft it; everyone then signs the new version.</p>`
+          : `<p class="small">${g.method === 'link' ? 'By personal link.' : 'In person, on this device.'} Nobody has started signing, so you can change this.${g.method === 'link' && g.sent_at ? ' The links already sent stop working.' : ''}</p><div class="toolbar"><button class="btn ghost" type="button" id="sgChange">Change to ${g.method === 'link' ? 'in person' : 'by link'}</button></div><p class="small err" id="sgChangeErr" role="alert"></p>`}</section>`; })() : ''}
       ${(asks || []).length ? `<section class="card" id="sgAsks"><h2>Asked for a change</h2>${asks.map(a => { const s = S_.find(x => x.id === a.signer_id) || {}; return `<div class="fact"><div class="k">${nt(s.name || '')} · ${esc(fmtDT(a.at))}</div><div class="v" style="font-weight:400">${esc(a.text)}</div></div>`; }).join('')}<p class="small">If it needs a change, correct the offer, re-draft and approve it, and tap Ready to sign. Everyone then signs the new version.</p></section>` : ''}
       ${Mk.length ? `<details class="card tight" id="sgMarks"><summary class="small">Marks (${Mk.length})</summary>${Mk.map(m => `<p class="small" style="margin:2px 0">Page ${m.page}: ${esc(SG.MARK_NAMES[m.kind] || m.kind)} by ${nt(m.by_name)}, ${esc(fmtDT(m.at))}${Rv.some(r => (r.marks || []).includes(m.id)) ? ', re-approved' : ''}</p>`).join('')}</details>` : ''}
     </div>`;
     $('#sgBackO').addEventListener('click', () => viewOfferAgent(g.offer_id));
     const nw = $('#sgNewer'); if (nw) nw.addEventListener('click', () => viewSigning(g.replaced_by));
+    const chg = $('#sgChange'); if (chg) chg.addEventListener('click', async () => { chg.disabled = true;
+      try { await sgRpc('agent_signing_cancel', { p_signing: sid, p_reason: 'Changed to ' + (g.method === 'link' ? 'in person' : 'by link') }); toast('Stopped. Choose how they sign'); viewSignRelease(g.draft_id, { method: g.method === 'link' ? 'in_person' : 'link' }); }
+      catch (e) { $('#sgChangeErr').textContent = e.message; chg.disabled = false; } });
     $$('[data-turn]').forEach(b => b.addEventListener('click', async () => { b.disabled = true; try { if (g.status === 'ready') await sgRpc('agent_signing_start', { p_signing: sid }); viewSignTurn(sid, b.dataset.turn); } catch (e) { toast(e.message); b.disabled = false; } }));
     const sg_ = $('#sgSendGo'); if (sg_) sg_.addEventListener('click', async () => { sg_.disabled = true; $('#sgSendOut').textContent = 'Sending...';
       const r = await offerCall('offer-sign', { action: 'send', signing_id: sid });
@@ -6784,12 +6792,13 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     if (!Object.keys(GUIDES).length) await Promise.race([loadGuides(), new Promise(r => setTimeout(r, 4000))]);
     const start = async () => {
       let st; try { st = await call('state'); } catch (e) { if (/code from your email/.test(e.message)) { setSes(''); return codeStep(); } return closed('Something went wrong', e.message); }
-      let bytes; try { bytes = new Uint8Array(await (await fetch(st.signing.draft_url)).arrayBuffer()); if (await REPO.sha256(bytes) !== st.signing.draft_sha256) throw new Error('x'); } catch (_) { return closed('The document didn\'t open', 'Check your connection and open the link again.'); }
+      // the document is given only once they agree to sign electronically
+      let bytes = null; if (st.signing.draft_url) { try { bytes = new Uint8Array(await (await fetch(st.signing.draft_url)).arrayBuffer()); if (await REPO.sha256(bytes) !== st.signing.draft_sha256) throw new Error('x'); } catch (_) { return closed('The document didn\'t open', 'Check your connection and open the link again.'); } }
       const S = st.signer, G = st.signing;
       signFlow({ mode: 'link', address: G.address, name: S.name, position: S.position, places: G.places || [], taps: new Set(st.taps || []), consent_at: S.consent_at, receipts: (S.receipts || []).map(r => r.guide), sig_png: S.sig_png, init_png: S.init_png,
         status: G.status, stopped: G.stopped, cca_pages: G.cca_pages || [], pages: G.pages, bytes, draftSha: G.draft_sha256, marks: [],
         api: { consent: () => call('consent'), receipt: r => call('receipt', r), marks: (a, b) => call('marks', { sig: a, init: b }), tap: pl => call('tap', { place: pl }), ask: t => call('ask', { text: t }), finish: () => call('finish') },
-        reload: start, done: r => { setSes(''); main().innerHTML = `<div class="login-card" id="sgThanks"><h1>Thank you, ${esc(S.name.split(' ')[0])}</h1><p class="lede">You've signed every place.${r && r.complete ? ' Everyone has now signed, and the signed copy is locked.' : ' Tim will let you know once everyone has signed.'}</p><p class="small">Nothing goes to the sellers until Tim has checked it. Any questions, call or text Tim on <a href="tel:0275627207">027 562 7207</a>.</p></div>`; top(); } });
+        reload: start, done: r => { setSes(''); main().innerHTML = `<div class="login-card" id="sgThanks"><h1>Thank you, ${esc(S.name.split(' ')[0])}</h1><p class="lede">You've signed every place.${r && r.complete && r.locked ? ' Everyone has now signed, and the signed copy is locked.' : r && r.complete ? ' Everyone has now signed. Tim will lock the signed copy and let you know.' : ' Tim will let you know once everyone has signed.'}</p><p class="small">Nothing goes to the sellers until Tim has checked it. Any questions, call or text Tim on <a href="tel:0275627207">027 562 7207</a>.</p></div>`; top(); } });
     };
     const codeStep = (msg) => {
       main().innerHTML = `<div class="login-card" id="sgCode"><h1>Kia ora ${esc(info.first)}</h1><p class="lede">Your offer for ${nt(info.address)} is ready to sign.</p>

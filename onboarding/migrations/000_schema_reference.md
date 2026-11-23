@@ -257,15 +257,17 @@ agreements/<agreement id>/signatures/... (vendors may upload their own signature
 ## 020 Purchaser signing (offers phase 3, 24 November 2026; tested in a rollback block on a local PostgreSQL stand-in, NOT yet on the live project)
 - `offer_events` gains `chain` (the offer id, or `p:` and the property id), `seq`, `prev_hash`, `body` (the exact text fingerprinted) and
   `hash` = SHA-256 of prev_hash, a new line and body, set by the `offer_event_chain` trigger. Earlier events have none. `offer_chain_verify`.
+- `offer_hits` kind check widened: also 'sign_code' and 'sign_try' (per-network limits on emailing and typing signing codes).
 - `offer_signings` (draft, method in_person or link, pages, places and their SHA-256, cca_pages, status ready, signing, held, complete,
-  locked or replaced). `offer_signers` (per purchaser: name and own email from the draft's details; token, code and session as
+  locked, replaced or cancelled; one live signing per draft). `offer_signers` (per purchaser: name and own email from the draft's details; token, code and session as
   fingerprints only, never readable by signed-in users; consent, drawn signature and initials, ID type, witness, finished, seen_sha256,
   user agent, network fingerprint, void). `offer_sign_taps`, `offer_sign_receipts` (cca, sale_purchase), `offer_sign_marks` (note,
   strike, cross, reinstate), `offer_sign_reviews`, `offer_sign_asks`, `offer_rounds` (Round 1: path, server-confirmed SHA-256, execution
   record, chain_last). Agent read only; nothing written directly; signings and signers change only through the functions; everything
   else never changes; no table can be emptied; vendors and anon see nothing.
 - Tim: `agent_signing_release`, `agent_signing_start`, `agent_signing_consent`, `agent_signing_receipt`, `agent_signing_marks`,
-  `agent_signing_tap`, `agent_signing_finish` (ID type), `agent_signing_mark`, `agent_signing_review`, `agent_offer_chain_check`.
+  `agent_signing_tap`, `agent_signing_finish` (ID type, or known_to_tim), `agent_signing_mark`, `agent_signing_review`,
+  `agent_signing_cancel` (change the method before anyone starts), `agent_offer_chain_check`.
   Service role (offer-sign): `offer_sign_issue`, `offer_sign_open`, `offer_sign_code`, `offer_sign_verify`, `offer_sign_state`,
   `offer_sign_consent`, `offer_sign_receipt`, `offer_sign_marks`, `offer_sign_tap`, `offer_sign_ask`, `offer_sign_finish`,
   `offer_round_material`, `offer_round_lock`.

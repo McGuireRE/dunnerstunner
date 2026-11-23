@@ -20,7 +20,7 @@ const S = require(path.join(__dirname, '..', 'src', 'sign-core.js'));
   const doc = await PDFLib.PDFDocument.create(); doc.addPage([595.32, 842.04]).drawText('Synthetic approved draft', { x: 40, y: 800, size: 12 }); doc.addPage([595.32, 842.04]);
   const draft = await doc.save(); let draftSha = sha(draft);
   const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
-  let calls = [], mails = [], files = {}, failMail = null, agent = 'agent@example.test', finishComplete = false, tapError = null;
+  let consented = true, calls = [], mails = [], files = {}, failMail = null, agent = 'agent@example.test', finishComplete = false, tapError = null;
   const material = () => ({ signing_id: SID, offer_id: OID, property_id: PID, address: '1 Example Road, Testville', offer_ref: 'Ana Testbuyer', method: 'link', draft: { id: 'd', number: 2, path: 'properties/' + PID + '/docs/offer-draft-x.pdf', sha256: draftSha },
     places_sha256: 'b'.repeat(64), made_at: '2026-11-24T01:00:00Z', places: [{ id: 'foot:p1:s1', signer: 1, kind: 'initial', why: 'foot', page: 1, x: 500, y: 5, w: 26, h: 13 }, { id: 'block:sig1:s1', signer: 1, kind: 'signature', why: 'block', page: 2, x: 40, y: 500, w: 150, h: 22 }],
     taps: [{ place_id: 'foot:p1:s1', signer: 1 }, { place_id: 'block:sig1:s1', signer: 1 }], signers: [{ position: 1, name: 'Ana Testbuyer', sig_png: png, init_png: png, verified_at: '2026-11-24T00:30:00Z', consent_at: '2026-11-24T00:31:00Z', receipts: [], places: 2, ua: 'Phone', net: 'f'.repeat(64), seen_sha256: 'd'.repeat(64), email: 'SHOULD-NOT-PRINT@example.com' }], marks: [], replaced: [] });
@@ -29,7 +29,7 @@ const S = require(path.join(__dirname, '..', 'src', 'sign-core.js'));
     if (fn === 'offer_sign_open') return args.p_token === TOK ? { data: { ok: true, first: 'Ana', address: '1 Example Road', finished: false, stopped: null, held: false, email_hint: 'a***@example.com', email: 'ana@example.com', vendor: 'Vera', others: ['Bo'] }, error: null } : { data: { ok: false }, error: null };
     if (fn === 'offer_sign_code') return { data: { ok: true, code: '123456', email: 'ana@example.com', name: 'Ana Testbuyer', address: '1 Example Road' }, error: null };
     if (fn === 'offer_sign_verify') return args.p_code === '123456' ? { data: { ok: true, session: SES }, error: null } : { data: { ok: false, reason: 'wrong' }, error: null };
-    if (fn === 'offer_sign_state') return { data: { signer: { position: 1, name: 'Ana Testbuyer' }, signing: { status: 'signing', draft_path: 'properties/' + PID + '/docs/offer-draft-x.pdf', places: [] }, taps: [] }, error: null };
+    if (fn === 'offer_sign_state') return { data: { signer: { position: 1, name: 'Ana Testbuyer' }, signing: { status: 'signing', draft_path: consented ? 'properties/' + PID + '/docs/offer-draft-x.pdf' : null, places: [] }, taps: [] }, error: null };
     if (fn === 'offer_sign_tap') return tapError ? { data: null, error: { message: tapError } } : { data: { done: 3, of: 9 }, error: null };
     if (fn === 'offer_sign_ask') return { data: { ok: true, name: 'Ana Testbuyer', address: '1 Example Road', offer_id: OID }, error: null };
     if (fn === 'offer_sign_finish') return { data: { ok: true, complete: finishComplete, signing_id: SID }, error: null };
@@ -71,6 +71,7 @@ const S = require(path.join(__dirname, '..', 'src', 'sign-core.js'));
   // state: a short-lived link to the draft, never the stored path
   x = await J(await post({ action: 'state', token: TOK, session: SES }));
   expect(x.j.ok && /^https:\/\/signed\.example\//.test(x.j.signing.draft_url) && !('draft_path' in x.j.signing), 'state: a 10 minute link to the draft, not its path');
+  consented = false; x = await J(await post({ action: 'state', token: TOK, session: SES })); expect(x.j.ok && x.j.signing.draft_url === null, 'before they agree to sign electronically: no link to the document'); consented = true;
   // refusals
   tapError = "That place isn't yours to sign"; x = await J(await post({ action: 'tap', token: TOK, session: SES, place: 'foot:p1:s2' })); expect(x.status === 400 && x.j.error === "That place isn't yours to sign", 'a refusal written for people is shown');
   tapError = 'permission denied for function offer_sign_tap'; x = await J(await post({ action: 'tap', token: TOK, session: SES, place: 'foot:p1:s1' })); expect(x.status === 400 && /Something went wrong/.test(x.j.error) && !/permission/.test(x.j.error), 'anything internal stays hidden');
@@ -96,6 +97,13 @@ const S = require(path.join(__dirname, '..', 'src', 'sign-core.js'));
   x = await J(await post({ action: 'finish', token: TOK, session: SES })); expect(x.j.complete && x.j.locked === false && !calls.some(c => c[0] === 'offer_round_lock') && Object.keys(files).length === before, 'a draft that doesn\'t match its fingerprint: nothing stored or locked');
   draftSha = sha(draft);
 
+  // finding 6: a different file already where Round 1 goes: never locked over it
+  Object.keys(files).filter(k => /offer-round-/.test(k)).forEach(k => delete files[k]);
+  calls = [];
+  const h2 = H.makeHandler({ cors: {}, appUrl: 'x', timEmail: 't', whoIsAgent: async () => agent, rpc: db, signedUrl: async () => null, download: async (p_) => /offer-round-/.test(p_) ? new Uint8Array([1, 2, 3]) : files[p_] || null,
+    upload: async () => ({ ok: false, exists: true }), sendMail: async () => { }, renderRound: (d_, m) => S.renderRound(PDFLib, d_, m), net: netOf });
+  x = await J(await h2(new Request('https://x/f', { method: 'POST', headers: { Authorization: 'Bearer good' }, body: JSON.stringify({ action: 'lock', signing_id: SID }) })));
+  expect(x.status === 400 && /different file is already stored/.test(x.j.error) && !calls.some(c => c[0] === 'offer_round_lock' || c[0] === 'offer_file_confirm'), 'a different file already at the round\'s place: not confirmed, not locked');
   // Tim's actions
   calls = []; x = await J(await post({ action: 'send', signing_id: SID })); expect(x.status === 403 && !calls.length, 'send without Tim\'s sign-in: refused before anything runs');
   x = await J(await post({ action: 'send', signing_id: SID }, { Authorization: 'Bearer vendor' })); expect(x.status === 403 && !calls.length, 'a signed-in vendor: refused');

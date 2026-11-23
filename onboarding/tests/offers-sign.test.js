@@ -102,7 +102,7 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   await draftAndApprove(offA, 'Synthetic extra term from Tim for signing.');
   let d = await db(p); const drA = d.offer_drafts.filter(x => x.offer_id === offA).sort((a, z) => z.number - a.number)[0];
   expect(!(d.offer_signings || []).length, 'approving does not release anything');
-  await p.click('#sgReady'); await p.waitForSelector('#sgRelease', { timeout: 30000 }); await p.waitForSelector('#sgCanvas .sg-place');
+  await p.click('#sgReady'); await p.waitForSelector('#sgReleaseView', { timeout: 30000 }); await p.waitForSelector('#sgCanvas .sg-place');
   out.summary = await p.$$eval('[data-sgsum]', e => e.map(x => x.textContent.replace(/\s+/g, ' ').trim()));
   expect(out.summary.length === 4 && out.summary.every(t => /the foot of each page/.test(t) && /beside each box filled or marked/.test(t) && /beside each further term/.test(t) && /the signature block/.test(t) && /acknowledgements you kept/.test(t)), 'every purchaser has places at each page foot, each filled box, each further term, the signature block and the acknowledgement');
   expect(!(await p.$('#sgWarn')), 'no warnings: the places are made with no set-up');
@@ -118,7 +118,7 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
     expect(new Set(mine.filter(x => x.why === 'foot').map(x => x.page)).size === drPages, `purchaser ${s}: initials at the foot of every page`);
     expect(mine.filter(x => x.why === 'term').length === 2 && mine.filter(x => x.kind === 'signature' && x.why === 'block').length === 1, `purchaser ${s}: each further term and a signature`);
     expect(mine.filter(x => x.why === 'ack').length === 1, `purchaser ${s}: the acknowledgement Tim kept`); }
-  const filledRefs = new Set(gA.places.filter(x => x.why === 'filled').map(x => x.ref)); const placedIds = drA.placed.filter(x => (x.boxes || []).length && x.id !== 'further_terms' && !/^name_purchaser_/.test(x.id)).map(x => /^chattel_x_/.test(x.id) ? x.id : (x.place || x.id));
+  const filledRefs = new Set(gA.places.filter(x => x.why === 'filled').map(x => x.ref)); const placedIds = drA.placed.filter(x => (x.boxes || []).length && x.id !== 'further_terms' && !/^name_purchaser_/.test(x.id)).map(x => /^chattel_x_/.test(x.id) ? x.id : (x.place || x.id)).map(r => /^d_/.test(r) ? 'c_' + r.slice(2) : r);   // a condition's date is initialled with its Yes/No row
   expect(placedIds.every(r => filledRefs.has(r)), 'every box the draft filled or marked has initials');
   expect(!gA.places.some(x => x.ref === 'date') && !drA.placed.some(x => x.id === 'date'), 'the date at the top stays blank and has no place');
   expect(gA.places.some(x => x.signer === 4 && x.kind === 'name') && gA.places.some(x => x.signer === 4 && x.added), 'the fourth purchaser gets a signature and name added beneath the printed three');
@@ -144,6 +144,7 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   d = await db(p); const s1 = d.offer_signers.find(s => s.signing_id === gA.id && s.position === 1);
   expect(s1.finished_at && s1.id_sighted === 'passport' && s1.witnessed_by && /^[0-9a-f]{64}$/.test(s1.seen_sha256), 'finished: witnessed, the ID type only, and the fingerprint of what they saw');
   expect(/Finished/.test(await p.textContent('#sgSigners [data-signer="1"]')), 'Tim sees purchaser 1 has finished');
+  expect(/Ana Maria Testbuyer has started signing, so this can't be changed/.test(await p.textContent('#sgMethodNo')) && !(await p.$('#sgChange')), 'once someone has started, the method can\'t be changed, and Tim is told why');
   expect(d.offer_signings.find(x => x.id === gA.id).status === 'signing', 'signing is under way');
 
   // ── 4. purchaser 2 marks the page on Tim's screen: a line through text; signing holds; Tim re-approves; then a reinstatement and a note ──
@@ -182,7 +183,7 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   await turnStart(p, 1); await p.waitForSelector('#sgPlaces');
   expect(await count(p) === out.need1 && +(await p.textContent('#sgCount')).match(/of (\d+)/)[1] === out.need1 + 3, 'purchaser 1 picks up where they left off, with the three marks to initial');
   await tapAll(p); await tick(p, '#sgSaw'); await p.selectOption('#sgIdType', 'passport'); await p.click('#sgFinishGo'); await p.waitForSelector('#sgView');
-  for (const n of [3, 4]) { await turnStart(p, n); await agreeReadDraw(p, n); await tapAll(p); await tick(p, '#sgSaw'); await p.selectOption('#sgIdType', 'kiwi_access_card'); await p.click('#sgFinishGo'); await p.waitForSelector('#sgView'); }
+  for (const n of [3, 4]) { await turnStart(p, n); await agreeReadDraw(p, n); await tapAll(p); await tick(p, '#sgSaw'); await p.selectOption('#sgIdType', n === 3 ? 'known_to_tim' : 'kiwi_access_card'); await p.click('#sgFinishGo'); await p.waitForSelector('#sgView'); }
   await p.waitForSelector('#sgRound', { timeout: 30000 });
   d = await db(p); const rA = d.offer_rounds.find(r => r.offer_id === offA);
   expect(rA && rA.number === 1 && d.offer_signings.find(x => x.id === gA.id).status === 'locked', 'Round 1 locked when the last purchaser finished');
@@ -190,7 +191,7 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   const rt = await pdfText(roundPdf); out.roundPages = rt.length;
   const rec = rt.slice(drPages).join(' ');
   expect(rt.length > drPages && /Execution record/.test(rec) && !rt.slice(0, drPages).some(t => /Execution record/.test(t)), 'the execution record is on pages added at the end, never on the REINZ pages');
-  expect(['Ana Maria Testbuyer', 'Bo Testbuyer', 'Cy Testbuyer', 'Di Testbuyer'].every(n => rec.includes(n)) && /saw them sign/.test(rec) && /Photo ID sighted: Passport/.test(rec) && /NZ driver licence/.test(rec), 'it names each signer, how they signed and the ID type');
+  expect(['Ana Maria Testbuyer', 'Bo Testbuyer', 'Cy Testbuyer', 'Di Testbuyer'].every(n => rec.includes(n)) && /saw them sign/.test(rec) && /Photo ID sighted: Passport/.test(rec) && /NZ driver licence/.test(rec) && /known to Tim McGuire personally/.test(rec), 'it names each signer, how they signed and the ID type (or that Tim knows them)');
   expect(/Fingerprint \(SHA-256\) of what they saw and signed: [0-9a-f]{64}/.test(rec) && rec.includes(drA.sha256), 'with the fingerprints of the draft and of what each saw');
   expect(/line through text by Bo Testbuyer/.test(rec) && /reinstatement by Bo Testbuyer/.test(rec) && /note by Bo Testbuyer/.test(rec), 'and each mark, with who and when');
   out.leak = (rt.join(' ').match(/buyer\.own@|ana\.p@|bo\.p@|cy\.p@|di\.p@|999 8888|777 6666|555 4444|333 2222|111 0000|vendor@example|000 1111/g) || []);
@@ -215,14 +216,19 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   process.stderr.write('step 6\n');
   await p.click('#sgBackO'); await p.waitForSelector('#ofView'); await p.click('#ofBackP'); await p.waitForSelector('#offTile');
   await draftAndApprove(offB); d = await db(p); let drB = d.offer_drafts.filter(x => x.offer_id === offB).sort((a, z) => z.number - a.number)[0];
-  await p.click('#sgReady'); await p.waitForSelector('#sgRelease', { timeout: 30000 });
+  await p.click('#sgReady'); await p.waitForSelector('#sgReleaseView', { timeout: 30000 });
   expect(await p.isChecked('input[name="sgMethod"][value="link"]') && /eve\.l@example\.com/.test(await p.textContent('#sgHow')), 'by link chosen, as the buyer asked; Tim sees where the links go');
   await p.click('#sgRelease'); await p.waitForSelector('#sgSendGo');
+  // Tim changes his mind before anyone has started: in person instead, then back to links; each change recorded
+  await p.click('#sgChange'); await p.waitForSelector('#sgReleaseView'); expect(await p.isChecked('input[name="sgMethod"][value="in_person"]'), 'changing the method opens Ready to sign the other way');
+  await p.click('#sgRelease'); await p.waitForSelector('#sgView'); expect(/In person, on this device/.test(await p.textContent('#sgMethod')), 'released again in person');
+  await p.click('#sgChange'); await p.waitForSelector('#sgReleaseView'); await p.click('#sgRelease'); await p.waitForSelector('#sgSendGo');
+  d = await db(p); expect(d.offer_events.filter(e => e.kind === 'sign_cancelled' && e.offer_id === offB).length === 2 && d.offer_signings.filter(x => x.offer_id === offB && x.status === 'cancelled').length === 2, 'each change is recorded; the stopped releases are kept');
   expect(!(await mails(p)).some(m => /offer_sign_(link|code)/.test(m.kind)), 'released by link: still nothing sent');
   await p.click('#sgSendGo'); await p.waitForSelector('#sgSigners');
   let ml = await mails(p); const links = ml.filter(m => m.kind === 'offer_sign_link');
   expect(links.length === 2 && links.map(m => m.to).sort().join() === 'eve.l@example.com,fin.l@example.com' && links[0].link !== links[1].link, 'Send: each purchaser emailed their own link');
-  d = await db(p); const gB = d.offer_signings.find(x => x.offer_id === offB && x.status !== 'replaced');
+  d = await db(p); const gB = d.offer_signings.find(x => x.offer_id === offB && !['replaced', 'cancelled'].includes(x.status));
   expect(d.offer_signers.filter(s => s.signing_id === gB.id).every(s => s.token_hash && !JSON.stringify(s).includes(links[0].link.split('sign=')[1])), 'the link tokens are kept only as fingerprints');
   // Tim's page closes; Eve opens her link on her own phone (dark mode, no sign-in)
   await p.evaluate(() => localStorage.removeItem('mocksession')); await p.close();
@@ -234,7 +240,9 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   expect(code && code.to === 'eve.l@example.com' && /^\d{6}$/.test(code.code), 'a one-time code emailed to her own address, as its own message');
   await q.fill('#sgCodeIn', code.code === '000000' ? '111111' : '000000'); await q.click('#sgCodeGo'); await q.waitForFunction(() => /isn't right/.test(document.querySelector('#sgCodeMsg').textContent));
   await q.fill('#sgCodeIn', code.code); await q.click('#sgCodeGo');
-  await q.waitForSelector('#sgConsent'); await tick(q, '#sgAgree'); await q.click('#sgAgreeGo'); await q.waitForSelector('#sgGuides'); await q.waitForSelector('#sgCcaPages .dr-pg canvas');
+  await q.waitForSelector('#sgConsent');
+  { const ses0 = await q.evaluate(() => Object.keys(sessionStorage).filter(k => /^sgSes:/.test(k)).map(k => sessionStorage.getItem(k))[0]);
+    const st0 = await invoke(q, { action: 'state', token: eveUrl.split('sign=')[1], session: ses0 }); expect(st0.ok && st0.signing.draft_url === null, 'the document isn\'t given before she agrees to sign electronically'); } await tick(q, '#sgAgree'); await q.click('#sgAgreeGo'); await q.waitForSelector('#sgGuides'); await q.waitForSelector('#sgCcaPages .dr-pg canvas');
   await tick(q, '#sgCcaOk'); await tick(q, '#sgSpOk'); await q.click('#sgGuidesGo'); await q.waitForSelector('#sgDraw');
   const bgD = await q.$eval('#sgDraw .sig-wrap', e => getComputedStyle(e).backgroundColor), inkBg = await q.$eval('body', e => getComputedStyle(e).backgroundColor);
   expect(bgD === 'rgb(255, 255, 255)' && inkBg !== 'rgb(255, 255, 255)', 'in dark mode the page is dark and the signature pad stays white');
@@ -260,8 +268,8 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   await rpc(p, 'agent_offer_correct', { p_offer: offB, p_details: offer({ sign: 'digital', price: '640000', settlement: { kind: 'relative', days: 20 }, conditions: [{ key: 'finance', days: 10 }], chattels_add: [], chattels_exclude: [], purchasers: [{ first: 'Eve', last: 'Linkbuyer', email: 'eve.l@example.com', phone: '027 100 2000' }, { first: 'Fin', last: 'Linkbuyer', email: 'fin.l@example.com', phone: '027 300 4000' }] }), p_note: 'Eve asked for settlement a week later' });
   r = await p.evaluate(b_ => window.supabase.createClient().functions.invoke('offer-sign', { body: b_ }).then(x => x.data || x.error.context.json()), { action: 'tap', token: tokE, session: sesE, place: gB.places.find(x => x.signer === 1 && x.why === 'foot').id });
   expect(r.ok === false && /offer has changed/.test(r.error), 'once the offer is corrected, signing the old version stops');
-  await openProp(p); await draftAndApprove(offB); await p.click('#sgReady'); await p.waitForSelector('#sgRelease', { timeout: 30000 }); await p.click('#sgRelease'); await p.waitForSelector('#sgSendGo');
-  d = await db(p); const gB2 = d.offer_signings.find(x => x.offer_id === offB && x.id !== gB.id), gB1 = d.offer_signings.find(x => x.id === gB.id);
+  await openProp(p); await draftAndApprove(offB); await p.click('#sgReady'); await p.waitForSelector('#sgReleaseView', { timeout: 30000 }); await p.click('#sgRelease'); await p.waitForSelector('#sgSendGo');
+  d = await db(p); const gB2 = d.offer_signings.find(x => x.offer_id === offB && x.id !== gB.id && x.status !== 'cancelled'), gB1 = d.offer_signings.find(x => x.id === gB.id);
   expect(gB1.status === 'replaced' && gB1.replaced_by === gB2.id && d.offer_signers.filter(s => s.signing_id === gB.id).every(s => s.void_at) && d.offer_sign_taps.filter(t => t.signing_id === gB.id).length === 4, 'the old signing replaced: its taps kept, its signers void');
   await p.click('#sgBackO'); await p.waitForSelector('#sgList'); expect(/Replaced by a newer draft/.test(await p.textContent('#sgList')), 'the offer page shows the old one as replaced');
   await p.click(`[data-signing="${gB.id}"]`); await p.waitForSelector('#sgReplaced'); expect(/kept, but they are void/.test(await p.textContent('#sgReplaced')) && /Replaced \(kept, void\)/.test(await p.textContent('#sgSigners')), 'opening it: replaced, the signatures kept but void');
@@ -271,15 +279,22 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   q = await page('dark'); await q.goto(eveUrl); await q.waitForSelector('#sgClosed'); expect(/isn't working/.test(await q.textContent('#sgClosed')), "Eve's old link no longer works"); await q.close();
   // both sign the new version by their new links
   for (const who of ['eve.l@example.com', 'fin.l@example.com']) {
-    q = await page(who.startsWith('eve') ? 'dark' : 'light'); await q.goto(links2.find(m => m.to === who).link); await q.waitForSelector('#sgCode');
+    q = await page(who.startsWith('eve') ? 'dark' : 'light'); if (who.startsWith('fin')) await q.goto(BASE + 'x').catch(() => null); await q.evaluate(f => f ? localStorage.setItem('mockLockFail', '1') : localStorage.removeItem('mockLockFail'), who.startsWith('fin')).catch(() => null);
+    await q.goto(links2.find(m => m.to === who).link); await q.waitForSelector('#sgCode');
     await q.click('#sgSendCode'); await q.waitForFunction(() => /Sent/.test(document.querySelector('#sgCodeMsg').textContent));
     await q.fill('#sgCodeIn', (await mails(q)).filter(m => m.kind === 'offer_sign_code' && m.to === who).pop().code); await q.click('#sgCodeGo');
     await q.waitForSelector('#sgConsent'); await tick(q, '#sgAgree'); await q.click('#sgAgreeGo'); await q.waitForSelector('#sgCcaPages .dr-pg canvas'); await tick(q, '#sgCcaOk'); await tick(q, '#sgSpOk'); await q.click('#sgGuidesGo');
     await q.waitForSelector('#sgDraw'); await draw(q, '#sgSig', 7); await draw(q, '#sgInit', 8); await q.click('#sgDrawGo'); await q.waitForSelector('#sgPlaces');
     await tapAll(q); await q.click('#sgFinishGo'); await q.waitForSelector('#sgThanks', { timeout: 30000 }); out['thanks_' + who.slice(0, 3)] = (await q.textContent('#sgThanks')).replace(/\s+/g, ' ').trim();
     await q.close(); }
-  expect(/the signed copy is locked/.test(out.thanks_fin), 'the last purchaser finishing locks Round 1 on the server');
+  expect(/Everyone has now signed\. Tim will lock the signed copy/.test(out.thanks_fin) && !/is locked/.test(out.thanks_fin), 'when locking fails at that moment, the thank-you says Tim will lock it (not that it is locked)');
+  q = await page(); await q.goto(BASE + 'x').catch(() => null);
+  r = await invoke(q, { action: 'send_code', token: links2.find(m => m.to === 'eve.l@example.com').link.split('sign=')[1] }); expect(r.ok === false && r.reason === 'stopped', 'a purchaser who has finished gets no further code');
+  r = await invoke(q, { action: 'verify', token: links2.find(m => m.to === 'eve.l@example.com').link.split('sign=')[1], code: '123456' }); expect(r.ok === false && r.reason === 'stopped', 'and no code check');
+  await q.evaluate(() => localStorage.removeItem('mockLockFail')); await q.close();
   p = await page(); await p.goto(BASE); await p.evaluate(s => localStorage.setItem('mocksession', s), SESSION); await p.goto(BASE); await p.waitForTimeout(600);
+  d = await db(p); expect(!d.offer_rounds.some(r_ => r_.offer_id === offB), 'Round 1 wasn\'t locked while making it failed');
+  await openProp(p); await p.click(`[data-offer="${offB}"]`); await p.waitForSelector('#sgList'); await p.click(`[data-signing="${d.offer_signings.find(x => x.offer_id === offB && x.status === 'complete').id}"]`); await p.waitForSelector('#sgRound', { timeout: 30000 });
   d = await db(p); const rB = d.offer_rounds.find(r_ => r_.offer_id === offB);
   expect(rB && rB.signing_id === gB2.id, 'Round 1 for offer B is the new version');
   const rtB = await pdfText(await blob(p, rB.path)), recB = rtB.join(' ');
@@ -295,6 +310,17 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   expect(!/Testbuyer|Linkbuyer|Round 1|Ready to sign/.test(await p.textContent('#main')), "the vendor's own pages show none of it");
   await p.evaluate(() => localStorage.removeItem('mocksession')); await p.goto(BASE); await p.waitForTimeout(600);
   expect((await p.evaluate(() => window.supabase.createClient().from('offer_signings').select('id'))).error, 'anyone not signed in: refused');
+
+  // ── 9. finding 1: printed words beneath the third signature line: four purchasers can't be released, in plain words ──
+  process.stderr.write('step 9\n');
+  await p.evaluate(s => localStorage.setItem('mocksession', s), SESSION); await p.goto(BASE); await p.waitForTimeout(600);
+  const offD = (await rpc(p, 'agent_offer_add', { p_property: 'P1', p_offer: offer({ price: '660000', conditions: [{ key: 'finance', days: 10 }], chattels_add: [], chattels_exclude: [] }) })).data;
+  await openProp(p); await p.setInputFiles('#drFile', { name: 'Agreement pack with a footnote.pdf', mimeType: 'application/pdf', buffer: Buffer.from(await SB.make({ cca: true, footnote: true })) });
+  await p.waitForSelector('#drMap', { timeout: 30000 }); await p.click('#drApprove'); await p.waitForSelector('#offTile');
+  await draftAndApprove(offD); await p.click('#sgReady'); await p.waitForSelector('#sgReleaseView', { timeout: 30000 });
+  out.noRoom = (await p.textContent('#sgBlock')).replace(/\s+/g, ' ').trim();
+  expect(/No room on the signature page for every purchaser\. Add a signature page in the portal, then load the blank again\./.test(out.noRoom) && await p.isDisabled('#sgRelease'), 'no room for a fourth signature: named, and Ready to sign waits');
+  expect(!(await side(p)), 'the refusal at 390 px: no sideways scroll'); await shot(p, 'no_room');
 
   console.log(JSON.stringify(Object.assign(out, { errs }), null, 1));
   await b.close();

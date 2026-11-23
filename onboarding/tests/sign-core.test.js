@@ -64,7 +64,16 @@ function png(w, h, seed) {
   // every filled or marked box
   const groups = S.filledGroups(placed); out.groups = groups.length;
   ok(groups.some(g => g.ref === 'nominee') && groups.some(g => g.ref === 'purchaser') && groups.some(g => g.ref === 'price') && groups.some(g => /^chattel_x_/.test(g.ref)) && groups.some(g => g.ref === 'clause22'), 'filled and marked boxes found (purchaser, price, nominee struck, a chattel struck, clause 22.0 struck)');
-  for (const s of signers) ok(groups.every(g => of(s.position).some(x => x.why === 'filled' && x.ref === g.ref && x.page === g.page)), `${s.name}: initials beside every filled or marked box`);
+  const refOf = g => /^d_/.test(g.ref) && groups.some(x => x.ref === 'c_' + g.ref.slice(2)) ? 'c_' + g.ref.slice(2) : g.ref;   // a condition's date is initialled with its Yes/No, one row
+  for (const s of signers) ok(groups.every(g => of(s.position).some(x => x.why === 'filled' && x.ref === refOf(g) && x.page === g.page)), `${s.name}: initials beside every filled or marked box`);
+  out.blocking = M.blocking; ok(!M.blocking.length, 'nothing blocks release on the synthetic blank');
+  // never over printed text (Tim's own acknowledgement spot and the printed signature lines are his and the form's), and near their box
+  const tr = n => S.textRects(pg.find(q => q.n === n)).map(b => ({ x: b.x + 0.3, y: b.y + 0.8, w: b.w - 0.6, h: b.h - 1.6 }));
+  const overText = M.places.filter(x => !(x.why === 'block' && !x.added) && !(x.why === 'ack' && x.signer === 1) && tr(x.page).some(b => S.overlap(x, b) > 0));
+  out.overText = overText.map(x => x.id); ok(!overText.length, 'no initial, signature or name place sits over printed words');
+  const cf = M.places.find(x => x.id === 'filled:c_finance:s1'), fd = placed.find(x => x.id === 'd_finance').boxes[0];
+  ok(cf && Math.abs((cf.y + cf.h / 2) - (fd.y + fd.h / 2)) < 8, "a condition's initials sit on its own row");
+  ok(M.places.filter(x => x.ref === 'c_finance').every(x => x.y > fd.y - 8 && x.y < fd.y + fd.h + 8), 'every purchaser\'s, on that row (smaller boxes where needed)');
   ok(!M.places.some(x => x.ref === 'date') && !placed.some(x => x.id === 'date'), 'the date at the top is never filled and never a place');
   const dateP = map.places.find(x => x.id === 'date'); ok(dateP && !M.places.some(x => x.page === dateP.page && S.overlap(x, S.rectOfMap(dateP)) > 0), 'nothing sits on the date');
   // each further term
@@ -81,8 +90,22 @@ function png(w, h, seed) {
   let clash = 0; for (let i = 0; i < M.places.length; i++) for (let j = i + 1; j < M.places.length; j++) if (M.places[i].page === M.places[j].page && S.overlap(M.places[i], M.places[j]) > 1) { clash++; out.clash = [M.places[i], M.places[j]]; }
   ok(clash === 0, 'no two places on top of each other (' + clash + ')');
   ok(new Set(M.places.map(x => x.id)).size === M.places.length, 'every place has its own id');
-  ok(signers.every(s => M.counts[s.position] >= dpages.length + groups.length + 3 + 1 + 2), 'each purchaser has every place to do');
+  ok(signers.every(s => M.counts[s.position] >= dpages.length + groups.filter(g => refOf(g) === g.ref).length + 3 + 1 + 2), 'each purchaser has every place to do');
   out.places = M.places.length;
+  // finding 1: a fourth purchaser's added signature would cover printed words: release is refused, in Tim's words
+  const fb = await SB.make({ cca: true, footnote: true }), fmap = D.buildMap(await D.readPages(pdfjs, fb)), fplan = D.planDraft({ details, map: fmap, terms, clauses: { electrical: 'Synthetic electrical wording from Tim.' }, today: '2026-11-24', province: 'otago' });
+  const fr = await D.renderDraft(PDFLib, fb, fplan), fpg = (await D.readPages(pdfjs, fr.bytes)).map(p => ({ n: p.n, w: p.w, h: p.h, items: p.items }));
+  const FM = S.makePlaces({ pages: fpg, placed: D.placedFrom(fplan, fr), mapPlaces: fmap.places, signers });
+  ok(FM.blocking.some(b => b.why === 'No room on the signature page for every purchaser. Add a signature page in the portal, then load the blank again.') && !FM.places.some(x => x.signer === 4 && x.why === 'block'), 'a footnote under the third line: no fourth signature place, and release is refused with the plain reason');
+  const F3 = S.makePlaces({ pages: fpg, placed: D.placedFrom(fplan, fr), mapPlaces: fmap.places, signers: signers.slice(0, 3) }); ok(!F3.blocking.length, 'three purchasers on the same blank: nothing blocks');
+  // finding 3: a page with no clear space near a box: a named, blocking item with a short reason, never initials over words
+  const crowd = pg.map(p => p.n === 1 ? Object.assign({}, p, { items: p.items.concat(Array.from({ length: 80 }, (_, k) => ({ s: 'x', x: 0, y: 10 * k, w: p.w, h: 9 }))) }) : p);
+  const CM = S.makePlaces({ pages: crowd, placed, mapPlaces, signers });
+  const cb = CM.blocking.find(b => b.id === 'filled:price'); out.crowdBlock = cb;
+  ok(cb && /Purchase price/.test(cb.label) && /no clear space within about 40 points/.test(cb.why), 'a crowded page: each box with no room is named, with the reason');
+  ok(CM.blocking.some(b => b.id === 'foot:p1' && /foot of the page/.test(b.why)) && !CM.blocking.some(b => /:p2$/.test(b.id)), 'including the foot of that page, and only that page');
+  const prw = S.placeRow(4, { x: 100, y: 400, w: 60, h: 10 }, { w: 595, h: 842 }, [], [{ x: 0, y: 330, w: 595, h: 140 }]); ok(!prw.ok, 'placeRow: text all around: not ok');
+  const pr2 = S.placeRow(4, { x: 100, y: 400, w: 60, h: 10 }, { w: 595, h: 842 }, [], [{ x: 0, y: 400, w: 160, h: 10 }]); ok(pr2.ok && pr2.boxes.every(b => S.overlap(b, { x: 0, y: 400, w: 160, h: 10 }) === 0 ) && Math.abs(pr2.boxes[0].x - 160) < 10, 'placeRow: beside the words, never over them');
   // one purchaser
   const one = S.makePlaces({ pages: pg, placed, mapPlaces, signers: [signers[0]] }); ok(one.places.every(x => x.signer === 1) && !one.places.some(x => x.kind === 'name'), 'one purchaser: their own places only, the name already typed');
 

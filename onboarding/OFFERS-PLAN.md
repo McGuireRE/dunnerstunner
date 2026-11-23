@@ -239,26 +239,43 @@ Status: built and tested locally only (Tim was asleep). Migration 020 passed its
 How it works:
 - "Ready to sign" on an approved draft (the newest, the offer unchanged since). The places are made by `src/sign-core.js` from the draft
   and its map, with no set-up: each purchaser initials the foot of every page, every box the draft filled or marked (a struck line and
-  the words beside it count as one change; each struck chattel is its own), and each further term (the draft now leaves a blank line
-  after each term for this); signs in the signature block (a purchaser beyond the printed lines gets a signature and name place
-  beneath the others); and does each acknowledgement, initial or signature place Tim kept on the map. The date at the top is never a
-  place. The Client and Customer Acknowledgement is found by its heading; Tim can change its page numbers. He picks in person or by
+  the words beside it count as one change; each struck chattel is its own; a condition's Yes/No and its date are one row), and each
+  further term (the draft now leaves a blank line after each term for this); signs in the signature block (a purchaser beyond the
+  printed lines gets a signature and name place beneath the others, only if that space is clear of printed words); and does each
+  acknowledgement, initial or signature place Tim kept on the map. The date at the top is never a place.
+- Where initials go (after the first review): never over another place and never over printed words. First on the box's own row
+  (in the blank part of the place, such as after a price or a date, then either side), then above or below, always within about
+  40 points of the box, at full size first and then smaller (20 by 10, then 16 by 8 points), as a row, two rows or a column. Anything
+  that can't be placed that way is listed on the Ready to sign screen with a short reason, and release waits. On the real 40-page
+  pack: no place over printed words for one or three purchasers (0 overlaps), each condition row's initials on its own row; four
+  purchasers are refused because the pack prints a footnote beneath the third signature line ("No room on the signature page for
+  every purchaser. Add a signature page in the portal, then load the blank again."). The Client and Customer Acknowledgement is found by its heading; Tim can change its page numbers. He picks in person or by
   link (defaulting to what the buyer asked on the form). Nothing is sent: by link, he taps Send next.
 - Each signer: agrees to sign electronically; receipts the Client and Customer Acknowledgement (its pages shown) and the REA sale and
   purchase guide (the same guide viewer and receipt as the agency agreement); draws a signature and initials once on a white pad; taps
   every place (a count, no "apply to all", Finish only when every place is done). Each tap is recorded with server time.
-- In person: Tim's device, one purchaser at a time. Tim ticks that he saw them sign and picks the photo ID type (never a number).
+- In person: Tim's device, one purchaser at a time. Tim ticks that he saw them sign and picks the photo ID type (never a number), or
+  "Known to Tim personally" (recorded as that on the execution record).
   Marks on Tim's screen only: a freehand note, a line through text, a crossed-out box, a reinstatement (of a line or box). They are an
   overlay; the draft is never altered. Any mark holds signing; Tim checks it and re-approves; every purchaser then initials beside
   it (anyone who had finished does those initials and finishes again).
 - By link: each purchaser's own link by email (a 43-character token, kept only as a fingerprint, 14 days), then a 6-digit code by
-  email as its own message (15 minutes, 5 tries, 5 codes an hour), then a 2-hour session. They see only their own places and the
-  draft by a 10-minute link. They can't mark the page; "Ask Tim for a change" emails Tim. Send again makes new links.
+  email as its own message (15 minutes, 5 tries, 5 codes an hour, held under simultaneous requests by locking the signer's record;
+  and per network, 20 codes and 30 tries an hour), then a 2-hour session. They see only their own places, and the draft by a
+  10-minute link only once they agree to sign electronically. They can't mark the page; "Ask Tim for a change" emails Tim. Send again
+  makes new links. Once a purchaser has finished, or the signing is no longer open, their link sends no code, checks no code and
+  opens nothing further, and their recorded device and network are never overwritten; once everyone has signed, no signer record
+  changes at all.
+- Changing how they sign: while nobody has started (agreed to sign or tapped a place), Tim can change in person to by link or back.
+  The release is stopped ("cancelled", recorded, any links sent stop working) and the same draft is released again the other way.
+  Once anyone has started, the screen says who and why it can't change (correct the offer and re-draft instead).
 - Tweak and re-sign: Tim corrects the offer (phase 1). Signing the old version stops at once. He re-drafts, approves and taps Ready
   to sign: the old signing is "replaced", its signatures and taps kept but void, the old links dead. Everyone signs the new one.
 - Locking: when the last purchaser finishes, the offer-sign edge function makes Round 1 (the draft checked against its fingerprint;
   signatures, initials and marks added on top; the execution record on pages at the end), stores it, takes its fingerprint from the
-  stored file, and locks it (`offer_round_lock`). In person, Tim's screen asks the function to lock straight after. Tim is emailed.
+  stored file, and locks it (`offer_round_lock`). A file already at that place must be exactly the one just made, or nothing is
+  locked. In person, Tim's screen asks the function to lock straight after. Tim is emailed. If locking fails at that moment, the last
+  purchaser is told Tim will lock it, and Tim's screen locks it when he opens the signing.
 - The execution record: per signer the name, the method, "email verified with a one-time code" and when (never the address) or "Tim
   saw them sign" and the ID type, consent time, guide receipts, first and last tap and finish (server time), the device, the network
   as a fingerprint, and the SHA-256 of what they saw; the marks; any replaced draft. No phone or email of anyone.
@@ -266,20 +283,26 @@ How it works:
   timeline" on Round 1 checks it, and Round 1 records the newest fingerprint.
 
 Edge function: `offer-sign` (new, fn/offer_sign.ts and fn/offer_sign_handler.ts), JWT verification OFF (buyers have no account; every
-buyer action needs their token, then their session; Tim's send and lock check is_agent with his own token). offer-draft, offer-public
-and doc-prefill are unchanged.
+buyer action needs their token, then their session; Tim's send and lock check is_agent with his own token). Its CORS answers only
+https://packages.dunnerstunner.co.nz (shared.ts `corsApp`); offer-public now uses the same (only the onboarding pages call either), so
+offer-public needs redeploying too. offer-draft and doc-prefill are unchanged. The function imports `onboarding/src/sign-core.js` (a
+plain script that sets globalThis.SIGN) by its relative path: checked locally with Deno 2.9.6, served over HTTP as text/plain as raw
+GitHub serves it, including making a Round 1 PDF with npm:pdf-lib; `deno check` passes on fn/offer_sign.ts and fn/offer_public.ts.
 
 Choices made while Tim was asleep (each easy to change):
-1. One method per release: all in person or all by link. Mixing would be a later step.
+1. One method per release: all in person or all by link. Mixing would be a later step. Tim can change it until someone starts.
 2. The names typed by the draft under the signatures are part of the signature block, so they aren't initialled separately.
-3. Further terms now have a blank line after each (for the initials). It changes phase 2's layout slightly (terms continue onto an
+3. Further terms now have a blank line after each (for the initials); a condition's Yes/No and its date share one set of initials. It changes phase 2's layout slightly (terms continue onto an
    added page a little sooner); not yet live.
-4. Four or more purchasers no longer block drafting: signing adds places beneath the printed lines. With no room on the page,
-   release is refused and Tim adds a signature page in the portal.
+4. Four or more purchasers no longer block drafting: signing adds places beneath the printed lines when that space is clear of
+   printed words; otherwise release is refused and Tim adds a signature page in the portal. On the real pack it is refused for four.
 5. Every page of the pack, guides included, has foot initials, per Tim's rule. On the real 40-page pack that is 57 places each.
 6. Each mark is initialled by every purchaser, reinstatements too, and holds signing until Tim re-approves.
 7. Codes by email only (there is no text provider in the repository). Each code email is a separate message from the link.
 8. Round 1 goes to Tim by email notice only. Purchasers aren't sent a copy yet.
+11. "Known to Tim personally" is allowed instead of a photo ID type, as common practice.
+12. The per-network code limits share offer_hits with the offer form: its kind check is widened to add 'sign_code' and 'sign_try'
+    (nothing removed). This is the one change to an existing table's rule in 020.
 9. Round 1 is stored with the offer (offer_rounds, property-files), not as an item on the property file's documents list.
 10. Sealing: not done. See questions.
 
@@ -296,12 +319,13 @@ Questions for Tim:
 
 Deploy steps (phase 3), after review and with Tim's approval, after phase 2's:
 1. Run the rollback block on the live project (`node onboarding/tests/offer-sign-rollback.js`): no CAPITALS. Then apply 020.
-2. Push, then deploy `offer-sign` (fn/offer_sign.ts) pinned to that commit, with the gateway's JWT verification OFF.
+   (The race test, `onboarding/tests/offer-sign-race.js`, is for a local stand-in only: it makes and drops a scratch database.)
+2. Push, then deploy `offer-sign` (fn/offer_sign.ts) pinned to that commit, with the gateway's JWT verification OFF. Redeploy
+   `offer-public` pinned to the same commit (JWT off, as now) for the narrower CORS.
 3. Sign a test offer with four test purchasers (in person) and one by link to Tim's own second address.
 
-Known limits: initials are placed clear of other places and as clear as possible of printed text, but on a crowded page they may sit
-over printed words (an overlay; Tim sees every place on the Ready to sign screen). On the real pack the fourth signature goes beneath
-the printed three on the signature page; check it there. Marking and the place taps were tested with a mouse on a phone-sized screen,
+Known limits: text that is drawn as lines or shapes (box borders, the portal's strike-throughs) isn't "printed words" to the check, so
+initials may touch a box border. Pages of the real pack were checked by eye at pages 1 and 20 only. Marking and the place taps were tested with a mouse on a phone-sized screen,
 not on a real phone or stylus.
 
 ## Rules for later phases (Tim, 23 November 2026)
