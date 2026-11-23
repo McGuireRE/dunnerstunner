@@ -77,6 +77,9 @@ Deploy steps (phase 1):
 
 Done 23 November 2026: the rollback block ran on the live project with Tim's approval (every line as expected, no CAPITALS;
 a real vendor sees the property but 0 offers, links or events), then 018 was applied as `018_offer_form`.
+offer-public deployed the same day pinned to 6e2c7c8, JWT verification off. Header check: a client-sent CF-Connecting-IP is refused
+by Cloudflare (error 1000); a client-sent X-Forwarded-For did not decide the recorded network (the same fake value gave two different
+hashes, one matching a request without the header). Phase 1 is live; each property's link stays off until Tim turns it on.
 
 1. With Tim's approval, run the rollback block on the live project; then apply 018.
 2. Push, then deploy `offer-public` (fn/offer_public.ts) pinned to that commit, with the gateway's JWT verification OFF (buyers have
