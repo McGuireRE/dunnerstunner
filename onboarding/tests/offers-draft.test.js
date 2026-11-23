@@ -427,6 +427,27 @@ const sha = b => crypto.createHash('sha256').update(Buffer.from(b)).digest('hex'
   const o2b = (await db(q)).property_offers.find(x => x.id === off2);
   const loopTry = await rpc(q, 'agent_offer_correct', { p_offer: off2, p_details: Object.assign({}, o2b.details, { conditions: o2b.details.conditions.map(c => c.key === 'finance' ? { key: 'finance', after: 'custom', days: 1 } : c), chattels_listed: undefined }), p_note: 'loop' });
   expect(loopTry.error && /wait for each other in a loop/.test(loopTry.error.message) && (await db(q)).offer_events.length === nEv, 'a loop is refused by the server, and nothing is recorded');
+  // clause 22.0 waiting for finance: its further term is tied to the lawyer's approval condition, so its chip corrects the offer too
+  const o2l = (await db(q)).property_offers.find(x => x.id === off2);
+  await rpc(q, 'agent_offer_correct', { p_offer: off2, p_details: Object.assign({}, o2l.details, { conditions: o2l.details.conditions.map(c => c.key === 'lawyer' ? { key: 'lawyer', after: 'finance', days: 3 } : c), chattels_listed: undefined }), p_note: 'Lawyer after finance' });
+  await q.click('#drRedraftChange'); dr9 = await waitDraft(++dn);
+  expect(ftOf(dr9).some(t => t.id === 'ft_time_lawyer' && t.timing && t.timing.key === 'lawyer' && !/NaN/.test(t.timing_text)), "clause 22.0's further term is on the draft, tied to its condition");
+  const ev0 = (await db(q)).offer_events.filter(e => e.offer_id === off2 && e.kind === 'corrected').length;
+  await q.click('li[data-term="ft_time_lawyer"] .dr-chip[data-chip="timing"]'); await q.waitForSelector('#drChipEd:not([hidden])');
+  expect(/changes it on the offer/.test(await q.textContent('#drChipFor')) && await q.$eval('#drCmAfter option[value="lawyer"]', e => e.disabled), 'its chip says it changes the offer');
+  await q.click('input[name="dr_cm"][value="days"] + .mark'); await q.fill('#drCmDays', '9'); await q.click('#drCmDone'); dr9 = await waitDraft(++dn);
+  const dd3 = await db(q), law9 = dd3.property_offers.find(x => x.id === off2).details.conditions.find(c => c.key === 'lawyer');
+  expect(law9.days === 9 && !law9.after && dd3.offer_events.filter(e => e.offer_id === off2 && e.kind === 'corrected').length === ev0 + 1 && dd3.offer_events.some(e => e.offer_id === off2 && /Changed the timing of Lawyer's approval of title, form and content on the draft: within 9 working days of the date of the agreement/.test((e.detail || {}).note || '')), "clause 22.0's timing changed on the offer, as a recorded correction");
+  expect(!(dr9.edits.term_timing || {}).ft_time_lawyer && dr9.placed.find(x => x.id === 'clause22_days').text === '9' && !ftOf(dr9).some(t => t.id === 'ft_time_lawyer'), 'not a draft edit: the new draft has 9 working days in clause 22.0 and no further term for it');
+  // the offer changed by someone else while the screen was open: nothing is saved, and Tim is asked to reopen
+  await q.click('li[data-term="ft_custom"] .dr-chip[data-chip="timing"]'); await q.waitForSelector('#drChipEd:not([hidden])');
+  const o2s = (await db(q)).property_offers.find(x => x.id === off2);
+  await rpc(q, 'agent_offer_correct', { p_offer: off2, p_details: Object.assign({}, o2s.details, { price: 701000, chattels_listed: undefined }), p_note: 'Buyer rang with a new price' });
+  const ev1 = (await db(q)).offer_events.filter(e => e.offer_id === off2 && e.kind === 'corrected').length, nd = (await db(q)).offer_drafts.filter(x => x.offer_id === off2).length;
+  await q.click('input[name="dr_cm"][value="days"] + .mark'); await q.fill('#drCmDays', '4'); await q.click('#drCmDone'); await q.waitForFunction(() => /changed since this screen opened/.test(document.querySelector('#drCmErr').textContent));
+  const dd4 = await db(q);
+  expect(dd4.offer_events.filter(e => e.offer_id === off2 && e.kind === 'corrected').length === ev1 && dd4.property_offers.find(x => x.id === off2).details.price === 701000 && dd4.offer_drafts.filter(x => x.offer_id === off2).length === nd, 'a stale screen saves nothing: the newer price is kept and no draft is made');
+  await q.click('#drCmCancel'); await q.click('#drRedraftChange'); dr9 = await waitDraft(++dn);
   // the date in the Keys wording (tied to no condition) was a draft-only edit: the offer was never corrected for it
   expect(!(await db(q)).offer_events.some(e => e.offer_id === off2 && e.kind === 'corrected' && /Keys|keys/.test((e.detail || {}).note || '')), 'a date chip not tied to a condition changes the draft only');
   expect(!(await side(q)), 'review screen with all of it at 390 px: no sideways scroll');

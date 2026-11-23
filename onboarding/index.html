@@ -4471,8 +4471,10 @@ window.JOURNEY_MEDIA_HINTS = {
       const top = (cont && cont.y < h.y && h.y - cont.y < 30 ? cont.y : h.y) - 16, foot = L.filter(l => /©/.test(l.text)).map(l => l.y + l.h).sort((a, b) => b - a)[0] || 40;
       const pl = L.filter(l => l.y < top + 4 && l.y > foot + 2 && !/^Further Terms continued/.test(l.text));
       const nums = pl.map(l => /^\s*(\d{1,2})\s*[.)]/.exec(l.text)).filter(Boolean).map(m => +m[1]);
+      // the style the page's own printed terms use: "22.0" (the portal's appendix clauses) or "1." / "1)"; none printed: null
+      const pstyle = pl.some(l => /^\s*\d{1,2}\.0\b/.test(l.text)) ? 'dot0' : pl.some(l => /^\s*\d{1,2}\s*[.)](\s|$)/.test(l.text)) ? 'dot' : null;
       add(box({ id: 'further_terms', key: 'further_terms', kind: 'area', page: page.n, x: h.x0 + 2, y: top, w: page.w - h.x0 - 30, h: top - foot - 10 + FONT_SIZE, label: LABELS.further_terms, source: 'anchor',
-        printed: pl.map(l => l.text.trim()).join(' ').trim() || undefined, printed_count: pl.length || undefined, printed_bottom: pl.length ? r1(Math.min(...pl.map(l => l.y))) : undefined, printed_last: nums.length ? Math.max(...nums) : undefined, foot: r1(foot) })); }
+        printed: pl.map(l => l.text.trim()).join(' ').trim() || undefined, printed_count: pl.length || undefined, printed_bottom: pl.length ? r1(Math.min(...pl.map(l => l.y))) : undefined, printed_last: nums.length ? Math.max(...nums) : undefined, printed_style: pstyle || undefined, foot: r1(foot) })); }
     // the appendix: 21.2, 21.3 and 22.0
     const ftIdx = ft ? ft.page.n : 0;
     const ap = PL.find(x => x.page.n >= ftIdx && x.L.some(l => /^Appendix\b/.test(l.text)) && x.L.some(l => /^2[12]\.\d\b/.test(l.text)))
@@ -4615,7 +4617,10 @@ window.JOURNEY_MEDIA_HINTS = {
   const isPlaceholder = s => /^\[Tim to /.test(String(s || ''));
   // the drafting's own reference markers ([[FT:x]], [[TERM:x]]) taken out of any text it didn't write itself (a buyer's, the AI's, a paste)
   // a further term's number as the agreement writes its clauses: 23.0, matching the printed 22.0
-  const termNo = n => `${n}.0`;
+  // style 'dot0' (the default, and Tim's packs: 22.0 printed) or 'dot' (when the page already prints terms as "1.", "2."):
+  // termNo is how the list writes it (23.0 / 3.), refNo how a sentence names it ("further term 23.0" / "further term 3")
+  const termNo = (n, style) => style === 'dot' ? `${n}.` : `${n}.0`;
+  const refNo = (n, style) => style === 'dot' ? `${n}` : `${n}.0`;
   const noRefs = s => String(s == null ? '' : s).replace(/\[\[|\]\]/g, '');
   // does a library rule apply to this offer?
   function ruleApplies(rule, d) {
@@ -4784,7 +4789,7 @@ window.JOURNEY_MEDIA_HINTS = {
         need('front_after_' + k, `${label}: the date line says "${short}" because it waits for ${labelOf(c.after)}. Check it reads clearly on the page.`, false);
       } else {
         const id = 'ft_time_' + k;
-        timeTerms.push({ id, title: `${dn.charAt(0).toUpperCase() + dn.slice(1)} (clause ${clause})`, text: `The ${dn} is the date that is ${wdays(n)} after the date ${refOf(c.after)} is satisfied or waived.`, cond: null, timing: true });
+        timeTerms.push({ id, title: `${dn.charAt(0).toUpperCase() + dn.slice(1)} (clause ${clause})`, template: `The ${dn} is {timing}.`, c });
         put('d_' + k, dp, `see further term [[TERM.${RK}:${id}]]`, { label: label + ': date' });
         need('front_after_' + k, `${label}: it waits for ${labelOf(c.after)}, which doesn't fit on the date line, so the line says "see further term [[TERM.${RK}:${id}]]" and further term [[TERM.${RK}:${id}]] sets out the date. Check both.`, false);
       }
@@ -4808,7 +4813,7 @@ window.JOURNEY_MEDIA_HINTS = {
         // waits for another condition: clause 22.0 counts working days from the agreement, so the printed count is struck out (if there
         // is one), "see further term N" is written beside it, and a further term sets out the time. The printed text is never changed.
         const dp22 = P('clause22_days'), id = 'ft_time_lawyer';
-        timeTerms.push({ id, title: "Lawyer's approval (clause 22.0)", text: `The time for the purchaser's lawyer's approval under clause 22.0 is ${timingPhrase(law)}.`, cond: null, timing: true });
+        timeTerms.push({ id, title: "Lawyer's approval (clause 22.0)", template: "The time for the purchaser's lawyer's approval under clause 22.0 is {timing}.", c: law });
         if (dp22 && dp22.printed) { strike('clause22_days_struck', dp22, 'Clause 22.0: the working days already on the blank, struck out');
           put('clause22_days', Object.assign({}, dp22, { x: dp22.x + dp22.w / 2 - 2, y: dp22.y + dp22.h * 0.62, w: 80 }), `see further term [[TERM.${RK}:${id}]]`, { label: 'Clause 22.0: working days', item: { size: 6 } }); }
         else if (dp22) put('clause22_days', dp22, `see further term [[TERM.${RK}:${id}]]`, { label: 'Clause 22.0: working days' });
@@ -4864,7 +4869,8 @@ window.JOURNEY_MEDIA_HINTS = {
       term(id, t.title, w, Object.assign({ template: f ? f.template : w, timing: tm }, c ? { cond: c.key, suffix: f && f.tokens ? '' : suffixFor(tm), detail: c.detail || (t.wording_from === 'sale' ? d.sale_address : '') } : {}));
     }
     // the dates of printed conditions that wait for another, where their own line couldn't hold them
-    timeTerms.forEach(x => term(x.id, x.title, x.text, { timing: true }));
+    // each tied to its condition with {timing}, so its timing chip on the review screen corrects the offer like any other condition's
+    timeTerms.forEach(x => { const f = fillTerm(x.id, x.title, x.template, x.c); term(x.id, x.title, f.text, { cond: x.c.key, template: f.template, timing: x.c, timeTerm: true }); });
     if (cond('sale')) need('sale_address_seen', `Sale of another property: the buyer's own address (${d.sale_address || 'not given'}) is named in that further term, so the vendors will see it on the agreement. Check the buyer is happy with that.`, false);
     // clauses Tim added from his library on the review screen (edits.added_terms: [{ id, key }]); the rule doesn't apply to these
     (Array.isArray(E.added_terms) ? E.added_terms : []).forEach(a => { if (!a || !/^[A-Za-z0-9_]{1,80}$/.test(String(a.id || ''))) return;
@@ -4906,29 +4912,31 @@ window.JOURNEY_MEDIA_HINTS = {
     const NB = Object.assign({}, map.numbering || {}, input.numbering || {}), retired = new Set((E.retired_numbers || []).map(Number).filter(n => n >= 1));
     const base = Math.max(+NB.general_last || +(ftp || {}).general_last || 0, +NB.appendix_last || +(ftp || {}).appendix_last || 0, +(ftp || {}).printed_last || 0);
     ftn = base;
-    if (base) need('term_start', `Further terms start at ${termNo(base + 1)} (general terms to ${NB.general_last || (ftp || {}).general_last || 'none found'}, appendix to ${NB.appendix_last || (ftp || {}).appendix_last || 'none found'}${(ftp || {}).printed_last ? `, printed on the further terms page to ${ftp.printed_last}` : ''}).`, false);
+    // the further terms are written in the style of any printed on the page; otherwise as the printed 22.0 (Tim, 24 November 2026)
+    const NST = (ftp || {}).printed_style === 'dot' ? 'dot' : 'dot0', tNo = n => termNo(n, NST), rNo = n => refNo(n, NST);
+    if (base) need('term_start', `Further terms start at ${tNo(base + 1).replace(/\.$/, '')} (general terms to ${NB.general_last || (ftp || {}).general_last || 'none found'}, appendix to ${NB.appendix_last || (ftp || {}).appendix_last || 'none found'}${(ftp || {}).printed_last ? `, printed on the further terms page to ${ftp.printed_last}` : ''}).`, false);
     if (ft.length && !base) need('numbering_unknown', "The last general terms clause number couldn't be read from the blank, so the further terms are numbered from 1. Check the numbering.", false);
     if (ft.length && ftp && ftp.printed_bottom != null) {
       // terms already printed on the page: ours start below the lowest printed line, numbered on from the highest printed number
       const top = ftp.printed_bottom - 14, cut = ftp.y - top; ftp = Object.assign({}, ftp, { y: top, h: ftp.h - cut });
       let first = ftn + 1; while (retired.has(first)) first++;
-      need('further_printed', `The Further Terms page already has ${ftp.printed_count} printed line${ftp.printed_count === 1 ? '' : 's'}${ftp.printed_last ? `, numbered to ${ftp.printed_last}` : ''}. The offer's terms start below the lowest of them, numbered from ${termNo(first)}. This layout hasn't been checked on a real blank yet: look at the page before you approve.`, true, true);
+      need('further_printed', `The Further Terms page already has ${ftp.printed_count} printed line${ftp.printed_count === 1 ? '' : 's'}${ftp.printed_last ? `, numbered to ${ftp.printed_last}` : ''}. The offer's terms start below the lowest of them, numbered from ${rNo(first)}. This layout hasn't been checked on a real blank yet: look at the page before you approve.`, true, true);
     }
     if (ft.length) {
       ft.forEach(x => { ftn++; while (retired.has(ftn)) ftn++; x.number = ftn; });
       // the further term numbers are known now: fill in every reference to one ("further term 3"), in the terms and on the page
       const numOf = new Map(), byId = new Map(ft.map(x => [x.id, x.number])); ft.forEach(x => { if (x.cond && !numOf.has(x.cond)) numOf.set(x.cond, x.number); });
-      resolveRefs = t => String(t).replace(REF('FT'), (m, k) => numOf.has(k) ? termNo(numOf.get(k)) : refMissing(k))
-        .replace(REF('TERM'), (m, id) => byId.has(id) ? termNo(byId.get(id)) : '?');
+      resolveRefs = t => String(t).replace(REF('FT'), (m, k) => numOf.has(k) ? rNo(numOf.get(k)) : refMissing(k))
+        .replace(REF('TERM'), (m, id) => byId.has(id) ? rNo(byId.get(id)) : '?');
       // Tim's edit of a term is its wording as he left it: {timing} and {date} in it are filled in like any other
       const text = ft.map(x => { const edited = Object.prototype.hasOwnProperty.call(edits, x.id) ? String(edits[x.id] || '') : null;
         let body = edited != null ? noRefs(edited) : x.text; if (edited != null) { x.template = edited; if (/\{(date|timing)\}/.test(edited)) { const f = fillTerm(x.id, x.title, edited, x.timing); body = f.text; x.suffix = ''; } }
         body = resolveRefs(body); x.text = body;
-        return `${termNo(x.number)} ${noRefs(x.title)}${x.detail ? ' (' + noRefs(x.detail) + ')' : ''}: ${body}${resolveRefs(x.suffix || '')}`; });
-      const it = put('further_terms', ftp, text.join('\n'), { label: 'Further terms of sale', item: { cont: NB.cont || null, number_base: base, terms: ft.map(x => ({ id: x.id, number: x.number, title: x.title, text: x.text, placeholder: isPlaceholder(x.text), custom: !!x.custom, request: x.request, wording: x.wording, ai: x.ai,
+        return `${tNo(x.number)} ${noRefs(x.title)}${x.detail ? ' (' + noRefs(x.detail) + ')' : ''}: ${body}${resolveRefs(x.suffix || '')}`; });
+      const it = put('further_terms', ftp, text.join('\n'), { label: 'Further terms of sale', item: { cont: NB.cont || null, number_base: base, number_style: NST, terms: ft.map(x => ({ id: x.id, number: x.number, title: x.title, text: x.text, placeholder: isPlaceholder(x.text), custom: !!x.custom, request: x.request, wording: x.wording, ai: x.ai,
         template: x.template != null ? resolveRefs(x.template) : null, timing: x.timing ? { key: x.timing.key, days: x.timing.days, date: x.timing.date, after: x.timing.after } : null, timing_text: x.timing ? resolveRefs(timingPhrase(x.timing)) : '',
         date_text: x.timing ? resolveRefs(dateText(x.timing)) : '', removable: !!x.removable, added: !!x.added, library: x.library || null, extra: !!x.extra })) } });
-      ft.filter(x => isPlaceholder(x.text)).forEach(x => need('ph_' + x.id, `Further term ${termNo(x.number)}, ${x.title}: ${x.text}`, true));
+      ft.filter(x => isPlaceholder(x.text)).forEach(x => need('ph_' + x.id, `Further term ${rNo(x.number)}, ${x.title}: ${x.text}`, true));
     }
     // any reference still waiting for its number (on the front page, beside clause 22.0, and in Tim's list of things to check)
     items.forEach(it => { if (it.text && hasRef(it.text)) it.text = resolveRefs(it.text); });
@@ -5116,7 +5124,7 @@ window.JOURNEY_MEDIA_HINTS = {
     return { bytes, boxes, continued, overflow, added_pages: addedPages };
   }
 
-  const DRAFT = { termNo, EDITIONS, EDITION_RE, editionOk, readPages, lines, xAt, matchAll, readEdition, editionPages, buildMap, parseChattels, numberIn, daysWords, FRONT_CONDITIONS, LABELS,
+  const DRAFT = { termNo, refNo, EDITIONS, EDITION_RE, editionOk, readPages, lines, xAt, matchAll, readEdition, editionPages, buildMap, parseChattels, numberIn, daysWords, FRONT_CONDITIONS, LABELS,
     packText, packBatches, placeFromProposal, rectOf, nsn, phoneRuns, ownContacts, holdsOwn, pickVendorLawyer, PROPOSAL_KINDS, planDraft, ruleApplies, fullDate, PLACEHOLDERS, placeholderFor, isPlaceholder, winAnsi, renderDraft, wrap, INK, FONT_SIZE };
   if (typeof module !== 'undefined' && module.exports) module.exports = DRAFT; else root.DRAFT = DRAFT;
 })(typeof window !== 'undefined' ? window : globalThis);
@@ -11670,10 +11678,10 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       ${ft ? `<section class="card" id="drTerms"><h2>Further terms of sale</h2>
         <p class="small">Change any wording here. The timing, dates and working days are the small highlighted pieces: tap one to change it. ${newest && !ap ? 'Drag a term to move it, or use its up and down buttons.' : ''} Changes go on the next draft.</p>
         <ol class="dr-terms" id="drTermList">${(ft.terms || []).map(t => { const tpl = t.custom && t.placeholder ? (t.wording || '') : t.template != null ? t.template : t.text;
-          return `<li class="dr-term-i" data-term="${esc(t.id)}" ><div class="dr-thead">${newest && !ap ? '<span class="dr-grip" aria-hidden="true" title="Drag to move">&#8942;&#8942;</span>' : ''}<span class="dr-tno"><strong>${DR.termNo(t.number)} ${esc(t.title)}</strong>${t.placeholder ? ' <span class="pill of-warnp">Needs you</span>' : ''}${t.ai ? ' <span class="pill">AI draft, ticked by you</span>' : ''}</span>
+          return `<li class="dr-term-i" data-term="${esc(t.id)}" ><div class="dr-thead">${newest && !ap ? '<span class="dr-grip" aria-hidden="true" title="Drag to move">&#8942;&#8942;</span>' : ''}<span class="dr-tno"><strong>${DR.termNo(t.number, ft.number_style)} ${esc(t.title)}</strong>${t.placeholder ? ' <span class="pill of-warnp">Needs you</span>' : ''}${t.ai ? ' <span class="pill">AI draft, ticked by you</span>' : ''}</span>
             ${newest && !ap ? `<span class="dr-tbtns"><button class="btn link" type="button" data-tup="${esc(t.id)}" aria-label="Move ${esc(t.title)} up">Up</button><button class="btn link" type="button" data-tdown="${esc(t.id)}" aria-label="Move ${esc(t.title)} down">Down</button>${t.removable ? `<button class="btn link" type="button" data-trm="${esc(t.id)}">Remove</button>` : ''}</span>` : ''}</div>
             ${t.custom ? `<p class="small" style="margin:0">The buyer asked for: ${esc(t.request || '(no description)')}${t.ai ? ' (worded with AI help)' : ''}</p>` : ''}
-            <div class="dr-rich" contenteditable="${newest && !ap ? 'true' : 'false'}" role="textbox" aria-multiline="true" aria-label="Wording of further term ${DR.termNo(t.number)}, ${esc(t.title)}" data-rich="${esc(t.id)}" data-orig="${esc(tpl)}">${drRichHTML(t, tpl)}</div></li>`; }).join('')}</ol>
+            <div class="dr-rich" contenteditable="${newest && !ap ? 'true' : 'false'}" role="textbox" aria-multiline="true" aria-label="Wording of further term ${DR.termNo(t.number, ft.number_style)}, ${esc(t.title)}" data-rich="${esc(t.id)}" data-orig="${esc(tpl)}">${drRichHTML(t, tpl)}</div></li>`; }).join('')}</ol>
         <div class="card tight dr-chiped" id="drChipEd" hidden><p class="small" style="margin:0 0 4px" id="drChipFor"></p>
           <div class="choices" id="drCmModes">${[['days', 'Working days from the date of the agreement'], ['date', 'By a date'], ['after', 'Working days after another condition is satisfied or waived']].map(([v, l]) => `<label class="choice"><input type="radio" name="dr_cm" value="${v}"><span class="mark"></span><span><span class="ct">${l}</span></span></label>`).join('')}</div>
           <div class="of-when"><div id="drCmDaysW"><label class="f" for="drCmDays">Working days</label><input type="number" id="drCmDays" min="1" max="250" inputmode="numeric"></div><div id="drCmDateW"><label class="f" for="drCmDate">Date</label><input type="date" id="drCmDate"></div>
@@ -11702,6 +11710,9 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     $$('[data-rich]').forEach(x => { x.dataset.base = drRichText(x); });   // the wording as shown: a change is anything different from this
     const go = async (edits, note) => { const btns = $$('#drRedraft,#drRedraftChange'); btns.forEach(x => { x.disabled = true; }); $('#drRvErr').textContent = 'Drafting...';
       try { const id = await drMakeDraft(d.offer_id, edits, note); toast('New draft made; the earlier one is kept'); viewDraftReview(id); } catch (e) { $('#drRvErr').textContent = e.message || 'That didn\'t draft.'; btns.forEach(x => { x.disabled = false; }); } };
+    // before a correction from this screen: the offer must be as it was when the screen opened, or older details would be put back
+    const drOfferSame = async () => { const f = await must(sb.from('property_offers').select('details').eq('id', d.offer_id).single());
+      if (JSON.stringify(drCanon(f.details)) !== JSON.stringify(drCanon(o.details))) throw new Error('The offer has changed since this screen opened, so nothing was saved. Go back to the offer, open the newest draft and try again.'); };
     // what "Re-draft after a change" carries over: everything but Tim's edits to single values (phase 2, choice 10)
     const carry = () => { const c = { date_format: E.date_format, extra_terms: E.extra_terms, custom_ok: E.custom_ok, custom_wording: E.custom_wording, retired_numbers: E.retired_numbers };
       ['added_terms', 'term_order', 'term_timing', 'marks', 'moves'].forEach(k => { if (E[k] != null) c[k] = E[k]; }); Object.keys(c).forEach(k => { if (c[k] === undefined) delete c[k]; }); return c; };
@@ -11723,7 +11734,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       if (!date && !(Math.floor(+days) >= 1)) return $('#drLuErr').textContent = 'Enter the working days or a date.';
       const det = Object.assign({}, o.details, { conditions: OF.lineUp((o.details || {}).conditions, t), line_up: true }), say = date ? 'by ' + OF.longDate(date) : `within ${Math.floor(+days)} working days`;
       lg.disabled = true; $('#drLuErr').textContent = '';
-      try { await must(sb.rpc('agent_offer_correct', { p_offer: d.offer_id, p_details: ofPayload(ofShape(det)), p_note: 'Lined up the conditions: all ' + say }));
+      try { await drOfferSame(); await must(sb.rpc('agent_offer_correct', { p_offer: d.offer_id, p_details: ofPayload(ofShape(det)), p_note: 'Lined up the conditions: all ' + say }));
         await go(carry(), 'Conditions lined up: all ' + say); }
       catch (e) { lg.disabled = false; $('#drLuErr').textContent = e.message || 'That didn\'t save.'; } });
     // ── further terms: reorder (drag, or up and down), remove, add from the library, timing chips ──
@@ -11739,13 +11750,13 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         const up = () => { document.removeEventListener('pointermove', mv); document.removeEventListener('pointerup', up); document.removeEventListener('pointercancel', up); li.classList.remove('dr-dragging'); if (moved) toast('Order changed: re-draft to apply it'); };
         document.addEventListener('pointermove', mv); document.addEventListener('pointerup', up); document.addEventListener('pointercancel', up); }));
       // remove a term Tim added: its number is never used again
-      $$('[data-trm]', tl).forEach(b => b.addEventListener('click', () => { const id = b.dataset.trm, t = (ft.terms || []).find(x => x.id === id); if (!t || !confirm(`Remove further term ${DR.termNo(t.number)}, ${t.title}? Its number won't be used again.`)) return;
+      $$('[data-trm]', tl).forEach(b => b.addEventListener('click', () => { const id = b.dataset.trm, t = (ft.terms || []).find(x => x.id === id); if (!t || !confirm(`Remove further term ${DR.termNo(t.number, ft.number_style)}, ${t.title}? Its number won't be used again.`)) return;
         const ed = collect(); ed.retired_numbers = [...new Set((ed.retired_numbers || []).concat(t.number))];
         if (t.added) ed.added_terms = (ed.added_terms || []).filter(a => a.id !== id);
         else if (t.extra) { const objs = ed.extra_terms.filter(x => typeof x === 'object' && x.id !== id), strs = (E.extra_terms || []).filter(x => typeof x === 'string'), si = /^ft_extra_(\d+)$/.exec(id);
           const keep = si ? strs.filter((x, i) => (E.extra_terms || []).indexOf(x) !== +si[1] - 1) : strs; ed.extra_terms = objs.concat(keep); Object.keys(ed.items).forEach(k => { if (/^ft_extra_\d+$/.test(k)) delete ed.items[k]; }); }
         delete ed.items[id]; if (ed.term_timing) delete ed.term_timing[id]; if (ed.term_order) ed.term_order = ed.term_order.filter(x => x !== id);
-        go(ed, `Removed further term ${DR.termNo(t.number)}, ${t.title}`); }));
+        go(ed, `Removed further term ${DR.termNo(t.number, ft.number_style)}, ${t.title}`); }));
       // the timing chips
       let chip = null; const ced = $('#drChipEd'), mode = () => (($$('input[name="dr_cm"]').find(x => x.checked)) || {}).value || 'days';
       const showMode = () => { const m = mode(), lit = chip && chip.dataset.chip === 'lit'; $('#drCmDaysW').hidden = m === 'date'; $('#drCmDateW').hidden = m !== 'date'; $('#drCmAfterW').hidden = m !== 'after'; if (typeof showAfter === 'function') showAfter(); };
@@ -11755,7 +11766,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       const openChip = c => { chip = c; const li = c.closest('li'), t = (ft.terms || []).find(x => x.id === li.dataset.term) || {}, tk = c.dataset.chip === 'lit' ? null : tiedKey(t), cur = (tk ? null : TT[li.dataset.term]) || t.timing || {};
         $$('#drCmAfter option').forEach(op => { op.disabled = !!tk && op.value === tk; });   // a condition can't wait for itself
         if (tk && $('#drCmAfter').value === tk) { const first = $$('#drCmAfter option').find(op => !op.disabled); if (first) $('#drCmAfter').value = first.value; }
-        $('#drChipFor').textContent = c.dataset.chip === 'lit' ? `Change "${c.dataset.val}" in ${t.title}` : tk ? `The timing of ${(OF.condInfo(tk) || { label: tk }).label}: this changes it on the offer (recorded as a correction, with the buyer's original kept) and makes a new draft.` : `The timing of ${DR.termNo(t.number)} ${t.title}`;
+        $('#drChipFor').textContent = c.dataset.chip === 'lit' ? `Change "${c.dataset.val}" in ${t.title}` : tk ? `The timing of ${(OF.condInfo(tk) || { label: tk }).label}: this changes it on the offer (recorded as a correction, with the buyer's original kept) and makes a new draft.` : `The timing of ${DR.termNo(t.number, ft.number_style)} ${t.title}`;
         const m0 = c.dataset.chip === 'lit' ? (/working day/.test(c.dataset.val) ? 'days' : 'date') : cur.after ? 'after' : cur.date ? 'date' : 'days';
         $$('input[name="dr_cm"]').forEach(x => { x.checked = x.value === m0; }); $('#drCmDays').value = c.dataset.chip === 'lit' ? ((/(\d+) working/.exec(c.dataset.val) || [])[1] || '') : (cur.days || ''); $('#drCmDate').value = cur.date || ''; if (cur.after) $('#drCmAfter').value = cur.after;
         $('#drCmErr').textContent = ''; ced.hidden = false; li.appendChild(ced); showMode(); showAfter(); const f = $(m0 === 'date' ? '#drCmDate' : '#drCmDays'); if (f) f.focus(); };
@@ -11774,7 +11785,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
           const label = (OF.condInfo(tk) || { label: tk }).label, say_ = OF.timingPlain(Object.assign({ key: tk }, nt));
           const det = Object.assign({}, o.details, { conditions: conds, line_up: !!(o.details.line_up && OF.sameTiming(conds)) });
           const done = $('#drCmDone'); done.disabled = true; $('#drCmErr').textContent = 'Saving...';
-          return (async () => { try { await must(sb.rpc('agent_offer_correct', { p_offer: d.offer_id, p_details: ofPayload(ofShape(det)), p_note: `Changed the timing of ${label} on the draft: ${say_}` }));
+          return (async () => { try { await drOfferSame(); await must(sb.rpc('agent_offer_correct', { p_offer: d.offer_id, p_details: ofPayload(ofShape(det)), p_note: `Changed the timing of ${label} on the draft: ${say_}` }));
               const ed = collect(); if (ed.term_timing) { delete ed.term_timing[id]; if (!Object.keys(ed.term_timing).length) delete ed.term_timing; }
               await go(ed, `Timing of ${label} changed: ${say_}`); } catch (e) { done.disabled = false; $('#drCmErr').textContent = e.message || 'That didn\'t save.'; } })(); }
         if (chip.dataset.chip === 'lit') { const hadDay = /^[A-Z][a-z]+day /.test(chip.dataset.val), v = m === 'date' ? (hadDay ? `${['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][OF.dow(dt)]} ${DR.fullDate(dt)}` : DR.fullDate(dt)) : `${n} working ${n === 1 ? 'day' : 'days'}`; chip.dataset.val = v; chip.textContent = v; }

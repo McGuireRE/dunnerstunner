@@ -207,8 +207,10 @@
       const top = (cont && cont.y < h.y && h.y - cont.y < 30 ? cont.y : h.y) - 16, foot = L.filter(l => /©/.test(l.text)).map(l => l.y + l.h).sort((a, b) => b - a)[0] || 40;
       const pl = L.filter(l => l.y < top + 4 && l.y > foot + 2 && !/^Further Terms continued/.test(l.text));
       const nums = pl.map(l => /^\s*(\d{1,2})\s*[.)]/.exec(l.text)).filter(Boolean).map(m => +m[1]);
+      // the style the page's own printed terms use: "22.0" (the portal's appendix clauses) or "1." / "1)"; none printed: null
+      const pstyle = pl.some(l => /^\s*\d{1,2}\.0\b/.test(l.text)) ? 'dot0' : pl.some(l => /^\s*\d{1,2}\s*[.)](\s|$)/.test(l.text)) ? 'dot' : null;
       add(box({ id: 'further_terms', key: 'further_terms', kind: 'area', page: page.n, x: h.x0 + 2, y: top, w: page.w - h.x0 - 30, h: top - foot - 10 + FONT_SIZE, label: LABELS.further_terms, source: 'anchor',
-        printed: pl.map(l => l.text.trim()).join(' ').trim() || undefined, printed_count: pl.length || undefined, printed_bottom: pl.length ? r1(Math.min(...pl.map(l => l.y))) : undefined, printed_last: nums.length ? Math.max(...nums) : undefined, foot: r1(foot) })); }
+        printed: pl.map(l => l.text.trim()).join(' ').trim() || undefined, printed_count: pl.length || undefined, printed_bottom: pl.length ? r1(Math.min(...pl.map(l => l.y))) : undefined, printed_last: nums.length ? Math.max(...nums) : undefined, printed_style: pstyle || undefined, foot: r1(foot) })); }
     // the appendix: 21.2, 21.3 and 22.0
     const ftIdx = ft ? ft.page.n : 0;
     const ap = PL.find(x => x.page.n >= ftIdx && x.L.some(l => /^Appendix\b/.test(l.text)) && x.L.some(l => /^2[12]\.\d\b/.test(l.text)))
@@ -351,7 +353,10 @@
   const isPlaceholder = s => /^\[Tim to /.test(String(s || ''));
   // the drafting's own reference markers ([[FT:x]], [[TERM:x]]) taken out of any text it didn't write itself (a buyer's, the AI's, a paste)
   // a further term's number as the agreement writes its clauses: 23.0, matching the printed 22.0
-  const termNo = n => `${n}.0`;
+  // style 'dot0' (the default, and Tim's packs: 22.0 printed) or 'dot' (when the page already prints terms as "1.", "2."):
+  // termNo is how the list writes it (23.0 / 3.), refNo how a sentence names it ("further term 23.0" / "further term 3")
+  const termNo = (n, style) => style === 'dot' ? `${n}.` : `${n}.0`;
+  const refNo = (n, style) => style === 'dot' ? `${n}` : `${n}.0`;
   const noRefs = s => String(s == null ? '' : s).replace(/\[\[|\]\]/g, '');
   // does a library rule apply to this offer?
   function ruleApplies(rule, d) {
@@ -520,7 +525,7 @@
         need('front_after_' + k, `${label}: the date line says "${short}" because it waits for ${labelOf(c.after)}. Check it reads clearly on the page.`, false);
       } else {
         const id = 'ft_time_' + k;
-        timeTerms.push({ id, title: `${dn.charAt(0).toUpperCase() + dn.slice(1)} (clause ${clause})`, text: `The ${dn} is the date that is ${wdays(n)} after the date ${refOf(c.after)} is satisfied or waived.`, cond: null, timing: true });
+        timeTerms.push({ id, title: `${dn.charAt(0).toUpperCase() + dn.slice(1)} (clause ${clause})`, template: `The ${dn} is {timing}.`, c });
         put('d_' + k, dp, `see further term [[TERM.${RK}:${id}]]`, { label: label + ': date' });
         need('front_after_' + k, `${label}: it waits for ${labelOf(c.after)}, which doesn't fit on the date line, so the line says "see further term [[TERM.${RK}:${id}]]" and further term [[TERM.${RK}:${id}]] sets out the date. Check both.`, false);
       }
@@ -544,7 +549,7 @@
         // waits for another condition: clause 22.0 counts working days from the agreement, so the printed count is struck out (if there
         // is one), "see further term N" is written beside it, and a further term sets out the time. The printed text is never changed.
         const dp22 = P('clause22_days'), id = 'ft_time_lawyer';
-        timeTerms.push({ id, title: "Lawyer's approval (clause 22.0)", text: `The time for the purchaser's lawyer's approval under clause 22.0 is ${timingPhrase(law)}.`, cond: null, timing: true });
+        timeTerms.push({ id, title: "Lawyer's approval (clause 22.0)", template: "The time for the purchaser's lawyer's approval under clause 22.0 is {timing}.", c: law });
         if (dp22 && dp22.printed) { strike('clause22_days_struck', dp22, 'Clause 22.0: the working days already on the blank, struck out');
           put('clause22_days', Object.assign({}, dp22, { x: dp22.x + dp22.w / 2 - 2, y: dp22.y + dp22.h * 0.62, w: 80 }), `see further term [[TERM.${RK}:${id}]]`, { label: 'Clause 22.0: working days', item: { size: 6 } }); }
         else if (dp22) put('clause22_days', dp22, `see further term [[TERM.${RK}:${id}]]`, { label: 'Clause 22.0: working days' });
@@ -600,7 +605,8 @@
       term(id, t.title, w, Object.assign({ template: f ? f.template : w, timing: tm }, c ? { cond: c.key, suffix: f && f.tokens ? '' : suffixFor(tm), detail: c.detail || (t.wording_from === 'sale' ? d.sale_address : '') } : {}));
     }
     // the dates of printed conditions that wait for another, where their own line couldn't hold them
-    timeTerms.forEach(x => term(x.id, x.title, x.text, { timing: true }));
+    // each tied to its condition with {timing}, so its timing chip on the review screen corrects the offer like any other condition's
+    timeTerms.forEach(x => { const f = fillTerm(x.id, x.title, x.template, x.c); term(x.id, x.title, f.text, { cond: x.c.key, template: f.template, timing: x.c, timeTerm: true }); });
     if (cond('sale')) need('sale_address_seen', `Sale of another property: the buyer's own address (${d.sale_address || 'not given'}) is named in that further term, so the vendors will see it on the agreement. Check the buyer is happy with that.`, false);
     // clauses Tim added from his library on the review screen (edits.added_terms: [{ id, key }]); the rule doesn't apply to these
     (Array.isArray(E.added_terms) ? E.added_terms : []).forEach(a => { if (!a || !/^[A-Za-z0-9_]{1,80}$/.test(String(a.id || ''))) return;
@@ -642,29 +648,31 @@
     const NB = Object.assign({}, map.numbering || {}, input.numbering || {}), retired = new Set((E.retired_numbers || []).map(Number).filter(n => n >= 1));
     const base = Math.max(+NB.general_last || +(ftp || {}).general_last || 0, +NB.appendix_last || +(ftp || {}).appendix_last || 0, +(ftp || {}).printed_last || 0);
     ftn = base;
-    if (base) need('term_start', `Further terms start at ${termNo(base + 1)} (general terms to ${NB.general_last || (ftp || {}).general_last || 'none found'}, appendix to ${NB.appendix_last || (ftp || {}).appendix_last || 'none found'}${(ftp || {}).printed_last ? `, printed on the further terms page to ${ftp.printed_last}` : ''}).`, false);
+    // the further terms are written in the style of any printed on the page; otherwise as the printed 22.0 (Tim, 24 November 2026)
+    const NST = (ftp || {}).printed_style === 'dot' ? 'dot' : 'dot0', tNo = n => termNo(n, NST), rNo = n => refNo(n, NST);
+    if (base) need('term_start', `Further terms start at ${tNo(base + 1).replace(/\.$/, '')} (general terms to ${NB.general_last || (ftp || {}).general_last || 'none found'}, appendix to ${NB.appendix_last || (ftp || {}).appendix_last || 'none found'}${(ftp || {}).printed_last ? `, printed on the further terms page to ${ftp.printed_last}` : ''}).`, false);
     if (ft.length && !base) need('numbering_unknown', "The last general terms clause number couldn't be read from the blank, so the further terms are numbered from 1. Check the numbering.", false);
     if (ft.length && ftp && ftp.printed_bottom != null) {
       // terms already printed on the page: ours start below the lowest printed line, numbered on from the highest printed number
       const top = ftp.printed_bottom - 14, cut = ftp.y - top; ftp = Object.assign({}, ftp, { y: top, h: ftp.h - cut });
       let first = ftn + 1; while (retired.has(first)) first++;
-      need('further_printed', `The Further Terms page already has ${ftp.printed_count} printed line${ftp.printed_count === 1 ? '' : 's'}${ftp.printed_last ? `, numbered to ${ftp.printed_last}` : ''}. The offer's terms start below the lowest of them, numbered from ${termNo(first)}. This layout hasn't been checked on a real blank yet: look at the page before you approve.`, true, true);
+      need('further_printed', `The Further Terms page already has ${ftp.printed_count} printed line${ftp.printed_count === 1 ? '' : 's'}${ftp.printed_last ? `, numbered to ${ftp.printed_last}` : ''}. The offer's terms start below the lowest of them, numbered from ${rNo(first)}. This layout hasn't been checked on a real blank yet: look at the page before you approve.`, true, true);
     }
     if (ft.length) {
       ft.forEach(x => { ftn++; while (retired.has(ftn)) ftn++; x.number = ftn; });
       // the further term numbers are known now: fill in every reference to one ("further term 3"), in the terms and on the page
       const numOf = new Map(), byId = new Map(ft.map(x => [x.id, x.number])); ft.forEach(x => { if (x.cond && !numOf.has(x.cond)) numOf.set(x.cond, x.number); });
-      resolveRefs = t => String(t).replace(REF('FT'), (m, k) => numOf.has(k) ? termNo(numOf.get(k)) : refMissing(k))
-        .replace(REF('TERM'), (m, id) => byId.has(id) ? termNo(byId.get(id)) : '?');
+      resolveRefs = t => String(t).replace(REF('FT'), (m, k) => numOf.has(k) ? rNo(numOf.get(k)) : refMissing(k))
+        .replace(REF('TERM'), (m, id) => byId.has(id) ? rNo(byId.get(id)) : '?');
       // Tim's edit of a term is its wording as he left it: {timing} and {date} in it are filled in like any other
       const text = ft.map(x => { const edited = Object.prototype.hasOwnProperty.call(edits, x.id) ? String(edits[x.id] || '') : null;
         let body = edited != null ? noRefs(edited) : x.text; if (edited != null) { x.template = edited; if (/\{(date|timing)\}/.test(edited)) { const f = fillTerm(x.id, x.title, edited, x.timing); body = f.text; x.suffix = ''; } }
         body = resolveRefs(body); x.text = body;
-        return `${termNo(x.number)} ${noRefs(x.title)}${x.detail ? ' (' + noRefs(x.detail) + ')' : ''}: ${body}${resolveRefs(x.suffix || '')}`; });
-      const it = put('further_terms', ftp, text.join('\n'), { label: 'Further terms of sale', item: { cont: NB.cont || null, number_base: base, terms: ft.map(x => ({ id: x.id, number: x.number, title: x.title, text: x.text, placeholder: isPlaceholder(x.text), custom: !!x.custom, request: x.request, wording: x.wording, ai: x.ai,
+        return `${tNo(x.number)} ${noRefs(x.title)}${x.detail ? ' (' + noRefs(x.detail) + ')' : ''}: ${body}${resolveRefs(x.suffix || '')}`; });
+      const it = put('further_terms', ftp, text.join('\n'), { label: 'Further terms of sale', item: { cont: NB.cont || null, number_base: base, number_style: NST, terms: ft.map(x => ({ id: x.id, number: x.number, title: x.title, text: x.text, placeholder: isPlaceholder(x.text), custom: !!x.custom, request: x.request, wording: x.wording, ai: x.ai,
         template: x.template != null ? resolveRefs(x.template) : null, timing: x.timing ? { key: x.timing.key, days: x.timing.days, date: x.timing.date, after: x.timing.after } : null, timing_text: x.timing ? resolveRefs(timingPhrase(x.timing)) : '',
         date_text: x.timing ? resolveRefs(dateText(x.timing)) : '', removable: !!x.removable, added: !!x.added, library: x.library || null, extra: !!x.extra })) } });
-      ft.filter(x => isPlaceholder(x.text)).forEach(x => need('ph_' + x.id, `Further term ${termNo(x.number)}, ${x.title}: ${x.text}`, true));
+      ft.filter(x => isPlaceholder(x.text)).forEach(x => need('ph_' + x.id, `Further term ${rNo(x.number)}, ${x.title}: ${x.text}`, true));
     }
     // any reference still waiting for its number (on the front page, beside clause 22.0, and in Tim's list of things to check)
     items.forEach(it => { if (it.text && hasRef(it.text)) it.text = resolveRefs(it.text); });
@@ -852,7 +860,7 @@
     return { bytes, boxes, continued, overflow, added_pages: addedPages };
   }
 
-  const DRAFT = { termNo, EDITIONS, EDITION_RE, editionOk, readPages, lines, xAt, matchAll, readEdition, editionPages, buildMap, parseChattels, numberIn, daysWords, FRONT_CONDITIONS, LABELS,
+  const DRAFT = { termNo, refNo, EDITIONS, EDITION_RE, editionOk, readPages, lines, xAt, matchAll, readEdition, editionPages, buildMap, parseChattels, numberIn, daysWords, FRONT_CONDITIONS, LABELS,
     packText, packBatches, placeFromProposal, rectOf, nsn, phoneRuns, ownContacts, holdsOwn, pickVendorLawyer, PROPOSAL_KINDS, planDraft, ruleApplies, fullDate, PLACEHOLDERS, placeholderFor, isPlaceholder, winAnsi, renderDraft, wrap, INK, FONT_SIZE };
   if (typeof module !== 'undefined' && module.exports) module.exports = DRAFT; else root.DRAFT = DRAFT;
 })(typeof window !== 'undefined' ? window : globalThis);

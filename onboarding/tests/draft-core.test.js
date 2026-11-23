@@ -183,8 +183,8 @@ const ok = (c, msg) => { if (!c) errs.push(msg); };
   const pmap = D.buildMap(await D.readPages(pdfjs, await SB.make({ printedTerms: true }))), pf = pmap.places.find(x => x.id === 'further_terms');
   ok(pf.printed_count === 3 && pf.printed_last === 2 && Math.abs(pf.printed_bottom - 706) < 0.5, 'printed terms on the Further Terms page read: three lines, numbered to 2');
   const ppt = D.planDraft({ details: Object.assign({}, base, { conditions: [{ key: 'electrical', days: 10 }] }), map: pmap, terms, clauses: { electrical: 'Words.' }, today: '2026-11-24', edits: { extra_terms: ['Extra.'] } });
-  const pit = I(ppt, 'further_terms'); ok(pit.y < 706 - 10 && /^23\.0 Electrical report/.test(pit.text) && /\n24\.0 Your further term: Extra\./.test(pit.text), 'our terms start below the lowest printed line, numbered from 3');
-  const fpn = N(ppt, 'further_printed'); ok(fpn && fpn.blocking && fpn.ackable && /3 printed lines, numbered to 2/.test(fpn.text) && /numbered from 23\.0/.test(fpn.text), 'and Tim must tick that he has checked the page');
+  const pit = I(ppt, 'further_terms'); ok(pit.y < 706 - 10 && /^23\. Electrical report/.test(pit.text) && /\n24\. Your further term: Extra\./.test(pit.text), 'our terms start below the lowest printed line, numbered from 23 in the page\'s own style ("1." printed: "23.")');
+  const fpn = N(ppt, 'further_printed'); ok(fpn && fpn.blocking && fpn.ackable && /3 printed lines, numbered to 2/.test(fpn.text) && /numbered from 23\./.test(fpn.text), 'and Tim must tick that he has checked the page');
   ok(!N(p, 'further_printed'), 'no such check on a page with no printed terms');
   // 10. settlement: every printed line struck, within the text, the new text below the last
   const m2 = D.buildMap(await D.readPages(pdfjs, await SB.make({ twoLineSettlement: true }))), sp2 = m2.places.find(x => x.id === 'settlement');
@@ -296,6 +296,12 @@ const ok = (c, msg) => { if (!c) errs.push(msg); };
   const fakeRef = D.planDraft({ details: Object.assign({}, base, { conditions: [{ key: 'custom', days: 5, wording: 'Pay [[FT:finance]] and [[TERM:x]] now {timing}.' }, { key: 'technical', days: 5, detail: '[[FT:lim]]' }] }), map, terms, clauses: { technical: 'A {detail} report {timing}.' }, today: '2026-11-24', edits: { custom_ok: true, extra_terms: [{ id: 'ft_ai_x', title: 'T', text: 'AI said [[FT:sdd]].' }] } });
   ok(!fakeRef.needs.some(n => /^ref_missing_/.test(n.id)) && /Pay FT:finance and TERM:x now/.test(FTr(fakeRef)) && /AI said FT:sdd\./.test(FTr(fakeRef)) && !/\[\[|\?/.test(FTr(fakeRef)), 'markers typed by a buyer or the AI are plain text, never references');
 
+  // the numbering style follows the page's own printed terms: "1." printed, ours "23." and named "further term 23"; "21.0" printed, or none, "23.0"
+  eq([pmap.places.find(x => x.id === 'further_terms').printed_style, (fpx || {}).printed_style, map.places.find(x => x.id === 'further_terms').printed_style], ['dot', 'dot0', undefined], 'the printed style read from the page');
+  const pst = D.planDraft({ details: Object.assign({}, base, { conditions: [{ key: 'electrical', days: 10 }, { key: 'custom', after: 'electrical', days: 2, wording: 'X {timing}.' }] }), map: pmap, terms, clauses: { electrical: 'Words.' }, today: '2026-11-24', edits: { custom_ok: true } });
+  ok(/^23\. Electrical report: Words\./m.test(I(pst, 'further_terms').text) && /^24\. Purchaser's condition: X within 2 working days of the date the electrical report condition in further term 23 is satisfied or waived\./m.test(I(pst, 'further_terms').text) && I(pst, 'further_terms').number_style === 'dot', '"1." style: listed 23. and named further term 23');
+  ok(N(pst, 'term_start') && /^Further terms start at 23 \(/.test(N(pst, 'term_start').text), 'and the starting note in that style');
+  const pst0 = plan({}, { extra_terms: ['A.'] }); ok(/^23\.0 Your further term: A\./m.test(I(pst0, 'further_terms').text) && I(pst0, 'further_terms').number_style === 'dot0' && D.termNo(3, 'dot') === '3.' && D.refNo(23, 'dot0') === '23.0', 'nothing printed: 23.0');
   // ── the review screen (Tim, 24 November 2026): clauses from the library, their timing, order, AI-written terms, marks, moves ──
   const lib = terms.concat({ key: 'std_pool', kind: 'further_term', title: 'Pool fence', wording: 'The Vendor shall provide a pool fence compliance certificate {timing}.', rule: {}, position: 50 },
     { key: 'std_keys', kind: 'further_term', title: 'Keys', wording: 'The Vendor shall hand over all keys at settlement.', rule: {}, position: 51 });
@@ -393,7 +399,7 @@ const ok = (c, msg) => { if (!c) errs.push(msg); };
   const narrow = Object.assign({}, map, { places: map.places.map(pl => pl.id === 'd_finance' ? Object.assign({}, pl, { w: 120 }) : pl) });
   const tnar = D.planDraft({ details: Object.assign({}, base, { conditions: [{ key: 'builders', days: 10 }, { key: 'finance', after: 'builders', days: 5 }, { key: 'electrical', days: 10 }] }), map: narrow, terms: tterms, clauses: elec, today: '2026-11-24' });
   eq(I(tnar, 'd_finance').text, 'see further term 24.0', 'too long for the line: "see further term 24.0"');
-  ok(/\n24\.0 Finance date \(clause 9\.1\): The finance date is the date that is 5 working days after the date the building report condition in clause 9\.4 is satisfied or waived\./.test(FT(tnar)), 'and further term 24.0 sets out the finance date');
+  ok(/\n24\.0 Finance date \(clause 9\.1\): The finance date is within 5 working days of the date the building report condition in clause 9\.4 is satisfied or waived\./.test(FT(tnar)), 'and further term 24.0 sets out the finance date');
   ok(N(tnar, 'front_after_finance') && /see further term 24\.0/.test(N(tnar, 'front_after_finance').text), 'Tim checks both');
   ok(!tnar.items.some(i => i.place === 'c_finance' && i.kind !== 'strike'), 'only Yes/No struck on the printed line, nothing rewritten');
   // clause 22.0 waiting for another condition: the printed count struck, "see further term N" beside it, the time in a further term
@@ -401,6 +407,9 @@ const ok = (c, msg) => { if (!c) errs.push(msg); };
   ok(I(t22, 'clause22_days_struck') && I(t22, 'clause22_days').text === 'see further term 23.0' && I(t22, 'clause22_days').size === 6, 'clause 22.0: struck, "see further term 23.0" small beside it');
   ok(/23\.0 Lawyer's approval \(clause 22\.0\): The time for the purchaser's lawyer's approval under clause 22\.0 is within 3 working days of the date the finance condition in clause 9\.1 is satisfied or waived\./.test(FT(t22)) && N(t22, 'clause22_after'), 'and a further term sets out its time, for Tim to check');
   ok(!I(t22, 'clause22'), 'clause 22.0 itself is not struck through');
+  const tl22 = I(t22, 'further_terms').terms.find(x => x.id === 'ft_time_lawyer');
+  ok(tl22 && JSON.stringify(tl22.timing) === JSON.stringify({ key: 'lawyer', days: 3, after: 'finance' }) && tl22.template === "The time for the purchaser's lawyer's approval under clause 22.0 is {timing}." && /^within 3 working days of the date the finance condition/.test(tl22.timing_text) && !/NaN/.test(tl22.timing_text + tl22.date_text), "clause 22.0's term is tied to the lawyer's approval condition, with {timing} (so its chip corrects the offer)");
+  const tfin = I(tnar, 'further_terms').terms.find(x => x.id === 'ft_time_finance'); ok(tfin && tfin.timing.key === 'finance' && tfin.template === 'The finance date is {timing}.' && !/NaN/.test(tfin.timing_text), 'a front-page date term is tied to its condition too');
   // a condition after the buyer's own: referred to by its further term number
   ok(/24\.0 Purchaser's condition: X within 2 working days of the date the electrical report condition in further term 23\.0 is satisfied or waived\./.test(FT(tplan([{ key: 'electrical', days: 5 }, { key: 'custom', after: 'electrical', days: 2, wording: 'X {timing}.' }], elec, { edits: { custom_ok: true } }))), 'the buyer\'s own after a further term');
   // a reference to a further term that isn't there: "?" and blocking

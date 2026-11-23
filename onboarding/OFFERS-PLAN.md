@@ -280,7 +280,12 @@ Built locally on `offers-timing` from main. Migration 022 is written and passed 
 - The AI condition helper writes `{timing}`; the form says what it stands for.
 - Further terms numbering: on from the last general terms clause and the highest clause printed on the appendix, both read from the
   blank (buildMap `numbering`), so 23.0 on Tim's packs. Written 23.0, 24.0 and so on, like the printed 22.0 (Tim, 24 November 2026):
-  in the list, in references ("further term 23.0"), on front-page lines ("see further term 24.0") and in the starting-number note. A removed term's number is retired (`edits.retired_numbers`) and never reused;
+  in the list, in references ("further term 23.0"), on front-page lines ("see further term 24.0") and in the starting-number note.
+  When the further terms page already prints its own terms as "1.", "2.", ours continue in that style ("23.", named "further term 23").
+- The further terms that set out a printed condition's date (front-page "see further term N", and clause 22.0) are tied to that
+  condition and written with {timing} ("The time for the purchaser's lawyer's approval under clause 22.0 is {timing}."), so their
+  timing chip corrects the offer like any other. Before any correction from the review screen the offer is read again; if it has
+  changed since the screen opened, nothing is saved and Tim is asked to reopen the newest draft. A removed term's number is retired (`edits.retired_numbers`) and never reused;
   `term_last` on each plan is where the sequence is up to (phase 4 continues from it).
 - Overflow: pages added straight after the further terms page, made from pictures of that page's own header and footer bands (PNG,
   rendered from the blank: pdf.js at scale 4 on Tim's screen, pdftoppm at 300 dpi in the tests; the page itself is never embedded, so
