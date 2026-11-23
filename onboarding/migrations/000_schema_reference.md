@@ -267,4 +267,5 @@ agreements/<agreement id>/signatures/... (vendors may upload their own signature
   Both service role only.
 - `offer_draft_edits_ok` also checks extra_terms (at most 60; a string up to 4,000, or {id, title up to 200, text up to 4,000, ai}),
   term_order entries (ids), items (id keys, text up to 4,000) and custom_wording.
-
+- `agent_offer_correct(offer, details, note, expected)`: 018's correction, refused unless the offer's details are still `expected`
+  (checked under the row lock). For corrections from the review screen.

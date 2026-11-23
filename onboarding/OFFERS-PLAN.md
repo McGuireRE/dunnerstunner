@@ -285,7 +285,16 @@ Built locally on `offers-timing` from main. Migration 022 is written and passed 
 - The further terms that set out a printed condition's date (front-page "see further term N", and clause 22.0) are tied to that
   condition and written with {timing} ("The time for the purchaser's lawyer's approval under clause 22.0 is {timing}."), so their
   timing chip corrects the offer like any other. Before any correction from the review screen the offer is read again; if it has
-  changed since the screen opened, nothing is saved and Tim is asked to reopen the newest draft. A removed term's number is retired (`edits.retired_numbers`) and never reused;
+  changed since the screen opened, nothing is saved and Tim is asked to reopen the newest draft. The database checks this too, under
+  the row lock (`agent_offer_correct(offer, details, note, expected)`, 022). If the correction saved but the new draft failed, Tim is
+  told the offer was corrected and gets "Re-draft now".
+- The date terms use the date form of the timing (`{timing_date}`): "The finance date is the date that is 5 working days after the
+  date the building report condition in clause 9.4 is satisfied or waived" ("... after the date of this agreement"; "... is Friday 5
+  December 2026").
+- Blocking, tickable checks: a condition-tied term whose wording Tim edited so it no longer holds its {timing} ("Further term 23.0 no
+  longer follows the offer's timing for ..."), and a typed-over front-page date or clause 22.0 count that differs from what the
+  offer works out (both values named). Both are checked on every draft while the edit stands. Phase 2 drafts (no number_style) show
+  "1." style on the review screen, as their PDF does. A removed term's number is retired (`edits.retired_numbers`) and never reused;
   `term_last` on each plan is where the sequence is up to (phase 4 continues from it).
 - Overflow: pages added straight after the further terms page, made from pictures of that page's own header and footer bands (PNG,
   rendered from the blank: pdf.js at scale 4 on Tim's screen, pdftoppm at 300 dpi in the tests; the page itself is never embedded, so

@@ -61,6 +61,15 @@ begin
   r := public.agent_offer_correct(oid, good || jsonb_build_object('line_up', true, 'conditions', jsonb_build_array(jsonb_build_object('key', 'builders', 'days', 8), jsonb_build_object('key', 'finance', 'days', 8))), 'Lined up the conditions: all within 8 working days');
   out := out || 'corrected line_up=' || (select details ->> 'line_up' from public.property_offers where id = oid) || ' submission kept=' || (select submission -> 'conditions' -> 1 ->> 'after' from public.property_offers where id = oid) || '; ';
   begin perform public.agent_offer_correct(oid, good || jsonb_build_object('conditions', jsonb_build_array(jsonb_build_object('key', 'finance', 'after', 'lim', 'days', 5))), 'bad chain'); out := out || 'CORRECTION WITH A BAD CHAIN SAVED; '; exception when others then out := out || 'bad correction: ' || sqlerrm || '; '; end;
+
+  -- the correction with the details as the screen loaded them: saved; with details that have changed since: refused, nothing saved
+  r := public.agent_offer_correct(oid, good || jsonb_build_object('conditions', jsonb_build_array(jsonb_build_object('key', 'builders', 'days', 6), jsonb_build_object('key', 'finance', 'days', 6))), 'Timing changed on the draft', (select details from public.property_offers where id = oid));
+  out := out || 'expected same=' || ((select details -> 'conditions' -> 0 ->> 'days' from public.property_offers where id = oid) = '6') || '; ';
+  x := (select count(*)::text from public.offer_events where offer_id = oid and kind = 'corrected');
+  begin perform public.agent_offer_correct(oid, good, 'stale screen', (select details from public.property_offers where id = oid) || '{"price": 1}'::jsonb); out := out || 'STALE CORRECTION SAVED; ';
+  exception when others then out := out || 'stale: ' || sqlerrm || '; '; end;
+  begin perform public.agent_offer_correct(oid, good, 'no expected', null); out := out || 'CORRECTION WITHOUT EXPECTED SAVED; '; exception when others then out := out || 'no expected: ' || left(sqlerrm, 40) || '; '; end;
+  out := out || 'events unchanged=' || ((select count(*)::text from public.offer_events where offer_id = oid and kind = 'corrected') = x) || ' days still=' || (select details -> 'conditions' -> 0 ->> 'days' from public.property_offers where id = oid) || '; ';
   execute 'reset role';
 
   -- 6. through the public door (the edge function, service role)

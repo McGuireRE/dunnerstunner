@@ -9,7 +9,8 @@
 -- and the offer may carry line_up: true (the buyer ticked "Confirm all conditions on the same day"; kept only when true).
 -- Also (Tim, 24 November 2026, the review screen): agent_draft_add (019) replaced to check what Tim did on the review screen
 -- (offer_draft_edits_ok: marks and moved places on the blank's own pages, clauses from his library, order, timing, removed numbers),
--- and offer_agent_ai_claim / offer_agent_ai_done, the daily cap for his clause writer with a reservation row in ai_calls (service role only).
+-- agent_offer_correct(offer, details, note, expected) (refused unless the offer is still as the screen loaded it), and
+-- offer_agent_ai_claim / offer_agent_ai_done, the daily cap for his clause writer with a reservation row in ai_calls (service role only).
 -- Before 022 the live offer_clean silently drops `after` (the condition would then count from the agreement): apply 022 before the
 -- page that sends it goes live. Everything else in offer_clean is exactly as in 018. offer_public_submit, agent_offer_add and
 -- agent_offer_correct call it and are unchanged. Nothing here touches agreements, signatures, signed records or their triggers.
@@ -270,8 +271,20 @@ begin
   if not found then raise exception 'No such pending AI call'; end if;
 end $$;
 
+-- A correction from the review screen (a timing chip, line-up): only if the offer is still as the screen loaded it (p_expected, its
+-- details as read), checked under the row lock, so a change made in between is never overwritten with older details. Then 018's
+-- agent_offer_correct, unchanged, does the correction and its record.
+create or replace function public.agent_offer_correct(p_offer uuid, p_details jsonb, p_note text, p_expected jsonb) returns jsonb language plpgsql security definer set search_path = public as $$
+declare me text := public.offer_agent(); cur jsonb;
+begin
+  select details into cur from public.property_offers where id = p_offer for update;
+  if not found then raise exception 'No such offer'; end if;
+  if p_expected is null or cur is distinct from p_expected then raise exception 'The offer has changed since this screen opened, so nothing was saved. Go back to the offer, open the newest draft and try again'; end if;
+  return public.agent_offer_correct(p_offer, p_details, p_note);
+end $$;
+
 revoke execute on function public.offer_box_ok(jsonb, jsonb, numeric), public.offer_draft_edits_ok(jsonb, jsonb) from public, anon, authenticated;
 revoke execute on function public.offer_agent_ai_claim(text, text), public.offer_agent_ai_done(bigint, boolean, text, int, int) from public, anon, authenticated;
 grant execute on function public.offer_agent_ai_claim(text, text), public.offer_agent_ai_done(bigint, boolean, text, int, int) to service_role;
-revoke execute on function public.agent_draft_add(uuid, uuid, text, text, bigint, jsonb, jsonb, jsonb, text) from public, anon;
-grant execute on function public.agent_draft_add(uuid, uuid, text, text, bigint, jsonb, jsonb, jsonb, text) to authenticated;
+revoke execute on function public.agent_draft_add(uuid, uuid, text, text, bigint, jsonb, jsonb, jsonb, text), public.agent_offer_correct(uuid, jsonb, text, jsonb) from public, anon;
+grant execute on function public.agent_draft_add(uuid, uuid, text, text, bigint, jsonb, jsonb, jsonb, text), public.agent_offer_correct(uuid, jsonb, text, jsonb) to authenticated;

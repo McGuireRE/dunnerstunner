@@ -399,7 +399,7 @@ const ok = (c, msg) => { if (!c) errs.push(msg); };
   const narrow = Object.assign({}, map, { places: map.places.map(pl => pl.id === 'd_finance' ? Object.assign({}, pl, { w: 120 }) : pl) });
   const tnar = D.planDraft({ details: Object.assign({}, base, { conditions: [{ key: 'builders', days: 10 }, { key: 'finance', after: 'builders', days: 5 }, { key: 'electrical', days: 10 }] }), map: narrow, terms: tterms, clauses: elec, today: '2026-11-24' });
   eq(I(tnar, 'd_finance').text, 'see further term 24.0', 'too long for the line: "see further term 24.0"');
-  ok(/\n24\.0 Finance date \(clause 9\.1\): The finance date is within 5 working days of the date the building report condition in clause 9\.4 is satisfied or waived\./.test(FT(tnar)), 'and further term 24.0 sets out the finance date');
+  ok(/\n24\.0 Finance date \(clause 9\.1\): The finance date is the date that is 5 working days after the date the building report condition in clause 9\.4 is satisfied or waived\./.test(FT(tnar)), 'and further term 24.0 sets out the finance date');
   ok(N(tnar, 'front_after_finance') && /see further term 24\.0/.test(N(tnar, 'front_after_finance').text), 'Tim checks both');
   ok(!tnar.items.some(i => i.place === 'c_finance' && i.kind !== 'strike'), 'only Yes/No struck on the printed line, nothing rewritten');
   // clause 22.0 waiting for another condition: the printed count struck, "see further term N" beside it, the time in a further term
@@ -409,7 +409,7 @@ const ok = (c, msg) => { if (!c) errs.push(msg); };
   ok(!I(t22, 'clause22'), 'clause 22.0 itself is not struck through');
   const tl22 = I(t22, 'further_terms').terms.find(x => x.id === 'ft_time_lawyer');
   ok(tl22 && JSON.stringify(tl22.timing) === JSON.stringify({ key: 'lawyer', days: 3, after: 'finance' }) && tl22.template === "The time for the purchaser's lawyer's approval under clause 22.0 is {timing}." && /^within 3 working days of the date the finance condition/.test(tl22.timing_text) && !/NaN/.test(tl22.timing_text + tl22.date_text), "clause 22.0's term is tied to the lawyer's approval condition, with {timing} (so its chip corrects the offer)");
-  const tfin = I(tnar, 'further_terms').terms.find(x => x.id === 'ft_time_finance'); ok(tfin && tfin.timing.key === 'finance' && tfin.template === 'The finance date is {timing}.' && !/NaN/.test(tfin.timing_text), 'a front-page date term is tied to its condition too');
+  const tfin = I(tnar, 'further_terms').terms.find(x => x.id === 'ft_time_finance'); ok(tfin && tfin.timing.key === 'finance' && tfin.template === 'The finance date is {timing_date}.' && tfin.timing_date_text === 'the date that is 5 working days after the date the building report condition in clause 9.4 is satisfied or waived' && !/NaN/.test(tfin.timing_text), 'a front-page date term is tied to its condition too');
   // a condition after the buyer's own: referred to by its further term number
   ok(/24\.0 Purchaser's condition: X within 2 working days of the date the electrical report condition in further term 23\.0 is satisfied or waived\./.test(FT(tplan([{ key: 'electrical', days: 5 }, { key: 'custom', after: 'electrical', days: 2, wording: 'X {timing}.' }], elec, { edits: { custom_ok: true } }))), 'the buyer\'s own after a further term');
   // a reference to a further term that isn't there: "?" and blocking
@@ -418,6 +418,25 @@ const ok = (c, msg) => { if (!c) errs.push(msg); };
   // old offers: exactly the same front page as before
   eq([I(p, 'd_finance').text, I(p, 'd_lim').text, I(p, 'd_builders').text], ['8 December 2026', '18 December 2026', '8 December 2026'], 'an old {days}/{date} offer drafts as before');
   ok(!N(p, 'after_check') && !p.needs.some(n => /^front_after_|^date_after_/.test(n.id)), 'and raises none of the new checks');
+  // the date form of the timing for the date terms: working days and a date too, and the exact wording on the agreement
+  const narrowT = (c2) => D.planDraft({ details: Object.assign({}, base, { conditions: [{ key: 'builders', days: 10 }, { key: 'finance', after: 'builders', days: 5 }] }), map: narrow, terms: tterms, clauses: {}, today: '2026-11-24', edits: { term_timing: {}, items: c2 || {} } });
+  const tn1 = narrowT(); ok(/^23\.0 Finance date \(clause 9\.1\): The finance date is the date that is 5 working days after the date the building report condition in clause 9\.4 is satisfied or waived\.$/m.test(FT(tn1)), 'the finance date term, exactly');
+  const ftT = (I(tn1, 'further_terms').terms || []).find(x => x.id === 'ft_time_finance');
+  ok(ftT && ftT.timing_date_text === 'the date that is 5 working days after the date the building report condition in clause 9.4 is satisfied or waived', 'its date phrase for the chip');
+  const tdOnly = D.planDraft({ details: Object.assign({}, base, { conditions: [{ key: 'builders', days: 10 }, { key: 'finance', after: 'builders', days: 5 }] }), map: narrow, terms: tterms, clauses: {}, today: '2026-11-24', edits: { items: { ft_time_finance: 'The finance date is {timing_date}, Tim says.' } } });
+  ok(/The finance date is the date that is 5 working days after the date the building report condition in clause 9\.4 is satisfied or waived, Tim says\./.test(FT(tdOnly)), 'Tim\'s edit keeps {timing_date}');
+  // an edit that drops the timing of a condition-tied term: blocking, tickable, on every later draft too (the edit carries over)
+  const tdrop = D.planDraft({ details: Object.assign({}, base, { conditions: [{ key: 'finance', days: 10 }, { key: 'electrical', after: 'finance', days: 5 }] }), map, terms: tterms, clauses: { electrical: 'Satisfied with the report {timing}.' }, today: '2026-11-24', edits: { items: { ft_electrical: 'Satisfied with the report within 9 working days.' } } });
+  const nd1 = N(tdrop, 'timing_dropped_ft_electrical');
+  ok(nd1 && nd1.blocking && nd1.ackable && nd1.text === "Further term 23.0 no longer follows the offer's timing for Electrical report (the offer says within 5 working days after Finance is satisfied or waived). Check it, or restore the timing.", 'a term no longer following the offer: ' + (nd1 && nd1.text));
+  ok(!N(rp([{ key: 'electrical', days: 10 }], { items: { ft_electrical: 'Tim reworded this, to be satisfied {timing}.' } }), 'timing_dropped_ft_electrical'), 'an edit that keeps {timing}: no check');
+  ok(!N(D.planDraft({ details: Object.assign({}, base, { conditions: [{ key: 'electrical', days: 10 }] }), map, terms: tterms, clauses: { electrical: "Tim's words." }, today: '2026-11-24', edits: { items: { ft_electrical: 'Changed words.' } } }), 'timing_dropped_ft_electrical'), 'wording that never had a token (its date is added after it): no check');
+  // typed over a front-page date or the clause 22.0 count: blocking, tickable, naming both
+  const ptyped = plan({ conditions: [{ key: 'finance', days: 10 }, { key: 'lawyer', days: 5 }] }, { items: { d_finance: '20 December 2026', clause22_days: '9' } });
+  const ntf = N(ptyped, 'typed_d_finance'), nt22 = N(ptyped, 'typed_clause22_days');
+  ok(ntf && ntf.blocking && ntf.ackable && /you typed "20 December 2026", but the offer works out "8 December 2026"/.test(ntf.text), 'a typed-over finance date names both values');
+  ok(nt22 && nt22.blocking && nt22.ackable && /you typed "9", but the offer works out "5"/.test(nt22.text), 'a typed-over clause 22.0 count too');
+  ok(!N(plan({}, { items: { d_finance: '8 December 2026' } }), 'typed_d_finance'), 'typing the same value: no check');
   // the drafted PDF carries it all
   const rt = await D.renderDraft(PDFLib, blank, tnar), tp = await D.readPages(pdfjs, rt.bytes), tx = n => tp[n - 1].items.map(i => i.s).join(' ');
   ok(tx(1).includes('see further term 24.0') && /Finance date \(clause 9\.1\)/.test(tx(3)), 'the PDF: "see further term 24.0" on the front page, the term on the Further Terms page');

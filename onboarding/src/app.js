@@ -6422,7 +6422,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     if (up.error && !/exists/i.test(up.error.message || '')) throw new Error('The draft didn\'t save. Check you have signal, then try again.');
     await drConfirm(pth, sha);
     const placed = plan.items.map(it => { const bx = r.boxes.filter(x => x.id === it.id || x.id.startsWith(it.id + '_cont'));
-      return { id: it.id, label: it.label, kind: it.kind, text: it.text || null, value: it.value || null, placeholder: !!it.placeholder, edited: !!it.edited, terms: it.terms, mark: it.mark || undefined, who: it.who || undefined, moved: it.moved || undefined, boxes: bx.map(x => ({ page: x.page, x: Math.round(x.x * 10) / 10, y: Math.round(x.y * 10) / 10, w: Math.round(x.w * 10) / 10, h: Math.round(x.h * 10) / 10 })) }; })
+      return { id: it.id, label: it.label, kind: it.kind, text: it.text || null, value: it.value || null, placeholder: !!it.placeholder, edited: !!it.edited, terms: it.terms, number_style: it.number_style || undefined, mark: it.mark || undefined, who: it.who || undefined, moved: it.moved || undefined, boxes: bx.map(x => ({ page: x.page, x: Math.round(x.x * 10) / 10, y: Math.round(x.y * 10) / 10, w: Math.round(x.w * 10) / 10, h: Math.round(x.h * 10) / 10 })) }; })
       // each page added for the further terms, with the page it was made from and the bands used (the draft's fingerprint covers it)
       .concat((r.added_pages || []).map((ap, i) => ({ id: 'added_page_' + (i + 1), label: `Page added after page ${ap.source_page}${ap.number ? `, numbered ${ap.number.written}` : ' (plain)'}`, kind: 'page', page: ap.page, source_page: ap.source_page, bands: ap.bands, number: ap.number, plain: !!ap.plain, boxes: [] })));
     const res = await must(sb.rpc('agent_draft_add', { p_offer: oid, p_map: map.id, p_path: pth, p_sha256: sha, p_size: r.bytes.length, p_placed: placed, p_needs: plan.needs, p_edits: Object.assign({}, edits || {}, { date_format: plan.date_format, retired_numbers: plan.retired_numbers, term_last: plan.term_last }), p_note: note || null }));
@@ -6444,7 +6444,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   // a term's wording as editable text with its timing, dates and working days as small chips (a tap changes them)
   function drChip(kind, label, val) { return `<span class="dr-chip" contenteditable="false" role="button" tabindex="0" data-chip="${kind}" data-val="${esc(val || '')}">${esc(label)}</span>`; }
   function drRichHTML(t, tpl) {
-    return String(tpl).split(/(\{timing\}|\{date\})/).map(part => {
+    return String(tpl).split(/(\{timing_date\}|\{timing\}|\{date\})/).map(part => {
+      if (part === '{timing_date}') return drChip('timing', t.timing_date_text || t.timing_text || 'set the timing', '{timing_date}');
       if (part === '{timing}') return drChip('timing', t.timing_text || 'set the timing', '{timing}');
       if (part === '{date}') return drChip('date', t.date_text || 'set the date', '{date}');
       let out = '', last = 0; part.replace(DR_LIT, (m, at) => { out += esc(part.slice(last, at)).replace(/\n/g, '<br>') + drChip('lit', m, m); last = at + m.length; return m; });
@@ -6452,7 +6453,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   }
   // the editor's text back to a term's wording: chips become {timing}, {date} or their (possibly changed) words
   function drRichText(el) {
-    const walk = n => Array.from(n.childNodes).map(c => c.nodeType === 3 ? c.nodeValue : c.nodeType !== 1 ? '' : c.classList.contains('dr-chip') ? (c.dataset.chip === 'lit' ? c.dataset.val : c.dataset.chip === 'date' ? '{date}' : '{timing}')
+    const walk = n => Array.from(n.childNodes).map(c => c.nodeType === 3 ? c.nodeValue : c.nodeType !== 1 ? '' : c.classList.contains('dr-chip') ? (c.dataset.chip === 'lit' ? c.dataset.val : /^\{(timing|timing_date|date)\}$/.test(c.dataset.val) ? c.dataset.val : c.dataset.chip === 'date' ? '{date}' : '{timing}')
       : c.tagName === 'BR' ? '\n' : (['DIV', 'P'].includes(c.tagName) ? '\n' : '') + walk(c)).join('');
     return walk(el).replace(/\u00a0/g, ' ').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
   }
@@ -6545,10 +6546,10 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       ${ft ? `<section class="card" id="drTerms"><h2>Further terms of sale</h2>
         <p class="small">Change any wording here. The timing, dates and working days are the small highlighted pieces: tap one to change it. ${newest && !ap ? 'Drag a term to move it, or use its up and down buttons.' : ''} Changes go on the next draft.</p>
         <ol class="dr-terms" id="drTermList">${(ft.terms || []).map(t => { const tpl = t.custom && t.placeholder ? (t.wording || '') : t.template != null ? t.template : t.text;
-          return `<li class="dr-term-i" data-term="${esc(t.id)}" ><div class="dr-thead">${newest && !ap ? '<span class="dr-grip" aria-hidden="true" title="Drag to move">&#8942;&#8942;</span>' : ''}<span class="dr-tno"><strong>${DR.termNo(t.number, ft.number_style)} ${esc(t.title)}</strong>${t.placeholder ? ' <span class="pill of-warnp">Needs you</span>' : ''}${t.ai ? ' <span class="pill">AI draft, ticked by you</span>' : ''}</span>
+          return `<li class="dr-term-i" data-term="${esc(t.id)}" ><div class="dr-thead">${newest && !ap ? '<span class="dr-grip" aria-hidden="true" title="Drag to move">&#8942;&#8942;</span>' : ''}<span class="dr-tno"><strong>${DR.termNo(t.number, ft.number_style || 'dot')} ${esc(t.title)}</strong>${t.placeholder ? ' <span class="pill of-warnp">Needs you</span>' : ''}${t.ai ? ' <span class="pill">AI draft, ticked by you</span>' : ''}</span>
             ${newest && !ap ? `<span class="dr-tbtns"><button class="btn link" type="button" data-tup="${esc(t.id)}" aria-label="Move ${esc(t.title)} up">Up</button><button class="btn link" type="button" data-tdown="${esc(t.id)}" aria-label="Move ${esc(t.title)} down">Down</button>${t.removable ? `<button class="btn link" type="button" data-trm="${esc(t.id)}">Remove</button>` : ''}</span>` : ''}</div>
             ${t.custom ? `<p class="small" style="margin:0">The buyer asked for: ${esc(t.request || '(no description)')}${t.ai ? ' (worded with AI help)' : ''}</p>` : ''}
-            <div class="dr-rich" contenteditable="${newest && !ap ? 'true' : 'false'}" role="textbox" aria-multiline="true" aria-label="Wording of further term ${DR.termNo(t.number, ft.number_style)}, ${esc(t.title)}" data-rich="${esc(t.id)}" data-orig="${esc(tpl)}">${drRichHTML(t, tpl)}</div></li>`; }).join('')}</ol>
+            <div class="dr-rich" contenteditable="${newest && !ap ? 'true' : 'false'}" role="textbox" aria-multiline="true" aria-label="Wording of further term ${DR.termNo(t.number, ft.number_style || 'dot')}, ${esc(t.title)}" data-rich="${esc(t.id)}" data-orig="${esc(tpl)}">${drRichHTML(t, tpl)}</div></li>`; }).join('')}</ol>
         <div class="card tight dr-chiped" id="drChipEd" hidden><p class="small" style="margin:0 0 4px" id="drChipFor"></p>
           <div class="choices" id="drCmModes">${[['days', 'Working days from the date of the agreement'], ['date', 'By a date'], ['after', 'Working days after another condition is satisfied or waived']].map(([v, l]) => `<label class="choice"><input type="radio" name="dr_cm" value="${v}"><span class="mark"></span><span><span class="ct">${l}</span></span></label>`).join('')}</div>
           <div class="of-when"><div id="drCmDaysW"><label class="f" for="drCmDays">Working days</label><input type="number" id="drCmDays" min="1" max="250" inputmode="numeric"></div><div id="drCmDateW"><label class="f" for="drCmDate">Date</label><input type="date" id="drCmDate"></div>
@@ -6576,10 +6577,12 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     </div>`;
     $$('[data-rich]').forEach(x => { x.dataset.base = drRichText(x); });   // the wording as shown: a change is anything different from this
     const go = async (edits, note) => { const btns = $$('#drRedraft,#drRedraftChange'); btns.forEach(x => { x.disabled = true; }); $('#drRvErr').textContent = 'Drafting...';
-      try { const id = await drMakeDraft(d.offer_id, edits, note); toast('New draft made; the earlier one is kept'); viewDraftReview(id); } catch (e) { $('#drRvErr').textContent = e.message || 'That didn\'t draft.'; btns.forEach(x => { x.disabled = false; }); } };
-    // before a correction from this screen: the offer must be as it was when the screen opened, or older details would be put back
-    const drOfferSame = async () => { const f = await must(sb.from('property_offers').select('details').eq('id', d.offer_id).single());
-      if (JSON.stringify(drCanon(f.details)) !== JSON.stringify(drCanon(o.details))) throw new Error('The offer has changed since this screen opened, so nothing was saved. Go back to the offer, open the newest draft and try again.'); };
+      try { const id = await drMakeDraft(d.offer_id, edits, note); toast('New draft made; the earlier one is kept'); viewDraftReview(id); return true; } catch (e) { $('#drRvErr').textContent = e.message || 'That didn\'t draft.'; btns.forEach(x => { x.disabled = false; }); return false; } };
+    // a correction from this screen carries the offer's details as the screen loaded them (p_expected): the database refuses it if the
+    // offer changed in between. If the correction saved but the new draft didn't, Tim is told so and can re-draft from here.
+    const correctedButNotDrafted = (box, edits, note) => { const el = $(box); if (!el) return;
+      el.innerHTML = `The offer was corrected, but the new draft wasn't made. <button class="btn link" type="button" id="drRedraftNow">Re-draft now</button>`;
+      $('#drRedraftNow').addEventListener('click', async () => { el.textContent = 'Drafting...'; if (!(await go(edits, note))) correctedButNotDrafted(box, edits, note); }); };
     // what "Re-draft after a change" carries over: everything but Tim's edits to single values (phase 2, choice 10)
     const carry = () => { const c = { date_format: E.date_format, extra_terms: E.extra_terms, custom_ok: E.custom_ok, custom_wording: E.custom_wording, retired_numbers: E.retired_numbers };
       ['added_terms', 'term_order', 'term_timing', 'marks', 'moves'].forEach(k => { if (E[k] != null) c[k] = E[k]; }); Object.keys(c).forEach(k => { if (c[k] === undefined) delete c[k]; }); return c; };
@@ -6601,8 +6604,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       if (!date && !(Math.floor(+days) >= 1)) return $('#drLuErr').textContent = 'Enter the working days or a date.';
       const det = Object.assign({}, o.details, { conditions: OF.lineUp((o.details || {}).conditions, t), line_up: true }), say = date ? 'by ' + OF.longDate(date) : `within ${Math.floor(+days)} working days`;
       lg.disabled = true; $('#drLuErr').textContent = '';
-      try { await drOfferSame(); await must(sb.rpc('agent_offer_correct', { p_offer: d.offer_id, p_details: ofPayload(ofShape(det)), p_note: 'Lined up the conditions: all ' + say }));
-        await go(carry(), 'Conditions lined up: all ' + say); }
+      try { await must(sb.rpc('agent_offer_correct', { p_offer: d.offer_id, p_expected: o.details, p_details: ofPayload(ofShape(det)), p_note: 'Lined up the conditions: all ' + say }));
+        if (!(await go(carry(), 'Conditions lined up: all ' + say))) correctedButNotDrafted('#drLuErr', carry(), 'Conditions lined up: all ' + say); }
       catch (e) { lg.disabled = false; $('#drLuErr').textContent = e.message || 'That didn\'t save.'; } });
     // ── further terms: reorder (drag, or up and down), remove, add from the library, timing chips ──
     const tl = $('#drTermList');
@@ -6617,13 +6620,13 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         const up = () => { document.removeEventListener('pointermove', mv); document.removeEventListener('pointerup', up); document.removeEventListener('pointercancel', up); li.classList.remove('dr-dragging'); if (moved) toast('Order changed: re-draft to apply it'); };
         document.addEventListener('pointermove', mv); document.addEventListener('pointerup', up); document.addEventListener('pointercancel', up); }));
       // remove a term Tim added: its number is never used again
-      $$('[data-trm]', tl).forEach(b => b.addEventListener('click', () => { const id = b.dataset.trm, t = (ft.terms || []).find(x => x.id === id); if (!t || !confirm(`Remove further term ${DR.termNo(t.number, ft.number_style)}, ${t.title}? Its number won't be used again.`)) return;
+      $$('[data-trm]', tl).forEach(b => b.addEventListener('click', () => { const id = b.dataset.trm, t = (ft.terms || []).find(x => x.id === id); if (!t || !confirm(`Remove further term ${DR.termNo(t.number, ft.number_style || 'dot')}, ${t.title}? Its number won't be used again.`)) return;
         const ed = collect(); ed.retired_numbers = [...new Set((ed.retired_numbers || []).concat(t.number))];
         if (t.added) ed.added_terms = (ed.added_terms || []).filter(a => a.id !== id);
         else if (t.extra) { const objs = ed.extra_terms.filter(x => typeof x === 'object' && x.id !== id), strs = (E.extra_terms || []).filter(x => typeof x === 'string'), si = /^ft_extra_(\d+)$/.exec(id);
           const keep = si ? strs.filter((x, i) => (E.extra_terms || []).indexOf(x) !== +si[1] - 1) : strs; ed.extra_terms = objs.concat(keep); Object.keys(ed.items).forEach(k => { if (/^ft_extra_\d+$/.test(k)) delete ed.items[k]; }); }
         delete ed.items[id]; if (ed.term_timing) delete ed.term_timing[id]; if (ed.term_order) ed.term_order = ed.term_order.filter(x => x !== id);
-        go(ed, `Removed further term ${DR.termNo(t.number, ft.number_style)}, ${t.title}`); }));
+        go(ed, `Removed further term ${DR.termNo(t.number, ft.number_style || 'dot')}, ${t.title}`); }));
       // the timing chips
       let chip = null; const ced = $('#drChipEd'), mode = () => (($$('input[name="dr_cm"]').find(x => x.checked)) || {}).value || 'days';
       const showMode = () => { const m = mode(), lit = chip && chip.dataset.chip === 'lit'; $('#drCmDaysW').hidden = m === 'date'; $('#drCmDateW').hidden = m !== 'date'; $('#drCmAfterW').hidden = m !== 'after'; if (typeof showAfter === 'function') showAfter(); };
@@ -6633,7 +6636,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       const openChip = c => { chip = c; const li = c.closest('li'), t = (ft.terms || []).find(x => x.id === li.dataset.term) || {}, tk = c.dataset.chip === 'lit' ? null : tiedKey(t), cur = (tk ? null : TT[li.dataset.term]) || t.timing || {};
         $$('#drCmAfter option').forEach(op => { op.disabled = !!tk && op.value === tk; });   // a condition can't wait for itself
         if (tk && $('#drCmAfter').value === tk) { const first = $$('#drCmAfter option').find(op => !op.disabled); if (first) $('#drCmAfter').value = first.value; }
-        $('#drChipFor').textContent = c.dataset.chip === 'lit' ? `Change "${c.dataset.val}" in ${t.title}` : tk ? `The timing of ${(OF.condInfo(tk) || { label: tk }).label}: this changes it on the offer (recorded as a correction, with the buyer's original kept) and makes a new draft.` : `The timing of ${DR.termNo(t.number, ft.number_style)} ${t.title}`;
+        $('#drChipFor').textContent = c.dataset.chip === 'lit' ? `Change "${c.dataset.val}" in ${t.title}` : tk ? `The timing of ${(OF.condInfo(tk) || { label: tk }).label}: this changes it on the offer (recorded as a correction, with the buyer's original kept) and makes a new draft.` : `The timing of ${DR.termNo(t.number, ft.number_style || 'dot')} ${t.title}`;
         const m0 = c.dataset.chip === 'lit' ? (/working day/.test(c.dataset.val) ? 'days' : 'date') : cur.after ? 'after' : cur.date ? 'date' : 'days';
         $$('input[name="dr_cm"]').forEach(x => { x.checked = x.value === m0; }); $('#drCmDays').value = c.dataset.chip === 'lit' ? ((/(\d+) working/.exec(c.dataset.val) || [])[1] || '') : (cur.days || ''); $('#drCmDate').value = cur.date || ''; if (cur.after) $('#drCmAfter').value = cur.after;
         $('#drCmErr').textContent = ''; ced.hidden = false; li.appendChild(ced); showMode(); showAfter(); const f = $(m0 === 'date' ? '#drCmDate' : '#drCmDays'); if (f) f.focus(); };
@@ -6652,9 +6655,9 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
           const label = (OF.condInfo(tk) || { label: tk }).label, say_ = OF.timingPlain(Object.assign({ key: tk }, nt));
           const det = Object.assign({}, o.details, { conditions: conds, line_up: !!(o.details.line_up && OF.sameTiming(conds)) });
           const done = $('#drCmDone'); done.disabled = true; $('#drCmErr').textContent = 'Saving...';
-          return (async () => { try { await drOfferSame(); await must(sb.rpc('agent_offer_correct', { p_offer: d.offer_id, p_details: ofPayload(ofShape(det)), p_note: `Changed the timing of ${label} on the draft: ${say_}` }));
+          return (async () => { try { await must(sb.rpc('agent_offer_correct', { p_offer: d.offer_id, p_expected: o.details, p_details: ofPayload(ofShape(det)), p_note: `Changed the timing of ${label} on the draft: ${say_}` }));
               const ed = collect(); if (ed.term_timing) { delete ed.term_timing[id]; if (!Object.keys(ed.term_timing).length) delete ed.term_timing; }
-              await go(ed, `Timing of ${label} changed: ${say_}`); } catch (e) { done.disabled = false; $('#drCmErr').textContent = e.message || 'That didn\'t save.'; } })(); }
+              const nt_ = `Timing of ${label} changed: ${say_}`; if (!(await go(ed, nt_))) { done.disabled = false; correctedButNotDrafted('#drCmErr', ed, nt_); } } catch (e) { done.disabled = false; $('#drCmErr').textContent = e.message || 'That didn\'t save.'; } })(); }
         if (chip.dataset.chip === 'lit') { const hadDay = /^[A-Z][a-z]+day /.test(chip.dataset.val), v = m === 'date' ? (hadDay ? `${['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][OF.dow(dt)]} ${DR.fullDate(dt)}` : DR.fullDate(dt)) : `${n} working ${n === 1 ? 'day' : 'days'}`; chip.dataset.val = v; chip.textContent = v; }
         else { const t = m === 'after' ? { after: $('#drCmAfter').value, days: n } : m === 'date' ? { date: dt } : { days: n }; TT[id] = t;
           $$('.dr-chip[data-chip="timing"],.dr-chip[data-chip="date"]', li).forEach(c => { c.textContent = OF.timingPlain(Object.assign({ key: id }, t)) + ' (re-draft to apply)'; }); }

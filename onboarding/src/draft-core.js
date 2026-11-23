@@ -426,6 +426,8 @@
     const put = (id, place, text, extra) => {
       if (!place) { need('missing_' + id, `There is no place for ${extra && extra.label || id} on this blank. Add it to the places on the blank, or write it in by hand.`, !(extra && extra.optional)); return; }
       let t = Object.prototype.hasOwnProperty.call(edits, id) ? edits[id] : text; if (t == null || t === '') return;
+      if (Object.prototype.hasOwnProperty.call(edits, id) && /^d_|^clause22_days$/.test(id) && text != null && String(t).trim() !== String(text).trim())
+        need('typed_' + id, `${(extra && extra.label) || place.label}: you typed "${String(t).slice(0, 80)}", but the offer works out "${String(text).slice(0, 80)}". Check it, or clear your edit so it follows the offer.`, true, true);
       t = String(t);
       if (!winAnsi(t)) { need('font_' + id, `${extra && extra.label || place.label}: "${t.slice(0, 80)}" has letters the typed font can't show (such as macrons). Write it in by hand, or change it.`, true); return; }
       const it = Object.assign({ id, key: place.key, place: place.id, page: place.page, kind: place.kind === 'area' ? 'area' : 'text', text: t, x: place.x, y: place.y, w: place.w, h: place.h, label: (extra && extra.label) || place.label, edited: Object.prototype.hasOwnProperty.call(edits, id) }, extra && extra.item);
@@ -497,6 +499,13 @@
       if (m === 'after') return `within ${wdays(n)} of the date ${refOf(c.after)} is satisfied or waived`;
       if (m === 'date') { const r = OF ? OF.conditionDate(c, today, province, conds) : null; movedNeed(c, r); return `on or before ${dayDate(r ? r.date : c.date)}`; }
       return `within ${wdays(n)} of the date of this agreement`; };
+    // {timing_date}: the same timing as a defined date, for the further terms that set out a printed condition's date ("The finance date is
+    // the date that is 5 working days after the date ..."; "... after the date of this agreement"; "... is Friday 5 December 2026")
+    const timingDatePhrase = c => { const m = mode(c), n = Math.floor(+c.days);
+      if (m === 'after') return `the date that is ${wdays(n)} after the date ${refOf(c.after)} is satisfied or waived`;
+      if (m === 'date') { const r = OF ? OF.conditionDate(c, today, province, conds) : null; movedNeed(c, r); return dayDate(r ? r.date : c.date); }
+      return `the date that is ${wdays(n)} after the date of this agreement`; };
+    const TOKEN_RE = /\{(date|timing|timing_date)\}/, TOKENS_RE = /\{(date|timing|timing_date)\}/g;
     // {date} and the printed date lines: a full date (from working days counted from today, or the date chosen). For a condition that
     // waits for another there is no date to give, so {date} becomes the timing phrase and Tim checks the sentence still reads right.
     const dateText = c => { if (!OF) return c.date || `${c.days} working days`;
@@ -504,9 +513,9 @@
       const r = OF.conditionDate(c, today, province, conds); if (!r) return ''; movedNeed(c, r);
       return fmt === 'date_days' ? `${fullDate(r.date)} (${r.days} working ${r.days === 1 ? 'day' : 'days'})` : fullDate(r.date); };
     // a clause's wording with its tokens filled in; tokens: whether {date} or {timing} was used (then nothing is added after it)
-    const fill = (w, c, extra) => { const tokens = /\{(date|timing)\}/.test(w);
+    const fill = (w, c, extra) => { const tokens = TOKEN_RE.test(w);
       let s = w; Object.entries(extra || {}).forEach(([k, v]) => { s = s.split('{' + k + '}').join(v); });
-      if (c) { if (s.includes('{timing}')) s = s.split('{timing}').join(timingPhrase(c)); if (s.includes('{date}')) s = s.split('{date}').join(dateText(c)); }
+      if (c) { if (s.includes('{timing_date}')) s = s.split('{timing_date}').join(timingDatePhrase(c)); if (s.includes('{timing}')) s = s.split('{timing}').join(timingPhrase(c)); if (s.includes('{date}')) s = s.split('{date}').join(dateText(c)); }
       return { text: s, tokens }; };
     // what goes after a condition's wording that names no time: the date as before, or for a condition that waits for another, the timing
     const suffixFor = c => !c ? '' : mode(c) === 'after' ? ` This condition is to be satisfied or waived ${timingPhrase(c)}.` : ` Condition date: ${dateText(c)}.`;
@@ -525,7 +534,7 @@
         need('front_after_' + k, `${label}: the date line says "${short}" because it waits for ${labelOf(c.after)}. Check it reads clearly on the page.`, false);
       } else {
         const id = 'ft_time_' + k;
-        timeTerms.push({ id, title: `${dn.charAt(0).toUpperCase() + dn.slice(1)} (clause ${clause})`, template: `The ${dn} is {timing}.`, c });
+        timeTerms.push({ id, title: `${dn.charAt(0).toUpperCase() + dn.slice(1)} (clause ${clause})`, template: `The ${dn} is {timing_date}.`, c });
         put('d_' + k, dp, `see further term [[TERM.${RK}:${id}]]`, { label: label + ': date' });
         need('front_after_' + k, `${label}: it waits for ${labelOf(c.after)}, which doesn't fit on the date line, so the line says "see further term [[TERM.${RK}:${id}]]" and further term [[TERM.${RK}:${id}]] sets out the date. Check both.`, false);
       }
@@ -587,8 +596,8 @@
     const NO_TIMING = '[Tim to set the timing]';
     const fillTerm = (id, title, w, tm, extra) => { let tpl = noRefs(w); Object.entries(extra || {}).forEach(([k, v]) => { tpl = tpl.split('{' + k + '}').join(noRefs(v)); });
       if (tm) { const f = fill(tpl, tm); return { text: f.text, template: tpl, tokens: f.tokens, timing: tm }; }
-      const tokens = /\{(date|timing)\}/.test(tpl); if (tokens) need('timing_missing_' + id, `${title}: its wording has {timing} but no timing yet. Tap the timing in the term to set it.`, true);
-      return { text: tpl.replace(/\{(date|timing)\}/g, NO_TIMING), template: tpl, tokens, timing: null }; };
+      const tokens = TOKEN_RE.test(tpl); if (tokens) need('timing_missing_' + id, `${title}: its wording has {timing} but no timing yet. Tap the timing in the term to set it.`, true);
+      return { text: tpl.replace(TOKENS_RE, NO_TIMING), template: tpl, tokens, timing: null }; };
     for (const t of terms) {
       if (t.kind !== 'further_term' || t.key === 'chattels' || !ruleApplies(t.rule, d)) continue;
       if (t.wording_from === 'custom') {
@@ -666,12 +675,15 @@
         .replace(REF('TERM'), (m, id) => byId.has(id) ? rNo(byId.get(id)) : '?');
       // Tim's edit of a term is its wording as he left it: {timing} and {date} in it are filled in like any other
       const text = ft.map(x => { const edited = Object.prototype.hasOwnProperty.call(edits, x.id) ? String(edits[x.id] || '') : null;
-        let body = edited != null ? noRefs(edited) : x.text; if (edited != null) { x.template = edited; if (/\{(date|timing)\}/.test(edited)) { const f = fillTerm(x.id, x.title, edited, x.timing); body = f.text; x.suffix = ''; } }
+        const orig = x.template;
+        let body = edited != null ? noRefs(edited) : x.text; if (edited != null) { x.template = edited; if (TOKEN_RE.test(edited)) { const f = fillTerm(x.id, x.title, edited, x.timing); body = f.text; x.suffix = ''; }
+          else if (x.cond && x.timing && cond(x.cond) && TOKEN_RE.test(String(orig || '')))
+            need('timing_dropped_' + x.id, `Further term ${rNo(x.number)} no longer follows the offer's timing for ${labelOf(x.cond)} (the offer says ${OF ? OF.timingPlain(cond(x.cond)) : 'otherwise'}). Check it, or restore the timing.`, true, true); }
         body = resolveRefs(body); x.text = body;
         return `${tNo(x.number)} ${noRefs(x.title)}${x.detail ? ' (' + noRefs(x.detail) + ')' : ''}: ${body}${resolveRefs(x.suffix || '')}`; });
       const it = put('further_terms', ftp, text.join('\n'), { label: 'Further terms of sale', item: { cont: NB.cont || null, number_base: base, number_style: NST, terms: ft.map(x => ({ id: x.id, number: x.number, title: x.title, text: x.text, placeholder: isPlaceholder(x.text), custom: !!x.custom, request: x.request, wording: x.wording, ai: x.ai,
         template: x.template != null ? resolveRefs(x.template) : null, timing: x.timing ? { key: x.timing.key, days: x.timing.days, date: x.timing.date, after: x.timing.after } : null, timing_text: x.timing ? resolveRefs(timingPhrase(x.timing)) : '',
-        date_text: x.timing ? resolveRefs(dateText(x.timing)) : '', removable: !!x.removable, added: !!x.added, library: x.library || null, extra: !!x.extra })) } });
+        date_text: x.timing ? resolveRefs(dateText(x.timing)) : '', timing_date_text: x.timing ? resolveRefs(timingDatePhrase(x.timing)) : '', removable: !!x.removable, added: !!x.added, library: x.library || null, extra: !!x.extra })) } });
       ft.filter(x => isPlaceholder(x.text)).forEach(x => need('ph_' + x.id, `Further term ${rNo(x.number)}, ${x.title}: ${x.text}`, true));
     }
     // any reference still waiting for its number (on the front page, beside clause 22.0, and in Tim's list of things to check)

@@ -446,8 +446,22 @@ const sha = b => crypto.createHash('sha256').update(Buffer.from(b)).digest('hex'
   const ev1 = (await db(q)).offer_events.filter(e => e.offer_id === off2 && e.kind === 'corrected').length, nd = (await db(q)).offer_drafts.filter(x => x.offer_id === off2).length;
   await q.click('input[name="dr_cm"][value="days"] + .mark'); await q.fill('#drCmDays', '4'); await q.click('#drCmDone'); await q.waitForFunction(() => /changed since this screen opened/.test(document.querySelector('#drCmErr').textContent));
   const dd4 = await db(q);
+  errs.splice(0, errs.length, ...errs.filter(e => !/changed since this screen opened/.test(e)));   // the refusal is logged on purpose
   expect(dd4.offer_events.filter(e => e.offer_id === off2 && e.kind === 'corrected').length === ev1 && dd4.property_offers.find(x => x.id === off2).details.price === 701000 && dd4.offer_drafts.filter(x => x.offer_id === off2).length === nd, 'a stale screen saves nothing: the newer price is kept and no draft is made');
   await q.click('#drCmCancel'); await q.click('#drRedraftChange'); dr9 = await waitDraft(++dn);
+  // the correction saves but the new draft fails: Tim is told the offer was corrected, and re-drafts from there
+  await q.click('li[data-term="ft_custom"] .dr-chip[data-chip="timing"]'); await q.waitForSelector('#drChipEd:not([hidden])');
+  const ev2 = (await db(q)).offer_events.filter(e => e.offer_id === off2 && e.kind === 'corrected').length;
+  await q.evaluate(() => localStorage.setItem('mockFailTable', 'property_people'));
+  await q.click('input[name="dr_cm"][value="days"] + .mark'); await q.fill('#drCmDays', '5'); await q.click('#drCmDone'); await q.waitForSelector('#drRedraftNow', { timeout: 30000 });
+  errs.splice(0, errs.length, ...errs.filter(e => !/Failed to fetch/.test(e)));   // the failed read is logged on purpose
+  expect(/The offer was corrected, but the new draft wasn't made/.test(await q.textContent('#drCmErr')) && !/nothing was saved/.test(await q.textContent('#drCmErr')), 'corrected but not drafted: said so, with Re-draft now');
+  expect((await db(q)).offer_events.filter(e => e.offer_id === off2 && e.kind === 'corrected').length === ev2 + 1 && (await db(q)).property_offers.find(x => x.id === off2).details.conditions.find(c => c.key === 'custom').days === 5, 'the correction itself was saved');
+  await q.evaluate(() => localStorage.removeItem('mockFailTable')); await q.click('#drRedraftNow'); dr9 = await waitDraft(++dn);
+  expect(/Timing of Your own condition changed: within 5 working days/.test(dr9.note), 'Re-draft now makes the new draft');
+  // the database checks the offer is as the screen loaded it (p_expected)
+  const exp = await rpc(q, 'agent_offer_correct', { p_offer: off2, p_details: { price: 1 }, p_note: 'stale', p_expected: Object.assign({}, (await db(q)).property_offers.find(x => x.id === off2).details, { price: 2 }) });
+  expect(exp.error && /changed since this screen opened/.test(exp.error.message), 'a correction with out-of-date expected details is refused by the database');
   // the date in the Keys wording (tied to no condition) was a draft-only edit: the offer was never corrected for it
   expect(!(await db(q)).offer_events.some(e => e.offer_id === off2 && e.kind === 'corrected' && /Keys|keys/.test((e.detail || {}).note || '')), 'a date chip not tied to a condition changes the draft only');
   expect(!(await side(q)), 'review screen with all of it at 390 px: no sideways scroll');
@@ -472,9 +486,12 @@ const sha = b => crypto.createHash('sha256').update(Buffer.from(b)).digest('hex'
   await DK.ctx.close();
   // the daily cap stops the writer before any model call
   const capBefore = await db(q);
-  await q.evaluate(() => { const dbx = JSON.parse(localStorage.getItem('mockdb')); dbx.offer_settings[0].ai_daily_cap = 1; localStorage.setItem('mockdb', JSON.stringify(dbx)); });
+  // an old (phase 2) draft has no number_style: its terms show "1." style on the review screen, as its PDF does
+  await q.evaluate(([oid]) => { const dbx = JSON.parse(localStorage.getItem('mockdb')); dbx.offer_settings[0].ai_daily_cap = 1;
+    const dr = dbx.offer_drafts.filter(x => x.offer_id === oid).sort((a, b) => b.number - a.number)[0], f = dr.placed.find(x => x.id === 'further_terms'); if (f) delete f.number_style; localStorage.setItem('mockdb', JSON.stringify(dbx)); }, [off2]);
   const reopen = async () => { await q.reload(); await q.waitForTimeout(600); await q.evaluate(async ([pth, b64]) => { const u = Uint8Array.from(atob(b64), c => c.charCodeAt(0)); (window.__repoBlobs ||= {})[pth] = new Blob([u], { type: 'application/pdf' }); }, [doc1.path, blank.toString('base64')]); await q.click('#navDash'); await q.waitForTimeout(400); await q.click('tr[data-prop="P1"]'); await q.waitForSelector('#offTile'); await q.click(`[data-offer="${off2}"]`); await q.waitForSelector('#drDrafts'); await q.click(`[data-draft="${(await latest()).id}"]`); await q.waitForSelector('#drTerms'); };
-  await reopen(); await q.click('#drAi summary'); await q.fill('#drAiAsk', 'another clause about the garden shed staying'); await q.click('#drAiGo'); await q.waitForFunction(() => /limit/.test(document.querySelector('#drAiMsg').textContent));
+  await reopen(); out.oldStyle = (await q.textContent('#drTermList li .dr-tno')).trim(); expect(/^\d+\. /.test(out.oldStyle), 'an old draft without number_style shows "23." style: ' + out.oldStyle);
+  await q.click('#drAi summary'); await q.fill('#drAiAsk', 'another clause about the garden shed staying'); await q.click('#drAiGo'); await q.waitForFunction(() => /limit/.test(document.querySelector('#drAiMsg').textContent));
   expect((await db(q)).ai_calls.filter(x => x.purpose === 'offer clause draft').length === (capBefore.ai_calls || []).filter(x => x.purpose === 'offer clause draft').length, 'at the daily cap: refused, and no call made');
   // a vendor's own phone, typed in another format, never goes on: left off and blocking
   const off3 = (await rpc(q, 'agent_offer_add', { p_property: 'P1', p_offer: offer({ conditions: [], chattels_add: ['Ring the vendor on +64 21 000 1111 about the spa'], chattels_exclude: [] }) })).data;
