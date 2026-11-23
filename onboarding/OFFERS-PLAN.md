@@ -67,6 +67,10 @@ Database changes are additive. Tests never email real buyers or vendors.
 
 ## Phase 1 detail: the offer form (Tim, 23 November 2026)
 
+Status: built 23 November 2026 on branch `offers-phase1` (migration 018, written and tested in a rollback block on the live
+project; not applied). Not yet reviewed, pushed or deployed. New edge function `offer-public` (fn/offer_public.ts, JWT
+verification off); doc-prefill gains the `offer_condition` mode and must be redeployed with JWT verification off.
+
 Fields carried over from the Jotform: contact email and phone; seen the property documents (yes/no, with the link);
 sign digitally or meet in person (first-time buyers steered to in person); settlement date; price; conditions;
 address of a property to be sold; KiwiSaver; entity name; purchasers (as many as needed: legal first names, last
@@ -105,5 +109,53 @@ choose it, the printed clause is struck out at drafting (phase 2). Where the buy
 them plainly that they can talk to a lawyer at any time before going further, as Tim's client and customer care
 obligations require (Tim, 23 November 2026).
 
+Added by Tim, 23 November 2026 (built in phase 1):
+
+- GST, tucked away and folded by default. It opens only if the buyer says they are registered for GST for this purchase;
+  registration for an unrelated business does not count, and they check with their accountant if unsure. A short note that they
+  can always talk to their financial adviser first. Their answer (and GST number, if given) is recorded on the offer.
+- Advice prompts, one line each and unpressured: beside the builder's report, electrical and specified technical report
+  conditions, and at the conditions step, that they can talk to a builder or a technical professional (engineer, electrician and
+  so on) before going further. These sit alongside the lawyer note.
+- Chattels review: the buyer sees the chattels included in the sale, adds any extra chattels they want included, and lists any
+  expressly excluded (free-text rows), with the note that anything included as a chattel is expected to be in full working order
+  at settlement (elements, bulbs and so on). In phase 1 the list comes from a list Tim types on the property (agent only); phase 2
+  fills it from the blank. With none held the buyer sees "Tim will confirm the chattels list with you" and can still add and
+  exclude items. The list shown is recorded on the offer from the server, not from the page.
+- Lawyer details matter more: Tim never puts personal contact details on the REINZ form, only the lawyers' details, to protect
+  both parties' privacy. The form asks for the lawyer's firm and person more firmly (still optional, with the reason), tells the
+  buyer their own phone and email are used only by Tim and never go on the agreement, and the privacy notice says so. The
+  buyer's contact details and the lawyer's details are stored as separate fields, so phase 2 can place only the lawyer's. No
+  automatic lawyer lookup in phase 1.
+
 Open questions for Tim before phase 2: the wording of his electrical and technical report clauses and the Specified
 Due Diligence clauses as he wants them used (he is sending these).
+
+## Rules for later phases (Tim, 23 November 2026)
+
+Phase 2 (drafting):
+
+- Purchaser and vendor contact details never go on the REINZ form; only the lawyers' details do.
+- A lawyer lookup finds each lawyer's contact details from public sources (the firm's own website, the Law Society register). If no
+  direct dial or mobile for the named lawyer is found, it uses the firm's reception or main line. It shows Tim each value with its
+  source, for his tick, before use (the AI suggests, Tim ticks).
+- The date at the top of the agreement is left blank until Tim has reviewed the document and it is fully agreed. Tim then types it
+  in full with the month name (for example "23 November 2026").
+- The AI reads each blank's form and content, because every pack is different. Examples: acknowledgements, deletions such as on an
+  "as is, where is" property, unique title documents, an inserted LIM report, subdivision details for an off-the-plans sale. It
+  proposes initialling and signing places, and acknowledgement places, wherever the buyer must acknowledge something or a point
+  could be contentious and negotiated. Tim reviews and adjusts the places before release; nothing is placed without his tick.
+- The chattels list on the offer form comes from the blank (phase 1 uses the list Tim types on the property).
+
+Phases 3 and 4 (signing and counteroffers):
+
+- Each signer initials every box that has been marked or filled.
+- Each signer initials the bottom of every page, outside any box.
+- Each appended or inserted further term is initialled by each party.
+- Every part of the document can be marked with a finger or stylus.
+- Deletion and undeletion (reinstatement). Deletion is a horizontal line through text, or a crossed box drawn across a passage or a
+  box. Reinstatement restores struck text, with its own initials. Both are recorded in the trail with who and when.
+
+Phase 4 (presentation):
+
+- When presenting, the vendor is reminded that anything provided as a chattel must be in full working order at settlement.

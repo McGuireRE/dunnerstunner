@@ -72,6 +72,12 @@ function q(table){ logCall('from:'+table);
     if(['property_documents','property_document_events','repo_kinds'].includes(table)){ const r0=repoTable(table,op,payload,op==='update'?T.filter(r=>filters.every(f=>f(r))):[],single); if(r0) return r0; }
     // after signing (migrations 009 and 010): these tables are for the agent only. A vendor sees and writes nothing; nobody writes the
     // stage record directly (agent_set_stage does) or removes a row from any of them.
+    // migration 018: nobody but Tim reads the offer tables, nobody writes them directly, and an offer from the form changes only through the agent_offer_* functions
+    if((OFFER_TABLES.includes(table)||table==='property_offers')&&!(S&&S.user)) throw new Error('permission denied for table '+table);
+    if(OFFER_TABLES.includes(table)&&op!=='select') throw new Error('permission denied for table '+table);
+    if(table==='offer_settings'&&op==='select') OSET();
+    if(table==='property_offers'&&op==='insert'&&(Array.isArray(payload)?payload:[payload]).some(x=>x&&((x.source||'manual')!=='manual'||x.submission||x.details))) throw new Error('Offers from the form are only added through the form');
+    if(table==='property_offers'&&op==='update'&&(DB.property_offers||[]).some(r=>filters.every(f=>f(r))&&(r.source||'manual')!=='manual')) throw new Error('Offers from the form are changed through the Offers tile, so there is a record');
     if(AGENT_ONLY.includes(table)){ const vendor=S&&S.user&&!AGENTS.includes(S.user.email); if(vendor){ if(op==='select') return {data:single?undefined:[],error:single?{message:'not found'}:null}; throw new Error('new row violates row-level security policy for table "'+table+'"'); }
       if(op==='delete'||(table==='property_events'&&op!=='select')) throw new Error('permission denied for table '+table); }
     if((op==='insert'||op==='update'||op==='delete')&&['translations','translation_log','user_language','translation_sets'].includes(table)) throw new Error('new row violates row-level security policy for table "'+table+'"');
@@ -146,7 +152,7 @@ const DECL_TEXT=['faults','reno','internet','insulation','glazing'];
 const hasAnswer=(k,v)=>k==='tenanted'?['now','will','no'].includes(v):DECL_TEXT.includes(k)?isObj(v)&&String(v.d||'').trim()!=='':isObj(v)&&['yes','no','unknown'].includes(v.a);
 const needsAnswers=fm=>{ const d=fm.data||{}, pre=isObj(d.pre)?d.pre:{}, ans=isObj(d.answers)?d.answers:{}; return Object.keys(pre).some(k=>pre[k]==='inspection'&&!hasAnswer(k,k==='tenanted'?d.tenanted:ans[k])); };
 const NEED_ANSWER='Please answer each question Tim noted at the inspection';
-const AGENT_ONLY=['property_events','campaign_stats','buyer_feedback','property_offers'];
+const AGENT_ONLY=['property_events','campaign_stats','buyer_feedback','property_offers','offer_links','offer_events','offer_settings','offer_clauses','offer_hits'];
 function mkNotices(ag){ if((ag.answers||{}).prior!=='yes') return; (DB.prior_agency_notices||=[]); (ag.answers.priorAgencies||[]).forEach((x,i)=>{ if(x.agency&&!DB.prior_agency_notices.some(n=>n.agreement_id===ag.id&&n.idx===i)) DB.prior_agency_notices.push({id:uid(),agreement_id:ag.id,idx:i,agency:x.agency,agent_name:x.agent||null,email:x.email||null,kind:x.kind,dated:x.dated||null,status:'to_send',created_at:now()}); }); }
 const ok=d=>Promise.resolve({data:d,error:null}); const bad=m=>Promise.resolve({data:null,error:{message:m}});
 function rpc(name,a){ logCall('rpc:'+name); if(['agent_repo_add','agent_repo_set','agent_repo_share','agent_repo_archive','vendor_repo_list','agent_property_export'].includes(name)) return repoRpc(name,a); if(localStorage.getItem('trHang')==='1'&&['get_translations','set_my_language'].includes(name)) return new Promise(()=>{}); const before=new Map((DB.agreements||[]).map(x=>[x.id,JSON.parse(JSON.stringify(x))]));
@@ -157,6 +163,8 @@ function rpcInner(name,a){
   const me=S&&S.user; const ag=a&&a.a?DB.agreements.find(x=>x.id===a.a):null;
   const mine=()=>DB.agreement_people.find(p=>p.agreement_id===a.a&&p.user_id===me.id);
   if(name.startsWith('agent_council_')) return councilRpc(name,a,me);
+  if(name.startsWith('agent_offer_')) return offerRpc(name,a,me);
+  if(name.startsWith('offer_public_')) return bad('permission denied for function '+name);
   const V=()=>(DB.agreement_variations||=[]), VS=()=>(DB.variation_signatures||=[]);
   const vafter=(vr)=>{ const rem=DB.agreement_people.filter(p=>p.agreement_id===vr.agreement_id&&p.legal_name&&p.signed_at&&!VS().some(s=>s.variation_id===vr.id&&s.person_id===p.id)).length; if(!rem){vr.status='signed';vr.signed_at=now();} save(); return ok({remaining:rem}); };
   if(name==='agent_new_variation'){ if(!['signed','countersigned'].includes(ag.status)) return bad('Only a signed agreement can be varied or extended'); if(V().some(v=>v.agreement_id===a.a&&['draft','sent'].includes(v.status))) return bad('Finish or withdraw the open variation first'); const n=V().filter(v=>v.agreement_id===a.a).reduce((m,v)=>Math.max(m,v.number),0)+1; const r={id:uid(),agreement_id:a.a,number:n,status:'draft',changes:{},summary:[],created_at:now()}; V().push(r); save(); return ok(r.id); }
@@ -315,6 +323,98 @@ const CL=()=>(DB.council_lookups||=[]), CUL=()=>(DB.council_use_log||=[]);
 const cNorm=t=>String(t||'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
 const isAgentMe=()=>!!(S&&S.user&&AGENTS.includes(S.user.email));
 function councilTable(op){ if(offline()) throw new Error('Failed to fetch'); if(op!=='select') throw new Error('permission denied for this table'); if(!isAgentMe()) return {data:[],error:null}; return null; }
+// ── the offer form (mirrors migrations/018_offer_form.sql and fn/offer_public_handler.ts) ──
+// Vendors and anyone not signed in get nothing from the offer tables. The public door is functions.invoke('offer-public') (info,
+// submit) and doc-prefill's offer_condition mode (help wording a condition). localStorage mockNet names the caller's network (for
+// the rate limits); offerAiMode = 'off' | 'fail' | 'unsuitable' changes the helper's answer. No email is ever sent: the
+// notification is recorded in email_log with mock: true.
+const OFFER_TABLES=['offer_links','offer_events','offer_settings','offer_clauses','offer_hits'];
+const OL=()=>(DB.offer_links||=[]), OE=()=>(DB.offer_events||=[]), OH=()=>(DB.offer_hits||=[]), PO=()=>(DB.property_offers||=[]);
+const OSET=()=>{ DB.offer_settings||=[]; if(!DB.offer_settings.length) DB.offer_settings.push({id:true,ks_warn_working_days:15,ai_daily_cap:40,updated_at:now()}); return DB.offer_settings[0]; };
+const offerStageOk=s=>['signed','live','under_offer'].includes(s);
+const offerToken=()=>{ const b=new Uint8Array(32); crypto.getRandomValues(b); return btoa(String.fromCharCode(...b)).replace(/=+$/,'').replace(/\+/g,'-').replace(/\//g,'_'); };
+const TOKEN_RE=/^[A-Za-z0-9_-]{40,64}$/;
+function offerLive(tok){ if(!TOKEN_RE.test(String(tok||''))) return null; const l=OL().find(x=>x.token===tok&&x.open); if(!l) return null; const p=PT().find(x=>x.id===l.property_id); return p&&offerStageOk(p.stage)?l:null; }
+const hits=(kind,net,pid,ms)=>OH().filter(h=>h.kind===kind&&Date.now()-Date.parse(h.at)<ms&&(net==null||h.net===net)&&(pid==null||h.property_id===pid)).length;
+const mockNet=()=>{ try{ return localStorage.getItem('mockNet')||'net-1'; }catch(_){ return 'net-1'; } };
+const nzToday0=()=>new Date().toLocaleDateString('en-CA',{timeZone:'Pacific/Auckland'});
+// offer_clean(): known fields only, each checked and capped. Throws the first problem in plain words.
+function offerClean(p,agent){ const O=window.OFFERS; if(!p||typeof p!=='object'||Array.isArray(p)) throw new Error('Nothing was sent'); if(JSON.stringify(p).length>60000) throw new Error('That is more than the form can take');
+  const t=v=>{ const s=String(v??'').replace(/[\u0001-\u0008\u000B\u000C\u000E-\u001F\u007F]/g,'').trim(); return s||null; };
+  const cap=(v,n,what)=>{ const s=t(v); if(s&&s.length>n) throw new Error(`Please shorten ${what}: ${n} characters at most`); return s; };
+  const errs=O.validate(Object.assign({},p,{email:agent&&!t(p.email)?'x@x.nz':p.email}),{skipDates:true});
+  if(errs.length) throw new Error(errs[0].text.replace(/\.$/,''));
+  const today=nzToday0(), minDay=agent?O.addDays(today,-90):today, maxDay=O.addDays(today,1100), dOk=d=>{ if(!d) return null; if(!O.isDate(d)||d<minDay||d>maxDay) throw new Error('The date for a condition needs to be from today to three years ahead'); return d; };
+  const keys=O.CONDITIONS.map(c=>c.key).concat('custom'), seen=[];
+  const conds=(p.conditions||[]).map(c=>{ if(!keys.includes(c.key)||seen.includes(c.key)) throw new Error('Please check the conditions'); seen.push(c.key);
+    const n=c.days===''||c.days==null?null:Math.floor(+c.days); const d=dOk(t(c.date)); if(!d&&!(n>=1&&n<=250)) throw new Error('Please add the working days or a date for each condition');
+    const o={key:c.key}; if(d) o.date=d; else o.days=n; if(c.key==='technical') o.detail=cap(c.detail,300,'the kind of technical report'); if(c.key==='custom'){ const w=cap(c.wording,2000,'your condition'), r=cap(c.request,600,'your description'); if(w) o.wording=w; if(r) o.request=r; o.ai=c.ai===true; } return o; });
+  const s=p.settlement||{}; const settlement=s.kind==='date'?{kind:'date',date:dOk(t(s.date))}:{kind:'relative',days:Math.floor(+s.days)};
+  if(settlement.kind==='relative'&&!(settlement.days>=1&&settlement.days<=250)) throw new Error('Please add the settlement working days');
+  const lw=p.lawyer||{};
+  return {email:(cap(p.email,254,'your email')||'').toLowerCase()||null,phone:cap(p.phone,40,'your phone number'),seen_docs:p.seen_docs,sign:p.sign,price:+String(p.price).replace(/[$, ]/g,''),settlement,conditions:conds,lawyer_approval:seen.includes('lawyer'),
+    sale_address:seen.includes('sale')?cap(p.sale_address,300,'the address'):null,kiwisaver:p.kiwisaver,entity:cap(p.entity,200,'the company or trust name'),nominee:p.nominee!==false,
+    purchasers:(p.purchasers||[]).map(x=>({first:cap(x.first,120,'first names'),last:cap(x.last,120,'last name'),email:(cap(x.email,254,'email')||'').toLowerCase()||null,phone:cap(x.phone,40,'phone')})),
+    chattels_add:(p.chattels_add||[]).map(x=>cap(x,200,'each chattel')).filter(Boolean),chattels_exclude:(p.chattels_exclude||[]).map(x=>cap(x,200,'each chattel')).filter(Boolean),
+    gst_registered:typeof p.gst_registered==='boolean'?p.gst_registered:null,gst_number:p.gst_registered===true?cap(p.gst_number,40,'the GST number'):null,
+    comments:cap(p.comments,3000,'your comments'),lawyer:{firm:cap(lw.firm,200,'the law firm'),person:cap(lw.person,200,'the lawyer'),email:(cap(lw.email,254,'email')||'').toLowerCase()||null,phone:cap(lw.phone,40,'phone')},
+    related:p.related,date_help:p.date_help===true,privacy:true,v:1}; }
+const offerLabel=d=>(d.entity||(d.purchasers||[]).map(x=>((x.first||'')+' '+(x.last||'')).trim()).join(', ')).slice(0,200);
+function offerRow(pid,d,source,by,prov){ const r={id:uid(),property_id:pid,agreement_id:null,received_at:now(),buyer_ref:offerLabel(d),amount:d.price,conditions:d.conditions.map(c=>c.key).join(', '),expires_at:null,status:'received',notes:null,entered_by:by,created_at:now(),updated_at:now(),
+  source,submission:JSON.parse(JSON.stringify(d)),details:d,kiwisaver:d.kiwisaver,lawyer_approval:d.lawyer_approval,needs_date_help:d.date_help,related_party:d.related,province:prov||'otago',as_at:nzToday0(),read_at:source==='agent'?now():null,read_by:source==='agent'?by:null,
+  status_at:null,status_by:null,gap_override_reason:null,gap_override_by:null,gap_override_at:null,net_hash:source==='buyer'?'h:'+mockNet().length:null,notified_at:null,notify_error:null}; PO().push(r); OE().push({id:OE().length+1,property_id:pid,offer_id:r.id,at:now(),actor:by,kind:'submitted',detail:{source}}); return r; }
+function offerInvoke(o){ const b=(o&&o.body)||{}, net=mockNet(); const res=(data,status)=>status&&status>=400?Promise.resolve({data:null,error:{message:String(status),context:{json:async()=>data}}}):ok(data);
+  const calls=JSON.parse(localStorage.getItem('offerCalls')||'[]'); calls.push(b.action); localStorage.setItem('offerCalls',JSON.stringify(calls));
+  if(offline()) return Promise.resolve({data:null,error:{message:'Failed to fetch'}});
+  if(!['info','submit'].includes(b.action)) return res({error:'Bad request'},400);
+  if(!TOKEN_RE.test(String(b.token||''))) return ok({ok:false});
+  if(hits('bad',net,null,36e5)>=30) return ok({ok:false,reason:'busy'});
+  const l=offerLive(b.token); if(!l){ OH().push({at:now(),kind:'bad',net}); save(); return ok({ok:false,reason:b.action==='submit'?'closed':undefined}); }
+  const p=PT().find(x=>x.id===l.property_id);
+  if(b.action==='info'){ OH().push({at:now(),kind:'info',net,property_id:l.property_id}); save(); const w={}; (DB.offer_clauses||[]).forEach(c=>{ if(c.wording) w[c.key]=c.wording; }); return ok({ok:true,open:true,address:p.address,province:l.province,ks_days:OSET().ks_warn_working_days,wording:w,chattels:(l.chattels||[]).slice()}); }
+  if(typeof b.website==='string'&&b.website.trim()) return ok({ok:true,ref:'RECEIVED'});
+  if(hits('submit',net,null,6e5)>=3||hits('submit',net,null,864e5)>=10||hits('submit',null,l.property_id,6e5)>=6||hits('submit',null,l.property_id,864e5)>=30) return ok({ok:false,reason:'busy'});
+  let d; try{ d=offerClean(b.offer,false); }catch(e){ return res({ok:false,error:e.message},400); } d.chattels_listed=(l.chattels||[]).slice();   // the list shown comes from the link, never the page
+  OH().push({at:now(),kind:'submit',net,property_id:l.property_id}); const r=offerRow(l.property_id,d,'buyer','buyer form',l.province);
+  (DB.email_log||=[]).push({id:(DB.email_log.length+1),agreement_id:null,at:now(),kind:'offer_received',recipients:'tim',subject:'New offer: '+p.address,ok:true,mock:true}); r.notified_at=now(); save();
+  return ok({ok:true,ref:r.id.replace(/-/g,'').slice(0,8).toUpperCase()}); }
+function offerDraftInvoke(o){ const b=(o&&o.body)||{}, net=mockNet(), m=localStorage.getItem('offerAiMode');
+  const calls=JSON.parse(localStorage.getItem('offerCalls')||'[]'); calls.push('draft'); localStorage.setItem('offerCalls',JSON.stringify(calls));
+  if(m==='off') return ok({ok:false,reason:'off'}); const t=String(b.text||'').trim();
+  if(t.length<10||t.length>600) return Promise.resolve({data:null,error:{message:'400',context:{json:async()=>({ok:false,error:t.length<10?'Please describe what you need in a few more words.':'Please keep it under 600 characters.'})}}});
+  const l=offerLive(b.token); if(!l) return ok({ok:false,reason:'closed'});
+  if(hits('ai',null,null,864e5)>=OSET().ai_daily_cap) return ok({ok:false,reason:'cap'});
+  if(hits('ai',net,null,36e5)>=5||hits('ai',net,null,864e5)>=12||hits('ai',null,l.property_id,36e5)>=8||hits('ai',null,l.property_id,864e5)>=20) return ok({ok:false,reason:'busy'});
+  OH().push({at:now(),kind:'ai',net,property_id:l.property_id}); (DB.ai_calls||=[]).push({id:(DB.ai_calls.length+1),at:now(),purpose:'offer condition draft',model:'claude-sonnet-5-5',ok:m!=='fail',agent:'buyer form'}); save();
+  if(m==='fail') return ok({ok:false,reason:'failed'});
+  if(m==='unsuitable') return ok({ok:false,reason:'unsuitable',why:'That does not look like a condition for buying this property.'});
+  return ok({ok:true,draft:true,wording:'This agreement is conditional upon the purchaser being satisfied that '+t.replace(/[<>]/g,'').slice(0,120)+', by the condition date.',summary:'You check this before the agreement goes ahead.'}); }
+function offerRpc(name,a,me){ if(!me||!AGENTS.includes(me.email)) return bad('Only Tim can do this');
+  const fnd=id=>PO().find(x=>x.id===id&&x.source!=='manual'); const ev=(pid,oid,kind,detail)=>OE().push({id:OE().length+1,property_id:pid,offer_id:oid||null,at:now(),actor:me.email,kind,detail:detail||{}});
+  if(name==='agent_offer_link'){ const p=PT().find(x=>x.id===a.p_property); if(!p) return bad('No such property'); let l=OL().find(x=>x.property_id===p.id);
+    if(a.p_action==='open'&&!offerStageOk(p.stage)) return bad(`Offers open once the agreement is signed and the property is on the market (now: ${p.stage})`);   // refused before anything is made, as the database rolls back
+    if(!l){ l={property_id:p.id,token:offerToken(),open:false,province:a.p_province||'otago',opened_at:null,closed_at:null,regenerated_at:null,updated_by:me.email,created_at:now(),updated_at:now()}; OL().push(l); ev(p.id,null,'link_made',{province:l.province}); }
+    if(a.p_action==='open'){ if(!offerStageOk(p.stage)) return bad(`Offers open once the agreement is signed and the property is on the market (now: ${p.stage})`); if(!l.open){ l.open=true; l.opened_at=now(); ev(p.id,null,'link_opened'); } }
+    else if(a.p_action==='close'){ if(l.open){ l.open=false; l.closed_at=now(); ev(p.id,null,'link_closed'); } }
+    else if(a.p_action==='regenerate'){ l.token=offerToken(); l.regenerated_at=now(); ev(p.id,null,'link_regenerated'); }
+    else if(a.p_action==='province'){ l.province=a.p_province; ev(p.id,null,'link_province',{province:a.p_province}); }
+    else if(a.p_action!=='get') return bad('Unknown action');
+    l.updated_at=now(); return ok({property_id:p.id,token:l.token,open:l.open,live:l.open&&offerStageOk(p.stage),province:l.province,stage:p.stage}); }
+  if(name==='agent_offer_chattels'){ const p=PT().find(x=>x.id===a.p_property); if(!p) return bad('No such property'); if(!Array.isArray(a.p_items)||a.p_items.length>60) return bad('Up to 60 chattels');
+    if(a.p_items.some(x=>String(x??'').trim().length>200)) return bad('Please shorten each chattel: 200 characters at most'); const items=a.p_items.map(x=>String(x??'').trim()).filter(Boolean);
+    offerRpc('agent_offer_link',{p_property:p.id,p_action:'get'},me); const l=OL().find(x=>x.property_id===p.id); const before=l.chattels||[]; l.chattels=items; ev(p.id,null,'chattels',{before,after:items}); return ok(items); }
+  if(name==='agent_offer_add'){ const p=PT().find(x=>x.id===a.p_property); if(!p) return bad('No such property'); let d; try{ d=offerClean(a.p_offer,true); }catch(e){ return bad(e.message); } const l=OL().find(x=>x.property_id===p.id); d.chattels_listed=((l&&l.chattels)||[]).slice(); return ok(offerRow(p.id,d,'agent',me.email,l&&l.province).id); }
+  if(name==='agent_offer_correct'){ const o=fnd(a.p_offer); if(!o) return bad('No such offer'); const note=String(a.p_note||'').trim(); if(note.length<3||note.length>500) return bad('Say what changed and how you heard (3 to 500 characters)');
+    let d; try{ d=offerClean(a.p_details,true); }catch(e){ return bad(e.message); } d.chattels_listed=(o.details.chattels_listed||[]).slice(); const before=o.details; Object.assign(o,{details:d,amount:d.price,conditions:d.conditions.map(c=>c.key).join(', '),buyer_ref:offerLabel(d),kiwisaver:d.kiwisaver,lawyer_approval:d.lawyer_approval,needs_date_help:d.date_help,related_party:d.related,updated_at:now()}); ev(o.property_id,o.id,'corrected',{note,before,after:d}); return ok(d); }
+  if(name==='agent_offer_status'){ const o=fnd(a.p_offer); if(!o) return bad('No such offer'); if(!['withdrawn','lapsed','received'].includes(a.p_status)) return bad('Choose withdrawn or lapsed'); const at=a.p_at||now();
+    if(Date.parse(at)>Date.now()+3e5||Date.parse(at)<Date.parse(o.received_at)-6e4) return bad('The time needs to be between when the offer came in and now'); const from=o.status; o.status=a.p_status; o.status_at=a.p_status==='received'?null:at; o.status_by=me.email; ev(o.property_id,o.id,'status',{from,to:a.p_status,at,note:(a.p_note||'').trim()||null}); return ok(null); }
+  if(name==='agent_offer_read'){ const o=PO().find(x=>x.id===a.p_offer); if(!o) return bad('No such offer'); if(!o.read_at){ o.read_at=now(); o.read_by=me.email; ev(o.property_id,o.id,'read'); } return ok(null); }
+  if(name==='agent_offer_gap'){ const o=fnd(a.p_offer); if(!o) return bad('No such offer'); const r=String(a.p_reason||'').trim()||null; if(r&&(r.length<5||r.length>500)) return bad('Give your reason (5 to 500 characters)');
+    o.gap_override_reason=r; o.gap_override_by=r?me.email:null; o.gap_override_at=r?now():null; ev(o.property_id,o.id,r?'gap_override':'gap_override_cleared',{reason:r}); return ok(null); }
+  if(name==='agent_offer_settings'){ const n=+a.p_ks_days; if(!(n>=1&&n<=60)||n!==Math.floor(n)) return bad('Choose 1 to 60 working days'); Object.assign(OSET(),{ks_warn_working_days:n,updated_by:me.email,updated_at:now()}); return ok(null); }
+  if(name==='agent_offer_clause'){ if(!['electrical','technical','sale','sdd'].includes(a.p_key)) return bad('Only your own clauses are held here'); const w=String(a.p_wording||'').trim()||null; if(w&&w.length>4000) return bad('That wording is too long (4,000 characters at most)');
+    DB.offer_clauses||=[]; const c=DB.offer_clauses.find(x=>x.key===a.p_key); if(c) Object.assign(c,{wording:w,updated_by:me.email,updated_at:now()}); else DB.offer_clauses.push({key:a.p_key,wording:w,updated_by:me.email,updated_at:now()}); return ok(null); }
+  return bad('unknown rpc '+name); }
 function councilInvoke(o){ const mode=localStorage.getItem('councilMode');
   if(mode==='offline'||offline()) return Promise.resolve({data:null,error:{name:'FunctionsFetchError',message:'Failed to send a request to the Edge Function'}});
   if(mode==='hang') return new Promise(()=>{});
@@ -528,7 +628,7 @@ function repoRpc(name,a){
     return ok(out); }
   return bad('unknown rpc '+name); }
 window.supabase={createClient(){ return {
-  from:q, rpc, functions:{invoke:(n,o)=>{ logCall('fn:'+n+(o&&o.body&&o.body.mode?':'+o.body.mode:'')); if(n==='property-lookup') return councilInvoke(o); if(n==='repo-link') return repoLinkInvoke(o); if(n==='doc-prefill'&&o.body&&o.body.mode==='translate'){ const reqs=JSON.parse(localStorage.getItem('trReqs')||'[]'); reqs.push(o.body); localStorage.setItem('trReqs',JSON.stringify(reqs)); const m=localStorage.getItem('translateMode'); if(m==='off') return Promise.resolve({data:null,error:{message:'503',context:{json:async()=>({error:'not_set_up'})}}}); const src=o.body.sources; const rej=m==='rejectFirst'?[src[0]]:[]; let cutL=[]; let use=src.filter(x=>!rej.includes(x)); if(m==='cutOff'){ const h=src.length>1?Math.floor(src.length/2):0; cutL=src.slice(h); use=src.slice(0,h); } const resp={ok:true,model:o.body.kind==='screens'||o.body.kind==='guide'?'claude-sonnet-5-5':'claude-haiku-5-5',cut_off:m==='cutOff',translations:use.map(x=>({source:x,text:'<'+o.body.lang+'> '+x})),rejected:rej.map(x=>({source:x,reason:'number changed'})).concat(cutL.map(x=>({source:x,reason:'cut off'}))),usage:{input:10,output:10}}; const D=+localStorage.getItem('translateDelay')||0; return D?new Promise(r=>setTimeout(()=>r({data:resp,error:null}),D)):ok(resp); }
+  from:q, rpc, functions:{invoke:(n,o)=>{ logCall('fn:'+n+(o&&o.body&&o.body.mode?':'+o.body.mode:'')); if(n==='property-lookup') return councilInvoke(o); if(n==='offer-public') return offerInvoke(o); if(n==='doc-prefill'&&o&&o.body&&o.body.mode==='offer_condition') return offerDraftInvoke(o); if(n==='repo-link') return repoLinkInvoke(o); if(n==='doc-prefill'&&o.body&&o.body.mode==='translate'){ const reqs=JSON.parse(localStorage.getItem('trReqs')||'[]'); reqs.push(o.body); localStorage.setItem('trReqs',JSON.stringify(reqs)); const m=localStorage.getItem('translateMode'); if(m==='off') return Promise.resolve({data:null,error:{message:'503',context:{json:async()=>({error:'not_set_up'})}}}); const src=o.body.sources; const rej=m==='rejectFirst'?[src[0]]:[]; let cutL=[]; let use=src.filter(x=>!rej.includes(x)); if(m==='cutOff'){ const h=src.length>1?Math.floor(src.length/2):0; cutL=src.slice(h); use=src.slice(0,h); } const resp={ok:true,model:o.body.kind==='screens'||o.body.kind==='guide'?'claude-sonnet-5-5':'claude-haiku-5-5',cut_off:m==='cutOff',translations:use.map(x=>({source:x,text:'<'+o.body.lang+'> '+x})),rejected:rej.map(x=>({source:x,reason:'number changed'})).concat(cutL.map(x=>({source:x,reason:'cut off'}))),usage:{input:10,output:10}}; const D=+localStorage.getItem('translateDelay')||0; return D?new Promise(r=>setTimeout(()=>r({data:resp,error:null}),D)):ok(resp); }
     if(n==='doc-prefill'){ const mode=localStorage.getItem('prefillMode'); if(mode==='off') return Promise.resolve({data:null,error:{message:'503',context:{json:async()=>({error:'not_set_up'})}}}); return ok({ok:true,skipped:[],result:JSON.parse(localStorage.getItem('prefillResult'))}); }const a=JSON.parse(localStorage.getItem('inv')||'[]');a.push(n+':'+o.body.type);localStorage.setItem('inv',JSON.stringify(a));
     if(n==='notify'&&o.body.type==='form_signed'){ const fm=(DB.property_forms||[]).find(x=>x.id===o.body.form_id); if(fm&&fm.status==='signed'&&(fm.kind==='healthy_homes'||fm.countersigned_at)&&!fm.document_id&&fm.agreement_id===o.body.agreement_id){ const d={id:uid(),property_id:fm.property_id,kind:fm.kind==='healthy_homes'?'Healthy Homes checklist and statement':'Vendor Declaration',name:(fm.kind==='healthy_homes'?'Healthy-Homes-Checklist-and-Statement':'Vendor-Declaration')+'.pdf',path:'properties/'+fm.property_id+'/generated/'+fm.id+'.pdf',source:'generated',created_by:'system',created_at:now(),bucket:'private',folder:'agency'}; (DB.property_documents||=[]).push(d); fm.document_id=d.id; save(); } }
     return ok({ok:true});}},

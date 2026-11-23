@@ -199,3 +199,27 @@ agreements/<agreement id>/signatures/... (vendors may upload their own signature
 - `wellbeing_docs` (user_id, path, body jsonb, updated_at; primary key user_id + path). Tim's personal wellbeing app at
   `/wellbeing/`. `path` is `config/main` or `days/YYYY-MM-DD`. One policy, `wb_own`: the signed-in agent reads and writes
   only their own rows. Vendors and anon have no access. `wellbeing_touch` trigger sets `updated_at`.
+
+## 018 The offer form (offers phase 1, 23 November 2026; written and tested in a rollback block on the live project, to be applied with Tim's OK)
+- `offer_links` (property_id, token 43 url-safe characters, open (default false), province (holidays for working days), chattels
+  (the list Tim types; buyers see it), opened_at, closed_at, regenerated_at, updated_by). Agent reads; nobody writes directly.
+- `offer_settings` (one row: ks_warn_working_days default 15, ai_daily_cap default 40, net_salt never readable by signed-in users).
+- `offer_clauses` (Tim's own wording for electrical, technical, sale, sdd; REINZ conditions are never held). Agent reads.
+- `offer_events`: permanent record (link made, opened, closed, regenerated, province, chattels; offer submitted, read, corrected with
+  before, after and note, status, gap override). Agent reads; rows can't be changed or removed.
+- `offer_hits`: rate limiting for the public door (hashed network address only). No policy at all; kept two days.
+- `property_offers` gains source (manual, buyer, agent), submission (what was sent, never changed), details (as it stands),
+  kiwisaver, lawyer_approval, needs_date_help, related_party, province, as_at, read_at/by, status_at/by, gap_override_reason/by/at,
+  net_hash, notified_at, notify_error. `guard_offer`: no offer is ever deleted; submission, source, property and net_hash never
+  change; a form offer changes only through the functions below. Rows from 010 ('manual') behave as before.
+- Offer details (jsonb, `offer_clean`): email, phone (the buyer's own, never on the agreement), seen_docs, sign, price, settlement
+  ({kind relative, days} or {kind date, date}), conditions ([{key, days or date, detail, wording, request, ai}]), lawyer_approval,
+  sale_address, kiwisaver, entity, nominee, purchasers ([{first, last, email, phone}], 1 to 12), comments, lawyer ({firm, person,
+  email, phone}, kept apart from the buyer's details), related, date_help, privacy, chattels_add, chattels_exclude,
+  chattels_listed (from the link, never the page), gst_registered, gst_number, v.
+- Public door, service role only (the offer-public edge function): `offer_public_info(token, net)`, `offer_public_submit(token,
+  offer, net)`, `offer_public_ai_claim(token, net)`, `offer_public_notified(offer, error)`. Anon and signed-in users can run none.
+- Tim: `agent_offer_link(property, action get|open|close|regenerate|province, province)` (open only at signed, live or under
+  offer), `agent_offer_add`, `agent_offer_correct(offer, details, note)`, `agent_offer_status(offer, withdrawn|lapsed|received, at,
+  note)`, `agent_offer_read`, `agent_offer_gap(offer, reason)`, `agent_offer_settings(ks_days)`, `agent_offer_clause(key, wording)`,
+  `agent_offer_chattels(property, items)`. Vendors: no policy and no function: they see nothing.

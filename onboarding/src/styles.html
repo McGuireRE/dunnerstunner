@@ -618,4 +618,68 @@ body.is-agent .tr-help { display: none; }
 .rq-err:empty { display: none; }
 .rq-sum { margin: 8px 0 0; }
 @media print { .repo-add, .repo-acts, #repoExport { display: none !important; } }
+/* the offer form (offers phase 1) */
+.of-page { max-width: 720px; }
+.of-page h2 { margin-top: 0; }
+.of-sec { margin: 14px 0; }
+.of-sec.of-bad { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.of-secerr:empty { display: none; }
+.of-addr { margin-top: -4px; overflow-wrap: anywhere; }
+.of-gh { font-size: 15px; margin: 14px 0 6px; }
+.of-crow { border-bottom: 1px solid var(--line); padding: 6px 0; }
+.of-chead { display: flex; gap: 8px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+.of-chead .choice { flex: 1 1 220px; min-width: 0; border: none; padding: 8px 4px; background: none; box-shadow: none; }
+.of-chead .choice:has(input:checked) { box-shadow: none; }
+.of-cinfo { white-space: nowrap; font-size: 14.5px; }
+.of-csub { padding: 2px 0 10px 36px; }
+.of-when { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+.of-when > div { flex: 1 1 130px; min-width: 0; }
+.of-when input { width: 100%; }
+.of-or { padding-bottom: 12px; color: var(--muted); font-size: 14px; }
+.of-calc { margin: 6px 0 0; }
+.of-lawnote { background: var(--accent-soft); border-radius: 6px; padding: 8px 10px; }
+.of-other { margin: 10px 0 4px; border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; }
+.of-other > summary { cursor: pointer; font-weight: 500; }
+.of-ov { position: fixed; z-index: 30; left: 50%; bottom: calc(14px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); width: min(480px, calc(100% - 24px)); max-height: 60vh; overflow-y: auto; background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,.25); padding: 14px 16px; }
+.of-ov[hidden] { display: none; }
+.of-ov-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.of-ov-head h3 { margin: 0; }
+.of-wording { border-left: 3px solid var(--line); padding: 2px 0 2px 10px; margin: 8px 0; }
+.of-wording p { margin: 2px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+table.sum.of-sum td:last-child, table.sum.of-dates td:last-child { white-space: normal; text-align: left; overflow-wrap: anywhere; }
+table.sum.of-sum td:first-child, table.sum.of-dates td:first-child { width: 40%; padding-right: 10px; color: var(--muted); }
+.of-ul { margin: 0; padding-left: 18px; }
+.of-pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.of-phead { display: flex; justify-content: space-between; align-items: baseline; }
+.of-phead h3 { margin: 0; }
+.of-person { margin: 8px 0; }
+.of-hp { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+.pill.of-new, .pill.of-hot { background: var(--accent); color: #fff; }
+.pill.of-warnp { background: var(--warn-soft); color: var(--warn); }
+.pill.of-off { background: var(--line); color: var(--muted); }
+.pill.of-draft { background: var(--warn-soft); color: var(--warn); }
+.of-list { list-style: none; margin: 8px 0 0; padding: 0; }
+.of-row { display: flex; flex-direction: column; gap: 2px; width: 100%; text-align: left; background: none; border: none; border-top: 1px solid var(--line); padding: 10px 0; color: inherit; font: inherit; cursor: pointer; }
+.of-row:hover { background: var(--accent-soft); }
+.of-r1, .of-r2 { overflow-wrap: anywhere; }
+.of-flags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
+.of-link { font-size: 13px; }
+.of-qr { text-align: center; margin: 8px 0; }
+.of-qrimg { display: inline-block; width: min(240px, 100%); background: #fff; padding: 8px; border-radius: 8px; }
+.of-qrimg svg { width: 100%; height: auto; display: block; }
+.of-more { margin-top: 10px; }
+.of-more select { width: 100%; }
+.of-related h3 { color: var(--accent); }
+.of-advice { color: var(--muted); margin: 6px 0 0; }
+.of-chin { display: flex; gap: 8px; align-items: center; }
+.of-chin input { flex: 1 1 auto; min-width: 0; }
+.of-gstd > summary { cursor: pointer; font-weight: 500; }
+#offCh { width: 100%; }
+@media print {
+  .of-ov, .of-hp { display: none !important; }
+  body.print-qr * { visibility: hidden; }
+  body.print-qr #offQr, body.print-qr #offQr * { visibility: visible; }
+  body.print-qr #offQr { position: absolute; left: 0; top: 0; width: 100%; }
+  body.print-qr .of-qrimg { width: 120mm; }
+}
 </style>

@@ -1192,6 +1192,7 @@ function lawyerForm(id, title, blurb) {
     let pforms = []; if (live) { try { const { data, error } = await sb.from('property_forms').select('*').eq('agreement_id', live.id); if (!error) pforms = data || []; } catch (_) { } }
     let pinsp = []; try { const { data, error } = await sb.from('property_inspections').select('id,status,started_at,finished_at,sent_at,facts,declaration').eq('property_id', id).order('started_at', { ascending: false }); if (!error) pinsp = (data || []).filter(x => !p.cycle_at || x.started_at >= p.cycle_at); } catch (_) { }
     let pevents = []; try { const { data, error } = await sb.from('property_events').select('at,actor,kind,detail').eq('property_id', id).order('at', { ascending: false }); if (!error) pevents = data || []; } catch (_) { }
+    const OFX = await offersLoad(id);   // the Offers tile (offers phase 1): agent only
     const pl = pls.find(x => x.status !== 'closed' && (!p.cycle_at || x.created_at >= p.cycle_at)) || null;   // only this round's pre-listing
     const byRole = r => people.filter(x => (x.role || 'owner') === r).map(x => Object.assign({ _orig_name: x.legal_name }, x));
     PF = { p, people: byRole('owner'), contacts: byRole('contact'), formers: byRole('former'), docs, pls, ags, liveAgreement: live, removed: [] };
@@ -1229,6 +1230,7 @@ function lawyerForm(id, title, blurb) {
         ${inspTileHTML(pinsp)}
         ${formsTileHTML(pforms, live)}
         ${stageTileHTML(p, govAg, pevents)}
+        ${offersTileHTML(p, OFX)}
         ${jTileHTML(p, live, pforms, pl)}
         ${crTileHTML(p)}
       </div>
@@ -1259,6 +1261,7 @@ function lawyerForm(id, title, blurb) {
     const jt = $('#jToggle'); if (jt) jt.addEventListener('click', () => { const l = $('#jListA'); const on = !l.classList.contains('open'); l.classList.toggle('open', on); const tl = $('#jTile'); if (tl) tl.classList.toggle('jopen', on); jt.setAttribute('aria-expanded', on); jt.textContent = on ? 'Show the current stop only' : 'Show every stop'; });
     $$('[data-agopen]').forEach(b => b.addEventListener('click', () => viewAgentDetail(b.dataset.agopen)));
     wireStageTile(id, p, inForce);
+    offersTileWire(p, OFX);
     crWireProperty(p);
     $$('[data-openlive]').forEach(b => b.addEventListener('click', () => live && viewAgentDetail(live.id)));
     $$('[data-plopen]').forEach(b => b.addEventListener('click', () => viewPrelistingAgent(b.dataset.plopen)));
@@ -2186,6 +2189,9 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const addr = id => (rows.find(r => r.id === id) || {}).address || 'Agreement';
     const needs = [];
     const insps = await safe(sb.from('property_inspections').select('id,property_id,status,started_at').eq('status', 'in_progress'));
+    // offers from the form that Tim hasn't opened yet (offers phase 1)
+    const fresh = await safe(sb.from('property_offers').select('id,property_id,amount,received_at,related_party,source').is('read_at', null).order('received_at', { ascending: false }));
+    fresh.filter(o => o.source === 'buyer').forEach(o => { const pr = props.find(p => p.id === o.property_id); needs.push({ what: o.related_party ? 'New offer: a purchaser is connected with you' : 'New offer to read', where: (pr && pr.address) || 'Property', sub: money(+o.amount) + ', ' + fmtDT(o.received_at), go: () => viewOfferAgent(o.id), hot: true, offer: o.id }); });
     insps.forEach(x => { const pr = props.find(p => p.id === x.property_id); needs.push({ what: 'Inspection started, not finished', where: (pr && pr.address) || 'Property', sub: 'Started ' + fmtDT(x.started_at), go: () => { INS = null; viewInspection(x.id); }, insp: x.id }); });
     crs.forEach(r => needs.push({ what: 'Call them about cancelling', where: addr(r.agreement_id), sub: 'Request from ' + r.requested_by, go: () => viewAgentDetail(r.agreement_id), hot: true }));
     pls.forEach(p => { if (p.status === 'submitted') needs.push({ what: 'Write their updated plan', where: p.address, sub: 'Questionnaire answers are in', go: () => viewPrelistingAgent(p.id) }); if (p.status === 'question') needs.push({ what: 'Answer their question', where: p.address, sub: 'About the updated plan', go: () => viewPrelistingAgent(p.id), hot: true }); if (p.status === 'accepted') { const a = rows.find(r => r.id === p.agreement_id); if (!a || a.status === 'draft') needs.push({ what: 'Add your fee and send the agreement', where: p.address, sub: 'They\'ve accepted the plan', go: () => viewPrelistingAgent(p.id) }); } });
@@ -5448,6 +5454,493 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     observe(); btSync(); setTimeout(run, 0);
   }
 
+  /* ═════════ OFFERS: the "Make an offer" form (offers phase 1, migration 018) ═════════ */
+  // A buyer opens the property's own link (?offer=<token>) or its QR code, with no sign-in, and tells Tim the details of their
+  // offer. This replaces the Jotform. The page only ever talks to the offer-public edge function (info, submit) and to doc-prefill's
+  // offer_condition mode (help wording their own condition): never a table. From the token it learns only the address, whether
+  // offers are open, the holiday province and the KiwiSaver warning setting, and Tim's own clause wording. What they type is kept on
+  // this device until they send it. Tim fills in the same form for a buyer from the property's Offers tile, and corrects an offer
+  // there (the buyer's original stays as it was). Vendors never see any of this. Everything a buyer types is shown escaped.
+  const OF = window.OFFERS;
+  const OFFER_STAGES = ['signed', 'live', 'under_offer'];
+  const offerUrl = t => APP_URL + '?offer=' + encodeURIComponent(t);
+  const ofSafe = async q => { try { const { data, error } = await q; return error ? null : data; } catch (_) { return null; } };
+  async function offerCall(fn, body) {
+    try {
+      const { data, error } = await sb.functions.invoke(fn, { body });
+      if (!error) return data || { ok: false };
+      try { const j = error.context && await error.context.json(); if (j) return j; } catch (_) { }
+      return { ok: false, reason: 'network' };
+    } catch (_) { return { ok: false, reason: 'network' }; }
+  }
+  const ofBlank = () => ({ email: '', phone: '', seen_docs: '', sign: '', price: '', settlement: { kind: 'relative', days: OF.SETTLE_DAYS_DEFAULT, date: '' }, conditions: [], sale_address: '', kiwisaver: null, entity: '', nominee: true,
+    purchasers: [{ first: '', last: '', email: '', phone: '' }], comments: '', lawyer: { firm: '', person: '', email: '', phone: '' }, related: null, date_help: false, privacy: false,
+    chattels_add: [], chattels_exclude: [], gst_registered: null, gst_number: '' });
+  // a saved or stored offer back into the form's shape (anything odd is dropped)
+  function ofShape(x) {
+    const F = ofBlank(); if (!x || typeof x !== 'object') return F;
+    ['email', 'phone', 'seen_docs', 'sign', 'sale_address', 'entity', 'comments'].forEach(k => { if (typeof x[k] === 'string') F[k] = x[k]; });
+    if (x.price != null) F.price = String(x.price);
+    ['kiwisaver', 'related'].forEach(k => { if (typeof x[k] === 'boolean') F[k] = x[k]; });
+    F.nominee = x.nominee !== false; F.date_help = x.date_help === true; F.privacy = x.privacy === true;
+    const s = x.settlement || {}; F.settlement = { kind: s.kind === 'date' ? 'date' : 'relative', days: s.kind === 'date' ? OF.SETTLE_DAYS_DEFAULT : (s.days ?? OF.SETTLE_DAYS_DEFAULT), date: s.date || '' };
+    if (Array.isArray(x.conditions)) F.conditions = x.conditions.filter(c => c && OF.condInfo(c.key)).map(c => ({ key: c.key, days: c.date ? '' : (c.days ?? ''), date: c.date || '', detail: c.detail || '', request: c.request || '', wording: c.wording || '', ai: c.ai === true }));
+    if (Array.isArray(x.purchasers) && x.purchasers.length) F.purchasers = x.purchasers.map(p => ({ first: (p && p.first) || '', last: (p && p.last) || '', email: (p && p.email) || '', phone: (p && p.phone) || '' }));
+    if (x.lawyer && typeof x.lawyer === 'object') ['firm', 'person', 'email', 'phone'].forEach(k => { F.lawyer[k] = x.lawyer[k] || ''; });
+    ['chattels_add', 'chattels_exclude'].forEach(k => { if (Array.isArray(x[k])) F[k] = x[k].filter(v => typeof v === 'string'); });
+    if (typeof x.gst_registered === 'boolean') F.gst_registered = x.gst_registered; if (typeof x.gst_number === 'string') F.gst_number = x.gst_number;
+    return F;
+  }
+  // what is sent: the fields the server takes, nothing else
+  function ofPayload(F) {
+    const s = F.settlement || {};
+    return { email: F.email.trim(), phone: F.phone.trim(), seen_docs: F.seen_docs, sign: F.sign, price: String(F.price || '').replace(/[^0-9.]/g, ''),
+      settlement: s.kind === 'date' ? { kind: 'date', date: s.date } : { kind: 'relative', days: s.days === '' ? null : +s.days },
+      conditions: F.conditions.map(c => { const o = { key: c.key }; if (c.date) o.date = c.date; else o.days = c.days === '' || c.days == null ? null : +c.days; if (c.key === 'technical') o.detail = c.detail; if (c.key === 'custom') { o.request = c.request; o.wording = c.wording; o.ai = !!c.ai; } return o; }),
+      sale_address: F.conditions.some(c => c.key === 'sale') ? F.sale_address : null, kiwisaver: F.kiwisaver, entity: F.entity, nominee: F.nominee !== false,
+      purchasers: F.purchasers.map(p => ({ first: p.first, last: p.last, email: p.email, phone: p.phone })), comments: F.comments, lawyer: Object.assign({}, F.lawyer),
+      related: F.related, date_help: !!F.date_help, privacy: !!F.privacy,
+      chattels_add: F.chattels_add.map(v => v.trim()).filter(Boolean), chattels_exclude: F.chattels_exclude.map(v => v.trim()).filter(Boolean),
+      gst_registered: F.gst_registered, gst_number: F.gst_registered === true ? F.gst_number.trim() : null };
+  }
+  const ofOpts = ctx => ({ asAt: ctx.asAt || OF.nzToday(), province: ctx.province || OF.DEFAULT_PROVINCE, ksDays: ctx.ksDays || OF.KS_DAYS_DEFAULT });
+  const ofErrors = (ctx, F) => OF.validate(ofPayload(F), ofOpts(ctx)).filter(e => !(ctx.mode !== 'public' && e.field === 'email' && !F.email.trim()));
+  // keep what is typed on this device (never sent anywhere until Send)
+  const ofKey = ctx => ctx.mode === 'public' ? 'offerDraft:' + ctx.token.slice(0, 20) : ctx.mode === 'agent' ? 'offerDraftA:' + ctx.pid : null;
+  function ofStore(ctx, F) { const k = ofKey(ctx); if (!k) return; try { localStorage.setItem(k, JSON.stringify({ at: new Date().toISOString(), F })); } catch (_) { } }
+  function ofRestore(ctx) { const k = ofKey(ctx); if (!k) return null; try { const j = JSON.parse(localStorage.getItem(k) || 'null'); return j && j.F && typeof j.F === 'object' ? j : null; } catch (_) { return null; } }
+  function ofForget(ctx) { const k = ofKey(ctx); if (!k) return; try { localStorage.removeItem(k); } catch (_) { } }
+
+  const ofRadio = (name, value, cur, title, desc) => `<label class="choice"><input type="radio" name="of_${name}" data-fr="${name}" value="${value}" ${cur === value ? 'checked' : ''}><span class="mark"></span><span><span class="ct">${title}</span>${desc ? `<span class="cd">${desc}</span>` : ''}</span></label>`;
+  const ofYes = v => v === true ? 'yes' : v === false ? 'no' : '';
+  const ofMinDate = ctx => OF.addDays(ofOpts(ctx).asAt, 1);
+  function ofCalcText(ctx, x) {
+    const o = ofOpts(ctx), r = OF.conditionDate(x, o.asAt, o.province);
+    if (!r) return 'Enter the working days, or pick a date.';
+    const L = OF.longDate;
+    if (x.date) return `${r.days} working ${r.days === 1 ? 'day' : 'days'} from ${ctx.asAt ? 'the day the offer came in' : 'today'}, so ${L(r.date)}.` + (r.adjusted ? ` ${L(r.chosen)} isn't a working day, so the date becomes the working day before.` : '');
+    return `That is ${L(r.date)}.`;
+  }
+  function ofCustomHTML(ctx, x) {
+    return `<label class="f" for="ofReq">Describe what you need, in your own words</label><textarea id="ofReq" rows="3" maxlength="600" data-fc="custom:request">${esc(x.request)}</textarea>
+      ${ctx.token ? `<div class="toolbar"><button class="btn ghost" type="button" id="ofAi">Help me word it</button></div><p class="small" id="ofAiMsg" role="status" aria-live="polite"></p>` : ''}
+      <label class="f" for="ofWord">Wording for the agreement <span class="opt">(a draft: Tim reads it and approves it before it goes on any agreement)</span></label>
+      <textarea id="ofWord" rows="4" maxlength="2000" data-fc="custom:wording">${esc(x.wording)}</textarea>
+      <p class="small" id="ofAiBadge" ${x.ai ? '' : 'hidden'}><span class="pill of-draft">Draft</span> Suggested with AI help from your description. Tim will check it with you.</p>`;
+  }
+  function ofCondSub(ctx, F, c, x) {
+    return `<div class="of-csub">
+      <div class="of-when"><div><label class="f" for="ofd_${c.key}">Working days</label><input type="number" id="ofd_${c.key}" min="1" max="250" inputmode="numeric" data-fc="${c.key}:days" value="${esc(x.days ?? '')}"></div>
+        <span class="of-or">or</span><div><label class="f" for="ofdt_${c.key}">A date</label><input type="date" id="ofdt_${c.key}" min="${ofMinDate(ctx)}" data-fc="${c.key}:date" value="${esc(x.date || '')}"></div></div>
+      <p class="small of-calc" data-ccalc="${c.key}" aria-live="polite">${esc(ofCalcText(ctx, x))}</p>
+      ${c.needs === 'detail' ? `<label class="f" for="ofdet_${c.key}">${esc(c.detailLabel)}</label><input type="text" id="ofdet_${c.key}" maxlength="300" data-fc="${c.key}:detail" value="${esc(x.detail)}" placeholder="${esc(c.detailHint || '')}">` : ''}
+      ${c.needs === 'address' ? `<label class="f" for="ofSale">${esc(c.detailLabel)}</label><input type="text" id="ofSale" maxlength="300" data-f="sale_address" value="${esc(F.sale_address)}">` : ''}
+      ${c.key === 'lawyer' ? `<p class="small of-lawnote" role="note">${esc(c.note)}</p>` : ''}
+      ${c.advice ? `<p class="small of-advice" role="note">${esc(c.advice)}</p>` : ''}
+      ${c.key === 'custom' ? ofCustomHTML(ctx, x) : ''}
+    </div>`;
+  }
+  function ofCondRow(ctx, F, c) {
+    const x = F.conditions.find(y => y.key === c.key);
+    return `<div class="of-crow${x ? ' on' : ''}" data-crow="${c.key}">
+      <div class="of-chead"><label class="choice cb of-cpick"><input type="checkbox" data-cond="${c.key}" ${x ? 'checked' : ''}><span class="mark"></span><span><span class="ct">${esc(c.label)}</span>${c.commercial ? '<span class="cd">Intended for commercial, lifestyle and farm properties</span>' : ''}</span></label>
+      <button class="btn link of-cinfo" type="button" data-cinfo="${c.key}" aria-haspopup="dialog">What this means</button></div>
+      ${x ? ofCondSub(ctx, F, c, x) : ''}</div>`;
+  }
+  const ofGroup = (ctx, F, g) => (g === 'custom' ? [OF.CUSTOM] : OF.CONDITIONS.filter(c => c.group === g)).map(c => ofCondRow(ctx, F, c)).join('');
+  function ofOverlayHTML(ctx, key) {
+    const c = OF.condInfo(key); if (!c) return '';
+    const w = OF.wordingFor(c, ctx.wording);
+    const wt = w.kind === 'custom' ? 'You write this one, with help if you like. Tim reads it and approves the wording before it goes on any agreement.' : w.text;
+    return `<div class="of-ov-in"><div class="of-ov-head"><h3 id="ofOvT">${esc(c.label)}</h3><button class="btn link" type="button" id="ofOvX">Close</button></div>
+      <p class="of-ov-sum">${esc(c.summary)}</p>
+      ${c.note ? `<p class="small"><strong>${esc(c.note)}</strong></p>` : ''}
+      <div class="of-wording" data-wkind="${w.kind}"><span class="small">${w.kind === 'tim' ? 'The wording Tim uses' : 'The wording'}</span><p>${esc(wt)}</p></div>
+      ${c.commercial ? '<p class="small">Not usually needed for a family home. If you are unsure, leave it unticked and ask Tim.</p>' : ''}</div>`;
+  }
+  function ofDatesHTML(ctx, F) {
+    const d = OF.checkDates(ofPayload(F), ofOpts(ctx)), L = OF.longDate, gap = d.problems.find(p => p.kind === 'gap');
+    const rows = d.conditions.filter(c => c.date).map(c => `<tr><td>${esc(c.label)}</td><td>${esc(L(c.date))}<br><span class="small">${c.days} working ${c.days === 1 ? 'day' : 'days'}</span></td></tr>`).join('');
+    return `<table class="sum of-dates">${rows}
+      ${d.lastCondition ? `<tr><td>Unconditional, if every condition is met by its date</td><td>${esc(L(d.confirmation))}</td></tr>` : ''}
+      <tr><td>Settlement</td><td>${d.settlement ? esc(L(d.settlement)) + (F.settlement.kind === 'relative' ? `<br><span class="small">${esc(F.settlement.days)} working days after it goes unconditional</span>` : d.settlementAdjusted ? '<br><span class="small">The date you picked isn\'t a working day, so it becomes the working day before.</span>' : '') : 'Choose below'}</td></tr></table>
+      <p class="small">Counted from ${ctx.asAt ? 'the day the offer came in' : 'today'}, in working days as the agreement defines them (weekends, public holidays, ${esc((OF.PROVINCES[ofOpts(ctx).province] || { name: 'the province\'s' }).name)} Anniversary Day, and 24 December to 5 January). On the agreement they count from the day everyone signs, so they may move a little.</p>
+      ${d.unknownYear ? '<p class="small">Some of these dates are too far ahead for the holiday list. Tim will check them.</p>' : ''}
+      ${d.problems.filter(p => ['gap', 'cond_past', 'settle_past'].includes(p.kind)).map(p => `<div class="card warnc tight of-prob" data-prob="${p.kind}"><p class="small" style="margin:0">${esc(p.text)}${p.kind === 'gap' ? ' Please change your dates, or tick below and Tim will help.' : ''}</p></div>`).join('')}
+      ${gap || F.date_help ? `<label class="choice cb of-help"><input type="checkbox" data-fb="date_help" ${F.date_help ? 'checked' : ''}><span class="mark"></span><span><span class="ct">I need Tim's help with dates</span><span class="cd">You can still send your offer. Tim will go through the dates with you.</span></span></label>` : ''}`;
+  }
+  function ofDepositHTML(ctx, F) {
+    if (F.kiwisaver !== true && F.kiwisaver !== false) return '';
+    const d = OF.checkDates(ofPayload(F), ofOpts(ctx));
+    return `<div class="card ${F.kiwisaver ? 'note' : 'okc'} tight of-dep" data-dep="${F.kiwisaver ? 'lawyer' : 'nzret'}"><p class="small" style="margin:0"><strong>Where your deposit goes.</strong> ${esc(OF.depositText(F.kiwisaver))}</p></div>
+      ${d.warnings.map(w => `<div class="card warnc tight of-warn" data-warn="${w.kind}"><p class="small" style="margin:0">${esc(w.text)}</p></div>`).join('')}`;
+  }
+  function ofPeopleHTML(F) {
+    return F.purchasers.map((p, i) => `<div class="card tight of-person" data-pi="${i}"><div class="of-phead"><h3>Purchaser ${i + 1}</h3>${F.purchasers.length > 1 ? `<button class="btn link" type="button" data-prm="${i}">Remove</button>` : ''}</div>
+      <div class="row2 stack"><div><label class="f" for="ofp${i}f">Legal first names</label><input type="text" id="ofp${i}f" maxlength="120" data-fp="${i}:first" value="${esc(p.first)}"></div>
+        <div><label class="f" for="ofp${i}l">Last name</label><input type="text" id="ofp${i}l" maxlength="120" data-fp="${i}:last" value="${esc(p.last)}"></div></div>
+      <div class="row2 stack"><div><label class="f" for="ofp${i}e">Email for signing <span class="opt">(optional)</span></label><input type="email" id="ofp${i}e" maxlength="254" inputmode="email" data-fp="${i}:email" value="${esc(p.email)}"></div>
+        <div><label class="f" for="ofp${i}p">Phone <span class="opt">(optional)</span></label><input type="tel" id="ofp${i}p" maxlength="40" data-fp="${i}:phone" value="${esc(p.phone)}"></div></div></div>`).join('')
+      + `<button class="btn link" type="button" id="ofAddP">Add another purchaser</button>`;
+  }
+  // chattel rows the buyer adds (kind 'add' or 'exclude'), free text
+  const ofChRows = (F, kind) => { const a = F[kind === 'add' ? 'chattels_add' : 'chattels_exclude'];
+    return a.map((v, i) => `<div class="of-chrow"><label class="f" for="ofch_${kind}_${i}">Item ${i + 1}</label><div class="of-chin"><input type="text" id="ofch_${kind}_${i}" maxlength="200" data-ch="${kind}:${i}" value="${esc(v)}"><button class="btn link" type="button" data-chrm="${kind}:${i}">Remove</button></div></div>`).join('')
+      + `<button class="btn link" type="button" data-chadd="${kind}">Add an item</button>`; };
+  const OF_PRIVACY ='McGuire Real Estate Limited (Tim McGuire) collects these details to prepare your offer and to keep in touch with you about it. The terms of your offer, including the price, conditions, dates and the purchasers\' names, are presented to the sellers. Your own phone and email are used only by Tim, are not given to the sellers, and never go on the agreement: only the lawyers\' details do. Your details are stored securely with the records of this sale. You can ask Tim to see or correct the information held about you at any time: tim@mcguire.co.nz or 027 562 7207.';
+  function ofFormHTML(ctx, F, restored) {
+    const pub = ctx.mode === 'public', fix = ctx.mode === 'correct', S = F.settlement;
+    const sec = (id, title, inner, opt) => `<section class="card of-sec" id="ofSec_${id}" data-sec="${id}"><h2>${title}${opt ? ` <span class="opt">${opt}</span>` : ''}</h2>${inner}<div class="err of-secerr" data-secerr="${id}" role="alert"></div></section>`;
+    return `<div class="view-pad of-page" id="ofForm">
+      ${pub ? '' : `<div class="toolbar no-print"><button class="btn ghost" type="button" id="ofBack">${fix ? 'Back to the offer' : 'Back to the property'}</button></div><span class="agent-flag">Only you see this</span>`}
+      <h1>${fix ? 'Correct this offer' : pub ? 'Make an offer' : 'Fill in an offer for a buyer'}</h1>
+      <p class="lede of-addr">${nt(ctx.address || '')}</p>
+      ${pub ? `<p>Tell Tim the details of your offer, and he will prepare the agreement for you. Nothing here is binding and nothing is signed on this page. Tim recommends you get legal advice before you sign anything.</p>
+        <p class="small">What you type is kept on this device as you go, so you can come back to it later. Questions? Call or text Tim on <a href="tel:0275627207">027 562 7207</a>.</p>` : fix ? `<p class="small">The buyer's original offer stays as they sent it. Your correction and your note are recorded with it.</p>` : `<p class="small">For a buyer who gave you their offer by phone or in person. It goes straight onto the property's Offers tile.</p>`}
+      ${restored ? `<div class="card note tight" id="ofRestored"><p class="small" style="margin:0">We kept what you typed on this device on ${esc(fmtDT(restored.at))}. <button class="btn link" type="button" id="ofReset">Start again</button></p></div>` : ''}
+      ${sec('contact', pub ? 'Your contact details' : 'Contact details', `<div class="row2 stack"><div><label class="f" for="ofEmail">Main email${pub ? '' : ' <span class="opt">(optional here)</span>'}</label><input type="email" id="ofEmail" maxlength="254" inputmode="email" autocomplete="email" data-f="email" value="${esc(F.email)}"></div>
+        <div><label class="f" for="ofPhone">Best phone</label><input type="tel" id="ofPhone" maxlength="40" autocomplete="tel" data-f="phone" value="${esc(F.phone)}"></div></div>
+        <p class="small of-contactnote">${pub ? 'Your' : 'Their'} phone and email are used only by Tim, to talk about this offer. They never go on the agreement.</p>`)}
+      ${sec('docs', 'The property documents', `<p class="small">Have you seen the property documents and information emailed to all enquirers?</p><div class="choices two">${ofRadio('seen_docs', 'yes', F.seen_docs, 'Yes')}${ofRadio('seen_docs', 'no', F.seen_docs, 'Not yet', 'Tim will send them to you.')}</div>`)}
+      ${sec('price', 'Your offer price', `<label class="f" for="ofPrice">Price</label><input type="text" id="ofPrice" inputmode="decimal" maxlength="20" autocomplete="off" data-f="price" value="${esc(F.price)}" placeholder="$"><p class="small" id="ofPriceSay" aria-live="polite">${+String(F.price).replace(/[^0-9.]/g, '') ? esc(money(+String(F.price).replace(/[^0-9.]/g, ''))) : ''}</p>`)}
+      ${sec('conds', 'Conditions', `<p class="small">Nothing is added unless you tick it. Each condition needs its own date: a number of working days, or a date. Tap <em>What this means</em> for a plain explanation.</p>
+        <p class="small of-advice" role="note">${esc(OF.ADVICE.conditions)}</p>
+        <h3 class="of-gh">Typical conditions</h3><div id="ofCondsTypical">${ofGroup(ctx, F, 'typical')}</div>
+        <details class="of-other" id="ofOther"${F.conditions.some(c => (OF.condInfo(c.key) || {}).group === 'other') ? ' open' : ''}><summary>Other conditions <span class="opt">(less common)</span></summary><div id="ofCondsOther">${ofGroup(ctx, F, 'other')}</div></details>
+        <h3 class="of-gh">Something else</h3><div id="ofCondsCustom">${ofGroup(ctx, F, 'custom')}</div>`)}
+      ${sec('settle', 'Settlement date', `<p class="small">The day you pay the balance and get the keys.</p><div class="choices">
+        ${ofRadio('settle', 'relative', S.kind, 'A number of working days after the agreement goes unconditional', 'The usual is 15 working days.')}
+        ${ofRadio('settle', 'date', S.kind, 'A set date')}</div>
+        <div class="of-settle" id="ofSettleIn">${S.kind === 'date' ? `<label class="f" for="ofSetDate">Settlement date</label><input type="date" id="ofSetDate" min="${ofMinDate(ctx)}" data-fs="date" value="${esc(S.date)}">` : `<label class="f" for="ofSetDays">Working days after unconditional</label><input type="number" id="ofSetDays" min="1" max="250" inputmode="numeric" data-fs="days" value="${esc(S.days)}" style="max-width:120px">`}</div>`)}
+      ${sec('dates', 'Your dates', `<div id="ofDates">${ofDatesHTML(ctx, F)}</div>`)}
+      ${sec('deposit', 'KiwiSaver and your deposit', `<p class="small">Will any KiwiSaver funds go into the deposit?</p><div class="choices two">${ofRadio('kiwisaver', 'yes', ofYes(F.kiwisaver), 'Yes')}${ofRadio('kiwisaver', 'no', ofYes(F.kiwisaver), 'No')}</div><div id="ofDeposit">${ofDepositHTML(ctx, F)}</div>`)}
+      ${sec('chattels', 'Chattels', `<p class="small">Chattels are the items that stay with the property, such as blinds, light fittings or a heat pump.</p>
+        ${(ctx.chattels || []).length ? `<p class="small" style="margin-bottom:2px"><strong>Included in the sale:</strong></p><ul class="of-ul of-chl">${ctx.chattels.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : '<p class="small of-chnone"><strong>Tim will confirm the chattels list with you.</strong></p>'}
+        <div class="card note tight of-chnote"><p class="small" style="margin:0">${esc(OF.CHATTEL_NOTE)}</p></div>
+        <h3 class="of-gh">Anything extra you would like included</h3><div id="ofChAdd">${ofChRows(F, 'add')}</div>
+        <h3 class="of-gh">Anything to be left out</h3><div id="ofChEx">${ofChRows(F, 'exclude')}</div>`, '(optional)')}
+      ${sec('gst', 'GST', `<details class="of-gstd" id="ofGst"${F.gst_registered === true ? ' open' : ''}><summary>Only if you are registered for GST for this purchase</summary>
+        <p class="small">Are you registered for GST for the purposes of buying this property? Most home buyers are not. Registration for an unrelated business does not count. If you are unsure, check with your accountant.</p>
+        <div class="choices two">${ofRadio('gst', 'yes', ofYes(F.gst_registered), 'Yes, for this purchase')}${ofRadio('gst', 'no', ofYes(F.gst_registered), 'No')}</div>
+        <div id="ofGstMore"${F.gst_registered === true ? '' : ' hidden'}><label class="f" for="ofGstNo">GST number <span class="opt">(optional)</span></label><input type="text" id="ofGstNo" maxlength="40" data-f="gst_number" value="${esc(F.gst_number)}" style="max-width:220px"><p class="small">Tim will go through the GST details on the agreement with you.</p></div>
+        <p class="small of-advice" role="note">${esc(OF.ADVICE.gst)}</p></details>`)}
+      ${sec('people', 'Purchasers', `<p class="small">Everyone who will be buying, with their legal names as on their ID. Add as many as you need.</p><div id="ofPeople">${ofPeopleHTML(F)}</div>
+        <label class="f" for="ofEntity">Buying as a company or trust? <span class="opt">(optional)</span></label><input type="text" id="ofEntity" maxlength="200" data-f="entity" value="${esc(F.entity)}" placeholder="Company or trust name">
+        <label class="choice cb" style="margin-top:10px"><input type="checkbox" data-fb="nominee" ${F.nominee !== false ? 'checked' : ''}><span class="mark"></span><span><span class="ct">Keep "and/or nominee" after the purchaser's name</span><span class="cd">As on the standard agreement. It lets the purchaser have the property transferred to someone else they choose. Untick it if you don't want that.</span></span></label>`)}
+      ${sec('lawyer', 'Your lawyer', `<p class="small of-lawwhy">Please add your lawyer's firm and name if you have one. Only the lawyers' details go on the agreement, never your own phone or email, to protect everyone's privacy. If you don't have a lawyer yet, you can leave this for now.</p>
+        <div class="row2 stack"><div><label class="f" for="ofLFirm">Firm</label><input type="text" id="ofLFirm" maxlength="200" data-fl="firm" value="${esc(F.lawyer.firm)}"></div><div><label class="f" for="ofLPerson">Lawyer</label><input type="text" id="ofLPerson" maxlength="200" data-fl="person" value="${esc(F.lawyer.person)}"></div></div>
+        <div class="row2 stack"><div><label class="f" for="ofLEmail">Email</label><input type="email" id="ofLEmail" maxlength="254" inputmode="email" data-fl="email" value="${esc(F.lawyer.email)}"></div><div><label class="f" for="ofLPhone">Phone</label><input type="tel" id="ofLPhone" maxlength="40" data-fl="phone" value="${esc(F.lawyer.phone)}"></div></div>`, '(optional, but it helps)')}
+      ${sec('sign', 'Signing', `<p class="small">How would you like to sign the agreement once Tim has prepared it?</p><div class="choices">
+        ${ofRadio('sign', 'in_person', F.sign, 'Meet Tim in person', 'Best if this is your first home, or you haven\'t signed a property agreement before. Tim goes through it with you page by page.')}
+        ${ofRadio('sign', 'digital', F.sign, 'Sign digitally', 'Each purchaser gets their own secure link.')}</div>`)}
+      ${sec('related', 'Anyone connected with Tim?', `<p class="small">Is any purchaser related to, or connected with, Tim McGuire or McGuire Real Estate? For example family, a close friend, or someone who works with Tim.</p><div class="choices two">${ofRadio('related', 'yes', ofYes(F.related), 'Yes')}${ofRadio('related', 'no', ofYes(F.related), 'No')}</div>`)}
+      ${sec('comments', 'Anything else?', `<label class="f" for="ofComments">Comments for Tim or the sellers</label><textarea id="ofComments" rows="4" maxlength="3000" data-f="comments">${esc(F.comments)}</textarea>`, '(optional)')}
+      ${sec('privacy', 'Privacy', `<p class="small of-privacy">${esc(OF_PRIVACY)}</p><label class="choice cb"><input type="checkbox" data-fb="privacy" ${F.privacy ? 'checked' : ''}><span class="mark"></span><span><span class="ct">${pub ? 'I have read this' : 'I have told the buyer this, or sent it to them'}</span></span></label>`)}
+      <div class="of-hp" aria-hidden="true"><label for="ofWebsite">Leave this empty</label><input type="text" id="ofWebsite" tabindex="-1" autocomplete="off"></div>
+      ${fix ? `<label class="f" for="ofNote">What changed, and how you heard <span class="opt">(needed, kept in the record)</span></label><textarea id="ofNote" rows="2" maxlength="500"></textarea>` : ''}
+      <div class="err" id="ofErr" role="alert"></div>
+      <div class="toolbar"><button class="btn primary" type="button" id="ofSend">${fix ? 'Save the correction' : pub ? 'Send my offer to Tim' : 'Save the offer'}</button></div>
+      <div class="of-ov" id="ofOv" role="dialog" aria-labelledby="ofOvT" hidden></div>
+    </div>`;
+  }
+
+  function ofOpen(ctx, F0) {
+    const restored = F0 ? null : ofRestore(ctx);
+    const F = F0 || (restored ? ofShape(restored.F) : ofBlank());
+    main().innerHTML = ofFormHTML(ctx, F, restored);
+    ofWire(ctx, F);
+    top();
+  }
+  function ofWire(ctx, F) {
+    const root = $('#ofForm'), ov = $('#ofOv');
+    let pinned = false;
+    const save = () => ofStore(ctx, F);
+    const light = () => {   // the parts that follow every change
+      $$('[data-ccalc]', root).forEach(p => { const x = F.conditions.find(c => c.key === p.dataset.ccalc); if (x) p.textContent = ofCalcText(ctx, x); });
+      $('#ofDates').innerHTML = ofDatesHTML(ctx, F); $('#ofDeposit').innerHTML = ofDepositHTML(ctx, F);
+      const n = +String(F.price).replace(/[^0-9.]/g, ''); $('#ofPriceSay').textContent = n ? money(n) : '';
+    };
+    const redrawConds = () => { $('#ofCondsTypical').innerHTML = ofGroup(ctx, F, 'typical'); $('#ofCondsOther').innerHTML = ofGroup(ctx, F, 'other'); $('#ofCondsCustom').innerHTML = ofGroup(ctx, F, 'custom'); };
+    const redrawPeople = () => { $('#ofPeople').innerHTML = ofPeopleHTML(F); };
+    const showOv = (key, pin) => { ov.innerHTML = ofOverlayHTML(ctx, key); ov.hidden = false; ov.dataset.key = key; pinned = !!pin; const x = $('#ofOvX'); if (x) x.addEventListener('click', hideOv); if (pin) x && x.focus(); };
+    const hideOv = () => { ov.hidden = true; ov.innerHTML = ''; ov.dataset.key = ''; pinned = false; };
+    root.addEventListener('input', e => {
+      const t = e.target, v = t.value;
+      if (t.dataset.f) F[t.dataset.f] = v;
+      else if (t.dataset.fl) F.lawyer[t.dataset.fl] = v;
+      else if (t.dataset.fp) { const [i, k] = t.dataset.fp.split(':'); if (F.purchasers[+i]) F.purchasers[+i][k] = v; }
+      else if (t.dataset.fs) { F.settlement[t.dataset.fs] = v; }
+      else if (t.dataset.ch) { const [kind, i] = t.dataset.ch.split(':'), a = F[kind === 'add' ? 'chattels_add' : 'chattels_exclude']; if (+i < a.length) a[+i] = v; }
+      else if (t.dataset.fc) {
+        const [key, k] = t.dataset.fc.split(':'), x = F.conditions.find(c => c.key === key); if (!x) return;
+        x[k] = v;
+        if (k === 'days' && v !== '') { x.date = ''; const d = $(`#ofdt_${key}`); if (d) d.value = ''; }
+        if (k === 'date' && v) { x.days = ''; const d = $(`#ofd_${key}`); if (d) d.value = ''; }
+      } else return;
+      light(); save();
+    });
+    root.addEventListener('change', e => {
+      const t = e.target;
+      if (t.dataset.fr) {
+        const k = t.dataset.fr, v = t.value;
+        if (k === 'kiwisaver' || k === 'related') F[k] = v === 'yes';
+        else if (k === 'gst') { F.gst_registered = v === 'yes'; $('#ofGstMore').hidden = !F.gst_registered; }
+        else if (k === 'settle') { F.settlement.kind = v; const S = F.settlement; $('#ofSettleIn').innerHTML = v === 'date' ? `<label class="f" for="ofSetDate">Settlement date</label><input type="date" id="ofSetDate" min="${ofMinDate(ctx)}" data-fs="date" value="${esc(S.date)}">` : `<label class="f" for="ofSetDays">Working days after unconditional</label><input type="number" id="ofSetDays" min="1" max="250" inputmode="numeric" data-fs="days" value="${esc(S.days)}" style="max-width:120px">`; }
+        else F[k] = v;
+      } else if (t.dataset.cond) {
+        const key = t.dataset.cond;
+        if (t.checked) { if (!F.conditions.some(c => c.key === key)) F.conditions.push({ key, days: '', date: '', detail: '', request: '', wording: '', ai: false }); }
+        else F.conditions = F.conditions.filter(c => c.key !== key);
+        redrawConds(); const first = $(`#ofd_${key}`); if (t.checked && first) first.focus();
+      } else if (t.dataset.fb) F[t.dataset.fb] = t.checked;
+      else return;
+      light(); save();
+    });
+    root.addEventListener('click', async e => {
+      const t = e.target.closest('button'); if (!t) return;
+      if (t.dataset.cinfo) { if (!ov.hidden && ov.dataset.key === t.dataset.cinfo && pinned) hideOv(); else showOv(t.dataset.cinfo, true); return; }
+      if (t.id === 'ofAddP') { F.purchasers.push({ first: '', last: '', email: '', phone: '' }); redrawPeople(); save(); const n = $(`#ofp${F.purchasers.length - 1}f`); if (n) n.focus(); return; }
+      if (t.dataset.prm) { F.purchasers.splice(+t.dataset.prm, 1); redrawPeople(); save(); return; }
+      if (t.dataset.chadd || t.dataset.chrm) {
+        const [kind, i] = (t.dataset.chadd || t.dataset.chrm).split(':'), key = kind === 'add' ? 'chattels_add' : 'chattels_exclude';
+        if (t.dataset.chadd) { if (F[key].length < OF.LIMITS.chattels) F[key].push(''); } else F[key].splice(+i, 1);
+        $(kind === 'add' ? '#ofChAdd' : '#ofChEx').innerHTML = ofChRows(F, kind); save();
+        if (t.dataset.chadd) { const n = $(`#ofch_${kind}_${F[key].length - 1}`); if (n) n.focus(); }
+        return;
+      }
+      if (t.id === 'ofReset') { if (!confirm('Clear what you typed and start again?')) return; ofForget(ctx); ofOpen(ctx, ofBlank()); return; }
+      if (t.id === 'ofBack') { if (ctx.mode === 'correct') viewOfferAgent(ctx.oid); else viewProperty(ctx.pid); return; }
+      if (t.id === 'ofAi') return ofAiHelp(ctx, F, save);
+      if (t.id === 'ofSend') return ofSend(ctx, F, t);
+    });
+    // hovering a condition on a computer shows the same overlay (tapping "What this means" pins it)
+    const hover = window.matchMedia && window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+    if (hover) {
+      root.addEventListener('mouseover', e => { const r = e.target.closest('.of-crow'); if (r && !pinned && ov.dataset.key !== r.dataset.crow) showOv(r.dataset.crow, false); });
+      root.addEventListener('mouseout', e => { const r = e.target.closest('.of-crow'); if (r && !pinned && !(e.relatedTarget && r.contains(e.relatedTarget))) hideOv(); });
+    }
+    document.addEventListener('keydown', function esc_(e) { if (!document.body.contains(root)) return document.removeEventListener('keydown', esc_); if (e.key === 'Escape' && !ov.hidden) hideOv(); });
+  }
+  async function ofAiHelp(ctx, F, save) {
+    const x = F.conditions.find(c => c.key === 'custom'), msg = $('#ofAiMsg'), btn = $('#ofAi'); if (!x || !msg) return;
+    const say = t => { msg.textContent = t; };
+    if ((x.request || '').trim().length < 10) return say('Describe what you need in a few more words first.');
+    btn.disabled = true; say('Working on a draft...');
+    const r = await offerCall('doc-prefill', { mode: 'offer_condition', token: ctx.token, text: x.request.trim() });
+    btn.disabled = false;
+    if (r && r.ok && r.wording) {
+      x.wording = r.wording; x.ai = true; $('#ofWord').value = r.wording; $('#ofAiBadge').hidden = false; save();
+      return say((r.summary ? r.summary + ' ' : '') + 'This is a draft. Change it if you like. Tim reads it and approves the wording before it goes on any agreement.');
+    }
+    if (r && r.reason === 'unsuitable') return say((r.why || 'That doesn\'t look like a condition Tim can put on an offer.') + ' You can type your own wording below.');
+    if (r && r.error) return say(r.error);
+    say('The wording helper isn\'t available right now. Please type your own wording below, and Tim will go through it with you.');
+  }
+  async function ofSend(ctx, F, btn) {
+    $$('.of-sec', $('#ofForm')).forEach(s => s.classList.remove('of-bad')); $$('[data-secerr]').forEach(x => { x.textContent = ''; });
+    const SEC = f => /^(email|phone)$/.test(f) ? 'contact' : f === 'seen_docs' ? 'docs' : f === 'price' ? 'price' : /^(c_|sale_address)/.test(f) ? 'conds' : f === 'gap' ? 'dates' : f === 'settlement' ? 'settle' : f === 'kiwisaver' ? 'deposit' : /^(p\d|purchasers)/.test(f) ? 'people' : /^chattels/.test(f) ? 'chattels' : f;
+    const errs = ofErrors(ctx, F);
+    if (errs.length) {
+      const seen = new Set(); errs.forEach(e => { const s = SEC(e.field), box = $(`[data-secerr="${s}"]`); if (box && !seen.has(s + e.text)) { seen.add(s + e.text); box.textContent = (box.textContent ? box.textContent + ' ' : '') + e.text; } const c = $('#ofSec_' + s); if (c) c.classList.add('of-bad'); });
+      $('#ofErr').textContent = errs.length === 1 ? 'One thing to fix above.' : `${errs.length} things to fix above.`;
+      const first = $('.of-sec.of-bad'); if (first) first.scrollIntoView({ block: 'start' });
+      return;
+    }
+    $('#ofErr').textContent = ''; const payload = ofPayload(F);
+    if (ctx.mode === 'public') {
+      btn.disabled = true; const r = await offerCall('offer-public', { action: 'submit', token: ctx.token, offer: payload, website: ($('#ofWebsite') || {}).value || '' }); btn.disabled = false;
+      if (r && r.ok) { ofForget(ctx); return ofThanks(ctx, Object.assign({}, payload, { chattels_listed: ctx.chattels || [] }), r.ref); }
+      $('#ofErr').textContent = r && r.error ? r.error : r && r.reason === 'busy' ? 'A lot has been sent from your connection just now. Please wait a few minutes and try again, or call Tim on 027 562 7207. What you typed is kept.'
+        : r && r.reason === 'closed' ? 'This offer form has just been closed. What you typed is kept on this device. Please call Tim on 027 562 7207.' : 'Your offer couldn\'t be sent just now. Please check your connection and try again. What you typed is kept.';
+      return;
+    }
+    btn.disabled = true;
+    try {
+      if (ctx.mode === 'agent') { const id = await must(sb.rpc('agent_offer_add', { p_property: ctx.pid, p_offer: payload })); ofForget(ctx); toast('Offer saved'); return viewOfferAgent(id); }
+      const note = ($('#ofNote').value || '').trim(); if (note.length < 3) { btn.disabled = false; return $('#ofErr').textContent = 'Say what changed and how you heard.'; }
+      await must(sb.rpc('agent_offer_correct', { p_offer: ctx.oid, p_details: payload, p_note: note })); toast('Correction saved'); return viewOfferAgent(ctx.oid);
+    } catch (e) { btn.disabled = false; $('#ofErr').textContent = (e && e.message) || 'That didn\'t save.'; }
+  }
+  // everything in an offer, for the buyer's copy and for Tim. Every value is the buyer's own text: always escaped.
+  function ofSummaryHTML(d, ctx, asAt) {
+    const L = OF.longDate, o = Object.assign(ofOpts(ctx), asAt ? { asAt } : {}), chk = OF.checkDates(d, o), row = (k, v) => v ? `<tr><td>${esc(k)}</td><td>${v}</td></tr>` : '';
+    const price = +String(d.price ?? '').replace(/[^0-9.]/g, '');
+    const conds = (d.conditions || []).map(c => { const i = OF.condInfo(c.key) || { label: c.key }, r = chk.conditions.find(x => x.key === c.key) || {};
+      return `<li><strong>${esc(i.label)}</strong>${r.date ? `: ${esc(L(r.date))} <span class="small">(${r.days} working ${r.days === 1 ? 'day' : 'days'})</span>` : ''}${c.detail ? `<br><span class="small">Report: ${esc(c.detail)}</span>` : ''}${c.key === 'custom' ? `${c.request ? `<br><span class="small">In their words: ${esc(c.request)}</span>` : ''}${c.wording ? `<br><span class="small">Wording${c.ai ? ' (drafted with AI help, for Tim to approve)' : ' (for Tim to approve)'}: ${esc(c.wording)}</span>` : ''}` : ''}</li>`; }).join('');
+    const S = d.settlement || {}, lw = d.lawyer || {};
+    return `<table class="sum of-sum">
+      ${row('Property', nt(ctx.address || ''))}
+      ${row('Price', price ? esc(money(price)) : '')}
+      <tr><td>Conditions</td><td>${conds ? `<ul class="of-ul">${conds}</ul>` : 'None (unconditional)'}${d.sale_address ? `<span class="small">Property to sell: ${esc(d.sale_address)}</span>` : ''}</td></tr>
+      ${row('Lawyer\'s approval', (d.conditions || []).some(c => c.key === 'lawyer') ? 'Chosen' : 'Not chosen')}
+      ${row('Settlement', (S.kind === 'date' ? esc(L(S.date)) : esc(`${S.days} working days after the agreement goes unconditional`)) + (chk.settlement && S.kind !== 'date' ? `<br><span class="small">About ${esc(L(chk.settlement))}</span>` : ''))}
+      ${row('Help with dates', d.date_help ? 'Asked for Tim\'s help with the dates' : '')}
+      ${row('KiwiSaver in the deposit', d.kiwisaver === true ? 'Yes' : d.kiwisaver === false ? 'No' : '')}
+      ${row('Deposit', esc(OF.depositText(d.kiwisaver)))}
+      ${row('Chattels listed', Array.isArray(d.chattels_listed) ? (d.chattels_listed.length ? esc(d.chattels_listed.join(', ')) : 'None held yet: Tim to confirm') : '')}
+      ${row('Chattels to add', (d.chattels_add || []).length ? esc(d.chattels_add.join(', ')) : '')}
+      ${row('Chattels left out', (d.chattels_exclude || []).length ? esc(d.chattels_exclude.join(', ')) : '')}
+      ${row('GST registered for this purchase', d.gst_registered === true ? 'Yes' + (d.gst_number ? ', ' + esc(d.gst_number) : '') : d.gst_registered === false ? 'No' : '')}
+      ${row('Purchasers', (d.purchasers || []).map(p => `${esc(((p.first || '') + ' ' + (p.last || '')).trim())}${p.email || p.phone ? `<br><span class="small">${esc([p.email, p.phone].filter(Boolean).join(' · '))}</span>` : ''}`).join('<br>'))}
+      ${row('Company or trust', d.entity ? esc(d.entity) : '')}
+      ${row('"and/or nominee"', d.nominee === false ? 'Removed' : 'Kept')}
+      ${row('Contact', esc([d.email, d.phone].filter(Boolean).join(' · ')))}
+      ${row('Lawyer', esc([lw.firm, lw.person, lw.email, lw.phone].filter(Boolean).join(' · ')))}
+      ${row('Signing', d.sign === 'in_person' ? 'Meet Tim in person' : d.sign === 'digital' ? 'Digitally' : '')}
+      ${row('Seen the documents', d.seen_docs === 'yes' ? 'Yes' : d.seen_docs === 'no' ? 'Not yet' : '')}
+      ${row('Connected with Tim', d.related === true ? '<strong>Yes</strong>' : d.related === false ? 'No' : '')}
+      ${row('Comments', d.comments ? `<span class="of-pre">${esc(d.comments)}</span>` : '')}
+    </table>`;
+  }
+  function ofThanks(ctx, payload, ref) {
+    header('Offer sent', '', 100);
+    main().innerHTML = `<div class="view-pad of-page" id="ofDone"><div class="card okc"><h1>Thank you. Your offer is with Tim.</h1>
+      <p>Your reference is <strong translate="no">${esc(ref)}</strong>. Tim will be in touch soon to go through it with you. Nothing has been signed, and nothing goes to the sellers until Tim has been through it with you.</p></div>
+      <p class="small">This summary is shown only now. Print it or save it as a PDF if you would like a copy.</p>
+      <div class="toolbar no-print"><button class="btn primary" type="button" id="ofPrint">Print or save a copy</button></div>
+      <h2>What you sent</h2>${ofSummaryHTML(payload, ctx)}</div>`;
+    $('#ofPrint').addEventListener('click', () => window.print());
+    top();
+  }
+  async function viewOfferPublic(token) {
+    document.title = 'Make an offer · McGuire Real Estate';
+    header('Make an offer', '', 0); actions(false); $('#signOut').hidden = true;
+    main().innerHTML = '<div class="loading">Loading...</div>';
+    const info = await offerCall('offer-public', { action: 'info', token });
+    if (!info || info.ok !== true) {
+      main().innerHTML = `<div class="login-card" id="ofClosed"><h1>This offer form isn't open</h1>
+        <p class="lede">${info && info.reason === 'busy' ? 'There have been a lot of requests from your connection. Please try again later.' : info && info.reason === 'network' ? 'We couldn\'t reach the form just now. Please check your connection and try again.' : 'The link may have changed, or offers on this property aren\'t open at the moment.'}</p>
+        <p>Please call or text Tim on <a href="tel:0275627207">027 562 7207</a>, or email <a href="mailto:tim@mcguire.co.nz">tim@mcguire.co.nz</a>.</p></div>`;
+      return;
+    }
+    ofOpen({ mode: 'public', token, address: info.address, province: info.province || OF.DEFAULT_PROVINCE, ksDays: +info.ks_days || OF.KS_DAYS_DEFAULT, wording: info.wording || {}, chattels: Array.isArray(info.chattels) ? info.chattels : [] });
+  }
+
+  /* ───── Tim's side ───── */
+  async function ofKs() { const r = await ofSafe(sb.from('offer_settings').select('ks_warn_working_days')); return ((r || [])[0] || {}).ks_warn_working_days || OF.KS_DAYS_DEFAULT; }
+  async function ofWording() { const r = await ofSafe(sb.from('offer_clauses').select('key,wording')); const w = {}; (r || []).forEach(x => { if (x.wording) w[x.key] = x.wording; }); return w; }
+  async function viewOfferNew(pid) {
+    header('Offer for a buyer', '', 0); actions(false);
+    main().innerHTML = '<div class="loading">Loading...</div>';
+    const p = await must(sb.from('properties').select('id,address,stage').eq('id', pid).single());
+    const l = ((await ofSafe(sb.from('offer_links').select('province,chattels').eq('property_id', pid))) || [])[0];
+    ofOpen({ mode: 'agent', pid, address: p.address, province: (l && l.province) || OF.provinceFor(p.address), ksDays: await ofKs(), wording: await ofWording(), chattels: (l && l.chattels) || [] });
+  }
+  async function viewOfferCorrect(oid) {
+    header('Correct an offer', '', 0); actions(false);
+    main().innerHTML = '<div class="loading">Loading...</div>';
+    const o = await must(sb.from('property_offers').select('*').eq('id', oid).single());
+    const p = await must(sb.from('properties').select('id,address').eq('id', o.property_id).single());
+    ofOpen({ mode: 'correct', oid, pid: o.property_id, address: p.address, province: o.province || OF.DEFAULT_PROVINCE, ksDays: await ofKs(), wording: await ofWording(), asAt: o.as_at, chattels: (o.details || {}).chattels_listed || [] }, ofShape(o.details));
+  }
+  const OF_EVENT = { submitted: 'Received', read: 'Opened', corrected: 'Corrected', status: 'Status changed', gap_override: 'Short date gap accepted', gap_override_cleared: 'Gap acceptance cleared' };
+  async function viewOfferAgent(oid) {
+    header('Offer', '', 0); actions(false);
+    main().innerHTML = '<div class="loading">Loading...</div>';
+    let o = await must(sb.from('property_offers').select('*').eq('id', oid).single());
+    if (!o.read_at) { try { await must(sb.rpc('agent_offer_read', { p_offer: oid })); } catch (_) { } }
+    const p = await must(sb.from('properties').select('id,address,stage').eq('id', o.property_id).single());
+    const evs = (await ofSafe(sb.from('offer_events').select('*').eq('offer_id', oid).order('at', { ascending: true }))) || [];
+    const ctx = { mode: 'view', address: p.address, province: o.province || OF.DEFAULT_PROVINCE, ksDays: await ofKs(), wording: {}, asAt: o.as_at };
+    const d = o.details || {}, chk = OF.checkDates(d, ofOpts(ctx)), L = OF.longDate, gap = chk.problems.find(x => x.kind === 'gap');
+    const fixes = evs.filter(e => e.kind === 'corrected'), off = ['withdrawn', 'lapsed'].includes(o.status);
+    const nowLocal = (() => { const t = new Date(); t.setMinutes(t.getMinutes() - t.getTimezoneOffset()); return t.toISOString().slice(0, 16); })();
+    main().innerHTML = `<div class="view-pad of-page" id="ofView">
+      <div class="toolbar no-print"><button class="btn ghost" type="button" id="ofBackP">Back to the property</button></div>
+      <span class="agent-flag">Only you see this</span>
+      <h1>${esc(money(+o.amount))} offer</h1>
+      <p>${nt(p.address)}<br><span class="small">${o.source === 'agent' ? 'Entered by you' : 'From the offer form'}, ${esc(fmtDT(o.received_at))}</span>${off ? ` <span class="pill of-off">${o.status === 'withdrawn' ? 'Withdrawn' : 'Lapsed'} ${esc(fmtDT(o.status_at))}</span>` : ''}</p>
+      ${o.related_party ? `<div class="card warnc of-related" role="alert"><h3 style="margin:0 0 4px">Connected to you</h3><p class="small" style="margin:0">The buyer says a purchaser is related to, or connected with, you or McGuire Real Estate. Deal with this before you go any further with the offer.</p></div>` : ''}
+      ${o.needs_date_help ? '<div class="card note tight of-helpflag"><p class="small" style="margin:0">They asked for your help with the dates.</p></div>' : ''}
+      <h2>Dates</h2>
+      <div class="card tight"><table class="sum of-dates">${chk.conditions.filter(c => c.date).map(c => `<tr><td>${esc(c.label)}</td><td>${esc(L(c.date))} <span class="small">(${c.days} working days)</span></td></tr>`).join('')}
+        ${chk.lastCondition ? `<tr><td>Unconditional</td><td>${esc(L(chk.confirmation))}</td></tr>` : ''}<tr><td>Settlement</td><td>${chk.settlement ? esc(L(chk.settlement)) : 'Not set'}</td></tr></table>
+        <p class="small" style="margin:6px 0 0">Counted from ${esc(L(o.as_at))}, the day it came in, with ${esc((OF.PROVINCES[ctx.province] || { name: ctx.province }).name)} holidays.</p></div>
+      ${gap || o.gap_override_reason ? (o.gap_override_reason
+        ? `<div class="card note tight" id="ofGapDone"><p class="small" style="margin:0">You accepted these dates: "${esc(o.gap_override_reason)}" (${esc(fmtDT(o.gap_override_at))}).</p><div class="toolbar"><button class="btn link" type="button" id="ofGapClear">Clear this</button></div></div>`
+        : `<div class="card warnc tight" id="ofGap"><p class="small" style="margin:0"><strong>The last condition date is ${chk.gapDays} ${chk.gapDays === 1 ? 'day' : 'days'} before settlement.</strong> It should be at least a week, so the buyer's lawyer has time to prepare for settlement. You can accept it, with your reason.</p>
+            <label class="f" for="ofGapWhy">Your reason <span class="opt">(kept on the offer)</span></label><textarea id="ofGapWhy" rows="2" maxlength="500"></textarea>
+            <div class="toolbar"><button class="btn ghost" type="button" id="ofGapOk">Accept these dates anyway</button></div><div class="err" id="ofGapErr" role="alert"></div></div>`) : ''}
+      ${chk.warnings.map(w => `<div class="card warnc tight of-warn" data-warn="${w.kind}"><p class="small" style="margin:0">${esc(w.text)}</p></div>`).join('')}
+      <h2>The offer${fixes.length ? ' as it stands' : ''}</h2>
+      <div class="card tight">${ofSummaryHTML(d, ctx, o.as_at)}</div>
+      ${fixes.length ? `<h2>What they sent</h2><details class="card tight" id="ofOrig" open><summary class="small">The original, unchanged</summary>${ofSummaryHTML(o.submission || {}, ctx, o.as_at)}</details>
+        <div class="card tight"><h3 style="margin:0 0 4px">Corrections</h3>${fixes.map(e => `<div class="fact"><div class="k">${esc(fmtDT(e.at))} · ${esc(e.actor)}</div><div class="v" style="font-weight:400">${esc((e.detail || {}).note || '')}</div></div>`).join('')}</div>` : ''}
+      <div class="toolbar no-print"><button class="btn primary" type="button" id="ofFix">Correct details</button></div>
+      <h2>Withdrawn or lapsed</h2>
+      <div class="card tight" id="ofStatus">${off ? `<p class="small" style="margin:0">${o.status === 'withdrawn' ? 'Withdrawn' : 'Lapsed'} at ${esc(fmtDT(o.status_at))}.</p><div class="toolbar"><button class="btn ghost" type="button" id="ofStBack">Mark it current again</button></div>`
+        : `<label class="f" for="ofStAt" style="margin-top:0">When</label><input type="datetime-local" id="ofStAt" value="${nowLocal}"><label class="f" for="ofStNote">Note <span class="opt">(optional)</span></label><input type="text" id="ofStNote" maxlength="500">
+          <div class="toolbar"><button class="btn ghost" type="button" data-ofst="withdrawn">Withdrawn</button><button class="btn ghost" type="button" data-ofst="lapsed">Lapsed</button></div>`}<div class="err" id="ofStErr" role="alert"></div></div>
+      <details class="card tight"><summary class="small">Record (${evs.length})</summary>${evs.map(e => `<div class="fact"><div class="k">${esc(fmtDT(e.at))} · ${esc(e.actor)}</div><div class="v" style="font-weight:400">${esc(OF_EVENT[e.kind] || e.kind)}${e.kind === 'status' ? ': ' + esc((e.detail || {}).to || '') : ''}</div></div>`).join('')}</details>
+    </div>`;
+    $('#ofBackP').addEventListener('click', () => viewProperty(o.property_id));
+    $('#ofFix').addEventListener('click', () => viewOfferCorrect(oid));
+    const go = async (fn, args, errBox) => { try { await must(sb.rpc(fn, args)); viewOfferAgent(oid); } catch (e) { if (errBox) $(errBox).textContent = e.message || 'That didn\'t save.'; } };
+    const gk = $('#ofGapOk'); if (gk) gk.addEventListener('click', () => { const r = $('#ofGapWhy').value.trim(); if (r.length < 5) return $('#ofGapErr').textContent = 'Give your reason.'; go('agent_offer_gap', { p_offer: oid, p_reason: r }, '#ofGapErr'); });
+    const gc = $('#ofGapClear'); if (gc) gc.addEventListener('click', () => go('agent_offer_gap', { p_offer: oid, p_reason: null }));
+    $$('[data-ofst]').forEach(b => b.addEventListener('click', () => { const v = $('#ofStAt').value; const at = v ? new Date(v) : new Date(); if (isNaN(at)) return $('#ofStErr').textContent = 'Check the time.'; go('agent_offer_status', { p_offer: oid, p_status: b.dataset.ofst, p_at: at.toISOString(), p_note: $('#ofStNote').value.trim() || null }, '#ofStErr'); }));
+    const sb_ = $('#ofStBack'); if (sb_) sb_.addEventListener('click', () => go('agent_offer_status', { p_offer: oid, p_status: 'received', p_at: new Date().toISOString(), p_note: null }, '#ofStErr'));
+    top();
+  }
+  // the property's Offers tile (agent only)
+  async function offersLoad(pid) {
+    const [lk, ofs, wd] = await Promise.all([ofSafe(sb.from('offer_links').select('*').eq('property_id', pid)), ofSafe(sb.from('property_offers').select('*').eq('property_id', pid).order('received_at', { ascending: false })), ofWording()]);
+    return { link: (lk || [])[0] || null, offers: (ofs || []).filter(o => o.source && o.source !== 'manual'), ks: await ofKs(), wording: wd };
+  }
+  function ofRowHTML(o, X) {
+    const d = o.details || {}, chk = OF.checkDates(d, { asAt: o.as_at, province: o.province, ksDays: X.ks }), L = OF.longDate;
+    const flags = [!o.read_at ? ['New', 'of-new'] : null, o.related_party ? ['Connected to you', 'of-hot'] : null, o.needs_date_help ? ['Wants help with dates', 'of-warnp'] : null,
+      !chk.gapOk && !o.gap_override_reason ? ['Dates under a week apart', 'of-warnp'] : null, o.gap_override_reason ? ['Short gap accepted', ''] : null, o.kiwisaver ? ['KiwiSaver', ''] : null,
+      ['withdrawn', 'lapsed'].includes(o.status) ? [o.status === 'withdrawn' ? 'Withdrawn' : 'Lapsed', 'of-off'] : null].filter(Boolean);
+    return `<li><button class="of-row" type="button" data-offer="${o.id}"><span class="of-r1"><strong>${esc(money(+o.amount))}</strong> <span>${esc(o.buyer_ref || 'Buyer')}</span></span>
+      <span class="small of-r2">${esc(OF.conditionsLine(d))}${chk.lastCondition ? ' · conditions to ' + esc(L(chk.lastCondition)) : ''}${chk.settlement ? ' · settles ' + esc(L(chk.settlement)) : ''}</span>
+      <span class="small">${esc(fmtDT(o.received_at))}${o.source === 'agent' ? ' · entered by you' : ''}</span>
+      ${flags.length ? `<span class="of-flags">${flags.map(([t, c]) => `<span class="pill ${c}">${esc(t)}</span>`).join('')}</span>` : ''}</button></li>`;
+  }
+  function offersTileHTML(p, X) {
+    const okStage = OFFER_STAGES.includes(p.stage), l = X.link, on = !!(l && l.open && okStage);
+    if (!okStage && !l && !X.offers.length) return '';
+    const fresh = X.offers.filter(o => !o.read_at).length, prov = l ? l.province : OF.provinceFor(p.address);
+    return `<div class="card ptile of-tile" id="offTile"><h3>Offers ${fresh ? `<span class="pill of-new">${fresh} new</span>` : ''}</h3>
+      <p class="small" style="margin:0 0 6px" id="offState">${on ? 'The offer form is <strong>on</strong>. Anyone with the link or QR code can send you an offer. Nothing goes to the vendors.' : okStage ? 'The offer form is <strong>off</strong>. Switch it on when you want buyers to be able to send offers.' : 'The offer form opens once the agreement is signed and the property is on the market.'}</p>
+      ${on ? `<div class="copybox of-link" id="offUrl" translate="no">${esc(offerUrl(l.token))}</div>` : ''}
+      <div class="toolbar">${on ? '<button class="btn ghost" type="button" id="offCopy">Copy link</button><button class="btn ghost" type="button" id="offQrBtn">QR code</button><button class="btn ghost" type="button" id="offOff">Switch off</button>' : okStage ? '<button class="btn primary" type="button" id="offOn">Switch on</button>' : ''}
+        <button class="btn ghost" type="button" id="offNew">Fill in an offer for a buyer</button></div>
+      <div id="offQr" class="of-qr" hidden></div>
+      ${X.offers.length ? `<ul class="of-list">${X.offers.map(o => ofRowHTML(o, X)).join('')}</ul>` : '<p class="small" style="margin:6px 0 0">No offers yet.</p>'}
+      <details class="of-more" id="offChD"><summary class="small">Chattels buyers see (${((l && l.chattels) || []).length || 'none yet'})</summary>
+        <label class="f" for="offCh">One chattel per line. With none, buyers see "Tim will confirm the chattels list with you".</label><textarea id="offCh" rows="5">${esc(((l && l.chattels) || []).join('\n'))}</textarea>
+        <div class="toolbar"><button class="btn ghost" type="button" id="offChSave">Save chattels</button></div></details>
+      <details class="of-more" id="offSetD"><summary class="small">Link and settings</summary>
+        ${l ? '<div class="toolbar"><button class="btn ghost" type="button" id="offRegen">Make a new link</button></div><p class="small" style="margin:0">A new link stops the old link and QR code working straight away.</p>' : ''}
+        <label class="f" for="offProv">Holidays for counting working days</label><select id="offProv">${Object.entries(OF.PROVINCES).map(([k, v]) => `<option value="${k}" ${prov === k ? 'selected' : ''}>${esc(v.name)}</option>`).join('')}</select>
+        <label class="f" for="offKs">KiwiSaver warning when settlement is fewer than this many working days after unconditional <span class="opt">(every property)</span></label>
+        <div class="toolbar"><input type="number" id="offKs" min="1" max="60" value="${X.ks}" style="max-width:100px"><button class="btn ghost" type="button" id="offKsSave">Save</button></div>
+        <p class="small" style="margin:10px 0 4px"><strong>Your own clause wording</strong> <span class="opt">(every property; buyers see it when they tap the condition)</span></p>
+        ${['electrical', 'technical', 'sale', 'sdd'].map(k => `<label class="f" for="offW_${k}">${esc(OF.condInfo(k).label)}</label><textarea id="offW_${k}" rows="3" maxlength="4000" data-offw="${k}">${esc(X.wording[k] || '')}</textarea>`).join('')}
+        <div class="toolbar"><button class="btn ghost" type="button" id="offWSave">Save wording</button></div></details></div>`;
+  }
+  function offersTileWire(p, X) {
+    const pid = p.id, on = (s, f, ev) => { const el = $(s); if (el) el.addEventListener(ev || 'click', f); };
+    const act = async (action, extra) => { try { await must(sb.rpc('agent_offer_link', Object.assign({ p_property: pid, p_action: action }, extra || {}))); viewProperty(pid); } catch (_) { } };
+    on('#offOn', () => act('open', { p_province: X.link ? null : OF.provinceFor(p.address) }));
+    on('#offOff', () => act('close'));
+    on('#offRegen', () => { if (confirm('Make a new link? The old link and QR code stop working straight away, including any you have printed or shared.')) act('regenerate'); });
+    on('#offProv', e => act('province', { p_province: e.target.value }), 'change');
+    on('#offNew', () => viewOfferNew(pid));
+    const url = X.link ? offerUrl(X.link.token) : '';
+    on('#offCopy', async () => { try { await navigator.clipboard.writeText(url); toast('Link copied'); } catch (_) { const r = document.createRange(); r.selectNodeContents($('#offUrl')); const s = getSelection(); s.removeAllRanges(); s.addRange(r); toast('Link selected: copy it'); } });
+    on('#offQrBtn', () => { const box = $('#offQr'); if (!box.hidden) { box.hidden = true; return; }
+      box.innerHTML = `<div class="of-qrimg">${window.QR.svg(url, { label: 'QR code for the offer form' })}</div><p class="small" translate="no">${esc(p.address)}</p><p class="small">Make an offer: scan with your phone's camera.</p><div class="toolbar no-print"><button class="btn ghost" type="button" id="offQrPrint">Print</button></div>`;
+      box.hidden = false; $('#offQrPrint').addEventListener('click', () => { document.body.classList.add('print-qr'); window.print(); setTimeout(() => document.body.classList.remove('print-qr'), 500); }); });
+    $$('[data-offer]').forEach(b => b.addEventListener('click', () => viewOfferAgent(b.dataset.offer)));
+    on('#offChSave', async () => { try { const items = $('#offCh').value.split('\n').map(x => x.trim()).filter(Boolean); await must(sb.rpc('agent_offer_chattels', { p_property: pid, p_items: items })); toast('Chattels saved'); viewProperty(pid); } catch (_) { } });
+    on('#offKsSave', async () => { try { await must(sb.rpc('agent_offer_settings', { p_ks_days: +$('#offKs').value })); toast('Saved'); } catch (_) { } });
+    on('#offWSave', async () => { try { for (const t of $$('[data-offw]')) { const k = t.dataset.offw; if ((X.wording[k] || '') !== t.value.trim()) { await must(sb.rpc('agent_offer_clause', { p_key: k, p_wording: t.value.trim() || null })); X.wording[k] = t.value.trim(); } } toast('Wording saved'); } catch (_) { } });
+  }
+
+  const offerToken = new URLSearchParams(location.search).get('offer');
+  if (offerToken) { const w = $('#langWrap'); if (w) w.hidden = true; viewOfferPublic(offerToken); return; }
   const lawyerToken = new URLSearchParams(location.search).get('lawyer');
   if (lawyerToken) { const w = $('#langWrap'); if (w) w.hidden = true; viewLawyer(lawyerToken); return; }
   window.addEventListener('hashchange', e => {

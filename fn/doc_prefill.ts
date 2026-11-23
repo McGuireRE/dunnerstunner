@@ -1,12 +1,32 @@
 // Reads the documents Tim drops in (title, LIM, property summary, CRM export, etc.) and suggests
 // values for the agency agreement. Suggestions only: Tim reviews and ticks each one before it's used.
-// Agent only. Needs the ANTHROPIC_API_KEY secret, which Tim adds himself in Supabase.
+// Agent only, except mode "offer_condition" (offers phase 1): a buyer on a property's offer form asks for help wording their own
+// condition. That mode needs the property's live offer link token, and the database's rate limits and daily cap
+// (offer_public_ai_claim, migration 018) before any model call; the result is a draft Tim approves. Because buyers have no
+// account, this function is deployed with the gateway's JWT verification OFF; every other mode still checks is_agent() with the
+// caller's own token, as before. Needs the ANTHROPIC_API_KEY secret, which Tim adds himself in Supabase.
 import { admin, cors, json } from "./shared.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
 import { unzipSync, strFromU8 } from "npm:fflate@0.8.2";
 import * as XLSX from "npm:xlsx@0.18.5";
 
 import { FIELD_KEYS, MAX_TOTAL, MODEL, SYSTEM, TOOL, TRANSLATE_KINDS, buildTranslateRequest, readTranslateResult } from "./prefill_shared.ts";
+import { makeDraft, netOf } from "./offer_public_handler.ts";
+
+const anthropic = async (key: string, request: unknown) => {
+  const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 25000);
+  try {
+    const r = await fetch("https://api.anthropic.com/v1/messages", { method: "POST", signal: ctl.signal, headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" }, body: JSON.stringify(request) });
+    return { ok: r.ok, status: r.status, body: await r.json().catch(() => ({})) };
+  } finally { clearTimeout(t); }
+};
+// the buyer's condition helper (offers phase 1)
+const offerDraft = makeDraft({
+  rpc: async (fn, args) => { const { data, error } = await admin().rpc(fn, args); return { data, error: error ? { message: error.message } : null }; },
+  aiKey: () => (Deno.env.get("ANTHROPIC_API_KEY") || "").trim(),
+  callModel: (request) => anthropic((Deno.env.get("ANTHROPIC_API_KEY") || "").trim(), request),
+  logAi: async (row) => { await admin().from("ai_calls").insert({ ...row, files: 0, agent: "buyer form" }); },
+});
 
 function b64(bytes: Uint8Array) { let s = ""; for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000)); return btoa(s); }
 export function docxText(bytes: Uint8Array) {
@@ -22,12 +42,20 @@ export function sheetText(bytes: Uint8Array) {
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   try {
+    // a buyer on the offer form: read the body first (capped), and never reach the agent-only modes below
+    const raw = await req.text();
+    let body: any = null; try { body = JSON.parse(raw); } catch (_) { body = null; }
+    if (body && body.mode === "offer_condition") {
+      if (raw.length > 4000) return json({ ok: false, error: "That is more than the helper can take." }, 413);
+      const r = await offerDraft(body, netOf(req));
+      return json(r.body, r.status);
+    }
+    if (!body || typeof body !== "object") return json({ error: "Bad request" }, 400);
     const userClient = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!, { global: { headers: { Authorization: req.headers.get("Authorization") || "" } } });
     if (!(await userClient.rpc("is_agent")).data) return json({ error: "Not allowed" }, 403);
     const key = (Deno.env.get("ANTHROPIC_API_KEY") || "").trim();
     if (!key) return json({ error: "not_set_up", message: "Document reading isn't switched on yet." }, 503);
 
-    const body = await req.json();
 
     // Translation mode (phase 4): same agent-only check, same key, same ai_calls log. The strings are data.
     if (body.mode === "translate") {
