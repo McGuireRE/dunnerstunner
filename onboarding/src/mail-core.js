@@ -9,6 +9,9 @@
      reopenedDraft(i)        "please initial the change and finish again", to a signer whose side changed the document after they finished
      roundNotice(i)          Tim's own notice, once per submitted round: who, what changed, which round, and its portal address
      agreedDrafts(i)         the agreed copy's two emails: to the purchasers (cc their lawyer) and to the vendors (cc theirs)
+     depositRecommended(ks)  who should hold the deposit: the vendors' lawyer if any KiwiSaver is part of it, else the NZ Real Estate Trust
+     DEPOSIT_HOLDERS         the choices on Tim's page, with their wording
+     withdrawDrafts(i)       after Tim records a withdrawal: to the side that directed it (cc their lawyer), and to the other side's lawyer
      firstWorkingDay(d, h)   the first working day after a date: Monday to Friday, not a public holiday (non_working_days)
      toHtml(text, link)      a draft's text as the email's HTML: paragraphs, **bold**, and the link where [the signing link] is
      BLANK_RE                finds the marked blanks
@@ -124,8 +127,11 @@
     const depAmt = money((/\$\s?[\d,]+(\.\d+)?/.exec(depText) || [''])[0]) || s_(AD.deposit) || blank('fill: the deposit amount');
     const depWhen = /unconditional/i.test(depText) ? 'once the agreement becomes unconditional' : /\b(on|upon) (signing|execution|acceptance)\b|\bwhen (this agreement is )?signed\b/i.test(depText) ? 'on signing' : blank('fill: when the deposit is paid');
     const ks = T.kiwisaver === true || D.kiwisaver === true;
-    const depositLine = whose => ks ? `Deposit (${depAmt}): payable to the vendors' lawyer's trust account ${depWhen}. Because ${whose} KiwiSaver is part of it, the whole deposit goes there and can't be released before settlement.`
-      : `Deposit (${depAmt}): payable to Public Trust O/A NZ Real Estate Trust ${depWhen}.`;
+    // who holds it: Tim's choice on his page (input.depositHolder), else the recommended one. With KiwiSaver it is never released before settlement.
+    const dh = input.depositHolder && DEPOSIT_HOLDERS[input.depositHolder.holder] ? input.depositHolder : { holder: depositRecommended(ks) };
+    const payee = dh.holder === 'other' ? (s_(dh.other) || blank('fill: who holds the deposit')) : DEPOSIT_HOLDERS[dh.holder].payee;
+    const depositLine = whose => `Deposit (${depAmt}): payable to ${payee} ${depWhen}.` + (!ks ? '' : dh.holder === 'vendor_lawyer' ? ` Because ${whose} KiwiSaver is part of it, the whole deposit goes there and can't be released before settlement.`
+      : ` Because ${whose} KiwiSaver is part of it, the deposit can't be released before settlement.`);
     const ft = Array.isArray(T.further_terms) ? T.further_terms : [];
     const asIs = ft.filter(t => /as is,?\s*where is/i.test(s_(t.text)));
     const excluded = (D.chattels_exclude || []).map(s_).filter(Boolean);
@@ -188,6 +194,39 @@
     return { purchasers, vendors, blanks };
   }
 
+  /* ───── who holds the deposit (Tim, 24 November 2026) ───── */
+  const DEPOSIT_HOLDERS = {
+    nzret: { label: "Public Trust O/A NZ Real Estate Trust (Tim's trust account)", payee: 'Public Trust O/A NZ Real Estate Trust' },
+    vendor_lawyer: { label: "Vendors' lawyer's trust account", payee: "the vendors' lawyer's trust account" },
+    other: { label: 'Other (type it in)', payee: '' },
+  };
+  const depositRecommended = ks => ks ? 'vendor_lawyer' : 'nzret';
+
+  /* ───── a withdrawal Tim has recorded ───── */
+  // i: { side (who directed it: 'purchaser' | 'vendor'), address, when (Date or ISO), partyFirst: [their first names], partyTo: [emails],
+  //   ownLawyer: { email }, otherLawyer: { person, firm, email } }  -> { party: { to, cc, subject, body }, lawyer: { to, cc, subject, body } }
+  // No reason is given in either: Tim adds anything more himself. The other side's own contact details are never in them.
+  function withdrawDrafts(i) {
+    const v = i.side === 'vendor', addr = s_(i.address) || 'the property', what = v ? 'counteroffer' : 'offer';
+    const w = i.when ? new Date(i.when) : null, when = w && !isNaN(w) ? w.toLocaleString('en-NZ', { timeZone: 'Pacific/Auckland', weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : blank('fill: when it was withdrawn');
+    const ol = i.otherLawyer || {}, olFirst = s_(ol.person).split(/\s+/)[0];
+    const party = {
+      to: uniq(i.partyTo || []), cc: uniq([(i.ownLawyer || {}).email]),
+      subject: `Your withdrawal is recorded: ${addr}`,
+      body: [`${v ? 'Hello' : 'Dear'} ${names((i.partyFirst || []).map(s_)) || blank('fill: their first names')},`,
+        `As you asked, I have recorded the withdrawal of your ${what} for ${addr}, with immediate effect from ${when}. Signing has stopped, and the signing links no longer work. Nothing anyone had already signed has been changed.`,
+        `I'll let the ${v ? "purchasers'" : "vendors'"} lawyer know. Any questions, just call me on ${TIM_PHONE}.`, 'Tim'].join('\n\n'),
+    };
+    const lawyer = {
+      to: uniq([ol.email]), cc: [],
+      subject: `Withdrawal: ${addr}`,
+      body: [`Dear ${olFirst || blank("fill: the lawyer's first name")},`,
+        `I write to let you know that the ${v ? 'vendors have withdrawn their counteroffer' : 'purchasers have withdrawn their offer'} for ${addr}, with immediate effect from ${when}. Signing has stopped, and nothing further will be presented on it.`,
+        `Please let your clients know. Any questions, just call me on ${TIM_PHONE}.`, 'Faithfully,\nTim McGuire\nMcGuire Real Estate'].join('\n\n'),
+    };
+    return { party, lawyer };
+  }
+
   // a draft's text as the email's HTML: escaped, paragraphs at blank lines, line breaks kept, **bold**, the link at [the signing link]
   function toHtml(text, link) {
     const esc = t => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -196,6 +235,6 @@
     return '<div style="font-family:Arial,sans-serif;font-size:15px;line-height:1.5;color:#1F1D1A;max-width:600px">' + String(text).split(/\n{2,}/).map(p => `<p>${para(p)}</p>`).join('') + '</div>';
   }
 
-  const MAIL = { LINK, BLANK_RE, signLinkDraft, reopenedDraft, roundNotice, agreedDrafts, firstWorkingDay, parseDate, longDate, toHtml, P_ACTION };
+  const MAIL = { LINK, BLANK_RE, signLinkDraft, reopenedDraft, roundNotice, agreedDrafts, DEPOSIT_HOLDERS, depositRecommended, withdrawDrafts, firstWorkingDay, parseDate, longDate, toHtml, P_ACTION };
   if (typeof module !== 'undefined' && module.exports) module.exports = MAIL; else root.MAIL = MAIL;
 })(typeof window !== 'undefined' ? window : globalThis);

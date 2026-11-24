@@ -261,7 +261,9 @@
     sign_released: 'Ready to sign (Round 1)', sign_started: 'Signing started on Tim\'s device', sign_links_sent: 'Personal links sent', sign_code_ok: 'Code checked', sign_consent: 'Agreed to sign electronically',
     sign_receipt: 'Read and receipted', sign_finished: 'Finished signing', sign_complete: 'Everyone on that side signed', sign_marked: 'Marked the page', sign_reviewed: 'Tim re-approved a mark',
     sign_cancelled: 'Signing stopped', sign_replaced: 'Replaced by a newer draft', sign_change_asked: 'Asked Tim for a change', round_locked: 'Round locked', round_presented: 'Tim authorised presentation',
-    round_change: 'A change was made', document_closed: 'Document closed for a fresh copy', agreement_formed: 'Agreement formed' };
+    round_change: 'A change was made', document_closed: 'Document closed for a fresh copy', agreement_formed: 'Agreement formed',
+    party_request: 'Asked Tim to stop', offer_frozen: 'Tim froze the offer', offer_unfrozen: 'Tim unfroze the offer', request_carry_on: 'Tim let them carry on', offer_withdrawn_now: 'Withdrawn',
+    deposit_holder_chosen: 'Deposit holder chosen' };
   const escH = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   // a plain description of one event, never contact details (events never hold them)
   function eventWords(e) {
@@ -271,6 +273,13 @@
     if (e.kind === 'round_change') return `${w} in Round ${d.round} by ${e.actor}: ${KIND_WORDS[d.kind] || d.kind} on page ${d.page}${d.text ? ' "' + d.text + '"' : ''}`;
     if (e.kind === 'status') return `${w} ${d.to}${d.note ? ': ' + d.note : ''}`;
     if (e.kind === 'withdrawn') return `The ${sideName(d.side)} withdrew, at ${NZ(d.at)}${d.note ? ': ' + d.note : ''}`;
+    // freeze and withdrawal (Tim, 24 November 2026): who asked, why, and when and how Tim was told
+    if (e.kind === 'party_request') return `${e.actor} (${d.side === 'vendor' ? 'a vendor' : 'a purchaser'}) asked Tim to ${d.kind === 'withdraw' ? 'withdraw' : 'stop for now'}, from their link on Round ${d.round}: ${d.reason || ''}`;
+    if (e.kind === 'offer_frozen') return `${w}. Every signing stopped. Asked by ${d.asked_by || 'Tim'}: ${d.reason || ''}`;
+    if (e.kind === 'offer_unfrozen') return `${w}. Signing can carry on: ${d.note || ''}`;
+    if (e.kind === 'request_carry_on') return `${w}: ${d.note || ''}`;
+    if (e.kind === 'offer_withdrawn_now') return `${w} with immediate effect, directed by ${d.person} for the ${sideName(d.side)}: ${d.reason || ''}. Tim was told ${NZ(d.told_at)}, ${({ in_person: 'in person', phone: 'by phone', email: 'by email', link_request: 'by their request from their link' })[d.told_how] || d.told_how}. Never presented or signed again`;
+    if (e.kind === 'deposit_holder_chosen') return `${w}: ${d.holder === 'other' ? d.other : d.holder === 'nzret' ? 'Public Trust O/A NZ Real Estate Trust' : "the vendors' lawyer's trust account"}${d.holder !== d.recommended ? ' (not the recommended one' + (d.kiwisaver ? '; KiwiSaver is part of the deposit)' : ')') : ''}`;
     if (e.kind === 'document_closed') return `${w} (Document ${d.document}, ${d.rounds} rounds kept): ${d.reason || ''}`;
     if (e.kind === 'agreement_formed') return `${w}: dated ${d.date}, acceptance communicated ${NZ(d.accepted_at)}. SHA-256 ${d.sha256 || ''}`;
     if (e.kind === 'sign_receipt') return `${w}: ${d.guide === 'chattels' ? 'the chattels reminder' : SIGN.GUIDE_NAMES[d.guide] || d.guide}`;
