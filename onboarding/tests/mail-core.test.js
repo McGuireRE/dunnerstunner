@@ -104,13 +104,17 @@ const base = () => ({
   { const b = base(); b.terms.kiwisaver = false; b.details.kiwisaver = false; b.depositHolder = { holder: 'vendor_lawyer' }; const t = M.agreedDrafts(b).purchasers.body;
     has(t, "Deposit ($65,500): payable to the vendors' lawyer's trust account [Tim to fill: when the deposit is paid].", 'no KiwiSaver, Tim chose the vendors\' lawyer'); ok(!/KiwiSaver/.test(t.split('Deposit (')[1].split('\n')[0]), 'no KiwiSaver words without KiwiSaver'); }
   // a withdrawal Tim recorded: to the side that directed it, and to the other side's lawyer; no reason, no other side's contacts
-  { const w = M.withdrawDrafts({ side: 'vendor', address: '12 Example Street, Dunedin', when: '2026-11-24T02:00:00Z', partyFirst: ['Vee', 'Val'], partyTo: ['Vee@Example.com'], ownLawyer: { email: 'vl@law.example' }, otherLawyer: { person: 'Pat Lawyer', firm: 'Law Ltd', email: 'pat@law.example' } });
+  { const w = M.withdrawDrafts({ side: 'vendor', counter: true, address: '12 Example Street, Dunedin', when: '2026-11-24T02:00:00Z', partyFirst: ['Vee', 'Val'], partyTo: ['Vee@Example.com'], ownLawyer: { email: 'vl@law.example' }, otherLawyer: { person: 'Pat Lawyer', firm: 'Law Ltd', email: 'pat@law.example' } });
     out.withdraw = w;
     ok(/^Hello Vee and Val,/.test(w.party.body) && w.party.to[0] === 'vee@example.com' && w.party.cc[0] === 'vl@law.example' && /withdrawal of your counteroffer for 12 Example Street, Dunedin, with immediate effect from Tuesday, 24 November 2026 at 3:00/.test(w.party.body), 'the email to the vendors who directed it');
     ok(/^Dear Pat,/.test(w.lawyer.body) && w.lawyer.to[0] === 'pat@law.example' && !w.lawyer.cc.length && /the vendors have withdrawn their counteroffer/.test(w.lawyer.body) && !/vee@|Vee/.test(w.lawyer.body), 'the email to the purchasers\' lawyer');
     const p = M.withdrawDrafts({ side: 'purchaser', address: 'x', when: null, partyFirst: ['Ana'], partyTo: ['ana@example.com'], otherLawyer: {} });
     ok(/^Dear Ana,/.test(p.party.body) && /your offer for x/.test(p.party.body) && /\[Tim to fill: when it was withdrawn\]/.test(p.party.body) && /\[Tim to fill: the lawyer's first name\]/.test(p.lawyer.body), 'purchasers: their offer; blanks where nothing is known');
-    ok(!/—/.test(JSON.stringify(w) + JSON.stringify(p)), 'no em dashes'); }
+    ok(!/—/.test(JSON.stringify(w) + JSON.stringify(p)), 'no em dashes');
+    // the vendors made no counteroffer: they have declined the offer, in both emails; Tim's sign-off
+    const n = M.withdrawDrafts({ side: 'vendor', counter: false, address: 'x', when: null, partyFirst: ['Vee'], partyTo: ['vee@example.com'], otherLawyer: { person: 'Pat Lawyer', email: 'pat@law.example' } });
+    ok(/recorded that you have declined the offer for x/.test(n.party.body) && /the vendors have declined the offer for x/.test(n.lawyer.body) && !/counteroffer/.test(n.party.body + n.lawyer.body), 'no counteroffer made: declined, not withdrawn');
+    ok(/Faithfully,\nTim$/.test(w.lawyer.body), 'the lawyer email signs off as Tim does'); }
   // signing emails and Tim's notice
   const sl = M.signLinkDraft({ first: 'Vee', address: '12 Example Street, Dunedin', side: 'vendor', round: 2 });
   ok(sl.subject === 'An offer on 12 Example Street, Dunedin' && sl.body.includes(M.LINK) && /^Hello Vee,/.test(sl.body) && /^Dear Ana,/.test(M.signLinkDraft({ first: 'Ana', address: 'x', side: 'purchaser', round: 1 }).body) && /027 562 7207/.test(sl.body) && /14 days/.test(sl.body) && /comes straight to me/.test(sl.body) && !/[—–]/.test(sl.body), 'the link draft: who, what, by when, Tim\'s phone, straight to Tim');

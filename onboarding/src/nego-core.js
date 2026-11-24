@@ -279,6 +279,7 @@
     if (e.kind === 'offer_unfrozen') return `${w}. Signing can carry on: ${d.note || ''}`;
     if (e.kind === 'request_carry_on') return `${w}: ${d.note || ''}`;
     if (e.kind === 'offer_withdrawn_now') return `${w} with immediate effect, directed by ${d.person} for the ${sideName(d.side)}: ${d.reason || ''}. Tim was told ${NZ(d.told_at)}, ${({ in_person: 'in person', phone: 'by phone', email: 'by email', link_request: 'by their request from their link' })[d.told_how] || d.told_how}. Never presented or signed again`;
+    if (e.kind === 'deposit_holder_chosen' && d.by_default) return `Deposit holder: the recommended one, used for the emails (not changed by Tim): ${d.holder === 'nzret' ? 'Public Trust O/A NZ Real Estate Trust' : "the vendors' lawyer's trust account"}`;
     if (e.kind === 'deposit_holder_chosen') return `${w}: ${d.holder === 'other' ? d.other : d.holder === 'nzret' ? 'Public Trust O/A NZ Real Estate Trust' : "the vendors' lawyer's trust account"}${d.holder !== d.recommended ? ' (not the recommended one' + (d.kiwisaver ? '; KiwiSaver is part of the deposit)' : ')') : ''}`;
     if (e.kind === 'document_closed') return `${w} (Document ${d.document}, ${d.rounds} rounds kept): ${d.reason || ''}`;
     if (e.kind === 'agreement_formed') return `${w}: dated ${d.date}, acceptance communicated ${NZ(d.accepted_at)}. SHA-256 ${d.sha256 || ''}`;

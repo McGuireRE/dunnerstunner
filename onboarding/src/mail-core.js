@@ -203,26 +203,28 @@
   const depositRecommended = ks => ks ? 'vendor_lawyer' : 'nzret';
 
   /* ───── a withdrawal Tim has recorded ───── */
-  // i: { side (who directed it: 'purchaser' | 'vendor'), address, when (Date or ISO), partyFirst: [their first names], partyTo: [emails],
+  // i: { side (who directed it: 'purchaser' | 'vendor'), counter (true when that side had made a counteroffer), address, when (Date or ISO), partyFirst: [their first names], partyTo: [emails],
   //   ownLawyer: { email }, otherLawyer: { person, firm, email } }  -> { party: { to, cc, subject, body }, lawyer: { to, cc, subject, body } }
   // No reason is given in either: Tim adds anything more himself. The other side's own contact details are never in them.
   function withdrawDrafts(i) {
-    const v = i.side === 'vendor', addr = s_(i.address) || 'the property', what = v ? 'counteroffer' : 'offer';
+    const v = i.side === 'vendor', addr = s_(i.address) || 'the property', vc = v && i.counter === true;
+    // the vendors withdraw their counteroffer only if they made one; otherwise they have declined the offer
+    const yours = vc ? 'the withdrawal of your counteroffer' : v ? 'that you have declined the offer' : 'the withdrawal of your offer', theirs = vc ? 'the vendors have withdrawn their counteroffer' : v ? 'the vendors have declined the offer' : 'the purchasers have withdrawn their offer';
     const w = i.when ? new Date(i.when) : null, when = w && !isNaN(w) ? w.toLocaleString('en-NZ', { timeZone: 'Pacific/Auckland', weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : blank('fill: when it was withdrawn');
     const ol = i.otherLawyer || {}, olFirst = s_(ol.person).split(/\s+/)[0];
     const party = {
       to: uniq(i.partyTo || []), cc: uniq([(i.ownLawyer || {}).email]),
       subject: `Your withdrawal is recorded: ${addr}`,
       body: [`${v ? 'Hello' : 'Dear'} ${names((i.partyFirst || []).map(s_)) || blank('fill: their first names')},`,
-        `As you asked, I have recorded the withdrawal of your ${what} for ${addr}, with immediate effect from ${when}. Signing has stopped, and the signing links no longer work. Nothing anyone had already signed has been changed.`,
+        `As you asked, I have recorded ${yours} for ${addr}, with immediate effect from ${when}. Signing has stopped, and the signing links no longer work. Nothing anyone had already signed has been changed.`,
         `I'll let the ${v ? "purchasers'" : "vendors'"} lawyer know. Any questions, just call me on ${TIM_PHONE}.`, 'Tim'].join('\n\n'),
     };
     const lawyer = {
       to: uniq([ol.email]), cc: [],
       subject: `Withdrawal: ${addr}`,
       body: [`Dear ${olFirst || blank("fill: the lawyer's first name")},`,
-        `I write to let you know that the ${v ? 'vendors have withdrawn their counteroffer' : 'purchasers have withdrawn their offer'} for ${addr}, with immediate effect from ${when}. Signing has stopped, and nothing further will be presented on it.`,
-        `Please let your clients know. Any questions, just call me on ${TIM_PHONE}.`, 'Faithfully,\nTim McGuire\nMcGuire Real Estate'].join('\n\n'),
+        `I write to let you know that ${theirs} for ${addr}, with immediate effect from ${when}. Signing has stopped, and nothing further will be presented on it.`,
+        `Please let your clients know. Any questions, just call me on ${TIM_PHONE}.`, 'Faithfully,\nTim'].join('\n\n'),
     };
     return { party, lawyer };
   }
