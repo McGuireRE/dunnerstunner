@@ -350,7 +350,7 @@ const nzToday0=()=>new Date().toLocaleDateString('en-CA',{timeZone:'Pacific/Auck
 function offerClean(p,agent){ const O=window.OFFERS; if(!p||typeof p!=='object'||Array.isArray(p)) throw new Error('Nothing was sent'); if(JSON.stringify(p).length>60000) throw new Error('That is more than the form can take');
   const t=v=>{ const s=String(v??'').replace(/[\u0001-\u0008\u000B\u000C\u000E-\u001F\u007F]/g,'').trim(); return s||null; };
   const cap=(v,n,what)=>{ const s=t(v); if(s&&s.length>n) throw new Error(`Please shorten ${what}: ${n} characters at most`); return s; };
-  // migration 022: a condition may wait for another on the same offer ({key, after, days}); refused as the database refuses it
+  // migration 021: a condition may wait for another on the same offer ({key, after, days}); refused as the database refuses it
   if(Array.isArray(p.conditions)){ const ks=p.conditions.map(c=>c&&c.key);
     for(const c of p.conditions){ if(!c||c.after==null||c.after==='') continue; const n=c.days===''||c.days==null?null:Math.floor(+c.days);
       if(typeof c.after!=='string'||c.after===c.key||!ks.includes(c.after)) throw new Error("Please check the conditions: a condition waits for one that isn't on the offer");
@@ -424,7 +424,7 @@ function offerRpc(name,a,me){ if(!me||!AGENTS.includes(me.email)) return bad('On
     offerRpc('agent_offer_link',{p_property:p.id,p_action:'get'},me); const l=OL().find(x=>x.property_id===p.id); const before=l.chattels||[]; l.chattels=items; ev(p.id,null,'chattels',{before,after:items}); return ok(items); }
   if(name==='agent_offer_add'){ const p=PT().find(x=>x.id===a.p_property); if(!p) return bad('No such property'); let d; try{ d=offerClean(a.p_offer,true); }catch(e){ return bad(e.message); } const l=OL().find(x=>x.property_id===p.id); d.chattels_listed=((l&&l.chattels)||[]).slice(); return ok(offerRow(p.id,d,'agent',me.email,l&&l.province).id); }
   if(name==='agent_offer_correct'){ const o=fnd(a.p_offer); if(!o) return bad('No such offer');
-    // migration 022: with p_expected (the details as the screen loaded them), refused when the offer has changed since
+    // migration 021: with p_expected (the details as the screen loaded them), refused when the offer has changed since
     if('p_expected' in a&&(a.p_expected==null||JSON.stringify(canonJ(o.details))!==JSON.stringify(canonJ(a.p_expected)))) return bad('The offer has changed since this screen opened, so nothing was saved. Go back to the offer, open the newest draft and try again'); const note=String(a.p_note||'').trim(); if(note.length<3||note.length>500) return bad('Say what changed and how you heard (3 to 500 characters)');
     let d; try{ d=offerClean(a.p_details,true); }catch(e){ return bad(e.message); } d.chattels_listed=(o.details.chattels_listed||[]).slice(); const before=o.details; Object.assign(o,{details:d,amount:d.price,conditions:d.conditions.map(c=>c.key).join(', '),buyer_ref:offerLabel(d),kiwisaver:d.kiwisaver,lawyer_approval:d.lawyer_approval,needs_date_help:d.date_help,related_party:d.related,updated_at:now()}); ev(o.property_id,o.id,'corrected',{note,before,after:d}); return ok(d); }
   if(name==='agent_offer_status'){ const o=fnd(a.p_offer); if(!o) return bad('No such offer'); if(!['withdrawn','lapsed','received'].includes(a.p_status)) return bad('Choose withdrawn or lapsed'); const at=a.p_at||now();
@@ -703,7 +703,7 @@ function draftRpc(name,a,me){ if(!me||!AGENTS.includes(me.email)) return bad('On
     if(!new RegExp('^properties/'+o.property_id+'/docs/offer-draft-'+o.id+'-[0-9]{1,4}-[0-9a-f]{12}\\.pdf$').test(a.p_path||'')) return bad('A draft is stored at its own place');
     const obj=SO()[a.p_path]; if(!obj) return bad("The draft hasn't arrived yet"); if(obj.size!==a.p_size||obj.mime!=='application/pdf') return bad("The stored draft doesn't match");
     if(!(DB.offer_file_hashes||[]).some(h=>h.path===a.p_path&&h.sha256===a.p_sha256&&h.size_bytes===a.p_size)) return bad("The draft's fingerprint hasn't been confirmed by the server yet. Try again");
-    if(!draftEditsOk(a.p_edits||{},b.sizes)) return bad("One of your changes on the review screen couldn't be kept: a mark or moved place off the page, too many terms, or text too long. Check them and draft again");   // migration 022
+    if(!draftEditsOk(a.p_edits||{},b.sizes)) return bad("One of your changes on the review screen couldn't be kept: a mark or moved place off the page, too many terms, or text too long. Check them and draft again");   // migration 021
     const n=OD().filter(x=>x.offer_id===o.id).reduce((m_,x)=>Math.max(m_,x.number),0)+1;
     const d={id:uid(),offer_id:o.id,property_id:o.property_id,number:n,blank_id:b.id,blank_sha256:b.sha256,map_id:m.id,details:JSON.parse(JSON.stringify(o.details)),edits:a.p_edits||{},placed:a.p_placed||[],needs:a.p_needs||[],path:a.p_path,sha256:a.p_sha256,size_bytes:a.p_size,note:(a.p_note||'').trim()||null,created_by:me.email,created_at:now()};
     OD().push(d); ev(o.property_id,o.id,'drafted',{draft_id:d.id,number:n,sha256:d.sha256,blank_sha256:b.sha256,map_version:m.version,needs:d.needs.length,note:d.note}); return ok({id:d.id,number:n}); }
@@ -723,7 +723,7 @@ function draftRpc(name,a,me){ if(!me||!AGENTS.includes(me.email)) return bad('On
     if(l.firm&&!law.firm) law.firm=l.firm; if(l.person&&!law.person) law.person=l.person; const before=o.details; o.details=Object.assign({},o.details,{lawyer:law}); o.updated_at=now();
     ev(o.property_id,o.id,'corrected',{note:"Lawyer's contact details from the lookup, ticked by Tim",before,after:o.details,lookup:l.id,used}); return ok(law); }
   return bad('unknown rpc '+name); }
-// migration 022: offer_draft_edits_ok, what Tim did on the review screen (marks and moved places on the blank's own pages, and the shape of the rest)
+// migration 021: offer_draft_edits_ok, what Tim did on the review screen (marks and moved places on the blank's own pages, and the shape of the rest)
 const canonJ=x=>Array.isArray(x)?x.map(canonJ):x&&typeof x==='object'?Object.keys(x).sort().reduce((m,k)=>{ if(x[k]!==undefined) m[k]=canonJ(x[k]); return m; },{}):x;
 function draftEditsOk(e,sizes){ const num=(v,lo,hi)=>typeof v==='number'&&isFinite(v)&&v>=lo&&v<=hi;
   const box=(v,min)=>{ if(!v||typeof v!=='object'||!Number.isInteger(v.page)||v.page<1||v.page>sizes.length) return false; const [w,h]=sizes[v.page-1]; return num(v.x,-1,w+1)&&num(v.y,-1,h+1)&&num(v.w,min,w+1)&&num(v.h,min,h+1)&&v.x+v.w<=w+1&&v.y+v.h<=h+1; };

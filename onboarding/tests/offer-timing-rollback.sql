@@ -1,4 +1,4 @@
--- Rollback test for migration 022 (condition timing: a condition that waits for another, and "Confirm all conditions on the same
+-- Rollback test for migration 021 (condition timing: a condition that waits for another, and "Confirm all conditions on the same
 -- day"). Run with onboarding/tests/offer-timing-rollback.js, which puts the whole migration inside the block, so one statement
 -- replaces offer_clean, runs the checks and then raises, which undoes it all. Nothing is kept. The output is the exception message:
 -- refusals read in lower case; a line in CAPITALS means something that should have been refused was allowed, or a value was wrong.

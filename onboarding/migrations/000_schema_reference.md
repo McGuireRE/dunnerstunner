@@ -254,7 +254,7 @@ agreements/<agreement id>/signatures/... (vendors may upload their own signature
   places of the newest usable blank, nothing blocking except "ackable" items Tim ticked as checked, kept in `offer_draft_approvals.checked`), `agent_lawyer_use(lookup, keys)` (email and phone
   only, from the stored lookup). Service role (offer-draft): `offer_ai_read_save`, `offer_lawyer_save`, `offer_file_confirm`.
 
-## 022 Condition timing and the review screen (24 November 2026; tested in a rollback block on a local PostgreSQL stand-in, NOT yet on the live project)
+## 021 Condition timing (built as 022) and the review screen (24 November 2026; tested in a rollback block on a local PostgreSQL stand-in, NOT yet on the live project)
 - `offer_clean` replaced: a condition may be `{key, after, days}` (within N working days, 1 to 250, of the date the condition `after`
   on the same offer is satisfied or waived); refused when it waits for itself or a condition not on the offer, loops, or runs more
   than three steps. `line_up: true` kept when the buyer asks for all conditions on the same day. Old `{days}`/`{date}` unchanged.

@@ -7,7 +7,7 @@
 //                   role), and records them (offer_file_confirm). The database accepts a blank or draft only with a matching fingerprint.
 //   write_clause:   Tim describes a further term in plain words; Sonnet drafts it (prefill_shared.ts), with {timing} where a
 //                   condition's time goes, within the daily cap (offer_agent_ai_claim reserves the row in ai_calls, offer_agent_ai_done
-//                   finishes it; migration 022). Only a
+//                   finishes it; migration 021). Only a
 //                   draft: his screen shows it for him to edit and tick before it is used or saved to his library. Nothing is stored here.
 //   lawyer_lookup:  finds the purchaser's lawyer's public work email and phone (the firm's own website, the Law Society) with the
 //                   Anthropic web search tool, each value with its source page. Only values from pages the search returned are kept;

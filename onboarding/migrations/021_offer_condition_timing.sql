@@ -1,4 +1,4 @@
--- 022 Condition timing (24 November 2026). Additive only: one function replaced, no table or column changed, no data touched.
+-- 021 Condition timing (numbered 021 when applied; built as 022) (24 November 2026). Additive only: one function replaced, no table or column changed, no data touched.
 --
 -- Tim often lines his conditions up to confirm on the same day, and a condition may be satisfied within so many working days of the
 -- date another condition is satisfied or waived. offer_clean (018) is replaced so an offer's conditions may now be, besides the
@@ -11,7 +11,7 @@
 -- (offer_draft_edits_ok: marks and moved places on the blank's own pages, clauses from his library, order, timing, removed numbers),
 -- agent_offer_correct(offer, details, note, expected) (refused unless the offer is still as the screen loaded it), and
 -- offer_agent_ai_claim / offer_agent_ai_done, the daily cap for his clause writer with a reservation row in ai_calls (service role only).
--- Before 022 the live offer_clean silently drops `after` (the condition would then count from the agreement): apply 022 before the
+-- Before 021 the live offer_clean silently drops `after` (the condition would then count from the agreement): apply 021 before the
 -- page that sends it goes live. Everything else in offer_clean is exactly as in 018. offer_public_submit, agent_offer_add and
 -- agent_offer_correct call it and are unchanged. Nothing here touches agreements, signatures, signed records or their triggers.
 
@@ -49,7 +49,7 @@ begin
     n := public.offer_int(c, 'days', 1, 250, 'the working days for a condition');
     a := public.offer_txt(c, 'after', 20, false, 'the condition it waits for');
     if a is not null then
-      -- 022: within so many working days of the date another condition on this offer is satisfied or waived (checked below)
+      -- 021: within so many working days of the date another condition on this offer is satisfied or waived (checked below)
       if n is null then raise exception 'Please add the working days for each condition'; end if;
       s := s || jsonb_build_object('after', a, 'days', n);
     else
@@ -64,7 +64,7 @@ begin
     end if;
     cs := cs || jsonb_build_array(s);
   end loop;
-  -- 022: a condition that waits for another points at a different condition on this offer, never round in a loop, and at most three
+  -- 021: a condition that waits for another points at a different condition on this offer, never round in a loop, and at most three
   -- steps in a row (the same rules as chainProblem in onboarding/src/offers-core.js)
   for c in select * from jsonb_array_elements(cs) loop
     continue when not (c ? 'after');
@@ -83,7 +83,7 @@ begin
     end loop;
   end loop;
   out := out || jsonb_build_object('conditions', cs, 'lawyer_approval', 'lawyer' = any(seen));
-  -- 022: the buyer asked for every condition to be confirmed on the same day (kept only when they did)
+  -- 021: the buyer asked for every condition to be confirmed on the same day (kept only when they did)
   if p ? 'line_up' and jsonb_typeof(p -> 'line_up') not in ('boolean', 'null') then raise exception 'Please check the conditions'; end if;
   if public.offer_bool(p, 'line_up') then out := out || jsonb_build_object('line_up', true); end if;
   t := public.offer_txt(p, 'sale_address', 300, 'sale' = any(seen), 'the address of the property you need to sell');
@@ -133,7 +133,7 @@ begin
 end $$;
 
 
--- ───── 022: the review screen (Tim, 24 November 2026) ─────
+-- ───── 021: the review screen (Tim, 24 November 2026) ─────
 -- Tim's edits to a draft may now hold, besides what 019 took: clauses added from his library (added_terms), the order of the
 -- further terms (term_order), a term's own timing (term_timing), the numbers of terms he removed (retired_numbers, never used
 -- again), areas he marked on the pages (marks) and places he moved or resized (moves). The browser makes the PDF from them, as in
@@ -211,7 +211,7 @@ begin
   return true;
 end $$;
 
--- 019's agent_draft_add, unchanged but for the check of Tim's edits above (marked 022)
+-- 019's agent_draft_add, unchanged but for the check of Tim's edits above (marked 021)
 create or replace function public.agent_draft_add(p_offer uuid, p_map uuid, p_path text, p_sha256 text, p_size bigint, p_placed jsonb, p_needs jsonb, p_edits jsonb, p_note text) returns jsonb language plpgsql security definer set search_path = public as $$
 declare me text := public.offer_agent(); o public.property_offers; m public.offer_blank_maps; b public.offer_blanks; n int; did uuid; obj jsonb; newest uuid;
 begin
@@ -234,7 +234,7 @@ begin
     raise exception 'The draft''s fingerprint hasn''t been confirmed by the server yet. Try again';
   end if;
   if length(coalesce(p_note, '')) > 500 then raise exception 'The note is too long'; end if;
-  -- 022: what Tim did on the review screen is checked before it is kept (marks and moved places sit on the blank's own pages)
+  -- 021: what Tim did on the review screen is checked before it is kept (marks and moved places sit on the blank's own pages)
   if not public.offer_draft_edits_ok(coalesce(nullif(p_edits, 'null'::jsonb), '{}'::jsonb), b.sizes) then raise exception 'One of your changes on the review screen couldn''t be kept: a mark or moved place off the page, too many terms, or text too long. Check them and draft again'; end if;
   select coalesce(max(number), 0) + 1 into n from public.offer_drafts where offer_id = p_offer;
   insert into public.offer_drafts (offer_id, property_id, number, blank_id, blank_sha256, map_id, details, edits, placed, needs, path, sha256, size_bytes, note, created_by)

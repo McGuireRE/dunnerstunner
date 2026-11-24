@@ -34,5 +34,5 @@ grant select on storage.objects to service_role;
 alter default privileges in schema public grant all on tables to anon, authenticated, service_role;
 alter default privileges in schema public grant all on sequences to anon, authenticated, service_role;
 alter default privileges in schema public grant execute on functions to anon, authenticated, service_role;
--- the AI call log (as on the live project; for 022's daily cap on Tim's clause writer)
+-- the AI call log (as on the live project; for 021's daily cap on Tim's clause writer)
 create table if not exists public.ai_calls (id bigserial primary key, at timestamptz not null default now(), purpose text, model text, ok boolean, error text, input_tokens integer, output_tokens integer, files integer, agreement_id uuid, agent text);

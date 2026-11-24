@@ -262,12 +262,12 @@ Phase 4 (presentation):
 
 ## Condition timing, further terms numbering and the review screen (Tim, 24 November 2026; branch `offers-timing`, NOT live)
 
-Built locally on `offers-timing` from main. Migration 022 is written and passed its rollback block on the local PostgreSQL 16 stand-in
+Built locally on `offers-timing` from main. Migration 021 is written and passed its rollback block on the local PostgreSQL 16 stand-in
 (`tests/pg-standin.sql`, then 010, 016 part A, 018, 019; `node onboarding/tests/offer-timing-rollback.js`), NOT the live project.
 
 - Timing for every condition: `{key, days}` and `{key, date}` (unchanged, live data reads as before) and new `{key, after, days}`: within
   N working days of the date another condition on the offer is satisfied or waived. Loops, a condition not on the offer, waiting for
-  itself, and chains of more than three steps are refused (offers-core `chainProblem`, and `offer_clean` in 022). For the checks an
+  itself, and chains of more than three steps are refused (offers-core `chainProblem`, and `offer_clean` in 021). For the checks an
   "after" date is the other condition's date (worst case) plus N working days by its own rule (the LIM rule runs to 15 January); it
   feeds the last condition date, the one-week gap, the KiwiSaver warning, and shows as "at the latest".
 - "Confirm all conditions on the same day" on the form (two or more conditions, off by default, not forced) and on the review screen
@@ -286,7 +286,7 @@ Built locally on `offers-timing` from main. Migration 022 is written and passed 
   condition and written with {timing} ("The time for the purchaser's lawyer's approval under clause 22.0 is {timing}."), so their
   timing chip corrects the offer like any other. Before any correction from the review screen the offer is read again; if it has
   changed since the screen opened, nothing is saved and Tim is asked to reopen the newest draft. The database checks this too, under
-  the row lock (`agent_offer_correct(offer, details, note, expected)`, 022). If the correction saved but the new draft failed, Tim is
+  the row lock (`agent_offer_correct(offer, details, note, expected)`, 021). If the correction saved but the new draft failed, Tim is
   told the offer was corrected and gets "Re-draft now".
 - The date terms use the date form of the timing (`{timing_date}`): "The finance date is the date that is 5 working days after the
   date the building report condition in clause 9.4 is satisfied or waived" ("... after the date of this agreement"; "... is Friday 5
@@ -320,7 +320,7 @@ Built locally on `offers-timing` from main. Migration 022 is written and passed 
 - Marks: Tim draws boxes on any page of the blank (initials or signature for the purchasers, the vendors or both; strike-out, a
   crossed box when taller than a line; text; highlight), moves and resizes them with 8 handles (finger-sized on touch), zoom control,
   kept inside the page, minimum 10 by 8 points. Filled places can be moved or resized the same way (`edits.moves`, from and to boxes;
-  the map is unchanged). Checked on the server (`offer_draft_edits_ok` in agent_draft_add, 022).
+  the map is unchanged). Checked on the server (`offer_draft_edits_ok` in agent_draft_add, 021).
 
 For phases 3 and 4 (not changed here):
 - sign-core (offers-phase3) `makePlaces` should turn placed items `kind: 'mark'` with `mark: 'initials' | 'signature'` and `who`
@@ -330,10 +330,10 @@ For phases 3 and 4 (not changed here):
 - nego-core and 021: counteroffer changes are marks on the PDF, not changes to `details.conditions`, so "after" needs no change there.
   A change to a condition's date written by a party is free text; a condition that waits for another reads its timing phrase. A new
   further term added in a counteroffer must take its number from the newest draft's `term_last` (and never a retired number).
-  `agent_offer_correct` in 021 calls `offer_clean`, so it takes `after` once 022 is applied (021 must not reapply the 018 version).
+  `agent_offer_correct` in the negotiation migration (built as 021 on offers-phase4) calls `offer_clean`, so it takes `after` now that the timing migration is applied (it must not reapply the 018 version).
 
-Deploy steps, with Tim's approval: run the rollback block on the live project (no CAPITALS), apply 022; push; deploy `offer-draft`
-(write_clause) and `offer-public` (helper prompt) pinned to that commit. 022 must be applied before the page goes live, or `after` is
+Deploy steps, with Tim's approval: run the rollback block on the live project (no CAPITALS), apply 021; push; deploy `offer-draft`
+(write_clause) and `offer-public` (helper prompt) pinned to that commit. 021 must be applied before the page goes live, or `after` is
 dropped by the live `offer_clean` without a word.
 
 Before relying on the cap, confirm signed-in users can't write ai_calls on the live project (read only; every row should say false):
@@ -342,3 +342,9 @@ Before relying on the cap, confirm signed-in users can't write ai_calls on the l
 select r.rolname, p.priv, has_table_privilege(r.rolname, 'public.ai_calls', p.priv) as allowed
 from (values ('anon'), ('authenticated')) r(rolname), (values ('INSERT'), ('UPDATE'), ('DELETE'), ('TRUNCATE')) p(priv) order by 1, 2;
 ```
+
+### Migration numbers (24 November 2026)
+Numbers are taken when a migration is applied, not when it is built, because the portal chat also adds migrations (020 is its
+`020_remove_spare_agent_login`). The timing work was built as 022 and applied as `021_offer_condition_timing`; the table privileges
+tidy-up is `022_tighten_table_privileges`. The signing (offers-phase3, built as 020) and negotiation (offers-phase4, built as 021)
+migrations take the next free numbers when they go live.
