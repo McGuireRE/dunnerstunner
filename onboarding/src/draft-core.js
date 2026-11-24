@@ -384,8 +384,11 @@
   // A New Zealand phone number as its national significant digits: +64 21 555 0199, 0064 21 555 0199, (021) 555-0199 and 21 555 0199
   // are all 215550199.
   const nsn = v => { let x = String(v || '').replace(/\D/g, ''); if (x.startsWith('0064')) x = x.slice(4); else if (x.startsWith('64') && x.length >= 10) x = x.slice(2); else if (x.startsWith('0')) x = x.slice(1); return x; };
-  // every run of digits in some text that could be a phone number, as national digits
-  const phoneRuns = t => (String(t || '').match(/[+(]?\d[\d\s().\-]{4,}\d/g) || []).map(nsn).filter(x => x.length >= 6);
+  // text made plain before it is compared: full-width digits and signs as ordinary ones, every kind of space (non-breaking, thin,
+  // full-width and so on) as a plain space, zero-width characters gone, and no spaces around an @ ("b @ example.com")
+  const plainText = t => String(t || '').normalize('NFKC').replace(/[\u200B-\u200D\u2060\uFEFF]/g, '').replace(/[\s\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]+/g, ' ').replace(/\s*@\s*/g, '@');
+  // every run of digits in some text that could be a phone number, as national digits (spaces, brackets, dots, dashes, / and _ between)
+  const phoneRuns = t => (plainText(t).match(/[+(]?\d[\d\s().\/_\-]{4,}\d/g) || []).map(nsn).filter(x => x.length >= 6);
   // the parties' own contact details, ready to compare: [{ who, email, phone }] -> { emails: [[email, who]], phones: [[digits, who]] }
   function ownContacts(list) {
     const emails = [], phones = [];
@@ -395,7 +398,7 @@
   }
   // whose own phone or email a piece of text holds ('' when none)
   function holdsOwn(text, own) {
-    const t = String(text || '').toLowerCase(); if (!t) return '';
+    const t = plainText(text).toLowerCase(); if (!t) return '';
     const e = own.emails.find(([v]) => t.includes(v)); if (e) return e[1];
     const runs = phoneRuns(t), ph = own.phones.find(([v]) => runs.some(r => r.includes(v))); return ph ? ph[1] : '';
   }
@@ -454,7 +457,8 @@
     const nameSlots = byKey('name_purchaser');
     const signers = entity ? [] : names;
     signers.forEach((n, i) => { if (nameSlots[i]) put('name_purchaser_' + (i + 1), nameSlots[i], n, { label: 'Purchaser name ' + (i + 1) }); });
-    if (signers.length > nameSlots.length) need('names_more', `There are ${signers.length} purchasers and ${nameSlots.length} name places under the signatures. Add the others by hand or on a separate page.`, true);
+    // signing (phase 3) adds a signature and name place for each purchaser beyond the printed lines, beneath the others
+    if (signers.length > nameSlots.length) need('names_more', `There are ${signers.length} purchasers and ${nameSlots.length} name places under the signatures. Signing adds places for the others beneath, with their names. Check there is room on that page.`, false);
     if (entity) need('entity_signers', `The purchaser is ${entity}. Fill in who signs for it, and which of Director, Trustee and so on applies, under the signatures.`, false);
     // GST: the front page asks about the vendor's registration: always yours. Schedule 1, 2(a) is the purchaser's: only if they said.
     need('gst_vendor', "GST on the front page is the vendor's registration: fill it in yourself.", false);
@@ -686,7 +690,7 @@
             need('timing_dropped_' + x.id, `Further term ${rNo(x.number)} no longer follows the offer's timing for ${labelOf(x.cond)} (the offer says ${OF ? OF.timingPlain(cond(x.cond)) : 'otherwise'}). Check it, or restore the timing.`, true, true); }
         body = resolveRefs(body); x.text = body;
         return `${tNo(x.number)} ${noRefs(x.title)}${x.detail ? ' (' + noRefs(x.detail) + ')' : ''}: ${body}${resolveRefs(x.suffix || '')}`; });
-      const it = put('further_terms', ftp, text.join('\n'), { label: 'Further terms of sale', item: { cont: NB.cont || null, number_base: base, number_style: NST, terms: ft.map(x => ({ id: x.id, number: x.number, title: x.title, text: x.text, placeholder: isPlaceholder(x.text), custom: !!x.custom, request: x.request, wording: x.wording, ai: x.ai,
+      const it = put('further_terms', ftp, text.join('\n'), { label: 'Further terms of sale', item: { term_texts: text, cont: NB.cont || null, number_base: base, number_style: NST, terms: ft.map(x => ({ id: x.id, number: x.number, title: x.title, text: x.text, placeholder: isPlaceholder(x.text), custom: !!x.custom, request: x.request, wording: x.wording, ai: x.ai,
         template: x.template != null ? resolveRefs(x.template) : null, timing: x.timing ? { key: x.timing.key, days: x.timing.days, date: x.timing.date, after: x.timing.after } : null, timing_text: x.timing ? resolveRefs(timingPhrase(x.timing)) : '',
         date_text: x.timing ? resolveRefs(dateText(x.timing)) : '', timing_date_text: x.timing ? resolveRefs(timingDatePhrase(x.timing)) : '', removable: !!x.removable, added: !!x.added, library: x.library || null, extra: !!x.extra })) } });
       ft.filter(x => isPlaceholder(x.text)).forEach(x => need('ph_' + x.id, `Further term ${rNo(x.number)}, ${x.title}: ${x.text}`, true));
@@ -797,14 +801,27 @@
         boxes.push({ id: it.id, page: it.page, x: it.x, y: it.y - (lines_.length - 1) * size * 1.2 - 2, w: Math.max(...lines_.map(l => font.widthOfTextAtSize(l, size))), h: lines_.length * size * 1.2 + 2, kind: 'text', label: it.label, placeholder: !!it.placeholder });
         continue;
       }
-      // an area: wrapped lines from the top down; any that don't fit continue on an added page (further terms only)
-      const all = wrap(font, it.text, size, it.w); let fit = Math.max(1, Math.floor((it.h - size) / lh) + 1);
+      // an area: wrapped lines from the top down; any that don't fit continue on an added page (further terms only). Further terms
+      // are written one term at a time with a blank line after each, where the parties initial it (signing, phase 3); each line
+      // remembers its term, so the term's place on the page is known.
+      const ftl = it.key === 'further_terms' && Array.isArray(it.term_texts) && it.terms && it.terms.length === it.term_texts.length;
+      const all = ftl ? it.term_texts.flatMap((tt, k) => wrap(font, tt, size, it.w).map(s => ({ s, term: it.terms[k].number })).concat([{ s: '', term: it.terms[k].number, gap: true }])) : wrap(font, it.text, size, it.w);
+      let fit = Math.max(1, Math.floor((it.h - size) / lh) + 1);
       if (it.key === 'further_terms' && all.length > fit) fit = Math.max(1, fit - 1);   // the last line is kept for the "continued" note
-      const here = all.slice(0, fit), rest = all.slice(fit);
-      const drawLines = (p, ls, x, y0, pageNo) => { ls.forEach((ln, i) => { const y = y0 - i * lh; const ph = /\[Tim to [^\]]*\]/.exec(ln);
+      const here = all.slice(0, fit); let rest = all.slice(fit);
+      if (ftl && rest.every(l => l.gap)) rest = [];   // only the blank line after the last term is left over: no page is added for it
+      const txt = l => typeof l === 'string' ? l : l.s;
+      // where each further term sits on a page: its lines, and the blank line after it (for the initials)
+      const termBoxes = (ls, x, y0, pageNo, w) => { const seen = new Map(); ls.forEach((l, i) => { if (typeof l === 'string') return; const y = y0 - i * lh;
+          if (!seen.has(l.term)) seen.set(l.term, { top: y + size, bottom: y - 2, gap: null });
+          const t = seen.get(l.term); if (l.gap) t.gap = { x, y: y - 2, w, h: lh }; else t.bottom = y - 2; });
+        seen.forEach((t, num) => boxes.push({ id: it.id + '#t' + num, page: pageNo, x, y: t.bottom, w, h: t.top - t.bottom, kind: 'term', number: num, gap: t.gap, label: it.label + ': term ' + num })); };
+      const drawLines = (p, ls, x, y0, pageNo) => { ls.forEach((l, i) => { const ln = txt(l); if (!ln) return; const y = y0 - i * lh; const ph = /\[Tim to [^\]]*\]/.exec(ln);
           if (ph) { const pre = ln.slice(0, ph.index); pg_hl(p, x + font.widthOfTextAtSize(pre, size) - 1, y - 2, font.widthOfTextAtSize(ph[0], size) + 2, size + 2); }
           p.drawText(ln, { x, y, size, font, color: ink }); });
-        boxes.push({ id: it.id, page: pageNo, x, y: y0 - (ls.length - 1) * lh - 2, w: it.w, h: (ls.length - 1) * lh + size + 4, kind: 'area', label: it.label, placeholder: ls.some(l => /\[Tim to /.test(l)) }); };
+        let n = ls.length; while (n > 1 && !txt(ls[n - 1])) n--;   // the box covers the written lines (not the trailing blank one)
+        boxes.push({ id: it.id, page: pageNo, x, y: y0 - (n - 1) * lh - 2, w: it.w, h: (n - 1) * lh + size + 4, kind: 'area', label: it.label, placeholder: ls.some(l => /\[Tim to /.test(txt(l))) });
+        if (ftl) termBoxes(ls, x, y0, pageNo, it.w); };
       const pg_hl = (p, x, y, w, h) => p.drawRectangle({ x, y, width: w, height: h, color: hl });
       drawLines(pg, here, it.x, it.y, it.page);
       if (rest.length) {
@@ -862,6 +879,9 @@
           if (ph) np.drawRectangle({ x: x0 + font.widthOfTextAtSize(ln.slice(0, ph.index), size) - 1, y: y - 2, width: font.widthOfTextAtSize(ph[0], size) + 2, height: size + 2, color: hl });
           np.drawText(ln, { x: x0, y, size, font, color: ink }); });
         boxes.push({ id: it.id + '_cont' + added, page: -at, x: x0, y: top0 - (ls.length - 1) * lh - 2, w: ww, h: (ls.length - 1) * lh + size + 4, kind: 'area', label: it.label + ' (continued)', placeholder: ls.some(l => /\[Tim to /.test(T(l))) });
+        // where each further term sits on the added page: its lines, and the blank line after it (for the initials, phase 3)
+        if (typeof ls[0] !== 'string') { const seen = new Map(); ls.forEach((l, i) => { const y = top0 - i * lh; if (!seen.has(l.term)) seen.set(l.term, { top: y + size, bottom: y - 2, gap: null }); const t = seen.get(l.term); if (l.gap) t.gap = { x: x0, y: y - 2, w: ww, h: lh }; else t.bottom = y - 2; });
+          seen.forEach((t, num) => boxes.push({ id: it.id + '#t' + num, page: -at, x: x0, y: t.bottom, w: ww, h: t.top - t.bottom, kind: 'term', number: num, gap: t.gap, label: it.label + ': term ' + num })); }
         added_pages.push({ page: at, source_page: it.page, bands: B ? { header: B.header, footer: B.footer, as: 'image' } : null, plain: !B, number });
       }
       boxes.forEach(b => { if (b.page < 0) b.page = -b.page; else if (b.page > it.page) b.page += added; });
@@ -879,7 +899,20 @@
     return { bytes, boxes, continued, overflow, added_pages: addedPages };
   }
 
-  const DRAFT = { termNo, refNo, EDITIONS, EDITION_RE, editionOk, readPages, lines, xAt, matchAll, readEdition, editionPages, buildMap, parseChattels, numberIn, daysWords, FRONT_CONDITIONS, LABELS,
-    packText, packBatches, placeFromProposal, rectOf, nsn, phoneRuns, ownContacts, holdsOwn, pickVendorLawyer, PROPOSAL_KINDS, planDraft, ruleApplies, fullDate, PLACEHOLDERS, placeholderFor, isPlaceholder, winAnsi, renderDraft, wrap, INK, FONT_SIZE };
+  // what a draft placed, where, as filed with it (offer_drafts.placed): each item with its boxes on the page, the map place it filled
+  // (so signing groups a struck line and the words beside it as one change), for the further terms where each term sits and the
+  // blank line after it (where each party initials it), Tim's drawn boxes (mark, who) and moved places (moved), and each page added
+  // for the further terms (kind 'page', with the page it was made from and the bands used; the draft's fingerprint covers it)
+  function placedFrom(plan, r) {
+    const rb = x => ({ page: x.page, x: Math.round(x.x * 10) / 10, y: Math.round(x.y * 10) / 10, w: Math.round(x.w * 10) / 10, h: Math.round(x.h * 10) / 10 });
+    return plan.items.map(it => { const bx = r.boxes.filter(x => x.id === it.id || x.id.startsWith(it.id + '_cont'));
+      const tb = it.id === 'further_terms' ? r.boxes.filter(x => x.kind === 'term').map(x => Object.assign(rb(x), { number: x.number, gap: x.gap ? rb(Object.assign({ page: x.page }, x.gap)) : null })) : undefined;
+      return { id: it.id, place: it.place || null, key: it.key || null, label: it.label, kind: it.kind, text: it.text || null, value: it.value || null, placeholder: !!it.placeholder, edited: !!it.edited, terms: it.terms,
+        number_style: it.number_style || undefined, mark: it.mark || undefined, who: it.who || undefined, moved: it.moved || undefined, boxes: bx.map(rb), term_boxes: tb }; })
+      .concat((r.added_pages || []).map((ap, i) => ({ id: 'added_page_' + (i + 1), label: `Page added after page ${ap.source_page}${ap.number ? `, numbered ${ap.number.written}` : ' (plain)'}`, kind: 'page', page: ap.page, source_page: ap.source_page, bands: ap.bands, number: ap.number, plain: !!ap.plain, boxes: [] })));
+  }
+
+  const DRAFT = { placedFrom, termNo, refNo, EDITIONS, EDITION_RE, editionOk, readPages, lines, xAt, matchAll, readEdition, editionPages, buildMap, parseChattels, numberIn, daysWords, FRONT_CONDITIONS, LABELS,
+    packText, packBatches, placeFromProposal, rectOf, nsn, phoneRuns, plainText, ownContacts, holdsOwn, pickVendorLawyer, PROPOSAL_KINDS, planDraft, ruleApplies, fullDate, PLACEHOLDERS, placeholderFor, isPlaceholder, winAnsi, renderDraft, wrap, INK, FONT_SIZE };
   if (typeof module !== 'undefined' && module.exports) module.exports = DRAFT; else root.DRAFT = DRAFT;
 })(typeof window !== 'undefined' ? window : globalThis);

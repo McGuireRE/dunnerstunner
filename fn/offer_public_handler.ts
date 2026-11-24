@@ -18,7 +18,7 @@ export const TOKEN_RE = /^[A-Za-z0-9_-]{40,64}$/;
 
 type Rpc = (fn: string, args: Record<string, unknown>) => Promise<{ data: any; error: { message: string } | null }>;
 type Deps = {
-  cors: Record<string, string>;
+  cors: Record<string, string> | ((req: Request) => Record<string, string>);   // a function: the headers for each request (corsFor)
   rpc: Rpc;                                                        // the offer_public_* functions, with the service role
   notifyTim: (offerId: string) => Promise<void>;                   // the email to Tim (throws on failure)
   draft?: (body: any, net: string) => Promise<{ status: number; body: any }>;   // makeDraft(...), for action "draft"
@@ -43,11 +43,12 @@ export function netOf(req: Request): string {
 const REASONS = ["busy_network", "busy_property", "busy_site", "closed"];
 
 export function makeHandler(d: Deps) {
-  const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: Object.assign({ "Content-Type": "application/json", "Cache-Control": "no-store" }, d.cors) });
+  const staticCors: Record<string, string> = typeof d.cors === "function" ? {} : d.cors;
+  const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: Object.assign({ "Content-Type": "application/json", "Cache-Control": "no-store" }, staticCors) });
   // a refusal from the database is a plain message for the buyer; anything else stays hidden
   const plain = (m: string) => /^(Please|Up to|That is more|The date for|Nothing was sent)/.test(m) ? m.slice(0, 200) : "Something went wrong. Please try again, or call Tim on 027 562 7207.";
-  return async (req: Request): Promise<Response> => {
-    if (req.method === "OPTIONS") return new Response("ok", { headers: d.cors });
+  const handle = async (req: Request): Promise<Response> => {
+    if (req.method === "OPTIONS") return new Response("ok", { headers: staticCors });
     if (req.method !== "POST") return json({ error: "Not allowed" }, 405);
     let text = "";
     try { text = await req.text(); } catch (_) { return json({ error: "Bad request" }, 400); }
@@ -89,6 +90,12 @@ export function makeHandler(d: Deps) {
     }
 
     return json({ error: "Bad request" }, 400);
+  };
+  // per request: the caller's own site when it is the onboarding app or the portal (corsFor), otherwise the fixed headers
+  return async (req: Request): Promise<Response> => {
+    const res = await handle(req);
+    if (typeof d.cors === "function") { const h = d.cors(req); for (const k of Object.keys(h)) res.headers.set(k, h[k]); }
+    return res;
   };
 }
 

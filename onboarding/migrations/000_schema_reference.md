@@ -269,3 +269,88 @@ agreements/<agreement id>/signatures/... (vendors may upload their own signature
   term_order entries (ids), items (id keys, text up to 4,000) and custom_wording.
 - `agent_offer_correct(offer, details, note, expected)`: 018's correction, refused unless the offer's details are still `expected`
   (checked under the row lock). For corrections from the review screen.
+
+## 022 Table privileges (24 November 2026, live)
+- anon and authenticated lose TRUNCATE, TRIGGER and REFERENCES on every public table, and on tables made later by postgres. Revoke only.
+
+## 023 Purchaser signing (offers phase 3, built as 020, 24 November 2026; tested in a rollback block on a local PostgreSQL stand-in, NOT yet on the live project)
+- `offer_events` gains `chain` (the offer id, or `p:` and the property id), `seq`, `prev_hash`, `body` (the exact text fingerprinted) and
+  `hash` = SHA-256 of prev_hash, a new line and body, set by the `offer_event_chain` trigger. Earlier events have none. `offer_chain_verify`.
+- `offer_hits` kind check widened: also 'sign_code' and 'sign_try' (per-network limits on emailing and typing signing codes).
+- `offer_signings` (draft, method in_person or link, pages, places and their SHA-256, cca_pages, status ready, signing, held, complete,
+  locked, replaced or cancelled; one live signing per draft). `offer_signers` (per purchaser: name and own email from the draft's details; token, code and session as
+  fingerprints only, never readable by signed-in users; consent, drawn signature and initials, ID type, witness, finished, seen_sha256,
+  user agent, network fingerprint, void). `offer_sign_taps`, `offer_sign_receipts` (cca, sale_purchase), `offer_sign_marks` (note,
+  strike, cross, reinstate), `offer_sign_reviews`, `offer_sign_asks`, `offer_rounds` (Round 1: path, server-confirmed SHA-256, execution
+  record, chain_last). Agent read only; nothing written directly; signings and signers change only through the functions; everything
+  else never changes; no table can be emptied; vendors and anon see nothing.
+- Tim: `agent_signing_release`, `agent_signing_start`, `agent_signing_consent`, `agent_signing_receipt`, `agent_signing_marks`,
+  `agent_signing_tap`, `agent_signing_finish` (ID type, or known_to_tim), `agent_signing_mark`, `agent_signing_review`,
+  `agent_signing_cancel` (change the method before anyone starts), `agent_offer_chain_check`.
+  Service role (offer-sign): `offer_sign_issue`, `offer_sign_open`, `offer_sign_code`, `offer_sign_verify`, `offer_sign_state`,
+  `offer_sign_consent`, `offer_sign_receipt`, `offer_sign_marks`, `offer_sign_tap`, `offer_sign_ask`, `offer_sign_finish`,
+  `offer_round_material`, `offer_round_lock`.
+
+## 024 Presentation and counteroffers (offers phase 4, built as 021, 24 November 2026; tested in a rollback block on a local PostgreSQL stand-in, NOT yet on the live project)
+- `offer_documents` (offer, number, draft and its sha256, status open, closed or agreed, closed_at/by/reason, agreed_at; one open per
+  offer; changed only from open through the functions). Made when a Round 1 locks. `offer_agreements` (offer unique, document, round,
+  path, sha256, size, agreement_date, date_text, accepted_at, record, chain_last, confirmed_by): never changed or removed.
+- `offer_signings` gain round_no, side (purchaser or vendor), document_id, base_round_id (one live signing per draft and round).
+  `offer_signers` gain person_id. `offer_rounds` gain document_id, doc_round, side, base_round_id, changes, lifted, outstanding (number
+  keeps counting for the offer). `offer_sign_marks.kind` may be 'insert'; `offer_sign_receipts.guide` may be 'chattels'.
+- Tim: `agent_round_present(offer, method, places, checked, note)`, `agent_round_change(signer, id, kind, page, geometry, target, places)`,
+  `agent_offer_layers(offer, document)`, `agent_document_close(offer, reason)`, `agent_negotiation_withdraw(offer, side, at, note)`;
+  `agent_offer_status` now stops signings in progress. Service role (offer-sign): `offer_sign_change`, `offer_agreement_material`,
+  `offer_agreement_lock`; `offer_round_material` and `offer_round_lock` serve every round. Vendors: no policy and no agent function.
+- After review: `offer_signings.status` may be 'withdrawn' (a side withdrew or declined). `offer_sign_reviews` gains `kind` (review or
+  change) and `changed_by`; `reviewed_by` is for Tim's re-approvals only. `offer_hits.kind` may be 'sign_change'. `offer_settings` gains
+  `resign_every_round` (default false; `agent_offer_negotiation_setting`). `offer_agreements` gains `round_sha256`, `draw_version` and
+  `terms` (the agreed terms for later phases). `agent_offer_correct` refuses once agreed. `offer_private_hit` also checks
+  `agreement_people`. Withdrawing, declining or lapsing closes the open document.
+- Tim's answers: `offer_settings.link_changes_default` (default false, Tim, 24 November 2026; `agent_offer_link_changes_default`) and `offer_signings.link_changes`
+  (set when Tim presents a round, `agent_round_present(..., p_link_changes)`); `offer_sign_change` refuses when it is off.
+- Merged with main (branch `offers-live`): `offer_sign_state` also gives `signing.terms` (the newest draft's `term_last`, `retired_numbers`
+  and further terms style; 23.0 style when the draft has no further terms), for a new further term in a counteroffer. 024's
+  `agent_offer_correct(offer, details, note)` is the live 018 body plus the agreement refusal; 021's 4-argument version is unchanged.
+- Emails as drafts (Tim, 24 November 2026; folded into 024): `offer_mail_drafts` (offer, signing, signer, agreement, kind sign_link,
+  reopened, agreed_purchasers or agreed_vendors; to, cc, subject, body, attach; status draft, sent or void; reviewed, edited, sent and
+  set-aside stamps; changed only through the functions and never once sent) and `offer_mail_log` (exactly what was sent, never changed).
+  Tim: `agent_mail_draft_add`, `agent_mail_draft_edit`, `agent_mail_draft_review`, `agent_mail_draft_void`. Service role (offer-sign):
+  `offer_mail_draft_sys` (reopened), `offer_mail_take` (a signing link's token is made here), `offer_mail_done`. Internal:
+  `offer_mail_allowed`, `offer_mail_side_hit`, `offer_mail_check`. `link_changes_default` now defaults to false.
+  `offer_sign_current` gives a party no reason beyond "no longer being signed". `agent_signing_release` refuses a draft without
+  `term_last` or term boxes; `offer_sign_do_change` refuses a taken counteroffer term number. 023 adds `agent_signing_turn_ok`; its
+  `agent_signing_finish` takes no identity choice as well; `offer_sign_places_ok` counts only block signatures.
+- Second review (24 November 2026): a draft is 'sending' between `offer_mail_take` and `offer_mail_done`, and `offer_mail_log` rows go
+  pending, then sent, failed or unconfirmed (only that outcome is ever filled in, once). `offer_mail_done(draft, log, actor, ok, error)`;
+  `agent_mail_draft_unstick` (Tim checked a send that may have gone did not arrive). Sending refuses marked blanks. The vendors' agreed
+  email may go only to this negotiation's vendor signers and the vendors' lawyer.
+- Freeze and withdrawal (Tim, 24 November 2026): `offer_holds` (kind freeze | withdraw; side and person who directed a withdrawal;
+  reason; told_at and told_how in_person | phone | email | link_request; request_id; made_by/at; a freeze lifted once with a note; a
+  withdrawal never lifted; no delete) and `offer_requests` (a party's own request from their signing link: kind freeze | withdraw,
+  reason_key from the list or 'other', reason, handled once as freeze | withdraw | carry_on). Both read by Tim only, written only by
+  the functions (`guard_offer_hold`). `offer_hold_active(offer)`; `offer_sign_current` gives the neutral line while one is active, so
+  every signer action, code, link and in-person turn stops; a requester alone is stopped by `offer_sign_ready` and `offer_sign_stop_for`
+  ("Your request has gone to Tim. He will contact you straight away."). `agent_offer_freeze(offer, reason, asked_by, request)`,
+  `agent_offer_unfreeze(offer, note)`, `agent_offer_withdraw_now(offer, side, person, reason, told_at, told_how, request)` (runs
+  `agent_negotiation_withdraw`, then a permanent hold), `agent_offer_request_carry_on(request, note)`, and
+  `offer_sign_request(token, session, kind, reason_key, reason, net)` (service role; the edge function then emails Tim at once).
+  Presenting, releasing, the agreement and signing emails are refused while a hold is active. Mail kinds `withdraw_party` (the side
+  that directed it and its lawyer) and `withdraw_lawyer` (the other side's lawyer only); `offer_mail_side(kind, signer, offer)`.
+  023: `offer_sign_code` and `offer_sign_verify` refuse ('stopped') once `offer_sign_current` gives a reason.
+- Deposit holder (Tim, 24 November 2026): `offer_deposit_holders` (append-only; holder nzret | vendor_lawyer | other with its text;
+  recommended; kiwisaver; warned; by_default, true when the recommendation was used for the emails before Tim chose; with the
+  agreement) and `agent_offer_deposit_holder(offer, holder, other, p_default)`. The newest row stands.
+- Final review (25 November 2026): `withdraw_party` to the vendors goes only to this negotiation's vendor signers and the property's
+  owners (`property_people.role = 'owner'`; never a contact or former owner). `offer_sign_request` locks the signer and allows one open
+  request at a time. `offer_sign_ask` (and decline) refuses while frozen, withdrawn or with a request open; 023's `offer_sign_code` and
+  `offer_sign_verify` use `offer_sign_stop_for` (023 defines it; 024 adds holds and requests). `offer_sign_do_finish` locks the offer,
+  then the signing, then the signer, so a finish can't complete after a freeze. `agent_offer_withdraw_now` checks the request is this offer's.
+- One lock order everywhere (25 November 2026): the offer row first, then the signing (or draft), then the signer. Party and service
+  steps take the offer FOR KEY SHARE first (`offer_lock_by_signer`, `offer_lock_by_signing`, 023); Tim's functions that change the
+  offer's state (present, close, status, withdraw, withdraw now, freeze, unfreeze, correct, release, round and agreement locks, new
+  email drafts) take it FOR UPDATE first. `offer_sign_ready` and `offer_sign_stop_for` give the neutral line before "replaced" once a
+  hold is active, since a withdrawal voids places too.
+  `offer_sign_ask` (Ask Tim for a change, Decline) takes the offer first too, and 024 redefines 019's `agent_draft_approve` word for
+  word (checked against the live body by fingerprint) with the offer FOR UPDATE first; `agent_offer_deposit_holder` takes it FOR UPDATE.
+

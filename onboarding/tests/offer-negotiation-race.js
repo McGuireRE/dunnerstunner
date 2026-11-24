@@ -1,0 +1,213 @@
+// Race test for migration 021, on a LOCAL PostgreSQL stand-in only (never the live project): requests arriving at the same moment on
+// separate connections. Makes a scratch database from a template that already has 020 applied (pg-standin with property_people.phone
+// and agreement_people.email and phone,
+// 010, 016 part A, 018, 019, 020), applies 021 to it, then:
+//   1. Tim taps "Present to the vendors" twice at once: exactly one Round 2 signing, both taps answered;
+//   2. one vendor adds a change at the moment the other vendor finishes: never "everyone has signed" with a change someone hasn't
+//      initialled (the signing is locked first by both);
+//   3. the agreed copy locked twice at once: exactly one agreement;
+//   4. Tim closes a document at the moment the edge function locks a round on it: either the round is locked and then the document
+//      closed with it kept, or the document is closed and the round refused; never a round locked into a closed document after it closed.
+//   2b. a change already holds the signing when a finish starts; 2c. a signing email being taken as a finish starts: neither deadlocks
+//      (every event insert takes FOR KEY SHARE on the offer, so the finish takes the offer only FOR KEY SHARE too). Any error other than
+//      the expected refusals, a deadlock above all, fails the test.
+//   2d. Tim presses Withdraw now while a vendor's change is part way through (it holds its locks and pauses before its event);
+//   2e. the reverse: Withdraw now holds the offer and pauses, and a change starts 0.4 s in; 2f. Tim closes the document while a change
+//      is part way through. One lock order everywhere (the offer, then the signing, then the signer): none deadlock.
+//   2g, 2h. a vendor's "Ask Tim for a change" (or Decline) part way through as Tim presses Freeze now, or Withdraw now: no deadlock.
+//   5. Tim freezes the offer as the last vendor finishes (review, 25 November 2026): the freeze holds the offer's lock a moment, the
+//      finish waits for it and is then refused; never a signing completed after the freeze.
+// The scratch database is dropped afterwards. Run: RACE_TEMPLATE=t4 PGHOST=/tmp/p2pg PGPORT=5499 PGUSER=postgres node onboarding/tests/offer-negotiation-race.js
+// (Named .js, not .test.js, so run-all.js doesn't run it.)
+const { spawn, execFileSync } = require('child_process'), fs = require('fs'), path = require('path');
+const T = process.env.RACE_TEMPLATE || 't4', DB = 'p4race_' + process.pid;
+// the SQL goes on standard input (the migrations are too long for a command-line argument)
+const psql = (sql, db) => new Promise((res) => { const p = spawn('psql', ['-d', db || DB, '-Atq', '-v', 'ON_ERROR_STOP=1', '-f', '-']); let o = '', e = ''; p.stdout.on('data', d => o += d); p.stderr.on('data', d => e += d); p.on('close', c => res({ c, o: o.trim(), e: e.trim() })); p.stdin.end(sql); });
+const errs = [], out = {}; const ok = (c, m) => { if (!c) errs.push(m); };
+const CLAIMS = `select set_config('request.jwt.claims', json_build_object('email', (select email from public.agents limit 1), 'role', 'authenticated')::text, false);`;
+const AGENT = `set role authenticated; select set_config('request.jwt.claims', json_build_object('email', (select email from public.agents limit 1), 'role', 'authenticated')::text, false);`;
+(async () => {
+  execFileSync('createdb', ['-T', T, DB]);
+  try {
+    const mig = await psql(fs.readFileSync(path.join(__dirname, '..', 'migrations', '024_offer_negotiation.sql'), 'utf8'));
+    if (mig.c) throw new Error('021 did not apply: ' + mig.e);
+    // helpers for the scratch database only (it is dropped afterwards)
+    const helpers = await psql(`
+      create function public.rc_places(n int, first_ boolean, marks uuid[], v boolean) returns jsonb language plpgsql as $b$
+        declare out_ jsonb := '[]'; s int; k int; mk uuid;
+        begin for s in 1..n loop
+          if first_ then for k in 1..3 loop out_ := out_ || jsonb_build_array(jsonb_build_object('id', 'foot:p' || k || ':s' || s, 'signer', s, 'kind', 'initial', 'why', 'foot', 'ref', 'p' || k, 'page', k, 'x', 440 + s * 28 + case when v then 60 else 0 end, 'y', 5, 'w', 26, 'h', 13)); end loop; end if;
+          out_ := out_ || jsonb_build_array(jsonb_build_object('id', 'block:' || case when v then 'vsig' else 'sig' end || s || ':s' || s, 'signer', s, 'kind', 'signature', 'why', 'block', 'ref', case when v then 'vsig' else 'sig' end || s, 'page', 3, 'x', case when v then 330 else 40 end, 'y', 530 - s * 70, 'w', 150, 'h', 22));
+          foreach mk in array coalesce(marks, '{}') loop out_ := out_ || jsonb_build_array(jsonb_build_object('id', 'chg:' || mk || ':s' || s, 'signer', s, 'kind', 'initial', 'why', 'change', 'ref', mk::text, 'page', 1, 'x', 300 + s * 28, 'y', 400, 'w', 26, 'h', 13)); end loop;
+        end loop; return out_; end $b$;
+      create function public.rc_cp(n int, mk uuid) returns jsonb language sql as $b$ select jsonb_agg(jsonb_build_object('id', 'chg:' || mk || ':s' || s, 'signer', s, 'kind', 'initial', 'why', 'change', 'ref', mk::text, 'page', 1, 'x', 160 + s * 28, 'y', 341, 'w', 26, 'h', 13)) from generate_series(1, n) s $b$;
+      create function public.rc_prep(g uuid, skip int default 0) returns void language plpgsql as $b$
+        declare s public.offer_signers; gg public.offer_signings; png text := 'data:image/png;base64,' || repeat('iVBORw0KGgo', 30);
+        begin select * into gg from public.offer_signings where id = g; if gg.status = 'ready' and gg.method = 'in_person' then perform public.agent_signing_start(g); end if;
+          for s in select * from public.offer_signers where signing_id = g and void_at is null order by position loop
+            perform public.offer_sign_do_consent(s.id, 'ua', null);
+            if gg.round_no = 1 then perform public.offer_sign_do_receipt(s.id, 'sale_purchase', 'August 2022', 'rea-sale-purchase-guide-2022-en.pdf', null, null); end if;
+            if gg.side = 'vendor' then perform public.offer_sign_do_receipt(s.id, 'chattels', null, null, null, null); end if;
+            perform public.offer_sign_do_marks(s.id, png, png); end loop; end $b$;
+      create function public.rc_taps(g uuid, pos int) returns void language plpgsql as $b$ declare s uuid := (select id from public.offer_signers where signing_id = g and position = pos); p text;
+        begin for p in select public.offer_sign_required(g, pos) loop perform public.offer_sign_do_tap(s, p); end loop; end $b$;
+      create function public.rc_finish_all(g uuid) returns void language plpgsql as $b$ declare s public.offer_signers;
+        begin for s in select * from public.offer_signers where signing_id = g and void_at is null and finished_at is null order by position loop perform public.rc_taps(g, s.position); perform public.offer_sign_do_finish(s.id, 'ua', null, 'passport', 'Tim'); end loop; end $b$;
+      create function public.rc_stage(g uuid) returns jsonb language plpgsql as $b$
+        declare mt jsonb := public.offer_round_material(g); sha text := encode(extensions.digest(g::text, 'sha256'), 'hex'); path text;
+        begin path := 'properties/' || (mt->>'property_id') || '/docs/offer-round-' || (mt->>'offer_id') || '-' || (mt->>'number') || '-' || left(sha, 12) || '.pdf';
+          insert into storage.objects (bucket_id, name, metadata) values ('property-files', path, '{"size": 5000, "mimetype": "application/pdf"}'); perform public.offer_file_confirm(path, sha, 5000, 'test');
+          return jsonb_build_object('path', path, 'sha', sha); end $b$;
+      create function public.rc_lock(g uuid) returns jsonb language plpgsql as $b$ declare st jsonb := public.rc_stage(g);
+        begin return public.offer_round_lock(g, st->>'path', st->>'sha', 5000, '{"check":{"lifted":[],"outstanding":[]}}', 'test'); end $b$;
+      create table public.rc (k text primary key, v text);
+      -- a pause inside a change, between its first locks and its event (only when the session sets rc.sleep): the real function, its own lock order
+      create function public.rc_sleep() returns trigger language plpgsql as $b$ begin if current_setting('rc.sleep', true) = 'on' then perform pg_sleep(1.5); end if; return new; end $b$;
+      create trigger rc_sleep before insert on public.offer_sign_marks for each row execute function public.rc_sleep();
+      -- a pause inside an event insert, after the chain trigger's advisory lock and before the foreign key's check (only when the session
+      -- sets rc.evsleep): where an ask that hadn't taken the offer first could deadlock against a freeze or Withdraw now
+      create function public.rc_evsleep() returns trigger language plpgsql as $b$ begin if current_setting('rc.evsleep', true) = 'on' then perform pg_sleep(1.5); end if; return new; end $b$;
+      create trigger zz_rc_evsleep before insert on public.offer_events for each row execute function public.rc_evsleep();`);
+    if (helpers.c) throw new Error('helpers failed: ' + helpers.e);
+    // four offers, each with Round 1 locked
+    const setup = await psql(`do $s$ declare pid uuid; o uuid; bl uuid; m uuid; d uuid; g uuid; k int; doc uuid;
+        agent text := json_build_object('email', (select email from public.agents limit 1), 'role', 'authenticated')::text;
+        good jsonb := '{"email":"b@example.com","phone":"021 555 0100","seen_docs":"yes","sign":"in_person","price":"650000","settlement":{"kind":"relative","days":15},"conditions":[],"kiwisaver":false,"related":false,"privacy":true,
+          "purchasers":[{"first":"Ana","last":"Racer","email":"ana@example.com"},{"first":"Bo","last":"Racer","email":"bo@example.com"}],"lawyer":{"firm":"Law","person":"Pat"}}';
+      begin
+        insert into public.properties (address, stage) values ('RC Race Street', 'live') returning id into pid;
+        insert into public.property_people (property_id, position, legal_name, email, role) values (pid, 1, 'Vera Racer', 'vera@example.com', 'owner'), (pid, 2, 'Val Racer', 'val@example.com', 'owner');
+        insert into public.property_documents (property_id, kind, name, path) values (pid, 'Other', 'b.pdf', 'rc') returning id into doc;
+        insert into public.offer_blanks (property_id, document_id, sha256, size_bytes, file_name, pages, sizes, edition, edition_checked, created_by) values (pid, doc, repeat('ab', 32), 10, 'b.pdf', 3, '[[595,842],[595,842],[595,842]]', 'Eleventh Edition 2022 (4)', true, 't') returning id into bl;
+        insert into public.offer_blank_maps (blank_id, version, places, approved, created_by) values (bl, 1, '[{"id":"date","key":"date","kind":"date","page":1,"x":80,"y":730,"w":200,"h":10}]', true, 't') returning id into m;
+        perform set_config('request.jwt.claims', agent, true);
+        for k in 1..12 loop
+          o := public.agent_offer_add(pid, good);
+          -- a draft as drafting makes it since the further terms numbering (024 refuses one without term_last)
+          insert into public.offer_drafts (offer_id, property_id, number, blank_id, blank_sha256, map_id, details, placed, needs, path, sha256, size_bytes, created_by, edits)
+            values (o, pid, 1, bl, repeat('ab', 32), m, (select details from public.property_offers where id = o), '[]', '[]', 'p' || k, repeat(lpad(to_hex(k), 2, '0'), 32), 100, 't', '{"term_last": 22}') returning id into d;
+          insert into public.offer_draft_approvals (draft_id, sha256, approved_by) values (d, repeat(lpad(to_hex(k), 2, '0'), 32), 't');
+          g := (public.agent_signing_release(d, 'in_person', '[[595,842],[595,842],[595,842]]', public.rc_places(2, true, null, false), '{}') ->> 'id')::uuid;
+          perform public.rc_prep(g); perform public.rc_finish_all(g); perform public.rc_lock(g);
+          insert into public.rc values ('o' || k, o::text);
+        end loop;
+      end $s$;`);
+    if (setup.c) throw new Error('set-up failed: ' + setup.e);
+    const v = async k => (await psql(`select v from public.rc where k = '${k}'`)).o;
+    const one = async sql => { const r = await psql(sql); if (r.c) throw new Error(r.e); return r.o.split('\n').pop(); };
+    const o1 = await v('o1'), o2 = await v('o2'), o3 = await v('o3'), o4 = await v('o4');
+
+    // 1. two presents at once
+    const pres = await Promise.all([1, 2].map(() => psql(`${AGENT} select public.agent_round_present('${o1}', 'in_person', public.rc_places(2, true, null, true), true)::text`)));
+    const ids = pres.map(r => JSON.parse(r.o.split('\n').pop() || '{}').id);
+    out.present = { errors: pres.filter(r => r.c).map(r => r.e), ids, signings: +(await one(`select count(*) from public.offer_signings where offer_id = '${o1}' and round_no = 2`)) };
+    ok(!out.present.errors.length && ids[0] === ids[1] && out.present.signings === 1, 'two presents at once: one Round 2 signing, both answered with it');
+
+    // 2. a change and the last finish at once (offer 2): Vera has finished; Val has done every place and finishes as Vera adds a change
+    const g2 = await one(`${AGENT} select public.agent_round_present('${o2}', 'in_person', public.rc_places(2, true, null, true), true)->>'id'`);
+    await one(`${CLAIMS} select public.rc_prep('${g2}'); select public.rc_taps('${g2}', 1); select public.offer_sign_do_finish((select id from public.offer_signers where signing_id = '${g2}' and position = 1), 'ua', null, 'passport', 'Tim')::text; select public.rc_taps('${g2}', 2)`);
+    const mk = '22222222-bbbb-4bbb-8bbb-000000000001';
+    const race2 = await Promise.all([psql(`select public.offer_sign_do_change((select id from public.offer_signers where signing_id = '${g2}' and position = 1), '${mk}', 'strike', 1, '{"x0":100,"x1":180,"y":345}', null, public.rc_cp(2, '${mk}'))::text`),
+      psql(`select public.offer_sign_do_finish((select id from public.offer_signers where signing_id = '${g2}' and position = 2), 'ua', null, 'passport', 'Tim')::text`)]);
+    const st2 = await one(`select status || ',' || (select count(*) from public.offer_sign_marks where signing_id = '${g2}') || ',' || (select count(*) from public.offer_signers s where s.signing_id = '${g2}' and s.finished_at is not null and exists (select 1 from public.offer_sign_required('${g2}', s.position) x where x not in (select place_id from public.offer_sign_taps t where t.signer_id = s.id))) from public.offer_signings where id = '${g2}'`);
+    const [status2, marks2, finishedMissing] = st2.split(',');
+    out.changeFinish = { change: race2[0].c ? race2[0].e.split('\n')[0] : 'saved', finish: race2[1].c ? race2[1].e.split('\n')[0] : 'finished', status: status2, marks: +marks2, finishedWithMissing: +finishedMissing };
+    ok(+finishedMissing === 0 && (status2 !== 'complete' || +marks2 === 0) && (race2[0].c || race2[1].c || status2 === 'signing'), 'a change and the last finish at once: never complete with a change someone hasn\'t initialled');
+    // only the expected refusals: anything else (a deadlock above all) fails
+    const EXPECTED = /Everyone has signed|There (is|are) still \d+ places? to do|Tim is checking a change|You have finished signing/;
+    const unexpected = rs => rs.filter(r => r.c && !EXPECTED.test(r.e)).map(r => r.e.split('\n')[0]);
+    ok(!unexpected(race2).length, 'race 2: no error but the expected refusals: ' + unexpected(race2).join(' | '));
+
+    // 2b. the reviewer's probe (offer 6): the change's transaction already holds the signing, and hasn't yet written its event, when the
+    //     last finish starts (the order that deadlocked when finish took the offer FOR UPDATE)
+    const o6 = await v('o6');
+    const g6 = await one(`${AGENT} select public.agent_round_present('${o6}', 'in_person', public.rc_places(2, true, null, true), true)->>'id'`);
+    await one(`${CLAIMS} select public.rc_prep('${g6}'); select public.rc_taps('${g6}', 1); select public.offer_sign_do_finish((select id from public.offer_signers where signing_id = '${g6}' and position = 1), 'ua', null, 'passport', 'Tim')::text; select public.rc_taps('${g6}', 2)`);
+    const mk6 = '22222222-bbbb-4bbb-8bbb-000000000006';
+    const ch6 = psql(`begin; select 1 from public.offer_signings where id = '${g6}' for update; select pg_sleep(1.5); select public.offer_sign_do_change((select id from public.offer_signers where signing_id = '${g6}' and position = 2), '${mk6}', 'strike', 1, '{"x0":100,"x1":180,"y":345}', null, public.rc_cp(2, '${mk6}'))::text; commit;`);
+    await new Promise(r => setTimeout(r, 400));
+    const fi6 = psql(`select public.offer_sign_do_finish((select id from public.offer_signers where signing_id = '${g6}' and position = 2), 'ua', null, 'passport', 'Tim')::text`);
+    const r6 = await Promise.all([ch6, fi6]), st6 = (await one(`select status || ',' || (select count(*) from public.offer_sign_marks where signing_id = '${g6}') from public.offer_signings where id = '${g6}'`)).split(',');
+    out.changeHoldsFinish = { change: r6[0].c ? r6[0].e.split('\n')[0] : 'saved', finish: r6[1].c ? r6[1].e.split('\n')[0] : 'finished', status: st6[0], marks: +st6[1] };
+    ok(!r6.some(r => /deadlock/i.test(r.e)) && !unexpected(r6).length && !r6[0].c && r6[1].c && st6[0] !== 'complete' && st6[1] === '1', 'a change holding the signing as a finish starts: no deadlock; the change saves and the finish waits, then is refused (the change needs initialling)');
+
+    // 2c. a signing email being taken (offer 7, by link): its transaction holds the signing before writing its event, as another signer
+    //     finishes: no deadlock, both go through
+    const o7 = await v('o7');
+    const g7 = await one(`${AGENT} select public.agent_round_present('${o7}', 'link', public.rc_places(2, true, null, true), true)->>'id'`);
+    await one(`${CLAIMS} select public.offer_sign_issue('${g7}', 'test')::text; select public.rc_prep('${g7}'); select public.rc_taps('${g7}', 1)`);
+    const val7 = await one(`select id from public.offer_signers where signing_id = '${g7}' and position = 2`), em7 = await one(`select email from public.offer_signers where id = '${val7}'`);
+    const dr7 = await one(`${AGENT} select public.agent_mail_draft_add('${o7}', 'sign_link', '${val7}', array['${em7}'], '{}', 'An offer on RC Race Street', 'Hello Val, [the signing link] Tim', null)::text`);
+    const tk7 = psql(`begin; select 1 from public.offer_signings where id = '${g7}' for update; select pg_sleep(1.5); select public.offer_mail_take('${dr7}', 'agent')::text; commit;`);
+    await new Promise(r => setTimeout(r, 400));
+    const fi7 = psql(`select public.offer_sign_do_finish((select id from public.offer_signers where signing_id = '${g7}' and position = 1), 'ua', null, 'passport', 'Tim')::text`);
+    const r7 = await Promise.all([tk7, fi7]), st7 = (await one(`select (select status from public.offer_mail_drafts where id = '${dr7}') || ',' || (select count(*) from public.offer_signers where signing_id = '${g7}' and finished_at is not null)`)).split(',');
+    out.mailTakeFinish = { take: r7[0].c ? r7[0].e.split('\n')[0] : 'taken', finish: r7[1].c ? r7[1].e.split('\n')[0] : 'finished', draft: st7[0], finished: +st7[1] };
+    ok(!r7.some(r => r.c) && st7[0] === 'sending' && st7[1] === '1', 'a signing email taken as a signer finishes: no deadlock, both go through');
+
+    // 3. the agreed copy locked twice at once (offer 3: vendors accept in Round 2)
+    const g3 = await one(`${AGENT} select public.agent_round_present('${o3}', 'in_person', public.rc_places(2, true, null, true), true)->>'id'`);
+    await one(`${CLAIMS} select public.rc_prep('${g3}'); select public.rc_finish_all('${g3}'); select public.rc_lock('${g3}')::text`);
+    const day = await one(`select to_char(public.offer_nz_today(), 'FMDD FMMonth YYYY')`), rid = await one(`select id from public.offer_rounds where offer_id = '${o3}' and doc_round = 2`);
+    const apath = await one(`select 'properties/' || property_id || '/docs/offer-agreement-' || id || '-' || repeat('a', 12) || '.pdf' from public.property_offers where id = '${o3}'`);
+    await one(`insert into storage.objects (bucket_id, name, metadata) values ('property-files', '${apath}', '{"size": 6000, "mimetype": "application/pdf"}'); select public.offer_file_confirm('${apath}', repeat('ac', 32), 6000, 't')`);
+    const acc = await one(`select now()::text`);
+    const lk = await Promise.all([1, 2].map(() => psql(`select public.offer_agreement_lock('${o3}', '${rid}', '${apath}', repeat('ac', 32), 6000, '${acc}', '${day}', jsonb_build_object('draw_version', 'nego-draw-1', 'base', jsonb_build_object('sha256', (select sha256 from public.offer_rounds where id = '${rid}'))), 'agent')::text`)));
+    out.agree = { errors: lk.filter(r => r.c).map(r => r.e.split('\n')[0]), existing: lk.map(r => (JSON.parse(r.o.split('\n').pop() || '{}').existing)), rows: +(await one(`select count(*) from public.offer_agreements where offer_id = '${o3}'`)), events: +(await one(`select count(*) from public.offer_events where offer_id = '${o3}' and kind = 'agreement_formed'`)) };
+    ok(!out.agree.errors.length && out.agree.rows === 1 && out.agree.events === 1 && out.agree.existing.filter(Boolean).length === 1, 'the agreed copy locked twice at once: one agreement, one event');
+
+    // 4. closing the document as a round locks on it (offer 4)
+    const g4 = await one(`${AGENT} select public.agent_round_present('${o4}', 'in_person', public.rc_places(2, true, null, true), true)->>'id'`);
+    await one(`${CLAIMS} select public.rc_prep('${g4}'); select public.rc_finish_all('${g4}')`);
+    const stg = JSON.parse(await one(`select public.rc_stage('${g4}')::text`));
+    const race4 = await Promise.all([psql(`select public.offer_round_lock('${g4}', '${stg.path}', '${stg.sha}', 5000, '{"check":{"lifted":[],"outstanding":[]}}', 'test')::text`), psql(`${AGENT} select public.agent_document_close('${o4}', 'A clean copy, at the same moment')::text`)]);
+    const st4 = (await one(`select d.status || ',' || (select count(*) from public.offer_rounds r where r.document_id = d.id and r.doc_round = 2) || ',' || coalesce((select (r.locked_at <= d.closed_at)::text from public.offer_rounds r where r.document_id = d.id and r.doc_round = 2), 'none') || ',' || (select status from public.offer_signings where id = '${g4}') from public.offer_documents d where d.offer_id = '${o4}'`)).split(',');
+    out.closeLock = { lock: race4[0].c ? race4[0].e.split('\n')[0] : 'locked', close: race4[1].c ? race4[1].e.split('\n')[0] : 'closed', doc: st4[0], round2: +st4[1], before: st4[2], signing: st4[3] };
+    ok(!race4[1].c && st4[0] === 'closed' && ((st4[1] === '1' && st4[2] === 'true' && st4[3] === 'locked') || (st4[1] === '0' && race4[0].c && st4[3] === 'cancelled')), 'closing as a round locks: the round is locked before the close, or refused after it');
+    // 2d, 2e, 2f: Withdraw now and closing the document against a change part way through, both ways round
+    const STOPPED = /no longer being signed|has been replaced|round was stopped|signing has stopped|withdrawn|Signing is finished/i;
+    const bad = rs => rs.filter(r => r.c && (/deadlock/i.test(r.e) || !STOPPED.test(r.e))).map(r => r.e.split('\n')[0]);
+    const round2 = async k => { const o = await v(k); const g = await one(`${AGENT} select public.agent_round_present('${o}', 'in_person', public.rc_places(2, true, null, true), true)->>'id'`); await one(`${CLAIMS} select public.rc_prep('${g}')`); return [o, g]; };
+    const change = (g, mk, sleep) => psql(`${sleep ? "set rc.sleep = 'on'; " : ''}select public.offer_sign_do_change((select id from public.offer_signers where signing_id = '${g}' and position = 2), '${mk}', 'strike', 1, '{"x0":100,"x1":180,"y":345}', null, public.rc_cp(2, '${mk}'))::text`);
+    const wdNow = (o, hold) => psql(`${AGENT} begin; ${hold ? `select 1 from public.property_offers where id = '${o}' for update; select pg_sleep(1.5); ` : ''}select public.agent_offer_withdraw_now('${o}', 'vendor', 'Vera Racer', 'We have entered a contract elsewhere', now(), 'phone', null)::text; commit;`);
+    const after = async (g, o) => (await one(`select (select status from public.offer_signings where id = '${g}') || ',' || (select count(*) from public.offer_sign_marks where signing_id = '${g}') || ',' || (select count(*) from public.offer_holds where offer_id = '${o}' and kind = 'withdraw') || ',' || coalesce((select status from public.offer_documents where offer_id = '${o}' order by number desc limit 1), 'none')`)).split(',');
+    const pause = () => new Promise(r => setTimeout(r, 400));
+    { const [o, g] = await round2('o8'); const c = change(g, '22222222-bbbb-4bbb-8bbb-000000000008', true); await pause(); const w = wdNow(o, false); const rs = await Promise.all([c, w]), a = await after(g, o);
+      out.withdrawDuringChange = { change: rs[0].c ? rs[0].e.split('\n')[0] : 'saved', withdraw: rs[1].c ? rs[1].e.split('\n')[0] : 'withdrawn', signing: a[0], marks: +a[1], holds: +a[2] };
+      ok(!bad(rs).length && !rs[1].c && a[0] === 'withdrawn' && a[2] === '1', '2d: Withdraw now while a change is part way through: no deadlock, the withdrawal stands: ' + bad(rs).join(' | ')); }
+    { const [o, g] = await round2('o9'); const w = wdNow(o, true); await pause(); const c = change(g, '22222222-bbbb-4bbb-8bbb-000000000009', false); const rs = await Promise.all([c, w]), a = await after(g, o);
+      out.changeDuringWithdraw = { change: rs[0].c ? rs[0].e.split('\n')[0] : 'saved', withdraw: rs[1].c ? rs[1].e.split('\n')[0] : 'withdrawn', signing: a[0], marks: +a[1], holds: +a[2] };
+      ok(!bad(rs).length && !rs[1].c && rs[0].c && /no longer being signed/.test(rs[0].e) && a[0] === 'withdrawn' && a[1] === '0', '2e: a change as Withdraw now holds the offer: no deadlock; the change waits and is refused: ' + bad(rs).join(' | ')); }
+    { const [o, g] = await round2('o10'); const c = change(g, '22222222-bbbb-4bbb-8bbb-000000000010', true); await pause(); const cl = psql(`${AGENT} select public.agent_document_close('${o}', 'A clean copy, during a change')::text`); const rs = await Promise.all([c, cl]), a = await after(g, o);
+      out.closeDuringChange = { change: rs[0].c ? rs[0].e.split('\n')[0] : 'saved', close: rs[1].c ? rs[1].e.split('\n')[0] : 'closed', signing: a[0], marks: +a[1], doc: a[3] };
+      ok(!bad(rs).length && !rs[1].c && a[3] === 'closed', '2f: closing the document while a change is part way through: no deadlock, the close stands: ' + bad(rs).join(' | ')); }
+
+    // 2g, 2h: an ask from a vendor's link, paused inside its event (after the chain's lock), as Tim freezes or withdraws 0.4 s in
+    const linkRound = async k => { const o = await v(k); const g = await one(`${AGENT} select public.agent_round_present('${o}', 'link', public.rc_places(2, true, null, true), true)->>'id'`);
+      const tok = await one(`${CLAIMS} select public.offer_sign_issue('${g}', 'test')->'links'->0->>'token'`), code = await one(`select public.offer_sign_code('${tok}', 'n-${k}')->>'code'`);
+      const ses = await one(`select public.offer_sign_verify('${tok}', '${code}', 'n-${k}', 'ua')->>'session'`); return [o, g, tok, ses]; };
+    const ask = (tok, ses) => psql(`set rc.evsleep = 'on'; select public.offer_sign_ask('${tok}', '${ses}', 'We decline it as it stands.')::text`);
+    const askAfter = async (o, g) => (await one(`select (select count(*) from public.offer_sign_asks where signing_id = '${g}') || ',' || (select count(*) from public.offer_holds where offer_id = '${o}') || ',' || (select status from public.offer_signings where id = '${g}')`)).split(',');
+    { const [o, g, tok, ses] = await linkRound('o11'); const a = ask(tok, ses); await pause(); const f = psql(`${AGENT} select public.agent_offer_freeze('${o}', 'Race: Vera rang', 'Vera Racer', null)::text`); const rs = await Promise.all([a, f]), x = await askAfter(o, g);
+      out.askDuringFreeze = { ask: rs[0].c ? rs[0].e.split('\n')[0] : 'asked', freeze: rs[1].c ? rs[1].e.split('\n')[0] : 'frozen', asks: +x[0], holds: +x[1], signing: x[2] };
+      ok(!bad(rs).length && !rs[1].c && x[1] === '1', '2g: an ask as Tim freezes: no deadlock, the freeze stands: ' + bad(rs).join(' | ')); }
+    { const [o, g, tok, ses] = await linkRound('o12'); const a = ask(tok, ses); await pause(); const w = wdNow(o, false); const rs = await Promise.all([a, w]), x = await askAfter(o, g);
+      out.askDuringWithdraw = { ask: rs[0].c ? rs[0].e.split('\n')[0] : 'asked', withdraw: rs[1].c ? rs[1].e.split('\n')[0] : 'withdrawn', asks: +x[0], holds: +x[1], signing: x[2] };
+      ok(!bad(rs).length && !rs[1].c && x[2] === 'withdrawn', '2h: an ask as Tim presses Withdraw now: no deadlock, the withdrawal stands: ' + bad(rs).join(' | ')); }
+
+    // 5. a freeze and the last finish at once (offer 5): the freeze takes the offer first and holds it a moment; the finish then waits
+    const o5 = await v('o5');
+    const g5 = await one(`${AGENT} select public.agent_round_present('${o5}', 'in_person', public.rc_places(2, true, null, true), true)->>'id'`);
+    await one(`${CLAIMS} select public.rc_prep('${g5}'); select public.rc_taps('${g5}', 1); select public.offer_sign_do_finish((select id from public.offer_signers where signing_id = '${g5}' and position = 1), 'ua', null, 'passport', 'Tim')::text; select public.rc_taps('${g5}', 2)`);
+    const fz = psql(`${AGENT} begin; select public.agent_offer_freeze('${o5}', 'Race: Vera rang to stop', 'Vera Racer', null)::text; select pg_sleep(1.5); commit;`);
+    await new Promise(r => setTimeout(r, 400));
+    const fin = psql(`select public.offer_sign_do_finish((select id from public.offer_signers where signing_id = '${g5}' and position = 2), 'ua', null, 'passport', 'Tim')::text`);
+    const [fr, fn] = await Promise.all([fz, fin]);
+    const st5 = (await one(`select status || ',' || (select count(*) from public.offer_signers where signing_id = '${g5}' and finished_at is not null) || ',' || (select count(*) from public.offer_events where offer_id = '${o5}' and kind = 'sign_complete' and detail->>'signing_id' = '${g5}') from public.offer_signings where id = '${g5}'`)).split(',');
+    out.freezeFinish = { freeze: fr.c ? fr.e.split('\n')[0] : 'frozen', finish: fn.c ? fn.e.split('\n')[0] : 'finished', status: st5[0], finished: +st5[1], complete_events: +st5[2] };
+    ok(!fr.c && fn.c && /no longer being signed/.test(fn.e) && st5[0] === 'signing' && st5[1] === '1' && st5[2] === '0', 'a freeze and the last finish at once: the finish waits and is refused; no signing completes after a freeze');
+    ok((await one(`select bool_and((public.offer_chain_verify(id::text)->>'ok')::boolean) from public.property_offers`)) === 't', 'every timeline still checks out');
+  } catch (e) { errs.push('crashed: ' + e.message); }
+  finally { try { execFileSync('dropdb', [DB]); } catch (_) { errs.push('scratch database not dropped: ' + DB); } }
+  console.log(JSON.stringify(Object.assign(out, { errs }), null, 1));
+})();

@@ -258,4 +258,13 @@ Condition timing, further terms numbering and the review screen (Tim, 24 Novembe
 021 (built as 022; local stand-in only), offer-draft gains `write_clause`, offer-public's helper writes {timing}. LIVE 24 November 2026 (NZ): rollback block passed on the live project (no capitals); applied as `021_offer_condition_timing`, plus `022_tighten_table_privileges` (Tim approved); main dae98d6; offer-draft (JWT on) and offer-public (JWT off) pinned to dae98d6; Tim's electrical, technical and sale wording now use {timing}. See `OFFERS-PLAN.md`.
 Tests: `offers-core.test.js`, `draft-core.test.js`, `offers.test.js`, `offers-draft.test.js`, `offer-public-fn.test.js`,
 `offer-draft-fn.test.js`; database: `offer-timing-rollback.sql` (via `offer-timing-rollback.js`).
+Phase 3 (purchaser signing) built 24 November 2026 on branch `offers-phase3`: migration 023 (built as 020; tested in a rollback block on a local
+PostgreSQL stand-in only), edge function `offer-sign` (new; JWT off, token checked). Awaiting review. Tests: `offers-sign.test.js`,
+`sign-core.test.js`, `offer-sign-fn.test.js`; database: `offer-sign-rollback.sql` (via `offer-sign-rollback.js`). See `OFFERS-PLAN.md`, "Phase 3 detail".
+Phase 4 (presentation and counteroffers) built 24 November 2026 on branch `offers-phase4`: migration 024 (built as 021), `offer-sign`
+extended. Both phases reviewed READY on their own. Brought up to date with main on branch `offers-live` (24 November 2026): migrations
+023 and 024, the portal addresses and pads, `offer-sign` and `offer-public` answering the portal too. Awaiting review. Tests add
+`offers-portal.test.js`; database: `offer-negotiation-rollback.js --with-023` runs 023 and 024 together. See `OFFERS-PLAN.md`, "Going live".
+Same branch, later on 24 November 2026: Tim's decisions built (emails as drafts he sends, identity optional, link changes start off, he
+mediates every round) and the first review's six fixes; new tests `mail-core.test.js`, and the mail counts in `offers-nego.test.js`.
 

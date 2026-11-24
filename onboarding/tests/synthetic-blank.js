@@ -3,7 +3,9 @@
 // Eleventh Edition 2022 (4) pack, with filler text and invented names around them. Nothing here is the form's wording.
 // make({ edition, clause22: false, filledDeposit, filledSettlement, twoLineSettlement, printedTerms, vendorLawyer: false, generalTerms (20),
 //   ftAppendix (the further terms page is the appendix, with 21.x and 22.0 printed on it, as the portal does), pageNoOffset (printed page numbers),
-//   pageNoFormat (n => the printed page number, e.g. '22 of 22'), laterNumbers (false: no page number after page 3, as the separate documents in a real pack) })
+//   pageNoFormat (n => the printed page number, e.g. '22 of 22'), laterNumbers (false: no page number after page 3, as the separate documents in a real pack), cca: true })
+// footnote: printed text beneath the third purchaser signature line (no room for a fourth)
+// cca: a synthetic Client and Customer Acknowledgement page in the pack (page 10, before the inserted page), for signing (phase 3)
 // Only the short label words the anchor finder needs are used; everything else is made-up filler. -> Uint8Array
 const { PDFDocument, StandardFonts, rgb } = require('/opt/npm-tools/node_modules/pdf-lib');
 async function make(o) {
@@ -67,6 +69,7 @@ async function make(o) {
   t('Signature of Purchaser(s):', 40, 560); t('Signature of Vendor(s):', 330, 560);
   for (let i = 0; i < 3; i++) { const y = 530 - i * 70; t('_'.repeat(40), 40, y); t('_'.repeat(40), 330, y); t('Name:', 42, y - 12); t('Name:', 332, y - 12); if (i < 2) fill(['Testy Vendorperson', 'Otherly Vendorperson'][i], 362, y - 12);
     t('Filler capacity line', 42, y - 24, 8); t('Filler capacity line', 332, y - 24, 8); }
+  if (o.footnote) t('Synthetic footnote printed beneath the third signature line.', 42, 330, 8);
   // 7. the back page
   page(); t('SYNTHETIC BACK PAGE', 112.7, 762.4, 16, true);
   t('VENDOR:', 31.4, 743.5, 10, true); fill('Testy Vendorperson & Otherly Vendorperson', 34, 730); t('Contact Details:', 31.4, 695.1);
@@ -83,6 +86,7 @@ async function make(o) {
   // 9. a pack page: an acknowledgement with a witness block
   if (o.pack) { page(); t('Synthetic pack page', 120, 760, 13, true); t('Property Address: 1 Example Road, Testville', 30, 740);
     t('The purchaser acknowledges the synthetic LIM report filler has been received.', 30, 700); t('The purchaser acknowledges the synthetic as is where is filler.', 30, 680); t('Witnessed filler:', 30, 600); t('Date:', 330, 600);
+    if (o.cca) { page(); t('CLIENT AND CUSTOMER ACKNOWLEDGEMENT', 120, 760, 13, true); t('Synthetic filler about the agent acting for the vendor.', 30, 730); t('Synthetic filler about the guide.', 30, 715); }
     pg = doc.addPage([W, H]); n++; t('A synthetic inserted LIM page without the edition string.', 30, 760); }
   return await doc.save();
 }

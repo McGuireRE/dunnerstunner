@@ -34,7 +34,8 @@ Order of work (set 24 November 2026, confirmed by Tim; reordered the same evenin
 8. P4 People, P5 Import and feeds, P6 Assessments. QMU's suburbs-from-owned-properties needs P4; until then QMU2 takes a
    recipient's suburbs typed in by Tim.
 
-Offers phases 5 and 6 follow `OFFERS-PLAN.md` and are not yet placed in this order.
+Offers phases 5 and 6 follow `OFFERS-PLAN.md` and are not yet placed in this order. Phases 3 and 4 (item 0) were fitted to P1 on
+branch `offers-live` (see `OFFERS-PLAN.md`, "Going live").
 
 ## Decisions (Tim, 24 November 2026)
 
@@ -81,6 +82,7 @@ Until the address is live, the same shell is served at packages.dunnerstunner.co
 | `/properties` | Listings row, pipeline row, map |
 | `/properties/<id>` | One property (today's `viewProperty` tiles) |
 | `/properties/<id>/agreement`, `/offers`, `/offers/<oid>`, `/inspection`, `/documents`, `/aml/<person>`, `/variations/<vid>`, `/forms/<fid>` | That property's work, each on its own address |
+| `/properties/<id>/offers/<oid>/draft/<did>/sign`, `/offers/<oid>/signing/<sid>`, `/offers/<oid>/signing/<sid>/turn/<signer>`, `/offers/<oid>/present` | Offers phases 3 and 4 (branch `offers-live`): Ready to sign, a round out for signing, one signer's turn on Tim's device (in person), presenting a round |
 | `/people` | Everyone, searchable |
 | `/people/<id>` | One person: contact details, every property they own or are linked to, files |
 | `/processes` | Start an appraisal, agency agreement, form, inspection or offer. The two assessments show as "Coming soon" (P6) |
@@ -113,7 +115,8 @@ address becomes its own once saved; read-only review keeps the menu. Caveat: thi
 a separate page load (for example /onboarding opened in the same tab before the portal), Back leaves without asking unless
 something is drawn or typed (then the browser asks).
 
-Open points for Tim (by design for now): the in-person exits ("Save and close", "Leave without saving", "Stop signing here") take
+Open points for Tim (by design for now): after a purchaser's or vendor's turn signing an offer on Tim's device (offers phases 3 and 4), Tim's page waits
+behind a cover until he taps "I'm Tim, carry on" (no menu, no offer, no one's details); P3's PIN or passkey replaces that tap. the in-person exits ("Save and close", "Leave without saving", "Stop signing here") take
 whoever taps them to agent pages. If Tim wants a vendor-proof appointment, a later option is an exit that needs his PIN, which fits
 the P3 lock design.
 
