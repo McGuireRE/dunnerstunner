@@ -254,3 +254,8 @@ LIVE 24 November 2026 (NZ): reviewed until ready; the rollback block passed on t
 technical-report and sale-of-property wording loaded (tokens {date} and {address}; the sale price stays a line for Tim to fill);
 both deposit clauses now struck when they don't apply. Specified Due Diligence left unworded (his file is a draft awaiting the
 solicitor), so a draft using it shows a placeholder Tim must fill before approving.
+Condition timing, further terms numbering and the review screen (Tim, 24 November 2026) built on branch `offers-timing`: migration
+022 (local stand-in only), offer-draft gains `write_clause`, offer-public's helper writes {timing}. Not live. See `OFFERS-PLAN.md`.
+Tests: `offers-core.test.js`, `draft-core.test.js`, `offers.test.js`, `offers-draft.test.js`, `offer-public-fn.test.js`,
+`offer-draft-fn.test.js`; database: `offer-timing-rollback.sql` (via `offer-timing-rollback.js`).
+

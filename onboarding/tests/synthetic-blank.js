@@ -1,15 +1,17 @@
 // A made-up stand-in for a REINZ agreement blank, made at test time (the real form is copyright and holds real names, so it is
 // never copied into the repository). It puts the printed labels the drafting anchors on in the same relative places as the
 // Eleventh Edition 2022 (4) pack, with filler text and invented names around them. Nothing here is the form's wording.
-// make({ edition, clause22: false, filledDeposit, filledSettlement, twoLineSettlement, printedTerms, vendorLawyer: false })
+// make({ edition, clause22: false, filledDeposit, filledSettlement, twoLineSettlement, printedTerms, vendorLawyer: false, generalTerms (20),
+//   ftAppendix (the further terms page is the appendix, with 21.x and 22.0 printed on it, as the portal does), pageNoOffset (printed page numbers),
+//   pageNoFormat (n => the printed page number, e.g. '22 of 22'), laterNumbers (false: no page number after page 3, as the separate documents in a real pack) })
 // Only the short label words the anchor finder needs are used; everything else is made-up filler. -> Uint8Array
 const { PDFDocument, StandardFonts, rgb } = require('/opt/npm-tools/node_modules/pdf-lib');
 async function make(o) {
-  o = Object.assign({ edition: 'Eleventh Edition 2022 (4)', clause22: true, filledDeposit: true, filledSettlement: true, vendorLawyer: true, pack: true }, o || {});
+  o = Object.assign({ edition: 'Eleventh Edition 2022 (4)', clause22: true, filledDeposit: true, filledSettlement: true, vendorLawyer: true, pack: true, generalTerms: 20, pageNoOffset: 0, pageNoFormat: null, laterNumbers: true }, o || {});
   const doc = await PDFDocument.create(); doc.setProducer('synthetic test blank'); doc.setTitle('Synthetic blank for tests');
   const F = await doc.embedFont(StandardFonts.Helvetica), B = await doc.embedFont(StandardFonts.HelveticaBold);
   const W = 595.32, H = 842.04; let pg, n = 0;
-  const page = () => { pg = doc.addPage([W, H]); n++; t(o.edition, 467.4, 790.4, 9); t('\u00a9 Synthetic test form. All rights reserved.', 28.3, 25.2, 9); t(String(n), 293.2, 25.2, 8); };
+  const page = () => { pg = doc.addPage([W, H]); n++; t(o.edition, 467.4, 790.4, 9); t('\u00a9 Synthetic test form. All rights reserved.', 28.3, 25.2, 9); if (o.laterNumbers || n <= 3) t(o.pageNoFormat ? o.pageNoFormat(n + o.pageNoOffset) : String(n + o.pageNoOffset), 293.2, 25.2, 8); };
   const t = (s, x, y, size, bold) => pg.drawText(s, { x, y, size: size || 9.5, font: bold ? B : F, color: rgb(0, 0, 0) });
   const fill = (s, x, y) => pg.drawText(s, { x, y, size: 8, font: F, color: rgb(0.1, 0.1, 0.1) });
   // 1. the front page
@@ -38,9 +40,17 @@ async function make(o) {
   t('TENANCIES', 28.3, 66.6, 10, true); t('Yes/No', 531.7, 66.6, 10);
   t('Synthetic filler about tenancies.', 28.3, 56.7, 9);
   // 2. filler general terms
-  page(); for (let i = 0; i < 30; i++) t(`${i + 1}.0 Synthetic general term filler line number ${i + 1} for the test blank.`, 34, 760 - i * 20, 9);
+  page(); for (let i = 0; i < o.generalTerms; i++) t(`${i + 1}.0 Synthetic general term filler line number ${i + 1} for the test blank.`, 34, 760 - i * 20, 9);
+  t('Filler that mentions clause 22.0 and 31.0 inside a sentence.', 34, 760 - o.generalTerms * 20, 9);
   // 3. further terms
-  page(); t('FURTHER TERMS OF SALE', 34.4, 765.1, 16, true); t('Further Terms continued filler', 33.5, 748.6, 9);
+  const appendix = top => { t('21.0 Synthetic Deposit Heading', 28.4, top, 11, true);
+    t('21.1 Synthetic filler sentence one for the deposit clause.', 28.4, top - 10.8, 9);
+    t('21.2 Synthetic filler about a trust account for the deposit, line one.', 28.4, top - 31.5, 9); t('Synthetic filler, line two.', 28.4, top - 41.9, 9);
+    t('21.3 Synthetic filler about KiwiSaver funding, line one.', 28.4, top - 72.9, 9); t('Synthetic filler, line two.', 28.4, top - 83.3, 9);
+    if (o.clause22) { t('22.0 Synthetic Approval Heading', 28.4, top - 138.7, 11, true); t('Synthetic filler about a lawyer approving, line one.', 28.4, top - 149.5, 9); t('Synthetic filler line two ends within one working', 28.4, top - 159.9, 9); t('days of filler.', 28.4, top - 170.2, 9); } };
+  page(); if (o.ftAppendix) t('Appendix', 28.4, 800, 18, true);
+  t('FURTHER TERMS OF SALE', 34.4, 765.1, 16, true); t('Further Terms continued filler', 33.5, 748.6, 9);
+  if (o.ftAppendix) appendix(728);
   if (o.printedTerms) { t('1. Synthetic printed term one, filler words.', 36, 730, 9); t('2. Synthetic printed term two, filler words.', 36, 718, 9); t('filler continuation of term two.', 36, 706, 9); }
   // 4. schedule 1
   page(); t('SCHEDULE 1', 260, 790.4, 11, true); t('Section 2 Purchaser', 30, 600, 9.5, true);
@@ -69,15 +79,21 @@ async function make(o) {
   t('Email address for service of notices', 31.4, 296.5); t('(clause 1.4)', 187, 296.5, 9); t(':', 232.3, 296.5, 10);
   t('SALE BY filler agency', 31.4, 274.9, 10, true);
   // 8. the appendix
-  page(); t('Appendix', 28.4, 758.6, 18, true); t('21.0 Synthetic Deposit Heading', 28.4, 743.3, 11, true);
-  t('21.1 Synthetic filler sentence one for the deposit clause.', 28.4, 732.5, 9);
-  t('21.2 Synthetic filler about a trust account for the deposit, line one.', 28.4, 711.8, 9); t('Synthetic filler, line two.', 28.4, 701.4, 9);
-  t('21.3 Synthetic filler about KiwiSaver funding, line one.', 28.4, 670.4, 9); t('Synthetic filler, line two.', 28.4, 660, 9);
-  if (o.clause22) { t('22.0 Synthetic Approval Heading', 28.4, 604.6, 11, true); t('Synthetic filler about a lawyer approving, line one.', 28.4, 593.8, 9); t('Synthetic filler line two ends within one working', 28.4, 583.4, 9); t('days of filler.', 28.4, 573.1, 9); }
+  page(); if (!o.ftAppendix) { t('Appendix', 28.4, 758.6, 18, true); appendix(743.3); } else t('Synthetic filler page.', 28.4, 758.6, 11, true);
   // 9. a pack page: an acknowledgement with a witness block
   if (o.pack) { page(); t('Synthetic pack page', 120, 760, 13, true); t('Property Address: 1 Example Road, Testville', 30, 740);
     t('The purchaser acknowledges the synthetic LIM report filler has been received.', 30, 700); t('The purchaser acknowledges the synthetic as is where is filler.', 30, 680); t('Witnessed filler:', 30, 600); t('Date:', 330, 600);
     pg = doc.addPage([W, H]); n++; t('A synthetic inserted LIM page without the edition string.', 30, 760); }
   return await doc.save();
 }
-module.exports = { make };
+// The band picture the drafting needs for a continuation page (renderDraft's opts.bandImage), as Tim's screen makes it with pdf.js:
+// here with pdftoppm at 300 dpi, cropped to the band. -> PNG bytes
+function bandImager(pdfBytes) {
+  const { execFileSync } = require('child_process'), fs = require('fs'), os = require('os'), path = require('path');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'band-')), src = path.join(dir, 'blank.pdf'); fs.writeFileSync(src, pdfBytes); let n = 0;
+  return async (pageNo, b) => { const R = 300, k = R / 72, out = path.join(dir, 'b' + (++n));
+    const H = 842.04;   // the synthetic blank's page height
+    execFileSync('pdftoppm', ['-f', String(pageNo), '-l', String(pageNo), '-r', String(R), '-x', '0', '-y', String(Math.round((H - b.top) * k)), '-W', String(Math.round(b.width * k)), '-H', String(Math.round(b.height * k)), '-png', '-singlefile', src, out]);
+    return new Uint8Array(fs.readFileSync(out + '.png')); };
+}
+module.exports = { make, bandImager };

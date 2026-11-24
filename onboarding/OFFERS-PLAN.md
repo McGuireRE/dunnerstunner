@@ -259,3 +259,86 @@ Phases 3 and 4 (signing and counteroffers):
 Phase 4 (presentation):
 
 - When presenting, the vendor is reminded that anything provided as a chattel must be in full working order at settlement.
+
+## Condition timing, further terms numbering and the review screen (Tim, 24 November 2026; branch `offers-timing`, NOT live)
+
+Built locally on `offers-timing` from main. Migration 022 is written and passed its rollback block on the local PostgreSQL 16 stand-in
+(`tests/pg-standin.sql`, then 010, 016 part A, 018, 019; `node onboarding/tests/offer-timing-rollback.js`), NOT the live project.
+
+- Timing for every condition: `{key, days}` and `{key, date}` (unchanged, live data reads as before) and new `{key, after, days}`: within
+  N working days of the date another condition on the offer is satisfied or waived. Loops, a condition not on the offer, waiting for
+  itself, and chains of more than three steps are refused (offers-core `chainProblem`, and `offer_clean` in 022). For the checks an
+  "after" date is the other condition's date (worst case) plus N working days by its own rule (the LIM rule runs to 15 January); it
+  feeds the last condition date, the one-week gap, the KiwiSaver warning, and shows as "at the latest".
+- "Confirm all conditions on the same day" on the form (two or more conditions, off by default, not forced) and on the review screen
+  (a recorded correction to the offer, then a re-draft). Kept on the offer as `line_up: true`.
+- Drafting: `{timing}` ("within 10 working days of the date of this agreement", "on or before Friday 5 December 2026", "within 5 working
+  days of the date the finance condition in clause 9.1 is satisfied or waived"); `{date}` for "after" gives the timing phrase and a
+  check. Printed front-page lines: the short phrase if it fits, otherwise "see further term N" plus a further term setting out that
+  date. Clause 22.0 "after": the printed count struck, "see further term N" beside it, the time in a further term. Wording with a
+  token no longer has "Condition date: ..." added after it (before, Tim's live wording printed the date twice).
+- The AI condition helper writes `{timing}`; the form says what it stands for.
+- Further terms numbering: on from the last general terms clause and the highest clause printed on the appendix, both read from the
+  blank (buildMap `numbering`), so 23.0 on Tim's packs. Written 23.0, 24.0 and so on, like the printed 22.0 (Tim, 24 November 2026):
+  in the list, in references ("further term 23.0"), on front-page lines ("see further term 24.0") and in the starting-number note.
+  When the further terms page already prints its own terms as "1.", "2.", ours continue in that style ("23.", named "further term 23").
+- The further terms that set out a printed condition's date (front-page "see further term N", and clause 22.0) are tied to that
+  condition and written with {timing} ("The time for the purchaser's lawyer's approval under clause 22.0 is {timing}."), so their
+  timing chip corrects the offer like any other. Before any correction from the review screen the offer is read again; if it has
+  changed since the screen opened, nothing is saved and Tim is asked to reopen the newest draft. The database checks this too, under
+  the row lock (`agent_offer_correct(offer, details, note, expected)`, 022). If the correction saved but the new draft failed, Tim is
+  told the offer was corrected and gets "Re-draft now".
+- The date terms use the date form of the timing (`{timing_date}`): "The finance date is the date that is 5 working days after the
+  date the building report condition in clause 9.4 is satisfied or waived" ("... after the date of this agreement"; "... is Friday 5
+  December 2026").
+- Blocking, tickable checks: a condition-tied term whose wording Tim edited so it no longer holds its {timing} ("Further term 23.0 no
+  longer follows the offer's timing for ..."), and a typed-over front-page date or clause 22.0 count that differs from what the
+  offer works out (both values named, compared once "see further term N" is resolved). Both are checked on every draft while the
+  edit stands. Tim's own wording for the buyer's condition (custom_wording) counts too: without the buyer's {timing} or {date} it
+  raises the same check, and no "Condition date" is added after his words. Once a correction has saved, its Done button stays off
+  if the re-draft fails; only "Re-draft now" is offered. Phase 2 drafts (no number_style) show
+  "1." style on the review screen, as their PDF does. A removed term's number is retired (`edits.retired_numbers`) and never reused;
+  `term_last` on each plan is where the sequence is up to (phase 4 continues from it).
+- Overflow: pages added straight after the further terms page, made from pictures of that page's own header and footer bands (PNG,
+  rendered from the blank: pdf.js at scale 4 on Tim's screen, pdftoppm at 300 dpi in the tests; the page itself is never embedded, so
+  none of its text or clauses is carried over), "(continued)" after the Appendix heading, the printed page number struck and the
+  right one beside it (22 to 23, 24; "22 of 22" to "23 of 24", "24 of 24"). Each added page is a `kind: 'page'` item in placed with
+  its source page and bands; a blocking, tickable check for Tim, and another when a later page of the agreement already prints a
+  bare number the added pages now take. No bands, or no picture: the plain page, with its own blocking check. Every draft also says
+  where the further terms start ("Further terms start at 23 (general terms to 20, appendix to 22)").
+  Known limit: the bands are pictures, so their words (the heading, the edition line, the footer) can't be selected or searched on
+  an added page; the struck page number is part of the picture, the new one is text.
+- Review screen: clauses from the library (`edits.added_terms`), reorder (grip drag with pointer events, and Up and Down buttons;
+  `edits.term_order`), remove a term Tim added, timing and date chips in each term's text. A timing chip in a term tied to one of the
+  offer's conditions changes that condition on the offer (Tim, 24 November 2026): a recorded correction (agent_offer_correct, the
+  buyer's original kept, loops refused), then a new draft, so the date checks (shown on the review screen, with the gap and KiwiSaver
+  warnings) follow and older drafts can't be approved. "After another condition" is offered (never itself). A chip in a term tied to no
+  condition, and a date or working-day count written in the wording, stay draft-only edits (`edits.term_timing`, `edits.items`), "Ask AI to write a clause" (offer-draft `write_clause`, Sonnet, daily cap with a reserved
+  ai_calls row per call, `offer_agent_ai_claim` then `offer_agent_ai_done`; Tim edits
+  and ticks; "Use in this offer only" or "Save to my clause library"), also in the clause library. Library terms can be "Only when I
+  add it to a draft" (rule `{}`).
+- Marks: Tim draws boxes on any page of the blank (initials or signature for the purchasers, the vendors or both; strike-out, a
+  crossed box when taller than a line; text; highlight), moves and resizes them with 8 handles (finger-sized on touch), zoom control,
+  kept inside the page, minimum 10 by 8 points. Filled places can be moved or resized the same way (`edits.moves`, from and to boxes;
+  the map is unchanged). Checked on the server (`offer_draft_edits_ok` in agent_draft_add, 022).
+
+For phases 3 and 4 (not changed here):
+- sign-core (offers-phase3) `makePlaces` should turn placed items `kind: 'mark'` with `mark: 'initials' | 'signature'` and `who`
+  (purchasers, vendors, both) into signing places for that side, at the item's box; strike, cross and highlight marks and moved items
+  are "filled boxes" each signer initials. Placed items `kind: 'page'` (added continuation pages) need the footer initials like any page.
+- phase 3/4 draft-core changes (`term_texts`, `placedFrom`) need merging with this branch's renderDraft continuation code.
+- nego-core and 021: counteroffer changes are marks on the PDF, not changes to `details.conditions`, so "after" needs no change there.
+  A change to a condition's date written by a party is free text; a condition that waits for another reads its timing phrase. A new
+  further term added in a counteroffer must take its number from the newest draft's `term_last` (and never a retired number).
+  `agent_offer_correct` in 021 calls `offer_clean`, so it takes `after` once 022 is applied (021 must not reapply the 018 version).
+
+Deploy steps, with Tim's approval: run the rollback block on the live project (no CAPITALS), apply 022; push; deploy `offer-draft`
+(write_clause) and `offer-public` (helper prompt) pinned to that commit. 022 must be applied before the page goes live, or `after` is
+dropped by the live `offer_clean` without a word.
+
+Before relying on the cap, confirm signed-in users can't write ai_calls on the live project (read only; every row should say false):
+
+```sql
+select r.rolname, p.priv, has_table_privilege(r.rolname, 'public.ai_calls', p.priv) as allowed
+from (values ('anon'), ('authenticated')) r(rolname), (values ('INSERT'), ('UPDATE'), ('DELETE'), ('TRUNCATE')) p(priv) order by 1, 2;
+```

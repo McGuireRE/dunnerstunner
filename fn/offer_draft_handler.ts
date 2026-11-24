@@ -5,13 +5,17 @@
 //                   offer_blank_reads and shown to Tim, who ticks, moves or deletes each proposal. Nothing is used until he does.
 //   confirm_file:   works out the SHA-256 and size of a blank or draft Tim has just uploaded, from the stored file itself (service
 //                   role), and records them (offer_file_confirm). The database accepts a blank or draft only with a matching fingerprint.
+//   write_clause:   Tim describes a further term in plain words; Sonnet drafts it (prefill_shared.ts), with {timing} where a
+//                   condition's time goes, within the daily cap (offer_agent_ai_claim reserves the row in ai_calls, offer_agent_ai_done
+//                   finishes it; migration 022). Only a
+//                   draft: his screen shows it for him to edit and tick before it is used or saved to his library. Nothing is stored here.
 //   lawyer_lookup:  finds the purchaser's lawyer's public work email and phone (the firm's own website, the Law Society) with the
 //                   Anthropic web search tool, each value with its source page. Only values from pages the search returned are kept;
 //                   with no direct dial or mobile, the firm's main line. Kept in offer_lawyer_lookups for Tim's tick. Always returns
 //                   links Tim can use himself, so it is a clear manual step when search isn't available.
 // The model calls and their ai_calls rows use prefill_shared.ts (Haiku, reading). The pack's text and web pages are data, never
 // instructions. Tested by onboarding/tests/offer-draft-fn.test.js with fakes, so no test calls a model or the database.
-import { buildLawyerLookupRequest, buildPackReadRequest, checkPackPages, LAWYER_LOOKUP_PURPOSE, lawyerManualLinks, MODEL_READ, PACK_READ_PURPOSE, readLawyerLookupResult, readPackReadResult } from "./prefill_shared.ts";
+import { buildClauseWriteRequest, buildLawyerLookupRequest, buildPackReadRequest, checkPackPages, CLAUSE_WRITE_PURPOSE, LAWYER_LOOKUP_PURPOSE, lawyerManualLinks, MODEL_DRAFT, MODEL_READ, PACK_READ_PURPOSE, readClauseWriteResult, readLawyerLookupResult, readPackReadResult } from "./prefill_shared.ts";
 
 export const MAX_BODY = 200000;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -41,7 +45,7 @@ export function makeHandler(d: Deps) {
     let body: any = null; try { body = JSON.parse(text); } catch (_) { body = null; }
     if (!body || typeof body !== "object" || Array.isArray(body)) return json({ error: "Bad request" }, 400);
     const action = String(body.action || "");
-    if (!["read_pack", "lawyer_lookup", "confirm_file"].includes(action)) return json({ error: "Bad request" }, 400);
+    if (!["read_pack", "lawyer_lookup", "confirm_file", "write_clause"].includes(action)) return json({ error: "Bad request" }, 400);
     let agent: string | null = null;
     try { agent = await d.whoIsAgent(auth); } catch (_) { agent = null; }
     if (!agent) return json({ error: "Only Tim can do this" }, 403);
@@ -56,6 +60,26 @@ export function makeHandler(d: Deps) {
       const r = await d.rpc("offer_file_confirm", { p_path: path, p_sha256: sha, p_size: bytes.length, p_actor: agent });
       if (r.error) return json({ ok: false, error: "The file's fingerprint couldn't be recorded." }, 409);
       return json({ ok: true, sha256: sha, size: bytes.length });
+    }
+
+    if (action === "write_clause") {
+      let request; try { request = buildClauseWriteRequest(String(body.text ?? "")); } catch (e: any) { return json({ ok: false, error: String(e?.message || e) }, 400); }
+      if (!key) return json({ ok: false, reason: "off", message: "The clause writer isn't switched on yet." });
+      // the claim reserves the call in ai_calls under the daily cap (one claim at a time); the row is finished after the model call
+      const claim = await d.rpc("offer_agent_ai_claim", { p_actor: agent, p_purpose: CLAUSE_WRITE_PURPOSE });
+      if (claim.error || !claim.data) return json({ ok: false, reason: "failed", message: "The clause writer isn't available just now." });
+      if (claim.data.ok !== true) return json({ ok: false, reason: "cap", message: "Today's AI help limit has been reached. It starts again tomorrow, or you can change the limit in the offer settings." });
+      const rid = Number(claim.data.id); if (!(rid > 0)) return json({ ok: false, reason: "failed", message: "The clause writer isn't available just now." });
+      let r: { ok: boolean; status: number; body: any };
+      try { r = await d.callModel(request, 30000); } catch (e: any) { r = { ok: false, status: 0, body: { error: { message: String(e?.message || e) } } }; }
+      const usage = r.body?.usage || {}, err = r.ok ? null : String(r.body?.error?.message || r.status).slice(0, 300);
+      let done: { error: { message: string } | null } = { error: null };
+      try { done = await d.rpc("offer_agent_ai_done", { p_id: rid, p_ok: r.ok, p_error: err, p_in: usage.input_tokens || 0, p_out: usage.output_tokens || 0 }); } catch (e: any) { done = { error: { message: String(e?.message || e) } }; }
+      if (done.error) console.error("offer_agent_ai_done failed for ai_calls row " + rid + ": " + done.error.message);   // the reservation still counts against the cap
+      if (!r.ok) return json({ ok: false, reason: "failed", message: friendly(r.status, err || "") });
+      const res = readClauseWriteResult(r.body);
+      if (!res.ok) return json({ ok: false, reason: "unsuitable", message: res.why });
+      return json({ ok: true, draft: true, title: res.title, wording: res.wording, summary: res.summary, is_condition: res.is_condition });
     }
 
     if (action === "read_pack") {

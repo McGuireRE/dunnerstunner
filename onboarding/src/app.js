@@ -5538,7 +5538,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   }
   const ofBlank = () => ({ email: '', phone: '', seen_docs: '', sign: '', price: '', settlement: { kind: 'relative', days: OF.SETTLE_DAYS_DEFAULT, date: '' }, conditions: [], sale_address: '', kiwisaver: null, entity: '', nominee: true,
     purchasers: [{ first: '', last: '', email: '', phone: '' }], comments: '', lawyer: { firm: '', person: '', email: '', phone: '' }, related: null, date_help: false, privacy: false,
-    chattels_add: [], chattels_exclude: [], gst_registered: null, gst_number: '' });
+    chattels_add: [], chattels_exclude: [], gst_registered: null, gst_number: '', line_up: false, lu: { days: '', date: '' } });
   // a saved or stored offer back into the form's shape (anything odd is dropped)
   function ofShape(x) {
     const F = ofBlank(); if (!x || typeof x !== 'object') return F;
@@ -5547,7 +5547,9 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     ['kiwisaver', 'related'].forEach(k => { if (typeof x[k] === 'boolean') F[k] = x[k]; });
     F.nominee = x.nominee !== false; F.date_help = x.date_help === true; F.privacy = x.privacy === true;
     const s = x.settlement || {}; F.settlement = { kind: s.kind === 'date' ? 'date' : 'relative', days: s.kind === 'date' ? OF.SETTLE_DAYS_DEFAULT : (s.days ?? OF.SETTLE_DAYS_DEFAULT), date: s.date || '' };
-    if (Array.isArray(x.conditions)) F.conditions = x.conditions.filter(c => c && OF.condInfo(c.key)).map(c => ({ key: c.key, days: c.date ? '' : (c.days ?? ''), date: c.date || '', detail: c.detail || '', request: c.request || '', wording: c.wording || '', ai: c.ai === true }));
+    if (Array.isArray(x.conditions)) F.conditions = x.conditions.filter(c => c && OF.condInfo(c.key)).map(c => ({ key: c.key, days: c.date && !c.after ? '' : (c.days ?? ''), date: c.after ? '' : c.date || '', after: typeof c.after === 'string' ? c.after : '', detail: c.detail || '', request: c.request || '', wording: c.wording || '', ai: c.ai === true }));
+    F.line_up = x.line_up === true; if (x.lu && typeof x.lu === 'object') F.lu = { days: String(x.lu.days ?? ''), date: String(x.lu.date || '') };
+    else if (F.line_up) { const st = OF.sameTiming(F.conditions); F.lu = { days: st.startsWith('days:') ? st.slice(5) : '', date: st.startsWith('date:') ? st.slice(5) : '' }; }
     if (Array.isArray(x.purchasers) && x.purchasers.length) F.purchasers = x.purchasers.map(p => ({ first: (p && p.first) || '', last: (p && p.last) || '', email: (p && p.email) || '', phone: (p && p.phone) || '' }));
     if (x.lawyer && typeof x.lawyer === 'object') ['firm', 'person', 'email', 'phone'].forEach(k => { F.lawyer[k] = x.lawyer[k] || ''; });
     ['chattels_add', 'chattels_exclude'].forEach(k => { if (Array.isArray(x[k])) F[k] = x[k].filter(v => typeof v === 'string'); });
@@ -5560,7 +5562,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const pn = OF.parsePrice(F.price);   // 650k and $1.2m are read; anything else is sent as typed and refused with a plain message
     return { email: F.email.trim(), phone: F.phone.trim(), seen_docs: F.seen_docs, sign: F.sign, price: isNaN(pn) ? String(F.price || '').trim() : String(pn),
       settlement: s.kind === 'date' ? { kind: 'date', date: s.date } : { kind: 'relative', days: s.days === '' ? null : +s.days },
-      conditions: F.conditions.map(c => { const o = { key: c.key }; if (c.date) o.date = c.date; else o.days = c.days === '' || c.days == null ? null : +c.days; if (c.key === 'technical') o.detail = c.detail; if (c.key === 'custom') { o.request = c.request; o.wording = c.wording; o.ai = !!c.ai; } return o; }),
+      conditions: F.conditions.map(c => { const o = { key: c.key }; if (c.after) { o.after = c.after; o.days = c.days === '' || c.days == null ? null : +c.days; } else if (c.date) o.date = c.date; else o.days = c.days === '' || c.days == null ? null : +c.days; if (c.key === 'technical') o.detail = c.detail; if (c.key === 'custom') { o.request = c.request; o.wording = c.wording; o.ai = !!c.ai; } return o; }),
+      line_up: !!F.line_up,
       sale_address: F.conditions.some(c => c.key === 'sale') ? F.sale_address : null, kiwisaver: F.kiwisaver, entity: F.entity, nominee: F.nominee !== false,
       purchasers: F.purchasers.map(p => ({ first: p.first, last: p.last, email: p.email, phone: p.phone })), comments: F.comments, lawyer: Object.assign({}, F.lawyer),
       related: F.related, date_help: !!F.date_help, privacy: !!F.privacy,
@@ -5580,10 +5583,17 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   const ofPriceSay = v => { if (!String(v ?? '').trim()) return ''; const n = OF.parsePrice(v); if (isNaN(n) || !(n >= 1)) return 'Please type the price in numbers, for example 650000 or 650k.'; return `${money(n)}: ${OF.priceWords(n)}`; };
   const ofYes = v => v === true ? 'yes' : v === false ? 'no' : '';
   const ofMinDate = ctx => OF.addDays(ofOpts(ctx).asAt, 1);
-  function ofCalcText(ctx, x) {
-    const o = ofOpts(ctx), r = OF.conditionDate(x, o.asAt, o.province);
+  function ofCalcText(ctx, x, F) {
+    const o = ofOpts(ctx), all = (F && F.conditions) || [x], L = OF.longDate;
+    if (OF.condMode(x) === 'after') {   // waits for another condition: the latest it could be
+      const cp = OF.chainProblem(all, x.key); if (cp) return cp.text;
+      const tl = (OF.condInfo(x.after) || { label: 'the other condition' }).label, r = OF.conditionDate(x, o.asAt, o.province, all);
+      if (!(Math.floor(+x.days) >= 1)) return `Enter the working days. They count from the day ${tl} is satisfied or waived.`;
+      if (!r) return `${tl} needs its own working days or a date first.`;
+      return `${r.n} working ${r.n === 1 ? 'day' : 'days'} after ${tl} is satisfied or waived. At the latest that is ${L(r.date)}, if ${tl} takes all its time; sooner if it is met sooner.`;
+    }
+    const r = OF.conditionDate(x, o.asAt, o.province);
     if (!r) return 'Enter the working days, or pick a date.';
-    const L = OF.longDate;
     if (x.date) { const bn = r.adjusted ? OF.breakNote(r.chosen, { province: o.province, lim: !!(OF.condInfo(x.key) || {}).lim }) : '';
       if (bn && r.date <= o.asAt) return bn + ' Please pick that day or later.';
       return `${r.days} working ${r.days === 1 ? 'day' : 'days'} from ${ctx.asAt ? 'the day the offer came in' : 'today'}, so ${L(r.date)}.` + (bn ? ' ' + bn + ' Under the agreement the date becomes the last working day before the break.' : r.adjusted ? ` ${L(r.chosen)} isn't a working day, so the date becomes the working day before.` : ''); }
@@ -5594,13 +5604,23 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       ${ctx.token ? `<div class="toolbar"><button class="btn ghost" type="button" id="ofAi">Help me word it</button></div><p class="small" id="ofAiMsg" role="status" aria-live="polite"></p>` : ''}
       <label class="f" for="ofWord">Wording for the agreement <span class="opt">(a draft: Tim reads it and approves it before it goes on any agreement)</span></label>
       <textarea id="ofWord" rows="4" maxlength="2000" data-fc="custom:wording">${esc(x.wording)}</textarea>
+      <p class="small" id="ofTimingSay" aria-live="polite">${esc(ofTimingSay(x))}</p>
       <p class="small" id="ofAiBadge" ${x.ai ? '' : 'hidden'}><span class="pill of-draft">Draft</span> Suggested with AI help from your description. Tim will check it with you.</p>`;
+  }
+  // "{timing}" in the buyer's own wording (the helper writes it so): what it stands for
+  const ofTimingSay = x => /\{timing\}/.test(x.wording || '') ? `"{timing}" in the wording stands for the time you chose above${OF.timingPlain(x) ? ': ' + OF.timingPlain(x) : ''}. Tim fills it in on the agreement.` : '';
+  // working days can count from the agreement, or from when another of the offer's conditions is satisfied or waived
+  function ofFromHTML(F, c, x) {
+    const others = F.conditions.filter(y => y.key !== c.key); if (!others.length && !x.after) return '';
+    return `<label class="f" for="ofa_${c.key}">Working days counted from</label><select id="ofa_${c.key}" data-fc="${c.key}:after">
+      <option value="">the date of the agreement</option>${others.map(y => `<option value="${y.key}" ${x.after === y.key ? 'selected' : ''}>when ${esc((OF.condInfo(y.key) || { label: y.key }).label)} is satisfied or waived</option>`).join('')}</select>`;
   }
   function ofCondSub(ctx, F, c, x) {
     return `<div class="of-csub">
       <div class="of-when"><div><label class="f" for="ofd_${c.key}">Working days</label><input type="number" id="ofd_${c.key}" min="1" max="250" inputmode="numeric" data-fc="${c.key}:days" value="${esc(x.days ?? '')}"></div>
         <span class="of-or">or</span><div><label class="f" for="ofdt_${c.key}">A date</label><input type="date" id="ofdt_${c.key}" min="${ofMinDate(ctx)}" data-fc="${c.key}:date" value="${esc(x.date || '')}"></div></div>
-      <p class="small of-calc" data-ccalc="${c.key}" aria-live="polite">${esc(ofCalcText(ctx, x))}</p>
+      <div class="of-from">${ofFromHTML(F, c, x)}</div>
+      <p class="small of-calc" data-ccalc="${c.key}" aria-live="polite">${esc(ofCalcText(ctx, x, F))}</p>
       ${c.needs === 'detail' ? `<label class="f" for="ofdet_${c.key}">${esc(c.detailLabel)}</label><input type="text" id="ofdet_${c.key}" maxlength="300" data-fc="${c.key}:detail" value="${esc(x.detail)}" placeholder="${esc(c.detailHint || '')}">` : ''}
       ${c.needs === 'address' ? `<label class="f" for="ofSale">${esc(c.detailLabel)}</label><input type="text" id="ofSale" maxlength="300" data-f="sale_address" value="${esc(F.sale_address)}">` : ''}
       ${c.key === 'lawyer' ? `<p class="small of-lawnote" role="note">${esc(c.note)}</p>` : ''}
@@ -5615,6 +5635,22 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <button class="btn link of-cinfo" type="button" data-cinfo="${c.key}" aria-haspopup="dialog">What this means</button></div>
       ${x ? ofCondSub(ctx, F, c, x) : ''}</div>`;
   }
+  // "Confirm all conditions on the same day" (Tim, 24 November 2026): off by default, shown once two or more are chosen. It sets every
+  // condition to one timing (a number of working days, or a date); each can still be changed afterwards.
+  function ofLuNote(ctx, F) {
+    if (!F.line_up) return '';
+    const st = OF.sameTiming(F.conditions); if (!st) return F.lu.days || F.lu.date ? 'Some conditions now have their own timing. Change the days or date here to line them all up again.' : 'Enter the working days or a date for all of them.';
+    const d = OF.checkDates(ofPayload(F), ofOpts(ctx)), dates = [...new Set(d.conditions.map(c => c.date).filter(Boolean))];
+    if (dates.length > 1 && F.conditions.some(c => c.key === 'lim')) return `All your conditions are on the same timing. Over summer the LIM's working days run to 15 January, so its date (${OF.longDate(d.conditions.find(c => c.key === 'lim').date)}) is later than the others.`;
+    return dates.length ? `All your conditions are to be satisfied or waived by ${OF.longDate(dates[0])}.` : '';
+  }
+  function ofLineUpHTML(ctx, F) {
+    if (F.conditions.length < 2 && !F.line_up) return '';
+    return `<label class="choice cb of-lineup"><input type="checkbox" data-fb="line_up" ${F.line_up ? 'checked' : ''}><span class="mark"></span><span><span class="ct">Confirm all conditions on the same day</span><span class="cd">Sets every condition to the same timing. You can still change any of them.</span></span></label>
+      ${F.line_up ? `<div class="of-csub"><div class="of-when"><div><label class="f" for="ofLuDays">Working days, for all</label><input type="number" id="ofLuDays" min="1" max="250" inputmode="numeric" data-lu="days" value="${esc(F.lu.days)}"></div>
+        <span class="of-or">or</span><div><label class="f" for="ofLuDate">A date, for all</label><input type="date" id="ofLuDate" min="${ofMinDate(ctx)}" data-lu="date" value="${esc(F.lu.date)}"></div></div>
+        <p class="small of-calc" id="ofLuNote" aria-live="polite">${esc(ofLuNote(ctx, F))}</p></div>` : ''}`;
+  }
   const ofGroup = (ctx, F, g) => (g === 'custom' ? [OF.CUSTOM] : OF.CONDITIONS.filter(c => c.group === g)).map(c => ofCondRow(ctx, F, c)).join('');
   function ofOverlayHTML(ctx, key) {
     const c = OF.condInfo(key); if (!c) return '';
@@ -5628,9 +5664,10 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   }
   function ofDatesHTML(ctx, F) {
     const d = OF.checkDates(ofPayload(F), ofOpts(ctx)), L = OF.longDate, gap = d.problems.find(p => p.kind === 'gap');
-    const rows = d.conditions.filter(c => c.date).map(c => `<tr><td>${esc(c.label)}</td><td>${esc(L(c.date))}<br><span class="small">${c.days} working ${c.days === 1 ? 'day' : 'days'}</span></td></tr>`).join('');
+    const latest = d.conditions.some(c => c.latest), tl = k => (OF.condInfo(k) || { label: k }).label;
+    const rows = d.conditions.filter(c => c.date).map(c => `<tr><td>${esc(c.label)}</td><td>${c.latest ? 'At the latest ' : ''}${esc(L(c.date))}<br><span class="small">${c.latest ? `${c.n} working ${c.n === 1 ? 'day' : 'days'} after ${esc(tl(c.after))} is satisfied or waived` : `${c.days} working ${c.days === 1 ? 'day' : 'days'}`}</span></td></tr>`).join('');
     return `<table class="sum of-dates">${rows}
-      ${d.lastCondition ? `<tr><td>Unconditional, if every condition is met by its date</td><td>${esc(L(d.confirmation))}</td></tr>` : ''}
+      ${d.lastCondition ? `<tr><td>${latest ? 'Unconditional at the latest, if each condition takes all its time' : 'Unconditional, if every condition is met by its date'}</td><td>${esc(L(d.confirmation))}</td></tr>` : ''}
       <tr><td>Settlement</td><td>${d.settlement ? esc(L(d.settlement)) + (F.settlement.kind === 'relative' ? `<br><span class="small">${esc(F.settlement.days)} working days after it goes unconditional</span>` : d.settlementAdjusted ? '<br><span class="small">The date you picked isn\'t a working day, so it becomes the working day before.</span>' : '') : 'Choose below'}</td></tr></table>
       <p class="small">Counted from ${ctx.asAt ? 'the day the offer came in' : 'today'}, in working days as the agreement defines them (weekends, public holidays, ${esc((OF.PROVINCES[ofOpts(ctx).province] || { name: 'the province\'s' }).name)} Anniversary Day, and 24 December to 5 January). On the agreement they count from the day everyone signs, so they may move a little.</p>
       ${d.unknownYear ? '<p class="small">Some of these dates are too far ahead for the holiday list. Tim will check them.</p>' : ''}
@@ -5675,7 +5712,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         <p class="small of-advice" role="note">${esc(OF.ADVICE.conditions)}</p>
         <h3 class="of-gh">Typical conditions</h3><div id="ofCondsTypical">${ofGroup(ctx, F, 'typical')}</div>
         <details class="of-other" id="ofOther"${F.conditions.some(c => (OF.condInfo(c.key) || {}).group === 'other') ? ' open' : ''}><summary>Other conditions <span class="opt">(less common)</span></summary><div id="ofCondsOther">${ofGroup(ctx, F, 'other')}</div></details>
-        <h3 class="of-gh">Something else</h3><div id="ofCondsCustom">${ofGroup(ctx, F, 'custom')}</div>`)}
+        <h3 class="of-gh">Something else</h3><div id="ofCondsCustom">${ofGroup(ctx, F, 'custom')}</div>
+        <div id="ofLineUp">${ofLineUpHTML(ctx, F)}</div>`)}
       ${sec('settle', 'Settlement date', `<p class="small">The day you pay the balance and get the keys.</p><div class="choices">
         ${ofRadio('settle', 'relative', S.kind, 'A number of working days after the agreement goes unconditional', 'The usual is 15 working days.')}
         ${ofRadio('settle', 'date', S.kind, 'A set date')}</div>
@@ -5724,11 +5762,16 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     let pinned = false;
     const save = () => ofStore(ctx, F);
     const light = () => {   // the parts that follow every change
-      $$('[data-ccalc]', root).forEach(p => { const x = F.conditions.find(c => c.key === p.dataset.ccalc); if (x) p.textContent = ofCalcText(ctx, x); });
+      $$('[data-ccalc]', root).forEach(p => { const x = F.conditions.find(c => c.key === p.dataset.ccalc); if (x) p.textContent = ofCalcText(ctx, x, F); });
+      const lu = $('#ofLuNote'); if (lu) lu.textContent = ofLuNote(ctx, F);
+      const ts = $('#ofTimingSay'), cx = F.conditions.find(c => c.key === 'custom'); if (ts && cx) ts.textContent = ofTimingSay(cx);
       $('#ofDates').innerHTML = ofDatesHTML(ctx, F); $('#ofDeposit').innerHTML = ofDepositHTML(ctx, F);
       $('#ofPriceSay').textContent = ofPriceSay(F.price);
     };
-    const redrawConds = () => { $('#ofCondsTypical').innerHTML = ofGroup(ctx, F, 'typical'); $('#ofCondsOther').innerHTML = ofGroup(ctx, F, 'other'); $('#ofCondsCustom').innerHTML = ofGroup(ctx, F, 'custom'); };
+    const redrawConds = () => { $('#ofCondsTypical').innerHTML = ofGroup(ctx, F, 'typical'); $('#ofCondsOther').innerHTML = ofGroup(ctx, F, 'other'); $('#ofCondsCustom').innerHTML = ofGroup(ctx, F, 'custom'); $('#ofLineUp').innerHTML = ofLineUpHTML(ctx, F); };
+    // every condition on the shared timing (it isn't forced: each can still be changed afterwards)
+    const applyLineUp = () => { const t = F.lu.date ? { date: F.lu.date } : { days: F.lu.days }; if (!F.lu.date && !(Math.floor(+F.lu.days) >= 1)) return false;
+      const by = new Map(OF.lineUp(F.conditions, t).map(c => [c.key, c])); F.conditions.forEach(c => { const n = by.get(c.key); c.days = n.days; c.date = n.date; c.after = ''; }); return true; };
     const redrawPeople = () => { $('#ofPeople').innerHTML = ofPeopleHTML(F); };
     const showOv = (key, pin) => { ov.innerHTML = ofOverlayHTML(ctx, key); ov.hidden = false; ov.dataset.key = key; pinned = !!pin; const x = $('#ofOvX'); if (x) x.addEventListener('click', hideOv); if (pin) x && x.focus(); };
     const hideOv = () => { ov.hidden = true; ov.innerHTML = ''; ov.dataset.key = ''; pinned = false; };
@@ -5738,12 +5781,17 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       else if (t.dataset.fl) F.lawyer[t.dataset.fl] = v;
       else if (t.dataset.fp) { const [i, k] = t.dataset.fp.split(':'); if (F.purchasers[+i]) F.purchasers[+i][k] = v; }
       else if (t.dataset.fs) { F.settlement[t.dataset.fs] = v; }
+      else if (t.dataset.lu) {   // the shared timing for "Confirm all conditions on the same day"
+        const k = t.dataset.lu; F.lu[k] = v; if (v) { const other = k === 'days' ? 'date' : 'days'; F.lu[other] = ''; const o2 = $(other === 'days' ? '#ofLuDays' : '#ofLuDate'); if (o2) o2.value = ''; }
+        if (applyLineUp()) { $('#ofCondsTypical').innerHTML = ofGroup(ctx, F, 'typical'); $('#ofCondsOther').innerHTML = ofGroup(ctx, F, 'other'); $('#ofCondsCustom').innerHTML = ofGroup(ctx, F, 'custom'); }
+      }
       else if (t.dataset.ch) { const [kind, i] = t.dataset.ch.split(':'), a = F[kind === 'add' ? 'chattels_add' : 'chattels_exclude']; if (+i < a.length) a[+i] = v; }
       else if (t.dataset.fc) {
         const [key, k] = t.dataset.fc.split(':'), x = F.conditions.find(c => c.key === key); if (!x) return;
         x[k] = v;
         if (k === 'days' && v !== '') { x.date = ''; const d = $(`#ofdt_${key}`); if (d) d.value = ''; }
-        if (k === 'date' && v) { x.days = ''; const d = $(`#ofd_${key}`); if (d) d.value = ''; }
+        if (k === 'date' && v) { x.days = ''; x.after = ''; const d = $(`#ofd_${key}`); if (d) d.value = ''; const a = $(`#ofa_${key}`); if (a) a.value = ''; }
+        if (k === 'after' && v) { x.date = ''; const d = $(`#ofdt_${key}`); if (d) d.value = ''; }
       } else return;
       light(); save();
     });
@@ -5757,10 +5805,15 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         else F[k] = v;
       } else if (t.dataset.cond) {
         const key = t.dataset.cond;
-        if (t.checked) { if (!F.conditions.some(c => c.key === key)) F.conditions.push({ key, days: '', date: '', detail: '', request: '', wording: '', ai: false }); }
-        else F.conditions = F.conditions.filter(c => c.key !== key);
+        if (t.checked) { if (!F.conditions.some(c => c.key === key)) F.conditions.push({ key, days: '', date: '', after: '', detail: '', request: '', wording: '', ai: false });
+          // lined up: the new condition takes the shared timing; the others keep any change made to them
+          const nc = F.conditions.find(c => c.key === key); if (F.line_up && !nc.days && !nc.date) { if (F.lu.date) nc.date = F.lu.date; else if (Math.floor(+F.lu.days) >= 1) nc.days = Math.floor(+F.lu.days); } }
+        else { F.conditions = F.conditions.filter(c => c.key !== key); F.conditions.forEach(c => { if (c.after === key) c.after = ''; }); }   // one that waited for it now counts from the agreement
+        if (F.conditions.length < 2) F.line_up = false;
         redrawConds(); const first = $(`#ofd_${key}`); if (t.checked && first) first.focus();
-      } else if (t.dataset.fb) F[t.dataset.fb] = t.checked;
+      } else if (t.dataset.fb) { F[t.dataset.fb] = t.checked;
+        if (t.dataset.fb === 'line_up') { if (t.checked) { const st = OF.sameTiming(F.conditions); if (st && !F.lu.days && !F.lu.date) F.lu = { days: st.startsWith('days:') ? st.slice(5) : '', date: st.startsWith('date:') ? st.slice(5) : '' }; else if (applyLineUp()) redrawConds(); }
+          $('#ofLineUp').innerHTML = ofLineUpHTML(ctx, F); const f = t.checked && $('#ofLuDays'); if (f) f.focus(); } }
       else return;
       light(); save();
     });
@@ -5797,7 +5850,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const r = await offerCall('offer-public', { action: 'draft', token: ctx.token, text: x.request.trim() });
     btn.disabled = false;
     if (r && r.ok && r.wording) {
-      x.wording = r.wording; x.ai = true; $('#ofWord').value = r.wording; $('#ofAiBadge').hidden = false; save();
+      x.wording = r.wording; x.ai = true; $('#ofWord').value = r.wording; $('#ofAiBadge').hidden = false; const ts = $('#ofTimingSay'); if (ts) ts.textContent = ofTimingSay(x); save();
       return say((r.summary ? r.summary + ' ' : '') + 'This is a draft. Change it if you like. Tim reads it and approves the wording before it goes on any agreement.');
     }
     if (r && r.reason === 'unsuitable') return say((r.why || 'That doesn\'t look like a condition Tim can put on an offer.') + ' You can type your own wording below.');
@@ -5838,13 +5891,14 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const L = OF.longDate, o = Object.assign(ofOpts(ctx), asAt ? { asAt } : {}), chk = OF.checkDates(d, o), row = (k, v) => v ? `<tr><td>${esc(k)}</td><td>${v}</td></tr>` : '';
     const price = +String(d.price ?? '').replace(/[^0-9.]/g, '');
     const conds = (d.conditions || []).map(c => { const i = OF.condInfo(c.key) || { label: c.key }, r = chk.conditions.find(x => x.key === c.key) || {};
-      return `<li><strong>${esc(i.label)}</strong>${r.date ? `: ${esc(L(r.date))} <span class="small">(${r.days} working ${r.days === 1 ? 'day' : 'days'})</span>` : ''}${c.detail ? `<br><span class="small">Report: ${esc(c.detail)}</span>` : ''}${c.key === 'custom' ? `${c.request ? `<br><span class="small">In their words: ${esc(c.request)}</span>` : ''}${c.wording ? `<br><span class="small">Wording${c.ai ? ' (drafted with AI help, for Tim to approve)' : ' (for Tim to approve)'}: ${esc(c.wording)}</span>` : ''}` : ''}</li>`; }).join('');
+      return `<li><strong>${esc(i.label)}</strong>${r.date ? (r.latest ? `: at the latest ${esc(L(r.date))} <span class="small">(${esc(OF.timingPlain(c))})</span>` : `: ${esc(L(r.date))} <span class="small">(${r.days} working ${r.days === 1 ? 'day' : 'days'})</span>`) : ''}${c.detail ? `<br><span class="small">Report: ${esc(c.detail)}</span>` : ''}${c.key === 'custom' ? `${c.request ? `<br><span class="small">In their words: ${esc(c.request)}</span>` : ''}${c.wording ? `<br><span class="small">Wording${c.ai ? ' (drafted with AI help, for Tim to approve)' : ' (for Tim to approve)'}: ${esc(c.wording)}</span>` : ''}` : ''}</li>`; }).join('');
     const S = d.settlement || {}, lw = d.lawyer || {};
     return `<table class="sum of-sum">
       ${row('Property', nt(ctx.address || ''))}
       ${row('Price', price ? esc(money(price)) : '')}
       <tr><td>Conditions</td><td>${conds ? `<ul class="of-ul">${conds}</ul>` : 'None (unconditional)'}${d.sale_address ? `<span class="small">Property to sell: ${esc(d.sale_address)}</span>` : ''}</td></tr>
       ${row('Lawyer\'s approval', (d.conditions || []).some(c => c.key === 'lawyer') ? 'Chosen' : 'Not chosen')}
+      ${row('Conditions', d.line_up ? 'All to be confirmed on the same day' : '')}
       ${row('Settlement', (S.kind === 'date' ? esc(L(S.date)) : esc(`${S.days} working days after the agreement goes unconditional`)) + (chk.settlement && S.kind !== 'date' ? `<br><span class="small">About ${esc(L(chk.settlement))}</span>` : ''))}
       ${row('Help with dates', d.date_help ? 'Asked for Tim\'s help with the dates' : '')}
       ${row('KiwiSaver in the deposit', d.kiwisaver === true ? 'Yes' : d.kiwisaver === false ? 'No' : '')}
@@ -5948,8 +6002,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       ${o.suspected_spam ? '<div class="card warnc tight of-spamflag"><p class="small" style="margin:0"><strong>Possible spam.</strong> It was sent with the form\'s hidden field filled in, which is usually a robot. You weren\'t emailed about it.</p><div class="toolbar"><button class="btn ghost" type="button" id="ofNotSpam">Not spam: treat it as a real offer</button></div></div>' : ''}
       ${o.needs_date_help ? '<div class="card note tight of-helpflag"><p class="small" style="margin:0">They asked for your help with the dates.</p></div>' : ''}
       <h2>Dates</h2>
-      <div class="card tight"><table class="sum of-dates">${chk.conditions.filter(c => c.date).map(c => `<tr><td>${esc(c.label)}</td><td>${esc(L(c.date))} <span class="small">(${c.days} working days)</span></td></tr>`).join('')}
-        ${chk.lastCondition ? `<tr><td>Unconditional</td><td>${esc(L(chk.confirmation))}</td></tr>` : ''}<tr><td>Settlement</td><td>${chk.settlement ? esc(L(chk.settlement)) : 'Not set'}</td></tr></table>
+      <div class="card tight"><table class="sum of-dates">${chk.conditions.filter(c => c.date).map(c => `<tr><td>${esc(c.label)}</td><td>${c.latest ? 'At the latest ' : ''}${esc(L(c.date))} <span class="small">(${c.latest ? `${c.n} working ${c.n === 1 ? 'day' : 'days'} after ${esc((OF.condInfo(c.after) || { label: c.after }).label)} is satisfied or waived` : `${c.days} working days`})</span></td></tr>`).join('')}
+        ${chk.lastCondition ? `<tr><td>Unconditional${chk.conditions.some(c => c.latest) ? ' at the latest' : ''}</td><td>${esc(L(chk.confirmation))}</td></tr>` : ''}<tr><td>Settlement</td><td>${chk.settlement ? esc(L(chk.settlement)) : 'Not set'}</td></tr></table>
         <p class="small" style="margin:6px 0 0">Counted from ${esc(L(o.as_at))}, the day it came in, with ${esc((OF.PROVINCES[ctx.province] || { name: ctx.province }).name)} holidays.</p></div>
       ${gap || o.gap_override_reason ? (o.gap_override_reason
         ? `<div class="card note tight" id="ofGapDone"><p class="small" style="margin:0">You accepted these dates: "${esc(o.gap_override_reason)}" (${esc(fmtDT(o.gap_override_at))}).</p><div class="toolbar"><button class="btn link" type="button" id="ofGapClear">Clear this</button></div></div>`
@@ -5991,7 +6045,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       !chk.gapOk && !o.gap_override_reason ? ['Dates under a week apart', 'of-warnp'] : null, o.gap_override_reason ? ['Short gap accepted', ''] : null, o.kiwisaver ? ['KiwiSaver', ''] : null,
       ['withdrawn', 'lapsed'].includes(o.status) ? [o.status === 'withdrawn' ? 'Withdrawn' : 'Lapsed', 'of-off'] : null].filter(Boolean);
     return `<li><button class="of-row" type="button" data-offer="${o.id}"><span class="of-r1"><strong>${esc(money(+o.amount))}</strong> <span>${esc(o.buyer_ref || 'Buyer')}</span></span>
-      <span class="small of-r2">${esc(OF.conditionsLine(d))}${chk.lastCondition ? ' · conditions to ' + esc(L(chk.lastCondition)) : ''}${chk.settlement ? ' · settles ' + esc(L(chk.settlement)) : ''}</span>
+      <span class="small of-r2">${esc(OF.conditionsLine(d))}${chk.lastCondition ? ' · conditions to ' + (chk.conditions.some(c => c.latest) ? 'at the latest ' : '') + esc(L(chk.lastCondition)) : ''}${chk.settlement ? ' · settles ' + esc(L(chk.settlement)) : ''}</span>
       <span class="small">${esc(fmtDT(o.received_at))}${o.source === 'agent' ? ' · entered by you' : ''}</span>
       ${flags.length ? `<span class="of-flags">${flags.map(([t, c]) => `<span class="pill ${c}">${esc(t)}</span>`).join('')}</span>` : ''}</button></li>`;
   }
@@ -6300,7 +6354,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     header('Clause library', '', 0); actions(false);
     const terms = (await ofSafe(sb.from('offer_terms').select('*').order('position'))) || [], wording = await ofWording();
     const ruleText = r => { const w = (r || {}).when || {}; if (w.always) return 'Every offer'; if ('kiwisaver' in w) return w.kiwisaver ? 'When KiwiSaver funds the deposit' : 'When KiwiSaver doesn\'t fund the deposit';
-      if (w.condition) return 'When the buyer chooses ' + ((OF.condInfo(w.condition) || { label: w.condition }).label); if (w.chattels) return 'When the buyer adds or leaves out chattels'; return 'By its rule'; };
+      if (w.condition) return 'When the buyer chooses ' + ((OF.condInfo(w.condition) || { label: w.condition }).label); if (w.chattels) return 'When the buyer adds or leaves out chattels'; if (!Object.keys(w).length) return 'Only when you add it to a draft'; return 'By its rule'; };
     main().innerHTML = `<div class="view-pad" id="drLib"><div class="toolbar no-print"><button class="btn ghost" type="button" id="drLibBack">Back to the property</button></div><span class="agent-flag">Only you see this</span>
       <h1>Your clause library</h1><p class="small">Your standard further terms and the rules that put them on each draft. Clauses already printed in the blank are named by their number only. Where you haven't added wording, the draft shows a highlighted placeholder and never makes wording up.</p>
       ${terms.map(t => `<section class="card tight dr-term" data-term="${esc(t.key)}"><h3 style="margin:0 0 2px">${esc(t.title)}</h3><p class="small" style="margin:0 0 6px">${esc(ruleText(t.rule))}${t.clause ? ' · printed clause ' + esc(t.clause) : ''}</p>
@@ -6312,10 +6366,13 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         <label class="choice cb"><input type="checkbox" data-tactive="${esc(t.key)}" ${t.active !== false ? 'checked' : ''}><span class="mark"></span><span><span class="ct">In use</span></span></label></section>`).join('')}
       <section class="card tight" id="drNewTerm"><h3 style="margin:0 0 4px">Add a standard further term</h3>
         <label class="f" for="drNtTitle">Title</label><input type="text" id="drNtTitle" maxlength="200">
-        <label class="f" for="drNtWhen">When it goes on</label><select id="drNtWhen"><option value="always">Every offer</option><option value="ks1">When KiwiSaver funds the deposit</option><option value="ks0">When KiwiSaver doesn't fund the deposit</option>${OF.CONDITIONS.map(c => `<option value="c:${c.key}">When the buyer chooses ${esc(c.label)}</option>`).join('')}</select>
+        <label class="f" for="drNtWhen">When it goes on</label><select id="drNtWhen"><option value="always">Every offer</option><option value="pick">Only when I add it to a draft</option><option value="ks1">When KiwiSaver funds the deposit</option><option value="ks0">When KiwiSaver doesn't fund the deposit</option>${OF.CONDITIONS.map(c => `<option value="c:${c.key}">When the buyer chooses ${esc(c.label)}</option>`).join('')}</select>
         <label class="f" for="drNtWord">Wording</label><textarea id="drNtWord" rows="3" maxlength="4000"></textarea></section>
+      ${drAiPanelHTML(false)}
       <div class="err" id="drLibErr" role="alert"></div><div class="toolbar"><button class="btn primary" type="button" id="drLibSave">Save the library</button></div></div>`;
     $('#drLibBack').addEventListener('click', () => viewProperty(pid));
+    // a clause written with AI help, saved to the library once Tim has ticked it; it goes on a draft only when he adds it there
+    drAiWire(async (kind, c) => { const key = drNewKey(c.title, terms); await must(sb.rpc('agent_offer_term', { p_key: key, p_title: c.title, p_wording: c.text, p_rule: {}, p_position: 100, p_active: true })); toast('Saved to your clause library'); viewClauseLibrary(pid); });
     $('#drLibSave').addEventListener('click', async () => {
       const err = $('#drLibErr'); err.textContent = '';
       try {
@@ -6326,7 +6383,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
           if (act !== (t.active !== false) || JSON.stringify(rule) !== JSON.stringify(t.rule || {}) || (tw && w !== (t.wording || ''))) await must(sb.rpc('agent_offer_term', { p_key: t.key, p_title: null, p_wording: w || null, p_rule: rule, p_position: null, p_active: act }));
         }
         const ti = $('#drNtTitle').value.trim();
-        if (ti) { const v = $('#drNtWhen').value, when = v === 'always' ? { always: true } : v === 'ks1' ? { kiwisaver: true } : v === 'ks0' ? { kiwisaver: false } : { condition: v.slice(2) };
+        if (ti) { const v = $('#drNtWhen').value, when = v === 'pick' ? {} : v === 'always' ? { always: true } : v === 'ks1' ? { kiwisaver: true } : v === 'ks0' ? { kiwisaver: false } : { condition: v.slice(2) };
           const key = 'std_' + ti.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 30) || 'std_term';
           await must(sb.rpc('agent_offer_term', { p_key: key, p_title: ti, p_wording: $('#drNtWord').value.trim() || null, p_rule: { when }, p_position: 100, p_active: true })); }
         toast('Library saved'); viewClauseLibrary(pid);
@@ -6390,16 +6447,30 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     // the vendor's lawyer, if the file holds one: only from a signed agreement of the current owners
     const links = ags.length ? ((await ofSafe(sb.from('lawyer_links').select('agreement_id,lawyer_name,firm,email,sent_at').in('agreement_id', ags.map(x => x.id)))) || []) : [];
     const vendorLawyer = DR.pickVendorLawyer(prop, ags, links, parties);
-    const plan = DR.planDraft({ details: o.details || {}, map: { places: map.places, chattels: (DR_CACHE[b.id] && DR_CACHE[b.id].pages ? DR.buildMap(DR_CACHE[b.id].pages).chattels : DR.buildMap(await drBlankPages(b)).chattels) }, terms: terms || [], clauses, edits: edits || {}, today: OF.nzToday(), province: o.province || OF.DEFAULT_PROVINCE, vendorLawyer, parties });
-    const r = await DR.renderDraft(PDFLib, bytes, plan, { title: 'Draft agreement: ' + (o.buyer_ref || 'offer') });
+    // read from the blank itself each time: the chattels, and the further terms numbering and continuation bands
+    const fresh = DR.buildMap(DR_CACHE[b.id] && DR_CACHE[b.id].pages ? DR_CACHE[b.id].pages : await drBlankPages(b));
+    const plan = DR.planDraft({ details: o.details || {}, map: { places: map.places, chattels: fresh.chattels }, numbering: fresh.numbering, terms: terms || [], clauses, edits: edits || {}, today: OF.nzToday(), province: o.province || OF.DEFAULT_PROVINCE, vendorLawyer, parties });
+    // the header and footer bands of a continuation page are pictures of the blank's page: rendered with pdf.js at scale 4, cropped
+    const bandCache = {}, bandImage = async (pageNo, b) => {
+      const pdfjs = await drPdfjs(), S = 4;
+      bandCache[pageNo] ||= (async () => { const doc = await pdfjs.getDocument(Object.assign({ data: bytes.slice(0), isEvalSupported: false }, PDF_OPTS)).promise;
+        try { const pg = await doc.getPage(pageNo), vp = pg.getViewport({ scale: S }), cv = document.createElement('canvas'); cv.width = Math.round(vp.width); cv.height = Math.round(vp.height);
+          const cx = cv.getContext('2d'); cx.fillStyle = '#fff'; cx.fillRect(0, 0, cv.width, cv.height); await pg.render({ canvasContext: cx, canvas: cv, viewport: vp }).promise; return { cv, H: vp.height / S }; } finally { try { await doc.destroy(); } catch (_) { } } })();
+      const { cv, H } = await bandCache[pageNo], out = document.createElement('canvas'); out.width = Math.max(1, Math.round(b.width * S)); out.height = Math.max(1, Math.round(b.height * S));
+      out.getContext('2d').drawImage(cv, 0, Math.round((H - b.top) * S), out.width, out.height, 0, 0, out.width, out.height);
+      const blob = await new Promise(res => out.toBlob(res, 'image/png')); if (!blob) throw new Error('No band picture');
+      return new Uint8Array(await blob.arrayBuffer()); };
+    const r = await DR.renderDraft(PDFLib, bytes, plan, { title: 'Draft agreement: ' + (o.buyer_ref || 'offer'), bandImage });
     const sha = await REPO.sha256(r.bytes), prev = (await ofSafe(sb.from('offer_drafts').select('number').eq('offer_id', oid).order('number', { ascending: false }))) || [], n = ((prev[0] || {}).number || 0) + 1;
     const pth = `properties/${o.property_id}/docs/offer-draft-${oid}-${n}-${sha.slice(0, 12)}.pdf`;
     const up = await sb.storage.from('property-files').upload(pth, new Blob([r.bytes], { type: 'application/pdf' }), { contentType: 'application/pdf', upsert: false });
     if (up.error && !/exists/i.test(up.error.message || '')) throw new Error('The draft didn\'t save. Check you have signal, then try again.');
     await drConfirm(pth, sha);
     const placed = plan.items.map(it => { const bx = r.boxes.filter(x => x.id === it.id || x.id.startsWith(it.id + '_cont'));
-      return { id: it.id, label: it.label, kind: it.kind, text: it.text || null, value: it.value || null, placeholder: !!it.placeholder, edited: !!it.edited, terms: it.terms, boxes: bx.map(x => ({ page: x.page, x: Math.round(x.x * 10) / 10, y: Math.round(x.y * 10) / 10, w: Math.round(x.w * 10) / 10, h: Math.round(x.h * 10) / 10 })) }; });
-    const res = await must(sb.rpc('agent_draft_add', { p_offer: oid, p_map: map.id, p_path: pth, p_sha256: sha, p_size: r.bytes.length, p_placed: placed, p_needs: plan.needs, p_edits: Object.assign({}, edits || {}, { date_format: plan.date_format }), p_note: note || null }));
+      return { id: it.id, label: it.label, kind: it.kind, text: it.text || null, value: it.value || null, placeholder: !!it.placeholder, edited: !!it.edited, terms: it.terms, number_style: it.number_style || undefined, mark: it.mark || undefined, who: it.who || undefined, moved: it.moved || undefined, boxes: bx.map(x => ({ page: x.page, x: Math.round(x.x * 10) / 10, y: Math.round(x.y * 10) / 10, w: Math.round(x.w * 10) / 10, h: Math.round(x.h * 10) / 10 })) }; })
+      // each page added for the further terms, with the page it was made from and the bands used (the draft's fingerprint covers it)
+      .concat((r.added_pages || []).map((ap, i) => ({ id: 'added_page_' + (i + 1), label: `Page added after page ${ap.source_page}${ap.number ? `, numbered ${ap.number.written}` : ' (plain)'}`, kind: 'page', page: ap.page, source_page: ap.source_page, bands: ap.bands, number: ap.number, plain: !!ap.plain, boxes: [] })));
+    const res = await must(sb.rpc('agent_draft_add', { p_offer: oid, p_map: map.id, p_path: pth, p_sha256: sha, p_size: r.bytes.length, p_placed: placed, p_needs: plan.needs, p_edits: Object.assign({}, edits || {}, { date_format: plan.date_format, retired_numbers: plan.retired_numbers, term_last: plan.term_last }), p_note: note || null }));
     DR_CACHE['draft-' + res.id] = { bytes: r.bytes };
     return res.id;
   }
@@ -6412,13 +6483,79 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   }
   // the offer's details compared by value (key order doesn't matter, as the database compares them)
   const drCanon = x => Array.isArray(x) ? x.map(drCanon) : x && typeof x === 'object' ? Object.keys(x).sort().reduce((a, k) => { a[k] = drCanon(x[k]); return a; }, {}) : x;
+  // ── the review screen's further terms, AI clause writer and marks (Tim, 24 November 2026) ──
+  const DR_MONTHS = 'January|February|March|April|May|June|July|August|September|October|November|December';
+  const DR_LIT = new RegExp(`(?:(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday) )?\\b\\d{1,2} (?:${DR_MONTHS}) \\d{4}\\b|\\b\\d{1,3} working days?\\b`, 'g');
+  // a term's wording as editable text with its timing, dates and working days as small chips (a tap changes them)
+  function drChip(kind, label, val) { return `<span class="dr-chip" contenteditable="false" role="button" tabindex="0" data-chip="${kind}" data-val="${esc(val || '')}">${esc(label)}</span>`; }
+  function drRichHTML(t, tpl) {
+    return String(tpl).split(/(\{timing_date\}|\{timing\}|\{date\})/).map(part => {
+      if (part === '{timing_date}') return drChip('timing', t.timing_date_text || t.timing_text || 'set the timing', '{timing_date}');
+      if (part === '{timing}') return drChip('timing', t.timing_text || 'set the timing', '{timing}');
+      if (part === '{date}') return drChip('date', t.date_text || 'set the date', '{date}');
+      let out = '', last = 0; part.replace(DR_LIT, (m, at) => { out += esc(part.slice(last, at)).replace(/\n/g, '<br>') + drChip('lit', m, m); last = at + m.length; return m; });
+      return out + esc(part.slice(last)).replace(/\n/g, '<br>'); }).join('');
+  }
+  // the editor's text back to a term's wording: chips become {timing}, {date} or their (possibly changed) words
+  function drRichText(el) {
+    const walk = n => Array.from(n.childNodes).map(c => c.nodeType === 3 ? c.nodeValue : c.nodeType !== 1 ? '' : c.classList.contains('dr-chip') ? (c.dataset.chip === 'lit' ? c.dataset.val : /^\{(timing|timing_date|date)\}$/.test(c.dataset.val) ? c.dataset.val : c.dataset.chip === 'date' ? '{date}' : '{timing}')
+      : c.tagName === 'BR' ? '\n' : (['DIV', 'P'].includes(c.tagName) ? '\n' : '') + walk(c)).join('');
+    return walk(el).replace(/\u00a0/g, ' ').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+  }
+  // a page of the draft and the same page of the blank (pages added for the further terms are not on the blank)
+  const drPageMaps = placed => { const added = (placed || []).filter(x => x.kind === 'page').map(x => x.page).sort((a, b) => a - b);
+    return { added, blankOf: dp => added.includes(dp) ? null : dp - added.filter(a => a < dp).length, draftOf: bp => { let dp = bp; for (const a of added) if (a <= dp) dp++; return dp; } }; };
+  const DR_MARK = { 'initials:purchasers': 'Initials: the purchasers', 'initials:vendors': 'Initials: the vendors', 'initials:both': 'Initials: everyone', 'signature:purchasers': 'Signature: the purchasers', 'signature:vendors': 'Signature: the vendors', strike: 'Strike-out', text: 'Text', highlight: 'Highlight' };
+  const DR_MOVABLE = ['text', 'area', 'strike', 'lines', 'caret', 'mark'];
+  // "Ask AI to write a clause": a panel for the review screen and the clause library. onUse(kind, { title, text }) is given only after
+  // Tim has read the draft and ticked it; kind is 'offer' (this offer only) or 'library' (saved to his library first)
+  function drAiPanelHTML(withOffer) {
+    return `<details class="card tight" id="drAi"><summary><strong>Ask AI to write a clause</strong></summary>
+      <p class="small" style="margin:4px 0">Describe the clause in plain words. The AI drafts it in legal wording for you to read, change and tick. Nothing is used until you do. For a condition, the time is written as a timing you set on the draft.</p>
+      <label class="f" for="drAiAsk">What the clause should say</label><textarea id="drAiAsk" rows="3" maxlength="3000" placeholder="For example: the vendor gets the spa pool serviced before settlement, for the purchaser's benefit only"></textarea>
+      <div class="toolbar"><button class="btn ghost" type="button" id="drAiGo">Write it</button></div><p class="small" id="drAiMsg" role="status" aria-live="polite"></p>
+      <div id="drAiOut" hidden><label class="f" for="drAiTitle">Title</label><input type="text" id="drAiTitle" maxlength="120">
+        <label class="f" for="drAiWord">Wording <span class="opt">(a draft from the AI: read and change it as you need)</span></label><textarea id="drAiWord" rows="5" maxlength="2400"></textarea>
+        <p class="small" id="drAiSum"></p>
+        <label class="choice cb"><input type="checkbox" id="drAiTick"><span class="mark"></span><span><span class="ct">I have read this wording and it can be used</span></span></label>
+        <div class="toolbar">${withOffer ? '<button class="btn primary" type="button" id="drAiUse" disabled>Use in this offer only</button>' : ''}<button class="btn ghost" type="button" id="drAiSave" disabled>Save to my clause library</button></div>
+        <p class="small err" id="drAiErr" role="alert"></p></div></details>`;
+  }
+  function drAiWire(onUse) {
+    const go = $('#drAiGo'); if (!go) return; const msg = $('#drAiMsg');
+    go.addEventListener('click', async () => { const t = $('#drAiAsk').value.trim(); if (t.length < 10) return msg.textContent = 'Describe the clause in a few more words first.';
+      go.disabled = true; msg.textContent = 'Writing a draft...'; const r = await offerCall('offer-draft', { action: 'write_clause', text: t }); go.disabled = false;
+      if (r && r.ok && r.wording) { $('#drAiOut').hidden = false; $('#drAiTitle').value = r.title || ''; $('#drAiWord').value = r.wording; $('#drAiSum').textContent = (r.summary || '') + (/\{timing\}/.test(r.wording) ? ' "{timing}" is the time for it, which you set on the draft.' : '');
+        $('#drAiTick').checked = false; $$('#drAiUse,#drAiSave').forEach(b => { b.disabled = true; }); return msg.textContent = 'A draft from the AI. Read it, change it if you need to, then tick it.'; }
+      msg.textContent = (r && (r.message || r.error)) || 'The clause writer isn\'t available right now. Type your own wording instead.'; });
+    $('#drAiTick').addEventListener('change', () => { $$('#drAiUse,#drAiSave').forEach(b => { b.disabled = !$('#drAiTick').checked; }); });
+    const use = kind => async () => { const title = $('#drAiTitle').value.trim(), text = $('#drAiWord').value.trim(); if (!$('#drAiTick').checked) return;
+      if (!title || text.length < 10) return $('#drAiErr').textContent = 'Give it a title and its wording.'; $('#drAiErr').textContent = '';
+      try { await onUse(kind, { title, text }); } catch (e) { $('#drAiErr').textContent = e.message || 'That didn\'t save.'; } };
+    const u = $('#drAiUse'); if (u) u.addEventListener('click', use('offer')); $('#drAiSave').addEventListener('click', use('library'));
+  }
+  // a new library key from a title, not already used
+  const drNewKey = (title, terms) => { const b = 'std_' + (title.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 30) || 'term'); let k = b, i = 2; while ((terms || []).some(t => t.key === k)) k = b + '_' + i++; return k; };
+
+  // the offer's dates on the review screen, checked again whenever the offer changes (the one-week gap and the KiwiSaver warnings)
+  function drDatesHTML(o, ks) {
+    const dd = o.details || {}, chk = OF.checkDates(dd, { asAt: o.as_at, province: o.province || OF.DEFAULT_PROVINCE, ksDays: ks }), L = OF.longDate, tl = k => (OF.condInfo(k) || { label: k }).label;
+    const gap = chk.problems.find(x => x.kind === 'gap'), latest = chk.conditions.some(c => c.latest);
+    return `<section class="card" id="drDates"><h2>The offer's dates</h2><table class="sum of-dates">${chk.conditions.filter(c => c.date).map(c => `<tr><td>${esc(c.label)}</td><td>${c.latest ? 'At the latest ' : ''}${esc(L(c.date))} <span class="small">(${c.latest ? `${c.n} working ${c.n === 1 ? 'day' : 'days'} after ${esc(tl(c.after))} is satisfied or waived` : `${c.days} working days`})</span></td></tr>`).join('')}
+      ${chk.lastCondition ? `<tr><td>Unconditional${latest ? ' at the latest' : ''}</td><td>${esc(L(chk.confirmation))}</td></tr>` : ''}<tr><td>Settlement</td><td>${chk.settlement ? esc(L(chk.settlement)) : 'Not set'}</td></tr></table>
+      <p class="small" style="margin:6px 0 0">Counted from ${esc(L(o.as_at))}, the day the offer came in. A change to a condition's timing here is a correction to the offer, so these follow it.</p>
+      ${gap ? `<div class="card warnc tight" data-drwarn="gap"><p class="small" style="margin:0">${esc(gap.text)}${o.gap_override_reason ? ` You accepted this: "${esc(o.gap_override_reason)}".` : ' Accept it on the offer with your reason, or change the dates.'}</p></div>` : ''}
+      ${chk.problems.filter(x => x.kind === 'cond_chain').map(x => `<div class="card warnc tight" data-drwarn="chain"><p class="small" style="margin:0">${esc(x.text)}</p></div>`).join('')}
+      ${chk.warnings.map(w => `<div class="card warnc tight" data-drwarn="${esc(w.kind)}"><p class="small" style="margin:0">${esc(w.text)}</p></div>`).join('')}</section>`;
+  }
   // Tim's review screen
   async function viewDraftReview(did) {
     header('Draft agreement', '', 0); actions(false);
     main().innerHTML = '<div class="loading">Loading...</div>';
     const d = await must(sb.from('offer_drafts').select('*').eq('id', did).single());
-    const [o, all, apps, p] = await Promise.all([must(sb.from('property_offers').select('*').eq('id', d.offer_id).single()), ofSafe(sb.from('offer_drafts').select('id,number').eq('offer_id', d.offer_id).order('number', { ascending: false })),
-      ofSafe(sb.from('offer_draft_approvals').select('*').eq('draft_id', did)), must(sb.from('properties').select('id,address').eq('id', d.property_id).single())]);
+    const [o, all, apps, p, libTerms] = await Promise.all([must(sb.from('property_offers').select('*').eq('id', d.offer_id).single()), ofSafe(sb.from('offer_drafts').select('id,number').eq('offer_id', d.offer_id).order('number', { ascending: false })),
+      ofSafe(sb.from('offer_draft_approvals').select('*').eq('draft_id', did)), must(sb.from('properties').select('id,address').eq('id', d.property_id).single()), ofSafe(sb.from('offer_terms').select('*').order('position'))]);
+    const ksR = await ofKs();
     const ap = (apps || [])[0], newest = ((all || [])[0] || {}).id === d.id, changed = JSON.stringify(drCanon(o.details)) !== JSON.stringify(drCanon(d.details));
     // newer places on this blank, or a newer usable blank: the draft must be made again before it can be approved
     const blanks = await drLoadBlanks(d.property_id), myBlank = blanks.find(x => x.id === d.blank_id) || {}, myMap = (myBlank.maps || []).find(m => m.id === d.map_id) || {};
@@ -6437,21 +6574,45 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       ${!newest ? '<div class="card warnc tight" id="drNotNewest"><p class="small" style="margin:0">There is a newer draft of this offer. This one is kept as it was.</p></div>' : ''}
       ${changed && newest ? `<div class="card warnc tight" id="drChanged"><p class="small" style="margin:0">The offer has been corrected since this draft. Re-draft it so the agreement matches${ap ? '' : '; this draft can\'t be approved'}.</p></div>` : ''}
       ${(newerMap || newerBlank) && !ap ? `<div class="card warnc tight" id="drStaleBlank"><p class="small" style="margin:0">${newerBlank ? 'A newer agreement blank has been loaded' : 'The places on the blank have been approved again'} since this draft. ${newerBlank ? 'Approve its places, then re-draft' : 'Re-draft'}; this draft can't be approved.</p></div>` : ''}
+      ${drDatesHTML(o, ksR)}
       <section class="card" id="drNeeds"><h2>Needs you ${block.length ? `<span class="pill of-warnp">${block.length}</span>` : ''}</h2>
         ${block.length ? `<ul class="dr-list">${block.map(n => `<li class="dr-need" data-need="${esc(n.id)}">${esc(n.text)}</li>`).join('')}</ul>` : ''}
         ${acks.length ? `<ul class="dr-list" id="drAcks">${acks.map(n => `<li><label class="choice cb"><input type="checkbox" data-ack="${esc(n.id)}" ${ap && (ap.checked || []).includes(n.id) ? 'checked' : ''} ${ap ? 'disabled' : ''}><span class="mark"></span><span><span class="ct dr-need">${esc(n.text)}</span><span class="cd">Tick once you have checked it on the page</span></span></label></li>`).join('')}</ul>` : ''}
         ${!block.length && !acks.length ? '<p class="small" id="drNoNeeds">Nothing is waiting on you before approval.</p>' : ''}
         ${check.length ? `<details class="of-more" open><summary class="small">To check (${check.length})</summary><ul class="dr-list">${check.map(n => `<li class="small" data-check="${esc(n.id)}">${esc(n.text)}</li>`).join('')}</ul></details>` : ''}</section>
-      <section class="card" id="drPagesRv"><h2>The drafted pages</h2><p class="small">Every place filled or marked is highlighted and numbered. Placeholders are in yellow.</p>
-        <div class="dr-nav"><label class="sr" for="drRvPick">Page</label><select id="drRvPick">${pagesWith.map(n => `<option value="${n}">Page ${n} (${boxes.filter(x => x.page === n).length})</option>`).join('')}</select></div>
+      <section class="card" id="drPagesRv"><h2>The drafted pages</h2><p class="small">Every place filled or marked is highlighted and numbered. Placeholders are in yellow.${newest && !ap ? ' You can mark an area on any page, or tap a filled place to move or resize it. Marks are only ever added; the printed form is never changed.' : ''}</p>
+        <div class="dr-nav"><label class="sr" for="drRvPick">Page</label><select id="drRvPick">${pagesWith.map(n => `<option value="${n}">Page ${n} (${boxes.filter(x => x.page === n).length})</option>`).join('')}</select>
+          <span class="dr-zoom"><button class="btn link" type="button" id="drZoomOut" aria-label="Zoom out">&minus;</button><span id="drZoomV">100%</span><button class="btn link" type="button" id="drZoomIn" aria-label="Zoom in">+</button></span></div>
+        ${newest && !ap ? `<div class="dr-mktools" id="drMkTools"><label class="f" for="drMkType" style="margin-top:0">Mark an area</label><div class="toolbar" style="margin-top:0"><select id="drMkType">${Object.entries(DR_MARK).map(([v, l]) => `<option value="${v}">${esc(l)}</option>`).join('')}</select>
+            <button class="btn ghost" type="button" id="drMkDraw" aria-pressed="false">Draw a box</button><button class="btn ghost" type="button" id="drMkDel" disabled>Delete</button><button class="btn ghost" type="button" id="drMkReset" hidden>Put it back</button></div>
+          <div id="drMkTextW" hidden><label class="f" for="drMkText">Text in the box</label><input type="text" id="drMkText" maxlength="500"></div>
+          <p class="small" id="drMkSay" aria-live="polite">Choose a kind, tap Draw a box, then drag on the page. Drag a box to move it, or its handles to resize it.</p></div>` : ''}
         <div id="drRvCanvas" class="dr-holder"></div></section>
+      ${ft ? `<section class="card" id="drTerms"><h2>Further terms of sale</h2>
+        <p class="small">Change any wording here. The timing, dates and working days are the small highlighted pieces: tap one to change it. ${newest && !ap ? 'Drag a term to move it, or use its up and down buttons.' : ''} Changes go on the next draft.</p>
+        <ol class="dr-terms" id="drTermList">${(ft.terms || []).map(t => { const tpl = t.custom && t.placeholder ? (t.wording || '') : t.template != null ? t.template : t.text;
+          return `<li class="dr-term-i" data-term="${esc(t.id)}" ><div class="dr-thead">${newest && !ap ? '<span class="dr-grip" aria-hidden="true" title="Drag to move">&#8942;&#8942;</span>' : ''}<span class="dr-tno"><strong>${DR.termNo(t.number, ft.number_style || 'dot')} ${esc(t.title)}</strong>${t.placeholder ? ' <span class="pill of-warnp">Needs you</span>' : ''}${t.ai ? ' <span class="pill">AI draft, ticked by you</span>' : ''}</span>
+            ${newest && !ap ? `<span class="dr-tbtns"><button class="btn link" type="button" data-tup="${esc(t.id)}" aria-label="Move ${esc(t.title)} up">Up</button><button class="btn link" type="button" data-tdown="${esc(t.id)}" aria-label="Move ${esc(t.title)} down">Down</button>${t.removable ? `<button class="btn link" type="button" data-trm="${esc(t.id)}">Remove</button>` : ''}</span>` : ''}</div>
+            ${t.custom ? `<p class="small" style="margin:0">The buyer asked for: ${esc(t.request || '(no description)')}${t.ai ? ' (worded with AI help)' : ''}</p>` : ''}
+            <div class="dr-rich" contenteditable="${newest && !ap ? 'true' : 'false'}" role="textbox" aria-multiline="true" aria-label="Wording of further term ${DR.termNo(t.number, ft.number_style || 'dot')}, ${esc(t.title)}" data-rich="${esc(t.id)}" data-orig="${esc(tpl)}">${drRichHTML(t, tpl)}</div></li>`; }).join('')}</ol>
+        <div class="card tight dr-chiped" id="drChipEd" hidden><p class="small" style="margin:0 0 4px" id="drChipFor"></p>
+          <div class="choices" id="drCmModes">${[['days', 'Working days from the date of the agreement'], ['date', 'By a date'], ['after', 'Working days after another condition is satisfied or waived']].map(([v, l]) => `<label class="choice"><input type="radio" name="dr_cm" value="${v}"><span class="mark"></span><span><span class="ct">${l}</span></span></label>`).join('')}</div>
+          <div class="of-when"><div id="drCmDaysW"><label class="f" for="drCmDays">Working days</label><input type="number" id="drCmDays" min="1" max="250" inputmode="numeric"></div><div id="drCmDateW"><label class="f" for="drCmDate">Date</label><input type="date" id="drCmDate"></div>
+            <div id="drCmAfterW"><label class="f" for="drCmAfter">After</label><select id="drCmAfter">${((o.details || {}).conditions || []).map(c => `<option value="${esc(c.key)}">${esc((OF.condInfo(c.key) || { label: c.key }).label)}</option>`).join('')}</select></div></div>
+          <div class="toolbar"><button class="btn primary" type="button" id="drCmDone">Done</button><button class="btn ghost" type="button" id="drCmCancel">Cancel</button></div><p class="small err" id="drCmErr" role="alert"></p></div>
+        ${newest && !ap ? `<div class="dr-addt"><label class="f" for="drAddTerm">Add a clause from your library</label><div class="toolbar" style="margin-top:0"><select id="drAddTerm"><option value="">Choose a clause</option>${(libTerms || []).filter(x => x.kind === 'further_term' && x.active !== false && x.wording_from !== 'custom' && x.key !== 'chattels' && !(ft.terms || []).some(t => t.id === 'ft_' + x.key || t.library === x.key)).map(x => `<option value="${esc(x.key)}">${esc(x.title)}</option>`).join('')}</select><button class="btn ghost" type="button" id="drAddTermGo">Add and re-draft</button></div></div>
+          ${drAiPanelHTML(true)}` : ''}</section>` : newest && !ap ? `<section class="card" id="drTerms"><h2>Further terms of sale</h2><p class="small">None yet.</p><div class="dr-addt"><label class="f" for="drAddTerm">Add a clause from your library</label><div class="toolbar" style="margin-top:0"><select id="drAddTerm"><option value="">Choose a clause</option>${(libTerms || []).filter(x => x.kind === 'further_term' && x.active !== false && x.wording_from !== 'custom' && x.key !== 'chattels').map(x => `<option value="${esc(x.key)}">${esc(x.title)}</option>`).join('')}</select><button class="btn ghost" type="button" id="drAddTermGo">Add and re-draft</button></div></div>${drAiPanelHTML(true)}</section>` : ''}
       <section class="card" id="drPlaced"><h2>Everything placed</h2>
         <ol class="dr-items">${d.placed.map((x, i) => `<li data-item="${esc(x.id)}" value="${i + 1}"><span class="small"><strong>${esc(x.label)}</strong>${x.edited ? ' <span class="pill">Edited by you</span>' : ''}</span>
-          ${x.kind === 'strike' || x.kind === 'lines' ? '' : x.id === 'further_terms' ? `<div class="small">${(x.terms || []).map(t => `<label class="f" for="drFt_${esc(t.id)}">${t.number}. ${esc(t.title)}${t.placeholder ? ' <span class="pill of-warnp">Needs you</span>' : ''}</label>${t.custom ? `<p class="small" style="margin:0">The buyer asked for: ${esc(t.request || '(no description)')}${t.ai ? ' (worded with AI help)' : ''}</p>` : ''}<textarea id="drFt_${esc(t.id)}" rows="3" data-edit="${esc(t.id)}" data-orig="${esc(t.text)}">${esc(t.custom && t.placeholder ? (t.wording || '') : t.text)}</textarea>`).join('')}</div>`
+          ${x.kind === 'strike' || x.kind === 'lines' || x.kind === 'mark' || x.kind === 'page' ? '' : x.id === 'further_terms' ? `<p class="small" style="margin:0">${(x.terms || []).length} term${(x.terms || []).length === 1 ? '' : 's'}: change them under Further terms of sale above.</p>`
             : `<label class="sr" for="drEd_${esc(x.id)}">${esc(x.label)}</label><input type="text" id="drEd_${esc(x.id)}" data-edit="${esc(x.id)}" data-orig="${esc(x.text || '')}" value="${esc(x.text || '')}">`}</li>`).join('')}</ol>
         ${customT ? `<label class="choice cb" id="drCustomOk"><input type="checkbox" id="drCustomTick" ${E.custom_ok ? 'checked' : ''}><span class="mark"></span><span><span class="ct">Use the wording above for the buyer's own condition</span><span class="cd">It goes on the agreement only once you tick this and re-draft.</span></span></label>` : ''}
-        <label class="f" for="drExtra">Add a further term <span class="opt">(your own wording, one per line)</span></label><textarea id="drExtra" rows="2">${esc((E.extra_terms || []).join('\n'))}</textarea>
+        <label class="f" for="drExtra">Add a further term <span class="opt">(your own wording, one per line)</span></label><textarea id="drExtra" rows="2">${esc((E.extra_terms || []).filter(x => typeof x === 'string').join('\n'))}</textarea>
         <label class="f" for="drFmt">Condition dates</label><select id="drFmt"><option value="date" ${E.date_format !== 'date_days' ? 'selected' : ''}>The date, for example 8 December 2026</option><option value="date_days" ${E.date_format === 'date_days' ? 'selected' : ''}>The date and the working days, for example 8 December 2026 (10 working days)</option></select>
+        ${newest && !ap && ((o.details || {}).conditions || []).length > 1 ? `<details class="of-more" id="drLineUp"><summary class="small">Confirm all conditions on the same day</summary>
+          <p class="small" style="margin:4px 0">Sets every condition on the offer to the same timing, records it as a correction (the buyer's original is kept), and re-drafts. Each can still be changed with Correct details.</p>
+          <div class="of-when"><div><label class="f" for="drLuDays">Working days, for all</label><input type="number" id="drLuDays" min="1" max="250" inputmode="numeric"></div><span class="of-or">or</span><div><label class="f" for="drLuDate">A date, for all</label><input type="date" id="drLuDate"></div></div>
+          <div class="toolbar"><button class="btn ghost" type="button" id="drLuGo">Line up and re-draft</button></div><p class="small err" id="drLuErr" role="alert"></p></details>` : ''}
         <label class="f" for="drRvDate">Date of the agreement</label><input type="text" id="drRvDate" disabled placeholder="Added once fully agreed"><p class="small" style="margin:2px 0 0">Added once fully agreed, in full with the month name.</p>
         <label class="f" for="drNote">What changed <span class="opt">(kept with the new draft)</span></label><input type="text" id="drNote" maxlength="500">
         <div class="toolbar"><button class="btn ghost" type="button" id="drRedraft">Re-draft with my changes</button></div></section>
@@ -6459,21 +6620,174 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <div class="toolbar"><button class="btn primary" type="button" id="drApproveDraft" ${ap || !newest || block.length || stale || acks.length ? 'disabled' : ''}>${ap ? 'Approved' : 'Approve draft'}</button><button class="btn ghost" type="button" id="drDownload">Download the PDF</button>${newest ? '<button class="btn ghost" type="button" id="drRedraftChange">Re-draft after a change</button>' : ''}</div>
       ${!ap && newest && (block.length || acks.length) && !stale ? `<p class="small">Approve is available once nothing needs you.${block.length ? ' Fill in each placeholder above and re-draft.' : ''}${acks.length ? ' Tick each check above.' : ''}</p>` : ''}
     </div>`;
+    $$('[data-rich]').forEach(x => { x.dataset.base = drRichText(x); });   // the wording as shown: a change is anything different from this
     const go = async (edits, note) => { const btns = $$('#drRedraft,#drRedraftChange'); btns.forEach(x => { x.disabled = true; }); $('#drRvErr').textContent = 'Drafting...';
-      try { const id = await drMakeDraft(d.offer_id, edits, note); toast('New draft made; the earlier one is kept'); viewDraftReview(id); } catch (e) { $('#drRvErr').textContent = e.message || 'That didn\'t draft.'; btns.forEach(x => { x.disabled = false; }); } };
-    const collect = () => { const ed = { items: Object.assign({}, E.items || {}) };
+      try { const id = await drMakeDraft(d.offer_id, edits, note); toast('New draft made; the earlier one is kept'); viewDraftReview(id); return true; } catch (e) { $('#drRvErr').textContent = e.message || 'That didn\'t draft.'; btns.forEach(x => { x.disabled = false; }); return false; } };
+    // a correction from this screen carries the offer's details as the screen loaded them (p_expected): the database refuses it if the
+    // offer changed in between. If the correction saved but the new draft didn't, Tim is told so and can re-draft from here.
+    const correctedButNotDrafted = (box, edits, note) => { const el = $(box); if (!el) return;
+      el.innerHTML = `The offer was corrected, but the new draft wasn't made. <button class="btn link" type="button" id="drRedraftNow">Re-draft now</button>`;
+      $('#drRedraftNow').addEventListener('click', async () => { el.textContent = 'Drafting...'; if (!(await go(edits, note))) correctedButNotDrafted(box, edits, note); }); };
+    // what "Re-draft after a change" carries over: everything but Tim's edits to single values (phase 2, choice 10)
+    const carry = () => { const c = { date_format: E.date_format, extra_terms: E.extra_terms, custom_ok: E.custom_ok, custom_wording: E.custom_wording, retired_numbers: E.retired_numbers };
+      ['added_terms', 'term_order', 'term_timing', 'marks', 'moves'].forEach(k => { if (E[k] != null) c[k] = E[k]; }); Object.keys(c).forEach(k => { if (c[k] === undefined) delete c[k]; }); return c; };
+    const TT = Object.assign({}, E.term_timing || {}), MK = { marks: JSON.parse(JSON.stringify(E.marks || [])), moves: JSON.parse(JSON.stringify(E.moves || {})) };
+    const collect = () => { const ed = { items: Object.assign({}, E.items || {}), retired_numbers: (E.retired_numbers || []).slice() };
       $$('[data-edit]').forEach(x => { const v = x.value.trim(); if (v !== x.dataset.orig) ed.items[x.dataset.edit] = v; });
-      if (customT) { ed.custom_ok = $('#drCustomTick').checked; const ta = $(`[data-edit="${customT.id}"]`); if (ta) { ed.custom_wording = ta.value.trim(); delete ed.items[customT.id]; } }
-      ed.extra_terms = $('#drExtra').value.split('\n').map(s => s.trim()).filter(Boolean); ed.date_format = $('#drFmt').value; return ed; };
+      $$('[data-rich]').forEach(x => { const id = x.dataset.rich; if (customT && id === customT.id) return; const v = drRichText(x); if (v !== x.dataset.base) ed.items[id] = v; });
+      if (customT) { ed.custom_ok = $('#drCustomTick').checked; const ta = $(`[data-rich="${customT.id}"]`); if (ta) { ed.custom_wording = drRichText(ta); delete ed.items[customT.id]; } }
+      ed.extra_terms = (E.extra_terms || []).filter(x => x && typeof x === 'object').concat($('#drExtra').value.split('\n').map(s => s.trim()).filter(Boolean)); ed.date_format = $('#drFmt').value;
+      if (E.added_terms) ed.added_terms = E.added_terms.slice(); if (Object.keys(TT).length) ed.term_timing = Object.assign({}, TT);
+      const order = $$('#drTermList [data-term]').map(li => li.dataset.term); if (order.length) ed.term_order = order;
+      if (MK.marks.length) ed.marks = MK.marks; if (Object.keys(MK.moves).length) ed.moves = MK.moves; return ed; };
     $('#drRvBack').addEventListener('click', () => viewOfferAgent(d.offer_id));
     $('#drRedraft').addEventListener('click', () => go(collect(), $('#drNote').value.trim() || 'Re-drafted with your changes'));
-    const rc = $('#drRedraftChange'); if (rc) rc.addEventListener('click', () => go({ date_format: E.date_format, extra_terms: E.extra_terms, custom_ok: E.custom_ok, custom_wording: E.custom_wording }, $('#drNote').value.trim() || 'Re-drafted after a change'));
+    const rc = $('#drRedraftChange'); if (rc) rc.addEventListener('click', () => go(carry(), $('#drNote').value.trim() || 'Re-drafted after a change'));
+    // line the conditions up from here: a correction to the offer (so the checks and the record follow), then a new draft
+    const lg = $('#drLuGo'); if (lg) lg.addEventListener('click', async () => {
+      const days = $('#drLuDays').value.trim(), date = $('#drLuDate').value, t = date ? { date } : { days };
+      if (!date && !(Math.floor(+days) >= 1)) return $('#drLuErr').textContent = 'Enter the working days or a date.';
+      const det = Object.assign({}, o.details, { conditions: OF.lineUp((o.details || {}).conditions, t), line_up: true }), say = date ? 'by ' + OF.longDate(date) : `within ${Math.floor(+days)} working days`;
+      lg.disabled = true; $('#drLuErr').textContent = '';
+      try { await must(sb.rpc('agent_offer_correct', { p_offer: d.offer_id, p_expected: o.details, p_details: ofPayload(ofShape(det)), p_note: 'Lined up the conditions: all ' + say }));
+        if (!(await go(carry(), 'Conditions lined up: all ' + say))) correctedButNotDrafted('#drLuErr', carry(), 'Conditions lined up: all ' + say); }
+      catch (e) { lg.disabled = false; $('#drLuErr').textContent = e.message || 'That didn\'t save.'; } });
+    // ── further terms: reorder (drag, or up and down), remove, add from the library, timing chips ──
+    const tl = $('#drTermList');
+    if (tl && newest && !ap) {
+      const move = (li, dir) => { if (dir < 0 && li.previousElementSibling) tl.insertBefore(li, li.previousElementSibling); else if (dir > 0 && li.nextElementSibling) tl.insertBefore(li.nextElementSibling, li); toast('Order changed: re-draft to apply it'); };
+      $$('[data-tup]', tl).forEach(b => b.addEventListener('click', () => move(b.closest('li'), -1))); $$('[data-tdown]', tl).forEach(b => b.addEventListener('click', () => move(b.closest('li'), 1)));
+      // drag a term by its grip (pointer events: mouse, finger or stylus); the up and down buttons do the same on any screen
+      $$('.dr-grip', tl).forEach(gr => gr.addEventListener('pointerdown', e => { const li = gr.closest('li'); e.preventDefault(); li.classList.add('dr-dragging'); let moved = false;
+        const mv = ev => { const sibs = $$('li[data-term]', tl).filter(x => x !== li), after = sibs.find(x => { const r = x.getBoundingClientRect(); return ev.clientY < r.top + r.height / 2; });
+          if ((after || null) !== li.nextElementSibling) { tl.insertBefore(li, after || null); moved = true; } };
+        // the term moves in the page as it is dragged, which ends any pointer capture: so the document follows the pointer instead
+        const up = () => { document.removeEventListener('pointermove', mv); document.removeEventListener('pointerup', up); document.removeEventListener('pointercancel', up); li.classList.remove('dr-dragging'); if (moved) toast('Order changed: re-draft to apply it'); };
+        document.addEventListener('pointermove', mv); document.addEventListener('pointerup', up); document.addEventListener('pointercancel', up); }));
+      // remove a term Tim added: its number is never used again
+      $$('[data-trm]', tl).forEach(b => b.addEventListener('click', () => { const id = b.dataset.trm, t = (ft.terms || []).find(x => x.id === id); if (!t || !confirm(`Remove further term ${DR.termNo(t.number, ft.number_style || 'dot')}, ${t.title}? Its number won't be used again.`)) return;
+        const ed = collect(); ed.retired_numbers = [...new Set((ed.retired_numbers || []).concat(t.number))];
+        if (t.added) ed.added_terms = (ed.added_terms || []).filter(a => a.id !== id);
+        else if (t.extra) { const objs = ed.extra_terms.filter(x => typeof x === 'object' && x.id !== id), strs = (E.extra_terms || []).filter(x => typeof x === 'string'), si = /^ft_extra_(\d+)$/.exec(id);
+          const keep = si ? strs.filter((x, i) => (E.extra_terms || []).indexOf(x) !== +si[1] - 1) : strs; ed.extra_terms = objs.concat(keep); Object.keys(ed.items).forEach(k => { if (/^ft_extra_\d+$/.test(k)) delete ed.items[k]; }); }
+        delete ed.items[id]; if (ed.term_timing) delete ed.term_timing[id]; if (ed.term_order) ed.term_order = ed.term_order.filter(x => x !== id);
+        go(ed, `Removed further term ${DR.termNo(t.number, ft.number_style || 'dot')}, ${t.title}`); }));
+      // the timing chips
+      let chip = null; const ced = $('#drChipEd'), mode = () => (($$('input[name="dr_cm"]').find(x => x.checked)) || {}).value || 'days';
+      const showMode = () => { const m = mode(), lit = chip && chip.dataset.chip === 'lit'; $('#drCmDaysW').hidden = m === 'date'; $('#drCmDateW').hidden = m !== 'date'; $('#drCmAfterW').hidden = m !== 'after'; if (typeof showAfter === 'function') showAfter(); };
+      // a timing chip in a term tied to one of the offer's conditions changes that condition on the offer (a recorded correction, so
+      // the date checks follow); any other chip changes this draft only
+      const tiedKey = t => { const k = t && t.timing && t.timing.key; return k && ((o.details || {}).conditions || []).some(c => c.key === k) ? k : null; };
+      const openChip = c => { chip = c; const li = c.closest('li'), t = (ft.terms || []).find(x => x.id === li.dataset.term) || {}, tk = c.dataset.chip === 'lit' ? null : tiedKey(t), cur = (tk ? null : TT[li.dataset.term]) || t.timing || {};
+        $$('#drCmAfter option').forEach(op => { op.disabled = !!tk && op.value === tk; });   // a condition can't wait for itself
+        if (tk && $('#drCmAfter').value === tk) { const first = $$('#drCmAfter option').find(op => !op.disabled); if (first) $('#drCmAfter').value = first.value; }
+        $('#drChipFor').textContent = c.dataset.chip === 'lit' ? `Change "${c.dataset.val}" in ${t.title}` : tk ? `The timing of ${(OF.condInfo(tk) || { label: tk }).label}: this changes it on the offer (recorded as a correction, with the buyer's original kept) and makes a new draft.` : `The timing of ${DR.termNo(t.number, ft.number_style || 'dot')} ${t.title}`;
+        const m0 = c.dataset.chip === 'lit' ? (/working day/.test(c.dataset.val) ? 'days' : 'date') : cur.after ? 'after' : cur.date ? 'date' : 'days';
+        $$('input[name="dr_cm"]').forEach(x => { x.checked = x.value === m0; }); $('#drCmDays').value = c.dataset.chip === 'lit' ? ((/(\d+) working/.exec(c.dataset.val) || [])[1] || '') : (cur.days || ''); $('#drCmDate').value = cur.date || ''; if (cur.after) $('#drCmAfter').value = cur.after;
+        $('#drCmErr').textContent = ''; ced.hidden = false; li.appendChild(ced); showMode(); showAfter(); const f = $(m0 === 'date' ? '#drCmDate' : '#drCmDays'); if (f) f.focus(); };
+      tl.addEventListener('click', e => { const c = e.target.closest('.dr-chip'); if (c && c.closest('.dr-rich').isContentEditable) openChip(c); });
+      tl.addEventListener('keydown', e => { const c = e.target.closest && e.target.closest('.dr-chip'); if (c && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); openChip(c); } });
+      $$('input[name="dr_cm"]').forEach(x => x.addEventListener('change', showMode));
+      const showAfter = () => { const n = $$('#drCmAfter option').filter(op => !op.disabled).length; $$('input[name="dr_cm"]')[2].closest('label').style.display = (chip && chip.dataset.chip === 'lit') || !n ? 'none' : ''; };
+      $('#drCmCancel').addEventListener('click', () => { ced.hidden = true; chip = null; });
+      $('#drCmDone').addEventListener('click', () => { if (!chip) return; const m = mode(), n = Math.floor(+$('#drCmDays').value), dt = $('#drCmDate').value, li = chip.closest('li'), id = li.dataset.term;
+        if (m === 'date' ? !OF.isDate(dt) : !(n >= 1 && n <= 250)) return $('#drCmErr').textContent = m === 'date' ? 'Choose a date.' : 'Enter 1 to 250 working days.';
+        const tt = (ft.terms || []).find(x => x.id === id) || {}, tk = chip.dataset.chip === 'lit' ? null : tiedKey(tt);
+        if (tk) {   // the offer's own condition: corrected on the offer, then re-drafted (so the checks rerun and older approvals go stale)
+          const nt = m === 'after' ? { after: $('#drCmAfter').value, days: n } : m === 'date' ? { date: dt } : { days: n };
+          const conds = (o.details.conditions || []).map(c => { if (c.key !== tk) return c; const x = Object.assign({}, c); delete x.days; delete x.date; delete x.after; return Object.assign(x, nt); });
+          const cp = OF.chainProblem(conds, tk); if (cp) return $('#drCmErr').textContent = cp.text;
+          const label = (OF.condInfo(tk) || { label: tk }).label, say_ = OF.timingPlain(Object.assign({ key: tk }, nt));
+          const det = Object.assign({}, o.details, { conditions: conds, line_up: !!(o.details.line_up && OF.sameTiming(conds)) });
+          const done = $('#drCmDone'); done.disabled = true; $('#drCmErr').textContent = 'Saving...';
+          return (async () => { try { await must(sb.rpc('agent_offer_correct', { p_offer: d.offer_id, p_expected: o.details, p_details: ofPayload(ofShape(det)), p_note: `Changed the timing of ${label} on the draft: ${say_}` }));
+              const ed = collect(); if (ed.term_timing) { delete ed.term_timing[id]; if (!Object.keys(ed.term_timing).length) delete ed.term_timing; }
+              const nt_ = `Timing of ${label} changed: ${say_}`; if (!(await go(ed, nt_))) { done.disabled = true; correctedButNotDrafted('#drCmErr', ed, nt_); /* the offer is corrected: only Re-draft now from here */ } } catch (e) { done.disabled = false; $('#drCmErr').textContent = e.message || 'That didn\'t save.'; } })(); }
+        if (chip.dataset.chip === 'lit') { const hadDay = /^[A-Z][a-z]+day /.test(chip.dataset.val), v = m === 'date' ? (hadDay ? `${['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][OF.dow(dt)]} ${DR.fullDate(dt)}` : DR.fullDate(dt)) : `${n} working ${n === 1 ? 'day' : 'days'}`; chip.dataset.val = v; chip.textContent = v; }
+        else { const t = m === 'after' ? { after: $('#drCmAfter').value, days: n } : m === 'date' ? { date: dt } : { days: n }; TT[id] = t;
+          $$('.dr-chip[data-chip="timing"],.dr-chip[data-chip="date"]', li).forEach(c => { c.textContent = OF.timingPlain(Object.assign({ key: id }, t)) + ' (re-draft to apply)'; }); }
+        ced.hidden = true; chip = null; });
+    }
+    const addGo = $('#drAddTermGo'); if (addGo) addGo.addEventListener('click', () => { const k = $('#drAddTerm').value; if (!k) return toast('Choose a clause first'); const t = (libTerms || []).find(x => x.key === k);
+      const ed = collect(), list = ed.added_terms || [], id = 'add_' + k + '_' + (list.filter(a => a.key === k).length + 1); ed.added_terms = list.concat({ id, key: k }); go(ed, 'Added ' + (t ? t.title : k) + ' from your library'); });
+    drAiWire(async (kind, c) => { const ed = collect();
+      if (kind === 'offer') { ed.extra_terms = (ed.extra_terms || []).concat({ id: 'ft_ai_' + Date.now().toString(36), title: c.title, text: c.text, ai: true }); return go(ed, 'Added a clause written with AI help: ' + c.title); }
+      const key = drNewKey(c.title, libTerms); await must(sb.rpc('agent_offer_term', { p_key: key, p_title: c.title, p_wording: c.text, p_rule: {}, p_position: 100, p_active: true }));
+      ed.added_terms = (ed.added_terms || []).concat({ id: 'add_' + key + '_1', key }); toast('Saved to your clause library'); return go(ed, 'Added ' + c.title + ' (saved to your library)'); });
     const ackBoxes = $$('[data-ack]'), canApprove = () => !ap && newest && !block.length && !stale && ackBoxes.every(x => x.checked);
     ackBoxes.forEach(x => x.addEventListener('change', () => { $('#drApproveDraft').disabled = !canApprove(); }));
     $('#drApproveDraft').addEventListener('click', async () => { try { await must(sb.rpc('agent_draft_approve', { p_draft: did, p_sha256: d.sha256, p_checked: ackBoxes.filter(x => x.checked).map(x => x.dataset.ack) })); toast('Draft approved'); viewDraftReview(did); } catch (e) { $('#drRvErr').textContent = e.message || 'That didn\'t save.'; } });
     $('#drDownload').addEventListener('click', async () => { try { const bytes = await drDraftBytes(d); const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' })); a.download = `Draft-${d.number}-${(p.address || 'agreement').replace(/[^A-Za-z0-9]+/g, '-').slice(0, 60)}.pdf`; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000); } catch (e) { $('#drRvErr').textContent = e.message; } });
-    const paint = async n => { try { const r = await drRender($('#drRvCanvas'), n, boxes, { bytes: await drDraftBytes(d), key: 'draft-' + d.id }); r.wrapEl.dataset.draft = d.id; } catch (e) { $('#drRvCanvas').innerHTML = `<p class="small err">${esc(e.message || drNoLib)}</p>`; } };
-    const pick = $('#drRvPick'); pick.addEventListener('change', () => paint(+pick.value)); if (pagesWith.length) paint(pagesWith[0]);
+    // ── the pages: zoom, marks Tim draws, and filled places he moves or resizes (pointer events: mouse, finger and stylus) ──
+    const PM = drPageMaps(d.placed), editable = newest && !ap, MIN_W = 10, MIN_H = 8;
+    let zoom = 1, cur = null, sel = null, drawOn = false;
+    const holder = $('#drRvCanvas'), say = t => { const e = $('#drMkSay'); if (e) e.textContent = t; };
+    const placedBox = id => { const x = d.placed.find(p => p.id === id); return x && (x.boxes || [])[0]; };
+    const markEl = (k, b, label, cls) => { const el = document.createElement('div'); el.className = 'dr-mark ' + (cls || ''); el.dataset.mk = k; el.setAttribute('role', 'group'); el.setAttribute('aria-label', label);
+      el.innerHTML = `<span class="dr-mk-lbl">${esc(label)}</span>` + ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'].map(h => `<span class="dr-h dr-h-${h}" data-h="${h}"></span>`).join(''); place(el, b); cur.wrapEl.appendChild(el); return el; };
+    // a box on the page; near an edge of the page its handles turn inwards, so they are never cut off
+    const place = (el, b) => { const { W, H } = cur, m = 26 * W / Math.max(1, cur.wrapEl.clientWidth); el.style.left = (b.x / W * 100) + '%'; el.style.width = (b.w / W * 100) + '%'; el.style.top = ((H - b.y - b.h) / H * 100) + '%'; el.style.height = (b.h / H * 100) + '%';
+      el.classList.toggle('dr-at-l', b.x < m); el.classList.toggle('dr-at-r', b.x + b.w > W - m); el.classList.toggle('dr-at-t', H - b.y - b.h < m); el.classList.toggle('dr-at-b', b.y < m); };
+    const markLabel = m => (DR_MARK[m.type + (m.who ? ':' + m.who : '')] || DR_MARK[m.type] || m.type) + (m.type === 'text' && m.text ? ': ' + m.text.slice(0, 30) : '');
+    // a device that can be touched gets finger-sized handles (some phones don't report a coarse pointer to CSS)
+    if (navigator.maxTouchPoints > 0 || 'ontouchstart' in window) document.documentElement.classList.add('dr-touch');
+    const drawLayer = () => { if (!cur) return; $$('.dr-mark', cur.wrapEl).forEach(e => e.remove()); const bp = PM.blankOf(cur.n);
+      if (bp != null) MK.marks.filter(m => m.page === bp).forEach(m => markEl('m:' + m.id, m, markLabel(m), sel === 'm:' + m.id ? 'dr-sel' : ''));
+      if (bp != null) Object.entries(MK.moves).forEach(([id, mv]) => { if (+mv.to.page === bp && sel !== 'p:' + id) markEl('p:' + id, mv.to, 'Moved: ' + ((d.placed.find(x => x.id === id) || {}).label || id), 'dr-moved'); });
+      if (sel && sel.startsWith('p:')) { const id = sel.slice(2), b = MK.moves[id] ? MK.moves[id].to : Object.assign({ page: bp }, placedBox(id)); if (b) markEl(sel, b, 'Move or resize: ' + ((d.placed.find(x => x.id === id) || {}).label || id), 'dr-sel dr-moved'); }
+      syncTools(); };
+    // the toolbar and the page follow the selection (touch scrolling is off on the page while drawing or editing a box)
+    const syncTools = () => { const del = $('#drMkDel'), rs = $('#drMkReset'), tw = $('#drMkTextW'), m = sel && sel.startsWith('m:') ? MK.marks.find(x => 'm:' + x.id === sel) : null;
+      if (del) del.disabled = !m; if (rs) rs.hidden = !(sel && sel.startsWith('p:') && MK.moves[sel.slice(2)]); if (tw) { tw.hidden = !(m && m.type === 'text'); if (m && m.type === 'text') $('#drMkText').value = m.text || ''; }
+      if (cur) { cur.wrapEl.classList.toggle('dr-drawing', drawOn); cur.wrapEl.classList.toggle('dr-editing', !!sel); } };
+    const selectEl = el => { $$('.dr-mark.dr-sel', cur.wrapEl).forEach(x => { if (x !== el) x.classList.remove('dr-sel'); }); if (el) el.classList.add('dr-sel'); syncTools(); };
+    const paint = async n => { try { holder.classList.toggle('dr-zoomed', zoom > 1); const r = await drRender(holder, n, boxes, { bytes: await drDraftBytes(d), key: 'draft-' + d.id }); r.wrapEl.dataset.draft = d.id;
+        if (zoom > 1) { r.wrapEl.style.width = (parseFloat(r.wrapEl.style.width) * zoom) + 'px'; r.wrapEl.style.maxWidth = 'none'; }
+        cur = Object.assign(r, { n }); r.wrapEl.classList.toggle('dr-drawing', drawOn); drawLayer(); if (editable) wirePage(r.wrapEl);
+        const doc = holder._docs && holder._docs['draft-' + d.id], pk = $('#drRvPick');
+        if (doc && pk.options.length < doc.numPages) { const cnt = k => boxes.filter(x => x.page === k).length; pk.innerHTML = Array.from({ length: doc.numPages }, (_, i) => i + 1).map(k => `<option value="${k}" ${k === n ? 'selected' : ''}>Page ${k}${cnt(k) ? ` (${cnt(k)})` : ''}${PM.added.includes(k) ? ', added' : ''}</option>`).join(''); }
+      } catch (e) { holder.innerHTML = `<p class="small err">${esc(e.message || drNoLib)}</p>`; } };
+    const pick = $('#drRvPick'); pick.addEventListener('change', () => { sel = null; paint(+pick.value); }); if (pagesWith.length) paint(pagesWith[0]);
+    const zv = () => { $('#drZoomV').textContent = Math.round(zoom * 100) + '%'; paint(cur ? cur.n : +pick.value); };
+    $('#drZoomIn').addEventListener('click', () => { if (zoom < 3) { zoom = Math.min(3, zoom + 0.5); zv(); } }); $('#drZoomOut').addEventListener('click', () => { if (zoom > 1) { zoom = Math.max(1, zoom - 0.5); zv(); } });
+    const dw = $('#drMkDraw'); if (dw) dw.addEventListener('click', () => { drawOn = !drawOn; dw.setAttribute('aria-pressed', String(drawOn)); dw.textContent = drawOn ? 'Drawing: drag on the page' : 'Draw a box'; if (cur) cur.wrapEl.classList.toggle('dr-drawing', drawOn);
+      if (drawOn && cur && PM.blankOf(cur.n) == null) say('This page was added for the further terms. Marks go on the pages of the blank.'); });
+    const dl = $('#drMkDel'); if (dl) dl.addEventListener('click', () => { if (!sel || !sel.startsWith('m:')) return; MK.marks = MK.marks.filter(m => 'm:' + m.id !== sel); sel = null; drawLayer(); say('Box deleted. Re-draft to apply it.'); });
+    const rsb = $('#drMkReset'); if (rsb) rsb.addEventListener('click', () => { if (!sel || !sel.startsWith('p:')) return; delete MK.moves[sel.slice(2)]; sel = null; drawLayer(); say('Put back where it was. Re-draft to apply it.'); });
+    const mt = $('#drMkText'); if (mt) mt.addEventListener('input', () => { const m = sel && MK.marks.find(x => 'm:' + x.id === sel); if (m) { m.text = mt.value.slice(0, 500); const l = $(`.dr-mark[data-mk="${sel}"] .dr-mk-lbl`); if (l) l.textContent = markLabel(m); } });
+    // page points from a pointer, kept inside the page
+    const pt = e => { const r = cur.wrapEl.getBoundingClientRect(); return { x: Math.max(0, Math.min(cur.W, (e.clientX - r.left) / r.width * cur.W)), y: Math.max(0, Math.min(cur.H, cur.H - (e.clientY - r.top) / r.height * cur.H)) }; };
+    const clamp = b => { const W = cur.W, H = cur.H; b.w = Math.max(MIN_W, Math.min(W, b.w)); b.h = Math.max(MIN_H, Math.min(H, b.h)); b.x = Math.max(0, Math.min(W - b.w, b.x)); b.y = Math.max(0, Math.min(H - b.h, b.y)); ['x', 'y', 'w', 'h'].forEach(k => { b[k] = Math.round(b[k] * 10) / 10; }); return b; };
+    function wirePage(wrap) {
+      wrap.addEventListener('pointerdown', e => {
+        if (e.button > 0) return; const bp = PM.blankOf(cur.n), h = e.target.closest('.dr-h'), mk = e.target.closest('.dr-mark'), bx = e.target.closest('.dr-box');
+        let target = null, kind = null, start = pt(e);
+        // the gesture keeps the element it started on: the layer is never rebuilt until the finger, mouse or pen lifts
+        let el = null;
+        if (mk) { sel = mk.dataset.mk; target = sel; kind = h ? h.dataset.h : 'move'; el = mk; selectEl(el); }
+        else if (drawOn && bp != null) { const [ty, who] = $('#drMkType').value.split(':'), m = { id: 'k' + Date.now().toString(36) + Math.floor(Math.random() * 1e4), page: bp, x: start.x, y: start.y, w: MIN_W, h: MIN_H, type: ty }; if (who) m.who = who; if (ty === 'text') m.text = '';
+          MK.marks.push(m); sel = 'm:' + m.id; target = sel; kind = 'new'; el = markEl(sel, m, markLabel(m), 'dr-sel'); selectEl(el); }
+        else if (bx && bp != null) { const it = d.placed.find(x => x.id === bx.dataset.id); if (!it || !DR_MOVABLE.includes(it.kind)) { say('That place can\'t be moved here.'); return; } sel = 'p:' + it.id; drawLayer(); say('Drag it to move it, or its handles to resize it. Re-draft to apply it.'); return; }
+        else { if (sel) { sel = null; drawLayer(); } return; }
+        e.preventDefault(); try { el.setPointerCapture(e.pointerId); } catch (_) { }
+        const isMark = target.startsWith('m:'), m = isMark ? MK.marks.find(x => 'm:' + x.id === target) : null, pid = isMark ? null : target.slice(2);
+        const b0 = isMark ? Object.assign({}, m) : Object.assign({ page: bp }, MK.moves[pid] ? MK.moves[pid].to : placedBox(pid)), mv0 = isMark ? null : MK.moves[pid] ? JSON.parse(JSON.stringify(MK.moves[pid])) : null;
+        const onMove = ev => { const p = pt(ev), dx = p.x - start.x, dy = p.y - start.y; let b = Object.assign({}, b0);
+          if (kind === 'new') b = { x: Math.min(start.x, p.x), y: Math.min(start.y, p.y), w: Math.abs(p.x - start.x), h: Math.abs(p.y - start.y) };
+          else if (kind === 'move') { b.x = b0.x + dx; b.y = b0.y + dy; }
+          else { if (/w/.test(kind)) { b.x = Math.min(b0.x + dx, b0.x + b0.w - MIN_W); b.w = b0.w - (b.x - b0.x); } if (/e/.test(kind)) b.w = b0.w + dx;
+            if (/s/.test(kind)) { b.y = Math.min(b0.y + dy, b0.y + b0.h - MIN_H); b.h = b0.h - (b.y - b0.y); } if (/n/.test(kind)) b.h = b0.h + dy; }
+          b = clamp(Object.assign({ page: b0.page }, b)); if (isMark) Object.assign(m, { x: b.x, y: b.y, w: b.w, h: b.h }); else MK.moves[pid] = { from: MK.moves[pid] ? MK.moves[pid].from : Object.assign({ page: bp }, placedBox(pid)), to: Object.assign({ page: bp }, b) }; place(el, b); };
+        const onUp = ev => { el.removeEventListener('pointermove', onMove); el.removeEventListener('pointerup', onUp); el.removeEventListener('pointercancel', onUp);
+          // a gesture the device cancelled (a scroll, a second finger): a new box goes; anything else goes back where it was
+          if (ev && ev.type === 'pointercancel') { if (kind === 'new') { MK.marks = MK.marks.filter(x => x !== m); sel = null; } else if (isMark) Object.assign(m, { x: b0.x, y: b0.y, w: b0.w, h: b0.h }); else if (mv0) MK.moves[pid] = mv0; else delete MK.moves[pid];
+            drawLayer(); return say(kind === 'new' ? 'The box was cancelled. Draw it again.' : 'Cancelled.'); }
+          drawLayer();
+          if (kind === 'new') { drawOn = false; if (dw) { dw.setAttribute('aria-pressed', 'false'); dw.textContent = 'Draw a box'; } syncTools(); say(m.type === 'text' ? 'Type the text for the box below, then re-draft.' : 'Box added. Drag it or its handles to adjust it, then re-draft.'); if (m.type === 'text') { const t = $('#drMkText'); if (t) t.focus(); } }
+          else say('Re-draft to apply it.'); };
+        el.addEventListener('pointermove', onMove); el.addEventListener('pointerup', onUp); el.addEventListener('pointercancel', onUp);
+      });
+    }
     top();
   }
 
