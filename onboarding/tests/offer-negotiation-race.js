@@ -8,6 +8,8 @@
 //   3. the agreed copy locked twice at once: exactly one agreement;
 //   4. Tim closes a document at the moment the edge function locks a round on it: either the round is locked and then the document
 //      closed with it kept, or the document is closed and the round refused; never a round locked into a closed document after it closed.
+//   5. Tim freezes the offer as the last vendor finishes (review, 25 November 2026): the freeze holds the offer's lock a moment, the
+//      finish waits for it and is then refused; never a signing completed after the freeze.
 // The scratch database is dropped afterwards. Run: RACE_TEMPLATE=t4 PGHOST=/tmp/p2pg PGPORT=5499 PGUSER=postgres node onboarding/tests/offer-negotiation-race.js
 // (Named .js, not .test.js, so run-all.js doesn't run it.)
 const { spawn, execFileSync } = require('child_process'), fs = require('fs'), path = require('path');
@@ -65,7 +67,7 @@ const AGENT = `set role authenticated; select set_config('request.jwt.claims', j
         insert into public.offer_blanks (property_id, document_id, sha256, size_bytes, file_name, pages, sizes, edition, edition_checked, created_by) values (pid, doc, repeat('ab', 32), 10, 'b.pdf', 3, '[[595,842],[595,842],[595,842]]', 'Eleventh Edition 2022 (4)', true, 't') returning id into bl;
         insert into public.offer_blank_maps (blank_id, version, places, approved, created_by) values (bl, 1, '[{"id":"date","key":"date","kind":"date","page":1,"x":80,"y":730,"w":200,"h":10}]', true, 't') returning id into m;
         perform set_config('request.jwt.claims', agent, true);
-        for k in 1..4 loop
+        for k in 1..5 loop
           o := public.agent_offer_add(pid, good);
           -- a draft as drafting makes it since the further terms numbering (024 refuses one without term_last)
           insert into public.offer_drafts (offer_id, property_id, number, blank_id, blank_sha256, map_id, details, placed, needs, path, sha256, size_bytes, created_by, edits)
@@ -117,6 +119,17 @@ const AGENT = `set role authenticated; select set_config('request.jwt.claims', j
     const st4 = (await one(`select d.status || ',' || (select count(*) from public.offer_rounds r where r.document_id = d.id and r.doc_round = 2) || ',' || coalesce((select (r.locked_at <= d.closed_at)::text from public.offer_rounds r where r.document_id = d.id and r.doc_round = 2), 'none') || ',' || (select status from public.offer_signings where id = '${g4}') from public.offer_documents d where d.offer_id = '${o4}'`)).split(',');
     out.closeLock = { lock: race4[0].c ? race4[0].e.split('\n')[0] : 'locked', close: race4[1].c ? race4[1].e.split('\n')[0] : 'closed', doc: st4[0], round2: +st4[1], before: st4[2], signing: st4[3] };
     ok(!race4[1].c && st4[0] === 'closed' && ((st4[1] === '1' && st4[2] === 'true' && st4[3] === 'locked') || (st4[1] === '0' && race4[0].c && st4[3] === 'cancelled')), 'closing as a round locks: the round is locked before the close, or refused after it');
+    // 5. a freeze and the last finish at once (offer 5): the freeze takes the offer first and holds it a moment; the finish then waits
+    const o5 = await v('o5');
+    const g5 = await one(`${AGENT} select public.agent_round_present('${o5}', 'in_person', public.rc_places(2, true, null, true), true)->>'id'`);
+    await one(`${CLAIMS} select public.rc_prep('${g5}'); select public.rc_taps('${g5}', 1); select public.offer_sign_do_finish((select id from public.offer_signers where signing_id = '${g5}' and position = 1), 'ua', null, 'passport', 'Tim')::text; select public.rc_taps('${g5}', 2)`);
+    const fz = psql(`${AGENT} begin; select public.agent_offer_freeze('${o5}', 'Race: Vera rang to stop', 'Vera Racer', null)::text; select pg_sleep(1.5); commit;`);
+    await new Promise(r => setTimeout(r, 400));
+    const fin = psql(`select public.offer_sign_do_finish((select id from public.offer_signers where signing_id = '${g5}' and position = 2), 'ua', null, 'passport', 'Tim')::text`);
+    const [fr, fn] = await Promise.all([fz, fin]);
+    const st5 = (await one(`select status || ',' || (select count(*) from public.offer_signers where signing_id = '${g5}' and finished_at is not null) || ',' || (select count(*) from public.offer_events where offer_id = '${o5}' and kind = 'sign_complete' and detail->>'signing_id' = '${g5}') from public.offer_signings where id = '${g5}'`)).split(',');
+    out.freezeFinish = { freeze: fr.c ? fr.e.split('\n')[0] : 'frozen', finish: fn.c ? fn.e.split('\n')[0] : 'finished', status: st5[0], finished: +st5[1], complete_events: +st5[2] };
+    ok(!fr.c && fn.c && /no longer being signed/.test(fn.e) && st5[0] === 'signing' && st5[1] === '1' && st5[2] === '0', 'a freeze and the last finish at once: the finish waits and is refused; no signing completes after a freeze');
     ok((await one(`select bool_and((public.offer_chain_verify(id::text)->>'ok')::boolean) from public.property_offers`)) === 't', 'every timeline still checks out');
   } catch (e) { errs.push('crashed: ' + e.message); }
   finally { try { execFileSync('dropdb', [DB]); } catch (_) { errs.push('scratch database not dropped: ' + DB); } }

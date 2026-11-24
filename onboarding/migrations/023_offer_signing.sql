@@ -301,6 +301,12 @@ begin
   return null;
 end $$;
 -- the signer may act now: not void, the signing current and open (not held for Tim)
+-- why this signer can't go on, if they can't: replaced, or the signing's own reason (024 adds a freeze, a withdrawal and their own request)
+create or replace function public.offer_sign_stop_for(s public.offer_signers, g public.offer_signings) returns text language plpgsql stable security definer set search_path = public as $$
+begin
+  if s.void_at is not null then return 'This version has been replaced. Tim will send you the new one.'; end if;
+  return public.offer_sign_current(g);
+end $$;
 create or replace function public.offer_sign_ready(s public.offer_signers, p_allow_finished boolean default false) returns public.offer_signings language plpgsql stable set search_path = public as $$
 declare g public.offer_signings; why text;
 begin
@@ -367,7 +373,9 @@ end $$;
 create or replace function public.offer_sign_do_finish(p_signer uuid, p_ua text, p_net text, p_id text, p_witness text) returns jsonb language plpgsql security definer set search_path = public as $$
 declare s public.offer_signers; g public.offer_signings; missing int; seen text; taps text; left_ int;
 begin
-  -- one finish at a time per signing: the signing is locked first, then the signer, and both are read again under the lock
+  -- one finish at a time per signing: the offer is locked first (the order Tim's functions use, so a freeze or withdrawal and a finish
+  -- never cross), then the signing, then the signer; all read again under the lock, so a finish can't complete just after a freeze
+  perform 1 from public.property_offers where id = (select gx.offer_id from public.offer_signings gx join public.offer_signers x on x.signing_id = gx.id where x.id = p_signer) for update;
   perform 1 from public.offer_signings where id = (select signing_id from public.offer_signers where id = p_signer) for update;
   select * into s from public.offer_signers where id = p_signer for update; g := public.offer_sign_ready(s);
   if s.consent_at is null or s.sig_png is null then raise exception 'Agree, read the guides and draw your signature and initials first'; end if;
@@ -636,8 +644,8 @@ begin
   insert into public.offer_hits (kind, net) values ('sign_code', n);
   -- the row is locked, so two requests at once can't both get under the limit
   select * into s from public.offer_signers where id = s.id for update;
-  -- no code while the offer is frozen or withdrawn, or this version isn't current (offer_sign_current, which 024 extends)
-  if s.void_at is not null or s.finished_at is not null or s.email is null or (select status from public.offer_signings where id = s.signing_id) not in ('signing', 'held') or public.offer_sign_current((select gx from public.offer_signings gx where gx.id = s.signing_id)) is not null then return jsonb_build_object('ok', false, 'reason', 'stopped'); end if;
+  -- no code while the offer is frozen or withdrawn, this version isn't current, or (024) the signer has asked Tim to stop: offer_sign_stop_for
+  if s.void_at is not null or s.finished_at is not null or s.email is null or (select status from public.offer_signings where id = s.signing_id) not in ('signing', 'held') or public.offer_sign_stop_for(s, (select gx from public.offer_signings gx where gx.id = s.signing_id)) is not null then return jsonb_build_object('ok', false, 'reason', 'stopped'); end if;
   if s.codes_window_at is not null and s.codes_window_at > now() - interval '1 hour' and s.codes_sent >= 5 then return jsonb_build_object('ok', false, 'reason', 'busy'); end if;
   b := extensions.gen_random_bytes(4); code := lpad(((get_byte(b, 0)::bigint * 16777216 + get_byte(b, 1) * 65536 + get_byte(b, 2) * 256 + get_byte(b, 3)) % 1000000)::text, 6, '0');
   perform set_config('offers.fn', 'on', true);
@@ -657,7 +665,7 @@ begin
   if public.offer_hit_count('sign_try', n, null, interval '1 hour') >= 30 then return jsonb_build_object('ok', false, 'reason', 'busy'); end if;
   insert into public.offer_hits (kind, net) values ('sign_try', n);
   select * into s from public.offer_signers where id = s.id for update;   -- one try at a time, so five tries really is five
-  if s.void_at is not null or s.finished_at is not null or (select status from public.offer_signings where id = s.signing_id) not in ('signing', 'held') or public.offer_sign_current((select gx from public.offer_signings gx where gx.id = s.signing_id)) is not null then return jsonb_build_object('ok', false, 'reason', 'stopped'); end if;
+  if s.void_at is not null or s.finished_at is not null or (select status from public.offer_signings where id = s.signing_id) not in ('signing', 'held') or public.offer_sign_stop_for(s, (select gx from public.offer_signings gx where gx.id = s.signing_id)) is not null then return jsonb_build_object('ok', false, 'reason', 'stopped'); end if;
   if s.code_hash is null then return jsonb_build_object('ok', false, 'reason', 'no_code'); end if;
   if s.code_expires_at < now() then return jsonb_build_object('ok', false, 'reason', 'expired'); end if;
   perform set_config('offers.fn', 'on', true);
@@ -762,7 +770,7 @@ end $$;
 
 -- ───── execute rights ─────
 revoke execute on function public.offer_event_body(text, bigint, timestamptz, text, text, uuid, uuid, jsonb), public.offer_event_chain(), public.guard_offer_signing(), public.guard_offer_signer(), public.offer_sha(text),
-  public.offer_sign_places_ok(jsonb, jsonb, int, boolean), public.offer_mark_ok(text, jsonb, numeric, numeric), public.offer_sign_required(uuid, int), public.offer_sign_current(public.offer_signings), public.offer_sign_ready(public.offer_signers, boolean),
+  public.offer_sign_places_ok(jsonb, jsonb, int, boolean), public.offer_mark_ok(text, jsonb, numeric, numeric), public.offer_sign_required(uuid, int), public.offer_sign_stop_for(public.offer_signers, public.offer_signings), public.offer_sign_current(public.offer_signings), public.offer_sign_ready(public.offer_signers, boolean),
   public.offer_sign_do_consent(uuid, text, text), public.offer_sign_do_receipt(uuid, text, text, text, text, int[]), public.offer_sign_do_marks(uuid, text, text), public.offer_sign_do_tap(uuid, text), public.offer_sign_do_finish(uuid, text, text, text, text),
   public.offer_sign_person(uuid), public.offer_chain_verify(text), public.offer_sign_find(text), public.offer_sign_by_token(text), public.offer_sign_me(text, text) from public, anon, authenticated;
 revoke execute on function public.offer_sign_issue(uuid, text), public.offer_sign_open(text, text, text), public.offer_sign_code(text, text), public.offer_sign_verify(text, text, text, text), public.offer_sign_state(text, text),

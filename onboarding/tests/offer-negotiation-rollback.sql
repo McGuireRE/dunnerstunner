@@ -363,6 +363,8 @@ begin
   declare o5 uuid; d5 uuid; g5 uuid; tv text; sv text; tl text; sl text; rq jsonb; hd uuid; vendor_try text;
   begin
     perform set_config('request.jwt.claims', agent, true); o5 := public.agent_offer_add(pid, good); execute 'reset role';
+    -- a former owner and a contact on the property: never the vendors (review B1)
+    insert into public.property_people (property_id, position, legal_name, email, phone, role) values (pid, 3, 'Fern Former', 'fern.former@example.com', '', 'former'), (pid, 4, 'Con Contact', 'con.contact@example.com', '', 'contact');
     insert into public.offer_drafts (offer_id, property_id, number, blank_id, blank_sha256, map_id, details, placed, needs, path, sha256, size_bytes, created_by, edits)
       values (o5, pid, 1, bl, repeat('ab', 32), m, (select details from public.property_offers where id = o5), '[]', '[]', 'properties/' || pid || '/docs/offer-draft-' || o5 || '-1.pdf', repeat('e5', 32), 100, 'test', '{"term_last": 22}') returning id into d5;
     insert into public.offer_draft_approvals (draft_id, sha256, approved_by) values (d5, repeat('e5', 32), 'test');
@@ -379,6 +381,9 @@ begin
     begin perform public.offer_sign_request(tv, 'not-the-session', 'withdraw', 'finance_changed', null, 'n5'); out := out || 'A REQUEST WITHOUT HER SESSION; '; exception when others then out := out || 'request session: ' || left(sqlerrm, 50) || '; '; end;
     rq := public.offer_sign_request(tv, sv, 'withdraw', 'finance_changed', null, 'n5');
     out := out || 'request: kind=' || (rq->>'kind') || ' reason=' || (rq->>'reason') || ' side=' || (rq->>'side') || ' offer still open=' || (public.offer_hold_active(o5) = false) || '; ';
+    begin perform public.offer_sign_request(tv, sv, 'withdraw', 'contract_elsewhere', null, 'n5'); out := out || 'A SECOND OPEN REQUEST; '; exception when others then out := out || 'one open request: ' || sqlerrm || '; '; end;
+    begin perform public.offer_sign_ask(tv, sv, 'Please change the date'); out := out || 'ASKED FOR A CHANGE WITH A REQUEST OPEN; '; exception when others then out := out || 'ask with request open: ' || sqlerrm || '; '; end;
+    out := out || 'code with request open=' || coalesce(public.offer_sign_code(tv, 'n5')->>'reason', 'A CODE WAS SENT') || '; ';
     out := out || 'Vera''s link says: ' || coalesce(public.offer_sign_state(tv, sv)->'signing'->>'stopped', 'NOTHING') || '; ';
     begin perform public.offer_sign_marks(tv, sv, 'data:image/png;base64,' || repeat('iVBORw0KGgo', 30), 'data:image/png;base64,' || repeat('iVBORw0KGgo', 30)); out := out || 'VERA SIGNED AFTER HER REQUEST; '; exception when others then out := out || 'Vera after request: ' || sqlerrm || '; '; end;
     out := out || 'Val unaffected, stopped=' || coalesce(public.offer_sign_state(tl, sl)->'signing'->>'stopped', 'none') || '; ';
@@ -393,6 +398,8 @@ begin
     hd := public.agent_offer_freeze(o5, 'Vera asked to stop while she checks her finance', null, (rq->>'id')::uuid);
     begin perform public.offer_sign_tap(tl, sl, 'block:vsig2:s2'); out := out || 'VAL TAPPED WHILE FROZEN; '; exception when others then out := out || 'Val frozen: ' || sqlerrm || '; '; end;
     out := out || 'code while frozen=' || coalesce(public.offer_sign_code(tl, 'n6')->>'reason', 'A CODE WAS SENT') || ' Val''s link says: ' || coalesce(public.offer_sign_state(tl, sl)->'signing'->>'stopped', 'NOTHING') || '; ';
+    begin perform public.offer_sign_ask(tl, sl, 'We decline it as it stands'); out := out || 'DECLINED WHILE FROZEN; '; exception when others then out := out || 'ask or decline frozen: ' || sqlerrm || '; '; end;
+    begin perform public.agent_offer_withdraw_now(o4, 'vendor', 'Vera Vendor', 'Contract elsewhere', now(), 'phone', (rq->>'id')::uuid); out := out || 'ANOTHER OFFER''S REQUEST USED; '; exception when others then out := out || 'request of another offer: ' || sqlerrm || '; '; end;
     begin perform public.offer_sign_issue(g5, 'agent'); out := out || 'LINKS SENT WHILE FROZEN; '; exception when others then out := out || 'links frozen: ' || sqlerrm || '; '; end;
     begin perform public.agent_offer_freeze(o5, 'again', null, null); out := out || 'FROZEN TWICE; '; exception when others then out := out || 'twice: ' || sqlerrm || '; '; end;
     out := out || 'request handled as=' || (select handled_as from public.offer_requests where id = (rq->>'id')::uuid) || ' told_how=' || (select told_how from public.offer_holds where id = hd) || '; ';
@@ -425,6 +432,9 @@ begin
     begin perform public.agent_mail_draft_add(o5, 'withdraw_lawyer', null, array['ana@example.com'], '{}', 'Withdrawn', 'Dear Pat', null); out := out || 'THE PURCHASER EMAILED AS THEIR LAWYER; '; exception when others then out := out || 'lawyer only: ' || left(sqlerrm, 60) || '; '; end;
     begin perform public.agent_mail_draft_add(o5, 'withdraw_lawyer', null, array['pat@law.example'], '{}', 'Withdrawn', 'Dear Pat, Vera is on 027 444 5555', null); out := out || 'A VENDOR''S PHONE TO THE PURCHASERS'' LAWYER; '; exception when others then out := out || 'privacy: ' || left(sqlerrm, 40) || '; '; end;
     perform public.agent_mail_draft_add(o5, 'withdraw_lawyer', null, array['pat@law.example'], '{}', 'Withdrawn', 'Dear Pat, the vendors have withdrawn their counteroffer.', null);
+    begin perform public.agent_mail_draft_add(o5, 'withdraw_party', null, array['fern.former@example.com'], '{}', 'x', 'Hello Fern', null); out := out || 'A FORMER OWNER EMAILED AS A VENDOR; '; exception when others then out := out || 'former owner: ' || left(sqlerrm, 50) || '; '; end;
+    begin perform public.agent_mail_draft_add(o5, 'withdraw_party', null, array['con.contact@example.com'], '{}', 'x', 'Hello Con', null); out := out || 'A CONTACT EMAILED AS A VENDOR; '; exception when others then out := out || 'contact: ' || left(sqlerrm, 50) || '; '; end;
+    begin perform public.agent_mail_draft_add(o5, 'withdraw_party', null, array['val@example.com'], '{}', 'x', 'Hello Val', null); out := out || 'an owner may be emailed; '; exception when others then out := out || 'AN OWNER REFUSED ' || sqlerrm || '; '; end;
     out := out || 'withdraw drafts=' || (select count(*) from public.offer_mail_drafts where offer_id = o5 and kind like 'withdraw%' and status = 'draft') || ' sent=' || (select count(*) from public.offer_mail_log where offer_id = o5) || '; ';
     out := out || 'trail=' || (select string_agg(kind, ',' order by seq) from public.offer_events where offer_id = o5 and kind in ('party_request', 'offer_frozen', 'offer_unfrozen', 'request_carry_on', 'withdrawn', 'offer_withdrawn_now')) || ' chain ok=' || (public.offer_chain_verify(o5::text)->>'ok') || '; ';
   end;
@@ -458,8 +468,10 @@ begin
     ma := public.agent_mail_draft_add(o1, 'agreed_vendors', null, array['rb-nego-vendor@example.com', 'val@example.com'], '{}', 'Congratulations!', 'Hello Vera and Val, the purchasers'' lawyer is Pat Lawyer, Law Ltd, pat@law.example, 03 477 0000.', att);
     out := out || 'agreed vendors draft=' || (select status from public.offer_mail_drafts where id = ma) || ' (the purchasers'' lawyer may be named); ';
     -- who holds the deposit: recommended Public Trust (no KiwiSaver), Tim's choice kept with the agreement, the newest standing
+    r := public.agent_offer_deposit_holder(o1, 'nzret', null, true); out := out || 'recommended used, not chosen: by_default=' || (r->>'by_default') || ' timeline=' || (select detail->>'by_default' from public.offer_events where offer_id = o1 and kind = 'deposit_holder_chosen' order by seq desc limit 1) || '; ';
+    begin perform public.agent_offer_deposit_holder(o1, 'nzret', null, true); out := out || 'THE RECOMMENDATION RECORDED TWICE; '; exception when others then out := out || 'default once: ' || sqlerrm || '; '; end;
     begin perform public.agent_offer_deposit_holder(o1, 'other', ' '); out := out || 'OTHER HOLDER WITH NO NAME; '; exception when others then out := out || 'other holder: ' || sqlerrm || '; '; end;
-    r := public.agent_offer_deposit_holder(o1, 'vendor_lawyer', null); out := out || 'deposit: recommended=' || (r->>'recommended') || ' warned=' || (r->>'warned') || '; ';
+    r := public.agent_offer_deposit_holder(o1, 'vendor_lawyer', null); out := out || 'deposit: recommended=' || (r->>'recommended') || ' warned=' || (r->>'warned') || ' Tim''s choice by_default=' || (r->>'by_default') || '; ';
     r := public.agent_offer_deposit_holder(o1, 'other', 'Smith Law trust account'); out := out || 'newest=' || (select holder || ':' || other_text || ' agreement=' || (agreement_id = (select id from public.offer_agreements where offer_id = o1)) from public.offer_deposit_holders where offer_id = o1 order by id desc limit 1) || '; ';
     execute 'reset role';
     begin update public.offer_deposit_holders set holder = 'nzret' where offer_id = o1; out := out || 'A DEPOSIT CHOICE WAS REWRITTEN; '; exception when others then out := out || 'choice kept: ' || sqlerrm || '; '; end;

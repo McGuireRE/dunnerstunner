@@ -765,6 +765,9 @@ declare s public.offer_signers; g public.offer_signings; t text := nullif(trim(r
 begin
   s := public.offer_sign_me(p_token, p_session); select * into g from public.offer_signings where id = s.signing_id;
   if s.void_at is not null or g.status in ('locked', 'replaced') then raise exception 'This version is no longer being signed'; end if;
+  -- frozen, withdrawn, or they have asked Tim to stop: no ask or decline either
+  if public.offer_hold_active(g.offer_id) then raise exception 'This version is no longer being signed. Tim will be in touch.'; end if;
+  if exists (select 1 from public.offer_requests r where r.signer_id = s.id and r.handled_at is null) then raise exception 'Your request has gone to Tim. He will contact you straight away.'; end if;
   if t is null or length(t) < 3 or length(t) > 1000 then raise exception 'Please say what you would like changed (up to 1,000 characters)'; end if;
   if (select count(*) from public.offer_sign_asks where signer_id = s.id and at > now() - interval '1 day') >= 10 then raise exception 'You have sent several requests today. Tim will be in touch'; end if;
   insert into public.offer_sign_asks (signing_id, signer_id, text) values (g.id, s.id, t);
@@ -1019,6 +1022,7 @@ begin
   if p_told_at is null then raise exception 'Say when you were told'; end if;
   select * into o from public.property_offers where id = p_offer for update; if o.id is null then raise exception 'No such offer'; end if;
   if exists (select 1 from public.offer_holds where offer_id = o.id and kind = 'withdraw') then raise exception 'This offer has already been withdrawn'; end if;
+  if p_request is not null and not exists (select 1 from public.offer_requests r where r.id = p_request and r.offer_id = o.id) then raise exception 'No such request on this offer'; end if;
   -- the existing withdrawal (stops every signing as withdrawn, closes the open document, marks the offer withdrawn or declined)
   r := public.agent_negotiation_withdraw(o.id, p_side, p_told_at, left('Directed by ' || trim(p_person) || ': ' || trim(p_reason), 500));
   perform set_config('offers.fn', 'on', true);
@@ -1046,8 +1050,11 @@ declare s public.offer_signers; g public.offer_signings; id_ uuid; why text; L j
   'incapacitated', 'One of our party is incapacitated', 'property_integrity', 'We have concerns about the integrity of the property', 'property_viability', 'We have concerns about the viability of the property');
 begin
   s := public.offer_sign_me(p_token, p_session);
+  -- the signer's row is locked, so two requests at once can't both pass the checks below
+  select * into s from public.offer_signers where id = s.id for update;
   select * into g from public.offer_signings where id = s.signing_id;
   if s.void_at is not null or g.status not in ('ready', 'signing', 'held', 'complete') or public.offer_sign_current(g) is not null then raise exception 'This version is no longer being signed. Tim will be in touch.'; end if;
+  if exists (select 1 from public.offer_requests r where r.signer_id = s.id and r.handled_at is null) then raise exception 'Your request has gone to Tim. He will contact you straight away.'; end if;
   if coalesce(p_kind, '') not in ('freeze', 'withdraw') then raise exception 'Choose stop for now, or withdraw'; end if;
   if coalesce(p_reason_key, '') not in ('finance_changed', 'contract_elsewhere', 'incapacitated', 'property_integrity', 'property_viability', 'other') then raise exception 'Choose a reason'; end if;
   why := case when p_reason_key = 'other' then nullif(trim(coalesce(p_reason, '')), '') else L->>p_reason_key end;
@@ -1077,6 +1084,7 @@ create table public.offer_deposit_holders (
   other_text text check ((holder = 'other') = (other_text is not null) and (other_text is null or length(other_text) between 3 and 200)),
   recommended text not null check (recommended in ('nzret', 'vendor_lawyer')),
   kiwisaver boolean not null, warned boolean not null,
+  by_default boolean not null default false,   -- the recommended holder, used when the emails were built; not a choice Tim made
   chosen_by text not null, chosen_at timestamptz not null default now()
 );
 create index on public.offer_deposit_holders (offer_id);
@@ -1086,7 +1094,7 @@ alter table public.offer_deposit_holders enable row level security;
 create policy odh_agent_read on public.offer_deposit_holders for select using (public.is_agent());
 revoke all on public.offer_deposit_holders from anon;
 revoke insert, update, delete, truncate, references, trigger on public.offer_deposit_holders from authenticated;
-create or replace function public.agent_offer_deposit_holder(p_offer uuid, p_holder text, p_other text) returns jsonb language plpgsql security definer set search_path = public as $$
+create or replace function public.agent_offer_deposit_holder(p_offer uuid, p_holder text, p_other text, p_default boolean default false) returns jsonb language plpgsql security definer set search_path = public as $$
 declare me text := public.offer_agent(); o public.property_offers; ag public.offer_agreements; ks boolean; rec text; id_ bigint;
 begin
   select * into o from public.property_offers where id = p_offer; if o.id is null then raise exception 'No such offer'; end if;
@@ -1095,15 +1103,16 @@ begin
   if p_holder = 'other' and coalesce(length(trim(p_other)), 0) not between 3 and 200 then raise exception 'Type who holds the deposit (3 to 200 characters)'; end if;
   ks := coalesce((ag.terms->>'kiwisaver')::boolean, false) or coalesce((o.details->>'kiwisaver')::boolean, false);   -- as the agreed terms or the offer say
   rec := case when ks then 'vendor_lawyer' else 'nzret' end;
+  if coalesce(p_default, false) and (p_holder <> rec or exists (select 1 from public.offer_deposit_holders where offer_id = o.id)) then raise exception 'The recommended holder is used only when nothing has been chosen'; end if;
   perform set_config('offers.fn', 'on', true);
-  insert into public.offer_deposit_holders (offer_id, property_id, agreement_id, holder, other_text, recommended, kiwisaver, warned, chosen_by)
-    values (o.id, o.property_id, ag.id, p_holder, case when p_holder = 'other' then trim(p_other) end, rec, ks, ks and p_holder <> 'vendor_lawyer', me) returning id into id_;
-  insert into public.offer_events (property_id, offer_id, actor, kind, detail) values (o.property_id, o.id, me, 'deposit_holder_chosen', jsonb_build_object('id', id_, 'holder', p_holder, 'other', case when p_holder = 'other' then trim(p_other) end, 'recommended', rec, 'kiwisaver', ks, 'agreement_id', ag.id));
+  insert into public.offer_deposit_holders (offer_id, property_id, agreement_id, holder, other_text, recommended, kiwisaver, warned, by_default, chosen_by)
+    values (o.id, o.property_id, ag.id, p_holder, case when p_holder = 'other' then trim(p_other) end, rec, ks, ks and p_holder <> 'vendor_lawyer', coalesce(p_default, false), me) returning id into id_;
+  insert into public.offer_events (property_id, offer_id, actor, kind, detail) values (o.property_id, o.id, me, 'deposit_holder_chosen', jsonb_build_object('id', id_, 'holder', p_holder, 'other', case when p_holder = 'other' then trim(p_other) end, 'recommended', rec, 'kiwisaver', ks, 'by_default', coalesce(p_default, false), 'agreement_id', ag.id));
   perform set_config('offers.fn', '', true);
-  return jsonb_build_object('id', id_, 'holder', p_holder, 'recommended', rec, 'warned', ks and p_holder <> 'vendor_lawyer');
+  return jsonb_build_object('id', id_, 'holder', p_holder, 'recommended', rec, 'warned', ks and p_holder <> 'vendor_lawyer', 'by_default', coalesce(p_default, false));
 end $$;
-revoke execute on function public.agent_offer_deposit_holder(uuid, text, text) from public, anon;
-grant execute on function public.agent_offer_deposit_holder(uuid, text, text) to authenticated;
+revoke execute on function public.agent_offer_deposit_holder(uuid, text, text, boolean) from public, anon;
+grant execute on function public.agent_offer_deposit_holder(uuid, text, text, boolean) to authenticated;
 
 -- ───── Emails as drafts Tim reviews and sends (Tim, 24 November 2026; EMAIL-VOICE.md) ─────
 -- Nothing goes to a buyer, vendor or lawyer by itself. Every email to them (a signing link, a "please initial again" notice after a
@@ -1206,7 +1215,7 @@ begin
     else
       select coalesce(array_agg(lower(trim(e))), '{}') into out_ from (
         select s.email e from public.offer_signers s join public.offer_signings g on g.id = s.signing_id where g.offer_id = p_offer and g.side = 'vendor' and p_kind = 'withdraw_party'   -- a withdrawal stops (voids) their places; they are still the vendors
-        union all select pp.email from public.property_people pp where pp.property_id = o.property_id and p_kind = 'withdraw_party'   -- the vendors on the property file
+        union all select pp.email from public.property_people pp where pp.property_id = o.property_id and pp.role = 'owner' and p_kind = 'withdraw_party'   -- the owners on the property file (never a contact or former owner)
         union all select ll.email from public.lawyer_links ll where ll.agreement_id = (select a.id from public.agreements a where a.property_id = o.property_id and a.status in ('signed', 'countersigned') order by a.created_at desc limit 1)
         union all select x->>'text' from public.offer_drafts d, jsonb_array_elements(d.placed) x where d.id = (select d2.id from public.offer_drafts d2 where d2.offer_id = p_offer order by d2.number desc limit 1) and x->>'id' in ('vl_email', 'vl_service')) z
         where coalesce(trim(e), '') <> '' and position('@' in e) > 1;
