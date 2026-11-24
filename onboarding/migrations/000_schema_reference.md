@@ -325,4 +325,19 @@ agreements/<agreement id>/signatures/... (vendors may upload their own signature
   pending, then sent, failed or unconfirmed (only that outcome is ever filled in, once). `offer_mail_done(draft, log, actor, ok, error)`;
   `agent_mail_draft_unstick` (Tim checked a send that may have gone did not arrive). Sending refuses marked blanks. The vendors' agreed
   email may go only to this negotiation's vendor signers and the vendors' lawyer.
+- Freeze and withdrawal (Tim, 24 November 2026): `offer_holds` (kind freeze | withdraw; side and person who directed a withdrawal;
+  reason; told_at and told_how in_person | phone | email | link_request; request_id; made_by/at; a freeze lifted once with a note; a
+  withdrawal never lifted; no delete) and `offer_requests` (a party's own request from their signing link: kind freeze | withdraw,
+  reason_key from the list or 'other', reason, handled once as freeze | withdraw | carry_on). Both read by Tim only, written only by
+  the functions (`guard_offer_hold`). `offer_hold_active(offer)`; `offer_sign_current` gives the neutral line while one is active, so
+  every signer action, code, link and in-person turn stops; a requester alone is stopped by `offer_sign_ready` and `offer_sign_stop_for`
+  ("Your request has gone to Tim. He will contact you straight away."). `agent_offer_freeze(offer, reason, asked_by, request)`,
+  `agent_offer_unfreeze(offer, note)`, `agent_offer_withdraw_now(offer, side, person, reason, told_at, told_how, request)` (runs
+  `agent_negotiation_withdraw`, then a permanent hold), `agent_offer_request_carry_on(request, note)`, and
+  `offer_sign_request(token, session, kind, reason_key, reason, net)` (service role; the edge function then emails Tim at once).
+  Presenting, releasing, the agreement and signing emails are refused while a hold is active. Mail kinds `withdraw_party` (the side
+  that directed it and its lawyer) and `withdraw_lawyer` (the other side's lawyer only); `offer_mail_side(kind, signer, offer)`.
+  023: `offer_sign_code` and `offer_sign_verify` refuse ('stopped') once `offer_sign_current` gives a reason.
+- Deposit holder (Tim, 24 November 2026): `offer_deposit_holders` (append-only; holder nzret | vendor_lawyer | other with its text;
+  recommended; kiwisaver; warned; with the agreement) and `agent_offer_deposit_holder(offer, holder, other)`. The newest row stands.
 

@@ -673,11 +673,26 @@ Real Estate Trust once the agreement becomes unconditional"); from Round 2 on a 
 Tim is warned before correcting while a round is out; the vendors' agreed email only to this negotiation's vendor signers and their
 lawyer; drafts open "Dear" (purchasers) and "Hello" (vendors); a signer sees "Document check code" behind Details.
 
+Freeze and withdrawal (Tim, 24 November 2026): on the offer page Tim can Freeze now (one tap and a confirm; all signing on every round
+stops at the server; links say only "This version is no longer being signed. Tim will be in touch."; nobody is emailed; Unfreeze lets
+it carry on) and Withdraw now (who directed it, side and person, the reason, when and how he was told; everything freeze does, for good;
+two draft emails, to that side with its lawyer and to the other side's lawyer, for Tim to read and send). A party can ask from their
+own signing link (stop for now, or withdraw, with a reason from the list or their own words): it stops only their link ("Your request
+has gone to Tim. He will contact you straight away."), Tim gets an urgent email at once, and it shows in red at the top of Home and on
+the offer, with Freeze now, Withdraw now and Let them carry on. Everything is on the timeline and the lawyers' pack. The old "A side has
+withdrawn" form is replaced by Withdraw now. The buyer's offer form has no per-buyer link, so requests come only from signing links.
+
+Who holds the deposit (Tim, 24 November 2026): a choice above the agreed copy's emails: Public Trust O/A NZ Real Estate Trust (Tim's
+trust account), the vendors' lawyer's trust account, or Other (typed). The recommended one (the vendors' lawyer when any KiwiSaver is
+part of the deposit) is preselected and marked; another choice with KiwiSaver is warned but allowed, and the drafts keep "can't be
+released before settlement". Each choice is kept with the agreement; unsent drafts are rebuilt to follow it.
+
 Open points for Tim:
 - One-time signing codes still go by themselves (a signer is waiting for it), holding only the code and who it is from.
 - "I'm Tim, carry on" is a tap; P3's PIN or passkey replaces it.
 - The roadmap's "when the deposit is paid" and the property page link are always blanks: the agreement's data doesn't hold them.
 - `offer_sign_issue` (023/024, service role only) still exists for the database tests; the edge function no longer calls it.
+- Phase 1's "Withdrawn or lapsed" buttons (agent_offer_status) still stop signing, but record no directing person or reason; Withdraw now is the full record.
 
 Going live, with Tim's approval, in order:
 1. Live rollback test: `node onboarding/tests/offer-negotiation-rollback.js --with-023` (023 and 024 together, both undone), run on the
@@ -688,4 +703,4 @@ Going live, with Tim's approval, in order:
    same commit. `offer-draft` and `doc-prefill` are unchanged. `offer-sign` imports `onboarding/src/mail-core.js` by its relative path.
 5. Test with Tim's own addresses: a test offer signed in person in the portal and by link (Prepare the emails, read, Send); present
    to a test vendor; a counter and an acceptance; check Tim's one email per round; the agreed copy and its two draft emails (fill the
-   blanks, send); the lawyers' pack. Tim's solicitor confirms the method before the first real offer.
+   blanks, send); the lawyers' pack; a request from a test link (Tim's urgent email), Freeze now, Unfreeze and Withdraw now. Tim's solicitor confirms the method before the first real offer.
