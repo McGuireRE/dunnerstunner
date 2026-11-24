@@ -339,5 +339,11 @@ agreements/<agreement id>/signatures/... (vendors may upload their own signature
   that directed it and its lawyer) and `withdraw_lawyer` (the other side's lawyer only); `offer_mail_side(kind, signer, offer)`.
   023: `offer_sign_code` and `offer_sign_verify` refuse ('stopped') once `offer_sign_current` gives a reason.
 - Deposit holder (Tim, 24 November 2026): `offer_deposit_holders` (append-only; holder nzret | vendor_lawyer | other with its text;
-  recommended; kiwisaver; warned; with the agreement) and `agent_offer_deposit_holder(offer, holder, other)`. The newest row stands.
+  recommended; kiwisaver; warned; by_default, true when the recommendation was used for the emails before Tim chose; with the
+  agreement) and `agent_offer_deposit_holder(offer, holder, other, p_default)`. The newest row stands.
+- Final review (25 November 2026): `withdraw_party` to the vendors goes only to this negotiation's vendor signers and the property's
+  owners (`property_people.role = 'owner'`; never a contact or former owner). `offer_sign_request` locks the signer and allows one open
+  request at a time. `offer_sign_ask` (and decline) refuses while frozen, withdrawn or with a request open; 023's `offer_sign_code` and
+  `offer_sign_verify` use `offer_sign_stop_for` (023 defines it; 024 adds holds and requests). `offer_sign_do_finish` locks the offer,
+  then the signing, then the signer, so a finish can't complete after a freeze. `agent_offer_withdraw_now` checks the request is this offer's.
 
