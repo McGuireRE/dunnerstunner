@@ -1,0 +1,39 @@
+[
+ {
+  "chain": "p:5a5a5a5a-0000-4000-8000-000000000001",
+  "seq": 1,
+  "at": "2026-11-24T00:07:58.682247+13:00",
+  "actor": "agent@example.test",
+  "kind": "link_made",
+  "offer_id": null,
+  "property_id": "5a5a5a5a-0000-4000-8000-000000000001",
+  "detail": {
+   "list": [
+    1,
+    {
+     "a": null,
+     "b": 2
+    }
+   ],
+   "note": "Kia ora Mārama \"quoted\"",
+   "price": 655000.5,
+   "province": "otago"
+  },
+  "body": "{\"at\": \"2026-11-23T11:07:58.682247Z\", \"seq\": 1, \"kind\": \"link_made\", \"actor\": \"agent@example.test\", \"chain\": \"p:5a5a5a5a-0000-4000-8000-000000000001\", \"offer\": null, \"detail\": {\"list\": [1, {\"a\": null, \"b\": 2}], \"note\": \"Kia ora Mārama \\\"quoted\\\"\", \"price\": 655000.50, \"province\": \"otago\"}, \"property\": \"5a5a5a5a-0000-4000-8000-000000000001\"}",
+  "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+  "hash": "6680857b2a46007b86bc5ac321b734e964038d750ce95f9a1e902524cd62ed80"
+ },
+ {
+  "chain": "p:5a5a5a5a-0000-4000-8000-000000000001",
+  "seq": 2,
+  "at": "2026-11-24T00:07:58.682247+13:00",
+  "actor": "agent@example.test",
+  "kind": "link_opened",
+  "offer_id": null,
+  "property_id": "5a5a5a5a-0000-4000-8000-000000000001",
+  "detail": {},
+  "body": "{\"at\": \"2026-11-23T11:07:58.682247Z\", \"seq\": 2, \"kind\": \"link_opened\", \"actor\": \"agent@example.test\", \"chain\": \"p:5a5a5a5a-0000-4000-8000-000000000001\", \"offer\": null, \"detail\": {}, \"property\": \"5a5a5a5a-0000-4000-8000-000000000001\"}",
+  "prev_hash": "6680857b2a46007b86bc5ac321b734e964038d750ce95f9a1e902524cd62ed80",
+  "hash": "35aac894b1ba958bc47f5688f87e8866a4d69ab46a3ef056a41086bb09cb38ec"
+ }
+]

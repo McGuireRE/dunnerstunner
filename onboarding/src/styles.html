@@ -757,6 +757,25 @@ table.sum.of-sum td:first-child, table.sum.of-dates td:first-child { width: 40%;
 .dr-items { padding-left: 22px; margin: 4px 0; }
 .dr-items > li { margin: 0 0 10px; }
 .dr-items input, .dr-items textarea { width: 100%; box-sizing: border-box; }
+/* purchaser signing (offers phase 3): the pages stay paper-white in both modes, like the signature pads */
+.sg-flow .card { overflow-wrap: anywhere; }
+.sg-steps { display: flex; flex-wrap: wrap; gap: 4px 10px; list-style: none; padding: 0; margin: 6px 0 10px; font-size: 14px; color: var(--muted); }
+.sg-steps li.on { color: var(--ink); font-weight: 600; } .sg-steps li.done { color: var(--ok); }
+.sg-count { margin: 4px 0; } .sg-bar { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; margin: 0 0 8px; } .sg-bar span { display: block; height: 100%; background: var(--ok); }
+.dr-box.sg-place { border-width: 2px; border-color: #C2410C; background: rgba(255, 196, 0, .38); min-width: 12px; min-height: 10px; display: flex; align-items: center; justify-content: center; overflow: visible; }
+.dr-box.sg-place::after { content: ''; position: absolute; left: 50%; top: 50%; width: max(100%, 30px); height: max(100%, 30px); transform: translate(-50%, -50%); }   /* a bigger target for a finger */
+.dr-box.sg-place.sg-done { border-color: #1E7A45; background: rgba(30, 122, 69, .10); cursor: default; }
+.dr-box.sg-place img { max-width: 100%; max-height: 100%; pointer-events: none; }
+.dr-box.sg-place .sg-name { font-size: 8px; color: #0d2973; white-space: nowrap; pointer-events: none; }
+.dr-box.sg-place:focus-visible { outline: 3px solid #1F5FBF; outline-offset: 2px; }
+.dr-box.sg-s2 { border-color: #1F5FBF; } .dr-box.sg-s3 { border-color: #7A3DB8; } .dr-box.sg-s4 { border-color: #1E7A45; }
+.sg-marks { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.sg-marks .sg-mark { pointer-events: auto; fill: none; stroke: #0d2973; stroke-width: 1.4; } .sg-marks text { fill: #0d2973; stroke: none; font: bold 7px sans-serif; }
+.sg-marks text.sg-ins { font-weight: normal; font-family: Helvetica, Arial, sans-serif; } .sg-marks text.ng-name { fill: #0d2973; font: 8px Helvetica, Arial, sans-serif; } .sg-marks image { pointer-events: none; }
+#ngInsText { flex: 1 1 180px; min-width: 0; }
+.sg-draw { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; cursor: crosshair; }
+.sg-marktools { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 6px 0; }
+.sig-wrap.sg-init { max-width: 260px; } .sig-wrap.sg-init canvas { height: 90px; }
 .pill.okp { background: var(--ok-soft); color: var(--ok-text, var(--ok)); }
 /* the portal (PORTAL-PLAN.md P1): the footer menu and the up link. These elements exist only in the portal. */
 .pnav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 7; background: var(--surface); border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom, 0px); }

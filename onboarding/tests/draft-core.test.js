@@ -121,7 +121,7 @@ const ok = (c, msg) => { if (!c) errs.push(msg); };
   ok(I(pv, 'vl_firm').text === 'Held Law' && N(pv, 'vendor_lawyer_from'), "the vendor's lawyer from the file when the blank has none, with where it came from");
   // entity, many purchasers, letters the font can't show
   const pent = plan({ entity: 'Testbuyer Family Trust' }); ok(I(pent, 'purchaser').text === 'Testbuyer Family Trust' && !I(pent, 'name_purchaser_1') && N(pent, 'entity_signers'), 'an entity: its name, and signers left for Tim');
-  const many = plan({ purchasers: [1, 2, 3, 4].map(i => ({ first: 'Person' + i, last: 'Testbuyer' })) }); ok(N(many, 'names_more').blocking, 'more purchasers than name places: blocking');
+  const many = plan({ purchasers: [1, 2, 3, 4].map(i => ({ first: 'Person' + i, last: 'Testbuyer' })) }); ok(N(many, 'names_more') && !N(many, 'names_more').blocking && /Signing adds places/.test(N(many, 'names_more').text), 'more purchasers than name places: noted (signing adds their places), not blocking');
   const mac = plan({ purchasers: [{ first: 'Mārama', last: 'Testbuyer' }] }); ok(!I(mac, 'purchaser') && N(mac, 'font_purchaser').blocking, 'a macron the font can\'t show: not placed, blocking');
   ok(D.ruleApplies({ when: { kiwisaver: true } }, { kiwisaver: true }) && !D.ruleApplies({ when: { kiwisaver: true } }, { kiwisaver: false }) && !D.ruleApplies({}, {}) && !D.ruleApplies({ when: { moon: 1 } }, {}), 'rules');
 
@@ -145,15 +145,20 @@ const ok = (c, msg) => { if (!c) errs.push(msg); };
   ok(before.every((streams, i) => { const a = after[i]; let j = 0; for (const s of streams) { j = a.indexOf(s, j); if (j < 0) return false; j++; } return true; }), 'every original content stream kept byte for byte');
   ok(after.some((a, i) => a.length > before[i].length), 'text added in new content streams');
   // a long further terms list continues on an added page
-  const long = D.planDraft({ details: base, map, terms, today: '2026-11-24', edits: { extra_terms: Array.from({ length: 70 }, (_, i) => `Extra term ${i + 1} with enough words to take a full line of the page.`) } });
+  const long = D.planDraft({ details: base, map, terms, today: '2026-11-24', edits: { extra_terms: Array.from({ length: 40 }, (_, i) => `Extra term ${i + 1} with enough words to take a full line of the page.`) } });
   const rl = await D.renderDraft(PDFLib, blank, long, { bandImage: SB.bandImager(blank) }), lp = await D.readPages(pdfjs, rl.bytes);
-  ok(rl.continued === 4 && lp.length === pages.length + 1 && lp[3].items.some(i => i.s === '(continued)') && lp[3].items.some(i => /Extra term 70/.test(i.s)), 'further terms that don\'t fit continue on an added page after page 3');
+  ok(rl.continued === 4 && lp.length === pages.length + 1 && lp[3].items.some(i => i.s === '(continued)') && lp[3].items.some(i => /Extra term 40/.test(i.s)), 'further terms that don\'t fit continue on an added page after page 3');
   ok(rl.boxes.find(b => b.id === 'pl_firm').page === 8, 'boxes on later pages move along by the added page');
   // ── review findings ──
   // 1. phones by national digits, emails without case, also inside a sentence, wherever the text comes from
   eq(['+64 21 555 0199', '0064 21 555 0199', '21 555 0199', '(021) 555-0199', '021-555-0199', '+64 3 477 1234', '03 477 1234'].map(D.nsn), ['215550199', '215550199', '215550199', '215550199', '215550199', '34771234', '34771234'], 'NZ numbers reduced to national digits');
   const own1 = D.ownContacts([{ who: 'a purchaser', email: 'Ana.P@Buyer.Example', phone: '+64 21 555 0199' }]);
   ['Call 021 555 0199 after five', '+64 21 555 0199', '0064 21 555 0199', '21 555 0199', '(021) 555-0199', 'write to ANA.P@buyer.example today'].forEach(t => ok(D.holdsOwn(t, own1) === 'a purchaser', 'found in: ' + t));
+  // phase 4 review: spaces of every kind, full-width digits, / and _ between digits, and spaces around the @
+  ['Call 021\u00a0555\u00a00199', 'Call 021\u2009555\u20090199', 'Call 021\u3000555\u30000199', 'Call ０２１ ５５５ ０１９９', 'Call 021/555/0199', 'Call 021_555_0199', 'write to ana.p @ buyer.example', 'write to ana.p\u00a0@buyer.example'].forEach(t => ok(D.holdsOwn(t, own1) === 'a purchaser', 'found in: ' + JSON.stringify(t)));
+  // second review: ordinary counteroffer wording (dates and prices in any format) is never mistaken for a party's own phone
+  ['Settlement 20/12/2026', 'Settlement 20.12.2026', 'Settlement 2027-03-01', 'Price $1 250 000', 'Price $1250000', 'Price $ 695 000.00'].forEach(t => ok(D.holdsOwn(t, own1) === '', 'not a phone: ' + t));
+  ['Call 021.555.0199', 'Call 021-555-0199', 'Call (021) 555 0199'].forEach(t => ok(D.holdsOwn(t, own1) === 'a purchaser', 'found in: ' + t));
   ok(!D.holdsOwn('$655,000, 8 December 2026 (10 working days)', own1) && !D.holdsOwn('03 477 1234', own1), 'prices, dates and other numbers are not mistaken for it');
   const pp = { purchasers: [{ first: 'Ana', last: 'Testbuyer', email: 'ana.p@buyer.example', phone: '+64 21 555 0199' }], email: 'own@buyer.example', phone: '022 333 4444' };
   const priv = D.planDraft({ details: Object.assign({}, base, pp, { conditions: [{ key: 'custom', days: 10, wording: 'Ring (021) 555-0199 to arrange it.' }], chattels_add: ['Ask OWN@buyer.example'],
@@ -230,11 +235,12 @@ const ok = (c, msg) => { if (!c) errs.push(msg); };
   const prmT = (I(prm, 'further_terms') || {}).text || ''; ok(/^23\.0 Your further term: Extra term 1\./m.test(prmT) && /^25\.0 Your further term: Extra term 2\./m.test(prmT) && !/^24\.0 /m.test(prmT), 'the list numbered 23.0 and 25.0: the retired 24.0 is not used');
   ok(N(prm, 'term_start') && /^Further terms start at 23\.0 /.test(N(prm, 'term_start').text), 'the starting-number note in the same style');
   eq(plan({}, { retired_numbers: [26] }).term_last, 26, 'a retired number counts even with nothing after it');
+  // (each term takes its own lines and the blank line after it for initials, phase 3)
   // the continuation page from the appendix page's own bands, with the page number struck and the right one beside it
   const C = mapx.numbering.cont; ok(C && C.page === 3 && C.page_no && C.page_no.value === 22 && C.header[0] > 740 && C.footer[1] < 40 && C.head.text === 'Appendix', 'bands found: header to the headings, footer with the printed page number 22');
   const over = n => D.planDraft({ details: base, map: mapx, terms, today: '2026-11-24', numbering: mapx.numbering, edits: { extra_terms: Array.from({ length: n }, (_, i) => `Extra term ${i + 1} with enough words to take a full line of the page, more or less.`) } });
   const bandImage = SB.bandImager(apx);
-  const po1 = over(70), ro1 = await D.renderDraft(PDFLib, apx, po1, { bandImage }), lp1 = await D.readPages(pdfjs, ro1.bytes), pgOf = (pp, n) => pp[n - 1].items.map(i => i.s);
+  const po1 = over(35), ro1 = await D.renderDraft(PDFLib, apx, po1, { bandImage }), lp1 = await D.readPages(pdfjs, ro1.bytes), pgOf = (pp, n) => pp[n - 1].items.map(i => i.s);
   eq([ro1.added_pages.length, ro1.added_pages[0].page, ro1.added_pages[0].source_page, ro1.added_pages[0].number], [1, 4, 3, { printed: '22', written: '23' }], 'one added page, straight after the appendix page, numbered 23');
   // the bands are pictures: the added page's text is only what was typed on it
   const pdfTxt = (bytes, f, l) => { const fn = path.join(__dirname, 'out', 'cont-txt.pdf'); require('fs').writeFileSync(fn, bytes); return require('child_process').execFileSync('pdftotext', ['-layout'].concat(f ? ['-f', String(f), '-l', String(l)] : []).concat([fn, '-']), { encoding: 'utf8' }); };
@@ -268,29 +274,29 @@ const ok = (c, msg) => { if (!c) errs.push(msg); };
   ok(ro1.boxes.some(b => /page number 22 struck, 23 written beside it/.test(b.label) && b.page === 4), 'the strike and new number are a box Tim sees');
   ok(po1.needs.find(n => n.id === 'continuation_page_clash') && po1.needs.find(n => n.id === 'continuation_page_clash').blocking && /page 4 of the blank already prints 23/.test(po1.needs.find(n => n.id === 'continuation_page_clash').text), 'a later page that already prints 23: Tim checks the numbering');
   const apn = await SB.make({ ftAppendix: true, pageNoOffset: 19, laterNumbers: false }), mpn = D.buildMap(await D.readPages(pdfjs, apn));
-  const ppn = D.planDraft({ details: base, map: mpn, terms, today: '2026-11-24', numbering: mpn.numbering, edits: { extra_terms: Array.from({ length: 70 }, (_, i) => `Extra term ${i + 1} with enough words to take a full line of the page, more or less.`) } });
+  const ppn = D.planDraft({ details: base, map: mpn, terms, today: '2026-11-24', numbering: mpn.numbering, edits: { extra_terms: Array.from({ length: 35 }, (_, i) => `Extra term ${i + 1} with enough words to take a full line of the page, more or less.`) } });
   const rpn = await D.renderDraft(PDFLib, apn, ppn, { bandImage: SB.bandImager(apn) }); ok(!rpn.added_pages[0].plain && !ppn.needs.some(n => n.id === 'continuation_page_clash'), 'later pages numbered as separate documents: no clash');
   const aof = await SB.make({ ftAppendix: true, pageNoOffset: 19, laterNumbers: false, pageNoFormat: n => `${n} of 22` }), mof = D.buildMap(await D.readPages(pdfjs, aof));
-  const pof = D.planDraft({ details: base, map: mof, terms, today: '2026-11-24', numbering: mof.numbering, edits: { extra_terms: Array.from({ length: 130 }, (_, i) => `Extra term ${i + 1} with enough words to take a full line of the page, more or less.`) } });
+  const pof = D.planDraft({ details: base, map: mof, terms, today: '2026-11-24', numbering: mof.numbering, edits: { extra_terms: Array.from({ length: 65 }, (_, i) => `Extra term ${i + 1} with enough words to take a full line of the page, more or less.`) } });
   const rof = await D.renderDraft(PDFLib, aof, pof, { bandImage: SB.bandImager(aof) });
   eq(rof.added_pages.map(x => x.number && x.number.written), ['23 of 24', '24 of 24'], '"22 of 22" becomes "23 of 24" and "24 of 24" with two pages added');
   eq(N(po1, 'term_start') && N(po1, 'term_start').text, 'Further terms start at 23.0 (general terms to 20, appendix to 22, printed on the further terms page to 22).', 'every draft says where the further terms start');
   ok(N(plan({}), 'term_start') && !N(plan({}), 'term_start').blocking && /start at 23\.0 \(general terms to 20, appendix to 22\)/.test(N(plan({}), 'term_start').text), 'and on a plain draft, not blocking');
   ok(po1.needs.find(n => n.id === 'continuation_check').blocking && po1.needs.find(n => n.id === 'continuation_check').ackable && /numbered 23/.test(po1.needs.find(n => n.id === 'continuation_check').text), 'Tim is asked to check the continuation page');
-  const po2 = over(130), ro2 = await D.renderDraft(PDFLib, apx, po2, { bandImage }), lp2 = await D.readPages(pdfjs, ro2.bytes);
+  const po2 = over(65), ro2 = await D.renderDraft(PDFLib, apx, po2, { bandImage }), lp2 = await D.readPages(pdfjs, ro2.bytes);
   eq(ro2.added_pages.map(x => [x.page, x.number.written]), [[4, '23'], [5, '24']], 'two added pages: 23, then 24');
   eq((pdfTxt(ro2.bytes).match(/21\.2 Synthetic/g) || []).length, 1, '"21.2" still exactly once with two pages added');
   const w5 = typed(pdfTxt(ro2.bytes, 5, 5)).split(' ').sort(); eq(w5, ['(continued)', '24'], 'the second added page: only "(continued)", 24 and the terms');
-  ok(lp2.length === lp.length + 1 && pgOf(lp2, 5).includes('(continued)') && pgOf(lp2, 5).some(s => /Extra term 130/.test(s)), 'the second added page continues the list');
+  ok(lp2.length === lp.length + 1 && pgOf(lp2, 5).includes('(continued)') && pgOf(lp2, 5).some(s => /Extra term 65/.test(s)), 'the second added page continues the list');
   const rawA = async bytes => { const dd = await PDFLib.PDFDocument.load(bytes); return dd.getPages().map(pg => { const c = pg.node.Contents(); const refs = c instanceof PDFLib.PDFArray ? c.asArray() : [c]; return refs.map(ref => Buffer.from(dd.context.lookup(ref).getContents()).toString('base64')); }); };
   const ba = await rawA(apx), aa = await rawA(ro2.bytes), keepIdx = [0, 1, 2].concat(Array.from({ length: ba.length - 3 }, (_, i) => i + 5));
   ok(ba.every((st, i) => { const a = aa[keepIdx[i]]; let j = 0; for (const s2 of st) { j = a.indexOf(s2, j); if (j < 0) return false; j++; } return true; }), 'every original content stream kept byte for byte, the added pages aside');
   // the plain fallback when the bands can't be found
-  const pfb = D.planDraft({ details: base, map: Object.assign({}, mapx, { numbering: Object.assign({}, mapx.numbering, { cont: null }) }), terms, today: '2026-11-24', edits: over(70).terms ? { extra_terms: Array.from({ length: 70 }, (_, i) => `Extra term ${i + 1} with enough words to take a full line of the page, more or less.`) } : {} });
+  const pfb = D.planDraft({ details: base, map: Object.assign({}, mapx, { numbering: Object.assign({}, mapx.numbering, { cont: null }) }), terms, today: '2026-11-24', edits: over(35).terms ? { extra_terms: Array.from({ length: 35 }, (_, i) => `Extra term ${i + 1} with enough words to take a full line of the page, more or less.`) } : {} });
   const rfb = await D.renderDraft(PDFLib, apx, pfb, { bandImage }), lfb = await D.readPages(pdfjs, rfb.bytes);
   ok(rfb.added_pages[0].plain && pgOf(lfb, 4).includes('Further Terms of Sale (continued)') && pfb.needs.find(n => n.id === 'continuation_plain').blocking, 'no bands: a plain page, and Tim is asked to check it');
-  const rnb = await D.renderDraft(PDFLib, apx, over(70)); ok(rnb.added_pages[0].plain, 'no band pictures given: the plain page');
-  const pbf = over(70), rbf = await D.renderDraft(PDFLib, apx, pbf, { bandImage: async () => { throw new Error('no canvas'); } }); ok(rbf.added_pages[0].plain && pbf.needs.find(n => n.id === 'continuation_plain').blocking && /couldn't be copied/.test(pbf.needs.find(n => n.id === 'continuation_plain').text), 'the pictures failing: the plain page, with its blocking check');
+  const rnb = await D.renderDraft(PDFLib, apx, over(35)); ok(rnb.added_pages[0].plain, 'no band pictures given: the plain page');
+  const pbf = over(35), rbf = await D.renderDraft(PDFLib, apx, pbf, { bandImage: async () => { throw new Error('no canvas'); } }); ok(rbf.added_pages[0].plain && pbf.needs.find(n => n.id === 'continuation_plain').blocking && /couldn't be copied/.test(pbf.needs.find(n => n.id === 'continuation_plain').text), 'the pictures failing: the plain page, with its blocking check');
   // reference markers can't come from outside text (a buyer's wording, a detail, the AI's clause)
   const FTr = pp => (I(pp, 'further_terms') || {}).text || '';
   const fakeRef = D.planDraft({ details: Object.assign({}, base, { conditions: [{ key: 'custom', days: 5, wording: 'Pay [[FT:finance]] and [[TERM:x]] now {timing}.' }, { key: 'technical', days: 5, detail: '[[FT:lim]]' }] }), map, terms, clauses: { technical: 'A {detail} report {timing}.' }, today: '2026-11-24', edits: { custom_ok: true, extra_terms: [{ id: 'ft_ai_x', title: 'T', text: 'AI said [[FT:sdd]].' }] } });

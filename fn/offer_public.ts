@@ -6,14 +6,14 @@
 // Deployed like the others: a tiny index.ts imports this file's raw GitHub URL pinned to a commit, as `offer-public`.
 // Action "draft" (help wording a buyer's own condition) uses makeDraft with prefill_shared.ts's callAnthropic and logAiCall, so the
 // model call and its ai_calls row live in the shared module. Email goes to Tim only.
-import { admin, APP_URL, cors, esc, money, sendMail, TIM_EMAIL, wrap } from "./shared.ts";
+import { admin, APP_URL, corsApp, esc, money, sendMail, TIM_EMAIL, wrap } from "./shared.ts";
 import { makeDraft, makeHandler } from "./offer_public_handler.ts";
 import { callAnthropic, logAiCall } from "./prefill_shared.ts";
 
 const CONDITION_NAMES: Record<string, string> = { builders: "Builder's report", finance: "Finance", lim: "LIM", lawyer: "Lawyer's approval", electrical: "Electrical report", technical: "Specified technical report", toxicology: "Toxicology report", oia: "OIA consent", land_act: "Land Act consent", sale: "Sale of another property", sdd: "Specified Due Diligence", custom: "Their own condition (to approve)" };
 
 Deno.serve(makeHandler({
-  cors,
+  cors: corsApp,   // only the onboarding pages at packages.dunnerstunner.co.nz call this
   rpc: async (fn, args) => { const { data, error } = await admin().rpc(fn, args); return { data, error: error ? { message: error.message } : null }; },
   draft: makeDraft({
     rpc: async (fn, args) => { const { data, error } = await admin().rpc(fn, args); return { data, error: error ? { message: error.message } : null }; },

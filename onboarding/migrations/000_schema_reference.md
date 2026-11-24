@@ -269,3 +269,41 @@ agreements/<agreement id>/signatures/... (vendors may upload their own signature
   term_order entries (ids), items (id keys, text up to 4,000) and custom_wording.
 - `agent_offer_correct(offer, details, note, expected)`: 018's correction, refused unless the offer's details are still `expected`
   (checked under the row lock). For corrections from the review screen.
+
+## 023 Purchaser signing (offers phase 3, built as 020, 24 November 2026; tested in a rollback block on a local PostgreSQL stand-in, NOT yet on the live project)
+- `offer_events` gains `chain` (the offer id, or `p:` and the property id), `seq`, `prev_hash`, `body` (the exact text fingerprinted) and
+  `hash` = SHA-256 of prev_hash, a new line and body, set by the `offer_event_chain` trigger. Earlier events have none. `offer_chain_verify`.
+- `offer_hits` kind check widened: also 'sign_code' and 'sign_try' (per-network limits on emailing and typing signing codes).
+- `offer_signings` (draft, method in_person or link, pages, places and their SHA-256, cca_pages, status ready, signing, held, complete,
+  locked, replaced or cancelled; one live signing per draft). `offer_signers` (per purchaser: name and own email from the draft's details; token, code and session as
+  fingerprints only, never readable by signed-in users; consent, drawn signature and initials, ID type, witness, finished, seen_sha256,
+  user agent, network fingerprint, void). `offer_sign_taps`, `offer_sign_receipts` (cca, sale_purchase), `offer_sign_marks` (note,
+  strike, cross, reinstate), `offer_sign_reviews`, `offer_sign_asks`, `offer_rounds` (Round 1: path, server-confirmed SHA-256, execution
+  record, chain_last). Agent read only; nothing written directly; signings and signers change only through the functions; everything
+  else never changes; no table can be emptied; vendors and anon see nothing.
+- Tim: `agent_signing_release`, `agent_signing_start`, `agent_signing_consent`, `agent_signing_receipt`, `agent_signing_marks`,
+  `agent_signing_tap`, `agent_signing_finish` (ID type, or known_to_tim), `agent_signing_mark`, `agent_signing_review`,
+  `agent_signing_cancel` (change the method before anyone starts), `agent_offer_chain_check`.
+  Service role (offer-sign): `offer_sign_issue`, `offer_sign_open`, `offer_sign_code`, `offer_sign_verify`, `offer_sign_state`,
+  `offer_sign_consent`, `offer_sign_receipt`, `offer_sign_marks`, `offer_sign_tap`, `offer_sign_ask`, `offer_sign_finish`,
+  `offer_round_material`, `offer_round_lock`.
+
+## 024 Presentation and counteroffers (offers phase 4, built as 021, 24 November 2026; tested in a rollback block on a local PostgreSQL stand-in, NOT yet on the live project)
+- `offer_documents` (offer, number, draft and its sha256, status open, closed or agreed, closed_at/by/reason, agreed_at; one open per
+  offer; changed only from open through the functions). Made when a Round 1 locks. `offer_agreements` (offer unique, document, round,
+  path, sha256, size, agreement_date, date_text, accepted_at, record, chain_last, confirmed_by): never changed or removed.
+- `offer_signings` gain round_no, side (purchaser or vendor), document_id, base_round_id (one live signing per draft and round).
+  `offer_signers` gain person_id. `offer_rounds` gain document_id, doc_round, side, base_round_id, changes, lifted, outstanding (number
+  keeps counting for the offer). `offer_sign_marks.kind` may be 'insert'; `offer_sign_receipts.guide` may be 'chattels'.
+- Tim: `agent_round_present(offer, method, places, checked, note)`, `agent_round_change(signer, id, kind, page, geometry, target, places)`,
+  `agent_offer_layers(offer, document)`, `agent_document_close(offer, reason)`, `agent_negotiation_withdraw(offer, side, at, note)`;
+  `agent_offer_status` now stops signings in progress. Service role (offer-sign): `offer_sign_change`, `offer_agreement_material`,
+  `offer_agreement_lock`; `offer_round_material` and `offer_round_lock` serve every round. Vendors: no policy and no agent function.
+- After review: `offer_signings.status` may be 'withdrawn' (a side withdrew or declined). `offer_sign_reviews` gains `kind` (review or
+  change) and `changed_by`; `reviewed_by` is for Tim's re-approvals only. `offer_hits.kind` may be 'sign_change'. `offer_settings` gains
+  `resign_every_round` (default false; `agent_offer_negotiation_setting`). `offer_agreements` gains `round_sha256`, `draw_version` and
+  `terms` (the agreed terms for later phases). `agent_offer_correct` refuses once agreed. `offer_private_hit` also checks
+  `agreement_people`. Withdrawing, declining or lapsing closes the open document.
+- Tim's answers: `offer_settings.link_changes_default` (default true; `agent_offer_link_changes_default`) and `offer_signings.link_changes`
+  (set when Tim presents a round, `agent_round_present(..., p_link_changes)`); `offer_sign_change` refuses when it is off.
+

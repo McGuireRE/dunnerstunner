@@ -1,4 +1,5 @@
--- A minimal Supabase-like stand-in for testing migrations on a local PostgreSQL 16 (never the live project). Used for 019:
+-- A minimal Supabase-like stand-in for testing migrations on a local PostgreSQL 16 (never the live project). Used for 019 to 021
+-- (property_people.phone added for 021's privacy check, as the live table has it):
 --   psql -f tests/pg-standin.sql, then 010, 016 (part A), 018 as the migrations are written, then the rollback block.
 -- Roles anon, authenticated and service_role; auth.jwt() from request.jwt.claims; pgcrypto in extensions; storage.objects
 -- with the size and type in metadata; the few tables and helpers the offer migrations build on.
@@ -15,9 +16,9 @@ grant execute on all functions in schema extensions to anon, authenticated, serv
 create table public.agents (email text, name text, created_at timestamptz default now());
 insert into public.agents (email) values ('agent@example.test');
 create table public.properties (id uuid primary key default gen_random_uuid(), address text, stage text default 'appraisal', cycle_at timestamptz, created_at timestamptz default now(), updated_at timestamptz default now());
-create table public.property_people (id uuid primary key default gen_random_uuid(), property_id uuid references public.properties(id), position int, legal_name text, email text, user_id uuid, role text default 'owner');
+create table public.property_people (id uuid primary key default gen_random_uuid(), property_id uuid references public.properties(id), position int, legal_name text, email text, phone text not null default '', user_id uuid, role text default 'owner');
 create table public.agreements (id uuid primary key default gen_random_uuid(), property_id uuid, status text default 'draft', created_at timestamptz default now());
-create table public.agreement_people (id uuid primary key default gen_random_uuid(), agreement_id uuid, user_id uuid);
+create table public.agreement_people (id uuid primary key default gen_random_uuid(), agreement_id uuid, user_id uuid, legal_name text, email text, phone text);
 create table public.property_inspections (id uuid primary key default gen_random_uuid(), property_id uuid);
 create table public.property_documents (id uuid primary key default gen_random_uuid(), property_id uuid not null references public.properties(id) on delete cascade, kind text, name text not null, path text not null,
   source text not null default 'dropped' check (source in ('dropped','uploaded','generated')), read_result jsonb, created_by text, created_at timestamptz not null default now());

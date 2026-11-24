@@ -258,4 +258,6 @@ Condition timing, further terms numbering and the review screen (Tim, 24 Novembe
 021 (built as 022; local stand-in only), offer-draft gains `write_clause`, offer-public's helper writes {timing}. LIVE 24 November 2026 (NZ): rollback block passed on the live project (no capitals); applied as `021_offer_condition_timing`, plus `022_tighten_table_privileges` (Tim approved); main dae98d6; offer-draft (JWT on) and offer-public (JWT off) pinned to dae98d6; Tim's electrical, technical and sale wording now use {timing}. See `OFFERS-PLAN.md`.
 Tests: `offers-core.test.js`, `draft-core.test.js`, `offers.test.js`, `offers-draft.test.js`, `offer-public-fn.test.js`,
 `offer-draft-fn.test.js`; database: `offer-timing-rollback.sql` (via `offer-timing-rollback.js`).
-
+Phase 3 (purchaser signing) built 24 November 2026 on branch `offers-phase3`: migration 023 (built as 020; tested in a rollback block on a local
+PostgreSQL stand-in only), edge function `offer-sign` (new; JWT off, token checked). Awaiting review. Tests: `offers-sign.test.js`,
+`sign-core.test.js`, `offer-sign-fn.test.js`; database: `offer-sign-rollback.sql` (via `offer-sign-rollback.js`). See `OFFERS-PLAN.md`, "Phase 3 detail".

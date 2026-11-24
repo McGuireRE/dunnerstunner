@@ -2799,10 +2799,10 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       ${named.some(p => !p.signed_at) ? `<div class="card note"><h3>Or let them sign on their own phones</h3><p class="small">They'll get a link, check what you've filled in together, and sign in their own time. Anyone who's already signed here stays signed.</p><div class="toolbar"><button class="btn ghost" type="button" id="tSendPhones">Send to sign on their phones</button></div></div>` : ''}
       <div id="tDone"></div>`;
   }
-  function makePad(cv) {
+  function makePad(cv, hPx) {
     if (!cv) return null;
     const dpr = window.devicePixelRatio || 1, r = cv.getBoundingClientRect();
-    cv.width = Math.max(1, r.width * dpr); cv.height = 150 * dpr;
+    cv.width = Math.max(1, r.width * dpr); cv.height = (hPx || 150) * dpr;
     const ctx = cv.getContext('2d'); ctx.scale(dpr, dpr); ctx.lineWidth = 2.2; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = '#1a1a1a';
     let drawing = false, last = null, drawn = false;
     const pos = e => { const b = cv.getBoundingClientRect(); return { x: e.clientX - b.left, y: e.clientY - b.top }; };
@@ -5997,7 +5997,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <div class="toolbar no-print"><button class="btn ghost" type="button" id="ofBackP">Back to the property</button></div>
       <span class="agent-flag">Only you see this</span>
       <h1>${esc(money(+o.amount))} offer</h1>
-      <p>${nt(p.address)}<br><span class="small">${o.source === 'agent' ? 'Entered by you' : 'From the offer form'}, ${esc(fmtDT(o.received_at))}</span>${off ? ` <span class="pill of-off">${o.status === 'withdrawn' ? 'Withdrawn' : 'Lapsed'} ${esc(fmtDT(o.status_at))}</span>` : ''}</p>
+      <p>${nt(p.address)}<br><span class="small">${o.source === 'agent' ? 'Entered by you' : 'From the offer form'}, ${esc(fmtDT(o.received_at))}</span>${off ? ` <span class="pill of-off">${o.status === 'withdrawn' ? 'Withdrawn' : 'Lapsed'} ${esc(fmtDT(o.status_at))}</span>` : o.status === 'declined' ? ` <span class="pill of-off">Declined by the vendors ${esc(fmtDT(o.status_at))}</span>` : ''}</p>
       ${o.related_party ? `<div class="card warnc of-related" role="alert"><h3 style="margin:0 0 4px">Connected to you</h3><p class="small" style="margin:0">The buyer says a purchaser is related to, or connected with, you or McGuire Real Estate. Deal with this before you go any further with the offer.</p></div>` : ''}
       ${o.suspected_spam ? '<div class="card warnc tight of-spamflag"><p class="small" style="margin:0"><strong>Possible spam.</strong> It was sent with the form\'s hidden field filled in, which is usually a robot. You weren\'t emailed about it.</p><div class="toolbar"><button class="btn ghost" type="button" id="ofNotSpam">Not spam: treat it as a real offer</button></div></div>' : ''}
       ${o.needs_date_help ? '<div class="card note tight of-helpflag"><p class="small" style="margin:0">They asked for your help with the dates.</p></div>' : ''}
@@ -6025,7 +6025,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     </div>`;
     $('#ofBackP').addEventListener('click', () => viewProperty(o.property_id));
     $('#ofFix').addEventListener('click', () => viewOfferCorrect(oid));
-    drOfferWire(o);
+    drOfferWire(o); ngOfferWire(o, p);
     const ns = $('#ofNotSpam'); if (ns) ns.addEventListener('click', async () => { ns.disabled = true; try { await must(sb.rpc('agent_offer_not_spam', { p_offer: oid })); toast('Moved to the offers list as a new offer'); viewProperty(o.property_id); } catch (_) { ns.disabled = false; } });
     const go = async (fn, args, errBox) => { try { await must(sb.rpc(fn, args)); viewOfferAgent(oid); } catch (e) { if (errBox) $(errBox).textContent = e.message || 'That didn\'t save.'; } };
     const gk = $('#ofGapOk'); if (gk) gk.addEventListener('click', () => { const r = $('#ofGapWhy').value.trim(); if (r.length < 5) return $('#ofGapErr').textContent = 'Give your reason.'; go('agent_offer_gap', { p_offer: oid, p_reason: r }, '#ofGapErr'); });
@@ -6037,7 +6037,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   // the property's Offers tile (agent only)
   async function offersLoad(pid) {
     const [lk, ofs, wd] = await Promise.all([ofSafe(sb.from('offer_links').select('*').eq('property_id', pid)), ofSafe(sb.from('property_offers').select('*').eq('property_id', pid).order('received_at', { ascending: false })), ofWording()]);
-    return { link: (lk || [])[0] || null, offers: (ofs || []).filter(o => o.source && o.source !== 'manual'), ks: await ofKs(), wording: wd, blanks: await drLoadBlanks(pid) };
+    const ng = ((await ofSafe(sb.from('offer_settings').select('resign_every_round,link_changes_default'))) || [])[0] || {};
+    return { link: (lk || [])[0] || null, offers: (ofs || []).filter(o => o.source && o.source !== 'manual'), ks: await ofKs(), wording: wd, blanks: await drLoadBlanks(pid), ng };
   }
   function ofRowHTML(o, X) {
     const d = o.details || {}, chk = OF.checkDates(d, { asAt: o.as_at, province: o.province, ksDays: X.ks }), L = OF.longDate;
@@ -6071,6 +6072,9 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         <label class="f" for="offProv">Holidays for counting working days</label><select id="offProv">${Object.entries(OF.PROVINCES).map(([k, v]) => `<option value="${k}" ${prov === k ? 'selected' : ''}>${esc(v.name)}</option>`).join('')}</select>
         <label class="f" for="offKs">KiwiSaver warning when settlement is fewer than this many working days after unconditional <span class="opt">(every property)</span></label>
         <div class="toolbar"><input type="number" id="offKs" min="1" max="60" value="${X.ks}" style="max-width:100px"><button class="btn ghost" type="button" id="offKsSave">Save</button></div>
+        <p class="small" style="margin:10px 0 4px"><strong>Negotiation</strong> <span class="opt">(every property)</span></p>
+        <label class="choice cb"><input type="checkbox" id="offNgLink" ${X.ng.link_changes_default !== false ? 'checked' : ''}><span class="mark"></span><span><span class="ct">Let the other side make changes from their link</span><span class="cd">The starting choice when you present a round; you can change it each time</span></span></label>
+        <label class="choice cb"><input type="checkbox" id="offNgResign" ${X.ng.resign_every_round ? 'checked' : ''}><span class="mark"></span><span><span class="ct">Everyone signs again every round</span><span class="cd">Off: a signature stands unless a change lifts it</span></span></label>
         <p class="small" style="margin:10px 0 4px"><strong>Your own clause wording</strong> <span class="opt">(every property; buyers see it when they tap the condition)</span></p>
         ${['electrical', 'technical', 'sale', 'sdd'].map(k => `<label class="f" for="offW_${k}">${esc(OF.condInfo(k).label)}</label><textarea id="offW_${k}" rows="3" maxlength="4000" data-offw="${k}">${esc(X.wording[k] || '')}</textarea>`).join('')}
         <div class="toolbar"><button class="btn ghost" type="button" id="offWSave">Save wording</button></div></details></div>`;
@@ -6090,6 +6094,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       box.hidden = false; $('#offQrPrint').addEventListener('click', () => { document.body.classList.add('print-qr'); window.print(); setTimeout(() => document.body.classList.remove('print-qr'), 500); }); });
     $$('[data-offer]').forEach(b => b.addEventListener('click', () => viewOfferAgent(b.dataset.offer)));
     on('#offChSave', async () => { try { const items = $('#offCh').value.split('\n').map(x => x.trim()).filter(Boolean); await must(sb.rpc('agent_offer_chattels', { p_property: pid, p_items: items })); toast('Chattels saved'); viewProperty(pid); } catch (_) { } });
+    on('#offNgLink', async e => { try { await must(sb.rpc('agent_offer_link_changes_default', { p_on: e.target.checked })); toast('Saved'); } catch (_) { e.target.checked = !e.target.checked; } }, 'change');
+    on('#offNgResign', async e => { try { await must(sb.rpc('agent_offer_negotiation_setting', { p_resign_every_round: e.target.checked })); toast('Saved'); } catch (_) { e.target.checked = !e.target.checked; } }, 'change');
     on('#offKsSave', async () => { try { await must(sb.rpc('agent_offer_settings', { p_ks_days: +$('#offKs').value })); toast('Saved'); } catch (_) { } });
     drTileWire(p, X);
     on('#offWSave', async () => { try { for (const t of $$('[data-offw]')) { const k = t.dataset.offw; if ((X.wording[k] || '') !== t.value.trim()) { await must(sb.rpc('agent_offer_clause', { p_key: k, p_wording: t.value.trim() || null })); X.wording[k] = t.value.trim(); } } toast('Wording saved'); } catch (_) { } });
@@ -6404,6 +6410,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <p class="small err" id="drDraftErr" role="alert"></p>
       ${drafts.length ? `<ul class="dr-list" id="drDrafts">${drafts.map((x, i) => { const ap = apps.find(a => a.draft_id === x.id); const nb = (x.needs || []).filter(n => n.blocking).length;
         return `<li><button class="of-row" type="button" data-draft="${x.id}"><span class="of-r1"><strong>Draft ${x.number}</strong>${i === 0 ? ' <span class="pill">Newest</span>' : ''}${ap ? ' <span class="pill okp">Approved</span>' : nb ? ` <span class="pill of-warnp">${nb} need${nb === 1 ? 's' : ''} you</span>` : ''}</span><span class="small">${esc(fmtDT(x.created_at))} · <span translate="no">${esc(drShort(x.sha256))}</span>${x.note ? ' · ' + esc(x.note) : ''}</span></button></li>`; }).join('')}</ul>` : ''}
+      ${await sgOfferHTML(o)}
+      ${await ngOfferHTML(o)}
       <label class="f" for="drAgDate">Date of the agreement</label><input type="text" id="drAgDate" disabled placeholder="Added once fully agreed" aria-describedby="drAgDateNote"><p class="small" id="drAgDateNote" style="margin:2px 0 0">Added once fully agreed. You type it in full, with the month name.</p>
       <h3 style="margin:14px 0 4px">The purchaser's lawyer</h3>
       <p class="small" style="margin:0">${law.firm || law.person ? esc([law.person, law.firm].filter(Boolean).join(', ')) : 'No lawyer named yet.'}${law.email ? ' · ' + esc(law.email) : ''}${law.phone ? ' · ' + esc(law.phone) : ''}</p>
@@ -6414,6 +6422,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const b = $('#drDraftBtn'); if (b) b.addEventListener('click', async () => { b.disabled = true; $('#drDraftErr').textContent = 'Drafting...'; try { const id = await drMakeDraft(o.id, null, null); viewDraftReview(id); } catch (e) { $('#drDraftErr').textContent = e.message || 'That didn\'t draft.'; b.disabled = false; } });
     $$('[data-draft]').forEach(x => x.addEventListener('click', () => viewDraftReview(x.dataset.draft)));
     const lb = $('#drLawBtn'); if (lb) lb.addEventListener('click', () => drLawLookup(o));
+    $$('[data-signing]').forEach(x => x.addEventListener('click', () => viewSigning(x.dataset.signing)));
   }
   async function drLawLookup(o) {
     const box = $('#drLaw'), law = (o.details || {}).lawyer || {}; box.innerHTML = '<p class="small">Looking on public pages (the firm\'s website and the Law Society)...</p>';
@@ -6466,10 +6475,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const up = await sb.storage.from('property-files').upload(pth, new Blob([r.bytes], { type: 'application/pdf' }), { contentType: 'application/pdf', upsert: false });
     if (up.error && !/exists/i.test(up.error.message || '')) throw new Error('The draft didn\'t save. Check you have signal, then try again.');
     await drConfirm(pth, sha);
-    const placed = plan.items.map(it => { const bx = r.boxes.filter(x => x.id === it.id || x.id.startsWith(it.id + '_cont'));
-      return { id: it.id, label: it.label, kind: it.kind, text: it.text || null, value: it.value || null, placeholder: !!it.placeholder, edited: !!it.edited, terms: it.terms, number_style: it.number_style || undefined, mark: it.mark || undefined, who: it.who || undefined, moved: it.moved || undefined, boxes: bx.map(x => ({ page: x.page, x: Math.round(x.x * 10) / 10, y: Math.round(x.y * 10) / 10, w: Math.round(x.w * 10) / 10, h: Math.round(x.h * 10) / 10 })) }; })
-      // each page added for the further terms, with the page it was made from and the bands used (the draft's fingerprint covers it)
-      .concat((r.added_pages || []).map((ap, i) => ({ id: 'added_page_' + (i + 1), label: `Page added after page ${ap.source_page}${ap.number ? `, numbered ${ap.number.written}` : ' (plain)'}`, kind: 'page', page: ap.page, source_page: ap.source_page, bands: ap.bands, number: ap.number, plain: !!ap.plain, boxes: [] })));
+    // what was placed, where (with Tim's drawn boxes, moved places and each page added for the further terms): DR.placedFrom
+    const placed = DR.placedFrom(plan, r);
     const res = await must(sb.rpc('agent_draft_add', { p_offer: oid, p_map: map.id, p_path: pth, p_sha256: sha, p_size: r.bytes.length, p_placed: placed, p_needs: plan.needs, p_edits: Object.assign({}, edits || {}, { date_format: plan.date_format, retired_numbers: plan.retired_numbers, term_last: plan.term_last }), p_note: note || null }));
     DR_CACHE['draft-' + res.id] = { bytes: r.bytes };
     return res.id;
@@ -6570,7 +6577,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <div class="toolbar no-print"><button class="btn ghost" type="button" id="drRvBack">Back to the offer</button></div><span class="agent-flag">Only you see this</span>
       <h1>Draft ${d.number} of the agreement</h1>
       <p class="lede">${nt(p.address)}</p><p class="small">For ${esc(o.buyer_ref || 'the buyer')}, ${esc(money(+o.amount))}. Made ${esc(fmtDT(d.created_at))}. Draft fingerprint <span translate="no">${esc(drShort(d.sha256))}</span>, on the blank <span translate="no">${esc(drShort(d.blank_sha256))}</span>.</p>
-      ${ap ? `<div class="card okc tight" id="drApproved"><p class="small" style="margin:0"><strong>Approved</strong> by ${esc(ap.approved_by)}, ${esc(fmtDT(ap.approved_at))}. Fingerprint <span translate="no">${esc(drShort(ap.sha256))}</span>. Signing comes next (not built yet).</p></div>` : ''}
+      ${ap ? `<div class="card okc tight" id="drApproved"><p class="small" style="margin:0"><strong>Approved</strong> by ${esc(ap.approved_by)}, ${esc(fmtDT(ap.approved_at))}. Fingerprint <span translate="no">${esc(drShort(ap.sha256))}</span>.</p>${newest && !stale ? `<div class="toolbar"><button class="btn primary" type="button" id="sgReady">Ready to sign</button></div>` : ''}</div>` : ''}
       ${!newest ? '<div class="card warnc tight" id="drNotNewest"><p class="small" style="margin:0">There is a newer draft of this offer. This one is kept as it was.</p></div>' : ''}
       ${changed && newest ? `<div class="card warnc tight" id="drChanged"><p class="small" style="margin:0">The offer has been corrected since this draft. Re-draft it so the agreement matches${ap ? '' : '; this draft can\'t be approved'}.</p></div>` : ''}
       ${(newerMap || newerBlank) && !ap ? `<div class="card warnc tight" id="drStaleBlank"><p class="small" style="margin:0">${newerBlank ? 'A newer agreement blank has been loaded' : 'The places on the blank have been approved again'} since this draft. ${newerBlank ? 'Approve its places, then re-draft' : 'Re-draft'}; this draft can't be approved.</p></div>` : ''}
@@ -6641,6 +6648,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       const order = $$('#drTermList [data-term]').map(li => li.dataset.term); if (order.length) ed.term_order = order;
       if (MK.marks.length) ed.marks = MK.marks; if (Object.keys(MK.moves).length) ed.moves = MK.moves; return ed; };
     $('#drRvBack').addEventListener('click', () => viewOfferAgent(d.offer_id));
+    const sr = $('#sgReady'); if (sr) sr.addEventListener('click', () => viewSignRelease(did));
     $('#drRedraft').addEventListener('click', () => go(collect(), $('#drNote').value.trim() || 'Re-drafted with your changes'));
     const rc = $('#drRedraftChange'); if (rc) rc.addEventListener('click', () => go(carry(), $('#drNote').value.trim() || 'Re-drafted after a change'));
     // line the conditions up from here: a correction to the offer (so the checks and the record follow), then a new draft
@@ -6789,6 +6797,624 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       });
     }
     top();
+  }
+
+  // ── Purchaser signing (offers phase 3) ──
+  // Tim taps "Ready to sign" on an approved draft. The signing places are made from the draft and its map with no set-up
+  // (SIGN.makePlaces): each purchaser initials the foot of every page, every box the draft filled or marked and each further term,
+  // and signs in the signature block, plus any acknowledgement Tim kept; the date at the top stays blank. He chooses in person on
+  // his device, one purchaser at a time, or a personal link to each (nothing is sent until he taps Send). Each signer agrees to sign
+  // electronically, receipts the Client and Customer Acknowledgement and the REA sale and purchase guide, draws their signature and
+  // initials once, and taps every place themselves (no "apply to all"). On Tim's screen a purchaser may mark the page (a note, a line
+  // through text, a crossed-out box, a reinstatement); any mark holds signing until Tim re-approves, and every purchaser then
+  // initials it. Link signers ask Tim for a change instead. When the last purchaser finishes, the server makes Round 1 (the draft,
+  // the signatures, initials and marks on top, and the execution record on a page at the end) and locks it. Vendors see none of it.
+  const SG = window.SIGN;
+  const SG_ID = [['nz_driver_licence', 'NZ driver licence'], ['passport', 'Passport'], ['nz_firearms_licence', 'NZ firearms licence'], ['kiwi_access_card', 'Kiwi Access Card'], ['other_photo_id', 'Other photo ID'], ['known_to_tim', 'Known to Tim personally']];
+  const SG_STATUS = { ready: 'Ready, nothing sent yet', signing: 'Signing', held: 'Waiting for you to check a change', complete: 'Everyone has signed', locked: 'Locked', replaced: 'Replaced by a newer draft', cancelled: 'Stopped', withdrawn: 'Stopped: withdrawn or declined' };
+  const SG_COLS = 'id,signing_id,position,name,email,link_sent_at,link_expires_at,opened_at,verified_at,consent_at,marks_at,id_sighted,witnessed_by,finished_at,seen_sha256,void_at';
+  const SG_WHY = { foot: 'the foot of each page', filled: 'beside each box filled or marked', term: 'beside each further term', block: 'the signature block', ack: 'acknowledgements you kept', mark: 'beside each mark' };
+  // a database call whose refusal is shown in plain words on the page (not as an error)
+  async function sgRpc(fn, args) { const { data, error } = await sb.rpc(fn, args); if (error) throw new Error(error.message || 'That didn\'t save.'); return data; }
+  const sgDot = s => s ? `<span class="pill ${s === 'locked' ? 'okp' : ['replaced', 'cancelled', 'withdrawn'].includes(s) ? 'of-off' : s === 'held' ? 'of-warnp' : ''}">${esc(SG_STATUS[s] || s)}</span>` : '';
+  // the signer's drawing, cropped to what they drew, as a PNG
+  function sgPng(cv) {
+    const g = cv.getContext('2d'), w = cv.width, h = cv.height, px = g.getImageData(0, 0, w, h).data; let x0 = w, y0 = h, x1 = -1, y1 = -1;
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (px[(y * w + x) * 4 + 3] > 20) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+    if (x1 < 0) return null; const pad = 6, c = document.createElement('canvas'); c.width = x1 - x0 + 1 + pad * 2; c.height = y1 - y0 + 1 + pad * 2;
+    c.getContext('2d').drawImage(cv, x0 - pad, y0 - pad, c.width, c.height, 0, 0, c.width, c.height); return c.toDataURL('image/png');
+  }
+  // the offer page: its signings and Round 1
+  async function sgOfferHTML(o) {
+    // Round 1 of each document (the purchasers signing the offer); later rounds are under Negotiation
+    const gs = (await ofSafe(sb.from('offer_signings').select('id,draft_id,method,status,released_at,locked_at,replaced_at').eq('offer_id', o.id).eq('round_no', 1).order('released_at', { ascending: false }))) || [];
+    const rd = ((await ofSafe(sb.from('offer_rounds').select('id,number,sha256,locked_at').eq('offer_id', o.id).eq('doc_round', 1).order('number', { ascending: false }))) || [])[0];
+    if (!gs.length && !rd) return '';
+    const ds = (await ofSafe(sb.from('offer_drafts').select('id,number').eq('offer_id', o.id))) || [];
+    return `<h3 style="margin:14px 0 4px">Signing</h3>${rd ? `<div class="card okc tight" id="sgRoundTile"><p class="small" style="margin:0"><strong>Round 1 locked</strong> ${esc(fmtDT(rd.locked_at))}. Fingerprint <span translate="no">${esc(drShort(rd.sha256))}</span>.</p></div>` : ''}
+      <ul class="dr-list" id="sgList">${gs.map(g => `<li><button class="of-row" type="button" data-signing="${g.id}"><span class="of-r1"><strong>Draft ${esc((ds.find(x => x.id === g.draft_id) || {}).number || '')}</strong>, ${g.method === 'link' ? 'by link' : 'in person'} ${sgDot(g.status)}</span><span class="small">Released ${esc(fmtDT(g.released_at))}</span></button></li>`).join('')}</ul>`;
+  }
+  // the draft's bytes and pages (checked against its fingerprint)
+  async function sgDraftPages(d) { const bytes = await drDraftBytes(d); return { bytes, pages: await DR.readPages(await drPdfjs(), bytes, PDF_OPTS) }; }
+
+  // "Ready to sign": the places made from the draft and map, the method, and nothing sent
+  async function viewSignRelease(did, opt) {
+    header('Ready to sign', '', 0); actions(false);
+    main().innerHTML = '<div class="loading">Loading...</div>';
+    const d = await must(sb.from('offer_drafts').select('*').eq('id', did).single());
+    const [o, p, mp, ex] = await Promise.all([must(sb.from('property_offers').select('*').eq('id', d.offer_id).single()), must(sb.from('properties').select('id,address').eq('id', d.property_id).single()),
+      must(sb.from('offer_blank_maps').select('id,places').eq('id', d.map_id).single()), ofSafe(sb.from('offer_signings').select('id,status').eq('draft_id', did))]);
+    const live = (ex || []).find(x => x.status !== 'cancelled'); if (live) return viewSigning(live.id);
+    let D_; try { D_ = await sgDraftPages(d); } catch (e) { main().innerHTML = `<div class="view-pad"><p class="err">${esc(e.message === 'pdf-lib' ? drNoLib : e.message || drNoLib)}</p><div class="toolbar"><button class="btn ghost" type="button" id="sgBk">Back to the draft</button></div></div>`; $('#sgBk').addEventListener('click', () => viewDraftReview(did)); return; }
+    const pages = D_.pages, signers = ((d.details || {}).purchasers || []).map((x, i) => ({ position: i + 1, name: [x.first, x.last].map(v => String(v || '').trim()).filter(Boolean).join(' ') || 'Purchaser ' + (i + 1), email: String(x.email || '').trim() }));
+    const M = SG.makePlaces({ pages, placed: d.placed || [], mapPlaces: mp.places || [], signers }), cca = SG.ccaPages(pages);
+    const R = { method: (opt && opt.method) || ((d.details || {}).sign === 'digital' ? 'link' : 'in_person'), page: (M.places.find(x => x.kind === 'signature') || { page: 1 }).page };
+    const counts = pos => Object.keys(SG_WHY).map(k => [k, M.places.filter(x => x.signer === pos && x.why === k).length]).filter(x => x[1]);
+    const paint = () => {
+      const noEmail = signers.filter(s => !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(s.email));
+      main().innerHTML = `<div class="view-pad dr-page" id="sgReleaseView"><div class="toolbar no-print"><button class="btn ghost" type="button" id="sgBack">Back to the draft</button></div><span class="agent-flag">Only you see this</span>
+        <h1>Ready to sign</h1><p class="lede">${nt(p.address)}</p>
+        <p class="small">Draft ${d.number}, fingerprint <span translate="no">${esc(drShort(d.sha256))}</span>. The signing places are made for you from the draft. The date at the top stays blank: it is added once everything is agreed.</p>
+        <section class="card" id="sgPlacesSum"><h2>Signing places</h2>
+          ${signers.map(s => `<p class="small" style="margin:0 0 4px" data-sgsum="${s.position}"><strong>${nt(s.name)}</strong>: ${M.counts[s.position] || 0} places (${counts(s.position).map(([k, n]) => `${n} ${esc(SG_WHY[k])}`).join(', ')})</p>`).join('')}
+          ${M.blocking.length ? `<div class="card warnc tight" id="sgBlock"><p class="small" style="margin:0 0 4px"><strong>Signing can't be released yet</strong></p><ul class="dr-list">${M.blocking.map(b => `<li class="small dr-need" data-block="${esc(b.id)}"><strong>${esc(b.label)}</strong>: ${esc(b.why)}</li>`).join('')}</ul></div>` : ''}
+          ${M.warnings.length ? `<div class="card note tight" id="sgWarn">${M.warnings.map(w => `<p class="small" style="margin:0">${esc(w)}</p>`).join('')}</div>` : ''}
+          <div class="dr-nav"><label class="sr" for="sgPick">Page</label><select id="sgPick">${pages.map(pg => `<option value="${pg.n}" ${pg.n === R.page ? 'selected' : ''}>Page ${pg.n} (${M.places.filter(x => x.page === pg.n).length})</option>`).join('')}</select></div>
+          <div id="sgCanvas" class="dr-holder"></div></section>
+        <section class="card" id="sgGuidesSum"><h2>Read before signing</h2>
+          <p class="small">Each purchaser receipts the Client and Customer Acknowledgement and the Real Estate Authority guide to sale and purchase agreements before they sign.</p>
+          <label class="f" for="sgCca">Client and Customer Acknowledgement: page numbers in this document</label><input type="text" id="sgCca" inputmode="numeric" value="${esc(cca.join(', '))}">
+          <p class="small" style="margin:2px 0 0">${cca.length ? 'Found from its heading. Check it.' : 'It wasn\'t found in the pack. Type its page numbers, or leave it empty if this pack hasn\'t got one.'}</p></section>
+        <section class="card" id="sgHow"><h2>How they sign</h2><div class="choices">
+          <label class="choice"><input type="radio" name="sgMethod" value="in_person" ${R.method === 'in_person' ? 'checked' : ''}><span class="mark"></span><span><span class="ct">In person, on this device</span><span class="cd">One purchaser at a time. You record that you saw them sign and the photo ID you sighted (the type only).</span></span></label>
+          <label class="choice"><input type="radio" name="sgMethod" value="link" ${R.method === 'link' ? 'checked' : ''}><span class="mark"></span><span><span class="ct">By a personal link to each purchaser</span><span class="cd">Each gets their own link by email and a one-time code, also by email. Nothing is sent until you tap Send.</span></span></label></div>
+          ${R.method === 'link' && noEmail.length ? `<div class="card warnc tight" id="sgNoEmail"><p class="small" style="margin:0">${esc(noEmail.map(s => s.name).join(', '))} ${noEmail.length === 1 ? 'has' : 'have'} no email. Add it with Correct details (then re-draft), or sign in person.</p></div>` : ''}
+          ${R.method === 'link' ? `<p class="small" style="margin:6px 0 0">Links go to: ${signers.map(s => `${nt(s.name)} <span class="small" translate="no">(${esc(s.email || 'no email')})</span>`).join(', ')}</p>` : ''}</section>
+        <div class="err" id="sgRelErr" role="alert"></div>
+        <div class="toolbar"><button class="btn primary" type="button" id="sgRelease" ${M.places.length && !M.blocking.length ? '' : 'disabled'}>Ready to sign</button></div>
+        <p class="small">${R.method === 'link' ? 'This gets the signing ready. You send the links on the next screen.' : 'Signing then happens on this device.'}</p></div>`;
+      $('#sgBack').addEventListener('click', () => viewDraftReview(did));
+      $$('input[name="sgMethod"]').forEach(x => x.addEventListener('change', () => { R.method = x.value; paint(); }));
+      $('#sgPick').addEventListener('change', e => { R.page = +e.target.value; canvas(); });
+      $('#sgRelease').addEventListener('click', async () => {
+        const btn = $('#sgRelease'); btn.disabled = true; $('#sgRelErr').textContent = '';
+        const cc = $('#sgCca').value.split(/[\s,]+/).filter(Boolean).map(Number);
+        if (cc.some(x => !Number.isInteger(x) || x < 1 || x > pages.length)) { $('#sgRelErr').textContent = 'Check the acknowledgement page numbers.'; btn.disabled = false; return; }
+        try { const r = await sgRpc('agent_signing_release', { p_draft: did, p_method: R.method, p_pages: pages.map(x => [x.w, x.h]), p_places: M.places, p_cca_pages: cc }); toast('Ready to sign'); viewSigning(r.id); }
+        catch (e) { $('#sgRelErr').textContent = e.message; btn.disabled = false; }
+      });
+      canvas();
+    };
+    const canvas = async () => { try { await drRender($('#sgCanvas'), R.page, M.places.map(x => Object.assign({}, x, { cls: 'sg-place sg-s' + ((x.signer - 1) % 4 + 1), badge: String(x.signer) })), { bytes: D_.bytes, key: 'draft-' + d.id }); } catch (_) { $('#sgCanvas').innerHTML = `<p class="small err">${drNoLib}</p>`; } };
+    paint(); top();
+  }
+
+  // Tim's view of one signing
+  async function viewSigning(sid, opts) {
+    header('Signing', '', 0); actions(false);
+    main().innerHTML = '<div class="loading">Loading...</div>';
+    const g = await must(sb.from('offer_signings').select('*').eq('id', sid).single());
+    const [o, p, d, signers, taps, marks, reviews, asks, rounds] = await Promise.all([must(sb.from('property_offers').select('*').eq('id', g.offer_id).single()), must(sb.from('properties').select('id,address').eq('id', g.property_id).single()),
+      must(sb.from('offer_drafts').select('*').eq('id', g.draft_id).single()), ofSafe(sb.from('offer_signers').select(SG_COLS).eq('signing_id', sid).order('position')), ofSafe(sb.from('offer_sign_taps').select('signer_id,place_id,at').eq('signing_id', sid)),
+      ofSafe(sb.from('offer_sign_marks').select('*').eq('signing_id', sid).order('at')), ofSafe(sb.from('offer_sign_reviews').select('*').eq('signing_id', sid).order('at')), ofSafe(sb.from('offer_sign_asks').select('*').eq('signing_id', sid).order('at')),
+      ofSafe(sb.from('offer_rounds').select('*').eq('signing_id', sid))]);
+    const allD = (await ofSafe(sb.from('offer_drafts').select('id,number').eq('offer_id', g.offer_id))) || [];
+    const stale = !['locked', 'replaced', 'cancelled'].includes(g.status) && (d.number !== Math.max(...allD.map(x => x.number)) || JSON.stringify(drCanon(o.details)) !== JSON.stringify(drCanon(d.details)));
+    const rd = (rounds || [])[0], S_ = signers || [], T_ = taps || [], Mk = marks || [], Rv = reviews || [], RN = g.round_no || 1;
+    const places = (g.places || []).concat(Rv.flatMap(r => r.places || [])), need = pos => places.filter(x => x.signer === pos), doneOf = s => T_.filter(t => t.signer_id === s.id && need(s.position).some(x => x.id === t.place_id)).length;
+    const open = Mk.filter(m => !Rv.some(r => (r.marks || []).includes(m.id)));
+    // everyone has finished: Round 1 is made and locked by the server
+    if (g.status === 'complete' && !rd && !(opts && opts.tried)) { main().innerHTML = '<div class="loading" id="sgLocking">Everyone has signed. Making and locking Round 1...</div>'; await offerCall('offer-sign', { action: 'lock', signing_id: sid }); return viewSigning(sid, { tried: true }); }
+    const stateOf = s => s.void_at ? (['cancelled', 'withdrawn'].includes(g.status) ? 'Stopped' : 'Replaced (kept, void)') : s.finished_at ? 'Finished ' + fmtDT(s.finished_at) : s.consent_at ? `Signing: ${doneOf(s)} of ${need(s.position).length} places` : g.method === 'link' ? (s.verified_at ? 'Code checked' : s.opened_at ? 'Opened the link' : s.link_sent_at ? 'Link sent ' + fmtDT(s.link_sent_at) : 'Not sent yet') : 'Not started';
+    main().innerHTML = `<div class="view-pad dr-page" id="sgView"><div class="toolbar no-print"><button class="btn ghost" type="button" id="sgBackO">Back to the offer</button></div><span class="agent-flag">Only you see this</span>
+      <h1>${RN > 1 ? `Round ${RN}: the ${ngSide(g.side)} sign` : 'Signing'}</h1><p class="lede">${nt(p.address)}</p>
+      <p>${sgDot(g.status)} <span class="small">${RN > 1 ? `Answering Round ${RN - 1}` : `Draft ${d.number}`}, ${g.method === 'link' ? 'by personal link' : 'in person on this device'}. Fingerprint <span translate="no">${esc(drShort(g.draft_sha256))}</span>.</span></p>
+      ${RN > 1 && Mk.length ? `<p class="small" id="ngChanges">${Mk.length} change${Mk.length === 1 ? '' : 's'} made so far in this round.</p>` : ''}
+      ${g.status === 'replaced' ? `<div class="card warnc tight" id="sgReplaced"><p class="small" style="margin:0">Replaced by a newer draft ${esc(fmtDT(g.replaced_at))}. The signatures and initials given on this version are kept, but they are void. Everyone signs the new version.</p>${g.replaced_by ? '<div class="toolbar"><button class="btn ghost" type="button" id="sgNewer">Open the new signing</button></div>' : ''}</div>` : ''}
+      ${g.status === 'withdrawn' ? `<div class="card note tight" id="sgWithdrawn"><p class="small" style="margin:0">Stopped because ${o.status === 'declined' ? 'the vendors declined the offer (or withdrew their counteroffer)' : o.status === 'lapsed' ? 'the offer lapsed' : 'the offer was withdrawn'}. What was signed is kept. Any links sent no longer work.</p></div>` : ''}
+      ${g.status === 'cancelled' ? `<div class="card note tight" id="sgCancelled"><p class="small" style="margin:0">${S_.some(s => s.consent_at) ? 'Stopped: the document was closed for a fresh copy. What was signed is kept.' : 'Stopped before anyone signed, so it could be released again another way.'} Any links sent no longer work.</p></div>` : ''}
+      ${stale ? `<div class="card warnc tight" id="sgStale"><p class="small" style="margin:0">The offer has changed since this was released, so signing has stopped. Re-draft and approve it, then tap Ready to sign. Signatures already given on this version stay recorded, as replaced.</p></div>` : ''}
+      ${rd ? `<section class="card okc" id="sgRound"><h2>Round ${rd.doc_round || 1} locked</h2><p class="small">Locked ${esc(fmtDT(rd.locked_at))}. Fingerprint <span translate="no">${esc(rd.sha256)}</span>, worked out by the server from the stored file. The approved draft is unchanged, with every signature, initial and mark added on top, and the execution record on a page of its own at the end. It can't be changed or removed.</p>
+        <div class="toolbar"><button class="btn ghost" type="button" id="sgRoundDl">Download Round ${rd.doc_round || 1}</button><button class="btn ghost" type="button" id="sgChain">Check the timeline</button></div><p class="small" id="sgChainOut" role="status" aria-live="polite"></p></section>` : ''}
+      ${g.status === 'complete' && !rd ? `<div class="card warnc tight" id="sgLockFail"><p class="small" style="margin:0">Everyone has signed, but Round 1 wasn't locked yet.</p><div class="toolbar"><button class="btn primary" type="button" id="sgLockGo">Make and lock Round 1</button></div><p class="small err" id="sgLockErr" role="alert"></p></div>` : ''}
+      ${g.status === 'held' ? `<section class="card warnc" id="sgHeld"><h2>Check the change</h2><p class="small">A purchaser marked the document on this screen. Look at each mark. If it's fine, re-approve: every purchaser then initials beside it, and anyone who has finished signs again. If the offer itself needs changing, correct it and re-draft instead.</p>
+        <ul class="dr-list">${open.map(m => `<li class="small" data-mark="${m.id}"><strong>Page ${m.page}:</strong> ${esc(SG.MARK_NAMES[m.kind] || m.kind)} by ${nt(m.by_name)}, ${esc(fmtDT(m.at))}</li>`).join('')}</ul>
+        <div class="dr-nav"><label class="sr" for="sgHeldPick">Page</label><select id="sgHeldPick">${[...new Set(open.map(m => m.page))].map(n => `<option value="${n}">Page ${n}</option>`).join('')}</select></div><div id="sgHeldCanvas" class="dr-holder"></div>
+        <div class="toolbar"><button class="btn primary" type="button" id="sgReview">Re-approve and carry on</button></div><p class="small err" id="sgRevErr" role="alert"></p></section>` : ''}
+      <section class="card" id="sgSigners"><h2>${g.side === 'vendor' ? 'Vendors' : 'Purchasers'}</h2>${S_.map(s => `<div class="fact" data-signer="${s.position}"><div class="k">${nt(s.name)}${g.method === 'link' && s.email ? ` <span class="small" translate="no">${esc(s.email)}</span>` : ''}</div><div class="v" style="font-weight:400;display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><span data-sgstate>${esc(stateOf(s))}</span>
+          ${g.method === 'in_person' && ['ready', 'signing'].includes(g.status) && !stale && !s.finished_at && !s.void_at ? `<button class="btn ${S_.find(x => !x.finished_at) === s ? 'primary' : 'ghost'}" type="button" data-turn="${s.id}">Start ${esc(s.name.split(' ')[0])}'s turn</button>` : ''}</div></div>`).join('')}</section>
+      ${g.method === 'link' && ['ready', 'signing'].includes(g.status) && !stale ? `<section class="card" id="sgSend"><h2>${g.status === 'ready' ? 'Send the links' : 'The links'}</h2><p class="small">${g.status === 'ready' ? 'Nothing has been sent yet. Send emails each purchaser their own link; they get a one-time code by email when they open it.' : 'Each purchaser has their own link. Sending again makes new links for anyone still to sign; their old ones stop working.'}</p>
+        <div class="toolbar"><button class="btn ${g.status === 'ready' ? 'primary' : 'ghost'}" type="button" id="sgSendGo">${g.status === 'ready' ? 'Send' : 'Send the links again'}</button></div><p class="small" id="sgSendOut" role="status" aria-live="polite"></p></section>` : ''}
+      ${['ready', 'signing'].includes(g.status) && !stale ? (() => { const begun = S_.filter(s => s.consent_at || T_.some(t => t.signer_id === s.id));
+        return `<section class="card" id="sgMethod"><h2>How they sign</h2>${begun.length ? `<p class="small" style="margin:0" id="sgMethodNo">${esc(begun.map(s => s.name).join(', '))} ${begun.length > 1 ? 'have' : 'has'} started signing, so this can't be changed to ${g.method === 'link' ? 'in person' : 'by link'} now. To start again, correct the offer and re-draft it; everyone then signs the new version.</p>`
+          : `<p class="small">${g.method === 'link' ? 'By personal link.' : 'In person, on this device.'} Nobody has started signing, so you can change this.${g.method === 'link' && g.sent_at ? ' The links already sent stop working.' : ''}</p><div class="toolbar"><button class="btn ghost" type="button" id="sgChange">Change to ${g.method === 'link' ? 'in person' : 'by link'}</button></div><p class="small err" id="sgChangeErr" role="alert"></p>`}</section>`; })() : ''}
+      ${(asks || []).length ? `<section class="card" id="sgAsks"><h2>Asked for a change</h2>${asks.map(a => { const s = S_.find(x => x.id === a.signer_id) || {}; return `<div class="fact"><div class="k">${nt(s.name || '')} · ${esc(fmtDT(a.at))}</div><div class="v" style="font-weight:400">${esc(a.text)}</div></div>`; }).join('')}<p class="small">If it needs a change, correct the offer, re-draft and approve it, and tap Ready to sign. Everyone then signs the new version.</p></section>` : ''}
+      ${Mk.length ? `<details class="card tight" id="sgMarks"><summary class="small">Marks (${Mk.length})</summary>${Mk.map(m => `<p class="small" style="margin:2px 0">Page ${m.page}: ${esc(SG.MARK_NAMES[m.kind] || m.kind)} by ${nt(m.by_name)}, ${esc(fmtDT(m.at))}${Rv.some(r => (r.marks || []).includes(m.id)) ? ', re-approved' : ''}</p>`).join('')}</details>` : ''}
+    </div>`;
+    $('#sgBackO').addEventListener('click', () => viewOfferAgent(g.offer_id));
+    const nw = $('#sgNewer'); if (nw) nw.addEventListener('click', () => viewSigning(g.replaced_by));
+    const chg = $('#sgChange'); if (chg) chg.addEventListener('click', async () => { chg.disabled = true;
+      try { await sgRpc('agent_signing_cancel', { p_signing: sid, p_reason: 'Changed to ' + (g.method === 'link' ? 'in person' : 'by link') }); toast('Stopped. Choose how they sign');
+        const m = g.method === 'link' ? 'in_person' : 'link'; if (RN > 1) viewRoundPresent(g.offer_id, { method: m }); else viewSignRelease(g.draft_id, { method: m }); }
+      catch (e) { $('#sgChangeErr').textContent = e.message; chg.disabled = false; } });
+    $$('[data-turn]').forEach(b => b.addEventListener('click', async () => { b.disabled = true; try { if (g.status === 'ready') await sgRpc('agent_signing_start', { p_signing: sid }); viewSignTurn(sid, b.dataset.turn); } catch (e) { toast(e.message); b.disabled = false; } }));
+    const sg_ = $('#sgSendGo'); if (sg_) sg_.addEventListener('click', async () => { sg_.disabled = true; $('#sgSendOut').textContent = 'Sending...';
+      const r = await offerCall('offer-sign', { action: 'send', signing_id: sid });
+      if (r && (r.ok || r.sent)) { toast(r.failed && r.failed.length ? 'Sent, but not to everyone' : 'Links sent'); return viewSigning(sid); }
+      $('#sgSendOut').textContent = (r && r.error) || 'The links didn\'t send. Check you have signal, then try again.'; sg_.disabled = false; });
+    const lg = $('#sgLockGo'); if (lg) lg.addEventListener('click', async () => { lg.disabled = true; const r = await offerCall('offer-sign', { action: 'lock', signing_id: sid }); if (r && r.ok) return viewSigning(sid, { tried: true }); $('#sgLockErr').textContent = (r && r.error) || 'That didn\'t work. Try again.'; lg.disabled = false; });
+    const dl = $('#sgRoundDl'); if (dl) dl.addEventListener('click', async () => { try { const { data, error } = await sb.storage.from('property-files').createSignedUrl(rd.path, 300); if (error || !data) throw new Error('Round 1 couldn\'t be opened. Check you have signal.');
+      const bytes = new Uint8Array(await (await fetch(data.signedUrl)).arrayBuffer()); if (await REPO.sha256(bytes) !== rd.sha256) throw new Error('The stored round doesn\'t match its fingerprint.');
+      const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' })); a.download = `Round-${rd.doc_round || 1}-${(p.address || 'agreement').replace(/[^A-Za-z0-9]+/g, '-').slice(0, 60)}.pdf`; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000); } catch (e) { toast(e.message); } });
+    const ch = $('#sgChain'); if (ch) ch.addEventListener('click', async () => { try { const r = await sgRpc('agent_offer_chain_check', { p_offer: g.offer_id });
+      $('#sgChainOut').textContent = r.ok ? `Timeline checked: ${r.events} events, each following on from the one before.${r.before ? ` (${r.before} from before the check began.)` : ''}` : 'The timeline doesn\'t check out: ' + ((r.problems || [])[0] || {}).why; } catch (e) { $('#sgChainOut').textContent = e.message; } });
+    if (g.status === 'held') {
+      const pg = $('#sgHeldPick'), bytesP = drDraftBytes(d);
+      const paintH = async () => { try { const r = await drRender($('#sgHeldCanvas'), +pg.value, [], { bytes: await bytesP, key: 'draft-' + d.id }); sgMarksLayer(r, Mk.filter(m => m.page === +pg.value), null); } catch (_) { $('#sgHeldCanvas').innerHTML = `<p class="small err">${drNoLib}</p>`; } };
+      if (pg) { pg.addEventListener('change', paintH); paintH(); }
+      $('#sgReview').addEventListener('click', async () => { const b = $('#sgReview'); b.disabled = true;
+        const live = S_.filter(s => !s.void_at).map(s => ({ position: s.position, name: s.name })), pgs = (g.pages || []).map((x, i) => ({ n: i + 1, w: x[0], h: x[1] }));
+        const add = SG.markPlaces(open, live, pgs, places);
+        try { await sgRpc('agent_signing_review', { p_signing: sid, p_places: add }); toast('Re-approved. Everyone initials the change'); viewSigning(sid); } catch (e) { $('#sgRevErr').textContent = e.message; b.disabled = false; } });
+    }
+    top();
+  }
+  // marks drawn over a rendered page (an overlay; the page itself is never changed)
+  function sgMarksLayer(r, marks, onPick) {
+    const NS = 'http://www.w3.org/2000/svg', svg = document.createElementNS(NS, 'svg'); svg.setAttribute('viewBox', `0 0 ${r.W} ${r.H}`); svg.setAttribute('class', 'sg-marks'); svg.setAttribute('preserveAspectRatio', 'none');
+    const Y = y => r.H - y, ln = (x1, y1, x2, y2, w) => { const l = document.createElementNS(NS, 'line'); Object.entries({ x1, y1: Y(y1), x2, y2: Y(y2), 'stroke-width': w || 1.2 }).forEach(([k, v]) => l.setAttribute(k, v)); return l; };
+    (marks || []).forEach(m => { const gEl = document.createElementNS(NS, 'g'); gEl.setAttribute('data-markid', m.id); gEl.setAttribute('class', 'sg-mark sg-k-' + m.kind); const geo = m.geometry || {};
+      if (m.kind === 'note') (geo.strokes || []).forEach(st => { const pl = document.createElementNS(NS, 'polyline'); pl.setAttribute('points', st.map(q => q[0] + ',' + Y(q[1])).join(' ')); gEl.appendChild(pl); });
+      else if (m.kind === 'strike') gEl.appendChild(ln(geo.x0, geo.y, geo.x1, geo.y, 1.4));
+      else if (m.kind === 'cross') { const rc = document.createElementNS(NS, 'rect'); Object.entries({ x: geo.x, y: Y(geo.y + geo.h), width: geo.w, height: geo.h }).forEach(([k, v]) => rc.setAttribute(k, v)); gEl.appendChild(rc); gEl.appendChild(ln(geo.x, geo.y, geo.x + geo.w, geo.y + geo.h)); gEl.appendChild(ln(geo.x, geo.y + geo.h, geo.x + geo.w, geo.y)); }
+      else if (m.kind === 'reinstate') { const t = document.createElementNS(NS, 'text'); t.setAttribute('x', geo.x); t.setAttribute('y', Y(geo.y + 2)); t.textContent = 'Reinstated'; gEl.appendChild(t); }
+      else if (m.kind === 'insert') { const t = document.createElementNS(NS, 'text'); t.setAttribute('x', geo.x); t.setAttribute('y', Y(geo.y)); t.setAttribute('class', 'sg-ins'); t.style.fontSize = (geo.size || 9) + 'px'; t.textContent = geo.text || ''; gEl.appendChild(t); }
+      if (onPick && ['strike', 'cross'].includes(m.kind)) { gEl.style.cursor = 'pointer'; gEl.addEventListener('click', e => { e.stopPropagation(); onPick(m); }); }
+      svg.appendChild(gEl); });
+    r.wrapEl.appendChild(svg); return svg;
+  }
+
+  // ── the signing itself: the same screens in person (Tim's device) and by link ──
+  // ctx: { mode: 'person'|'link', address, name, position, places, taps (Set), consent_at, receipts ([guide]), sig_png, init_png,
+  //   status, stopped, cca_pages, pages ([[w, h]]), bytes, draftSha, marks, api: { consent, receipt, marks, tap, mark?, ask?, finish }, done(r), back? }
+  function signFlow(ctx) {
+    const F = { page: null, marking: null, draft: null, pick: null };
+    const req = () => ctx.places, done = () => req().filter(x => ctx.taps.has(x.id)).length;
+    // phase 4: from Round 2 on, the side answering sees the working copy and can change it; the vendors read the chattels reminder first
+    const R2 = (ctx.round || 1) > 1, VEND = ctx.side === 'vendor';
+    const hasR = g => ctx.receipts.includes(g), guidesDone = () => VEND ? hasR('chattels') : R2 ? true : hasR('sale_purchase') && (!(ctx.cca_pages || []).length || hasR('cca'));
+    const step = ctx.stopped ? 'stopped' : ctx.status === 'held' ? 'held' : !ctx.consent_at ? 'consent' : !guidesDone() ? 'guides' : !ctx.sig_png ? 'draw' : 'places';
+    const nextUndone = () => req().filter(x => !ctx.taps.has(x.id)).sort((a, b) => a.page - b.page || b.y - a.y)[0];
+    if (!F.page) F.page = (nextUndone() || req()[0] || { page: 1 }).page;
+    const err = t => { const e = $('#sgErr'); if (e) e.textContent = t || ''; };
+    const steps = [['consent', 'Agree'], ['guides', 'Read'], ['draw', 'Draw'], ['places', 'Sign']].filter(x => !(R2 && !VEND && x[0] === 'guides'));
+    const stepBar = `<ol class="sg-steps" aria-label="Steps">${steps.map(([k, l], i) => `<li class="${k === step ? 'on' : steps.findIndex(x => x[0] === step) > i ? 'done' : ''}">${i + 1}. ${l}</li>`).join('')}</ol>`;
+    const g2 = GUIDES.sale_purchase;
+    let body = '';
+    if (step === 'stopped') body = `<div class="card warnc" id="sgStopped"><p style="margin:0">${esc(ctx.stopped)}</p></div>`;
+    else if (step === 'held') body = `<div class="card note" id="sgHeldMsg"><h2 style="margin-top:0">Sent to Tim to check</h2><p class="small" style="margin:0">${ctx.mode === 'person' ? 'A change was marked on the document. Tim checks it and re-approves before signing carries on. Everyone then initials beside it.' : 'Tim is checking a change to the document. Signing carries on once he has. Come back to this link then.'}</p>${ctx.back ? '<div class="toolbar"><button class="btn primary" type="button" id="sgToTim">Back to Tim\'s screen</button></div>' : ''}</div>`;
+    else if (step === 'consent') body = `<section class="card" id="sgConsent"><h2>Signing electronically</h2>
+      <p class="small">You're about to sign the agreement for ${nt(ctx.address)} on screen. Your drawn signature and initials, and each place you tap, have the same effect as signing on paper. A record of when and how you signed is kept with the signed copy.</p>
+      <p class="small">You can stop at any time, and you can ask for a paper copy instead.</p>
+      <label class="choice cb"><input type="checkbox" id="sgAgree"><span class="mark"></span><span><span class="ct">I agree to sign this agreement electronically</span></span></label>
+      <div class="toolbar"><button class="btn primary" type="button" id="sgAgreeGo">Continue</button></div></section>`;
+    else if (step === 'guides' && VEND) body = ngChattelsHTML(ctx);
+    else if (step === 'guides') body = `<section class="card" id="sgGuides"><h2>Before you sign</h2>
+      ${(ctx.cca_pages || []).length ? `<h3>Client and Customer Acknowledgement</h3><p class="small">This is in the agreement pack (page${ctx.cca_pages.length > 1 ? 's' : ''} ${ctx.cca_pages.join(', ')}). It explains who Tim acts for and what he must do for you. Read it here.</p><div id="sgCcaPages"></div>
+        ${hasR('cca') ? '<p class="small okc" id="sgCcaDone">Received.</p>' : `<label class="choice cb"><input type="checkbox" id="sgCcaOk"><span class="mark"></span><span><span class="ct">I've read the Client and Customer Acknowledgement</span><span class="cd">This is recorded with the time</span></span></label>`}` : ''}
+      <h3>Real Estate Authority guide to sale and purchase agreements</h3><p class="small">It explains the agreement you are about to sign.</p>${g2 ? guideViewer(g2) : `<p><a href="${REA_SP}" target="_blank" rel="noopener">Read the guide on the Real Estate Authority website</a></p>`}
+      ${hasR('sale_purchase') ? '<p class="small" id="sgSpDone">Received.</p>' : `<label class="choice cb"><input type="checkbox" id="sgSpOk"><span class="mark"></span><span><span class="ct">I've received the Real Estate Authority guide to sale and purchase agreements</span><span class="cd">This is recorded with the time</span></span></label>`}
+      <div class="toolbar"><button class="btn primary" type="button" id="sgGuidesGo">Continue</button></div></section>`;
+    else if (step === 'draw') body = `<section class="card" id="sgDraw"><h2>Your signature and initials</h2><p class="small">Draw them once with your finger or a stylus. You then put them in each place yourself, one tap at a time.</p>
+      <div style="display:flex;justify-content:space-between;align-items:baseline"><h3 style="margin:0">Signature</h3><button class="btn link" type="button" id="sgClrS">Clear</button></div>
+      <div class="sig-wrap"><canvas id="sgSig" aria-label="Signature pad"></canvas><div class="sig-line"></div><span class="hint">Sign here</span></div>
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:10px"><h3 style="margin:0">Initials</h3><button class="btn link" type="button" id="sgClrI">Clear</button></div>
+      <div class="sig-wrap sg-init"><canvas id="sgInit" aria-label="Initials pad"></canvas><span class="hint">Initials here</span></div>
+      ${saveNote('Save my signature and initials')}<div class="toolbar"><button class="btn primary" type="button" id="sgDrawGo">Save my signature and initials</button></div></section>`;
+    else {
+      const left = req().length - done(), pagesWith = [...new Set(req().map(x => x.page))].sort((a, b) => a - b);
+      body = `<section class="card" id="sgPlaces"><h2>Sign and initial each place</h2>
+        <p class="small">Your places are highlighted on each page. Tap each one yourself to put your ${'initials or signature'} there.</p>
+        <p class="sg-count" id="sgCount" role="status" aria-live="polite"><strong>${done()} of ${req().length}</strong> places done</p>
+        <div class="sg-bar"><span style="width:${req().length ? Math.round(done() / req().length * 100) : 0}%"></span></div>
+        <div class="dr-nav"><button class="btn ghost" type="button" id="sgPrev">Previous</button><label class="sr" for="sgPgPick">Page</label><select id="sgPgPick">${ctx.pages.map((x, i) => { const n = i + 1, t = req().filter(y => y.page === n).length, l = req().filter(y => y.page === n && !ctx.taps.has(y.id)).length; return `<option value="${n}" ${n === F.page ? 'selected' : ''}>Page ${n}${t ? ` (${l ? l + ' to do' : 'done'})` : ''}</option>`; }).join('')}</select><button class="btn ghost" type="button" id="sgNext">Next</button></div>
+        ${left ? '<div class="toolbar"><button class="btn link" type="button" id="sgGoNext">Go to the next place to do</button></div>' : ''}
+        ${R2 && ctx.mode === 'link' && !ctx.link_changes ? `<div class="card note tight" id="ngNoChanges"><p class="small" style="margin:0">You can accept it as it stands by initialling and signing each place, or decline it. If you would like something changed, ask Tim below.</p>
+          <div class="toolbar"><button class="btn ghost" type="button" id="ngDecline">Decline it as it stands</button></div><p class="small" id="ngDeclineOut" role="status"></p></div>
+` : R2 ? `<div class="sg-marktools" id="sgTools"><p class="small" style="margin:0 0 4px">To accept it as it stands, just initial and sign each place. To counter, change the document:</p> ${[['strike', 'Line through text'], ['cross', 'Cross out a passage'], ['insert', 'Type words'], ['note', 'Write by hand'], ['reinstate', 'Reinstate']].map(([k, l]) => `<button class="btn ${F.marking === k ? 'primary' : 'ghost'}" type="button" data-tool="${k}">${l}</button>`).join('')}</div>
+` : ctx.mode === 'person' ? `<div class="sg-marktools" id="sgTools"><span class="small">Mark the page:</span> ${[['note', 'Note'], ['strike', 'Line through text'], ['cross', 'Cross out a box'], ['reinstate', 'Reinstate']].map(([k, l]) => `<button class="btn ${F.marking === k ? 'primary' : 'ghost'}" type="button" data-tool="${k}">${l}</button>`).join('')}</div>
+` : ''}
+        <div id="sgPage" class="dr-holder sg-holder"></div>
+        <p class="small">${pagesWith.length} page${pagesWith.length === 1 ? '' : 's'} have places for you.</p>
+        ${ctx.mode === 'link' && (!R2 || !ctx.link_changes) ? `<details class="card tight" id="sgAskBox"><summary class="small">Ask Tim for a change</summary><p class="small">You can't change the document here. Tell Tim what you would like changed and he'll be in touch. If the offer changes, everyone signs the new version.</p>
+          <label class="sr" for="sgAskText">What you would like changed</label><textarea id="sgAskText" rows="3" maxlength="1000"></textarea><div class="toolbar"><button class="btn ghost" type="button" id="sgAskGo">Send to Tim</button></div><p class="small" id="sgAskOut" role="status"></p></details>` : ''}
+        </section>
+        <section class="card" id="sgFinish"><h2>Finish</h2>${left ? `<p class="small" id="sgLeft">${left} place${left === 1 ? '' : 's'} still to do. You can finish once every place is done.</p>` : '<p class="small" id="sgAllDone">Every place is done.</p>'}
+          ${ctx.mode === 'person' ? `<label class="choice cb"><input type="checkbox" id="sgSaw"><span class="mark"></span><span><span class="ct">Tim: I saw ${esc(ctx.name)} sign</span></span></label>
+            <label class="f" for="sgIdType">Photo ID sighted <span class="opt">(the type only; no number is kept)</span></label><select id="sgIdType"><option value="">Choose</option>${SG_ID.map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select>` : ''}
+          <div class="toolbar"><button class="btn primary" type="button" id="sgFinishGo" ${left ? 'disabled' : ''}>Finish signing</button></div></section>`;
+    }
+    main().innerHTML = `<div class="view-pad dr-page sg-flow" id="sgFlow"><h1>${ctx.mode === 'person' ? esc(ctx.name) + ' signs' : VEND ? 'An offer on your property' : R2 ? 'The vendors\' reply to your offer' : 'Your offer to sign'}</h1><p class="lede">${nt(ctx.address)}</p>
+      ${R2 ? ngIntroHTML(ctx) : ''}
+      ${ctx.mode === 'person' ? `<p class="small">${esc(ctx.name)} uses this screen. Only their own places can be done here.</p>` : `<p class="small">Signing as ${nt(ctx.name)}. What you are signing has the fingerprint <span translate="no">${esc(drShort(ctx.draftSha))}</span>.</p>`}
+      ${step === 'stopped' ? '' : stepBar}${body}<p class="err" id="sgErr" role="alert"></p>
+      ${ctx.back ? '<div class="toolbar no-print"><button class="btn ghost" type="button" id="sgBackTim">Back to Tim\'s screen</button></div>' : ''}</div>`;
+    const on = (sel, f, ev) => { const el = $(sel); if (el) el.addEventListener(ev || 'click', f); };
+    const act = async (f, then) => { err(''); try { await f(); } catch (e) { return err(e.message); } return then ? then() : ctx.reload(); };
+    on('#sgBackTim', () => ctx.back()); on('#sgToTim', () => ctx.back());
+    on('#sgAgreeGo', () => { if (!$('#sgAgree').checked) return err('Tick the box to agree to sign electronically, or stop here and call Tim.'); act(() => ctx.api.consent()); });
+    if (step === 'guides' && VEND) on('#ngChatGo', () => act(async () => { if (!$('#ngChatOk').checked) throw new Error('Tick that you have read the reminder about chattels.'); await ctx.api.receipt({ guide: 'chattels' }); }));
+    else if (step === 'guides') {
+      const box = $('#sgCcaPages'); if (box) (async () => { for (const n of ctx.cca_pages) { const h = document.createElement('div'); h.className = 'dr-holder'; box.appendChild(h); try { await drRender(h, n, [], { bytes: ctx.bytes, key: 'sg-' + ctx.draftSha }); } catch (_) { h.innerHTML = `<p class="small err">${drNoLib}</p>`; } } })();
+      reaFill();
+      on('#sgGuidesGo', () => act(async () => {
+        const cc = $('#sgCcaOk'), sp = $('#sgSpOk');
+        if (cc && !cc.checked) throw new Error('Tick that you\'ve read the Client and Customer Acknowledgement.'); if (sp && !sp.checked) throw new Error('Tick that you\'ve received the guide.');
+        if (cc) await ctx.api.receipt({ guide: 'cca', pages: ctx.cca_pages });
+        if (sp) await ctx.api.receipt(g2 ? { guide: 'sale_purchase', version: g2.version, file: g2.file, sha256: g2.sha256 } : { guide: 'sale_purchase', version: 'REA website', file: REA_SP.split('/').pop(), sha256: null });
+      }));
+    }
+    if (step === 'draw') {
+      const ps = makePad($('#sgSig')), pi = makePad($('#sgInit'), 90);
+      on('#sgClrS', () => ps.clear()); on('#sgClrI', () => pi.clear());
+      on('#sgDrawGo', () => act(async () => { if (!ps.drawn()) throw new Error('Please draw your signature.'); if (!pi.drawn()) throw new Error('Please draw your initials.');
+        const s = sgPng($('#sgSig')), i = sgPng($('#sgInit')); await ctx.api.marks(s, i); }));
+    }
+    if (step === 'places') {
+      const paint = async () => {
+        const holder = $('#sgPage'); if (!holder) return;
+        // each paint draws into its own holder and only the newest is shown, so a quick page change and tool change never mix
+        const my = (F.seq = (F.seq || 0) + 1), tmp = document.createElement('div'); tmp._docs = holder._docs || (holder._docs = {});
+        const mine = req().filter(x => x.page === F.page).map(x => Object.assign({}, x, { cls: 'sg-place ' + (ctx.taps.has(x.id) ? 'sg-done' : 'sg-todo'), label: x.label }));
+        let r; try { r = await drRender(tmp, F.page, mine, { bytes: ctx.bytes, key: 'sg-' + ctx.draftSha, button: !F.marking }); } catch (_) { holder.innerHTML = `<p class="small err">${drNoLib}</p>`; return; }
+        if (my !== F.seq) return; holder.innerHTML = ''; holder.appendChild(r.wrapEl);
+        // what has been done shows as the signer's own initials, signature or name
+        $$('.sg-place', r.wrapEl).forEach(b => fillBox(b, req().find(x => x.id === b.dataset.id)));
+        const pick = F.marking === 'reinstate' ? m => { F.pick = m; const s = $('#sgMarkSave'); if (s) s.disabled = false; toast(R2 ? 'Tap Save this change to reinstate it' : 'Tap Save this mark to reinstate it'); } : null;
+        if (R2) ngLayer(r, ngStanding(ctx), F.page, pick); else sgMarksLayer(r, (ctx.marks || []).filter(m => m.page === F.page), pick);
+        // a place already done (a tap that finished while the page was being drawn again) is simply shown as done
+        if (!F.marking) r.wrapEl.addEventListener('click', async e => { const b = e.target.closest('.sg-place'); if (!b || b.dataset.busy) return; if (ctx.taps.has(b.dataset.id)) { fillBox(b, req().find(x => x.id === b.dataset.id)); return counts(); } b.dataset.busy = '1'; err('');
+          try { await ctx.api.tap(b.dataset.id); ctx.taps.add(b.dataset.id); } catch (x) { delete b.dataset.busy; return err(x.message); }
+          delete b.dataset.busy; const pl = req().find(x => x.id === b.dataset.id); fillBox(b, pl); $$(`#sgPage .sg-place[data-id="${CSS.escape(pl.id)}"]`).forEach(x => fillBox(x, pl)); counts(); });
+        else if (F.marking !== 'reinstate') sgDrawLayer(r, F);
+      };
+      const fillBox = (b, pl) => { if (!b || !pl) return; const isDone = ctx.taps.has(pl.id); b.classList.toggle('sg-done', isDone); b.classList.toggle('sg-todo', !isDone); b.setAttribute('aria-pressed', isDone ? 'true' : 'false'); b.setAttribute('aria-label', (isDone ? 'Done: ' : '') + pl.label);
+        if (isDone && !b.querySelector('img,.sg-name')) { if (pl.kind === 'name') { const sp = document.createElement('span'); sp.className = 'sg-name'; sp.textContent = pl.name || ctx.name; b.appendChild(sp); } else { const im = document.createElement('img'); im.alt = ''; im.src = pl.kind === 'signature' ? ctx.sig_png : ctx.init_png; b.appendChild(im); } } };
+      // the count, the bar, the page list and Finish, kept up to date as each place is done (the page doesn't jump)
+      const counts = () => { const n = done(), t = req().length, left = t - n; $('#sgCount').innerHTML = `<strong>${n} of ${t}</strong> places done`; $('.sg-bar span').style.width = (t ? Math.round(n / t * 100) : 0) + '%';
+        $$('#sgPgPick option').forEach(op => { const pn = +op.value, tt = req().filter(y => y.page === pn).length, l = req().filter(y => y.page === pn && !ctx.taps.has(y.id)).length; op.textContent = `Page ${pn}${tt ? ` (${l ? l + ' to do' : 'done'})` : ''}`; });
+        const fin = $('#sgFinish p'); if (fin) { fin.id = left ? 'sgLeft' : 'sgAllDone'; fin.textContent = left ? `${left} place${left === 1 ? '' : 's'} still to do. You can finish once every place is done.` : 'Every place is done.'; }
+        $('#sgFinishGo').disabled = left > 0; const gn = $('#sgGoNext'); if (gn && !left) gn.remove(); };
+      if (ctx._page) F.page = ctx._page;
+      const sel = $('#sgPgPick'); if (sel) sel.value = String(F.page);
+      on('#sgPgPick', e => { F.page = +e.target.value; ctx._page = F.page; paint(); }, 'change');
+      on('#sgPrev', () => { if (F.page > 1) { F.page--; ctx._page = F.page; $('#sgPgPick').value = F.page; paint(); } });
+      on('#sgNext', () => { if (F.page < ctx.pages.length) { F.page++; ctx._page = F.page; $('#sgPgPick').value = F.page; paint(); } });
+      on('#sgGoNext', () => { const n = nextUndone(); if (!n) return; F.page = n.page; ctx._page = F.page; $('#sgPgPick').value = F.page; paint().then(() => { const b = $(`.sg-place[data-id="${CSS.escape(n.id)}"]`); if (b) { b.scrollIntoView({ block: 'center' }); b.focus({ preventScroll: true }); } }); });
+      $$('[data-tool]').forEach(b => b.addEventListener('click', () => { F.marking = F.marking === b.dataset.tool ? null : b.dataset.tool; F.draft = null; F.pick = null; signFlowTools(ctx, F, paint); }));
+      paint();
+      on('#ngDecline', async () => { if (!confirm('Tell Tim you decline it as it stands?')) return;
+        try { await ctx.api.ask(VEND ? 'We decline the offer as it stands.' : 'We decline the vendors\' counteroffer as it stands.', true); $('#ngDeclineOut').textContent = 'Sent to Tim. He will be in touch, and records it for you.'; $('#ngDecline').disabled = true; } catch (e) { $('#ngDeclineOut').textContent = e.message; } });
+      on('#sgAskGo', async () => { const t = $('#sgAskText').value.trim(); if (t.length < 3) return ($('#sgAskOut').textContent = 'Say what you would like changed.');
+        try { await ctx.api.ask(t); $('#sgAskText').value = ''; $('#sgAskOut').textContent = 'Sent to Tim. He\'ll be in touch.'; } catch (e) { $('#sgAskOut').textContent = e.message; } });
+      on('#sgFinishGo', () => act(async () => { let o = {};
+        if (ctx.mode === 'person') { if (!$('#sgSaw').checked) throw new Error('Tim: tick that you saw them sign.'); const id = $('#sgIdType').value; if (!id) throw new Error('Choose the photo ID you sighted.'); o = { id }; }
+        const r = await ctx.api.finish(o); ctx.finished = r; }, () => ctx.done(ctx.finished)));
+      F.rerender = paint;
+    }
+    top();
+  }
+  // switching a marking tool repaints the toolbar and the page in place
+  function signFlowTools(ctx, F, paint) {
+    const tools = $('#sgTools'); if (!tools) return;
+    $$('[data-tool]').forEach(b => { b.className = 'btn ' + (F.marking === b.dataset.tool ? 'primary' : 'ghost'); });
+    let hint = $('#sgMarkHint'); const tb = hint ? hint.nextElementSibling : null; if (hint) hint.remove(); if (tb) tb.remove();
+    if (F.marking && (ctx.round || 1) > 1) return ngTools(ctx, F, paint, tools);
+    if (F.marking) { tools.insertAdjacentHTML('afterend', `<p class="small" id="sgMarkHint">${{ note: 'Write or draw on the page with your finger or stylus.', strike: 'Drag along the line of text to strike it through.', cross: 'Drag from one corner of the passage or box to the other.', reinstate: 'Tap the line or crossed-out box to reinstate.' }[F.marking]} Any mark goes to Tim to check before signing carries on.</p><div class="toolbar"><button class="btn primary" type="button" id="sgMarkSave" disabled>Save this mark</button><button class="btn ghost" type="button" id="sgMarkCancel">Cancel</button></div>`);
+      $('#sgMarkCancel').addEventListener('click', () => { F.marking = null; F.draft = null; F.pick = null; signFlowTools(ctx, F, paint); });
+      $('#sgMarkSave').addEventListener('click', async () => { const e = $('#sgErr'); e.textContent = '';
+        const m = F.marking === 'reinstate' ? (F.pick ? { kind: 'reinstate', page: F.page, target: F.pick.id, geometry: { x: Math.round(SG.markRect(F.pick).x * 10) / 10, y: Math.round((SG.markRect(F.pick).y + SG.markRect(F.pick).h + 2) * 10) / 10 } } : null) : F.draft;
+        if (!m) return (e.textContent = 'Mark the page first.');
+        const pw = ctx.pages[F.page - 1]; if (!SG.markOk(m, { w: pw[0], h: pw[1] })) return (e.textContent = 'That mark doesn\'t sit on the page. Try again.');
+        try { await ctx.api.mark(m); toast('Sent to Tim to check'); ctx.reload(); } catch (x) { e.textContent = x.message; } }); }
+    paint();
+  }
+  // drawing a mark: a note (freehand), a line through text, or a crossed-out box, in page points
+  function sgDrawLayer(r, F) {
+    const cv = document.createElement('canvas'), wrap = r.wrapEl, rect0 = () => wrap.getBoundingClientRect(); cv.className = 'sg-draw'; wrap.appendChild(cv);
+    const b = rect0(), dpr = window.devicePixelRatio || 1; cv.width = b.width * dpr; cv.height = b.height * dpr; const g = cv.getContext('2d'); g.scale(dpr, dpr); g.strokeStyle = '#0d2973'; g.lineWidth = 2; g.lineCap = 'round';
+    const pt = e => { const q = rect0(); return [Math.round(Math.max(0, Math.min(r.W, (e.clientX - q.left) / q.width * r.W)) * 10) / 10, Math.round(Math.max(0, Math.min(r.H, r.H - (e.clientY - q.top) / q.height * r.H)) * 10) / 10]; };
+    const px = p => { const q = rect0(); return [p[0] / r.W * q.width, (r.H - p[1]) / r.H * q.height]; };
+    let down = null, strokes = F.draft && F.draft.kind === 'note' ? F.draft.geometry.strokes : [], cur = null;
+    const redraw = (a, z) => { g.clearRect(0, 0, cv.width, cv.height); strokes.forEach(st => { g.beginPath(); st.forEach((p, i) => { const [x, y] = px(p); i ? g.lineTo(x, y) : g.moveTo(x, y); }); g.stroke(); });
+      if (a && z) { const [x0, y0] = px(a), [x1, y1] = px(z); g.beginPath(); if (F.marking === 'strike') { g.moveTo(x0, y0); g.lineTo(x1, y0); } else { g.rect(Math.min(x0, x1), Math.min(y0, y1), Math.abs(x1 - x0), Math.abs(y1 - y0)); g.moveTo(x0, y0); g.lineTo(x1, y1); g.moveTo(x0, y1); g.lineTo(x1, y0); } g.stroke(); } };
+    redraw();
+    const ready = () => { const s = $('#sgMarkSave'); if (s) s.disabled = !F.draft; };
+    cv.addEventListener('pointerdown', e => { e.preventDefault(); cv.setPointerCapture(e.pointerId); down = pt(e); if (F.marking === 'note') { cur = [down]; strokes.push(cur); } });
+    cv.addEventListener('pointermove', e => { if (!down) return; const p = pt(e); if (F.marking === 'note') { cur.push(p); if (cur.length > 400) cur.shift(); redraw(); } else if (F.marking !== 'insert') redraw(down, p); });
+    const end = e => { if (!down) return; const p = pt(e);
+      if (F.marking === 'note') { if (cur && cur.length < 2) cur.push(p); F.draft = { kind: 'note', page: F.page, geometry: { strokes: strokes.slice(-60) } }; }
+      else if (F.marking === 'insert') F.draft = { kind: 'insert', page: F.page, geometry: { x: p[0], y: p[1], text: '', size: 9 } };
+      else if (F.marking === 'strike') F.draft = { kind: 'strike', page: F.page, geometry: { x0: Math.min(down[0], p[0]), x1: Math.max(down[0], p[0]), y: down[1] } };
+      else F.draft = { kind: 'cross', page: F.page, geometry: { x: Math.min(down[0], p[0]), y: Math.min(down[1], p[1]), w: Math.abs(p[0] - down[0]), h: Math.abs(p[1] - down[1]) } };
+      down = null; cur = null; if (F.marking !== 'note') redraw();
+      if (F.marking === 'insert' && F.draft) { const [qx, qy] = px([F.draft.geometry.x, F.draft.geometry.y]); g.beginPath(); g.moveTo(qx, qy - 10); g.lineTo(qx, qy + 2); g.lineTo(qx + 14, qy + 2); g.stroke(); }
+      ready(); };
+    cv.addEventListener('pointerup', end); cv.addEventListener('pointercancel', end);
+  }
+
+  // in person: one purchaser's turn on Tim's device
+  async function viewSignTurn(sid, signerId) {
+    header('Signing', '', 0); actions(false);
+    main().innerHTML = '<div class="loading">Loading...</div>';
+    const g = await must(sb.from('offer_signings').select('*').eq('id', sid).single());
+    const [d, p, s, taps, rcs, rvs, marks] = await Promise.all([must(sb.from('offer_drafts').select('*').eq('id', g.draft_id).single()), must(sb.from('properties').select('id,address').eq('id', g.property_id).single()),
+      must(sb.from('offer_signers').select(SG_COLS + ',sig_png,init_png').eq('id', signerId).single()), ofSafe(sb.from('offer_sign_taps').select('place_id').eq('signer_id', signerId)),
+      ofSafe(sb.from('offer_sign_receipts').select('guide').eq('signer_id', signerId)), ofSafe(sb.from('offer_sign_reviews').select('places').eq('signing_id', sid)), ofSafe(sb.from('offer_sign_marks').select('*').eq('signing_id', sid))]);
+    let bytes; try { bytes = await drDraftBytes(d); } catch (e) { main().innerHTML = `<div class="view-pad"><p class="err">${esc(e.message)}</p></div>`; return; }
+    const allD = (await ofSafe(sb.from('offer_drafts').select('id,number').eq('offer_id', g.offer_id))) || [], o = await must(sb.from('property_offers').select('details,status').eq('id', g.offer_id).single());
+    const stale = g.status === 'replaced' || s.void_at ? 'This version has been replaced.' : (d.number !== Math.max(...allD.map(x => x.number)) || JSON.stringify(drCanon(o.details)) !== JSON.stringify(drCanon(d.details))) ? 'The offer has changed since this was released. Re-draft and release it again.' : s.finished_at ? `${s.name} has finished signing.` : ['complete', 'locked'].includes(g.status) ? 'Everyone has signed.' : ['cancelled', 'withdrawn'].includes(g.status) ? 'This round was stopped. Any links sent no longer work.' : null;
+    const ua = navigator.userAgent, P_ = { p_signer: signerId }, RN = g.round_no || 1;
+    // from Round 2 on: the earlier rounds of the document (the working copy), the parties as on the agreement, and everyone on this side
+    // the parties' own contact details, for the check on typed words on this screen only (never sent to a signer's own screen)
+    const ownList = async () => { const pp = (await ofSafe(sb.from('property_people').select('email,phone').eq('property_id', g.property_id))) || [], ags = (await ofSafe(sb.from('agreements').select('id').eq('property_id', g.property_id))) || [];
+      const ap = ags.length ? ((await ofSafe(sb.from('agreement_people').select('email,phone').in('agreement_id', ags.map(x => x.id)))) || []) : [], dt = o.details || {};
+      return DR.ownContacts([{ who: 'a purchaser', email: dt.email, phone: dt.phone }].concat((dt.purchasers || []).map(q => ({ who: 'a purchaser', email: q.email, phone: q.phone })), pp.concat(ap).map(x => ({ who: 'a vendor', email: x.email, phone: x.phone })))); };
+    const R2x = RN > 1 ? { own: await ownList(), layers: ((await sgRpc('agent_offer_layers', { p_offer: g.offer_id, p_document: g.document_id })).layers || []).filter(L => L.doc_round < RN), parties: g.side === 'vendor' ? ngParties(o.details) : null,
+      sideSigners: ((await ofSafe(sb.from('offer_signers').select(SG_COLS).eq('signing_id', sid).order('position'))) || []).filter(x => !x.void_at).map(x => ({ position: x.position, name: x.name })),
+      side_places: (g.places || []).concat((rvs || []).flatMap(r => r.places || [])) } : {};
+    signFlow({ mode: 'person', address: p.address, name: s.name, position: s.position, places: (g.places || []).concat((rvs || []).flatMap(r => r.places || [])).filter(x => x.signer === s.position), taps: new Set((taps || []).map(t => t.place_id)),
+      consent_at: s.consent_at, receipts: (rcs || []).map(r => r.guide), sig_png: s.sig_png, init_png: s.init_png, status: g.status, stopped: stale, cca_pages: g.cca_pages || [], pages: g.pages, bytes, draftSha: g.draft_sha256, marks: marks || [], round: RN, side: g.side || 'purchaser', ...R2x,
+      api: { change: c => sgRpc('agent_round_change', Object.assign({ p_id: c.id, p_kind: c.kind, p_page: c.page, p_geometry: c.geometry, p_target: c.target || null, p_places: c.places }, P_)), consent: () => sgRpc('agent_signing_consent', Object.assign({ p_ua: ua }, P_)), receipt: r => sgRpc('agent_signing_receipt', Object.assign({ p_guide: r.guide, p_version: r.version || null, p_file: r.file || null, p_sha256: r.sha256 || null, p_pages: r.pages || null }, P_)),
+        marks: (a, b) => sgRpc('agent_signing_marks', Object.assign({ p_sig: a, p_init: b }, P_)), tap: pl => sgRpc('agent_signing_tap', Object.assign({ p_place: pl }, P_)),
+        mark: m => sgRpc('agent_signing_mark', Object.assign({ p_kind: m.kind, p_page: m.page, p_geometry: m.geometry, p_target: m.target || null }, P_)), finish: o2 => sgRpc('agent_signing_finish', Object.assign({ p_id_sighted: o2.id, p_ua: ua }, P_)) },
+      reload: () => viewSignTurn(sid, signerId), back: () => viewSigning(sid), done: r => { toast(`${s.name} has finished`); viewSigning(sid); } });
+  }
+
+  // ── presentation and counteroffers (offers phase 4, migration 021) ──
+  // Nothing reaches the other side until Tim has looked at the newest locked round and taps Present. The side presented to signs on
+  // the same screens as Round 1 (in person on Tim's device, or by a personal link and an emailed code), on the working copy: the draft
+  // with every round's ink on top, where a change lifts the other side's initials at its place (every earlier round still shows them).
+  // To accept, they initial each change and sign; to counter, they change the document first (each change carries everyone's
+  // initials on their side). Each round is locked with its record. The vendors' dashboard and journey map never show any of it.
+  const NG = window.NEGO;
+  const ngSide = s => s === 'vendor' ? 'vendors' : 'purchasers';
+  const ngUuid = () => { try { if (crypto.randomUUID) return crypto.randomUUID(); } catch (_) { } const b = crypto.getRandomValues(new Uint8Array(16)); b[6] = (b[6] & 15) | 64; b[8] = (b[8] & 63) | 128; const h = Array.from(b, x => x.toString(16).padStart(2, '0')).join(''); return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`; };
+  // the parties as the agreement names them (the purchasers' names and their lawyer), never their own contact details
+  const ngParties = d => { const x = d || {}, lw = x.lawyer || {}; return { purchasers: (x.purchasers || []).map(q => [q.first, q.last].map(v => String(v || '').trim()).filter(Boolean).join(' ')), entity: String(x.entity || '').trim() || null,
+    lawyer: { firm: lw.firm || null, person: lw.person || null, email: lw.email || null, phone: lw.phone || null }, chattels: x.chattels_listed || [], chattels_add: x.chattels_add || [], chattels_exclude: x.chattels_exclude || [] }; };
+  const ngItem = c => typeof c === 'string' ? c : (c && (c.name || c.text || c.label)) || '';
+  // at the top of every step from Round 2 on: who the purchasers are (as on the agreement) and that a lawyer can help at any time
+  function ngIntroHTML(ctx) {
+    const P_ = ctx.parties, lw = (P_ && P_.lawyer) || {};
+    return `<div class="card note tight" id="ngIntro"><p class="small" style="margin:0">${ctx.side === 'vendor' ? `Round ${ctx.round}: the purchasers have signed this offer. You can accept it as it stands, or change it and sign your changes as a counteroffer.` : `Round ${ctx.round}: the vendors have answered your offer. You can accept their changes, or change it again and sign as a counteroffer.`} Nothing goes back until everyone on your side has signed and Tim has checked it.</p>
+      ${P_ ? `<p class="small" style="margin:6px 0 0" id="ngParties"><strong>Purchasers:</strong> ${esc(P_.purchasers.join(', '))}${P_.entity ? ` (${esc(P_.entity)})` : ''}${lw.firm || lw.person ? `<br><strong>Their lawyer:</strong> ${esc([lw.person, lw.firm].filter(Boolean).join(', '))}${lw.email ? ' · ' + esc(lw.email) : ''}${lw.phone ? ' · ' + esc(lw.phone) : ''}` : ''}</p>` : ''}
+      <p class="small" style="margin:6px 0 0" id="ngLawyer">You can talk to your lawyer at any time before you sign. If you'd like to, stop here and come back to this ${ctx.mode === 'link' ? 'link' : 'screen'} afterwards.</p></div>`;
+  }
+  // the vendors' reminder about chattels, receipted before they sign
+  function ngChattelsHTML(ctx) {
+    const P_ = ctx.parties || {}, inc = (P_.chattels || []).map(ngItem).filter(Boolean).concat((P_.chattels_add || []).map(ngItem).filter(Boolean)), exc = (P_.chattels_exclude || []).map(ngItem).filter(Boolean);
+    return `<section class="card" id="ngChattels"><h2>Before you sign: the chattels</h2>
+      <p>Anything provided as a chattel must be in full working order at settlement: elements, bulbs, remotes, heat pumps and so on. If something isn't working, tell Tim now, so it can be dealt with in the agreement.</p>
+      ${inc.length ? `<p class="small" style="margin:0"><strong>Included in this offer:</strong> ${esc(inc.join(', '))}</p>` : '<p class="small" style="margin:0">The chattels are listed on the agreement.</p>'}
+      ${exc.length ? `<p class="small" style="margin:4px 0 0"><strong>Left out by the purchasers:</strong> ${esc(exc.join(', '))}</p>` : ''}
+      <label class="choice cb"><input type="checkbox" id="ngChatOk"><span class="mark"></span><span><span class="ct">I understand that every chattel included must be in full working order at settlement</span><span class="cd">This is recorded with the time</span></span></label>
+      <div class="toolbar"><button class="btn primary" type="button" id="ngChatGo">Continue</button></div></section>`;
+  }
+  // the working copy for this signer: every earlier round's ink, with this round's changes lifting the other side's at their place
+  const ngStanding = ctx => NG.standing(ctx.layers || [], { doc_round: ctx.round, side: ctx.side, signing_id: 'current', marks: ctx.marks || [] });
+  // ink and changes drawn over a rendered page (an overlay; the page itself is never changed)
+  function ngLayer(r, st, page, onPick) {
+    const svg = sgMarksLayer(r, (st.changes || []).filter(m => m.page === page), onPick), NS = 'http://www.w3.org/2000/svg';
+    (st.ink || []).filter(k => k.page === page).forEach(k => { const el = k.kind === 'name' || !k.png ? document.createElementNS(NS, 'text') : document.createElementNS(NS, 'image');
+      if (k.kind === 'name' || !k.png) { el.setAttribute('x', k.x); el.setAttribute('y', r.H - k.y - 2); el.setAttribute('class', 'ng-name'); el.textContent = k.name || k.who || ''; }
+      else { el.setAttribute('href', k.png); el.setAttribute('x', k.x); el.setAttribute('y', r.H - k.y - k.h); el.setAttribute('width', k.w); el.setAttribute('height', k.h); el.setAttribute('preserveAspectRatio', 'xMidYMid meet'); }
+      el.setAttribute('data-ink', k.key); el.setAttribute('data-side', k.side); svg.appendChild(el); });
+    return svg;
+  }
+  // the pages with their printed words (for placing initials beside a change clear of them), read once
+  async function ngPageItems(ctx) { if (!ctx._items) ctx._items = (await DR.readPages(await drPdfjs(), ctx.bytes, PDF_OPTS)).map(p => ({ n: p.n, w: p.w, h: p.h, items: p.items })); return ctx._items; }
+  // the change tools from Round 2 on (both on Tim's device and by link): each change goes in with everyone's initials beside it
+  function ngTools(ctx, F, paint, tools) {
+    const hint = { strike: 'Drag along the line of text to strike it through.', cross: 'Drag from one corner of the passage or box to the other.', insert: 'Tap where the words go, then type them below.', note: 'Write or draw on the page with your finger or stylus.', reinstate: 'Tap a line or crossed-out passage to reinstate it.' }[F.marking];
+    tools.insertAdjacentHTML('afterend', `<p class="small" id="sgMarkHint">${hint} Everyone on your side initials each change, and the ${ngSide(ctx.side === 'vendor' ? 'purchaser' : 'vendor')}' initials at that place are lifted from this copy (they stay on the earlier rounds).</p><div class="toolbar">${F.marking === 'insert' ? '<label class="sr" for="ngInsText">Words to add</label><input type="text" id="ngInsText" maxlength="300" placeholder="Words to add, for example $690,000">' : ''}<button class="btn primary" type="button" id="sgMarkSave" disabled>Save this change</button><button class="btn ghost" type="button" id="sgMarkCancel">Cancel</button></div>`);
+    $('#sgMarkCancel').addEventListener('click', () => { F.marking = null; F.draft = null; F.pick = null; signFlowTools(ctx, F, paint); });
+    const it = $('#ngInsText'); if (it) it.addEventListener('input', () => { $('#sgMarkSave').disabled = !(F.draft && it.value.trim()); });
+    $('#sgMarkSave').addEventListener('click', async () => { const e = $('#sgErr'); e.textContent = '';
+      let m = F.marking === 'reinstate' ? (F.pick ? { kind: 'reinstate', page: F.page, target: F.pick.id, geometry: { x: Math.round(SG.markRect(F.pick).x * 10) / 10, y: Math.round((SG.markRect(F.pick).y + SG.markRect(F.pick).h + 2) * 10) / 10 } } : null) : F.draft;
+      if (!m) return (e.textContent = 'Change the page first.');
+      if (m.kind === 'insert') { const t = ($('#ngInsText') || {}).value || ''; if (!t.trim()) return (e.textContent = 'Type the words to add.');
+        // on Tim's own screen, where the parties' own contact details are loaded, his check straight away (phase 2's rule); dates and prices
+        // are fine. A link signer's screen never has those details: the database checks (offer_private_hit) and its refusal is shown plainly.
+        const who = ctx.own ? DR.holdsOwn(t, ctx.own) : ''; if (who) return (e.textContent = `Those words hold ${who}'s own phone or email, so they can't go on the agreement. Only the lawyers' details go on it.`);
+        m = Object.assign({}, m, { geometry: Object.assign({}, m.geometry, { text: t.trim().replace(/\s+/g, ' ') }) }); }
+      const pw = ctx.pages[F.page - 1]; if (m.kind !== 'insert' && !SG.markOk(Object.assign({}, m, { target: m.target || (m.kind === 'reinstate' ? 'x' : null) }), { w: pw[0], h: pw[1] })) return (e.textContent = 'That change doesn\'t sit on the page. Try again.');
+      const btn = $('#sgMarkSave'); btn.disabled = true;
+      try { const c = Object.assign({ id: ngUuid() }, m), items = await ngPageItems(ctx);
+        const places = NG.changePlaces(c, ctx.sideSigners, items, ngStanding(ctx), ctx.side_places || []);
+        await ctx.api.change({ id: c.id, kind: c.kind, page: c.page, geometry: c.geometry, target: c.target || null, places }); toast('Change saved. Everyone on your side initials it'); ctx.reload(); }
+      catch (x) { e.textContent = x.message; btn.disabled = false; } });
+    paint();
+  }
+
+  // Tim's view of the negotiation, on the offer page
+  async function ngOfferHTML(o) {
+    const docs = (await ofSafe(sb.from('offer_documents').select('*').eq('offer_id', o.id).order('number', { ascending: false }))) || [];
+    if (!docs.length) return '';
+    const [rounds, gs, ags] = await Promise.all([ofSafe(sb.from('offer_rounds').select('id,number,document_id,doc_round,side,changes,outstanding,lifted,sha256,locked_at,signing_id,path').eq('offer_id', o.id).order('number')),
+      ofSafe(sb.from('offer_signings').select('id,round_no,side,status,method,document_id,released_at').eq('offer_id', o.id).gt('round_no', 1)), ofSafe(sb.from('offer_agreements').select('*').eq('offer_id', o.id))]);
+    const R_ = rounds || [], ag = (ags || [])[0], open = docs.find(x => x.status === 'open'), off = ['withdrawn', 'lapsed', 'declined'].includes(o.status);
+    const last = open ? R_.filter(r => r.document_id === open.id).sort((a, z) => z.doc_round - a.doc_round)[0] : null;
+    const live = open ? (gs || []).find(g => g.document_id === open.id && ['ready', 'signing', 'held', 'complete'].includes(g.status)) : null;
+    const formed = last && last.doc_round > 1 && !last.changes && !(last.outstanding || []).length && !live;
+    const nowLocal = (() => { const t = new Date(); t.setMinutes(t.getMinutes() - t.getTimezoneOffset()); return t.toISOString().slice(0, 16); })();
+    const today = NG.fullDate(new Date().toLocaleDateString('en-CA', { timeZone: 'Pacific/Auckland' }));
+    const rRow = r => `<li class="small" data-round="${r.doc_round}"><strong>Round ${r.doc_round}</strong>, signed by the ${ngSide(r.side)}: ${r.doc_round === 1 ? 'the offer' : r.changes ? `${r.changes} change${r.changes === 1 ? '' : 's'} (a counteroffer)` : 'accepted with no changes'}. Locked ${esc(fmtDT(r.locked_at))}, fingerprint <span translate="no">${esc(drShort(r.sha256))}</span>. <button class="btn link" type="button" data-ngdl="${r.id}">Download</button></li>`;
+    return `<h3 style="margin:14px 0 4px">Negotiation</h3><div id="ngOffer">
+      ${ag ? `<div class="card okc" id="ngAgreed"><h3 style="margin:0 0 4px">Agreement made</h3><p class="small" style="margin:0">Dated ${esc(ag.date_text)}. Acceptance communicated ${esc(fmtDT(ag.accepted_at))}. The agreed copy is locked, fingerprint <span translate="no">${esc(drShort(ag.sha256))}</span>. Other offers on the property haven't been touched: you decide what happens with them.</p>
+        <div class="toolbar"><button class="btn ghost" type="button" id="ngAgDl">Download the agreed copy</button></div></div>` : ''}
+      ${docs.map(dc => `<div class="card tight ng-doc" data-doc="${dc.number}"><p class="small" style="margin:0 0 4px"><strong>Document ${dc.number}</strong> ${dc.status === 'open' ? '<span class="pill">Open</span>' : dc.status === 'agreed' ? '<span class="pill okp">Agreed</span>' : `<span class="pill of-off">Closed, kept as history</span> ${esc(fmtDT(dc.closed_at))}: ${esc(dc.close_reason || '')}`}</p>
+        <ul class="dr-list">${R_.filter(r => r.document_id === dc.id).sort((a, z) => a.doc_round - z.doc_round).map(rRow).join('')}
+        ${(gs || []).filter(g => g.document_id === dc.id && !['locked'].includes(g.status)).map(g => `<li><button class="of-row" type="button" data-signing="${g.id}"><span class="of-r1"><strong>Round ${g.round_no}</strong>, the ${ngSide(g.side)}, ${g.method === 'link' ? 'by link' : 'in person'} ${sgDot(g.status)}</span></button></li>`).join('')}</ul></div>`).join('')}
+      ${open && !off && !ag ? (live ? `<p class="small" id="ngLive">Round ${live.round_no} is with the ${ngSide(live.side)}. Open it above to see where they are.</p>`
+        : formed ? `<div class="card okc" id="ngFormed"><h3 style="margin:0 0 4px">The agreement is formed</h3><p class="small" style="margin:0">Both sides have signed the same version (Round ${last.doc_round}), every change initialled by everyone, every signature there. Check it, then confirm.</p>
+          <label class="f" for="ngAccAt">When acceptance was communicated</label><input type="datetime-local" id="ngAccAt" value="${nowLocal}">
+          <label class="f" for="ngDate">The date at the top of the agreement <span class="opt">(in full, with the month name)</span></label><input type="text" id="ngDate" value="${esc(today)}" maxlength="20">
+          <p class="small" style="margin:2px 0 0">The day acceptance was communicated, filled in for you; it can be no earlier than that, and not after today. This is the only time the date is added. It goes on as an overlay; the signed rounds are unchanged.</p>
+          <label class="choice cb"><input type="checkbox" id="ngAgCheck"><span class="mark"></span><span><span class="ct">I've looked at Round ${last.doc_round} and it is fully agreed</span></span></label>
+          <div class="toolbar"><button class="btn primary" type="button" id="ngAgree">Confirm the agreement</button></div><p class="small err" id="ngAgErr" role="alert"></p></div>`
+        : `<div class="card tight" id="ngNext"><p class="small" style="margin:0">Round ${last.doc_round} is locked. Nothing has gone to the ${ngSide(last.side === 'purchaser' ? 'vendor' : 'purchaser')} yet.</p>
+          <div class="toolbar"><button class="btn primary" type="button" id="ngPresent">${last.side === 'purchaser' ? (last.doc_round === 1 ? 'Present to the vendors' : 'Present back to the vendors') : 'Present back to the purchasers'}</button></div></div>`) : ''}
+      ${open && !ag ? `<details class="card tight" id="ngFresh"><summary class="small">Start a fresh copy</summary><p class="small">For when the document has become hard to read. It is closed and filed as negotiation history, with every round kept. Then correct the offer to the terms as they stand, re-draft and approve it, and the purchasers sign Round 1 of a new document.</p>
+        <label class="f" for="ngFreshWhy">Why</label><textarea id="ngFreshWhy" rows="2" maxlength="500"></textarea><div class="toolbar"><button class="btn ghost" type="button" id="ngClose">Close this document</button></div><p class="small err" id="ngFreshErr" role="alert"></p></details>` : ''}
+      ${!off && !ag ? `<details class="card tight" id="ngWithdraw"><summary class="small">A side has withdrawn</summary><p class="small">Record who told you and when. Anything out for signing stops, any links sent stop working, and this document is filed as history: if it comes back to life, it starts again with a fresh copy.</p>
+        <div class="choices"><label class="choice"><input type="radio" name="ngWdSide" value="purchaser"><span class="mark"></span><span><span class="ct">The purchasers withdrew their offer</span></span></label><label class="choice"><input type="radio" name="ngWdSide" value="vendor"><span class="mark"></span><span><span class="ct">The vendors declined the offer, or withdrew their counteroffer</span></span></label></div>
+        <label class="f" for="ngWdAt">When</label><input type="datetime-local" id="ngWdAt" value="${nowLocal}"><label class="f" for="ngWdNote">Note <span class="opt">(optional)</span></label><input type="text" id="ngWdNote" maxlength="500">
+        <div class="toolbar"><button class="btn ghost" type="button" id="ngWdGo">Record the withdrawal</button></div><p class="small err" id="ngWdErr" role="alert"></p></details>` : ''}
+      ${R_.length ? `<div class="toolbar"><button class="btn ghost" type="button" id="ngPack">Lawyers' pack (every round and the timeline)</button></div><p class="small" id="ngPackOut" role="status" aria-live="polite"></p>` : ''}</div>`;
+  }
+  // a stored file, checked against its fingerprint
+  async function ngFile(path, sha) { const { data, error } = await sb.storage.from('property-files').createSignedUrl(path, 300); if (error || !data) throw new Error('A file couldn\'t be opened. Check you have signal.');
+    const bytes = new Uint8Array(await (await fetch(data.signedUrl)).arrayBuffer()); if (await REPO.sha256(bytes) !== sha) throw new Error('A stored file doesn\'t match its fingerprint.'); return bytes; }
+  const ngSave = (bytes, name, type) => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([bytes], { type })); a.download = name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000); };
+  const ngSlug = t => String(t || 'agreement').replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60);
+  function ngOfferWire(o, p) {
+    const reload = () => viewOfferAgent(o.id);
+    const pr = $('#ngPresent'); if (pr) pr.addEventListener('click', () => viewRoundPresent(o.id));
+    $$('[data-ngdl]').forEach(b => b.addEventListener('click', async () => { try { const r = (await must(sb.from('offer_rounds').select('*').eq('id', b.dataset.ngdl).single())), dc = await must(sb.from('offer_documents').select('number').eq('id', r.document_id).single());
+      ngSave(await ngFile(r.path, r.sha256), `Document-${dc.number}-Round-${r.doc_round}-${ngSlug(p.address)}.pdf`, 'application/pdf'); } catch (e) { toast(e.message); } }));
+    const ad = $('#ngAgDl'); if (ad) ad.addEventListener('click', async () => { try { const ag = (await must(sb.from('offer_agreements').select('*').eq('offer_id', o.id)))[0]; ngSave(await ngFile(ag.path, ag.sha256), `Agreement-${ngSlug(p.address)}.pdf`, 'application/pdf'); } catch (e) { toast(e.message); } });
+    const cl = $('#ngClose'); if (cl) cl.addEventListener('click', async () => { cl.disabled = true; try { await sgRpc('agent_document_close', { p_offer: o.id, p_reason: $('#ngFreshWhy').value.trim() }); toast('Filed as history. Correct the offer, then re-draft it'); reload(); } catch (e) { $('#ngFreshErr').textContent = e.message; cl.disabled = false; } });
+    const wd = $('#ngWdGo'); if (wd) wd.addEventListener('click', async () => { const side = ($('input[name="ngWdSide"]:checked') || {}).value; if (!side) return ($('#ngWdErr').textContent = 'Choose who withdrew.');
+      const at = new Date($('#ngWdAt').value); if (isNaN(at)) return ($('#ngWdErr').textContent = 'Check the time.'); wd.disabled = true;
+      try { await sgRpc('agent_negotiation_withdraw', { p_offer: o.id, p_side: side, p_at: at.toISOString(), p_note: $('#ngWdNote').value.trim() || null }); toast('Withdrawal recorded'); reload(); } catch (e) { $('#ngWdErr').textContent = e.message; wd.disabled = false; } });
+    const acc_ = $('#ngAccAt'); if (acc_) { let edited = false; $('#ngDate').addEventListener('input', () => { edited = true; });
+      acc_.addEventListener('change', () => { const t = new Date(acc_.value); if (!edited && !isNaN(t)) $('#ngDate').value = NG.fullDate(t.toLocaleDateString('en-CA', { timeZone: 'Pacific/Auckland' })); }); }
+    const ag = $('#ngAgree'); if (ag) ag.addEventListener('click', async () => { const er = $('#ngAgErr'); er.textContent = '';
+      if (!$('#ngAgCheck').checked) return (er.textContent = 'Tick that you have looked at the final round.');
+      const dt = $('#ngDate').value.trim().replace(/\s+/g, ' '); if (!NG.parseFullDate(dt)) return (er.textContent = 'Type the date in full with the month name, for example 24 November 2026.');
+      const at = new Date($('#ngAccAt').value); if (isNaN(at)) return (er.textContent = 'Check when acceptance was communicated.');
+      ag.disabled = true; er.textContent = 'Making the agreed copy...';
+      const r = await offerCall('offer-sign', { action: 'agree', offer_id: o.id, accepted_at: at.toISOString(), date_text: dt });
+      if (!r || !r.ok) { er.textContent = (r && r.error) || 'That didn\'t work. Try again.'; ag.disabled = false; return; }
+      // the property's stage moves to Under offer with the existing stage function; other offers are left for Tim
+      let msg = 'Agreement confirmed and locked.';
+      if (p.stage !== 'under_offer') { try { await sgRpc('agent_set_stage', { pid: p.id, p_stage: 'under_offer', p_reason: null, p_confirmed: true }); msg += ' The property is now under offer.'; } catch (e) { msg += ' The stage didn\'t move (' + e.message + '). Change it on the property page.'; } }
+      toast(msg); reload(); });
+    const pk = $('#ngPack'); if (pk) pk.addEventListener('click', () => ngPack(o, p));
+  }
+  // the lawyers' pack: every locked round across every document, the agreed copy, and the timeline as a readable page, in one zip.
+  // Each file inside is the locked copy byte for byte (checked against its fingerprint first). Agent only.
+  async function ngPack(o, p) {
+    const out_ = $('#ngPackOut'); out_.textContent = 'Putting the pack together...';
+    try {
+      const [rounds, docs, ags, evs] = await Promise.all([must(sb.from('offer_rounds').select('*').eq('offer_id', o.id).order('number')), must(sb.from('offer_documents').select('id,number').eq('offer_id', o.id)), ofSafe(sb.from('offer_agreements').select('*').eq('offer_id', o.id)), must(sb.from('offer_events').select('*').eq('offer_id', o.id))]);
+      const files = [];
+      for (const r of rounds) { const dn = (docs.find(x => x.id === r.document_id) || {}).number || 1; files.push({ name: `Document-${dn}-Round-${r.doc_round}.pdf`, bytes: await ngFile(r.path, r.sha256), sha256: r.sha256 }); }
+      const ag = (ags || [])[0]; if (ag) files.push({ name: 'Agreement-as-agreed.pdf', bytes: await ngFile(ag.path, ag.sha256), sha256: ag.sha256 });
+      let check = null; try { check = await sgRpc('agent_offer_chain_check', { p_offer: o.id }); } catch (_) { }
+      const html = NG.timelineHtml(evs, { address: p.address, offer_ref: o.buyer_ref, made_at: new Date().toISOString(), check, files: files.map(f => ({ name: f.name, sha256: f.sha256 })) });
+      files.push({ name: 'Timeline.html', bytes: new TextEncoder().encode(html) });
+      ngSave(NG.zip(files), `Lawyers-pack-${ngSlug(p.address)}.zip`, 'application/zip');
+      out_.textContent = `Downloaded: ${files.length - 1} locked cop${files.length - 1 === 1 ? 'y' : 'ies'} and the timeline${check && check.ok ? ' (checked)' : ''}.`;
+    } catch (e) { out_.textContent = e.message || 'The pack couldn\'t be made.'; }
+  }
+  // "Present": Tim looks at the newest locked round, chooses how the other side signs, and authorises it. Nothing is sent here.
+  async function viewRoundPresent(oid, opt) {
+    header('Present', '', 0); actions(false);
+    main().innerHTML = '<div class="loading">Loading...</div>';
+    const o = await must(sb.from('property_offers').select('*').eq('id', oid).single()), p = await must(sb.from('properties').select('id,address,stage').eq('id', o.property_id).single());
+    const ly = await sgRpc('agent_offer_layers', { p_offer: oid, p_document: null }), doc = ly.document, layers = ly.layers || [];
+    if (!doc || doc.status !== 'open' || !layers.length) return viewOfferAgent(oid);
+    const last = layers[layers.length - 1], side = last.side === 'purchaser' ? 'vendor' : 'purchaser';
+    const d = await must(sb.from('offer_drafts').select('*').eq('id', doc.draft_id).single()), mp = await must(sb.from('offer_blank_maps').select('id,places').eq('id', d.map_id).single());
+    let D_; try { D_ = await sgDraftPages(d); } catch (e) { main().innerHTML = `<div class="view-pad"><p class="err">${esc(e.message === 'pdf-lib' ? drNoLib : e.message || drNoLib)}</p></div>`; return; }
+    // who signs: a side's later round is the same people as its newest locked round (the database refuses if the owners have changed since);
+    // the vendors' first round, the owners on the property
+    const prevL = layers.filter(L => L.side === side).sort((a, z) => z.doc_round - a.doc_round)[0];
+    const owners = ((await ofSafe(sb.from('property_people').select('id,position,legal_name,email,role').eq('property_id', o.property_id))) || []).filter(x => (x.role || 'owner') === 'owner').sort((a, z) => (a.position || 0) - (z.position || 0));
+    const people = prevL ? ((await ofSafe(sb.from('offer_signers').select(SG_COLS + ',person_id').eq('signing_id', prevL.signing_id).order('position'))) || []).filter(x => !x.void_at).map(x => { const pp = owners.find(q => q.id === x.person_id); return { position: x.position, name: x.name, email: String((pp && pp.email) || x.email || '').trim(), person: x.person_id }; })
+      : side === 'vendor' ? owners.map((x, i) => ({ position: i + 1, name: String(x.legal_name || '').trim(), email: String(x.email || '').trim(), person: x.id })) : [];
+    const ownersChanged = !!(prevL && side === 'vendor' && owners.map(x => x.id).sort().join() !== people.map(x => x.person).sort().join());
+    const setg = ((await ofSafe(sb.from('offer_settings').select('resign_every_round,link_changes_default'))) || [])[0] || {}, resignEvery = !!setg.resign_every_round;
+    const pages = D_.pages.map(x => ({ n: x.n, w: x.w, h: x.h, items: x.items }));
+    const M = NG.presentPlaces({ pages, placed: d.placed || [], mapPlaces: mp.places || [], side, signers: people, layers, resignEvery });
+    const st = NG.standing(layers), changedPages = [...new Set(last.marks.map(m => m.page))];
+    const R = { method: (opt && opt.method) || 'in_person', page: changedPages[0] || 1, linkChanges: setg.link_changes_default !== false };   // Tim presents: in person unless he chooses a link
+    const paint = () => {
+      const noEmail = people.filter(x => !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x.email)), noName = people.filter(x => !x.name);
+      main().innerHTML = `<div class="view-pad dr-page" id="ngPresentView"><div class="toolbar no-print"><button class="btn ghost" type="button" id="ngBack">Back to the offer</button></div><span class="agent-flag">Only you see this</span>
+        <h1>Present Round ${last.doc_round} to the ${ngSide(side)}</h1><p class="lede">${nt(p.address)}</p>
+        <section class="card" id="ngLook"><h2>Look at Round ${last.doc_round}</h2><p class="small">Signed by the ${ngSide(last.side)}${last.doc_round > 1 ? `, ${last.marks.length ? last.marks.length + ' change' + (last.marks.length === 1 ? '' : 's') : 'no changes'}` : ''}. Fingerprint <span translate="no">${esc(drShort(last.sha256))}</span>. This is the working copy: every round's signatures and initials, with what each change lifted taken off.</p>
+          ${st.lifted.length ? `<p class="small" id="ngLifted">${st.lifted.length} initial${st.lifted.length === 1 ? '' : 's'} or signature${st.lifted.length === 1 ? '' : 's'} lifted at the place of a change. They still show on the round${st.lifted.length === 1 ? '' : 's'} they were signed in.</p>` : ''}
+          <div class="dr-nav"><label class="sr" for="ngPick">Page</label><select id="ngPick">${pages.map(pg => `<option value="${pg.n}" ${pg.n === R.page ? 'selected' : ''}>Page ${pg.n}${changedPages.includes(pg.n) ? ' (changed)' : ''}</option>`).join('')}</select></div>
+          <div id="ngCanvas" class="dr-holder"></div>
+          <label class="choice cb"><input type="checkbox" id="ngChecked"><span class="mark"></span><span><span class="ct">I've looked at Round ${last.doc_round} and it can go to the ${ngSide(side)}</span></span></label></section>
+        <section class="card" id="ngWho"><h2>Who signs</h2>${people.map(x => `<p class="small" style="margin:0 0 4px" data-ngwho="${x.position}"><strong>${nt(x.name || 'No legal name yet')}</strong>: ${M.counts[x.position] || 0} places${R.method === 'link' ? ` <span translate="no">(${esc(x.email || 'no email')})</span>` : ''}</p>`).join('')}
+          ${ownersChanged ? `<div class="card warnc tight" id="ngOwners"><p class="small" style="margin:0">The owners on the property have changed since Round ${prevL.doc_round}. Start a fresh copy, so the right people sign.</p></div>` : ''}
+          <p class="small">${M.first ? `It's their first round, so each initials the foot of every page and every filled box, and signs.` : `Each initials every change not yet initialled${resignEvery ? ', and signs again' : '. Their signatures from before stand, unless a change lifted one: then they sign again'}.`}${side === 'vendor' ? ' Before signing, the vendors read the reminder that every chattel must be in full working order at settlement, and are told they can talk to their lawyer at any time. They see the purchasers\' names and lawyer, as on the agreement, never their own contact details.' : ''}</p>
+          ${noName.length ? `<div class="card warnc tight"><p class="small" style="margin:0">Add each vendor's legal name on the property first.</p></div>` : ''}
+          ${M.blocking.length ? `<div class="card warnc tight" id="ngBlock"><ul class="dr-list">${M.blocking.map(b => `<li class="small"><strong>${esc(b.label)}</strong>: ${esc(b.why)}</li>`).join('')}</ul></div>` : ''}</section>
+        <section class="card" id="ngHow"><h2>How they sign</h2><div class="choices">
+          <label class="choice"><input type="radio" name="ngMethod" value="in_person" ${R.method === 'in_person' ? 'checked' : ''}><span class="mark"></span><span><span class="ct">In person, on this device</span><span class="cd">One at a time. You record that you saw them sign and the photo ID you sighted (the type only).</span></span></label>
+          <label class="choice"><input type="radio" name="ngMethod" value="link" ${R.method === 'link' ? 'checked' : ''}><span class="mark"></span><span><span class="ct">By a personal link to each</span><span class="cd">Each gets their own link and a one-time code by email. Nothing is sent until you tap Send.</span></span></label></div>
+          <label class="choice cb" style="margin-top:8px"><input type="checkbox" id="ngLinkChanges" ${R.linkChanges ? 'checked' : ''}><span class="mark"></span><span><span class="ct">Let them make changes from their link</span><span class="cd">Off: their link shows only accept or decline, and Ask Tim for a change. On your device they can always make changes.</span></span></label>
+          ${R.method === 'link' && noEmail.length ? `<div class="card warnc tight" id="ngNoEmail"><p class="small" style="margin:0">${esc(noEmail.map(x => x.name || 'A vendor').join(', '))} ${noEmail.length === 1 ? 'has' : 'have'} no email. Add it on the property, or sign in person.</p></div>` : ''}</section>
+        <div class="err" id="ngErr" role="alert"></div>
+        <div class="toolbar"><button class="btn primary" type="button" id="ngGo" ${M.blocking.length || noName.length || ownersChanged ? 'disabled' : ''}>Present to the ${ngSide(side)}</button></div>
+        <p class="small">${R.method === 'link' ? 'This authorises it. You send the links on the next screen.' : 'Signing then happens on this device.'}</p></div>`;
+      $('#ngBack').addEventListener('click', () => viewOfferAgent(oid));
+      $$('input[name="ngMethod"]').forEach(x => x.addEventListener('change', () => { R.method = x.value; paint(); }));
+      $('#ngLinkChanges').addEventListener('change', e => { R.linkChanges = e.target.checked; });
+      $('#ngPick').addEventListener('change', e => { R.page = +e.target.value; canvas(); });
+      $('#ngGo').addEventListener('click', async () => { const b = $('#ngGo'); b.disabled = true; $('#ngErr').textContent = '';
+        try { const r = await sgRpc('agent_round_present', { p_offer: oid, p_method: R.method, p_places: M.places, p_checked: $('#ngChecked').checked, p_note: null, p_link_changes: R.linkChanges }); toast(`Round ${r.round || last.doc_round + 1} authorised`); viewSigning(r.id); }
+        catch (e) { $('#ngErr').textContent = e.message; b.disabled = false; } });
+      canvas();
+    };
+    const canvas = async () => { try { const r = await drRender($('#ngCanvas'), R.page, [], { bytes: D_.bytes, key: 'draft-' + d.id }); ngLayer(r, st, R.page, null); } catch (_) { $('#ngCanvas').innerHTML = `<p class="small err">${drNoLib}</p>`; } };
+    paint(); top();
+  }
+
+  // by link: the purchaser's own page (no account; the token, then a one-time code by email)
+  async function viewSignRemote(token) {
+    document.title = 'Sign your offer · McGuire Real Estate';
+    header('Sign your offer', '', 0); actions(false); $('#signOut').hidden = true;
+    main().innerHTML = '<div class="loading">Loading...</div>';
+    const call = async (action, extra) => { const r = await offerCall('offer-sign', Object.assign({ action, token, session: sgSes() }, extra || {})); if (!r || r.ok === false) { const e = new Error((r && r.error) || (r && r.reason === 'network' ? 'We couldn\'t reach the signing page just now. Check your connection and try again.' : 'That didn\'t work. Please try again.')); e.r = r; throw e; } return r; };
+    const key = 'sgSes:' + token.slice(0, 12), sgSes = () => { try { return sessionStorage.getItem(key) || ''; } catch (_) { return ''; } }, setSes = v => { try { v ? sessionStorage.setItem(key, v) : sessionStorage.removeItem(key); } catch (_) { } };
+    const closed = (t, why) => { main().innerHTML = `<div class="login-card" id="sgClosed"><h1>${esc(t)}</h1><p class="lede">${esc(why)}</p><p>Please call or text Tim on <a href="tel:0275627207">027 562 7207</a>, or email <a href="mailto:tim@mcguire.co.nz">tim@mcguire.co.nz</a>.</p></div>`; };
+    const info = await offerCall('offer-sign', { action: 'open', token });
+    if (!info || info.ok !== true) return closed('This link isn\'t working', info && info.reason === 'network' ? 'We couldn\'t reach the signing page just now. Check your connection and try again.' : 'It may have been replaced by a newer link, or it has run out.');
+    const VS = info.side === 'vendor', LR = (info.round || 1) > 1;
+    if (VS) document.title = 'An offer on your property · McGuire Real Estate';
+    if (info.finished) return closed('You\'ve signed', VS || LR ? 'Thank you. Tim has your signed copy. Nothing goes back until everyone on your side has signed and Tim has checked it.' : 'Thank you. Tim has your signed offer. Nothing goes to the sellers until everyone has signed and Tim has checked it.');
+    if (info.stopped) return closed('This version isn\'t being signed', info.stopped);
+    if (!Object.keys(GUIDES).length) await Promise.race([loadGuides(), new Promise(r => setTimeout(r, 4000))]);
+    const start = async () => {
+      let st; try { st = await call('state'); } catch (e) { if (/code from your email/.test(e.message)) { setSes(''); return codeStep(); } return closed('Something went wrong', e.message); }
+      // the document is given only once they agree to sign electronically
+      let bytes = null; if (st.signing.draft_url) { try { bytes = new Uint8Array(await (await fetch(st.signing.draft_url)).arrayBuffer()); if (await REPO.sha256(bytes) !== st.signing.draft_sha256) throw new Error('x'); } catch (_) { return closed('The document didn\'t open', 'Check your connection and open the link again.'); } }
+      const S = st.signer, G = st.signing;
+      signFlow({ mode: 'link', address: G.address, name: S.name, position: S.position, places: G.places || [], taps: new Set(st.taps || []), consent_at: S.consent_at, receipts: (S.receipts || []).map(r => r.guide), sig_png: S.sig_png, init_png: S.init_png,
+        status: G.status, stopped: G.stopped, cca_pages: G.cca_pages || [], pages: G.pages, bytes, draftSha: G.draft_sha256, marks: (G.round || 1) > 1 ? G.marks || [] : [],
+        round: G.round || 1, side: G.side || 'purchaser', link_changes: !!G.link_changes, layers: G.layers || [], parties: G.parties || null, side_places: G.side_places || [], sideSigners: Array.from({ length: G.signers || 1 }, (_, i) => ({ position: i + 1, name: '' })),
+        api: { change: c => call('change', c), consent: () => call('consent'), receipt: r => call('receipt', r), marks: (a, b) => call('marks', { sig: a, init: b }), tap: pl => call('tap', { place: pl }), ask: (t, decline) => call('ask', { text: t, decline: !!decline }), finish: () => call('finish') },
+        reload: start, done: r => { setSes(''); main().innerHTML = `<div class="login-card" id="sgThanks"><h1>Thank you, ${esc(S.name.split(' ')[0])}</h1><p class="lede">You've signed every place.${r && r.complete && r.locked ? ' Everyone has now signed, and the signed copy is locked.' : r && r.complete ? ' Everyone has now signed. Tim will lock the signed copy and let you know.' : ' Tim will let you know once everyone has signed.'}</p><p class="small">${VS || LR ? `Nothing goes back to the ${VS ? 'purchasers' : 'vendors'} until Tim has checked it.` : 'Nothing goes to the sellers until Tim has checked it.'} Any questions, call or text Tim on <a href="tel:0275627207">027 562 7207</a>.</p></div>`; top(); } });
+    };
+    const codeStep = (msg) => {
+      main().innerHTML = `<div class="login-card" id="sgCode"><h1>Kia ora ${esc(info.first)}</h1><p class="lede">${VS ? `Tim has an offer on ${nt(info.address)} for you to look at.` : LR ? `The vendors have answered your offer for ${nt(info.address)}.` : `Your offer for ${nt(info.address)} is ready to sign.`}</p>
+        <p class="small">First, a quick check that it's you. We'll email a 6-digit code to <span translate="no">${esc(info.email_hint)}</span>.</p>
+        <div class="toolbar"><button class="btn primary" type="button" id="sgSendCode">Email me a code</button></div>
+        <label class="f" for="sgCodeIn">The code from your email</label><input type="text" id="sgCodeIn" inputmode="numeric" autocomplete="one-time-code" maxlength="8">
+        <div class="toolbar"><button class="btn primary" type="button" id="sgCodeGo">Continue</button></div><p class="small" id="sgCodeMsg" role="status" aria-live="polite">${esc(msg || '')}</p></div>`;
+      $('#sgSendCode').addEventListener('click', async () => { const r = await offerCall('offer-sign', { action: 'send_code', token }); $('#sgCodeMsg').textContent = r && r.ok ? 'Sent. Check your email (and your junk folder). The code works once, for 15 minutes.' : r && r.reason === 'busy' ? 'Several codes have been sent in the last hour. Please wait a little, or call Tim.' : 'The code didn\'t send. Please try again, or call Tim.'; });
+      $('#sgCodeGo').addEventListener('click', async () => { const c = $('#sgCodeIn').value.trim(); const r = await offerCall('offer-sign', { action: 'verify', token, code: c });
+        if (r && r.ok && r.session) { setSes(r.session); return start(); }
+        $('#sgCodeMsg').textContent = r && r.reason === 'expired' ? 'That code has run out. Email yourself a new one.' : r && r.reason === 'tries' ? 'That was wrong too many times. Email yourself a new code.' : r && r.reason === 'no_code' ? 'Email yourself a code first.' : 'That code isn\'t right. Check it and try again.'; });
+      top();
+    };
+    if (sgSes()) start(); else codeStep();
   }
 
   /* ═════════════════ PORTAL (PORTAL-PLAN.md, phase P1): an address for every page, and a footer menu ═════════════════
@@ -7142,6 +7768,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
 
   const offerToken = new URLSearchParams(location.search).get('offer');
   if (offerToken) { const w = $('#langWrap'); if (w) w.hidden = true; viewOfferPublic(offerToken); return; }
+  const signToken = new URLSearchParams(location.search).get('sign');
+  if (signToken) { const w = $('#langWrap'); if (w) w.hidden = true; viewSignRemote(signToken); return; }
   const lawyerToken = new URLSearchParams(location.search).get('lawyer');
   if (lawyerToken) { const w = $('#langWrap'); if (w) w.hidden = true; viewLawyer(lawyerToken); return; }
   window.addEventListener('hashchange', e => {
