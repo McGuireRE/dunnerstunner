@@ -666,6 +666,13 @@ For Tim's information (no change): drafting leaves a blank initials line after e
 continuation pages sooner; and more purchasers than the printed name places no longer blocks drafting (signing adds places beneath,
 or refuses on a pack with no room, as on Tim's real pack for a fourth purchaser).
 
+Second review (24 November 2026): one send at a time (a draft is "sending" with a pending log row; a second Send is refused; a send
+the mail server took but that wasn't recorded says "This may have gone. Check before sending again", and Tim makes it a draft again only
+once he has checked); marked blanks refused by the server; the deposit in Tim's words ("Deposit ($X): payable to Public Trust O/A NZ
+Real Estate Trust once the agreement becomes unconditional"); from Round 2 on a correction shows the parties only the neutral reason, and
+Tim is warned before correcting while a round is out; the vendors' agreed email only to this negotiation's vendor signers and their
+lawyer; drafts open "Dear" (purchasers) and "Hello" (vendors); a signer sees "Document check code" behind Details.
+
 Open points for Tim:
 - One-time signing codes still go by themselves (a signer is waiting for it), holding only the code and who it is from.
 - "I'm Tim, carry on" is a tap; P3's PIN or passkey replaces it.

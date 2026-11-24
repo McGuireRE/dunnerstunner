@@ -321,4 +321,8 @@ agreements/<agreement id>/signatures/... (vendors may upload their own signature
   `offer_sign_current` gives a party no reason beyond "no longer being signed". `agent_signing_release` refuses a draft without
   `term_last` or term boxes; `offer_sign_do_change` refuses a taken counteroffer term number. 023 adds `agent_signing_turn_ok`; its
   `agent_signing_finish` takes no identity choice as well; `offer_sign_places_ok` counts only block signatures.
+- Second review (24 November 2026): a draft is 'sending' between `offer_mail_take` and `offer_mail_done`, and `offer_mail_log` rows go
+  pending, then sent, failed or unconfirmed (only that outcome is ever filled in, once). `offer_mail_done(draft, log, actor, ok, error)`;
+  `agent_mail_draft_unstick` (Tim checked a send that may have gone did not arrive). Sending refuses marked blanks. The vendors' agreed
+  email may go only to this negotiation's vendor signers and the vendors' lawyer.
 
