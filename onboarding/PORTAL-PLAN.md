@@ -8,6 +8,27 @@ Why: the agent side of the onboarding app has grown one tool at a time. Its scre
 "return to dashboard" and "return to property" are confusing. Tim wants one front door with a menu, and an address
 for every page.
 
+## Central plan and order of work
+
+Tim's central build plan for the portal is the doc "Dunnerstunner portal: central build plan"
+(https://claude.ai/artifact/GQasqhc7aq6M2Y8koiWcmL). Every request is written there first; only the master controller chat
+(this repository's session) builds, tests, reviews and publishes. Other chats add requests there and never change the code,
+the database or the live site. The controller copies each queued request into this file when it schedules it.
+
+Order of work (set 24 November 2026; Tim may reorder):
+
+1. P1 follow-ups: a refreshed form stays in signing mode; plainer "Couldn't save" wording.
+2. GT1. Grand Tour pass 1 (typed and dictated notes). Small, no new service, and the information gathering it speeds up is
+   where most of Tim's time goes.
+3. Appraisal page (target 11 December 2026). Decisions so far are in Tim's other chats; it gets its own plan file here before
+   any build.
+4. P2. Properties.
+5. P3. Security and never losing work. Must come before GT2 and GT3, which hold recordings and the client heart, and before P4.
+6. GT2 and GT3. Grand Tour recording, transcription, field suggestions, property brain and client heart.
+7. P4 People, P5 Import and feeds, P6 Assessments.
+
+Offers phases 3 to 6 follow `OFFERS-PLAN.md` and are not yet placed in this order.
+
 ## Decisions (Tim, 24 November 2026)
 
 - Address: portal.dunnerstunner.co.nz. No separate domain.
@@ -174,3 +195,38 @@ Until then the Processes page shows two tiles, "Improvements and preparation ass
 "Coming soon" and not clickable. Neither is ever called an appraisal: a desktop analysis is expressly less than an appraisal of
 market value. There is no `processes/assessment` address; it shows "This page isn't here".
 
+### GT. Grand Tour
+
+Added 24 November 2026 from Tim's central plan. Scheduled: GT1 next after the P1 follow-ups; GT2 and GT3 after P3.
+
+Grand Tour is the first page of a property's inspection: a fast way for Tim to capture what he sees and hears on a walk-through,
+which he confirms later as the authorised agent. It is not a declaration: the Vendor Declaration stays a separate step the vendors
+sign. Decided: a portal feature, not a Claude chat. The portal records and stores; an AI model behind the portal transcribes and
+interprets. Address: `properties/<p>/inspection/<i>/tour`, the inspection's first section.
+
+Agreed behaviour (Tim, 24 November 2026):
+- Three ways in: typed notes, dictated notes, or a recorded conversation.
+- Consent first: a tick box and a one-line script before the record button goes live.
+- A large pause button always in reach, with an obvious paused state.
+- Un-pausing restarts the recording straight away. A one-line "Anything from that to note for disclosure?" box appears at the same
+  time and never blocks or delays the recording, answered or not.
+- Audio saved to the property as it goes, so nothing is lost if reception drops.
+- Keep or delete audio: Tim's choice per tour, with a default set once.
+- Two brains. Property brain: features, condition, history, chattels, each fact tagged with where it came from. Client heart:
+  motivation, timing, family, worries, how they like to be dealt with; agent only, never on vendor pages, never sent to DwellHub.
+- Field suggestions: the AI proposes inspection field updates, each with the sentence it came from; Tim accepts or rejects each.
+- Notes written up room by room from the transcript.
+
+Passes:
+- GT1. The Grand Tour page with typed notes and dictation (the phone's own voice typing; no new service), saved as typed under
+  P3's "never lose work" rule as far as it exists by then, kept offline and synced like the inspection's answers. Used on a real
+  tour before GT2 and GT3 are polished.
+- GT2. Recording with consent, pause, the disclosure note box, transcription and the written-up notes. Needs a speech-to-text
+  service connected to the portal: choose one that Tim can switch on without copying keys, or set it up for him.
+- GT3. Field suggestions, property brain and client heart.
+
+Rules carried over: Relab ownership details and buyers' locations stay on agent-only pages. Whatever Tim learns about a defect,
+recorded or not, still falls under his disclosure duties (REA rules 10.7 and 10.8): the pause keeps a conversation off the
+recording; it does not make it confidential.
+
+Open for Tim: the pause button's label and what sellers are told ("Pause recording" or "Off the record").
