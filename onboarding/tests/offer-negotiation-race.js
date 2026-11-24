@@ -14,6 +14,7 @@
 //   2d. Tim presses Withdraw now while a vendor's change is part way through (it holds its locks and pauses before its event);
 //   2e. the reverse: Withdraw now holds the offer and pauses, and a change starts 0.4 s in; 2f. Tim closes the document while a change
 //      is part way through. One lock order everywhere (the offer, then the signing, then the signer): none deadlock.
+//   2g, 2h. a vendor's "Ask Tim for a change" (or Decline) part way through as Tim presses Freeze now, or Withdraw now: no deadlock.
 //   5. Tim freezes the offer as the last vendor finishes (review, 25 November 2026): the freeze holds the offer's lock a moment, the
 //      finish waits for it and is then refused; never a signing completed after the freeze.
 // The scratch database is dropped afterwards. Run: RACE_TEMPLATE=t4 PGHOST=/tmp/p2pg PGPORT=5499 PGUSER=postgres node onboarding/tests/offer-negotiation-race.js
@@ -62,7 +63,11 @@ const AGENT = `set role authenticated; select set_config('request.jwt.claims', j
       create table public.rc (k text primary key, v text);
       -- a pause inside a change, between its first locks and its event (only when the session sets rc.sleep): the real function, its own lock order
       create function public.rc_sleep() returns trigger language plpgsql as $b$ begin if current_setting('rc.sleep', true) = 'on' then perform pg_sleep(1.5); end if; return new; end $b$;
-      create trigger rc_sleep before insert on public.offer_sign_marks for each row execute function public.rc_sleep();`);
+      create trigger rc_sleep before insert on public.offer_sign_marks for each row execute function public.rc_sleep();
+      -- a pause inside an event insert, after the chain trigger's advisory lock and before the foreign key's check (only when the session
+      -- sets rc.evsleep): where an ask that hadn't taken the offer first could deadlock against a freeze or Withdraw now
+      create function public.rc_evsleep() returns trigger language plpgsql as $b$ begin if current_setting('rc.evsleep', true) = 'on' then perform pg_sleep(1.5); end if; return new; end $b$;
+      create trigger zz_rc_evsleep before insert on public.offer_events for each row execute function public.rc_evsleep();`);
     if (helpers.c) throw new Error('helpers failed: ' + helpers.e);
     // four offers, each with Round 1 locked
     const setup = await psql(`do $s$ declare pid uuid; o uuid; bl uuid; m uuid; d uuid; g uuid; k int; doc uuid;
@@ -76,7 +81,7 @@ const AGENT = `set role authenticated; select set_config('request.jwt.claims', j
         insert into public.offer_blanks (property_id, document_id, sha256, size_bytes, file_name, pages, sizes, edition, edition_checked, created_by) values (pid, doc, repeat('ab', 32), 10, 'b.pdf', 3, '[[595,842],[595,842],[595,842]]', 'Eleventh Edition 2022 (4)', true, 't') returning id into bl;
         insert into public.offer_blank_maps (blank_id, version, places, approved, created_by) values (bl, 1, '[{"id":"date","key":"date","kind":"date","page":1,"x":80,"y":730,"w":200,"h":10}]', true, 't') returning id into m;
         perform set_config('request.jwt.claims', agent, true);
-        for k in 1..10 loop
+        for k in 1..12 loop
           o := public.agent_offer_add(pid, good);
           -- a draft as drafting makes it since the further terms numbering (024 refuses one without term_last)
           insert into public.offer_drafts (offer_id, property_id, number, blank_id, blank_sha256, map_id, details, placed, needs, path, sha256, size_bytes, created_by, edits)
@@ -176,6 +181,19 @@ const AGENT = `set role authenticated; select set_config('request.jwt.claims', j
     { const [o, g] = await round2('o10'); const c = change(g, '22222222-bbbb-4bbb-8bbb-000000000010', true); await pause(); const cl = psql(`${AGENT} select public.agent_document_close('${o}', 'A clean copy, during a change')::text`); const rs = await Promise.all([c, cl]), a = await after(g, o);
       out.closeDuringChange = { change: rs[0].c ? rs[0].e.split('\n')[0] : 'saved', close: rs[1].c ? rs[1].e.split('\n')[0] : 'closed', signing: a[0], marks: +a[1], doc: a[3] };
       ok(!bad(rs).length && !rs[1].c && a[3] === 'closed', '2f: closing the document while a change is part way through: no deadlock, the close stands: ' + bad(rs).join(' | ')); }
+
+    // 2g, 2h: an ask from a vendor's link, paused inside its event (after the chain's lock), as Tim freezes or withdraws 0.4 s in
+    const linkRound = async k => { const o = await v(k); const g = await one(`${AGENT} select public.agent_round_present('${o}', 'link', public.rc_places(2, true, null, true), true)->>'id'`);
+      const tok = await one(`${CLAIMS} select public.offer_sign_issue('${g}', 'test')->'links'->0->>'token'`), code = await one(`select public.offer_sign_code('${tok}', 'n-${k}')->>'code'`);
+      const ses = await one(`select public.offer_sign_verify('${tok}', '${code}', 'n-${k}', 'ua')->>'session'`); return [o, g, tok, ses]; };
+    const ask = (tok, ses) => psql(`set rc.evsleep = 'on'; select public.offer_sign_ask('${tok}', '${ses}', 'We decline it as it stands.')::text`);
+    const askAfter = async (o, g) => (await one(`select (select count(*) from public.offer_sign_asks where signing_id = '${g}') || ',' || (select count(*) from public.offer_holds where offer_id = '${o}') || ',' || (select status from public.offer_signings where id = '${g}')`)).split(',');
+    { const [o, g, tok, ses] = await linkRound('o11'); const a = ask(tok, ses); await pause(); const f = psql(`${AGENT} select public.agent_offer_freeze('${o}', 'Race: Vera rang', 'Vera Racer', null)::text`); const rs = await Promise.all([a, f]), x = await askAfter(o, g);
+      out.askDuringFreeze = { ask: rs[0].c ? rs[0].e.split('\n')[0] : 'asked', freeze: rs[1].c ? rs[1].e.split('\n')[0] : 'frozen', asks: +x[0], holds: +x[1], signing: x[2] };
+      ok(!bad(rs).length && !rs[1].c && x[1] === '1', '2g: an ask as Tim freezes: no deadlock, the freeze stands: ' + bad(rs).join(' | ')); }
+    { const [o, g, tok, ses] = await linkRound('o12'); const a = ask(tok, ses); await pause(); const w = wdNow(o, false); const rs = await Promise.all([a, w]), x = await askAfter(o, g);
+      out.askDuringWithdraw = { ask: rs[0].c ? rs[0].e.split('\n')[0] : 'asked', withdraw: rs[1].c ? rs[1].e.split('\n')[0] : 'withdrawn', asks: +x[0], holds: +x[1], signing: x[2] };
+      ok(!bad(rs).length && !rs[1].c && x[2] === 'withdrawn', '2h: an ask as Tim presses Withdraw now: no deadlock, the withdrawal stands: ' + bad(rs).join(' | ')); }
 
     // 5. a freeze and the last finish at once (offer 5): the freeze takes the offer first and holds it a moment; the finish then waits
     const o5 = await v('o5');

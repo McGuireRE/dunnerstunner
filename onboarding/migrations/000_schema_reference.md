@@ -351,4 +351,6 @@ agreements/<agreement id>/signatures/... (vendors may upload their own signature
   offer's state (present, close, status, withdraw, withdraw now, freeze, unfreeze, correct, release, round and agreement locks, new
   email drafts) take it FOR UPDATE first. `offer_sign_ready` and `offer_sign_stop_for` give the neutral line before "replaced" once a
   hold is active, since a withdrawal voids places too.
+  `offer_sign_ask` (Ask Tim for a change, Decline) takes the offer first too, and 024 redefines 019's `agent_draft_approve` word for
+  word (checked against the live body by fingerprint) with the offer FOR UPDATE first; `agent_offer_deposit_holder` takes it FOR UPDATE.
 

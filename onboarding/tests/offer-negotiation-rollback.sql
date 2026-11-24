@@ -366,8 +366,10 @@ begin
     -- a former owner and a contact on the property: never the vendors (review B1)
     insert into public.property_people (property_id, position, legal_name, email, phone, role) values (pid, 3, 'Fern Former', 'fern.former@example.com', '', 'former'), (pid, 4, 'Con Contact', 'con.contact@example.com', '', 'contact');
     insert into public.offer_drafts (offer_id, property_id, number, blank_id, blank_sha256, map_id, details, placed, needs, path, sha256, size_bytes, created_by, edits)
-      values (o5, pid, 1, bl, repeat('ab', 32), m, (select details from public.property_offers where id = o5), '[]', '[]', 'properties/' || pid || '/docs/offer-draft-' || o5 || '-1.pdf', repeat('e5', 32), 100, 'test', '{"term_last": 22}') returning id into d5;
-    insert into public.offer_draft_approvals (draft_id, sha256, approved_by) values (d5, repeat('e5', 32), 'test');
+      values (o5, pid, 1, bl, repeat('ab', 32), m2, (select details from public.property_offers where id = o5), '[]', '[]', 'properties/' || pid || '/docs/offer-draft-' || o5 || '-1.pdf', repeat('e5', 32), 100, 'test', '{"term_last": 22}') returning id into d5;
+    -- approved through 019's own function, as 024 redefines it (the offer locked first)
+    perform set_config('request.jwt.claims', agent, true); r := public.agent_draft_approve(d5, repeat('e5', 32), '{}');
+    out := out || 'draft approved through the function: existing=' || (r->>'existing') || ' again=' || (public.agent_draft_approve(d5, repeat('e5', 32), '{}')->>'existing') || '; ';
     perform set_config('request.jwt.claims', agent, true);
     g5 := (public.agent_signing_release(d5, 'in_person', sizes, pg_temp.rb_places(2, true, null, false), '{}') ->> 'id')::uuid; perform pg_temp.rb_prep(g5); perform pg_temp.rb_finish(g5); perform pg_temp.rb_lock(g5, '{}');
     g5 := (public.agent_round_present(o5, 'link', pg_temp.rb_places(2, true, null, true), true)->>'id')::uuid; r := public.offer_sign_issue(g5, 'agent');

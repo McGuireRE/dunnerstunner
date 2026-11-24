@@ -119,6 +119,31 @@ revoke insert, update, delete, truncate, references, trigger on public.offer_doc
 -- the new signer column is readable by Tim like the others (the link fingerprints still never are)
 grant select (person_id) on public.offer_signers to authenticated;
 
+-- 019's agent_draft_approve, word for word as it is live (its body checked against the live project by fingerprint on 25 November 2026),
+-- with one line added: the offer is locked first (FOR UPDATE), as every function writing to an offer's timeline now does, so approving
+-- can't deadlock against a freeze, a withdrawal or a correction, and the "offer has changed" check can't be overtaken. Same arguments,
+-- so its grants (authenticated and service_role) are kept.
+create or replace function public.agent_draft_approve(p_draft uuid, p_sha256 text, p_checked text[] default '{}') returns jsonb language plpgsql security definer set search_path = public as $$
+declare me text := public.offer_agent(); d public.offer_drafts; latest int; m public.offer_blank_maps; b public.offer_blanks; ck text[] := coalesce(p_checked, '{}');
+begin
+  perform 1 from public.property_offers where id = (select offer_id from public.offer_drafts where id = p_draft) for update;   -- 024: lock order, the offer first
+  select * into d from public.offer_drafts where id = p_draft; if d.id is null then raise exception 'No such draft'; end if;
+  if p_sha256 is distinct from d.sha256 then raise exception 'That isn''t the draft on your screen. Open it again'; end if;
+  if exists (select 1 from public.offer_draft_approvals where draft_id = p_draft) then return jsonb_build_object('ok', true, 'existing', true); end if;
+  select max(number) into latest from public.offer_drafts where offer_id = d.offer_id;
+  if d.number <> latest then raise exception 'There is a newer draft of this offer. Approve that one'; end if;
+  if (select details from public.property_offers where id = d.offer_id) is distinct from d.details then raise exception 'The offer has changed since this draft. Re-draft it first'; end if;
+  select * into m from public.offer_blank_maps where id = d.map_id; select * into b from public.offer_blanks where id = d.blank_id;
+  if exists (select 1 from public.offer_blank_maps x where x.blank_id = b.id and x.approved and x.version > m.version) then raise exception 'The places on the blank have been approved again since this draft. Re-draft it first'; end if;
+  if exists (select 1 from public.offer_blanks x where x.property_id = b.property_id and x.edition_checked and x.created_at > b.created_at) then raise exception 'A newer agreement blank has been loaded since this draft. Approve its places and re-draft first'; end if;
+  if exists (select 1 from jsonb_array_elements(d.needs) e where (e->>'blocking')::boolean is true and not ((e->>'ackable')::boolean is true and (e->>'id') = any (ck))) then
+    raise exception 'Some places still need you. Fill them in and draft again';
+  end if;
+  insert into public.offer_draft_approvals (draft_id, sha256, approved_by, checked) values (d.id, d.sha256, me, to_jsonb(ck));
+  insert into public.offer_events (property_id, offer_id, actor, kind, detail) values (d.property_id, d.offer_id, me, 'draft_approved', jsonb_build_object('draft_id', d.id, 'number', d.number, 'sha256', d.sha256, 'blank_sha256', d.blank_sha256, 'checked', to_jsonb(ck)));
+  return jsonb_build_object('ok', true, 'existing', false);
+end $$;
+
 -- ───── Freeze and withdrawal (Tim, 24 November 2026): Tim alone stops an offer ─────
 -- A freeze stops every round of an offer at once: nobody can sign, initial, change, submit or get a code on it, and their links say only
 -- that this version is no longer being signed. Tim lifts it. A withdrawal does all that for good, recorded for the party who directed it.
@@ -769,7 +794,11 @@ end $$;
 create or replace function public.offer_sign_ask(p_token text, p_session text, p_text text) returns jsonb language plpgsql security definer set search_path = public as $$
 declare s public.offer_signers; g public.offer_signings; t text := nullif(trim(regexp_replace(coalesce(p_text, ''), '[\u0001-\u0008\u000B\u000C\u000E-\u001F\u007F]', '', 'g')), ''); addr text;
 begin
-  s := public.offer_sign_me(p_token, p_session); select * into g from public.offer_signings where id = s.signing_id;
+  s := public.offer_sign_me(p_token, p_session);
+  -- lock order: the offer first (its event's chain lock would otherwise come before the offer's, against a freeze or withdrawal); the
+  -- freeze and withdrawal checks below run after it, so they can't be overtaken
+  perform public.offer_lock_by_signer(s.id);
+  select * into g from public.offer_signings where id = s.signing_id;
   if s.void_at is not null or g.status in ('locked', 'replaced') then raise exception 'This version is no longer being signed'; end if;
   -- frozen, withdrawn, or they have asked Tim to stop: no ask or decline either
   if public.offer_hold_active(g.offer_id) then raise exception 'This version is no longer being signed. Tim will be in touch.'; end if;
@@ -1107,7 +1136,7 @@ revoke insert, update, delete, truncate, references, trigger on public.offer_dep
 create or replace function public.agent_offer_deposit_holder(p_offer uuid, p_holder text, p_other text, p_default boolean default false) returns jsonb language plpgsql security definer set search_path = public as $$
 declare me text := public.offer_agent(); o public.property_offers; ag public.offer_agreements; ks boolean; rec text; id_ bigint;
 begin
-  select * into o from public.property_offers where id = p_offer; if o.id is null then raise exception 'No such offer'; end if;
+  select * into o from public.property_offers where id = p_offer for update; if o.id is null then raise exception 'No such offer'; end if;   -- lock order: the offer first
   select * into ag from public.offer_agreements where offer_id = o.id; if ag.id is null then raise exception 'The agreement hasn''t been made yet'; end if;
   if coalesce(p_holder, '') not in ('nzret', 'vendor_lawyer', 'other') then raise exception 'Choose who holds the deposit'; end if;
   if p_holder = 'other' and coalesce(length(trim(p_other)), 0) not between 3 and 200 then raise exception 'Type who holds the deposit (3 to 200 characters)'; end if;
