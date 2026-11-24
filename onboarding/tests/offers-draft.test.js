@@ -456,6 +456,7 @@ const sha = b => crypto.createHash('sha256').update(Buffer.from(b)).digest('hex'
   await q.click('input[name="dr_cm"][value="days"] + .mark'); await q.fill('#drCmDays', '5'); await q.click('#drCmDone'); await q.waitForSelector('#drRedraftNow', { timeout: 30000 });
   errs.splice(0, errs.length, ...errs.filter(e => !/Failed to fetch/.test(e)));   // the failed read is logged on purpose
   expect(/The offer was corrected, but the new draft wasn't made/.test(await q.textContent('#drCmErr')) && !/nothing was saved/.test(await q.textContent('#drCmErr')), 'corrected but not drafted: said so, with Re-draft now');
+  expect(await q.isDisabled('#drCmDone'), 'Done stays off once the correction has saved: only Re-draft now is offered');
   expect((await db(q)).offer_events.filter(e => e.offer_id === off2 && e.kind === 'corrected').length === ev2 + 1 && (await db(q)).property_offers.find(x => x.id === off2).details.conditions.find(c => c.key === 'custom').days === 5, 'the correction itself was saved');
   await q.evaluate(() => localStorage.removeItem('mockFailTable')); await q.click('#drRedraftNow'); dr9 = await waitDraft(++dn);
   expect(/Timing of Your own condition changed: within 5 working days/.test(dr9.note), 'Re-draft now makes the new draft');

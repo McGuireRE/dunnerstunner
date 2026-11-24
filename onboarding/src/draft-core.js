@@ -423,11 +423,12 @@
     // a blocking item stops approval; an "ackable" one can be cleared by Tim ticking that he has checked it
     const need = (id, text, blocking, ackable) => { if (!needs.some(n => n.id === id)) needs.push(Object.assign({ id, text, blocking: !!blocking }, ackable ? { ackable: true } : {})); };
     const has = k => Object.prototype.hasOwnProperty.call(edits, k);
+    const typedChecks = [];
     const put = (id, place, text, extra) => {
       if (!place) { need('missing_' + id, `There is no place for ${extra && extra.label || id} on this blank. Add it to the places on the blank, or write it in by hand.`, !(extra && extra.optional)); return; }
       let t = Object.prototype.hasOwnProperty.call(edits, id) ? edits[id] : text; if (t == null || t === '') return;
-      if (Object.prototype.hasOwnProperty.call(edits, id) && /^d_|^clause22_days$/.test(id) && text != null && String(t).trim() !== String(text).trim())
-        need('typed_' + id, `${(extra && extra.label) || place.label}: you typed "${String(t).slice(0, 80)}", but the offer works out "${String(text).slice(0, 80)}". Check it, or clear your edit so it follows the offer.`, true, true);
+      // a typed-over date line or clause 22.0 count: compared with what the offer works out once references are resolved (below)
+      if (Object.prototype.hasOwnProperty.call(edits, id) && /^d_|^clause22_days$/.test(id) && text != null) typedChecks.push({ id, label: (extra && extra.label) || place.label, typed: String(t), text: String(text) });
       t = String(t);
       if (!winAnsi(t)) { need('font_' + id, `${extra && extra.label || place.label}: "${t.slice(0, 80)}" has letters the typed font can't show (such as macrons). Write it in by hand, or change it.`, true); return; }
       const it = Object.assign({ id, key: place.key, place: place.id, page: place.page, kind: place.kind === 'area' ? 'area' : 'text', text: t, x: place.x, y: place.y, w: place.w, h: place.h, label: (extra && extra.label) || place.label, edited: Object.prototype.hasOwnProperty.call(edits, id) }, extra && extra.item);
@@ -604,7 +605,10 @@
         const c = cond('custom'); if (!c) continue;
         // the buyer's own wording may hold {timing} (the helper writes it so) or {date}: filled in like Tim's own clauses
         const w = String(E.custom_wording || c.wording || '').trim(), tm = timedFor('ft_custom', c, "Purchaser's condition"), f = E.custom_ok && w ? fillTerm('ft_custom', "Purchaser's condition", w, tm) : null;
-        term('ft_custom', "Purchaser's condition", f ? f.text : PLACEHOLDERS.custom, { custom: true, cond: 'custom', request: c.request || '', wording: c.wording || '', ai: !!c.ai, suffix: f && f.tokens ? '' : suffixFor(tm), template: f ? f.template : null, timing: tm });
+        // Tim's wording for it (edits.custom_wording, carried to later drafts) with no {timing}, {timing_date} or {date} where the buyer's
+        // wording had one: it no longer follows the offer's timing. A check for him, and no "Condition date" added after his words.
+        const dropTiming = !!(f && E.custom_ok && String(E.custom_wording || '').trim() && !TOKEN_RE.test(String(E.custom_wording)) && TOKEN_RE.test(String(c.wording || '')));
+        term('ft_custom', "Purchaser's condition", f ? f.text : PLACEHOLDERS.custom, { custom: true, cond: 'custom', request: c.request || '', wording: c.wording || '', ai: !!c.ai, suffix: dropTiming || (f && f.tokens) ? '' : suffixFor(tm), template: f ? f.template : null, timing: tm, dropTiming });
         continue;
       }
       let w = t.wording_from ? String((input.clauses || {})[t.wording_from] || '').trim() : String(t.wording || '').trim();
@@ -676,6 +680,7 @@
       // Tim's edit of a term is its wording as he left it: {timing} and {date} in it are filled in like any other
       const text = ft.map(x => { const edited = Object.prototype.hasOwnProperty.call(edits, x.id) ? String(edits[x.id] || '') : null;
         const orig = x.template;
+        if (x.dropTiming) need('timing_dropped_' + x.id, `Further term ${rNo(x.number)} no longer follows the offer's timing for ${labelOf(x.cond)} (the offer says ${OF ? OF.timingPlain(cond(x.cond)) : 'otherwise'}). Check it, or restore the timing.`, true, true);
         let body = edited != null ? noRefs(edited) : x.text; if (edited != null) { x.template = edited; if (TOKEN_RE.test(edited)) { const f = fillTerm(x.id, x.title, edited, x.timing); body = f.text; x.suffix = ''; }
           else if (x.cond && x.timing && cond(x.cond) && TOKEN_RE.test(String(orig || '')))
             need('timing_dropped_' + x.id, `Further term ${rNo(x.number)} no longer follows the offer's timing for ${labelOf(x.cond)} (the offer says ${OF ? OF.timingPlain(cond(x.cond)) : 'otherwise'}). Check it, or restore the timing.`, true, true); }
@@ -688,6 +693,8 @@
     }
     // any reference still waiting for its number (on the front page, beside clause 22.0, and in Tim's list of things to check)
     items.forEach(it => { if (it.text && hasRef(it.text)) it.text = resolveRefs(it.text); });
+    typedChecks.forEach(x => { const want = resolveRefs(x.text).trim(); if (x.typed.trim() !== want)
+      need('typed_' + x.id, `${x.label}: you typed "${x.typed.slice(0, 80)}", but the offer works out "${want.slice(0, 80)}". Check it, or clear your edit so it follows the offer.`, true, true); });
     needs.forEach(n => { if (hasRef(n.text)) n.text = resolveRefs(n.text); });
     // the lawyers' details, and only theirs: never a purchaser's or vendor's own phone or email
     const L = d.lawyer || {};

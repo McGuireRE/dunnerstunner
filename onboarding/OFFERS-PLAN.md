@@ -293,7 +293,10 @@ Built locally on `offers-timing` from main. Migration 022 is written and passed 
   December 2026").
 - Blocking, tickable checks: a condition-tied term whose wording Tim edited so it no longer holds its {timing} ("Further term 23.0 no
   longer follows the offer's timing for ..."), and a typed-over front-page date or clause 22.0 count that differs from what the
-  offer works out (both values named). Both are checked on every draft while the edit stands. Phase 2 drafts (no number_style) show
+  offer works out (both values named, compared once "see further term N" is resolved). Both are checked on every draft while the
+  edit stands. Tim's own wording for the buyer's condition (custom_wording) counts too: without the buyer's {timing} or {date} it
+  raises the same check, and no "Condition date" is added after his words. Once a correction has saved, its Done button stays off
+  if the re-draft fails; only "Re-draft now" is offered. Phase 2 drafts (no number_style) show
   "1." style on the review screen, as their PDF does. A removed term's number is retired (`edits.retired_numbers`) and never reused;
   `term_last` on each plan is where the sequence is up to (phase 4 continues from it).
 - Overflow: pages added straight after the further terms page, made from pictures of that page's own header and footer bands (PNG,

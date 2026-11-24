@@ -437,6 +437,21 @@ const ok = (c, msg) => { if (!c) errs.push(msg); };
   ok(ntf && ntf.blocking && ntf.ackable && /you typed "20 December 2026", but the offer works out "8 December 2026"/.test(ntf.text), 'a typed-over finance date names both values');
   ok(nt22 && nt22.blocking && nt22.ackable && /you typed "9", but the offer works out "5"/.test(nt22.text), 'a typed-over clause 22.0 count too');
   ok(!N(plan({}, { items: { d_finance: '8 December 2026' } }), 'typed_d_finance'), 'typing the same value: no check');
+  // Tim's own wording for the buyer's condition (custom_wording) dropping the buyer's {timing}: blocking, tickable, no "Condition date" added
+  const cdrop = ed => D.planDraft({ details: Object.assign({}, base, { conditions: [{ key: 'custom', days: 5, wording: 'Subject to the pool fence {timing}.' }] }), map, terms: tterms, clauses: {}, today: '2026-11-24', edits: ed });
+  const cd1 = cdrop({ custom_ok: true, custom_wording: 'Subject to the pool fence by Friday.' }), ncd = N(cd1, 'timing_dropped_ft_custom');
+  ok(ncd && ncd.blocking && ncd.ackable && ncd.text === "Further term 23.0 no longer follows the offer's timing for Your own condition (the offer says within 5 working days of the date of the agreement). Check it, or restore the timing.", "Tim's wording for the buyer's condition without its timing: " + (ncd && ncd.text));
+  ok(/^23\.0 Purchaser's condition: Subject to the pool fence by Friday\.$/m.test(FT(cd1)) && !/Condition date/.test(FT(cd1)), 'and nothing contradicting his words is added after them');
+  ok(N(cdrop({ custom_ok: true, custom_wording: 'Subject to the pool fence by Friday.', date_format: 'date' }), 'timing_dropped_ft_custom'), 'again on a later draft, while his wording carries over');
+  ok(!N(cdrop({ custom_ok: true, custom_wording: 'Subject to the pool fence {timing}, Tim says.' }), 'timing_dropped_ft_custom') && !N(cdrop({ custom_ok: true }), 'timing_dropped_ft_custom'), 'his wording keeping {timing}, or the buyer\'s own wording: no check');
+  const cnt = D.planDraft({ details: Object.assign({}, base, { conditions: [{ key: 'custom', days: 5, wording: 'Subject to the pool fence.' }] }), map, terms: tterms, clauses: {}, today: '2026-11-24', edits: { custom_ok: true, custom_wording: 'Subject to the pool fence, Tim says.' } });
+  ok(!N(cnt, 'timing_dropped_ft_custom') && /Tim says\. Condition date: 1 December 2026\./.test(FT(cnt)), 'buyer wording with no token to begin with: no check, and the condition date still added');
+  // a typed-over line compared after "see further term N" is resolved: the same text raises nothing, a different one is named
+  const tyNar = it => D.planDraft({ details: Object.assign({}, base, { conditions: [{ key: 'builders', days: 10 }, { key: 'finance', after: 'builders', days: 5 }] }), map: narrow, terms: tterms, clauses: {}, today: '2026-11-24', edits: { items: it } });
+  ok(!N(tyNar({ d_finance: 'see further term 23.0' }), 'typed_d_finance'), 'typing the resolved "see further term 23.0": nothing raised');
+  const tyBad = N(tyNar({ d_finance: 'see further term 30.0' }), 'typed_d_finance'); ok(tyBad && tyBad.blocking && /you typed "see further term 30\.0", but the offer works out "see further term 23\.0"/.test(tyBad.text) && !/\[\[/.test(tyBad.text), 'a different one names both, resolved');
+  const ty22 = it => D.planDraft({ details: Object.assign({}, base, { conditions: [{ key: 'finance', days: 10 }, { key: 'lawyer', after: 'finance', days: 3 }] }), map, terms, clauses: {}, today: '2026-11-24', edits: { items: it } });
+  ok(!N(ty22({ clause22_days: 'see further term 23.0' }), 'typed_clause22_days') && N(ty22({ clause22_days: '4' }), 'typed_clause22_days'), 'clause 22.0 likewise');
   // the drafted PDF carries it all
   const rt = await D.renderDraft(PDFLib, blank, tnar), tp = await D.readPages(pdfjs, rt.bytes), tx = n => tp[n - 1].items.map(i => i.s).join(' ');
   ok(tx(1).includes('see further term 24.0') && /Finance date \(clause 9\.1\)/.test(tx(3)), 'the PDF: "see further term 24.0" on the front page, the term on the Further Terms page');
