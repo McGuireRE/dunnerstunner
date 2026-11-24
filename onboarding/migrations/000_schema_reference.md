@@ -346,4 +346,9 @@ agreements/<agreement id>/signatures/... (vendors may upload their own signature
   request at a time. `offer_sign_ask` (and decline) refuses while frozen, withdrawn or with a request open; 023's `offer_sign_code` and
   `offer_sign_verify` use `offer_sign_stop_for` (023 defines it; 024 adds holds and requests). `offer_sign_do_finish` locks the offer,
   then the signing, then the signer, so a finish can't complete after a freeze. `agent_offer_withdraw_now` checks the request is this offer's.
+- One lock order everywhere (25 November 2026): the offer row first, then the signing (or draft), then the signer. Party and service
+  steps take the offer FOR KEY SHARE first (`offer_lock_by_signer`, `offer_lock_by_signing`, 023); Tim's functions that change the
+  offer's state (present, close, status, withdraw, withdraw now, freeze, unfreeze, correct, release, round and agreement locks, new
+  email drafts) take it FOR UPDATE first. `offer_sign_ready` and `offer_sign_stop_for` give the neutral line before "replaced" once a
+  hold is active, since a withdrawal voids places too.
 
