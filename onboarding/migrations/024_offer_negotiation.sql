@@ -68,7 +68,7 @@ alter table public.offer_hits drop constraint offer_hits_kind_check, add constra
 -- Tim's setting: does a side sign again every round, or only where its signature was lifted (the default)?
 alter table public.offer_settings add column resign_every_round boolean not null default false;
 -- Tim's setting: may the side a round goes to make changes from their own link? (on by default; he chooses for each round)
-alter table public.offer_settings add column link_changes_default boolean not null default true;
+alter table public.offer_settings add column link_changes_default boolean not null default false;   -- off: Tim switches link changes on per round (Tim, 24 November 2026)
 grant select (resign_every_round, link_changes_default) on public.offer_settings to authenticated;
 -- and the choice Tim made for each round he presents (null for Round 1, which has no changes)
 alter table public.offer_signings add column link_changes boolean;
@@ -485,7 +485,7 @@ end $$;
 create or replace function public.agent_round_present(p_offer uuid, p_method text, p_places jsonb, p_checked boolean, p_note text default null, p_link_changes boolean default null) returns jsonb language plpgsql security definer set search_path = public as $$
 declare me text := public.offer_agent(); o public.property_offers; doc public.offer_documents; last public.offer_rounds; base public.offer_signings; side_ text; n int; sid uuid; ex uuid; em text; i int; x jsonb; first_ boolean; m record; ppl jsonb;
   prev public.offer_rounds; owners uuid[]; resign boolean := coalesce((select resign_every_round from public.offer_settings limit 1), false); mk public.offer_sign_marks;
-  lc boolean := coalesce(p_link_changes, (select link_changes_default from public.offer_settings limit 1), true);
+  lc boolean := coalesce(p_link_changes, (select link_changes_default from public.offer_settings limit 1), false);
 begin
   if coalesce(p_method, '') not in ('in_person', 'link') then raise exception 'Choose in person or by link'; end if;
   select * into o from public.property_offers where id = p_offer for update; if o.id is null then raise exception 'No such offer'; end if;

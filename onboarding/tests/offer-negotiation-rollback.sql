@@ -104,14 +104,16 @@ begin
   begin perform public.agent_round_present(o2, 'link', pg_temp.rb_places(2, true, null, true), true); out := out || 'PRESENTED BEFORE ROUND 1; '; exception when others then out := out || 'before round 1: ' || sqlerrm || '; '; end;
   begin perform public.agent_round_present(o1, 'link', pg_temp.rb_places(2, true, null, true), false); out := out || 'PRESENTED UNCHECKED; '; exception when others then out := out || 'unchecked: ' || sqlerrm || '; '; end;
   begin perform public.agent_round_present(o1, 'link', pg_temp.rb_places(2, false, null, true), true); out := out || 'VENDORS SKIPPED THE PAGE FEET; '; exception when others then out := out || 'feet: ' || sqlerrm || '; '; end;
-  r := public.agent_round_present(o1, 'link', pg_temp.rb_places(2, true, null, true), true, 'Presented at the open home table'); g2 := (r->>'id')::uuid;
+  -- link changes start off (Tim, 24 November 2026): the setting reads false until he changes it; this round he switches them on himself
+  out := out || 'link changes default=' || (select link_changes_default from public.offer_settings limit 1) || '; ';
+  r := public.agent_round_present(o1, 'link', pg_temp.rb_places(2, true, null, true), true, 'Presented at the open home table', true); g2 := (r->>'id')::uuid;
   out := out || 'presented: side=' || (r->>'side') || ' round=' || (r->>'round') || ' again existing=' || (public.agent_round_present(o1, 'link', '[]', true)->>'existing') || '; ';
   out := out || 'signers: ' || (select string_agg(name || case when person_id is not null then '+' else '' end, ', ' order by position) from public.offer_signers where signing_id = g2) || ' status=' || (select status from public.offer_signings where id = g2) || '; ';
   execute 'reset role';
 
   -- 4. Vera opens her link: the vendors' side, round 2; a code; the reminder about chattels comes before any place
   r := public.offer_sign_issue(g2, 'agent'); tok := r->'links'->0->>'token';
-  out := out || 'issue side=' || (r->>'side') || ' round=' || (r->>'round') || ' links=' || jsonb_array_length(r->'links') || ' changes from link (default on)=' || (select link_changes from public.offer_signings where id = g2) || ' recorded=' || (select detail->>'link_changes' from public.offer_events where kind = 'round_presented' and detail->>'signing_id' = g2::text) || '; ';
+  out := out || 'issue side=' || (r->>'side') || ' round=' || (r->>'round') || ' links=' || jsonb_array_length(r->'links') || ' changes from link (switched on for this round)=' || (select link_changes from public.offer_signings where id = g2) || ' recorded=' || (select detail->>'link_changes' from public.offer_events where kind = 'round_presented' and detail->>'signing_id' = g2::text) || '; ';
   r := public.offer_sign_open(tok, 'n1', 'ua'); out := out || 'open: first=' || (r->>'first') || ' side=' || (r->>'side') || ' stopped=' || coalesce(r->>'stopped', 'none') || '; ';
   code := public.offer_sign_code(tok, 'n1')->>'code'; ses := public.offer_sign_verify(tok, code, 'n1', 'ua')->>'session';
   r := public.offer_sign_state(tok, ses);

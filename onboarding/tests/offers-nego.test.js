@@ -129,14 +129,15 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   expect(/Nothing has gone to the vendors yet/.test(await p.textContent('#ngNext')), 'the offer page says nothing has gone to the vendors');
   await p.click('#ngPresent'); await p.waitForSelector('#ngPresentView'); await p.waitForSelector('#ngCanvas .dr-pg canvas');
   expect(/first round, so each initials the foot of every page/.test(await p.textContent('#ngWho')) && /Testy Vendorperson/.test(await p.textContent('#ngWho')) && /Otherly Vendorperson/.test(await p.textContent('#ngWho')), 'the present screen shows who signs and what they do');
-  expect(await p.isChecked('#ngLinkChanges'), 'the present screen has "Let them make changes from their link", on by default (Tim\'s setting)');
+  expect(await p.$('#ngLinkChanges') && !(await p.isChecked('#ngLinkChanges')), 'the present screen has "Let them make changes from their link", off by default (Tim, 24 November 2026)');
+  await p.$eval('#ngLinkChanges', e => { if (!e.checked) e.click(); });   // Tim switches them on for this round himself
   expect(!(await side(p)), 'the present screen at 390 px: no sideways scroll'); await shot(p, 'present');
   await tick(p, 'input[name="ngMethod"][value="link"]'); await p.waitForTimeout(150);
   await p.click('#ngGo'); await p.waitForFunction(() => /Tick that you have looked at Round 1/.test(document.querySelector('#ngErr').textContent));
   d = await db(p); expect(!d.offer_signings.some(g => g.side === 'vendor'), 'not presented until Tim ticks that he has looked at Round 1');
   await tick(p, '#ngChecked'); await p.click('#ngGo'); await p.waitForSelector('#sgSendGo');
   d = await db(p); const g2 = d.offer_signings.find(g => g.offer_id === offA && g.round_no === 2);
-  expect(g2 && g2.link_changes === true, 'the vendors\' round allows changes from their link, as Tim left the switch');
+  expect(g2 && g2.link_changes === true, 'the vendors\' round allows changes from their link, because Tim switched it on for this round');
   expect(g2 && g2.side === 'vendor' && g2.status === 'ready' && d.offer_events.some(e => e.kind === 'round_presented' && e.detail.checked_round === 1), 'presented: Round 2 for the vendors, recorded as authorised after looking');
   expect(!(await mails(p)).some(m => m.kind === 'offer_sign_link'), 'still nothing sent before Send');
   expect(/Round 2: the vendors sign/.test(await p.textContent('#sgView h1')), 'the signing screen says it is the vendors\' round');
@@ -365,7 +366,9 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   process.stderr.write('step 10\n');
   await p.click('#ofBackP'); await p.waitForSelector('#offTile');
   // Tim's negotiation settings on the Offers tile: changes from a link switched off by default from now on
-  await p.click('#offSetD summary'); expect(await p.isChecked('#offNgLink') && !(await p.isChecked('#offNgResign')), 'the Offers tile shows both negotiation settings (changes from a link on, sign every round off)');
+  await p.click('#offSetD summary'); expect(!(await p.isChecked('#offNgLink')) && !(await p.isChecked('#offNgResign')), 'the Offers tile shows both negotiation settings, both off (changes from a link start off)');
+  // switching the default on and off again is recorded
+  await p.$eval('#offNgLink', e => e.click()); await p.waitForFunction(() => JSON.parse(localStorage.getItem('mockdb')).offer_settings[0].link_changes_default === true);
   await p.$eval('#offNgLink', e => e.click()); await p.waitForFunction(() => JSON.parse(localStorage.getItem('mockdb')).offer_settings[0].link_changes_default === false);
   await draftAndApprove(p, offC); await p.click('#sgReady'); await p.waitForSelector('#sgReleaseView', { timeout: 30000 }); await tick(p, 'input[name="sgMethod"][value="in_person"]'); await p.waitForTimeout(100); await p.click('#sgRelease'); await p.waitForSelector('#sgView');
   d = await db(p); r = await rpcRound(p, d.offer_signings.find(g => g.offer_id === offC && g.round_no === 1).id); expect(r && r.ok, 'offer C: Round 1 locked');

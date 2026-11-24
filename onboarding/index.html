@@ -11971,7 +11971,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         <label class="f" for="offKs">KiwiSaver warning when settlement is fewer than this many working days after unconditional <span class="opt">(every property)</span></label>
         <div class="toolbar"><input type="number" id="offKs" min="1" max="60" value="${X.ks}" style="max-width:100px"><button class="btn ghost" type="button" id="offKsSave">Save</button></div>
         <p class="small" style="margin:10px 0 4px"><strong>Negotiation</strong> <span class="opt">(every property)</span></p>
-        <label class="choice cb"><input type="checkbox" id="offNgLink" ${X.ng.link_changes_default !== false ? 'checked' : ''}><span class="mark"></span><span><span class="ct">Let the other side make changes from their link</span><span class="cd">The starting choice when you present a round; you can change it each time</span></span></label>
+        <label class="choice cb"><input type="checkbox" id="offNgLink" ${X.ng.link_changes_default === true ? 'checked' : ''}><span class="mark"></span><span><span class="ct">Let the other side make changes from their link</span><span class="cd">The starting choice when you present a round; you can change it each time</span></span></label>
         <label class="choice cb"><input type="checkbox" id="offNgResign" ${X.ng.resign_every_round ? 'checked' : ''}><span class="mark"></span><span><span class="ct">Everyone signs again every round</span><span class="cd">Off: a signature stands unless a change lifts it</span></span></label>
         <p class="small" style="margin:10px 0 4px"><strong>Your own clause wording</strong> <span class="opt">(every property; buyers see it when they tap the condition)</span></p>
         ${['electrical', 'technical', 'sale', 'sdd'].map(k => `<label class="f" for="offW_${k}">${esc(OF.condInfo(k).label)}</label><textarea id="offW_${k}" rows="3" maxlength="4000" data-offw="${k}">${esc(X.wording[k] || '')}</textarea>`).join('')}
@@ -13277,7 +13277,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const pages = D_.pages.map(x => ({ n: x.n, w: x.w, h: x.h, items: x.items }));
     const M = NG.presentPlaces({ pages, placed: d.placed || [], mapPlaces: mp.places || [], side, signers: people, layers, resignEvery });
     const st = NG.standing(layers), changedPages = [...new Set(last.marks.map(m => m.page))];
-    const R = { method: (opt && opt.method) || 'in_person', page: changedPages[0] || 1, linkChanges: setg.link_changes_default !== false };   // Tim presents: in person unless he chooses a link
+    const R = { method: (opt && opt.method) || 'in_person', page: changedPages[0] || 1, linkChanges: setg.link_changes_default === true };   // Tim presents: in person unless he chooses a link
     const paint = () => {
       const noEmail = people.filter(x => !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x.email)), noName = people.filter(x => !x.name);
       main().innerHTML = `<div class="view-pad dr-page" id="ngPresentView"><div class="toolbar no-print"><button class="btn ghost" type="button" id="ngBack">Back to the offer</button></div><span class="agent-flag">Only you see this</span>
