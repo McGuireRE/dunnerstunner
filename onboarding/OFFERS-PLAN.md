@@ -236,8 +236,8 @@ read; Tim checks them (the chattels note says so). The layout below printed furt
 
 ## Phase 3 detail: purchaser signing (built 24 November 2026, branch `offers-phase3`, on top of `offers-phase2`; not applied, pushed or deployed)
 
-Status: built and tested locally only (Tim was asleep). Migration 020 passed its rollback block on a local PostgreSQL 16 stand-in
-(`tests/pg-standin.sql`, then 010, 016 part A, 018 and 019), NOT the live project. Phases 2 and 3 go live together, in order (019, then 020).
+Status: built and tested locally only (Tim was asleep). Migration 023 (built as 020) passed its rollback block on a local PostgreSQL 16 stand-in
+(`tests/pg-standin.sql`, then 010, 016 part A, 018 and 019), NOT the live project. Phases 2 and 3 go live together, in order (019, then 020). Now: 023 (see "Going live" below).
 
 How it works:
 - "Ready to sign" on an approved draft (the newest, the offer unchanged since). The places are made by `src/sign-core.js` from the draft
@@ -282,7 +282,7 @@ How it works:
 - The execution record: per signer the name, the method, "email verified with a one-time code" and when (never the address) or "Tim
   saw them sign" and the ID type, consent time, guide receipts, first and last tap and finish (server time), the device, the network
   as a fingerprint, and the SHA-256 of what they saw; the marks; any replaced draft. No phone or email of anyone.
-- Timeline: every offer event (all phases, from 020 on) carries the fingerprint of the one before it in its chain; "Check the
+- Timeline: every offer event (all phases, from 023 on) carries the fingerprint of the one before it in its chain; "Check the
   timeline" on Round 1 checks it, and Round 1 records the newest fingerprint.
 
 Edge function: `offer-sign` (new, fn/offer_sign.ts and fn/offer_sign_handler.ts), JWT verification OFF (buyers have no account; every
@@ -305,7 +305,7 @@ Choices made while Tim was asleep (each easy to change):
 8. Round 1 goes to Tim by email notice only. Purchasers aren't sent a copy yet.
 11. "Known to Tim personally" is allowed instead of a photo ID type, as common practice.
 12. The per-network code limits share offer_hits with the offer form: its kind check is widened to add 'sign_code' and 'sign_try'
-    (nothing removed). This is the one change to an existing table's rule in 020.
+    (nothing removed). This is the one change to an existing table's rule in 023.
 9. Round 1 is stored with the offer (offer_rounds, property-files), not as an item on the property file's documents list.
 10. Sealing: not done. See questions.
 
@@ -321,7 +321,7 @@ Questions for Tim:
 - (Answered 24 November 2026) Tim's solicitor will confirm the method before first live use (as the signing standard says).
 
 Deploy steps (phase 3), after review and with Tim's approval, after phase 2's:
-1. Run the rollback block on the live project (`node onboarding/tests/offer-sign-rollback.js`): no CAPITALS. Then apply 020.
+1. Run the rollback block on the live project (`node onboarding/tests/offer-sign-rollback.js`): no CAPITALS. Then apply 023.
    (The race test, `onboarding/tests/offer-sign-race.js`, is for a local stand-in only: it makes and drops a scratch database.)
 2. Push, then deploy `offer-sign` (fn/offer_sign.ts) pinned to that commit, with the gateway's JWT verification OFF. Redeploy
    `offer-public` pinned to the same commit (JWT off, as now) for the narrower CORS.
@@ -333,9 +333,9 @@ not on a real phone or stylus.
 
 ## Phase 4 detail: presentation and counteroffers (built 24 November 2026, branch `offers-phase4`, on top of `offers-phase3`; not applied, pushed or deployed)
 
-Status: built and tested locally only (Tim was asleep). Migration 021 passed its rollback block on a local PostgreSQL 16 stand-in
+Status: built and tested locally only (Tim was asleep). Migration 024 (built as 021) passed its rollback block on a local PostgreSQL 16 stand-in
 (`tests/pg-standin.sql`, then 010, 016 part A, 018, 019 and 020), NOT the live project. Phases 2, 3 and 4 go live together, in order
-(019, 020, then 021).
+(019, 020, then 021). Now: 023 then 024 (see "Going live" below).
 
 How it works (Tim's words, 24 November 2026: "I present the offer to the seller (never automated - I view each step and authorise
 presentation), they make tweaks ... each time a change is made, I delete the other party's initials or signature at that location ...
@@ -391,10 +391,10 @@ The foundational REINZ document is never edited, text or marks are only ever add
   "Withdrawn" or "Lapsed" does the same. Marking the offer current again doesn't re-open anything: presenting needs a fresh copy (correct,
   re-draft, Round 1 of a new document). None of this is possible once the agreement is made.
 
-Migration 021 (`021_offer_negotiation.sql`), additive: offer_documents; offer_agreements; columns on offer_signings (round_no, side,
+Migration 024 (`024_offer_negotiation.sql`, built as 021), additive: offer_documents; offer_agreements; columns on offer_signings (round_no, side,
 document_id, base_round_id), offer_signers (person_id) and offer_rounds (document_id, doc_round, side, base_round_id, changes, lifted,
 outstanding); kind 'insert' on offer_sign_marks and guide 'chattels' on offer_sign_receipts (check constraints widened, nothing removed);
-the one-live-signing-per-draft index becomes per draft and round. It replaces some 020 functions with the same names and arguments,
+the one-live-signing-per-draft index becomes per draft and round. It replaces some 023 functions with the same names and arguments,
 keeping Round 1 as it was: offer_sign_places_ok (adds 'change'), offer_sign_current (adds: document open, no agreement), the receipt and
 tap steps (the chattels reminder; no guides in later rounds), agent_signing_release (a fresh copy), agent_signing_mark (Round 1 only),
 offer_sign_issue/open/state (side, round, layers, parties), offer_round_material and offer_round_lock (any round), and 018's
@@ -431,7 +431,7 @@ Review fixes (24 November 2026, after the first review):
    (`round_sha256`, `draw_version`) name the round it was drawn from, and the database refuses an agreed copy whose record names any other
    round. Tests show the drawing is deterministic: Round 2 drawn again from its stored layers and record reproduces its fingerprint
    exactly (nego-core.test.js and offer-nego-fn.test.js).
-7. Once agreed, `agent_offer_correct` (018, replaced in 021, otherwise unchanged) refuses. `offer_agreements.terms` holds the agreed terms
+7. Once agreed, `agent_offer_correct` (018, 3-argument version replaced in 024, otherwise unchanged; main's 4-argument version from 021 calls it) refuses. `offer_agreements.terms` holds the agreed terms
    for later phases: price, settlement, conditions, the KiwiSaver answer as given, the drafted values (price, deposit,
    settlement, each condition and its date), the deposit as printed, the further terms, and every change in order. (Rollback block;
    offers-nego.test.js.)
@@ -484,7 +484,7 @@ Questions for Tim:
 - (Answered) Your solicitor confirms the method (phases 3 and 4) before first live use: Tim says he will.
 
 Deploy steps (phase 4), after review and with Tim's approval, after phases 2 and 3:
-1. Run the rollback block on the live project (`node onboarding/tests/offer-negotiation-rollback.js`): no CAPITALS. Then apply 021.
+1. Run the rollback block on the live project (`node onboarding/tests/offer-negotiation-rollback.js`): no CAPITALS. Then apply 024.
    (The race test is for a local stand-in only.)
 2. Push, then deploy `offer-sign` pinned to that commit, JWT verification OFF.
 3. A test negotiation with Tim's own addresses as vendor and purchaser: Round 1, a counter, an acceptance, the agreed copy, the pack.
@@ -611,3 +611,50 @@ Numbers are taken when a migration is applied, not when it is built, because the
 `020_remove_spare_agent_login`). The timing work was built as 022 and applied as `021_offer_condition_timing`; the table privileges
 tidy-up is `022_tighten_table_privileges`. The signing (offers-phase3, built as 020) and negotiation (offers-phase4, built as 021)
 migrations take the next free numbers when they go live.
+
+## Going live: phases 3 and 4 brought up to date with main (branch `offers-live`, 24 November 2026; not applied, pushed or deployed)
+
+Tim made this the next priority on 24 November 2026. `offers-live` is main with `origin/offers-phase4` (which holds offers-phase3)
+merged in, then fitted to the timing work and to portal phase 1. Both phases were independently reviewed READY on their own; this
+merge needs its own review.
+
+- Migrations renumbered: `023_offer_signing.sql` (built as 020) and `024_offer_negotiation.sql` (built as 021). Neither number is taken
+  live (checked read only). 024 needs 023. Overlap with main: neither touches `offer_clean`, `agent_draft_add`, `offer_draft_edits_ok`
+  or the AI cap functions. 024 replaces only the 3-argument `agent_offer_correct` (018's, word for word as live, plus "refused once the
+  agreement is made"); main's 4-argument version (021, the "expected details" check) is untouched and calls it, so "after another
+  condition" still works. `offer_hits_kind_check` is widened from exactly the live list. New tables follow 022: anon gets nothing,
+  signed-in users read only (TRUNCATE, TRIGGER and REFERENCES revoked), as the live default privileges also give.
+- 024 also gives a link signer the newest draft's further terms numbering (`offer_sign_state` -> signing.terms: term_last, retired
+  numbers, style), so "A new further term" in a counteroffer takes the next number (23.0 style, never a retired one).
+- Kept from the timing work: further terms numbered 23.0 with retired numbers never reused; continuation pages drawn from pictures
+  of the header and footer bands; Tim's drawn initials and signature boxes are signing places for their side (purchasers, vendors or
+  both); strike, text and highlight boxes and moved places are filled boxes every signer initials; added pages get foot initials;
+  timing chips correct the offer through `agent_offer_correct(offer, details, note, expected)`.
+- Edge functions: `offer-sign` and `offer-public` answer browsers on packages.dunnerstunner.co.nz and portal.dunnerstunner.co.nz
+  (`fn/cors_app.ts`), because Tim's send, lock and agree run from the portal.
+- Portal (PORTAL-PLAN.md P1): `properties/<p>/offers/<o>/draft/<d>/sign` (Ready to sign), `.../signing/<s>` (a round out for signing),
+  `.../signing/<s>/turn/<signer>` (one signer's turn on Tim's device, in person from the start), `.../present` (presenting a round).
+  Signers' pads `#sgSig`, `#sgInit` and the marking canvas `canvas.sg-draw` are in `VENDOR_PADS`; Tim has no pad in phases 3 and 4.
+  Signing links stay at packages.dunnerstunner.co.nz/onboarding (`?sign=` opened at the portal goes there). Test: `offers-portal.test.js`.
+- Locked rounds: stored with the offer in the property-files bucket and listed on the offer page; the lawyers' pack is a zip Tim
+  downloads to his device. Nothing is saved to OneDrive and there is no OneDrive connection.
+
+Not on the branch, for Tim to decide (the handover listed them as decided):
+- Emails as drafts Tim proofs: not built. Tim's Send emails each signer their link straight away; codes go automatically when a signer
+  asks; a change that reopens someone emails them and Tim. Presentation itself still waits for Tim's tap every time.
+- Signers "known to the agent" by default with an option to request ID: not built. In person, Tim must choose, and "Known to Tim
+  personally" is one of the choices; by link, an emailed code. There is no "request ID" step.
+- The agreed copy to both parties and both lawyers: not built. Nothing goes to the parties or lawyers; Tim is emailed when a round locks.
+- Changes from a link: each round has Tim's switch; its starting position is his setting, on unless he turns it off.
+- A fourth purchaser: refused on Tim's real pack (no room below the third line), so a signature page must be added; on a blank with
+  clear space below the printed lines, a fourth is added there.
+
+Going live, with Tim's approval, in order:
+1. Live rollback test: `node onboarding/tests/offer-negotiation-rollback.js --with-023` (023 and 024 together, both undone), run on the
+   live project. Every line lower case, no CAPITALS, and nothing left behind (no `offer_signings` table afterwards).
+2. Apply 023 (`023_offer_signing`), then 024 (`024_offer_negotiation`).
+3. Merge `offers-live` into main and push.
+4. Deploy `offer-sign` (new, JWT verification OFF) pinned to that commit, then redeploy `offer-public` (JWT OFF, as now) pinned to the
+   same commit. `offer-draft` and `doc-prefill` are unchanged.
+5. Test with Tim's own addresses: a test offer signed in person in the portal and by link; present to a test vendor; a counter and
+   an acceptance; the agreed copy; the lawyers' pack. Tim's solicitor confirms the method before the first real offer.

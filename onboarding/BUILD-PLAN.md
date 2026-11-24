@@ -261,3 +261,7 @@ Tests: `offers-core.test.js`, `draft-core.test.js`, `offers.test.js`, `offers-dr
 Phase 3 (purchaser signing) built 24 November 2026 on branch `offers-phase3`: migration 023 (built as 020; tested in a rollback block on a local
 PostgreSQL stand-in only), edge function `offer-sign` (new; JWT off, token checked). Awaiting review. Tests: `offers-sign.test.js`,
 `sign-core.test.js`, `offer-sign-fn.test.js`; database: `offer-sign-rollback.sql` (via `offer-sign-rollback.js`). See `OFFERS-PLAN.md`, "Phase 3 detail".
+Phase 4 (presentation and counteroffers) built 24 November 2026 on branch `offers-phase4`: migration 024 (built as 021), `offer-sign`
+extended. Both phases reviewed READY on their own. Brought up to date with main on branch `offers-live` (24 November 2026): migrations
+023 and 024, the portal addresses and pads, `offer-sign` and `offer-public` answering the portal too. Awaiting review. Tests add
+`offers-portal.test.js`; database: `offer-negotiation-rollback.js --with-023` runs 023 and 024 together. See `OFFERS-PLAN.md`, "Going live".

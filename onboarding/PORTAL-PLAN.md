@@ -27,7 +27,8 @@ Order of work (set 24 November 2026; Tim may reorder):
 6. GT2 and GT3. Grand Tour recording, transcription, field suggestions, property brain and client heart.
 7. P4 People, P5 Import and feeds, P6 Assessments.
 
-Offers phases 3 to 6 follow `OFFERS-PLAN.md` and are not yet placed in this order.
+Offers phases 3 to 6 follow `OFFERS-PLAN.md` and are not yet placed in this order. Phases 3 and 4 were made the next priority on
+24 November 2026 and fitted to P1 on branch `offers-live` (see `OFFERS-PLAN.md`, "Going live").
 
 ## Decisions (Tim, 24 November 2026)
 
@@ -74,6 +75,7 @@ Until the address is live, the same shell is served at packages.dunnerstunner.co
 | `/properties` | Listings row, pipeline row, map |
 | `/properties/<id>` | One property (today's `viewProperty` tiles) |
 | `/properties/<id>/agreement`, `/offers`, `/offers/<oid>`, `/inspection`, `/documents`, `/aml/<person>`, `/variations/<vid>`, `/forms/<fid>` | That property's work, each on its own address |
+| `/properties/<id>/offers/<oid>/draft/<did>/sign`, `/offers/<oid>/signing/<sid>`, `/offers/<oid>/signing/<sid>/turn/<signer>`, `/offers/<oid>/present` | Offers phases 3 and 4 (branch `offers-live`): Ready to sign, a round out for signing, one signer's turn on Tim's device (in person), presenting a round |
 | `/people` | Everyone, searchable |
 | `/people/<id>` | One person: contact details, every property they own or are linked to, files |
 | `/processes` | Start an appraisal, agency agreement, form, inspection or offer. The two assessments show as "Coming soon" (P6) |

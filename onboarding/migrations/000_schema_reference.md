@@ -270,6 +270,9 @@ agreements/<agreement id>/signatures/... (vendors may upload their own signature
 - `agent_offer_correct(offer, details, note, expected)`: 018's correction, refused unless the offer's details are still `expected`
   (checked under the row lock). For corrections from the review screen.
 
+## 022 Table privileges (24 November 2026, live)
+- anon and authenticated lose TRUNCATE, TRIGGER and REFERENCES on every public table, and on tables made later by postgres. Revoke only.
+
 ## 023 Purchaser signing (offers phase 3, built as 020, 24 November 2026; tested in a rollback block on a local PostgreSQL stand-in, NOT yet on the live project)
 - `offer_events` gains `chain` (the offer id, or `p:` and the property id), `seq`, `prev_hash`, `body` (the exact text fingerprinted) and
   `hash` = SHA-256 of prev_hash, a new line and body, set by the `offer_event_chain` trigger. Earlier events have none. `offer_chain_verify`.
@@ -306,4 +309,6 @@ agreements/<agreement id>/signatures/... (vendors may upload their own signature
   `agreement_people`. Withdrawing, declining or lapsing closes the open document.
 - Tim's answers: `offer_settings.link_changes_default` (default true; `agent_offer_link_changes_default`) and `offer_signings.link_changes`
   (set when Tim presents a round, `agent_round_present(..., p_link_changes)`); `offer_sign_change` refuses when it is off.
-
+- Merged with main (branch `offers-live`): `offer_sign_state` also gives `signing.terms` (the newest draft's `term_last`, `retired_numbers`
+  and further terms style; 23.0 style when the draft has no further terms), for a new further term in a counteroffer. 024's
+  `agent_offer_correct(offer, details, note)` is the live 018 body plus the agreement refusal; 021's 4-argument version is unchanged.
