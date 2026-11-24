@@ -120,6 +120,9 @@ a { color: var(--accent); }
 .card.note { background: var(--accent-soft); border-color: transparent; }
 .card.okc { background: var(--ok-soft); border-color: transparent; }
 .card.warnc { background: var(--warn-soft); border-color: transparent; }
+/* urgent: a party asked Tim to stop or withdraw, or the offer is frozen or withdrawn (red, both modes) */
+.card.urgentc { background: var(--accent-soft); border: 2px solid var(--accent); }
+.card.urgentc h2, .card.urgentc h3 { color: var(--accent); }
 .prefill { font-size: 13.5px; color: var(--muted); display: flex; align-items: center; gap: 6px; margin-bottom: 10px; }
 .prefill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex: none; }
 

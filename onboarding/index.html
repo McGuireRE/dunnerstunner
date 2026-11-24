@@ -129,6 +129,9 @@ a { color: var(--accent); }
 .card.note { background: var(--accent-soft); border-color: transparent; }
 .card.okc { background: var(--ok-soft); border-color: transparent; }
 .card.warnc { background: var(--warn-soft); border-color: transparent; }
+/* urgent: a party asked Tim to stop or withdraw, or the offer is frozen or withdrawn (red, both modes) */
+.card.urgentc { background: var(--accent-soft); border: 2px solid var(--accent); }
+.card.urgentc h2, .card.urgentc h3 { color: var(--accent); }
 .prefill { font-size: 13.5px; color: var(--muted); display: flex; align-items: center; gap: 6px; margin-bottom: 10px; }
 .prefill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex: none; }
 
@@ -5845,7 +5848,9 @@ window.JOURNEY_MEDIA_HINTS = {
     sign_released: 'Ready to sign (Round 1)', sign_started: 'Signing started on Tim\'s device', sign_links_sent: 'Personal links sent', sign_code_ok: 'Code checked', sign_consent: 'Agreed to sign electronically',
     sign_receipt: 'Read and receipted', sign_finished: 'Finished signing', sign_complete: 'Everyone on that side signed', sign_marked: 'Marked the page', sign_reviewed: 'Tim re-approved a mark',
     sign_cancelled: 'Signing stopped', sign_replaced: 'Replaced by a newer draft', sign_change_asked: 'Asked Tim for a change', round_locked: 'Round locked', round_presented: 'Tim authorised presentation',
-    round_change: 'A change was made', document_closed: 'Document closed for a fresh copy', agreement_formed: 'Agreement formed' };
+    round_change: 'A change was made', document_closed: 'Document closed for a fresh copy', agreement_formed: 'Agreement formed',
+    party_request: 'Asked Tim to stop', offer_frozen: 'Tim froze the offer', offer_unfrozen: 'Tim unfroze the offer', request_carry_on: 'Tim let them carry on', offer_withdrawn_now: 'Withdrawn',
+    deposit_holder_chosen: 'Deposit holder chosen' };
   const escH = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   // a plain description of one event, never contact details (events never hold them)
   function eventWords(e) {
@@ -5855,6 +5860,13 @@ window.JOURNEY_MEDIA_HINTS = {
     if (e.kind === 'round_change') return `${w} in Round ${d.round} by ${e.actor}: ${KIND_WORDS[d.kind] || d.kind} on page ${d.page}${d.text ? ' "' + d.text + '"' : ''}`;
     if (e.kind === 'status') return `${w} ${d.to}${d.note ? ': ' + d.note : ''}`;
     if (e.kind === 'withdrawn') return `The ${sideName(d.side)} withdrew, at ${NZ(d.at)}${d.note ? ': ' + d.note : ''}`;
+    // freeze and withdrawal (Tim, 24 November 2026): who asked, why, and when and how Tim was told
+    if (e.kind === 'party_request') return `${e.actor} (${d.side === 'vendor' ? 'a vendor' : 'a purchaser'}) asked Tim to ${d.kind === 'withdraw' ? 'withdraw' : 'stop for now'}, from their link on Round ${d.round}: ${d.reason || ''}`;
+    if (e.kind === 'offer_frozen') return `${w}. Every signing stopped. Asked by ${d.asked_by || 'Tim'}: ${d.reason || ''}`;
+    if (e.kind === 'offer_unfrozen') return `${w}. Signing can carry on: ${d.note || ''}`;
+    if (e.kind === 'request_carry_on') return `${w}: ${d.note || ''}`;
+    if (e.kind === 'offer_withdrawn_now') return `${w} with immediate effect, directed by ${d.person} for the ${sideName(d.side)}: ${d.reason || ''}. Tim was told ${NZ(d.told_at)}, ${({ in_person: 'in person', phone: 'by phone', email: 'by email', link_request: 'by their request from their link' })[d.told_how] || d.told_how}. Never presented or signed again`;
+    if (e.kind === 'deposit_holder_chosen') return `${w}: ${d.holder === 'other' ? d.other : d.holder === 'nzret' ? 'Public Trust O/A NZ Real Estate Trust' : "the vendors' lawyer's trust account"}${d.holder !== d.recommended ? ' (not the recommended one' + (d.kiwisaver ? '; KiwiSaver is part of the deposit)' : ')') : ''}`;
     if (e.kind === 'document_closed') return `${w} (Document ${d.document}, ${d.rounds} rounds kept): ${d.reason || ''}`;
     if (e.kind === 'agreement_formed') return `${w}: dated ${d.date}, acceptance communicated ${NZ(d.accepted_at)}. SHA-256 ${d.sha256 || ''}`;
     if (e.kind === 'sign_receipt') return `${w}: ${d.guide === 'chattels' ? 'the chattels reminder' : SIGN.GUIDE_NAMES[d.guide] || d.guide}`;
@@ -5907,6 +5919,9 @@ window.JOURNEY_MEDIA_HINTS = {
      reopenedDraft(i)        "please initial the change and finish again", to a signer whose side changed the document after they finished
      roundNotice(i)          Tim's own notice, once per submitted round: who, what changed, which round, and its portal address
      agreedDrafts(i)         the agreed copy's two emails: to the purchasers (cc their lawyer) and to the vendors (cc theirs)
+     depositRecommended(ks)  who should hold the deposit: the vendors' lawyer if any KiwiSaver is part of it, else the NZ Real Estate Trust
+     DEPOSIT_HOLDERS         the choices on Tim's page, with their wording
+     withdrawDrafts(i)       after Tim records a withdrawal: to the side that directed it (cc their lawyer), and to the other side's lawyer
      firstWorkingDay(d, h)   the first working day after a date: Monday to Friday, not a public holiday (non_working_days)
      toHtml(text, link)      a draft's text as the email's HTML: paragraphs, **bold**, and the link where [the signing link] is
      BLANK_RE                finds the marked blanks
@@ -6022,8 +6037,11 @@ window.JOURNEY_MEDIA_HINTS = {
     const depAmt = money((/\$\s?[\d,]+(\.\d+)?/.exec(depText) || [''])[0]) || s_(AD.deposit) || blank('fill: the deposit amount');
     const depWhen = /unconditional/i.test(depText) ? 'once the agreement becomes unconditional' : /\b(on|upon) (signing|execution|acceptance)\b|\bwhen (this agreement is )?signed\b/i.test(depText) ? 'on signing' : blank('fill: when the deposit is paid');
     const ks = T.kiwisaver === true || D.kiwisaver === true;
-    const depositLine = whose => ks ? `Deposit (${depAmt}): payable to the vendors' lawyer's trust account ${depWhen}. Because ${whose} KiwiSaver is part of it, the whole deposit goes there and can't be released before settlement.`
-      : `Deposit (${depAmt}): payable to Public Trust O/A NZ Real Estate Trust ${depWhen}.`;
+    // who holds it: Tim's choice on his page (input.depositHolder), else the recommended one. With KiwiSaver it is never released before settlement.
+    const dh = input.depositHolder && DEPOSIT_HOLDERS[input.depositHolder.holder] ? input.depositHolder : { holder: depositRecommended(ks) };
+    const payee = dh.holder === 'other' ? (s_(dh.other) || blank('fill: who holds the deposit')) : DEPOSIT_HOLDERS[dh.holder].payee;
+    const depositLine = whose => `Deposit (${depAmt}): payable to ${payee} ${depWhen}.` + (!ks ? '' : dh.holder === 'vendor_lawyer' ? ` Because ${whose} KiwiSaver is part of it, the whole deposit goes there and can't be released before settlement.`
+      : ` Because ${whose} KiwiSaver is part of it, the deposit can't be released before settlement.`);
     const ft = Array.isArray(T.further_terms) ? T.further_terms : [];
     const asIs = ft.filter(t => /as is,?\s*where is/i.test(s_(t.text)));
     const excluded = (D.chattels_exclude || []).map(s_).filter(Boolean);
@@ -6086,6 +6104,39 @@ window.JOURNEY_MEDIA_HINTS = {
     return { purchasers, vendors, blanks };
   }
 
+  /* ───── who holds the deposit (Tim, 24 November 2026) ───── */
+  const DEPOSIT_HOLDERS = {
+    nzret: { label: "Public Trust O/A NZ Real Estate Trust (Tim's trust account)", payee: 'Public Trust O/A NZ Real Estate Trust' },
+    vendor_lawyer: { label: "Vendors' lawyer's trust account", payee: "the vendors' lawyer's trust account" },
+    other: { label: 'Other (type it in)', payee: '' },
+  };
+  const depositRecommended = ks => ks ? 'vendor_lawyer' : 'nzret';
+
+  /* ───── a withdrawal Tim has recorded ───── */
+  // i: { side (who directed it: 'purchaser' | 'vendor'), address, when (Date or ISO), partyFirst: [their first names], partyTo: [emails],
+  //   ownLawyer: { email }, otherLawyer: { person, firm, email } }  -> { party: { to, cc, subject, body }, lawyer: { to, cc, subject, body } }
+  // No reason is given in either: Tim adds anything more himself. The other side's own contact details are never in them.
+  function withdrawDrafts(i) {
+    const v = i.side === 'vendor', addr = s_(i.address) || 'the property', what = v ? 'counteroffer' : 'offer';
+    const w = i.when ? new Date(i.when) : null, when = w && !isNaN(w) ? w.toLocaleString('en-NZ', { timeZone: 'Pacific/Auckland', weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : blank('fill: when it was withdrawn');
+    const ol = i.otherLawyer || {}, olFirst = s_(ol.person).split(/\s+/)[0];
+    const party = {
+      to: uniq(i.partyTo || []), cc: uniq([(i.ownLawyer || {}).email]),
+      subject: `Your withdrawal is recorded: ${addr}`,
+      body: [`${v ? 'Hello' : 'Dear'} ${names((i.partyFirst || []).map(s_)) || blank('fill: their first names')},`,
+        `As you asked, I have recorded the withdrawal of your ${what} for ${addr}, with immediate effect from ${when}. Signing has stopped, and the signing links no longer work. Nothing anyone had already signed has been changed.`,
+        `I'll let the ${v ? "purchasers'" : "vendors'"} lawyer know. Any questions, just call me on ${TIM_PHONE}.`, 'Tim'].join('\n\n'),
+    };
+    const lawyer = {
+      to: uniq([ol.email]), cc: [],
+      subject: `Withdrawal: ${addr}`,
+      body: [`Dear ${olFirst || blank("fill: the lawyer's first name")},`,
+        `I write to let you know that the ${v ? 'vendors have withdrawn their counteroffer' : 'purchasers have withdrawn their offer'} for ${addr}, with immediate effect from ${when}. Signing has stopped, and nothing further will be presented on it.`,
+        `Please let your clients know. Any questions, just call me on ${TIM_PHONE}.`, 'Faithfully,\nTim McGuire\nMcGuire Real Estate'].join('\n\n'),
+    };
+    return { party, lawyer };
+  }
+
   // a draft's text as the email's HTML: escaped, paragraphs at blank lines, line breaks kept, **bold**, the link at [the signing link]
   function toHtml(text, link) {
     const esc = t => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -6094,7 +6145,7 @@ window.JOURNEY_MEDIA_HINTS = {
     return '<div style="font-family:Arial,sans-serif;font-size:15px;line-height:1.5;color:#1F1D1A;max-width:600px">' + String(text).split(/\n{2,}/).map(p => `<p>${para(p)}</p>`).join('') + '</div>';
   }
 
-  const MAIL = { LINK, BLANK_RE, signLinkDraft, reopenedDraft, roundNotice, agreedDrafts, firstWorkingDay, parseDate, longDate, toHtml, P_ACTION };
+  const MAIL = { LINK, BLANK_RE, signLinkDraft, reopenedDraft, roundNotice, agreedDrafts, DEPOSIT_HOLDERS, depositRecommended, withdrawDrafts, firstWorkingDay, parseDate, longDate, toHtml, P_ACTION };
   if (typeof module !== 'undefined' && module.exports) module.exports = MAIL; else root.MAIL = MAIL;
 })(typeof window !== 'undefined' ? window : globalThis);
 
@@ -8292,6 +8343,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const h = +new Date().toLocaleString('en-NZ', { hour: 'numeric', hour12: false, timeZone: 'Pacific/Auckland' });
     main().innerHTML = `<div class="view-pad">
       <h1>${h < 12 ? 'Morning' : h < 17 ? 'Afternoon' : 'Evening'}, Tim</h1>
+      <div id="homeUrgent"></div>
       <div class="home-tiles">
         ${HOME_TILES}
       </div>
@@ -8302,6 +8354,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     $('#homeInspect').addEventListener('click', viewInspectStart);
     $('#homeOffer').addEventListener('click', viewOfferPick);
     $('#homeDash').addEventListener('click', e => { e.preventDefault(); viewAgentDashboard(); });
+    hdUrgent().then(list => { const box = $('#homeUrgent'); if (!box || !list.length) return; box.innerHTML = hdUrgentHTML(list, 'homeUrgentCard'); hdUrgentWire(list); });
     dashData().then(d => { const n = d.needs.length; if (n && $('#homeNeeds')) $('#homeNeeds').innerHTML = `<strong>${n} ${n === 1 ? 'thing needs' : 'things need'} you.</strong> See them on the <a href="#" id="homeDash2">Dashboard</a>.`; const l = $('#homeDash2'); if (l) l.addEventListener('click', e => { e.preventDefault(); viewAgentDashboard(); }); }).catch(() => null);
     top();
   }
@@ -8320,6 +8373,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const seen = await safe(sb.from('agreement_events').select('agreement_id,kind,detail,at').in('kind', ['review_checked', 'appraisal_given']));
     const addr = id => (rows.find(r => r.id === id) || {}).address || 'Agreement';
     const needs = [];
+    // a party asked Tim to stop or withdraw: urgent, at the top
+    (await hdUrgent()).forEach(u => needs.push({ what: `URGENT: ${u.side === 'vendor' ? 'a vendor' : 'a purchaser'} asks to ${u.kind === 'withdraw' ? 'withdraw' : 'stop signing'}`, where: u.address, sub: u.reason, go: () => viewOfferAgent(u.offer_id), hot: true, urgent: true }));
     const insps = await safe(sb.from('property_inspections').select('id,property_id,status,started_at').eq('status', 'in_progress'));
     // offers: emails waiting for Tim to read and send (drafts; nothing goes by itself), one item per signing or agreed copy
     const mds = await safe(sb.from('offer_mail_drafts').select('id,offer_id,property_id,kind,signing_id,status').in('status', ['draft', 'sending']));
@@ -12095,7 +12150,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const openSg = await ocOpenSigning(oid);
     ofOpen({ mode: 'correct', openSigning: openSg, oid, pid: o.property_id, address: p.address, province: o.province || OF.DEFAULT_PROVINCE, ksDays: await ofKs(), wording: await ofWording(), asAt: o.as_at, chattels: (o.details || {}).chattels_listed || [] }, ofShape(o.details));
   }
-  const OF_EVENT = { submitted: 'Received', read: 'Opened', corrected: 'Corrected', status: 'Status changed', gap_override: 'Short date gap accepted', gap_override_cleared: 'Gap acceptance cleared' };
+  const OF_EVENT = { submitted: 'Received', read: 'Opened', corrected: 'Corrected', status: 'Status changed', gap_override: 'Short date gap accepted', gap_override_cleared: 'Gap acceptance cleared',
+    party_request: 'A party asked you to stop or withdraw', offer_frozen: 'Frozen', offer_unfrozen: 'Unfrozen', request_carry_on: 'Let them carry on', offer_withdrawn_now: 'Withdrawn now', deposit_holder_chosen: 'Deposit holder chosen' };
   async function viewOfferAgent(oid) {
     header('Offer', '', 0); actions(false);
     main().innerHTML = '<div class="loading">Loading...</div>';
@@ -12108,11 +12164,13 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const fixes = evs.filter(e => e.kind === 'corrected'), off = ['withdrawn', 'lapsed'].includes(o.status);
     const nowLocal = (() => { const t = new Date(); t.setMinutes(t.getMinutes() - t.getTimezoneOffset()); return t.toISOString().slice(0, 16); })();
     const drH = await drOfferHTML(o);   // the agreement: drafting and the lawyer lookup (offers phase 2)
+    const hdH = o.source === 'manual' ? '' : await hdOfferHTML(o);   // freeze and withdrawal (Tim only)
     main().innerHTML = `<div class="view-pad of-page" id="ofView">
       <div class="toolbar no-print"><button class="btn ghost" type="button" id="ofBackP">Back to the property</button></div>
       <span class="agent-flag">Only you see this</span>
       <h1>${esc(money(+o.amount))} offer</h1>
       <p>${nt(p.address)}<br><span class="small">${o.source === 'agent' ? 'Entered by you' : 'From the offer form'}, ${esc(fmtDT(o.received_at))}</span>${off ? ` <span class="pill of-off">${o.status === 'withdrawn' ? 'Withdrawn' : 'Lapsed'} ${esc(fmtDT(o.status_at))}</span>` : o.status === 'declined' ? ` <span class="pill of-off">Declined by the vendors ${esc(fmtDT(o.status_at))}</span>` : ''}</p>
+      ${hdH}
       ${o.related_party ? `<div class="card warnc of-related" role="alert"><h3 style="margin:0 0 4px">Connected to you</h3><p class="small" style="margin:0">The buyer says a purchaser is related to, or connected with, you or McGuire Real Estate. Deal with this before you go any further with the offer.</p></div>` : ''}
       ${o.suspected_spam ? '<div class="card warnc tight of-spamflag"><p class="small" style="margin:0"><strong>Possible spam.</strong> It was sent with the form\'s hidden field filled in, which is usually a robot. You weren\'t emailed about it.</p><div class="toolbar"><button class="btn ghost" type="button" id="ofNotSpam">Not spam: treat it as a real offer</button></div></div>' : ''}
       ${o.needs_date_help ? '<div class="card note tight of-helpflag"><p class="small" style="margin:0">They asked for your help with the dates.</p></div>' : ''}
@@ -12140,7 +12198,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     </div>`;
     $('#ofBackP').addEventListener('click', () => viewProperty(o.property_id));
     $('#ofFix').addEventListener('click', () => viewOfferCorrect(oid));
-    drOfferWire(o); ngOfferWire(o, p);
+    drOfferWire(o); ngOfferWire(o, p); hdOfferWire(o, p);
     const ns = $('#ofNotSpam'); if (ns) ns.addEventListener('click', async () => { ns.disabled = true; try { await must(sb.rpc('agent_offer_not_spam', { p_offer: oid })); toast('Moved to the offers list as a new offer'); viewProperty(o.property_id); } catch (_) { ns.disabled = false; } });
     const go = async (fn, args, errBox) => { try { await must(sb.rpc(fn, args)); viewOfferAgent(oid); } catch (e) { if (errBox) $(errBox).textContent = e.message || 'That didn\'t save.'; } };
     const gk = $('#ofGapOk'); if (gk) gk.addEventListener('click', () => { const r = $('#ofGapWhy').value.trim(); if (r.length < 5) return $('#ofGapErr').textContent = 'Give your reason.'; go('agent_offer_gap', { p_offer: oid, p_reason: r }, '#ofGapErr'); });
@@ -13015,7 +13073,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
      Nothing goes to a buyer, vendor or lawyer until Tim presses Send. Each email is a draft (offer_mail_drafts, 024) he can read and
      change here; Send saves his changes and sends exactly that (offer-sign send_mail); the log keeps what went. Marked blanks
      ("[Tim to ...]") must be filled or deleted first. Only the one-time signing code goes by itself. */
-  const ML_KIND = { sign_link: 'Signing link', reopened: 'Please initial again', agreed_purchasers: 'Agreed copy: to the purchasers (cc their lawyer)', agreed_vendors: 'Agreed copy: to the vendors (cc their lawyer)' };
+  const ML_KIND = { withdraw_party: 'Withdrawal: to the side that directed it (cc their lawyer)', withdraw_lawyer: 'Withdrawal: to the other side\'s lawyer', sign_link: 'Signing link', reopened: 'Please initial again', agreed_purchasers: 'Agreed copy: to the purchasers (cc their lawyer)', agreed_vendors: 'Agreed copy: to the vendors (cc their lawyer)' };
   const mlList = a => (a || []).join(', '), mlSplit = t => String(t || '').split(/[,;\s]+/).map(x => x.trim()).filter(Boolean);
   function mlPanelHTML(drafts, title, id, intro) {
     const open = (drafts || []).filter(m => m.status === 'draft'), sent = (drafts || []).filter(m => m.status === 'sent'), going = (drafts || []).filter(m => m.status === 'sending');
@@ -13089,8 +13147,11 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const vs = vg && vg[0] ? ((await ofSafe(sb.from('offer_signers').select(SG_COLS).eq('signing_id', vg[0].id).order('position'))) || []).filter(x => !x.void_at) : [];
     const vendorsOf = vs.map(x => { const pp = (owners || []).find(q => (q.email && x.email && q.email.toLowerCase() === x.email.toLowerCase()) || q.legal_name === x.name) || {}; return { legal_name: x.name, pref_name: pp.pref_name || '', email: x.email, phone: pp.phone || '' }; });
     const labels = {}; (((ag.terms || {}).conditions) || []).forEach(c => { const i = OF.condInfo && OF.condInfo(c.key); labels[c.key] = (i && i.label) || c.key; });
+    // who holds the deposit: Tim's newest choice, kept with the agreement; none yet, the recommended one is recorded as his choice now
+    let dh = ((await ofSafe(sb.from('offer_deposit_holders').select('*').eq('offer_id', o.id).order('id', { ascending: false }).limit(1))) || [])[0];
+    if (!dh) { await sgRpc('agent_offer_deposit_holder', { p_offer: o.id, p_holder: MAIL.depositRecommended(ngKs(o, ag)), p_other: null }); dh = { holder: MAIL.depositRecommended(ngKs(o, ag)) }; }
     const r = MAIL.agreedDrafts({ address: p.address, agreement: ag, terms: ag.terms || {}, details: o.details || {}, vendors: vendorsOf,
-      vendorLawyer: { person: pl('vl_person'), firm: pl('vl_firm'), email: pl('vl_email') || pl('vl_service'), phone: pl('vl_phone') }, holidays: hol || [], labels });
+      vendorLawyer: { person: pl('vl_person'), firm: pl('vl_firm'), email: pl('vl_email') || pl('vl_service'), phone: pl('vl_phone') }, holidays: hol || [], labels, depositHolder: { holder: dh.holder, other: dh.other_text || '' } });
     const att = { path: ag.path, sha256: ag.sha256, name: `Agreement ${String(p.address || '').replace(/[^A-Za-z0-9 ,.-]+/g, '').slice(0, 80)}.pdf` };
     for (const [kind, m] of [['agreed_purchasers', r.purchasers], ['agreed_vendors', r.vendors]]) {
       if (!m.to.length) continue;   // nobody to send to: Tim adds the address on the property or the offer first
@@ -13262,12 +13323,14 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       ${R2 ? ngIntroHTML(ctx) : ''}
       ${ctx.mode === 'person' ? `<p class="small">${esc(ctx.name)} uses this screen. Only their own places can be done here.</p>` : `<p class="small">Signing as ${nt(ctx.name)}.</p><details class="small" id="sgDocCheck"><summary>Details</summary><p class="small" style="margin:4px 0 0">Document check code: <span translate="no">${esc(drShort(ctx.draftSha))}</span>. It is worked out from the document itself, so anyone can later confirm the copy you signed is exactly this one.</p></details>`}
       ${step === 'stopped' ? '' : stepBar}${body}<p class="err" id="sgErr" role="alert"></p>
+      ${ctx.mode === 'link' && step !== 'stopped' && ctx.api.request ? sgRequestHTML() : ''}
       ${ctx.back ? '<div class="toolbar no-print"><button class="btn ghost" type="button" id="sgBackTim">Back to Tim\'s screen</button></div>' : ''}</div>`;
     const on = (sel, f, ev) => { const el = $(sel); if (el) el.addEventListener(ev || 'click', f); };
     const act = async (f, then) => { err(''); try { await f(); } catch (e) { return err(e.message); } return then ? then() : ctx.reload(); };
     // a purchaser or vendor may be holding the device: leaving their turn asks first, and Tim's screen then waits for him (SG_HANDBACK)
     const handBack = () => { if (confirm("Hand the device back to Tim? Anything drawn and not finished on this turn is kept.")) ctx.back(); };
     on('#sgBackTim', handBack); on('#sgToTim', handBack);
+    sgRequestWire(ctx);
     on('#sgAgreeGo', () => { if (!$('#sgAgree').checked) return err('Tick the box to agree to sign electronically, or stop here and call Tim.'); act(() => ctx.api.consent()); });
     if (step === 'guides' && VEND) on('#ngChatGo', () => act(async () => { if (!$('#ngChatOk').checked) throw new Error('Tick that you have read the reminder about chattels.'); await ctx.api.receipt({ guide: 'chattels' }); }));
     else if (step === 'guides') {
@@ -13387,7 +13450,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     if (s.signing_id !== sid) { if (PORTAL) { portalView(''); return viewPortalMissing(); } main().innerHTML = '<div class="view-pad"><p class="err">That signer isn\'t part of this signing.</p></div>'; return; }
     let bytes; try { bytes = await drDraftBytes(d); } catch (e) { main().innerHTML = `<div class="view-pad"><p class="err">${esc(e.message)}</p></div>`; return; }
     const allD = (await ofSafe(sb.from('offer_drafts').select('id,number').eq('offer_id', g.offer_id))) || [], o = await must(sb.from('property_offers').select('details,status').eq('id', g.offer_id).single());
-    const stale = g.status === 'replaced' || s.void_at ? 'This version has been replaced.' : (d.number !== Math.max(...allD.map(x => x.number)) || JSON.stringify(drCanon(o.details)) !== JSON.stringify(drCanon(d.details))) ? 'The offer has changed since this was released. Re-draft and release it again.' : s.finished_at ? `${s.name} has finished signing.` : ['complete', 'locked'].includes(g.status) ? 'Everyone has signed.' : ['cancelled', 'withdrawn'].includes(g.status) ? 'This round was stopped. Any links sent no longer work.' : null;
+    const frozen = ((await ofSafe(sb.from('offer_holds').select('kind,lifted_at').eq('offer_id', g.offer_id))) || []).some(h => h.kind === 'withdraw' || !h.lifted_at);
+    const stale = frozen ? 'This offer is frozen or withdrawn, so nobody signs it now. Unfreeze it on the offer page to carry on.' : g.status === 'replaced' || s.void_at ? 'This version has been replaced.' : (d.number !== Math.max(...allD.map(x => x.number)) || JSON.stringify(drCanon(o.details)) !== JSON.stringify(drCanon(d.details))) ? 'The offer has changed since this was released. Re-draft and release it again.' : s.finished_at ? `${s.name} has finished signing.` : ['complete', 'locked'].includes(g.status) ? 'Everyone has signed.' : ['cancelled', 'withdrawn'].includes(g.status) ? 'This round was stopped. Any links sent no longer work.' : null;
     const ua = navigator.userAgent, P_ = { p_signer: signerId }, RN = g.round_no || 1;
     // from Round 2 on: the earlier rounds of the document (the working copy), the parties as on the agreement, and everyone on this side
     // the parties' own contact details, for the check on typed words on this screen only (never sent to a signer's own screen)
@@ -13485,6 +13549,111 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
 
   // Tim's view of the negotiation, on the offer page
   const NG_MAIL = {};
+  /* ───── Freeze and withdrawal (Tim, 24 November 2026): only Tim stops an offer ─────
+     Freeze now stops every round of the offer at once (nobody signs, initials, changes or gets a code; links say only that this version
+     is no longer being signed) and nobody is emailed; Unfreeze lets it carry on. Withdraw now does that for good, recorded for the party
+     who directed it, and builds two emails for Tim to read and send. A party's own request from their link comes here, in red. */
+  const HD_HOW = [['in_person', 'In person'], ['phone', 'By phone'], ['email', 'By email'], ['link_request', 'Their request from their link']];
+  async function hdUrgent() {
+    const rq = (await ofSafe(sb.from('offer_requests').select('id,offer_id,property_id,side,kind,reason,at,signer_id').is('handled_at', null).order('at', { ascending: false }))) || [];
+    if (!rq.length) return [];
+    const ps = (await ofSafe(sb.from('properties').select('id,address').in('id', [...new Set(rq.map(r => r.property_id))]))) || [];
+    return rq.map(r => Object.assign({}, r, { address: (ps.find(p => p.id === r.property_id) || {}).address || 'Property' }));
+  }
+  const hdUrgentHTML = (list, id) => `<section class="card urgentc" id="${id}" role="alert"><h2 style="margin:0 0 4px">Urgent</h2>${list.map((u, i) => `<div class="fact"><div class="k">${esc(fmtDT(u.at))} · ${nt(u.address)}</div>
+    <div class="v" style="font-weight:400"><strong>${u.side === 'vendor' ? 'A vendor' : 'A purchaser'} asks to ${u.kind === 'withdraw' ? 'withdraw' : 'stop signing for now'}.</strong> ${esc(u.reason)}</div>
+    <div class="toolbar"><button class="btn primary" type="button" data-hdgo="${i}">Open the offer</button></div></div>`).join('')}<p class="small" style="margin:4px 0 0">Only their own link has stopped. Nobody else has been told.</p></section>`;
+  const hdUrgentWire = list => $$('[data-hdgo]').forEach(b => b.addEventListener('click', () => viewOfferAgent(list[+b.dataset.hdgo].offer_id)));
+  // the people on each side, for "who directed it"
+  async function hdVendorSigners(o) {
+    const gs = (await ofSafe(sb.from('offer_signings').select('id').eq('offer_id', o.id).eq('side', 'vendor'))) || [];
+    return gs.length ? ((await ofSafe(sb.from('offer_signers').select('name,email').in('signing_id', gs.map(g => g.id)))) || []) : [];
+  }
+  async function hdPeople(o) {
+    const d = o.details || {}, purch = (d.purchasers || []).map(q => [q.first, q.last].filter(Boolean).join(' ').trim()).filter(Boolean);
+    const [pp, vs] = await Promise.all([ofSafe(sb.from('property_people').select('legal_name,position').eq('property_id', o.property_id).order('position')), hdVendorSigners(o)]);
+    const vend = [...new Set([...(pp || []).map(x => x.legal_name), ...(vs || []).map(x => x.name)].filter(Boolean))];
+    return { purchaser: purch, vendor: vend };
+  }
+  async function hdOfferHTML(o) {
+    const [holds, reqs, ags] = await Promise.all([ofSafe(sb.from('offer_holds').select('*').eq('offer_id', o.id).order('made_at')), ofSafe(sb.from('offer_requests').select('*').eq('offer_id', o.id).order('at')),
+      ofSafe(sb.from('offer_agreements').select('id').eq('offer_id', o.id))]);
+    const H_ = holds || [], wdH = H_.find(h => h.kind === 'withdraw'), frz = H_.find(h => h.kind === 'freeze' && !h.lifted_at), open = (reqs || []).filter(r => !r.handled_at), ag = (ags || [])[0];
+    const sn = s => s === 'vendor' ? 'vendors' : 'purchasers', reqName = async r => ((await ofSafe(sb.from('offer_signers').select('name').eq('id', r.signer_id))) || [{}])[0].name || (r.side === 'vendor' ? 'A vendor' : 'A purchaser');
+    HD[o.id] = { open, people: await hdPeople(o), names: {} };
+    for (const r of open) HD[o.id].names[r.id] = await reqName(r);
+    if (wdH) {
+      const wm = (await ofSafe(sb.from('offer_mail_drafts').select('*').eq('offer_id', o.id).in('kind', ['withdraw_party', 'withdraw_lawyer']).order('created_at'))) || [];
+      HD[o.id].mail = wm;
+      return `<section class="card urgentc" id="hdWithdrawn"><h2 style="margin:0 0 4px">Withdrawn</h2><p class="small" style="margin:0">Directed by ${esc(wdH.person)} for the ${sn(wdH.side)}, ${esc(fmtDT(wdH.told_at))} (${esc((HD_HOW.find(x => x[0] === wdH.told_how) || [, wdH.told_how])[1].toLowerCase())}): ${esc(wdH.reason)}. Recorded ${esc(fmtDT(wdH.made_at))}.</p>
+        <p class="small" style="margin:4px 0 0">Every signing stopped and the links no longer work. It is never presented or signed again. Everything signed is kept as it was.</p></section>
+        ${wm.some(m => m.status !== 'void') ? mlPanelHTML(wm, 'Withdrawal emails', 'hdMail', 'Ready for you to read. Nothing goes until you press Send.') : `<section class="card" id="hdMail"><h2>Withdrawal emails</h2><p class="small">One to the ${sn(wdH.side)} (cc their lawyer) and one to the other side's lawyer. Nothing is sent until you press Send.</p><div class="toolbar"><button class="btn primary" type="button" id="hdBuildMail">Build the emails</button></div><p class="small" id="hdMailOut" role="status"></p></section>`}`;
+    }
+    if (ag) return '';
+    const nowLocal = (() => { const t = new Date(); t.setMinutes(t.getMinutes() - t.getTimezoneOffset()); return t.toISOString().slice(0, 16); })();
+    const reqCards = open.map(r => `<section class="card urgentc" data-hdreq="${r.id}"><h2 style="margin:0 0 4px">Urgent: ${nt(HD[o.id].names[r.id])} asks to ${r.kind === 'withdraw' ? 'withdraw' : 'stop signing for now'}</h2>
+      <p class="small" style="margin:0">${esc(fmtDT(r.at))}, from their own link (${r.side === 'vendor' ? 'a vendor' : 'a purchaser'}): <strong>${esc(r.reason)}</strong></p>
+      <p class="small" style="margin:4px 0 0">Only their own link has stopped. Nobody else has been told. Contact them straight away.</p>
+      <div class="toolbar"><button class="btn primary" type="button" data-hdfreeze="${r.id}">Freeze now</button><button class="btn primary" type="button" data-hdwd="${r.id}">Withdraw now</button></div>
+      <details class="tight"><summary class="small">Let them carry on</summary><label class="f" for="hdCarry-${r.id}">What you agreed with them</label><input type="text" id="hdCarry-${r.id}" maxlength="500"><div class="toolbar"><button class="btn ghost" type="button" data-hdcarry="${r.id}">Let them carry on</button></div></details>
+      <p class="small err" data-hderr="${r.id}" role="alert"></p></section>`).join('');
+    const reasonSel = `<select id="hdWdWhy"><option value="">Choose a reason</option>${SG_REQ_REASONS.map(([k, l]) => `<option value="${esc(k === 'other' ? '' : l)}" data-k="${k}">${esc(l)}</option>`).join('')}</select>`;
+    return `${reqCards}<section class="card ${frz ? 'urgentc' : 'tight'}" id="hdPanel">${frz ? `<h2 style="margin:0 0 4px">Frozen</h2><p class="small" style="margin:0" id="hdFrozen">Since ${esc(fmtDT(frz.made_at))}. Asked by ${esc(frz.person || 'Tim')}: ${esc(frz.reason)}. Nobody can sign, initial, change or get a code on any round. Their links say only that this version is no longer being signed. Nobody was emailed.</p>
+        <label class="f" for="hdUnNote">Why it carries on</label><input type="text" id="hdUnNote" maxlength="500"><div class="toolbar"><button class="btn ghost" type="button" id="hdUnfreeze">Unfreeze</button></div>`
+      : `<h3 style="margin:0 0 4px">Stop this offer</h3><p class="small" style="margin:0">Freeze now stops all signing on every round at once. Nobody is emailed, and nothing signed changes. You can unfreeze it.</p>
+        <label class="f" for="hdFrWho">Who asked <span class="opt">(optional)</span></label><input type="text" id="hdFrWho" maxlength="250"><label class="f" for="hdFrWhy">Why <span class="opt">(optional)</span></label><input type="text" id="hdFrWhy" maxlength="500">
+        <div class="toolbar"><button class="btn primary" type="button" id="hdFreeze">Freeze now</button></div>`}
+      <details class="tight" id="hdWdBox" ${open.length ? 'open' : ''}><summary class="small">Withdraw now</summary><p class="small">For good, with immediate effect, on behalf of the party who directed it. Everything freeze does, and it is never presented or signed again.</p>
+        <fieldset><legend class="f">Who directed it</legend><label class="choice"><input type="radio" name="hdWdSide" value="purchaser"><span class="mark"></span><span><span class="ct">The purchasers</span></span></label><label class="choice"><input type="radio" name="hdWdSide" value="vendor"><span class="mark"></span><span><span class="ct">The vendors</span></span></label></fieldset>
+        <label class="f" for="hdWdPerson">Which person</label><select id="hdWdPerson"><option value="">Choose the side first</option></select>
+        <label class="f" for="hdWdWhy">Reason</label>${reasonSel}<div id="hdWdOtherBox" hidden><label class="f" for="hdWdOther">The reason</label><input type="text" id="hdWdOther" maxlength="500"></div>
+        <label class="f" for="hdWdAt">When you were told</label><input type="datetime-local" id="hdWdAt" value="${nowLocal}">
+        <label class="f" for="hdWdHow">How you were told</label><select id="hdWdHow"><option value="">Choose</option>${HD_HOW.map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select>
+        <input type="hidden" id="hdWdReq" value=""><div class="toolbar"><button class="btn primary" type="button" id="hdWdGo">Withdraw now</button></div></details>
+      <p class="small err" id="hdErr" role="alert"></p></section>`;
+  }
+  const HD = {};
+  function hdOfferWire(o, p) {
+    const reload = () => viewOfferAgent(o.id), st = HD[o.id] || { open: [], people: { purchaser: [], vendor: [] }, names: {} }, err = t => { const e = $('#hdErr'); if (e) e.textContent = t || ''; };
+    if (st.mail) mlWire(st.mail, reload);
+    const bm = $('#hdBuildMail'); if (bm) bm.addEventListener('click', async () => { bm.disabled = true; try { await hdBuildMail(o, p); toast('The emails are ready for you to read'); reload(); } catch (e) { $('#hdMailOut').textContent = e.message; bm.disabled = false; } });
+    const fill = side => { const sel = $('#hdWdPerson'); if (!sel) return; sel.innerHTML = `<option value="">Choose</option>${(st.people[side] || []).map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join('')}`; };
+    $$('input[name="hdWdSide"]').forEach(r => r.addEventListener('change', () => fill(r.value)));
+    const why = $('#hdWdWhy'); if (why) why.addEventListener('change', () => { $('#hdWdOtherBox').hidden = (why.selectedOptions[0] || {}).dataset.k !== 'other'; });
+    const freeze = async (reason, askedBy, request) => { if (!confirm('Freeze this offer now? All signing stops at once, on every round. Nobody is emailed.')) return;
+      try { await sgRpc('agent_offer_freeze', { p_offer: o.id, p_reason: reason, p_asked_by: askedBy || null, p_request: request || null }); toast('Frozen. Nobody can sign it until you unfreeze it.'); reload(); } catch (e) { err(e.message); } };
+    const fz = $('#hdFreeze'); if (fz) fz.addEventListener('click', () => freeze($('#hdFrWhy').value.trim() || 'Tim froze it', $('#hdFrWho').value.trim()));
+    const uf = $('#hdUnfreeze'); if (uf) uf.addEventListener('click', async () => { const n = $('#hdUnNote').value.trim(); if (n.length < 3) return err('Say why it carries on.');
+      if (!confirm('Unfreeze this offer? Signing can carry on where it was.')) return; try { await sgRpc('agent_offer_unfreeze', { p_offer: o.id, p_note: n }); toast('Unfrozen. Signing can carry on.'); reload(); } catch (e) { err(e.message); } });
+    const withdraw = async (a) => { if (!confirm(`Withdraw this offer now, for the ${a.side === 'vendor' ? 'vendors' : 'purchasers'} (${a.person})? All signing stops for good. Nobody is emailed until you send the emails yourself.`)) return;
+      try { await sgRpc('agent_offer_withdraw_now', { p_offer: o.id, p_side: a.side, p_person: a.person, p_reason: a.reason, p_told_at: a.at, p_told_how: a.how, p_request: a.request || null });
+        let msg = 'Withdrawn.'; try { await hdBuildMail(o, p); msg += ' The emails are built for you to read and send.'; } catch (_) { msg += ' Build the emails on the offer page.'; } toast(msg); reload(); } catch (e) { err(e.message); } };
+    const wg = $('#hdWdGo'); if (wg) wg.addEventListener('click', () => { const side = ($('input[name="hdWdSide"]:checked') || {}).value, person = $('#hdWdPerson').value, k = ($('#hdWdWhy').selectedOptions[0] || {}).dataset.k;
+      const reason = k === 'other' ? $('#hdWdOther').value.trim() : $('#hdWdWhy').value, at = new Date($('#hdWdAt').value), how = $('#hdWdHow').value;
+      if (!side) return err('Choose who directed it.'); if (!person) return err('Choose which person.'); if (!reason || reason.length < 3) return err('Give the reason.'); if (isNaN(at)) return err('Check when you were told.'); if (!how) return err('Choose how you were told.');
+      withdraw({ side, person, reason, at: at.toISOString(), how, request: $('#hdWdReq').value || null }); });
+    // from a party's request: one tap and a confirm, with their name, side, reason and when filled in
+    $$('[data-hdfreeze]').forEach(b => b.addEventListener('click', () => { const r = st.open.find(x => x.id === b.dataset.hdfreeze); freeze(r.reason, st.names[r.id], r.id); }));
+    $$('[data-hdwd]').forEach(b => b.addEventListener('click', () => { const r = st.open.find(x => x.id === b.dataset.hdwd); withdraw({ side: r.side, person: st.names[r.id], reason: r.reason, at: r.at, how: 'link_request', request: r.id }); }));
+    $$('[data-hdcarry]').forEach(b => b.addEventListener('click', async () => { const id = b.dataset.hdcarry, n = ($('#hdCarry-' + id) || {}).value || '';
+      try { await sgRpc('agent_offer_request_carry_on', { p_request: id, p_note: n.trim() }); toast('They can carry on signing.'); reload(); } catch (e) { const el = $(`[data-hderr="${id}"]`); if (el) el.textContent = e.message; } }));
+  }
+  // the two withdrawal emails, as drafts Tim reads and sends: to the side that directed it (cc their lawyer), and to the other side's lawyer
+  async function hdBuildMail(o, p) {
+    const h = ((await ofSafe(sb.from('offer_holds').select('*').eq('offer_id', o.id).eq('kind', 'withdraw'))) || [])[0]; if (!h) throw new Error('Record the withdrawal first.');
+    const d = o.details || {}, dr = ((await ofSafe(sb.from('offer_drafts').select('id,number,placed').eq('offer_id', o.id).order('number', { ascending: false }).limit(1))) || [])[0];
+    const pl = id => (((dr && dr.placed) || []).find(x => x.id === id) || {}).text || '', vl = { person: pl('vl_person'), firm: pl('vl_firm'), email: pl('vl_email') || pl('vl_service') };
+    let partyTo, partyFirst, own, other;
+    if (h.side === 'purchaser') { const q = d.purchasers || []; partyTo = q.map(x => x.email).filter(Boolean); if (!partyTo.length && d.email) partyTo = [d.email]; partyFirst = q.map(x => x.first); own = d.lawyer || {}; other = vl; }
+    else { const [vs, pp] = await Promise.all([hdVendorSigners(o), ofSafe(sb.from('property_people').select('legal_name,pref_name,email').eq('property_id', o.property_id).order('position'))]);
+      partyTo = [...new Set([...(vs || []).map(x => x.email), ...(pp || []).map(x => x.email)].filter(Boolean).map(x => x.toLowerCase()))]; partyFirst = (pp || []).map(x => x.pref_name || String(x.legal_name || '').split(/\s+/)[0]); own = vl; other = d.lawyer || {}; }
+    const w = MAIL.withdrawDrafts({ side: h.side, address: p.address, when: h.told_at, partyFirst, partyTo, ownLawyer: own, otherLawyer: other });
+    let made = 0;
+    for (const [kind, m] of [['withdraw_party', w.party], ['withdraw_lawyer', w.lawyer]]) { if (!m.to.length) continue; await sgRpc('agent_mail_draft_add', { p_offer: o.id, p_kind: kind, p_signer: null, p_to: m.to, p_cc: m.cc, p_subject: m.subject, p_body: m.body, p_attach: null }); made++; }
+    if (!made) throw new Error('There is no email address for either side yet. Add them, then build the emails.');
+    return w;
+  }
+
   async function ngOfferHTML(o) {
     const docs = (await ofSafe(sb.from('offer_documents').select('*').eq('offer_id', o.id).order('number', { ascending: false }))) || [];
     if (!docs.length) return '';
@@ -13494,6 +13663,16 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     // the agreed copy's emails (drafts Tim sends); kept for ngOfferWire
     const agMail = ag ? ((await ofSafe(sb.from('offer_mail_drafts').select('*').eq('offer_id', o.id).in('kind', ['agreed_purchasers', 'agreed_vendors']).order('created_at'))) || []) : [];
     NG_MAIL[o.id] = agMail;
+    // who holds the deposit (Tim, 24 November 2026): recommended preselected and marked, his choice recorded with the agreement
+    const dhRow = ag ? ((await ofSafe(sb.from('offer_deposit_holders').select('*').eq('offer_id', o.id).order('id', { ascending: false }).limit(1))) || [])[0] : null;
+    const ks = ag ? ngKs(o, ag) : false, rec = MAIL.depositRecommended(ks), dhNow = dhRow ? dhRow.holder : rec;
+    const depHTML = ag ? `<section class="card" id="ngDeposit" data-ks="${ks ? 1 : 0}" data-rec="${rec}"><h3 style="margin:0 0 4px">Who holds the deposit</h3>
+      <p class="small" style="margin:0 0 6px">For the emails to the parties. ${ks ? 'KiwiSaver is part of this deposit.' : 'No KiwiSaver is part of this deposit.'}</p>
+      <label class="f" for="ngDepHolder">Deposit holder</label><select id="ngDepHolder">${Object.entries(MAIL.DEPOSIT_HOLDERS).map(([k, x]) => `<option value="${k}" ${k === dhNow ? 'selected' : ''}>${esc(x.label)}${k === rec ? ' (Recommended)' : ''}</option>`).join('')}</select>
+      <div id="ngDepOtherBox" ${dhNow === 'other' ? '' : 'hidden'}><label class="f" for="ngDepOther">Who holds it</label><input type="text" id="ngDepOther" maxlength="200" value="${esc((dhRow && dhRow.other_text) || '')}"></div>
+      <p class="small warnc" id="ngDepWarn" role="alert" ${ks && dhNow !== 'vendor_lawyer' ? '' : 'hidden'}>KiwiSaver is part of this deposit. It normally goes to the vendors' lawyer's trust account, because it can't be released before settlement. You can still choose this; the emails keep that line.</p>
+      ${dhRow ? `<p class="small" id="ngDepNow">Recorded ${esc(fmtDT(dhRow.chosen_at))}: ${esc(dhRow.holder === 'other' ? dhRow.other_text : MAIL.DEPOSIT_HOLDERS[dhRow.holder].label)}.</p>` : ''}
+      <div class="toolbar"><button class="btn ghost" type="button" id="ngDepSave">Use this${agMail.some(m => m.status === 'draft') ? ' and rebuild the emails' : ''}</button></div><p class="small" id="ngDepOut" role="status" aria-live="polite"></p></section>` : '';
     const agMailHTML = ag ? (agMail.some(m => m.status !== 'void') ? mlPanelHTML(agMail, 'Emails to the parties', 'mlAgreed', 'Built from the agreement. Nothing goes until you press Send. Fill in or delete each marked blank, read each one, then send it, or tick Reviewed on both and use Send all reviewed. The lawyers\' pack is separate.')
       : `<section class="card" id="mlAgreed"><h2>Emails to the parties</h2><p class="small">One to the purchasers (cc their lawyer) and one to the vendors (cc theirs), each with the agreed copy and the other side's lawyer. Nothing is sent until you press Send.</p><div class="toolbar"><button class="btn primary" type="button" id="mlBuildAgreed">Build the emails</button></div><p class="small" id="mlBuildOut" role="status" aria-live="polite"></p></section>`) : '';
     const last = open ? R_.filter(r => r.document_id === open.id).sort((a, z) => z.doc_round - a.doc_round)[0] : null;
@@ -13502,7 +13681,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const nowLocal = (() => { const t = new Date(); t.setMinutes(t.getMinutes() - t.getTimezoneOffset()); return t.toISOString().slice(0, 16); })();
     const today = NG.fullDate(new Date().toLocaleDateString('en-CA', { timeZone: 'Pacific/Auckland' }));
     const rRow = r => `<li class="small" data-round="${r.doc_round}"><strong>Round ${r.doc_round}</strong>, signed by the ${ngSide(r.side)}: ${r.doc_round === 1 ? 'the offer' : r.changes ? `${r.changes} change${r.changes === 1 ? '' : 's'} (a counteroffer)` : 'accepted with no changes'}. Locked ${esc(fmtDT(r.locked_at))}, fingerprint <span translate="no">${esc(drShort(r.sha256))}</span>. <button class="btn link" type="button" data-ngdl="${r.id}">Download</button></li>`;
-    return `<h3 style="margin:14px 0 4px">Negotiation</h3>${agMailHTML}<div id="ngOffer">
+    return `<h3 style="margin:14px 0 4px">Negotiation</h3>${depHTML}${agMailHTML}<div id="ngOffer">
       ${ag ? `<div class="card okc" id="ngAgreed"><h3 style="margin:0 0 4px">Agreement made</h3><p class="small" style="margin:0">Dated ${esc(ag.date_text)}. Acceptance communicated ${esc(fmtDT(ag.accepted_at))}. The agreed copy is locked, fingerprint <span translate="no">${esc(drShort(ag.sha256))}</span>. Other offers on the property haven't been touched: you decide what happens with them.</p>
         <div class="toolbar"><button class="btn ghost" type="button" id="ngAgDl">Download the agreed copy</button></div></div>` : ''}
       ${docs.map(dc => `<div class="card tight ng-doc" data-doc="${dc.number}"><p class="small" style="margin:0 0 4px"><strong>Document ${dc.number}</strong> ${dc.status === 'open' ? '<span class="pill">Open</span>' : dc.status === 'agreed' ? '<span class="pill okp">Agreed</span>' : `<span class="pill of-off">Closed, kept as history</span> ${esc(fmtDT(dc.closed_at))}: ${esc(dc.close_reason || '')}`}</p>
@@ -13519,16 +13698,14 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
           <div class="toolbar"><button class="btn primary" type="button" id="ngPresent">${last.side === 'purchaser' ? (last.doc_round === 1 ? 'Present to the vendors' : 'Present back to the vendors') : 'Present back to the purchasers'}</button></div></div>`) : ''}
       ${open && !ag ? `<details class="card tight" id="ngFresh"><summary class="small">Start a fresh copy</summary><p class="small">For when the document has become hard to read. It is closed and filed as negotiation history, with every round kept. Then correct the offer to the terms as they stand, re-draft and approve it, and the purchasers sign Round 1 of a new document.</p>
         <label class="f" for="ngFreshWhy">Why</label><textarea id="ngFreshWhy" rows="2" maxlength="500"></textarea><div class="toolbar"><button class="btn ghost" type="button" id="ngClose">Close this document</button></div><p class="small err" id="ngFreshErr" role="alert"></p></details>` : ''}
-      ${!off && !ag ? `<details class="card tight" id="ngWithdraw"><summary class="small">A side has withdrawn</summary><p class="small">Record who told you and when. Anything out for signing stops, any links sent stop working, and this document is filed as history: if it comes back to life, it starts again with a fresh copy.</p>
-        <div class="choices"><label class="choice"><input type="radio" name="ngWdSide" value="purchaser"><span class="mark"></span><span><span class="ct">The purchasers withdrew their offer</span></span></label><label class="choice"><input type="radio" name="ngWdSide" value="vendor"><span class="mark"></span><span><span class="ct">The vendors declined the offer, or withdrew their counteroffer</span></span></label></div>
-        <label class="f" for="ngWdAt">When</label><input type="datetime-local" id="ngWdAt" value="${nowLocal}"><label class="f" for="ngWdNote">Note <span class="opt">(optional)</span></label><input type="text" id="ngWdNote" maxlength="500">
-        <div class="toolbar"><button class="btn ghost" type="button" id="ngWdGo">Record the withdrawal</button></div><p class="small err" id="ngWdErr" role="alert"></p></details>` : ''}
       ${R_.length ? `<div class="toolbar"><button class="btn ghost" type="button" id="ngPack">Lawyers' pack (every round and the timeline)</button></div><p class="small" id="ngPackOut" role="status" aria-live="polite"></p>` : ''}</div>`;
   }
   // a stored file, checked against its fingerprint
   async function ngFile(path, sha) { const { data, error } = await sb.storage.from('property-files').createSignedUrl(path, 300); if (error || !data) throw new Error('A file couldn\'t be opened. Check you have signal.');
     const bytes = new Uint8Array(await (await fetch(data.signedUrl)).arrayBuffer()); if (await REPO.sha256(bytes) !== sha) throw new Error('A stored file doesn\'t match its fingerprint.'); return bytes; }
   const ngSave = (bytes, name, type) => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([bytes], { type })); a.download = name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000); };
+  // is any KiwiSaver part of the deposit (as the agreed terms, or the offer, say)
+  const ngKs = (o, ag) => ((ag && ag.terms) || {}).kiwisaver === true || ((o && o.details) || {}).kiwisaver === true;
   const ngSlug = t => String(t || 'agreement').replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60);
   function ngOfferWire(o, p) {
     const reload = () => viewOfferAgent(o.id);
@@ -13536,13 +13713,18 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const mb = $('#mlBuildAgreed'); if (mb) mb.addEventListener('click', async () => { mb.disabled = true; $('#mlBuildOut').textContent = 'Building...';
       try { await mlBuildAgreed(o, p); toast('The emails are ready for you to read'); reload(); } catch (e) { $('#mlBuildOut').textContent = e.message; mb.disabled = false; } });
     const pr = $('#ngPresent'); if (pr) pr.addEventListener('click', () => viewRoundPresent(o.id));
+    const dsel = $('#ngDepHolder'); if (dsel) { const box = $('#ngDeposit'), ksD = box.dataset.ks === '1';
+      dsel.addEventListener('change', () => { $('#ngDepOtherBox').hidden = dsel.value !== 'other'; $('#ngDepWarn').hidden = !(ksD && dsel.value !== 'vendor_lawyer'); });
+      $('#ngDepSave').addEventListener('click', async () => { const b = $('#ngDepSave'), out = $('#ngDepOut'), other = $('#ngDepOther').value.trim();
+        if (dsel.value === 'other' && other.length < 3) return (out.textContent = 'Type who holds the deposit.');
+        b.disabled = true; out.textContent = 'Saving...';
+        try { await sgRpc('agent_offer_deposit_holder', { p_offer: o.id, p_holder: dsel.value, p_other: dsel.value === 'other' ? other : null });
+          if ((NG_MAIL[o.id] || []).some(m => m.status === 'draft')) await mlBuildAgreed(o, p);   // drafts not yet sent follow the choice; a sent email is kept as it went
+          toast('Saved. The emails follow it.'); reload(); } catch (e) { out.textContent = e.message; b.disabled = false; } }); }
     $$('[data-ngdl]').forEach(b => b.addEventListener('click', async () => { try { const r = (await must(sb.from('offer_rounds').select('*').eq('id', b.dataset.ngdl).single())), dc = await must(sb.from('offer_documents').select('number').eq('id', r.document_id).single());
       ngSave(await ngFile(r.path, r.sha256), `Document-${dc.number}-Round-${r.doc_round}-${ngSlug(p.address)}.pdf`, 'application/pdf'); } catch (e) { toast(e.message); } }));
     const ad = $('#ngAgDl'); if (ad) ad.addEventListener('click', async () => { try { const ag = (await must(sb.from('offer_agreements').select('*').eq('offer_id', o.id)))[0]; ngSave(await ngFile(ag.path, ag.sha256), `Agreement-${ngSlug(p.address)}.pdf`, 'application/pdf'); } catch (e) { toast(e.message); } });
     const cl = $('#ngClose'); if (cl) cl.addEventListener('click', async () => { cl.disabled = true; try { await sgRpc('agent_document_close', { p_offer: o.id, p_reason: $('#ngFreshWhy').value.trim() }); toast('Filed as history. Correct the offer, then re-draft it'); reload(); } catch (e) { $('#ngFreshErr').textContent = e.message; cl.disabled = false; } });
-    const wd = $('#ngWdGo'); if (wd) wd.addEventListener('click', async () => { const side = ($('input[name="ngWdSide"]:checked') || {}).value; if (!side) return ($('#ngWdErr').textContent = 'Choose who withdrew.');
-      const at = new Date($('#ngWdAt').value); if (isNaN(at)) return ($('#ngWdErr').textContent = 'Check the time.'); wd.disabled = true;
-      try { await sgRpc('agent_negotiation_withdraw', { p_offer: o.id, p_side: side, p_at: at.toISOString(), p_note: $('#ngWdNote').value.trim() || null }); toast('Withdrawal recorded'); reload(); } catch (e) { $('#ngWdErr').textContent = e.message; wd.disabled = false; } });
     const acc_ = $('#ngAccAt'); if (acc_) { let edited = false; $('#ngDate').addEventListener('input', () => { edited = true; });
       acc_.addEventListener('change', () => { const t = new Date(acc_.value); if (!edited && !isNaN(t)) $('#ngDate').value = NG.fullDate(t.toLocaleDateString('en-CA', { timeZone: 'Pacific/Auckland' })); }); }
     const ag = $('#ngAgree'); if (ag) ag.addEventListener('click', async () => { const er = $('#ngAgErr'); er.textContent = '';
@@ -13632,6 +13814,31 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     paint(); top();
   }
 
+  // A party asks Tim, from their own link, to stop for now or to withdraw (Tim, 24 November 2026). The reason is required. It goes to Tim
+  // at once, as an urgent email; only their own link stops until he acts, and nobody else is told.
+  const SG_ASKED = 'Your request has gone to Tim. He will contact you straight away.';
+  const SG_REQ_REASONS = [['finance_changed', 'Our financial situation has changed'], ['contract_elsewhere', 'We have entered a contract elsewhere'], ['incapacitated', 'One of our party is incapacitated'],
+    ['property_integrity', 'We have concerns about the integrity of the property'], ['property_viability', 'We have concerns about the viability of the property'], ['other', 'Other (type it in)']];
+  const sgRequestHTML = () => `<details class="card tight" id="sgReqBox"><summary class="small">Ask Tim to stop or withdraw</summary>
+    <p class="small">If something has changed and you need to stop, tell Tim here. It goes straight to him and he will contact you. Nothing is sent to anyone else.</p>
+    <fieldset><legend class="f">What would you like?</legend>
+      <label class="choice"><input type="radio" name="sgReqKind" value="freeze"><span class="mark"></span><span><span class="ct">Stop for now, while I talk to Tim</span></span></label>
+      <label class="choice"><input type="radio" name="sgReqKind" value="withdraw"><span class="mark"></span><span><span class="ct">Withdraw</span></span></label></fieldset>
+    <label class="f" for="sgReqWhy">Why</label><select id="sgReqWhy"><option value="">Choose a reason</option>${SG_REQ_REASONS.map(([k, l]) => `<option value="${k}">${esc(l)}</option>`).join('')}</select>
+    <div id="sgReqOtherBox" hidden><label class="f" for="sgReqOther">Your reason</label><textarea id="sgReqOther" rows="2" maxlength="500"></textarea></div>
+    <div class="toolbar"><button class="btn ghost" type="button" id="sgReqGo">Send to Tim now</button></div><p class="small" id="sgReqOut" role="status"></p></details>`;
+  function sgRequestWire(ctx) {
+    const go = $('#sgReqGo'); if (!go) return;
+    $('#sgReqWhy').addEventListener('change', () => { $('#sgReqOtherBox').hidden = $('#sgReqWhy').value !== 'other'; });
+    go.addEventListener('click', async () => {
+      const out = $('#sgReqOut'), kind = (document.querySelector('input[name="sgReqKind"]:checked') || {}).value, key = $('#sgReqWhy').value, other = $('#sgReqOther').value.trim();
+      if (!kind) return (out.textContent = 'Choose stop for now, or withdraw.'); if (!key) return (out.textContent = 'Choose a reason.'); if (key === 'other' && other.length < 3) return (out.textContent = 'Type your reason.');
+      go.disabled = true; out.textContent = 'Sending...';
+      try { await ctx.api.request({ kind, reason_key: key, reason: key === 'other' ? other : '' }); main().innerHTML = `<div class="login-card" id="sgReqSent"><h1>Your request has gone to Tim</h1><p class="lede">${esc(SG_ASKED)}</p><p>You can also call or text Tim on <a href="tel:0275627207">027 562 7207</a>.</p></div>`; top(); }
+      catch (e) { go.disabled = false; out.textContent = e.message; }
+    });
+  }
+
   // by link: the purchaser's own page (no account; the token, then a one-time code by email)
   async function viewSignRemote(token) {
     document.title = 'Sign your offer · McGuire Real Estate';
@@ -13645,7 +13852,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const VS = info.side === 'vendor', LR = (info.round || 1) > 1;
     if (VS) document.title = 'An offer on your property · McGuire Real Estate';
     if (info.finished) return closed('You\'ve signed', VS || LR ? 'Thank you. Tim has your signed copy. Nothing goes back until everyone on your side has signed and Tim has checked it.' : 'Thank you. Tim has your signed offer. Nothing goes to the sellers until everyone has signed and Tim has checked it.');
-    if (info.stopped) return closed('This version isn\'t being signed', info.stopped);
+    if (info.stopped) return closed(info.stopped === SG_ASKED ? 'Your request has gone to Tim' : 'This version isn\'t being signed', info.stopped);
     if (!Object.keys(GUIDES).length) await Promise.race([loadGuides(), new Promise(r => setTimeout(r, 4000))]);
     const start = async () => {
       let st; try { st = await call('state'); } catch (e) { if (/code from your email/.test(e.message)) { setSes(''); return codeStep(); } return closed('Something went wrong', e.message); }
@@ -13655,7 +13862,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       signFlow({ mode: 'link', address: G.address, name: S.name, position: S.position, places: G.places || [], taps: new Set(st.taps || []), consent_at: S.consent_at, receipts: (S.receipts || []).map(r => r.guide), sig_png: S.sig_png, init_png: S.init_png,
         status: G.status, stopped: G.stopped, cca_pages: G.cca_pages || [], pages: G.pages, bytes, draftSha: G.draft_sha256, marks: (G.round || 1) > 1 ? G.marks || [] : [],
         round: G.round || 1, side: G.side || 'purchaser', link_changes: !!G.link_changes, layers: G.layers || [], parties: G.parties || null, side_places: G.side_places || [], terms: G.terms || null, sideSigners: Array.from({ length: G.signers || 1 }, (_, i) => ({ position: i + 1, name: '' })),
-        api: { change: c => call('change', c), consent: () => call('consent'), receipt: r => call('receipt', r), marks: (a, b) => call('marks', { sig: a, init: b }), tap: pl => call('tap', { place: pl }), ask: (t, decline) => call('ask', { text: t, decline: !!decline }), finish: () => call('finish') },
+        api: { change: c => call('change', c), consent: () => call('consent'), receipt: r => call('receipt', r), marks: (a, b) => call('marks', { sig: a, init: b }), tap: pl => call('tap', { place: pl }), ask: (t, decline) => call('ask', { text: t, decline: !!decline }), request: r => call('request', r), finish: () => call('finish') },
         reload: start, done: r => { setSes(''); main().innerHTML = `<div class="login-card" id="sgThanks"><h1>Thank you, ${esc(S.name.split(' ')[0])}</h1><p class="lede">You've signed every place.${r && r.complete && r.locked ? ' Everyone has now signed, and the signed copy is locked.' : r && r.complete ? ' Everyone has now signed. Tim will lock the signed copy and let you know.' : ' Tim will let you know once everyone has signed.'}</p><p class="small">${VS || LR ? `Nothing goes back to the ${VS ? 'purchasers' : 'vendors'} until Tim has checked it.` : 'Nothing goes to the sellers until Tim has checked it.'} Any questions, call or text Tim on <a href="tel:0275627207">027 562 7207</a>.</p></div>`; top(); } });
     };
     const codeStep = (msg) => {

@@ -357,13 +357,36 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   // the agreed copy's emails: built straight away as drafts, nothing sent (Tim, 24 November 2026)
   { const ml = await mails(p); expect(ml.length === MA, 'confirming the agreement sends nothing to anyone: ' + ml.slice(MA).map(m => m.kind + '>' + m.to).join(', ')); }
   await p.waitForSelector('#mlAgreed [data-mlsend]', { timeout: 30000 });
-  d = await db(p); { const mds = (d.offer_mail_drafts || []).filter(m => m.offer_id === offA && /^agreed_/.test(m.kind) && m.status === 'draft'), dp = mds.find(m => m.kind === 'agreed_purchasers'), dv = mds.find(m => m.kind === 'agreed_vendors');
+  d = await db(p); { let mds = (d.offer_mail_drafts || []).filter(m => m.offer_id === offA && /^agreed_/.test(m.kind) && m.status === 'draft'), dp = mds.find(m => m.kind === 'agreed_purchasers'), dv = mds.find(m => m.kind === 'agreed_vendors');
     out.agreedDrafts = mds.map(m => ({ kind: m.kind, to: m.to_addr, cc: m.cc_addr, subject: m.subject }));
     expect(dp && dv && mds.length === 2, 'two drafts: to the purchasers and to the vendors');
     expect(dp.to_addr.join() === 'ana.p@example.com,bo.p@example.com' && dp.cc_addr.join() === 'pat@synthlaw.example' && dp.attach.path === ag.path && dp.attach.sha256 === ag.sha256, 'the purchasers\' email: to them, cc their lawyer, the agreed copy attached');
     expect(dv.to_addr.slice().sort().join() === 'vendor2@example.com,vendor@example.com' && dv.attach.sha256 === ag.sha256, 'the vendors\' email: to them, the agreed copy attached');
     expect(!/vendor@example|vendor2@example|000 1111/.test(dp.body) && !/ana\.p@|bo\.p@|buyer\.own@|777 6666|555 4444|999 8888/.test(dv.body), "neither side's email holds the other side's own details");
     expect(/Pat Solicitor/.test(dv.body) && /Roadmap/.test(dp.body) && /Price: \$/.test(dp.body) && /Faithfully,\nTim/.test(dp.body), "each holds the other side's lawyer and the roadmap");
+    // who holds the deposit (Tim, 24 November 2026): no KiwiSaver, so the NZ Real Estate Trust is recommended, preselected and recorded
+    const dep = async () => { const d_ = await db(p); return (d_.offer_deposit_holders || []).filter(x => x.offer_id === offA).sort((a, z) => z.id - a.id)[0]; }, bodyP = async () => (await db(p)).offer_mail_drafts.find(m => m.offer_id === offA && m.kind === 'agreed_purchasers' && m.status === 'draft').body;
+    await p.waitForSelector('#ngDepHolder');
+    expect(await p.inputValue('#ngDepHolder') === 'nzret' && /Tim's trust account\) \(Recommended\)/.test(await p.textContent('#ngDepHolder option[value="nzret"]')) && await p.isHidden('#ngDepWarn') && await p.isHidden('#ngDepOtherBox'), 'deposit holder: the recommended one preselected and marked, no warning');
+    expect((await dep()).holder === 'nzret' && (await dep()).recommended === 'nzret' && /payable to Public Trust O\/A NZ Real Estate Trust/.test(dp.body), 'the recommended holder is recorded with the agreement, and the draft says it');
+    expect(!(await side(p)), 'the deposit holder at 390 px: no sideways scroll');
+    await p.selectOption('#ngDepHolder', 'other'); expect(await p.isVisible('#ngDepOther'), 'Other: type it in'); await p.click('#ngDepSave'); expect(/Type who holds the deposit/.test(await p.textContent('#ngDepOut')), 'Other needs the holder typed');
+    await p.fill('#ngDepOther', 'Smith Law trust account'); await p.click('#ngDepSave'); await p.waitForFunction(() => /Smith Law/.test((document.querySelector('#ngDepNow') || {}).textContent || ''), null, { timeout: 30000 });
+    expect((await dep()).holder === 'other' && (await dep()).other_text === 'Smith Law trust account' && /payable to Smith Law trust account/.test(await bodyP()), 'Other: recorded, and the draft follows it');
+    await p.selectOption('#ngDepHolder', 'vendor_lawyer'); await p.click('#ngDepSave'); await p.waitForFunction(() => /Vendors' lawyer's trust account\./.test((document.querySelector('#ngDepNow') || {}).textContent || ''), null, { timeout: 30000 });
+    expect(/payable to the vendors' lawyer's trust account/.test(await bodyP()) && !/KiwiSaver/.test((await bodyP()).split('Deposit (')[1].split('\n')[0]), 'the vendors\' lawyer chosen: the draft follows, with no KiwiSaver words');
+    // with KiwiSaver, the vendors' lawyer is recommended; choosing Tim's trust account warns but is allowed, and keeps the release line
+    await p.evaluate(id => { window.__mockDB.offer_agreements.find(a => a.offer_id === id).terms.kiwisaver = true; }, offA);
+    await openProp(p); await p.click(`[data-offer="${offA}"]`); await p.waitForSelector('#ngDepHolder');
+    expect(/Vendors' lawyer's trust account \(Recommended\)/.test(await p.textContent('#ngDepHolder option[value="vendor_lawyer"]')) && await p.isHidden('#ngDepWarn'), 'KiwiSaver: the vendors\' lawyer recommended');
+    await p.selectOption('#ngDepHolder', 'nzret'); expect(await p.isVisible('#ngDepWarn') && /can't be released before settlement/.test(await p.textContent('#ngDepWarn')), 'KiwiSaver and Tim\'s trust account: warned');
+    await p.click('#ngDepSave'); await p.waitForFunction(() => /Tim's trust account\)\./.test((document.querySelector('#ngDepNow') || {}).textContent || ''), null, { timeout: 30000 });
+    expect((await dep()).holder === 'nzret' && (await dep()).warned === true && (await dep()).kiwisaver === true && /payable to Public Trust O\/A NZ Real Estate Trust [^\n]*Because your KiwiSaver is part of it, the deposit can't be released before settlement\./.test(await bodyP()), 'allowed, the warning recorded, and the KiwiSaver line kept');
+    d = await db(p); expect(d.offer_events.filter(e => e.offer_id === offA && e.kind === 'deposit_holder_chosen').length === 4, 'each choice is on the timeline');
+    // back as it was for the rest of the test
+    await p.evaluate(id => { window.__mockDB.offer_agreements.find(a => a.offer_id === id).terms.kiwisaver = false; }, offA);
+    await openProp(p); await p.click(`[data-offer="${offA}"]`); await p.waitForSelector('#ngDepHolder'); await p.click('#ngDepSave'); await p.waitForTimeout(1500); await p.waitForSelector('#mlAgreed [data-mlsend]');
+    d = await db(p); mds = d.offer_mail_drafts.filter(m => m.offer_id === offA && /^agreed_/.test(m.kind) && m.status === 'draft'); dp = mds.find(m => m.kind === 'agreed_purchasers'); dv = mds.find(m => m.kind === 'agreed_vendors');
     // Needs you
     await p.click('#navDash'); await p.waitForTimeout(700); expect(/2 emails to read and send/.test(await p.textContent('#main')), 'Needs you lists the unsent emails');
     await openProp(p); await p.click(`[data-offer="${offA}"]`); await p.waitForSelector('#mlAgreed [data-mlsend]');
@@ -483,19 +506,86 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
     expect((await mails(v)).some(m => m.kind === 'offer_sign_ask' && /^A vendor asks for a change/.test(m.subject)), 'Ask Tim for a change from a vendor is worded for a vendor');
     expect(!(await side(v)), 'the accept-or-decline link screen at 390 px: no sideways scroll');
     await v.close(); await p.evaluate(s => localStorage.setItem('mocksession', s), ses0); }
-  await toOffer(p, offC); await p.waitForSelector('#ngWithdraw'); await p.click('#ngWithdraw summary');
-  await p.click('#ngWdGo'); expect(/Choose who withdrew/.test(await p.textContent('#ngWdErr')), 'who withdrew must be chosen');
-  await tick(p, 'input[name="ngWdSide"][value="vendor"]'); await p.fill('#ngWdNote', 'Testy rang: they are keeping the house'); await p.click('#ngWdGo'); await p.waitForSelector('#ofView');
+  // ── 10b. freeze and withdrawal (Tim, 24 November 2026): a vendor asks from their link; only Tim stops the offer ──
+  process.stderr.write('step 10b\n');
+  const NEUTRAL = 'This version is no longer being signed. Tim will be in touch.', ASKED = 'Your request has gone to Tim. He will contact you straight away.';
+  const c2Link = (await mails(p)).filter(m => m.kind === 'offer_sign_link' && m.to === 'vendor2@example.com').pop().link, t1 = cLink.split('sign=')[1], t2 = c2Link.split('sign=')[1];
+  const PNG = 'data:image/png;base64,' + 'iVBORw0KGgo'.repeat(30), notTimMail = async pg => (await mails(pg)).filter(m => m.to !== 'tim').length;
+  const sesOf = async (pg, tok, who) => { await invoke(pg, { action: 'send_code', token: tok }); const c = (await mails(pg)).filter(m => m.kind === 'offer_sign_code' && m.to === who).pop().code; return (await invoke(pg, { action: 'verify', token: tok, code: c })).session; };
+  // the second vendor is part way through the round
+  const s2 = await sesOf(p, t2, 'vendor2@example.com'); await invoke(p, { action: 'consent', token: t2, session: s2 }); await invoke(p, { action: 'receipt', token: t2, session: s2, guide: 'chattels' }); await invoke(p, { action: 'marks', token: t2, session: s2, sig: PNG, init: PNG });
+  const pl2 = (await invoke(p, { action: 'state', token: t2, session: s2 })).signing.places.map(x => x.id);
+  r = await invoke(p, { action: 'tap', token: t2, session: s2, place: pl2[0] }); expect(r.ok, 'the second vendor taps a place');
+  // the first vendor asks Tim from their own link: a reason is needed; it goes to Tim alone, at once, marked urgent
+  await p.evaluate(() => localStorage.removeItem('mocksession'));
+  let v = await page(); await v.setViewportSize({ width: 390, height: 844 }); await v.goto(cLink); await v.waitForSelector('#sgCode'); await v.click('#sgSendCode'); await v.waitForFunction(() => /Sent/.test(document.querySelector('#sgCodeMsg').textContent));
+  await v.fill('#sgCodeIn', (await mails(v)).filter(m => m.kind === 'offer_sign_code' && m.to === 'vendor@example.com').pop().code); await v.click('#sgCodeGo'); await v.waitForSelector('#sgReqBox');
+  const s1 = await v.evaluate(() => Object.keys(sessionStorage).filter(k => /^sgSes:/.test(k)).map(k => sessionStorage.getItem(k))[0]);
+  const before = await notTimMail(v), timBefore = (await mails(v)).filter(m => m.to === 'tim').length;
+  await v.click('#sgReqBox summary'); expect(!(await side(v)), 'the request box at 390 px: no sideways scroll');
+  await v.click('#sgReqGo'); expect(/Choose stop for now, or withdraw/.test(await v.textContent('#sgReqOut')), 'a request needs stop or withdraw');
+  await tick(v, 'input[name="sgReqKind"][value="freeze"]'); await v.selectOption('#sgReqWhy', 'other'); await v.click('#sgReqGo'); expect(/Type your reason/.test(await v.textContent('#sgReqOut')), 'Other needs the reason typed');
+  out.reqReasons = await v.$$eval('#sgReqWhy option', o => o.map(x => x.textContent));
+  expect(out.reqReasons.join('|') === 'Choose a reason|Our financial situation has changed|We have entered a contract elsewhere|One of our party is incapacitated|We have concerns about the integrity of the property|We have concerns about the viability of the property|Other (type it in)', 'the reasons offered');
+  await v.selectOption('#sgReqWhy', 'finance_changed'); await v.click('#sgReqGo'); await v.waitForSelector('#sgReqSent');
+  expect((await v.textContent('#sgReqSent')).includes(ASKED), 'the requester is told it has gone to Tim');
+  const urgent = (await mails(v)).filter(m => m.to === 'tim').slice(timBefore);
+  expect(urgent.length === 1 && urgent[0].kind === 'offer_sign_request' && /^URGENT: a vendor asks to stop signing: 1 Example Road/.test(urgent[0].subject) && (await notTimMail(v)) === before, 'one urgent email, to Tim alone, at once; nobody else is emailed');
+  await v.goto(cLink); await v.waitForSelector('#sgClosed'); expect((await v.textContent('#sgClosed')).includes(ASKED) && /Your request has gone to Tim/.test(await v.textContent('#sgClosed h1')), 'their link now shows only that the request has gone to Tim');
+  r = await invoke(v, { action: 'state', token: t1, session: s1 }); expect(r.signing && r.signing.stopped === ASKED, 'and their state says so');
+  r = await invoke(v, { action: 'marks', token: t1, session: s1, sig: PNG, init: PNG }); expect(r.ok === false && r.error === ASKED, 'the requester can\'t go on until Tim acts (refused at the server)');
+  r = await invoke(v, { action: 'tap', token: t2, session: s2, place: pl2[1] }); expect(r.ok, 'the request alone freezes nothing: the other vendor carries on');
+  r = await invoke(v, { action: 'tap', token: t2, session: s2, place: pl2[0] }); const st2 = await invoke(v, { action: 'state', token: t2, session: s2 }); expect(!st2.signing.stopped, 'the other vendor sees nothing of the request');
+  await v.close(); await p.evaluate(x => localStorage.setItem('mocksession', x), SESSION);
+  // Tim: a red item at the top of Home, and on the offer
+  await p.goto(BASE); await p.waitForSelector('#homeUrgentCard'); expect(/asks to stop signing for now/.test(await p.textContent('#homeUrgentCard')) && await p.$eval('#homeUrgentCard', e => e.classList.contains('urgentc') && e.parentElement.nextElementSibling.classList.contains('home-tiles')), 'Home: the urgent request in red, above everything');
+  await p.click('[data-hdgo="0"]'); await p.waitForSelector('[data-hdreq]'); expect(/Urgent: Testy Vendorperson asks to stop signing for now/.test(await p.textContent('[data-hdreq]')) && /Our financial situation has changed/.test(await p.textContent('[data-hdreq]')), 'the offer page shows the request, with who and why');
+  // he talks to them; they carry on
+  d = await db(p); const rq1 = d.offer_requests.find(x => x.offer_id === offC && !x.handled_at);
+  await p.click(`[data-hdreq="${rq1.id}"] details summary`); await p.fill(`#hdCarry-${rq1.id}`, 'Spoke to Testy: finance is fine'); await p.click(`[data-hdcarry="${rq1.id}"]`);
+  await p.waitForFunction(id => JSON.parse(localStorage.getItem('mockdb')).offer_requests.find(x => x.id === id).handled_as === 'carry_on', rq1.id); await p.waitForSelector('#hdFreeze');
+  r = await invoke(p, { action: 'state', token: t1, session: s1 }); expect(!r.signing.stopped, 'carry on: the requester\'s link works again');
+  // Freeze now: one tap and a confirm; the next tap by a signer mid-round is refused at the server; links say only the neutral line; no email
+  const mailsBeforeFreeze = (await mails(p)).length;
+  await p.fill('#hdFrWho', 'Testy Vendorperson'); await p.fill('#hdFrWhy', 'Testy rang: wants a pause'); await p.click('#hdFreeze'); await p.waitForSelector('#hdFrozen');
+  r = await invoke(p, { action: 'tap', token: t2, session: s2, place: pl2[2] || pl2[1] }); expect(r.ok === false && r.error === NEUTRAL, 'frozen: the next tap is refused at the server: ' + (r && r.error));
+  r = await invoke(p, { action: 'send_code', token: t2 }); expect(r.ok === false && r.reason === 'stopped', 'frozen: no code');
+  r = await invoke(p, { action: 'state', token: t1, session: s1 }); expect(r.signing.stopped === NEUTRAL, 'frozen: the link says only that this version is no longer being signed');
+  r = await rpc(p, 'agent_round_present', { p_offer: offC, p_method: 'in_person', p_places: [], p_checked: true }); expect(r.error && /frozen or withdrawn/.test(r.error.message), 'frozen: nothing is presented');
+  expect((await mails(p)).length === mailsBeforeFreeze, 'freezing emails nobody');
+  q = await page(); await q.goto(c2Link); await q.waitForSelector('#sgClosed'); expect((await q.textContent('#sgClosed')).includes(NEUTRAL), 'frozen: the other vendor\'s link shows only the neutral line'); await q.close();
+  // Unfreeze: signing carries on where it was
+  await p.click('#hdUnfreeze'); expect(/Say why it carries on/.test(await p.textContent('#hdErr')), 'unfreezing needs a note');
+  await p.fill('#hdUnNote', 'Testy is ready to carry on'); await p.click('#hdUnfreeze'); await p.waitForSelector('#hdFreeze');
+  r = await invoke(p, { action: 'tap', token: t2, session: s2, place: pl2[1] }); expect(r.ok, 'unfrozen: signing works again');
+  // Withdraw now: who directed it (side and person), why, when and how Tim was told; then drafts for Tim to read; nothing sent
+  await p.click('#hdWdBox summary'); await p.click('#hdWdGo'); expect(/Choose who directed it/.test(await p.textContent('#hdErr')), 'Withdraw now needs who directed it');
+  await tick(p, 'input[name="hdWdSide"][value="vendor"]'); out.wdPeople = await p.$$eval('#hdWdPerson option', o => o.map(x => x.textContent));
+  await p.click('#hdWdGo'); expect(/Choose which person/.test(await p.textContent('#hdErr')), 'and which person');
+  await p.selectOption('#hdWdPerson', 'Testy Vendorperson'); await p.selectOption('#hdWdWhy', { label: 'We have entered a contract elsewhere' }); await p.click('#hdWdGo'); expect(/Choose how you were told/.test(await p.textContent('#hdErr')), 'and how Tim was told');
+  await p.selectOption('#hdWdHow', 'phone'); const mailsBeforeWd = (await mails(p)).length; await p.click('#hdWdGo'); await p.waitForSelector('#hdWithdrawn');
+  expect(/Directed by Testy Vendorperson for the vendors/.test(await p.textContent('#hdWithdrawn')) && /by phone/.test(await p.textContent('#hdWithdrawn')), 'the offer page shows the withdrawal, who and how');
+  d = await db(p); const wh = d.offer_holds.find(h => h.offer_id === offC && h.kind === 'withdraw'), wds = d.offer_mail_drafts.filter(m => m.offer_id === offC && /^withdraw_/.test(m.kind));
+  expect(wh && wh.side === 'vendor' && wh.person === 'Testy Vendorperson' && wh.reason === 'We have entered a contract elsewhere' && wh.told_how === 'phone', 'the withdrawal is recorded with who, why and how');
+  expect(wds.length === 2 && wds.every(m => m.status === 'draft') && wds.find(m => m.kind === 'withdraw_party').to_addr.includes('vendor@example.com') && wds.find(m => m.kind === 'withdraw_lawyer').to_addr.join() === 'pat@synthlaw.example', 'two drafts: to the vendors, and to the purchasers\' lawyer');
+  expect(!/buyer\.own@|di\.t@|027 300 4000/.test(wds.find(m => m.kind === 'withdraw_party').body) && (await mails(p)).length === mailsBeforeWd && !d.offer_mail_log.some(l => /^withdraw_/.test(l.kind)), 'nothing is emailed until Tim sends them');
+  await p.waitForSelector('#hdMail'); expect(/Withdrawal: to the side that directed it/.test(await p.textContent('#hdMail')), 'the withdrawal emails are on the offer page to read and send');
+  r = await invoke(p, { action: 'tap', token: t2, session: s2, place: pl2[1] }); expect(r.ok === false, 'withdrawn: no more signing');
+  r = await rpc(p, 'agent_offer_unfreeze', { p_offer: offC, p_note: 'undo it' }); expect(r.error && /withdrawn, so it stays stopped/.test(r.error.message), 'a withdrawal is never unfrozen');
+  expect(['party_request', 'request_carry_on', 'offer_frozen', 'offer_unfrozen', 'offer_withdrawn_now'].every(k => d.offer_events.some(e => e.offer_id === offC && e.kind === k)), 'the timeline records the request, carry on, freeze, unfreeze and withdrawal');
+  r = await rpc(p, 'agent_offer_chain_check', { p_offer: offC }); expect(r.data && r.data.ok, 'the timeline still checks out: ' + JSON.stringify(r.data && r.data.problems));
+  out.wdWords = await p.evaluate(evs => evs.map(e => window.NEGO.eventWords(e)), d.offer_events.filter(e => e.offer_id === offC && ['offer_frozen', 'offer_withdrawn_now', 'party_request'].includes(e.kind)));
+  expect(out.wdWords.some(w => /Tim froze the offer\. Every signing stopped\. Asked by Testy Vendorperson: Testy rang: wants a pause/.test(w)) && out.wdWords.some(w => /Withdrawn with immediate effect, directed by Testy Vendorperson for the vendors: We have entered a contract elsewhere\. Tim was told .*, by phone\. Never presented or signed again/.test(w)) && out.wdWords.some(w => /asked Tim to stop for now, from their link on Round 2: Our financial situation has changed/.test(w)), 'the lawyers\' pack timeline says who asked, why, and how Tim was told');
   d = await db(p); expect(d.property_offers.find(o => o.id === offC).status === 'declined' && d.offer_signings.find(g => g.id === pr.id).status === 'withdrawn' && d.offer_events.some(e => e.kind === 'withdrawn' && e.detail.side === 'vendor' && e.detail.status === 'declined' && e.detail.stopped === 1) && d.offer_documents.find(x => x.offer_id === offC).status === 'closed', 'the vendors declined: recorded with the time and side, the round stopped as withdrawn, the document filed');
   await rpc(p, 'agent_offer_status', { p_offer: offC, p_status: 'received', p_at: new Date().toISOString(), p_note: 'They changed their minds' });
-  r = await rpc(p, 'agent_round_present', { p_offer: offC, p_method: 'in_person', p_places: [], p_checked: true }); expect(r.error && /fresh copy/.test(r.error.message), 'marked current again: the old document can\'t be presented; a fresh copy is needed');
+  r = await rpc(p, 'agent_round_present', { p_offer: offC, p_method: 'in_person', p_places: [], p_checked: true }); expect(r.error && /never presented again/.test(r.error.message), 'marked current again: a withdrawn offer is never presented again');
   await p.evaluate(() => localStorage.removeItem('mocksession')); await p.close();
   q = await page(); await q.goto(cLink); await q.waitForSelector('#sgClosed');
   expect(/isn't being signed|isn't working/.test(await q.textContent('#sgClosed')), 'the vendors\' open link stops working');
   // another buyer (offer C's purchaser has no link into offer A or B): a made-up token and session see nothing
   r = await invoke(q, { action: 'state', token: 'Zq3_kX9-aB4cD7eF0gH2iJ5kL8mN1oP6qR9sT3uV7wX', session: sesV2 }); expect(r.ok === false && !r.signing, 'another token opens nothing');
   await q.evaluate(() => localStorage.setItem('mocksession', JSON.stringify({ user: { id: 'b-9', email: 'cy.o@example.com' } }))); await q.goto(BASE); await q.waitForTimeout(600);
-  const other = await q.evaluate(async () => { const o_ = []; for (const t of ['offer_rounds', 'offer_documents', 'offer_signings', 'offer_agreements']) { const r_ = await window.supabase.createClient().from(t).select('id'); o_.push((r_.data || []).length); } return o_; });
+  const other = await q.evaluate(async () => { const o_ = []; for (const t of ['offer_rounds', 'offer_documents', 'offer_signings', 'offer_agreements', 'offer_requests', 'offer_holds', 'offer_deposit_holders']) { const r_ = await window.supabase.createClient().from(t).select('id'); o_.push((r_.data || []).length); } return o_; });
   out.other = other; expect(other.every(n => n === 0), 'another buyer signed in sees no rounds, documents or signings');
   await q.close();
 
