@@ -39,7 +39,7 @@ const PK = 'https://packages.dunnerstunner.co.nz', PB = PK + '/portal/', OB = PK
   await ctx.route(PK + '/onboarding/assets/guides/**', r => { const u = r.request().url(); if (u.endsWith('guides.json')) return r.fulfill({ contentType: 'application/json', body: JSON.stringify(GUIDES) }); if (u.endsWith('.pdf')) return r.fulfill({ contentType: 'application/pdf', body: GUIDE_PDF }); return r.fulfill({ status: 404, body: '' }); });
   const seen = new Set();
   const p = await ctx.newPage(); p.on('pageerror', e => errs.push('page: ' + e.message)); p.on('console', m => { if (m.type() === 'error' && !/Failed to load resource/.test(m.text())) errs.push('console: ' + m.text()); });
-  p.on('dialog', d => d.accept());
+  const asked = []; p.on('dialog', d => { asked.push(d.message()); d.accept(); });
   p.on('framenavigated', f => { if (f === p.mainFrame()) seen.add(new URL(f.url()).pathname); });
   const db = () => p.evaluate(() => JSON.parse(localStorage.getItem('mockdb')));
   const rpc = (fn, args) => p.evaluate(([fn, args]) => window.supabase.createClient().rpc(fn, args), [fn, args]);
@@ -126,7 +126,13 @@ const PK = 'https://packages.dunnerstunner.co.nz', PB = PK + '/portal/', OB = PK
   c = await chrome(); expect(!c.nav && !c.up, 'drawing on the purchaser\'s pad: still in person');
   await draw('#sgInit', 4); await p.click('#sgDrawGo'); await p.waitForSelector('#sgPlaces');
   expect(await p.$('#sgTools'), "on Tim's device the page can be marked (the marking canvas is the signer's too)");
-  await tapAll(); await tick('#sgSaw'); await p.selectOption('#sgIdType', 'known_to_tim'); await p.click('#sgFinishGo');
+  await tapAll(); await tick('#sgSaw'); await p.$eval('input[name="sgIdWho"][value="known"]', e => e.click()); await p.click('#sgFinishGo');
+  // the turn has ended: Tim's page waits behind a cover until he says it is him
+  await p.waitForSelector('#sgHandback', { timeout: 30000 }); await wait();
+  c = await chrome(); out.cover = (await p.textContent('#main')).replace(/\s+/g, ' ').trim();
+  expect(!c.nav && !c.up && !(await p.$('#sgView')) && !/Testbuyer|Vendorperson|example\.com|021|022/.test(out.cover), 'after the turn: a cover only, with no menu, no up link, no offer and no one\'s details: ' + out.cover);
+  await p.goBack(); await wait(600); expect(await p.$('#sgHandback'), 'Back stays on the cover');
+  await p.click('#sgImTim');
   await p.waitForSelector('#sgView', { timeout: 30000 });
   await p.waitForFunction(() => (JSON.parse(localStorage.getItem('mockdb')).offer_rounds || []).length > 0, null, { timeout: 30000 }).catch(() => null); await wait(1200);   // Round 1 locks straight after (in person)
   expect(await at() === signAddr, 'the turn finished: back on the signing, and the turn\'s address replaced: ' + await at());
@@ -158,11 +164,18 @@ const PK = 'https://packages.dunnerstunner.co.nz', PB = PK + '/portal/', OB = PK
   const vSigner = d.offer_signers.find(x => x.signing_id === g2.id && x.position === 1);
   await p.click('#sgSigners [data-signer="1"] [data-turn]'); await p.waitForSelector('#sgFlow'); await wait();
   expect(await at() === `/portal/properties/P1/offers/${oid}/signing/${g2.id}/turn/${vSigner.id}` && !(await chrome()).nav, "the vendor's turn: its own address, in person");
-  await p.click('#sgBackTim'); await p.waitForSelector('#sgView'); await wait();
+  asked.length = 0; await p.click('#sgBackTim'); await p.waitForSelector('#sgHandback'); await wait();
+  expect(asked.some(m => m === 'Hand the device back to Tim? Anything drawn and not finished on this turn is kept.'), "Back to Tim's screen asks first: " + JSON.stringify(asked));
+  expect(!(await chrome()).nav, 'and then the cover, with no menu');
+  await p.click('#sgImTim'); await p.waitForSelector('#sgView'); await wait();
   expect(await at() === `/portal/properties/P1/offers/${oid}/signing/${g2.id}` && (await chrome()).nav, "Back to Tim's screen: the way out of a turn");
   await p.reload(); await p.waitForSelector('#sgView', { timeout: 30000 }); expect(await at() === `/portal/properties/P1/offers/${oid}/signing/${g2.id}`, 'a signing opens directly from its address');
   await p.goto(PB + `properties/P1/offers/${oid}/signing/${g2.id}/turn/${vSigner.id}`); await p.waitForSelector('#sgFlow', { timeout: 30000 }); await wait();
   expect(!(await chrome()).nav, 'a turn opened from its address: in person');
+  // ids that don't belong together: this page isn't here (a signer of another signing, another offer, another property)
+  for (const bad of [`properties/P1/offers/${oid}/signing/${g2.id}/turn/${signer1.id}`, `properties/P1/offers/${g1.id}/signing/${g2.id}/turn/${vSigner.id}`, `properties/P9/offers/${oid}/signing/${g2.id}/turn/${vSigner.id}`, `properties/P9/offers/${oid}/signing/${g2.id}`, `properties/P1/offers/${g1.id}/present`]) {
+    await p.goto(PB + bad); await p.waitForSelector('#pMissing, #sgFlow, #sgView, #ngPresentView', { timeout: 30000 });
+    expect(await p.$('#pMissing') && !(await p.$('#sgFlow')), 'a mismatched address shows "This page isn\'t here": ' + bad); }
 
   // ── 5. addresses hold ids only; a signing link at the portal goes to the onboarding app ──
   process.stderr.write('step 5\n');
@@ -172,6 +185,19 @@ const PK = 'https://packages.dunnerstunner.co.nz', PB = PK + '/portal/', OB = PK
   expect(out.seen.filter(a => /\/offers\//.test(a)).every(a => new RegExp(`^/portal/properties/${ID}/offers/${ID}(/(draft/${ID}(/sign)?|signing/${ID}(/turn/${ID})?|present|correct))?$|^/portal/properties/${ID}/offers/blank/${ID}$`).test(a)), 'every offers address is one of the patterns, ids only');
   await p.goto(PB + '?sign=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ'); await p.waitForURL(u => u.pathname === '/onboarding/', { timeout: 10000 }).catch(() => null);
   out.signLink = new URL(p.url()); expect(out.signLink.pathname === '/onboarding/' && out.signLink.search === '?sign=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ', 'a signing link opened at the portal goes to the onboarding app: ' + p.url());
+
+  // ── 5b. review fix 5: a draft from before the numbering (no term_last, no term boxes) can't be signed, in the app and the database ──
+  process.stderr.write('step 5b\n');
+  await p.goto(PB + `properties/P1/offers/${oid}`); await p.waitForSelector('#main h1', { timeout: 30000 });
+  const oldId = await p.evaluate(([o, did]) => { const D = window.__mockDB, d0 = D.offer_drafts.find(x => x.id === did), id = 'OLDDRAFT1';
+    const nd = Object.assign(JSON.parse(JSON.stringify(d0)), { id, number: Math.max(...D.offer_drafts.filter(x => x.offer_id === o).map(x => x.number)) + 1, edits: {}, sha256: 'e'.repeat(64) });
+    (nd.placed.find(x => x.id === 'further_terms') || {}).term_boxes = []; D.offer_drafts.push(nd); D.offer_draft_approvals.push({ id: 'OLDAPPR1', draft_id: id, sha256: nd.sha256, approved_by: 'test', approved_at: new Date().toISOString() });
+    localStorage.setItem('mockdb', JSON.stringify(D)); return id; }, [oid, dr.id]);
+  const oldRpc = await rpc('agent_signing_release', { p_draft: oldId, p_method: 'in_person', p_pages: [[595, 842]], p_places: [], p_cca_pages: [] });
+  expect(oldRpc.error && oldRpc.error.message === 'This draft was made before signing was added. Make a fresh draft from the offer, then choose Ready to sign.', 'the database refuses it with the plain message: ' + JSON.stringify(oldRpc.error));
+  await p.goto(PB + `properties/P1/offers/${oid}/draft/${oldId}/sign`); await p.waitForSelector('#sgOldDraft, #sgReleaseView', { timeout: 30000 });
+  expect(await p.$('#sgOldDraft') && /made before signing was added/.test(await p.textContent('#sgOldDraft')), 'Ready to sign on that draft shows the same message and offers nothing to sign');
+  await p.evaluate(() => { const D = window.__mockDB; D.offer_drafts = D.offer_drafts.filter(x => x.id !== 'OLDDRAFT1'); D.offer_draft_approvals = D.offer_draft_approvals.filter(x => x.id !== 'OLDAPPR1'); localStorage.setItem('mockdb', JSON.stringify(D)); });
 
   // ── 6. the onboarding app at /onboarding: the same screens, and its address never changes ──
   process.stderr.write('step 6\n');

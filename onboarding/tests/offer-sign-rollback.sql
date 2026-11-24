@@ -126,8 +126,12 @@ begin
   perform public.agent_signing_finish(s1, 'passport', 'Tim''s tablet');
   perform public.agent_signing_receipt(s2, 'cca', null, null, null, '{3}'); perform public.agent_signing_receipt(s2, 'sale_purchase', 'August 2022', 'rea-sale-purchase-guide-2022-en.pdf', null, null); perform public.agent_signing_marks(s2, png, png);
   perform public.agent_signing_tap(s2, z.pid_) from (select e->>'id' pid_ from jsonb_array_elements(places) e where (e->>'signer')::int = 2 union select 'mark:' || mm.id || ':s2' from public.offer_sign_marks mm where mm.signing_id = sg) z;
-  r := public.agent_signing_finish(s2, 'known_to_tim', 'Tim''s tablet');
-  out := out || 'signer 2 known to Tim=' || (select id_sighted from public.offer_signers where id = s2) || '; ';
+  -- a turn's address is checked whole: the signer, the signing, the offer and the property must belong together
+  out := out || 'turn ok=' || public.agent_signing_turn_ok(pid, oid, sg, s2) || case when public.agent_signing_turn_ok(pid, oid2, sg, s2) then ' A TURN OPENED UNDER ANOTHER OFFER' else ' other offer refused' end
+    || case when public.agent_signing_turn_ok(gen_random_uuid(), oid, sg, s2) then ' A TURN OPENED UNDER ANOTHER PROPERTY' else ' other property refused' end || '; ';
+  -- identity is optional (Tim, 24 November 2026): no choice at all finishes, and is recorded as none
+  r := public.agent_signing_finish(s2, null, 'Tim''s tablet');
+  out := out || 'signer 2 no identity choice=' || coalesce((select id_sighted from public.offer_signers where id = s2), 'none') || ' recorded on the trail=' || (select (detail ? 'id_sighted') and detail->>'id_sighted' is null from public.offer_events where kind = 'sign_finished' and detail->>'signing_id' = sg::text and (detail->>'signer')::int = 2 order by seq desc limit 1) || '; ';
   out := out || 'signer 2 finished complete=' || (r ->> 'complete') || ' status=' || (select status from public.offer_signings where id = sg) || ' taps=' || (select count(*) from public.offer_sign_taps where signing_id = sg) || '; ';
   begin perform public.agent_signing_tap(s2, 'foot:p1:s2'); out := out || 'TAPPED AFTER COMPLETE; '; exception when others then out := out || 'after complete: ' || sqlerrm || '; '; end;
   begin perform public.agent_signing_cancel(sg, 'x'); out := out || 'A FINISHED SIGNING CANCELLED; '; exception when others then out := out || 'cancel after complete: ' || sqlerrm || '; '; end;

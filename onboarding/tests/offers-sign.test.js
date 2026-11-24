@@ -139,8 +139,11 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   d = await db(p); expect(d.offer_sign_taps.filter(t => t.signer_id === d.offer_signers.find(s => s.signing_id === gA.id && s.position === 1).id).length === 5, 'each tap recorded on the server');
   await tapAll(p); expect(await count(p) === out.need1 && !(await p.isDisabled('#sgFinishGo')), 'all places done: Finish is available');
   await p.click('#sgFinishGo'); expect(/saw them sign/.test(await p.textContent('#sgErr')), 'Tim must record that he saw them sign');
-  await tick(p, '#sgSaw'); await p.click('#sgFinishGo'); expect(/photo ID/.test(await p.textContent('#sgErr')), 'and the ID type');
-  await p.selectOption('#sgIdType', 'passport'); await p.click('#sgFinishGo'); await p.waitForSelector('#sgView');
+  await tick(p, '#sgSaw');
+  // identity is a free choice: Neither is chosen at the start; picking "ID checked" asks only what was seen
+  expect(await p.isChecked('input[name="sgIdWho"][value=""]') && await p.$('input[name="sgIdWho"][value="known"]') && await p.$('input[name="sgIdWho"][value="checked"]'), 'the choice offers Known to the agent, ID checked, or neither (the starting choice)');
+  await p.$eval('input[name="sgIdWho"][value="checked"]', e => e.click()); await p.click('#sgFinishGo'); expect(/Choose what ID you saw, or choose Neither/.test(await p.textContent('#sgErr')), 'ID checked asks what was seen');
+  await p.selectOption('#sgIdType', 'passport'); await p.click('#sgFinishGo'); await p.waitForSelector('#sgHandback'); await p.click('#sgImTim'); await p.waitForSelector('#sgView');
   d = await db(p); const s1 = d.offer_signers.find(s => s.signing_id === gA.id && s.position === 1);
   expect(s1.finished_at && s1.id_sighted === 'passport' && s1.witnessed_by && /^[0-9a-f]{64}$/.test(s1.seen_sha256), 'finished: witnessed, the ID type only, and the fingerprint of what they saw');
   expect(/Finished/.test(await p.textContent('#sgSigners [data-signer="1"]')), 'Tim sees purchaser 1 has finished');
@@ -155,7 +158,7 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
     await p.click(`[data-tool="${tool}"]`); await p.waitForSelector(tool === 'reinstate' ? '#sgPage .sg-mark' : '#sgPage .sg-draw', { state: 'attached' });
     await act(); await p.waitForSelector('#sgMarkSave:not([disabled])'); await p.click('#sgMarkSave'); await p.waitForSelector('#sgHeldMsg');
     expect(/Sent to Tim to check/.test(await p.textContent('#sgHeldMsg')), `a ${tool}: sent to Tim to check`);
-    await p.click('#sgToTim'); await p.waitForSelector('#sgHeld'); await p.waitForSelector('#sgHeldCanvas .sg-marks .sg-mark', { state: 'attached' });
+    await p.click('#sgToTim'); await p.waitForSelector('#sgHandback'); await p.click('#sgImTim'); await p.waitForSelector('#sgHeld'); await p.waitForSelector('#sgHeldCanvas .sg-marks .sg-mark', { state: 'attached' });
     expect(!(await side(p)), 'checking a mark at 390 px: no sideways scroll');
     await p.click('#sgReview'); await p.waitForSelector('#sgView:not(:has(#sgHeld))'); };
   const drag = async (fx, fy, tx, ty, steps) => { await (await p.$('#sgPage .sg-draw')).scrollIntoViewIfNeeded(); const bx = await (await p.$('#sgPage .sg-draw')).boundingBox(); await p.mouse.move(bx.x + bx.width * fx, bx.y + bx.height * fy); await p.mouse.down(); await p.mouse.move(bx.x + bx.width * tx, bx.y + bx.height * ty, { steps: steps || 6 }); await p.mouse.up(); };
@@ -179,11 +182,16 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
 
   // ── 5. everyone finishes; Round 1 is made and locked ──
   process.stderr.write('step 5\n');
-  await turnStart(p, 2); await p.waitForSelector('#sgPlaces'); await tapAll(p); await tick(p, '#sgSaw'); await p.selectOption('#sgIdType', 'nz_driver_licence'); await p.click('#sgFinishGo'); await p.waitForSelector('#sgView');
+  await turnStart(p, 2); await p.waitForSelector('#sgPlaces'); await tapAll(p); await tick(p, '#sgSaw'); await p.selectOption('#sgIdType', 'nz_driver_licence'); await p.click('#sgFinishGo'); await p.waitForSelector('#sgHandback'); await p.click('#sgImTim'); await p.waitForSelector('#sgView');
   await turnStart(p, 1); await p.waitForSelector('#sgPlaces');
   expect(await count(p) === out.need1 && +(await p.textContent('#sgCount')).match(/of (\d+)/)[1] === out.need1 + 3, 'purchaser 1 picks up where they left off, with the three marks to initial');
-  await tapAll(p); await tick(p, '#sgSaw'); await p.selectOption('#sgIdType', 'passport'); await p.click('#sgFinishGo'); await p.waitForSelector('#sgView');
-  for (const n of [3, 4]) { await turnStart(p, n); await agreeReadDraw(p, n); await tapAll(p); await tick(p, '#sgSaw'); await p.selectOption('#sgIdType', n === 3 ? 'known_to_tim' : 'kiwi_access_card'); await p.click('#sgFinishGo'); await p.waitForSelector('#sgView'); }
+  await tapAll(p); await tick(p, '#sgSaw'); await p.selectOption('#sgIdType', 'passport'); await p.click('#sgFinishGo'); await p.waitForSelector('#sgHandback'); await p.click('#sgImTim'); await p.waitForSelector('#sgView');
+  // purchaser 3: known to the agent; purchaser 4: no choice at all (optional, never blocks)
+  for (const n of [3, 4]) { await turnStart(p, n); await agreeReadDraw(p, n); await tapAll(p); await tick(p, '#sgSaw'); if (n === 3) await p.$eval('input[name="sgIdWho"][value="known"]', e => e.click()); await p.click('#sgFinishGo'); await p.waitForSelector('#sgHandback'); await p.click('#sgImTim'); await p.waitForSelector('#sgView'); }
+  { const d0 = await db(p), s3 = d0.offer_signers.find(s => s.signing_id === gA.id && s.position === 3), s4 = d0.offer_signers.find(s => s.signing_id === gA.id && s.position === 4);
+    expect(s3.id_sighted === 'known_to_tim' && s3.finished_at, 'known to the agent: recorded');
+    expect(s4.id_sighted == null && s4.finished_at, 'no identity choice: finished, and recorded as none');
+    const ev4 = d0.offer_events.find(e => e.kind === 'sign_finished' && e.detail.signing_id === gA.id && e.detail.signer === 4); expect(ev4 && ev4.detail.id_sighted == null && 'id_sighted' in ev4.detail, 'the audit trail records that no choice was made'); }
   await p.waitForSelector('#sgRound', { timeout: 30000 });
   d = await db(p); const rA = d.offer_rounds.find(r => r.offer_id === offA);
   expect(rA && rA.number === 1 && d.offer_signings.find(x => x.id === gA.id).status === 'locked', 'Round 1 locked when the last purchaser finished');
@@ -191,7 +199,7 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   const rt = await pdfText(roundPdf); out.roundPages = rt.length;
   const rec = rt.slice(drPages).join(' ');
   expect(rt.length > drPages && /Execution record/.test(rec) && !rt.slice(0, drPages).some(t => /Execution record/.test(t)), 'the execution record is on pages added at the end, never on the REINZ pages');
-  expect(['Ana Maria Testbuyer', 'Bo Testbuyer', 'Cy Testbuyer', 'Di Testbuyer'].every(n => rec.includes(n)) && /saw them sign/.test(rec) && /Photo ID sighted: Passport/.test(rec) && /NZ driver licence/.test(rec) && /known to Tim McGuire personally/.test(rec), 'it names each signer, how they signed and the ID type (or that Tim knows them)');
+  expect(['Ana Maria Testbuyer', 'Bo Testbuyer', 'Cy Testbuyer', 'Di Testbuyer'].every(n => rec.includes(n)) && /saw them sign/.test(rec) && /Photo ID sighted: Passport/.test(rec) && /NZ driver licence/.test(rec) && /known to Tim McGuire personally/.test(rec) && /Identity: no choice recorded \(knowing them and an ID check are both optional\)/.test(rec), 'it names each signer, how they signed and the ID type (or that Tim knows them, or that no choice was made)');
   expect(/Fingerprint \(SHA-256\) of what they saw and signed: [0-9a-f]{64}/.test(rec) && rec.includes(drA.sha256), 'with the fingerprints of the draft and of what each saw');
   expect(/line through text by Bo Testbuyer/.test(rec) && /reinstatement by Bo Testbuyer/.test(rec) && /note by Bo Testbuyer/.test(rec), 'and each mark, with who and when');
   out.leak = (rt.join(' ').match(/buyer\.own@|ana\.p@|bo\.p@|cy\.p@|di\.p@|999 8888|777 6666|555 4444|333 2222|111 0000|vendor@example|000 1111/g) || []);

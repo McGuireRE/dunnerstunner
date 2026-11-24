@@ -293,7 +293,7 @@
     add(`This copy was made and locked by the server on ${NZ(rec.made_at)}. Its own fingerprint is recorded by the server when it is locked, and it is never changed.`, { size: 8.5 });
     (rec.signers || []).forEach((s, i) => {
       add(`Purchaser ${i + 1}: ${s.name}`, { bold: true, gap: 8 });
-      if (s.method === 'in_person') { add(`Signed in person on Tim McGuire's device. ${s.witnessed_by || 'Tim McGuire'} saw them sign.`); add(s.id_sighted === 'known_to_tim' ? 'Identity: known to Tim McGuire personally (no photo ID was needed).' : `Photo ID sighted: ${ID_TYPES[s.id_sighted] || s.id_sighted || 'not recorded'} (the type only; no ID number is kept).`); }
+      if (s.method === 'in_person') { add(`Signed in person on Tim McGuire's device. ${s.witnessed_by || 'Tim McGuire'} saw them sign.`); add(s.id_sighted === 'known_to_tim' ? 'Identity: known to Tim McGuire personally (no photo ID was needed).' : !s.id_sighted ? 'Identity: no choice recorded (knowing them and an ID check are both optional).' : `Photo ID sighted: ${ID_TYPES[s.id_sighted] || s.id_sighted} (the type only; no ID number is kept).`); }
       else { add('Signed by a personal link sent only to them.'); add(`Email verified with a one-time code on ${NZ(s.verified_at)}.`); }
       add(`Agreed to sign electronically: ${NZ(s.consent_at)}.`);
       (s.receipts || []).forEach(r => add(`Received the ${GUIDE_NAMES[r.guide] || r.guide}${r.version ? ', version ' + r.version : ''}${r.pages && r.pages.length ? ' (page' + (r.pages.length > 1 ? 's ' : ' ') + r.pages.join(', ') + ' of this document)' : ''}: ${NZ(r.at)}.`, { size: 8.5 }));

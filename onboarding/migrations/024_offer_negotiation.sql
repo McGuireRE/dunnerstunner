@@ -353,6 +353,26 @@ begin
     raise exception 'That is where the date goes once the agreement is made. Make the change somewhere else'; end if;
   if p_kind = 'insert' then who := public.offer_private_hit(g.offer_id, p_geometry->>'text');
     if who is not null then raise exception 'Those words hold %''s own phone or email, so they can''t go on the agreement. Only the lawyers'' details go on it', who; end if; end if;
+  -- a new further term (typed words starting "N.0 " or "N. "): N must be free in this agreement: above the newest draft's term_last
+  -- and every retired number, and not taken by another counteroffer term in this document (any round, this one too). The signing
+  -- row is locked above, so two additions at once can't both take N. The message names the next free number; the page retries with it.
+  if p_kind = 'insert' and (p_geometry->>'text') ~ '^\s*[0-9]{1,3}(\.0|\.)\s' then
+    declare tn int := substring(p_geometry->>'text' from '^\s*([0-9]{1,3})')::int; dr public.offer_drafts; used int[]; top_ int; nxt int; sty text;
+    begin
+      select * into dr from public.offer_drafts where id = g.draft_id;
+      select coalesce(array_agg(substring(m.geometry->>'text' from '^\s*([0-9]{1,3})')::int), '{}') into used from public.offer_sign_marks m
+        where m.kind = 'insert' and (m.geometry->>'text') ~ '^\s*[0-9]{1,3}(\.0|\.)\s'
+          and (m.signing_id = g.id or m.signing_id in (select x3.signing_id from public.offer_rounds x3 where x3.document_id = g.document_id));
+      top_ := greatest(coalesce((dr.edits->>'term_last')::int, 0), coalesce((select max(v::int) from jsonb_array_elements_text(coalesce(dr.edits->'retired_numbers', '[]'::jsonb)) v), 0), coalesce((select max(u) from unnest(used) u), 0));
+      if tn <= greatest(coalesce((dr.edits->>'term_last')::int, 0), coalesce((select max(v::int) from jsonb_array_elements_text(coalesce(dr.edits->'retired_numbers', '[]'::jsonb)) v), 0)) or tn = any(used)
+         or tn > top_ + 1 then
+        nxt := top_ + 1;
+        while exists (select 1 from jsonb_array_elements_text(coalesce(dr.edits->'retired_numbers', '[]'::jsonb)) v where v::int = nxt) loop nxt := nxt + 1; end loop;
+        sty := case when (p_geometry->>'text') ~ '^\s*[0-9]{1,3}\.0\s' then '.0' else '.' end;
+        raise exception 'Further term % is already taken or out of order in this agreement. The next free number is %', tn || sty, nxt || sty;
+      end if;
+    end;
+  end if;
   -- the initials of everyone on this side, one each, beside the change
   select count(*) into n from public.offer_signers where signing_id = g.id and void_at is null;
   if not public.offer_sign_places_ok(p_places, g.pages, n, false) or jsonb_array_length(p_places) <> n then raise exception 'Everyone on your side initials each change once'; end if;
@@ -387,6 +407,11 @@ begin
   if not exists (select 1 from public.offer_draft_approvals a where a.draft_id = d.id and a.sha256 = d.sha256) then raise exception 'Approve the draft first'; end if;
   if d.number <> (select max(number) from public.offer_drafts where offer_id = d.offer_id) then raise exception 'There is a newer draft of this offer. Use that one'; end if;
   if o.details is distinct from d.details then raise exception 'The offer has changed since this draft. Re-draft and approve it first'; end if;
+  -- a draft made before the further terms numbering and the term boxes (24 November 2026) can't be signed: a counteroffer term on it
+  -- would be numbered from 1, and the purchasers would have nowhere to initial each term
+  if not (d.edits ? 'term_last') or exists (select 1 from jsonb_array_elements(d.placed) x where x->>'id' = 'further_terms' and jsonb_array_length(coalesce(x->'terms', '[]'::jsonb)) > 0
+      and jsonb_array_length(case when jsonb_typeof(x->'term_boxes') = 'array' then x->'term_boxes' else '[]'::jsonb end) = 0) then
+    raise exception 'This draft was made before signing was added. Make a fresh draft from the offer, then choose Ready to sign.'; end if;
   if o.status in ('withdrawn', 'lapsed', 'declined') then raise exception 'This offer has been withdrawn, declined or has lapsed'; end if;
   if exists (select 1 from public.offer_documents x where x.offer_id = o.id and x.status in ('open', 'agreed')) then raise exception 'This offer already has a signed Round 1. For a fresh copy, close the current document first'; end if;
   if exists (select 1 from public.offer_documents x where x.draft_id = d.id) then raise exception 'That draft belongs to a closed document. Re-draft the offer for a fresh copy'; end if;

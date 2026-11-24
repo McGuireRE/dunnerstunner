@@ -476,7 +476,17 @@ begin
   perform public.offer_agent();
   select * into s from public.offer_signers where id = p_signer; if s.id is null then raise exception 'No such signer'; end if;
   if (select method from public.offer_signings where id = s.signing_id) <> 'in_person' then raise exception 'This purchaser signs by their own link'; end if;
+  -- a signer whose version was replaced, or a signing Tim stopped, has no turn (the address of a turn is checked whole by agent_signing_turn_ok)
+  if s.void_at is not null or (select status from public.offer_signings where id = s.signing_id) in ('cancelled', 'replaced', 'withdrawn') then raise exception 'This signing has stopped, so this turn is closed'; end if;
   return s;
+end $$;
+-- a turn's address (properties/<p>/offers/<o>/signing/<s>/turn/<signer>) checked whole: the signer is in that signing, the signing is
+-- of that offer and that property, it is signed in person, and the signer's version stands
+create or replace function public.agent_signing_turn_ok(p_property uuid, p_offer uuid, p_signing uuid, p_signer uuid) returns boolean language plpgsql stable security definer set search_path = public as $$
+begin
+  perform public.offer_agent();
+  return exists (select 1 from public.offer_signers s join public.offer_signings g on g.id = s.signing_id
+    where s.id = p_signer and g.id = p_signing and g.offer_id = p_offer and g.property_id = p_property and g.method = 'in_person' and s.void_at is null);
 end $$;
 create or replace function public.agent_signing_consent(p_signer uuid, p_ua text) returns void language plpgsql security definer set search_path = public as $$
 begin perform public.offer_sign_person(p_signer); perform public.offer_sign_do_consent(p_signer, p_ua, null); end $$;
@@ -486,13 +496,14 @@ create or replace function public.agent_signing_marks(p_signer uuid, p_sig text,
 begin perform public.offer_sign_person(p_signer); perform public.offer_sign_do_marks(p_signer, p_sig, p_init); end $$;
 create or replace function public.agent_signing_tap(p_signer uuid, p_place text) returns jsonb language plpgsql security definer set search_path = public as $$
 begin perform public.offer_sign_person(p_signer); return public.offer_sign_do_tap(p_signer, p_place); end $$;
--- Tim records that he saw them sign and the photo ID he sighted (its type only, never a number)
+-- Tim records that he saw them sign and, if he chooses, that he knows them or the photo ID he sighted (its type only, never a number)
 create or replace function public.agent_signing_finish(p_signer uuid, p_id_sighted text, p_ua text) returns jsonb language plpgsql security definer set search_path = public as $$
 declare me text := public.offer_agent();
 begin
   perform public.offer_sign_person(p_signer);
-  if coalesce(p_id_sighted, '') not in ('nz_driver_licence', 'passport', 'nz_firearms_licence', 'kiwi_access_card', 'other_photo_id', 'known_to_tim') then raise exception 'Choose the photo ID you sighted, or that you know them personally'; end if;
-  return public.offer_sign_do_finish(p_signer, p_ua, null, p_id_sighted, coalesce((select name from public.agents where lower(email) = lower(me) limit 1), me));
+  -- identity is Tim's free choice (Tim, 24 November 2026): known to the agent, an ID check (the type seen), or neither; blank is allowed
+  if nullif(p_id_sighted, '') is not null and p_id_sighted not in ('nz_driver_licence', 'passport', 'nz_firearms_licence', 'kiwi_access_card', 'other_photo_id', 'known_to_tim') then raise exception 'That ID choice isn''t one of the list'; end if;
+  return public.offer_sign_do_finish(p_signer, p_ua, null, nullif(p_id_sighted, ''), coalesce((select name from public.agents where lower(email) = lower(me) limit 1), me));
 end $$;
 -- a mark made with a finger or stylus on Tim's screen (in person only): an overlay, never a change to the REINZ content. Any mark
 -- holds signing until Tim has looked at it and re-approved.
@@ -759,7 +770,7 @@ revoke execute on function public.offer_sign_issue(uuid, text), public.offer_sig
 grant execute on function public.offer_sign_issue(uuid, text), public.offer_sign_open(text, text, text), public.offer_sign_code(text, text), public.offer_sign_verify(text, text, text, text), public.offer_sign_state(text, text),
   public.offer_sign_consent(text, text, text, text), public.offer_sign_receipt(text, text, text, text, text, text, int[]), public.offer_sign_marks(text, text, text, text), public.offer_sign_tap(text, text, text), public.offer_sign_finish(text, text, text, text),
   public.offer_sign_ask(text, text, text), public.offer_round_material(uuid), public.offer_round_lock(uuid, text, text, bigint, jsonb, text) to service_role;
-revoke execute on function public.agent_signing_release(uuid, text, jsonb, jsonb, int[]), public.agent_signing_start(uuid), public.agent_signing_consent(uuid, text), public.agent_signing_receipt(uuid, text, text, text, text, int[]), public.agent_signing_marks(uuid, text, text),
+revoke execute on function public.agent_signing_turn_ok(uuid, uuid, uuid, uuid), public.agent_signing_release(uuid, text, jsonb, jsonb, int[]), public.agent_signing_start(uuid), public.agent_signing_consent(uuid, text), public.agent_signing_receipt(uuid, text, text, text, text, int[]), public.agent_signing_marks(uuid, text, text),
   public.agent_signing_tap(uuid, text), public.agent_signing_finish(uuid, text, text), public.agent_signing_mark(uuid, text, int, jsonb, uuid), public.agent_signing_review(uuid, jsonb), public.agent_signing_cancel(uuid, text), public.agent_offer_chain_check(uuid) from public, anon;
-grant execute on function public.agent_signing_release(uuid, text, jsonb, jsonb, int[]), public.agent_signing_start(uuid), public.agent_signing_consent(uuid, text), public.agent_signing_receipt(uuid, text, text, text, text, int[]), public.agent_signing_marks(uuid, text, text),
+grant execute on function public.agent_signing_turn_ok(uuid, uuid, uuid, uuid), public.agent_signing_release(uuid, text, jsonb, jsonb, int[]), public.agent_signing_start(uuid), public.agent_signing_consent(uuid, text), public.agent_signing_receipt(uuid, text, text, text, text, int[]), public.agent_signing_marks(uuid, text, text),
   public.agent_signing_tap(uuid, text), public.agent_signing_finish(uuid, text, text), public.agent_signing_mark(uuid, text, int, jsonb, uuid), public.agent_signing_review(uuid, jsonb), public.agent_signing_cancel(uuid, text), public.agent_offer_chain_check(uuid) to authenticated;

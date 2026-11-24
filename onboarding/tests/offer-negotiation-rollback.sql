@@ -70,12 +70,20 @@ begin
   -- offer 1's draft records main's further terms numbering (term_last, a retired number), as drafts made since 021 do
   insert into public.offer_drafts (offer_id, property_id, number, blank_id, blank_sha256, map_id, details, placed, needs, path, sha256, size_bytes, created_by, edits)
     select oo, pid, 1, bl, repeat('ab', 32), m, (select details from public.property_offers where id = oo), '[]', '[]', 'properties/' || pid || '/docs/offer-draft-' || oo || '-1.pdf', encode(extensions.digest(oo::text, 'sha256'), 'hex'), 100, 'test',
-      case when oo = o1 then '{"term_last": 22, "retired_numbers": [24]}'::jsonb else '{}'::jsonb end from unnest(array[o1, o2, o3]) oo;
+      case when oo = o1 then '{"term_last": 24, "retired_numbers": [23]}'::jsonb else '{"term_last": 22}'::jsonb end from unnest(array[o1, o2, o3]) oo;
   select id into d1 from public.offer_drafts where offer_id = o1; select id into d2 from public.offer_drafts where offer_id = o2; select id into d3 from public.offer_drafts where offer_id = o3;
   insert into public.offer_blank_maps (blank_id, version, places, approved, created_by) values (bl, 2, '[]', true, 'test') returning id into m2;   -- a map with no date place
-  insert into public.offer_drafts (offer_id, property_id, number, blank_id, blank_sha256, map_id, details, placed, needs, path, sha256, size_bytes, created_by)
-    values (o4, pid, 1, bl, repeat('ab', 32), m2, (select details from public.property_offers where id = o4), '[]', '[]', 'properties/' || pid || '/docs/offer-draft-' || o4 || '-1.pdf', repeat('d4', 32), 100, 'test') returning id into d4;
+  insert into public.offer_drafts (offer_id, property_id, number, blank_id, blank_sha256, map_id, details, placed, needs, path, sha256, size_bytes, created_by, edits)
+    values (o4, pid, 1, bl, repeat('ab', 32), m2, (select details from public.property_offers where id = o4), '[]', '[]', 'properties/' || pid || '/docs/offer-draft-' || o4 || '-1.pdf', repeat('d4', 32), 100, 'test', '{"term_last": 22}') returning id into d4;
   insert into public.offer_draft_approvals (draft_id, sha256, approved_by) select id, sha256, 'test' from public.offer_drafts where offer_id in (o1, o2, o3, o4);
+  -- a draft from before the further terms numbering (no term_last): signing is refused, with Tim's plain message
+  execute 'set local role authenticated'; perform set_config('request.jwt.claims', agent, true); x := public.agent_offer_add(pid, good)::text; execute 'reset role';
+  insert into public.offer_drafts (offer_id, property_id, number, blank_id, blank_sha256, map_id, details, placed, needs, path, sha256, size_bytes, created_by)
+    values (x::uuid, pid, 1, bl, repeat('ab', 32), m, (select details from public.property_offers where id = x::uuid), '[]', '[]', 'properties/' || pid || '/docs/offer-draft-old.pdf', repeat('0d', 32), 100, 'test') returning id into d4;
+  insert into public.offer_draft_approvals (draft_id, sha256, approved_by) values (d4, repeat('0d', 32), 'test');
+  perform set_config('request.jwt.claims', agent, true);
+  begin perform public.agent_signing_release(d4, 'in_person', sizes, pg_temp.rb_places(2, true, null, false), '{}'); out := out || 'A DRAFT FROM BEFORE THE NUMBERING RELEASED; '; exception when others then out := out || 'old-style draft: ' || sqlerrm || '; '; end;
+  select id into d4 from public.offer_drafts where offer_id = o4;
 
   -- 1. Round 1 (020, unchanged) locks and opens Document 1; nothing has gone to the vendors
   perform set_config('request.jwt.claims', agent, true);
@@ -142,6 +150,20 @@ begin
   out := out || 'dates and prices accepted, never matched=' || (select bool_and(public.offer_private_hit(o1, t) is null) from unnest(array['Settlement 20/12/2026', 'Settlement 20.12.2026', 'Settlement 2027-03-01', 'Price $1 250 000', 'Price $1250000', 'Price $ 695 000.00']) t) || '; ';
   out := out || 'own phones still refused=' || (select string_agg(coalesce(public.offer_private_hit(o1, t), 'NOT FOUND'), ',') from unnest(array['Call 021/111/2222', 'Call 021.111.2222', 'Call 021-111-2222', 'Call (021) 111 2222', 'Ring 027 444 5555']) t) || '; ';
   -- items 9 and 10: initials beside the change; never on the date's place
+  -- a new further term's number (024): free in this agreement only. The draft's term_last is 24 (23 retired, as drafting keeps it), so 25.0 is next.
+  -- The accepted term is undone at once (a sub-block), so the counts below are unchanged.
+  declare tA uuid := gen_random_uuid(); tB uuid := gen_random_uuid(); gA jsonb := '{"x":100,"y":300,"text":"25.0 Synthetic counteroffer term","size":9}'; gB jsonb := '{"x":100,"y":280,"text":"25.0 Another synthetic term","size":9}';
+    gC jsonb := '{"x":100,"y":280,"text":"24.0 Synthetic term","size":9}'; gD jsonb := '{"x":100,"y":280,"text":"30.0 Synthetic term","size":9}'; gE jsonb := '{"x":100,"y":280,"text":"23.0 Synthetic term","size":9}';
+  begin
+    begin perform public.offer_sign_change(tok, ses, 'n1', tB, 'insert', 1, gC, null, pg_temp.rb_change_places(2, tB, 'insert', gC)); out := out || 'TERM 24.0 TAKEN AGAIN; '; exception when others then out := out || 'term at term_last: ' || sqlerrm || '; '; end;
+    begin perform public.offer_sign_change(tok, ses, 'n1', tB, 'insert', 1, gD, null, pg_temp.rb_change_places(2, tB, 'insert', gD)); out := out || 'TERM 30.0 OUT OF ORDER ACCEPTED; '; exception when others then out := out || 'term out of order: ' || sqlerrm || '; '; end;
+    begin
+      perform public.offer_sign_change(tok, ses, 'n1', tA, 'insert', 1, gA, null, pg_temp.rb_change_places(2, tA, 'insert', gA)); out := out || 'term 25.0 taken; ';
+      begin perform public.offer_sign_change(tok, ses, 'n1', tB, 'insert', 1, gB, null, pg_temp.rb_change_places(2, tB, 'insert', gB)); out := out || 'A TERM NUMBER USED TWICE; '; exception when others then out := out || 'same number again: ' || sqlerrm || '; '; end;
+      begin perform public.offer_sign_change(tok, ses, 'n1', tB, 'insert', 1, gE, null, pg_temp.rb_change_places(2, tB, 'insert', gE)); out := out || 'A RETIRED NUMBER USED; '; exception when others then out := out || 'retired number: ' || sqlerrm || '; '; end;
+      raise exception 'undo-term';
+    exception when others then if sqlerrm <> 'undo-term' then out := out || 'TERM TEST FAILED ' || sqlerrm || '; '; end if; end;
+  end;
   begin perform public.offer_sign_change(tok, ses, 'n1', mk2, 'insert', 1, '{"x":100,"y":330,"text":"$690,000","size":9}', null, pg_temp.rb_change_places(2, mk2, 'insert', '{"x":100,"y":330,"text":"$690,000","size":9}', true)); out := out || 'INITIALS FAR FROM THE CHANGE; '; exception when others then out := out || 'beside: ' || sqlerrm || '; '; end;
   begin perform public.offer_sign_change(tok, ses, 'n1', mk2, 'insert', 1, '{"x":120,"y":731,"text":"25 December 2026","size":9}', null, pg_temp.rb_change_places(2, mk2, 'insert', '{"x":120,"y":731,"text":"25 December 2026","size":9}')); out := out || 'A CHANGE ON THE DATE; '; exception when others then out := out || 'date place: ' || sqlerrm || '; '; end;
   -- item 12: the per-network limit on changes from a link (60 an hour), and the per-signer limit (30 an hour)
@@ -241,8 +263,8 @@ begin
   begin perform public.agent_round_present(o2, 'link', '[]', true); out := out || 'PRESENTED A CLOSED DOCUMENT; '; exception when others then out := out || 'closed present: ' || sqlerrm || '; '; end;
   -- Tim corrects the offer to the terms as they stand and re-drafts (019); Round 1 of Document 2
   perform public.agent_offer_correct(o2, good || '{"price":"670000"}', 'Price as agreed in the negotiation so far');
-  insert into public.offer_drafts (offer_id, property_id, number, blank_id, blank_sha256, map_id, details, placed, needs, path, sha256, size_bytes, created_by)
-    values (o2, pid, 2, bl, repeat('ab', 32), m, (select details from public.property_offers where id = o2), '[]', '[]', 'properties/' || pid || '/docs/offer-draft-' || o2 || '-2.pdf', repeat('d7', 32), 100, 'test') returning id into d2b;
+  insert into public.offer_drafts (offer_id, property_id, number, blank_id, blank_sha256, map_id, details, placed, needs, path, sha256, size_bytes, created_by, edits)
+    values (o2, pid, 2, bl, repeat('ab', 32), m, (select details from public.property_offers where id = o2), '[]', '[]', 'properties/' || pid || '/docs/offer-draft-' || o2 || '-2.pdf', repeat('d7', 32), 100, 'test', '{"term_last": 22}') returning id into d2b;
   insert into public.offer_draft_approvals (draft_id, sha256, approved_by) values (d2b, repeat('d7', 32), 'test');
   g1 := (public.agent_signing_release(d2b, 'in_person', sizes, pg_temp.rb_places(2, true, null, false), '{}') ->> 'id')::uuid; perform pg_temp.rb_prep(g1); perform pg_temp.rb_finish(g1); r := pg_temp.rb_lock(g1, '{}');
   out := out || 'fresh copy: number=' || (r->>'number') || ' document=' || (r->>'document') || ' docs=' || (select string_agg(number || ':' || status, ',' order by number) from public.offer_documents where offer_id = o2) || ' history rounds=' || (select count(*) from public.offer_rounds where offer_id = o2) || '; ';

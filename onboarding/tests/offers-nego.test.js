@@ -71,7 +71,7 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   const consentDraw = async (p, k) => { await p.waitForSelector('#sgConsent'); await tick(p, '#sgAgree'); await p.click('#sgAgreeGo'); await p.waitForSelector('#sgDraw');
     const bg = await p.$eval('#sgDraw .sig-wrap', e => getComputedStyle(e).backgroundColor); expect(bg === 'rgb(255, 255, 255)', 'the signature pad is white (' + bg + ')');
     await draw(p, '#sgSig', k); await draw(p, '#sgInit', k + 3); await p.click('#sgDrawGo'); await p.waitForSelector('#sgPlaces'); };
-  const finishInPerson = async (p, id) => { await tick(p, '#sgSaw'); await p.selectOption('#sgIdType', id || 'passport'); await p.click('#sgFinishGo'); await p.waitForSelector('#sgView'); };
+  const finishInPerson = async (p, id) => { await tick(p, '#sgSaw'); if (id === 'known_to_tim') await p.$eval('input[name="sgIdWho"][value="known"]', e => e.click()); else if (id !== 'none') await p.selectOption('#sgIdType', id || 'passport'); await p.click('#sgFinishGo'); await p.waitForSelector('#sgHandback'); await p.click('#sgImTim'); await p.waitForSelector('#sgView'); };
   // a purchaser's full Round 1 turn on Tim's device (phase 3's screens)
   const round1Turn = async (p, n) => { await turnStart(p, n); await p.waitForSelector('#sgConsent'); await tick(p, '#sgAgree'); await p.click('#sgAgreeGo'); await p.waitForSelector('#sgCcaPages .dr-pg canvas');
     await tick(p, '#sgCcaOk'); await tick(p, '#sgSpOk'); await p.click('#sgGuidesGo'); await p.waitForSelector('#sgDraw'); await draw(p, '#sgSig', n); await draw(p, '#sgInit', n + 3); await p.click('#sgDrawGo'); await p.waitForSelector('#sgPlaces'); await tapAll(p); await finishInPerson(p); };
@@ -216,9 +216,29 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
     await q.waitForFunction(() => window.JSON.parse(localStorage.getItem('mockdb')).offer_sign_marks.some(m => m.kind === 'insert' && /Synthetic counteroffer term$/.test(m.geometry.text)), null, { timeout: 10000 }).catch(() => null); await q.waitForSelector('#sgPlaces');
     const mt = (await db(q)).offer_sign_marks.find(m => m.kind === 'insert' && /Synthetic counteroffer term$/.test(m.geometry.text));
     expect(mt && mt.geometry.text === want + ' Synthetic counteroffer term', 'saved as "' + want + ' Synthetic counteroffer term": ' + (mt && mt.geometry.text)); }
+  // review fix 6: the server refuses a number already used in this agreement, and the page retries with the free one it names
+  { const ses_ = await q.evaluate(() => Object.keys(sessionStorage).filter(k => /^sgSes:/.test(k)).map(k => sessionStorage.getItem(k))[0]);
+    const dd = await db(q), drN = dd.offer_drafts.find(x => x.id === dd.offer_signings.find(g => g.id === g2.id).draft_id), last = drN.edits.term_last;
+    const dup = await invoke(q, { action: 'change', token: linkV1.split('sign=')[1], session: ses_, id: '9e9e9e9e-0000-4000-8000-000000000001', kind: 'insert', page: 2, geometry: { x: 60, y: 200, text: `${last + 1}.0 Duplicate synthetic term`, size: 9 }, places: [] });
+    expect(dup.ok === false && new RegExp(`Further term ${last + 1}\\.0 is already taken.*next free number is ${last + 2}\\.0`).test(dup.error), 'the server refuses the same number twice: ' + JSON.stringify(dup));
+    // another addition lands at the same moment (put straight into the mock), while this page still offers the old next number
+    await q.selectOption('#sgPgPick', '2'); await q.waitForSelector('#sgPage .dr-pg[data-page="2"] canvas');
+    await q.click('[data-tool="insert"]'); await q.waitForSelector('#sgPage .sg-draw', { state: 'attached' });
+    { const el = await q.$('#sgPage .sg-draw'); await el.scrollIntoViewIfNeeded(); const bx = await el.boundingBox(); await q.mouse.click(bx.x + bx.width * 0.08, bx.y + bx.height * 0.9); }
+    const stale = (await q.textContent('label:has(#ngInsTerm)')).trim(); expect(stale.endsWith(`numbered ${last + 2}.0`), 'the page offers ' + (last + 2) + '.0: ' + stale);
+    await q.evaluate(([gid, n]) => { const d = window.__mockDB; const s0 = d.offer_signers.find(x => x.signing_id === gid);   // the mock's own data (DB), as another request would leave it
+      d.offer_sign_marks.push({ id: '9e9e9e9e-0000-4000-8000-0000000000aa', signing_id: gid, signer_id: s0.id, by_name: s0.name, kind: 'insert', page: 2, geometry: { x: 60, y: 150, text: n + '.0 Simultaneous synthetic term', size: 9 }, target: null, at: new Date().toISOString() });
+      localStorage.setItem('mockdb', JSON.stringify(d)); }, [g2.id, last + 2]);
+    await q.$eval('#ngInsTerm', e => { if (!e.checked) e.click(); }); await q.fill('#ngInsText', 'Retried synthetic term'); await q.click('#sgMarkSave');
+    await q.waitForFunction(() => JSON.parse(localStorage.getItem('mockdb')).offer_sign_marks.some(m => /Retried synthetic term$/.test((m.geometry || {}).text || '')), null, { timeout: 10000 }).catch(() => null);
+    const rt_ = (await db(q)).offer_sign_marks.find(m => /Retried synthetic term$/.test((m.geometry || {}).text || ''));
+    expect(rt_ && rt_.geometry.text === `${last + 3}.0 Retried synthetic term`, 'the page retried with the next free number: ' + (rt_ && rt_.geometry.text));
+    // the simultaneous one was only a stand-in for the race: take it out again so the rest of the round is as before
+    await q.evaluate(() => { const D = window.__mockDB, i = D.offer_sign_marks.findIndex(m => m.id === '9e9e9e9e-0000-4000-8000-0000000000aa'); if (i >= 0) D.offer_sign_marks.splice(i, 1); localStorage.setItem('mockdb', JSON.stringify(D)); });
+    await q.reload(); await q.waitForSelector('#sgPlaces', { timeout: 30000 }); }
   d = await db(q); out.ordinary = d.offer_sign_marks.filter(m => m.kind === 'insert').map(m => m.geometry.text);
   expect(ORDINARY.every(t => out.ordinary.includes(t)), 'dates and prices typed in any format are accepted');
-  const NCH = 3 + ORDINARY.length;
+  const NCH = 4 + ORDINARY.length;
   d = await db(q); const ch2 = d.offer_sign_marks.filter(m => m.signing_id === g2.id);
   expect(ch2.length === NCH && ch2.some(m => m.kind === 'strike') && ch2.some(m => m.kind === 'insert' && m.geometry.text === '$690,000') && ch2.every(m => m.by_name === 'Testy Vendorperson'), 'two changes saved, with who made them');
   expect(d.offer_sign_reviews.filter(r => r.signing_id === g2.id).every(r => r.places.length === 2 && r.places.every(x => x.why === 'change')), 'each change carries both vendors\' initials');

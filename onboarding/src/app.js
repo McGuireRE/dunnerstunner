@@ -6845,6 +6845,10 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const [o, p, mp, ex] = await Promise.all([must(sb.from('property_offers').select('*').eq('id', d.offer_id).single()), must(sb.from('properties').select('id,address').eq('id', d.property_id).single()),
       must(sb.from('offer_blank_maps').select('id,places').eq('id', d.map_id).single()), ofSafe(sb.from('offer_signings').select('id,status').eq('draft_id', did))]);
     const live = (ex || []).find(x => x.status !== 'cancelled'); if (live) return viewSigning(live.id);
+    // a draft from before the further terms numbering and the term boxes can't be signed (the database refuses it too, 024)
+    const ftOld = (d.placed || []).find(x => x.id === 'further_terms');
+    if (!(d.edits && 'term_last' in d.edits) || (ftOld && (ftOld.terms || []).length && !(ftOld.term_boxes || []).length)) {
+      main().innerHTML = `<div class="view-pad" id="sgOldDraft"><p class="err">This draft was made before signing was added. Make a fresh draft from the offer, then choose Ready to sign.</p><div class="toolbar"><button class="btn ghost" type="button" id="sgBk">Back to the draft</button></div></div>`; $('#sgBk').addEventListener('click', () => viewDraftReview(did)); top(); return; }
     let D_; try { D_ = await sgDraftPages(d); } catch (e) { main().innerHTML = `<div class="view-pad"><p class="err">${esc(e.message === 'pdf-lib' ? drNoLib : e.message || drNoLib)}</p><div class="toolbar"><button class="btn ghost" type="button" id="sgBk">Back to the draft</button></div></div>`; $('#sgBk').addEventListener('click', () => viewDraftReview(did)); return; }
     const pages = D_.pages, signers = ((d.details || {}).purchasers || []).map((x, i) => ({ position: i + 1, name: [x.first, x.last].map(v => String(v || '').trim()).filter(Boolean).join(' ') || 'Purchaser ' + (i + 1), email: String(x.email || '').trim() }));
     const M = SG.makePlaces({ pages, placed: d.placed || [], mapPlaces: mp.places || [], signers }), cca = SG.ccaPages(pages);
@@ -6890,8 +6894,17 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   }
 
   // Tim's view of one signing
+  // after a turn on Tim's device ends or is left, his signing page waits behind a cover until he says it is him: no other offer, no
+  // other party's details, no menu (P3's PIN replaces the tap later)
+  let SG_HANDBACK = null;
   async function viewSigning(sid, opts) {
     header('Signing', '', 0); actions(false);
+    if (SG_HANDBACK === sid) {
+      if (PORTAL) { INPERSON_VIEW = true; portalChrome(); }
+      main().innerHTML = `<div class="login-card" id="sgHandback"><h1>Thank you</h1><p class="lede">Please hand the device back to Tim.</p><div class="toolbar"><button class="btn primary" type="button" id="sgImTim">I'm Tim, carry on</button></div></div>`;
+      $('#sgImTim').addEventListener('click', () => { SG_HANDBACK = null; if (PORTAL) { INPERSON_VIEW = false; portalChrome(); } viewSigning(sid, opts); });
+      top(); return;
+    }
     main().innerHTML = '<div class="loading">Loading...</div>';
     const g = await must(sb.from('offer_signings').select('*').eq('id', sid).single());
     const [o, p, d, signers, taps, marks, reviews, asks, rounds] = await Promise.all([must(sb.from('property_offers').select('*').eq('id', g.offer_id).single()), must(sb.from('properties').select('id,address').eq('id', g.property_id).single()),
@@ -7031,7 +7044,11 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         </section>
         <section class="card" id="sgFinish"><h2>Finish</h2>${left ? `<p class="small" id="sgLeft">${left} place${left === 1 ? '' : 's'} still to do. You can finish once every place is done.</p>` : '<p class="small" id="sgAllDone">Every place is done.</p>'}
           ${ctx.mode === 'person' ? `<label class="choice cb"><input type="checkbox" id="sgSaw"><span class="mark"></span><span><span class="ct">Tim: I saw ${esc(ctx.name)} sign</span></span></label>
-            <label class="f" for="sgIdType">Photo ID sighted <span class="opt">(the type only; no number is kept)</span></label><select id="sgIdType"><option value="">Choose</option>${SG_ID.map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select>` : ''}
+            <fieldset class="sg-idwho" id="sgIdWho"><legend class="f">Identity <span class="opt">(optional: choose one, or leave it)</span></legend>
+              <label class="choice"><input type="radio" name="sgIdWho" value="" checked><span class="mark"></span><span><span class="ct">Neither</span></span></label>
+              <label class="choice"><input type="radio" name="sgIdWho" value="known"><span class="mark"></span><span><span class="ct">Known to the agent</span></span></label>
+              <label class="choice"><input type="radio" name="sgIdWho" value="checked"><span class="mark"></span><span><span class="ct">ID checked</span></span></label>
+              <label class="f" for="sgIdType">What was seen <span class="opt">(the type only; no number is kept)</span></label><select id="sgIdType"><option value="">Choose</option>${SG_ID.filter(([k]) => k !== 'known_to_tim').map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select></fieldset>` : ''}
           <div class="toolbar"><button class="btn primary" type="button" id="sgFinishGo" ${left ? 'disabled' : ''}>Finish signing</button></div></section>`;
     }
     main().innerHTML = `<div class="view-pad dr-page sg-flow" id="sgFlow"><h1>${ctx.mode === 'person' ? esc(ctx.name) + ' signs' : VEND ? 'An offer on your property' : R2 ? 'The vendors\' reply to your offer' : 'Your offer to sign'}</h1><p class="lede">${nt(ctx.address)}</p>
@@ -7041,7 +7058,9 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       ${ctx.back ? '<div class="toolbar no-print"><button class="btn ghost" type="button" id="sgBackTim">Back to Tim\'s screen</button></div>' : ''}</div>`;
     const on = (sel, f, ev) => { const el = $(sel); if (el) el.addEventListener(ev || 'click', f); };
     const act = async (f, then) => { err(''); try { await f(); } catch (e) { return err(e.message); } return then ? then() : ctx.reload(); };
-    on('#sgBackTim', () => ctx.back()); on('#sgToTim', () => ctx.back());
+    // a purchaser or vendor may be holding the device: leaving their turn asks first, and Tim's screen then waits for him (SG_HANDBACK)
+    const handBack = () => { if (confirm("Hand the device back to Tim? Anything drawn and not finished on this turn is kept.")) ctx.back(); };
+    on('#sgBackTim', handBack); on('#sgToTim', handBack);
     on('#sgAgreeGo', () => { if (!$('#sgAgree').checked) return err('Tick the box to agree to sign electronically, or stop here and call Tim.'); act(() => ctx.api.consent()); });
     if (step === 'guides' && VEND) on('#ngChatGo', () => act(async () => { if (!$('#ngChatOk').checked) throw new Error('Tick that you have read the reminder about chattels.'); await ctx.api.receipt({ guide: 'chattels' }); }));
     else if (step === 'guides') {
@@ -7098,7 +7117,13 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       on('#sgAskGo', async () => { const t = $('#sgAskText').value.trim(); if (t.length < 3) return ($('#sgAskOut').textContent = 'Say what you would like changed.');
         try { await ctx.api.ask(t); $('#sgAskText').value = ''; $('#sgAskOut').textContent = 'Sent to Tim. He\'ll be in touch.'; } catch (e) { $('#sgAskOut').textContent = e.message; } });
       on('#sgFinishGo', () => act(async () => { let o = {};
-        if (ctx.mode === 'person') { if (!$('#sgSaw').checked) throw new Error('Tim: tick that you saw them sign.'); const id = $('#sgIdType').value; if (!id) throw new Error('Choose the photo ID you sighted.'); o = { id }; }
+        // identity is Tim's free choice (Tim, 24 November 2026): known to the agent, an ID check with what was seen, or neither
+        if (ctx.mode === 'person') { if (!$('#sgSaw').checked) throw new Error('Tim: tick that you saw them sign.');
+          const who = ($('input[name="sgIdWho"]:checked') || {}).value || '', seen = $('#sgIdType').value;
+          let id = who === 'known' ? 'known_to_tim' : who === 'checked' ? seen : null;
+          if (who === 'checked' && !seen) throw new Error('Choose what ID you saw, or choose Neither.');
+          if (!who && seen) id = seen;   // a type chosen without the button: an ID check
+          o = { id }; }
         const r = await ctx.api.finish(o); ctx.finished = r; }, () => ctx.done(ctx.finished)));
       F.rerender = paint;
     }
@@ -7151,6 +7176,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const [d, p, s, taps, rcs, rvs, marks] = await Promise.all([must(sb.from('offer_drafts').select('*').eq('id', g.draft_id).single()), must(sb.from('properties').select('id,address').eq('id', g.property_id).single()),
       must(sb.from('offer_signers').select(SG_COLS + ',sig_png,init_png').eq('id', signerId).single()), ofSafe(sb.from('offer_sign_taps').select('place_id').eq('signer_id', signerId)),
       ofSafe(sb.from('offer_sign_receipts').select('guide').eq('signer_id', signerId)), ofSafe(sb.from('offer_sign_reviews').select('places').eq('signing_id', sid)), ofSafe(sb.from('offer_sign_marks').select('*').eq('signing_id', sid))]);
+    // the signer must be in this signing (an address or a stale button could name another)
+    if (s.signing_id !== sid) { if (PORTAL) { portalView(''); return viewPortalMissing(); } main().innerHTML = '<div class="view-pad"><p class="err">That signer isn\'t part of this signing.</p></div>'; return; }
     let bytes; try { bytes = await drDraftBytes(d); } catch (e) { main().innerHTML = `<div class="view-pad"><p class="err">${esc(e.message)}</p></div>`; return; }
     const allD = (await ofSafe(sb.from('offer_drafts').select('id,number').eq('offer_id', g.offer_id))) || [], o = await must(sb.from('property_offers').select('details,status').eq('id', g.offer_id).single());
     const stale = g.status === 'replaced' || s.void_at ? 'This version has been replaced.' : (d.number !== Math.max(...allD.map(x => x.number)) || JSON.stringify(drCanon(o.details)) !== JSON.stringify(drCanon(d.details))) ? 'The offer has changed since this was released. Re-draft and release it again.' : s.finished_at ? `${s.name} has finished signing.` : ['complete', 'locked'].includes(g.status) ? 'Everyone has signed.' : ['cancelled', 'withdrawn'].includes(g.status) ? 'This round was stopped. Any links sent no longer work.' : null;
@@ -7168,7 +7195,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       api: { change: c => sgRpc('agent_round_change', Object.assign({ p_id: c.id, p_kind: c.kind, p_page: c.page, p_geometry: c.geometry, p_target: c.target || null, p_places: c.places }, P_)), consent: () => sgRpc('agent_signing_consent', Object.assign({ p_ua: ua }, P_)), receipt: r => sgRpc('agent_signing_receipt', Object.assign({ p_guide: r.guide, p_version: r.version || null, p_file: r.file || null, p_sha256: r.sha256 || null, p_pages: r.pages || null }, P_)),
         marks: (a, b) => sgRpc('agent_signing_marks', Object.assign({ p_sig: a, p_init: b }, P_)), tap: pl => sgRpc('agent_signing_tap', Object.assign({ p_place: pl }, P_)),
         mark: m => sgRpc('agent_signing_mark', Object.assign({ p_kind: m.kind, p_page: m.page, p_geometry: m.geometry, p_target: m.target || null }, P_)), finish: o2 => sgRpc('agent_signing_finish', Object.assign({ p_id_sighted: o2.id, p_ua: ua }, P_)) },
-      reload: () => viewSignTurn(sid, signerId), back: () => viewSigning(sid), done: r => { toast(`${s.name} has finished`); viewSigning(sid); } });
+      reload: () => viewSignTurn(sid, signerId), back: () => { SG_HANDBACK = sid; viewSigning(sid); }, done: r => { toast(`${s.name} has finished`); SG_HANDBACK = sid; viewSigning(sid); } });
   }
 
   // ── presentation and counteroffers (offers phase 4, migration 021) ──
@@ -7237,7 +7264,14 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       const btn = $('#sgMarkSave'); btn.disabled = true;
       try { const c = Object.assign({ id: ngUuid() }, m), items = await ngPageItems(ctx);
         const places = NG.changePlaces(c, ctx.sideSigners, items, ngStanding(ctx), ctx.side_places || []);
-        await ctx.api.change({ id: c.id, kind: c.kind, page: c.page, geometry: c.geometry, target: c.target || null, places }); toast('Change saved. Everyone on your side initials it'); ctx.reload(); }
+        try { await ctx.api.change({ id: c.id, kind: c.kind, page: c.page, geometry: c.geometry, target: c.target || null, places }); }
+        catch (x) {
+          // a new further term whose number was taken meanwhile (the server checks it in this agreement): once more, with the number it names
+          const nf = /The next free number is (\d{1,3}(?:\.0|\.))/.exec(x.message || ''); if (!nf || c.kind !== 'insert' || !/^\s*\d{1,3}(\.0|\.)\s/.test(c.geometry.text)) throw x;
+          const c2 = Object.assign({}, c, { id: ngUuid(), geometry: Object.assign({}, c.geometry, { text: c.geometry.text.replace(/^\s*\d{1,3}(\.0|\.)/, nf[1]) }) });
+          const pl2 = NG.changePlaces(c2, ctx.sideSigners, items, ngStanding(ctx), ctx.side_places || []);
+          await ctx.api.change({ id: c2.id, kind: c2.kind, page: c2.page, geometry: c2.geometry, target: null, places: pl2 }); toast('That number had just been taken, so the term is numbered ' + nf[1]); }
+        toast('Change saved. Everyone on your side initials it'); ctx.reload(); }
       catch (x) { e.textContent = x.message; btn.disabled = false; } });
     paint();
   }
@@ -7547,10 +7581,14 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     R('properties/:id/offers/blank/:id', 'viewBlankMap', (p, b) => RAW.viewBlankMap(b)),
     R('properties/:id/offers/:id/draft/:id', 'viewDraftReview', (p, o, d) => RAW.viewDraftReview(d)),
     R('properties/:id/offers/:id/correct', 'viewOfferCorrect', (p, o) => RAW.viewOfferCorrect(o)),
-    R('properties/:id/offers/:id/draft/:id/sign', 'viewSignRelease', (p, o, d) => RAW.viewSignRelease(d)),
-    R('properties/:id/offers/:id/signing/:id', 'viewSigning', (p, o, g) => RAW.viewSigning(g)),
-    R('properties/:id/offers/:id/signing/:id/turn/:id', 'viewSignTurn', (p, o, g, t) => RAW.viewSignTurn(g, t)),
-    R('properties/:id/offers/:id/present', 'viewRoundPresent', (p, o) => RAW.viewRoundPresent(o)),
+    // offers phases 3 and 4: every id in the address must belong to the one before it, or the page isn't here
+    R('properties/:id/offers/:id/draft/:id/sign', 'viewSignRelease', async (p, o, d) => { const r = await rowOf('offer_drafts', d, 'id,property_id,offer_id'); return r && r.offer_id === o && r.property_id === p ? RAW.viewSignRelease(d) : viewPortalMissing(); }),
+    R('properties/:id/offers/:id/signing/:id', 'viewSigning', async (p, o, g) => { const r = await rowOf('offer_signings', g, 'id,property_id,offer_id'); return r && r.offer_id === o && r.property_id === p ? RAW.viewSigning(g) : viewPortalMissing(); }),
+    R('properties/:id/offers/:id/signing/:id/turn/:id', 'viewSignTurn', async (p, o, g, t) => {
+      let fine = false; try { fine = (await sb.rpc('agent_signing_turn_ok', { p_property: p, p_offer: o, p_signing: g, p_signer: t })).data === true; } catch (_) { fine = false; }
+      if (!fine) { portalView(''); return viewPortalMissing(); }
+      return RAW.viewSignTurn(g, t); }),
+    R('properties/:id/offers/:id/present', 'viewRoundPresent', async (p, o) => { const r = await rowOf('property_offers', o, 'id,property_id'); return r && r.property_id === p ? RAW.viewRoundPresent(o) : viewPortalMissing(); }),
     R('properties/:id/offers/:id', 'viewOfferAgent', (p, o) => RAW.viewOfferAgent(o)),
     R('people', 'people', () => viewPortalPeople()),
     R('processes', 'processes', () => viewPortalProcesses()),

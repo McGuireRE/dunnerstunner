@@ -170,7 +170,7 @@
       rec.lifted.forEach(x => add(`Page ${x.page}: ${x.kind === 'signature' ? 'the signature' : 'the initials'} of ${x.who || 'one of the ' + sideName(x.side)} from Round ${x.round}.`, { size: 8.5 })); }
     (rec.signers || []).forEach((s, i) => {
       add(`${rec.side === 'vendor' ? 'Vendor' : 'Purchaser'} ${i + 1}: ${s.name}`, { bold: true, gap: 8 });
-      if (s.method === 'in_person') { add(`Signed in person on Tim McGuire's device. ${s.witnessed_by || 'Tim McGuire'} saw them sign.`); add(s.id_sighted === 'known_to_tim' ? 'Identity: known to Tim McGuire personally (no photo ID was needed).' : `Photo ID sighted: ${SIGN.ID_TYPES[s.id_sighted] || s.id_sighted || 'not recorded'} (the type only; no ID number is kept).`); }
+      if (s.method === 'in_person') { add(`Signed in person on Tim McGuire's device. ${s.witnessed_by || 'Tim McGuire'} saw them sign.`); add(s.id_sighted === 'known_to_tim' ? 'Identity: known to Tim McGuire personally (no photo ID was needed).' : !s.id_sighted ? 'Identity: no choice recorded (knowing them and an ID check are both optional).' : `Photo ID sighted: ${SIGN.ID_TYPES[s.id_sighted] || s.id_sighted} (the type only; no ID number is kept).`); }
       else { add('Signed by a personal link sent only to them.'); add(`Email verified with a one-time code on ${NZ(s.verified_at)}.`); }
       add(`Agreed to sign electronically: ${NZ(s.consent_at)}.`);
       (s.receipts || []).forEach(r => add(r.guide === 'chattels' ? `Read the reminder that every chattel must be in full working order at settlement: ${NZ(r.at)}.` : `Received the ${SIGN.GUIDE_NAMES[r.guide] || r.guide}: ${NZ(r.at)}.`, { size: 8.5 }));
