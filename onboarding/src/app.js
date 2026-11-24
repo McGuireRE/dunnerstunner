@@ -7436,7 +7436,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   const RAW = {};            // the view functions before wrapping, for opening a page from its address
   const PID_RE = /^[A-Za-z0-9_-]{1,64}$/;
   const okId = x => typeof x === 'string' && PID_RE.test(x);
-  const IN_PERSON_VIEWS = ['viewTable', 'viewVarTogether'];
+  // viewSignTurn: one purchaser's or vendor's turn signing an offer on Tim's device (offers phases 3 and 4), from consent to finish
+  const IN_PERSON_VIEWS = ['viewTable', 'viewVarTogether', 'viewSignTurn'];
   function portalPath() {
     let p = location.pathname; try { p = decodeURI(p); } catch (_) { }
     if (p === PORTAL_BASE.replace(/\/$/, '')) return '';
@@ -7454,7 +7455,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   }
   // a page sets its own address: the first time after it opens it goes into the history as that opening said; after that it replaces
   function portalAt(path) { if (!PORTAL || path == null) return; const mode = NAV_FRESH || 'replace'; NAV_FRESH = null; setAddr(path, mode); }
-  const isCreation = p => /\/new$/.test(p || '') || p === 'processes/agreement' || p === 'processes/appraisal';
+  // set-up screens a page moves on from (an offer's signing set-up, presenting a round, a signer's turn): the next page takes their place
+  const isCreation = p => /\/new$/.test(p || '') || p === 'processes/agreement' || p === 'processes/appraisal' || /\/offers\/[^/]+\/(draft\/[^/]+\/sign|present|signing\/[^/]+\/turn\/[^/]+)$/.test(p || '');
   function portalView(name) { INPERSON_VIEW = IN_PERSON_VIEWS.includes(name); }
   // the property (and other ids) a page belongs to, looked up once and remembered
   const ROWS = {};
@@ -7482,6 +7484,11 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     viewBlankMap: async bid => okId(bid) ? under(await pidOf('offer_blanks', bid), `offers/blank/${bid}`) : null,
     viewClauseLibrary: pid => under(pid, 'offers/clauses'),
     viewDraftReview: async did => { const r = await rowOf('offer_drafts', did, 'id,property_id,offer_id'); return r && okId(r.offer_id) ? under(r.property_id, `offers/${r.offer_id}/draft/${did}`) : null; },
+    // offers phases 3 and 4: the signing set-up for an approved draft, a round out for signing, one signer's turn on this device, presenting a round
+    viewSignRelease: async did => { const r = await rowOf('offer_drafts', did, 'id,property_id,offer_id'); return r && okId(r.offer_id) ? under(r.property_id, `offers/${r.offer_id}/draft/${did}/sign`) : null; },
+    viewSigning: async sid => { const r = await rowOf('offer_signings', sid, 'id,property_id,offer_id'); return r && okId(r.offer_id) ? under(r.property_id, `offers/${r.offer_id}/signing/${sid}`) : null; },
+    viewSignTurn: async (sid, signer) => { const r = okId(signer) ? await rowOf('offer_signings', sid, 'id,property_id,offer_id') : null; return r && okId(r.offer_id) ? under(r.property_id, `offers/${r.offer_id}/signing/${sid}/turn/${signer}`) : null; },
+    viewRoundPresent: async oid => okId(oid) ? under(await pidOf('property_offers', oid), `offers/${oid}/present`) : null,
     viewInspectStart: () => 'processes/inspection',
     viewTranslations: () => APP_TRANSLATION ? 'translations' : null,
     // these set their own address where they are drawn: viewTable (tShow), viewInspection (inspDraw), viewInspectionFinish
@@ -7540,6 +7547,10 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     R('properties/:id/offers/blank/:id', 'viewBlankMap', (p, b) => RAW.viewBlankMap(b)),
     R('properties/:id/offers/:id/draft/:id', 'viewDraftReview', (p, o, d) => RAW.viewDraftReview(d)),
     R('properties/:id/offers/:id/correct', 'viewOfferCorrect', (p, o) => RAW.viewOfferCorrect(o)),
+    R('properties/:id/offers/:id/draft/:id/sign', 'viewSignRelease', (p, o, d) => RAW.viewSignRelease(d)),
+    R('properties/:id/offers/:id/signing/:id', 'viewSigning', (p, o, g) => RAW.viewSigning(g)),
+    R('properties/:id/offers/:id/signing/:id/turn/:id', 'viewSignTurn', (p, o, g, t) => RAW.viewSignTurn(g, t)),
+    R('properties/:id/offers/:id/present', 'viewRoundPresent', (p, o) => RAW.viewRoundPresent(o)),
     R('properties/:id/offers/:id', 'viewOfferAgent', (p, o) => RAW.viewOfferAgent(o)),
     R('people', 'people', () => viewPortalPeople()),
     R('processes', 'processes', () => viewPortalProcesses()),
@@ -7581,7 +7592,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   function upOf(path) {
     const id = '([A-Za-z0-9_-]{1,64})'; let m;
     if (!path) return null;
-    if ((m = new RegExp(`^properties/${id}/offers/${id}/(draft/${id}|correct)$`).exec(path))) return [`properties/${m[1]}/offers/${m[2]}`, 'Offer'];
+    if ((m = new RegExp(`^properties/${id}/offers/${id}/signing/${id}/turn/${id}$`).exec(path))) return [`properties/${m[1]}/offers/${m[2]}/signing/${m[3]}`, 'Signing'];
+    if ((m = new RegExp(`^properties/${id}/offers/${id}/(draft/${id}|draft/${id}/sign|correct|signing/${id}|present)$`).exec(path))) return [`properties/${m[1]}/offers/${m[2]}`, 'Offer'];
     if ((m = new RegExp(`^properties/${id}/agreement/${id}/edit`).exec(path))) return [`properties/${m[1]}/agreement/${m[2]}`, 'Agreement'];
     if ((m = new RegExp(`^properties/${id}/offers/(clauses|blank/${id})$`).exec(path))) return [`properties/${m[1]}/offers`, 'Property file'];
     if ((m = new RegExp(`^properties/${id}/.+$`).exec(path))) return [`properties/${m[1]}`, 'Property file'];
@@ -7595,7 +7607,9 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   // the menu and the up link go away until it is finished.
   // Vendors' pads (the appointment, a form signed on this device, a variation signed together) are in person; Tim's own pads
   // (countersigning, signing a variation to issue it) are not, but a drawn and unsaved signature is never dropped without asking.
-  const VENDOR_PADS = '#main canvas[id^="pad_"], #main canvas[id^="fpad_"], #main canvas[data-vcv], #main #sig0, #main #vfSig, #main #vSigV';
+  // offers phases 3 and 4: #sgSig and #sgInit (a purchaser's or vendor's own signature and initials, drawn on Tim's device in their turn) and
+  // canvas.sg-draw (their marks and changes on the page) are theirs. Tim draws on no pad in phases 3 and 4.
+  const VENDOR_PADS = '#main canvas[id^="pad_"], #main canvas[id^="fpad_"], #main canvas[data-vcv], #main #sig0, #main #vfSig, #main #vSigV, #main #sgSig, #main #sgInit, #main canvas.sg-draw';
   // A page with vendors' pads that Tim can open alone (a form waiting for signatures, which can sit for days while vendors sign on
   // their own phones) is a normal page until a vendor pad is drawn on; from then until the address changes it is in person.
   function portalPadStarted(cv) { if (PORTAL && cv && CUR !== null && cv.matches(VENDOR_PADS)) { PAD_STARTED = CUR; portalChrome(); } }
@@ -7757,7 +7771,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     portalMount();
     Object.assign(RAW, { viewAgentDashboard, viewProperty, viewAgentDetail, viewPrelistingAgent, viewAml, viewVariation, viewVarIssue, viewVarTogether, viewFormAgent,
       viewOfferAgent, viewOfferCorrect, viewOfferNew, viewOfferPick, viewBlankMap, viewClauseLibrary, viewDraftReview, viewInspectStart, viewTranslations,
-      viewTable, viewInspection, viewInspectionFinish });
+      viewTable, viewInspection, viewInspectionFinish, viewSignRelease, viewSigning, viewSignTurn, viewRoundPresent });
     viewAgentHome = portalWrap('viewAgentHome', viewPortalHome);
     viewAgentDashboard = portalWrap('viewAgentDashboard', viewAgentDashboard); viewProperty = portalWrap('viewProperty', viewProperty);
     viewAgentDetail = portalWrap('viewAgentDetail', viewAgentDetail); viewPrelistingAgent = portalWrap('viewPrelistingAgent', viewPrelistingAgent);
@@ -7767,9 +7781,10 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     viewOfferPick = portalWrap('viewOfferPick', viewOfferPick); viewBlankMap = portalWrap('viewBlankMap', viewBlankMap); viewClauseLibrary = portalWrap('viewClauseLibrary', viewClauseLibrary);
     viewDraftReview = portalWrap('viewDraftReview', viewDraftReview); viewInspectStart = portalWrap('viewInspectStart', viewInspectStart); viewTranslations = portalWrap('viewTranslations', viewTranslations);
     viewTable = portalWrap('viewTable', viewTable); viewInspection = portalWrap('viewInspection', viewInspection); viewInspectionFinish = portalWrap('viewInspectionFinish', viewInspectionFinish);
+    viewSignRelease = portalWrap('viewSignRelease', viewSignRelease); viewSigning = portalWrap('viewSigning', viewSigning); viewSignTurn = portalWrap('viewSignTurn', viewSignTurn); viewRoundPresent = portalWrap('viewRoundPresent', viewRoundPresent);
   }
-  // the onboarding app's own links (an offer form, a lawyer's link) always open there, never in the portal
-  if (PORTAL && /[?&](offer|lawyer)=/.test(location.search)) { location.replace(ONBOARDING_URL + location.search); return; }
+  // the onboarding app's own links (an offer form, a signing link, a lawyer's link) always open there, never in the portal
+  if (PORTAL && /[?&](offer|sign|lawyer)=/.test(location.search)) { location.replace(ONBOARDING_URL + location.search); return; }
 
   const offerToken = new URLSearchParams(location.search).get('offer');
   if (offerToken) { const w = $('#langWrap'); if (w) w.hidden = true; viewOfferPublic(offerToken); return; }
