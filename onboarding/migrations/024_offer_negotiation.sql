@@ -238,8 +238,9 @@ begin
   if g.status = 'locked' then return 'Signing is finished, and the signed copy is locked.'; end if;
   if g.status = 'cancelled' then return 'This signing was stopped before anyone signed. Tim will send it to you again.'; end if;
   select * into d from public.offer_drafts where id = g.draft_id; select * into o from public.property_offers where id = g.offer_id;
-  if g.status = 'withdrawn' or o.status in ('withdrawn', 'lapsed', 'declined') then return case when o.status = 'declined' then 'The vendors have declined this offer, so it is no longer being signed.' when o.status = 'lapsed' then 'This offer has lapsed, so it is no longer being signed.' else 'This offer has been withdrawn, so it is no longer being signed.' end; end if;
-  if exists (select 1 from public.offer_agreements a where a.offer_id = g.offer_id) then return 'This agreement has been made, so nothing more is signed here.'; end if;
+  -- Tim mediates (24 November 2026): a party's link never says what the other side, or Tim, has decided. He tells them himself.
+  if g.status = 'withdrawn' or o.status in ('withdrawn', 'lapsed', 'declined') then return 'This version is no longer being signed. Tim will be in touch.'; end if;
+  if exists (select 1 from public.offer_agreements a where a.offer_id = g.offer_id) then return 'This version is no longer being signed. Tim will be in touch.'; end if;
   if g.document_id is not null then
     select status into ds from public.offer_documents where id = g.document_id;
     if ds is distinct from 'open' then return 'This version is no longer being signed. Tim will be in touch.'; end if;
@@ -383,15 +384,15 @@ begin
   insert into public.offer_sign_marks (id, signing_id, signer_id, by_name, kind, page, geometry, target) values (p_id, g.id, s.id, s.name, p_kind, p_page, p_geometry, case when p_kind = 'reinstate' then p_target end);
   perform set_config('offers.fn', 'on', true);
   insert into public.offer_sign_reviews (signing_id, marks, places, places_sha256, kind, changed_by) values (g.id, array[p_id], p_places, public.offer_sha(p_places::text), 'change', left(s.name, 254));
-  -- anyone on this side who had finished initials the change and finishes again (told by email, for those signing by link)
-  select coalesce(jsonb_agg(jsonb_build_object('position', x2.position, 'name', x2.name, 'email', case when g.method = 'link' then x2.email end) order by x2.position), '[]'::jsonb) into back
+  -- anyone on this side who had finished initials the change and finishes again (a draft for each, by link, that Tim sends himself)
+  select coalesce(jsonb_agg(jsonb_build_object('id', x2.id, 'position', x2.position, 'name', x2.name, 'email', case when g.method = 'link' then x2.email end) order by x2.position), '[]'::jsonb) into back
     from public.offer_signers x2 where x2.signing_id = g.id and x2.finished_at is not null and x2.void_at is null and x2.id <> s.id;
   update public.offer_signers set finished_at = null, seen_sha256 = null where signing_id = g.id and finished_at is not null and void_at is null;
   get diagnostics reopened = row_count;
   insert into public.offer_events (property_id, offer_id, actor, kind, detail) values (g.property_id, g.offer_id, s.name, 'round_change',
     jsonb_build_object('signing_id', g.id, 'round', g.round_no, 'side', g.side, 'mark_id', p_id, 'kind', p_kind, 'page', p_page, 'signer', s.position, 'target', p_target, 'text', case when p_kind = 'insert' then p_geometry->>'text' end, 'reopened', reopened));
   perform set_config('offers.fn', '', true);
-  return jsonb_build_object('id', p_id, 'reopened', reopened, 'reopened_signers', back, 'by', s.name, 'method', g.method, 'side', g.side, 'round', g.round_no,
+  return jsonb_build_object('id', p_id, 'reopened', reopened, 'reopened_signers', back, 'by', s.name, 'method', g.method, 'side', g.side, 'round', g.round_no, 'offer_id', g.offer_id,
     'address', (select address from public.properties where id = g.property_id));
 end $$;
 
@@ -892,6 +893,235 @@ begin
   if p_on is null then raise exception 'Choose yes or no'; end if;
   update public.offer_settings set link_changes_default = p_on, updated_by = me, updated_at = now();
 end $$;
+
+-- ───── Emails as drafts Tim reviews and sends (Tim, 24 November 2026; EMAIL-VOICE.md) ─────
+-- Nothing goes to a buyer, vendor or lawyer by itself. Every email to them (a signing link, a "please initial again" notice after a
+-- change, the agreed copy to each side) is a draft here first; Tim reads it, may edit it, and presses Send. The one exception is the
+-- one-time signing code, which a signer asks for while signing (open point for Tim). offer_mail_log keeps exactly what was sent.
+create table public.offer_mail_drafts (
+  id uuid primary key default gen_random_uuid(),
+  offer_id uuid not null references public.property_offers(id),
+  property_id uuid not null references public.properties(id),
+  signing_id uuid references public.offer_signings(id),
+  signer_id uuid references public.offer_signers(id),
+  agreement_id uuid references public.offer_agreements(id),
+  kind text not null check (kind in ('sign_link', 'reopened', 'agreed_purchasers', 'agreed_vendors')),
+  to_addr text[] not null,
+  cc_addr text[] not null default '{}',
+  subject text not null check (length(subject) between 1 and 300),
+  body text not null check (length(body) between 1 and 30000),
+  attach jsonb,                      -- the agreed copy: { path, sha256, name }
+  status text not null default 'draft' check (status in ('draft', 'sent', 'void')),
+  reviewed_at timestamptz, reviewed_by text,
+  created_at timestamptz not null default now(), created_by text not null,
+  edited_at timestamptz, edited_by text,
+  sent_at timestamptz, sent_by text,
+  void_at timestamptz, void_by text, void_reason text
+);
+create index on public.offer_mail_drafts (offer_id, status);
+create table public.offer_mail_log (
+  id bigserial primary key,
+  draft_id uuid not null references public.offer_mail_drafts(id),
+  offer_id uuid not null references public.property_offers(id),
+  property_id uuid not null references public.properties(id),
+  kind text not null,
+  to_addr text[] not null, cc_addr text[] not null default '{}',
+  subject text not null, body text not null,      -- exactly as sent (a signing link's token shown only as "[personal link]")
+  attachments jsonb not null default '[]'::jsonb,  -- [{ name, sha256 }]
+  sent_by text not null, sent_at timestamptz not null default now(),
+  ok boolean not null, error text
+);
+-- a draft changes only through the functions below, and never once it is sent or set aside; nothing is removed
+create or replace function public.guard_offer_mail() returns trigger language plpgsql set search_path = public as $$
+begin
+  if tg_op = 'DELETE' then raise exception 'Email records are never removed'; end if;
+  if coalesce(current_setting('offers.fn', true), '') <> 'on' then raise exception 'Emails are changed only through the offer screens, so there is a record'; end if;
+  if old.status <> 'draft' then raise exception 'This email was sent or set aside, so it is kept as it was'; end if;
+  if new.id <> old.id or new.offer_id <> old.offer_id or new.kind <> old.kind or new.created_at <> old.created_at or new.signer_id is distinct from old.signer_id
+     or new.agreement_id is distinct from old.agreement_id or new.attach is distinct from old.attach then raise exception 'Only the wording, recipients and status of a draft change'; end if;
+  return new;
+end $$;
+create trigger guard_offer_mail before update or delete on public.offer_mail_drafts for each row execute function public.guard_offer_mail();
+create trigger offer_mail_log_fixed before update or delete on public.offer_mail_log for each row execute function public.guard_offer_record();
+create trigger offer_mail_drafts_no_truncate before truncate on public.offer_mail_drafts for each statement execute function public.guard_offer_truncate();
+create trigger offer_mail_log_no_truncate before truncate on public.offer_mail_log for each statement execute function public.guard_offer_truncate();
+alter table public.offer_mail_drafts enable row level security;
+alter table public.offer_mail_log enable row level security;
+create policy omd_agent_read on public.offer_mail_drafts for select using (public.is_agent());
+create policy oml_agent_read on public.offer_mail_log for select using (public.is_agent());
+revoke all on public.offer_mail_drafts, public.offer_mail_log from anon;
+revoke insert, update, delete, truncate, references, trigger on public.offer_mail_drafts, public.offer_mail_log from authenticated;
+revoke all on sequence public.offer_mail_log_id_seq from anon, authenticated;
+
+-- who a draft may go to: a signer, their own address only; the purchasers' email, the purchasers and their lawyer; the vendors' email,
+-- the owners on the file, the vendors who signed, and the vendors' lawyer (from the agreed draft or the agency agreement's lawyer link)
+create or replace function public.offer_mail_allowed(p_offer uuid, p_kind text, p_signer uuid) returns text[] language plpgsql stable security definer set search_path = public as $$
+declare o public.property_offers; out_ text[] := '{}'; ag public.offer_agreements;
+begin
+  select * into o from public.property_offers where id = p_offer; if o.id is null then return out_; end if;
+  if p_kind in ('sign_link', 'reopened') then
+    select coalesce(array_agg(lower(trim(s.email))), '{}') into out_ from public.offer_signers s join public.offer_signings g on g.id = s.signing_id where s.id = p_signer and g.offer_id = p_offer and coalesce(s.email, '') <> '';
+  elsif p_kind = 'agreed_purchasers' then
+    select coalesce(array_agg(lower(trim(e))), '{}') into out_ from (select o.details->>'email' e union all select q->>'email' from jsonb_array_elements(coalesce(o.details->'purchasers', '[]'::jsonb)) q
+      union all select o.details->'lawyer'->>'email') z where coalesce(trim(e), '') <> '';
+  elsif p_kind = 'agreed_vendors' then
+    select * into ag from public.offer_agreements where offer_id = p_offer;
+    select coalesce(array_agg(lower(trim(e))), '{}') into out_ from (
+      select pp.email e from public.property_people pp where pp.property_id = o.property_id and coalesce(pp.role, 'owner') = 'owner'
+      union all select ap.email from public.agreement_people ap join public.agreements a on a.id = ap.agreement_id where a.property_id = o.property_id
+      union all select s.email from public.offer_signers s join public.offer_signings g on g.id = s.signing_id where g.offer_id = p_offer and g.side = 'vendor' and s.void_at is null
+      union all select ll.email from public.lawyer_links ll join public.agreements a on a.id = ll.agreement_id where a.property_id = o.property_id
+      union all select x->>'text' from public.offer_documents doc join public.offer_drafts d on d.id = doc.draft_id, jsonb_array_elements(d.placed) x where doc.id = ag.document_id and x->>'id' in ('vl_email', 'vl_service')) z
+      where coalesce(trim(e), '') <> '' and position('@' in e) > 1;
+  end if;
+  return out_;
+end $$;
+-- the other side's own phone or email in a draft (EMAIL-VOICE.md: each party sees only their own details and both lawyers'):
+-- p_forbid 'vendor' for anything to the purchasers, 'purchaser' for anything to the vendors. Lawyers' details are never theirs.
+create or replace function public.offer_mail_side_hit(p_offer uuid, p_forbid text, p_text text) returns text language plpgsql stable security definer set search_path = public as $$
+declare o public.property_offers; t text := lower(public.offer_plain(p_text)); runs text[]; r record; v text; law text;
+begin
+  select * into o from public.property_offers where id = p_offer; if o.id is null or t = '' then return null; end if;
+  select coalesce(array_agg(public.offer_nsn(m[1])), '{}') into runs from regexp_matches(t, '([+(]?\d[\d\s().\/_\-]{4,}\d)', 'g') m;
+  law := lower(coalesce(o.details->'lawyer'->>'email', ''));
+  for r in
+    select 'a purchaser' who, o.details->>'email' email, o.details->>'phone' phone where p_forbid = 'purchaser'
+    union all select 'a purchaser', q->>'email', q->>'phone' from jsonb_array_elements(coalesce(o.details->'purchasers', '[]'::jsonb)) q where p_forbid = 'purchaser'
+    union all select 'a vendor', pp.email, pp.phone from public.property_people pp where pp.property_id = o.property_id and p_forbid = 'vendor'
+    union all select 'a vendor', ap.email, ap.phone from public.agreement_people ap join public.agreements a on a.id = ap.agreement_id where a.property_id = o.property_id and p_forbid = 'vendor'
+    union all select 'a vendor', s.email, null from public.offer_signers s join public.offer_signings g on g.id = s.signing_id where g.offer_id = p_offer and g.side = 'vendor' and p_forbid = 'vendor'
+  loop
+    v := lower(public.offer_plain(trim(coalesce(r.email, ''))));
+    if length(v) >= 5 and position('@' in v) > 0 and v <> law and position(v in t) > 0 then return r.who; end if;
+    v := public.offer_nsn(public.offer_plain(r.phone));
+    if length(v) >= 7 and exists (select 1 from unnest(runs) x where length(x) >= 6 and position(v in x) > 0) then return r.who; end if;
+  end loop;
+  return null;
+end $$;
+-- whose side a draft is for
+create or replace function public.offer_mail_side(p_kind text, p_signer uuid) returns text language sql stable security definer set search_path = public as $$
+  select case when p_kind = 'agreed_purchasers' then 'purchaser' when p_kind = 'agreed_vendors' then 'vendor'
+    else (select g.side from public.offer_signers s join public.offer_signings g on g.id = s.signing_id where s.id = p_signer) end $$;
+-- a draft's recipients and wording, checked whenever it is made or edited
+create or replace function public.offer_mail_check(p_offer uuid, p_kind text, p_signer uuid, p_to text[], p_cc text[], p_subject text, p_body text) returns void language plpgsql stable security definer set search_path = public as $$
+declare allowed text[] := public.offer_mail_allowed(p_offer, p_kind, p_signer); x text; who text; side text := public.offer_mail_side(p_kind, p_signer);
+begin
+  if coalesce(array_length(p_to, 1), 0) < 1 or coalesce(array_length(p_to, 1), 0) + coalesce(array_length(p_cc, 1), 0) > 12 then raise exception 'Choose who it goes to'; end if;
+  foreach x in array p_to || coalesce(p_cc, '{}') loop
+    if not (lower(trim(x)) = any(allowed)) then raise exception 'It can only go to the people on this side of the offer and their lawyer (% isn''t one)', x; end if;
+  end loop;
+  if p_kind in ('sign_link', 'reopened') and coalesce(array_length(p_cc, 1), 0) > 0 then raise exception 'A signing email goes to its signer alone'; end if;
+  if coalesce(length(trim(p_subject)), 0) < 1 or length(p_subject) > 300 then raise exception 'The subject needs 1 to 300 characters'; end if;
+  if coalesce(length(trim(p_body)), 0) < 1 or length(p_body) > 30000 then raise exception 'The email needs some words (up to 30,000 characters)'; end if;
+  if p_kind = 'sign_link' and position('[the signing link]' in p_body) = 0 then raise exception 'Keep [the signing link] in the email: the personal link goes there when it is sent'; end if;
+  who := public.offer_mail_side_hit(p_offer, case when side = 'vendor' then 'purchaser' else 'vendor' end, p_subject || ' ' || p_body);
+  if who is not null then raise exception 'This email holds %''s own phone or email. Each side sees only their own details and both lawyers''', who; end if;
+end $$;
+create or replace function public.offer_mail_insert(p_actor text, p_offer uuid, p_kind text, p_signer uuid, p_to text[], p_cc text[], p_subject text, p_body text, p_attach jsonb) returns uuid language plpgsql security definer set search_path = public as $$
+declare o public.property_offers; s public.offer_signers; g public.offer_signings; ag public.offer_agreements; id_ uuid; why text;
+begin
+  select * into o from public.property_offers where id = p_offer for update; if o.id is null then raise exception 'No such offer'; end if;
+  if p_kind in ('sign_link', 'reopened') then
+    select * into s from public.offer_signers where id = p_signer; select * into g from public.offer_signings where id = s.signing_id;
+    if s.id is null or g.offer_id <> o.id then raise exception 'No such signer on this offer'; end if;
+    if g.method <> 'link' then raise exception 'This signer signs in person, on your device'; end if;
+    if s.void_at is not null then raise exception 'This signer''s version was replaced'; end if;
+    why := public.offer_sign_current(g); if why is not null then raise exception '%', why; end if;
+    if p_kind = 'sign_link' and (s.finished_at is not null or g.status not in ('ready', 'signing')) then raise exception 'Signing is held or finished, so no link is sent'; end if;
+  elsif p_kind in ('agreed_purchasers', 'agreed_vendors') then
+    select * into ag from public.offer_agreements where offer_id = o.id; if ag.id is null then raise exception 'The agreement hasn''t been made yet'; end if;
+    if p_attach is null or p_attach->>'path' is distinct from ag.path or p_attach->>'sha256' is distinct from ag.sha256 or coalesce(length(p_attach->>'name'), 0) not between 5 and 200 then raise exception 'Attach the agreed copy'; end if;
+  else raise exception 'Choose what kind of email it is';
+  end if;
+  perform public.offer_mail_check(o.id, p_kind, p_signer, p_to, coalesce(p_cc, '{}'), p_subject, p_body);
+  perform set_config('offers.fn', 'on', true);
+  -- one open draft at a time for a signer, or for each side's agreed copy: a newer one sets the older aside
+  update public.offer_mail_drafts set status = 'void', void_at = now(), void_by = p_actor, void_reason = 'A newer draft replaced it'
+    where offer_id = o.id and kind = p_kind and status = 'draft' and signer_id is not distinct from p_signer;
+  insert into public.offer_mail_drafts (offer_id, property_id, signing_id, signer_id, agreement_id, kind, to_addr, cc_addr, subject, body, attach, created_by)
+    values (o.id, o.property_id, g.id, p_signer, ag.id, p_kind, p_to, coalesce(p_cc, '{}'), p_subject, p_body, case when ag.id is not null then p_attach end, left(p_actor, 254)) returning id into id_;
+  insert into public.offer_events (property_id, offer_id, actor, kind, detail) values (o.property_id, o.id, left(p_actor, 254), 'mail_drafted', jsonb_build_object('draft_id', id_, 'kind', p_kind, 'signing_id', g.id, 'to', coalesce(array_length(p_to, 1), 0), 'cc', coalesce(array_length(p_cc, 1), 0)));
+  perform set_config('offers.fn', '', true);
+  return id_;
+end $$;
+-- Tim makes a draft (his screen writes the wording, EMAIL-VOICE.md); the edge function makes the "please initial again" drafts
+create or replace function public.agent_mail_draft_add(p_offer uuid, p_kind text, p_signer uuid, p_to text[], p_cc text[], p_subject text, p_body text, p_attach jsonb) returns uuid language plpgsql security definer set search_path = public as $$
+declare me text := public.offer_agent();
+begin return public.offer_mail_insert(me, p_offer, p_kind, p_signer, p_to, p_cc, p_subject, p_body, p_attach); end $$;
+create or replace function public.offer_mail_draft_sys(p_offer uuid, p_signer uuid, p_to text[], p_subject text, p_body text) returns uuid language plpgsql security definer set search_path = public as $$
+begin return public.offer_mail_insert('system', p_offer, 'reopened', p_signer, p_to, '{}', p_subject, p_body, null); end $$;
+-- Tim edits a draft (its recipients, subject and words), ticks it reviewed, or sets it aside
+create or replace function public.agent_mail_draft_edit(p_draft uuid, p_to text[], p_cc text[], p_subject text, p_body text) returns void language plpgsql security definer set search_path = public as $$
+declare me text := public.offer_agent(); m public.offer_mail_drafts;
+begin
+  select * into m from public.offer_mail_drafts where id = p_draft for update; if m.id is null then raise exception 'No such email'; end if;
+  if m.status <> 'draft' then raise exception 'This email was sent or set aside, so it is kept as it was'; end if;
+  perform public.offer_mail_check(m.offer_id, m.kind, m.signer_id, p_to, coalesce(p_cc, '{}'), p_subject, p_body);
+  perform set_config('offers.fn', 'on', true);
+  update public.offer_mail_drafts set to_addr = p_to, cc_addr = coalesce(p_cc, '{}'), subject = p_subject, body = p_body, edited_at = now(), edited_by = me, reviewed_at = null, reviewed_by = null where id = m.id;
+  insert into public.offer_events (property_id, offer_id, actor, kind, detail) values (m.property_id, m.offer_id, me, 'mail_edited', jsonb_build_object('draft_id', m.id, 'kind', m.kind));
+  perform set_config('offers.fn', '', true);
+end $$;
+create or replace function public.agent_mail_draft_review(p_draft uuid, p_reviewed boolean) returns void language plpgsql security definer set search_path = public as $$
+declare me text := public.offer_agent(); m public.offer_mail_drafts;
+begin
+  select * into m from public.offer_mail_drafts where id = p_draft for update; if m.id is null then raise exception 'No such email'; end if;
+  if m.status <> 'draft' then raise exception 'This email was sent or set aside, so it is kept as it was'; end if;
+  perform set_config('offers.fn', 'on', true);
+  update public.offer_mail_drafts set reviewed_at = case when p_reviewed then now() end, reviewed_by = case when p_reviewed then me end where id = m.id;
+  perform set_config('offers.fn', '', true);
+end $$;
+create or replace function public.agent_mail_draft_void(p_draft uuid, p_reason text) returns void language plpgsql security definer set search_path = public as $$
+declare me text := public.offer_agent(); m public.offer_mail_drafts;
+begin
+  select * into m from public.offer_mail_drafts where id = p_draft for update; if m.id is null then raise exception 'No such email'; end if;
+  if m.status <> 'draft' then raise exception 'This email was sent or set aside, so it is kept as it was'; end if;
+  perform set_config('offers.fn', 'on', true);
+  update public.offer_mail_drafts set status = 'void', void_at = now(), void_by = me, void_reason = left(nullif(trim(coalesce(p_reason, '')), ''), 300) where id = m.id;
+  insert into public.offer_events (property_id, offer_id, actor, kind, detail) values (m.property_id, m.offer_id, me, 'mail_set_aside', jsonb_build_object('draft_id', m.id, 'kind', m.kind));
+  perform set_config('offers.fn', '', true);
+end $$;
+-- the edge function, when Tim presses Send: the draft as it stands (locked), and for a signing link a fresh personal link for that
+-- signer only (its token kept as a fingerprint, as offer_sign_issue does)
+create or replace function public.offer_mail_take(p_draft uuid, p_actor text) returns jsonb language plpgsql security definer set search_path = public as $$
+declare m public.offer_mail_drafts; s public.offer_signers; g public.offer_signings; tok text; why text;
+begin
+  select * into m from public.offer_mail_drafts where id = p_draft for update; if m.id is null then raise exception 'No such email'; end if;
+  if m.status <> 'draft' then raise exception 'This email was already sent or set aside'; end if;
+  perform public.offer_mail_check(m.offer_id, m.kind, m.signer_id, m.to_addr, m.cc_addr, m.subject, m.body);
+  if m.kind = 'sign_link' then
+    select * into g from public.offer_signings where id = m.signing_id for update; select * into s from public.offer_signers where id = m.signer_id for update;
+    why := public.offer_sign_current(g); if why is not null then raise exception '%', why; end if;
+    if s.void_at is not null or s.finished_at is not null or g.status not in ('ready', 'signing') then raise exception 'Signing is held or finished, so no link is sent'; end if;
+    perform set_config('offers.fn', 'on', true);
+    tok := public.offer_token();
+    update public.offer_signers set token_hash = public.offer_sha(tok), link_sent_at = now(), link_expires_at = now() + interval '14 days', session_hash = null, session_expires_at = null, code_hash = null, code_expires_at = null, code_tries = 0 where id = s.id;
+    update public.offer_signings set status = 'signing', sent_at = coalesce(sent_at, now()) where id = g.id;
+    insert into public.offer_events (property_id, offer_id, actor, kind, detail) values (g.property_id, g.offer_id, left(coalesce(p_actor, 'agent'), 254), 'sign_links_sent', jsonb_build_object('signing_id', g.id, 'signers', 1, 'signer', s.position, 'round', g.round_no, 'side', g.side, 'draft_id', m.id));
+    perform set_config('offers.fn', '', true);
+  end if;
+  return jsonb_build_object('id', m.id, 'kind', m.kind, 'to', to_jsonb(m.to_addr), 'cc', to_jsonb(m.cc_addr), 'subject', m.subject, 'body', m.body, 'attach', m.attach, 'token', tok);
+end $$;
+-- after the send: the log (exactly what went), and the draft marked sent (or left as a draft if it failed)
+create or replace function public.offer_mail_done(p_draft uuid, p_actor text, p_body text, p_attachments jsonb, p_ok boolean, p_error text) returns void language plpgsql security definer set search_path = public as $$
+declare m public.offer_mail_drafts;
+begin
+  select * into m from public.offer_mail_drafts where id = p_draft for update; if m.id is null then raise exception 'No such email'; end if;
+  if m.status <> 'draft' then raise exception 'This email was already sent or set aside'; end if;
+  insert into public.offer_mail_log (draft_id, offer_id, property_id, kind, to_addr, cc_addr, subject, body, attachments, sent_by, ok, error)
+    values (m.id, m.offer_id, m.property_id, m.kind, m.to_addr, m.cc_addr, m.subject, coalesce(p_body, m.body), coalesce(p_attachments, '[]'::jsonb), left(coalesce(p_actor, 'agent'), 254), coalesce(p_ok, false), left(p_error, 500));
+  perform set_config('offers.fn', 'on', true);
+  if coalesce(p_ok, false) then update public.offer_mail_drafts set status = 'sent', sent_at = now(), sent_by = left(p_actor, 254) where id = m.id; end if;
+  insert into public.offer_events (property_id, offer_id, actor, kind, detail) values (m.property_id, m.offer_id, left(coalesce(p_actor, 'agent'), 254), case when coalesce(p_ok, false) then 'mail_sent' else 'mail_failed' end,
+    jsonb_build_object('draft_id', m.id, 'kind', m.kind, 'to', coalesce(array_length(m.to_addr, 1), 0), 'cc', coalesce(array_length(m.cc_addr, 1), 0)));
+  perform set_config('offers.fn', '', true);
+end $$;
+revoke execute on function public.guard_offer_mail(), public.offer_mail_allowed(uuid, text, uuid), public.offer_mail_side_hit(uuid, text, text), public.offer_mail_side(text, uuid), public.offer_mail_check(uuid, text, uuid, text[], text[], text, text),
+  public.offer_mail_insert(text, uuid, text, uuid, text[], text[], text, text, jsonb) from public, anon, authenticated;
+revoke execute on function public.offer_mail_draft_sys(uuid, uuid, text[], text, text), public.offer_mail_take(uuid, text), public.offer_mail_done(uuid, text, text, jsonb, boolean, text) from public, anon, authenticated;
+grant execute on function public.offer_mail_draft_sys(uuid, uuid, text[], text, text), public.offer_mail_take(uuid, text), public.offer_mail_done(uuid, text, text, jsonb, boolean, text) to service_role;
+revoke execute on function public.agent_mail_draft_add(uuid, text, uuid, text[], text[], text, text, jsonb), public.agent_mail_draft_edit(uuid, text[], text[], text, text), public.agent_mail_draft_review(uuid, boolean), public.agent_mail_draft_void(uuid, text) from public, anon;
+grant execute on function public.agent_mail_draft_add(uuid, text, uuid, text[], text[], text, text, jsonb), public.agent_mail_draft_edit(uuid, text[], text[], text, text), public.agent_mail_draft_review(uuid, boolean), public.agent_mail_draft_void(uuid, text) to authenticated;
 
 -- ───── execute rights ─────
 revoke execute on function public.guard_offer_document(), public.offer_change_ok(text, jsonb, numeric, numeric), public.offer_nsn(text), public.offer_private_hit(uuid, text), public.offer_doc_layers(uuid, int), public.offer_parties(uuid),

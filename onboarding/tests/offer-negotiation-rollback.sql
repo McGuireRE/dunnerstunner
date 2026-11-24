@@ -111,6 +111,43 @@ begin
   out := out || 'signers: ' || (select string_agg(name || case when person_id is not null then '+' else '' end, ', ' order by position) from public.offer_signers where signing_id = g2) || ' status=' || (select status from public.offer_signings where id = g2) || '; ';
   execute 'reset role';
 
+  -- 3b. emails are drafts Tim sends (Tim, 24 November 2026): a draft for Val (the second vendor), its checks, the send and its log
+  declare mv uuid; sv uuid; tk jsonb; n0 int;
+  begin
+    select id into sv from public.offer_signers where signing_id = g2 and position = 2;
+    perform set_config('request.jwt.claims', agent, true);
+    begin perform public.agent_mail_draft_add(o1, 'sign_link', sv, array['ana@example.com'], '{}', 'An offer', 'Hello [the signing link]', null); out := out || 'A VENDOR''S LINK TO A PURCHASER''S ADDRESS; '; exception when others then out := out || 'wrong recipient: ' || sqlerrm || '; '; end;
+    begin perform public.agent_mail_draft_add(o1, 'sign_link', sv, array['val@example.com'], '{}', 'An offer', 'Hello, open it here', null); out := out || 'A LINK EMAIL WITHOUT ITS LINK; '; exception when others then out := out || 'no link: ' || sqlerrm || '; '; end;
+    begin perform public.agent_mail_draft_add(o1, 'sign_link', sv, array['val@example.com'], '{}', 'An offer', 'Call Ana on 021 111 2222 [the signing link]', null); out := out || 'A PURCHASER''S PHONE TO THE VENDOR; '; exception when others then out := out || 'other side''s phone: ' || sqlerrm || '; '; end;
+    begin perform public.agent_mail_draft_add(o1, 'sign_link', sv, array['val@example.com'], array['pat@law.example'], 'An offer', 'Hello [the signing link]', null); out := out || 'A SIGNING LINK COPIED TO SOMEONE; '; exception when others then out := out || 'cc: ' || sqlerrm || '; '; end;
+    begin perform public.agent_mail_draft_add(o1, 'agreed_vendors', null, array['val@example.com'], '{}', 'Congratulations', 'Hello', '{"path":"x","sha256":"y","name":"Agreement.pdf"}'); out := out || 'AN AGREED-COPY EMAIL BEFORE THE AGREEMENT; '; exception when others then out := out || 'agreed too soon: ' || sqlerrm || '; '; end;
+    mv := public.agent_mail_draft_add(o1, 'sign_link', sv, array['VAL@example.com'], '{}', 'An offer on the property', 'Kia ora Val, [the signing link] Tim', null);
+    perform public.agent_mail_draft_edit(mv, array['val@example.com'], '{}', 'An offer on the property', 'Kia ora Val, here is your link: [the signing link]. Any questions, call me on 027 562 7207. Tim');
+    perform public.agent_mail_draft_review(mv, true);
+    out := out || 'draft status=' || (select status from public.offer_mail_drafts where id = mv) || ' reviewed=' || ((select reviewed_at from public.offer_mail_drafts where id = mv) is not null) || ' val link before send=' || ((select token_hash from public.offer_signers where id = sv) is not null) || '; ';
+    begin update public.offer_mail_drafts set body = 'x' where id = mv; out := out || 'A DRAFT CHANGED DIRECTLY; '; exception when others then out := out || 'direct edit: ' || sqlerrm || '; '; end;
+    execute 'set local role authenticated';
+    begin insert into public.offer_mail_drafts (offer_id, property_id, kind, to_addr, subject, body, created_by) values (o1, pid, 'reopened', array['val@example.com'], 's', 'b', 'me'); out := out || 'A SIGNED-IN USER WROTE A DRAFT; '; exception when others then out := out || 'insert: ' || sqlerrm || '; '; end;
+    perform set_config('request.jwt.claims', vendor, true);
+    out := out || 'vendor sees drafts=' || (select count(*) from public.offer_mail_drafts) || ' log=' || (select count(*) from public.offer_mail_log) || '; ';
+    begin perform public.offer_mail_take(mv, 'x'); out := out || 'A SIGNED-IN USER SENT AN EMAIL; '; exception when others then out := out || 'take as user: ' || sqlerrm || '; '; end;
+    execute 'reset role'; perform set_config('request.jwt.claims', agent, true);
+    execute 'set local role service_role';
+    tk := public.offer_mail_take(mv, 'Tim McGuire');
+    out := out || 'take: token=' || (length(tk->>'token') >= 40) || ' kept as a fingerprint=' || ((select token_hash from public.offer_signers where id = sv) = public.offer_sha(tk->>'token')) || '; ';
+    perform public.offer_mail_done(mv, 'Tim McGuire', replace(tk->>'body', '[the signing link]', 'https://example.test/?sign=[personal link]'), '[]', true, null);
+    execute 'reset role'; perform set_config('request.jwt.claims', agent, true);
+    out := out || 'sent: status=' || (select status from public.offer_mail_drafts where id = mv) || ' log ok=' || (select ok from public.offer_mail_log where draft_id = mv) || ' log keeps no token=' || ((select position(tk->>'token' in body) from public.offer_mail_log where draft_id = mv) = 0) || '; ';
+    begin perform public.agent_mail_draft_edit(mv, array['val@example.com'], '{}', 's', 'b [the signing link]'); out := out || 'A SENT EMAIL EDITED; '; exception when others then out := out || 'edit after send: ' || sqlerrm || '; '; end;
+    begin update public.offer_mail_log set body = 'x' where draft_id = mv; out := out || 'THE LOG CHANGED; '; exception when others then out := out || 'log fixed: ' || sqlerrm || '; '; end;
+    begin delete from public.offer_mail_drafts where id = mv; out := out || 'A DRAFT REMOVED; '; exception when others then out := out || 'remove: ' || sqlerrm || '; '; end;
+    -- a newer draft for the same signer sets the older aside; Tim can set one aside himself
+    mv := public.agent_mail_draft_add(o1, 'sign_link', sv, array['val@example.com'], '{}', 'Again', 'Your link again: [the signing link]', null);
+    perform public.agent_mail_draft_add(o1, 'sign_link', sv, array['val@example.com'], '{}', 'Again', 'Your link once more: [the signing link]', null);
+    out := out || 'older set aside=' || (select status from public.offer_mail_drafts where id = mv) || '; ';
+    select id into mv from public.offer_mail_drafts where signer_id = sv and status = 'draft'; perform public.agent_mail_draft_void(mv, 'Not needed');
+    out := out || 'open drafts left=' || (select count(*) from public.offer_mail_drafts where signer_id = sv and status = 'draft') || '; ';
+  end;
   -- 4. Vera opens her link: the vendors' side, round 2; a code; the reminder about chattels comes before any place
   r := public.offer_sign_issue(g2, 'agent'); tok := r->'links'->0->>'token';
   out := out || 'issue side=' || (r->>'side') || ' round=' || (r->>'round') || ' links=' || jsonb_array_length(r->'links') || ' changes from link (switched on for this round)=' || (select link_changes from public.offer_signings where id = g2) || ' recorded=' || (select detail->>'link_changes' from public.offer_events where kind = 'round_presented' and detail->>'signing_id' = g2::text) || '; ';
@@ -300,6 +337,20 @@ begin
   out := out || 'switched on for this round despite the default=' || (select link_changes from public.offer_signings where id = g4) || '; '; perform pg_temp.rb_prep(g4); perform pg_temp.rb_finish(g4); perform pg_temp.rb_lock(g4, '{"lifted":[],"outstanding":[]}');
   begin perform public.offer_agreement_check(o4, now(), to_char(public.offer_nz_today(), 'FMDD FMMonth YYYY')); out := out || 'AGREED WITH NO DATE PLACE; '; exception when others then out := out || 'no date place: ' || sqlerrm || '; '; end;
 
+  -- 9b. the agreed copy's emails (offer 1 is agreed): one per side, each to that side and its lawyer, the agreed copy attached
+  declare agp text; ags text; att jsonb; ma uuid;
+  begin
+    perform set_config('request.jwt.claims', agent, true);
+    select path, sha256 into agp, ags from public.offer_agreements where offer_id = o1; att := jsonb_build_object('path', agp, 'sha256', ags, 'name', 'Agreement.pdf');
+    ma := public.agent_mail_draft_add(o1, 'agreed_purchasers', null, array['ana@example.com', 'bo@example.com'], array['pat@law.example'], 'Congratulations!', 'Dear Ana and Bo, the vendors'' lawyer is ...', att);
+    out := out || 'agreed purchasers draft=' || (select status || ' to=' || array_length(to_addr, 1) || ' cc=' || cc_addr[1] from public.offer_mail_drafts where id = ma) || '; ';
+    begin perform public.agent_mail_draft_add(o1, 'agreed_purchasers', null, array['ana@example.com'], array['rb-nego-vendor@example.com'], 's', 'b', att); out := out || 'A VENDOR COPIED ON THE PURCHASERS'' EMAIL; '; exception when others then out := out || 'vendor on purchasers'': ' || left(sqlerrm, 60) || '; '; end;
+    begin perform public.agent_mail_draft_add(o1, 'agreed_purchasers', null, array['ana@example.com'], '{}', 's', 'Vera is on 027 444 5555', att); out := out || 'A VENDOR''S PHONE TO THE PURCHASERS; '; exception when others then out := out || 'vendor phone to purchasers: ' || left(sqlerrm, 60) || '; '; end;
+    begin perform public.agent_mail_draft_add(o1, 'agreed_vendors', null, array['rb-nego-vendor@example.com'], '{}', 's', 'Ana is ana@example.com', att); out := out || 'A PURCHASER''S EMAIL TO THE VENDORS; '; exception when others then out := out || 'purchaser email to vendors: ' || left(sqlerrm, 60) || '; '; end;
+    begin perform public.agent_mail_draft_add(o1, 'agreed_vendors', null, array['rb-nego-vendor@example.com'], '{}', 's', 'b', jsonb_build_object('path', 'other.pdf', 'sha256', ags, 'name', 'Agreement.pdf')); out := out || 'ANOTHER FILE ATTACHED; '; exception when others then out := out || 'attachment: ' || left(sqlerrm, 40) || '; '; end;
+    ma := public.agent_mail_draft_add(o1, 'agreed_vendors', null, array['rb-nego-vendor@example.com', 'val@example.com'], '{}', 'Congratulations!', 'Hello Vera and Val, the purchasers'' lawyer is Pat Lawyer, Law Ltd, pat@law.example, 03 477 0000.', att);
+    out := out || 'agreed vendors draft=' || (select status from public.offer_mail_drafts where id = ma) || ' (the purchasers'' lawyer may be named); ';
+  end;
   -- 10. the timelines still check out, every round's event carrying the one before
   out := out || 'chains ok=' || ((public.offer_chain_verify(o1::text)->>'ok')::boolean and (public.offer_chain_verify(o2::text)->>'ok')::boolean and (public.offer_chain_verify(o3::text)->>'ok')::boolean) || ' agreement chain last=' || ((select chain_last from public.offer_agreements where offer_id = o1) = (select hash from public.offer_events where offer_id = o1 order by seq desc limit 1)) || '; ';
   raise exception 'ROLLBACK %', out;

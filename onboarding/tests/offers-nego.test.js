@@ -72,6 +72,18 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
     const bg = await p.$eval('#sgDraw .sig-wrap', e => getComputedStyle(e).backgroundColor); expect(bg === 'rgb(255, 255, 255)', 'the signature pad is white (' + bg + ')');
     await draw(p, '#sgSig', k); await draw(p, '#sgInit', k + 3); await p.click('#sgDrawGo'); await p.waitForSelector('#sgPlaces'); };
   const finishInPerson = async (p, id) => { await tick(p, '#sgSaw'); if (id === 'known_to_tim') await p.$eval('input[name="sgIdWho"][value="known"]', e => e.click()); else if (id !== 'none') await p.selectOption('#sgIdType', id || 'passport'); await p.click('#sgFinishGo'); await p.waitForSelector('#sgHandback'); await p.click('#sgImTim'); await p.waitForSelector('#sgView'); };
+  // Tim prepares the link emails (drafts: nothing is sent), then sends them from the page: one at a time, or ticking Reviewed and Send all reviewed
+  // Tim mediates (24 November 2026): mail since a point, to anyone but Tim, codes aside (a signer asks for their own code)
+  // what a vendor sees on their own page (dashboard and journey map), as text
+  const vendorView = async () => { const pv = await page(); await pv.goto(BASE); await pv.evaluate(() => localStorage.setItem('mocksession', JSON.stringify({ user: { id: 'v-1', email: 'vendor@example.com' } }))); await pv.goto(BASE); await pv.waitForTimeout(900);
+    const t = (await pv.textContent('#main')).replace(/\s+/g, ' ').trim(); await pv.evaluate(() => localStorage.removeItem('mocksession')); await pv.close(); return t; };
+  const notTim = (list, from) => list.slice(from).filter(m => m.to !== 'tim' && m.kind !== 'offer_sign_code');
+  const toTim = (list, from) => list.slice(from).filter(m => m.to === 'tim');
+  const prepAndSend = async (p, all) => { const n0 = (await mails(p)).length; await p.click('#sgSendGo'); await p.waitForSelector('[data-mlsend]', { timeout: 20000 });
+    expect((await mails(p)).length === n0, 'preparing the link emails sends nothing');
+    if (all) { for (const c of await p.$$('[data-mlrev]')) { await c.evaluate(e => { if (!e.checked) e.click(); }); await p.waitForTimeout(150); } await p.click('[data-mlall]'); await p.waitForFunction(() => !document.querySelector('[data-mlsend]'), null, { timeout: 20000 }); }
+    else for (let i = 0; i < 20; i++) { const bs = await p.$$('[data-mlsend]'); if (!bs.length) break; await bs[0].click(); await p.waitForFunction(n => document.querySelectorAll('[data-mlsend]').length < n, bs.length, { timeout: 20000 }); }
+    await p.waitForSelector('#sgSigners'); };
   // a purchaser's full Round 1 turn on Tim's device (phase 3's screens)
   const round1Turn = async (p, n) => { await turnStart(p, n); await p.waitForSelector('#sgConsent'); await tick(p, '#sgAgree'); await p.click('#sgAgreeGo'); await p.waitForSelector('#sgCcaPages .dr-pg canvas');
     await tick(p, '#sgCcaOk'); await tick(p, '#sgSpOk'); await p.click('#sgGuidesGo'); await p.waitForSelector('#sgDraw'); await draw(p, '#sgSig', n); await draw(p, '#sgInit', n + 3); await p.click('#sgDrawGo'); await p.waitForSelector('#sgPlaces'); await tapAll(p); await finishInPerson(p); };
@@ -141,7 +153,7 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   expect(g2 && g2.side === 'vendor' && g2.status === 'ready' && d.offer_events.some(e => e.kind === 'round_presented' && e.detail.checked_round === 1), 'presented: Round 2 for the vendors, recorded as authorised after looking');
   expect(!(await mails(p)).some(m => m.kind === 'offer_sign_link'), 'still nothing sent before Send');
   expect(/Round 2: the vendors sign/.test(await p.textContent('#sgView h1')), 'the signing screen says it is the vendors\' round');
-  await p.click('#sgSendGo'); await p.waitForSelector('#sgSigners');
+  await prepAndSend(p);
   const vLinks = (await mails(p)).filter(m => m.kind === 'offer_sign_link');
   expect(vLinks.length === 2 && vLinks.map(m => m.to).sort().join() === 'vendor2@example.com,vendor@example.com' && vLinks.every(m => /An offer on 1 Example Road/.test(m.subject)), 'Send: each vendor emailed their own link');
 
@@ -157,6 +169,11 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   // ── 4. Testy opens her link (dark mode): a code; the chattels reminder; the lawyer note; the purchasers as on the agreement ──
   process.stderr.write('step 4\n');
   const linkV1 = vLinks.find(m => m.to === 'vendor@example.com').link, linkV2 = vLinks.find(m => m.to === 'vendor2@example.com').link;
+  // from here the vendors sign, initial and change many times; only the submitted round may tell anyone, and only Tim
+  let p0 = await page(); await p0.goto(BASE); const M0 = (await mails(p0)).length;
+  const offerTok = (await rpc(p0, 'agent_offer_link', { p_property: 'P1', p_action: 'get' })).data;
+  const buyerView0 = offerTok && offerTok.token ? JSON.stringify((await p0.evaluate(t => window.supabase.createClient().functions.invoke('offer-public', { body: { action: 'info', token: t } }), offerTok.token)).data) : null;
+  await p0.close();
   let q = await page('dark'); await q.goto(linkV1); await q.waitForSelector('#sgCode');
   expect(/Tim has an offer on 1 Example Road/.test(await q.textContent('#sgCode')) && !/Testbuyer/.test(await q.textContent('#sgCode')), 'the link greets the vendor; nothing more before the code');
   await q.click('#sgSendCode'); await q.waitForFunction(() => /Sent/.test(document.querySelector('#sgCodeMsg').textContent));
@@ -245,7 +262,10 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   expect(d.offer_sign_reviews.filter(r => r.signing_id === g2.id).every(r => r.places.length === 2 && r.places.every(x => x.why === 'change')), 'each change carries both vendors\' initials');
   expect(d.offer_events.filter(e => e.kind === 'round_change' && e.offer_id === offA).length === NCH, 'each change is on the timeline');
   expect(!(await side(q)), 'the change tools at 390 px: no sideways scroll'); await shot(q, 'counter_dark');
-  await tapAll(q); await q.click('#sgFinishGo'); await q.waitForSelector('#sgThanks'); await q.close();
+  expect(await q.$('#sgToTimOnly') && /goes straight to Tim McGuire, the agent/.test(await q.textContent('#sgToTimOnly')), 'before confirming: it goes straight to Tim, who tells the other party');
+  await tapAll(q); await q.click('#sgFinishGo'); await q.waitForSelector('#sgThanks');
+  { const ml = await mails(q); expect(!notTim(ml, M0).length && !toTim(ml, M0).length, 'the first vendor\'s many taps, changes and finish: no email to anyone, Tim included: ' + notTim(ml, M0).concat(toTim(ml, M0)).map(m => m.kind + '>' + m.to).join(', ')); }
+  await q.close();
   // the second vendor, by her own link: she must initial both changes too
   q = await page('light'); await q.goto(linkV2); await q.waitForSelector('#sgCode'); await q.click('#sgSendCode'); await q.waitForFunction(() => /Sent/.test(document.querySelector('#sgCodeMsg').textContent));
   code = (await mails(q)).filter(m => m.kind === 'offer_sign_code' && m.to === 'vendor2@example.com').pop(); await q.fill('#sgCodeIn', code.code); await q.click('#sgCodeGo');
@@ -257,6 +277,11 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   const sesV2 = await q.evaluate(() => Object.keys(sessionStorage).filter(k => /^sgSes:/.test(k)).map(k => sessionStorage.getItem(k))[0]);
   await tapAll(q); await q.click('#sgFinishGo'); await q.waitForSelector('#sgThanks', { timeout: 30000 });
   expect(/locked/.test(await q.textContent('#sgThanks')) && /Nothing goes back to the purchasers/.test(await q.textContent('#sgThanks')), 'the last vendor is thanked; nothing goes back until Tim has checked it');
+  { const ml = await mails(q), tim = toTim(ml, M0);
+    expect(!notTim(ml, M0).length, 'the round submitted: nothing to the purchasers, their lawyer or anyone else: ' + notTim(ml, M0).map(m => m.kind + '>' + m.to).join(', '));
+    expect(tim.length === 1 && tim[0].kind === 'offer_round_locked' && /^Round 2 submitted by the vendors/.test(tim[0].subject) && /What changed in this round/.test(tim[0].body) && /portal\.dunnerstunner\.co\.nz\/properties\/P1\/offers\//.test(tim[0].body), 'exactly one email, to Tim, at submission: who, what changed, the round\'s address');
+    const bv = offerTok && offerTok.token ? JSON.stringify((await q.evaluate(t => window.supabase.createClient().functions.invoke('offer-public', { body: { action: 'info', token: t } }), offerTok.token)).data) : null;
+    expect(bv === buyerView0, "the buyers' own offer link shows the same as before the vendors acted"); }
   d = await db(q); const rA2 = d.offer_rounds.find(r => r.offer_id === offA && r.doc_round === 2);
   expect(rA2 && rA2.side === 'vendor' && rA2.changes === NCH && rA2.number === 2 && d.property_offers.find(o => o.id === offA).status === 'countered', 'Round 2 locked: the vendors\' counteroffer with its two changes');
   expect(rA2.lifted.filter(x => x.why === 'filled' && x.side === 'purchaser').length === 2 && rA2.outstanding.length === 2 * NCH, 'its record holds the lifted initials, and the purchasers\' initials beside each change outstanding');
@@ -280,6 +305,7 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   expect(/initials every change not yet initialled/.test(await p.textContent('#ngWho')) && /signatures from before stand/.test(await p.textContent('#ngWho')), 'the purchasers initial the changes; their signatures stand');
   expect(await p.isChecked('input[name="ngMethod"][value="in_person"]'), 'presenting defaults to in person');
   await tick(p, 'input[name="ngMethod"][value="in_person"]'); await p.waitForSelector('#ngChecked'); await tick(p, '#ngChecked'); await p.click('#ngGo'); await p.waitForSelector('#sgView');
+  const M3 = (await mails(p)).length, vView3 = await vendorView();
   for (const n of [1, 2]) { await turnStart(p, n); await consentDraw(p, n + 10);
     expect(!(await p.$('#sgGuides')) && !(await p.$('#ngChattels')), 'no guides again for the purchasers');
     out['need3_' + n] = +(await p.textContent('#sgCount')).match(/of (\d+)/)[1];
@@ -295,6 +321,10 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   await p.waitForSelector('#sgRound', { timeout: 30000 });
   d = await db(p); const rA3 = d.offer_rounds.find(r => r.offer_id === offA && r.doc_round === 3);
   expect(rA3 && rA3.changes === 0 && !rA3.outstanding.length, 'Round 3 locked: accepted, nothing outstanding');
+  { const ml = await mails(p); expect(!notTim(ml, M3).length && toTim(ml, M3).length === 1, 'the purchasers\' round: one email to Tim at submission, nothing to the vendors');
+    expect(d.properties.find(x => x.id === 'P1').stage !== 'under_offer', 'the property is not under offer just because both sides have signed: Tim acts');
+    // the vendors' own page (dashboard and journey map): exactly as before the purchasers accepted
+    const vt = await vendorView(); expect(vt === vView3 && !/655,000|690,000|Testbuyer/.test(vt), "the vendors' page is unchanged by the purchasers accepting"); out.vendorView = vt.slice(0, 300); }
   await toOffer(p, offA); await p.waitForSelector('#ngFormed');
 
   // ── 7. the agreement: Tim confirms, the date typed in full; the agreed copy locked; Under offer; other offers untouched ──
@@ -306,6 +336,7 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   const yesterday = await p.evaluate(() => window.NEGO.fullDate(new Date(Date.now() - 864e5).toLocaleDateString('en-CA', { timeZone: 'Pacific/Auckland' })));
   await p.fill('#ngDate', yesterday); await p.click('#ngAgree'); await p.waitForFunction(() => /from the day acceptance was communicated/.test(document.querySelector('#ngAgErr').textContent));
   expect(true, 'a date before acceptance was communicated is refused');
+  const MA = (await mails(p)).length;
   await p.fill('#ngDate', today); await p.click('#ngAgree'); await p.waitForSelector('#ngAgreed', { timeout: 30000 });
   d = await db(p); const ag = d.offer_agreements.find(x => x.offer_id === offA);
   expect(ag && ag.date_text === today && ag.round_id === rA3.id && d.offer_documents.find(x => x.id === ag.document_id).status === 'agreed' && d.property_offers.find(o => o.id === offA).status === 'accepted', 'the agreement is locked against Round 3, dated as typed');
@@ -315,6 +346,37 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   expect(!(await pdfText(r1Pdf)).concat(await pdfText(r2Pdf)).some(t => t.includes(today + ' ') && false), 'the date appears on no earlier round');
   expect(!(await pdfText(r2Pdf))[dateP.page - 1].includes(today), 'the date is not on Round 2');
   expect(d.properties.find(x => x.id === 'P1').stage === 'under_offer', 'the property is now under offer');
+  // the agreed copy's emails: built straight away as drafts, nothing sent (Tim, 24 November 2026)
+  { const ml = await mails(p); expect(ml.length === MA, 'confirming the agreement sends nothing to anyone: ' + ml.slice(MA).map(m => m.kind + '>' + m.to).join(', ')); }
+  await p.waitForSelector('#mlAgreed [data-mlsend]', { timeout: 30000 });
+  d = await db(p); { const mds = (d.offer_mail_drafts || []).filter(m => m.offer_id === offA && /^agreed_/.test(m.kind) && m.status === 'draft'), dp = mds.find(m => m.kind === 'agreed_purchasers'), dv = mds.find(m => m.kind === 'agreed_vendors');
+    out.agreedDrafts = mds.map(m => ({ kind: m.kind, to: m.to_addr, cc: m.cc_addr, subject: m.subject }));
+    expect(dp && dv && mds.length === 2, 'two drafts: to the purchasers and to the vendors');
+    expect(dp.to_addr.join() === 'ana.p@example.com,bo.p@example.com' && dp.cc_addr.join() === 'pat@synthlaw.example' && dp.attach.path === ag.path && dp.attach.sha256 === ag.sha256, 'the purchasers\' email: to them, cc their lawyer, the agreed copy attached');
+    expect(dv.to_addr.slice().sort().join() === 'vendor2@example.com,vendor@example.com' && dv.attach.sha256 === ag.sha256, 'the vendors\' email: to them, the agreed copy attached');
+    expect(!/vendor@example|vendor2@example|000 1111/.test(dp.body) && !/ana\.p@|bo\.p@|buyer\.own@|777 6666|555 4444|999 8888/.test(dv.body), "neither side's email holds the other side's own details");
+    expect(/Pat Solicitor/.test(dv.body) && /Roadmap/.test(dp.body) && /Price: \$/.test(dp.body) && /Faithfully,\nTim/.test(dp.body), "each holds the other side's lawyer and the roadmap");
+    // Needs you
+    await p.click('#navDash'); await p.waitForTimeout(700); expect(/2 emails to read and send/.test(await p.textContent('#main')), 'Needs you lists the unsent emails');
+    await openProp(p); await p.click(`[data-offer="${offA}"]`); await p.waitForSelector('#mlAgreed [data-mlsend]');
+    // marked blanks block sending until Tim fills or deletes them
+    const M5 = (await mails(p)).length;
+    await p.click(`[data-mlsend="${dp.id}"]`); await p.waitForFunction(id => /marked blanks first/.test(document.querySelector(`[data-mlout="${id}"]`).textContent), dp.id);
+    expect((await mails(p)).length === M5, 'a draft with marked blanks is not sent');
+    for (const m of [dp, dv]) await p.$eval(`#mlBody-${m.id}`, e => { e.value = e.value.replace(/\[Tim to [^\]]*\]/g, 'Filled in by Tim'); });
+    await p.click(`[data-mlsend="${dp.id}"]`); await p.waitForFunction(id => !document.querySelector(`[data-mlsend="${id}"]`), dp.id, { timeout: 20000 });
+    let ml = (await mails(p)).slice(M5), sp = ml.find(m => m.kind === 'offer_mail_agreed_purchasers');
+    expect(ml.length === 1 && sp && sp.to === 'ana.p@example.com, bo.p@example.com' && (sp.cc || []).join() === 'pat@synthlaw.example' && sp.attachments[0].sha256 === ag.sha256 && /Filled in by Tim/.test(sp.body) && !/\[Tim to /.test(sp.body), 'Send: the purchasers\' email goes as Tim left it, cc their lawyer, the agreed copy attached; nothing else goes');
+    // the vendors' email: save, tick Reviewed, then Send all reviewed
+    await p.waitForSelector(`[data-mlsave="${dv.id}"]`); await p.$eval(`#mlBody-${dv.id}`, e => { e.value = e.value.replace(/\[Tim to [^\]]*\]/g, 'Filled in by Tim'); });
+    await p.click(`[data-mlsave="${dv.id}"]`); await p.waitForSelector(`[data-mlrev="${dv.id}"]`); await p.$eval(`[data-mlrev="${dv.id}"]`, e => { if (!e.checked) e.click(); }); await p.waitForTimeout(300);
+    await p.click('[data-mlall]'); await p.waitForFunction(() => !document.querySelector('[data-mlsend]'), null, { timeout: 20000 });
+    ml = (await mails(p)).slice(M5); expect(ml.length === 2 && ml.some(m => m.kind === 'offer_mail_agreed_vendors' && /vendor@example\.com/.test(m.to)), 'Send all reviewed: the vendors\' email goes');
+    d = await db(p); const lg = (d.offer_mail_log || []).filter(x => x.offer_id === offA && /^agreed_/.test(x.kind));
+    expect(lg.length === 2 && lg.every(x => x.ok && x.sent_by && x.sent_at && x.attachments[0].sha256 === ag.sha256 && /Filled in by Tim/.test(x.body)), 'the log keeps who sent what and when, and the exact text');
+    expect(d.offer_mail_drafts.filter(m => m.offer_id === offA && /^agreed_/.test(m.kind)).every(m => m.status === 'sent' && m.sent_by), 'both drafts marked sent');
+    await p.click('#navDash'); await p.waitForTimeout(700); expect(!/emails to read and send/.test(await p.textContent('#main')), 'Needs you is clear once they are sent');
+    await openProp(p); await p.click(`[data-offer="${offA}"]`); await p.waitForSelector('#ngAgreed'); }
   expect(['received'].includes(d.property_offers.find(o => o.id === offB).status) && d.property_offers.find(o => o.id === offC).status === 'received', 'other offers on the property are untouched');
   r = await rpc(p, 'agent_round_present', { p_offer: offA, p_method: 'link', p_places: [], p_checked: true }); expect(r.error && /agreement has been made/.test(r.error.message), 'nothing more is presented once agreed');
   r = await rpc(p, 'agent_offer_correct', { p_offer: offA, p_details: offer({ price: '1' }), p_note: 'Trying to change an agreed offer' }); expect(r.error && /can't be corrected/.test(r.error.message), 'an agreed offer can\'t be corrected');
@@ -372,7 +434,12 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   await p.$eval('#offNgLink', e => e.click()); await p.waitForFunction(() => JSON.parse(localStorage.getItem('mockdb')).offer_settings[0].link_changes_default === false);
   await draftAndApprove(p, offC); await p.click('#sgReady'); await p.waitForSelector('#sgReleaseView', { timeout: 30000 }); await tick(p, 'input[name="sgMethod"][value="in_person"]'); await p.waitForTimeout(100); await p.click('#sgRelease'); await p.waitForSelector('#sgView');
   d = await db(p); r = await rpcRound(p, d.offer_signings.find(g => g.offer_id === offC && g.round_no === 1).id); expect(r && r.ok, 'offer C: Round 1 locked');
-  pr = await rpcPresent(p, offC, 'link'); await invoke(p, { action: 'send', signing_id: pr.id });
+  pr = await rpcPresent(p, offC, 'link');
+  // the links as drafts, sent one by one (as Tim's page does)
+  await p.evaluate(async sid => { const c = window.supabase.createClient(), D = window.__mockDB, g = D.offer_signings.find(x => x.id === sid), pp = D.properties.find(x => x.id === g.property_id);
+    for (const s of D.offer_signers.filter(x => x.signing_id === sid && !x.void_at && !x.finished_at)) { const w = window.MAIL.signLinkDraft({ first: s.name.split(' ')[0], address: pp.address, side: g.side, round: g.round_no });
+      const r = await c.rpc('agent_mail_draft_add', { p_offer: g.offer_id, p_kind: 'sign_link', p_signer: s.id, p_to: [s.email], p_cc: [], p_subject: w.subject, p_body: w.body, p_attach: null });
+      await c.functions.invoke('offer-sign', { body: { action: 'send_mail', draft_id: r.data } }); } }, pr.id);
   d = await db(p); expect(pr.link_changes === false && d.offer_events.some(e => e.kind === 'round_presented' && e.detail.signing_id === pr.id && e.detail.link_changes === false), 'the round follows the new default: changes from the link not allowed, recorded on the timeline');
   const cLink = (await mails(p)).filter(m => m.kind === 'offer_sign_link' && m.to === 'vendor@example.com').pop().link;
   // the vendor's link with changes switched off: accept or decline, and Ask Tim for a change; no change tools; a change is refused plainly

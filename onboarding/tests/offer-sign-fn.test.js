@@ -10,6 +10,7 @@
 const path = require('path'), crypto = require('crypto');
 const PDFLib = require('/opt/npm-tools/node_modules/pdf-lib');
 const S = require(path.join(__dirname, '..', 'src', 'sign-core.js'));
+const MAILC = require(path.join(__dirname, '..', 'src', 'mail-core.js'));
 (async () => {
   const errs = [], out = {};
   const expect = (ok, msg) => { if (!ok) errs.push(msg); };
@@ -20,7 +21,7 @@ const S = require(path.join(__dirname, '..', 'src', 'sign-core.js'));
   const doc = await PDFLib.PDFDocument.create(); doc.addPage([595.32, 842.04]).drawText('Synthetic approved draft', { x: 40, y: 800, size: 12 }); doc.addPage([595.32, 842.04]);
   const draft = await doc.save(); let draftSha = sha(draft);
   const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
-  let consented = true, calls = [], mails = [], files = {}, failMail = null, agent = 'agent@example.test', finishComplete = false, tapError = null;
+  let mailTake = null, consented = true, calls = [], mails = [], files = {}, failMail = null, agent = 'agent@example.test', finishComplete = false, tapError = null;
   const material = () => ({ signing_id: SID, offer_id: OID, property_id: PID, address: '1 Example Road, Testville', offer_ref: 'Ana Testbuyer', method: 'link', draft: { id: 'd', number: 2, path: 'properties/' + PID + '/docs/offer-draft-x.pdf', sha256: draftSha },
     places_sha256: 'b'.repeat(64), made_at: '2026-11-24T01:00:00Z', places: [{ id: 'foot:p1:s1', signer: 1, kind: 'initial', why: 'foot', page: 1, x: 500, y: 5, w: 26, h: 13 }, { id: 'block:sig1:s1', signer: 1, kind: 'signature', why: 'block', page: 2, x: 40, y: 500, w: 150, h: 22 }],
     taps: [{ place_id: 'foot:p1:s1', signer: 1 }, { place_id: 'block:sig1:s1', signer: 1 }], signers: [{ position: 1, name: 'Ana Testbuyer', sig_png: png, init_png: png, verified_at: '2026-11-24T00:30:00Z', consent_at: '2026-11-24T00:31:00Z', receipts: [], places: 2, ua: 'Phone', net: 'f'.repeat(64), seen_sha256: 'd'.repeat(64), email: 'SHOULD-NOT-PRINT@example.com' }], marks: [], replaced: [] });
@@ -33,6 +34,8 @@ const S = require(path.join(__dirname, '..', 'src', 'sign-core.js'));
     if (fn === 'offer_sign_tap') return tapError ? { data: null, error: { message: tapError } } : { data: { done: 3, of: 9 }, error: null };
     if (fn === 'offer_sign_ask') return { data: { ok: true, name: 'Ana Testbuyer', address: '1 Example Road', offer_id: OID }, error: null };
     if (fn === 'offer_sign_finish') return { data: { ok: true, complete: finishComplete, signing_id: SID }, error: null };
+    if (fn === 'offer_mail_take') return { data: Object.assign({ id: args.p_draft, kind: 'sign_link', to: ['ana@example.com'], cc: [], subject: 'Your offer to sign: 1 Example Road', body: 'Kia ora Ana,\n\n[the signing link]\n\nTim', attach: null, token: TOK }, mailTake || {}), error: null };
+    if (fn === 'offer_mail_done') return { data: null, error: null };
     if (fn === 'offer_round_material') return { data: material(), error: null };
     if (fn === 'offer_file_confirm') return { data: null, error: null };
     if (fn === 'offer_round_lock') return { data: { id: 'r1', number: 1, sha256: args.p_sha256, existing: false }, error: null };
@@ -40,7 +43,7 @@ const S = require(path.join(__dirname, '..', 'src', 'sign-core.js'));
     return { data: null, error: { message: 'unknown' } };
   };
   files['properties/' + PID + '/docs/offer-draft-x.pdf'] = draft;
-  const h = H.makeHandler({ cors: { 'Access-Control-Allow-Origin': '*' }, appUrl: 'https://packages.dunnerstunner.co.nz/onboarding/', timEmail: 'tim@example.test',
+  const h = H.makeHandler({ cors: { 'Access-Control-Allow-Origin': '*' }, appUrl: 'https://packages.dunnerstunner.co.nz/onboarding/', timEmail: 'tim@example.test', mail: MAILC,
     whoIsAgent: async (a) => (a === 'Bearer good' ? agent : null), rpc: db, signedUrl: async (p) => 'https://signed.example/' + encodeURIComponent(p) + '?t=600',
     download: async (p) => files[p] || null, upload: async (p, b) => { if (files[p]) return { ok: false, exists: true }; files[p] = b; return { ok: true }; },
     sendMail: async (kind, m) => { if (failMail && failMail(m)) throw new Error('SMTP down'); mails.push(Object.assign({ kind }, m)); },
@@ -65,6 +68,8 @@ const S = require(path.join(__dirname, '..', 'src', 'sign-core.js'));
   // the code: emailed to their own address, never returned
   mails = []; x = await J(await post({ action: 'send_code', token: TOK }));
   expect(x.j.ok && !JSON.stringify(x.j).includes('123456') && mails.length === 1 && mails[0].to === 'ana@example.com' && /123456/.test(mails[0].html) && mails[0].kind === 'offer_sign_code', 'the code goes to their own email only, as its own message');
+  { const txt = mails[0].html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    expect(mails[0].subject === 'Your signing code' && txt === 'Your signing code is 123456 From Tim McGuire, McGuire Real Estate.', 'the code email holds only the code and who it is from (automatic: the signer is waiting): ' + txt); }
   failMail = () => true; x = await J(await post({ action: 'send_code', token: TOK })); expect(x.j.ok === false && x.j.reason === 'mail', 'email down: said so'); failMail = null;
   x = await J(await post({ action: 'verify', token: TOK, code: '12 34 56' })); expect(x.j.ok && x.j.session === SES, 'the right code (spaces ignored) gives a session');
   x = await J(await post({ action: 'verify', token: TOK, code: '000000' })); expect(x.j.ok === false && x.j.reason === 'wrong' && !x.j.session, 'a wrong code: no session');
@@ -105,15 +110,30 @@ const S = require(path.join(__dirname, '..', 'src', 'sign-core.js'));
   x = await J(await h2(new Request('https://x/f', { method: 'POST', headers: { Authorization: 'Bearer good' }, body: JSON.stringify({ action: 'lock', signing_id: SID }) })));
   expect(x.status === 400 && /different file is already stored/.test(x.j.error) && !calls.some(c => c[0] === 'offer_round_lock' || c[0] === 'offer_file_confirm'), 'a different file already at the round\'s place: not confirmed, not locked');
   // Tim's actions
-  calls = []; x = await J(await post({ action: 'send', signing_id: SID })); expect(x.status === 403 && !calls.length, 'send without Tim\'s sign-in: refused before anything runs');
-  x = await J(await post({ action: 'send', signing_id: SID }, { Authorization: 'Bearer vendor' })); expect(x.status === 403 && !calls.length, 'a signed-in vendor: refused');
+  // Tim's actions: an email goes only when Tim presses Send on its draft (send_mail), exactly as the draft stands
+  const DID = '6c6c6c6c-0000-4000-8000-000000000001';
+  calls = []; x = await J(await post({ action: 'send_mail', draft_id: DID })); expect(x.status === 403 && !calls.length, 'send without Tim\'s sign-in: refused before anything runs');
+  x = await J(await post({ action: 'send_mail', draft_id: DID }, { Authorization: 'Bearer vendor' })); expect(x.status === 403 && !calls.length, 'a signed-in vendor: refused');
+  x = await J(await post({ action: 'send', signing_id: SID }, { Authorization: 'Bearer good' })); expect(x.status === 400 && !calls.some(c => c[0] === 'offer_sign_issue'), 'the old "send every link now" is gone');
   x = await J(await post({ action: 'lock', signing_id: 'nope' }, { Authorization: 'Bearer good' })); expect(x.status === 400, 'a bad signing id');
-  mails = []; failMail = m => m.to === 'bo@example.com';
-  x = await J(await post({ action: 'send', signing_id: SID }, { Authorization: 'Bearer good' })); failMail = null;
-  const iss = calls.find(c => c[0] === 'offer_sign_issue');
-  expect(iss && iss[1].p_actor === agent, 'links issued as Tim');
-  expect(mails.length === 1 && mails[0].to === 'ana@example.com' && mails[0].html.includes('?sign=' + TOK) && mails[0].kind === 'offer_sign_link', 'each purchaser is emailed their own link');
-  expect(x.j.sent === 1 && JSON.stringify(x.j.failed) === '[2]' && !JSON.stringify(x.j).includes(TOK), 'Tim is told who wasn\'t emailed; no token reaches his page');
+  mails = []; calls = [];
+  x = await J(await post({ action: 'send_mail', draft_id: DID }, { Authorization: 'Bearer good' }));
+  const tk_ = calls.find(c => c[0] === 'offer_mail_take'), dn_ = calls.find(c => c[0] === 'offer_mail_done');
+  expect(tk_ && tk_[1].p_actor === agent && tk_[1].p_draft === DID, 'the draft is taken as Tim');
+  expect(mails.length === 1 && mails[0].to.join() === 'ana@example.com' && mails[0].html.includes('?sign=' + TOK) && mails[0].kind === 'offer_mail_sign_link' && mails[0].subject === 'Your offer to sign: 1 Example Road', 'that one signer is emailed their own link, with the draft\'s subject');
+  expect(dn_ && dn_[1].p_ok === true && dn_[1].p_body.includes('?sign=[personal link]') && !dn_[1].p_body.includes(TOK) && x.j.ok && !JSON.stringify(x.j).includes(TOK), 'the log keeps exactly what went, without the token; no token reaches his page');
+  mails = []; calls = []; failMail = m => true;
+  x = await J(await post({ action: 'send_mail', draft_id: DID }, { Authorization: 'Bearer good' })); failMail = null;
+  expect(!x.j.ok && /didn't send/.test(x.j.error) && calls.some(c => c[0] === 'offer_mail_done' && c[1].p_ok === false), 'a failed send: Tim is told, and it is logged as failed (the draft stays to send again)');
+  // the agreed copy: attached only if the stored file matches its fingerprint
+  mails = []; calls = []; mailTake = { kind: 'agreed_purchasers', to: ['ana@example.com', 'bo@example.com'], cc: ['pat@law.example'], subject: 'Congratulations! 1 Example Road', body: 'Dear Ana and Bo,\n\n**Roadmap**', attach: { path: 'properties/' + PID + '/docs/offer-draft-x.pdf', sha256: draftSha, name: 'Agreement 1 Example Road.pdf' }, token: null };
+  x = await J(await post({ action: 'send_mail', draft_id: DID }, { Authorization: 'Bearer good' }));
+  expect(x.j.ok && mails.length === 1 && mails[0].cc.join() === 'pat@law.example' && mails[0].attachments && mails[0].attachments[0].filename === 'Agreement 1 Example Road.pdf' && mails[0].html.includes('<strong>Roadmap</strong>'), 'the agreed copy goes to the purchasers, cc their lawyer, with the file attached');
+  { const dn2 = calls.find(c => c[0] === 'offer_mail_done'); expect(dn2 && dn2[1].p_ok === true && dn2[1].p_attachments[0].sha256 === draftSha, 'the log names the attached file by its fingerprint'); }
+  mails = []; calls = []; mailTake.attach.sha256 = 'f'.repeat(64);
+  x = await J(await post({ action: 'send_mail', draft_id: DID }, { Authorization: 'Bearer good' }));
+  expect(!x.j.ok && !mails.length && calls.some(c => c[0] === 'offer_mail_done' && c[1].p_ok === false), 'an agreed copy that doesn\'t match its fingerprint: nothing sent');
+  mailTake = null;
   Object.keys(files).filter(k => /offer-round-/.test(k)).forEach(k => delete files[k]);
   x = await J(await post({ action: 'lock', signing_id: SID }, { Authorization: 'Bearer good' })); expect(x.j.ok && x.j.round.number === 1, 'Tim can lock Round 1 from his screen');
 

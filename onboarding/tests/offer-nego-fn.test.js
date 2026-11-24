@@ -10,6 +10,7 @@
 const path = require('path'), crypto = require('crypto'), fs = require('fs');
 const PDFLib = require('/opt/npm-tools/node_modules/pdf-lib');
 const S = require(path.join(__dirname, '..', 'src', 'sign-core.js'));
+const MAILC = require(path.join(__dirname, '..', 'src', 'mail-core.js'));
 const N = require(path.join(__dirname, '..', 'src', 'nego-core.js'));
 const D = require(path.join(__dirname, '..', 'src', 'draft-core.js'));
 (async () => {
@@ -43,7 +44,8 @@ const D = require(path.join(__dirname, '..', 'src', 'draft-core.js'));
     return { round_id: 'r3', number: 3, doc_round: 3, side: 'purchaser', signing_id: 'g3', sha256: 'e'.repeat(64), places: pl, taps: (outstandingLayers ? pl.slice(0, 1) : pl).map(p => ({ place_id: p.id, signer: 1 })), signers: L1.signers, marks: [] }; };
   const db = async (fn, args) => {
     calls.push([fn, args]);
-    if (fn === 'offer_sign_change') return changeErr ? { data: null, error: { message: changeErr } } : { data: Object.assign({ id: args.p_id, reopened: 0, reopened_signers: [], by: 'Vera Vendor', round: 2, address: '1 Example Road' }, reopen || {}), error: null };
+    if (fn === 'offer_sign_change') return changeErr ? { data: null, error: { message: changeErr } } : { data: Object.assign({ id: args.p_id, reopened: 0, reopened_signers: [], by: 'Vera Vendor', round: 2, address: '1 Example Road', offer_id: OID }, reopen || {}), error: null };
+    if (fn === 'offer_mail_draft_sys') return { data: 'draft-1', error: null };
     if (fn === 'offer_sign_issue') return { data: { address: '1 Example Road', side: 'vendor', round: 2, links: [{ signer_id: 's1', position: 1, name: 'Vera Vendor', email: 'vera@example.com', token: TOK }] }, error: null };
     if (fn === 'offer_sign_open') return { data: { ok: true, first: 'Vera', address: '1 Example Road', finished: false, stopped: null, held: false, email_hint: 'v***@example.com', side: 'vendor', round: 2, email: 'vera@example.com' }, error: null };
     if (fn === 'offer_sign_finish') return { data: { ok: true, complete: true, signing_id: SID }, error: null };
@@ -58,7 +60,7 @@ const D = require(path.join(__dirname, '..', 'src', 'draft-core.js'));
   const h = H.makeHandler({ cors: { 'Access-Control-Allow-Origin': 'https://packages.dunnerstunner.co.nz' }, appUrl: 'https://packages.dunnerstunner.co.nz/onboarding/', timEmail: 'tim@example.test',
     whoIsAgent: async (a) => (a === 'Bearer good' ? agent : null), rpc: db, signedUrl: async (p) => 'https://signed.example/' + encodeURIComponent(p),
     download: async (p) => files[p] || null, upload: async (p, b) => { if (files[p]) return { ok: false, exists: true }; files[p] = b; return { ok: true }; },
-    sendMail: async (kind, m) => { mails.push(Object.assign({ kind }, m)); }, renderRound: (d, m) => S.renderRound(PDFLib, d, m), renderWorking: (d, m) => N.renderWorking(PDFLib, d, m), nego: N, net: netOf });
+    sendMail: async (kind, m) => { mails.push(Object.assign({ kind }, m)); }, renderRound: (d, m) => S.renderRound(PDFLib, d, m), renderWorking: (d, m) => N.renderWorking(PDFLib, d, m), nego: N, mail: MAILC, net: netOf });
   const post = (body, headers) => h(new Request('https://x.supabase.co/functions/v1/offer-sign', { method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json', 'user-agent': 'Phone browser', 'x-forwarded-for': '203.0.113.7' }, headers || {}), body: JSON.stringify(body) }));
   const J = async r => ({ status: r.status, j: await r.json() });
   const text = async bytes => (await D.readPages(pdfjs, new Uint8Array(bytes))).map(p => p.items.map(i => i.s).join(' '));
@@ -72,11 +74,13 @@ const D = require(path.join(__dirname, '..', 'src', 'draft-core.js'));
   const ch = calls.find(c => c[0] === 'offer_sign_change');
   expect(r.status === 200 && r.j.ok && r.j.id === MK && ch && ch[1].p_token === TOK && ch[1].p_session === SES && typeof ch[1].p_net === 'string' && ch[1].p_net.length > 8 && ch[1].p_geometry.text === '$690,000' && ch[1].p_places.length === 1, 'a change is passed on to the database as data, with the token, session and network (for its limit)');
   expect(!mails.length, 'nobody reopened: nobody emailed');
-  // a change that reopens someone who had finished: they are told by email (their link still works), and so is Tim
-  reopen = { reopened: 1, reopened_signers: [{ position: 2, name: 'Val Vendor', email: 'val@example.com' }] };
+  // a change that reopens someone who had finished: no email to anyone now (Tim included; he hears once, when the round is submitted);
+  // a draft for them, which Tim reads and sends himself
+  reopen = { reopened: 1, reopened_signers: [{ id: 'sig-val', position: 2, name: 'Val Vendor', email: 'val@example.com' }] }; calls = [];
   r = await J(await post({ action: 'change', token: TOK, session: SES, id: MK, kind: 'strike', page: 1, geometry: { x0: 100, x1: 160, y: 403 }, places: [] }));
-  const vm2 = mails.find(m => m.to === 'val@example.com'), tm2 = mails.find(m => m.to === 'tim@example.test' && m.kind === 'offer_change_reopened');
-  expect(r.j.ok && r.j.reopened === 1 && vm2 && /A change to initial/.test(vm2.subject) && /link I sent you earlier/.test(vm2.html) && tm2 && /Val Vendor/.test(tm2.html), 'a reopened signer and Tim are each emailed');
+  const dsys = calls.find(c => c[0] === 'offer_mail_draft_sys');
+  expect(r.j.ok && r.j.reopened === 1 && !mails.length, 'a change that reopens a signer: no email to anyone, not even Tim');
+  expect(dsys && dsys[1].p_offer === OID && dsys[1].p_signer === 'sig-val' && dsys[1].p_to.join() === 'val@example.com' && /A change to initial/.test(dsys[1].p_subject) && /link I sent you earlier/.test(dsys[1].p_body) && /Kia ora Val/.test(dsys[1].p_body), 'a draft for Val, in Tim\'s voice, for him to send');
   reopen = null; mails = [];
   changeErr = "Those words hold a purchaser's own phone or email, so they can't go on the agreement. Only the lawyers' details go on it";
   r = await J(await post({ action: 'change', token: TOK, session: SES, id: MK, kind: 'insert', page: 1, geometry: { x: 1, y: 1, text: 'x', size: 9 }, places: [] }));
@@ -98,13 +102,11 @@ const D = require(path.join(__dirname, '..', 'src', 'draft-core.js'));
     expect(mails[1] && mails[1].kind === 'offer_sign_ask' && mails[1].subject === 'A vendor asks for a change: 1 Example Road' && !/buyer/.test(mails[1].subject), 'a vendor\'s ask is worded for a vendor, not a buyer');
     mails = []; }
 
-  // ── Send to the vendors: worded for them ──
-  r = await J(await post({ action: 'send', signing_id: SID }));
+  // ── the vendors' link email: a draft worded for them (Tim sends it with send_mail; the old "send" is gone) ──
+  r = await J(await post({ action: 'send_mail', draft_id: '6c6c6c6c-0000-4000-8000-000000000001' }));
   expect(r.status === 403, 'Send needs Tim');
-  r = await J(await post({ action: 'send', signing_id: SID }, { Authorization: 'Bearer good' }));
-  const vm = mails.find(m => m.kind === 'offer_sign_link');
-  expect(r.j.ok && vm && vm.to === 'vera@example.com' && /An offer on 1 Example Road/.test(vm.subject) && /talk to your lawyer/.test(vm.html) && /counteroffer/.test(vm.html) && !/Your offer to sign/.test(vm.subject), 'the vendors\' email is worded for them');
-  expect(!JSON.stringify(r.j).includes(TOK), 'the link token is never returned to the page');
+  { const w = MAILC.signLinkDraft({ first: 'Vera', address: '1 Example Road', side: 'vendor', round: 2 });
+    expect(/An offer on 1 Example Road/.test(w.subject) && /talk to your lawyer/.test(w.body) && /counteroffer/.test(w.body) && /\[the signing link\]/.test(w.body) && /comes straight to me/.test(w.body), 'the vendors\' link email is worded for them, and says it comes straight to Tim'); }
 
   // ── the last vendor finishes: Round 2 made from the layers and locked ──
   mails = [];
@@ -124,7 +126,9 @@ const D = require(path.join(__dirname, '..', 'src', 'draft-core.js'));
   expect(rt[0].includes('$690,000') && rt.length === 3 && /Execution record: Round 2/.test(rt[2]) && /lifted/i.test(rt[2]) && !/vera@example|SHOULD-NOT/.test(rt.join(' ')), 'the round shows the typed price, with its record at the end and no contact details');
   const ini = rt[0]; out.r2text = ini.slice(0, 80);
   expect(/Changes from link: allowed/.test(rt[2]) && lk[1].p_execution.link_changes === true, 'the round\'s record says whether changes from the link were allowed');
-  const tm = mails.find(m => m.kind === 'offer_round_locked'); expect(tm && /Round 2 signed and locked/.test(tm.subject) && /Nothing has gone back to the purchasers/.test(tm.html), 'Tim is told nothing has gone back yet');
+  const tm = mails.find(m => m.kind === 'offer_round_locked'); out.notice = tm ? { to: tm.to, subject: tm.subject, html: tm.html.slice(0, 900) } : null;
+  expect(tm && tm.to === 'tim@example.test' && tm.subject === 'Round 2 submitted by the vendors: 1 Example Road, Testville' && /Nothing has gone back to the purchasers/.test(tm.html) && /What changed in this round/.test(tm.html) && tm.html.includes(`https://portal.dunnerstunner.co.nz/properties/${PID}/offers/${OID}/signing/${SID}`), 'Tim is told once: who, what changed, which round, and the round\'s portal address');
+  expect(mails.length === 1, 'the submitted round: exactly one email, to Tim, and nobody else: ' + mails.map(m => m.kind + '>' + m.to).join(', '));
   // an acceptance (no changes, nothing outstanding) is flagged as the agreement formed
   marks2 = []; const accM = material; calls = [];
   const h2 = H.makeHandler({ cors: {}, appUrl: 'x', timEmail: 'tim@example.test', whoIsAgent: async (a) => (a === 'Bearer good' ? agent : null),

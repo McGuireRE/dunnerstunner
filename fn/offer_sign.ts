@@ -6,6 +6,8 @@
 // offer-draft does. The database functions it calls can only be run by the service role. Email goes through shared.ts sendMail: the
 // links and codes to each purchaser's own address, a note to Tim when a purchaser asks for a change, and to Tim when Round 1 locks.
 // Codes are emailed as their own message; there is no text-message provider yet (see OFFERS-PLAN.md, phase 3 questions).
+// Emails as drafts (Tim, 24 November 2026; EMAIL-VOICE.md): links, "please initial again" notices and the agreed copy's emails are drafts Tim
+// sends one at a time (action send_mail); only the one-time code goes by itself. Tim is told once per submitted round (src/mail-core.js).
 // Round 1 is drawn with pdf-lib and the same signing core the browser uses (onboarding/src/sign-core.js, at the same commit).
 // Phase 4 (migration 021): the vendors and the counteroffers go through the same function (JWT verification still OFF): later rounds,
 // a change made from a link, and Tim's "agree" (the agreed copy) are drawn with the negotiation core (onboarding/src/nego-core.js).
@@ -14,13 +16,16 @@ import { createClient } from "npm:@supabase/supabase-js@2.45.4";
 import * as PDFLib from "npm:pdf-lib@1.17.1";
 import "../onboarding/src/sign-core.js";
 import "../onboarding/src/nego-core.js";
+import "../onboarding/src/mail-core.js";
 import { makeHandler } from "./offer_sign_handler.ts";
 import { netOf } from "./offer_public_handler.ts";
 
-const SIGN = (globalThis as any).SIGN, NEGO = (globalThis as any).NEGO;
+const SIGN = (globalThis as any).SIGN, NEGO = (globalThis as any).NEGO, MAIL = (globalThis as any).MAIL;
 Deno.serve(makeHandler({
   cors: corsFor,   // only the onboarding pages (packages.dunnerstunner.co.nz) and Tim's portal (portal.dunnerstunner.co.nz) call this
   appUrl: APP_URL,
+  portalUrl: "https://portal.dunnerstunner.co.nz/",
+  mail: MAIL,
   timEmail: TIM_EMAIL,
   whoIsAgent: async (authorization) => {
     const uc = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!, { global: { headers: { Authorization: authorization } }, auth: { persistSession: false } });

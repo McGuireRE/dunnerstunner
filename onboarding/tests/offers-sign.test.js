@@ -60,6 +60,12 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
     conditions: [{ key: 'finance', days: 10 }, { key: 'builders', days: 10 }, { key: 'electrical', days: 10 }], kiwisaver: false, entity: '', nominee: false,
     purchasers: [{ first: 'Ana Maria', last: 'Testbuyer', email: 'ana.p@example.com', phone: '022 777 6666' }, { first: 'Bo', last: 'Testbuyer', email: 'bo.p@example.com', phone: '022 555 4444' }, { first: 'Cy', last: 'Testbuyer', email: 'cy.p@example.com', phone: '022 333 2222' }, { first: 'Di', last: 'Testbuyer', email: 'di.p@example.com', phone: '022 111 0000' }],
     comments: '', lawyer: { firm: 'Synthetic Law', person: 'Pat Solicitor', email: 'pat@synthlaw.example', phone: '03 477 1234' }, related: false, date_help: false, privacy: true, chattels_add: ['Outdoor table'], chattels_exclude: ['Heat pump'], gst_registered: null, gst_number: null }, o || {});
+  // Tim prepares the link emails (drafts: nothing is sent), then sends them from the page: one at a time, or ticking Reviewed and Send all reviewed
+  const prepAndSend = async (p, all) => { const n0 = (await mails(p)).length; await p.click('#sgSendGo'); await p.waitForSelector('[data-mlsend]', { timeout: 20000 });
+    expect((await mails(p)).length === n0, 'preparing the link emails sends nothing');
+    if (all) { for (const c of await p.$$('[data-mlrev]')) { await c.evaluate(e => { if (!e.checked) e.click(); }); await p.waitForTimeout(150); } await p.click('[data-mlall]'); await p.waitForFunction(() => !document.querySelector('[data-mlsend]'), null, { timeout: 20000 }); }
+    else for (let i = 0; i < 20; i++) { const bs = await p.$$('[data-mlsend]'); if (!bs.length) break; await bs[0].click(); await p.waitForFunction(n => document.querySelectorAll('[data-mlsend]').length < n, bs.length, { timeout: 20000 }); }
+    await p.waitForSelector('#sgSigners'); };
   // draw a squiggle on a signature pad
   const draw = async (p, sel, seed_) => { await (await p.$(sel)).scrollIntoViewIfNeeded(); const bx = await (await p.$(sel)).boundingBox(); await p.mouse.move(bx.x + 20, bx.y + bx.height / 2); await p.mouse.down(); for (let i = 1; i <= 12; i++) await p.mouse.move(bx.x + 20 + i * (bx.width - 40) / 12, bx.y + bx.height / 2 + Math.sin(i + (seed_ || 0)) * bx.height / 4); await p.mouse.up(); };
   const tick = (p, sel) => p.$eval(sel, e => { if (!e.checked) e.click(); });
@@ -132,6 +138,11 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   out.need1 = +(await p.textContent('#sgCount')).match(/of (\d+)/)[1];
   expect(out.need1 === gA.places.filter(x => x.signer === 1).length, 'the count is every one of their places');
   expect(!(await p.$$eval('#sgFlow button', bs => bs.some(x => /all/i.test(x.textContent)))), 'no "apply to all"');
+  // Tim mediates: one plain line at the final confirm step only, never beside each place, and a tap raises nothing
+  { const t = await p.$$eval('#main *', es => { const re = /goes straight to Tim McGuire/; return es.filter(e => re.test(e.textContent) && ![...e.children].some(c => re.test(c.textContent))).length; });
+    const beside = await p.$eval('#sgToTimOnly', e => !!e.closest('section') && !!e.closest('section').querySelector('#sgFinishGo'));
+    out.toTimLine = { t, beside, text: await p.textContent('#sgToTimOnly') };
+    expect(t === 1 && beside && /He will be in touch with the other party; they are not told until he does\./.test(await p.textContent('#sgToTimOnly')), 'the line shows once, beside Finish, with Tim\'s name'); }
   expect(await p.isDisabled('#sgFinishGo'), 'Finish waits until every place is done');
   expect(await p.$('#sgTools') && !(await p.$('#sgAskBox')), "on Tim's screen the page can be marked");
   expect(!(await side(p)), 'the places at 390 px: no sideways scroll'); await shot(p, 'places');
@@ -233,7 +244,7 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   await p.click('#sgChange'); await p.waitForSelector('#sgReleaseView'); await p.click('#sgRelease'); await p.waitForSelector('#sgSendGo');
   d = await db(p); expect(d.offer_events.filter(e => e.kind === 'sign_cancelled' && e.offer_id === offB).length === 2 && d.offer_signings.filter(x => x.offer_id === offB && x.status === 'cancelled').length === 2, 'each change is recorded; the stopped releases are kept');
   expect(!(await mails(p)).some(m => /offer_sign_(link|code)/.test(m.kind)), 'released by link: still nothing sent');
-  await p.click('#sgSendGo'); await p.waitForSelector('#sgSigners');
+  await prepAndSend(p);
   let ml = await mails(p); const links = ml.filter(m => m.kind === 'offer_sign_link');
   expect(links.length === 2 && links.map(m => m.to).sort().join() === 'eve.l@example.com,fin.l@example.com' && links[0].link !== links[1].link, 'Send: each purchaser emailed their own link');
   d = await db(p); const gB = d.offer_signings.find(x => x.offer_id === offB && !['replaced', 'cancelled'].includes(x.status));
@@ -281,7 +292,7 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   expect(gB1.status === 'replaced' && gB1.replaced_by === gB2.id && d.offer_signers.filter(s => s.signing_id === gB.id).every(s => s.void_at) && d.offer_sign_taps.filter(t => t.signing_id === gB.id).length === 4, 'the old signing replaced: its taps kept, its signers void');
   await p.click('#sgBackO'); await p.waitForSelector('#sgList'); expect(/Replaced by a newer draft/.test(await p.textContent('#sgList')), 'the offer page shows the old one as replaced');
   await p.click(`[data-signing="${gB.id}"]`); await p.waitForSelector('#sgReplaced'); expect(/kept, but they are void/.test(await p.textContent('#sgReplaced')) && /Replaced \(kept, void\)/.test(await p.textContent('#sgSigners')), 'opening it: replaced, the signatures kept but void');
-  await p.click('#sgNewer'); await p.waitForSelector('#sgSendGo'); await p.click('#sgSendGo'); await p.waitForSelector('#sgSigners');
+  await p.click('#sgNewer'); await p.waitForSelector('#sgSendGo'); await prepAndSend(p, true);   // this time: tick Reviewed on each, then Send all reviewed
   const links2 = (await mails(p)).filter(m => m.kind === 'offer_sign_link').slice(-2);
   await p.evaluate(() => localStorage.removeItem('mocksession')); await p.close();
   q = await page('dark'); await q.goto(eveUrl); await q.waitForSelector('#sgClosed'); expect(/isn't working/.test(await q.textContent('#sgClosed')), "Eve's old link no longer works"); await q.close();
@@ -334,7 +345,7 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   process.stderr.write('step 10\n');
   const gil = { first: 'Gil', last: 'Onebuyer', email: 'gil.o@example.com', phone: '027 500 6000' };
   const offE = (await rpc(p, 'agent_offer_add', { p_property: 'P1', p_offer: offer({ sign: 'digital', price: '661000', conditions: [{ key: 'finance', days: 10 }], chattels_add: [], chattels_exclude: [], purchasers: [gil] }) })).data;
-  await openProp(p); await draftAndApprove(offE); await p.click('#sgReady'); await p.waitForSelector('#sgReleaseView', { timeout: 30000 }); await p.click('#sgRelease'); await p.waitForSelector('#sgSendGo'); await p.click('#sgSendGo'); await p.waitForSelector('#sgSigners');
+  await openProp(p); await draftAndApprove(offE); await p.click('#sgReady'); await p.waitForSelector('#sgReleaseView', { timeout: 30000 }); await p.click('#sgRelease'); await p.waitForSelector('#sgSendGo'); await prepAndSend(p);
   const gilLink = (await mails(p)).filter(m => m.kind === 'offer_sign_link' && m.to === gil.email).pop().link;
   await p.evaluate(() => { localStorage.removeItem('mocksession'); localStorage.setItem('mockLockFail', '1'); }); await p.close();
   q = await page(); await q.goto(gilLink); await q.waitForSelector('#sgCode'); await q.click('#sgSendCode'); await q.waitForFunction(() => /Sent/.test(document.querySelector('#sgCodeMsg').textContent));

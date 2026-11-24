@@ -31,6 +31,8 @@ type Rpc = (fn: string, args: Record<string, unknown>) => Promise<{ data: any; e
 export type Deps = {
   cors: Record<string, string> | ((req: Request) => Record<string, string>);   // a function: the headers for each request (corsFor)
   appUrl: string;
+  portalUrl?: string;   // Tim's portal (https://portal.dunnerstunner.co.nz/), for the address of a round in his notice
+  mail?: any;           // src/mail-core.js (MAIL): the wording of drafts and of Tim's round notice
   timEmail: string;
   whoIsAgent: (authorization: string) => Promise<string | null>;
   rpc: Rpc;                                                          // the offer_sign_* functions, offer_round_*, offer_file_confirm, with the service role
@@ -101,7 +103,14 @@ export function makeHandler(d: Deps) {
     await call("offer_file_confirm", { p_path: path, p_sha256: ssha, p_size: stored.length, p_actor: actor });
     const lk = await call("offer_round_lock", { p_signing: signingId, p_path: path, p_sha256: ssha, p_size: stored.length, p_execution: record, p_actor: actor });
     const who = m.side === "vendor" ? "vendor" : "purchaser", next = round === 1 ? "Nothing has gone to the vendors. Look at it, then present it when you are ready." : formed ? "Both sides have now signed the same version with nothing outstanding. Open the offer to confirm the agreement." : `Nothing has gone back to the ${m.side === "vendor" ? "purchasers" : "vendors"}. Look at it, then present it when you are ready.`;
-    try { await d.sendMail("offer_round_locked", { to: d.timEmail, subject: `Round ${round} signed and locked: ${m.address || "an offer"}`, html: wrap(`<p>Every ${who} has signed Round ${round} of ${esc(m.offer_ref || "the offer")} for <strong>${esc(m.address || "")}</strong>${round > 1 ? ` (${(m.marks || []).length ? (m.marks || []).length + " change" + ((m.marks || []).length === 1 ? "" : "s") : "no changes"})` : ""}.</p><p>It is locked with its execution record. Fingerprint: <code>${esc(ssha.slice(0, 16))}</code>.</p><p>${esc(next)} <a href="${esc(d.appUrl)}">${esc(d.appUrl)}</a></p>`) }); } catch (_) { /* the round is locked either way */ }
+    // Tim alone is told, once per submitted round (Tim, 24 November 2026: he mediates; nobody else hears of it until he presents it)
+    if (!lk.existing) {
+      const portal = `${(d.portalUrl || "https://portal.dunnerstunner.co.nz/").replace(/\/?$/, "/")}properties/${m.property_id}/offers/${m.offer_id}/signing/${signingId}`;
+      const nt = d.mail ? d.mail.roundNotice({ side: m.side || "purchaser", round, docRound: m.doc_round, address: m.address, signers: (m.signers || []).map((s: any) => s.name),
+        changes: (m.marks || []).map((c: any) => ({ kind: c.kind, page: c.page, text: c.geometry && c.geometry.text, by: c.by_name || c.by })), portalUrl: portal }) : null;
+      const extra = `<p>${esc(next)}</p><p>Fingerprint: <code>${esc(ssha.slice(0, 16))}</code></p>`;
+      try { await d.sendMail("offer_round_locked", { to: d.timEmail, subject: nt ? nt.subject : `Round ${round} submitted: ${m.address || "an offer"}`, html: nt ? d.mail.toHtml(nt.body).replace(/<\/div>$/, extra + "</div>") : wrap(`<p>Round ${round} for ${esc(m.address || "")} is signed and locked.</p>${extra}<p><a href="${esc(portal)}">${esc(portal)}</a></p>`) }); } catch (_) { /* the round is locked either way */ }
+    }
     return { number: lk.number, round: lk.round || round, sha256: lk.sha256, existing: !!lk.existing, formed };
   }
   // the agreed copy: every round's layers, nothing outstanding (checked again here by the core), the date Tim typed at the top
@@ -135,7 +144,7 @@ export function makeHandler(d: Deps) {
     const action = String(body.action || ""), net = d.net(req), ua = (req.headers.get("user-agent") || "").slice(0, 400);
 
     // ── Tim ──
-    if (action === "send" || action === "lock" || action === "agree") {
+    if (action === "send_mail" || action === "lock" || action === "agree") {
       const auth = req.headers.get("Authorization") || "";
       let agent: string | null = null; if (/^Bearer\s+\S+/.test(auth)) { try { agent = await d.whoIsAgent(auth); } catch (_) { agent = null; } }
       if (!agent) return json({ error: "Only Tim can do this" }, 403);
@@ -144,33 +153,28 @@ export function makeHandler(d: Deps) {
         if (!UUID.test(oid) || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/.test(at)) return json({ error: "Bad request" }, 400);
         try { return json({ ok: true, agreement: await agree(oid, at, dt, agent) }); } catch (e) { return json({ ok: false, error: plain((e as Error).message) }, 400); }
       }
-      const sid = String(body.signing_id || ""); if (!UUID.test(sid)) return json({ error: "Bad request" }, 400);
-      try {
-        if (action === "lock") return json({ ok: true, round: await lockRound(sid, agent) });
-        const r = await call("offer_sign_issue", { p_signing: sid, p_actor: agent });
-        const failed: number[] = []; let sent = 0;
-        for (const l of r.links || []) {
-          const link = `${d.appUrl}?sign=${encodeURIComponent(l.token)}`, first = String(l.name || "").split(" ")[0];
-          try {
-            if (r.side === "vendor" || (r.round || 1) > 1) {
-              const v = r.side === "vendor";
-              await d.sendMail("offer_sign_link", { to: l.email, subject: v ? `An offer on ${r.address || "your property"}` : `The vendors' reply to your offer: ${r.address || "the property"}`, html: wrap(`<p>Kia ora ${esc(first)},</p>
-              <p>${v ? `I have an offer on <strong>${esc(r.address || "")}</strong> for you to look at.` : `The vendors have answered your offer for <strong>${esc(r.address || "")}</strong>.`} This link is just for you: please don't forward it.</p>
-              <p><a href="${esc(link)}" style="display:inline-block;background:#1F3B57;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none">Open it</a></p>
-              <p>When you open it, I'll email you a one-time code to check it's you. You can accept it as it stands, or make changes and sign them as a counteroffer. Each of you initials every change and signs.</p>
-              <p>You can talk to your lawyer at any time before you sign, and I'm happy to go through it with you. Nothing goes back until you have all signed and I have checked it.</p><p>Tim</p>`) });
-              sent++; continue;
-            }
-            await d.sendMail("offer_sign_link", { to: l.email, subject: `Your offer to sign: ${r.address || "the property"}`, html: wrap(`<p>Kia ora ${esc(first)},</p>
-              <p>Your offer for <strong>${esc(r.address || "")}</strong> is ready for you to sign. This link is just for you: please don't forward it.</p>
-              <p><a href="${esc(link)}" style="display:inline-block;background:#1F3B57;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none">Open my offer to sign</a></p>
-              <p>When you open it, I'll email you a one-time code to check it's you. You read each page, then sign and initial each place yourself. It takes about 15 minutes.</p>
-              <p>If something isn't right, use "Ask Tim for a change" on the page, or call me. Nothing goes to the sellers until you have all signed and I have checked it.</p><p>Tim</p>`) });
-            sent++;
-          } catch (_) { failed.push(l.position); }
+      // Tim presses Send on one draft (offer_mail_drafts, 024): it goes exactly as it stands, and the log keeps exactly what went.
+      // A signing link's personal token is made now, for that signer only, and is never kept or returned anywhere.
+      if (action === "send_mail") {
+        const did = String(body.draft_id || ""); if (!UUID.test(did)) return json({ error: "Bad request" }, 400);
+        let m: any; try { m = await call("offer_mail_take", { p_draft: did, p_actor: agent }); } catch (e) { return json({ ok: false, error: plain((e as Error).message) }, 400); }
+        const link = m.token ? `${d.appUrl}?sign=${encodeURIComponent(m.token)}` : null;
+        const logged = String(m.body).split("[the signing link]").join(link ? `${d.appUrl}?sign=[personal link]` : "[the signing link]");
+        const atts: any[] = [], attLog: any[] = [];
+        try {
+          if (m.attach && m.attach.path) { const f = await d.download(m.attach.path); if (!f || await sha256(f) !== m.attach.sha256) throw new Error("The agreed copy doesn't match its fingerprint, so nothing was sent.");
+            atts.push({ filename: String(m.attach.name || "Agreement.pdf"), content: f, contentType: "application/pdf" }); attLog.push({ name: String(m.attach.name || "Agreement.pdf"), sha256: m.attach.sha256 }); }
+          const html = d.mail ? d.mail.toHtml(m.body, link) : wrap(esc(m.body).replace(/\n/g, "<br>"));
+          await d.sendMail("offer_mail_" + m.kind, Object.assign({ to: m.to, cc: (m.cc || []).length ? m.cc : undefined, subject: m.subject, html }, atts.length ? { attachments: atts } : {}));
+        } catch (e) {
+          try { await call("offer_mail_done", { p_draft: did, p_actor: agent, p_body: logged, p_attachments: attLog, p_ok: false, p_error: String((e as Error).message || e).slice(0, 400) }); } catch (_) { /* the failure stays visible on the draft */ }
+          return json({ ok: false, error: "It didn't send. Nothing has gone. Try again." });
         }
-        return json({ ok: failed.length === 0, sent, failed });
-      } catch (e) { return json({ ok: false, error: plain((e as Error).message) }, 400); }
+        await call("offer_mail_done", { p_draft: did, p_actor: agent, p_body: logged, p_attachments: attLog, p_ok: true, p_error: null });
+        return json({ ok: true });
+      }
+      const sid = String(body.signing_id || ""); if (!UUID.test(sid)) return json({ error: "Bad request" }, 400);
+      try { return json({ ok: true, round: await lockRound(sid, agent) }); } catch (e) { return json({ ok: false, error: plain((e as Error).message) }, 400); }
     }
 
     // ── a purchaser, by their own link ──
@@ -187,7 +191,8 @@ export function makeHandler(d: Deps) {
         const r = await call("offer_sign_code", { p_token: token, p_net: net });
         if (!r || r.ok !== true) return json({ ok: false, reason: r && r.reason === "busy" ? "busy" : r && r.reason === "stopped" ? "stopped" : undefined });
         try {
-          await d.sendMail("offer_sign_code", { to: r.email, subject: `Your code to sign: ${r.address || "your offer"}`, html: wrap(`<p>Your code is</p><p style="font-size:28px;letter-spacing:6px;font-weight:bold">${esc(r.code)}</p><p>Type it on the signing page. It works once, for 15 minutes. If you didn't ask for it, you can ignore this email.</p>`) });
+          // automatic (the signer is waiting for it): only the code, and who it is from (open point for Tim, EMAIL-VOICE.md)
+          await d.sendMail("offer_sign_code", { to: r.email, subject: "Your signing code", html: `<div style="font-family:Arial,sans-serif;font-size:15px;line-height:1.5;color:#1F1D1A"><p>Your signing code is <strong style="font-size:22px;letter-spacing:4px">${esc(r.code)}</strong></p><p>From Tim McGuire, McGuire Real Estate.</p></div>` });
         } catch (_) { return json({ ok: false, reason: "mail" }); }
         return json({ ok: true });
       }
@@ -213,11 +218,12 @@ export function makeHandler(d: Deps) {
         const id = String(body.id || ""), target = body.target == null ? null : String(body.target);
         if (!UUID.test(id) || (target !== null && !UUID.test(target)) || !Number.isInteger(body.page) || !body.geometry || typeof body.geometry !== "object" || !Array.isArray(body.places)) return json({ ok: false, error: "That change didn't save. Please try again." }, 400);
         const r = await call("offer_sign_change", { p_token: token, p_session: session, p_net: net, p_id: id, p_kind: String(body.kind || "").slice(0, 12), p_page: body.page, p_geometry: body.geometry, p_target: target, p_places: body.places.slice(0, 20) });
-        // anyone on this side who had finished now has a change to initial: they are told (their link still works), and so is Tim
+        // anyone on this side who had finished now has a change to initial: a draft for each, which Tim reads and sends himself. No email
+        // goes to anyone now, Tim included: he hears once, when the round is submitted (Tim, 24 November 2026).
         if (r.reopened > 0) {
-          for (const x of r.reopened_signers || []) { if (!x.email) continue;
-            try { await d.sendMail("offer_change_reopened", { to: x.email, subject: `A change to initial: ${r.address || "the offer"}`, html: wrap(`<p>Kia ora ${esc(String(x.name || "").split(" ")[0])},</p><p>${esc(r.by || "Someone on your side")} has made a change to the document for <strong>${esc(r.address || "")}</strong> since you finished. Please open the link I sent you earlier and initial the change, then finish again. You'll be asked for a new code.</p><p>Nothing goes anywhere until you have all signed and I have checked it. You can talk to your lawyer at any time.</p><p>Tim</p>`) }); } catch (_) { /* Tim is told below */ } }
-          try { await d.sendMail("offer_change_reopened", { to: d.timEmail, subject: `A change reopened signing: ${r.address || "an offer"}`, html: wrap(`<p>${esc(r.by || "A signer")} made a change in Round ${esc(r.round)} for <strong>${esc(r.address || "")}</strong>. ${esc(r.reopened)} ${r.reopened === 1 ? "person who had" : "people who had"} finished now ${r.reopened === 1 ? "needs" : "need"} to initial it and finish again: ${esc((r.reopened_signers || []).map((x: any) => x.name).join(", "))}. They have been emailed.</p>`) }); } catch (_) { /* the change is saved either way */ }
+          for (const x of r.reopened_signers || []) { if (!x.email || !x.id) continue;
+            try { const w = d.mail ? d.mail.reopenedDraft({ first: String(x.name || "").split(" ")[0], address: r.address, by: r.by }) : { subject: `A change to initial: ${r.address || "the offer"}`, body: `Please open the link I sent you earlier and initial the change. Tim` };
+              await call("offer_mail_draft_sys", { p_offer: r.offer_id, p_signer: x.id, p_to: [x.email], p_subject: w.subject, p_body: w.body }); } catch (_) { /* Tim sees the reopened signer on the round's page either way */ } }
         }
         return json({ ok: true, id: r.id, reopened: r.reopened });
       }
