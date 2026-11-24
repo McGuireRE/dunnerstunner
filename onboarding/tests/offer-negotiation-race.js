@@ -12,7 +12,8 @@
 // (Named .js, not .test.js, so run-all.js doesn't run it.)
 const { spawn, execFileSync } = require('child_process'), fs = require('fs'), path = require('path');
 const T = process.env.RACE_TEMPLATE || 't4', DB = 'p4race_' + process.pid;
-const psql = (sql, db) => new Promise((res) => { const p = spawn('psql', ['-d', db || DB, '-Atq', '-v', 'ON_ERROR_STOP=1', '-c', sql]); let o = '', e = ''; p.stdout.on('data', d => o += d); p.stderr.on('data', d => e += d); p.on('close', c => res({ c, o: o.trim(), e: e.trim() })); });
+// the SQL goes on standard input (the migrations are too long for a command-line argument)
+const psql = (sql, db) => new Promise((res) => { const p = spawn('psql', ['-d', db || DB, '-Atq', '-v', 'ON_ERROR_STOP=1', '-f', '-']); let o = '', e = ''; p.stdout.on('data', d => o += d); p.stderr.on('data', d => e += d); p.on('close', c => res({ c, o: o.trim(), e: e.trim() })); p.stdin.end(sql); });
 const errs = [], out = {}; const ok = (c, m) => { if (!c) errs.push(m); };
 const CLAIMS = `select set_config('request.jwt.claims', json_build_object('email', (select email from public.agents limit 1), 'role', 'authenticated')::text, false);`;
 const AGENT = `set role authenticated; select set_config('request.jwt.claims', json_build_object('email', (select email from public.agents limit 1), 'role', 'authenticated')::text, false);`;
@@ -66,8 +67,9 @@ const AGENT = `set role authenticated; select set_config('request.jwt.claims', j
         perform set_config('request.jwt.claims', agent, true);
         for k in 1..4 loop
           o := public.agent_offer_add(pid, good);
-          insert into public.offer_drafts (offer_id, property_id, number, blank_id, blank_sha256, map_id, details, placed, needs, path, sha256, size_bytes, created_by)
-            values (o, pid, 1, bl, repeat('ab', 32), m, (select details from public.property_offers where id = o), '[]', '[]', 'p' || k, repeat('d' || k, 32), 100, 't') returning id into d;
+          -- a draft as drafting makes it since the further terms numbering (024 refuses one without term_last)
+          insert into public.offer_drafts (offer_id, property_id, number, blank_id, blank_sha256, map_id, details, placed, needs, path, sha256, size_bytes, created_by, edits)
+            values (o, pid, 1, bl, repeat('ab', 32), m, (select details from public.property_offers where id = o), '[]', '[]', 'p' || k, repeat('d' || k, 32), 100, 't', '{"term_last": 22}') returning id into d;
           insert into public.offer_draft_approvals (draft_id, sha256, approved_by) values (d, repeat('d' || k, 32), 't');
           g := (public.agent_signing_release(d, 'in_person', '[[595,842],[595,842],[595,842]]', public.rc_places(2, true, null, false), '{}') ->> 'id')::uuid;
           perform public.rc_prep(g); perform public.rc_finish_all(g); perform public.rc_lock(g);
