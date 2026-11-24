@@ -260,7 +260,7 @@ Phase 4 (presentation):
 
 - When presenting, the vendor is reminded that anything provided as a chattel must be in full working order at settlement.
 
-## Condition timing, further terms numbering and the review screen (Tim, 24 November 2026; branch `offers-timing`, NOT live)
+## Condition timing, further terms numbering and the review screen (Tim, 24 November 2026; LIVE 24 November 2026, main dae98d6, migration 021)
 
 Built locally on `offers-timing` from main. Migration 021 is written and passed its rollback block on the local PostgreSQL 16 stand-in
 (`tests/pg-standin.sql`, then 010, 016 part A, 018, 019; `node onboarding/tests/offer-timing-rollback.js`), NOT the live project.

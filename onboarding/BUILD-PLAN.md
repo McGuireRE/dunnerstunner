@@ -255,7 +255,7 @@ technical-report and sale-of-property wording loaded (tokens {date} and {address
 both deposit clauses now struck when they don't apply. Specified Due Diligence left unworded (his file is a draft awaiting the
 solicitor), so a draft using it shows a placeholder Tim must fill before approving.
 Condition timing, further terms numbering and the review screen (Tim, 24 November 2026) built on branch `offers-timing`: migration
-021 (built as 022; local stand-in only), offer-draft gains `write_clause`, offer-public's helper writes {timing}. Not live. See `OFFERS-PLAN.md`.
+021 (built as 022; local stand-in only), offer-draft gains `write_clause`, offer-public's helper writes {timing}. LIVE 24 November 2026 (NZ): rollback block passed on the live project (no capitals); applied as `021_offer_condition_timing`, plus `022_tighten_table_privileges` (Tim approved); main dae98d6; offer-draft (JWT on) and offer-public (JWT off) pinned to dae98d6; Tim's electrical, technical and sale wording now use {timing}. See `OFFERS-PLAN.md`.
 Tests: `offers-core.test.js`, `draft-core.test.js`, `offers.test.js`, `offers-draft.test.js`, `offer-public-fn.test.js`,
 `offer-draft-fn.test.js`; database: `offer-timing-rollback.sql` (via `offer-timing-rollback.js`).
 
