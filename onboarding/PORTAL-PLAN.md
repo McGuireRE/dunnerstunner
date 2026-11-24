@@ -22,6 +22,7 @@ Order of work (set 24 November 2026, confirmed by Tim; reordered the same evenin
 1. P1 follow-ups: a refreshed form stays in signing mode; plainer "Couldn't save" wording.
 2. GT1. Grand Tour pass 1 (typed and dictated notes). Small, no new service, and the information gathering it speeds up is
    where most of Tim's time goes.
+   With it, IP1: inspection photos in two places (below).
 3. Appraisal page (target 11 December 2026). Decisions so far are in the central plan; it gets its own plan file here before
    any build. Its monthly market data and chart code are built as shared parts (see QMU below).
 4. QMU1 and QMU2. Quarterly market update passes 1 and 2, built on the Appraisal page's shared market data and charts.
@@ -299,3 +300,22 @@ Passes:
   the portal or ActivePipe linking to the portal page; (b) which owners count as having agreed to hear from him, and whether the
   first send asks everyone to opt in.
 - QMU4. DwellHub invitation switch, wired once DwellHub can receive an owner by link.
+
+### IP. Inspection photos in two places
+
+Added 24 November 2026 from Tim. Scheduled with GT1.
+
+Tim's words: a space for uploading all photos taken at the inspection, with a separate repository for the general look of the
+place and another for documents and evidence of issues or features (for example a photo of the hot water cylinder label or the
+meter).
+
+- Two places on the inspection, each taking camera shots (several at once) and files, as the property's photos and documents
+  section already does:
+  1. "The look of the place": general photos, tagged to a room or area (and to a title where there are several). These are the
+     photos Tim marks for the appraisal's mockup listing and their order.
+  2. "Documents and evidence": labels, meters, plates, defects, features, paperwork. Each item takes a short caption (for example
+     "Hot water cylinder label") and, where it fits, the inspection field or section it supports, so it sits beside that answer.
+- Both file into the existing property repository (migration 016): same checks, redrawing, fingerprints, offline queue and
+  sharing rules. Evidence is agent only by default and never shared with vendors unless Tim shares an item.
+- Photos can be moved between the two places, and nothing is deleted (archive, as now).
+- Evidence photos are where GT3's field suggestions can later read labels (for example a cylinder's size and year); not in IP1.
