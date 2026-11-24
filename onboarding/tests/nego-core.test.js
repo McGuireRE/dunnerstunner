@@ -159,5 +159,17 @@ function png(w, h, seed) {
   ok(files.every(f => crypto.createHash('sha256').update(fs.readFileSync(path.join(dir, f.name))).digest('hex') === crypto.createHash('sha256').update(Buffer.from(f.bytes)).digest('hex')), 'each file in it is byte for byte the locked copy');
   fs.rmSync(dir, { recursive: true, force: true });
 
+  // ── a new further term in a counteroffer: on from the newest draft's term_last, never a retired number (merged with main's numbering) ──
+  {
+    const ins = t => ({ kind: 'insert', geometry: { text: t } });
+    const nt = (t, c) => N.nextTermNo(t, c);
+    ok(JSON.stringify(nt({ last: 25, retired: [], style: 'dot0' }, [])) === JSON.stringify({ number: 26, label: '26.0' }), 'on from term_last, in the printed 22.0 style');
+    ok(nt({ last: 25, retired: [26, 27], style: 'dot0' }, []).number === 28, 'retired numbers are skipped');
+    ok(nt({ last: 24, retired: [30], style: 'dot0' }, []).number === 31, 'a retired number above term_last still counts');
+    ok(nt({ last: 25, retired: [], style: 'dot0' }, [ins('26.0 Synthetic term from Round 2'), ins('$690,000'), ins('20 December 2026')]).number === 27, "an earlier counteroffer's term counts; prices and dates don't");
+    ok(nt({ last: 25, style: 'dot' }, [ins('26. Synthetic')]).label === '27.', 'the "23." style where the page prints its own terms that way');
+    ok(nt({ last: 3 }, []).label === '4.', 'a draft with no style (phase 2) numbers 4., as its PDF does');
+    ok(nt(null, []).number === 1, 'no numbering known: 1');
+  }
   console.log(JSON.stringify(Object.assign(out, { errs }), null, 1));
 })().catch(e => { console.log(JSON.stringify({ errs: ['crashed: ' + (e.stack || e.message)] })); });

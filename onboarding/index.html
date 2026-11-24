@@ -5817,6 +5817,20 @@ window.JOURNEY_MEDIA_HINTS = {
     const st = standing(layers); return renderWorking(PDFLib, draftBytes, { ink: st.ink, changes: st.changes, lines: roundLines(execution), title: execution.title });
   }
 
+  /* ───── a new further term in a counteroffer ───── */
+  // A further term a party adds in a counteroffer (typed words, starting with its number) takes the next number after the newest
+  // draft's term_last (the highest number used or retired on the drafts), after any number an earlier counteroffer term took, and
+  // never a retired one. terms: { last, retired: [n], style: 'dot0' (23.0, as the printed 22.0) or 'dot' (23., also a draft with no style) }, changes: every
+  // change of the document so far (standing().changes). Returns { number, label } (label as DRAFT.termNo writes it).
+  const TERM_HEAD = /^\s*(\d{1,3})(?:\.0|\.)\s/;
+  function nextTermNo(terms, changes) {
+    const t = terms || {}, retired = new Set((t.retired || []).map(Number).filter(n => n >= 1)), style = t.style === 'dot0' ? 'dot0' : 'dot';
+    let top = Math.max(0, +t.last || 0, ...[...retired]);
+    (changes || []).forEach(c => { if (c && c.kind === 'insert') { const m = TERM_HEAD.exec(String((c.geometry || {}).text || '')); if (m) top = Math.max(top, +m[1]); } });
+    let n = top + 1; while (retired.has(n)) n++;
+    return { number: n, label: style === 'dot' ? `${n}.` : `${n}.0` };
+  }
+
   /* ───── the lawyers' pack ───── */
   const EVENT_WORDS = {
     submitted: 'The offer came in', corrected: 'Tim corrected the offer', status: 'The offer was marked', withdrawn: 'A side withdrew', drafted: 'Drafted', approved: 'Draft approved',
@@ -5868,7 +5882,7 @@ window.JOURNEY_MEDIA_HINTS = {
   }
 
   const NEGO = { changeRect, atPlace, ROW_REACH, inkOf, standing, outstanding, formed, presentPlaces, changePlaces, initialsBeside, rectsOf, KIND_WORDS, fullDate, parseFullDate, roundLines, agreementLines,
-    renderWorking, redrawRound, timelineHtml, eventWords, zip, crc32, sideName, other, MONTHS, DRAW_VERSION, textWidth, initialsFor };
+    renderWorking, redrawRound, nextTermNo, timelineHtml, eventWords, zip, crc32, sideName, other, MONTHS, DRAW_VERSION, textWidth, initialsFor };
   if (typeof module !== 'undefined' && module.exports) module.exports = NEGO; else root.NEGO = NEGO;
 })(typeof window !== 'undefined' ? window : globalThis);
 
@@ -13038,7 +13052,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       return DR.ownContacts([{ who: 'a purchaser', email: dt.email, phone: dt.phone }].concat((dt.purchasers || []).map(q => ({ who: 'a purchaser', email: q.email, phone: q.phone })), pp.concat(ap).map(x => ({ who: 'a vendor', email: x.email, phone: x.phone })))); };
     const R2x = RN > 1 ? { own: await ownList(), layers: ((await sgRpc('agent_offer_layers', { p_offer: g.offer_id, p_document: g.document_id })).layers || []).filter(L => L.doc_round < RN), parties: g.side === 'vendor' ? ngParties(o.details) : null,
       sideSigners: ((await ofSafe(sb.from('offer_signers').select(SG_COLS).eq('signing_id', sid).order('position'))) || []).filter(x => !x.void_at).map(x => ({ position: x.position, name: x.name })),
-      side_places: (g.places || []).concat((rvs || []).flatMap(r => r.places || [])) } : {};
+      side_places: (g.places || []).concat((rvs || []).flatMap(r => r.places || [])), terms: ngTermsOf(d) } : {};
     signFlow({ mode: 'person', address: p.address, name: s.name, position: s.position, places: (g.places || []).concat((rvs || []).flatMap(r => r.places || [])).filter(x => x.signer === s.position), taps: new Set((taps || []).map(t => t.place_id)),
       consent_at: s.consent_at, receipts: (rcs || []).map(r => r.guide), sig_png: s.sig_png, init_png: s.init_png, status: g.status, stopped: stale, cca_pages: g.cca_pages || [], pages: g.pages, bytes, draftSha: g.draft_sha256, marks: marks || [], round: RN, side: g.side || 'purchaser', ...R2x,
       api: { change: c => sgRpc('agent_round_change', Object.assign({ p_id: c.id, p_kind: c.kind, p_page: c.page, p_geometry: c.geometry, p_target: c.target || null, p_places: c.places }, P_)), consent: () => sgRpc('agent_signing_consent', Object.assign({ p_ua: ua }, P_)), receipt: r => sgRpc('agent_signing_receipt', Object.assign({ p_guide: r.guide, p_version: r.version || null, p_file: r.file || null, p_sha256: r.sha256 || null, p_pages: r.pages || null }, P_)),
@@ -13055,6 +13069,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   // initials on their side). Each round is locked with its record. The vendors' dashboard and journey map never show any of it.
   const NG = window.NEGO;
   const ngSide = s => s === 'vendor' ? 'vendors' : 'purchasers';
+  // the newest draft's further terms numbering (term_last, retired numbers, the printed style), for a new further term in a counteroffer
+  const ngTermsOf = d => ({ last: ((d && d.edits) || {}).term_last ?? null, retired: ((d && d.edits) || {}).retired_numbers || [], style: (((d && d.placed) || []).find(x => x.id === 'further_terms') || {}).number_style || (((d && d.edits) || {}).term_last != null ? 'dot0' : null) });   // no further terms on the draft: main's numbering writes 23.0
   const ngUuid = () => { try { if (crypto.randomUUID) return crypto.randomUUID(); } catch (_) { } const b = crypto.getRandomValues(new Uint8Array(16)); b[6] = (b[6] & 15) | 64; b[8] = (b[8] & 63) | 128; const h = Array.from(b, x => x.toString(16).padStart(2, '0')).join(''); return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`; };
   // the parties as the agreement names them (the purchasers' names and their lawyer), never their own contact details
   const ngParties = d => { const x = d || {}, lw = x.lawyer || {}; return { purchasers: (x.purchasers || []).map(q => [q.first, q.last].map(v => String(v || '').trim()).filter(Boolean).join(' ')), entity: String(x.entity || '').trim() || null,
@@ -13078,6 +13094,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <div class="toolbar"><button class="btn primary" type="button" id="ngChatGo">Continue</button></div></section>`;
   }
   // the working copy for this signer: every earlier round's ink, with this round's changes lifting the other side's at their place
+  const ngNextTerm = ctx => { const t = ctx.terms || {}, n = NG.nextTermNo(t, ngStanding(ctx).changes).number; return { number: n, label: DR.termNo(n, t.style === 'dot0' ? 'dot0' : 'dot') }; };
   const ngStanding = ctx => NG.standing(ctx.layers || [], { doc_round: ctx.round, side: ctx.side, signing_id: 'current', marks: ctx.marks || [] });
   // ink and changes drawn over a rendered page (an overlay; the page itself is never changed)
   function ngLayer(r, st, page, onPick) {
@@ -13093,7 +13110,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   // the change tools from Round 2 on (both on Tim's device and by link): each change goes in with everyone's initials beside it
   function ngTools(ctx, F, paint, tools) {
     const hint = { strike: 'Drag along the line of text to strike it through.', cross: 'Drag from one corner of the passage or box to the other.', insert: 'Tap where the words go, then type them below.', note: 'Write or draw on the page with your finger or stylus.', reinstate: 'Tap a line or crossed-out passage to reinstate it.' }[F.marking];
-    tools.insertAdjacentHTML('afterend', `<p class="small" id="sgMarkHint">${hint} Everyone on your side initials each change, and the ${ngSide(ctx.side === 'vendor' ? 'purchaser' : 'vendor')}' initials at that place are lifted from this copy (they stay on the earlier rounds).</p><div class="toolbar">${F.marking === 'insert' ? '<label class="sr" for="ngInsText">Words to add</label><input type="text" id="ngInsText" maxlength="300" placeholder="Words to add, for example $690,000">' : ''}<button class="btn primary" type="button" id="sgMarkSave" disabled>Save this change</button><button class="btn ghost" type="button" id="sgMarkCancel">Cancel</button></div>`);
+    tools.insertAdjacentHTML('afterend', `<p class="small" id="sgMarkHint">${hint} Everyone on your side initials each change, and the ${ngSide(ctx.side === 'vendor' ? 'purchaser' : 'vendor')}' initials at that place are lifted from this copy (they stay on the earlier rounds).</p><div class="toolbar">${F.marking === 'insert' ? `<label class="sr" for="ngInsText">Words to add</label><input type="text" id="ngInsText" maxlength="290" placeholder="Words to add, for example $690,000"><label class="chk" style="flex-basis:100%"><input type="checkbox" id="ngInsTerm"> A new further term, numbered ${esc(ngNextTerm(ctx).label)}</label>` : ''}<button class="btn primary" type="button" id="sgMarkSave" disabled>Save this change</button><button class="btn ghost" type="button" id="sgMarkCancel">Cancel</button></div>`);
     $('#sgMarkCancel').addEventListener('click', () => { F.marking = null; F.draft = null; F.pick = null; signFlowTools(ctx, F, paint); });
     const it = $('#ngInsText'); if (it) it.addEventListener('input', () => { $('#sgMarkSave').disabled = !(F.draft && it.value.trim()); });
     $('#sgMarkSave').addEventListener('click', async () => { const e = $('#sgErr'); e.textContent = '';
@@ -13103,7 +13120,9 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         // on Tim's own screen, where the parties' own contact details are loaded, his check straight away (phase 2's rule); dates and prices
         // are fine. A link signer's screen never has those details: the database checks (offer_private_hit) and its refusal is shown plainly.
         const who = ctx.own ? DR.holdsOwn(t, ctx.own) : ''; if (who) return (e.textContent = `Those words hold ${who}'s own phone or email, so they can't go on the agreement. Only the lawyers' details go on it.`);
-        m = Object.assign({}, m, { geometry: Object.assign({}, m.geometry, { text: t.trim().replace(/\s+/g, ' ') }) }); }
+        // a new further term: numbered on from the newest draft's term_last and any counteroffer term before it, never a retired number
+        const asTerm = !!($('#ngInsTerm') || {}).checked, body = t.trim().replace(/\s+/g, ' ');
+        m = Object.assign({}, m, { geometry: Object.assign({}, m.geometry, { text: asTerm ? `${ngNextTerm(ctx).label} ${body}` : body }) }); }
       const pw = ctx.pages[F.page - 1]; if (m.kind !== 'insert' && !SG.markOk(Object.assign({}, m, { target: m.target || (m.kind === 'reinstate' ? 'x' : null) }), { w: pw[0], h: pw[1] })) return (e.textContent = 'That change doesn\'t sit on the page. Try again.');
       const btn = $('#sgMarkSave'); btn.disabled = true;
       try { const c = Object.assign({ id: ngUuid() }, m), items = await ngPageItems(ctx);
@@ -13274,7 +13293,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       const S = st.signer, G = st.signing;
       signFlow({ mode: 'link', address: G.address, name: S.name, position: S.position, places: G.places || [], taps: new Set(st.taps || []), consent_at: S.consent_at, receipts: (S.receipts || []).map(r => r.guide), sig_png: S.sig_png, init_png: S.init_png,
         status: G.status, stopped: G.stopped, cca_pages: G.cca_pages || [], pages: G.pages, bytes, draftSha: G.draft_sha256, marks: (G.round || 1) > 1 ? G.marks || [] : [],
-        round: G.round || 1, side: G.side || 'purchaser', link_changes: !!G.link_changes, layers: G.layers || [], parties: G.parties || null, side_places: G.side_places || [], sideSigners: Array.from({ length: G.signers || 1 }, (_, i) => ({ position: i + 1, name: '' })),
+        round: G.round || 1, side: G.side || 'purchaser', link_changes: !!G.link_changes, layers: G.layers || [], parties: G.parties || null, side_places: G.side_places || [], terms: G.terms || null, sideSigners: Array.from({ length: G.signers || 1 }, (_, i) => ({ position: i + 1, name: '' })),
         api: { change: c => call('change', c), consent: () => call('consent'), receipt: r => call('receipt', r), marks: (a, b) => call('marks', { sig: a, init: b }), tap: pl => call('tap', { place: pl }), ask: (t, decline) => call('ask', { text: t, decline: !!decline }), finish: () => call('finish') },
         reload: start, done: r => { setSes(''); main().innerHTML = `<div class="login-card" id="sgThanks"><h1>Thank you, ${esc(S.name.split(' ')[0])}</h1><p class="lede">You've signed every place.${r && r.complete && r.locked ? ' Everyone has now signed, and the signed copy is locked.' : r && r.complete ? ' Everyone has now signed. Tim will lock the signed copy and let you know.' : ' Tim will let you know once everyone has signed.'}</p><p class="small">${VS || LR ? `Nothing goes back to the ${VS ? 'purchasers' : 'vendors'} until Tim has checked it.` : 'Nothing goes to the sellers until Tim has checked it.'} Any questions, call or text Tim on <a href="tel:0275627207">027 562 7207</a>.</p></div>`; top(); } });
     };

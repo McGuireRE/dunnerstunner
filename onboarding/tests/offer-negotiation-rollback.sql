@@ -1,8 +1,8 @@
--- Rollback test for migration 021 (presentation and counteroffers). Run with onboarding/tests/offer-negotiation-rollback.js, which puts
+-- Rollback test for migration 024 (presentation and counteroffers; built as 021). Run with onboarding/tests/offer-negotiation-rollback.js, which puts
 -- the whole migration inside the block, so one statement creates everything, runs the checks and then raises, which undoes it all.
 -- Nothing is kept. The output is the exception message: refusals read in lower case; a line in CAPITALS means something that should
 -- have been refused was allowed, or a value was wrong. Roles: the agent and a vendor are simulated with request.jwt.claims and the
--- authenticated role; the offer-sign edge function with service_role. Needs 020 (and 019, 018, 016 part A, 010) applied first, and
+-- authenticated role; the offer-sign edge function with service_role. Needs 023 (and 019, 018, 016 part A, 010) applied first, or run with --with-023, and
 -- property_people.phone (the live table has it; tests/pg-standin.sql adds it). The blank, map, drafts and approvals are set up
 -- directly (019's own rollback covers how they are made); the signing steps of each round use 020's own functions.
 do $t$
@@ -67,8 +67,10 @@ begin
   insert into public.property_documents (property_id, kind, name, path) values (pid, 'Other', 'Blank.pdf', 'rb-blank') returning id into x;
   insert into public.offer_blanks (property_id, document_id, sha256, size_bytes, file_name, pages, sizes, edition, edition_checked, created_by) values (pid, x::uuid, repeat('ab', 32), 10, 'Blank.pdf', 3, sizes, 'Eleventh Edition 2022 (4)', true, 'test') returning id into bl;
   insert into public.offer_blank_maps (blank_id, version, places, approved, created_by) values (bl, 1, '[{"id":"date","key":"date","kind":"date","page":1,"x":80,"y":730,"w":200,"h":10}]', true, 'test') returning id into m;
-  insert into public.offer_drafts (offer_id, property_id, number, blank_id, blank_sha256, map_id, details, placed, needs, path, sha256, size_bytes, created_by)
-    select oo, pid, 1, bl, repeat('ab', 32), m, (select details from public.property_offers where id = oo), '[]', '[]', 'properties/' || pid || '/docs/offer-draft-' || oo || '-1.pdf', encode(extensions.digest(oo::text, 'sha256'), 'hex'), 100, 'test' from unnest(array[o1, o2, o3]) oo;
+  -- offer 1's draft records main's further terms numbering (term_last, a retired number), as drafts made since 021 do
+  insert into public.offer_drafts (offer_id, property_id, number, blank_id, blank_sha256, map_id, details, placed, needs, path, sha256, size_bytes, created_by, edits)
+    select oo, pid, 1, bl, repeat('ab', 32), m, (select details from public.property_offers where id = oo), '[]', '[]', 'properties/' || pid || '/docs/offer-draft-' || oo || '-1.pdf', encode(extensions.digest(oo::text, 'sha256'), 'hex'), 100, 'test',
+      case when oo = o1 then '{"term_last": 22, "retired_numbers": [24]}'::jsonb else '{}'::jsonb end from unnest(array[o1, o2, o3]) oo;
   select id into d1 from public.offer_drafts where offer_id = o1; select id into d2 from public.offer_drafts where offer_id = o2; select id into d3 from public.offer_drafts where offer_id = o3;
   insert into public.offer_blank_maps (blank_id, version, places, approved, created_by) values (bl, 2, '[]', true, 'test') returning id into m2;   -- a map with no date place
   insert into public.offer_drafts (offer_id, property_id, number, blank_id, blank_sha256, map_id, details, placed, needs, path, sha256, size_bytes, created_by)
@@ -105,6 +107,8 @@ begin
   r := public.offer_sign_open(tok, 'n1', 'ua'); out := out || 'open: first=' || (r->>'first') || ' side=' || (r->>'side') || ' stopped=' || coalesce(r->>'stopped', 'none') || '; ';
   code := public.offer_sign_code(tok, 'n1')->>'code'; ses := public.offer_sign_verify(tok, code, 'n1', 'ua')->>'session';
   r := public.offer_sign_state(tok, ses);
+  -- the newest draft's further terms numbering, for a new further term in a counteroffer (the 23.0 style when the draft has no further terms)
+  out := out || 'terms for a new further term: last=' || coalesce(r->'signing'->'terms'->>'last', 'NONE') || ' retired=' || coalesce(r->'signing'->'terms'->>'retired', 'NONE') || ' style=' || coalesce(r->'signing'->'terms'->>'style', 'NONE') || '; ';
   out := out || 'state before consent: layers=' || jsonb_array_length(r->'signing'->'layers') || ' parties=' || (r->'signing'->'parties'->'purchasers')::text || ' lawyer=' || (r->'signing'->'parties'->'lawyer'->>'firm') || ' no purchaser contact=' || (position('ana@example.com' in r::text) = 0 and position('111 2222' in r::text) = 0 and position('buyer@example.com' in r::text) = 0) || '; ';
   perform public.offer_sign_consent(tok, ses, 'n1', 'ua');
   r := public.offer_sign_state(tok, ses); out := out || 'after consent: layers=' || jsonb_array_length(r->'signing'->'layers') || ' round1 taps=' || jsonb_array_length(r->'signing'->'layers'->0->'taps') || ' no emails in layers=' || (position('@' in (r->'signing'->'layers')::text) = 0) || '; ';

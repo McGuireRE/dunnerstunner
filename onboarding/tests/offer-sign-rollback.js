@@ -1,6 +1,6 @@
-// Builds the rollback test for migration 020 (purchaser signing): the whole migration goes inside the test's DO block. Run:
+// Builds the rollback test for migration 023 (purchaser signing; built as 020): the whole migration goes inside the test's DO block. Run:
 // node onboarding/tests/offer-sign-rollback.js > <file>.sql and execute the output against a database that has 019 (and 018, 016,
-// 010) applied. Nothing is kept. (Named .js, not .test.js, so run-all.js doesn't run it.)
+// 010; on the live project also 020 to 022) applied. Nothing is kept. (Named .js, not .test.js, so run-all.js doesn't run it.)
 const fs = require('fs'), path = require('path');
 // whole-line comments are left out to keep the statement small; nothing else changes
 const mig = fs.readFileSync(path.join(__dirname, '..', 'migrations', '023_offer_signing.sql'), 'utf8').split('\n').filter(l => !/^\s*--/.test(l)).join('\n');

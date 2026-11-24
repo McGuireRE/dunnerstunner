@@ -646,7 +646,13 @@ begin
       'receipts', (select coalesce(jsonb_agg(jsonb_build_object('guide', r.guide, 'version', r.version, 'at', r.at)), '[]'::jsonb) from public.offer_sign_receipts r where r.signer_id = s.id)),
     'signing', jsonb_build_object('status', g.status, 'stopped', case when s.void_at is not null then 'This version has been replaced. Tim will send you the new one.' else public.offer_sign_current(g) end, 'pages', g.pages, 'cca_pages', to_jsonb(g.cca_pages),
       'draft_path', case when s.consent_at is not null then d.path end, 'draft_sha256', d.sha256, 'address', addr,   -- the document only once they agree to sign electronically
-      'round', g.round_no, 'side', g.side, 'link_changes', coalesce(g.link_changes, false), 'signers', (select count(*) from public.offer_signers x where x.signing_id = g.id and x.void_at is null),
+      'round', g.round_no, 'side', g.side, 'link_changes', coalesce(g.link_changes, false),
+      -- the newest draft's further terms numbering, so a new further term in a counteroffer takes the next number (never a retired one);
+      -- with no further terms on the draft, the 23.0 style the drafting writes
+      'terms', jsonb_build_object('last', d.edits->'term_last', 'retired', coalesce(d.edits->'retired_numbers', '[]'::jsonb),
+        'style', coalesce((select e->>'number_style' from jsonb_array_elements(case when jsonb_typeof(d.placed) = 'array' then d.placed else '[]'::jsonb end) e where e->>'id' = 'further_terms' limit 1),
+          case when d.edits ? 'term_last' then 'dot0' end)),
+      'signers', (select count(*) from public.offer_signers x where x.signing_id = g.id and x.void_at is null),
       'parties', case when g.side = 'vendor' then public.offer_parties(g.offer_id) end,
       'layers', case when g.round_no > 1 and s.consent_at is not null then public.offer_doc_layers(g.document_id, g.round_no - 1) else '[]'::jsonb end,
       'marks', case when g.round_no > 1 then (select coalesce(jsonb_agg(jsonb_build_object('id', m.id, 'kind', m.kind, 'page', m.page, 'geometry', m.geometry, 'target', m.target, 'by', m.by_name, 'at', m.at) order by m.at, m.id), '[]'::jsonb) from public.offer_sign_marks m where m.signing_id = g.id) else '[]'::jsonb end,

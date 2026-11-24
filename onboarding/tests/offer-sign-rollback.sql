@@ -1,11 +1,12 @@
--- Rollback test for migration 020 (purchaser signing). Run with onboarding/tests/offer-sign-rollback.js, which puts the whole migration
+-- Rollback test for migration 023 (purchaser signing; built as 020). Run with onboarding/tests/offer-sign-rollback.js, which puts the whole migration
 -- inside the block, so one statement creates everything, runs the checks and then raises, which undoes it all. Nothing is kept. The
 -- output is the exception message: refusals read in lower case; a line in CAPITALS means something that should have been refused was
 -- allowed, or a value was wrong. Roles: the agent and a vendor are simulated with request.jwt.claims and the authenticated role; the
 -- offer-sign edge function with service_role; anyone not signed in with anon. Needs 019 (and 018, 016, 010) applied first. The blank,
 -- map, drafts and approvals are set up directly (019's own rollback test covers how they are made).
 -- Local run: 24 November 2026, on a local PostgreSQL 16 stand-in (tests/pg-standin.sql, then 010, 016 part A, 018 and 019 applied):
--- every line as expected, no CAPITALS. NOT run on the live project: that run, with Tim's approval, comes before 020 is applied.
+-- every line as expected, no CAPITALS. Again 24 November 2026 as 023 on main's schema (stand-in, then 010, 016 part A, 018, 019, 021
+-- and 022): no CAPITALS. NOT run on the live project: that run, with Tim's approval, comes before 023 is applied.
 do $t$
 declare out text := ''; r jsonb; pid uuid; oid uuid; oid2 uuid; bl uuid; m uuid; d1 uuid; d2 uuid; d3 uuid; sg uuid; sg2 uuid; sg3 uuid; s1 uuid; s2 uuid; l1 uuid; l2 uuid; tok1 text; tok2 text; ses text; code text; x text; n int; mk uuid; rid uuid;
   agent text := json_build_object('email', (select email from public.agents order by created_at limit 1), 'sub', '22222222-2222-2222-2222-222222222222', 'role', 'authenticated')::text;

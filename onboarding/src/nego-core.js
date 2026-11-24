@@ -240,6 +240,20 @@
     const st = standing(layers); return renderWorking(PDFLib, draftBytes, { ink: st.ink, changes: st.changes, lines: roundLines(execution), title: execution.title });
   }
 
+  /* ───── a new further term in a counteroffer ───── */
+  // A further term a party adds in a counteroffer (typed words, starting with its number) takes the next number after the newest
+  // draft's term_last (the highest number used or retired on the drafts), after any number an earlier counteroffer term took, and
+  // never a retired one. terms: { last, retired: [n], style: 'dot0' (23.0, as the printed 22.0) or 'dot' (23., also a draft with no style) }, changes: every
+  // change of the document so far (standing().changes). Returns { number, label } (label as DRAFT.termNo writes it).
+  const TERM_HEAD = /^\s*(\d{1,3})(?:\.0|\.)\s/;
+  function nextTermNo(terms, changes) {
+    const t = terms || {}, retired = new Set((t.retired || []).map(Number).filter(n => n >= 1)), style = t.style === 'dot0' ? 'dot0' : 'dot';
+    let top = Math.max(0, +t.last || 0, ...[...retired]);
+    (changes || []).forEach(c => { if (c && c.kind === 'insert') { const m = TERM_HEAD.exec(String((c.geometry || {}).text || '')); if (m) top = Math.max(top, +m[1]); } });
+    let n = top + 1; while (retired.has(n)) n++;
+    return { number: n, label: style === 'dot' ? `${n}.` : `${n}.0` };
+  }
+
   /* ───── the lawyers' pack ───── */
   const EVENT_WORDS = {
     submitted: 'The offer came in', corrected: 'Tim corrected the offer', status: 'The offer was marked', withdrawn: 'A side withdrew', drafted: 'Drafted', approved: 'Draft approved',
@@ -291,6 +305,6 @@
   }
 
   const NEGO = { changeRect, atPlace, ROW_REACH, inkOf, standing, outstanding, formed, presentPlaces, changePlaces, initialsBeside, rectsOf, KIND_WORDS, fullDate, parseFullDate, roundLines, agreementLines,
-    renderWorking, redrawRound, timelineHtml, eventWords, zip, crc32, sideName, other, MONTHS, DRAW_VERSION, textWidth, initialsFor };
+    renderWorking, redrawRound, nextTermNo, timelineHtml, eventWords, zip, crc32, sideName, other, MONTHS, DRAW_VERSION, textWidth, initialsFor };
   if (typeof module !== 'undefined' && module.exports) module.exports = NEGO; else root.NEGO = NEGO;
 })(typeof window !== 'undefined' ? window : globalThis);

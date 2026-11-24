@@ -204,9 +204,21 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
     { const el = await q.$('#sgPage .sg-draw'); await el.scrollIntoViewIfNeeded(); const bx = await el.boundingBox(); await q.mouse.click(bx.x + bx.width * 0.08, bx.y + bx.height * (0.3 + i * 0.08)); }
     await q.fill('#ngInsText', t); await q.click('#sgMarkSave'); await q.waitForFunction(n => window.JSON.parse(localStorage.getItem('mockdb')).offer_sign_marks.filter(m => m.kind === 'insert').length === n, i + 2, { timeout: 10000 }).catch(() => null);
     await q.waitForSelector('#sgPlaces'); }
+  // a new further term in the counteroffer: numbered on from the newest draft's term_last, in the draft's printed style (main's 23.0)
+  { await q.selectOption('#sgPgPick', '2'); await q.waitForSelector('#sgPage .dr-pg[data-page="2"] canvas');
+    await q.click('[data-tool="insert"]'); await q.waitForSelector('#sgPage .sg-draw', { state: 'attached' });
+    { const el = await q.$('#sgPage .sg-draw'); await el.scrollIntoViewIfNeeded(); const bx = await el.boundingBox(); await q.mouse.click(bx.x + bx.width * 0.08, bx.y + bx.height * 0.85); }
+    const dd = await db(q), drN = dd.offer_drafts.find(x => x.id === dd.offer_signings.find(g => g.id === g2.id).draft_id), last = drN.edits.term_last, style = (drN.placed.find(x => x.id === 'further_terms') || {}).number_style;
+    const want = (style || (last != null ? 'dot0' : 'dot')) === 'dot0' ? `${last + 1}.0` : `${last + 1}.`;
+    out.newTerm = { last, style, label: await q.textContent('label:has(#ngInsTerm)') };
+    expect(Number.isInteger(last) && last >= 1 && out.newTerm.label.trim().endsWith('numbered ' + want), 'the box offers the next further term number after the draft\'s term_last: ' + JSON.stringify(out.newTerm));
+    await q.$eval('#ngInsTerm', e => { if (!e.checked) e.click(); }); await q.fill('#ngInsText', 'Synthetic counteroffer term'); await q.click('#sgMarkSave');
+    await q.waitForFunction(() => window.JSON.parse(localStorage.getItem('mockdb')).offer_sign_marks.some(m => m.kind === 'insert' && /Synthetic counteroffer term$/.test(m.geometry.text)), null, { timeout: 10000 }).catch(() => null); await q.waitForSelector('#sgPlaces');
+    const mt = (await db(q)).offer_sign_marks.find(m => m.kind === 'insert' && /Synthetic counteroffer term$/.test(m.geometry.text));
+    expect(mt && mt.geometry.text === want + ' Synthetic counteroffer term', 'saved as "' + want + ' Synthetic counteroffer term": ' + (mt && mt.geometry.text)); }
   d = await db(q); out.ordinary = d.offer_sign_marks.filter(m => m.kind === 'insert').map(m => m.geometry.text);
   expect(ORDINARY.every(t => out.ordinary.includes(t)), 'dates and prices typed in any format are accepted');
-  const NCH = 2 + ORDINARY.length;
+  const NCH = 3 + ORDINARY.length;
   d = await db(q); const ch2 = d.offer_sign_marks.filter(m => m.signing_id === g2.id);
   expect(ch2.length === NCH && ch2.some(m => m.kind === 'strike') && ch2.some(m => m.kind === 'insert' && m.geometry.text === '$690,000') && ch2.every(m => m.by_name === 'Testy Vendorperson'), 'two changes saved, with who made them');
   expect(d.offer_sign_reviews.filter(r => r.signing_id === g2.id).every(r => r.places.length === 2 && r.places.every(x => x.why === 'change')), 'each change carries both vendors\' initials');
