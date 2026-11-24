@@ -181,7 +181,10 @@ const PK = 'https://packages.dunnerstunner.co.nz', PB = PK + '/portal/', OB = PK
   process.stderr.write('step 5\n');
   const NAMES = ['Ana', 'Testbuyer', 'Vendorperson', 'example.com', '021', '022', 'Example Road'];
   out.seen = [...seen].filter(x => /^\/portal\//.test(x));
-  expect(out.seen.every(a => !NAMES.some(n => a.includes(n))), 'no address holds a name, email, phone or street: ' + out.seen.join(' '));
+  // whole words only: an id that happens to contain "021" is not a phone number
+  const word = n => new RegExp('(^|[^A-Za-z0-9])' + n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '($|[^A-Za-z0-9])');
+  expect(!word('021').test('/portal/properties/a0210b3c-0210-4021-8021-021021021021') && word('021').test('/portal/x/021 555 0100'), 'the check matches a phone fragment only as a whole word, never inside an id');
+  expect(out.seen.every(a => !NAMES.some(n => word(n).test(a))), 'no address holds a name, email, phone or street: ' + out.seen.join(' '));
   expect(out.seen.filter(a => /\/offers\//.test(a)).every(a => new RegExp(`^/portal/properties/${ID}/offers/${ID}(/(draft/${ID}(/sign)?|signing/${ID}(/turn/${ID})?|present|correct))?$|^/portal/properties/${ID}/offers/blank/${ID}$`).test(a)), 'every offers address is one of the patterns, ids only');
   await p.goto(PB + '?sign=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ'); await p.waitForURL(u => u.pathname === '/onboarding/', { timeout: 10000 }).catch(() => null);
   out.signLink = new URL(p.url()); expect(out.signLink.pathname === '/onboarding/' && out.signLink.search === '?sign=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ', 'a signing link opened at the portal goes to the onboarding app: ' + p.url());

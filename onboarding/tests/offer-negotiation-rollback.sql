@@ -480,6 +480,6 @@ begin
     execute 'reset role'; perform set_config('request.jwt.claims', agent, true);
   end;
   -- 10. the timelines still check out, every round's event carrying the one before
-  out := out || 'chains ok=' || ((public.offer_chain_verify(o1::text)->>'ok')::boolean and (public.offer_chain_verify(o2::text)->>'ok')::boolean and (public.offer_chain_verify(o3::text)->>'ok')::boolean) || ' agreement chain last=' || ((select chain_last from public.offer_agreements where offer_id = o1) = (select hash from public.offer_events where offer_id = o1 order by seq desc limit 1)) || '; ';
+  out := out || 'chains ok=' || ((public.offer_chain_verify(o1::text)->>'ok')::boolean and (public.offer_chain_verify(o2::text)->>'ok')::boolean and (public.offer_chain_verify(o3::text)->>'ok')::boolean) || ' agreement chain last=' || ((select chain_last from public.offer_agreements where offer_id = o1) = (select hash from public.offer_events where offer_id = o1 and kind = 'agreement_formed')) || '   -- its own event; later events (emails, deposit choice) follow it; ';
   raise exception 'ROLLBACK %', out;
 end $t$;
