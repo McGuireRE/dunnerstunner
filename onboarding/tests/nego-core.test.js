@@ -171,5 +171,18 @@ function png(w, h, seed) {
     ok(nt({ last: 3 }, []).label === '4.', 'a draft with no style (phase 2) numbers 4., as its PDF does');
     ok(nt(null, []).number === 1, 'no numbering known: 1');
   }
+  // ── review fix 2: only a signature in the signature block counts as signed ──
+  {
+    const pl = [{ id: 'block:sig1:s1', signer: 1, kind: 'signature', why: 'block', ref: 'sig1', page: 3, x: 40, y: 500, w: 150, h: 22 },
+      { id: 'ack:mark_s:s1', signer: 1, kind: 'signature', why: 'ack', ref: 'mark_s', page: 2, x: 300, y: 500, w: 80, h: 40 }];
+    const A1 = { doc_round: 1, number: 1, side: 'purchaser', signing_id: 'gA', places: pl, taps: pl.map(p => ({ place_id: p.id, signer: 1 })), signers: [{ position: 1, name: 'Ana Testbuyer' }], marks: [] };
+    const chg = { id: 'cX', kind: 'strike', page: 3, geometry: { x0: 30, x1: 200, y: 510 } };   // a vendor strikes through the purchaser's signature line
+    const A2 = { doc_round: 2, number: 2, side: 'vendor', signing_id: 'gB', places: [], taps: [], signers: [{ position: 1, name: 'Vera Vendor' }], marks: [chg] };
+    const stA = N.standing([A1, A2]);
+    ok(stA.lifted.some(x => x.ink === 'gA/block:sig1:s1') && stA.ink.some(k => k.why === 'ack' && k.kind === 'signature'), 'the block signature is lifted; the drawn-box signature stands');
+    ok(N.outstanding(stA, { purchaser: [{ position: 1, name: 'Ana Testbuyer' }] }).some(x => x.what === 'signature'), "the purchaser's signature is outstanding although a drawn-box signature stands");
+    const prA = N.presentPlaces({ pages: [{ n: 1, w: 595, h: 842 }, { n: 2, w: 595, h: 842 }, { n: 3, w: 595, h: 842 }], placed: [], mapPlaces: [], side: 'purchaser', signers: [{ position: 1, name: 'Ana Testbuyer' }], layers: [A1, A2] });
+    ok(prA.places.some(p => p.id === 'block:sig1:s1' && p.kind === 'signature'), 'the next round asks the purchaser to sign the block again');
+  }
   console.log(JSON.stringify(Object.assign(out, { errs }), null, 1));
 })().catch(e => { console.log(JSON.stringify({ errs: ['crashed: ' + (e.stack || e.message)] })); });

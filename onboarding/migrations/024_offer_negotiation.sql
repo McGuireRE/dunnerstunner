@@ -137,7 +137,7 @@ begin
   if (select count(distinct e->>'id') from jsonb_array_elements(p_places) e) <> jsonb_array_length(p_places) then return false; end if;
   if p_need_all then
     for s in 1..p_signers loop
-      if not exists (select 1 from jsonb_array_elements(p_places) e where (e->>'signer')::int = s and e->>'kind' = 'signature') then return false; end if;
+      if not exists (select 1 from jsonb_array_elements(p_places) e where (e->>'signer')::int = s and e->>'kind' = 'signature' and e->>'why' = 'block') then return false; end if;   -- the signature block (a drawn box is extra)
       if (select count(distinct (e->>'page')::int) from jsonb_array_elements(p_places) e where (e->>'signer')::int = s and e->>'why' = 'foot') <> n then return false; end if;
     end loop;
   end if;
@@ -510,7 +510,7 @@ begin
   if not public.offer_sign_places_ok(p_places, base.pages, n, first_) then raise exception 'Please check the signing places: everyone signs%', case when first_ then ', and initials the foot of every page' else '' end; end if;
   if first_ or resign then
     for i in 1..n loop
-      if not exists (select 1 from jsonb_array_elements(p_places) e where (e->>'signer')::int = i and e->>'kind' = 'signature') then raise exception 'Please check the signing places: everyone signs'; end if;
+      if not exists (select 1 from jsonb_array_elements(p_places) e where (e->>'signer')::int = i and e->>'kind' = 'signature' and e->>'why' = 'block') then raise exception 'Please check the signing places: everyone signs'; end if;
     end loop;
   end if;
   for m in select k.id from public.offer_sign_marks k where k.signing_id = last.signing_id loop

@@ -818,7 +818,7 @@ function sgPlacesOk(pl,pages,n,needAll){ if(!Array.isArray(pl)||pl.length>6000) 
   for(const x of pl){ if(!x||!/^[a-z]{3,8}:[A-Za-z0-9_.:-]{1,110}:s[0-9]{1,2}$/.test(x.id||'')||!num(x.signer,1,n)||!['initial','signature','name'].includes(x.kind)||!['filled','foot','term','block','ack','mark','change'].includes(x.why)) return false;
     if(!new RegExp(':s'+x.signer+'$').test(x.id)||!num(x.page,1,pages.length)) return false; const [w,h]=pages[x.page-1]; if(!(num(x.x,-1,w+1)&&num(x.y,-1,h+1)&&num(x.w,1,w+1)&&num(x.h,1,h+1))) return false; }
   if(new Set(pl.map(x=>x.id)).size!==pl.length) return false;
-  if(needAll) for(let s=1;s<=n;s++){ if(!pl.some(p=>p.signer===s&&p.kind==='signature')) return false; if(new Set(pl.filter(p=>p.signer===s&&p.why==='foot').map(p=>p.page)).size!==pages.length) return false; }
+  if(needAll) for(let s=1;s<=n;s++){ if(!pl.some(p=>p.signer===s&&p.kind==='signature'&&p.why==='block')) return false; if(new Set(pl.filter(p=>p.signer===s&&p.why==='foot').map(p=>p.page)).size!==pages.length) return false; }
   return true; }
 const PNG_RE=/^data:image\/png;base64,[A-Za-z0-9+/=]+$/;
 function sgConsent(s,ua,net){ const g=sgReady(s); if(s.consent_at) return; s.consent_at=now(); s.user_agent=(ua||s.user_agent||'').slice(0,400); if(net) s.net_hash=net; sgEv(g,s.name,'sign_consent',{signing_id:g.id,signer:s.position}); }
@@ -951,7 +951,7 @@ function roundPresent(a,me){ if(!['in_person','link'].includes(a.p_method)) thro
   if(n<1||n>12) throw new Error(`There need to be 1 to 12 people to sign (now ${n})`);
   if(a.p_method==='link'){ ppl.forEach(x=>{ if(!x.email||!/^[^@\s<>"]+@[^@\s<>"]+\.[^@\s<>"]+$/.test(x.email)) throw new Error(`${x.name} has no email to send a link to. Add it, or sign in person`); }); if(new Set(ppl.map(x=>x.email)).size!==n) throw new Error('Two people have the same email. Each needs their own to sign by link'); }
   const first=!prev, pl=a.p_places||[], resign=!!OSET().resign_every_round;
-  if(!sgPlacesOk(pl,base.pages,n,first)||((first||resign)&&ppl.some((_,i)=>!pl.some(p=>p.signer===i+1&&p.kind==='signature')))) throw new Error('Please check the signing places: everyone signs'+(first?', and initials the foot of every page':''));
+  if(!sgPlacesOk(pl,base.pages,n,first)||((first||resign)&&ppl.some((_,i)=>!pl.some(p=>p.signer===i+1&&p.kind==='signature'&&p.why==='block')))) throw new Error('Please check the signing places: everyone signs'+(first?', and initials the foot of every page':''));
   OSM().filter(m=>m.signing_id===last.signing_id).forEach(m=>ppl.forEach((_,i)=>{ if(!pl.some(p=>p.id===`chg:${m.id}:s${i+1}`&&p.why==='change'&&p.kind==='initial')) throw new Error(`Please check the signing places: everyone initials each change made in Round ${last.doc_round}`); }));
   const docSigns=ORN().filter(r=>r.document_id===doc.id).map(r=>r.signing_id);
   pl.filter(p=>p.why==='change').forEach(p=>{ const m=OSM().find(k=>k.id===p.ref&&docSigns.includes(k.signing_id)); if(!m||p.page!==m.page||gapOf(p,chgRect(m.kind,m.geometry))>60) throw new Error('Please check the signing places: initials for a change go beside it'); });

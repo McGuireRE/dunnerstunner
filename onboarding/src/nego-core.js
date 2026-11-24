@@ -85,7 +85,8 @@
   function outstanding(st, sides) {
     const out = [], has = (side, pos, f) => st.ink.some(k => k.side === side && k.signer === pos && f(k));
     Object.entries(sides || {}).forEach(([side, list]) => (list || []).forEach(s => {
-      if (!has(side, s.position, k => k.kind === 'signature')) out.push({ side, signer: s.position, who: s.name || '', what: 'signature' });
+      // only a signature in the signature block counts as having signed (a signature in a box Tim drew is an extra place: why 'ack')
+      if (!has(side, s.position, k => k.kind === 'signature' && k.why === 'block')) out.push({ side, signer: s.position, who: s.name || '', what: 'signature' });
       st.changes.forEach(c => { if (!has(side, s.position, k => initialsFor(k, c.id))) out.push({ side, signer: s.position, who: s.name || '', what: 'change', ref: c.id, page: c.page }); });
     }));
     return out;
@@ -122,7 +123,7 @@
       // a signer signs again where they signed before when their signature was lifted (or, with resignEvery, every round); the newer
       // signature replaces the older on the working copy. Otherwise their signature stands and they initial the changes.
       const mine = layers.filter(L => L.side === side).sort((a, b) => b.doc_round - a.doc_round)[0];
-      signers.forEach(s => { const standingSig = st.ink.some(k => k.side === side && k.signer === s.position && k.kind === 'signature'); if (standingSig && !input.resignEvery) return;
+      signers.forEach(s => { const standingSig = st.ink.some(k => k.side === side && k.signer === s.position && k.kind === 'signature' && k.why === 'block'); if (standingSig && !input.resignEvery) return;
         const blockPl = (mine.places || []).filter(p => p.signer === s.position && p.why === 'block'); blockPl.forEach(p => places.push(Object.assign({}, p)));
         if (!blockPl.some(p => p.kind === 'signature')) blocking.push({ id: 'sig:' + s.position, label: 'Signatures', why: `${s.name} has no signature place from an earlier round.` }); });
     }

@@ -252,7 +252,7 @@ begin
   if (select count(distinct e->>'id') from jsonb_array_elements(p_places) e) <> jsonb_array_length(p_places) then return false; end if;
   if p_need_all then
     for s in 1..p_signers loop
-      if not exists (select 1 from jsonb_array_elements(p_places) e where (e->>'signer')::int = s and e->>'kind' = 'signature') then return false; end if;
+      if not exists (select 1 from jsonb_array_elements(p_places) e where (e->>'signer')::int = s and e->>'kind' = 'signature' and e->>'why' = 'block') then return false; end if;   -- the signature block (a drawn box is extra)
       if (select count(distinct (e->>'page')::int) from jsonb_array_elements(p_places) e where (e->>'signer')::int = s and e->>'why' = 'foot') <> n then return false; end if;
     end loop;
   end if;

@@ -14,6 +14,7 @@ const SB = require(path.join(__dirname, 'synthetic-blank.js'));
 const PDFLib = require('/opt/npm-tools/node_modules/pdf-lib');
 const errs = [], out = {};
 const ok = (c, msg) => { if (!c) errs.push(msg); };
+const eq = (a, b, msg) => { if (JSON.stringify(a) !== JSON.stringify(b)) errs.push(msg + ': got ' + JSON.stringify(a) + ', expected ' + JSON.stringify(b)); };
 // a small PNG (a dark line on a clear background), as the signature pad makes
 function png(w, h, seed) {
   const raw = Buffer.alloc((w * 4 + 1) * h);
@@ -205,6 +206,30 @@ function png(w, h, seed) {
   const MM = S.makePlaces({ pages: (await D.readPages(pdfjs, rmv.bytes)).map(p => ({ n: p.n, w: p.w, h: p.h, items: p.items })), placed: mvPlaced, mapPlaces: map.places, signers: tsig });
   ok(mvItem && tsig.every(s2 => MM.places.some(x => x.why === 'filled' && x.ref === (mvItem.place || mvItem.id) && x.signer === s2.position)), 'a moved place: a filled box every purchaser initials');
 
+  }
+  // ── review fix 1: a drawn box for both sides is shared, never one side's places on the other's ink (positions, not counts) ──
+  {
+    const pgs = [{ n: 1, w: 595, h: 842, items: [] }, { n: 2, w: 595, h: 842, items: [] }];
+    const box = (id, mark, x, y, w, h, who) => ({ id, kind: 'mark', mark, who, label: id, boxes: [{ page: 2, x, y, w, h }] });
+    const placedB = [box('mark_i', 'initials', 300, 600, 90, 20, 'both'), box('mark_s', 'signature', 300, 500, 160, 40, 'both'), box('mark_n', 'initials', 300, 400, 90, 20, undefined)];
+    const P2 = [{ position: 1, name: 'Ana Testbuyer' }, { position: 2, name: 'Bo Testbuyer' }];
+    const MPu = S.makePlaces({ pages: pgs, placed: placedB, mapPlaces: [], signers: P2 });
+    const MVe = S.makePlaces({ pages: pgs, placed: placedB, mapPlaces: [], signers: [{ position: 1, name: 'Vera Vendor' }], side: 'vendor', obstacles: MPu.places.filter(x => x.page === 2) });
+    const R_ = (M, ref) => M.places.filter(x => x.ref === ref).map(x => [x.x, x.y, x.w, x.h]);
+    out.sharedBox = { purchasers: R_(MPu, 'mark_i'), vendor: R_(MVe, 'mark_i'), sigP: R_(MPu, 'mark_s'), sigV: R_(MVe, 'mark_s') };
+    for (const ref of ['mark_i', 'mark_s', 'mark_n']) {
+      const pu = MPu.places.filter(x => x.ref === ref), ve = MVe.places.filter(x => x.ref === ref);
+      ok(pu.length === 2 && ve.length === 1, ref + ': a place for each purchaser and for the vendor');
+      ok(!pu.some(a => ve.some(b => S.overlap(a, b) > 0)), ref + ": the vendor's place never covers a purchaser's: " + JSON.stringify([pu.map(x => [x.x, x.y, x.w, x.h]), ve.map(x => [x.x, x.y, x.w, x.h])]));
+      const b = placedB.find(x => x.id === ref).boxes[0];
+      ok(pu.concat(ve).every(x => x.x >= b.x - 0.01 && x.y >= b.y - 0.01 && x.x + x.w <= b.x + b.w + 0.01 && x.y + x.h <= b.y + b.h + 0.01), ref + ': every place stays inside the box Tim drew');
+    }
+    eq(R_(MPu, 'mark_i'), [[300, 610, 45, 9], [300, 600, 45, 9]], "the purchasers share the left half of the 90 by 20 initials box, one above the other");
+    eq(R_(MVe, 'mark_i'), [[345, 600, 45, 20]], 'the vendor takes the right half');
+    ok(!MVe.blocking.some(x => /^ack:/.test(x.id)), 'nothing about the drawn boxes blocks when the box is shared (this bare test page has no signature block): ' + JSON.stringify(MVe.blocking));
+    // ink of the other side already inside a vendors-only box: release waits
+    const MVx = S.makePlaces({ pages: pgs, placed: [box('mark_v', 'initials', 300, 300, 90, 20, 'vendors')], mapPlaces: [], signers: [{ position: 1, name: 'Vera Vendor' }], side: 'vendor', obstacles: [{ page: 2, x: 310, y: 302, w: 20, h: 10 }] });
+    ok(MVx.blocking.some(x => x.id === 'ack:mark_v' && /already holds the other side's/.test(x.why)), "a box already holding the other side's ink blocks, with the reason");
   }
   console.log(JSON.stringify(Object.assign(out, { errs }), null, 1));
 })().catch(e => { console.log(JSON.stringify({ errs: ['crashed: ' + (e.stack || e.message)] })); });

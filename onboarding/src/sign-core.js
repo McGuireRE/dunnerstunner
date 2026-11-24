@@ -222,13 +222,20 @@
     // text, highlights and places he moved are filled boxes (step 1), which every signer initials.
     const SIDE_WHO = vendor ? 'vendors' : 'purchasers';
     placed.filter(it => it && it.kind === 'mark' && (it.mark === 'initials' || it.mark === 'signature') && (it.who === SIDE_WHO || it.who === 'both' || !it.who) && (it.boxes || []).length).forEach(it => {
-      const b = it.boxes[0], pg = P(b.page), lbl = `${it.mark === 'signature' ? 'Sign' : 'Initial'}: the place Tim marked on page ${b.page}`;
-      if (!pg) { block('ack:' + it.id, lbl, `Page ${b.page} isn't in the draft.`); return; }
+      const b0 = it.boxes[0], pg = P(b0.page), lbl = `${it.mark === 'signature' ? 'Sign' : 'Initial'}: the place Tim marked on page ${b0.page}`;
+      if (!pg) { block('ack:' + it.id, lbl, `Page ${b0.page} isn't in the draft.`); return; }
+      // a box for both sides is shared: the purchasers take its first half (left, or top), the vendors the second, so neither side's
+      // places ever sit on the other's ink
+      const shared = it.who !== SIDE_WHO, wide = b0.w >= b0.h * 2;
+      const b = !shared ? b0 : wide ? { page: b0.page, x: b0.x + (vendor ? b0.w / 2 : 0), y: b0.y, w: b0.w / 2, h: b0.h } : { page: b0.page, x: b0.x, y: b0.y + (vendor ? 0 : b0.h / 2), w: b0.w, h: b0.h / 2 };
       // the box shared by everyone on the side: side by side when it is wide enough, otherwise one above the other
       const across = b.w / n >= Math.min(b.h, 30) * 1.2 || b.h / n < 8, cw = across ? b.w / n : b.w, ch = across ? b.h : b.h / n;
       if (cw < 10 || ch < 6) block('ack:' + it.id, lbl, `Page ${b.page}: the box you marked is too small for ${n === 1 ? 'the signer' : 'every signer'}. Make it bigger on the review screen and re-draft.`);
       signers.forEach((sg, i) => push(sg.position, it.mark === 'signature' ? 'signature' : 'initial', 'ack', it.id, b.page,
-        { x: across ? b.x + i * cw : b.x, y: across ? b.y : b.y + b.h - (i + 1) * ch, w: Math.max(1, cw - (across && n > 1 ? 1 : 0)), h: Math.max(1, ch - (!across && n > 1 ? 1 : 0)) }, lbl + (n > 1 ? ` (${sg.name || 'signer ' + sg.position})` : ''), { marked: true })); });
+        { x: across ? b.x + i * cw : b.x, y: across ? b.y : b.y + b.h - (i + 1) * ch, w: Math.max(1, cw - (across && n > 1 ? 1 : 0)), h: Math.max(1, ch - (!across && n > 1 ? 1 : 0)) }, lbl + (n > 1 ? ` (${sg.name || 'signer ' + sg.position})` : ''), { marked: true }));
+      // ink already on the page (the other side's, from an earlier round) is never covered
+      if ((input.obstacles || []).some(k => k && k.page === b.page && out.some(x => x.ref === it.id && x.page === k.page && overlap(x, k) > 0.5)))
+        block('ack:' + it.id, lbl, `Page ${b.page}: the box you marked already holds the other side's initials or signature. Draw a separate box for ${vendor ? 'the vendors' : 'the purchasers'}.`); });
     // 5. the foot of every page, outside any box (last, so it keeps clear of everything above)
     pages.forEach(pg => row('foot', 'p' + pg.n, pg.n, { x: pg.w - MARGIN, y: FOOT_Y, w: 1, h: IH }, `Initial the foot of page ${pg.n}`, { foot: true, minY: 2, maxY: 28 }));
     const counts = {}; signers.forEach(s => { counts[s.position] = out.filter(p => p.signer === s.position).length; });
