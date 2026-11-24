@@ -33,6 +33,7 @@ const MAILC = require(path.join(__dirname, '..', 'src', 'mail-core.js'));
     if (fn === 'offer_sign_state') return { data: { signer: { position: 1, name: 'Ana Testbuyer' }, signing: { status: 'signing', draft_path: consented ? 'properties/' + PID + '/docs/offer-draft-x.pdf' : null, places: [] }, taps: [] }, error: null };
     if (fn === 'offer_sign_tap') return tapError ? { data: null, error: { message: tapError } } : { data: { done: 3, of: 9 }, error: null };
     if (fn === 'offer_sign_ask') return { data: { ok: true, name: 'Ana Testbuyer', address: '1 Example Road', offer_id: OID }, error: null };
+    if (fn === 'offer_sign_request') return args.p_reason_key ? { data: { id: 'rq1', name: 'Vera Vendor', side: 'vendor', round: 2, kind: args.p_kind, reason: args.p_reason_key === 'other' ? args.p_reason : 'Our financial situation has changed', offer_id: OID, property_id: PID, address: '1 Example Road' }, error: null } : { data: null, error: { message: 'Choose a reason' } };
     if (fn === 'offer_sign_finish') return { data: { ok: true, complete: finishComplete, signing_id: SID }, error: null };
     if (fn === 'offer_mail_take') return takeErr ? { data: null, error: { message: takeErr } } : { data: Object.assign({ log_id: 77, id: args.p_draft, kind: 'sign_link', to: ['ana@example.com'], cc: [], subject: 'Your offer to sign: 1 Example Road', body: 'Kia ora Ana,\n\n[the signing link]\n\nTim', attach: null, token: TOK }, mailTake || {}), error: null };
     if (fn === 'offer_mail_done') return doneFail && args.p_ok ? { data: null, error: { message: 'connection lost' } } : { data: null, error: null };
@@ -84,6 +85,14 @@ const MAILC = require(path.join(__dirname, '..', 'src', 'mail-core.js'));
   // ask Tim for a change
   mails = []; x = await J(await post({ action: 'ask', token: TOK, session: SES, text: 'Can settlement move a week? <script>alert(1)</script>' }));
   expect(x.j.ok && x.j.emailed && mails.length === 1 && mails[0].to === 'tim@example.test' && /&lt;script&gt;/.test(mails[0].html) && !/<script>/.test(mails[0].html), 'Tim is emailed the request, made safe');
+  // ask Tim to stop or withdraw: recorded, then one urgent email to Tim alone, at once; the reason made safe; nobody else emailed
+  mails = []; calls = []; x = await J(await post({ action: 'request', token: TOK, session: SES, kind: 'withdraw', reason_key: 'other', reason: 'We bought elsewhere <b>today</b>' }));
+  const rqc = calls.find(c => c[0] === 'offer_sign_request');
+  expect(x.j.ok && x.j.emailed && rqc && rqc[1].p_kind === 'withdraw' && rqc[1].p_reason_key === 'other' && rqc[1].p_session === SES, 'the request is recorded with its kind and reason');
+  expect(mails.length === 1 && mails[0].to === 'tim@example.test' && mails[0].kind === 'offer_sign_request' && /^URGENT: a vendor asks to withdraw: 1 Example Road$/.test(mails[0].subject), 'one urgent email to Tim: ' + (mails[0] && mails[0].subject));
+  expect(mails[0] && /&lt;b&gt;today/.test(mails[0].html) && /properties\/[^/]+\/offers\/[^"<]+/.test(mails[0].html) && /Freeze now or Withdraw now/.test(mails[0].html) && !/\u2014/.test(mails[0].html), 'the email links his offer page, made safe');
+  mails = []; x = await J(await post({ action: 'request', token: TOK, session: SES, kind: 'freeze', reason_key: '' }));
+  expect(x.j.ok === false && /Choose a reason/.test(x.j.error || '') && mails.length === 0, 'no reason: refused, nothing emailed');
   // finish: not the last purchaser, nothing locked
   calls = []; x = await J(await post({ action: 'finish', token: TOK, session: SES })); expect(x.j.ok && x.j.complete === false && !calls.some(c => c[0] === 'offer_round_lock'), 'not the last: nothing locked');
   // the last purchaser: Round 1 made, stored, fingerprinted from the stored file and locked

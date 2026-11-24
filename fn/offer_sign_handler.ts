@@ -11,6 +11,8 @@
 //   state       their own places, the pages and a 10 minute link to the approved draft.
 //   consent, receipt, marks, tap   the signing steps; each place is tapped by the signer themselves.
 //   ask         "Ask Tim for a change": a note emailed to Tim. A link signer can't mark the document.
+//   request     "Ask Tim to stop or withdraw": recorded, and an urgent email to Tim at once. It stops only this signer until Tim acts;
+//               nobody else is told anything.
 //   finish      once every place is done. When the last purchaser finishes, Round 1 is made and locked here and then.
 //   send (Tim)  a personal link emailed to each purchaser still to sign. The links' tokens are never returned to any page.
 //   lock (Tim)  makes and locks the round (in person, after the last signer; or again if locking didn't finish).
@@ -182,7 +184,7 @@ export function makeHandler(d: Deps) {
 
     // ── a purchaser, by their own link ──
     const token = typeof body.token === "string" ? body.token : "", session = typeof body.session === "string" ? body.session : "";
-    if (!["open", "send_code", "verify", "state", "consent", "receipt", "marks", "tap", "change", "ask", "finish"].includes(action)) return json({ error: "Bad request" }, 400);
+    if (!["open", "send_code", "verify", "state", "consent", "receipt", "marks", "tap", "change", "ask", "request", "finish"].includes(action)) return json({ error: "Bad request" }, 400);
     if (!TOKEN_RE.test(token)) return json({ ok: false });
     try {
       if (action === "open") {
@@ -240,6 +242,18 @@ export function makeHandler(d: Deps) {
           : later ? `<p><strong>${esc(r.name)}</strong> (${v ? "a vendor" : "a purchaser"}) is answering Round ${esc(r.round)} for <strong>${esc(r.address || "")}</strong> and asks for a change:</p>${quoted}<p>You can switch on changes from their link for this round by presenting it again, or make the change with them in person.</p>`
           : `<p><strong>${esc(r.name)}</strong> is signing their offer for <strong>${esc(r.address || "")}</strong> and asks for a change:</p>${quoted}<p>If it needs changing, correct the offer, re-draft and approve it, and release it again. Everyone then signs the new version.</p>`;
         try { await d.sendMail(decline ? "offer_sign_decline" : "offer_sign_ask", { to: d.timEmail, subject, html: wrap(html) }); } catch (_) { emailed = false; }
+        return json({ ok: true, emailed });
+      }
+      if (action === "request") {
+        const kind = body.kind === "withdraw" ? "withdraw" : body.kind === "freeze" ? "freeze" : "";
+        const r = await call("offer_sign_request", { p_token: token, p_session: session, p_kind: kind, p_reason_key: String(body.reason_key || ""), p_reason: String(body.reason || "").slice(0, 600), p_net: net });
+        let emailed = true;
+        const v = r.side === "vendor", page = `${(d.portalUrl || "https://portal.dunnerstunner.co.nz/").replace(/\/?$/, "/")}properties/${r.property_id}/offers/${r.offer_id}`;
+        const subject = `URGENT: ${v ? "a vendor" : "a purchaser"} asks to ${kind === "withdraw" ? "withdraw" : "stop signing"}: ${r.address || "an offer"}`;
+        const html = `<p style="color:#9B2C2C"><strong>Urgent.</strong></p><p><strong>${esc(r.name)}</strong> (${v ? "a vendor" : "a purchaser"}) asks to ${kind === "withdraw" ? "withdraw" : "stop signing for now"} on Round ${esc(r.round)} for <strong>${esc(r.address || "")}</strong>.</p>`
+          + `<p>Their reason:</p><blockquote style="border-left:3px solid #C9C4BD;margin:0;padding:4px 12px">${esc(r.reason)}</blockquote>`
+          + `<p>Nothing is frozen yet. Only their own link has stopped, and nobody else has been told. Open the offer to Freeze now or Withdraw now:</p><p><a href="${esc(page)}">${esc(page)}</a></p>`;
+        try { await d.sendMail("offer_sign_request", { to: d.timEmail, subject, html: wrap(html) }); } catch (_) { emailed = false; }
         return json({ ok: true, emailed });
       }
       if (action === "finish") {
