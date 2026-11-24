@@ -253,3 +253,19 @@ agreements/<agreement id>/signatures/... (vendors may upload their own signature
   checked), `agent_draft_approve(draft, sha256, checked)` (newest draft, the offer unchanged since, the newest approved
   places of the newest usable blank, nothing blocking except "ackable" items Tim ticked as checked, kept in `offer_draft_approvals.checked`), `agent_lawyer_use(lookup, keys)` (email and phone
   only, from the stored lookup). Service role (offer-draft): `offer_ai_read_save`, `offer_lawyer_save`, `offer_file_confirm`.
+
+## 021 Condition timing (built as 022) and the review screen (24 November 2026; tested in a rollback block on a local PostgreSQL stand-in, NOT yet on the live project)
+- `offer_clean` replaced: a condition may be `{key, after, days}` (within N working days, 1 to 250, of the date the condition `after`
+  on the same offer is satisfied or waived); refused when it waits for itself or a condition not on the offer, loops, or runs more
+  than three steps. `line_up: true` kept when the buyer asks for all conditions on the same day. Old `{days}`/`{date}` unchanged.
+- `offer_box_ok(box, sizes, min)`, `offer_draft_edits_ok(edits, sizes)`: the shape of Tim's review-screen edits (marks, moves,
+  added_terms, term_order, retired_numbers, term_timing); marks and moved places on a page of the blank. Not callable by users.
+- `agent_draft_add` replaced: 019's, plus `offer_draft_edits_ok`.
+- `offer_agent_ai_claim(actor, purpose)`: the daily cap (offer_settings.ai_daily_cap) for Tim's clause writer. One claim at a time
+  (advisory transaction lock); counts ai_calls ('offer clause draft') since midnight NZ and, under the cap, inserts a reservation row
+  (ok false, error 'pending') and returns its id. `offer_agent_ai_done(id, ok, error, in, out)` finishes that row after the model call.
+  Both service role only.
+- `offer_draft_edits_ok` also checks extra_terms (at most 60; a string up to 4,000, or {id, title up to 200, text up to 4,000, ai}),
+  term_order entries (ids), items (id keys, text up to 4,000) and custom_wording.
+- `agent_offer_correct(offer, details, note, expected)`: 018's correction, refused unless the offer's details are still `expected`
+  (checked under the row lock). For corrections from the review screen.

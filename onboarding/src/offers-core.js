@@ -203,22 +203,88 @@
     const lim = opts && opts.lim;
     return `${longDate(iso)} falls in the Christmas break (24 December to ${lim ? '15' : '5'} January${lim ? ' for the LIM date' : ''}), which doesn't count as working days. The first working day after it is ${longDate(toIso(d))}.`;
   }
-  // when a condition falls: { date, days, adjusted } from either a number of working days or a chosen date, counted from asAt
-  function conditionDate(c, asAt, province) {
+  /* ───── timing: how each condition is to be satisfied (Tim, 24 November 2026) ─────
+     A condition on an offer is one of:
+       { key, days }          within so many working days of the date of the agreement (counted from asAt for the checks)
+       { key, date }          by a date
+       { key, after, days }   within so many working days of the date another condition on the same offer (after: its key) is
+                              satisfied or waived
+     Older offers hold only { days } or { date } and read exactly as before. A chain may not loop, may not point at a condition that
+     isn't on the offer, and may be at most MAX_CHAIN steps long. For the checks, an "after" condition's date is the worst case: the
+     other condition's own date plus its working days, counted with this condition's own rule (the LIM rule runs to 15 January). */
+  const MAX_CHAIN = 3;
+  const condMode = c => !c ? '' : (c.after != null && c.after !== '') ? 'after' : (c.date ? 'date' : 'days');
+  // the words a condition is called by in a sentence ("the finance condition"); the agreement adds where it is
+  const NOUNS = { builders: 'building report condition', finance: 'finance condition', lim: 'LIM condition', lawyer: "lawyer's approval condition", electrical: 'electrical report condition',
+    technical: 'specified technical report condition', toxicology: 'toxicology report condition', oia: 'Overseas Investment Act consent condition', land_act: 'Land Act consent condition',
+    sale: 'sale of property condition', sdd: 'due diligence condition', custom: "purchaser's own condition" };
+  const nounFor = k => NOUNS[k] || ((condInfo(k) || { label: k }).label.toLowerCase() + ' condition');
+  // what is wrong with a condition's chain, as { kind, text } (null when it is fine): it points at itself, at a condition that isn't on
+  // the offer, round in a loop, or further than MAX_CHAIN steps
+  function chainProblem(conds, key) {
+    const list = conds || [], by = k => list.find(c => c && c.key === k), label = k => (condInfo(k) || { label: k }).label;
+    let c = by(key); if (!c || condMode(c) !== 'after') return null;
+    const seen = [key]; let steps = 0;
+    while (c && condMode(c) === 'after') {
+      const t = String(c.after);
+      if (t === c.key) return { kind: 'self', text: `${label(key)} can't wait for itself. Choose another condition, or give it its own working days or a date.` };
+      const next = by(t);
+      if (!next) return { kind: 'missing', text: `${label(key)} waits for ${condInfo(t) ? label(t) : 'a condition'}, which isn't on this offer. Choose one of your conditions, or give it its own working days or a date.` };
+      if (seen.includes(t)) { const ring = seen.slice(seen.indexOf(t)).map(label), names = ring.length > 1 ? ring.slice(0, -1).join(', ') + ' and ' + ring[ring.length - 1] : ring[0];
+        return { kind: 'loop', text: `${names} wait for each other, so none of them would ever start. Give one of them its own working days or a date.` }; }
+      seen.push(t); steps++;
+      if (steps > MAX_CHAIN) return { kind: 'deep', text: `${label(key)} waits for a condition that waits for another, more than ${MAX_CHAIN} steps in a row. Give one of them its own working days or a date.` };
+      c = next;
+    }
+    return null;
+  }
+  // when a condition falls: { date, days, adjusted } from a number of working days, a chosen date, or (with all the offer's
+  // conditions) the worst-case date after another condition. For 'after': { date, days (working days from asAt), n, after, latest: true }.
+  function conditionDate(c, asAt, province, all, depth) {
     const info = condInfo(c.key) || {}, o = { province, lim: !!info.lim };
+    if (condMode(c) === 'after') {
+      const n = Math.floor(+c.days); if (c.days === '' || c.days == null || !(n >= 1) || !all || (depth || 0) > MAX_CHAIN || chainProblem(all, c.key)) return null;
+      const t = all.find(x => x && x.key === c.after); if (!t) return null;
+      const r = conditionDate(t, asAt, province, all, (depth || 0) + 1); if (!r) return null;
+      const date = addWorkingDays(r.date, n, o); return { date, days: countWorkingDays(asAt, date, o), n, after: t.key, from: r.date, latest: true, adjusted: false };
+    }
     if (c.date && isDate(c.date)) { const date = onOrBefore(c.date, o); return { date, days: countWorkingDays(asAt, date, o), adjusted: date !== c.date, chosen: c.date }; }
     const n = Math.floor(+c.days); if (c.days !== '' && c.days != null && n >= 1) { const date = addWorkingDays(asAt, n, o); return { date, days: n, adjusted: false }; }
     return null;
+  }
+  // "Confirm all conditions on the same day": every condition gets the same timing, { days } or { date }. Nothing else changes;
+  // each can still be changed afterwards.
+  function lineUp(conds, timing) {
+    const t = timing || {}, n = Math.floor(+t.days), useDate = !!(t.date && isDate(t.date));
+    return (conds || []).map(c => { const o = Object.assign({}, c); delete o.after;
+      if (useDate) { o.date = t.date; o.days = ''; } else if (n >= 1) { o.days = n; o.date = ''; } return o; });
+  }
+  // are the conditions all on the same timing? ('' when not, or the shared timing as 'days:10' / 'date:2026-12-05')
+  function sameTiming(conds) {
+    const k = c => condMode(c) === 'after' ? 'after' : condMode(c) === 'date' ? 'date:' + c.date : 'days:' + Math.floor(+c.days);
+    const ks = (conds || []).map(k); return ks.length && ks.every(x => x === ks[0]) && ks[0] !== 'after' && !/NaN|:0$|:$/.test(ks[0]) ? ks[0] : '';
+  }
+  // the timing in plain words for the buyer ("within 5 working days after Finance is satisfied or waived")
+  function timingPlain(c) {
+    const m = condMode(c), n = Math.floor(+c.days), wd = `${n} working ${n === 1 ? 'day' : 'days'}`;
+    if (m === 'after') return n >= 1 ? `within ${wd} after ${(condInfo(c.after) || { label: 'the other condition' }).label} is satisfied or waived` : '';
+    if (m === 'date') return isDate(c.date) ? `by ${longDate(c.date)}` : '';
+    return n >= 1 ? `within ${wd} of the date of the agreement` : '';
   }
   // every check on an offer's dates. offer: { conditions:[{key, days|date}], settlement:{kind:'relative', days}|{kind:'date', date}, kiwisaver }
   // opts: { asAt (the day the dates count from; today), province, ksDays }. Warnings inform; only problems ask for a change.
   function checkDates(offer, opts) {
     const o = opts || {}, asAt = o.asAt || nzToday(), province = o.province || DEFAULT_PROVINCE, ksDays = +o.ksDays || KS_DAYS_DEFAULT;
     const out = { asAt, province, conditions: [], problems: [], warnings: [], lastCondition: null, confirmation: asAt, settlement: null, gapDays: null, gapOk: true, ksWarnSettle: false, ksWarnDeposit: false, unknownYear: false };
-    (offer.conditions || []).forEach(c => {
-      const r = conditionDate(c, asAt, province); const info = condInfo(c.key) || { label: c.key };
-      out.conditions.push(Object.assign({ key: c.key, label: info.label }, r || {}));
-      if (!r) out.problems.push({ key: c.key, kind: 'cond_missing', text: `Add the working days or a date for ${info.label}.` });
+    const all = offer.conditions || [];
+    all.forEach(c => {
+      const r = conditionDate(c, asAt, province, all); const info = condInfo(c.key) || { label: c.key };
+      out.conditions.push(Object.assign({ key: c.key, label: info.label, mode: condMode(c) }, r || {}));
+      const cp = condMode(c) === 'after' ? chainProblem(all, c.key) : null;
+      if (cp) out.problems.push({ key: c.key, kind: 'cond_chain', chain: cp.kind, text: cp.text });
+      else if (!r && condMode(c) === 'after') { const n = Math.floor(+c.days); out.problems.push({ key: c.key, kind: c.days === '' || c.days == null || !(n >= 1) ? 'cond_missing' : 'cond_chain', chain: 'waiting',
+        text: c.days === '' || c.days == null || !(n >= 1) ? `Add the working days for ${info.label}.` : `${info.label} waits for ${(condInfo(c.after) || { label: 'another condition' }).label}, which needs its own working days or a date first.` }); }
+      else if (!r) out.problems.push({ key: c.key, kind: 'cond_missing', text: `Add the working days or a date for ${info.label}.` });
       else if (r.date <= asAt) { const bn = c.date ? breakNote(c.date, { province, lim: !!info.lim }) : ''; out.problems.push({ key: c.key, kind: 'cond_past', text: bn ? `${info.label}: ${bn} Please pick that day or later.` : `The date for ${info.label} needs to be after today.` }); }
     });
     const dated = out.conditions.filter(c => c.date);
@@ -276,7 +342,12 @@
       if (info && info.needs === 'detail') need(s(c.detail), 'c_' + c.key, 'Say what kind of technical report you need.');
       if (info && info.needs === 'address') need(s(f.sale_address), 'sale_address', 'Add the address of the property you need to sell.');
       if (c.key === 'custom') need(s(c.wording) || s(c.request), 'c_custom', 'Describe your own condition, or untick it.');
+      // a condition that waits for another: the working days, and a chain that ends (checked even when the dates aren't)
+      if (info && condMode(c) === 'after' && o.skipDates) { const n = Math.floor(+c.days);
+        need(c.days !== '' && c.days != null && n >= 1 && n <= LIMITS.days, 'c_' + c.key, `Add the working days for ${info.label}.`);
+        const cp = chainProblem(f.conditions, c.key); if (cp) e.push({ field: 'c_' + c.key, text: cp.text }); }
     });
+    need(f.line_up == null || typeof f.line_up === 'boolean', 'conditions', 'Please check the conditions.');
     ['chattels_add', 'chattels_exclude'].forEach(k => { const a = Array.isArray(f[k]) ? f[k] : []; need(a.length <= LIMITS.chattels, k, `Up to ${LIMITS.chattels} chattels can be listed here. Tim can add more.`); need(a.every(x => String(x ?? '').length <= LIMITS.chattel), k, `Please shorten each chattel to ${LIMITS.chattel} characters.`); });
     need(f.gst_registered == null || typeof f.gst_registered === 'boolean', 'gst', 'Please check the GST answer.');
     need(String(f.gst_number ?? '').length <= LIMITS.gst, 'gst', 'Please check the GST number.');
@@ -290,6 +361,7 @@
 
   const OFFERS = { ISO_RE, toN, toIso, addDays, daysBetween, isDate, nzToday, dow, easterSunday, mondayNearest, nthWeekday, MATARIKI, EXTRA_HOLIDAYS, FIRST_YEAR, LAST_YEAR, PROVINCES, DEFAULT_PROVINCE, provinceFor,
     holidays, notWorkingBecause, isWorkingDay, yearKnown, addWorkingDays, countWorkingDays, onOrBefore, CONDITIONS, CUSTOM, condInfo, wordingFor, NO_WORDING, DEPOSIT, depositText,
-    ADVICE, CHATTEL_NOTE, parsePrice, priceWords, breakNote, GAP_DAYS, KS_DAYS_DEFAULT, SETTLE_DAYS_DEFAULT, conditionDate, checkDates, longDate, LIMITS, EMAIL_RE, PHONE_RE, validate, conditionsLine };
+    ADVICE, CHATTEL_NOTE, parsePrice, priceWords, breakNote, GAP_DAYS, KS_DAYS_DEFAULT, SETTLE_DAYS_DEFAULT, conditionDate, checkDates, longDate, LIMITS, EMAIL_RE, PHONE_RE, validate, conditionsLine,
+    MAX_CHAIN, condMode, NOUNS, nounFor, chainProblem, lineUp, sameTiming, timingPlain };
   if (typeof module !== 'undefined' && module.exports) module.exports = OFFERS; else root.OFFERS = OFFERS;
 })(typeof window !== 'undefined' ? window : globalThis);

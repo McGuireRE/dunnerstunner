@@ -317,6 +317,73 @@ const AGENT = 'agent-test@example.com';
   out.direct = await p.evaluate(async id => { const c = window.supabase.createClient(); const a = await c.from('property_offers').update({ notes: 'rang them' }).eq('id', id); const b2 = await c.from('property_offers').update({ read_by: 'x' }).eq('id', id); return [!a.error, !!b2.error]; }, sp.id);
   expect(out.direct.every(Boolean), 'notes editable, other columns locked');
 
+  process.stderr.write('step 5b\n');
+  // ── 5b. condition timing (Tim, 24 November 2026): line them up, or count from another condition ──
+  await q.evaluate(() => { localStorage.setItem('mockNet', 'net-timing'); localStorage.removeItem('offerAiMode'); Object.keys(localStorage).filter(k => /^offerDraft/.test(k)).forEach(k => localStorage.removeItem(k)); });   // a fresh form
+  await q.goto(BASE + '?offer=' + TOKEN2); await q.waitForTimeout(600);
+  await q.fill('#ofEmail', 'timing@example.com'); await q.fill('#ofPhone', '021 000 2222'); await q.click('input[name="of_seen_docs"][value="yes"] + .mark'); await q.fill('#ofPrice', '610000');
+  await q.click('input[name="of_kiwisaver"][value="no"] + .mark'); await q.fill('#ofp0f', 'Tia'); await q.fill('#ofp0l', 'Timing'); await q.click('input[name="of_related"][value="no"] + .mark');
+  await q.click('input[name="of_sign"][value="digital"] + .mark'); await q.click('label:has([data-fb="privacy"]) .mark');
+  await q.click('label:has([data-cond="builders"]) .mark');
+  expect(!(await q.$('[data-fb="line_up"]')) && !(await q.$('#ofa_builders')), 'one condition: no line-up option and nothing to count from');
+  await q.click('label:has([data-cond="finance"]) .mark'); await q.click('label:has([data-cond="lim"]) .mark');
+  expect(await q.isVisible('[data-fb="line_up"]') && !(await q.$eval('[data-fb="line_up"]', e => e.checked)), 'two or more: "Confirm all conditions on the same day" shown, off by default');
+  out.luText = await q.textContent('.of-lineup'); expect(/Confirm all conditions on the same day/.test(out.luText) && /You can still change any of them/.test(out.luText), 'the option says it is not forced');
+  await q.click('label:has([data-fb="line_up"]) .mark'); await q.fill('#ofLuDays', '10'); await q.waitForTimeout(150);
+  out.lined = await q.$$eval('[data-fc$=":days"]', e => e.map(x => x.dataset.fc + '=' + x.value));
+  expect(out.lined.join() === 'builders:days=10,finance:days=10,lim:days=10', 'every condition set to 10 working days: ' + out.lined);
+  out.luNote = await q.textContent('#ofLuNote'); expect(/All your conditions are|LIM's working days run to 15 January/.test(out.luNote), 'the shared date is said: ' + out.luNote);
+  await q.fill('#ofLuDate', await addWD(12)); await q.waitForTimeout(150);
+  out.linedDate = await q.$$eval('[data-fc$=":date"]', e => e.map(x => x.value)); expect(new Set(out.linedDate).size === 1 && out.linedDate[0] === await addWD(12) && (await q.inputValue('#ofLuDays')) === '', 'or every condition on one date');
+  expect(/All your conditions are to be satisfied or waived by/.test(await q.textContent('#ofLuNote')), 'one date for all');
+  // each can still be changed: finance counts 3 working days from when the builder's report is satisfied or waived
+  await q.selectOption('#ofa_finance', 'builders'); await q.fill('#ofd_finance', '3'); await q.waitForTimeout(150);
+  out.finAfter = await q.textContent('[data-ccalc="finance"]');
+  expect(/^3 working days after Builder's report is satisfied or waived\. At the latest that is /.test(out.finAfter) && (await q.inputValue('#ofdt_finance')) === '', 'after another: working days from it, the latest date shown: ' + out.finAfter);
+  expect(/Some conditions now have their own timing/.test(await q.textContent('#ofLuNote')), 'the line-up box says one now differs');
+  out.datesAfter = await q.textContent('#ofDates'); expect(/At the latest/.test(out.datesAfter) && /3 working days after Builder's report is satisfied or waived/.test(out.datesAfter) && /Unconditional at the latest/.test(out.datesAfter), 'the dates panel shows "at the latest"');
+  // a loop is refused plainly
+  await q.selectOption('#ofa_builders', 'finance'); await q.fill('#ofd_builders', '2'); await q.waitForTimeout(150);
+  expect(/wait for each other, so none of them would ever start/.test(await q.textContent('[data-ccalc="builders"]')), 'a loop is explained under the condition');
+  await q.click('#ofSend'); await q.waitForTimeout(200); expect(/wait for each other/.test(await q.textContent('[data-secerr="conds"]')) && !JSON.parse(await q.evaluate(() => localStorage.getItem('offerCalls'))).slice(-1).includes('submit'), 'and stops sending');
+  await q.selectOption('#ofa_builders', ''); await q.fill('#ofd_builders', '10'); await q.waitForTimeout(150);
+  // the LIM waits for finance: its date over summer follows the LIM rule, shown as the latest
+  await q.selectOption('#ofa_lim', 'finance'); await q.fill('#ofd_lim', '2'); await q.waitForTimeout(150);
+  expect(/2 working days after Finance is satisfied or waived/.test(await q.textContent('[data-ccalc="lim"]')), 'LIM after finance');
+  // the buyer's own condition: the helper writes {timing}, and the form says what it stands for
+  await q.click('label:has([data-cond="custom"]) .mark'); await q.selectOption('#ofa_custom', 'lim'); await q.fill('#ofd_custom', '4'); await q.fill('#ofReq', 'I need the pool fence signed off by the council');
+  await q.click('#ofAi'); await q.waitForTimeout(300);
+  out.aiTiming = await q.inputValue('#ofWord'); out.timingSay = await q.textContent('#ofTimingSay');
+  expect(/\{timing\}/.test(out.aiTiming) && /stands for the time you chose above: within 4 working days after LIM \(council report\) is satisfied or waived/.test(out.timingSay), 'the {timing} in the wording is explained: ' + out.timingSay);
+  // unticking a condition another waits for: that one counts from the agreement again
+  await q.click('label:has([data-cond="builders"]) .mark'); await q.waitForTimeout(150);
+  expect((await q.inputValue('#ofa_finance')) === '' && /^That is /.test(await q.textContent('[data-ccalc="finance"]')), 'the condition waiting for an unticked one counts from the agreement');
+  await q.click('label:has([data-cond="builders"]) .mark'); await q.fill('#ofd_builders', '10'); await q.selectOption('#ofa_finance', 'builders'); await q.waitForTimeout(150);
+  expect(!(await side(q)), 'conditions with timing at 390 px: no sideways scroll');
+  await shot(q, 'timing390');
+  await q.click('#ofSend'); await q.waitForTimeout(500);
+  out.timingRef = await q.textContent('#ofDone strong').catch(() => '');
+  expect(/^[0-9A-F]{8}$/.test(out.timingRef), 'the offer with timing is sent: ' + (await q.textContent('#ofErr').catch(() => '')));
+  const tsum = await q.textContent('#ofDone').catch(async () => 'NOT SENT: ' + await q.textContent('#ofErr') + ' | ' + await q.textContent('[data-secerr="conds"]')); expect(/at the latest/.test(tsum) && /within 3 working days after Builder's report is satisfied or waived/.test(tsum) && /All to be confirmed on the same day/.test(tsum), 'the copy shows the timing and the line-up');
+  d = await db(q); const offT = d.property_offers.filter(x => x.source === 'buyer').find(x => x.details.email === 'timing@example.com');
+  out.storedTiming = offT && offT.details.conditions.map(c => c.key + (c.after ? '>' + c.after : '') + ':' + (c.days || c.date));
+  expect(offT && offT.details.line_up === true && out.storedTiming.join() === `finance>builders:3,lim>finance:2,custom>lim:4,builders:10`, 'stored with what each waits for, and line_up: ' + out.storedTiming);
+  expect(offT && /\{timing\}/.test(offT.details.conditions.find(c => c.key === 'custom').wording), "the buyer's own wording keeps {timing}");
+  // dark, at 390 px
+  const DK = await mk(390, 'dark'); await DK.p.goto(BASE); await keepDb(q, DK.p, { mockNet: 'net-dark' }); await DK.p.goto(BASE + '?offer=' + TOKEN2); await DK.p.waitForTimeout(600);
+  await DK.p.click('label:has([data-cond="finance"]) .mark'); await DK.p.click('label:has([data-cond="lim"]) .mark'); await DK.p.click('label:has([data-fb="line_up"]) .mark'); await DK.p.fill('#ofLuDays', '8'); await DK.p.selectOption('#ofa_lim', 'finance');
+  expect(!(await side(DK.p, 390)), 'dark, 390 px: no sideways scroll'); await shot(DK.p, 'timing390dark'); await DK.ctx.close();
+  // Tim sees "at the latest" on his side, and the correction form keeps what each waits for
+  await keepDb(q, p, { mockAgents: JSON.stringify([AGENT]), mocksession: JSON.stringify({ user: { id: 'agent-1', email: AGENT } }) }); await p.goto(BASE); await p.waitForTimeout(500);
+  await p.evaluate(() => {}); await p.click('#navDash'); await p.waitForTimeout(400); await p.click('tr[data-prop="P1"]'); await p.waitForTimeout(500);
+  const rowsT = await p.$$('.of-row'); let opened = false;
+  for (const rw of rowsT) { if (/Tia Timing/.test(await rw.textContent())) { await rw.click(); opened = true; break; } }
+  await p.waitForTimeout(600); expect(opened, 'the timing offer is on the tile');
+  out.timView = await p.textContent('#ofView'); expect(/At the latest/.test(out.timView) && /3 working days after Builder's report is satisfied or waived/.test(out.timView) && /Unconditional at the latest/.test(out.timView), 'Tim\'s view shows the latest dates');
+  await p.click('#ofFix'); await p.waitForTimeout(500);
+  expect((await p.inputValue('#ofa_finance')) === 'builders' && (await p.inputValue('#ofd_finance')) === '3' && await p.$eval('[data-fb="line_up"]', e => e.checked), 'the correction form opens with the timing and the line-up');
+  await p.click('#ofBack'); await p.waitForTimeout(400);
+
   process.stderr.write('step 6\n');
   // ── 6. the vendor sees nothing about offers ──
   const V = await mk(390, 'light'); const v = V.p; await v.goto(BASE); await keepDb(q, v, { mocksession: JSON.stringify({ user: { id: 'v-1', email: 'vendor@example.com' } }) });
