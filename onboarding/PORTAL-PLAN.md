@@ -19,7 +19,8 @@ Order of work (set 24 November 2026, confirmed by Tim; reordered the same evenin
 
 0. Offers phases 3 (signing) and 4 (counteroffers) live, with the email review changes below, each live step approved by Tim.
    Tim may use it on a live listing at short notice. See `OFFERS-PLAN.md`, "Going live", and `EMAIL-VOICE.md`.
-1. P1 follow-ups: a refreshed form stays in signing mode; plainer "Couldn't save" wording.
+1. SW. Site-wide settings (below): language menu, light and dark, text size and contrast, full screen, and the greeting
+   style slider for drafts. Then the P1 follow-ups: a refreshed form stays in signing mode; plainer "Couldn't save" wording.
 2. GT1. Grand Tour pass 1 (typed and dictated notes). Small, no new service, and the information gathering it speeds up is
    where most of Tim's time goes.
    With it, IP1: inspection photos in two places (below).
@@ -319,3 +320,32 @@ meter).
   sharing rules. Evidence is agent only by default and never shared with vendors unless Tim shares an item.
 - Photos can be moved between the two places, and nothing is deleted (archive, as now).
 - Evidence photos are where GT3's field suggestions can later read labels (for example a cylinder's size and year); not in IP1.
+
+### SW. Site-wide settings
+
+Added 24 November 2026 from Tim. Scheduled first after offers go live. Applies across dunnerstunner: the portal, the vendor,
+buyer and lawyer pages at packages.dunnerstunner.co.nz, the Quiet List and the packages page, wherever it fits.
+
+A small row of controls at the top of every page:
+- Language: a plain dropdown or button that uses the browser's own translation (as decided 9 November 2026). No introduction or
+  explanation anywhere: remove the translation notes and help text now shown at packages.dunnerstunner.co.nz and in the
+  onboarding app, keeping only the control. Names, prices and dates stay protected from translation as now. English prevails.
+- Light and dark: a button that switches the look and remembers the choice on that device (the system setting stays the
+  default until someone chooses). Signature pads stay white with dark ink in both.
+- Text size: at least three steps (normal, large, larger), for older readers. Layout must still hold at 390 px with no sideways
+  scroll at the largest size.
+- Contrast: a higher contrast option (stronger text and borders), working in both light and dark.
+- Full screen: an expand icon and a reduce icon that enter and leave the browser's full screen, where the browser allows it.
+Each choice is remembered per device. None of them changes any signed document or PDF.
+
+Greeting style for drafts (Tim's words, in summary): some New Zealanders are irked by te reo Maori words used in contrived
+settings, others are endeared by it. Tim is flexible and reads each person at the walk-through, so:
+- A slider when drafting any email or message to a party, also settable per person (on their People record, and on the
+  property's people until P4), so the choice carries to every later draft for them.
+- Default in the middle, "Happy medium". Tim's names for the ends, kept as fun labels on his own screens only: "Woke mode"
+  (te reo Maori woven through greetings and sign-offs) and "Codger mode" (no te reo unless it is a name or a place). Never
+  shown to a party, and never in anything sent.
+- Other common languages can be chosen for the greeting and sign-off, where Tim knows a person prefers one (for example the
+  greeting in their language with the body in English). The body of legal emails stays English.
+- The AI may vary the wording within the chosen style; Tim still reviews every draft before sending.
+- The offers emails use plain English openings ("Dear" for purchasers, "Hello" for vendors) until this is built.
