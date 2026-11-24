@@ -15,20 +15,25 @@ Tim's central build plan for the portal is the doc "Dunnerstunner portal: centra
 (this repository's session) builds, tests, reviews and publishes. Other chats add requests there and never change the code,
 the database or the live site. The controller copies each queued request into this file when it schedules it.
 
-Order of work (set 24 November 2026; Tim may reorder):
+Order of work (set 24 November 2026, confirmed by Tim; reordered the same evening at his request):
 
+0. Offers phases 3 (signing) and 4 (counteroffers) live, with the email review changes below, each live step approved by Tim.
+   Tim may use it on a live listing at short notice. See `OFFERS-PLAN.md`, "Going live", and `EMAIL-VOICE.md`.
 1. P1 follow-ups: a refreshed form stays in signing mode; plainer "Couldn't save" wording.
 2. GT1. Grand Tour pass 1 (typed and dictated notes). Small, no new service, and the information gathering it speeds up is
    where most of Tim's time goes.
-3. Appraisal page (target 11 December 2026). Decisions so far are in Tim's other chats; it gets its own plan file here before
-   any build.
-4. P2. Properties.
-5. P3. Security and never losing work. Must come before GT2 and GT3, which hold recordings and the client heart, and before P4.
-6. GT2 and GT3. Grand Tour recording, transcription, field suggestions, property brain and client heart.
-7. P4 People, P5 Import and feeds, P6 Assessments.
+3. Appraisal page (target 11 December 2026). Decisions so far are in the central plan; it gets its own plan file here before
+   any build. Its monthly market data and chart code are built as shared parts (see QMU below).
+4. QMU1 and QMU2. Quarterly market update passes 1 and 2, built on the Appraisal page's shared market data and charts.
+   QMU3 (sending) is held until Tim answers the two open questions below.
+5. P2. Properties.
+6. P3. Security and never losing work. Must come before GT2 and GT3, which hold recordings and the client heart, and before P4.
+7. GT2 and GT3. Grand Tour recording, transcription, field suggestions, property brain and client heart.
+8. P4 People, P5 Import and feeds, P6 Assessments. QMU's suburbs-from-owned-properties needs P4; until then QMU2 takes a
+   recipient's suburbs typed in by Tim.
 
-Offers phases 3 to 6 follow `OFFERS-PLAN.md` and are not yet placed in this order. Phases 3 and 4 were made the next priority on
-24 November 2026 and fitted to P1 on branch `offers-live` (see `OFFERS-PLAN.md`, "Going live").
+Offers phases 5 and 6 follow `OFFERS-PLAN.md` and are not yet placed in this order. Phases 3 and 4 (item 0) were fitted to P1 on
+branch `offers-live` (see `OFFERS-PLAN.md`, "Going live").
 
 ## Decisions (Tim, 24 November 2026)
 
@@ -232,3 +237,67 @@ recorded or not, still falls under his disclosure duties (REA rules 10.7 and 10.
 recording; it does not make it confidential.
 
 Open for Tim: the pause button's label and what sellers are told ("Pause recording" or "Off the record").
+
+Pause button label decided by Tim, 24 November 2026: "Pause recording".
+
+### QMU. Quarterly market update
+
+Added 24 November 2026 from Tim's central plan (section "Quarterly market update"). Scheduled after the Appraisal page.
+Agreed layout: the sample at https://claude.ai/artifact/NmeEKE5zwfgHXtc6qHfzzW (a made-up owner with homes in Roslyn and
+Dalmore). An option alongside ActivePipe's market report: Tim chooses per quarter, or per owner, which one an owner gets, so no
+owner receives both.
+
+A visual, personal update sent each quarter to owners Tim is prospecting, covering Dunedin and every suburb where that owner holds
+property. It keeps Tim in front of future vendors between appraisals and turns market curiosity into a call.
+
+What the owner sees, top to bottom:
+1. Header video or photo from the Dunedin NZ Visual Library, credited "DunedinNZ", with the season and an AI-drafted headline.
+2. Tim's short note, greeting them by preferred name.
+3. Last month at a glance: the Dunedin median for the latest REINZ month, change on a year ago, sales and days to sell, two or
+   three sentences of commentary.
+4. The year in Dunedin: four tiles with sparklines (12-month median, homes sold this quarter against the same quarter last year,
+   days to sell, middle half of sales); the median-and-spread chart with a 12 months / 2 years switch and this quarter shaded;
+   days to sell; homes sold each month against the year before.
+5. Your suburbs: a tab per suburb they own in. 12-month median, middle half, sales, days to sell, change on last year, and how
+   far above or below the Dunedin median; the suburb against its neighbours (Tim's suburb groupings, as in the appraisal); recent
+   sales as dots with price, month and bedrooms only, never an address. Tapping a dot drops a ready-made question into Ask me.
+6. Where Dunedin prices sit: price bands for the last 12 months with the bands holding their suburbs' medians highlighted, and
+   how homes were sold (median price and days by method).
+7. When buyers are busiest: average sales by month of the year, months ahead in colour, a line on timing a move.
+8. Where does your place sit? Two open questions ("Is there a sale you have seen and wondered about?" and "What would you like to
+   know about where your property sits?"), Send to Tim, and call or text. No preset answers.
+9. DwellHub invitation (off by default until DwellHub is ready): "See your property on DwellHub". A link out only.
+10. Sources, "general market information, not an appraisal or a registered valuation", why they are receiving it, unsubscribe.
+Paper: the same page through a print stylesheet, every suburb shown, no forms or buttons.
+
+Tim's view: set-up per recipient (suburbs from owned properties, any can be unticked; DwellHub invitation on or off; recent sales
+shown or hidden). The AI drafts all wording from the quarter's figures; Tim edits in place and approves the quarter before
+anything sends (one approval for the shared commentary; personal notes editable per recipient). A send checklist: consent
+recorded, unsubscribe working, figures refreshed and checked, words approved.
+
+Sending and signals: quarterly, after REINZ's monthly release (late February, May, August, November), covering the three latest
+REINZ months against the same months a year earlier. A private, unindexed link per owner, no sign-in, suburbs only. Delivery is
+an email in Tim's name with the headline, one chart image and a button to the page. Tim is told when someone sends a question or
+taps call; opens, suburb taps and repeat visits are logged on their People record, and asking about a sale or opening twice in a
+week marks them "value curious" with a reminder to call.
+
+Data: SHARED, NOT COPIED. The Appraisal page's monthly market data (REINZ Market Insights plus individual REINZ sales, refreshed
+once a month) and its chart code (median and spread, days to sell, volume bars, price bands, suburb strips) are built once as
+shared parts and used by both, so an appraisal and an update never disagree. Suburb figures are calculated from individual REINZ
+dwelling sales at each refresh; suburbs under 10 sales carry a "read with care" note. Recent sales are stored with price, month and
+bedrooms; the address stays agent only.
+
+Rules: no address, owner name or property detail of anyone else ever appears; no fees, no price for their property, no mention of
+quiet or off-market listings; sent only to owners who have agreed to hear from Tim, with Tim identified as sender and a working
+unsubscribe that takes effect at once (Unsolicited Electronic Messages Act 2007); the AI drafts and Tim approves before anything
+sends; DwellHub stays a link out only, and portal data is not sent to DwellHub by this feature.
+
+Passes:
+- QMU1. The update page from the shared market data, with Tim's view, print, and the Ask me form going to Tim. Build when it
+  comes up.
+- QMU2. Suburb figures per quarter from REINZ, recent sales dots, and the People link (suburbs from owned properties; typed in
+  by Tim until P4). Build when it comes up.
+- QMU3. Sending, unsubscribe, consent records and the interest signals. HELD until Tim answers both: (a) who sends the email,
+  the portal or ActivePipe linking to the portal page; (b) which owners count as having agreed to hear from him, and whether the
+  first send asks everyone to opt in.
+- QMU4. DwellHub invitation switch, wired once DwellHub can receive an owner by link.
