@@ -2225,10 +2225,10 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const insps = await safe(sb.from('property_inspections').select('id,property_id,status,started_at').eq('status', 'in_progress'));
     // offers: emails waiting for Tim to read and send (drafts; nothing goes by itself), one item per signing or agreed copy
     const mds = await safe(sb.from('offer_mail_drafts').select('id,offer_id,property_id,kind,signing_id,status').in('status', ['draft', 'sending']));
-    const mdGroups = {}; (mds || []).forEach(m => { const k = /^agreed_/.test(m.kind) ? 'a:' + m.offer_id : 's:' + m.signing_id; (mdGroups[k] ||= []).push(m); });
-    Object.values(mdGroups).forEach(list => { const m = list[0], pr = props.find(x => x.id === m.property_id), agreed = /^agreed_/.test(m.kind);
-      needs.push({ what: list.some(x => x.status === 'sending') ? 'An email may have gone: check it' : `${list.length} email${list.length === 1 ? '' : 's'} to read and send`, where: (pr && pr.address) || 'Property', sub: agreed ? 'The agreed copy, to both parties' : list.some(x => x.kind === 'reopened') ? 'Please initial again, after a change' : 'Signing links',
-        go: () => agreed ? viewOfferAgent(m.offer_id) : viewSigning(m.signing_id), mail: true }); });
+    const mdGroups = {}; (mds || []).forEach(m => { const k = /^agreed_/.test(m.kind) ? 'a:' + m.offer_id : /^withdraw_/.test(m.kind) ? 'w:' + m.offer_id : 's:' + m.signing_id; (mdGroups[k] ||= []).push(m); });   // a withdrawal's emails have no signing: grouped by offer
+    Object.values(mdGroups).forEach(list => { const m = list[0], pr = props.find(x => x.id === m.property_id), agreed = /^agreed_/.test(m.kind), wd = /^withdraw_/.test(m.kind);
+      needs.push({ what: list.some(x => x.status === 'sending') ? 'An email may have gone: check it' : `${list.length} email${list.length === 1 ? '' : 's'} to read and send`, where: (pr && pr.address) || 'Property', sub: agreed ? 'The agreed copy, to both parties' : wd ? 'The withdrawal, to that side and the other side\'s lawyer' : list.some(x => x.kind === 'reopened') ? 'Please initial again, after a change' : 'Signing links',
+        go: () => agreed || wd ? viewOfferAgent(m.offer_id) : viewSigning(m.signing_id), mail: true }); });
     // offers from the form that Tim hasn't opened yet (offers phase 1)
     const fresh = await safe(sb.from('property_offers').select('id,property_id,amount,received_at,related_party,source,suspected_spam').is('read_at', null).order('received_at', { ascending: false }));
     // possible spam: one quiet line per property, opening its fold (no email was sent for these)
@@ -6996,7 +6996,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const labels = {}; (((ag.terms || {}).conditions) || []).forEach(c => { const i = OF.condInfo && OF.condInfo(c.key); labels[c.key] = (i && i.label) || c.key; });
     // who holds the deposit: Tim's newest choice, kept with the agreement; none yet, the recommended one is recorded as his choice now
     let dh = ((await ofSafe(sb.from('offer_deposit_holders').select('*').eq('offer_id', o.id).order('id', { ascending: false }).limit(1))) || [])[0];
-    if (!dh) { await sgRpc('agent_offer_deposit_holder', { p_offer: o.id, p_holder: MAIL.depositRecommended(ngKs(o, ag)), p_other: null }); dh = { holder: MAIL.depositRecommended(ngKs(o, ag)) }; }
+    if (!dh) { await sgRpc('agent_offer_deposit_holder', { p_offer: o.id, p_holder: MAIL.depositRecommended(ngKs(o, ag)), p_other: null, p_default: true }); dh = { holder: MAIL.depositRecommended(ngKs(o, ag)) }; }   // kept as the recommendation, not as his choice
     const r = MAIL.agreedDrafts({ address: p.address, agreement: ag, terms: ag.terms || {}, details: o.details || {}, vendors: vendorsOf,
       vendorLawyer: { person: pl('vl_person'), firm: pl('vl_firm'), email: pl('vl_email') || pl('vl_service'), phone: pl('vl_phone') }, holidays: hol || [], labels, depositHolder: { holder: dh.holder, other: dh.other_text || '' } });
     const att = { path: ag.path, sha256: ag.sha256, name: `Agreement ${String(p.address || '').replace(/[^A-Za-z0-9 ,.-]+/g, '').slice(0, 80)}.pdf` };
@@ -7418,7 +7418,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   }
   async function hdPeople(o) {
     const d = o.details || {}, purch = (d.purchasers || []).map(q => [q.first, q.last].filter(Boolean).join(' ').trim()).filter(Boolean);
-    const [pp, vs] = await Promise.all([ofSafe(sb.from('property_people').select('legal_name,position').eq('property_id', o.property_id).order('position')), hdVendorSigners(o)]);
+    const [pp, vs] = await Promise.all([ofSafe(sb.from('property_people').select('legal_name,position').eq('property_id', o.property_id).eq('role', 'owner').order('position')), hdVendorSigners(o)]);   // owners only: never a contact or former owner
     const vend = [...new Set([...(pp || []).map(x => x.legal_name), ...(vs || []).map(x => x.name)].filter(Boolean))];
     return { purchaser: purch, vendor: vend };
   }
@@ -7492,9 +7492,11 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const pl = id => (((dr && dr.placed) || []).find(x => x.id === id) || {}).text || '', vl = { person: pl('vl_person'), firm: pl('vl_firm'), email: pl('vl_email') || pl('vl_service') };
     let partyTo, partyFirst, own, other;
     if (h.side === 'purchaser') { const q = d.purchasers || []; partyTo = q.map(x => x.email).filter(Boolean); if (!partyTo.length && d.email) partyTo = [d.email]; partyFirst = q.map(x => x.first); own = d.lawyer || {}; other = vl; }
-    else { const [vs, pp] = await Promise.all([hdVendorSigners(o), ofSafe(sb.from('property_people').select('legal_name,pref_name,email').eq('property_id', o.property_id).order('position'))]);
+    else { const [vs, pp] = await Promise.all([hdVendorSigners(o), ofSafe(sb.from('property_people').select('legal_name,pref_name,email').eq('property_id', o.property_id).eq('role', 'owner').order('position'))]);
       partyTo = [...new Set([...(vs || []).map(x => x.email), ...(pp || []).map(x => x.email)].filter(Boolean).map(x => x.toLowerCase()))]; partyFirst = (pp || []).map(x => x.pref_name || String(x.legal_name || '').split(/\s+/)[0]); own = vl; other = d.lawyer || {}; }
-    const w = MAIL.withdrawDrafts({ side: h.side, address: p.address, when: h.told_at, partyFirst, partyTo, ownLawyer: own, otherLawyer: other });
+    // did that side make a counteroffer (a round of theirs with changes)? The vendors withdraw one only if they made one; otherwise they declined
+    const counter = ((await ofSafe(sb.from('offer_rounds').select('id,side,changes').eq('offer_id', o.id))) || []).some(r => r.side === h.side && r.changes > 0);
+    const w = MAIL.withdrawDrafts({ side: h.side, counter, address: p.address, when: h.told_at, partyFirst, partyTo, ownLawyer: own, otherLawyer: other });
     let made = 0;
     for (const [kind, m] of [['withdraw_party', w.party], ['withdraw_lawyer', w.lawyer]]) { if (!m.to.length) continue; await sgRpc('agent_mail_draft_add', { p_offer: o.id, p_kind: kind, p_signer: null, p_to: m.to, p_cc: m.cc, p_subject: m.subject, p_body: m.body, p_attach: null }); made++; }
     if (!made) throw new Error('There is no email address for either side yet. Add them, then build the emails.');
@@ -7518,7 +7520,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <label class="f" for="ngDepHolder">Deposit holder</label><select id="ngDepHolder">${Object.entries(MAIL.DEPOSIT_HOLDERS).map(([k, x]) => `<option value="${k}" ${k === dhNow ? 'selected' : ''}>${esc(x.label)}${k === rec ? ' (Recommended)' : ''}</option>`).join('')}</select>
       <div id="ngDepOtherBox" ${dhNow === 'other' ? '' : 'hidden'}><label class="f" for="ngDepOther">Who holds it</label><input type="text" id="ngDepOther" maxlength="200" value="${esc((dhRow && dhRow.other_text) || '')}"></div>
       <p class="small warnc" id="ngDepWarn" role="alert" ${ks && dhNow !== 'vendor_lawyer' ? '' : 'hidden'}>KiwiSaver is part of this deposit. It normally goes to the vendors' lawyer's trust account, because it can't be released before settlement. You can still choose this; the emails keep that line.</p>
-      ${dhRow ? `<p class="small" id="ngDepNow">Recorded ${esc(fmtDT(dhRow.chosen_at))}: ${esc(dhRow.holder === 'other' ? dhRow.other_text : MAIL.DEPOSIT_HOLDERS[dhRow.holder].label)}.</p>` : ''}
+      ${dhRow ? `<p class="small" id="ngDepNow">${dhRow.by_default ? 'The recommendation, used for the emails; you haven\'t chosen yet' : 'Your choice, recorded'} ${esc(fmtDT(dhRow.chosen_at))}: ${esc(dhRow.holder === 'other' ? dhRow.other_text : MAIL.DEPOSIT_HOLDERS[dhRow.holder].label)}.</p>` : ''}
       <div class="toolbar"><button class="btn ghost" type="button" id="ngDepSave">Use this${agMail.some(m => m.status === 'draft') ? ' and rebuild the emails' : ''}</button></div><p class="small" id="ngDepOut" role="status" aria-live="polite"></p></section>` : '';
     const agMailHTML = ag ? (agMail.some(m => m.status !== 'void') ? mlPanelHTML(agMail, 'Emails to the parties', 'mlAgreed', 'Built from the agreement. Nothing goes until you press Send. Fill in or delete each marked blank, read each one, then send it, or tick Reviewed on both and use Send all reviewed. The lawyers\' pack is separate.')
       : `<section class="card" id="mlAgreed"><h2>Emails to the parties</h2><p class="small">One to the purchasers (cc their lawyer) and one to the vendors (cc theirs), each with the agreed copy and the other side's lawyer. Nothing is sent until you press Send.</p><div class="toolbar"><button class="btn primary" type="button" id="mlBuildAgreed">Build the emails</button></div><p class="small" id="mlBuildOut" role="status" aria-live="polite"></p></section>`) : '';

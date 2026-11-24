@@ -866,7 +866,7 @@ function mailAllowed(offerId,kind,signerId){ const o=PO().find(x=>x.id===offerId
     if(side==='purchaser') return lowAll([party&&d.email,...(party?(d.purchasers||[]).map(q=>q.email):[]),(d.lawyer||{}).email]).filter(x=>x.indexOf('@')>0);
     const inForce=(DB.agreements||[]).filter(x=>x.property_id===o.property_id&&['signed','countersigned'].includes(x.status)).sort((x,y)=>String(y.created_at).localeCompare(String(x.created_at)))[0];
     const dr=(DB.offer_drafts||[]).filter(x=>x.offer_id===offerId).sort((x,y)=>y.number-x.number)[0];
-    return lowAll([...(party?OSR().filter(x=>{ const g=OSG().find(y=>y.id===x.signing_id); return g&&g.offer_id===offerId&&g.side==='vendor'; }).map(x=>x.email):[]),...(party?(DB.property_people||[]).filter(x=>x.property_id===o.property_id).map(x=>x.email):[]),...(DB.lawyer_links||[]).filter(x=>inForce&&x.agreement_id===inForce.id).map(x=>x.email),
+    return lowAll([...(party?OSR().filter(x=>{ const g=OSG().find(y=>y.id===x.signing_id); return g&&g.offer_id===offerId&&g.side==='vendor'; }).map(x=>x.email):[]),...(party?(DB.property_people||[]).filter(x=>x.property_id===o.property_id&&x.role==='owner').map(x=>x.email):[]),...(DB.lawyer_links||[]).filter(x=>inForce&&x.agreement_id===inForce.id).map(x=>x.email),
       ...((dr&&dr.placed)||[]).filter(x=>['vl_email','vl_service'].includes(x.id)).map(x=>x.text)]).filter(x=>x.indexOf('@')>0); }
   return []; }
 const wdSide=offerId=>((OHD().filter(h=>h.offer_id===offerId&&h.kind==='withdraw').sort((x,y)=>String(y.made_at).localeCompare(String(x.made_at)))[0])||{}).side||null;
@@ -990,6 +990,7 @@ function signRpc(name,a,me){ if(!me||!AGENTS.includes(me.email)) return bad('Onl
     const person=String(a.p_person||'').trim(); if(person.length<2||person.length>250) throw new Error('Choose which person directed it'); const why=reason(a.p_reason,'Give the reason (3 to 500 characters)');
     if(!['in_person','phone','email','link_request'].includes(a.p_told_how)) throw new Error('Choose how you were told'); if(!a.p_told_at) throw new Error('Say when you were told');
     const o=PO().find(x=>x.id===a.p_offer); if(!o) throw new Error('No such offer'); if(OHD().some(h=>h.offer_id===o.id&&h.kind==='withdraw')) throw new Error('This offer has already been withdrawn');
+    if(a.p_request&&!ORQ().some(x=>x.id===a.p_request&&x.offer_id===o.id)) throw new Error('No such request on this offer');
     const r={data:negWithdraw({p_offer:o.id,p_side:a.p_side,p_at:a.p_told_at,p_note:('Directed by '+person+': '+why).slice(0,500)},me)};
     OHD().filter(h=>h.offer_id===o.id&&h.kind==='freeze'&&!h.lifted_at).forEach(h=>Object.assign(h,{lifted_at:now(),lifted_by:me.email,lift_note:'Withdrawn'}));
     const h={id:uid(),offer_id:o.id,property_id:o.property_id,kind:'withdraw',side:a.p_side,person,reason:why,told_at:a.p_told_at,told_how:a.p_told_how,request_id:a.p_request||null,made_by:me.email,made_at:now(),lifted_at:null,lifted_by:null,lift_note:null}; OHD().push(h);
@@ -999,9 +1000,10 @@ function signRpc(name,a,me){ if(!me||!AGENTS.includes(me.email)) return bad('Onl
     Object.assign(rq,{handled_at:now(),handled_by:me.email,handled_as:'carry_on'}); sgEv(rq,me.email,'request_carry_on',{request_id:rq.id,note:why}); return null; });
   if(name==='agent_offer_deposit_holder') return sgTry(()=>{ const o=PO().find(x=>x.id===a.p_offer); if(!o) throw new Error('No such offer'); const ag=OAG().find(x=>x.offer_id===o.id); if(!ag) throw new Error("The agreement hasn't been made yet");
     if(!['nzret','vendor_lawyer','other'].includes(a.p_holder)) throw new Error('Choose who holds the deposit'); const other=String(a.p_other||'').trim(); if(a.p_holder==='other'&&(other.length<3||other.length>200)) throw new Error('Type who holds the deposit (3 to 200 characters)');
-    const ks=(ag.terms||{}).kiwisaver===true||(o.details||{}).kiwisaver===true, rec=ks?'vendor_lawyer':'nzret', warned=ks&&a.p_holder!=='vendor_lawyer';
-    const row={id:ODH().length+1,offer_id:o.id,property_id:o.property_id,agreement_id:ag.id,holder:a.p_holder,other_text:a.p_holder==='other'?other:null,recommended:rec,kiwisaver:ks,warned,chosen_by:me.email,chosen_at:now()}; ODH().push(row);
-    sgEv({property_id:o.property_id,offer_id:o.id},me.email,'deposit_holder_chosen',{id:row.id,holder:a.p_holder,other:row.other_text,recommended:rec,kiwisaver:ks,agreement_id:ag.id}); return {id:row.id,holder:a.p_holder,recommended:rec,warned}; });
+    const ks=(ag.terms||{}).kiwisaver===true||(o.details||{}).kiwisaver===true, rec=ks?'vendor_lawyer':'nzret', warned=ks&&a.p_holder!=='vendor_lawyer', byDef=a.p_default===true;
+    if(byDef&&(a.p_holder!==rec||ODH().some(x=>x.offer_id===o.id))) throw new Error('The recommended holder is used only when nothing has been chosen');
+    const row={id:ODH().length+1,offer_id:o.id,property_id:o.property_id,agreement_id:ag.id,holder:a.p_holder,other_text:a.p_holder==='other'?other:null,recommended:rec,kiwisaver:ks,warned,by_default:byDef,chosen_by:me.email,chosen_at:now()}; ODH().push(row);
+    sgEv({property_id:o.property_id,offer_id:o.id},me.email,'deposit_holder_chosen',{id:row.id,holder:a.p_holder,other:row.other_text,recommended:rec,kiwisaver:ks,by_default:byDef,agreement_id:ag.id}); return {id:row.id,holder:a.p_holder,recommended:rec,warned,by_default:byDef}; });
   if(name==='agent_offer_link_changes_default') return sgTry(()=>{ if(typeof a.p_on!=='boolean') throw new Error('Choose yes or no'); OSET().link_changes_default=a.p_on; OSET().updated_by=me.email; return null; });
   if(name==='agent_offer_negotiation_setting') return sgTry(()=>{ if(typeof a.p_resign_every_round!=='boolean') throw new Error('Choose yes or no'); OSET().resign_every_round=a.p_resign_every_round; OSET().updated_by=me.email; return null; });
   return bad('unknown rpc '+name); }
@@ -1189,7 +1191,7 @@ async function signInvoke(o){ const b=(o&&o.body)||{}, me=S&&S.user, net='h:'+mo
   const s=OSR().find(x=>x.token_hash&&x.token_hash===shaS(tok)&&x.link_expires_at>now());
   if(!s){ if(b.action==='open'&&hits('bad',net,null,36e5)<30){ OH().push({at:now(),kind:'bad',net}); save(); } return res({ok:false}); }
   const g=OSG().find(x=>x.id===s.signing_id), p=PT().find(x=>x.id===g.property_id);
-  const mayAct=()=>!s.finished_at&&!s.void_at&&['signing','held'].includes(g.status), codeOk=()=>mayAct()&&!sgCurrent(g);   // 023: no code once stopped, frozen or replaced
+  const mayAct=()=>!s.finished_at&&!s.void_at&&['signing','held'].includes(g.status), codeOk=()=>mayAct()&&!sgStopFor(s,g);   // 023/024: no code once stopped, frozen, replaced, or while their own request is with Tim
   const me_=()=>{ if(!mayAct()) throw new Error("This link isn't working. Ask Tim for a new one."); if(!/^[A-Za-z0-9_-]{40,64}$/.test(b.session||'')||s.session_hash!==shaS(b.session)||s.session_expires_at<now()) throw new Error('Please enter the code from your email again'); return s; };
   try{
     if(b.action==='open'){ if(!s.opened_at){ s.opened_at=now(); save(); } const e=s.email||''; return res({ok:true,first:s.name.split(' ')[0],address:p.address,finished:!!s.finished_at,stopped:sgStopFor(s,g),held:g.status==='held',side:g.side||'purchaser',round:g.round_no||1,email_hint:e.indexOf('@')>0?e[0]+'***@'+e.split('@')[1]:''}); }
@@ -1217,7 +1219,7 @@ async function signInvoke(o){ const b=(o&&o.body)||{}, me=S&&S.user, net='h:'+mo
       // 024: a draft for each reopened link signer, which Tim sends himself; no email to anyone now, Tim included (he hears once per round)
       if(r.reopened>0) (r.reopened_signers||[]).forEach(x=>{ if(!x.email||!x.id) return; try{ const w=window.MAIL.reopenedDraft({first:String(x.name||'').split(' ')[0],address:r.address,by:r.by,side:g.side}); mailInsert('system',{p_offer:g.offer_id,p_kind:'reopened',p_signer:x.id,p_to:[x.email],p_cc:[],p_subject:w.subject,p_body:w.body}); }catch(_){} }); save();
       return res({ok:true,id:r.id,reopened:r.reopened}); }
-    if(b.action==='ask'){ if(s.void_at||['locked','replaced'].includes(g.status)) throw new Error('This version is no longer being signed'); const t=String(b.text||'').trim(); if(t.length<3||t.length>1000) throw new Error('Please say what you would like changed (up to 1,000 characters)');
+    if(b.action==='ask'){ if(s.void_at||['locked','replaced'].includes(g.status)) throw new Error('This version is no longer being signed'); if(holdActive(g.offer_id)) throw new Error(NEUTRAL_STOP); if(ORQ().some(r=>r.signer_id===s.id&&!r.handled_at)) throw new Error(ASKED_STOP); const t=String(b.text||'').trim(); if(t.length<3||t.length>1000) throw new Error('Please say what you would like changed (up to 1,000 characters)');
       OSA().push({id:OSA().length+1,signing_id:g.id,signer_id:s.id,text:t,at:now()}); sgEv(g,s.name,'sign_change_asked',{signing_id:g.id,signer:s.position,length:t.length,round:g.round_no||1,side:g.side||'purchaser'}); let emailed=true;
       const v=g.side==='vendor', later=(g.round_no||1)>1, decline=b.decline===true&&later, who=v?'vendor':later?'purchaser':'buyer';   // worded by side; a decline has its own subject
       try{ sgMail(decline?'offer_sign_decline':'offer_sign_ask','tim',{text:t,side:g.side||'purchaser',subject:decline?(v?'The vendors have declined the offer':"The purchasers have declined the vendors' counteroffer")+' for '+p.address:`A ${who} asks for a change: `+p.address}); }catch(_){ emailed=false; } save(); return res({ok:true,emailed}); }
@@ -1225,7 +1227,7 @@ async function signInvoke(o){ const b=(o&&o.body)||{}, me=S&&S.user, net='h:'+mo
     if(b.action==='request'){ const L={finance_changed:'Our financial situation has changed',contract_elsewhere:'We have entered a contract elsewhere',incapacitated:'One of our party is incapacitated',property_integrity:'We have concerns about the integrity of the property',property_viability:'We have concerns about the viability of the property'};
       if(s.void_at||!['ready','signing','held','complete'].includes(g.status)||sgCurrent(g)) throw new Error(NEUTRAL_STOP); const kind=b.kind; if(!['freeze','withdraw'].includes(kind)) throw new Error('Choose stop for now, or withdraw');
       if(!(b.reason_key in L)&&b.reason_key!=='other') throw new Error('Choose a reason'); const why=b.reason_key==='other'?String(b.reason||'').trim():L[b.reason_key]; if(why.length<3||why.length>500) throw new Error('Type the reason (3 to 500 characters)');
-      if(ORQ().filter(x=>x.signer_id===s.id&&Date.parse(x.at)>Date.now()-36e5).length>=5) throw new Error(ASKED_STOP);
+      if(ORQ().some(x=>x.signer_id===s.id&&!x.handled_at)||ORQ().filter(x=>x.signer_id===s.id&&Date.parse(x.at)>Date.now()-36e5).length>=5) throw new Error(ASKED_STOP);   // one open request at a time
       const rq={id:uid(),offer_id:g.offer_id,property_id:g.property_id,signing_id:g.id,signer_id:s.id,side:g.side||'purchaser',kind,reason_key:b.reason_key,reason:why,at:now(),net_hash:net,handled_at:null,handled_by:null,handled_as:null}; ORQ().push(rq);
       sgEv(g,s.name,'party_request',{request_id:rq.id,kind,side:rq.side,signer:s.position,round:g.round_no||1,reason_key:b.reason_key,reason:why}); let emailed=true; const v=rq.side==='vendor';
       try{ sgMail('offer_sign_request','tim',{side:rq.side,request:kind,reason:why,subject:`URGENT: ${v?'a vendor':'a purchaser'} asks to ${kind==='withdraw'?'withdraw':'stop signing'}: `+p.address}); }catch(_){ emailed=false; } save(); return res({ok:true,emailed}); }
