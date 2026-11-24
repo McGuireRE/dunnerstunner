@@ -373,9 +373,11 @@ end $$;
 create or replace function public.offer_sign_do_finish(p_signer uuid, p_ua text, p_net text, p_id text, p_witness text) returns jsonb language plpgsql security definer set search_path = public as $$
 declare s public.offer_signers; g public.offer_signings; missing int; seen text; taps text; left_ int;
 begin
-  -- one finish at a time per signing: the offer is locked first (the order Tim's functions use, so a freeze or withdrawal and a finish
-  -- never cross), then the signing, then the signer; all read again under the lock, so a finish can't complete just after a freeze
-  perform 1 from public.property_offers where id = (select gx.offer_id from public.offer_signings gx join public.offer_signers x on x.signing_id = gx.id where x.id = p_signer) for update;
+  -- one finish at a time per signing. The offer is taken FOR KEY SHARE first: that waits behind a freeze or withdrawal (which take the
+  -- offer FOR UPDATE), so a finish can't complete just after one, but it doesn't block the event inserts of a change, mark or email on
+  -- the same signing (each event takes FOR KEY SHARE on the offer through its foreign key), so there is no deadlock. Then the signing,
+  -- then the signer, all read again under the lock.
+  perform 1 from public.property_offers where id = (select gx.offer_id from public.offer_signings gx join public.offer_signers x on x.signing_id = gx.id where x.id = p_signer) for key share;
   perform 1 from public.offer_signings where id = (select signing_id from public.offer_signers where id = p_signer) for update;
   select * into s from public.offer_signers where id = p_signer for update; g := public.offer_sign_ready(s);
   if s.consent_at is null or s.sig_png is null then raise exception 'Agree, read the guides and draw your signature and initials first'; end if;

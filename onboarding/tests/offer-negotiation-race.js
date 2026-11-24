@@ -8,6 +8,9 @@
 //   3. the agreed copy locked twice at once: exactly one agreement;
 //   4. Tim closes a document at the moment the edge function locks a round on it: either the round is locked and then the document
 //      closed with it kept, or the document is closed and the round refused; never a round locked into a closed document after it closed.
+//   2b. a change already holds the signing when a finish starts; 2c. a signing email being taken as a finish starts: neither deadlocks
+//      (every event insert takes FOR KEY SHARE on the offer, so the finish takes the offer only FOR KEY SHARE too). Any error other than
+//      the expected refusals, a deadlock above all, fails the test.
 //   5. Tim freezes the offer as the last vendor finishes (review, 25 November 2026): the freeze holds the offer's lock a moment, the
 //      finish waits for it and is then refused; never a signing completed after the freeze.
 // The scratch database is dropped afterwards. Run: RACE_TEMPLATE=t4 PGHOST=/tmp/p2pg PGPORT=5499 PGUSER=postgres node onboarding/tests/offer-negotiation-race.js
@@ -67,7 +70,7 @@ const AGENT = `set role authenticated; select set_config('request.jwt.claims', j
         insert into public.offer_blanks (property_id, document_id, sha256, size_bytes, file_name, pages, sizes, edition, edition_checked, created_by) values (pid, doc, repeat('ab', 32), 10, 'b.pdf', 3, '[[595,842],[595,842],[595,842]]', 'Eleventh Edition 2022 (4)', true, 't') returning id into bl;
         insert into public.offer_blank_maps (blank_id, version, places, approved, created_by) values (bl, 1, '[{"id":"date","key":"date","kind":"date","page":1,"x":80,"y":730,"w":200,"h":10}]', true, 't') returning id into m;
         perform set_config('request.jwt.claims', agent, true);
-        for k in 1..5 loop
+        for k in 1..7 loop
           o := public.agent_offer_add(pid, good);
           -- a draft as drafting makes it since the further terms numbering (024 refuses one without term_last)
           insert into public.offer_drafts (offer_id, property_id, number, blank_id, blank_sha256, map_id, details, placed, needs, path, sha256, size_bytes, created_by, edits)
@@ -99,6 +102,37 @@ const AGENT = `set role authenticated; select set_config('request.jwt.claims', j
     const [status2, marks2, finishedMissing] = st2.split(',');
     out.changeFinish = { change: race2[0].c ? race2[0].e.split('\n')[0] : 'saved', finish: race2[1].c ? race2[1].e.split('\n')[0] : 'finished', status: status2, marks: +marks2, finishedWithMissing: +finishedMissing };
     ok(+finishedMissing === 0 && (status2 !== 'complete' || +marks2 === 0) && (race2[0].c || race2[1].c || status2 === 'signing'), 'a change and the last finish at once: never complete with a change someone hasn\'t initialled');
+    // only the expected refusals: anything else (a deadlock above all) fails
+    const EXPECTED = /Everyone has signed|There (is|are) still \d+ places? to do|Tim is checking a change|You have finished signing/;
+    const unexpected = rs => rs.filter(r => r.c && !EXPECTED.test(r.e)).map(r => r.e.split('\n')[0]);
+    ok(!unexpected(race2).length, 'race 2: no error but the expected refusals: ' + unexpected(race2).join(' | '));
+
+    // 2b. the reviewer's probe (offer 6): the change's transaction already holds the signing, and hasn't yet written its event, when the
+    //     last finish starts (the order that deadlocked when finish took the offer FOR UPDATE)
+    const o6 = await v('o6');
+    const g6 = await one(`${AGENT} select public.agent_round_present('${o6}', 'in_person', public.rc_places(2, true, null, true), true)->>'id'`);
+    await one(`${CLAIMS} select public.rc_prep('${g6}'); select public.rc_taps('${g6}', 1); select public.offer_sign_do_finish((select id from public.offer_signers where signing_id = '${g6}' and position = 1), 'ua', null, 'passport', 'Tim')::text; select public.rc_taps('${g6}', 2)`);
+    const mk6 = '22222222-bbbb-4bbb-8bbb-000000000006';
+    const ch6 = psql(`begin; select 1 from public.offer_signings where id = '${g6}' for update; select pg_sleep(1.5); select public.offer_sign_do_change((select id from public.offer_signers where signing_id = '${g6}' and position = 2), '${mk6}', 'strike', 1, '{"x0":100,"x1":180,"y":345}', null, public.rc_cp(2, '${mk6}'))::text; commit;`);
+    await new Promise(r => setTimeout(r, 400));
+    const fi6 = psql(`select public.offer_sign_do_finish((select id from public.offer_signers where signing_id = '${g6}' and position = 2), 'ua', null, 'passport', 'Tim')::text`);
+    const r6 = await Promise.all([ch6, fi6]), st6 = (await one(`select status || ',' || (select count(*) from public.offer_sign_marks where signing_id = '${g6}') from public.offer_signings where id = '${g6}'`)).split(',');
+    out.changeHoldsFinish = { change: r6[0].c ? r6[0].e.split('\n')[0] : 'saved', finish: r6[1].c ? r6[1].e.split('\n')[0] : 'finished', status: st6[0], marks: +st6[1] };
+    ok(!r6.some(r => /deadlock/i.test(r.e)) && !unexpected(r6).length && !r6[0].c && r6[1].c && st6[0] !== 'complete' && st6[1] === '1', 'a change holding the signing as a finish starts: no deadlock; the change saves and the finish waits, then is refused (the change needs initialling)');
+
+    // 2c. a signing email being taken (offer 7, by link): its transaction holds the signing before writing its event, as another signer
+    //     finishes: no deadlock, both go through
+    const o7 = await v('o7');
+    const g7 = await one(`${AGENT} select public.agent_round_present('${o7}', 'link', public.rc_places(2, true, null, true), true)->>'id'`);
+    await one(`${CLAIMS} select public.offer_sign_issue('${g7}', 'test')::text; select public.rc_prep('${g7}'); select public.rc_taps('${g7}', 1)`);
+    const val7 = await one(`select id from public.offer_signers where signing_id = '${g7}' and position = 2`), em7 = await one(`select email from public.offer_signers where id = '${val7}'`);
+    const dr7 = await one(`${AGENT} select public.agent_mail_draft_add('${o7}', 'sign_link', '${val7}', array['${em7}'], '{}', 'An offer on RC Race Street', 'Hello Val, [the signing link] Tim', null)::text`);
+    const tk7 = psql(`begin; select 1 from public.offer_signings where id = '${g7}' for update; select pg_sleep(1.5); select public.offer_mail_take('${dr7}', 'agent')::text; commit;`);
+    await new Promise(r => setTimeout(r, 400));
+    const fi7 = psql(`select public.offer_sign_do_finish((select id from public.offer_signers where signing_id = '${g7}' and position = 1), 'ua', null, 'passport', 'Tim')::text`);
+    const r7 = await Promise.all([tk7, fi7]), st7 = (await one(`select (select status from public.offer_mail_drafts where id = '${dr7}') || ',' || (select count(*) from public.offer_signers where signing_id = '${g7}' and finished_at is not null)`)).split(',');
+    out.mailTakeFinish = { take: r7[0].c ? r7[0].e.split('\n')[0] : 'taken', finish: r7[1].c ? r7[1].e.split('\n')[0] : 'finished', draft: st7[0], finished: +st7[1] };
+    ok(!r7.some(r => r.c) && st7[0] === 'sending' && st7[1] === '1', 'a signing email taken as a signer finishes: no deadlock, both go through');
 
     // 3. the agreed copy locked twice at once (offer 3: vendors accept in Round 2)
     const g3 = await one(`${AGENT} select public.agent_round_present('${o3}', 'in_person', public.rc_places(2, true, null, true), true)->>'id'`);
