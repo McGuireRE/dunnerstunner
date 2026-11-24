@@ -119,6 +119,73 @@ revoke insert, update, delete, truncate, references, trigger on public.offer_doc
 -- the new signer column is readable by Tim like the others (the link fingerprints still never are)
 grant select (person_id) on public.offer_signers to authenticated;
 
+-- ───── Freeze and withdrawal (Tim, 24 November 2026): Tim alone stops an offer ─────
+-- A freeze stops every round of an offer at once: nobody can sign, initial, change, submit or get a code on it, and their links say only
+-- that this version is no longer being signed. Tim lifts it. A withdrawal does all that for good, recorded for the party who directed it.
+-- A party may ask from their own link; the request alone stops only that person, until Tim acts. Nothing signed ever changes.
+create table public.offer_holds (
+  id uuid primary key default gen_random_uuid(),
+  offer_id uuid not null references public.property_offers(id),
+  property_id uuid not null references public.properties(id),
+  kind text not null check (kind in ('freeze', 'withdraw')),
+  side text check (side is null or side in ('purchaser', 'vendor')),   -- withdraw: the side that directed it
+  person text check (person is null or length(person) <= 250),        -- withdraw: who directed it; freeze: who asked (or Tim)
+  reason text not null check (length(reason) between 3 and 500),
+  told_at timestamptz, told_how text check (told_how is null or told_how in ('in_person', 'phone', 'email', 'link_request')),
+  request_id uuid,
+  made_by text not null, made_at timestamptz not null default now(),
+  lifted_at timestamptz, lifted_by text, lift_note text
+);
+create index on public.offer_holds (offer_id);
+create table public.offer_requests (
+  id uuid primary key default gen_random_uuid(),
+  offer_id uuid not null references public.property_offers(id),
+  property_id uuid not null references public.properties(id),
+  signing_id uuid not null references public.offer_signings(id),
+  signer_id uuid not null references public.offer_signers(id),
+  side text not null check (side in ('purchaser', 'vendor')),
+  kind text not null check (kind in ('freeze', 'withdraw')),
+  reason_key text not null check (reason_key in ('finance_changed', 'contract_elsewhere', 'incapacitated', 'property_integrity', 'property_viability', 'other')),
+  reason text not null check (length(reason) between 3 and 500),
+  at timestamptz not null default now(), net_hash text,
+  handled_at timestamptz, handled_by text, handled_as text check (handled_as is null or handled_as in ('freeze', 'withdraw', 'carry_on'))
+);
+create index on public.offer_requests (offer_id);
+create or replace function public.guard_offer_hold() returns trigger language plpgsql set search_path = public as $$
+begin
+  if tg_op = 'DELETE' then raise exception 'These records are never removed'; end if;
+  if coalesce(current_setting('offers.fn', true), '') <> 'on' then raise exception 'Changed only through Tim''s offer screens, so there is a record'; end if;
+  if tg_table_name = 'offer_holds' then
+    -- only a freeze is ever lifted, once; everything else stays as made
+    if old.lifted_at is not null or old.kind <> 'freeze' or (to_jsonb(new) - array['lifted_at', 'lifted_by', 'lift_note']) is distinct from (to_jsonb(old) - array['lifted_at', 'lifted_by', 'lift_note']) then raise exception 'This record is kept exactly as it was made'; end if;
+  elsif tg_table_name = 'offer_requests' then
+    if old.handled_at is not null or (to_jsonb(new) - array['handled_at', 'handled_by', 'handled_as']) is distinct from (to_jsonb(old) - array['handled_at', 'handled_by', 'handled_as']) then raise exception 'This record is kept exactly as it was made'; end if;
+  else raise exception 'This record is kept exactly as it was made';
+  end if;
+  return new;
+end $$;
+create trigger guard_offer_holds before update or delete on public.offer_holds for each row execute function public.guard_offer_hold();
+create trigger guard_offer_requests before update or delete on public.offer_requests for each row execute function public.guard_offer_hold();
+create trigger offer_holds_no_truncate before truncate on public.offer_holds for each statement execute function public.guard_offer_truncate();
+create trigger offer_requests_no_truncate before truncate on public.offer_requests for each statement execute function public.guard_offer_truncate();
+alter table public.offer_holds enable row level security;
+alter table public.offer_requests enable row level security;
+create policy ohd_agent_read on public.offer_holds for select using (public.is_agent());
+create policy orq_agent_read on public.offer_requests for select using (public.is_agent());
+revoke all on public.offer_holds, public.offer_requests from anon;
+revoke insert, update, delete, truncate, references, trigger on public.offer_holds, public.offer_requests from authenticated;
+-- is the offer frozen (a freeze not lifted) or withdrawn (for good)?
+create or replace function public.offer_hold_active(p_offer uuid) returns boolean language sql stable security definer set search_path = public as $$
+  select exists (select 1 from public.offer_holds h where h.offer_id = p_offer and (h.kind = 'withdraw' or h.lifted_at is null)) $$;
+-- what a signer's own link says when they can't go on: replaced, their own request with Tim, or the signing's reason
+create or replace function public.offer_sign_stop_for(s public.offer_signers, g public.offer_signings) returns text language plpgsql stable security definer set search_path = public as $$
+begin
+  if s.void_at is not null then return 'This version has been replaced. Tim will send you the new one.'; end if;
+  if public.offer_hold_active(g.offer_id) then return 'This version is no longer being signed. Tim will be in touch.'; end if;
+  if exists (select 1 from public.offer_requests r where r.signer_id = s.id and r.handled_at is null) then return 'Your request has gone to Tim. He will contact you straight away.'; end if;
+  return public.offer_sign_current(g);
+end $$;
+
 -- ───── helpers (internal) ─────
 -- 020's place check, with 'change' added: the initials beside a change made in a counteroffer
 create or replace function public.offer_sign_places_ok(p_places jsonb, p_pages jsonb, p_signers int, p_need_all boolean default true) returns boolean language plpgsql immutable set search_path = public as $$
@@ -234,6 +301,8 @@ end $$;
 create or replace function public.offer_sign_current(g public.offer_signings) returns text language plpgsql stable set search_path = public as $$
 declare d public.offer_drafts; o public.property_offers; ds text;
 begin
+  -- frozen or withdrawn by Tim (offer_holds): every round of the offer stops at once, for everyone, with nothing said beyond this
+  if public.offer_hold_active(g.offer_id) then return 'This version is no longer being signed. Tim will be in touch.'; end if;
   if g.status = 'replaced' then return 'This version has been replaced. Tim will send you the new one.'; end if;
   if g.status = 'locked' then return 'Signing is finished, and the signed copy is locked.'; end if;
   if g.status = 'cancelled' then return 'This signing was stopped before anyone signed. Tim will send it to you again.'; end if;
@@ -406,6 +475,7 @@ begin
   if coalesce(p_method, '') not in ('in_person', 'link') then raise exception 'Choose in person or by link'; end if;
   select * into d from public.offer_drafts where id = p_draft; if d.id is null then raise exception 'No such draft'; end if;
   select * into o from public.property_offers where id = d.offer_id for update;
+  if public.offer_hold_active(o.id) then raise exception 'This offer is frozen or withdrawn, so nothing is released for signing. Unfreeze it first; a withdrawn offer is never signed again'; end if;
   if not exists (select 1 from public.offer_draft_approvals a where a.draft_id = d.id and a.sha256 = d.sha256) then raise exception 'Approve the draft first'; end if;
   if d.number <> (select max(number) from public.offer_drafts where offer_id = d.offer_id) then raise exception 'There is a newer draft of this offer. Use that one'; end if;
   if o.details is distinct from d.details then raise exception 'The offer has changed since this draft. Re-draft and approve it first'; end if;
@@ -491,6 +561,7 @@ declare me text := public.offer_agent(); o public.property_offers; doc public.of
 begin
   if coalesce(p_method, '') not in ('in_person', 'link') then raise exception 'Choose in person or by link'; end if;
   select * into o from public.property_offers where id = p_offer for update; if o.id is null then raise exception 'No such offer'; end if;
+  if public.offer_hold_active(o.id) then raise exception 'This offer is frozen or withdrawn, so nothing is presented. Unfreeze it first; a withdrawn offer is never presented again'; end if;
   if o.status in ('withdrawn', 'lapsed', 'declined') then raise exception 'This offer has been withdrawn or has lapsed'; end if;
   if exists (select 1 from public.offer_agreements a where a.offer_id = o.id) then raise exception 'The agreement has been made'; end if;
   select * into doc from public.offer_documents where offer_id = o.id and status = 'open';
@@ -657,7 +728,7 @@ begin
   end if;
   select * into g from public.offer_signings where id = s.signing_id; select address into addr from public.properties where id = g.property_id;
   if s.opened_at is null and s.void_at is null and s.finished_at is null and g.status in ('ready', 'signing', 'held') then perform set_config('offers.fn', 'on', true); update public.offer_signers set opened_at = now() where id = s.id; perform set_config('offers.fn', '', true); end if;
-  why := case when s.void_at is not null then 'This version has been replaced. Tim will send you the new one.' else public.offer_sign_current(g) end;
+  why := public.offer_sign_stop_for(s, g);
   e := coalesce(s.email, '');
   return jsonb_build_object('ok', true, 'first', split_part(s.name, ' ', 1), 'address', addr, 'finished', s.finished_at is not null, 'stopped', why, 'held', g.status = 'held', 'side', g.side, 'round', g.round_no,
     'email_hint', case when position('@' in e) > 1 then left(e, 1) || '***@' || split_part(e, '@', 2) else '' end);
@@ -671,7 +742,7 @@ begin
   select * into g from public.offer_signings where id = s.signing_id; select * into d from public.offer_drafts where id = g.draft_id; select address into addr from public.properties where id = g.property_id;
   return jsonb_build_object('signer', jsonb_build_object('position', s.position, 'name', s.name, 'consent_at', s.consent_at, 'has_marks', s.sig_png is not null, 'sig_png', s.sig_png, 'init_png', s.init_png, 'finished_at', s.finished_at, 'void', s.void_at is not null,
       'receipts', (select coalesce(jsonb_agg(jsonb_build_object('guide', r.guide, 'version', r.version, 'at', r.at)), '[]'::jsonb) from public.offer_sign_receipts r where r.signer_id = s.id)),
-    'signing', jsonb_build_object('status', g.status, 'stopped', case when s.void_at is not null then 'This version has been replaced. Tim will send you the new one.' else public.offer_sign_current(g) end, 'pages', g.pages, 'cca_pages', to_jsonb(g.cca_pages),
+    'signing', jsonb_build_object('status', g.status, 'stopped', public.offer_sign_stop_for(s, g), 'pages', g.pages, 'cca_pages', to_jsonb(g.cca_pages),
       'draft_path', case when s.consent_at is not null then d.path end, 'draft_sha256', d.sha256, 'address', addr,   -- the document only once they agree to sign electronically
       'round', g.round_no, 'side', g.side, 'link_changes', coalesce(g.link_changes, false),
       -- the newest draft's further terms numbering, so a new further term in a counteroffer takes the next number (never a retired one);
@@ -792,6 +863,7 @@ begin
   select * into o from public.property_offers where id = p_offer; if o.id is null then raise exception 'No such offer'; end if;
   if exists (select 1 from public.offer_agreements a where a.offer_id = o.id) then raise exception 'The agreement has already been made'; end if;
   if o.status in ('withdrawn', 'lapsed', 'declined') then raise exception 'This offer has been withdrawn or has lapsed'; end if;
+  if public.offer_hold_active(o.id) then raise exception 'This offer is frozen or withdrawn, so no agreement is made while it is'; end if;
   select * into doc from public.offer_documents where offer_id = o.id and status = 'open'; if doc.id is null then raise exception 'There is no open document'; end if;
   last := public.offer_doc_last(doc.id);
   if last.doc_round < 2 then raise exception 'Both sides sign before the agreement is made'; end if;
@@ -895,6 +967,144 @@ begin
   update public.offer_settings set link_changes_default = p_on, updated_by = me, updated_at = now();
 end $$;
 
+-- 023's readiness check, plus: a signer who has asked Tim to freeze or withdraw does nothing more on this round until Tim acts
+create or replace function public.offer_sign_ready(s public.offer_signers, p_allow_finished boolean default false) returns public.offer_signings language plpgsql stable set search_path = public as $$
+declare g public.offer_signings; why text;
+begin
+  select * into g from public.offer_signings where id = s.signing_id;
+  if s.void_at is not null then raise exception 'This version has been replaced. Tim will send you the new one.'; end if;
+  why := public.offer_sign_current(g); if why is not null then raise exception '%', why; end if;
+  if exists (select 1 from public.offer_requests r where r.signer_id = s.id and r.handled_at is null) then raise exception 'Your request has gone to Tim. He will contact you straight away.'; end if;
+  if g.status = 'ready' then raise exception 'Signing hasn''t started yet'; end if;
+  if g.status = 'held' then raise exception 'Tim is checking a change to the document. Signing carries on once he has.'; end if;
+  if g.status = 'complete' then raise exception 'Everyone has signed. The signed copy is being locked.'; end if;
+  if s.finished_at is not null and not p_allow_finished then raise exception 'You have finished signing. Thank you.'; end if;
+  return g;
+end $$;
+-- Tim: freeze now (one tap and a confirm on his page), unfreeze, withdraw now, or let a requester carry on
+create or replace function public.agent_offer_freeze(p_offer uuid, p_reason text, p_asked_by text default null, p_request uuid default null) returns uuid language plpgsql security definer set search_path = public as $$
+declare me text := public.offer_agent(); o public.property_offers; id_ uuid; rq public.offer_requests;
+begin
+  select * into o from public.property_offers where id = p_offer for update; if o.id is null then raise exception 'No such offer'; end if;
+  if exists (select 1 from public.offer_agreements a where a.offer_id = o.id) then raise exception 'The agreement has been made. Talk to the lawyers'; end if;
+  if public.offer_hold_active(o.id) then raise exception 'This offer is already frozen or withdrawn'; end if;
+  if coalesce(length(trim(p_reason)), 0) < 3 or length(p_reason) > 500 then raise exception 'Say why (3 to 500 characters)'; end if;
+  if p_request is not null then select * into rq from public.offer_requests where id = p_request and offer_id = o.id; if rq.id is null then raise exception 'No such request'; end if; end if;
+  perform set_config('offers.fn', 'on', true);
+  insert into public.offer_holds (offer_id, property_id, kind, person, reason, told_at, told_how, request_id, made_by) values (o.id, o.property_id, 'freeze', left(coalesce(nullif(trim(coalesce(p_asked_by, '')), ''), rq.side || ' request', 'Tim McGuire'), 250), trim(p_reason),
+    case when rq.id is not null then rq.at end, case when rq.id is not null then 'link_request' end, rq.id, me) returning id into id_;
+  update public.offer_requests set handled_at = now(), handled_by = me, handled_as = 'freeze' where offer_id = o.id and handled_at is null;
+  insert into public.offer_events (property_id, offer_id, actor, kind, detail) values (o.property_id, o.id, me, 'offer_frozen', jsonb_build_object('hold_id', id_, 'reason', trim(p_reason), 'asked_by', coalesce(nullif(trim(coalesce(p_asked_by, '')), ''), case when rq.id is not null then rq.side else 'Tim' end), 'request_id', rq.id));
+  perform set_config('offers.fn', '', true);
+  return id_;
+end $$;
+create or replace function public.agent_offer_unfreeze(p_offer uuid, p_note text) returns void language plpgsql security definer set search_path = public as $$
+declare me text := public.offer_agent(); h public.offer_holds;
+begin
+  if exists (select 1 from public.offer_holds where offer_id = p_offer and kind = 'withdraw') then raise exception 'This offer was withdrawn, so it stays stopped'; end if;
+  select * into h from public.offer_holds where offer_id = p_offer and kind = 'freeze' and lifted_at is null for update; if h.id is null then raise exception 'This offer isn''t frozen'; end if;
+  if coalesce(length(trim(p_note)), 0) < 3 or length(p_note) > 500 then raise exception 'Say why it carries on (3 to 500 characters)'; end if;
+  perform set_config('offers.fn', 'on', true);
+  update public.offer_holds set lifted_at = now(), lifted_by = me, lift_note = trim(p_note) where id = h.id;
+  insert into public.offer_events (property_id, offer_id, actor, kind, detail) values (h.property_id, h.offer_id, me, 'offer_unfrozen', jsonb_build_object('hold_id', h.id, 'note', trim(p_note)));
+  perform set_config('offers.fn', '', true);
+end $$;
+create or replace function public.agent_offer_withdraw_now(p_offer uuid, p_side text, p_person text, p_reason text, p_told_at timestamptz, p_told_how text, p_request uuid default null) returns uuid language plpgsql security definer set search_path = public as $$
+declare me text := public.offer_agent(); o public.property_offers; id_ uuid; r jsonb;
+begin
+  if coalesce(p_side, '') not in ('purchaser', 'vendor') then raise exception 'Choose who directed it: the purchasers or the vendors'; end if;
+  if coalesce(length(trim(p_person)), 0) < 2 or length(p_person) > 250 then raise exception 'Choose which person directed it'; end if;
+  if coalesce(length(trim(p_reason)), 0) < 3 or length(p_reason) > 500 then raise exception 'Give the reason (3 to 500 characters)'; end if;
+  if coalesce(p_told_how, '') not in ('in_person', 'phone', 'email', 'link_request') then raise exception 'Choose how you were told'; end if;
+  if p_told_at is null then raise exception 'Say when you were told'; end if;
+  select * into o from public.property_offers where id = p_offer for update; if o.id is null then raise exception 'No such offer'; end if;
+  if exists (select 1 from public.offer_holds where offer_id = o.id and kind = 'withdraw') then raise exception 'This offer has already been withdrawn'; end if;
+  -- the existing withdrawal (stops every signing as withdrawn, closes the open document, marks the offer withdrawn or declined)
+  r := public.agent_negotiation_withdraw(o.id, p_side, p_told_at, left('Directed by ' || trim(p_person) || ': ' || trim(p_reason), 500));
+  perform set_config('offers.fn', 'on', true);
+  update public.offer_holds set lifted_at = now(), lifted_by = me, lift_note = 'Withdrawn' where offer_id = o.id and kind = 'freeze' and lifted_at is null;
+  insert into public.offer_holds (offer_id, property_id, kind, side, person, reason, told_at, told_how, request_id, made_by)
+    values (o.id, o.property_id, 'withdraw', p_side, trim(p_person), trim(p_reason), p_told_at, p_told_how, p_request, me) returning id into id_;
+  update public.offer_requests set handled_at = now(), handled_by = me, handled_as = 'withdraw' where offer_id = o.id and handled_at is null;
+  insert into public.offer_events (property_id, offer_id, actor, kind, detail) values (o.property_id, o.id, me, 'offer_withdrawn_now', jsonb_build_object('hold_id', id_, 'side', p_side, 'person', trim(p_person), 'reason', trim(p_reason), 'told_at', p_told_at, 'told_how', p_told_how, 'request_id', p_request, 'stopped', r->'stopped'));
+  perform set_config('offers.fn', '', true);
+  return id_;
+end $$;
+create or replace function public.agent_offer_request_carry_on(p_request uuid, p_note text) returns void language plpgsql security definer set search_path = public as $$
+declare me text := public.offer_agent(); rq public.offer_requests;
+begin
+  select * into rq from public.offer_requests where id = p_request for update; if rq.id is null or rq.handled_at is not null then raise exception 'No open request'; end if;
+  if coalesce(length(trim(p_note)), 0) < 3 or length(p_note) > 500 then raise exception 'Say what you agreed with them (3 to 500 characters)'; end if;
+  perform set_config('offers.fn', 'on', true);
+  update public.offer_requests set handled_at = now(), handled_by = me, handled_as = 'carry_on' where id = rq.id;
+  insert into public.offer_events (property_id, offer_id, actor, kind, detail) values (rq.property_id, rq.offer_id, me, 'request_carry_on', jsonb_build_object('request_id', rq.id, 'note', trim(p_note)));
+  perform set_config('offers.fn', '', true);
+end $$;
+-- a party asks, from their own signing link (the edge function, then an urgent email to Tim). It stops only them until Tim acts.
+create or replace function public.offer_sign_request(p_token text, p_session text, p_kind text, p_reason_key text, p_reason text, p_net text) returns jsonb language plpgsql security definer set search_path = public as $$
+declare s public.offer_signers; g public.offer_signings; id_ uuid; why text; L jsonb := jsonb_build_object('finance_changed', 'Our financial situation has changed', 'contract_elsewhere', 'We have entered a contract elsewhere',
+  'incapacitated', 'One of our party is incapacitated', 'property_integrity', 'We have concerns about the integrity of the property', 'property_viability', 'We have concerns about the viability of the property');
+begin
+  s := public.offer_sign_me(p_token, p_session);
+  select * into g from public.offer_signings where id = s.signing_id;
+  if s.void_at is not null or g.status not in ('ready', 'signing', 'held', 'complete') or public.offer_sign_current(g) is not null then raise exception 'This version is no longer being signed. Tim will be in touch.'; end if;
+  if coalesce(p_kind, '') not in ('freeze', 'withdraw') then raise exception 'Choose stop for now, or withdraw'; end if;
+  if coalesce(p_reason_key, '') not in ('finance_changed', 'contract_elsewhere', 'incapacitated', 'property_integrity', 'property_viability', 'other') then raise exception 'Choose a reason'; end if;
+  why := case when p_reason_key = 'other' then nullif(trim(coalesce(p_reason, '')), '') else L->>p_reason_key end;
+  if why is null or length(why) < 3 or length(why) > 500 then raise exception 'Type the reason (3 to 500 characters)'; end if;
+  if (select count(*) from public.offer_requests where signer_id = s.id and at > now() - interval '1 hour') >= 5 then raise exception 'Your request has gone to Tim. He will contact you straight away.'; end if;
+  perform set_config('offers.fn', 'on', true);
+  insert into public.offer_requests (offer_id, property_id, signing_id, signer_id, side, kind, reason_key, reason, net_hash) values (g.offer_id, g.property_id, g.id, s.id, g.side, p_kind, p_reason_key, why, public.offer_net(p_net)) returning id into id_;
+  insert into public.offer_events (property_id, offer_id, actor, kind, detail) values (g.property_id, g.offer_id, s.name, 'party_request', jsonb_build_object('request_id', id_, 'kind', p_kind, 'side', g.side, 'signer', s.position, 'round', g.round_no, 'reason_key', p_reason_key, 'reason', why));
+  perform set_config('offers.fn', '', true);
+  return jsonb_build_object('id', id_, 'name', s.name, 'side', g.side, 'round', g.round_no, 'kind', p_kind, 'reason', why, 'offer_id', g.offer_id, 'property_id', g.property_id, 'signing_id', g.id, 'address', (select address from public.properties where id = g.property_id));
+end $$;
+revoke execute on function public.guard_offer_hold(), public.offer_hold_active(uuid), public.offer_sign_stop_for(public.offer_signers, public.offer_signings) from public, anon, authenticated;
+revoke execute on function public.offer_sign_request(text, text, text, text, text, text) from public, anon, authenticated;
+grant execute on function public.offer_sign_request(text, text, text, text, text, text) to service_role;
+revoke execute on function public.agent_offer_freeze(uuid, text, text, uuid), public.agent_offer_unfreeze(uuid, text), public.agent_offer_withdraw_now(uuid, text, text, text, timestamptz, text, uuid), public.agent_offer_request_carry_on(uuid, text) from public, anon;
+grant execute on function public.agent_offer_freeze(uuid, text, text, uuid), public.agent_offer_unfreeze(uuid, text), public.agent_offer_withdraw_now(uuid, text, text, text, timestamptz, text, uuid), public.agent_offer_request_carry_on(uuid, text) to authenticated;
+
+-- ───── Who holds the deposit (Tim, 24 November 2026): his choice for the agreed copy's emails, kept with the agreement ─────
+-- Recommended: the vendors' lawyer's trust account when any KiwiSaver is part of the deposit, otherwise Public Trust O/A NZ Real Estate
+-- Trust. Tim may choose otherwise (with KiwiSaver he is warned, and the warning is recorded). Each choice is a new row; the newest stands.
+create table public.offer_deposit_holders (
+  id bigserial primary key,
+  offer_id uuid not null references public.property_offers(id),
+  property_id uuid not null references public.properties(id),
+  agreement_id uuid not null references public.offer_agreements(id),
+  holder text not null check (holder in ('nzret', 'vendor_lawyer', 'other')),
+  other_text text check ((holder = 'other') = (other_text is not null) and (other_text is null or length(other_text) between 3 and 200)),
+  recommended text not null check (recommended in ('nzret', 'vendor_lawyer')),
+  kiwisaver boolean not null, warned boolean not null,
+  chosen_by text not null, chosen_at timestamptz not null default now()
+);
+create index on public.offer_deposit_holders (offer_id);
+create trigger guard_offer_deposit_holders before update or delete on public.offer_deposit_holders for each row execute function public.guard_offer_hold();
+create trigger offer_deposit_holders_no_truncate before truncate on public.offer_deposit_holders for each statement execute function public.guard_offer_truncate();
+alter table public.offer_deposit_holders enable row level security;
+create policy odh_agent_read on public.offer_deposit_holders for select using (public.is_agent());
+revoke all on public.offer_deposit_holders from anon;
+revoke insert, update, delete, truncate, references, trigger on public.offer_deposit_holders from authenticated;
+create or replace function public.agent_offer_deposit_holder(p_offer uuid, p_holder text, p_other text) returns jsonb language plpgsql security definer set search_path = public as $$
+declare me text := public.offer_agent(); o public.property_offers; ag public.offer_agreements; ks boolean; rec text; id_ bigint;
+begin
+  select * into o from public.property_offers where id = p_offer; if o.id is null then raise exception 'No such offer'; end if;
+  select * into ag from public.offer_agreements where offer_id = o.id; if ag.id is null then raise exception 'The agreement hasn''t been made yet'; end if;
+  if coalesce(p_holder, '') not in ('nzret', 'vendor_lawyer', 'other') then raise exception 'Choose who holds the deposit'; end if;
+  if p_holder = 'other' and coalesce(length(trim(p_other)), 0) not between 3 and 200 then raise exception 'Type who holds the deposit (3 to 200 characters)'; end if;
+  ks := coalesce((ag.terms->>'kiwisaver')::boolean, false) or coalesce((o.details->>'kiwisaver')::boolean, false);   -- as the agreed terms or the offer say
+  rec := case when ks then 'vendor_lawyer' else 'nzret' end;
+  perform set_config('offers.fn', 'on', true);
+  insert into public.offer_deposit_holders (offer_id, property_id, agreement_id, holder, other_text, recommended, kiwisaver, warned, chosen_by)
+    values (o.id, o.property_id, ag.id, p_holder, case when p_holder = 'other' then trim(p_other) end, rec, ks, ks and p_holder <> 'vendor_lawyer', me) returning id into id_;
+  insert into public.offer_events (property_id, offer_id, actor, kind, detail) values (o.property_id, o.id, me, 'deposit_holder_chosen', jsonb_build_object('id', id_, 'holder', p_holder, 'other', case when p_holder = 'other' then trim(p_other) end, 'recommended', rec, 'kiwisaver', ks, 'agreement_id', ag.id));
+  perform set_config('offers.fn', '', true);
+  return jsonb_build_object('id', id_, 'holder', p_holder, 'recommended', rec, 'warned', ks and p_holder <> 'vendor_lawyer');
+end $$;
+revoke execute on function public.agent_offer_deposit_holder(uuid, text, text) from public, anon;
+grant execute on function public.agent_offer_deposit_holder(uuid, text, text) to authenticated;
+
 -- ───── Emails as drafts Tim reviews and sends (Tim, 24 November 2026; EMAIL-VOICE.md) ─────
 -- Nothing goes to a buyer, vendor or lawyer by itself. Every email to them (a signing link, a "please initial again" notice after a
 -- change, the agreed copy to each side) is a draft here first; Tim reads it, may edit it, and presses Send. The one exception is the
@@ -906,7 +1116,7 @@ create table public.offer_mail_drafts (
   signing_id uuid references public.offer_signings(id),
   signer_id uuid references public.offer_signers(id),
   agreement_id uuid references public.offer_agreements(id),
-  kind text not null check (kind in ('sign_link', 'reopened', 'agreed_purchasers', 'agreed_vendors')),
+  kind text not null check (kind in ('sign_link', 'reopened', 'agreed_purchasers', 'agreed_vendors', 'withdraw_party', 'withdraw_lawyer')),
   to_addr text[] not null,
   cc_addr text[] not null default '{}',
   subject text not null check (length(subject) between 1 and 300),
@@ -969,7 +1179,7 @@ revoke all on sequence public.offer_mail_log_id_seq from anon, authenticated;
 -- who a draft may go to: a signer, their own address only; the purchasers' email, the purchasers and their lawyer; the vendors' email,
 -- the vendors who signed this negotiation and the vendors' lawyer (from the agreed draft, or the agency agreement in force)
 create or replace function public.offer_mail_allowed(p_offer uuid, p_kind text, p_signer uuid) returns text[] language plpgsql stable security definer set search_path = public as $$
-declare o public.property_offers; out_ text[] := '{}'; ag public.offer_agreements;
+declare o public.property_offers; out_ text[] := '{}'; ag public.offer_agreements; side text;
 begin
   select * into o from public.property_offers where id = p_offer; if o.id is null then return out_; end if;
   if p_kind in ('sign_link', 'reopened') then
@@ -986,9 +1196,27 @@ begin
       union all select ll.email from public.lawyer_links ll where ll.agreement_id = (select a.id from public.agreements a where a.property_id = o.property_id and a.status in ('signed', 'countersigned') order by a.created_at desc limit 1)
       union all select x->>'text' from public.offer_documents doc join public.offer_drafts d on d.id = doc.draft_id, jsonb_array_elements(d.placed) x where doc.id = ag.document_id and x->>'id' in ('vl_email', 'vl_service')) z
       where coalesce(trim(e), '') <> '' and position('@' in e) > 1;
+  elsif p_kind in ('withdraw_party', 'withdraw_lawyer') then
+    -- after Tim records a withdrawal: to the side that directed it (them and their own lawyer), or to the other side's lawyer alone
+    side := public.offer_mail_wd_side(p_offer); if side is null then return out_; end if;
+    if p_kind = 'withdraw_lawyer' then side := case when side = 'vendor' then 'purchaser' else 'vendor' end; end if;
+    if side = 'purchaser' then
+      select coalesce(array_agg(lower(trim(e))), '{}') into out_ from (select o.details->>'email' e where p_kind = 'withdraw_party' union all select q->>'email' from jsonb_array_elements(coalesce(o.details->'purchasers', '[]'::jsonb)) q where p_kind = 'withdraw_party'
+        union all select o.details->'lawyer'->>'email') z where coalesce(trim(e), '') <> '' and position('@' in e) > 1;
+    else
+      select coalesce(array_agg(lower(trim(e))), '{}') into out_ from (
+        select s.email e from public.offer_signers s join public.offer_signings g on g.id = s.signing_id where g.offer_id = p_offer and g.side = 'vendor' and p_kind = 'withdraw_party'   -- a withdrawal stops (voids) their places; they are still the vendors
+        union all select pp.email from public.property_people pp where pp.property_id = o.property_id and p_kind = 'withdraw_party'   -- the vendors on the property file
+        union all select ll.email from public.lawyer_links ll where ll.agreement_id = (select a.id from public.agreements a where a.property_id = o.property_id and a.status in ('signed', 'countersigned') order by a.created_at desc limit 1)
+        union all select x->>'text' from public.offer_drafts d, jsonb_array_elements(d.placed) x where d.id = (select d2.id from public.offer_drafts d2 where d2.offer_id = p_offer order by d2.number desc limit 1) and x->>'id' in ('vl_email', 'vl_service')) z
+        where coalesce(trim(e), '') <> '' and position('@' in e) > 1;
+    end if;
   end if;
   return out_;
 end $$;
+-- the side that directed a withdrawal Tim recorded (null if none)
+create or replace function public.offer_mail_wd_side(p_offer uuid) returns text language sql stable security definer set search_path = public as $$
+  select h.side from public.offer_holds h where h.offer_id = p_offer and h.kind = 'withdraw' order by h.made_at desc limit 1 $$;
 -- the other side's own phone or email in a draft (EMAIL-VOICE.md: each party sees only their own details and both lawyers'):
 -- p_forbid 'vendor' for anything to the purchasers, 'purchaser' for anything to the vendors. Lawyers' details are never theirs.
 create or replace function public.offer_mail_side_hit(p_offer uuid, p_forbid text, p_text text) returns text language plpgsql stable security definer set search_path = public as $$
@@ -1012,12 +1240,14 @@ begin
   return null;
 end $$;
 -- whose side a draft is for
-create or replace function public.offer_mail_side(p_kind text, p_signer uuid) returns text language sql stable security definer set search_path = public as $$
+create or replace function public.offer_mail_side(p_kind text, p_signer uuid, p_offer uuid default null) returns text language sql stable security definer set search_path = public as $$
   select case when p_kind = 'agreed_purchasers' then 'purchaser' when p_kind = 'agreed_vendors' then 'vendor'
+    when p_kind = 'withdraw_party' then public.offer_mail_wd_side(p_offer)
+    when p_kind = 'withdraw_lawyer' then case public.offer_mail_wd_side(p_offer) when 'vendor' then 'purchaser' when 'purchaser' then 'vendor' end
     else (select g.side from public.offer_signers s join public.offer_signings g on g.id = s.signing_id where s.id = p_signer) end $$;
 -- a draft's recipients and wording, checked whenever it is made or edited
 create or replace function public.offer_mail_check(p_offer uuid, p_kind text, p_signer uuid, p_to text[], p_cc text[], p_subject text, p_body text, p_sending boolean default false) returns void language plpgsql stable security definer set search_path = public as $$
-declare allowed text[] := public.offer_mail_allowed(p_offer, p_kind, p_signer); x text; who text; side text := public.offer_mail_side(p_kind, p_signer);
+declare allowed text[] := public.offer_mail_allowed(p_offer, p_kind, p_signer); x text; who text; side text := public.offer_mail_side(p_kind, p_signer, p_offer);
 begin
   if coalesce(array_length(p_to, 1), 0) < 1 or coalesce(array_length(p_to, 1), 0) + coalesce(array_length(p_cc, 1), 0) > 12 then raise exception 'Choose who it goes to'; end if;
   foreach x in array p_to || coalesce(p_cc, '{}') loop
@@ -1046,6 +1276,9 @@ begin
   elsif p_kind in ('agreed_purchasers', 'agreed_vendors') then
     select * into ag from public.offer_agreements where offer_id = o.id; if ag.id is null then raise exception 'The agreement hasn''t been made yet'; end if;
     if p_attach is null or p_attach->>'path' is distinct from ag.path or p_attach->>'sha256' is distinct from ag.sha256 or coalesce(length(p_attach->>'name'), 0) not between 5 and 200 then raise exception 'Attach the agreed copy'; end if;
+  elsif p_kind in ('withdraw_party', 'withdraw_lawyer') then
+    if public.offer_mail_wd_side(o.id) is null then raise exception 'Record the withdrawal first'; end if;
+    if p_signer is not null or p_attach is not null then raise exception 'A withdrawal email has no link or attachment'; end if;
   else raise exception 'Choose what kind of email it is';
   end if;
   perform public.offer_mail_check(o.id, p_kind, p_signer, p_to, coalesce(p_cc, '{}'), p_subject, p_body);
@@ -1107,6 +1340,8 @@ begin
   if m.status = 'sending' then raise exception 'This email is already being sent, or may have gone. Check before sending again'; end if;
   if m.status <> 'draft' then raise exception 'This email was already sent or set aside'; end if;
   perform public.offer_mail_check(m.offer_id, m.kind, m.signer_id, m.to_addr, m.cc_addr, m.subject, m.body, true);
+  -- frozen or withdrawn: no signing email goes (withdrawal emails do; Tim sends them)
+  if m.kind in ('sign_link', 'reopened') and public.offer_hold_active(m.offer_id) then raise exception 'This offer is frozen or withdrawn, so no signing email goes'; end if;
   perform set_config('offers.fn', 'on', true);
   if m.kind = 'sign_link' then
     select * into g from public.offer_signings where id = m.signing_id for update; select * into s from public.offer_signers where id = m.signer_id for update;
@@ -1153,7 +1388,7 @@ begin
   insert into public.offer_events (property_id, offer_id, actor, kind, detail) values (m.property_id, m.offer_id, me, 'mail_unconfirmed', jsonb_build_object('draft_id', m.id, 'kind', m.kind));
   perform set_config('offers.fn', '', true);
 end $$;
-revoke execute on function public.guard_offer_mail(), public.offer_mail_allowed(uuid, text, uuid), public.offer_mail_side_hit(uuid, text, text), public.offer_mail_side(text, uuid), public.offer_mail_check(uuid, text, uuid, text[], text[], text, text, boolean), public.guard_offer_mail_log(),
+revoke execute on function public.guard_offer_mail(), public.offer_mail_allowed(uuid, text, uuid), public.offer_mail_side_hit(uuid, text, text), public.offer_mail_side(text, uuid, uuid), public.offer_mail_wd_side(uuid), public.offer_mail_check(uuid, text, uuid, text[], text[], text, text, boolean), public.guard_offer_mail_log(),
   public.offer_mail_insert(text, uuid, text, uuid, text[], text[], text, text, jsonb) from public, anon, authenticated;
 revoke execute on function public.offer_mail_draft_sys(uuid, uuid, text[], text, text), public.offer_mail_take(uuid, text), public.offer_mail_done(uuid, bigint, text, boolean, text) from public, anon, authenticated;
 grant execute on function public.offer_mail_draft_sys(uuid, uuid, text[], text, text), public.offer_mail_take(uuid, text), public.offer_mail_done(uuid, bigint, text, boolean, text) to service_role;

@@ -359,6 +359,76 @@ begin
   perform public.agent_offer_status(o2, 'withdrawn', now(), 'Purchasers withdrew by phone');
   out := out || 'offer 2 open signings=' || (select count(*) from public.offer_signings where offer_id = o2 and status in ('ready', 'signing', 'held', 'complete')) || '; ';
 
+  -- 9c. freeze and withdrawal (Tim, 24 November 2026), offer 5: the vendors' Round 2 is out by link to Vera and Val
+  declare o5 uuid; d5 uuid; g5 uuid; tv text; sv text; tl text; sl text; rq jsonb; hd uuid; vendor_try text;
+  begin
+    perform set_config('request.jwt.claims', agent, true); o5 := public.agent_offer_add(pid, good); execute 'reset role';
+    insert into public.offer_drafts (offer_id, property_id, number, blank_id, blank_sha256, map_id, details, placed, needs, path, sha256, size_bytes, created_by, edits)
+      values (o5, pid, 1, bl, repeat('ab', 32), m, (select details from public.property_offers where id = o5), '[]', '[]', 'properties/' || pid || '/docs/offer-draft-' || o5 || '-1.pdf', repeat('e5', 32), 100, 'test', '{"term_last": 22}') returning id into d5;
+    insert into public.offer_draft_approvals (draft_id, sha256, approved_by) values (d5, repeat('e5', 32), 'test');
+    perform set_config('request.jwt.claims', agent, true);
+    g5 := (public.agent_signing_release(d5, 'in_person', sizes, pg_temp.rb_places(2, true, null, false), '{}') ->> 'id')::uuid; perform pg_temp.rb_prep(g5); perform pg_temp.rb_finish(g5); perform pg_temp.rb_lock(g5, '{}');
+    g5 := (public.agent_round_present(o5, 'link', pg_temp.rb_places(2, true, null, true), true)->>'id')::uuid; r := public.offer_sign_issue(g5, 'agent');
+    tv := r->'links'->0->>'token'; tl := r->'links'->1->>'token';
+    sv := public.offer_sign_verify(tv, public.offer_sign_code(tv, 'n5')->>'code', 'n5', 'ua')->>'session'; perform public.offer_sign_consent(tv, sv, 'n5', 'ua');
+    sl := public.offer_sign_verify(tl, public.offer_sign_code(tl, 'n6')->>'code', 'n6', 'ua')->>'session'; perform public.offer_sign_consent(tl, sl, 'n6', 'ua');
+    perform public.offer_sign_marks(tl, sl, 'data:image/png;base64,' || repeat('iVBORw0KGgo', 30), 'data:image/png;base64,' || repeat('iVBORw0KGgo', 30)); perform public.offer_sign_receipt(tl, sl, 'chattels', null, null, null, null);
+    -- Vera asks from her own link: a reason is needed; then it stops only her, until Tim acts
+    begin perform public.offer_sign_request(tv, sv, 'withdraw', 'other', '  ', 'n5'); out := out || 'A REQUEST WITH NO REASON; '; exception when others then out := out || 'request reason: ' || sqlerrm || '; '; end;
+    begin perform public.offer_sign_request(tv, sv, 'withdraw', 'bored', null, 'n5'); out := out || 'A REQUEST WITH A MADE-UP REASON; '; exception when others then out := out || 'request list: ' || sqlerrm || '; '; end;
+    begin perform public.offer_sign_request(tv, 'not-the-session', 'withdraw', 'finance_changed', null, 'n5'); out := out || 'A REQUEST WITHOUT HER SESSION; '; exception when others then out := out || 'request session: ' || left(sqlerrm, 50) || '; '; end;
+    rq := public.offer_sign_request(tv, sv, 'withdraw', 'finance_changed', null, 'n5');
+    out := out || 'request: kind=' || (rq->>'kind') || ' reason=' || (rq->>'reason') || ' side=' || (rq->>'side') || ' offer still open=' || (public.offer_hold_active(o5) = false) || '; ';
+    out := out || 'Vera''s link says: ' || coalesce(public.offer_sign_state(tv, sv)->'signing'->>'stopped', 'NOTHING') || '; ';
+    begin perform public.offer_sign_marks(tv, sv, 'data:image/png;base64,' || repeat('iVBORw0KGgo', 30), 'data:image/png;base64,' || repeat('iVBORw0KGgo', 30)); out := out || 'VERA SIGNED AFTER HER REQUEST; '; exception when others then out := out || 'Vera after request: ' || sqlerrm || '; '; end;
+    out := out || 'Val unaffected, stopped=' || coalesce(public.offer_sign_state(tl, sl)->'signing'->>'stopped', 'none') || '; ';
+    -- only Tim stops an offer: a vendor can't freeze, unfreeze or withdraw
+    execute 'set local role authenticated'; perform set_config('request.jwt.claims', vendor, true);
+    begin perform public.agent_offer_freeze(o5, 'I say so', null, null); vendor_try := 'A VENDOR FROZE IT'; exception when others then vendor_try := 'vendor freeze refused'; end;
+    begin perform public.agent_offer_withdraw_now(o5, 'vendor', 'Vera Vendor', 'x reason', now(), 'phone', null); vendor_try := vendor_try || ', A VENDOR WITHDREW IT'; exception when others then vendor_try := vendor_try || ', vendor withdraw refused'; end;
+    begin perform count(*) from public.offer_requests; vendor_try := vendor_try || ' reads requests=' || (select count(*) from public.offer_requests); exception when others then vendor_try := vendor_try || ' no read'; end;
+    out := out || vendor_try || '; '; execute 'reset role';
+    -- Tim freezes from the request: every place on every round stops at once, at the server
+    perform set_config('request.jwt.claims', agent, true);
+    hd := public.agent_offer_freeze(o5, 'Vera asked to stop while she checks her finance', null, (rq->>'id')::uuid);
+    begin perform public.offer_sign_tap(tl, sl, 'block:vsig2:s2'); out := out || 'VAL TAPPED WHILE FROZEN; '; exception when others then out := out || 'Val frozen: ' || sqlerrm || '; '; end;
+    out := out || 'code while frozen=' || coalesce(public.offer_sign_code(tl, 'n6')->>'reason', 'A CODE WAS SENT') || ' Val''s link says: ' || coalesce(public.offer_sign_state(tl, sl)->'signing'->>'stopped', 'NOTHING') || '; ';
+    begin perform public.offer_sign_issue(g5, 'agent'); out := out || 'LINKS SENT WHILE FROZEN; '; exception when others then out := out || 'links frozen: ' || sqlerrm || '; '; end;
+    begin perform public.agent_offer_freeze(o5, 'again', null, null); out := out || 'FROZEN TWICE; '; exception when others then out := out || 'twice: ' || sqlerrm || '; '; end;
+    out := out || 'request handled as=' || (select handled_as from public.offer_requests where id = (rq->>'id')::uuid) || ' told_how=' || (select told_how from public.offer_holds where id = hd) || '; ';
+    -- the record is kept: no change or removal outside Tim's functions
+    execute 'reset role';
+    begin update public.offer_holds set reason = 'nothing happened' where id = hd; out := out || 'A HOLD WAS REWRITTEN; '; exception when others then out := out || 'hold kept: ' || sqlerrm || '; '; end;
+    begin delete from public.offer_requests where offer_id = o5; out := out || 'A REQUEST WAS REMOVED; '; exception when others then out := out || 'request kept: ' || sqlerrm || '; '; end;
+    -- Tim unfreezes: signing carries on where it was, for Val and for Vera
+    perform set_config('request.jwt.claims', agent, true);
+    perform public.agent_offer_unfreeze(o5, 'Vera rang back: finance is fine, carry on');
+    out := out || 'unfrozen: Val taps=' || (public.offer_sign_tap(tl, sl, 'block:vsig2:s2')->>'done') || ' Vera stopped=' || coalesce(public.offer_sign_state(tv, sv)->'signing'->>'stopped', 'none') || '; ';
+    -- Val asks, Tim talks to her and lets her carry on: her link works again, with nothing frozen
+    rq := public.offer_sign_request(tl, sl, 'freeze', 'other', 'I want to talk to my lawyer first', 'n6');
+    out := out || 'Val asked: ' || coalesce(public.offer_sign_state(tl, sl)->'signing'->>'stopped', 'NOTHING') || ' typed=' || (rq->>'reason') || '; ';
+    begin perform public.agent_offer_request_carry_on((rq->>'id')::uuid, ''); out := out || 'CARRY ON WITH NO NOTE; '; exception when others then out := out || 'carry on note: ' || sqlerrm || '; '; end;
+    perform public.agent_offer_request_carry_on((rq->>'id')::uuid, 'Spoke to Val; her lawyer is happy');
+    out := out || 'carry on: Val stopped=' || coalesce(public.offer_sign_state(tl, sl)->'signing'->>'stopped', 'none') || ' frozen=' || public.offer_hold_active(o5) || '; ';
+    begin perform public.agent_offer_unfreeze(o5, 'again'); out := out || 'UNFROZEN TWICE; '; exception when others then out := out || 'unfreeze twice: ' || sqlerrm || '; '; end;
+    -- withdraw now: Tim must say who directed it, why, when and how he was told
+    begin perform public.agent_offer_withdraw_now(o5, 'vendor', '', 'Contract elsewhere', now(), 'phone', null); out := out || 'WITHDRAWN FOR NOBODY; '; exception when others then out := out || 'who: ' || sqlerrm || '; '; end;
+    begin perform public.agent_offer_withdraw_now(o5, 'vendor', 'Vera Vendor', 'Contract elsewhere', now(), 'carrier pigeon', null); out := out || 'TOLD BY ANY MEANS; '; exception when others then out := out || 'how: ' || sqlerrm || '; '; end;
+    hd := public.agent_offer_withdraw_now(o5, 'vendor', 'Vera Vendor', 'We have entered a contract elsewhere', now(), 'phone', null);
+    out := out || 'withdrawn now: signing=' || (select status from public.offer_signings where id = g5) || ' offer=' || (select status from public.property_offers where id = o5) || ' link=' || coalesce((public.offer_sign_by_token(tl)).id::text, 'dead') || ' kept rounds=' || (select count(*) from public.offer_rounds rr join public.offer_documents dd on dd.id = rr.document_id where dd.offer_id = o5) || '; ';
+    begin perform public.agent_offer_unfreeze(o5, 'undo it'); out := out || 'A WITHDRAWAL WAS UNFROZEN; '; exception when others then out := out || 'stays withdrawn: ' || sqlerrm || '; '; end;
+    perform public.agent_offer_status(o5, 'received', now(), 'Trying to bring it back');
+    begin perform public.agent_round_present(o5, 'link', pg_temp.rb_places(2, true, null, true), true); out := out || 'A WITHDRAWN OFFER PRESENTED AGAIN; '; exception when others then out := out || 'never again: ' || sqlerrm || '; '; end;
+    begin perform public.agent_signing_release(d5, 'in_person', sizes, pg_temp.rb_places(2, true, null, false), '{}'); out := out || 'A WITHDRAWN OFFER RELEASED AGAIN; '; exception when others then out := out || 'never signed: ' || left(sqlerrm, 60) || '; '; end;
+    -- the drafts Tim may send: to the vendors (who directed it) and to the purchasers' lawyer alone
+    perform public.agent_mail_draft_add(o5, 'withdraw_party', null, array['rb-nego-vendor@example.com'], '{}', 'Your withdrawal', 'Hello Vera, I have recorded it.', null);
+    begin perform public.agent_mail_draft_add(o5, 'withdraw_lawyer', null, array['ana@example.com'], '{}', 'Withdrawn', 'Dear Pat', null); out := out || 'THE PURCHASER EMAILED AS THEIR LAWYER; '; exception when others then out := out || 'lawyer only: ' || left(sqlerrm, 60) || '; '; end;
+    begin perform public.agent_mail_draft_add(o5, 'withdraw_lawyer', null, array['pat@law.example'], '{}', 'Withdrawn', 'Dear Pat, Vera is on 027 444 5555', null); out := out || 'A VENDOR''S PHONE TO THE PURCHASERS'' LAWYER; '; exception when others then out := out || 'privacy: ' || left(sqlerrm, 40) || '; '; end;
+    perform public.agent_mail_draft_add(o5, 'withdraw_lawyer', null, array['pat@law.example'], '{}', 'Withdrawn', 'Dear Pat, the vendors have withdrawn their counteroffer.', null);
+    out := out || 'withdraw drafts=' || (select count(*) from public.offer_mail_drafts where offer_id = o5 and kind like 'withdraw%' and status = 'draft') || ' sent=' || (select count(*) from public.offer_mail_log where offer_id = o5) || '; ';
+    out := out || 'trail=' || (select string_agg(kind, ',' order by seq) from public.offer_events where offer_id = o5 and kind in ('party_request', 'offer_frozen', 'offer_unfrozen', 'request_carry_on', 'withdrawn', 'offer_withdrawn_now')) || ' chain ok=' || (public.offer_chain_verify(o5::text)->>'ok') || '; ';
+  end;
+  execute 'reset role';
   -- item 11: a map with no date place: no agreement until the places are put right
   g1 := (public.agent_signing_release(d4, 'in_person', sizes, pg_temp.rb_places(2, true, null, false), '{}') ->> 'id')::uuid; perform pg_temp.rb_prep(g1); perform pg_temp.rb_finish(g1); perform pg_temp.rb_lock(g1, '{}');
   -- an in-person change in a round whose link switch is off: allowed (the switch is only about links); tried, then undone
@@ -387,6 +457,15 @@ begin
     begin perform public.agent_mail_draft_add(o1, 'agreed_vendors', null, array['rb-nego-vendor@example.com'], '{}', 's', 'b', jsonb_build_object('path', 'other.pdf', 'sha256', ags, 'name', 'Agreement.pdf')); out := out || 'ANOTHER FILE ATTACHED; '; exception when others then out := out || 'attachment: ' || left(sqlerrm, 40) || '; '; end;
     ma := public.agent_mail_draft_add(o1, 'agreed_vendors', null, array['rb-nego-vendor@example.com', 'val@example.com'], '{}', 'Congratulations!', 'Hello Vera and Val, the purchasers'' lawyer is Pat Lawyer, Law Ltd, pat@law.example, 03 477 0000.', att);
     out := out || 'agreed vendors draft=' || (select status from public.offer_mail_drafts where id = ma) || ' (the purchasers'' lawyer may be named); ';
+    -- who holds the deposit: recommended Public Trust (no KiwiSaver), Tim's choice kept with the agreement, the newest standing
+    begin perform public.agent_offer_deposit_holder(o1, 'other', ' '); out := out || 'OTHER HOLDER WITH NO NAME; '; exception when others then out := out || 'other holder: ' || sqlerrm || '; '; end;
+    r := public.agent_offer_deposit_holder(o1, 'vendor_lawyer', null); out := out || 'deposit: recommended=' || (r->>'recommended') || ' warned=' || (r->>'warned') || '; ';
+    r := public.agent_offer_deposit_holder(o1, 'other', 'Smith Law trust account'); out := out || 'newest=' || (select holder || ':' || other_text || ' agreement=' || (agreement_id = (select id from public.offer_agreements where offer_id = o1)) from public.offer_deposit_holders where offer_id = o1 order by id desc limit 1) || '; ';
+    execute 'reset role';
+    begin update public.offer_deposit_holders set holder = 'nzret' where offer_id = o1; out := out || 'A DEPOSIT CHOICE WAS REWRITTEN; '; exception when others then out := out || 'choice kept: ' || sqlerrm || '; '; end;
+    execute 'set local role authenticated'; perform set_config('request.jwt.claims', vendor, true);
+    begin perform public.agent_offer_deposit_holder(o1, 'nzret', null); out := out || 'A VENDOR CHOSE THE DEPOSIT HOLDER; '; exception when others then out := out || 'vendor choice: refused; '; end;
+    execute 'reset role'; perform set_config('request.jwt.claims', agent, true);
   end;
   -- 10. the timelines still check out, every round's event carrying the one before
   out := out || 'chains ok=' || ((public.offer_chain_verify(o1::text)->>'ok')::boolean and (public.offer_chain_verify(o2::text)->>'ok')::boolean and (public.offer_chain_verify(o3::text)->>'ok')::boolean) || ' agreement chain last=' || ((select chain_last from public.offer_agreements where offer_id = o1) = (select hash from public.offer_events where offer_id = o1 order by seq desc limit 1)) || '; ';

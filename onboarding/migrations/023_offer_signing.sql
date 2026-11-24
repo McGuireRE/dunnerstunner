@@ -636,7 +636,8 @@ begin
   insert into public.offer_hits (kind, net) values ('sign_code', n);
   -- the row is locked, so two requests at once can't both get under the limit
   select * into s from public.offer_signers where id = s.id for update;
-  if s.void_at is not null or s.finished_at is not null or s.email is null or (select status from public.offer_signings where id = s.signing_id) not in ('signing', 'held') then return jsonb_build_object('ok', false, 'reason', 'stopped'); end if;
+  -- no code while the offer is frozen or withdrawn, or this version isn't current (offer_sign_current, which 024 extends)
+  if s.void_at is not null or s.finished_at is not null or s.email is null or (select status from public.offer_signings where id = s.signing_id) not in ('signing', 'held') or public.offer_sign_current((select gx from public.offer_signings gx where gx.id = s.signing_id)) is not null then return jsonb_build_object('ok', false, 'reason', 'stopped'); end if;
   if s.codes_window_at is not null and s.codes_window_at > now() - interval '1 hour' and s.codes_sent >= 5 then return jsonb_build_object('ok', false, 'reason', 'busy'); end if;
   b := extensions.gen_random_bytes(4); code := lpad(((get_byte(b, 0)::bigint * 16777216 + get_byte(b, 1) * 65536 + get_byte(b, 2) * 256 + get_byte(b, 3)) % 1000000)::text, 6, '0');
   perform set_config('offers.fn', 'on', true);
@@ -656,7 +657,7 @@ begin
   if public.offer_hit_count('sign_try', n, null, interval '1 hour') >= 30 then return jsonb_build_object('ok', false, 'reason', 'busy'); end if;
   insert into public.offer_hits (kind, net) values ('sign_try', n);
   select * into s from public.offer_signers where id = s.id for update;   -- one try at a time, so five tries really is five
-  if s.void_at is not null or s.finished_at is not null or (select status from public.offer_signings where id = s.signing_id) not in ('signing', 'held') then return jsonb_build_object('ok', false, 'reason', 'stopped'); end if;
+  if s.void_at is not null or s.finished_at is not null or (select status from public.offer_signings where id = s.signing_id) not in ('signing', 'held') or public.offer_sign_current((select gx from public.offer_signings gx where gx.id = s.signing_id)) is not null then return jsonb_build_object('ok', false, 'reason', 'stopped'); end if;
   if s.code_hash is null then return jsonb_build_object('ok', false, 'reason', 'no_code'); end if;
   if s.code_expires_at < now() then return jsonb_build_object('ok', false, 'reason', 'expired'); end if;
   perform set_config('offers.fn', 'on', true);
