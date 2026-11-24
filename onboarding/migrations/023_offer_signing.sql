@@ -301,6 +301,13 @@ begin
   return null;
 end $$;
 -- the signer may act now: not void, the signing current and open (not held for Tim)
+-- One lock order everywhere: the offer row first, then the signing, then the signer. Party and service steps take the offer FOR KEY
+-- SHARE (every event they write takes that anyway, through its foreign key, so taking it first can't deadlock with Tim's functions,
+-- which take the offer FOR UPDATE first when they change its state: present, close, withdraw, freeze, the round and agreement locks).
+create or replace function public.offer_lock_by_signer(p_signer uuid) returns void language sql security definer set search_path = public as $$
+  select null::void from (select 1 from public.property_offers where id = (select g.offer_id from public.offer_signings g join public.offer_signers x on x.signing_id = g.id where x.id = p_signer) for key share) z $$;
+create or replace function public.offer_lock_by_signing(p_signing uuid) returns void language sql security definer set search_path = public as $$
+  select null::void from (select 1 from public.property_offers where id = (select g.offer_id from public.offer_signings g where g.id = p_signing) for key share) z $$;
 -- why this signer can't go on, if they can't: replaced, or the signing's own reason (024 adds a freeze, a withdrawal and their own request)
 create or replace function public.offer_sign_stop_for(s public.offer_signers, g public.offer_signings) returns text language plpgsql stable security definer set search_path = public as $$
 begin
@@ -323,6 +330,7 @@ end $$;
 create or replace function public.offer_sign_do_consent(p_signer uuid, p_ua text, p_net text) returns void language plpgsql security definer set search_path = public as $$
 declare s public.offer_signers; g public.offer_signings;
 begin
+  perform public.offer_lock_by_signer(p_signer);   -- lock order: the offer, then the signing, then the signer
   select * into s from public.offer_signers where id = p_signer for update; g := public.offer_sign_ready(s);
   if s.consent_at is not null then return; end if;
   perform set_config('offers.fn', 'on', true);
@@ -333,6 +341,7 @@ end $$;
 create or replace function public.offer_sign_do_receipt(p_signer uuid, p_guide text, p_version text, p_file text, p_sha256 text, p_pages int[]) returns void language plpgsql security definer set search_path = public as $$
 declare s public.offer_signers; g public.offer_signings;
 begin
+  perform public.offer_lock_by_signer(p_signer);   -- lock order: the offer, then the signing, then the signer
   select * into s from public.offer_signers where id = p_signer for update; g := public.offer_sign_ready(s);
   if s.consent_at is null then raise exception 'Agree to sign electronically first'; end if;
   if p_guide not in ('cca', 'sale_purchase') then raise exception 'Unknown guide'; end if;
@@ -345,6 +354,7 @@ end $$;
 create or replace function public.offer_sign_do_marks(p_signer uuid, p_sig text, p_init text) returns void language plpgsql security definer set search_path = public as $$
 declare s public.offer_signers; g public.offer_signings;
 begin
+  perform public.offer_lock_by_signer(p_signer);   -- lock order: the offer, then the signing, then the signer
   select * into s from public.offer_signers where id = p_signer for update; g := public.offer_sign_ready(s);
   if s.consent_at is null then raise exception 'Agree to sign electronically first'; end if;
   if coalesce(p_sig, '') !~ '^data:image/png;base64,[A-Za-z0-9+/=]+$' or length(p_sig) > 400000 or length(p_sig) < 200 then raise exception 'Please draw your signature'; end if;
@@ -357,6 +367,7 @@ end $$;
 create or replace function public.offer_sign_do_tap(p_signer uuid, p_place text) returns jsonb language plpgsql security definer set search_path = public as $$
 declare s public.offer_signers; g public.offer_signings; done int; need int;
 begin
+  perform public.offer_lock_by_signer(p_signer);   -- lock order: the offer, then the signing, then the signer
   select * into s from public.offer_signers where id = p_signer for update; g := public.offer_sign_ready(s);
   if s.consent_at is null then raise exception 'Agree to sign electronically first'; end if;
   if not exists (select 1 from public.offer_sign_receipts where signer_id = s.id and guide = 'sale_purchase') or (coalesce(array_length(g.cca_pages, 1), 0) > 0 and not exists (select 1 from public.offer_sign_receipts where signer_id = s.id and guide = 'cca')) then
@@ -377,7 +388,7 @@ begin
   -- offer FOR UPDATE), so a finish can't complete just after one, but it doesn't block the event inserts of a change, mark or email on
   -- the same signing (each event takes FOR KEY SHARE on the offer through its foreign key), so there is no deadlock. Then the signing,
   -- then the signer, all read again under the lock.
-  perform 1 from public.property_offers where id = (select gx.offer_id from public.offer_signings gx join public.offer_signers x on x.signing_id = gx.id where x.id = p_signer) for key share;
+  perform public.offer_lock_by_signer(p_signer);
   perform 1 from public.offer_signings where id = (select signing_id from public.offer_signers where id = p_signer) for update;
   select * into s from public.offer_signers where id = p_signer for update; g := public.offer_sign_ready(s);
   if s.consent_at is null or s.sig_png is null then raise exception 'Agree, read the guides and draw your signature and initials first'; end if;
@@ -454,6 +465,7 @@ end $$;
 create or replace function public.agent_signing_start(p_signing uuid) returns void language plpgsql security definer set search_path = public as $$
 declare me text := public.offer_agent(); g public.offer_signings; why text;
 begin
+  perform public.offer_lock_by_signing(p_signing);   -- lock order: the offer, then the signing, then the signer
   select * into g from public.offer_signings where id = p_signing for update; if g.id is null then raise exception 'No such signing'; end if;
   if g.method <> 'in_person' then raise exception 'This signing is by link: use Send'; end if;
   why := public.offer_sign_current(g); if why is not null then raise exception '%', why; end if;
@@ -468,6 +480,7 @@ end $$;
 create or replace function public.agent_signing_cancel(p_signing uuid, p_reason text) returns jsonb language plpgsql security definer set search_path = public as $$
 declare me text := public.offer_agent(); g public.offer_signings; who text;
 begin
+  perform public.offer_lock_by_signing(p_signing);   -- lock order: the offer, then the signing, then the signer
   select * into g from public.offer_signings where id = p_signing for update; if g.id is null then raise exception 'No such signing'; end if;
   if g.status not in ('ready', 'signing') then raise exception 'This signing can''t be changed now (%)', g.status; end if;
   select string_agg(name, ', ' order by position) into who from public.offer_signers s where s.signing_id = g.id and (s.consent_at is not null or exists (select 1 from public.offer_sign_taps t where t.signer_id = s.id));
@@ -520,6 +533,7 @@ end $$;
 create or replace function public.agent_signing_mark(p_signer uuid, p_kind text, p_page int, p_geometry jsonb, p_target uuid) returns jsonb language plpgsql security definer set search_path = public as $$
 declare me text := public.offer_agent(); s public.offer_signers; g public.offer_signings; t public.offer_sign_marks; mid uuid; w numeric; h numeric; why text;
 begin
+  perform public.offer_lock_by_signer(p_signer);   -- lock order: the offer, then the signing, then the signer
   s := public.offer_sign_person(p_signer);
   select * into g from public.offer_signings where id = s.signing_id for update; select * into s from public.offer_signers where id = p_signer for update;
   -- several marks may be made before Tim looks at them, so a held signing still takes marks
@@ -546,6 +560,7 @@ end $$;
 create or replace function public.agent_signing_review(p_signing uuid, p_places jsonb) returns jsonb language plpgsql security definer set search_path = public as $$
 declare me text := public.offer_agent(); g public.offer_signings; ms uuid[]; n int; x jsonb; why text; reopened int;
 begin
+  perform public.offer_lock_by_signing(p_signing);   -- lock order: the offer, then the signing, then the signer
   select * into g from public.offer_signings where id = p_signing for update; if g.id is null then raise exception 'No such signing'; end if;
   if g.status <> 'held' then raise exception 'Nothing is waiting for you to check'; end if;
   why := public.offer_sign_current(g); if why is not null then raise exception '%', why; end if;
@@ -590,6 +605,7 @@ begin perform public.offer_agent(); return public.offer_chain_verify(p_offer::te
 create or replace function public.offer_sign_issue(p_signing uuid, p_actor text) returns jsonb language plpgsql security definer set search_path = public as $$
 declare g public.offer_signings; s public.offer_signers; tok text; out_ jsonb := '[]'::jsonb; why text; addr text;
 begin
+  perform public.offer_lock_by_signing(p_signing);   -- lock order: the offer, then the signing, then the signer
   select * into g from public.offer_signings where id = p_signing for update; if g.id is null then raise exception 'No such signing'; end if;
   if g.method <> 'link' then raise exception 'This signing is in person, on your device'; end if;
   why := public.offer_sign_current(g); if why is not null then raise exception '%', why; end if;
@@ -645,6 +661,7 @@ begin
   if public.offer_hit_count('sign_code', n, null, interval '1 hour') >= 20 then return jsonb_build_object('ok', false, 'reason', 'busy'); end if;
   insert into public.offer_hits (kind, net) values ('sign_code', n);
   -- the row is locked, so two requests at once can't both get under the limit
+  perform public.offer_lock_by_signer(s.id);   -- lock order: the offer, then the signing, then the signer
   select * into s from public.offer_signers where id = s.id for update;
   -- no code while the offer is frozen or withdrawn, this version isn't current, or (024) the signer has asked Tim to stop: offer_sign_stop_for
   if s.void_at is not null or s.finished_at is not null or s.email is null or (select status from public.offer_signings where id = s.signing_id) not in ('signing', 'held') or public.offer_sign_stop_for(s, (select gx from public.offer_signings gx where gx.id = s.signing_id)) is not null then return jsonb_build_object('ok', false, 'reason', 'stopped'); end if;
@@ -666,6 +683,7 @@ begin
   if s.id is null then if public.offer_hit_count('bad', n, null, interval '1 hour') < 30 then insert into public.offer_hits (kind, net) values ('bad', n); end if; return jsonb_build_object('ok', false); end if;
   if public.offer_hit_count('sign_try', n, null, interval '1 hour') >= 30 then return jsonb_build_object('ok', false, 'reason', 'busy'); end if;
   insert into public.offer_hits (kind, net) values ('sign_try', n);
+  perform public.offer_lock_by_signer(s.id);   -- lock order: the offer, then the signing, then the signer
   select * into s from public.offer_signers where id = s.id for update;   -- one try at a time, so five tries really is five
   if s.void_at is not null or s.finished_at is not null or (select status from public.offer_signings where id = s.signing_id) not in ('signing', 'held') or public.offer_sign_stop_for(s, (select gx from public.offer_signings gx where gx.id = s.signing_id)) is not null then return jsonb_build_object('ok', false, 'reason', 'stopped'); end if;
   if s.code_hash is null then return jsonb_build_object('ok', false, 'reason', 'no_code'); end if;
@@ -749,6 +767,7 @@ end $$;
 create or replace function public.offer_round_lock(p_signing uuid, p_path text, p_sha256 text, p_size bigint, p_execution jsonb, p_actor text) returns jsonb language plpgsql security definer set search_path = public as $$
 declare g public.offer_signings; why text; obj jsonb; rid uuid; h text; ex public.offer_rounds;
 begin
+  perform 1 from public.property_offers where id = (select offer_id from public.offer_signings where id = p_signing) for update;   -- locking a round changes the offer's state: the offer FOR UPDATE first
   select * into g from public.offer_signings where id = p_signing for update; if g.id is null then raise exception 'No such signing'; end if;
   select * into ex from public.offer_rounds where signing_id = g.id; if ex.id is not null then return jsonb_build_object('id', ex.id, 'number', ex.number, 'sha256', ex.sha256, 'existing', true); end if;
   if g.status <> 'complete' then raise exception 'Not everyone has finished signing'; end if;
@@ -772,7 +791,7 @@ end $$;
 
 -- ───── execute rights ─────
 revoke execute on function public.offer_event_body(text, bigint, timestamptz, text, text, uuid, uuid, jsonb), public.offer_event_chain(), public.guard_offer_signing(), public.guard_offer_signer(), public.offer_sha(text),
-  public.offer_sign_places_ok(jsonb, jsonb, int, boolean), public.offer_mark_ok(text, jsonb, numeric, numeric), public.offer_sign_required(uuid, int), public.offer_sign_stop_for(public.offer_signers, public.offer_signings), public.offer_sign_current(public.offer_signings), public.offer_sign_ready(public.offer_signers, boolean),
+  public.offer_sign_places_ok(jsonb, jsonb, int, boolean), public.offer_mark_ok(text, jsonb, numeric, numeric), public.offer_sign_required(uuid, int), public.offer_sign_stop_for(public.offer_signers, public.offer_signings), public.offer_lock_by_signer(uuid), public.offer_lock_by_signing(uuid), public.offer_sign_current(public.offer_signings), public.offer_sign_ready(public.offer_signers, boolean),
   public.offer_sign_do_consent(uuid, text, text), public.offer_sign_do_receipt(uuid, text, text, text, text, int[]), public.offer_sign_do_marks(uuid, text, text), public.offer_sign_do_tap(uuid, text), public.offer_sign_do_finish(uuid, text, text, text, text),
   public.offer_sign_person(uuid), public.offer_chain_verify(text), public.offer_sign_find(text), public.offer_sign_by_token(text), public.offer_sign_me(text, text) from public, anon, authenticated;
 revoke execute on function public.offer_sign_issue(uuid, text), public.offer_sign_open(text, text, text), public.offer_sign_code(text, text), public.offer_sign_verify(text, text, text, text), public.offer_sign_state(text, text),

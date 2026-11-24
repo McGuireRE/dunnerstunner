@@ -180,8 +180,9 @@ create or replace function public.offer_hold_active(p_offer uuid) returns boolea
 -- what a signer's own link says when they can't go on: replaced, their own request with Tim, or the signing's reason
 create or replace function public.offer_sign_stop_for(s public.offer_signers, g public.offer_signings) returns text language plpgsql stable security definer set search_path = public as $$
 begin
-  if s.void_at is not null then return 'This version has been replaced. Tim will send you the new one.'; end if;
+  -- a freeze or withdrawal first: a withdrawn signer's places are voided too, and they are told only the neutral line
   if public.offer_hold_active(g.offer_id) then return 'This version is no longer being signed. Tim will be in touch.'; end if;
+  if s.void_at is not null then return 'This version has been replaced. Tim will send you the new one.'; end if;
   if exists (select 1 from public.offer_requests r where r.signer_id = s.id and r.handled_at is null) then return 'Your request has gone to Tim. He will contact you straight away.'; end if;
   return public.offer_sign_current(g);
 end $$;
@@ -370,6 +371,7 @@ end $$;
 create or replace function public.offer_sign_do_receipt(p_signer uuid, p_guide text, p_version text, p_file text, p_sha256 text, p_pages int[]) returns void language plpgsql security definer set search_path = public as $$
 declare s public.offer_signers; g public.offer_signings;
 begin
+  perform public.offer_lock_by_signer(p_signer);   -- lock order: the offer, then the signing, then the signer
   select * into s from public.offer_signers where id = p_signer for update; g := public.offer_sign_ready(s);
   if s.consent_at is null then raise exception 'Agree to sign electronically first'; end if;
   if p_guide not in ('cca', 'sale_purchase', 'chattels') or (p_guide = 'chattels' and g.side <> 'vendor') then raise exception 'Unknown guide'; end if;
@@ -383,6 +385,7 @@ end $$;
 create or replace function public.offer_sign_do_tap(p_signer uuid, p_place text) returns jsonb language plpgsql security definer set search_path = public as $$
 declare s public.offer_signers; g public.offer_signings; done int; need int;
 begin
+  perform public.offer_lock_by_signer(p_signer);   -- lock order: the offer, then the signing, then the signer
   select * into s from public.offer_signers where id = p_signer for update; g := public.offer_sign_ready(s);
   if s.consent_at is null then raise exception 'Agree to sign electronically first'; end if;
   if g.round_no = 1 and (not exists (select 1 from public.offer_sign_receipts where signer_id = s.id and guide = 'sale_purchase') or (coalesce(array_length(g.cca_pages, 1), 0) > 0 and not exists (select 1 from public.offer_sign_receipts where signer_id = s.id and guide = 'cca'))) then
@@ -401,6 +404,7 @@ end $$;
 create or replace function public.offer_sign_do_change(p_signer uuid, p_id uuid, p_kind text, p_page int, p_geometry jsonb, p_target uuid, p_places jsonb) returns jsonb language plpgsql security definer set search_path = public as $$
 declare s public.offer_signers; g public.offer_signings; t public.offer_sign_marks; w numeric; h numeric; n int; x jsonb; who text; reopened int; rc jsonb; dp jsonb; back jsonb;
 begin
+  perform public.offer_lock_by_signer(p_signer);   -- lock order: the offer, then the signing, then the signer
   perform 1 from public.offer_signings where id = (select signing_id from public.offer_signers where id = p_signer) for update;   -- as finishing does: the signing, then the signer
   select * into s from public.offer_signers where id = p_signer for update; g := public.offer_sign_ready(s, true);
   if g.round_no < 2 then raise exception 'Changes are made when the offer is answered, from Round 2 on'; end if;
@@ -528,6 +532,7 @@ end $$;
 create or replace function public.agent_signing_mark(p_signer uuid, p_kind text, p_page int, p_geometry jsonb, p_target uuid) returns jsonb language plpgsql security definer set search_path = public as $$
 declare me text := public.offer_agent(); s public.offer_signers; g public.offer_signings; t public.offer_sign_marks; mid uuid; w numeric; h numeric; why text;
 begin
+  perform public.offer_lock_by_signer(p_signer);   -- lock order: the offer, then the signing, then the signer
   s := public.offer_sign_person(p_signer);
   select * into g from public.offer_signings where id = s.signing_id for update; select * into s from public.offer_signers where id = p_signer for update;
   if g.round_no > 1 then raise exception 'In a counteroffer, use the change tools'; end if;
@@ -701,6 +706,7 @@ end $$;
 create or replace function public.offer_sign_issue(p_signing uuid, p_actor text) returns jsonb language plpgsql security definer set search_path = public as $$
 declare g public.offer_signings; s public.offer_signers; tok text; out_ jsonb := '[]'::jsonb; why text; addr text;
 begin
+  perform public.offer_lock_by_signing(p_signing);   -- lock order: the offer, then the signing, then the signer
   select * into g from public.offer_signings where id = p_signing for update; if g.id is null then raise exception 'No such signing'; end if;
   if g.method <> 'link' then raise exception 'This signing is in person, on your device'; end if;
   why := public.offer_sign_current(g); if why is not null then raise exception '%', why; end if;
@@ -975,6 +981,7 @@ create or replace function public.offer_sign_ready(s public.offer_signers, p_all
 declare g public.offer_signings; why text;
 begin
   select * into g from public.offer_signings where id = s.signing_id;
+  if public.offer_hold_active(g.offer_id) then raise exception 'This version is no longer being signed. Tim will be in touch.'; end if;   -- before the void check: a withdrawal voids places too
   if s.void_at is not null then raise exception 'This version has been replaced. Tim will send you the new one.'; end if;
   why := public.offer_sign_current(g); if why is not null then raise exception '%', why; end if;
   if exists (select 1 from public.offer_requests r where r.signer_id = s.id and r.handled_at is null) then raise exception 'Your request has gone to Tim. He will contact you straight away.'; end if;
@@ -1004,6 +1011,7 @@ end $$;
 create or replace function public.agent_offer_unfreeze(p_offer uuid, p_note text) returns void language plpgsql security definer set search_path = public as $$
 declare me text := public.offer_agent(); h public.offer_holds;
 begin
+  perform 1 from public.property_offers where id = p_offer for update;   -- unfreezing changes the offer's state: the offer FOR UPDATE first
   if exists (select 1 from public.offer_holds where offer_id = p_offer and kind = 'withdraw') then raise exception 'This offer was withdrawn, so it stays stopped'; end if;
   select * into h from public.offer_holds where offer_id = p_offer and kind = 'freeze' and lifted_at is null for update; if h.id is null then raise exception 'This offer isn''t frozen'; end if;
   if coalesce(length(trim(p_note)), 0) < 3 or length(p_note) > 500 then raise exception 'Say why it carries on (3 to 500 characters)'; end if;
@@ -1037,6 +1045,7 @@ end $$;
 create or replace function public.agent_offer_request_carry_on(p_request uuid, p_note text) returns void language plpgsql security definer set search_path = public as $$
 declare me text := public.offer_agent(); rq public.offer_requests;
 begin
+  perform 1 from public.property_offers where id = (select offer_id from public.offer_requests where id = p_request) for key share;   -- lock order: the offer, then the signing, then the signer
   select * into rq from public.offer_requests where id = p_request for update; if rq.id is null or rq.handled_at is not null then raise exception 'No open request'; end if;
   if coalesce(length(trim(p_note)), 0) < 3 or length(p_note) > 500 then raise exception 'Say what you agreed with them (3 to 500 characters)'; end if;
   perform set_config('offers.fn', 'on', true);
@@ -1051,6 +1060,7 @@ declare s public.offer_signers; g public.offer_signings; id_ uuid; why text; L j
 begin
   s := public.offer_sign_me(p_token, p_session);
   -- the signer's row is locked, so two requests at once can't both pass the checks below
+  perform public.offer_lock_by_signer(s.id);   -- lock order: the offer, then the signing, then the signer
   select * into s from public.offer_signers where id = s.id for update;
   select * into g from public.offer_signings where id = s.signing_id;
   if s.void_at is not null or g.status not in ('ready', 'signing', 'held', 'complete') or public.offer_sign_current(g) is not null then raise exception 'This version is no longer being signed. Tim will be in touch.'; end if;
@@ -1311,6 +1321,7 @@ begin return public.offer_mail_insert('system', p_offer, 'reopened', p_signer, p
 create or replace function public.agent_mail_draft_edit(p_draft uuid, p_to text[], p_cc text[], p_subject text, p_body text) returns void language plpgsql security definer set search_path = public as $$
 declare me text := public.offer_agent(); m public.offer_mail_drafts;
 begin
+  perform 1 from public.property_offers where id = (select offer_id from public.offer_mail_drafts where id = p_draft) for key share;   -- lock order: the offer, then the draft, then the signing and signer
   select * into m from public.offer_mail_drafts where id = p_draft for update; if m.id is null then raise exception 'No such email'; end if;
   if m.status <> 'draft' then raise exception 'This email was sent or set aside, so it is kept as it was'; end if;
   perform public.offer_mail_check(m.offer_id, m.kind, m.signer_id, p_to, coalesce(p_cc, '{}'), p_subject, p_body);
@@ -1322,6 +1333,7 @@ end $$;
 create or replace function public.agent_mail_draft_review(p_draft uuid, p_reviewed boolean) returns void language plpgsql security definer set search_path = public as $$
 declare me text := public.offer_agent(); m public.offer_mail_drafts;
 begin
+  perform 1 from public.property_offers where id = (select offer_id from public.offer_mail_drafts where id = p_draft) for key share;   -- lock order: the offer, then the draft, then the signing and signer
   select * into m from public.offer_mail_drafts where id = p_draft for update; if m.id is null then raise exception 'No such email'; end if;
   if m.status <> 'draft' then raise exception 'This email was sent or set aside, so it is kept as it was'; end if;
   perform set_config('offers.fn', 'on', true);
@@ -1331,6 +1343,7 @@ end $$;
 create or replace function public.agent_mail_draft_void(p_draft uuid, p_reason text) returns void language plpgsql security definer set search_path = public as $$
 declare me text := public.offer_agent(); m public.offer_mail_drafts;
 begin
+  perform 1 from public.property_offers where id = (select offer_id from public.offer_mail_drafts where id = p_draft) for key share;   -- lock order: the offer, then the draft, then the signing and signer
   select * into m from public.offer_mail_drafts where id = p_draft for update; if m.id is null then raise exception 'No such email'; end if;
   if m.status <> 'draft' then raise exception 'This email was sent or set aside, so it is kept as it was'; end if;
   perform set_config('offers.fn', 'on', true);
@@ -1343,6 +1356,7 @@ end $$;
 create or replace function public.offer_mail_take(p_draft uuid, p_actor text) returns jsonb language plpgsql security definer set search_path = public as $$
 declare m public.offer_mail_drafts; s public.offer_signers; g public.offer_signings; tok text; why text; lid bigint; logged text;
 begin
+  perform 1 from public.property_offers where id = (select offer_id from public.offer_mail_drafts where id = p_draft) for key share;   -- lock order: the offer, then the draft, then the signing and signer
   -- one send at a time: the draft row is locked, must still be a draft, and moves to 'sending' here, with a pending log row holding
   -- exactly what is handed out. A second Send (another tab, Send all reviewed) finds it sending and is refused.
   select * into m from public.offer_mail_drafts where id = p_draft for update; if m.id is null then raise exception 'No such email'; end if;
@@ -1373,6 +1387,7 @@ end $$;
 create or replace function public.offer_mail_done(p_draft uuid, p_log bigint, p_actor text, p_ok boolean, p_error text) returns void language plpgsql security definer set search_path = public as $$
 declare m public.offer_mail_drafts; l public.offer_mail_log;
 begin
+  perform 1 from public.property_offers where id = (select offer_id from public.offer_mail_drafts where id = p_draft) for key share;   -- lock order: the offer, then the draft, then the signing and signer
   -- the outcome of one send: sent (the draft is sent) or failed at the mail server (back to a draft; a new Send makes a new link)
   select * into m from public.offer_mail_drafts where id = p_draft for update; if m.id is null then raise exception 'No such email'; end if;
   select * into l from public.offer_mail_log where id = p_log and draft_id = m.id for update; if l.id is null or l.status <> 'pending' or m.status <> 'sending' then raise exception 'This send was already recorded'; end if;
@@ -1389,6 +1404,7 @@ end $$;
 create or replace function public.agent_mail_draft_unstick(p_draft uuid) returns void language plpgsql security definer set search_path = public as $$
 declare me text := public.offer_agent(); m public.offer_mail_drafts;
 begin
+  perform 1 from public.property_offers where id = (select offer_id from public.offer_mail_drafts where id = p_draft) for key share;   -- lock order: the offer, then the draft, then the signing and signer
   select * into m from public.offer_mail_drafts where id = p_draft for update; if m.id is null then raise exception 'No such email'; end if;
   if m.status <> 'sending' then raise exception 'This email isn''t waiting on a send'; end if;
   perform set_config('offers.fn', 'on', true);
