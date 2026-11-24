@@ -794,7 +794,7 @@ function draftInvoke(o){ const b=(o&&o.body)||{}; const me=S&&S.user; const res=
 // ever sent: each is kept in email_log (mock: true) and in localStorage mockSignMail ({kind, to, code?, link?}) for the tests to read.
 // localStorage mockMailFail = an address: email to it fails.
 const SIGN_TABLES=['offer_signings','offer_signers','offer_sign_taps','offer_sign_receipts','offer_sign_marks','offer_sign_reviews','offer_sign_asks','offer_rounds','offer_documents','offer_agreements','offer_mail_drafts','offer_mail_log'];
-const SIGN_RPCS=['agent_mail_draft_add','agent_mail_draft_edit','agent_mail_draft_review','agent_mail_draft_void','agent_signing_turn_ok','agent_signing_cancel','agent_signing_release','agent_signing_start','agent_signing_consent','agent_signing_receipt','agent_signing_marks','agent_signing_tap','agent_signing_finish','agent_signing_mark','agent_signing_review','agent_offer_chain_check','agent_round_present','agent_round_change','agent_offer_layers','agent_document_close','agent_negotiation_withdraw','agent_offer_negotiation_setting','agent_offer_link_changes_default'];
+const SIGN_RPCS=['agent_mail_draft_unstick','agent_mail_draft_add','agent_mail_draft_edit','agent_mail_draft_review','agent_mail_draft_void','agent_signing_turn_ok','agent_signing_cancel','agent_signing_release','agent_signing_start','agent_signing_consent','agent_signing_receipt','agent_signing_marks','agent_signing_tap','agent_signing_finish','agent_signing_mark','agent_signing_review','agent_offer_chain_check','agent_round_present','agent_round_change','agent_offer_layers','agent_document_close','agent_negotiation_withdraw','agent_offer_negotiation_setting','agent_offer_link_changes_default'];
 const OSG=()=>(DB.offer_signings||=[]), OSR=()=>(DB.offer_signers||=[]), OST=()=>(DB.offer_sign_taps||=[]), OSC=()=>(DB.offer_sign_receipts||=[]), OSM=()=>(DB.offer_sign_marks||=[]), OSV=()=>(DB.offer_sign_reviews||=[]), OSA=()=>(DB.offer_sign_asks||=[]), ORN=()=>(DB.offer_rounds||=[]);
 const shaS=t=>window.SIGN.sha256Hex(String(t));
 const SIGN_ID_TYPES=['nz_driver_licence','passport','nz_firearms_licence','kiwi_access_card','other_photo_id','known_to_tim'];
@@ -810,7 +810,7 @@ function sgCurrent(g){ if(g.status==='replaced') return 'This version has been r
   if(g.status==='withdrawn'||['withdrawn','lapsed','declined'].includes(o.status)) return 'This version is no longer being signed. Tim will be in touch.';   // 024: Tim tells them himself
   if(OAG().some(x=>x.offer_id===g.offer_id)) return 'This version is no longer being signed. Tim will be in touch.';
   if(g.document_id&&(ODC().find(x=>x.id===g.document_id)||{}).status!=='open') return 'This version is no longer being signed. Tim will be in touch.';
-  if(d.number!==Math.max(...ds.map(x=>x.number))||!same(o.details,d.details)) return 'The offer has changed since it was sent for signing. Tim will send you the new version.'; return null; }
+  if(d.number!==Math.max(...ds.map(x=>x.number))||!same(o.details,d.details)) return (g.round_no||1)>1?'This version is no longer being signed. Tim will be in touch.':'The offer has changed since it was sent for signing. Tim will send you the new version.'; return null; }
 function sgReady(s,allowFinished){ const g=OSG().find(x=>x.id===s.signing_id); if(s.void_at) throw new Error('This version has been replaced. Tim will send you the new one.'); const w=sgCurrent(g); if(w) throw new Error(w);
   if(g.status==='ready') throw new Error("Signing hasn't started yet"); if(g.status==='held') throw new Error('Tim is checking a change to the document. Signing carries on once he has.');
   if(g.status==='complete') throw new Error('Everyone has signed. The signed copy is being locked.'); if(s.finished_at&&!allowFinished) throw new Error('You have finished signing. Thank you.'); return g; }
@@ -854,8 +854,8 @@ function mailAllowed(offerId,kind,signerId){ const o=PO().find(x=>x.id===offerId
   const d=o.details||{};
   if(kind==='agreed_purchasers') return lowAll([d.email,...(d.purchasers||[]).map(q=>q.email),(d.lawyer||{}).email]);
   if(kind==='agreed_vendors'){ const ag=OAG().find(x=>x.offer_id===offerId), doc=ag&&ODC().find(x=>x.id===ag.document_id), dr=doc&&DB.offer_drafts.find(x=>x.id===doc.draft_id), ags=(DB.agreements||[]).filter(x=>x.property_id===o.property_id).map(x=>x.id);
-    return lowAll([...(DB.property_people||[]).filter(x=>x.property_id===o.property_id&&(x.role||'owner')==='owner').map(x=>x.email),...(DB.agreement_people||[]).filter(x=>ags.includes(x.agreement_id)).map(x=>x.email),
-      ...OSR().filter(x=>{ const g=OSG().find(y=>y.id===x.signing_id); return g&&g.offer_id===offerId&&g.side==='vendor'&&!x.void_at; }).map(x=>x.email),...(DB.lawyer_links||[]).filter(x=>ags.includes(x.agreement_id)).map(x=>x.email),
+    const inForce=(DB.agreements||[]).filter(x=>x.property_id===o.property_id&&['signed','countersigned'].includes(x.status)).sort((x,y)=>String(y.created_at).localeCompare(String(x.created_at)))[0];   // 024: the vendor signers and the lawyer of the agreement in force
+    return lowAll([...OSR().filter(x=>{ const g=OSG().find(y=>y.id===x.signing_id); return g&&g.offer_id===offerId&&g.side==='vendor'&&!x.void_at; }).map(x=>x.email),...(DB.lawyer_links||[]).filter(x=>inForce&&x.agreement_id===inForce.id).map(x=>x.email),
       ...((dr&&dr.placed)||[]).filter(x=>['vl_email','vl_service'].includes(x.id)).map(x=>x.text)]).filter(x=>x.indexOf('@')>0); }
   return []; }
 // the other side's own phone or email (024 offer_mail_side_hit): forbid 'vendor' in anything to the purchasers, 'purchaser' in anything to the vendors
@@ -865,7 +865,8 @@ function mailSideHit(offerId,forbid,text){ const o=PO().find(x=>x.id===offerId);
       .concat(OSR().filter(x=>{ const g=OSG().find(y=>y.id===x.signing_id); return g&&g.offer_id===offerId&&g.side==='vendor'; }).map(x=>({who:'a vendor',email:x.email,phone:null})));
   return D?D.holdsOwn(text,D.ownContacts(own.filter(x=>String(x.email||'').toLowerCase()!==law||!law))):null; }
 const mailSide=(kind,signerId)=>kind==='agreed_purchasers'?'purchaser':kind==='agreed_vendors'?'vendor':((OSG().find(g=>g.id===(OSR().find(x=>x.id===signerId)||{}).signing_id))||{}).side||'purchaser';
-function mailCheck(offerId,kind,signerId,to,cc,subject,body){ const allowed=mailAllowed(offerId,kind,signerId);
+function mailCheck(offerId,kind,signerId,to,cc,subject,body,sending){ const allowed=mailAllowed(offerId,kind,signerId);
+  if(sending&&(String(subject||'')+' '+String(body||'')).indexOf('[Tim to')>=0) throw new Error('Fill or delete the marked blanks first.');
   if(!(to||[]).length||(to||[]).length+(cc||[]).length>12) throw new Error('Choose who it goes to');
   for(const x of (to||[]).concat(cc||[])) if(!allowed.includes(String(x).trim().toLowerCase())) throw new Error(`It can only go to the people on this side of the offer and their lawyer (${x} isn't one)`);
   if((kind==='sign_link'||kind==='reopened')&&(cc||[]).length) throw new Error('A signing email goes to its signer alone');
@@ -887,6 +888,8 @@ function mailInsert(actor,a){ const o=PO().find(x=>x.id===a.p_offer); if(!o) thr
 function signRpc(name,a,me){ if(!me||!AGENTS.includes(me.email)) return bad('Only Tim can do this');
   const person=id=>{ const s=OSR().find(x=>x.id===id); if(!s) throw new Error('No such signer'); const g_=OSG().find(g=>g.id===s.signing_id); if(g_.method!=='in_person') throw new Error('This purchaser signs by their own link'); if(s.void_at||['cancelled','replaced','withdrawn'].includes(g_.status)) throw new Error('This signing has stopped, so this turn is closed'); return s; };
   if(name==='agent_mail_draft_add') return sgTry(()=>mailInsert(me.email,a));
+  if(name==='agent_mail_draft_unstick') return sgTry(()=>{ const m=OMD().find(x=>x.id===a.p_draft); if(!m) throw new Error('No such email'); if(m.status!=='sending') throw new Error("This email isn't waiting on a send");
+    OML().filter(l=>l.draft_id===m.id&&l.status==='pending').forEach(l=>Object.assign(l,{status:'unconfirmed',error:'Tim checked it had not arrived',done_at:now()})); Object.assign(m,{status:'draft',reviewed_at:null}); return null; });
   if(name==='agent_mail_draft_edit') return sgTry(()=>{ const m=OMD().find(x=>x.id===a.p_draft); if(!m) throw new Error('No such email'); if(m.status!=='draft') throw new Error('This email was sent or set aside, so it is kept as it was');
     mailCheck(m.offer_id,m.kind,m.signer_id,a.p_to,a.p_cc||[],a.p_subject,a.p_body); Object.assign(m,{to_addr:a.p_to,cc_addr:a.p_cc||[],subject:a.p_subject,body:a.p_body,edited_at:now(),edited_by:me.email,reviewed_at:null,reviewed_by:null});
     OE().push({id:OE().length+1,property_id:m.property_id,offer_id:m.offer_id,at:now(),actor:me.email,kind:'mail_edited',detail:{draft_id:m.id,kind:m.kind}}); return null; });
@@ -1121,17 +1124,21 @@ async function signInvoke(o){ const b=(o&&o.body)||{}, me=S&&S.user, net='h:'+mo
   if(b.action==='send_mail'||b.action==='lock'||b.action==='agree'){ if(!me||!AGENTS.includes(me.email)) return res({error:'Only Tim can do this'},403);
     try{ if(b.action==='lock') return res({ok:true,round:await sgLock(b.signing_id,me.email)});
       if(b.action==='agree'){ if(!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/.test(String(b.accepted_at||''))) return res({error:'Bad request'},400); return res({ok:true,agreement:await sgAgree(b,me)}); }
-      // send_mail: one draft, exactly as it stands (mirrors fn/offer_sign_handler.ts and 024's offer_mail_take / offer_mail_done)
-      const m=OMD().find(x=>x.id===b.draft_id); if(!m) throw new Error('No such email'); if(m.status!=='draft') throw new Error('This email was already sent or set aside');
-      mailCheck(m.offer_id,m.kind,m.signer_id,m.to_addr,m.cc_addr,m.subject,m.body); let link=null;
+      // send_mail (mirrors fn/offer_sign_handler.ts and 024): take moves the draft to 'sending' with a pending log row of exactly what
+      // goes; a second Send is refused; done records the outcome. localStorage mockMailDoneFail='1': recording fails after the mail went.
+      const m=OMD().find(x=>x.id===b.draft_id); if(!m) throw new Error('No such email');
+      if(m.status==='sending') throw new Error('This email is already being sent, or may have gone. Check before sending again'); if(m.status!=='draft') throw new Error('This email was already sent or set aside');
+      mailCheck(m.offer_id,m.kind,m.signer_id,m.to_addr,m.cc_addr,m.subject,m.body,true); let link=null, tok=null;
       if(m.kind==='sign_link'){ const g=OSG().find(x=>x.id===m.signing_id), sr=OSR().find(x=>x.id===m.signer_id); const w=sgCurrent(g); if(w) throw new Error(w); if(sr.void_at||sr.finished_at||!['ready','signing'].includes(g.status)) throw new Error('Signing is held or finished, so no link is sent');
-        const tok=offerToken(); Object.assign(sr,{token_hash:shaS(tok),link_sent_at:now(),link_expires_at:new Date(Date.now()+14*864e5).toISOString(),session_hash:null,code_hash:null,code_tries:0}); link=location.origin+location.pathname+'?sign='+tok;
+        tok=offerToken(); Object.assign(sr,{token_hash:shaS(tok),link_sent_at:now(),link_expires_at:new Date(Date.now()+14*864e5).toISOString(),session_hash:null,code_hash:null,code_tries:0}); link=location.origin+location.pathname+'?sign='+tok;
         g.status='signing'; g.sent_at=g.sent_at||now(); sgEv(g,me.email,'sign_links_sent',{signing_id:g.id,signers:1,signer:sr.position,round:g.round_no||1,side:g.side||'purchaser',draft_id:m.id}); }
-      const logged=String(m.body).split('[the signing link]').join(link?location.origin+location.pathname+'?sign=[personal link]':'[the signing link]'), att=m.attach?[{name:m.attach.name,sha256:m.attach.sha256}]:[];
+      const att=m.attach?[{name:m.attach.name,sha256:m.attach.sha256}]:[];
+      const L={id:OML().length+1,draft_id:m.id,offer_id:m.offer_id,property_id:m.property_id,kind:m.kind,to_addr:m.to_addr.slice(),cc_addr:(m.cc_addr||[]).slice(),subject:m.subject,body:String(m.body).split('[the signing link]').join(tok?'[personal link]':'[the signing link]'),attachments:att,sent_by:me.email,sent_at:now(),status:'pending',ok:null,error:null,done_at:null};
+      OML().push(L); m.status='sending'; save();
       try{ sgMail(m.kind==='sign_link'?'offer_sign_link':m.kind==='reopened'?'offer_change_reopened':'offer_mail_'+m.kind,(m.to_addr||[]).join(', '),{side:(OSG().find(g=>g.id===m.signing_id)||{}).side||null,to_list:m.to_addr,cc:m.cc_addr,subject:m.subject,body:m.body,link,attachments:att,draft_id:m.id}); }
-      catch(e){ OML().push({id:OML().length+1,draft_id:m.id,offer_id:m.offer_id,property_id:m.property_id,kind:m.kind,to_addr:m.to_addr,cc_addr:m.cc_addr,subject:m.subject,body:logged,attachments:att,sent_by:me.email,sent_at:now(),ok:false,error:String(e.message)}); save(); return res({ok:false,error:"It didn't send. Nothing has gone. Try again."}); }
-      OML().push({id:OML().length+1,draft_id:m.id,offer_id:m.offer_id,property_id:m.property_id,kind:m.kind,to_addr:m.to_addr,cc_addr:m.cc_addr,subject:m.subject,body:logged,attachments:att,sent_by:me.email,sent_at:now(),ok:true,error:null});
-      Object.assign(m,{status:'sent',sent_at:now(),sent_by:me.email}); OE().push({id:OE().length+1,property_id:m.property_id,offer_id:m.offer_id,at:now(),actor:me.email,kind:'mail_sent',detail:{draft_id:m.id,kind:m.kind,to:(m.to_addr||[]).length,cc:(m.cc_addr||[]).length}}); save(); return res({ok:true}); }
+      catch(e){ Object.assign(L,{status:'failed',ok:false,error:String(e.message),done_at:now()}); Object.assign(m,{status:'draft',reviewed_at:null}); save(); return res({ok:false,error:"It didn't send. Nothing has gone. Try again."}); }
+      if(localStorage.getItem('mockMailDoneFail')==='1'){ save(); return res({ok:false,maybe_sent:true,error:'This may have gone. Check before sending again.'}); }
+      Object.assign(L,{status:'sent',ok:true,done_at:now()}); Object.assign(m,{status:'sent',sent_at:L.sent_at,sent_by:me.email}); OE().push({id:OE().length+1,property_id:m.property_id,offer_id:m.offer_id,at:now(),actor:me.email,kind:'mail_sent',detail:{draft_id:m.id,log_id:L.id,kind:m.kind,to:(m.to_addr||[]).length,cc:(m.cc_addr||[]).length}}); save(); return res({ok:true}); }
     catch(e){ return fail(e); } }
   const tok=String(b.token||''); if(!TOKEN_RE.test(tok)) return res({ok:false});
   const s=OSR().find(x=>x.token_hash&&x.token_hash===shaS(tok)&&x.link_expires_at>now());
@@ -1163,7 +1170,7 @@ async function signInvoke(o){ const b=(o&&o.body)||{}, me=S&&S.user, net='h:'+mo
       if(hits('sign_change',net,null,36e5)>=60) throw new Error('A lot of changes have been made from here in the last hour. Please call Tim on 027 562 7207'); OH().push({at:now(),kind:'sign_change',net});
       const r=sgChange(s,{p_id:b.id,p_kind:b.kind,p_page:b.page,p_geometry:b.geometry,p_target:b.target||null,p_places:b.places}); save();
       // 024: a draft for each reopened link signer, which Tim sends himself; no email to anyone now, Tim included (he hears once per round)
-      if(r.reopened>0) (r.reopened_signers||[]).forEach(x=>{ if(!x.email||!x.id) return; try{ const w=window.MAIL.reopenedDraft({first:String(x.name||'').split(' ')[0],address:r.address,by:r.by}); mailInsert('system',{p_offer:g.offer_id,p_kind:'reopened',p_signer:x.id,p_to:[x.email],p_cc:[],p_subject:w.subject,p_body:w.body}); }catch(_){} }); save();
+      if(r.reopened>0) (r.reopened_signers||[]).forEach(x=>{ if(!x.email||!x.id) return; try{ const w=window.MAIL.reopenedDraft({first:String(x.name||'').split(' ')[0],address:r.address,by:r.by,side:g.side}); mailInsert('system',{p_offer:g.offer_id,p_kind:'reopened',p_signer:x.id,p_to:[x.email],p_cc:[],p_subject:w.subject,p_body:w.body}); }catch(_){} }); save();
       return res({ok:true,id:r.id,reopened:r.reopened}); }
     if(b.action==='ask'){ if(s.void_at||['locked','replaced'].includes(g.status)) throw new Error('This version is no longer being signed'); const t=String(b.text||'').trim(); if(t.length<3||t.length>1000) throw new Error('Please say what you would like changed (up to 1,000 characters)');
       OSA().push({id:OSA().length+1,signing_id:g.id,signer_id:s.id,text:t,at:now()}); sgEv(g,s.name,'sign_change_asked',{signing_id:g.id,signer:s.position,length:t.length,round:g.round_no||1,side:g.side||'purchaser'}); let emailed=true;

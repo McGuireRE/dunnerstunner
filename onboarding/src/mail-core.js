@@ -46,23 +46,24 @@
   const inBreak = d => d && ((d.getUTCMonth() === 11 && d.getUTCDate() >= 24) || (d.getUTCMonth() === 0 && d.getUTCDate() <= 5));
 
   /* ───── signing emails ───── */
-  // i: { first, address, side ('purchaser' | 'vendor'), round }
+  // i: { first (their preferred name), address, side ('purchaser' | 'vendor'), round }
   function signLinkDraft(i) {
     const first = s_(i.first) || 'there', addr = s_(i.address) || 'the property', v = i.side === 'vendor', later = (+i.round || 1) > 1;
     const subject = v ? `An offer on ${addr}` : later ? `The vendors' reply to your offer: ${addr}` : `Your offer to sign: ${addr}`;
     const what = v ? `I have an offer on ${addr} for you to look at.` : later ? `I have the vendors' reply to your offer for ${addr} for you to look at.` : `Your offer for ${addr} is ready for you to sign.`;
     const how = v || later ? 'You can accept it as it stands, or make changes and sign them as a counteroffer. Each of you initials every change and signs.'
       : 'You read each page, then sign and initial each place yourself. It takes about 15 minutes.';
-    const body = [`Kia ora ${first},`, `${what} This link is just for you, so please don't forward it:`, LINK,
+    // the way Tim's own emails open: "Dear" to purchasers, "Hello" to vendors, by preferred name
+    const body = [`${v ? 'Hello' : 'Dear'} ${first},`, `${what} This link is just for you, so please don't forward it:`, LINK,
       `When you open it, I'll email you a one-time code to check it's you. ${how} The link works for 14 days.`,
       `When you confirm, it comes straight to me, and I'll be in touch with the other party myself. You can talk to your lawyer at any time before you sign, and any questions, just call me on ${TIM_PHONE}.`,
       'Tim'].join('\n\n');
     return { subject, body };
   }
-  // i: { first, address, by (who made the change) }
+  // i: { first, address, by (who made the change), side ('purchaser' | 'vendor') }
   function reopenedDraft(i) {
     const first = s_(i.first) || 'there', addr = s_(i.address) || 'the property';
-    return { subject: `A change to initial: ${addr}`, body: [`Kia ora ${first},`,
+    return { subject: `A change to initial: ${addr}`, body: [`${i.side === 'vendor' ? 'Hello' : 'Dear'} ${first},`,
       `${s_(i.by) || 'Someone on your side'} has made a change to the document for ${addr} since you finished. Please open the link I sent you earlier, initial the change and finish again. You'll be asked for a new code.`,
       `It all comes to me before anything goes anywhere. Any questions, just call me on ${TIM_PHONE}.`, 'Tim'].join('\n\n') };
   }
@@ -117,10 +118,14 @@
     const endHol = settleD || lastDue;
     const hols = agreed && endHol ? (input.holidays || []).filter(h => { const x = fromIso(h.day); return x && x > agreed && x <= endHol; }) : [];
     const price = money(AD.price) || money(T.price) || blank('fill: the price');
-    const deposit = s_(AD.deposit) || s_(T.deposit_printed) || blank('fill: the deposit amount');
+    // the deposit, in Tim's words: his trust account at the NZ Real Estate Trust, unless any part is KiwiSaver (then the vendors'
+    // lawyer's trust account, not released before settlement). When it is paid only if the agreement's own deposit wording says so.
+    const depText = [s_(AD.deposit), s_(T.deposit_printed)].join(' ');
+    const depAmt = money((/\$\s?[\d,]+(\.\d+)?/.exec(depText) || [''])[0]) || s_(AD.deposit) || blank('fill: the deposit amount');
+    const depWhen = /unconditional/i.test(depText) ? 'once the agreement becomes unconditional' : /\b(on|upon) (signing|execution|acceptance)\b|\bwhen (this agreement is )?signed\b/i.test(depText) ? 'on signing' : blank('fill: when the deposit is paid');
     const ks = T.kiwisaver === true || D.kiwisaver === true;
-    const depositWho = ks ? "The whole deposit is paid to the vendors' lawyer's trust account, because KiwiSaver is part of it, and it can't be released before settlement."
-      : 'The deposit is paid to the NZ Real Estate Trust account.';
+    const depositLine = whose => ks ? `Deposit (${depAmt}): payable to the vendors' lawyer's trust account ${depWhen}. Because ${whose} KiwiSaver is part of it, the whole deposit goes there and can't be released before settlement.`
+      : `Deposit (${depAmt}): payable to Public Trust O/A NZ Real Estate Trust ${depWhen}.`;
     const ft = Array.isArray(T.further_terms) ? T.further_terms : [];
     const asIs = ft.filter(t => /as is,?\s*where is/i.test(s_(t.text)));
     const excluded = (D.chattels_exclude || []).map(s_).filter(Boolean);
@@ -139,7 +144,7 @@
       : 'Conditions: none. The agreement is unconditional.';
     const condV = conds.length ? ["Conditions: purchaser's action steps", ...due.map((x, k) => `${k + 1}. ${x.label}: ${period(x.c, labels)}, due **${x.text}**.`),
       ...(sameDay ? ['They all fall due on the same day.'] : [])].join('\n') : 'Conditions: none. The agreement is unconditional.';
-    const depositP = `Deposit: ${deposit}. ${depositWho} ${blank('fill: when the deposit is paid')}`;
+    const depositP = depositLine('your');
     const chatP = `Chattels to note: ${chattels.length ? chattels.join(' ') : 'none noted in the agreement.'}`;
     const inspect = 'Pre-settlement inspection: around five working days before settlement, I\'ll attend the property with you so you can check everything is as it should be, including the chattels in working order.';
     const close = 'It has been great working with you thus far, and I look forward to ensuring everything continues smoothly.\n\nFaithfully,\nTim';
@@ -170,7 +175,7 @@
         `The purchaser's lawyer is: ${lawyerLine(pl)}.`,
         '**Roadmap**',
         ...(conds.length ? ['From here, the purchasers will complete the agreed conditions. In the meantime, ensure any bookings and plans pertaining to your move are only tentative "pencil" bookings. The property is not sold yet, but "under offer".'] : []),
-        ...dateLines, `Price: ${price}`, condV, `Deposit: ${deposit}. ${depositWho.replace("because KiwiSaver is part of it", "because the purchasers' KiwiSaver is part of it")} ${blank('fill: when the deposit is paid')}`,
+        ...dateLines, `Price: ${price}`, condV, depositLine("the purchasers'"),
         vendorItems.length ? 'Your action items from the further terms:\n' + vendorItems.map((t, k) => `${k + 1}. Further term ${t.number}${t.title ? ` (${t.title})` : ''}: ${s_(t.text)} Please book any work now.`).join('\n')
           : blank('check: no vendor action items were found in the further terms'),
         `Chattels to note: ${chattels.length ? chattels.join(' ') : 'none noted in the agreement.'} Anything included as a chattel needs to be in full working order at settlement.`,

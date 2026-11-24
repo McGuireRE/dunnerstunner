@@ -267,6 +267,8 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   expect(bgD === 'rgb(255, 255, 255)' && inkBg !== 'rgb(255, 255, 255)', 'in dark mode the page is dark and the signature pad stays white');
   expect(!(await side(q)), 'the link page at 390 px: no sideways scroll'); await shot(q, 'link_draw_dark');
   await draw(q, '#sgSig', 5); await draw(q, '#sgInit', 6); await q.click('#sgDrawGo'); await q.waitForSelector('#sgPlaces');
+  // plain words for a signer: no "fingerprint"; the check code sits behind Details, with what it is for
+  expect(!/fingerprint/i.test(await q.textContent('#main')) && await q.$('#sgDocCheck') && /Document check code/.test(await q.textContent('#sgDocCheck')) && !(await q.$eval('#sgDocCheck', e => e.open)), 'the signer sees "Document check code" behind Details, never "fingerprint"');
   expect(!(await q.$('#sgTools')) && await q.$('#sgAskBox'), 'a link signer cannot mark the document, but can ask Tim for a change');
   const allMine = await q.$$eval('#sgPgPick option', o => o.length); expect(allMine >= 1, 'the pages are there to read');
   d = await db(q); const eve = d.offer_signers.find(s => s.signing_id === gB.id && s.position === 1), fin = d.offer_signers.find(s => s.signing_id === gB.id && s.position === 2);

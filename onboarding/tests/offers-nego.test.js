@@ -305,6 +305,14 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   expect(/initials every change not yet initialled/.test(await p.textContent('#ngWho')) && /signatures from before stand/.test(await p.textContent('#ngWho')), 'the purchasers initial the changes; their signatures stand');
   expect(await p.isChecked('input[name="ngMethod"][value="in_person"]'), 'presenting defaults to in person');
   await tick(p, 'input[name="ngMethod"][value="in_person"]'); await p.waitForSelector('#ngChecked'); await tick(p, '#ngChecked'); await p.click('#ngGo'); await p.waitForSelector('#sgView');
+  // a round is out for signing: correcting the offer warns Tim and needs his tick (it would stop the round; the parties are told nothing)
+  { await openProp(p); await p.click(`[data-offer="${offA}"]`); await p.waitForSelector('#ofFix'); await p.click('#ofFix'); await p.waitForSelector('#ocSignWarn');
+    expect(/out for signing/.test(await p.textContent('#ocSignWarn')) && /you tell them yourself/.test(await p.textContent('#ocSignWarn')), 'the correction screen warns that a round is out for signing');
+    await p.fill('#ofNote', 'Testing the warning only'); await p.click('#ofSend');
+    await p.waitForFunction(() => /stops the round out for signing/.test((document.querySelector('#ofErr') || {}).textContent || ''), null, { timeout: 5000 }).catch(() => null);
+    expect(/Tick that you know this stops the round out for signing/.test(await p.textContent('#ofErr')), 'and saving needs his tick');
+    d = await db(p); expect(!d.offer_events.some(e => e.offer_id === offA && e.kind === 'corrected' && e.at > new Date(Date.now() - 6e4).toISOString()), 'nothing corrected without the tick');
+    await openProp(p); await p.click(`[data-offer="${offA}"]`); await p.waitForSelector('#ngOffer'); { const d3 = await db(p), g3 = d3.offer_signings.find(g => g.offer_id === offA && g.round_no === 3); await p.click(`[data-signing="${g3.id}"]`); } await p.waitForSelector('#sgView'); }
   const M3 = (await mails(p)).length, vView3 = await vendorView();
   for (const n of [1, 2]) { await turnStart(p, n); await consentDraw(p, n + 10);
     expect(!(await p.$('#sgGuides')) && !(await p.$('#ngChattels')), 'no guides again for the purchasers');
@@ -364,17 +372,34 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
     await p.click(`[data-mlsend="${dp.id}"]`); await p.waitForFunction(id => /marked blanks first/.test(document.querySelector(`[data-mlout="${id}"]`).textContent), dp.id);
     expect((await mails(p)).length === M5, 'a draft with marked blanks is not sent');
     for (const m of [dp, dv]) await p.$eval(`#mlBody-${m.id}`, e => { e.value = e.value.replace(/\[Tim to [^\]]*\]/g, 'Filled in by Tim'); });
-    await p.click(`[data-mlsend="${dp.id}"]`); await p.waitForFunction(id => !document.querySelector(`[data-mlsend="${id}"]`), dp.id, { timeout: 20000 });
-    let ml = (await mails(p)).slice(M5), sp = ml.find(m => m.kind === 'offer_mail_agreed_purchasers');
-    expect(ml.length === 1 && sp && sp.to === 'ana.p@example.com, bo.p@example.com' && (sp.cc || []).join() === 'pat@synthlaw.example' && sp.attachments[0].sha256 === ag.sha256 && /Filled in by Tim/.test(sp.body) && !/\[Tim to /.test(sp.body), 'Send: the purchasers\' email goes as Tim left it, cc their lawyer, the agreed copy attached; nothing else goes');
-    // the vendors' email: save, tick Reviewed, then Send all reviewed
-    await p.waitForSelector(`[data-mlsave="${dv.id}"]`); await p.$eval(`#mlBody-${dv.id}`, e => { e.value = e.value.replace(/\[Tim to [^\]]*\]/g, 'Filled in by Tim'); });
-    await p.click(`[data-mlsave="${dv.id}"]`); await p.waitForSelector(`[data-mlrev="${dv.id}"]`); await p.$eval(`[data-mlrev="${dv.id}"]`, e => { if (!e.checked) e.click(); }); await p.waitForTimeout(300);
+    await p.click(`[data-mlsave="${dp.id}"]`); await p.waitForSelector(`[data-mlsend="${dv.id}"]`);
+    // the same email sent twice at once (two tabs, or Send then Send all reviewed): exactly one goes, the other is refused
+    const twice = await p.evaluate(id => Promise.all([0, 1].map(() => window.supabase.createClient().functions.invoke('offer-sign', { body: { action: 'send_mail', draft_id: id } }).then(r => r.data || (r.error && r.error.context ? r.error.context.json() : null)))), dp.id);
+    let ml = (await mails(p)).slice(M5), sp = ml.filter(m => m.kind === 'offer_mail_agreed_purchasers');
+    out.twice = twice;
+    expect(sp.length === 1 && twice.filter(r => r && r.ok).length === 1 && twice.some(r => r && /already being sent|already sent/.test(r.error || '')), 'two sends at once: one email, the other refused');
+    expect(sp[0].to === 'ana.p@example.com, bo.p@example.com' && (sp[0].cc || []).join() === 'pat@synthlaw.example' && sp[0].attachments[0].sha256 === ag.sha256 && /Filled in by Tim/.test(sp[0].body) && !/\[Tim to /.test(sp[0].body), 'the purchasers\' email goes as Tim left it, cc their lawyer, the agreed copy attached');
+    d = await db(p); expect((d.offer_mail_log || []).filter(x => x.draft_id === dp.id).length === 1, 'one log row for one send');
+    // the mail server takes the vendors' email but the record of it fails: the page never says nothing has gone
+    await openProp(p); await p.click(`[data-offer="${offA}"]`); await p.waitForSelector(`[data-mlsend="${dv.id}"]`);
+    await p.$eval(`#mlBody-${dv.id}`, e => { e.value = e.value.replace(/\[Tim to [^\]]*\]/g, 'Filled in by Tim'); });
+    await p.evaluate(() => localStorage.setItem('mockMailDoneFail', '1'));
+    await p.click(`[data-mlsend="${dv.id}"]`); await p.waitForSelector(`[data-mlgoing="${dv.id}"]`, { timeout: 20000 });
+    expect(/this may have gone/i.test(await p.textContent(`[data-mlgoing="${dv.id}"]`)) && !/Nothing has gone/.test(await p.textContent('#mlAgreed')), 'the page says it may have gone, and to check first');
+    d = await db(p); expect(d.offer_mail_drafts.find(m => m.id === dv.id).status === 'sending' && d.offer_mail_log.filter(x => x.draft_id === dv.id).map(x => x.status).join() === 'pending', 'the draft waits as sending, with its pending log row');
+    const again = await p.evaluate(id => window.supabase.createClient().functions.invoke('offer-sign', { body: { action: 'send_mail', draft_id: id } }).then(r => r.data || (r.error && r.error.context ? r.error.context.json() : null)), dv.id);
+    expect(again && again.ok === false && /already being sent, or may have gone/.test(again.error), 'it can\'t simply be sent again');
+    await p.click('#navDash'); await p.waitForTimeout(700); expect(/An email may have gone: check it/.test(await p.textContent('#main')), 'Needs you says to check it');
+    // Tim checks it didn't arrive: a draft again, the unconfirmed row kept; then he sends it (tick Reviewed, Send all reviewed)
+    await p.evaluate(() => localStorage.removeItem('mockMailDoneFail'));
+    await openProp(p); await p.click(`[data-offer="${offA}"]`); await p.waitForSelector(`[data-mlunstick="${dv.id}"]`); await p.click(`[data-mlunstick="${dv.id}"]`);
+    await p.waitForSelector(`[data-mlrev="${dv.id}"]`); await p.$eval(`[data-mlrev="${dv.id}"]`, e => { if (!e.checked) e.click(); }); await p.waitForTimeout(300);
     await p.click('[data-mlall]'); await p.waitForFunction(() => !document.querySelector('[data-mlsend]'), null, { timeout: 20000 });
-    ml = (await mails(p)).slice(M5); expect(ml.length === 2 && ml.some(m => m.kind === 'offer_mail_agreed_vendors' && /vendor@example\.com/.test(m.to)), 'Send all reviewed: the vendors\' email goes');
+    ml = (await mails(p)).slice(M5); expect(ml.filter(m => m.kind === 'offer_mail_agreed_vendors' && /vendor@example\.com/.test(m.to)).length === 2, 'the vendors\' email sent again once Tim checked');
     d = await db(p); const lg = (d.offer_mail_log || []).filter(x => x.offer_id === offA && /^agreed_/.test(x.kind));
-    expect(lg.length === 2 && lg.every(x => x.ok && x.sent_by && x.sent_at && x.attachments[0].sha256 === ag.sha256 && /Filled in by Tim/.test(x.body)), 'the log keeps who sent what and when, and the exact text');
-    expect(d.offer_mail_drafts.filter(m => m.offer_id === offA && /^agreed_/.test(m.kind)).every(m => m.status === 'sent' && m.sent_by), 'both drafts marked sent');
+    expect(lg.map(x => x.kind + ':' + x.status).sort().join() === 'agreed_purchasers:sent,agreed_vendors:sent,agreed_vendors:unconfirmed', 'the log: each send kept, the unconfirmed one marked: ' + lg.map(x => x.kind + ':' + x.status).join());
+    expect(lg.every(x => x.sent_by && x.sent_at && x.attachments[0].sha256 === ag.sha256 && /Filled in by Tim/.test(x.body)), 'each row: who, when, the exact text and the attachment');
+    expect(d.offer_mail_drafts.filter(m => m.offer_id === offA && /^agreed_/.test(m.kind) && m.status !== 'void').every(m => m.status === 'sent' && m.sent_by), 'both drafts marked sent');
     await p.click('#navDash'); await p.waitForTimeout(700); expect(!/emails to read and send/.test(await p.textContent('#main')), 'Needs you is clear once they are sent');
     await openProp(p); await p.click(`[data-offer="${offA}"]`); await p.waitForSelector('#ngAgreed'); }
   expect(['received'].includes(d.property_offers.find(o => o.id === offB).status) && d.property_offers.find(o => o.id === offC).status === 'received', 'other offers on the property are untouched');

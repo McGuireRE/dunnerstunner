@@ -44,7 +44,7 @@ const D = require(path.join(__dirname, '..', 'src', 'draft-core.js'));
     return { round_id: 'r3', number: 3, doc_round: 3, side: 'purchaser', signing_id: 'g3', sha256: 'e'.repeat(64), places: pl, taps: (outstandingLayers ? pl.slice(0, 1) : pl).map(p => ({ place_id: p.id, signer: 1 })), signers: L1.signers, marks: [] }; };
   const db = async (fn, args) => {
     calls.push([fn, args]);
-    if (fn === 'offer_sign_change') return changeErr ? { data: null, error: { message: changeErr } } : { data: Object.assign({ id: args.p_id, reopened: 0, reopened_signers: [], by: 'Vera Vendor', round: 2, address: '1 Example Road', offer_id: OID }, reopen || {}), error: null };
+    if (fn === 'offer_sign_change') return changeErr ? { data: null, error: { message: changeErr } } : { data: Object.assign({ id: args.p_id, reopened: 0, reopened_signers: [], by: 'Vera Vendor', round: 2, side: 'vendor', address: '1 Example Road', offer_id: OID }, reopen || {}), error: null };
     if (fn === 'offer_mail_draft_sys') return { data: 'draft-1', error: null };
     if (fn === 'offer_sign_issue') return { data: { address: '1 Example Road', side: 'vendor', round: 2, links: [{ signer_id: 's1', position: 1, name: 'Vera Vendor', email: 'vera@example.com', token: TOK }] }, error: null };
     if (fn === 'offer_sign_open') return { data: { ok: true, first: 'Vera', address: '1 Example Road', finished: false, stopped: null, held: false, email_hint: 'v***@example.com', side: 'vendor', round: 2, email: 'vera@example.com' }, error: null };
@@ -80,7 +80,7 @@ const D = require(path.join(__dirname, '..', 'src', 'draft-core.js'));
   r = await J(await post({ action: 'change', token: TOK, session: SES, id: MK, kind: 'strike', page: 1, geometry: { x0: 100, x1: 160, y: 403 }, places: [] }));
   const dsys = calls.find(c => c[0] === 'offer_mail_draft_sys');
   expect(r.j.ok && r.j.reopened === 1 && !mails.length, 'a change that reopens a signer: no email to anyone, not even Tim');
-  expect(dsys && dsys[1].p_offer === OID && dsys[1].p_signer === 'sig-val' && dsys[1].p_to.join() === 'val@example.com' && /A change to initial/.test(dsys[1].p_subject) && /link I sent you earlier/.test(dsys[1].p_body) && /Kia ora Val/.test(dsys[1].p_body), 'a draft for Val, in Tim\'s voice, for him to send');
+  expect(dsys && dsys[1].p_offer === OID && dsys[1].p_signer === 'sig-val' && dsys[1].p_to.join() === 'val@example.com' && /A change to initial/.test(dsys[1].p_subject) && /link I sent you earlier/.test(dsys[1].p_body) && /^Hello Val,/.test(dsys[1].p_body), 'a draft for Val, in Tim\'s voice, for him to send');
   reopen = null; mails = [];
   changeErr = "Those words hold a purchaser's own phone or email, so they can't go on the agreement. Only the lawyers' details go on it";
   r = await J(await post({ action: 'change', token: TOK, session: SES, id: MK, kind: 'insert', page: 1, geometry: { x: 1, y: 1, text: 'x', size: 9 }, places: [] }));

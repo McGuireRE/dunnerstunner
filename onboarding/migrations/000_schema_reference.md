@@ -307,7 +307,7 @@ agreements/<agreement id>/signatures/... (vendors may upload their own signature
   `resign_every_round` (default false; `agent_offer_negotiation_setting`). `offer_agreements` gains `round_sha256`, `draw_version` and
   `terms` (the agreed terms for later phases). `agent_offer_correct` refuses once agreed. `offer_private_hit` also checks
   `agreement_people`. Withdrawing, declining or lapsing closes the open document.
-- Tim's answers: `offer_settings.link_changes_default` (default true; `agent_offer_link_changes_default`) and `offer_signings.link_changes`
+- Tim's answers: `offer_settings.link_changes_default` (default false, Tim, 24 November 2026; `agent_offer_link_changes_default`) and `offer_signings.link_changes`
   (set when Tim presents a round, `agent_round_present(..., p_link_changes)`); `offer_sign_change` refuses when it is off.
 - Merged with main (branch `offers-live`): `offer_sign_state` also gives `signing.terms` (the newest draft's `term_last`, `retired_numbers`
   and further terms style; 23.0 style when the draft has no further terms), for a new further term in a counteroffer. 024's

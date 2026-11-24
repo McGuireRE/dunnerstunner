@@ -133,11 +133,37 @@ begin
     begin perform public.offer_mail_take(mv, 'x'); out := out || 'A SIGNED-IN USER SENT AN EMAIL; '; exception when others then out := out || 'take as user: ' || sqlerrm || '; '; end;
     execute 'reset role'; perform set_config('request.jwt.claims', agent, true);
     execute 'set local role service_role';
+    -- the send is taken once: the draft is 'sending' with a pending log row of exactly what goes; a second take is refused
     tk := public.offer_mail_take(mv, 'Tim McGuire');
-    out := out || 'take: token=' || (length(tk->>'token') >= 40) || ' kept as a fingerprint=' || ((select token_hash from public.offer_signers where id = sv) = public.offer_sha(tk->>'token')) || '; ';
-    perform public.offer_mail_done(mv, 'Tim McGuire', replace(tk->>'body', '[the signing link]', 'https://example.test/?sign=[personal link]'), '[]', true, null);
+    out := out || 'take: token=' || (length(tk->>'token') >= 40) || ' kept as a fingerprint=' || ((select token_hash from public.offer_signers where id = sv) = public.offer_sha(tk->>'token'))
+      || ' draft=' || (select status from public.offer_mail_drafts where id = mv) || ' log=' || (select status || ' to=' || to_addr[1] || ' subject=' || subject from public.offer_mail_log where id = (tk->>'log_id')::bigint) || '; ';
+    begin perform public.offer_mail_take(mv, 'Tim McGuire'); out := out || 'AN EMAIL TAKEN TO SEND TWICE; '; exception when others then out := out || 'second take: ' || sqlerrm || '; '; end;
+    out := out || 'one link only=' || ((select token_hash from public.offer_signers where id = sv) = public.offer_sha(tk->>'token')) || '; ';
+    perform public.offer_mail_done(mv, (tk->>'log_id')::bigint, 'Tim McGuire', true, null);
+    begin perform public.offer_mail_done(mv, (tk->>'log_id')::bigint, 'Tim McGuire', false, 'x'); out := out || 'A SEND RECORDED TWICE; '; exception when others then out := out || 'done twice: ' || sqlerrm || '; '; end;
     execute 'reset role'; perform set_config('request.jwt.claims', agent, true);
-    out := out || 'sent: status=' || (select status from public.offer_mail_drafts where id = mv) || ' log ok=' || (select ok from public.offer_mail_log where draft_id = mv) || ' log keeps no token=' || ((select position(tk->>'token' in body) from public.offer_mail_log where draft_id = mv) = 0) || '; ';
+    out := out || 'sent: status=' || (select status from public.offer_mail_drafts where id = mv) || ' log=' || (select status || ' ok=' || ok from public.offer_mail_log where draft_id = mv) || ' log keeps no token=' || ((select position(tk->>'token' in body) from public.offer_mail_log where draft_id = mv) = 0)
+      || ' rows=' || (select count(*) from public.offer_mail_log where draft_id = mv) || '; ';
+    -- a failed send at the mail server: the draft is a draft again, the log row says failed; a deliberate Send again takes a new link
+    declare mf uuid; tf jsonb; tf2 jsonb; mu uuid; tu jsonb; mb uuid;
+    begin
+      mf := public.agent_mail_draft_add(o1, 'sign_link', sv, array['val@example.com'], '{}', 'Again', 'Your link: [the signing link]', null);
+      execute 'set local role service_role'; tf := public.offer_mail_take(mf, 'Tim McGuire'); perform public.offer_mail_done(mf, (tf->>'log_id')::bigint, 'Tim McGuire', false, 'SMTP down');
+      out := out || 'failed send: draft=' || (select status from public.offer_mail_drafts where id = mf) || ' log=' || (select status from public.offer_mail_log where id = (tf->>'log_id')::bigint) || '; ';
+      tf2 := public.offer_mail_take(mf, 'Tim McGuire'); out := out || 'sent again: new link=' || (tf2->>'token' <> tf->>'token') || ' new log row=' || ((tf2->>'log_id')::bigint <> (tf->>'log_id')::bigint) || '; ';
+      -- the mail server took it but the outcome was never recorded: it stays sending, Tim checks, then makes it a draft again; the row is kept
+      execute 'reset role'; perform set_config('request.jwt.claims', agent, true);
+      begin perform public.agent_mail_draft_edit(mf, array['val@example.com'], '{}', 's', 'b [the signing link]'); out := out || 'A SENDING EMAIL EDITED; '; exception when others then out := out || 'edit while sending: ' || sqlerrm || '; '; end;
+      perform public.agent_mail_draft_unstick(mf);
+      out := out || 'unstuck: draft=' || (select status from public.offer_mail_drafts where id = mf) || ' log=' || (select status from public.offer_mail_log where id = (tf2->>'log_id')::bigint) || '; ';
+      begin update public.offer_mail_log set body = 'x' where id = (tf2->>'log_id')::bigint; out := out || 'A LOG ROW REWRITTEN; '; exception when others then out := out || 'log row fixed: ' || sqlerrm || '; '; end;
+      -- a draft still holding Tim's marked blanks can't be sent
+      mb := public.agent_mail_draft_add(o1, 'sign_link', sv, array['val@example.com'], '{}', 'Again', 'Your link: [the signing link] [Tim to fill: something]', null);
+      execute 'set local role service_role';
+      begin perform public.offer_mail_take(mb, 'Tim McGuire'); out := out || 'A DRAFT WITH BLANKS SENT; '; exception when others then out := out || 'blanks: ' || sqlerrm || '; '; end;
+      execute 'reset role'; perform set_config('request.jwt.claims', agent, true);
+      perform public.agent_mail_draft_void(mb, 'test');
+    end;
     begin perform public.agent_mail_draft_edit(mv, array['val@example.com'], '{}', 's', 'b [the signing link]'); out := out || 'A SENT EMAIL EDITED; '; exception when others then out := out || 'edit after send: ' || sqlerrm || '; '; end;
     begin update public.offer_mail_log set body = 'x' where draft_id = mv; out := out || 'THE LOG CHANGED; '; exception when others then out := out || 'log fixed: ' || sqlerrm || '; '; end;
     begin delete from public.offer_mail_drafts where id = mv; out := out || 'A DRAFT REMOVED; '; exception when others then out := out || 'remove: ' || sqlerrm || '; '; end;
@@ -152,6 +178,13 @@ begin
   r := public.offer_sign_issue(g2, 'agent'); tok := r->'links'->0->>'token';
   out := out || 'issue side=' || (r->>'side') || ' round=' || (r->>'round') || ' links=' || jsonb_array_length(r->'links') || ' changes from link (switched on for this round)=' || (select link_changes from public.offer_signings where id = g2) || ' recorded=' || (select detail->>'link_changes' from public.offer_events where kind = 'round_presented' and detail->>'signing_id' = g2::text) || '; ';
   r := public.offer_sign_open(tok, 'n1', 'ua'); out := out || 'open: first=' || (r->>'first') || ' side=' || (r->>'side') || ' stopped=' || coalesce(r->>'stopped', 'none') || '; ';
+  -- Tim corrects the offer while the vendors' Round 2 is out: their link says only that this version is no longer being signed (he mediates)
+  begin
+    perform set_config('request.jwt.claims', agent, true);
+    perform public.agent_offer_correct(o1, good || jsonb_build_object('price', '651000'), 'Purchaser rang to change the price');
+    out := out || 'round 2 after a correction: ' || coalesce(public.offer_sign_open(tok, 'n1', 'ua')->>'stopped', 'NOTHING SAID') || '; ';
+    raise exception 'undo-correct';
+  exception when others then if sqlerrm <> 'undo-correct' then out := out || 'CORRECTION TEST FAILED ' || sqlerrm || '; '; end if; end;
   code := public.offer_sign_code(tok, 'n1')->>'code'; ses := public.offer_sign_verify(tok, code, 'n1', 'ua')->>'session';
   r := public.offer_sign_state(tok, ses);
   -- the newest draft's further terms numbering, for a new further term in a counteroffer (the 23.0 style when the draft has no further terms)
@@ -347,6 +380,10 @@ begin
     begin perform public.agent_mail_draft_add(o1, 'agreed_purchasers', null, array['ana@example.com'], array['rb-nego-vendor@example.com'], 's', 'b', att); out := out || 'A VENDOR COPIED ON THE PURCHASERS'' EMAIL; '; exception when others then out := out || 'vendor on purchasers'': ' || left(sqlerrm, 60) || '; '; end;
     begin perform public.agent_mail_draft_add(o1, 'agreed_purchasers', null, array['ana@example.com'], '{}', 's', 'Vera is on 027 444 5555', att); out := out || 'A VENDOR''S PHONE TO THE PURCHASERS; '; exception when others then out := out || 'vendor phone to purchasers: ' || left(sqlerrm, 60) || '; '; end;
     begin perform public.agent_mail_draft_add(o1, 'agreed_vendors', null, array['rb-nego-vendor@example.com'], '{}', 's', 'Ana is ana@example.com', att); out := out || 'A PURCHASER''S EMAIL TO THE VENDORS; '; exception when others then out := out || 'purchaser email to vendors: ' || left(sqlerrm, 60) || '; '; end;
+    -- someone only on an earlier agency agreement of the property, not a vendor in this negotiation: not a recipient
+    execute 'reset role'; insert into public.agreements (property_id, status) values (pid, 'ended') returning id into x; insert into public.agreement_people (agreement_id, legal_name, email) values (x::uuid, 'Earlier Owner', 'earlier.owner@example.com');
+    perform set_config('request.jwt.claims', agent, true);
+    begin perform public.agent_mail_draft_add(o1, 'agreed_vendors', null, array['earlier.owner@example.com'], '{}', 's', 'b', att); out := out || 'AN EARLIER AGREEMENT''S PERSON EMAILED; '; exception when others then out := out || 'earlier owner: ' || left(sqlerrm, 60) || '; '; end;
     begin perform public.agent_mail_draft_add(o1, 'agreed_vendors', null, array['rb-nego-vendor@example.com'], '{}', 's', 'b', jsonb_build_object('path', 'other.pdf', 'sha256', ags, 'name', 'Agreement.pdf')); out := out || 'ANOTHER FILE ATTACHED; '; exception when others then out := out || 'attachment: ' || left(sqlerrm, 40) || '; '; end;
     ma := public.agent_mail_draft_add(o1, 'agreed_vendors', null, array['rb-nego-vendor@example.com', 'val@example.com'], '{}', 'Congratulations!', 'Hello Vera and Val, the purchasers'' lawyer is Pat Lawyer, Law Ltd, pat@law.example, 03 477 0000.', att);
     out := out || 'agreed vendors draft=' || (select status from public.offer_mail_drafts where id = ma) || ' (the purchasers'' lawyer may be named); ';

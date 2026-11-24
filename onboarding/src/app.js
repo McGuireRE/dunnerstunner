@@ -2220,10 +2220,10 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const needs = [];
     const insps = await safe(sb.from('property_inspections').select('id,property_id,status,started_at').eq('status', 'in_progress'));
     // offers: emails waiting for Tim to read and send (drafts; nothing goes by itself), one item per signing or agreed copy
-    const mds = await safe(sb.from('offer_mail_drafts').select('id,offer_id,property_id,kind,signing_id').eq('status', 'draft'));
+    const mds = await safe(sb.from('offer_mail_drafts').select('id,offer_id,property_id,kind,signing_id,status').in('status', ['draft', 'sending']));
     const mdGroups = {}; (mds || []).forEach(m => { const k = /^agreed_/.test(m.kind) ? 'a:' + m.offer_id : 's:' + m.signing_id; (mdGroups[k] ||= []).push(m); });
     Object.values(mdGroups).forEach(list => { const m = list[0], pr = props.find(x => x.id === m.property_id), agreed = /^agreed_/.test(m.kind);
-      needs.push({ what: `${list.length} email${list.length === 1 ? '' : 's'} to read and send`, where: (pr && pr.address) || 'Property', sub: agreed ? 'The agreed copy, to both parties' : list.some(x => x.kind === 'reopened') ? 'Please initial again, after a change' : 'Signing links',
+      needs.push({ what: list.some(x => x.status === 'sending') ? 'An email may have gone: check it' : `${list.length} email${list.length === 1 ? '' : 's'} to read and send`, where: (pr && pr.address) || 'Property', sub: agreed ? 'The agreed copy, to both parties' : list.some(x => x.kind === 'reopened') ? 'Please initial again, after a change' : 'Signing links',
         go: () => agreed ? viewOfferAgent(m.offer_id) : viewSigning(m.signing_id), mail: true }); });
     // offers from the form that Tim hasn't opened yet (offers phase 1)
     const fresh = await safe(sb.from('property_offers').select('id,property_id,amount,received_at,related_party,source,suspected_spam').is('read_at', null).order('received_at', { ascending: false }));
@@ -5749,6 +5749,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       ${sec('comments', 'Anything else?', `<label class="f" for="ofComments">Comments for Tim or the sellers</label><textarea id="ofComments" rows="4" maxlength="3000" data-f="comments">${esc(F.comments)}</textarea>`, '(optional)')}
       ${sec('privacy', 'Privacy', `<p class="small of-privacy">${esc(OF_PRIVACY)}</p><label class="choice cb"><input type="checkbox" data-fb="privacy" ${F.privacy ? 'checked' : ''}><span class="mark"></span><span><span class="ct">${pub ? 'I have read this' : 'I have told the buyer this, or sent it to them'}</span></span></label>`)}
       <div class="of-hp" aria-hidden="true"><label for="ofWebsite">Leave this empty</label><input type="text" id="ofWebsite" tabindex="-1" autocomplete="off"></div>
+      ${fix && ctx.openSigning ? `<div class="card note tight" id="ocSignWarn"><p class="small" style="margin:0"><strong>A round of this offer is out for signing.</strong> Correcting the offer stops it. The signers see only that this version is no longer being signed, and you tell them yourself.</p><label class="choice cb"><input type="checkbox" id="ocSignWarnOk"><span class="mark"></span><span><span class="ct">I know this stops the round out for signing</span></span></label></div>` : ''}
       ${fix ? `<label class="f" for="ofNote">What changed, and how you heard <span class="opt">(needed, kept in the record)</span></label><textarea id="ofNote" rows="2" maxlength="500"></textarea>` : ''}
       <div class="err" id="ofErr" role="alert"></div>
       <div class="toolbar"><button class="btn primary" type="button" id="ofSend">${fix ? 'Save the correction' : pub ? 'Send my offer to Tim' : 'Save the offer'}</button></div>
@@ -5889,6 +5890,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     try {
       if (ctx.mode === 'agent') { const id = await must(sb.rpc('agent_offer_add', { p_property: ctx.pid, p_offer: payload })); ofForget(ctx); toast('Offer saved'); return viewOfferAgent(id); }
       const note = ($('#ofNote').value || '').trim(); if (note.length < 3) { btn.disabled = false; return $('#ofErr').textContent = 'Say what changed and how you heard.'; }
+      if (ctx.openSigning && !($('#ocSignWarnOk') || {}).checked) { btn.disabled = false; return $('#ofErr').textContent = 'Tick that you know this stops the round out for signing.'; }
       await must(sb.rpc('agent_offer_correct', { p_offer: ctx.oid, p_details: payload, p_note: note })); toast('Correction saved'); return viewOfferAgent(ctx.oid);
     } catch (e) { btn.disabled = false; $('#ofErr').textContent = (e && e.message) || 'That didn\'t save.'; }
   }
@@ -5979,12 +5981,17 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     $$('[data-pick-see]').forEach(b => b.addEventListener('click', async () => { await viewProperty(b.dataset.pickSee); const t = $('#offTile'); if (t) t.scrollIntoView({ block: 'start' }); }));
     top();
   }
+  // correcting an offer while a round is out for signing stops that round: Tim is warned and confirms; the parties' links only ever say
+  // "This version is no longer being signed. Tim will be in touch." (024), and he tells them himself
+  const OC_WARN = 'A round of this offer is out for signing. Correcting the offer stops it: the signers see only that this version is no longer being signed, and you tell them yourself. Carry on?';
+  async function ocOpenSigning(oid) { return ((await ofSafe(sb.from('offer_signings').select('id,status,round_no,side').eq('offer_id', oid).in('status', ['ready', 'signing', 'held']))) || [])[0] || null; }
   async function viewOfferCorrect(oid) {
     header('Correct an offer', '', 0); actions(false);
     main().innerHTML = '<div class="loading">Loading...</div>';
     const o = await must(sb.from('property_offers').select('*').eq('id', oid).single());
     const p = await must(sb.from('properties').select('id,address').eq('id', o.property_id).single());
-    ofOpen({ mode: 'correct', oid, pid: o.property_id, address: p.address, province: o.province || OF.DEFAULT_PROVINCE, ksDays: await ofKs(), wording: await ofWording(), asAt: o.as_at, chattels: (o.details || {}).chattels_listed || [] }, ofShape(o.details));
+    const openSg = await ocOpenSigning(oid);
+    ofOpen({ mode: 'correct', openSigning: openSg, oid, pid: o.property_id, address: p.address, province: o.province || OF.DEFAULT_PROVINCE, ksDays: await ofKs(), wording: await ofWording(), asAt: o.as_at, chattels: (o.details || {}).chattels_listed || [] }, ofShape(o.details));
   }
   const OF_EVENT = { submitted: 'Received', read: 'Opened', corrected: 'Corrected', status: 'Status changed', gap_override: 'Short date gap accepted', gap_override_cleared: 'Gap acceptance cleared' };
   async function viewOfferAgent(oid) {
@@ -6662,6 +6669,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       const days = $('#drLuDays').value.trim(), date = $('#drLuDate').value, t = date ? { date } : { days };
       if (!date && !(Math.floor(+days) >= 1)) return $('#drLuErr').textContent = 'Enter the working days or a date.';
       const det = Object.assign({}, o.details, { conditions: OF.lineUp((o.details || {}).conditions, t), line_up: true }), say = date ? 'by ' + OF.longDate(date) : `within ${Math.floor(+days)} working days`;
+      if (await ocOpenSigning(d.offer_id) && !confirm(OC_WARN)) return;
       lg.disabled = true; $('#drLuErr').textContent = '';
       try { await must(sb.rpc('agent_offer_correct', { p_offer: d.offer_id, p_expected: o.details, p_details: ofPayload(ofShape(det)), p_note: 'Lined up the conditions: all ' + say }));
         if (!(await go(carry(), 'Conditions lined up: all ' + say))) correctedButNotDrafted('#drLuErr', carry(), 'Conditions lined up: all ' + say); }
@@ -6714,7 +6722,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
           const label = (OF.condInfo(tk) || { label: tk }).label, say_ = OF.timingPlain(Object.assign({ key: tk }, nt));
           const det = Object.assign({}, o.details, { conditions: conds, line_up: !!(o.details.line_up && OF.sameTiming(conds)) });
           const done = $('#drCmDone'); done.disabled = true; $('#drCmErr').textContent = 'Saving...';
-          return (async () => { try { await must(sb.rpc('agent_offer_correct', { p_offer: d.offer_id, p_expected: o.details, p_details: ofPayload(ofShape(det)), p_note: `Changed the timing of ${label} on the draft: ${say_}` }));
+          return (async () => { if (await ocOpenSigning(d.offer_id) && !confirm(OC_WARN)) { done.disabled = false; $('#drCmErr').textContent = ''; return; }
+            try { await must(sb.rpc('agent_offer_correct', { p_offer: d.offer_id, p_expected: o.details, p_details: ofPayload(ofShape(det)), p_note: `Changed the timing of ${label} on the draft: ${say_}` }));
               const ed = collect(); if (ed.term_timing) { delete ed.term_timing[id]; if (!Object.keys(ed.term_timing).length) delete ed.term_timing; }
               const nt_ = `Timing of ${label} changed: ${say_}`; if (!(await go(ed, nt_))) { done.disabled = true; correctedButNotDrafted('#drCmErr', ed, nt_); /* the offer is corrected: only Re-draft now from here */ } } catch (e) { done.disabled = false; $('#drCmErr').textContent = e.message || 'That didn\'t save.'; } })(); }
         if (chip.dataset.chip === 'lit') { const hadDay = /^[A-Z][a-z]+day /.test(chip.dataset.val), v = m === 'date' ? (hadDay ? `${['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][OF.dow(dt)]} ${DR.fullDate(dt)}` : DR.fullDate(dt)) : `${n} working ${n === 1 ? 'day' : 'days'}`; chip.dataset.val = v; chip.textContent = v; }
@@ -6907,8 +6916,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   const ML_KIND = { sign_link: 'Signing link', reopened: 'Please initial again', agreed_purchasers: 'Agreed copy: to the purchasers (cc their lawyer)', agreed_vendors: 'Agreed copy: to the vendors (cc their lawyer)' };
   const mlList = a => (a || []).join(', '), mlSplit = t => String(t || '').split(/[,;\s]+/).map(x => x.trim()).filter(Boolean);
   function mlPanelHTML(drafts, title, id, intro) {
-    const open = (drafts || []).filter(m => m.status === 'draft'), sent = (drafts || []).filter(m => m.status === 'sent');
-    if (!open.length && !sent.length) return '';
+    const open = (drafts || []).filter(m => m.status === 'draft'), sent = (drafts || []).filter(m => m.status === 'sent'), going = (drafts || []).filter(m => m.status === 'sending');
+    if (!open.length && !sent.length && !going.length) return '';
     return `<section class="card" id="${id}"><h2>${esc(title)}</h2><p class="small">${esc(intro || 'Nothing goes until you press Send. Read each one and change anything you like, then send it, or tick Reviewed on each and use Send all reviewed.')}</p>
       ${open.length ? `<div class="toolbar"><button class="btn ghost" type="button" data-mlall>Send all reviewed</button></div>` : ''}
       ${open.map(m => { const bl = (String(m.subject) + '\n' + String(m.body)).match(MAIL.BLANK_RE) || [];
@@ -6923,6 +6932,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         <label class="choice cb"><input type="checkbox" data-mlrev="${m.id}" ${m.reviewed_at ? 'checked' : ''}><span class="mark"></span><span><span class="ct">Reviewed</span></span></label>
         <div class="toolbar"><button class="btn primary" type="button" data-mlsend="${m.id}">Send</button><button class="btn ghost" type="button" data-mlsave="${m.id}">Save changes</button><button class="btn ghost" type="button" data-mlvoid="${m.id}">Set aside</button></div>
         <p class="small" data-mlout="${m.id}" role="status" aria-live="polite"></p></div>`; }).join('')}
+      ${going.map(m => `<div class="card note tight" data-mlgoing="${m.id}"><p class="small" style="margin:0"><strong>${esc(ML_KIND[m.kind] || m.kind)} to ${esc(mlList(m.to_addr))}: this may have gone.</strong> The mail server took it, but the send wasn't confirmed. Check before sending again (ask them, or look in your sent mail).</p>
+        <div class="toolbar"><button class="btn ghost" type="button" data-mlunstick="${m.id}">I've checked: it didn't arrive. Make it a draft again</button></div></div>`).join('')}
       ${sent.length ? `<details class="tight"><summary class="small">Sent (${sent.length})</summary>${sent.map(m => `<p class="small" style="margin:2px 0">${esc(ML_KIND[m.kind] || m.kind)}: to ${esc(mlList(m.to_addr))}${(m.cc_addr || []).length ? ', cc ' + esc(mlList(m.cc_addr)) : ''}, ${esc(fmtDT(m.sent_at))}</p>`).join('')}</details>` : ''}</section>`;
   }
   function mlWire(drafts, after) {
@@ -6930,26 +6941,37 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const val = id => ({ to: mlSplit(($('#mlTo-' + id) || {}).value), cc: $('#mlCc-' + id) ? mlSplit($('#mlCc-' + id).value) : [], subject: ($('#mlSub-' + id) || {}).value || '', body: ($('#mlBody-' + id) || {}).value || '' });
     const changed = (m, v) => mlList(v.to) !== mlList(m.to_addr) || mlList(v.cc) !== mlList(m.cc_addr || []) || v.subject !== m.subject || v.body !== m.body;
     const save = async m => { const v = val(m.id); if (changed(m, v)) { await sgRpc('agent_mail_draft_edit', { p_draft: m.id, p_to: v.to, p_cc: v.cc, p_subject: v.subject, p_body: v.body }); Object.assign(m, { to_addr: v.to, cc_addr: v.cc, subject: v.subject, body: v.body, reviewed_at: null }); } return v; };
-    const send = async m => { const v = await save(m); if ((v.subject + '\n' + v.body).match(MAIL.BLANK_RE)) throw new Error('Fill in or delete the marked blanks first.');
-      const r = await offerCall('offer-sign', { action: 'send_mail', draft_id: m.id }); if (!r || !r.ok) throw new Error((r && r.error) || 'It didn\'t send. Nothing has gone. Try again.'); };
+    // one send at a time on this page; the database refuses a second send of the same email from anywhere (024 offer_mail_take)
+    let busy = false; const lock_ = on => { busy = on; $$('[data-mlsend],[data-mlall]').forEach(b => { b.disabled = on; }); };
+    const send = async m => { if (m.status !== 'draft') throw new Error('This email is already being sent, or has gone.'); const v = await save(m); if ((v.subject + '\n' + v.body).match(MAIL.BLANK_RE)) throw new Error('Fill or delete the marked blanks first.');
+      m.status = 'sending'; const r = await offerCall('offer-sign', { action: 'send_mail', draft_id: m.id });
+      if (r && r.ok) { m.status = 'sent'; return; }
+      if (!(r && r.maybe_sent)) m.status = 'draft';
+      const e = new Error((r && r.error) || 'This may have gone. Check before sending again.'); e.maybe = !!(r && r.maybe_sent) || !r; throw e; };
     const out = (id, t) => { const e = $(`[data-mlout="${id}"]`); if (e) e.textContent = t; };
-    $$('[data-mlsend]').forEach(b => b.addEventListener('click', async () => { const m = byId(b.dataset.mlsend); if (!m) return; b.disabled = true; out(m.id, 'Sending...');
-      try { await send(m); JDIRTY = false; toast('Sent'); after(); } catch (e) { out(m.id, e.message); b.disabled = false; } }));
+    $$('[data-mlsend]').forEach(b => b.addEventListener('click', async () => { const m = byId(b.dataset.mlsend); if (!m || busy) return; lock_(true); out(m.id, 'Sending...');
+      try { await send(m); JDIRTY = false; toast('Sent'); after(); } catch (e) { out(m.id, e.message); if (e.maybe) return after(); lock_(false); } }));
+    $$('[data-mlunstick]').forEach(b => b.addEventListener('click', async () => { if (!confirm('Only do this once you have checked it did not arrive. Make it a draft again?')) return; b.disabled = true;
+      try { await sgRpc('agent_mail_draft_unstick', { p_draft: b.dataset.mlunstick }); toast('It is a draft again'); after(); } catch (e) { toast(e.message); b.disabled = false; } }));
     $$('[data-mlsave]').forEach(b => b.addEventListener('click', async () => { const m = byId(b.dataset.mlsave); if (!m) return; b.disabled = true;
       try { await save(m); JDIRTY = false; toast('Saved'); after(); } catch (e) { out(m.id, e.message); b.disabled = false; } }));
     $$('[data-mlvoid]').forEach(b => b.addEventListener('click', async () => { const m = byId(b.dataset.mlvoid); if (!m || !confirm('Set this email aside? It won\'t be sent.')) return; b.disabled = true;
       try { await sgRpc('agent_mail_draft_void', { p_draft: m.id, p_reason: 'Set aside by Tim' }); toast('Set aside'); after(); } catch (e) { out(m.id, e.message); b.disabled = false; } }));
     $$('[data-mlrev]').forEach(c => c.addEventListener('change', async () => { const m = byId(c.dataset.mlrev); if (!m) return;
       try { if (c.checked) await save(m); await sgRpc('agent_mail_draft_review', { p_draft: m.id, p_reviewed: c.checked }); m.reviewed_at = c.checked ? new Date().toISOString() : null; } catch (e) { c.checked = !c.checked; out(m.id, e.message); } }));
-    $$('[data-mlall]').forEach(b => b.addEventListener('click', async () => { const todo = D_.filter(m => m.status === 'draft' && ($(`[data-mlrev="${m.id}"]`) || {}).checked);
-      if (!todo.length) return toast('Tick Reviewed on each email you want to send first.'); b.disabled = true; let ok = 0; const bad = [];
-      for (const m of todo) { try { const v = val(m.id); if (changed(m, v)) { bad.push(m.id); out(m.id, 'Changed since you ticked Reviewed: save it and tick again, or press Send.'); continue; } await send(m); ok++; } catch (e) { bad.push(m.id); out(m.id, e.message); } }
-      toast(`${ok} sent${bad.length ? `, ${bad.length} not sent` : ''}`); if (!bad.length) after(); else b.disabled = false; }));
+    $$('[data-mlall]').forEach(b => b.addEventListener('click', async () => { if (busy) return; const todo = D_.filter(m => m.status === 'draft' && ($(`[data-mlrev="${m.id}"]`) || {}).checked);
+      if (!todo.length) return toast('Tick Reviewed on each email you want to send first.'); lock_(true); let ok = 0, maybe = false; const bad = [];
+      for (const m of todo) { if (m.status !== 'draft') continue;   // already sending or sent: skipped
+        try { const v = val(m.id); if (changed(m, v)) { bad.push(m.id); out(m.id, 'Changed since you ticked Reviewed: save it and tick again, or press Send.'); continue; } await send(m); ok++; } catch (e) { bad.push(m.id); out(m.id, e.message); if (e.maybe) { maybe = true; break; } } }
+      toast(`${ok} sent${bad.length ? `, ${bad.length} not sent` : ''}`); if (!bad.length || maybe) after(); else lock_(false); }));
   }
   // the signing links: one draft per signer still to sign, in Tim's voice (src/mail-core.js), for him to read and send
   async function mlPrepareLinks(g, p) {
     const S_ = ((await ofSafe(sb.from('offer_signers').select(SG_COLS).eq('signing_id', g.id).order('position'))) || []).filter(s => !s.void_at && !s.finished_at && s.email);
-    for (const s of S_) { const w = MAIL.signLinkDraft({ first: s.name.split(' ')[0], address: p.address, side: g.side || 'purchaser', round: g.round_no || 1 });
+    // called by their preferred names: a vendor's from the property file; a purchaser's first name as they gave it
+    const pp = (await ofSafe(sb.from('property_people').select('legal_name,pref_name,email').eq('property_id', g.property_id))) || [];
+    const callOf = s => { const q = pp.find(x => (x.email && s.email && x.email.toLowerCase() === s.email.toLowerCase()) || x.legal_name === s.name); return (g.side === 'vendor' && q && String(q.pref_name || '').trim()) || s.name.split(' ')[0]; };
+    for (const s of S_) { const w = MAIL.signLinkDraft({ first: callOf(s), address: p.address, side: g.side || 'purchaser', round: g.round_no || 1 });
       await sgRpc('agent_mail_draft_add', { p_offer: g.offer_id, p_kind: 'sign_link', p_signer: s.id, p_to: [s.email], p_cc: [], p_subject: w.subject, p_body: w.body, p_attach: null }); }
     return S_.length;
   }
@@ -6959,9 +6981,13 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const doc = ((await ofSafe(sb.from('offer_documents').select('id,draft_id').eq('id', ag.document_id))) || [])[0];
     const dr = doc ? ((await ofSafe(sb.from('offer_drafts').select('id,placed').eq('id', doc.draft_id))) || [])[0] : null;
     const pl = id => (((dr && dr.placed) || []).find(x => x.id === id) || {}).text || '';
-    const [owners, hol] = await Promise.all([ofSafe(sb.from('property_people').select('legal_name,pref_name,email,phone,role,position').eq('property_id', p.id).order('position')), ofSafe(sb.from('non_working_days').select('day,label'))]);
+    // the vendors are those who signed this negotiation (their newest round), called by their preferred names from the property file
+    const [owners, hol, vg] = await Promise.all([ofSafe(sb.from('property_people').select('legal_name,pref_name,email,phone,role,position').eq('property_id', p.id).order('position')), ofSafe(sb.from('non_working_days').select('day,label')),
+      ofSafe(sb.from('offer_signings').select('id,round_no').eq('offer_id', o.id).eq('side', 'vendor').order('round_no', { ascending: false }))]);
+    const vs = vg && vg[0] ? ((await ofSafe(sb.from('offer_signers').select(SG_COLS).eq('signing_id', vg[0].id).order('position'))) || []).filter(x => !x.void_at) : [];
+    const vendorsOf = vs.map(x => { const pp = (owners || []).find(q => (q.email && x.email && q.email.toLowerCase() === x.email.toLowerCase()) || q.legal_name === x.name) || {}; return { legal_name: x.name, pref_name: pp.pref_name || '', email: x.email, phone: pp.phone || '' }; });
     const labels = {}; (((ag.terms || {}).conditions) || []).forEach(c => { const i = OF.condInfo && OF.condInfo(c.key); labels[c.key] = (i && i.label) || c.key; });
-    const r = MAIL.agreedDrafts({ address: p.address, agreement: ag, terms: ag.terms || {}, details: o.details || {}, vendors: (owners || []).filter(x => (x.role || 'owner') === 'owner'),
+    const r = MAIL.agreedDrafts({ address: p.address, agreement: ag, terms: ag.terms || {}, details: o.details || {}, vendors: vendorsOf,
       vendorLawyer: { person: pl('vl_person'), firm: pl('vl_firm'), email: pl('vl_email') || pl('vl_service'), phone: pl('vl_phone') }, holidays: hol || [], labels });
     const att = { path: ag.path, sha256: ag.sha256, name: `Agreement ${String(p.address || '').replace(/[^A-Za-z0-9 ,.-]+/g, '').slice(0, 80)}.pdf` };
     for (const [kind, m] of [['agreed_purchasers', r.purchasers], ['agreed_vendors', r.vendors]]) {
@@ -7132,7 +7158,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     }
     main().innerHTML = `<div class="view-pad dr-page sg-flow" id="sgFlow"><h1>${ctx.mode === 'person' ? esc(ctx.name) + ' signs' : VEND ? 'An offer on your property' : R2 ? 'The vendors\' reply to your offer' : 'Your offer to sign'}</h1><p class="lede">${nt(ctx.address)}</p>
       ${R2 ? ngIntroHTML(ctx) : ''}
-      ${ctx.mode === 'person' ? `<p class="small">${esc(ctx.name)} uses this screen. Only their own places can be done here.</p>` : `<p class="small">Signing as ${nt(ctx.name)}. What you are signing has the fingerprint <span translate="no">${esc(drShort(ctx.draftSha))}</span>.</p>`}
+      ${ctx.mode === 'person' ? `<p class="small">${esc(ctx.name)} uses this screen. Only their own places can be done here.</p>` : `<p class="small">Signing as ${nt(ctx.name)}.</p><details class="small" id="sgDocCheck"><summary>Details</summary><p class="small" style="margin:4px 0 0">Document check code: <span translate="no">${esc(drShort(ctx.draftSha))}</span>. It is worked out from the document itself, so anyone can later confirm the copy you signed is exactly this one.</p></details>`}
       ${step === 'stopped' ? '' : stepBar}${body}<p class="err" id="sgErr" role="alert"></p>
       ${ctx.back ? '<div class="toolbar no-print"><button class="btn ghost" type="button" id="sgBackTim">Back to Tim\'s screen</button></div>' : ''}</div>`;
     const on = (sel, f, ev) => { const el = $(sel); if (el) el.addEventListener(ev || 'click', f); };

@@ -38,8 +38,8 @@ const base = () => ({
     has(t, 'Note: Friday 25 December 2026 is a public holiday (Christmas Day)', 'a public holiday in the period');
     has(t, 'Note: Monday 8 February 2027 is a public holiday (Waitangi Day (observed))', 'the last holiday before settlement');
     has(t, 'Price: $655,000', 'price');
-    has(t, "Deposit: $65,500. The whole deposit is paid to the vendors' lawyer's trust account", 'the KiwiSaver deposit rule');
-    has(t, "can't be released before settlement", 'KiwiSaver: not released before settlement');
+    has(t, "Deposit ($65,500): payable to the vendors' lawyer's trust account [Tim to fill: when the deposit is paid]. Because", 'the KiwiSaver deposit rule (when it is paid: not in this agreement\'s data, so a blank)');
+    has(t, "KiwiSaver is part of it, the whole deposit goes there and can't be released before settlement.", 'KiwiSaver: not released before settlement');
     has(t, 'Chattels to note: As is, where is: further term 24 (Garage door). Expressly excluded: Heat pump.', 'chattels as is and excluded');
     has(t, 'Possession and Settlement day: **Friday 12 February 2027**', 'settlement day');
     has(t, 'Pre-settlement inspection:', 'the pre-settlement inspection'); has(t, 'Meeting with your lawyer:', 'the meeting with their lawyer');
@@ -82,17 +82,23 @@ const base = () => ({
     ok(x.purchasers.body.startsWith('[Tim to check: the negotiation made 1 change to the document; make sure this roadmap follows them]'), 'a negotiated agreement: Tim checks the roadmap follows the changes'); }
   { const b = base(); b.terms.conditions = []; b.terms.kiwisaver = false; b.details.kiwisaver = false; b.details.chattels_exclude = []; b.terms.further_terms = []; const x = M.agreedDrafts(b);
     has(x.purchasers.body, 'Conditions: none. The agreement is unconditional.', 'unconditional');
-    has(x.purchasers.body, 'The deposit is paid to the NZ Real Estate Trust account.', 'no KiwiSaver: the trust account');
+    has(x.purchasers.body, 'Deposit ($65,500): payable to Public Trust O/A NZ Real Estate Trust [Tim to fill: when the deposit is paid].', 'no KiwiSaver: Tim\'s trust account, in his words');
     has(x.purchasers.body, 'Chattels to note: none noted in the agreement.', 'no chattels to note');
     ok(!x.vendors.body.includes('Until the purchaser confirms'), 'unconditional: no "until the purchaser confirms"'); }
+  // the deposit's timing, when the agreement's own deposit wording says it (Tim's words from his past emails)
+  { const b = base(); b.terms.kiwisaver = false; b.details.kiwisaver = false; b.terms.deposit_printed = '$65,500 payable upon the agreement becoming unconditional'; const x = M.agreedDrafts(b);
+    has(x.purchasers.body, 'Deposit ($65,500): payable to Public Trust O/A NZ Real Estate Trust once the agreement becomes unconditional.', 'unconditional: Tim\'s exact wording');
+    ok(!x.blanks.includes('[Tim to fill: when the deposit is paid]'), 'no blank when the agreement says when');
+    b.terms.deposit_printed = 'payable on signing'; b.terms.as_drafted.deposit = '$65,500'; has(M.agreedDrafts(b).purchasers.body, 'Deposit ($65,500): payable to Public Trust O/A NZ Real Estate Trust on signing.', 'on signing'); }
   // the first working day
   ok(M.longDate(M.firstWorkingDay('2026-12-24', holidays)) === 'Tuesday 29 December 2026', 'over Christmas: weekends and public holidays skipped');
   { const b = base(); b.agreement.agreement_date = '2026-12-24'; has(M.agreedDrafts(b).purchasers.body, '[Tim to check: the first working day falls between 24 December and 5 January', 'in the Christmas break Tim checks the dates'); }
   // signing emails and Tim's notice
   const sl = M.signLinkDraft({ first: 'Vee', address: '12 Example Street, Dunedin', side: 'vendor', round: 2 });
-  ok(sl.subject === 'An offer on 12 Example Street, Dunedin' && sl.body.includes(M.LINK) && /Kia ora Vee/.test(sl.body) && /027 562 7207/.test(sl.body) && /14 days/.test(sl.body) && /comes straight to me/.test(sl.body) && !/[—–]/.test(sl.body), 'the link draft: who, what, by when, Tim\'s phone, straight to Tim');
+  ok(sl.subject === 'An offer on 12 Example Street, Dunedin' && sl.body.includes(M.LINK) && /^Hello Vee,/.test(sl.body) && /^Dear Ana,/.test(M.signLinkDraft({ first: 'Ana', address: 'x', side: 'purchaser', round: 1 }).body) && /027 562 7207/.test(sl.body) && /14 days/.test(sl.body) && /comes straight to me/.test(sl.body) && !/[—–]/.test(sl.body), 'the link draft: who, what, by when, Tim\'s phone, straight to Tim');
   out.signLink = sl;
-  const ro = M.reopenedDraft({ first: 'Val', address: '12 Example Street, Dunedin', by: 'Vee' }); out.reopened = ro;
+  const ro = M.reopenedDraft({ first: 'Val', address: '12 Example Street, Dunedin', by: 'Vee', side: 'vendor' }); out.reopened = ro;
+  ok(/^Hello Val,/.test(ro.body) && /^Dear Bo,/.test(M.reopenedDraft({ first: 'Bo', address: 'x', by: 'Ana', side: 'purchaser' }).body) && !/Kia ora/.test(ro.body + sl.body), 'Tim\'s openings: Hello to vendors, Dear to purchasers, by preferred name');
   ok(/A change to initial/.test(ro.subject) && /Vee has made a change/.test(ro.body) && /initial the change and finish again/.test(ro.body), 'the "please initial again" draft');
   const nt = M.roundNotice({ side: 'vendor', round: 2, address: '12 Example Street, Dunedin', signers: ['Vera Vendorperson'], changes: [{ kind: 'insert', page: 1, text: '$690,000', by: 'Vera Vendorperson' }, { kind: 'strike', page: 1, by: 'Vera Vendorperson' }], portalUrl: 'https://portal.dunnerstunner.co.nz/properties/P/offers/O/signing/S' });
   out.notice = nt;

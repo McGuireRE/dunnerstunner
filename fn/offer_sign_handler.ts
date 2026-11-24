@@ -157,20 +157,23 @@ export function makeHandler(d: Deps) {
       // A signing link's personal token is made now, for that signer only, and is never kept or returned anywhere.
       if (action === "send_mail") {
         const did = String(body.draft_id || ""); if (!UUID.test(did)) return json({ error: "Bad request" }, 400);
+        // take: the draft moves to "sending" and a pending log row holds exactly what is handed out (024); a second Send is refused
         let m: any; try { m = await call("offer_mail_take", { p_draft: did, p_actor: agent }); } catch (e) { return json({ ok: false, error: plain((e as Error).message) }, 400); }
         const link = m.token ? `${d.appUrl}?sign=${encodeURIComponent(m.token)}` : null;
-        const logged = String(m.body).split("[the signing link]").join(link ? `${d.appUrl}?sign=[personal link]` : "[the signing link]");
-        const atts: any[] = [], attLog: any[] = [];
+        const fail = async (why: string) => { try { await call("offer_mail_done", { p_draft: did, p_log: m.log_id, p_actor: agent, p_ok: false, p_error: why.slice(0, 400) }); } catch (_) { /* left pending: the page says to check */ } };
+        const atts: any[] = [];
+        if (m.attach && m.attach.path) {
+          const f = await d.download(m.attach.path);
+          if (!f || await sha256(f) !== m.attach.sha256) { await fail("The agreed copy doesn't match its fingerprint"); return json({ ok: false, error: "The agreed copy doesn't match its fingerprint, so nothing was sent." }); }
+          atts.push({ filename: String(m.attach.name || "Agreement.pdf"), content: f, contentType: "application/pdf" });
+        }
         try {
-          if (m.attach && m.attach.path) { const f = await d.download(m.attach.path); if (!f || await sha256(f) !== m.attach.sha256) throw new Error("The agreed copy doesn't match its fingerprint, so nothing was sent.");
-            atts.push({ filename: String(m.attach.name || "Agreement.pdf"), content: f, contentType: "application/pdf" }); attLog.push({ name: String(m.attach.name || "Agreement.pdf"), sha256: m.attach.sha256 }); }
           const html = d.mail ? d.mail.toHtml(m.body, link) : wrap(esc(m.body).replace(/\n/g, "<br>"));
           await d.sendMail("offer_mail_" + m.kind, Object.assign({ to: m.to, cc: (m.cc || []).length ? m.cc : undefined, subject: m.subject, html }, atts.length ? { attachments: atts } : {}));
-        } catch (e) {
-          try { await call("offer_mail_done", { p_draft: did, p_actor: agent, p_body: logged, p_attachments: attLog, p_ok: false, p_error: String((e as Error).message || e).slice(0, 400) }); } catch (_) { /* the failure stays visible on the draft */ }
-          return json({ ok: false, error: "It didn't send. Nothing has gone. Try again." });
-        }
-        await call("offer_mail_done", { p_draft: did, p_actor: agent, p_body: logged, p_attachments: attLog, p_ok: true, p_error: null });
+        } catch (e) { await fail(String((e as Error).message || e)); return json({ ok: false, error: "It didn't send. Nothing has gone. Try again." }); }
+        // the mail server has it: from here, a failure to record that must never read as "nothing has gone"
+        try { await call("offer_mail_done", { p_draft: did, p_log: m.log_id, p_actor: agent, p_ok: true, p_error: null }); }
+        catch (_) { return json({ ok: false, maybe_sent: true, error: "This may have gone. Check before sending again." }); }
         return json({ ok: true });
       }
       const sid = String(body.signing_id || ""); if (!UUID.test(sid)) return json({ error: "Bad request" }, 400);
@@ -222,7 +225,7 @@ export function makeHandler(d: Deps) {
         // goes to anyone now, Tim included: he hears once, when the round is submitted (Tim, 24 November 2026).
         if (r.reopened > 0) {
           for (const x of r.reopened_signers || []) { if (!x.email || !x.id) continue;
-            try { const w = d.mail ? d.mail.reopenedDraft({ first: String(x.name || "").split(" ")[0], address: r.address, by: r.by }) : { subject: `A change to initial: ${r.address || "the offer"}`, body: `Please open the link I sent you earlier and initial the change. Tim` };
+            try { const w = d.mail ? d.mail.reopenedDraft({ first: String(x.name || "").split(" ")[0], address: r.address, by: r.by, side: r.side }) : { subject: `A change to initial: ${r.address || "the offer"}`, body: `Please open the link I sent you earlier and initial the change. Tim` };
               await call("offer_mail_draft_sys", { p_offer: r.offer_id, p_signer: x.id, p_to: [x.email], p_subject: w.subject, p_body: w.body }); } catch (_) { /* Tim sees the reopened signer on the round's page either way */ } }
         }
         return json({ ok: true, id: r.id, reopened: r.reopened });

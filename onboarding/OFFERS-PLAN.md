@@ -449,7 +449,7 @@ Tim's answers (24 November 2026, the morning after the build):
 - Changes from a link: allowed, under Tim's control. Some vendors want to make changes themselves after a private discussion. Each round
   he presents has a switch, "Let them make changes from their link" (`offer_signings.link_changes`, recorded on the timeline and on the
   round's execution record as "Changes from link: allowed" or "not allowed"). Its starting position is his setting
-  `offer_settings.link_changes_default` (on by default; `agent_offer_link_changes_default`). It applies to the purchasers too when a
+  `offer_settings.link_changes_default` (off by default since 24 November 2026; `agent_offer_link_changes_default`). It applies to the purchasers too when a
   round goes back to them. Switched off, the link shows only accept (initial and sign), decline (a note to Tim) and "Ask Tim for a
   change", and the database refuses a change from the link, said plainly. On Tim's own device changes can always be made. Both negotiation
   settings (this one and signing again every round) are toggles under "Link and settings" on the property's Offers tile.
@@ -466,7 +466,7 @@ Choices made while Tim was asleep (each easy to change):
 3. The vendors' first round initials the foot of every page and every filled box, as the purchasers did (Tim's rule "each signer").
    That is 54 places each on the real pack.
 4. Vendors are the property's owners on its file (role owner), in their order there, by legal name.
-5. (Answered by Tim) Changes from a link are allowed for a round when Tim switches it on (on by default); Tim still looks at every round
+5. (Answered by Tim) Changes from a link are allowed for a round when Tim switches it on (off by default since 24 November 2026); Tim still looks at every round
    before it goes anywhere.
 6. A change can't be undone once saved (it is a record); strike it or reinstate it instead, as on paper.
 7. (Decided) Present defaults to in person; Tim can choose a link.
