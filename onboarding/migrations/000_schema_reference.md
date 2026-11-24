@@ -312,3 +312,13 @@ agreements/<agreement id>/signatures/... (vendors may upload their own signature
 - Merged with main (branch `offers-live`): `offer_sign_state` also gives `signing.terms` (the newest draft's `term_last`, `retired_numbers`
   and further terms style; 23.0 style when the draft has no further terms), for a new further term in a counteroffer. 024's
   `agent_offer_correct(offer, details, note)` is the live 018 body plus the agreement refusal; 021's 4-argument version is unchanged.
+- Emails as drafts (Tim, 24 November 2026; folded into 024): `offer_mail_drafts` (offer, signing, signer, agreement, kind sign_link,
+  reopened, agreed_purchasers or agreed_vendors; to, cc, subject, body, attach; status draft, sent or void; reviewed, edited, sent and
+  set-aside stamps; changed only through the functions and never once sent) and `offer_mail_log` (exactly what was sent, never changed).
+  Tim: `agent_mail_draft_add`, `agent_mail_draft_edit`, `agent_mail_draft_review`, `agent_mail_draft_void`. Service role (offer-sign):
+  `offer_mail_draft_sys` (reopened), `offer_mail_take` (a signing link's token is made here), `offer_mail_done`. Internal:
+  `offer_mail_allowed`, `offer_mail_side_hit`, `offer_mail_check`. `link_changes_default` now defaults to false.
+  `offer_sign_current` gives a party no reason beyond "no longer being signed". `agent_signing_release` refuses a draft without
+  `term_last` or term boxes; `offer_sign_do_change` refuses a taken counteroffer term number. 023 adds `agent_signing_turn_ok`; its
+  `agent_signing_finish` takes no identity choice as well; `offer_sign_places_ok` counts only block signatures.
+

@@ -265,3 +265,6 @@ Phase 4 (presentation and counteroffers) built 24 November 2026 on branch `offer
 extended. Both phases reviewed READY on their own. Brought up to date with main on branch `offers-live` (24 November 2026): migrations
 023 and 024, the portal addresses and pads, `offer-sign` and `offer-public` answering the portal too. Awaiting review. Tests add
 `offers-portal.test.js`; database: `offer-negotiation-rollback.js --with-023` runs 023 and 024 together. See `OFFERS-PLAN.md`, "Going live".
+Same branch, later on 24 November 2026: Tim's decisions built (emails as drafts he sends, identity optional, link changes start off, he
+mediates every round) and the first review's six fixes; new tests `mail-core.test.js`, and the mail counts in `offers-nego.test.js`.
+

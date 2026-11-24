@@ -113,7 +113,8 @@ address becomes its own once saved; read-only review keeps the menu. Caveat: thi
 a separate page load (for example /onboarding opened in the same tab before the portal), Back leaves without asking unless
 something is drawn or typed (then the browser asks).
 
-Open points for Tim (by design for now): the in-person exits ("Save and close", "Leave without saving", "Stop signing here") take
+Open points for Tim (by design for now): after a purchaser's or vendor's turn signing an offer on Tim's device (offers phases 3 and 4), Tim's page waits
+behind a cover until he taps "I'm Tim, carry on" (no menu, no offer, no one's details); P3's PIN or passkey replaces that tap. the in-person exits ("Save and close", "Leave without saving", "Stop signing here") take
 whoever taps them to agent pages. If Tim wants a vendor-proof appointment, a later option is an exit that needs his PIN, which fits
 the P3 lock design.
 

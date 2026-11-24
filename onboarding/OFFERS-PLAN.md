@@ -639,15 +639,38 @@ merge needs its own review.
 - Locked rounds: stored with the offer in the property-files bucket and listed on the offer page; the lawyers' pack is a zip Tim
   downloads to his device. Nothing is saved to OneDrive and there is no OneDrive connection.
 
-Not on the branch, for Tim to decide (the handover listed them as decided):
-- Emails as drafts Tim proofs: not built. Tim's Send emails each signer their link straight away; codes go automatically when a signer
-  asks; a change that reopens someone emails them and Tim. Presentation itself still waits for Tim's tap every time.
-- Signers "known to the agent" by default with an option to request ID: not built. In person, Tim must choose, and "Known to Tim
-  personally" is one of the choices; by link, an emailed code. There is no "request ID" step.
-- The agreed copy to both parties and both lawyers: not built. Nothing goes to the parties or lawyers; Tim is emailed when a round locks.
-- Changes from a link: each round has Tim's switch; its starting position is his setting, on unless he turns it off.
-- A fourth purchaser: refused on Tim's real pack (no room below the third line), so a signature page must be added; on a blank with
-  clear space below the printed lines, a fourth is added there.
+Tim's decisions of 24 November 2026, built on `offers-live` (all database pieces folded into 023 and 024, still unapplied):
+- Emails are drafts Tim reviews, then sends from the page (`EMAIL-VOICE.md`). `offer_mail_drafts` and `offer_mail_log` (024). Signing
+  links: "Prepare the emails" makes one draft per signer; the personal link is made only when that draft is sent. "Please initial
+  again" after a change: a draft per reopened link signer. The agreed copy: one draft to the purchasers (cc their lawyer) and one to
+  the vendors (cc theirs), the agreed copy attached, built from the agreement's data (`src/mail-core.js`), marked blanks where the
+  data is silent; built as soon as Tim confirms the agreement. Each is edited on the page; Send, or Reviewed then Send all reviewed;
+  marked blanks block sending; unsent drafts show in Needs you; the log keeps who, when and the exact text. Recipients are checked by
+  the database (that side and its lawyer only), and so is privacy (no other party's own phone or email).
+- Identity is a free choice: Known to the agent, ID checked (with what was seen), or neither. Blank never blocks (023).
+- Changes from a link start off (`link_changes_default` false, 024); Tim switches them on per round.
+- Tim mediates every round: before a signer confirms, the line "When you confirm, this goes straight to Tim McGuire, the agent. He will
+  be in touch with the other party; they are not told until he does." shows once, beside Finish (never per place). Nobody but Tim is
+  emailed when a party signs, initials, changes or submits; Tim is emailed once per submitted round (who, what changed, which round,
+  the round's portal address). A party's own link never says what the other side or Tim decided ("This version is no longer being
+  signed. Tim will be in touch."). The vendors' dashboard and journey map show no offer activity, and the property moves to Under
+  offer only when Tim confirms the agreement.
+
+Review fixes on `offers-live` (24 November 2026): a drawn box for both sides is shared (purchasers first half, vendors second; other
+side's ink inside blocks); only the signature block counts as signed (core, 023, 024, mock); a turn's address is checked whole
+(`agent_signing_turn_ok`, 023, and every new route); "Back to Tim's screen" asks first and Tim's page waits behind "I'm Tim, carry on";
+a draft from before the numbering can't be signed (024 and the app); a counteroffer term number already used, retired or out of
+order is refused by the server, which names the next free one, and the page retries once.
+
+For Tim's information (no change): drafting leaves a blank initials line after each further term, so drafts are longer and run onto
+continuation pages sooner; and more purchasers than the printed name places no longer blocks drafting (signing adds places beneath,
+or refuses on a pack with no room, as on Tim's real pack for a fourth purchaser).
+
+Open points for Tim:
+- One-time signing codes still go by themselves (a signer is waiting for it), holding only the code and who it is from.
+- "I'm Tim, carry on" is a tap; P3's PIN or passkey replaces it.
+- The roadmap's "when the deposit is paid" and the property page link are always blanks: the agreement's data doesn't hold them.
+- `offer_sign_issue` (023/024, service role only) still exists for the database tests; the edge function no longer calls it.
 
 Going live, with Tim's approval, in order:
 1. Live rollback test: `node onboarding/tests/offer-negotiation-rollback.js --with-023` (023 and 024 together, both undone), run on the
@@ -655,6 +678,7 @@ Going live, with Tim's approval, in order:
 2. Apply 023 (`023_offer_signing`), then 024 (`024_offer_negotiation`).
 3. Merge `offers-live` into main and push.
 4. Deploy `offer-sign` (new, JWT verification OFF) pinned to that commit, then redeploy `offer-public` (JWT OFF, as now) pinned to the
-   same commit. `offer-draft` and `doc-prefill` are unchanged.
-5. Test with Tim's own addresses: a test offer signed in person in the portal and by link; present to a test vendor; a counter and
-   an acceptance; the agreed copy; the lawyers' pack. Tim's solicitor confirms the method before the first real offer.
+   same commit. `offer-draft` and `doc-prefill` are unchanged. `offer-sign` imports `onboarding/src/mail-core.js` by its relative path.
+5. Test with Tim's own addresses: a test offer signed in person in the portal and by link (Prepare the emails, read, Send); present
+   to a test vendor; a counter and an acceptance; check Tim's one email per round; the agreed copy and its two draft emails (fill the
+   blanks, send); the lawyers' pack. Tim's solicitor confirms the method before the first real offer.
