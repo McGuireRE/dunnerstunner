@@ -168,5 +168,43 @@ function png(w, h, seed) {
   const untapped = await S.renderRound(PDFLib, r.bytes, { places: all, taps: [], signers: sig, marks: [], record: rec });
   ok(untapped.bytes.length < rr.bytes.length, 'nothing is drawn for a place not done');
 
+  {
+  // ── Tim's drawn boxes and added continuation pages (main's review screen tools, merged with phase 3 and 4) ──
+  // initials and signature boxes become signing places for that side; strike, text and highlight boxes and moved places are filled
+  // boxes every signer initials; a page added for the further terms gets foot initials like any page
+  const mk = [{ id: 'mi', type: 'initials', who: 'purchasers', page: 2, x: 300, y: 600, w: 90, h: 20 }, { id: 'ms', type: 'signature', who: 'vendors', page: 2, x: 300, y: 540, w: 160, h: 30 },
+    { id: 'mb', type: 'initials', who: 'both', page: 2, x: 300, y: 480, w: 120, h: 20 }, { id: 'mx', type: 'strike', page: 2, x: 60, y: 420, w: 120, h: 8 },
+    { id: 'mh', type: 'highlight', page: 2, x: 60, y: 380, w: 120, h: 12 }, { id: 'mt', type: 'text', text: 'Synthetic typed words', page: 2, x: 60, y: 330, w: 200, h: 14 }];
+  const two = details.purchasers.slice(0, 2), tsig = signers.slice(0, 2);
+  const pm = D.planDraft({ details: Object.assign({}, details, { purchasers: two }), map, terms, clauses: { electrical: 'Synthetic electrical wording from Tim.' },
+    edits: { marks: mk, extra_terms: Array.from({ length: 40 }, (_, i) => `Synthetic extra term ${i + 1} with enough words to take a full line of the page.`) }, today: '2026-11-24' });
+  const rm = await D.renderDraft(PDFLib, blank, pm), pmPages = (await D.readPages(pdfjs, rm.bytes)).map(p => ({ n: p.n, w: p.w, h: p.h, items: p.items })), pmPlaced = D.placedFrom(pm, rm);
+  const added = pmPlaced.filter(x => x.kind === 'page');
+  ok(added.length >= 1 && pmPages.length === bpages.length + added.length, 'the long further terms add a page, recorded in placed as kind page');
+  const MP = S.makePlaces({ pages: pmPages, placed: pmPlaced, mapPlaces: map.places, signers: tsig });
+  const on = (ref, who) => MP.places.filter(x => x.ref === ref && (who == null || x.signer === who));
+  ok(tsig.every(s2 => { const q = on('mark_mi', s2.position); return q.length === 1 && q[0].kind === 'initial' && q[0].why === 'ack' && q[0].x >= 300 && q[0].x + q[0].w <= 390.5 && q[0].y >= 600 && q[0].y + q[0].h <= 620.5; }), 'an initials box for the purchasers: one initial place each, inside the box Tim drew');
+  ok(!on('mark_ms').length, "a signature box for the vendors is not the purchasers' place");
+  ok(tsig.every(s2 => on('mark_mb', s2.position).length === 1), 'a box for both sides: a place for each purchaser');
+  ok(['mark_mx', 'mark_mh', 'mark_mt'].every(id => tsig.every(s2 => MP.places.some(x => x.why === 'filled' && x.ref === id && x.signer === s2.position))), 'strike, highlight and typed text boxes: filled boxes every purchaser initials');
+  ok(!MP.places.some(x => x.why === 'filled' && /^mark_m[isb]$/.test(x.ref)), 'initials and signature boxes are never filled boxes');
+  ok(added.every(a => tsig.every(s2 => MP.places.some(x => x.why === 'foot' && x.page === a.page && x.signer === s2.position))), 'every added page has foot initials for every purchaser');
+  ok(tsig.every(s2 => new Set(MP.places.filter(x => x.why === 'foot' && x.signer === s2.position).map(x => x.page)).size === pmPages.length), 'foot initials on every page, added pages included (the database insists on it)');
+  const tnum = (pmPlaced.find(x => x.id === 'further_terms').terms || [])[0].number;
+  ok(MP.places.some(x => x.why === 'term' && x.label.startsWith(`Initial further term ${tnum}.0 `)), 'term initials are labelled in the printed style (23.0)');
+  const contTerms = (pmPlaced.find(x => x.id === 'further_terms').term_boxes || []).filter(b => added.some(a => a.page === b.page));
+  ok(contTerms.length > 0 && contTerms.every(b => tsig.every(s2 => MP.places.some(x => x.why === 'term' && x.ref === 't' + b.number && x.signer === s2.position))), 'terms on the added page are initialled too');
+  const MV = S.makePlaces({ pages: pmPages, placed: pmPlaced, mapPlaces: map.places, signers: [{ position: 1, name: 'Vera Vendor' }], side: 'vendor' });
+  const vs = MV.places.filter(x => x.ref === 'mark_ms');
+  ok(vs.length === 1 && vs[0].kind === 'signature' && vs[0].x >= 300 && vs[0].y >= 540, "the vendors' signature box is the vendor's signing place");
+  ok(!MV.places.some(x => x.ref === 'mark_mi') && MV.places.some(x => x.ref === 'mark_mb'), "the vendors don't get the purchasers' box, but do get the box for both");
+  // a moved place is still a filled box that every signer initials
+  const pmv = D.planDraft({ details: Object.assign({}, details, { purchasers: two }), map, terms, clauses: { electrical: 'x' }, today: '2026-11-24',
+    edits: { moves: (() => { const it = pm.items.find(x => x.kind === 'text' && x.page === 1); return it ? { [it.id]: { from: { page: 1, x: it.x, y: it.y, w: it.w, h: it.h }, to: { page: 1, x: it.x + 4, y: it.y, w: it.w, h: it.h } } } : {}; })() } });
+  const rmv = await D.renderDraft(PDFLib, blank, pmv), mvPlaced = D.placedFrom(pmv, rmv), mvItem = mvPlaced.find(x => x.moved);
+  const MM = S.makePlaces({ pages: (await D.readPages(pdfjs, rmv.bytes)).map(p => ({ n: p.n, w: p.w, h: p.h, items: p.items })), placed: mvPlaced, mapPlaces: map.places, signers: tsig });
+  ok(mvItem && tsig.every(s2 => MM.places.some(x => x.why === 'filled' && x.ref === (mvItem.place || mvItem.id) && x.signer === s2.position)), 'a moved place: a filled box every purchaser initials');
+
+  }
   console.log(JSON.stringify(Object.assign(out, { errs }), null, 1));
 })().catch(e => { console.log(JSON.stringify({ errs: ['crashed: ' + (e.stack || e.message)] })); });

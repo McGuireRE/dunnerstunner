@@ -5359,6 +5359,8 @@ window.JOURNEY_MEDIA_HINTS = {
     (placed || []).forEach(it => {
       if (!it || !(it.boxes || []).length) return;
       if (it.id === 'further_terms' || /^name_purchaser_/.test(it.id)) return;   // terms are initialled one by one; names belong to the signature block
+      // a box Tim drew for initials or a signature is a signing place for that side (makePlaces, step 4b), never a filled box
+      if (it.kind === 'mark' && (it.mark === 'initials' || it.mark === 'signature')) return;
       const g = /^chattel_x_/.test(it.id) ? it.id : (it.place || it.id);
       (it.boxes || []).forEach(b => { const k = g + '@' + b.page; if (!groups.has(k)) groups.set(k, { ref: g, page: b.page, boxes: [], labels: [] }); const x = groups.get(k); x.boxes.push(b); if (!x.labels.includes(it.label)) x.labels.push(it.label); });
     });
@@ -5400,13 +5402,13 @@ window.JOURNEY_MEDIA_HINTS = {
     // 2. each further term, in the space left after it
     const ft = placed.find(x => x.id === 'further_terms');
     if (ft) {
-      const tb = ft.term_boxes || [];
+      const tb = ft.term_boxes || [], tno = k => ft.number_style === 'dot0' ? `${k}.0` : `${k}`;   // as the draft numbers them (23.0 on Tim's packs)
       if (tb.length) {
         const byTerm = new Map(); tb.forEach(b => { if (!byTerm.has(b.number)) byTerm.set(b.number, []); byTerm.get(b.number).push(b); });
         [...byTerm.entries()].sort((a, b) => a[0] - b[0]).forEach(([num, bs]) => { const last = bs[bs.length - 1], title = (((ft.terms || []).find(t => t.number === num)) || {}).title || '';
           const pref = last.gap ? lay => (lay.h <= last.gap.h + 2.5 ? { x: last.gap.x + last.gap.w - lay.w, y: last.gap.y + (last.gap.h - lay.h) / 2 } : null) : null;
-          row('term', 't' + num, last.page, last, `Initial further term ${num}${title ? ' (' + title + ')' : ''}`, { prefer: pref }); });
-      } else (ft.terms || []).forEach(t => { const b = (ft.boxes || [])[0]; if (b) row('term', 't' + t.number, b.page, { x: b.x, y: b.y + b.h - (t.number) * 14, w: b.w, h: 12 }, `Initial further term ${t.number}${t.title ? ' (' + t.title + ')' : ''}`); });
+          row('term', 't' + num, last.page, last, `Initial further term ${tno(num)}${title ? ' (' + title + ')' : ''}`, { prefer: pref }); });
+      } else (ft.terms || []).forEach(t => { const b = (ft.boxes || [])[0]; if (b) row('term', 't' + t.number, b.page, { x: b.x, y: b.y + b.h - (t.number) * 14, w: b.w, h: 12 }, `Initial further term ${tno(t.number)}${t.title ? ' (' + t.title + ')' : ''}`); });
     }
     // 3. the signature block: each purchaser's signature, and their name where the draft didn't type it
     const num = id => +(String(id).match(/(\d+)$/) || [0, 0])[1];
@@ -5443,6 +5445,18 @@ window.JOURNEY_MEDIA_HINTS = {
         for (const r of spots) { if (r.x >= 4 && r.y > FOOT_Y + IH + 4 && r.x + r.w <= pg.w - 4 && r.y + r.h <= pg.h - 4 && apart(r, base) <= NEAR && !ob(p.page).some(b => overlap(r, b) > 0.5) && !text(p.page).some(b => overlap(r, inset(b, 0.3, 0.8)) > 0)) { spot = { x: r.x, y: r.y, w: r.w, h: r.h }; break; } }
         if (!spot) { spot = base; block('ack:' + p.id, ackLabel(p), `Page ${p.page}: there is no clear space within about ${NEAR} points of it for every purchaser without covering printed words.`); }
         push(s.position, ackKind(p), 'ack', p.id, p.page, spot, ackLabel(p)); }); });
+    // 4b. boxes Tim drew on the review screen for initials or a signature (draft edits.marks; placed kind 'mark', with who: purchasers,
+    // vendors or both): a signing place for each signer on that side, inside the box he drew (Tim, 24 November 2026). Strike-outs, typed
+    // text, highlights and places he moved are filled boxes (step 1), which every signer initials.
+    const SIDE_WHO = vendor ? 'vendors' : 'purchasers';
+    placed.filter(it => it && it.kind === 'mark' && (it.mark === 'initials' || it.mark === 'signature') && (it.who === SIDE_WHO || it.who === 'both' || !it.who) && (it.boxes || []).length).forEach(it => {
+      const b = it.boxes[0], pg = P(b.page), lbl = `${it.mark === 'signature' ? 'Sign' : 'Initial'}: the place Tim marked on page ${b.page}`;
+      if (!pg) { block('ack:' + it.id, lbl, `Page ${b.page} isn't in the draft.`); return; }
+      // the box shared by everyone on the side: side by side when it is wide enough, otherwise one above the other
+      const across = b.w / n >= Math.min(b.h, 30) * 1.2 || b.h / n < 8, cw = across ? b.w / n : b.w, ch = across ? b.h : b.h / n;
+      if (cw < 10 || ch < 6) block('ack:' + it.id, lbl, `Page ${b.page}: the box you marked is too small for ${n === 1 ? 'the signer' : 'every signer'}. Make it bigger on the review screen and re-draft.`);
+      signers.forEach((sg, i) => push(sg.position, it.mark === 'signature' ? 'signature' : 'initial', 'ack', it.id, b.page,
+        { x: across ? b.x + i * cw : b.x, y: across ? b.y : b.y + b.h - (i + 1) * ch, w: Math.max(1, cw - (across && n > 1 ? 1 : 0)), h: Math.max(1, ch - (!across && n > 1 ? 1 : 0)) }, lbl + (n > 1 ? ` (${sg.name || 'signer ' + sg.position})` : ''), { marked: true })); });
     // 5. the foot of every page, outside any box (last, so it keeps clear of everything above)
     pages.forEach(pg => row('foot', 'p' + pg.n, pg.n, { x: pg.w - MARGIN, y: FOOT_Y, w: 1, h: IH }, `Initial the foot of page ${pg.n}`, { foot: true, minY: 2, maxY: 28 }));
     const counts = {}; signers.forEach(s => { counts[s.position] = out.filter(p => p.signer === s.position).length; });
