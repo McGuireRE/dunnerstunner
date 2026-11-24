@@ -29,7 +29,7 @@ const TOKEN_RE = /^[A-Za-z0-9_-]{40,64}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 type Rpc = (fn: string, args: Record<string, unknown>) => Promise<{ data: any; error: { message: string } | null }>;
 export type Deps = {
-  cors: Record<string, string>;
+  cors: Record<string, string> | ((req: Request) => Record<string, string>);   // a function: the headers for each request (corsFor)
   appUrl: string;
   timEmail: string;
   whoIsAgent: (authorization: string) => Promise<string | null>;
@@ -60,7 +60,8 @@ export function executionRecord(m: any) {
 const wrap = (inner: string) => `<div style="font-family:Arial,sans-serif;font-size:15px;line-height:1.5;color:#1F1D1A;max-width:560px">${inner}<p style="color:#6E6A65;font-size:13.5px">McGuire Real Estate · Tim McGuire · 027 562 7207</p></div>`;
 
 export function makeHandler(d: Deps) {
-  const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: Object.assign({ "Content-Type": "application/json", "Cache-Control": "no-store" }, d.cors) });
+  const staticCors: Record<string, string> = typeof d.cors === "function" ? {} : d.cors;
+  const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: Object.assign({ "Content-Type": "application/json", "Cache-Control": "no-store" }, staticCors) });
   const call = async (fn: string, args: Record<string, unknown>) => { const r = await d.rpc(fn, args); if (r.error) throw new Error(r.error.message); return r.data; };
 
   // who is on each side, from the newest round each side signed (for the "nothing outstanding" check)
@@ -124,8 +125,8 @@ export function makeHandler(d: Deps) {
     return { sha256: lk.sha256, existing: !!lk.existing, property_id: m.property_id };
   }
 
-  return async (req: Request): Promise<Response> => {
-    if (req.method === "OPTIONS") return new Response("ok", { headers: d.cors });
+  const handle = async (req: Request): Promise<Response> => {
+    if (req.method === "OPTIONS") return new Response("ok", { headers: staticCors });
     if (req.method !== "POST") return json({ error: "Not allowed" }, 405);
     let text = ""; try { text = await req.text(); } catch (_) { return json({ error: "Bad request" }, 400); }
     if (text.length > MAX_BODY) return json({ ok: false, error: "That is more than can be sent at once." }, 413);
@@ -240,5 +241,11 @@ export function makeHandler(d: Deps) {
       }
     } catch (e) { return json({ ok: false, error: plain((e as Error).message) }, 400); }
     return json({ error: "Bad request" }, 400);
+  };
+  // per request: the caller's own site when it is the onboarding app or the portal (corsFor), otherwise the fixed headers
+  return async (req: Request): Promise<Response> => {
+    const res = await handle(req);
+    if (typeof d.cors === "function") { const h = d.cors(req); for (const k of Object.keys(h)) res.headers.set(k, h[k]); }
+    return res;
   };
 }

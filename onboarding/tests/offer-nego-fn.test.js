@@ -160,6 +160,6 @@ const D = require(path.join(__dirname, '..', 'src', 'draft-core.js'));
 
   // ── the entry file ──
   const entry = fs.readFileSync(path.join(__dirname, '..', '..', 'fn', 'offer_sign.ts'), 'utf8');
-  expect(/cors: corsApp/.test(entry) && /nego-core\.js/.test(entry) && /renderWorking/.test(entry) && /JWT verification still OFF/.test(entry), 'the entry uses the app-only CORS and the negotiation core');
+  expect(/cors: corsFor/.test(entry) && /nego-core\.js/.test(entry) && /renderWorking/.test(entry) && /JWT verification still OFF/.test(entry), 'the entry uses the app-and-portal CORS and the negotiation core');
   console.log(JSON.stringify(Object.assign(out, { errs }), null, 1));
 })().catch(e => { console.log(JSON.stringify({ errs: ['crashed: ' + (e.stack || e.message)] })); });

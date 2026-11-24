@@ -117,5 +117,18 @@ const S = require(path.join(__dirname, '..', 'src', 'sign-core.js'));
   Object.keys(files).filter(k => /offer-round-/.test(k)).forEach(k => delete files[k]);
   x = await J(await post({ action: 'lock', signing_id: SID }, { Authorization: 'Bearer good' })); expect(x.j.ok && x.j.round.number === 1, 'Tim can lock Round 1 from his screen');
 
+  // ── CORS: the onboarding app and Tim's portal only (portal P1 lives at portal.dunnerstunner.co.nz and calls send, lock and agree) ──
+  { const { corsFor, APP_ORIGINS } = await import(path.join(__dirname, '..', '..', 'fn', 'cors_app.ts'));
+    const hc = H.makeHandler({ cors: corsFor, appUrl: 'https://packages.dunnerstunner.co.nz/onboarding/', timEmail: 't', whoIsAgent: async () => null, rpc: db, signedUrl: async () => null, download: async () => null, upload: async () => ({ ok: true }), sendMail: async () => { }, renderRound: async () => ({ bytes: new Uint8Array() }), renderWorking: async () => ({ bytes: new Uint8Array() }), net: () => 'n' });
+    const at = async (origin, method) => { const r = await hc(new Request('https://x/f', { method: method || 'POST', headers: origin ? { Origin: origin, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' }, body: method === 'OPTIONS' ? undefined : JSON.stringify({ action: 'open', token: TOK }) })); return r.headers.get('Access-Control-Allow-Origin'); };
+    expect(APP_ORIGINS.join() === 'https://packages.dunnerstunner.co.nz,https://portal.dunnerstunner.co.nz', 'two sites only: the onboarding app and the portal');
+    expect(await at('https://portal.dunnerstunner.co.nz') === 'https://portal.dunnerstunner.co.nz' && await at('https://portal.dunnerstunner.co.nz', 'OPTIONS') === 'https://portal.dunnerstunner.co.nz', 'the portal gets its own site back, preflight too');
+    expect(await at('https://packages.dunnerstunner.co.nz') === 'https://packages.dunnerstunner.co.nz', 'the onboarding app gets its own site back');
+    expect(await at('https://evil.example') === 'https://packages.dunnerstunner.co.nz' && await at(null) === 'https://packages.dunnerstunner.co.nz', 'any other site gets the onboarding site, so its browser refuses');
+    const PH = await import(path.join(__dirname, '..', '..', 'fn', 'offer_public_handler.ts'));
+    const hp = PH.makeHandler({ cors: corsFor, rpc: async () => ({ data: null, error: { message: 'x' } }), draft: async () => ({ status: 200, body: {} }), notifyTim: async () => { } });
+    const rp = await hp(new Request('https://x/f', { method: 'OPTIONS', headers: { Origin: 'https://portal.dunnerstunner.co.nz' } }));
+    expect(rp.headers.get('Access-Control-Allow-Origin') === 'https://portal.dunnerstunner.co.nz' && rp.headers.get('Vary') === 'Origin', 'offer-public answers the portal the same way');
+    const ent = require('fs').readFileSync(path.join(__dirname, '..', '..', 'fn', 'offer_public.ts'), 'utf8'); expect(/cors: corsFor/.test(ent), 'offer-public uses it'); }
   console.log(JSON.stringify(Object.assign(out, { errs }), null, 1));
 })().catch(e => { console.log(JSON.stringify({ errs: ['crashed: ' + (e.stack || e.message)] })); });

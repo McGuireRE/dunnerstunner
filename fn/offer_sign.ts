@@ -9,7 +9,7 @@
 // Round 1 is drawn with pdf-lib and the same signing core the browser uses (onboarding/src/sign-core.js, at the same commit).
 // Phase 4 (migration 021): the vendors and the counteroffers go through the same function (JWT verification still OFF): later rounds,
 // a change made from a link, and Tim's "agree" (the agreed copy) are drawn with the negotiation core (onboarding/src/nego-core.js).
-import { admin, APP_URL, corsApp, sendMail, TIM_EMAIL } from "./shared.ts";
+import { admin, APP_URL, corsFor, sendMail, TIM_EMAIL } from "./shared.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
 import * as PDFLib from "npm:pdf-lib@1.17.1";
 import "../onboarding/src/sign-core.js";
@@ -19,7 +19,7 @@ import { netOf } from "./offer_public_handler.ts";
 
 const SIGN = (globalThis as any).SIGN, NEGO = (globalThis as any).NEGO;
 Deno.serve(makeHandler({
-  cors: corsApp,   // only the onboarding pages at packages.dunnerstunner.co.nz call this
+  cors: corsFor,   // only the onboarding pages (packages.dunnerstunner.co.nz) and Tim's portal (portal.dunnerstunner.co.nz) call this
   appUrl: APP_URL,
   timEmail: TIM_EMAIL,
   whoIsAgent: async (authorization) => {
