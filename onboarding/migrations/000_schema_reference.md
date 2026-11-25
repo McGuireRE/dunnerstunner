@@ -421,3 +421,44 @@ agreements/<agreement id>/signatures/... (vendors may upload their own signature
   (pg-standin, 010, 016 part A, 018, 019, 021, 022, 023, 024, 025): every line as expected, no CAPITALS. Also run on the stand-in with
   026 applied straight after 024: 024's own rollback test (output identical apart from the new tables in its truncate notice), 025's
   rollback test (identical) and 024's race test (no errors).
+
+## 028 The shared records (LW0, 26 November 2026; tested in a rollback block, NOT yet on the live project)
+One home for each fact. Every new table has RLS; nobody writes them directly; every trigger here catches its own errors and records them
+in `shared_record_log` (agent reads), so this layer can never stop a vendor's questionnaire, a signing or an offer. Signed records,
+signatures and fingerprints are not touched.
+- Property profile: `profile_keys` (the facts once: page 1's description keys, title and legal description, the council values; `vendor`
+  false for `owners_relab`; `ql_column` the Quiet List column for the same fact), `property_fact_values` (every value from every source:
+  council, reinz, relab, inspection, agreement, tim, first_visit, questionnaire, quiet_list; with display, source name, `as_of`,
+  `recorded_at`, `recorded_by`; never changed or removed, `guard_fact_value`), `property_profile` (per property and fact: the chosen value,
+  `chosen_by` auto or tim, `ticked`). `profile_record` (internal) decides: Tim's own entry is chosen and ticked; an automatic value is
+  chosen only when nothing ticked stands, never a record over a person's entry, and the same value changes nothing; a source clearing its
+  chosen value hands over to the newest other value. Triggers: `profile_from_found` (council values Tim used are his; one that waited is a
+  value only), `profile_from_inspection` (Tim's answers chosen and ticked unless the agreement in force differs; his choice there applied),
+  `profile_from_agreement` (page 1 as an automatic value). Read: `agent_property_profile(p)`, `my_property_profile(p)` (a party to the
+  property, never Relab). Write: `agent_profile_set(p, key, value)`, `agent_profile_choose(p, key, value_id)` (both write back to
+  `properties.description`, title_ref or legal_description, never to an agreement), `agent_profile_tick(p, keys or null, on)`.
+- Person: `person_links` (source property_people, agreement_people, prelisting, offer_signer, lawyer_link, ql_listing or ql_seller_lead,
+  and its row; contact; property; role; `matched_by` email, name, record, new or tim; `doubt` and `doubt_contact_id` for Tim). Matching
+  (`person_find`, `person_link`, internal): the same email and a name that fits (an informal name fits on its first name or preferred
+  name; a contact known only informally fits any name); with no email, the same legal name on the same property; two checked names on one
+  email are kept apart with a doubt. Triggers: `person_link_pp` (before; fills `property_people.contact_id`), `person_link_ap` (before; fills
+  `agreement_people.contact_id` only while unsigned), `person_link_after` on prelistings, offer_signers (insert), lawyer_links and
+  ql_seller_leads; `aml_file_contact` (a new AML file gets its person's contact). `agent_person_link_resolve(link, same)`.
+- Property and person link: `crm_property_links` is the home (role check gains trustee, executor and contact); property_people stays the
+  working list of this round's owners and is kept in step by `person_link_pp`. View `property_person_roles` (security invoker, agent only).
+- Question bank: `qa_questions` (27 questions: goals, timing, price, plans, home and area, agents, the old questionnaire's nine, own words,
+  and four of Tim's own, `vendor_visible` false) and `qa_answers` (question, property, contact, value, source appointment_confirmation,
+  first_visit, questionnaire, quiet_list_seller_form, quiet_list_listing, seller_profile or tim; `source_ref`; `by_vendor`; `answered_at`;
+  unique per question, source and source_ref). Triggers `qa_from_prelisting` (every answer to the questions before we meet, as saved),
+  `qa_from_seller_lead`, `qa_from_profile` (crm_profiles seller: motivation, timeframe, price) and the Quiet List listing's m_* notes.
+  `agent_qa_answer(...)`. A vendor reads their own answers (`qa_mine`) to vendor-visible questions only.
+- Quiet List: `ql_listings` gains `property_id`, `vendor_contact_id`, `photo_doc_ids`. `ql_listing_shared` (before: empty fact columns filled
+  from the profile when tied to a property; vendor linked) and `ql_listing_shared_after` (its facts as Quiet List values; Tim's notes to
+  the bank). Its existing columns keep working.
+- Photos and documents: `agent_ql_set_photos(listing, docs)` (photos of the listing's property only), `ql_listing_photos(listing)`,
+  `inspection_photos(inspection)`. `property_inspections.photos` is no longer used (commented); no files move.
+- Backfill: every name list linked (signed agreement people through person_links only), unlocked AML files filed with their contact and
+  locked files' summary copied to the contact, council values, agreements and inspections into the profile, questionnaire answers into
+  the bank.
+- Rollback test: `tests/shared-records-rollback.sql` (built by `tests/shared-records-rollback.js`); quick local stand-in
+  `tests/lw0-standin.sql` (simplified inspection functions; the live run uses the real ones).

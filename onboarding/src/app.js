@@ -1144,6 +1144,13 @@ function lawyerForm(id, title, blurb) {
   async function propSave() {
     const p = PF.p;
     await must(sb.from('properties').update({ address: p.address, title_ref: p.title_ref || null, owners_on_title: p.owners_on_title || null, ownership: p.ownership, description: p.description, disclosures: p.disclosures }).eq('id', p.id));
+    // LW0: what Tim typed here is his own entry on the property profile (chosen and ticked); the file already has it
+    if (PF.was) {
+      const was = PF.was, changed = DESC_FIELDS.map(([k]) => k).filter(k => String(was.description[k] ?? '') !== String(p.description[k] ?? '')).map(k => [k, p.description[k] ?? null]);
+      if ((was.title_ref || '') !== (p.title_ref || '')) changed.push(['title_ref', p.title_ref || null]);
+      for (const [k, v] of changed) { try { await sb.rpc('agent_profile_set', { p_property: p.id, p_key: k, p_value: v }); } catch (_) { } }
+      PF.was = { description: Object.assign({}, p.description), title_ref: p.title_ref || '' };
+    }
     let pos = 1;
     for (const x of PF.people) {
       if (!(x.legal_name || '').trim() && !(x.email || '').trim()) { pos++; continue; }
@@ -1220,7 +1227,7 @@ function lawyerForm(id, title, blurb) {
     const OFX = await offersLoad(id);   // the Offers tile (offers phase 1): agent only
     const pl = pls.find(x => x.status !== 'closed' && (!p.cycle_at || x.created_at >= p.cycle_at)) || null;   // only this round's pre-listing
     const byRole = r => people.filter(x => (x.role || 'owner') === r).map(x => Object.assign({ _orig_name: x.legal_name }, x));
-    PF = { p, people: byRole('owner'), contacts: byRole('contact'), formers: byRole('former'), docs, pls, ags, liveAgreement: live, removed: [] };
+    PF = { p, people: byRole('owner'), contacts: byRole('contact'), formers: byRole('former'), docs, pls, ags, liveAgreement: live, removed: [], was: { description: Object.assign({}, p.description), title_ref: p.title_ref || '' } };
     const locked = !!live;
     const flags = propFlags(docs);
     const at = STAGES.findIndex(s => s[0] === p.stage);
@@ -1242,13 +1249,13 @@ function lawyerForm(id, title, blurb) {
       <div class="ptiles">
         <div class="card ptile"><h3>Next step</h3>
           ${live ? `<p class="small">Agreement ${esc(live.ref)}: <span class="pill ${live.status}">${esc(live.status)}</span></p><div class="toolbar"><button class="btn primary" type="button" data-agopen="${live.id}">Open the agreement</button></div>`
-            : pl && pl.status !== 'accepted' ? `<p class="small">Pre-listing: ${esc(plStatusText(pl))}</p><div class="toolbar"><button class="btn primary" type="button" data-plopen="${pl.id}">Open the pre-listing</button></div>`
+            : pl && pl.status !== 'accepted' ? `<p class="small">Questions before we meet: ${esc(plStatusText(pl))}</p><div class="toolbar"><button class="btn primary" type="button" data-plopen="${pl.id}">Open their questions</button></div>`
             : ['withdrawn', 'settled'].includes(p.stage) ? `<p class="small">Choose same or new owners above to start again.</p>`
-            : `<p class="small">Nothing under way.</p><div class="toolbar"><button class="btn ghost" type="button" id="pfBegin">Let's begin: appraisal page</button><button class="btn primary" type="button" id="pfAgree">Let's agree: agreement</button></div>`}
+            : `<p class="small">Nothing under way.</p><div class="toolbar"><button class="btn ghost" type="button" id="pfBegin">Questions before we meet</button><button class="btn primary" type="button" id="pfAgree">Let's agree: agreement</button></div>`}
           ${meet ? `<p class="small" style="margin:8px 0 0"><strong>Best times to meet:</strong> ${esc(meet)}</p>` : ''}
         </div>
         <div class="card ptile"><h3>History</h3>
-          ${pls.map(x => `<div class="fact"><div class="k">Pre-listing</div><div class="v" style="font-weight:400;display:flex;justify-content:space-between;gap:8px"><span>${esc(plStatusText(x))}, ${esc(fmtDate(x.created_at))}</span><button class="btn link" type="button" data-plopen="${x.id}">Open</button></div></div>`).join('')}
+          ${pls.map(x => `<div class="fact"><div class="k">Questions before we meet</div><div class="v" style="font-weight:400;display:flex;justify-content:space-between;gap:8px"><span>${esc(plStatusText(x))}, ${esc(fmtDate(x.created_at))}</span><button class="btn link" type="button" data-plopen="${x.id}">Open</button></div></div>`).join('')}
           ${ags.map(a => { const ppl = a.agreement_people || [], ver = ppl.filter(x => x.id_verified_at).length; return `<div class="fact"><div class="k">Agreement ${esc(a.ref)}</div><div class="v" style="font-weight:400;display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><span><span class="pill ${a.status}">${esc(a.status)}</span> <span class="small">ID checks ${ver} of ${ppl.length}</span></span><button class="btn link" type="button" data-agopen="${a.id}">Open</button></div></div>`; }).join('')}
           ${!pls.length && !ags.length ? '<p class="small" style="margin:0">No appraisal page or agreement yet.</p>' : ''}
         </div>
@@ -1277,6 +1284,9 @@ function lawyerForm(id, title, blurb) {
           <div class="row2 stack">${DESC_FIELDS.slice(6).map(([k, l]) => `<div><label class="f" for="pfd_${k}">${l}</label><input type="text" id="pfd_${k}" data-pfd="${k}" value="${dval(k)}"></div>`).join('')}</div>`}
       </div>
       ${locked ? '' : '<div class="toolbar"><button class="btn primary" type="button" id="pfSave">Save the property file</button></div><div class="err" id="pfErr"></div>'}
+      <h2>Property profile</h2>
+      <p class="small">Each fact once, with where it came from and when. Where two sources differ, both are shown and you choose.</p>
+      <div class="card" id="pfProfile"><div class="loading">Loading...</div></div>
       ${flags.length ? `<div class="card warnc"><h3>From the documents: talk these through</h3><ul class="small" style="margin:6px 0 0;padding-left:20px">${flags.map(f => `<li>${esc(f.text)} <span class="src-badge">From ${esc(f.source)}</span></li>`).join('')}</ul></div>` : ''}
       ${repoSectionHTML(id, docs)}
       ${importCardHTML(PROP_TARGET)}
@@ -1298,6 +1308,7 @@ function lawyerForm(id, title, blurb) {
     $$('[data-pfreopen]').forEach(b => b.addEventListener('click', async () => { await must(sb.rpc('agent_reopen_property', { pid: id, new_owners: b.dataset.pfreopen === 'new' })); toast(b.dataset.pfreopen === 'new' ? 'Started again for new owners' : 'Started again'); viewProperty(id); }));
     $$('[data-pfown]').forEach(b => b.addEventListener('click', async () => { const x = PF.contacts[+b.dataset.pfown]; await must(sb.from('property_people').update({ role: 'owner', position: PF.people.length + 1 }).eq('id', x.id)); viewProperty(id); }));
     repoWire(id, docs);
+    profileCardDraw(id);
     if (!locked) {
       const readPeople = () => $$('.pfp').forEach(c => { const x = PF.people[+c.dataset.i]; $$('[data-pf]', c).forEach(inp => { if (x[inp.dataset.pf] !== inp.value) { x[inp.dataset.pf] = inp.value; x._dirty = true; } }); });
       const readProp = () => { p.address = $('#pfAddr').value.trim(); p.title_ref = $('#pfTitle').value.trim(); p.owners_on_title = $('#pfOwners').value.trim(); $$('[data-pfd]').forEach(i => { const v = i.value.trim(); if (v) p.description[i.dataset.pfd] = v; else delete p.description[i.dataset.pfd]; }); };
@@ -2138,7 +2149,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   function crInspectHook() {
     // once started, a retry (say the accept failed for want of signal) uses the same property file and inspection, never a second
     let iid = null, made = null, madeFor = '';
-    crAddressHook($('#insAddr'), $('#crInsp'), () => ({ pid: null, useLabel: 'Start the inspection and use these',
+    crAddressHook($('#insAddr'), $('#crInsp'), () => ({ pid: null, useLabel: 'Start the disclosures check and use these',
       before: async () => { const a = $('#insAddr').value.replace(/\s+/g, ' ').trim(); if (made && madeFor === a) return made;
         const { data, error } = await sb.rpc('agent_inspection_start', { p_property: null, p_address: a });
         if (error) { toast(netErr(error) ? 'No signal. Starting needs a connection for a moment.' : error.message); return null; } iid = data.inspection_id; made = data.property_id; madeFor = a; return made; },
@@ -2181,9 +2192,9 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   $('#navTr').addEventListener('click', () => { if (APP_TRANSLATION) navGo(viewTranslations); });
   $$('.brand img').forEach(i => i.addEventListener('click', () => { if (IS_AGENT) { if (PORTAL) { if (!portalInPerson()) portalNav(''); } else navGo(viewAgentHome); } }));   // in person the logo does nothing: a vendor may be holding the tablet
 
-  const TILE_BEGIN = `<button class="home-tile" type="button" id="homeBegin"><span class="kick">After an appraisal</span><span class="ttl">Let's begin</span><span class="txt">Set up their appraisal page. They answer a few questions, you send back an updated plan, and they're ready to sign.</span><span class="go">Start an appraisal page →</span></button>`;
-  const TILE_INSPECT = `<button class="home-tile" type="button" id="homeInspect"><span class="kick">At the property</span><span class="ttl">Inspect a property</span><span class="txt">Walk round with your phone and note the property facts and the Vendor Declaration answers. Only the address is needed.</span><span class="go">Start an inspection →</span></button>`;
-  const TILE_AGREE = `<button class="home-tile primary" type="button" id="homeAgree"><span class="kick">At the listing appointment</span><span class="ttl">Let's agree</span><span class="txt">Go through the agency agreement together, then sign here or send it to their phones.</span><span class="go">Start the agreement →</span></button>`;
+  const TILE_BEGIN = `<button class="home-tile" type="button" id="homeBegin"><span class="kick">Before the presentation</span><span class="ttl">Questions before we meet</span><span class="txt">Send them a few questions with your summary, so you hear what matters to them before you meet. Their answers file to the person and the property.</span><span class="go">Set up their questions →</span></button>`;
+  const TILE_INSPECT = `<button class="home-tile" type="button" id="homeInspect"><span class="kick">For the listing</span><span class="ttl">Disclosures check</span><span class="txt">Walk round with your phone and note the property facts and the Vendor Declaration answers. Only the address is needed.</span><span class="go">Start a disclosures check →</span></button>`;
+  const TILE_AGREE = `<button class="home-tile primary" type="button" id="homeAgree"><span class="kick">Listing</span><span class="ttl">Let's agree</span><span class="txt">Go through the agency agreement together, then sign here or send it to their phones.</span><span class="go">Start the agreement →</span></button>`;
   const TILE_OFFER = `<button class="home-tile" type="button" id="homeOffer"><span class="kick">When a buyer is ready</span><span class="ttl">Draft an offer</span><span class="txt">Fill in an offer for a buyer, see the offers received, or share a property's offer link and QR code.</span><span class="go">Choose the property →</span></button>`;
   const HOME_TILES = [TILE_BEGIN, TILE_INSPECT, TILE_AGREE, TILE_OFFER].join('\n        ');
   function viewAgentHome() {
@@ -2195,7 +2206,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <div class="home-tiles">
         ${HOME_TILES}
       </div>
-      <p class="small" id="homeNeeds">Your agreements and pre-listings are on the <a href="#" id="homeDash">Dashboard</a>.</p>
+      <p class="small" id="homeNeeds">Your agreements and questions before we meet are on the <a href="#" id="homeDash">Dashboard</a>.</p>
     </div>`;
     $('#homeBegin').addEventListener('click', () => viewPrelistingAgent(null));
     $('#homeAgree').addEventListener('click', () => viewTable(null));
@@ -2248,7 +2259,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         needs.push({ what: 'Offer waiting: no agreement blank ready', where: (pr && pr.address) || 'Property', sub: st === 'none' ? 'Load the REINZ agreement blank' : st === 'unapproved' ? 'Its places aren\'t approved yet' : 'Its edition hasn\'t been checked yet', hot: true, noBlank: pid,
           go: async () => { await viewProperty(pid); const t = $('#offNoBlank') || $('#offTile'); if (t) t.scrollIntoView({ block: 'start' }); } }); });
     }
-    insps.forEach(x => { const pr = props.find(p => p.id === x.property_id); needs.push({ what: 'Inspection started, not finished', where: (pr && pr.address) || 'Property', sub: 'Started ' + fmtDT(x.started_at), go: () => { INS = null; viewInspection(x.id); }, insp: x.id }); });
+    insps.forEach(x => { const pr = props.find(p => p.id === x.property_id); needs.push({ what: 'Disclosures check started, not finished', where: (pr && pr.address) || 'Property', sub: 'Started ' + fmtDT(x.started_at), go: () => { INS = null; viewInspection(x.id); }, insp: x.id }); });
     crs.forEach(r => needs.push({ what: 'Call them about cancelling', where: addr(r.agreement_id), sub: 'Request from ' + r.requested_by, go: () => viewAgentDetail(r.agreement_id), hot: true }));
     pls.forEach(p => { if (p.status === 'submitted') needs.push({ what: 'Write their updated plan', where: p.address, sub: 'Questionnaire answers are in', go: () => viewPrelistingAgent(p.id) }); if (p.status === 'question') needs.push({ what: 'Answer their question', where: p.address, sub: 'About the updated plan', go: () => viewPrelistingAgent(p.id), hot: true }); if (p.status === 'accepted') { const a = rows.find(r => r.id === p.agreement_id); if (!a || a.status === 'draft') needs.push({ what: 'Add your fee and send the agreement', where: p.address, sub: 'They\'ve accepted the plan', go: () => viewPrelistingAgent(p.id) }); } });
     rows.forEach(r => { if (r.status === 'signed') needs.push({ what: 'Countersign', where: r.address, sub: 'Everyone has signed', go: () => viewAgentDetail(r.id) }); });
@@ -2316,8 +2327,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <div class="chip-row" role="tablist">${STAGE_GROUPS.map(([k, l]) => `<button class="chip" type="button" role="tab" aria-selected="${DASH_FILTER === k}" data-filter="${k}" style="${DASH_FILTER === k ? 'border-color:var(--accent);background:var(--accent-soft)' : ''}">${l} <span class="small">${count(k)}</span></button>`).join('')}</div>
       ${shown.length ? `<div class="card tight" style="overflow-x:auto;margin-top:10px"><table class="tbl"><thead><tr><th>Property</th><th>Owners</th><th>Where it's up to</th><th class="hide-sm">Updated</th></tr></thead><tbody>
       ${shown.map(r => { const la = latestAg(r); return `<tr class="click" data-prop="${r.id}" ${la ? `data-ag="${la.id}"` : ''} ${(r.prelistings || [])[0] ? `data-plrow="${r.prelistings[0].id}"` : ''}><td><strong>${esc(r.address || '(no address yet)')}</strong>${la ? `<br><span class="small">${esc(la.ref)}</span>` : ''}</td><td>${esc(owners(r) || '–')}</td><td>${stagePill(r.stage)}</td><td class="small hide-sm">${esc(fmtDT(r.updated_at))}</td></tr>`; }).join('')}
-      </tbody></table></div>` : `<div class="card note tight" style="margin-top:10px"><p class="small" style="margin:0">${props.length ? 'None here.' : 'No properties yet. Start with Let\'s begin or Let\'s agree.'}</p></div>`}
-      <div class="toolbar"><button class="btn ghost" type="button" id="newInsp">Inspect a property</button><button class="btn ghost" type="button" id="newPl">Let's begin: new appraisal page</button><button class="btn primary" type="button" id="newAg">Let's agree: new agreement</button></div>
+      </tbody></table></div>` : `<div class="card note tight" style="margin-top:10px"><p class="small" style="margin:0">${props.length ? 'None here.' : 'No properties yet. Start with Questions before we meet or Let\'s agree.'}</p></div>`}
+      <div class="toolbar"><button class="btn ghost" type="button" id="newInsp">Disclosures check</button><button class="btn ghost" type="button" id="newPl">Questions before we meet</button><button class="btn primary" type="button" id="newAg">Let's agree: new agreement</button></div>
     </div>`;
     needsWire(needs, viewAgentDashboard);
     $$('[data-filter]').forEach(b => b.addEventListener('click', () => { DASH_FILTER = b.dataset.filter; viewAgentDashboard(); }));
@@ -2430,7 +2441,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       // can never open a blank and make a second draft
       if (PORTAL && okId(T.ag.property_id) && isCreation(CUR) && portalPath() === CUR) setAddr(`properties/${T.ag.property_id}/agreement/${T.id}/edit${T.page ? '/' + (T.page + 1) : ''}`, 'replace');
       return true;
-    } catch (e) { if (PORTAL) tErr('Couldn\'t save. You\'re offline or the connection dropped. Your work is kept on this page; try Save and close again when you have signal.'); return false; }
+    } catch (e) { if (PORTAL) tErr('Not saved yet. Everything you typed is still here. Check you have signal, then tap Save and close again.'); return false; }
   }
 
   function tValidate(p) {
@@ -2934,7 +2945,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         ${ag.status === 'signed' ? '<button class="btn primary" type="button" id="counterBtn">Countersign</button>' : ''}
         <button class="btn primary" type="button" data-pdf="1">Full agreement (PDF)</button>
         ${cfg.campaign || cfg.schedule ? '<button class="btn ghost" type="button" id="campPdf">Campaign PDF</button>' : ''}
-        ${cfg.prelisting_id ? '<button class="btn ghost" type="button" id="plAns">Pre-listing answers</button>' : ''}
+        ${cfg.prelisting_id ? '<button class="btn ghost" type="button" id="plAns">Their answers before we met</button>' : ''}
         <button class="btn ghost" type="button" id="printBtn">Print this page</button>
         ${['signed', 'countersigned', 'sent', 'parked'].includes(ag.status) ? '<button class="btn ghost" type="button" id="endBtn">End agency</button>' : ''}
       </div>
@@ -3930,6 +3941,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     INS = { id, row: base, pending, conflicts: base.conflicts || {}, offline: !row,
       facts: Object.assign({}, base.facts, pending.facts), decl: Object.assign({}, base.declaration, pending.decl), notes: Object.assign({}, base.notes, pending.notes) };
     if (!row) INS_STATE[id] = { kind: 'net' };
+    INS.profile = await profileLoad(base.property_id);   // LW0: the property profile is read first; its values are offered, never copied in by themselves
     return INS;
   }
 
@@ -3942,13 +3954,13 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
 
   // starting: an address alone, or an existing property chosen by address (so the same property isn't filed twice)
   async function viewInspectStart() {
-    header('Inspect a property', '', 0); actions(false);
+    header('Disclosures check', '', 0); actions(false);
     main().innerHTML = '<div class="loading">Loading...</div>';
     let props = []; try { props = (await must(sb.from('properties').select('id,address,stage,updated_at').order('updated_at', { ascending: false }))) || []; } catch (_) { }
     const norm = s => String(s || '').toLowerCase().replace(/[,.]/g, ' ').replace(/\s+/g, ' ').trim();
     main().innerHTML = `<div class="view-pad">
       <span class="agent-flag">Only you see this</span>
-      <h1>Inspect a property</h1>
+      <h1>Disclosures check</h1>
       <p class="lede">Walk round and note what you see. You only need the address: no vendor details, and nothing is sent to anyone.</p>
       <label class="f" for="insAddr" style="margin-top:0">Address</label><input type="text" id="insAddr" autocomplete="off" placeholder="Street, suburb, Dunedin">
       <div id="insMatches"></div>
@@ -3972,6 +3984,41 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     top(); $('#insAddr').focus();
   }
 
+  /* ───────── LW0: the property profile (migration 028), one home for each fact ───────── */
+  const PROFILE_SRC = { council: 'Council records', inspection: 'Disclosures check', agreement: 'Agency agreement', tim: 'You', quiet_list: 'The Quiet List', relab: 'Relab', reinz: 'REINZ', first_visit: 'First visit', questionnaire: 'Their answers' };
+  async function profileLoad(pid) {
+    if (!okId(pid) && !(typeof pid === 'string' && pid)) return [];
+    try { const { data, error } = await sb.rpc('agent_property_profile', { p_property: pid }); if (error || !data) return []; return Array.isArray(data.facts) ? data.facts : []; } catch (_) { return []; }
+  }
+  const profileFact = (facts, k) => (facts || []).find(x => x.key === k && x.value_id && !ijblank(x.value)) || null;
+  const profileVal = x => x.display || (Array.isArray(x.value) ? x.value.join(', ') : typeof x.value === 'string' ? x.value : String(x.value));
+  const profileWhen = x => [PROFILE_SRC[x.source] || x.source, x.as_of].filter(Boolean).join(', ');
+  // on the disclosures check: a fact not yet noted that the profile already holds is offered, with where it came from
+  function inspProfileHint(k, v) {
+    const x = !ijblank(v) || !INS || !INS.profile ? null : profileFact(INS.profile, k);
+    if (!x || Array.isArray(x.value)) return '';
+    return `<p class="small iprof" style="margin:6px 0 0">On the property profile: <strong>${esc(profileVal(x))}</strong> <span class="src-badge">${esc(profileWhen(x))}</span> <button class="btn link" type="button" data-iprof="${esc(k)}">Use this</button></p>`;
+  }
+  // the property file's Property profile card: each fact with its source and date; where sources differ, both, and Tim chooses
+  function profileCardHTML(facts) {
+    if (!facts.length) return '<p class="small" style="margin:0">Nothing on the profile yet. Council records, the disclosures check and the agreement fill it as they are used.</p>';
+    const unticked = facts.filter(x => x.value_id && !x.ticked).length;
+    return `<table class="sum" id="pfProfTbl">${facts.map(x => `<tr data-prof="${esc(x.key)}"><td style="white-space:normal">${esc(x.label)}</td><td style="white-space:normal">${x.value_id ? `${esc(profileVal(x))} <span class="src-badge">${esc(profileWhen(x))}</span>${x.ticked ? ' <span class="small" title="Ticked by you">✓</span>' : ''}` : '<span class="small">No value chosen</span>'}
+        ${(x.others || []).map(o => `<div class="small pfother" style="margin-top:4px">${esc(PROFILE_SRC[o.source] || o.source)} says <strong>${esc(o.display || (Array.isArray(o.value) ? o.value.join(', ') : String(o.value)))}</strong>${o.as_of ? ` (${esc(o.as_of)})` : ''} <button class="btn link" type="button" data-profuse="${esc(x.key)}" data-vid="${esc(o.value_id)}">Use this</button></div>`).join('')}</td></tr>`).join('')}</table>
+      ${unticked ? `<div class="toolbar"><button class="btn ghost" type="button" id="pfProfTick">Tick all ${unticked} as checked</button></div>` : ''}`;
+  }
+  async function profileCardDraw(pid) {
+    const box = $('#pfProfile'); if (!box) return;
+    const facts = await profileLoad(pid); if (!$('#pfProfile')) return;
+    box.innerHTML = profileCardHTML(facts);
+    $$('[data-profuse]', box).forEach(b => b.addEventListener('click', async () => {
+      b.disabled = true; const { error } = await sb.rpc('agent_profile_choose', { p_property: pid, p_key: b.dataset.profuse, p_value_id: b.dataset.vid });
+      if (error) { b.disabled = false; return toast('Not saved yet. Check you have signal, then try again.'); }
+      toast('Used. The property file has it now.'); viewProperty(pid);
+    }));
+    const t = $('#pfProfTick'); if (t) t.addEventListener('click', async () => { t.disabled = true; const { error } = await sb.rpc('agent_profile_tick', { p_property: pid, p_keys: null, p_on: true }); if (error) { t.disabled = false; return toast('Not saved yet. Check you have signal, then try again.'); } profileCardDraw(pid); });
+  }
+
   function inspItemHTML(it) {
     const [t, k] = it.split(':'), ik = esc(it);
     const radios = (name, opts, cur, cls) => `<div class="ipick ${cls || ''}">${opts.map(([v, l]) => `<label class="ichip"><input type="radio" name="${name}" value="${esc(v)}" ${cur === v ? 'checked' : ''}><span>${esc(l)}</span></label>`).join('')}</div>`;
@@ -3983,7 +4030,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       if (f.kind === 'yn') { const y = INSP_YN[k]; return `<div class="card tight iq" data-ik="${ik}"><h3>${esc(f.l)}</h3>${radios('if_' + k, [['no', y[1]], ['yes', 'Yes']], v, 'two')}<button class="btn link iclr" type="button" data-iclear="${ik}">Clear</button>
         <div data-ireveal="${esc(k)}" ${v === 'yes' || INS.facts[k + 'Detail'] ? '' : 'hidden'}><label class="f" for="ifd_${k}">${esc(y[2])}</label><textarea id="ifd_${k}" maxlength="${INSP_MAX}" data-itext="f:${esc(k)}Detail">${esc(INS.facts[k + 'Detail'] || '')}</textarea></div>${conf}</div>`; }
       const inp = f.kind === 'area' ? `<textarea id="if_${k}" maxlength="${INSP_MAX}" data-itext="${ik}">${esc(v || '')}</textarea>` : `<input type="text" id="if_${k}" maxlength="${f.kind === 'num' ? 20 : INSP_MAX}" data-itext="${ik}" value="${esc(v || '')}" ${f.kind === 'num' ? 'inputmode="numeric"' : ''}>`;
-      return `<div class="card tight iq" data-ik="${ik}"><label class="f" for="if_${k}" style="margin-top:0;font-weight:600">${esc(f.l)}</label>${inp}${conf}</div>`;
+      return `<div class="card tight iq" data-ik="${ik}"><label class="f" for="if_${k}" style="margin-top:0;font-weight:600">${esc(f.l)}</label>${inp}${inspProfileHint(k, v)}${conf}</div>`;
     }
     const v = INS.decl[k] || {};
     if (k === 'tenanted') return `<div class="card tight iq" data-ik="${ik}"><h3>${esc(INSP_TEN_Q)}</h3>${radios('id_tenanted', INSP_TEN, v.a)}<button class="btn link iclr" type="button" data-iclear="${ik}">Clear</button></div>`;
@@ -4073,7 +4120,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   const inspFlush = () => { Object.keys(INS_TIMERS).forEach(k => { clearTimeout(INS_TIMERS[k].t); INS_TIMERS[k].go(); delete INS_TIMERS[k]; }); };
 
   async function viewInspection(id, sec) {
-    header('Inspection', '', 0); actions(false);
+    header('Disclosures check', '', 0); actions(false);
     main().innerHTML = '<div class="loading">Loading...</div>';
     if (!INS || INS.id !== id) { if (!(await inspLoad(id))) { main().innerHTML = '<div class="view-pad"><h1>Inspection not found</h1><p class="lede">It may not have reached the database. Try again when you have signal.</p></div>'; return; } }
     INS.sec = sec ?? INS.sec ?? 0;
@@ -4085,7 +4132,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     header(s[1], '', 0); inspOpenSet(INS.id + ':' + i); inspKeep(INS.id); inspStatusSlot(s[1]);
     if (PORTAL && INS.row.property_id) portalAt(`properties/${INS.row.property_id}/inspection/${INS.id}${i ? '/' + (i + 1) : ''}`);
     main().innerHTML = `<div class="view-pad insp">
-      <p class="small insp-addr"><span class="agent-flag" style="margin:0 6px 0 0">Inspection</span>${nt(INS.row.address || 'Address to come')}</p>
+      <p class="small insp-addr"><span class="agent-flag" style="margin:0 6px 0 0">Disclosures check</span>${nt(INS.row.address || 'Address to come')}</p>
       <nav class="insp-tabs" aria-label="Sections">${INSP_SECTIONS.map((x, j) => `<button type="button" class="insp-tab ${j === i ? 'on' : ''}" data-isec="${x[0]}" data-isecn="${j}" ${j === i ? 'aria-current="step"' : ''}>${esc(x[1])} <span class="n"></span></button>`).join('')}<button type="button" class="insp-tab" id="insGoFinish">Finish</button></nav>
       <h1>${esc(s[1])}</h1>
       <p class="small" data-iseccount="${s[0]}"></p>
@@ -4106,6 +4153,12 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   // one set of listeners for the walk-round (main is never replaced, only its content, and a card can be redrawn)
     main().addEventListener('click', e => {
       if (!INS || !e.target.closest || !e.target.closest('.view-pad.insp')) return;
+      const pu = e.target.closest('[data-iprof]');
+      if (pu) {   // LW0: use the property profile's value for this fact (it is saved as Tim's answer, like typing it)
+        const k = pu.dataset.iprof, x = profileFact(INS.profile, k); if (!x) return;
+        const val = typeof x.value === 'string' ? x.value : String(x.value), inp = $('#if_' + k);
+        if (inp) { inp.value = val; inspQueue('facts', k, val); } pu.closest('.iprof').remove(); return;
+      }
       const cl = e.target.closest('[data-iclear]');
       if (cl) {
         const it = cl.dataset.iclear, card = $(`[data-ik="${it}"]`), k = it.slice(2);
@@ -4159,8 +4212,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   // finishing: what was noted, any differences with an agreement in force, and where the declaration answers go next
   async function viewInspectionFinish() {
     const id = INS.id;
-    header('Inspection', '', 100); actions(false);
-    inspOpenSet(id + ':finish'); inspKeep(id); inspStatusSlot('Inspection');
+    header('Disclosures check', '', 100); actions(false);
+    inspOpenSet(id + ':finish'); inspKeep(id); inspStatusSlot('Disclosures check');
     if (PORTAL && INS.row.property_id) portalAt(`properties/${INS.row.property_id}/inspection/${id}/finish`);
     main().innerHTML = '<div class="loading">Saving...</div>';
     inspFlush();
@@ -4190,11 +4243,11 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
           <div class="fact"><div class="k">Agreement ${esc(c.ref || '')}</div><div class="v">${esc(inspVal(k, c.agreement))}</div></div><div class="fact"><div class="k">You noted</div><div class="v">${esc(inspVal(k, c.inspection))}</div></div>
           <div class="toolbar"><button class="btn ghost" type="button" data-iresolve="${esc(k)}" data-use="agreement">Keep the agreement's</button><button class="btn primary" type="button" data-iresolve="${esc(k)}" data-use="inspection">Use mine</button></div></div>`).join('')}` : ''}
       <h2>Where your notes go</h2>
-      <div class="card tight"><h3>Property facts</h3><p class="small" style="margin:0">${nFacts} ${nFacts === 1 ? 'detail is' : 'details are'} on the property file. Let's begin, the questionnaire and a new agreement's page 1 are filled from it.</p></div>
+      <div class="card tight"><h3>Property facts</h3><p class="small" style="margin:0">${nFacts} ${nFacts === 1 ? 'detail is' : 'details are'} on the property file. The questions before we meet and a new agreement's page 1 are filled from it.</p></div>
       <div class="card tight" id="insDecl"><h3>Vendor Declaration</h3>
         ${!nDecl ? '<p class="small" style="margin:0">No Vendor Declaration answers noted.</p>'
           : !signedAg ? `<p class="small" style="margin:0">${nDecl} ${nDecl === 1 ? 'answer' : 'answers'} noted. When the vendors start their Vendor Declaration after signing, these are filled in for them, marked as noted by you at this inspection. They check each one before they can sign.</p>`
-          : formSigned ? `<p class="small" style="margin:0">The Vendor Declaration for ${esc(signedAg.ref)} has been signed, so your inspection can't change it.</p>${diffs.length ? `<p class="small" style="margin:8px 0 4px"><strong>Where your notes differ from what was signed:</strong></p>${diffs.map(([k, v]) => `<div class="fact"><div class="k">${esc(inspLabel(k))}</div><div class="v" style="font-weight:400">Signed: ${esc(inspVal(k, k === 'tenanted' ? { a: (form.data || {}).tenanted } : ((form.data || {}).answers || {})[k]))}<br>You noted: ${esc(inspVal(k, v))}</div></div>`).join('')}` : ''}`
+          : formSigned ? `<p class="small" style="margin:0">The Vendor Declaration for ${esc(signedAg.ref)} has been signed, so your disclosures check can't change it.</p>${diffs.length ? `<p class="small" style="margin:8px 0 4px"><strong>Where your notes differ from what was signed:</strong></p>${diffs.map(([k, v]) => `<div class="fact"><div class="k">${esc(inspLabel(k))}</div><div class="v" style="font-weight:400">Signed: ${esc(inspVal(k, k === 'tenanted' ? { a: (form.data || {}).tenanted } : ((form.data || {}).answers || {})[k]))}<br>You noted: ${esc(inspVal(k, v))}</div></div>`).join('')}` : ''}`
           : `<p class="small" style="margin:0">${nDecl} ${nDecl === 1 ? 'answer' : 'answers'} noted. Agreement ${esc(signedAg.ref)} is signed, so you can send them now. Each one is marked as noted by you, and the vendors confirm or change every one before they can sign.</p><div class="toolbar"><button class="btn primary" type="button" id="insSend" ${finished ? '' : 'disabled'}>Send to the vendors to check and sign</button></div><div id="insSendBox"></div>`}
       </div>
       <div class="toolbar"><button class="btn ghost" type="button" id="insBackWalk">Back to the walk-round</button><button class="btn primary" type="button" id="insProp">Property file</button></div>
@@ -4229,10 +4282,10 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   function inspTileHTML(list) {
     const cur = list.find(x => x.status === 'in_progress'), lastDone = list.find(x => x.status === 'finished');
     const count = r => INSP_ITEMS.filter(it => { const [t, k] = it.split(':'); const v = t === 'f' ? (r.facts || {})[k] : (r.declaration || {})[k]; return !ijblank(v) && !(t === 'd' && !v.a && !String(v.d || '').trim()); }).length;
-    return `<div class="card ptile no-print" id="inspTile"><h3>Inspection</h3>
+    return `<div class="card ptile no-print" id="inspTile"><h3>Disclosures check</h3>
       ${cur ? `<p class="small"><span class="status pending">Started, not finished</span><br>${esc(fmtDT(cur.started_at))} · ${count(cur)} of ${INSP_ITEMS.length} noted</p><div class="toolbar"><button class="btn primary" type="button" data-inspopen="${cur.id}">Carry on</button></div>`
         : lastDone ? `<p class="small"><span class="status done">Finished ${esc(fmtDate(lastDone.finished_at))}</span><br>${count(lastDone)} of ${INSP_ITEMS.length} noted${lastDone.sent_at ? ` · sent to the vendors ${esc(fmtDate(lastDone.sent_at))}` : ''}</p><div class="toolbar"><button class="btn ghost" type="button" data-inspopen="${lastDone.id}">Open</button><button class="btn ghost" type="button" id="inspNewP">Start a new one</button></div>`
-        : `<p class="small">Walk round and note the property facts and the Vendor Declaration answers. Nothing is sent to anyone.</p><div class="toolbar"><button class="btn primary" type="button" id="inspNewP">Start an inspection</button></div>`}
+        : `<p class="small">Walk round and note the property facts and the Vendor Declaration answers. Nothing is sent to anyone.</p><div class="toolbar"><button class="btn primary" type="button" id="inspNewP">Start a disclosures check</button></div>`}
     </div>`;
   }
 
@@ -4786,7 +4839,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     </table>`;
   }
   async function viewPrelistingAgent(id, propId) {
-    header('Pre-listing', '', 0); actions(false);
+    header('Questions before we meet', '', 0); actions(false);
     let pl = id ? await must(sb.from('prelistings').select('*').eq('id', id).single()) : { address: '', contact_name: '', contact_email: '', status: 'appraisal', appraisal: {}, answers: {}, plan: {}, property_id: propId || null };
     if (!id && propId) {
       const pr = await must(sb.from('properties').select('address').eq('id', propId).single());
@@ -4801,7 +4854,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     main().innerHTML = `<div class="view-pad">
       <div class="toolbar no-print"><button class="btn ghost" type="button" id="plBack">Dashboard</button>${pl.property_id ? '<button class="btn ghost" type="button" id="plProp">Property file</button>' : ''}</div>
       <span class="agent-flag">Only you see this</span>
-      <h1>${esc(pl.address || 'New appraisal page')}</h1>
+      <h1>${esc(pl.address || 'Questions before we meet')}</h1>
       ${id ? `<p><span class="pill">${esc(plStatusText(pl))}</span> <span class="small">${pl.submitted_at ? 'Answers in ' + esc(fmtDT(pl.submitted_at)) : pl.invited_at ? 'Invited ' + esc(fmtDT(pl.invited_at)) : ''}</span></p>` : '<p class="lede">The vendor sees this after your appraisal, with an "I\'d like to proceed" button that opens the questionnaire.</p>'}
       ${pl.status === 'question' ? `<div class="card warnc"><h3>Their question</h3><p style="margin:0">“${esc(pl.question)}”</p><p class="small" style="margin:8px 0 0">Asked ${esc(fmtDT(pl.question_at))}. Reply by phone or email, update the plan below if needed, then publish it again.</p></div>` : ''}
       ${pl.status === 'accepted' ? `<div class="card okc"><h3>They're happy with the plan</h3><p class="small">Accepted ${esc(fmtDT(pl.accepted_at))}. Their agency agreement is ready as a draft, with every owner's name, preferred name, email and mobile filled in. After you meet, add your fee and send it to sign.</p><div class="toolbar"><button class="btn primary" type="button" id="plOpenAg">Open the agreement</button></div></div>` : ''}
@@ -4824,7 +4877,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         <div class="err" id="plApErr"></div>
       </div>
       ${id && pl.status === 'appraisal' ? `<div class="card note no-print"><h3>Send it to them</h3><div class="copybox" id="plMsg">${esc(msg)}</div><div class="toolbar"><button class="btn primary" type="button" id="plEmail">Email it to them</button><button class="btn ghost" type="button" id="plCopy">Copy message</button></div></div>` : ''}
-      ${id && pl.status !== 'accepted' ? `<div class="toolbar no-print"><button class="btn link" type="button" id="plClose">${pl.status === 'closed' ? 'Closed' : 'Close this pre-listing'}</button></div>` : ''}
+      ${id && pl.status !== 'accepted' ? `<div class="toolbar no-print"><button class="btn link" type="button" id="plClose">${pl.status === 'closed' ? 'Closed' : 'Close these questions'}</button></div>` : ''}
       <div class="err" id="plErr"></div>
     </div>`;
     $('#plBack').addEventListener('click', viewAgentList);
@@ -4865,8 +4918,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     top();
   }
   function plListHTML(pls) {
-    return `<h2>Pre-listings</h2>
-      <div class="toolbar"><button class="btn ghost" type="button" id="newPl">Let's begin: new appraisal page</button></div>
+    return `<h2>Questions before we meet</h2>
+      <div class="toolbar"><button class="btn ghost" type="button" id="newPl">Questions before we meet</button></div>
       ${pls.length ? `<div class="card tight" style="overflow-x:auto"><table class="tbl"><thead><tr><th>Property</th><th>Vendor</th><th>Status</th><th class="hide-sm">Updated</th></tr></thead><tbody>
       ${pls.map(r => `<tr class="click" data-pl="${r.id}"><td><strong>${nt(r.address)}</strong></td><td>${esc(r.contact_name || r.contact_email)}</td><td><span class="pill ${['submitted', 'question', 'accepted'].includes(r.status) ? 'sent' : ''}">${esc(plStatusText(r))}</span></td><td class="small hide-sm">${esc(fmtDT(r.updated_at))}</td></tr>`).join('')}
       </tbody></table></div>` : ''}`;
@@ -7970,6 +8023,10 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   let ROUTE_OPENING = null;  // a page is being opened from its address (its own token): any page it moves on to replaces that address
   let PAD_STARTED = null;    // the address where a vendor started signing on a pad on this device (a form waiting for signatures is not in person until then)
   let INPERSON_VIEW = false; // a page done together with the vendors on this device (the agreement appointment, signing together)
+  // P1 follow-up: a vendor's signing on a pad survives a reload of the same page (kept for this tab only), so the menu stays hidden
+  // and the page stays in signing mode; any other address ends it
+  function padStartedSet(path) { PAD_STARTED = path; try { if (path) sessionStorage.setItem('portalPad', path); else sessionStorage.removeItem('portalPad'); } catch (_) { } }
+  function padStartedKept(path) { let k = null; try { k = sessionStorage.getItem('portalPad'); } catch (_) { } if (k && k === path) return path; try { sessionStorage.removeItem('portalPad'); } catch (_) { } return null; }
   const RAW = {};            // the view functions before wrapping, for opening a page from its address
   const PID_RE = /^[A-Za-z0-9_-]{1,64}$/;
   const okId = x => typeof x === 'string' && PID_RE.test(x);
@@ -7987,7 +8044,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   function setAddr(path, mode) {
     const url = PORTAL_BASE + path;
     if (location.pathname !== url || location.search || location.hash) { try { history[mode === 'push' && CUR !== null && CUR !== path ? 'pushState' : 'replaceState']({ portal: path }, '', url); } catch (_) { } }
-    if (path !== CUR) PAD_STARTED = null;
+    if (path !== CUR) padStartedSet(null);
     CUR = path; portalChrome();
   }
   // a page sets its own address: the first time after it opens it goes into the history as that opening said; after that it replaces
@@ -8105,7 +8162,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   // open the page for an address (after sign-in, a typed or saved address, back and forward, the menu and links)
   async function portalOpen(path) {
     const hit = ROUTES.map(([re, view, open]) => [re.exec(path), view, open]).find(x => x[0]);
-    NAV_SEQ++; NAV_FRESH = null; CUR = path; PAD_STARTED = null; portalView(hit ? hit[1] : '');
+    NAV_SEQ++; NAV_FRESH = null; CUR = path; PAD_STARTED = padStartedKept(path); portalView(hit ? hit[1] : '');
     if (!hit) { portalChrome(); return viewPortalMissing(); }
     const tok = {}; ROUTE_OPENING = tok;
     try { portalChrome(); await hit[2](...hit[0].slice(1)); }
@@ -8153,7 +8210,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   const VENDOR_PADS = '#main canvas[id^="pad_"], #main canvas[id^="fpad_"], #main canvas[data-vcv], #main #sig0, #main #vfSig, #main #vSigV, #main #sgSig, #main #sgInit, #main canvas.sg-draw';
   // A page with vendors' pads that Tim can open alone (a form waiting for signatures, which can sit for days while vendors sign on
   // their own phones) is a normal page until a vendor pad is drawn on; from then until the address changes it is in person.
-  function portalPadStarted(cv) { if (PORTAL && cv && CUR !== null && cv.matches(VENDOR_PADS)) { PAD_STARTED = CUR; portalChrome(); } }
+  function portalPadStarted(cv) { if (PORTAL && cv && CUR !== null && cv.matches(VENDOR_PADS)) { padStartedSet(CUR); portalChrome(); } }
   const padInPerson = () => PAD_STARTED !== null && PAD_STARTED === CUR && !!$(VENDOR_PADS);
   const portalInPerson = () => INPERSON_VIEW || padInPerson() || PITCH_ON || !!($('#journey') && !$('#journey').hidden);
   function portalChrome() {
@@ -8181,7 +8238,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     main().parentNode.insertBefore(ex, main());
     ex.querySelector('button').addEventListener('click', () => {
       if (!confirm('Stop signing on this device and go back to the property file? A signature drawn here and not saved is lost.')) return;
-      const to = (upOf(CUR) || ['properties'])[0]; PAD_STARTED = null; portalNav(to, true);
+      const to = (upOf(CUR) || ['properties'])[0]; padStartedSet(null); portalNav(to, true);
     });
     // a vendor starts signing on a pad: from now on this page is in person (Back, Forward, the logo and the menu stay away)
     document.addEventListener('pointerdown', e => { const w = e.target.closest && e.target.closest('.sig-wrap'), cv = w && w.querySelector('canvas'); if (cv) portalPadStarted(cv); }, true);
@@ -8233,7 +8290,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <h2 id="d-needs">Needs you</h2>
       <div id="pNeeds"><div class="loading">Loading...</div></div>
       <h2>Shortcuts</h2>
-      <div class="p-short">${plink('processes/appraisal', 'Let\'s begin')}${plink('processes/inspection', 'Inspect a property')}${plink('processes/agreement', 'Let\'s agree')}${plink('processes/offer', 'Draft an offer')}${plink('properties', 'Properties')}</div>
+      <div class="p-short">${plink('processes/appraisal', 'Questions before we meet')}${plink('processes/inspection', 'Disclosures check')}${plink('processes/agreement', 'Let\'s agree')}${plink('processes/offer', 'Draft an offer')}${plink('properties', 'Properties')}</div>
     </div>`;
     top();
     const { needs } = await dashData();
@@ -8248,13 +8305,15 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <h1>Processes</h1>
       <p class="small">Start something new. Each one carries on at its property's own page.</p>
       <div class="home-tiles">
-        <div class="home-tile soon" id="soonDesk" aria-disabled="true"><span class="kick">Coming soon</span><span class="ttl">Desktop analysis</span><span class="txt">A lighter look from the information a vendor supplies, less in depth than a market value opinion. Not built yet.</span></div>
+        <div class="home-tile soon" id="soonFirst" aria-disabled="true"><span class="kick">Coming soon</span><span class="ttl">First visit</span><span class="txt">Loose notes, photos and client details from the walk-through and the conversation. Nothing compulsory. Not built yet.</span></div>
+        <div class="home-tile soon" id="soonReport" aria-disabled="true"><span class="kick">Coming soon</span><span class="ttl">Appraisal report</span><span class="txt">Your written opinion of price with its evidence, from the property profile. Not built yet.</span></div>
         ${TILE_BEGIN}
-        <div class="home-tile soon" id="soonPrep" aria-disabled="true"><span class="kick">Coming soon</span><span class="ttl">Improvements and preparation assessment</span><span class="txt">What to improve and prepare before selling. Not built yet.</span></div>
         ${TILE_INSPECT}
         ${TILE_AGREE}
         <button class="home-tile" type="button" id="homeForms"><span class="kick">After signing</span><span class="ttl">Forms</span><span class="txt">The Vendor Declaration and the Healthy Homes checklist for each property: fill in, countersign and file.</span><span class="go">Choose the form →</span></button>
         ${TILE_OFFER}
+        <div class="home-tile soon" id="soonDesk" aria-disabled="true"><span class="kick">Coming soon</span><span class="ttl">Desktop analysis</span><span class="txt">A lighter look from the information a vendor supplies, less in depth than a market value opinion. Not built yet.</span></div>
+        <div class="home-tile soon" id="soonPrep" aria-disabled="true"><span class="kick">Coming soon</span><span class="ttl">Improvements and preparation assessment</span><span class="txt">What to improve and prepare before selling. Not built yet.</span></div>
       </div>
     </div>`;
     [['homeBegin', 'processes/appraisal'], ['homeInspect', 'processes/inspection'], ['homeAgree', 'processes/agreement'], ['homeOffer', 'processes/offer'], ['homeForms', 'processes/forms']]

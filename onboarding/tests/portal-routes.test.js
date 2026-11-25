@@ -120,7 +120,7 @@ const out = {}; const errs = [];
     'properties/P1/offers/blank/B1': async () => (await p.textContent('#stepName')) === 'Places on the blank',
     'properties/P1/offers/O1/draft/D1': async () => (await p.textContent('#stepName')) === 'Draft agreement' && !!(await p.$('#drReview')),
     'people': async () => !!(await p.$('#pPeople')),
-    'processes': async () => (await p.$$('#pProc button.home-tile')).length === 5 && JSON.stringify(await p.$$eval('#pProc .home-tile.soon', l => l.map(x => [x.tagName, x.querySelector('.kick').textContent, x.querySelector('.ttl').textContent]))) === JSON.stringify([['DIV', 'Coming soon', 'Desktop analysis'], ['DIV', 'Coming soon', 'Improvements and preparation assessment']]) && !/appraisal/i.test(await p.$$eval('#pProc .home-tile.soon', l => l.map(x => x.textContent).join(' '))),
+    'processes': async () => (await p.$$('#pProc button.home-tile')).length === 5 && JSON.stringify(await p.$$eval('#pProc .home-tile.soon', l => l.map(x => [x.tagName, x.querySelector('.kick').textContent, x.querySelector('.ttl').textContent]))) === JSON.stringify([['DIV', 'Coming soon', 'First visit'], ['DIV', 'Coming soon', 'Appraisal report'], ['DIV', 'Coming soon', 'Desktop analysis'], ['DIV', 'Coming soon', 'Improvements and preparation assessment']]) && !/appraisal/i.test(await p.$$eval('#pProc #soonDesk, #pProc #soonPrep', l => l.map(x => x.textContent).join(' '))),
     'processes/appraisal': async () => (await p.inputValue('#plAddr')) === '',
     'processes/agreement': async () => !!(await p.$('.ttabs')) && (await p.inputValue('#tAddr')) === '',
     'processes/inspection': async () => !!(await p.$('#insAddr')),
@@ -179,8 +179,8 @@ const out = {}; const errs = [];
   await menu('People'); out.m5 = await at(p);
   await menu('Processes'); out.m6 = await at(p);
   out.procOrder = await p.$$eval('#pProc .home-tile', els => els.map(e => e.id));
-  expect(JSON.stringify(out.procOrder) === JSON.stringify(['soonDesk', 'homeBegin', 'soonPrep', 'homeInspect', 'homeAgree', 'homeForms', 'homeOffer']), 'Processes are in the order they are used for a property: ' + out.procOrder);
-  await p.click('#soonPrep'); await wait(p, 400); await p.click('#soonDesk'); await wait(p, 400);
+  expect(JSON.stringify(out.procOrder) === JSON.stringify(['soonFirst', 'soonReport', 'homeBegin', 'homeInspect', 'homeAgree', 'homeForms', 'homeOffer', 'soonDesk', 'soonPrep']), 'Processes are in the order they are used for a property: ' + out.procOrder);
+  await p.click('#soonPrep'); await wait(p, 400); await p.click('#soonDesk'); await wait(p, 400); await p.click('#soonFirst'); await wait(p, 400); await p.click('#soonReport'); await wait(p, 400);
   out.soonStays = await at(p); expect(out.soonStays === '/portal/processes', 'the Coming soon tiles do nothing when tapped: ' + out.soonStays);
   await p.click('#homeBegin'); await wait(p, 700); out.m7 = [await at(p), (await chrome(p)).up];
   await menu('Home'); out.m8 = await at(p);
@@ -193,7 +193,7 @@ const out = {}; const errs = [];
   const back = [];
   for (const want of ['/portal/processes/appraisal', '/portal/processes', '/portal/people', '/portal/properties/P1', '/portal/properties/P1/agreement/A1']) { await p.goBack(); await wait(p, 700); back.push([await at(p), await p.textContent('#stepName')]); expect((await at(p)) === want, 'back to ' + want + ', got ' + (await at(p))); }
   out.back = back;
-  expect(back[0][1] === 'Pre-listing' && back[3][1] === 'Property file' && back[4][1] === 'Agreement', 'back shows the right page each time: ' + JSON.stringify(back));
+  expect(back[0][1] === 'Questions before we meet' && back[3][1] === 'Property file' && back[4][1] === 'Agreement', 'back shows the right page each time: ' + JSON.stringify(back));
   await p.goForward(); await wait(p, 700); out.fwd = [await at(p), await p.textContent('#stepName')];
   expect(out.fwd[0] === '/portal/properties/P1' && out.fwd[1] === 'Property file', 'forward: ' + out.fwd);
   // the inspection: each section has its own address (it replaces as Tim moves on, so Back leaves the walk-round)
@@ -264,7 +264,7 @@ const out = {}; const errs = [];
   const errsBefore = errs.length; await p.click('#tSaveClose'); await wait(p, 600);
   errs.splice(errsBefore, errs.length - errsBefore, ...errs.slice(errsBefore).filter(e => !/Failed to fetch/.test(e)));   // the failed save itself is expected
   out.saveFail = [await at(p), (await p.textContent('#main .err')).trim()];
-  expect(out.saveFail[0] === '/portal/properties/P2/agreement/A2/edit/2' && out.saveFail[1] === 'Couldn\'t save. You\'re offline or the connection dropped. Your work is kept on this page; try Save and close again when you have signal.', 'a failed save: a plain message, still on the page: ' + JSON.stringify(out.saveFail));
+  expect(out.saveFail[0] === '/portal/properties/P2/agreement/A2/edit/2' && out.saveFail[1] === 'Not saved yet. Everything you typed is still here. Check you have signal, then tap Save and close again.', 'a failed save: a plain message, still on the page: ' + JSON.stringify(out.saveFail));
   await p.evaluate(() => localStorage.removeItem('mockFailWrite'));
   await p.click('#tSaveClose'); await wait(p, 800);
   out.savedClose = await at(p); c = await chrome(p);
@@ -317,6 +317,10 @@ const out = {}; const errs = [];
   await draw('#main canvas[id^="fpad_"]'); c = await chrome(p);
   expect(!c.nav && !c.up && (await p.isVisible('#pExit')), 'a vendor has drawn: in person, no menu or up link, Stop signing shown: ' + JSON.stringify(c));
   await stuck('/portal/properties/P1/forms/F3', 'signing a form in person');
+  // P1 follow-up (LW0): a reload during signing keeps the form in signing mode (no menu, no up link, Stop signing shown)
+  answer = true; asked = []; await p.reload().catch(() => null); await wait(p, 1200); c = await chrome(p);
+  expect((await at(p)) === '/portal/properties/P1/forms/F3' && !c.nav && !c.up && (await p.isVisible('#pExit')), 'reloaded while signing: still in signing mode: ' + JSON.stringify(c));
+  await draw('#main canvas[id^="fpad_"]');
   answer = false; asked = []; await p.click('#pExit'); await wait(p, 500);
   expect(asked.length === 1 && /Stop signing/.test(asked[0]) && (await at(p)) === '/portal/properties/P1/forms/F3' && !!(await p.$('#main .sig-wrap .unsaved')), 'Stop signing asks first; no keeps the drawing: ' + JSON.stringify(asked));
   answer = true; asked = []; await p.click('#pExit'); await wait(p, 800);
@@ -378,7 +382,7 @@ const out = {}; const errs = [];
     return Array.from(document.querySelectorAll('.home-tile.soon')).flatMap(t => { const bg = rgb(getComputedStyle(t).backgroundColor), op = getComputedStyle(t).opacity;
       return ['.kick', '.ttl', '.txt'].map(k => [k, op, Math.round(ratio(rgb(getComputedStyle(t.querySelector(k)).color), bg) * 100) / 100]); });
   });
-  expect(out.soonContrast.length === 6 && out.soonContrast.every(([, op, r]) => op === '1' && r >= 4.5), 'Coming soon text: at least 4.5:1 in dark mode: ' + JSON.stringify(out.soonContrast));
+  expect(out.soonContrast.length === 12 && out.soonContrast.every(([, op, r]) => op === '1' && r >= 4.5), 'Coming soon text: at least 4.5:1 in dark mode: ' + JSON.stringify(out.soonContrast));
   await p.evaluate(() => localStorage.removeItem('mocksession')); await p.goto(PR + 'people'); await wait(p, 600);
   await p.fill('#loginEmail', 'agent-test@example.com'); await p.click('#loginBtn'); await wait(p, 300);
   out.rootOtp = await p.evaluate(() => JSON.parse(localStorage.getItem('otpLog') || '[]').pop());

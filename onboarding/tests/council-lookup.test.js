@@ -192,7 +192,7 @@ const norm = t => String(t || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim
   expect(!(await p.$('[data-cr-key="zone"]')) && /Waitaki District Council's zone isn't checked here yet/.test(await card()), 'Waitaki zone switched off, and said');
   expect(await p.isVisible('a[href="https://opencitiesfrontend.waitaki.govt.nz/propertyrating?assessmentNo=112719"]'), 'link to the council\'s own page');
   for (const k of ['title_ref', 'land_area', 'capital_value']) await p.check(`[data-cr-tick="${k}"]`);
-  expect((await p.textContent(useBtn)).trim() === 'Start the inspection and use these', 'start-and-use button');
+  expect((await p.textContent(useBtn)).trim() === 'Start the disclosures check and use these', 'start-and-use button');
   // the first try fails after the property file was started (no signal): the retry uses the same file, never a second
   await p.evaluate(() => localStorage.setItem('councilAcceptFail', '1'));
   await p.click(useBtn); await p.waitForTimeout(600);

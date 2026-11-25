@@ -1,7 +1,7 @@
 (function(){
 const DB = JSON.parse(localStorage.getItem('mockdb')||'null') || {agreements:[],agreement_people:[],agreement_events:[],signatures:[],lawyer_links:[],aml_files:[],aml_events:[],email_log:[],cancellation_requests:[]};
 window.__mockDB = DB;   // tests reach the mock's own data (as another request would leave it)
-const save=()=>localStorage.setItem('mockdb',JSON.stringify(DB));
+const save=()=>{ try{ sharedSync(); }catch(e){ console.warn('sharedSync',e); } localStorage.setItem('mockdb',JSON.stringify(DB)); };   // LW0: the shared records follow every write, as the triggers do
 const uid=()=>crypto.randomUUID(); const now=()=>new Date().toISOString();
 // ── property file emulation (mirrors migrations/001 and 002) ──
 const PT=()=>(DB.properties||=[]), PP=()=>(DB.property_people||=[]);
@@ -42,7 +42,113 @@ function personSync(ap,old){ const ag=(DB.agreements||[]).find(x=>x.id===ap.agre
 // backfill on load, like the migration
 (DB.agreements||[]).slice().sort((a,b)=>(a.created_at||'')<(b.created_at||'')?-1:1).forEach(ag=>{ if(ag.property_id) return; let p=PT().find(x=>ag.address&&x.address.toLowerCase().trim()===ag.address.toLowerCase().trim()); if(!p) p=newProp(ag.address); ag.property_id=p.id; (DB.agreement_people||[]).filter(x=>x.agreement_id===ag.id).forEach(x=>mergePerson(p.id,x.legal_name,x.pref_name,x.email,x.phone,x.user_id,'agreement')); syncAgreement(ag); if(ag.status==='ended'&&!(DB.agreements||[]).some(o=>o.property_id===p.id&&o.status!=='ended')) p.stage='withdrawn'; });
 (DB.prelistings||[]).forEach(pl=>{ if(pl.property_id) return; const ag=(DB.agreements||[]).find(x=>x.id===pl.agreement_id); let p=ag?PT().find(x=>x.id===ag.property_id):PT().find(x=>pl.address&&x.address.toLowerCase().trim()===pl.address.toLowerCase().trim()); if(!p) p=newProp(pl.address); pl.property_id=p.id; mergePerson(p.id,pl.contact_name,'',pl.contact_email,'',pl.user_id,'appraisal'); syncPrelisting(pl); });
-localStorage.setItem('mockdb',JSON.stringify(DB));
+// ── LW0, the shared records (mirrors migrations/028): one property profile, one person record, the question bank ──
+// The database keeps these in step with triggers; the mock does the same after every write (sharedSync, from save()), recording
+// only what changed, so the result is the same as the triggers' (same choice rules: Tim's own entries chosen and ticked, an
+// agreement's value chosen only when nothing ticked stands, a record never replacing a person's entry, a cleared value handing over to
+// the newest other one). Nobody writes these tables directly; vendors read only their own profile (never Relab) and their own answers.
+const PROFILE_KEYS=['pType','pYear','pBed','pBath','pFloor','pLand','pBuild','pPark','pHeat','pLove','chattels','chatOther','title_ref','legal_description','title_type','capital_value','land_value','improvements_value','valuation_ref','rates_council','rates_orc','zone','land_use','owners_relab'];
+const PROFILE_LABEL={pType:'Type of property',pYear:'Year built',pBed:'Bedrooms',pBath:'Bathrooms',pFloor:'Floor area (m²)',pLand:'Land area (m²)',pBuild:'Construction',pPark:'Parking',pHeat:'Heating',pLove:'What they love about it',chattels:'Chattels',chatOther:'Other chattels',title_ref:'Title reference',legal_description:'Legal description',title_type:'Title type',capital_value:'Capital value',land_value:'Land value',improvements_value:'Value of improvements',valuation_ref:'Valuation reference',rates_council:'City or district rates',rates_orc:'Regional rates',zone:'District plan zone',land_use:'Land use',owners_relab:'Owners (Relab)'};
+const SHARED_TABLES=['property_fact_values','property_profile','person_links','crm_contacts','crm_contact_methods','crm_property_links','property_person_roles','qa_answers','qa_questions','profile_keys','shared_record_log'];
+const QA_PL={spoke:'other_agents_spoken',spokeFeel:'other_agents_feel',choose:'agent_choice_same_fee',chooseWhy:'agent_choice_why',ideas:'plan_ideas',conf:'plan_confidence',likeMost:'plan_like_most',easyYes:'easy_yes',meet:'meeting_times'};
+const FV=()=>(DB.property_fact_values||=[]), PRF=()=>(DB.property_profile||=[]), CT=()=>(DB.crm_contacts||=[]), CM=()=>(DB.crm_contact_methods||=[]), PLK=()=>(DB.person_links||=[]), CPL=()=>(DB.crm_property_links||=[]), QA=()=>(DB.qa_answers||=[]);
+const recKind=s=>['council','reinz','relab'].includes(s)?'record':'person';
+const lwToday=()=>new Date().toLocaleDateString('en-NZ',{day:'numeric',month:'short',year:'numeric',timeZone:'Pacific/Auckland'});
+let SEQ=0; const stamp=()=>new Date(Date.now()+(SEQ++)).toISOString();
+function profileRecord(pid,key,value,source,ref,asOf,sourceName,display,by,choose){
+  if(!pid||!key) return null; if(!PROFILE_KEYS.includes(key)&&source!=='council') return null;
+  const v=jblank(value)?null:value;
+  const last=FV().filter(f=>f.property_id===pid&&f.key===key&&f.source===source).sort((a,b)=>a.recorded_at<b.recorded_at?1:-1)[0];
+  let vid;
+  if(last&&same(last.value,v)&&(last.display||'')===(display||'')&&(last.source_ref||null)===(ref||null)) vid=last.id;
+  else { if(!last&&v==null) return null; const row={id:uid(),property_id:pid,key,value:v,display:display||null,source,source_name:sourceName||null,source_ref:ref||null,as_of:asOf||null,recorded_at:stamp(),recorded_by:by||'agent'}; FV().push(row); vid=row.id; }
+  const c=PRF().find(x=>x.property_id===pid&&x.key===key), cv=c?FV().find(f=>f.id===c.value_id):null;
+  const setC=(id,by_,tick)=>{ const n={property_id:pid,key,value_id:id,chosen_by:by_,chosen_at:now(),ticked:!!tick,ticked_at:tick?now():null,ticked_by:tick?(by||'agent'):null}; if(c) Object.assign(c,n); else PRF().push(n); };
+  if(v==null){ if(c&&cv&&cv.source===source&&(!c.ticked||choose==='tim')){ const alt=Object.values(FV().filter(f=>f.property_id===pid&&f.key===key&&f.source!==source).reduce((m,f)=>{ if(!m[f.source]||m[f.source].recorded_at<f.recorded_at) m[f.source]=f; return m; },{})).filter(f=>f.value!=null).sort((a,b)=>a.recorded_at<b.recorded_at?1:-1)[0];
+      if(alt) setC(alt.id,'auto',false); else DB.property_profile=PRF().filter(x=>x!==c); } return vid; }
+  if(choose==='never') return vid;
+  if(choose==='tim'){ setC(vid,'tim',true); return vid; }
+  let move; if(!c) move=true; else if(same(cv&&cv.value,v)) move=false; else if(c.ticked) move=false; else if(cv&&cv.source===source) move=true; else if(recKind(source)==='record'&&recKind(cv&&cv.source)==='person') move=false; else move=true;
+  if(move) setC(vid,'auto',false); return vid; }
+function profileRead(pid,vendor){
+  const ok=f=>!vendor||(f.source!=='relab'&&f.key!=='owners_relab');
+  const latest={}; FV().filter(f=>f.property_id===pid&&ok(f)).forEach(f=>{ const k=f.key+'|'+f.source; if(!latest[k]||latest[k].recorded_at<f.recorded_at) latest[k]=f; });
+  const L=Object.values(latest), keys=[...new Set(L.map(f=>f.key))];
+  return keys.map(k=>{ const c=PRF().find(x=>x.property_id===pid&&x.key===k), cv=c?FV().find(f=>f.id===c.value_id&&ok(f)):null;
+    const others=L.filter(f=>f.key===k&&f.value!=null&&(!cv||(f.id!==cv.id&&!same(f.value,cv.value)))).sort((a,b)=>a.recorded_at<b.recorded_at?1:-1).map(f=>({value_id:f.id,value:f.value,display:f.display,source:f.source,source_name:f.source_name,as_of:f.as_of,recorded_at:f.recorded_at}));
+    return {key:k,label:PROFILE_LABEL[k]||k,position:PROFILE_KEYS.includes(k)?PROFILE_KEYS.indexOf(k):500,value_id:cv?cv.id:null,value:cv?cv.value:null,display:cv?cv.display:null,source:cv?cv.source:null,source_name:cv?cv.source_name:null,as_of:cv?cv.as_of:null,recorded_at:cv?cv.recorded_at:null,ticked:!!(c&&c.ticked&&cv),chosen_by:c?c.chosen_by:null,others}; })
+    .filter(x=>x.value_id||x.others.length).sort((a,b)=>a.position-b.position||(a.key<b.key?-1:1)); }
+function profileWriteBack(pid,key,v){ const p=PT().find(x=>x.id===pid); if(!p) return; if(DESC.includes(key)){ if(v==null) delete p.description[key]; else p.description[key]=(key==='chattels'&&Array.isArray(v))?v:(typeof v==='string'?v:String(v)); } else if(key==='title_ref') p.title_ref=v; else if(key==='legal_description') p.legal_description=v; }
+// people: one contact per person (the same email with a name that fits; no email, the same legal name on the property)
+const first=s=>norm(s).split(' ')[0];
+function nameFits(c,nm,inf){ return !norm(nm)||!c.legal_name||sameName(c.legal_name,nm)||norm(c.legal_name)===norm(nm)||(inf&&(first(c.legal_name)===first(nm)||norm(c.preferred_name)===norm(nm)||norm(c.display_name)===norm(nm))); }
+function personFind(nm,pref,em,pid,inf,src){
+  if(em){ const cands=CT().filter(c=>!c.archived_at&&CM().some(m=>m.contact_id===c.id&&m.kind==='email'&&m.value_norm===em)); const fits=cands.filter(c=>nameFits(c,nm,inf));
+    if(fits.length===1) return {id:fits[0].id,by:'email'};
+    if(fits.length>1){ const best=fits.find(c=>c.legal_name&&nm&&(sameName(c.legal_name,nm)||norm(c.legal_name)===norm(nm))); return best?{id:best.id,by:'email'}:{id:fits[0].id,by:'email',doubt:'The same email belongs to more than one person. Check this is the right one.',dc:fits[1].id}; }
+    if(cands.length&&inf) return {id:cands[0].id,by:'email',doubt:'Same email as this person, but the name given here ('+nm+') does not match. Check it is the same person.'};
+    var dbt=cands.length?{doubt:'Same email as another person with a different name, so kept as a separate person. Check whether they are the same.',dc:cands[0].id}:{}; }
+  else if(nm&&pid){ const ids=[...new Set(PLK().filter(l=>l.property_id===pid).map(l=>l.contact_id))].filter(id=>{ const c=CT().find(x=>x.id===id); return c&&!c.archived_at&&(norm(c.legal_name)===norm(nm)||(inf&&norm(c.display_name)===norm(nm))); });
+    if(ids.length) return {id:ids[0],by:'name',doubt:ids.length>1?'More than one person on this property has this name. Check this is the right one.':null,dc:ids[1]||null}; }
+  if(!nm&&!em) return null;
+  const c={id:uid(),kind:'person',display_name:(pref||nm||em).slice(0,200),legal_name:inf?null:(nm||null),preferred_name:pref||null,lead_source:src,marketing_consent:'unknown',status:'active',aml_status:'none',created_at:stamp(),updated_at:now()}; CT().push(c);
+  return Object.assign({id:c.id,by:'new'},dbt||{}); }
+function personLink(src,sid,pid,name,pref,email,phone,inf,role,current,contact){
+  if(!sid) return null; const em=(email||'').trim().toLowerCase(), nm=(name||'').replace(/\s+/g,' ').trim(), ph=(phone||'').trim();
+  let l=PLK().find(x=>x.source===src&&x.source_id===sid); if(!nm&&!em&&!contact) return l?l.contact_id:null;
+  const keep=l&&(l.matched_by==='tim'||(contact&&l.contact_id===contact)||(!contact&&(!em||CM().some(m=>m.contact_id===l.contact_id&&m.kind==='email'&&m.value_norm===em))&&nameFits(CT().find(c=>c.id===l.contact_id)||{},nm,inf)));
+  let cid;
+  if(keep){ cid=l.contact_id; if(pid) l.property_id=pid; if(role) l.role=role; }
+  else { const f=contact?{id:contact,by:'record'}:personFind(nm,pref,em,pid,inf,src); if(!f) return null; cid=f.id; const old=l&&l.contact_id, oldRole=l&&l.role;
+    if(!l){ l={id:uid(),source:src,source_id:sid,created_at:now()}; PLK().push(l); }
+    Object.assign(l,{contact_id:cid,property_id:pid||l.property_id||null,role:role||null,matched_by:f.by,doubt:f.doubt||null,doubt_contact_id:f.dc||null,updated_at:now()});
+    if(old&&old!==cid&&oldRole&&pid) CPL().filter(x=>x.contact_id===old&&x.property_id===pid&&x.role===oldRole&&x.source===src).forEach(x=>{ x.is_current=false; x.ended_on=x.ended_on||now().slice(0,10); }); }
+  const addM=(kind,value,vn)=>{ if(!CM().some(m=>m.contact_id===cid&&m.kind===kind&&m.value_norm===vn)) CM().push({id:uid(),contact_id:cid,kind,value,value_norm:vn,is_primary:!CM().some(m=>m.contact_id===cid&&(kind==='email'?m.kind==='email':['mobile','phone'].includes(m.kind))),source:src,created_at:now()}); };
+  if(em) addM('email',em,em);
+  if(ph){ let vn=ph.replace(/[^0-9+]/g,''); if(vn.startsWith('+64')) vn='0'+vn.slice(3); if(vn) addM(vn.startsWith('02')?'mobile':'phone',ph,vn); }
+  const c=CT().find(x=>x.id===cid); if(c){ if(!c.legal_name&&!inf&&nm){ if(c.display_name===em) c.display_name=nm; c.legal_name=nm; } if(!c.preferred_name&&(pref||'').trim()) c.preferred_name=pref.trim(); }
+  if(pid&&role){ let x=CPL().find(y=>y.contact_id===cid&&y.property_id===pid&&y.role===role); const cur=current!==false;
+    if(!x) CPL().push({id:uid(),contact_id:cid,property_id:pid,role,is_current:cur,started_on:now().slice(0,10),ended_on:cur?null:now().slice(0,10),source:src,created_at:now(),updated_at:now()});
+    else { x.is_current=x.source===src?cur:(x.is_current||cur); x.ended_on=x.is_current?null:(x.ended_on||now().slice(0,10)); } }
+  return cid; }
+function qaPut(key,pid,cid,value,source,ref,byVendor,by){
+  const blank=jblank(value)||(typeof value==='string'&&!value.trim()); const i=QA().findIndex(a=>a.question_key===key&&a.source===source&&a.source_ref===ref);
+  if(blank){ if(i>=0) QA().splice(i,1); return; }
+  if(i>=0){ const a=QA()[i]; if(!same(a.value,value)) a.answered_at=now(); a.value=value; a.property_id=pid||a.property_id; a.contact_id=cid||a.contact_id; a.recorded_by=by; }
+  else QA().push({id:uid(),question_key:key,property_id:pid||null,contact_id:cid||null,value,source,source_ref:ref,by_vendor:byVendor,answered_at:now(),recorded_by:by}); }
+// the triggers, as one pass over what changed since the last pass
+function sharedSync(){
+  const seen=(DB._lw0||={});
+  const once=(k,sig,fn)=>{ if(seen[k]!==sig){ fn(seen[k]===undefined?null:JSON.parse(seen[k])); seen[k]=sig; } };
+  (DB.agreement_people||[]).forEach(ap=>{ const ag=(DB.agreements||[]).find(x=>x.id===ap.agreement_id)||{}; const sig=JSON.stringify([ap.legal_name,ap.pref_name,ap.email,ap.phone,ag.property_id]);
+    once('ap:'+ap.id,sig,()=>{ const cap=(ag.answers||{}).capacity; const cid=personLink('agreement_people',ap.id,ag.property_id,ap.legal_name,ap.pref_name,ap.email,ap.phone,false,!cap||cap==='Owners'?null:cap==='Trustee'?'trustee':'vendor',!['ended','cancelled'].includes(ag.status)); if(!ap.signed_at&&cid) ap.contact_id=cid; }); });
+  PP().forEach(x=>once('pp:'+x.id,JSON.stringify([x.legal_name,x.pref_name,x.email,x.phone,x.role,x.name_from]),()=>{ const cid=personLink('property_people',x.id,x.property_id,x.legal_name,x.pref_name,x.email,x.phone,(x.name_from||x.source||'')==='appraisal',x.role==='contact'?'contact':'owner',x.role!=='former'); if(cid) x.contact_id=cid; }));
+  (DB.prelistings||[]).forEach(pl=>{ once('pl:'+pl.id,JSON.stringify([pl.contact_name,pl.contact_email,pl.property_id,pl.status]),()=>personLink('prelisting',pl.id,pl.property_id,pl.contact_name,null,pl.contact_email,null,true,null,pl.status!=='closed'));
+    const cid=(PLK().find(l=>l.source==='prelisting'&&l.source_id===pl.id)||{}).contact_id||null;
+    Object.entries(QA_PL).forEach(([k,q])=>once('plq:'+pl.id+':'+k,JSON.stringify([(pl.answers||{})[k]??null,pl.property_id]),()=>qaPut(q,pl.property_id,cid,(pl.answers||{})[k],'questionnaire',pl.id,true,pl.contact_email))); });
+  PT().forEach(p=>Object.keys(Object.assign({},p.found||{},JSON.parse(seen['found:'+p.id]||'{}'))).forEach(k=>{ const v=(p.found||{})[k]; once('found:'+p.id+':'+k,JSON.stringify(v??null),()=>{
+    const f=v||{}; const pk=['title_ref','legal_description'].concat(DESC).includes(f.field)?f.field:k; const ch=!v?'tim':(f.field&&!f.written?'never':'tim');
+    profileRecord(p.id,(v?pk:(JSON.parse(seen['foundkey:'+p.id+':'+k]||'null')||k)),v?f.value:null,'council',null,f.as_of_label||f.as_of||(f.fetched_at||'').slice(0,10),f.source_name,f.display,'agent',ch);
+    if(v) seen['foundkey:'+p.id+':'+k]=JSON.stringify(pk); }); }));
+  PT().forEach(p=>{ seen['found:'+p.id]=JSON.stringify(Object.fromEntries(Object.keys(Object.assign({},JSON.parse(seen['found:'+p.id]||'{}'),p.found||{})).map(k=>[k,1]))); });
+  (DB.agreements||[]).forEach(ag=>{ if(!ag.property_id||['ended','cancelled'].includes(ag.status)) return; DESC.forEach(k=>once('aga:'+ag.id+':'+k,JSON.stringify([(ag.answers||{})[k]??null,ag.property_id]),prev=>{ const v=(ag.answers||{})[k]; if(jblank(v)&&(!prev||jblank(prev[0]))) return; profileRecord(ag.property_id,k,v,'agreement',ag.id,lwToday(),'Agency agreement '+(ag.ref||''),null,'agent','auto'); })); });
+  (DB.property_inspections||[]).forEach(i=>DESC.forEach(k=>once('insp:'+i.id+':'+k,JSON.stringify((i.facts||{})[k]??null),prev=>{ const v=(i.facts||{})[k]; if(jblank(v)&&prev===null) return; profileRecord(i.property_id,k,v,'inspection',i.id,lwToday(),'Inspect a property',null,i.created_by,(i.conflicts||{})[k]?'never':'tim'); })));
+}
+function sharedRpc(name,a,me){
+  const agent=me&&AGENTS.includes(me.email);
+  if(name==='my_property_profile'){ if(!propParty(a.p_property)) return bad('Not found'); return ok({property_id:a.p_property,facts:profileRead(a.p_property,true)}); }
+  if(!agent) return bad('Agent only');
+  if(name==='agent_property_profile') return ok({property_id:a.p_property,facts:profileRead(a.p_property,false)});
+  if(name==='agent_profile_choose'){ const f=FV().find(x=>x.id===a.p_value_id&&x.property_id===a.p_property&&x.key===a.p_key); if(!f||f.value==null) return bad('That value is not on this property');
+    const c=PRF().find(x=>x.property_id===a.p_property&&x.key===a.p_key), n={property_id:a.p_property,key:a.p_key,value_id:f.id,chosen_by:'tim',chosen_at:now(),ticked:true,ticked_at:now(),ticked_by:me.email}; if(c) Object.assign(c,n); else PRF().push(n);
+    profileWriteBack(a.p_property,a.p_key,f.value); save(); return ok({property_id:a.p_property,facts:profileRead(a.p_property,false)}); }
+  if(name==='agent_profile_tick'){ PRF().filter(x=>x.property_id===a.p_property&&(!a.p_keys||a.p_keys.includes(x.key))).forEach(x=>{ x.ticked=!!a.p_on; x.ticked_at=a.p_on?now():null; x.ticked_by=a.p_on?me.email:null; }); save(); return ok({property_id:a.p_property,facts:profileRead(a.p_property,false)}); }
+  if(name==='agent_profile_set'){ if(!PROFILE_KEYS.includes(a.p_key)) return bad('Not a property fact'); profileRecord(a.p_property,a.p_key,a.p_value,'tim',null,lwToday(),'Tim',null,me.email,'tim'); profileWriteBack(a.p_property,a.p_key,jblank(a.p_value)?null:a.p_value); save(); return ok({property_id:a.p_property,facts:profileRead(a.p_property,false)}); }
+  if(name==='agent_person_link_resolve'){ const l=PLK().find(x=>x.id===a.p_link); if(!l) return bad('Not found'); if(!l.doubt) return bad('Nothing to check here');
+    if(a.p_same){ if(!l.doubt_contact_id) return bad('There is no other person to join this to'); const old=l.contact_id; l.contact_id=l.doubt_contact_id; if(!PLK().some(x=>x.contact_id===old)){ const c=CT().find(x=>x.id===old); if(c){ c.archived_at=now(); c.status='archived'; } } }
+    Object.assign(l,{matched_by:'tim',doubt:null,doubt_contact_id:null,resolved_at:now(),resolved_by:me.email}); save(); return ok(l); }
+  return bad('unknown '+name); }
+save();   // LW0 backfill on load, like the migration
 const S = JSON.parse(localStorage.getItem('mocksession')||'null');
 // who may read a property, like is_property_party() in migration 002: an owner still on it, a party to its live agreement, or the contact of this round's open pre-listing
 // is_party(): a person on the agreement, by user id only (an email match is not enough)
@@ -89,6 +195,9 @@ function q(table){ logCall('from:'+table);
     if(table==='property_offers'&&op==='insert'&&(Array.isArray(payload)?payload:[payload]).some(x=>x&&((x.source||'manual')!=='manual'||x.submission||x.details))) throw new Error('Offers from the form are only added through the form');
     if(table==='property_offers'&&op==='update'&&(DB.property_offers||[]).some(r=>filters.every(f=>f(r))&&(r.source||'manual')!=='manual')&&Object.keys(payload||{}).some(k=>!['notes','expires_at'].includes(k))) throw new Error('Offers from the form are changed through the Offers tile, so there is a record');
     if(table==='property_offers'&&op==='update'&&['submission','details','suspected_spam','source'].some(k=>k in (payload||{}))) throw new Error('Offers from the form are only added through the form');
+    // 028: nobody writes the shared records directly (the triggers and the agent_profile_* functions do); vendors read their own
+    // profile only through my_property_profile here (the vendor policies on the live tables are checked in the rollback test)
+    if(SHARED_TABLES.includes(table)&&op!=='select') throw new Error('permission denied for table '+table);
     if(AGENT_ONLY.includes(table)){ const vendor=S&&S.user&&!AGENTS.includes(S.user.email); if(vendor){ if(op==='select') return {data:single?undefined:[],error:single?{message:'not found'}:null}; throw new Error('new row violates row-level security policy for table "'+table+'"'); }
       if(op==='delete'||(table==='property_events'&&op!=='select')) throw new Error('permission denied for table '+table); }
     if((op==='insert'||op==='update'||op==='delete')&&['translations','translation_log','user_language','translation_sets'].includes(table)) throw new Error('new row violates row-level security policy for table "'+table+'"');
@@ -163,7 +272,7 @@ const DECL_TEXT=['faults','reno','internet','insulation','glazing'];
 const hasAnswer=(k,v)=>k==='tenanted'?['now','will','no'].includes(v):DECL_TEXT.includes(k)?isObj(v)&&String(v.d||'').trim()!=='':isObj(v)&&['yes','no','unknown'].includes(v.a);
 const needsAnswers=fm=>{ const d=fm.data||{}, pre=isObj(d.pre)?d.pre:{}, ans=isObj(d.answers)?d.answers:{}; return Object.keys(pre).some(k=>pre[k]==='inspection'&&!hasAnswer(k,k==='tenanted'?d.tenanted:ans[k])); };
 const NEED_ANSWER='Please answer each question Tim noted at the inspection';
-const AGENT_ONLY=['property_events','campaign_stats','buyer_feedback','property_offers','offer_links','offer_events','offer_settings','offer_clauses','offer_hits','offer_blanks','offer_blank_maps','offer_blank_reads','offer_terms','offer_term_changes','offer_drafts','offer_draft_approvals','offer_lawyer_lookups','offer_file_hashes','offer_signings','offer_signers','offer_sign_taps','offer_sign_receipts','offer_sign_marks','offer_sign_reviews','offer_sign_asks','offer_rounds','offer_documents','offer_agreements','offer_mail_drafts','offer_mail_log','offer_holds','offer_requests','offer_deposit_holders','offer_sign_undos','offer_sign_redraws','offer_confirm_holds','offer_sign_taps_live','offer_sign_marks_live','offer_sign_reviews_live'];
+const AGENT_ONLY=SHARED_TABLES.concat(['property_events','campaign_stats','buyer_feedback','property_offers','offer_links','offer_events','offer_settings','offer_clauses','offer_hits','offer_blanks','offer_blank_maps','offer_blank_reads','offer_terms','offer_term_changes','offer_drafts','offer_draft_approvals','offer_lawyer_lookups','offer_file_hashes','offer_signings','offer_signers','offer_sign_taps','offer_sign_receipts','offer_sign_marks','offer_sign_reviews','offer_sign_asks','offer_rounds','offer_documents','offer_agreements','offer_mail_drafts','offer_mail_log','offer_holds','offer_requests','offer_deposit_holders','offer_sign_undos','offer_sign_redraws','offer_confirm_holds','offer_sign_taps_live','offer_sign_marks_live','offer_sign_reviews_live']);
 function mkNotices(ag){ if((ag.answers||{}).prior!=='yes') return; (DB.prior_agency_notices||=[]); (ag.answers.priorAgencies||[]).forEach((x,i)=>{ if(x.agency&&!DB.prior_agency_notices.some(n=>n.agreement_id===ag.id&&n.idx===i)) DB.prior_agency_notices.push({id:uid(),agreement_id:ag.id,idx:i,agency:x.agency,agent_name:x.agent||null,email:x.email||null,kind:x.kind,dated:x.dated||null,status:'to_send',created_at:now()}); }); }
 const ok=d=>Promise.resolve({data:d,error:null}); const bad=m=>Promise.resolve({data:null,error:{message:m}});
 function rpc(name,a){ logCall('rpc:'+name); if(['agent_repo_add','agent_repo_set','agent_repo_share','agent_repo_archive','vendor_repo_list','agent_property_export'].includes(name)) return repoRpc(name,a); if(localStorage.getItem('trHang')==='1'&&['get_translations','set_my_language'].includes(name)) return new Promise(()=>{}); const before=new Map((DB.agreements||[]).map(x=>[x.id,JSON.parse(JSON.stringify(x))]));
@@ -173,6 +282,7 @@ function rpc(name,a){ logCall('rpc:'+name); if(['agent_repo_add','agent_repo_set
 function rpcInner(name,a){
   const me=S&&S.user; const ag=a&&a.a?DB.agreements.find(x=>x.id===a.a):null;
   const mine=()=>DB.agreement_people.find(p=>p.agreement_id===a.a&&p.user_id===me.id);
+  if(['agent_property_profile','agent_profile_choose','agent_profile_tick','agent_profile_set','agent_person_link_resolve','my_property_profile'].includes(name)) return sharedRpc(name,a,me);
   if(name.startsWith('agent_council_')) return councilRpc(name,a,me);
   if(SIGN_RPCS.includes(name)) return signRpc(name,a,me);
   if(DRAFT_RPCS.includes(name)) return draftRpc(name,a,me);

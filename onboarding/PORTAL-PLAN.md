@@ -17,6 +17,11 @@ the database or the live site. The controller copies each queued request into th
 
 Order of work (set 24 November 2026, confirmed by Tim; reordered the same evening at his request):
 
+LW0. The shared records map, names and order (Tim's central plan, "Listing workflow" and "LW0: the shared records map", 25 and 26
+   November 2026; branch `lw0-shared-records`). Status: Built, awaiting review and Tim's approval (needs migration 028 applied after
+   review). See "LW0. The shared records" below. The two P1 follow-ups (a refreshed form stays in signing mode; plainer "Couldn't save"
+   wording) are done in it.
+
 0000. Offers fixes 3 (Tim's decisions of 25 and 26 November 2026; branch `offers-fixes-3`, on main 92ebdd3). Status: Built, awaiting
    review and Tim's approval (needs migration 026, rollback test first, and offer-sign redeployed). (1) Confirm the agreement while
    frozen is held, not locked, sealed or dated; nothing emailed; completed or discarded once unfrozen. (2) Going back to the last
@@ -125,6 +130,50 @@ Ids in addresses are the database ids. Addresses never contain a name, email or 
 | P4. People | onboarding-core | People pages on the `crm_*` tables, linked to properties |
 | P5. Import and feeds | onboarding-core | Import the cleaned LockedOn contacts; feeds out to LockedOn and ActivePipe |
 | P6. Assessments | to be agreed | An improvements and preparation assessment, and a desktop analysis. Design still to be agreed with Tim |
+
+### LW0. The shared records
+
+Status: built 26 November 2026 on branch `lw0-shared-records`, awaiting review and Tim's approval. Migration 028 (`migrations/028_shared_records.sql`)
+is written and tested in a rollback block on the live project and on a local stand-in; it is NOT applied. Tests: `lw0-shared-records.test.js`,
+`tests/shared-records-rollback.sql` (with `.js`), `tests/lw0-standin.sql`; `portal-routes.test.js`, `inspection.test.js` and
+`council-lookup.test.js` updated for the new names and order.
+
+The rule (Tim): every fact has one home; pages read from it and save back; every value carries where it came from and when; if two
+sources disagree both are shown and Tim chooses; nothing he ticked is overwritten; signed and sent records keep their own frozen copies.
+
+The five records:
+1. Property profile: `property_fact_values` (every value from every source, dated, never changed) and `property_profile` (the chosen
+   value per fact, and whether Tim ticked it), over `profile_keys`. Filled by the council lookup, the disclosures check, agreements, the
+   Quiet List and Tim. Choosing a value writes it back to the property file, never to an agreement. On screen: a "Property profile" card on
+   the property file (source and date per fact, the other source's value with "Use this", "Tick all"); the disclosures check offers the
+   profile's value for a fact it hasn't noted ("On the property profile: ... Use this"); Tim's typing on the property file is saved to the
+   profile as his.
+2. Person: `crm_contacts` is the one person record. `person_links` ties every name list to it (the property's people, the agreement's
+   people, the questions before we meet, offer signers, the vendors' lawyers, the Quiet List). Same email with a fitting name is one person;
+   no email, the same legal name on the same property; two different checked names on one email are kept apart and flagged for Tim.
+   Signed records are linked aside, never changed.
+3. Property and person link: `crm_property_links` is the home (agent only, roles and dates; trustee, executor and contact added).
+   `property_people` stays as the working list of this round's owners (signing and vendor access read it) and is kept in step by
+   trigger. Least disruptive: nothing that signs or grants access had to change.
+4. Question bank: `qa_questions` and `qa_answers`. The old questionnaire's nine questions are in it; every answer to the questions before
+   we meet is saved to it as the vendor answers, with the person, the property, the source and the date. The Quiet List seller form,
+   Tim's Quiet List notes and seller profiles also save to it. The copy emailed to Tim and "What I heard from you" come later (LW3, LW5).
+5. Photos and documents: `property_documents` stays the one store. The Quiet List points at it (`photo_doc_ids`); inspection photos are
+   the store's items with the inspection's id. No files moved.
+
+Who sees what: vendors read their own property profile (never Relab) and their own answers to questions that are theirs; people records,
+links, roles, AML and Tim's notes are agent only. Nobody writes these tables directly.
+
+Names and order (no new screens): "Let's begin" and "pre-listing" are now "Questions before we meet" everywhere Tim sees them (the address
+`/processes/appraisal` still opens it); "Inspect a property" is the "Disclosures check". Processes: First visit (coming soon), Appraisal
+report (coming soon), Questions before we meet, Disclosures check, Let's agree (Listing), Forms, Draft an offer, then the two assessments
+(coming soon). Signed records and their wording are unchanged: the Vendor Declaration's "Noted ... at the inspection" lines and the
+campaign schedule's "Pre-listing period" (printed into agreements) stay as they are.
+
+P1 follow-ups: a vendor signing a form on Tim's device stays in signing mode after a reload (no menu, Stop signing shown); a failed save
+says "Not saved yet. Everything you typed is still here. Check you have signal, then tap Save and close again."
+
+Open for Tim: see the build report (doubts on today's test people; whether "What I heard from you" may show answers to Tim's own questions).
 
 ### P1. Shell and addresses
 

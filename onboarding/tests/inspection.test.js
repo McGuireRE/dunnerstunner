@@ -151,8 +151,8 @@ const TIM = ['agent-1', 'hello@timmcguire.co.nz'];
   // 6. resume from the dashboard ("Needs you", quiet) and from the property page
   await p.click('#navDash'); await p.waitForTimeout(600);
   out.needs = await p.$$eval('.needs li', e => e.map(x => x.textContent.replace(/\s+/g, ' ')));
-  const ni = out.needs.findIndex(t => t.includes('Inspection started, not finished') && t.includes('9 Test Road'));
-  expect(ni >= 0, 'Needs you: Inspection started, not finished');
+  const ni = out.needs.findIndex(t => t.includes('Disclosures check started, not finished') && t.includes('9 Test Road'));
+  expect(ni >= 0, 'Needs you: Disclosures check started, not finished');
   expect(await p.$eval(`[data-need="${ni}"]`, e => e.classList.contains('ghost')), 'it is a quiet item');
   expect(!(await p.evaluate(() => localStorage.getItem('inspOpen'))), 'leaving the walk-round forgets it for reloads');
   out.leftOnPhone = await p.evaluate(() => Object.keys(localStorage).filter(k => k.startsWith('inspQ:')));
@@ -395,7 +395,7 @@ const TIM = ['agent-1', 'hello@timmcguire.co.nz'];
   expect(/has been signed, so the inspection can't change it/.test(late || ''), 'a signed declaration can\'t be changed by the inspection: ' + late);
   await p.click('#navDash'); await p.waitForTimeout(500); await p.click('tr[data-prop]:has-text("9 Test Road")'); await p.waitForTimeout(600);
   await p.click('#inspTile [data-inspopen]'); await p.waitForTimeout(600); await p.click('#insGoFinish'); await p.waitForTimeout(800);
-  out.signedMsg = await p.textContent('#insDecl'); expect(/has been signed, so your inspection can't change it/.test(out.signedMsg) && !(await p.$('#insSend')), 'the finish screen says so and offers no send');
+  out.signedMsg = await p.textContent('#insDecl'); expect(/has been signed, so your disclosures check can't change it/.test(out.signedMsg) && !(await p.$('#insSend')), 'the finish screen says so and offers no send');
   expect(/Signed: Unknown/.test(out.signedMsg) && /You noted: No/.test(out.signedMsg), 'and shows where the notes differ from what was signed');
 
   // 16. a vendor who starts the declaration themselves gets Tim's notes, marked (Sam, 22 Queens Drive), from every inspection of
