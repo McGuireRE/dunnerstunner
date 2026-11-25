@@ -150,9 +150,9 @@ const sha = b => crypto.createHash('sha256').update(Buffer.from(b)).digest('hex'
   // the owners' or agreement people's details fail to load: nothing is drafted, and Tim is told plainly
   for (const t of ['property_people', 'agreement_people']) {
     await p.evaluate(t => localStorage.setItem('mockFailTable', t), t); const e0 = errs.length;
-    await p.click('#drDraftBtn'); await p.waitForFunction(() => /nothing was drafted/.test(document.querySelector('#drDraftErr').textContent), null, { timeout: 30000 });
+    await p.click('#drDraftBtn'); await p.waitForFunction(() => /nothing was drafted/.test((document.querySelector('#bn-drDraftBtn') || { textContent: '' }).textContent), null, { timeout: 30000 });
     errs.splice(e0, errs.length - e0, ...errs.slice(e0).filter(e => !/Failed to fetch/.test(e)));   // must() logs the failed read on purpose
-    expect(!((await db(p)).offer_drafts || []).length && /owners' details couldn't be loaded/.test(await p.textContent('#drDraftErr')), `when ${t} can't be read, no draft is made`);
+    expect(!((await db(p)).offer_drafts || []).length && /owners' details couldn't be loaded/.test(await p.textContent('#bn-drDraftBtn')), `when ${t} can't be read, no draft is made`);
     await p.evaluate(() => localStorage.removeItem('mockFailTable'));
     await p.click('#ofBackP').catch(() => null); await p.waitForSelector('#offTile'); await p.click(`[data-offer="${off1}"]`); await p.waitForSelector('#drDraftBtn');
   }
@@ -202,7 +202,7 @@ const sha = b => crypto.createHash('sha256').update(Buffer.from(b)).digest('hex'
   // stays on the same draft, approval kept, with no copy made
   await p.click('#drRedraft'); await p.waitForFunction(() => /Nothing changed, so this is the same as Draft 2/.test(document.body.textContent), null, { timeout: 30000 });
   await p.waitForSelector('#drReview h1:has-text("Draft 2")'); d = await db(p);
-  expect(d.offer_drafts.length === 2 && d.offer_draft_approvals.length === 1 && await p.$('#drApproved') && !/duplicate key/.test(await p.textContent('body')), 're-draft with nothing changed: same draft, approval kept, no error');
+  expect(d.offer_drafts.length === 2 && d.offer_draft_approvals.length === 1 && await p.$('#drApproved') && !/duplicate key/.test(await p.innerText('body')), 're-draft with nothing changed: same draft, approval kept, no error: ' + JSON.stringify({ drafts: d.offer_drafts.length, approvals: d.offer_draft_approvals.length, approved: !!(await p.$('#drApproved')), dup: /duplicate key/.test(await p.innerText('body')) }));
   // and the message sits right under the button Tim pressed, not elsewhere on the page (Tim, 26 November 2026)
   const under = await p.evaluate(() => { const n = document.getElementById('bn-drRedraft'), b = document.getElementById('drRedraft'); if (!n || !b) return null;
     const row = b.closest('.toolbar') || b; return { next: row.nextElementSibling === n, gap: n.getBoundingClientRect().top - row.getBoundingClientRect().bottom, text: n.textContent, kind: n.dataset.kind }; });
@@ -393,9 +393,13 @@ const sha = b => crypto.createHash('sha256').update(Buffer.from(b)).digest('hex'
   const bad = await rpc(q, 'agent_draft_add', { p_offer: off2, p_map: dr9.map_id, p_path: dr9.path, p_sha256: dr9.sha256, p_size: dr9.size_bytes, p_placed: dr9.placed, p_needs: dr9.needs, p_edits: Object.assign({}, dr9.edits, { marks: [{ id: 'x1', type: 'strike', page: 99, x: 1, y: 1, w: 20, h: 20 }] }), p_note: null });
   expect(bad.error && /couldn't be kept: a mark or moved place off the page/.test(bad.error.message), 'a mark off the blank is refused by the server');
   // a re-draft after a change keeps the marks, the added clauses and the order
-  // (nothing has changed here, so since 26 November 2026 it stays on the same draft and says so instead of making a copy)
+  // (with nothing changed it stays on the same draft and says so, since 26 November 2026)
   await q.click('#drRedraftChange'); await q.waitForFunction(n => new RegExp('Nothing changed, so this is the same as Draft ' + n).test(document.body.textContent), dn, { timeout: 30000 });
-  expect((await db(q)).offer_drafts.filter(x => x.offer_id === off2).length === (await db(q)).offer_drafts.filter(x => x.offer_id === off2 && x.number <= dn).length, 'no copy made');
+  expect((await db(q)).offer_drafts.filter(x => x.offer_id === off2).length === (await db(q)).offer_drafts.filter(x => x.offer_id === off2 && x.number <= dn).length, 'nothing changed: no copy made');
+  // a real change (the buyer's price corrected), then re-draft after a change: a new draft that still carries the marks, clauses and order
+  const o2p = (await db(q)).property_offers.find(x => x.id === off2);
+  await rpc(q, 'agent_offer_correct', { p_offer: off2, p_details: Object.assign({}, o2p.details, { price: Number(o2p.details.price) + 1000, chattels_listed: undefined }), p_note: 'Buyer rang with a slightly higher price' });
+  await q.click('#drRedraftChange'); dr9 = await waitDraft(++dn);
   expect(dr9.edits.marks.length === 2 && dr9.edits.added_terms.some(a => a.id === 'add_std_pool_1') && dr9.edits.moves.price && dr9.edits.retired_numbers.includes(keysNo), 'kept through a re-draft after a change');
 
   // too many further terms for the page: the continuation page made on Tim's screen, its bands pictures rendered with pdf.js
