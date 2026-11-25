@@ -243,7 +243,31 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   ti = await visibleText(p, '#ngCanvas text.sg-ins'); out.insOnPresent = ti;
   expect(ti.length === 1 && ti[0].t === '$690,000' && ti[0].w > 5 && ti[0].kids === 0, 'the typed words are drawn on Tim\'s present screen: ' + JSON.stringify(ti));
   // the purchasers accept Round 2 in person (through Tim's database calls), and the agreement is formed
-  const pr3 = await rpcPresent(p, offA, 'in_person'); const lk3 = await rpcRound(p, pr3.id); expect(lk3 && lk3.ok && lk3.round.formed, 'Round 3: the purchasers accept; the agreement is formed: ' + JSON.stringify(lk3));
+  // ── 4b. a counter-counteroffer (re-review): the purchasers, on Tim's device, strike the figure the vendors typed and type their own ──
+  process.stderr.write('step 4b\n');
+  const pr3 = await rpcPresent(p, offA, 'in_person');
+  await p.goto(BASE); await p.waitForTimeout(500); await openProp(p); await p.click(`[data-offer="${offA}"]`); await p.waitForSelector(`[data-signing="${pr3.id}"]`, { timeout: 30000 }); await p.click(`[data-signing="${pr3.id}"]`);
+  await turnStart(p, 1); await consentDraw(p, 7);
+  await p.selectOption('#sgPgPick', String(priceBox.page)); await p.waitForSelector(`#sgPage .dr-pg[data-page="${priceBox.page}"] canvas`);
+  const vIns = (await db(p)).offer_sign_marks.find(m => m.kind === 'insert' && m.geometry.text === '$690,000').geometry, vW = 8 * 9 * 0.556;
+  const dragP = async (x0, x1, y) => { const el = await p.$('#sgPage .sg-draw'); await el.scrollIntoViewIfNeeded(); const bx = await el.boundingBox(); await p.mouse.move(bx.x + bx.width * x0 / W, bx.y + bx.height * fy(y)); await p.mouse.down(); await p.mouse.move(bx.x + bx.width * x1 / W, bx.y + bx.height * fy(y), { steps: 6 }); await p.mouse.up(); };
+  await p.click('[data-tool="strike"]'); await p.waitForSelector('#sgPage .sg-draw', { state: 'attached' });
+  await dragP(vIns.x + 4, vIns.x + vW - 6, vIns.y + 2.5);
+  await p.waitForFunction(() => /This strikes through:/.test((document.querySelector('#sgStrikeWords') || {}).textContent || ''), null, { timeout: 15000 });
+  out.counterWords = await p.textContent('#sgStrikeWords');
+  expect(/This strikes through: "\$690,000"/.test(out.counterWords), 'Round 3 can strike the figure the vendors typed in Round 2 (their typed words count as words on the page): ' + out.counterWords);
+  await p.click('#sgMarkSave'); await p.waitForSelector('#sgPlaces'); await p.waitForSelector('#sgPage .dr-pg canvas');
+  await p.click('[data-tool="insert"]'); await p.waitForSelector('#sgPage .sg-draw', { state: 'attached' });
+  { const el = await p.$('#sgPage .sg-draw'); await el.scrollIntoViewIfNeeded(); const bx = await el.boundingBox(); await p.mouse.click(bx.x + bx.width * (priceBox.x / W), bx.y + bx.height * fy(priceBox.y - 22)); }
+  await p.fill('#ngInsText', '$672,500'); await p.click('#sgMarkSave'); await p.waitForSelector('#sgPlaces'); await p.waitForSelector('#sgPage .dr-pg canvas');
+  await tapAll(p); await finishInPerson(p);
+  await turnStart(p, 2); await consentDraw(p, 9); await tapAll(p); await finishInPerson(p);
+  await p.waitForSelector('#sgRound', { timeout: 30000 });
+  d = await db(p); const r3 = d.offer_rounds.find(r => r.offer_id === offA && r.doc_round === 3), sm3 = d.offer_sign_marks.find(m => m.signing_id === pr3.id && m.kind === 'strike');
+  expect(sm3 && sm3.geometry.text === '$690,000', 'the line is recorded as striking the vendors\' typed figure: ' + JSON.stringify(sm3 && sm3.geometry));
+  const r3txt = r3 ? (await pdfText(await blob(p, r3.path))).join(' ') : ''; expect(/a line through text striking "\$690,000"/.test(r3txt) && /typed words "\$672,500"/.test(r3txt), 'Round 3\'s execution record: what was struck and what was typed');
+  // the vendors accept Round 3 in person (through Tim's database calls), and the agreement is formed
+  const pr4 = await rpcPresent(p, offA, 'in_person'); const lk3 = await rpcRound(p, pr4.id); expect(lk3 && lk3.ok && lk3.round.formed, 'Round 4: the vendors accept; the agreement is formed: ' + JSON.stringify(lk3));
 
   // ── 5. Tim confirms: he alone is emailed the dated copy at once, with the agreed price after the negotiation; the drafts follow it ──
   process.stderr.write('step 5\n');
@@ -257,15 +281,15 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   const tm = (await mails(p)).slice(M0); out.timMail = tm.map(m => ({ kind: m.kind, to: m.to, subject: m.subject, body: m.body }));
   expect(tm.length === 1 && tm[0].kind === 'offer_agreed_copy' && tm[0].to === 'tim' && tm[0].attachments[0].sha256 === ag.sha256, 'Tim alone is emailed the locked dated copy at once');
   const tb = (tm[0] || {}).body || '';
-  expect(tb.includes('Price: $690,000. Changed in the negotiation: typed in Round 2 in place of the struck price.') && !/^Price:.*655,000/m.test(tb) && /Changes made in the negotiation \(2\):\n1\. Round 2, page 1: line through "\$655,000"\n2\. Round 2, page 1: typed "\$690,000"/.test(tb), 'Tim\'s email: every change listed; the agreed price is the typed figure, with the round it was changed in; never the first offer\'s: ' + tb);
+  expect(tb.includes('Price: $672,500. Changed in the negotiation: typed in Round 3 in place of the struck price.') && !/^Price:.*(655,000|690,000)/m.test(tb) && /Changes made in the negotiation \(4\):\n1\. Round 2, page 1: line through "\$655,000"\n2\. Round 2, page 1: typed "\$690,000"\n3\. Round 3, page 1: line through "\$690,000"\n4\. Round 3, page 1: typed "\$672,500"/.test(tb), 'Tim\'s email: every change listed; the agreed price is the typed figure, with the round it was changed in; never the first offer\'s: ' + tb);
   expect(tb.includes('Purchasers: Ana Testbuyer and Bo Testbuyer.') && tb.includes('Vendors: Testy Vendorperson.') && /Date of agreement: \w+day \d{1,2} \w+ \d{4}\./.test(tb) && /Settlement day: \w+day/.test(tb) && /Deposit holder: /.test(tb), 'Tim\'s email: the date, the parties, settlement day and the deposit holder');
   await p.waitForSelector('#mlAgreed [data-mlsend]', { timeout: 30000 });
   d = await db(p); const dp = d.offer_mail_drafts.find(m => m.offer_id === offA && m.kind === 'agreed_purchasers' && m.status === 'draft'), dv = d.offer_mail_drafts.find(m => m.offer_id === offA && m.kind === 'agreed_vendors' && m.status === 'draft');
   out.dpBody = dp && dp.body;
-  expect(dp && dv && /Price: \$690,000/.test(dp.body) && /Price: \$690,000/.test(dv.body) && !/655,000/.test(dp.body + dv.body), 'the parties\' drafts: the agreed price after the negotiation');
+  expect(dp && dv && /Price: \$672,500/.test(dp.body) && /Price: \$672,500/.test(dv.body) && !/655,000|690,000/.test(dp.body + dv.body), 'the parties\' drafts: the agreed price after the negotiation');
   expect(!/\[Tim to fill: (the \w+ due date|settlement day|the agreed price after negotiation)\]/.test(dp.body + dv.body), 'no blanks for what the portal knows: the due date, settlement day and price');
   const notes = await p.textContent('#mlNotes'); out.notes = notes.replace(/\s+/g, ' ');
-  expect(/Price \$690,000 \(the figure typed in Round 2 in place of the struck price; check\)/.test(notes) && /Settlement day \w+day \d{1,2} \w+ \d{4} \(worked out from the agreement date/.test(notes) && !/worked out/.test(dp.body + dv.body), 'what was worked out, shown once to Tim beside the editor, with how; never in the emails: ' + out.notes);
+  expect(/Price \$672,500 \(the figure typed in Round 3 in place of the struck price; check\)/.test(notes) && /Settlement day \w+day \d{1,2} \w+ \d{4} \(worked out from the agreement date/.test(notes) && !/worked out/.test(dp.body + dv.body), 'what was worked out, shown once to Tim beside the editor, with how; never in the emails: ' + out.notes);
   expect(!(await side(p)), 'the offer page at 390 px: no sideways scroll');
   await p.emulateMedia({ colorScheme: 'dark' }); await p.waitForTimeout(200);
   out.darkNotes = await contrast(p, '#mlNotes li'); out.darkAgMail = await contrast(p, '#ngAgMail');
@@ -281,6 +305,9 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   ar = await add('Dear Ana,\n\nThe vendor is on 021 000 1111.\n\nTim'); expect(ar.error && /a vendor's own phone or email/.test(ar.error.message), 'a real vendor\'s own phone is still refused: ' + (ar.error && ar.error.message));
   ar = await add('Dear Ana,\n\nThe vendor is vendor@example.com.\n\nTim'); expect(ar.error && /a vendor's own phone or email/.test(ar.error.message), 'and a vendor\'s own email');
 
+  // 025's column grant: Tim's screen may read the agent's phone and email, never the salt
+  { const cs = await p.evaluate(async () => { const c = window.supabase.createClient(); const a = await c.from('offer_settings').select('agent_phone,agent_email'), b_ = await c.from('offer_settings').select('net_salt'); return { a: a.error ? 'error' : a.data[0], b: b_.error ? 'error' : 'read' }; });
+    expect(cs.a && cs.a.agent_phone === '027 562 7207' && cs.b === 'error', 'the agent\'s phone and email can be read by Tim\'s screen; the salt never: ' + JSON.stringify(cs)); }
   await b.close();
   console.log(JSON.stringify(Object.assign(out, { errs }), null, 1));
 })().catch(e => { console.log(JSON.stringify({ errs: ['crashed: ' + (e.stack || e.message)].concat(global.__errs || []), out: global.__out })); process.exit(0); });

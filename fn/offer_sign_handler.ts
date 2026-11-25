@@ -83,13 +83,18 @@ export function makeHandler(d: Deps) {
   const agentLoad = async () => { if (!d.mail || !d.mail.setAgent) return; try { const r = await d.rpc("offer_agent_contact", {}); if (!r.error && r.data && r.data.phone) d.mail.setAgent({ phone: r.data.phone }); } catch (_) { /* the default stands */ } };
   // the words a signer's device recorded for a line through text are checked against the draft itself before a round is locked:
   // the same snap from the stored line must give the same words in the same place, on a page that isn't turned (Offers fixes 2 review)
-  async function checkStrikes(draft: Uint8Array, marks: any[]) {
-    const lines = (marks || []).filter((k: any) => k.kind === "strike" && k.geometry && k.geometry.text != null);
+  // Earlier rounds' typed words count as words on the page (NEGO.typedItems), so a counter-counteroffer can strike the other side's figure.
+  // Every line in a round being locked now must carry its words (lines in rounds locked before this change are never checked again).
+  async function checkStrikes(draft: Uint8Array, marks: any[], earlier: any[]) {
+    const all = (marks || []).filter((k: any) => k.kind === "strike");
+    if (all.some((k: any) => !k.geometry || k.geometry.text == null)) throw new Error("A line through text has no words recorded with it, so the round wasn't locked. Tim will look into it.");
+    const lines = all;
     if (!lines.length) return;
     if (!d.pageText || !d.sign) throw new Error("The struck words couldn't be checked, so the round wasn't locked. Tim will look into it.");
     let pages: any[]; try { pages = await d.pageText(draft); } catch (_) { throw new Error("The struck words couldn't be checked, so the round wasn't locked. Tim will look into it."); }
     for (const k of lines) {
-      const g = k.geometry, pg = pages.find((x: any) => x.n === k.page), sn = pg && !pg.rot ? d.sign.snapStrike(pg, g.x0, g.x1, g.y) : null;
+      const g = k.geometry, pg0 = pages.find((x: any) => x.n === k.page), typed = d.nego && d.nego.typedItems ? d.nego.typedItems(earlier || [], marks || [], k.page) : [];
+      const pg = pg0 ? Object.assign({}, pg0, { items: (pg0.items || []).concat(typed) }) : null, sn = pg && !pg.rot ? d.sign.snapStrike(pg, g.x0, g.x1, g.y) : null;
       const same = sn && sn.text === g.text && Math.abs(sn.x0 - g.x0) <= 0.6 && Math.abs(sn.x1 - g.x1) <= 0.6 && Math.abs(sn.y - g.y) <= 0.6;
       if (!same) throw new Error(`A line through text on page ${k.page} doesn't match the words on the document, so the round wasn't locked. Tim will look into it.`);
     }
@@ -100,7 +105,7 @@ export function makeHandler(d: Deps) {
     const m = await call("offer_round_material", { p_signing: signingId });
     const draft = await d.download(m.draft.path);
     if (!draft || await sha256(draft) !== m.draft.sha256) throw new Error("The approved draft doesn't match its fingerprint, so the round wasn't made. Tim will look into it.");
-    await checkStrikes(draft, m.marks || []);
+    await checkStrikes(draft, m.marks || [], (m.round || 1) > 1 ? (m.earlier || []) : []);
     await agentLoad();
     const n = m.number || 1, round = m.round || 1;
     let bytes: Uint8Array, record: any, formed = false;

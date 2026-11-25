@@ -771,6 +771,12 @@ After the independent review (25 November 2026), fixed on the same branch:
 - Confirm answers once the copy is locked; Tim's email goes after (EdgeRuntime.waitUntil) and his page checks the email log and says
   when it went or failed. Agreed-copy email_log rows carry the property's agency agreement. Typed words show on the page as they are
   typed. Dark mode checked for the new text.
+After the re-review: a counter-counteroffer can strike the figure the other side typed in an earlier round. Those typed words
+(still standing, not struck by an earlier line unless reinstated) count as words on the page (`NEGO.typedItems`), on screen and in
+the function's check, so the line is snapped to them and recorded as striking them. Every line in a round locked now must carry its
+words (rounds locked before are never checked again). 025 grants Tim's screen select on `agent_phone` and `agent_email`; the alarm's
+own "what" wins over its detail; the function waits for Tim's email itself where the runtime can't carry work on; the page watches
+only this offer's email, from the server's lock time.
 Later (026): `offer_private_hit` (the check on typed words in a counteroffer) has the same agent-is-a-party problem as item 5; to be
 fixed the same way in 026.
 Open (Tim to decide; behaviour unchanged): whether "Confirm the agreement" should be blocked while an offer is frozen.

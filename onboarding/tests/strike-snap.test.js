@@ -44,6 +44,19 @@ const D = require(path.join(__dirname, '..', 'src', 'draft-core.js'));
   // the snapped line is what the locked copy draws (renderRound draws g.x0..g.x1 at g.y): the geometry is stored as is
   { const g = S.snapStrike(page, fx + 6, fx + wOf('$1,000,000') - 8, 401.5), rect = S.markRect({ kind: 'strike', geometry: g });
     ok(rect.x === Math.min(g.x0, g.x1) && rect.w === Math.abs(g.x1 - g.x0) && rect.y === g.y - 4, 'its rectangle (for the initials beside it) follows the snapped line'); }
+  // re-review: a counter-counteroffer strikes the figure the other side typed in an earlier round (their typed words count as page items)
+  { const pit = page.items.find(i => /1,000,000/.test(i.s)), ins = { id: 'i2', kind: 'insert', page: 1, geometry: { x: pit.x + pit.w + 12, y: pit.y + 20, text: '$690,000', size: 9 } };
+    const L2 = [{ doc_round: 1, side: 'purchaser', marks: [] }, { doc_round: 2, side: 'vendor', marks: [{ id: 'k1', kind: 'strike', page: 1, geometry: { x0: 10, x1: 30, y: 700 } }, ins] }];
+    const items = N.typedItems(L2, [], 1), w = N.textWidth('$690,000', 9); out.typed = items;
+    ok(items.length === 1 && items[0].s === '$690,000' && items[0].h === 9 && Math.abs(items[0].w - w) < 0.01 && items[0].x === ins.geometry.x, 'the earlier round\'s typed words, with their drawn place and size: ' + JSON.stringify(items));
+    ok(S.snapStrike(page, ins.geometry.x + 2, ins.geometry.x + w - 2, ins.geometry.y + 3) === null, 'without them, a drag along the typed figure finds nothing (the bug)');
+    const r = S.snapStrike(Object.assign({}, page, { items: page.items.concat(items) }), ins.geometry.x + 2, ins.geometry.x + w - 2, ins.geometry.y + 3); out.counter = r;
+    ok(r && r.text === '$690,000' && Math.abs(r.x0 - ins.geometry.x) < 0.2 && Math.abs(r.x1 - (ins.geometry.x + w)) < 0.2, 'with them: the line strikes exactly the typed figure: ' + JSON.stringify(r));
+    // typed words already struck through by an earlier line are left out; a reinstated line brings them back; other pages' words are not on this one
+    const struckL = [L2[0], { doc_round: 2, side: 'vendor', marks: [ins] }, { doc_round: 3, side: 'purchaser', marks: [{ id: 'k3', kind: 'strike', page: 1, geometry: { x0: ins.geometry.x, x1: ins.geometry.x + w, y: ins.geometry.y + 3 } }] }];
+    ok(N.typedItems(struckL, [], 1).length === 0, 'struck typed words are not words to strike again');
+    ok(N.typedItems(struckL, [{ id: 'r1', kind: 'reinstate', target: 'k3' }], 1).length === 1, 'reinstated: they are words again');
+    ok(N.typedItems(L2, [], 2).length === 0, 'only the page\'s own typed words'); }
   // the struck words in the records
   { const base = { address: 'x', offer_ref: 'y', round: 1, draft: { number: 1, sha256: 'a' }, places_sha256: 'b', made_at: '2026-11-25T01:00:00Z', signers: [], replaced: [] };
     const now = S.executionLines(Object.assign({}, base, { marks: [{ kind: 'strike', page: 1, by: 'Ana', at: '2026-11-25T01:00:00Z', text: '$1,000,000' }] })).map(l => l.t).join('\n');

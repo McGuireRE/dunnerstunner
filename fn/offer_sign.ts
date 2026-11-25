@@ -34,7 +34,8 @@ Deno.serve(makeHandler({
   sign: SIGN,
   pageText,
   logMail: async (row) => { await admin().from("email_log").insert(row); },
-  background: (work) => { const rt = (globalThis as any).EdgeRuntime; if (rt && typeof rt.waitUntil === "function") rt.waitUntil(work); },
+  // only where the runtime can carry work on after the answer; otherwise the handler waits for the email itself
+  ...(((globalThis as any).EdgeRuntime && typeof (globalThis as any).EdgeRuntime.waitUntil === "function") ? { background: (work: Promise<unknown>) => (globalThis as any).EdgeRuntime.waitUntil(work) } : {}),
   offers: OFFERS,
   timEmail: TIM_EMAIL,
   whoIsAgent: async (authorization) => {

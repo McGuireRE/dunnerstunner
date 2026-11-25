@@ -32,7 +32,9 @@ let failTim = false;
   // Round 1: the purchaser's price initials beside the price, a foot initial and a signature
   const r1places = [{ id: 'filled:price:s1', signer: 1, kind: 'initial', why: 'filled', ref: 'price', page: 1, x: 200, y: 398, w: 26, h: 13, for: { x: 40, y: 398, w: 190, h: 12 } }, { id: 'foot:p1:s1', signer: 1, kind: 'initial', why: 'foot', ref: 'p1', page: 1, x: 500, y: 5, w: 26, h: 13 }, { id: 'block:sig1:s1', signer: 1, kind: 'signature', why: 'block', ref: 'sig1', page: 2, x: 40, y: 500, w: 150, h: 22 }];
   const L1 = { round_id: 'r1', number: 1, doc_round: 1, side: 'purchaser', signing_id: 'g1', sha256: 'a'.repeat(64), places: r1places, taps: r1places.map(p => ({ place_id: p.id, signer: 1 })), signers: [{ position: 1, name: 'Ana Testbuyer', sig_png: png, init_png: png }], marks: [] };
-  const strike = { id: MK, kind: 'strike', page: 1, geometry: { x0: 100, x1: 160, y: 403 }, by: 'Vera Vendor', at: '2026-11-24T02:00:00Z' };
+  // the line through the price as the screen snaps it (the words recorded): every line in a round locked now carries them (re-review)
+  const snapped = S.snapStrike((await D.readPages(pdfjs, new Uint8Array(draft)))[0], 110, 150, 402.5);
+  const strike = { id: MK, kind: 'strike', page: 1, geometry: snapped, by: 'Vera Vendor', at: '2026-11-24T02:00:00Z' };
   const insert = { id: MK.replace('5555', '6666'), kind: 'insert', page: 1, geometry: { x: 100, y: 386, text: '$690,000', size: 9 }, by: 'Vera Vendor', at: '2026-11-24T02:01:00Z' };
   const v2places = [{ id: 'foot:p1:s1', signer: 1, kind: 'initial', why: 'foot', ref: 'p1', page: 1, x: 470, y: 5, w: 26, h: 13 }, { id: 'block:vsig1:s1', signer: 1, kind: 'signature', why: 'block', ref: 'vsig1', page: 2, x: 330, y: 500, w: 150, h: 22 },
     { id: `chg:${strike.id}:s1`, signer: 1, kind: 'initial', why: 'change', ref: strike.id, page: 1, x: 165, y: 410, w: 26, h: 13 }, { id: `chg:${insert.id}:s1`, signer: 1, kind: 'initial', why: 'change', ref: insert.id, page: 1, x: 165, y: 384, w: 26, h: 13 }];
@@ -168,7 +170,21 @@ let failTim = false;
     r = await J(await post({ action: 'lock', signing_id: SID }, { Authorization: 'Bearer good' })); expect(r.status === 400 && !calls.some(c => c[0] === 'offer_round_lock'), 'a line on a turned page: not locked');
     pageTextOverride = async () => { throw new Error('pdf.js missing'); }; calls = [];
     r = await J(await post({ action: 'lock', signing_id: SID }, { Authorization: 'Bearer good' })); expect(r.status === 400 && /couldn't be checked/.test(r.j.error) && !calls.some(c => c[0] === 'offer_round_lock'), 'the words can\'t be read: not locked, said plainly');
-    pageTextOverride = null; marks2 = [strike, insert]; }
+    // a line with no words recorded, arriving for a round being locked now: refused
+    pageTextOverride = null; marks2 = [Object.assign({}, strike, { geometry: { x0: 100, x1: 160, y: 403 } }), insert]; calls = [];
+    r = await J(await post({ action: 'lock', signing_id: SID }, { Authorization: 'Bearer good' })); expect(r.status === 400 && /no words recorded/.test(r.j.error) && !calls.some(c => c[0] === 'offer_round_lock'), 'a line with no words recorded: not locked');
+    // a counter-counteroffer: Round 3 strikes the figure the vendors typed in Round 2 (their typed words count as words on the page)
+    { const w = N.textWidth('$690,000', 9), pg1 = (await D.readPages(pdfjs, new Uint8Array(draft)))[0];
+      const g3 = S.snapStrike(Object.assign({}, pg1, { items: pg1.items.concat(N.typedItems([L1, L2()], [], 1)) }), insert.geometry.x + 2, insert.geometry.x + w - 2, insert.geometry.y + 3); out.r3snap = g3;
+      const k3 = { id: MK.replace('5555', '7777'), kind: 'strike', page: 1, geometry: g3, by: 'Ana Testbuyer', at: '2026-11-24T04:00:00Z' };
+      const m3 = () => Object.assign(material(), { round: 3, number: 3, side: 'purchaser', earlier: [L1, L2()], marks: [k3], places: [], taps: [] });
+      const h3 = H.makeHandler({ cors: {}, appUrl: 'x', timEmail: 'tim@example.test', whoIsAgent: async (a) => (a === 'Bearer good' ? agent : null), rpc: async (fn, args) => fn === 'offer_round_material' ? { data: m3(), error: null } : db(fn, args),
+        signedUrl: async () => null, download: async (p) => files[p] || null, upload: async (p, b) => { files[p] = b; return { ok: true }; }, sendMail: async (kind, m) => { mails.push(Object.assign({ kind }, m)); },
+        renderRound: () => null, renderWorking: (d, m) => N.renderWorking(PDFLib, d, m), nego: N, sign: S, mail: MAILC, net: netOf, pageText: async (b) => (await D.readPages(pdfjs, new Uint8Array(b))).map(p => Object.assign(p, { rot: 0 })) });
+      calls = []; const r3 = await J(await h3(new Request('https://x/f', { method: 'POST', headers: { Authorization: 'Bearer good' }, body: JSON.stringify({ action: 'lock', signing_id: SID }) })));
+      expect(g3 && g3.text === '$690,000' && r3.j.ok && calls.some(c => c[0] === 'offer_round_lock'), 'Round 3 striking the vendors\' typed figure: checked against the draft and their typed words, and locked: ' + JSON.stringify(r3.j) + ' ' + JSON.stringify(g3));
+      const rec3 = (calls.find(c => c[0] === 'offer_round_lock') || [, {}])[1].p_execution || {}; expect((rec3.changes || []).some(c => c.kind === 'strike' && c.text === '$690,000'), 'and its record lists the typed figure as struck'); }
+    marks2 = [strike, insert]; }
 
   // ── agree ──
   r = await J(await post({ action: 'agree', offer_id: OID, accepted_at: '2026-11-24T05:00:00Z', date_text: '24 November 2026' }));
@@ -205,7 +221,7 @@ let failTim = false;
     for (const w of ['Date of agreement: Tuesday 24 November 2026.', 'Purchasers: Ana Testbuyer.', 'Vendors: Vera Vendor.', 'Price: $690,000. Changed in the negotiation: typed in Round 2 in place of the struck price.', '1. Finance: due Tuesday 8 December 2026 (worked out from the agreement date)',
       'Settlement day: Monday 11 January 2027 (worked out from the agreement date).',
       'Deposit holder: Public Trust O/A NZ Real Estate Trust (your choice).', 'Fingerprint (SHA-256): ' + al[1].p_sha256, `https://portal.dunnerstunner.co.nz/properties/${PID}/offers/${OID}`]) expect(t.includes(w), "Tim's email holds: " + w);
-    expect(!/655,000/.test(t), "never the first offer's price");
+    expect(!/Price:[^<]*655,000/.test(t) && /line through &quot;\$655,000&quot;|line through "\$655,000"/.test(t), "never the first offer's price (the struck words are listed with the changes)");
     // again, from the button: the same email, marked as sent again; refused without Tim's sign-in
     mails = []; let q = await J(await post({ action: 'agreed_notice', offer_id: OID }, { Authorization: 'Bearer good' }));
     expect(q.j.ok && q.j.attached === true && mails.length === 1 && mails[0].kind === 'offer_agreed_copy_again' && mails[0].to === 'tim@example.test' && /Sent again, as you asked/.test(mails[0].html), 'Email me the agreed copy again: the same email, to Tim');

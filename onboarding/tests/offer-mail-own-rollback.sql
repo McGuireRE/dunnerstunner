@@ -74,5 +74,10 @@ begin
   begin perform public.offer_integrity_alarm(oid, repeat('x', 500), '"not an object"'); out := out || 'alarm with odd detail kept: ' || (select length(detail->>'what') from public.offer_events where offer_id = oid order by id desc limit 1) || '; ';
   exception when others then out := out || 'ODD ALARM REFUSED: ' || sqlerrm || '; '; end;
   if has_function_privilege('authenticated', 'public.offer_integrity_alarm(uuid, text, jsonb)', 'execute') or has_function_privilege('authenticated', 'public.offer_agent_contact()', 'execute') or not has_function_privilege('service_role', 'public.offer_agent_contact()', 'execute') then out := out || 'ALARM OR CONTACT PRIVILEGES WRONG; '; end if;
+  -- 8. Tim's screen may read the two new columns (column privileges), and still never the salt; an alarm's own what wins over its detail's
+  out := out || 'columns: phone=' || has_column_privilege('authenticated', 'public.offer_settings', 'agent_phone', 'select') || ' email=' || has_column_privilege('authenticated', 'public.offer_settings', 'agent_email', 'select') || ' salt=' || has_column_privilege('authenticated', 'public.offer_settings', 'net_salt', 'select') || '; ';
+  if not has_column_privilege('authenticated', 'public.offer_settings', 'agent_phone', 'select') or not has_column_privilege('authenticated', 'public.offer_settings', 'agent_email', 'select') or has_column_privilege('authenticated', 'public.offer_settings', 'net_salt', 'select') then out := out || 'COLUMN PRIVILEGES WRONG; '; end if;
+  perform public.offer_integrity_alarm(oid, 'the fixed what', jsonb_build_object('what', 'from the detail', 'path', 'y'));
+  if (select detail->>'what' from public.offer_events where offer_id = oid order by id desc limit 1) <> 'the fixed what' then out := out || 'DETAIL OVERRODE WHAT; '; end if;
   raise exception 'ROLLBACK %', out;
 end $t$;

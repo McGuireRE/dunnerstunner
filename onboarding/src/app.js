@@ -7365,7 +7365,9 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       else if (F.marking === 'insert') F.draft = { kind: 'insert', page: F.page, geometry: { x: p[0], y: p[1], text: '', size: 9 } };
       else if (F.marking === 'strike') {
         const my = ++seq, mark = F.marking; F.draft = null; words(''); ready(); redraw(d0, [p[0], d0[1]]);
-        let sn = null, pg = null; try { pg = await pgInfo(); sn = pg ? SG.snapStrike(pg, d0[0], p[0], d0[1]) : null; } catch (_) { sn = null; }
+        // the printed words, and from Round 2 on the earlier rounds' typed words still standing (a counter-counteroffer strikes the other side's figure)
+        let sn = null, pg = null; try { const pg0 = await pgInfo(); pg = pg0 ? Object.assign({}, pg0, { items: (pg0.items || []).concat((ctx.round || 1) > 1 ? NG.typedItems(ctx.layers || [], ctx.marks || [], F.page) : []) }) : null;
+          sn = pg ? SG.snapStrike(pg, d0[0], p[0], d0[1]) : null; } catch (_) { sn = null; }
         if (my !== seq || F.marking !== mark) return;
         if (!sn) { redraw(); say(pg && !(pg.items || []).length ? SG_SCAN_MSG : 'Drag along the words you want to strike through.'); return; }
         F.draft = { kind: 'strike', page: F.page, geometry: sn }; redraw(); words(sn.text); ready(); return;
@@ -7686,22 +7688,26 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       const dt = $('#ngDate').value.trim().replace(/\s+/g, ' '); if (!NG.parseFullDate(dt)) return (er.textContent = 'Type the date in full with the month name, for example 24 November 2026.');
       const at = new Date($('#ngAccAt').value); if (isNaN(at)) return (er.textContent = 'Check when acceptance was communicated.');
       ag.disabled = true; er.textContent = 'Making the agreed copy...';
-      const t0 = new Date(Date.now() - 5000).toISOString(), r = await offerCall('offer-sign', { action: 'agree', offer_id: o.id, accepted_at: at.toISOString(), date_text: dt });
+      const r = await offerCall('offer-sign', { action: 'agree', offer_id: o.id, accepted_at: at.toISOString(), date_text: dt });
       if (!r || !r.ok) { er.textContent = (r && r.error) || 'That didn\'t work. Try again.'; ag.disabled = false; return; }
       // the property's stage moves to Under offer with the existing stage function; other offers are left for Tim
       // the email to Tim goes after the agreement is locked (the function answers first): a follow-up check says when it went or failed
       let msg = 'Agreement confirmed and locked.' + (r.agreement && r.agreement.emailed === false ? ' The email to you with the agreed copy didn\'t go: use "Email me the agreed copy again".' : '');
-      if (r.agreement && !r.agreement.existing && r.agreement.emailed !== false) ngAgreedMailWatch(t0);
+      if (r.agreement && !r.agreement.existing && r.agreement.emailed !== false) ngAgreedMailWatch(o, p);
       try { await mlBuildAgreed(o, p); msg += ' The emails to both parties are built for you to read and send.'; } catch (_) { msg += ' Build the emails to the parties on the offer page.'; }
       if (p.stage !== 'under_offer') { try { await sgRpc('agent_set_stage', { pid: p.id, p_stage: 'under_offer', p_reason: null, p_confirmed: true }); msg += ' The property is now under offer.'; } catch (e) { msg += ' The stage didn\'t move (' + e.message + '). Change it on the property page.'; } }
       toast(msg); reload(); });
     const pk = $('#ngPack'); if (pk) pk.addEventListener('click', () => ngPack(o, p));
   }
   // after Confirm: watch the email log for Tim's own agreed-copy email (sent by the function after it answered) and say how it went
-  async function ngAgreedMailWatch(since) {
+  // this offer's email only: its subject names the address, sent after the server locked the agreement (the server's time, not the device's)
+  async function ngAgreedMailWatch(o, p) {
     await new Promise(res => setTimeout(res, 3600));   // after the "Agreement confirmed" message has been read
+    const ag = ((await ofSafe(sb.from('offer_agreements').select('locked_at').eq('offer_id', o.id))) || [])[0];
+    if (!ag || !ag.locked_at) return;
+    const since = new Date(new Date(ag.locked_at).getTime() - 2000).toISOString(), subject = `Agreement confirmed: ${p.address || ''}`;
     for (let k = 0; k < 20; k++) {
-      const rows = (await ofSafe(sb.from('email_log').select('kind,ok,at').eq('kind', 'offer_agreed_copy').gte('at', since))) || [];
+      const rows = ((await ofSafe(sb.from('email_log').select('kind,ok,at,subject').eq('kind', 'offer_agreed_copy').eq('subject', subject).gte('at', since))) || []);
       if (rows.some(x => x.ok)) return toast('The dated agreed copy has been emailed to you.');
       if (rows.length) return toast('The email to you with the agreed copy didn\'t go. Use "Email me the agreed copy again" on the offer page.');
       await new Promise(res => setTimeout(res, 1500));

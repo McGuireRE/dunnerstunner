@@ -16,6 +16,8 @@
 
 alter table public.offer_settings add column if not exists agent_phone text not null default '027 562 7207' check (length(agent_phone) between 6 and 40);
 alter table public.offer_settings add column if not exists agent_email text not null default 'hello@timmcguire.co.nz' check (length(agent_email) between 5 and 254 and position('@' in agent_email) > 1);
+-- Tim's screen reads them for the drafts' sign-off (the authenticated role has column privileges on offer_settings: never the salt)
+grant select (agent_phone, agent_email) on public.offer_settings to authenticated;
 
 create or replace function public.offer_agent_own() returns table (emails text[], nsn text) language sql stable security definer set search_path = public as $$
   select (select coalesce(array_agg(distinct e), '{}') from (select lower(trim(a.email)) e from public.agents a union all select lower(trim(s.agent_email)) from public.offer_settings s) z where coalesce(e, '') <> ''),
@@ -73,7 +75,7 @@ grant execute on function public.offer_agreed_notice_material(uuid) to service_r
 create or replace function public.offer_integrity_alarm(p_offer uuid, p_what text, p_detail jsonb) returns void language plpgsql security definer set search_path = public as $$
 begin
   insert into public.offer_events (property_id, offer_id, actor, kind, detail)
-    select o.property_id, o.id, 'system', 'integrity_alarm', jsonb_build_object('what', left(coalesce(p_what, ''), 200)) || coalesce(case when jsonb_typeof(p_detail) = 'object' then p_detail end, '{}'::jsonb)
+    select o.property_id, o.id, 'system', 'integrity_alarm', coalesce(case when jsonb_typeof(p_detail) = 'object' then p_detail end, '{}'::jsonb) || jsonb_build_object('what', left(coalesce(p_what, ''), 200))   -- the fixed what wins over the detail's
     from public.property_offers o where o.id = p_offer;
 end $$;
 revoke execute on function public.offer_integrity_alarm(uuid, text, jsonb) from public, anon, authenticated;

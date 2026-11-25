@@ -372,6 +372,7 @@ agreements/<agreement id>/signatures/... (vendors may upload their own signature
   (Tim's screen reads `offer_settings` itself); `offer_agreed_notice_material` also gives `agency_agreement_id` (the property's newest
   signed agency agreement), so the agreed-copy email_log rows are filed with it; `offer_integrity_alarm(offer, what, detail)` (service
   role) puts an `integrity_alarm` event on the offer's hash-chained timeline when a stored copy doesn't match its fingerprint.
+- `grant select (agent_phone, agent_email) on public.offer_settings to authenticated` (column privileges; never the salt).
 - Rollback test: `tests/offer-mail-own-rollback.sql` (built by `tests/offer-mail-own-rollback.js`). Local run 25 November 2026 on the
   stand-in (pg-standin, 010, 016 part A, 018, 019, 021, 022, 023, 024): every line as expected, no CAPITALS. `offer_agreed_notice_material`
   was also run against the agreement 024's own rollback test makes (one block: 024, its checks to the agreement, then 025): it returned

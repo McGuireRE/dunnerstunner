@@ -55,6 +55,21 @@
     return cy >= r.y - 3 && cy <= r.y + r.h + 3 && gapX <= ROW_REACH;
   }
 
+  // The typed words of earlier rounds as page items ({ s, x, y, w, h }, as DRAFT.readPages gives the printed words), so a later round can
+  // strike them with a line snapped to them (SIGN.snapStrike) on screen and in the offer-sign function's check (Offers fixes 2, re-review):
+  // a counter-counteroffer striking the figure the other side typed. layers: the locked rounds before this one; marks: this round's
+  // changes so far (only their reinstatements count here); page: the page. Words already struck through by an earlier round's line
+  // (not reinstated) are left out. The same rule on both sides, so the browser and the function snap alike.
+  function typedItems(layers, marks, page) {
+    const earlier = []; (layers || []).slice().sort((a, b) => a.doc_round - b.doc_round).forEach(L => (L.marks || []).forEach(m => earlier.push(m)));
+    const back = new Set(earlier.concat(marks || []).filter(c => c.kind === 'reinstate' && c.target).map(c => c.target));
+    const lines = earlier.filter(c => (c.kind === 'strike' || c.kind === 'cross') && !back.has(c.id) && c.page === page);
+    return earlier.filter(c => c.kind === 'insert' && c.page === page && c.geometry && String(c.geometry.text || '').trim()).map(c => {
+      const g = c.geometry, z = g.size || 9; return { s: String(g.text), x: g.x, y: g.y, w: Math.round(textWidth(g.text, z) * 100) / 100, h: z }; })
+      .filter(it => !lines.some(l => { const g = l.geometry || {}; if (l.kind === 'strike') return g.y >= it.y && g.y <= it.y + it.h * 0.75 && Math.min(g.x0, g.x1) < it.x + it.w && Math.max(g.x0, g.x1) > it.x;
+        return g.x < it.x + it.w && g.x + g.w > it.x && g.y < it.y + it.h * 0.75 && g.y + g.h > it.y; }));
+  }
+
   /* ───── the working copy ───── */
   // the ink of one round: each tap, at its place, with whose drawn mark it shows
   function inkOf(L) {
@@ -315,7 +330,7 @@
     const all = parts.concat(central, [end]), out = new Uint8Array(all.reduce((a, b) => a + b.length, 0)); let p = 0; all.forEach(b => { out.set(b, p); p += b.length; }); return out;
   }
 
-  const NEGO = { changeRect, atPlace, ROW_REACH, inkOf, standing, outstanding, formed, presentPlaces, changePlaces, initialsBeside, rectsOf, KIND_WORDS, fullDate, parseFullDate, roundLines, agreementLines,
+  const NEGO = { typedItems, textWidth, changeRect, atPlace, ROW_REACH, inkOf, standing, outstanding, formed, presentPlaces, changePlaces, initialsBeside, rectsOf, KIND_WORDS, fullDate, parseFullDate, roundLines, agreementLines,
     renderWorking, redrawRound, nextTermNo, timelineHtml, eventWords, zip, crc32, sideName, other, MONTHS, DRAW_VERSION, textWidth, initialsFor };
   if (typeof module !== 'undefined' && module.exports) module.exports = NEGO; else root.NEGO = NEGO;
 })(typeof window !== 'undefined' ? window : globalThis);

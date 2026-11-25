@@ -81,7 +81,9 @@ function q(table){ logCall('from:'+table);
     if((OFFER_TABLES.includes(table)||table==='property_offers')&&!(S&&S.user)) throw new Error('permission denied for table '+table);
     if(OFFER_TABLES.includes(table)&&op!=='select') throw new Error('permission denied for table '+table);
     if(table==='offer_signers'&&op==='select'&&(sel==='*'||/token_hash|code_hash|session_hash|code_tries|codes_window_at|session_expires_at/.test(sel))) throw new Error('permission denied for table offer_signers');   // column privileges (020)
-    if(table==='offer_settings'&&op==='select') OSET();
+    // column privileges on offer_settings (018, 024, 025): a named column outside the grants is refused (never the salt)
+    if(table==='offer_settings'&&op==='select'){ const ok_=['id','ks_warn_working_days','ai_daily_cap','updated_by','updated_at','resign_every_round','link_changes_default','agent_phone','agent_email']; const cols=String(sel||'*').split(',').map(x=>x.trim());
+      if(cols[0]!=='*'&&cols.some(c=>!ok_.includes(c))) throw new Error('permission denied for table offer_settings'); OSET(); }   // named columns only ('*' as before: the policy then decides)
     if(table==='offer_terms'&&op==='select') OTERMS();
     if(table==='property_offers'&&op==='insert'&&(Array.isArray(payload)?payload:[payload]).some(x=>x&&((x.source||'manual')!=='manual'||x.submission||x.details))) throw new Error('Offers from the form are only added through the form');
     if(table==='property_offers'&&op==='update'&&(DB.property_offers||[]).some(r=>filters.every(f=>f(r))&&(r.source||'manual')!=='manual')&&Object.keys(payload||{}).some(k=>!['notes','expires_at'].includes(k))) throw new Error('Offers from the form are changed through the Offers tile, so there is a record');
