@@ -24,10 +24,11 @@ await tick('[data-vk="marketing"]'); await p.fill('#vMktDesc','Two more weeks of
 await p.fill('#vReason','More time to reach the right buyer');
 await p.screenshot({path:require('path').join(__dirname,'out','v1_edit.png'),fullPage:true});
 await p.click('#next'); await p.waitForTimeout(400);
-out.issueH1=await p.textContent('h1'); await p.screenshot({path:require('path').join(__dirname,'out','v2_issue.png'),fullPage:true});
+out.issueH1=await p.textContent('h1'); const vwr=async w=>{ if(!await p.$('#varDv .dv-frame [data-dv-page] table')) errs.push(w+': the variation is not in the shared signing viewer'); };   // the signing viewer (Tim, 26 November 2026)
+await vwr('Tim signs and issues'); await p.screenshot({path:require('path').join(__dirname,'out','v2_issue.png'),fullPage:true});
 await p.click('#next'); await p.waitForTimeout(200); out.noSigErr=await p.textContent('.err');
 await draw('#vSigA'); await p.click('#next'); await p.waitForTimeout(500);
-out.togetherH1=await p.textContent('h1');
+out.togetherH1=await p.textContent('h1'); await vwr('signing together');
 await p.click('#next'); await p.waitForTimeout(200); out.noTogErr=await p.textContent('.err');
 for (const id of ['P1','P2']) { await draw(`[data-vcv="${id}"]`); }
 await p.click('#next'); await p.waitForTimeout(200); out.tickErr=await p.textContent('.err');
@@ -50,7 +51,7 @@ await go(); await p.waitForTimeout(400);
 out.vendorH1=await p.textContent('h1'); await p.screenshot({path:require('path').join(__dirname,'out','v4_vendor.png'),fullPage:true});
 out.sideScroll=await p.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth);
 await p.click('#next'); await p.waitForTimeout(200); out.vErr=await p.textContent('.err');
-await tick('#vOk'); await draw('#vSigV'); await p.click('#next'); await p.waitForTimeout(3200);
+await vwr('the vendor\'s phone'); await p.click('#varDvIn'); await p.waitForTimeout(200); if(await p.$eval('#varDv .dv-doc',e=>e.style.zoom)!=='1.25') errs.push('the variation zooms'); await tick('#vOk'); await draw('#vSigV'); await p.click('#next'); await p.waitForTimeout(3200);
 out.doneH1=await p.textContent('h1'); out.doneVars=await p.evaluate(()=>[...document.querySelectorAll('.card h3')].filter(h=>h.textContent.startsWith('Variation')).map(h=>h.parentElement.textContent.replace(/\s+/g,' ').slice(0,90)));
 await p.screenshot({path:require('path').join(__dirname,'out','v5_done.png'),fullPage:true});
 const db=await p.evaluate(()=>JSON.parse(localStorage.getItem('mockdb')));

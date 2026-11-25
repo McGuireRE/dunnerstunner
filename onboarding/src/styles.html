@@ -807,4 +807,28 @@ body.portal .stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 /* old "back to" buttons: the up link replaces them in the portal */
 body.portal #pfBack, body.portal #toList, body.portal #toProp, body.portal #fBack, body.portal #plBack, body.portal #plProp, body.portal #ofBackP, body.portal #drBack, body.portal #drBk, body.portal #drLibBack, body.portal #drRvBack, body.portal #insProp { display: none !important; }
 @media print { .pnav, .p-up-row { display: none !important; } }
+/* the signing viewer (Tim, 26 November 2026): one bar of buttons in the highlight colour over a frame the document moves inside */
+.dv { margin: 8px 0; max-width: 100%; }
+.dv-bar { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; margin: 6px 0; }
+.dv-grp { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; max-width: 100%; }
+.dv-btn, .dv-btn.primary { background: var(--accent-fill); border-color: var(--accent-fill); color: var(--on-accent); min-height: 44px; min-width: 44px; padding: 8px 14px; font-size: 15.5px; line-height: 1.2; }
+.dv-btn:hover:not([disabled]) { filter: brightness(1.08); }
+.dv-btn:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; box-shadow: 0 0 0 5px var(--bg); }
+.dv-btn.dv-sq { padding: 6px 0; width: 48px; font-size: 22px; font-weight: 700; }
+.dv-pgv { font-size: 14.5px; color: var(--muted); }
+.dv-zv { font-size: 14.5px; min-width: 3.4em; text-align: center; }
+.dv-pick select { max-width: 100%; min-height: 44px; }
+.dv-auto { margin: 4px 0 8px; }
+.dv-frame { position: relative; overflow: auto; max-width: 100%; touch-action: pan-x pan-y; -webkit-overflow-scrolling: touch; border-radius: 6px; }
+.dv-frame:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.dv-frame.dv-zoomed:has(.dv-drawn) { max-height: 78vh; }
+.dv-frame.dv-canpan { cursor: grab; } .dv-frame.dv-panning { cursor: grabbing; user-select: none; -webkit-user-select: none; }
+.dv-doc { transform-origin: 0 0; }
+.dv .dr-holder { overflow: visible; margin: 0 0 8px; }
+.dv-drawn .dr-pg { max-width: none; }
+.dv .dr-holder.sg-holder { margin: 0; }
+.dv.dv-full, .dv:fullscreen { position: fixed; inset: 0; z-index: 1000; margin: 0; background: var(--bg); display: flex; flex-direction: column; box-sizing: border-box; width: 100%; height: 100%; max-width: none;
+  padding: max(8px, env(safe-area-inset-top, 0px)) max(10px, env(safe-area-inset-right, 0px)) max(8px, env(safe-area-inset-bottom, 0px)) max(10px, env(safe-area-inset-left, 0px)); }
+.dv.dv-full .dv-frame, .dv:fullscreen .dv-frame { flex: 1 1 auto; max-height: none; min-height: 0; }
+body.dv-lock { overflow: hidden; }
 </style>

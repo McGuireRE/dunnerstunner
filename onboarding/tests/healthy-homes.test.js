@@ -79,6 +79,8 @@ await go();
 await p.click('[data-form="healthy_homes"]'); await p.waitForTimeout(500);
 out.mH1=await p.textContent('main h1'); expect(/Healthy Homes/.test(out.mH1),'Mere checks and signs');
 out.mSees=await p.evaluate(()=>document.querySelector('main').textContent.includes('No underfloor insulation, quote arranged')); expect(out.mSees,'Mere sees Tim\'s notes');
+// the signing viewer (Tim, 26 November 2026)
+if(!await p.$('#vfDv .dv-frame [data-dv-page]')) errs.push('the landlord\'s Healthy Homes signing is not in the shared signing viewer');
 await pick('#vfOk'); await draw('#vfSig'); await p.click('#next'); await p.waitForTimeout(3600);
 d=await db(); hh=d.property_forms.find(f=>f.id==='F2');
 expect(hh.status==='signed'&&hh.document_id&&d.property_documents.some(x=>x.kind==='Healthy Homes checklist and statement'&&x.source==='generated'),'signed by both landlords and filed on the property');

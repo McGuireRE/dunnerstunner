@@ -720,6 +720,40 @@ Going live, with Tim's approval, in order:
    to a test vendor; a counter and an acceptance; check Tim's one email per round; the agreed copy and its two draft emails (fill the
    blanks, send); the lawyers' pack; a request from a test link (Tim's urgent email), Freeze now, Unfreeze and Withdraw now. Tim's solicitor confirms the method before the first real offer.
 
+## Signing viewer (Tim, 26 November 2026; branch `signing-viewer`, from `offers-hotfix-3` 96a8178)
+
+Status: built, awaiting review. Screens only: no database change, no edge function change, nothing pushed or deployed.
+
+One shared document viewer (`docViewer` and `dvWire` in `src/app.js`, styles under "the signing viewer" in `src/styles.html`) on every
+screen where someone reads a document to sign it, by email link or on Tim's screen:
+- Offers and counteroffers: the signing places in every round, in person and by link (the vendors' rounds too), and the Client and
+  Customer Acknowledgement pages read before signing.
+- The agency agreement: the vendor's own phone (the front page and each prior-agency cancellation notice, one page each) and Tim's
+  in-person signing (the front page, and the notices in their own viewer).
+- Variations: Tim signing and issuing, signing together on Tim's device, and the vendor's own phone.
+- The Vendor Declaration and the Healthy Homes checklist on the vendor's phone, and Tim's form screen once it shows the finished document.
+What it does:
+- A bar of buttons in the highlight colour (the accent fill with its own text colour, light and dark): Previous page, Next page, the
+  page it is on ("Page 2 of 11"), Zoom out, the size, Zoom in, Full screen. Buttons at least 44 px, labelled, with a clear focus ring.
+- Full screen: the browser's own where it has one, otherwise the viewer fills the window (an iPhone). Close full screen, or Escape.
+- Zoom from 100% to 300%: the buttons, a pinch on a phone, ctrl or a trackpad pinch on a computer, and + or - with the document
+  focused. Offer pages are drawn again, sharp, at each size; the other documents are scaled and re-flow. The zoom is kept per signer
+  on the device (on Tim's device each purchaser of each document has their own), so it holds after each place, when the page is drawn
+  again, on the next page, and on coming back to the screen.
+- Pan by dragging with a mouse, or scrolling with a finger, inside the document's own frame: the page itself never scrolls sideways
+  at 390 px, even at 300%.
+- "Move to the next place for me" (off until ticked, remembered per signer): after each place, a gentle glide to the next place
+  still to do, onto the next page when a page is finished, keeping the zoom; at once for anyone who asks their device for less motion.
+  Also on Tim's in-person agreement signing with two or more vendors: after one signs, it moves on to the next still to sign.
+- Feedback (the zoom, the tick) shows just under the bar that was pressed (`atBtn`). The wording is in `src/strings.js` (group "viewer").
+- Nothing signed changes: what is signed, the signing places, fingerprints and every signed record are as before. The viewer only
+  changes how the document is shown on screen. A zoomed offer page is drawn within what a phone can hold (about 12 million pixels).
+Tests: `tests/signing-viewer.test.js` (new), and checks added to `variations.test.js`, `vendor-declaration.test.js`, `healthy-homes.test.js`.
+Not covered: Tim's own review and set-up screens (the draft review, the blank's places, releasing and presenting a round) keep their
+current page controls: they are not signing screens. While Tim is still filling in a Healthy Homes checklist (before the first
+signature), his screen shows the form to fill, not the document, so it has no viewer until then. Full screen is left when a screen is
+drawn again from scratch (undo, a held change): the browser only allows it after a tap, so the signer taps Full screen again.
+
 ## Offers fixes 3 (Tim's decisions of 25 and 26 November 2026; branch `offers-fixes-3`, from main 92ebdd3)
 
 Status: Live 26 November 2026 (see Live status). Waiting on Tim's live checks (step 5). Was: needs migration 026 (`026_offer_undo_revert_hold.sql`; its rollback test first,

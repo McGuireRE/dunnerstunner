@@ -81,6 +81,7 @@ out.statement=await p.evaluate(()=>document.querySelector('main').textContent.in
 expect(out.statement,'the Vendor Statement in Tim\'s words');
 out.btn=await p.textContent('#next'); expect(out.btn==='Save my signature and sign','the button says it saves the signature');
 out.padBg=await p.$eval('#vfSig',e=>getComputedStyle(e.closest('.sig-wrap')).backgroundColor);
+if(!await p.$('#vfDv .dv-frame [data-dv-page]')) errs.push('the declaration is not in the shared signing viewer');   // the signing viewer (Tim, 26 November 2026)
 await next(); out.e4=await errText(); expect(/Tick the box/.test(out.e4),'must make the declaration');
 await pick('#vfOk'); await next(); out.e5=await errText(); expect(/sign in the box/.test(out.e5),'must sign');
 await draw('#vfSig'); await p.click('#next'); await p.waitForTimeout(300);

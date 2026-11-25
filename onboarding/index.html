@@ -816,6 +816,30 @@ body.portal .stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 /* old "back to" buttons: the up link replaces them in the portal */
 body.portal #pfBack, body.portal #toList, body.portal #toProp, body.portal #fBack, body.portal #plBack, body.portal #plProp, body.portal #ofBackP, body.portal #drBack, body.portal #drBk, body.portal #drLibBack, body.portal #drRvBack, body.portal #insProp { display: none !important; }
 @media print { .pnav, .p-up-row { display: none !important; } }
+/* the signing viewer (Tim, 26 November 2026): one bar of buttons in the highlight colour over a frame the document moves inside */
+.dv { margin: 8px 0; max-width: 100%; }
+.dv-bar { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; margin: 6px 0; }
+.dv-grp { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; max-width: 100%; }
+.dv-btn, .dv-btn.primary { background: var(--accent-fill); border-color: var(--accent-fill); color: var(--on-accent); min-height: 44px; min-width: 44px; padding: 8px 14px; font-size: 15.5px; line-height: 1.2; }
+.dv-btn:hover:not([disabled]) { filter: brightness(1.08); }
+.dv-btn:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; box-shadow: 0 0 0 5px var(--bg); }
+.dv-btn.dv-sq { padding: 6px 0; width: 48px; font-size: 22px; font-weight: 700; }
+.dv-pgv { font-size: 14.5px; color: var(--muted); }
+.dv-zv { font-size: 14.5px; min-width: 3.4em; text-align: center; }
+.dv-pick select { max-width: 100%; min-height: 44px; }
+.dv-auto { margin: 4px 0 8px; }
+.dv-frame { position: relative; overflow: auto; max-width: 100%; touch-action: pan-x pan-y; -webkit-overflow-scrolling: touch; border-radius: 6px; }
+.dv-frame:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.dv-frame.dv-zoomed:has(.dv-drawn) { max-height: 78vh; }
+.dv-frame.dv-canpan { cursor: grab; } .dv-frame.dv-panning { cursor: grabbing; user-select: none; -webkit-user-select: none; }
+.dv-doc { transform-origin: 0 0; }
+.dv .dr-holder { overflow: visible; margin: 0 0 8px; }
+.dv-drawn .dr-pg { max-width: none; }
+.dv .dr-holder.sg-holder { margin: 0; }
+.dv.dv-full, .dv:fullscreen { position: fixed; inset: 0; z-index: 1000; margin: 0; background: var(--bg); display: flex; flex-direction: column; box-sizing: border-box; width: 100%; height: 100%; max-width: none;
+  padding: max(8px, env(safe-area-inset-top, 0px)) max(10px, env(safe-area-inset-right, 0px)) max(8px, env(safe-area-inset-bottom, 0px)) max(10px, env(safe-area-inset-left, 0px)); }
+.dv.dv-full .dv-frame, .dv:fullscreen .dv-frame { flex: 1 1 auto; max-height: none; min-height: 0; }
+body.dv-lock { overflow: hidden; }
 </style>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script src="../catalogue.js"></script>
@@ -916,6 +940,25 @@ body.portal #pfBack, body.portal #toList, body.portal #toProp, body.portal #fBac
 // checked by a person. 'guide' is the Vendor Guide, the acknowledgements and the wording of signed documents (a reading aid only).
 window.I18N_STRINGS = {
  "screens": [
+  [
+   "viewer",
+   [
+    "Document controls",
+    "Previous page",
+    "Next page",
+    "Page {n} of {total}",
+    "Zoom out",
+    "Zoom in",
+    "Full screen",
+    "Close full screen",
+    "Move to the next place for me",
+    "The document. Drag or scroll to move around it.",
+    "Zoomed to {pct}%. It stays this size while you sign.",
+    "Back to the normal size.",
+    "On. After each place you sign, the page moves to the next one for you.",
+    "Off. The page stays where you leave it."
+   ]
+  ],
   [
    "language",
    [
@@ -6473,6 +6516,159 @@ window.JOURNEY_MEDIA_HINTS = {
     return new Promise(r => setTimeout(r, 2500));
   }
   const saveNote = label => `<p class="sig-save-note">When you're happy with it, press <strong>${esc(label)}</strong>. Your signature isn't saved until you do.</p>`;
+  /* ───── the signing viewer: one document viewer for every signing screen (Tim, 26 November 2026) ─────
+     Used wherever someone reads a document to sign it, by link or on Tim's screen: offers and counteroffers, the agency agreement,
+     its prior-agency cancellation notices, variations, the Vendor Declaration and the Healthy Homes checklist. It only changes how
+     the document is shown on screen: what is signed, its fingerprint, the signing places and every signed record are untouched.
+       docViewer(inner, o)  the HTML: a bar (Previous page, Next page, Zoom out, Zoom in, Full screen) over a frame holding the document
+       dvWire(o)            wires it once it is on the page, and returns the viewer (V): V.zoom, V.pageW(), V.go(n), V.sync(),
+                            V.painted(), V.glide(el), V.auto()
+     o: { id, who (whose zoom: a signer, or 'me' for this device), places (show "Move to the next place for me"), pick (extra HTML in
+          the bar, such as a page list), ids ({ prev, next }), count () / current () / go (n) for a document shown a page at a time,
+          render () to draw it again at the new zoom (PDF pages are drawn sharp at each size; other documents are scaled with CSS zoom) }
+     Pages of a document shown whole are its [data-dv-page] elements. The zoom and the tick are kept per signer on this device
+     (localStorage), so they hold after each place, when the page is drawn again, on the next page and on coming back. */
+  const DV_STEPS = [1, 1.25, 1.5, 2, 2.5, 3], DV_MAX = 3;
+  const DV_POS = {};   // where each viewer was scrolled to, by page, so a redraw lands back in the same place
+  const dvStore = (k, v) => { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, String(v)); } catch (_) { } return null; };
+  const dvZoomOf = who => { const z = parseFloat(dvStore('dvZoom:' + (who || 'me'))); return z >= 1 && z <= DV_MAX ? z : 1; };
+  const dvAutoOf = who => dvStore('dvAuto:' + (who || 'me')) === '1';
+  const dvCalm = () => { try { return matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (_) { return false; } };
+  const dvClamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  function docViewer(inner, o) {
+    const id = o.id, ids = o.ids || {}, z = dvZoomOf(o.who);
+    return `<div class="dv" id="${id}" data-who="${esc(o.who || 'me')}">
+      <div class="toolbar dv-bar" role="toolbar" aria-label="Document controls">
+        <span class="dv-grp"><button class="btn dv-btn" type="button" id="${ids.prev || id + 'Prev'}" data-dv="prev">Previous page</button><button class="btn dv-btn" type="button" id="${ids.next || id + 'Next'}" data-dv="next">Next page</button></span>
+        <span class="dv-pgv" id="${id}Pg" aria-live="polite">Page 1 of 1</span>${o.pick ? `<span class="dv-grp dv-pick">${o.pick}</span>` : ''}
+        <span class="dv-grp"><button class="btn dv-btn dv-sq" type="button" id="${id}Out" data-dv="out" aria-label="Zoom out"><span aria-hidden="true" data-no-tr translate="no">&minus;</span></button><span class="dv-zv" id="${id}Zv" role="status" data-no-tr translate="no">${Math.round(z * 100)}%</span><button class="btn dv-btn dv-sq" type="button" id="${id}In" data-dv="in" aria-label="Zoom in"><span aria-hidden="true" data-no-tr translate="no">+</span></button></span>
+        <span class="dv-grp"><button class="btn dv-btn" type="button" id="${id}Full" data-dv="full">Full screen</button><button class="btn dv-btn" type="button" id="${id}Close" data-dv="close" hidden>Close full screen</button></span>
+      </div>
+      ${o.places ? `<label class="choice cb dv-auto" id="${id}AutoL"><input type="checkbox" id="${id}Auto" ${dvAutoOf(o.who) ? 'checked' : ''}><span class="mark"></span><span><span class="ct">Move to the next place for me</span></span></label>` : ''}
+      <div class="dv-frame${z > 1 ? ' dv-zoomed' : ''}" id="${id}Frame" tabindex="0" role="region" aria-label="The document. Drag or scroll to move around it."><div class="dv-doc${o.render ? ' dv-drawn' : ''}"${!o.render && z > 1 ? ` style="zoom:${z}"` : ''}>${inner}</div></div></div>`;
+  }
+  // a viewer left full screen when its screen was replaced leaves nothing behind
+  function dvTidy() { if (!document.querySelector('.dv.dv-full')) document.body.classList.remove('dv-lock'); }
+  let DV_KEYS = false;
+  function dvGlobal() {
+    if (DV_KEYS) return; DV_KEYS = true;
+    document.addEventListener('keydown', e => { if (e.key !== 'Escape') return; const f = document.querySelector('.dv.dv-full'); if (f && f._dv) { e.preventDefault(); f._dv.close(); } });
+    const fc = () => { const el = document.fullscreenElement || document.webkitFullscreenElement; $$('.dv.dv-full').forEach(f => { if (f._dv && f._dv.native && f !== el) f._dv.close(true); }); };
+    document.addEventListener('fullscreenchange', fc); document.addEventListener('webkitfullscreenchange', fc);
+  }
+  function dvWire(o) {
+    const root = $('#' + o.id); if (!root) return null;
+    dvGlobal(); dvTidy();
+    const who = root.dataset.who, frame = $('.dv-frame', root), docEl = $('.dv-doc', root), posKey = o.id + '|' + who;
+    const B = k => $(`[data-dv="${k}"]`, root);
+    const V = { root, frame, zoom: dvZoomOf(who), native: false, o };
+    root._dv = V;
+    const pageEls = () => $$('[data-dv-page]', docEl);
+    let goneTo = 0, goneAt = 0;
+    const htmlCur = () => { const els = pageEls(); if (!els.length) return 1; if (Date.now() - goneAt < 900) return goneTo;
+      const top = Math.max(frame.getBoundingClientRect().top, 0) + 60; let n = 1; els.forEach((e, i) => { if (e.getBoundingClientRect().top <= top) n = i + 1; }); return n; };
+    const count = () => o.count ? o.count() : Math.max(1, pageEls().length), cur = () => o.current ? o.current() : htmlCur();
+    V.isFull = () => root.classList.contains('dv-full');
+    // the width a page is drawn at: the frame's own width (wider in full screen), times the zoom
+    V.pageW = () => Math.round(Math.max(240, Math.min((frame.clientWidth || drPageW()) - 2, V.isFull() ? 1100 : 760)) * V.zoom);
+    V.auto = () => { const a = $('#' + o.id + 'Auto'); return !!(a && a.checked); };
+    V.sync = () => { const n = count(), c = dvClamp(cur(), 1, n), pv = $('#' + o.id + 'Pg');
+      if (pv) pv.textContent = trs('Page {n} of {total}', { n: c, total: n });
+      B('prev').disabled = c <= 1; B('next').disabled = c >= n;
+      const zv = $('#' + o.id + 'Zv'); if (zv) zv.textContent = Math.round(V.zoom * 100) + '%';
+      B('out').disabled = V.zoom <= 1; B('in').disabled = V.zoom >= DV_MAX;
+      frame.classList.toggle('dv-zoomed', V.zoom > 1); frame.classList.toggle('dv-canpan', frame.scrollWidth > frame.clientWidth + 1 || frame.scrollHeight > frame.clientHeight + 1); };
+    const note = (b, msg, kind) => { const n = atBtn(b, msg, kind || 'ok'); clearTimeout(V._nt); V._nt = setTimeout(() => { if (n) n.hidden = true; }, 3000); };
+    // the zoom: kept on the frame's point under a finger or the pointer (the middle otherwise), so nothing jumps away
+    const anchorOf = (cx, cy) => { const r = frame.getBoundingClientRect(), ax = cx == null ? frame.clientWidth / 2 : cx - r.left, ay = cy == null ? frame.clientHeight / 2 : cy - r.top;
+      return { ax, ay, fx: (frame.scrollLeft + ax) / Math.max(1, frame.scrollWidth), fy: (frame.scrollTop + ay) / Math.max(1, frame.scrollHeight) }; };
+    const toAnchor = a => { if (!a) return; frame.scrollLeft = a.fx * frame.scrollWidth - a.ax; frame.scrollTop = a.fy * frame.scrollHeight - a.ay; };
+    V.setZoom = async (z, cx, cy) => {
+      z = Math.round(dvClamp(z, 1, DV_MAX) * 20) / 20; docEl.style.transform = ''; if (z === V.zoom) return V.sync();
+      const a = anchorOf(cx, cy); V.zoom = z; dvStore('dvZoom:' + who, z);
+      if (!o.render) docEl.style.zoom = z === 1 ? '' : String(z);
+      frame.classList.toggle('dv-zoomed', z > 1);
+      if (o.render) await o.render();
+      toAnchor(a); V.sync();
+    };
+    const step = dir => { const i = DV_STEPS.findIndex(s => s >= V.zoom - 0.001); const at = i < 0 ? DV_STEPS.length - 1 : i;
+      return dir > 0 ? (DV_STEPS[at] > V.zoom + 0.001 ? DV_STEPS[at] : DV_STEPS[Math.min(at + 1, DV_STEPS.length - 1)]) : (DV_STEPS[Math.max(0, (DV_STEPS[at] < V.zoom - 0.001 ? at : at - 1))] || 1); };
+    B('in').addEventListener('click', async () => { await V.setZoom(step(1)); note(B('in'), trs('Zoomed to {pct}%. It stays this size while you sign.', { pct: Math.round(V.zoom * 100) })); });
+    B('out').addEventListener('click', async () => { await V.setZoom(step(-1)); note(B('out'), V.zoom > 1 ? trs('Zoomed to {pct}%. It stays this size while you sign.', { pct: Math.round(V.zoom * 100) }) : trs('Back to the normal size.')); });
+    // pages: shown one at a time (o.go), or a whole document moved through by scrolling
+    V.go = async n => { n = dvClamp(n, 1, count());
+      if (o.go) { await o.go(n); frame.scrollTop = 0; frame.scrollLeft = 0; root.scrollIntoView({ block: 'nearest' }); }
+      else { const el = pageEls()[n - 1]; goneTo = n; goneAt = Date.now(); if (el) el.scrollIntoView({ block: 'start', behavior: dvCalm() ? 'auto' : 'smooth' }); }
+      V.sync(); };
+    B('prev').addEventListener('click', () => V.go(cur() - 1));
+    B('next').addEventListener('click', () => V.go(cur() + 1));
+    // full screen: the browser's own where it has one, otherwise the viewer fills the window (an iPhone); Close or Escape to leave
+    const fullUI = on => { root.classList.toggle('dv-full', on); document.body.classList.toggle('dv-lock', on); B('full').hidden = on; B('close').hidden = !on; };
+    V.open = async () => {
+      const req = root.requestFullscreen || root.webkitRequestFullscreen; V.native = false;
+      if (req) { try { await req.call(root); V.native = true; } catch (_) { V.native = false; } }
+      const a = anchorOf(); fullUI(true); if (o.render) await o.render(); toAnchor(a); V.sync(); B('close').focus({ preventScroll: true });
+    };
+    V.close = async fromBrowser => {
+      if (!V.isFull()) return;
+      if (V.native && !fromBrowser) { const fe = document.fullscreenElement || document.webkitFullscreenElement, ex = document.exitFullscreen || document.webkitExitFullscreen; if (fe && ex) { try { await ex.call(document); } catch (_) { } } }
+      V.native = false; const a = anchorOf(); fullUI(false); if (o.render) await o.render(); toAnchor(a); V.sync(); B('full').focus({ preventScroll: true });
+    };
+    B('full').addEventListener('click', () => V.open());
+    B('close').addEventListener('click', () => V.close());
+    const au = $('#' + o.id + 'Auto');
+    if (au) au.addEventListener('change', () => { dvStore('dvAuto:' + who, au.checked ? '1' : '0'); note(au.closest('label'), au.checked ? trs('On. After each place you sign, the page moves to the next one for you.') : trs('Off. The page stays where you leave it.')); });
+    // a gentle glide to a place (in the frame, and the screen), keeping the zoom; at once for anyone who prefers less motion
+    V.glide = el => new Promise(res => { if (!el || !el.isConnected) return res();
+      const fr = frame.getBoundingClientRect(), r = el.getBoundingClientRect();
+      const maxL = frame.scrollWidth - frame.clientWidth, maxT = frame.scrollHeight - frame.clientHeight;
+      const l0 = frame.scrollLeft, t0 = frame.scrollTop, inside = frame.contains(el);
+      const l1 = !inside ? l0 : dvClamp(l0 + (r.left + r.width / 2) - (fr.left + frame.clientWidth / 2), 0, Math.max(0, maxL)), t1 = !inside ? t0 : dvClamp(t0 + (r.top + r.height / 2) - (fr.top + frame.clientHeight / 2), 0, Math.max(0, maxT));
+      const w0 = window.scrollY, elTop = r.top - (t1 - t0), w1 = V.isFull() ? w0 : Math.max(0, w0 + elTop + r.height / 2 - window.innerHeight / 2);
+      const end = () => { try { el.focus({ preventScroll: true }); } catch (_) { } V.sync(); res(); };
+      if (dvCalm()) { frame.scrollLeft = l1; frame.scrollTop = t1; if (w1 !== w0) window.scrollTo(0, w1); return end(); }
+      const t00 = performance.now(), dur = 520, ease = x => x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
+      const tick = now => { const k = ease(Math.min(1, (now - t00) / dur)); frame.scrollLeft = l0 + (l1 - l0) * k; frame.scrollTop = t0 + (t1 - t0) * k; if (w1 !== w0) window.scrollTo(0, w0 + (w1 - w0) * k);
+        if (k < 1) requestAnimationFrame(tick); else end(); };
+      requestAnimationFrame(tick);
+    });
+    // after each redraw of a page: back to where this page was scrolled to
+    V.painted = () => { const p = DV_POS[posKey]; if (p && p.page === cur() && p.z === V.zoom) { frame.scrollLeft = p.l; frame.scrollTop = p.t; } V.sync(); };
+    frame.addEventListener('scroll', () => { DV_POS[posKey] = { page: cur(), z: V.zoom, l: frame.scrollLeft, t: frame.scrollTop }; }, { passive: true });
+    if (!o.go) { let q = 0; const onS = () => { if (!root.isConnected) return window.removeEventListener('scroll', onS); if (q) return; q = requestAnimationFrame(() => { q = 0; V.sync(); }); };
+      window.addEventListener('scroll', onS, { passive: true }); frame.addEventListener('scroll', onS, { passive: true }); }
+    // drag to pan with a mouse (a finger scrolls the frame by itself); never while marking the page, and a drag is never a tap
+    let pan = null, swallow = false;
+    const noPan = t => t.closest('button,a,input,select,textarea,label,.sg-draw,.dr-drawing,.dr-editing,.sig-wrap');
+    frame.addEventListener('pointerdown', e => { if (e.pointerType !== 'mouse' || e.button !== 0 || noPan(e.target)) return;
+      if (frame.scrollWidth <= frame.clientWidth + 1 && frame.scrollHeight <= frame.clientHeight + 1) return;
+      pan = { x: e.clientX, y: e.clientY, l: frame.scrollLeft, t: frame.scrollTop, on: false, id: e.pointerId }; });
+    frame.addEventListener('pointermove', e => { if (!pan || e.pointerId !== pan.id) return; const dx = e.clientX - pan.x, dy = e.clientY - pan.y;
+      if (!pan.on && Math.hypot(dx, dy) > 4) { pan.on = true; frame.classList.add('dv-panning'); try { frame.setPointerCapture(e.pointerId); } catch (_) { } }
+      if (pan.on) { frame.scrollLeft = pan.l - dx; frame.scrollTop = pan.t - dy; e.preventDefault(); } });
+    const panEnd = () => { if (pan && pan.on) { swallow = true; setTimeout(() => { swallow = false; }, 0); } pan = null; frame.classList.remove('dv-panning'); };
+    frame.addEventListener('pointerup', panEnd); frame.addEventListener('pointercancel', panEnd);
+    frame.addEventListener('click', e => { if (swallow) { e.stopPropagation(); e.preventDefault(); swallow = false; } }, true);
+    // pinch on a phone, ctrl or a trackpad pinch on a computer: shown at once, then drawn sharp at the new size
+    let pinch = null, wheelT = 0, wheelZ = null, wheelAt = null;
+    const preview = (s, cx, cy) => { const r = docEl.getBoundingClientRect(); docEl.style.transformOrigin = `${cx - r.left}px ${cy - r.top}px`; docEl.style.transform = `scale(${s})`; };
+    const dist = t => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+    frame.addEventListener('touchstart', e => { if (e.touches.length === 2 && !frame.querySelector('.dr-drawing,.dr-editing')) { pinch = { d: dist(e.touches), z: V.zoom, cx: (e.touches[0].clientX + e.touches[1].clientX) / 2, cy: (e.touches[0].clientY + e.touches[1].clientY) / 2, s: 1 }; } }, { passive: true });
+    frame.addEventListener('touchmove', e => { if (!pinch || e.touches.length !== 2) return; e.preventDefault();
+      pinch.s = dvClamp(dist(e.touches) / pinch.d, 1 / pinch.z, DV_MAX / pinch.z); preview(pinch.s, pinch.cx, pinch.cy); }, { passive: false });
+    const pinchEnd = e => { if (!pinch || (e.touches && e.touches.length >= 2)) return; const p = pinch; pinch = null; V.setZoom(p.z * p.s, p.cx, p.cy); };
+    frame.addEventListener('touchend', pinchEnd); frame.addEventListener('touchcancel', pinchEnd);
+    frame.addEventListener('gesturestart', e => e.preventDefault());   // Safari's own page zoom stays out of the frame
+    frame.addEventListener('wheel', e => { if (!e.ctrlKey && !e.metaKey) return; e.preventDefault();
+      wheelZ = dvClamp((wheelZ || V.zoom) * Math.exp(-e.deltaY * 0.01), 1, DV_MAX); wheelAt = [e.clientX, e.clientY]; preview(wheelZ / V.zoom, e.clientX, e.clientY);
+      clearTimeout(wheelT); wheelT = setTimeout(() => { const z = wheelZ; wheelZ = null; V.setZoom(z, wheelAt[0], wheelAt[1]); }, 160); }, { passive: false });
+    // keyboard: + and - zoom, Page Up and Page Down move between pages, while the document has focus
+    frame.addEventListener('keydown', e => { if (e.target !== frame) return;
+      if (e.key === '+' || e.key === '=') { e.preventDefault(); V.setZoom(step(1)); } else if (e.key === '-') { e.preventDefault(); V.setZoom(step(-1)); }
+      else if (e.key === 'PageDown' && o.go) { e.preventDefault(); V.go(cur() + 1); } else if (e.key === 'PageUp' && o.go) { e.preventDefault(); V.go(cur() - 1); } });
+    V.sync();
+    return V;
+  }
   function header(name, count, pct) {
     const wasPitch = PITCH_ON; PITCH_ON = false; document.title = DEFAULT_TITLE;   // every other screen leaves the journey page and its title behind
     if (IS_AGENT) { try { localStorage.removeItem('inspOpen'); } catch (_) { } inspTidy(); }
@@ -6857,7 +7053,7 @@ window.JOURNEY_MEDIA_HINTS = {
       'We have appointed McGuire Real Estate Limited. Please reply to us, with a copy to Tim McGuire at tim@mcguire.co.nz.',
     ];
   }
-  const noticeHTML = (address, sellers, x) => `<div class="card tight notice"><h3 style="margin:0 0 6px">Notice cancelling your agency with ${esc(x.agency)}</h3>${noticeParas(address, sellers, x).map(p => `<p class="small" style="margin:0 0 6px">${esc(p)}</p>`).join('')}</div>`;
+  const noticeHTML = (address, sellers, x) => `<div class="card tight notice" data-dv-page><h3 style="margin:0 0 6px">Notice cancelling your agency with ${esc(x.agency)}</h3>${noticeParas(address, sellers, x).map(p => `<p class="small" style="margin:0 0 6px">${esc(p)}</p>`).join('')}</div>`;
   const noticeSnapshot = (address, sellers, an) => priorList(an).map((x, i) => ({ idx: (an.priorAgencies || []).indexOf(x), agency: x.agency, agent: x.agent || '', kind: x.kind || '', dated: x.dated || '', text: noticeParas(address, sellers, x) }));
 
   /* ───────── auth ───────── */
@@ -7373,8 +7569,8 @@ window.JOURNEY_MEDIA_HINTS = {
     return `
     <h1>Review and sign</h1>
     <p class="lede">Here's your front page, built from your answers.</p>
-    <div class="card"><table class="sum">${rows.map(r => `<tr><td>${r[0] ? `<span class="clause">${r[0]}</span> ` : ''}${r[1]}</td><td style="white-space:normal">${r[2]}</td></tr>`).join('')}</table></div>
-    ${priorList(ANS).length ? `<h2>Cancelling your previous agency</h2><p class="small">Signed with the same signature, then checked and sent by Tim.</p>${priorList(ANS).map(x => noticeHTML(A.address, fp.client, x)).join('')}` : ''}
+    ${docViewer(`<div class="card" data-dv-page><table class="sum">${rows.map(r => `<tr><td>${r[0] ? `<span class="clause">${r[0]}</span> ` : ''}${r[1]}</td><td style="white-space:normal">${r[2]}</td></tr>`).join('')}</table></div>
+    ${priorList(ANS).length ? `<h2>Cancelling your previous agency</h2><p class="small">Signed with the same signature, then checked and sent by Tim.</p>${priorList(ANS).map(x => noticeHTML(A.address, fp.client, x)).join('')}` : ''}`, { id: 'agDv' })}
     <h2>Signatures</h2>
     ${P.filter(p => p.legal_name).map(p => {
       const mine = ME && p.id === ME.id;
@@ -7399,7 +7595,7 @@ window.JOURNEY_MEDIA_HINTS = {
     const end = () => { drawing = false; if (padDrawn) padUnsaved(cv, true); }; cv.addEventListener('pointerup', end); cv.addEventListener('pointercancel', end);
     return () => { ctx.clearRect(0, 0, cv.width, cv.height); padDrawn = false; padUnsaved(cv, false); const h = cv.parentElement.querySelector('.hint'); if (h) h.hidden = false; };
   }
-  BIND[9] = () => { wirePdf(A.id); const clear = initPad('sig0'); const c = $('#clearSig'); if (c && clear) c.addEventListener('click', clear); if (!$('#sig0')) actions(true, 'Back', 'See status'); };
+  BIND[9] = () => { dvWire({ id: 'agDv' }); wirePdf(A.id); const clear = initPad('sig0'); const c = $('#clearSig'); if (c && clear) c.addEventListener('click', clear); if (!$('#sig0')) actions(true, 'Back', 'See status'); };
   NEXT[9] = async () => {
     if (!$('#sig0')) return true;
     if (!padDrawn) return err('Please sign in the box.');
@@ -9209,7 +9405,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <p class="lede">Go through the agreement together, record what's been explained, then sign here or send it to their phones.</p>
       ${parked ? `<div class="card warnc"><h3>Paused for legal advice</h3><p class="small" style="margin:0">Sent to ${esc(L.lawyer || 'their lawyer')}${L.firm ? ', ' + esc(L.firm) : ''}. Once they've heard back, record it below and carry on.</p></div>` : ''}
       <h2>Front page</h2>
-      <div class="card"><table class="sum">${rows.map(r => `<tr><td>${r[0] ? `<span class="clause">${r[0]}</span> ` : ''}${r[1]}</td><td style="white-space:normal">${r[2]}</td></tr>`).join('')}</table></div>
+      ${docViewer(`<div class="card" data-dv-page><table class="sum">${rows.map(r => `<tr><td>${r[0] ? `<span class="clause">${r[0]}</span> ` : ''}${r[1]}</td><td style="white-space:normal">${r[2]}</td></tr>`).join('')}</table></div>`, { id: 'tFrontDv', places: named.length > 1 })}
       <div class="toolbar">${pdfBtn('Open the full agreement (PDF)')}</div>
       <h2>The agreement in plain English</h2><p class="small">Tick each section once you've been through it together. <strong id="tGuideCount">${guide.length} of ${GUIDE.length}</strong></p>
       <div class="toolbar" style="margin-top:0"><button class="btn ghost" type="button" data-tickall="guide">Tick all: we've been through these</button></div>
@@ -9222,7 +9418,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         <label class="f">Lawyer's email</label><input type="email" id="tLawE"><div class="toolbar"><button class="btn primary" type="button" id="tLawGo">Send to lawyer and pause</button></div></div>
       <h2>Identity</h2>
       <div class="card tight"><p class="small" style="margin:0">${manual ? 'You verify each seller yourself. Use the AML file for each person on the agreement page.' : `${esc(T.c.aml)} sends each seller a link to verify on their phone.`} They can sign now; you can't act until everyone is verified.</p></div>
-      ${priorList(T.an).length ? `<h2>Cancelling the previous agency</h2><p class="small">Each seller also signs ${priorList(T.an).length > 1 ? 'these notices' : 'this notice'} with the same signature. You check and send ${priorList(T.an).length > 1 ? 'them' : 'it'} from the agreement page.</p>${priorList(T.an).map(x => noticeHTML(T.ag.address, fp.client || '(names to come)', x)).join('')}` : ''}
+      ${priorList(T.an).length ? `<h2>Cancelling the previous agency</h2><p class="small">Each seller also signs ${priorList(T.an).length > 1 ? 'these notices' : 'this notice'} with the same signature. You check and send ${priorList(T.an).length > 1 ? 'them' : 'it'} from the agreement page.</p>${docViewer(priorList(T.an).map(x => noticeHTML(T.ag.address, fp.client || '(names to come)', x)).join(''), { id: 'tNoticeDv' })}` : ''}
       <h2>Signatures</h2>
       ${named.length ? named.map(p => p.signed_at ? `<div class="card tight" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><h3 style="margin:0">${nt(p.legal_name)}</h3><span class="signed-badge">✓ Signed ${esc(fmtDT(p.signed_at))}</span></div>`
         : `<div class="card tight" data-signer="${p.id || ''}"><div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:8px"><h3 style="margin:0">${nt(p.legal_name)}</h3><button class="btn link" type="button" data-clear="${p.id}">Clear</button></div>
@@ -9251,6 +9447,9 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     if (['have', 'waive'].includes(pick) && (T.ag.legal || {}).choice !== pick) { await must(sb.rpc('agent_set_legal', { a: T.id, choice: pick })); T.ag.legal = Object.assign({}, T.ag.legal, { choice: pick }); }
   }
   function tBind3() {
+    const FV = dvWire({ id: 'tFrontDv' }); dvWire({ id: 'tNoticeDv' });
+    // after a signature is saved, "Move to the next place for me" glides on to the next person still to sign
+    if (T.glideNext) { T.glideNext = false; const nx = $('[data-signer]'); if (FV && FV.auto() && nx) setTimeout(() => FV.glide(nx), 60); }
     if (T.id) wirePdf(T.id); else $$('[data-pdf]').forEach(b => b.addEventListener('click', async () => { tCollect(); if (await tSave()) openPdf(T.id); }));
     const tak = $('#tak1'); if (tak && GUIDES.agency) tak.addEventListener('change', () => { if (tak.checked) T.an._reaAgencyAt = new Date().toISOString(); });
     const tak2 = $('#tak2'); if (tak2 && GUIDES.sale_purchase) tak2.addEventListener('change', () => { if (tak2.checked) T.an._reaSaleAt = new Date().toISOString(); });
@@ -9295,7 +9494,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
           toast(fe ? 'All signed. The copy email didn\'t send; resend it from the agreement page.' : 'All signed. Copies are on their way.');
           return viewAgentDetail(T.id);
         }
-        toast(person.legal_name + ' has signed'); tShow(2);
+        toast(person.legal_name + ' has signed'); T.glideNext = true; tShow(2);
       } catch (x) { b.disabled = false; }
     }));
     const sp = $('#tSendPhones');
@@ -9633,9 +9832,9 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   // the same document on screen, as tiles
   function docHTML(doc) {
     return `${(doc.head || []).length ? `<div class="card tight"><div class="facts">${doc.head.map(([k, v]) => `<div class="fact"><div class="k">${esc(k.replace(/:$/, ''))}</div><div class="v">${esc(v || '')}</div></div>`).join('')}</div></div>` : ''}
-      ${doc.pages.map(pg => `<h2>${esc(pg.title)}${pg.sub && /^Page/.test(pg.sub) ? ` <span class="opt small">${esc(pg.sub)}</span>` : ''}</h2>${(pg.intro || []).map(t => `<p class="small">${esc(t)}</p>`).join('')}
+      ${doc.pages.map(pg => `<div data-dv-page><h2>${esc(pg.title)}${pg.sub && /^Page/.test(pg.sub) ? ` <span class="opt small">${esc(pg.sub)}</span>` : ''}</h2>${(pg.intro || []).map(t => `<p class="small">${esc(t)}</p>`).join('')}
         ${(pg.sections || []).map(s => `<div class="card tight"><h3>${esc(s.title)}</h3>${s.rows.map(r => `<div class="fact"><div class="k">${esc(r[0])}</div><div class="v" style="font-weight:400">${esc([r[1], r[2]].filter(Boolean).join('. ') || 'Not answered')}</div></div>`).join('')}</div>`).join('')}
-        ${(pg.after || []).map((t, i) => i === 0 && t === 'Vendor Statement' ? `<h2>${esc(t)}</h2>` : `<p class="small">${esc(t)}</p>`).join('')}`).join('')}`;
+        ${(pg.after || []).map((t, i) => i === 0 && t === 'Vendor Statement' ? `<h2>${esc(t)}</h2>` : `<p class="small">${esc(t)}</p>`).join('')}</div>`).join('')}`;
   }
   const signersOf = people => people.filter(p => p.legal_name && p.signed_at);
 
@@ -9816,13 +10015,14 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       const mine = iSigned(fm);
       h = `<h1>${isHH ? 'Check and sign your Healthy Homes checklist' : locked ? 'Check and sign the Vendor Declaration' : 'Vendor Statement and signing'}</h1>
         <p class="lede">${locked && !isHH ? 'These answers are already signed by someone else on the agreement, so they can\'t change here. If anything is wrong, call Tim before signing.' : isHH ? 'Tim filled this in on site. Check it, and call him on 027 562 7207 if anything is wrong before you sign.' : 'Here\'s your declaration. Check it, then sign below. Everyone on the agreement signs it, each on their own phone.'}</p>
-        ${locked || isHH ? docHTML(doc) : `${docHTML({ pages: [{ title: 'Vendor Statement', after: VD_STATEMENT }] })}<details class="card tight"><summary class="small">See all your answers</summary>${docHTML(doc)}</details>`}
+        ${docViewer(locked || isHH ? docHTML(doc) : `${docHTML({ pages: [{ title: 'Vendor Statement', after: VD_STATEMENT }] })}<details class="card tight"><summary class="small">See all your answers</summary>${docHTML(doc)}</details>`, { id: 'vfDv' })}
         ${mine ? '<div class="card okc tight"><p class="small" style="margin:0">You\'ve signed this.</p></div>' : `<h2>Sign</h2><div class="card tight">
           <label class="choice cb"><input type="checkbox" id="vfOk"><span class="mark"></span><span><span class="ct">${isHH ? 'I\'ve checked this checklist and statement' : 'I declare the Vendor Statement is true, and my answers are correct to the best of my knowledge'}</span></span></label>
           <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin:8px 0"><h3 style="margin:0">${esc(ME.legal_name)}</h3><button class="btn link" type="button" id="vfClr">Clear</button></div>
           <div class="sig-wrap"><canvas id="vfSig" aria-label="Signature pad"></canvas><div class="sig-line"></div><span class="hint">Sign here with your finger or mouse</span></div>${saveNote('Save my signature and sign')}</div>`}`;
     }
     main().innerHTML = `<section class="screen active" data-signed${i === 3 && !iSigned(fm) ? ' data-signing' : ''}>${h}<div class="err"></div></section>`;
+    dvWire({ id: 'vfDv' });
     const fu = () => { const c = $('input[name="vfFile"]:checked'); if ($('#vfChWrap')) $('#vfChWrap').hidden = !(c && c.value === 'changed'); };
     $$('input[name="vfFile"]').forEach(r => r.addEventListener('change', fu));
     const tu = () => { const c = $('input[name="vfTen"]:checked'); if ($('#vfHHWrap')) $('#vfHHWrap').hidden = !(c && c.value !== 'no'); };
@@ -9902,7 +10102,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         <h2>Compliance Statement: Data Capture <span class="opt small">Page 3</span></h2><p class="small">${esc(HH_ST_INTRO)}</p>
         ${HH_ST.map(([t, items]) => `<div class="card tight"><h3>${esc(t)}</h3>${items.map(([k, q]) => `<label class="f">${esc(q)}</label><input type="text" data-hs="${k}" value="${esc(ad.st[k] || '')}">`).join('')}</div>`).join('')}
         <div class="toolbar"><button class="btn ghost" type="button" id="hSave">Save</button><button class="btn primary" type="button" id="hReady">${fm.status === 'ready' ? 'Save, still ready to sign' : 'Ready for the landlord to sign'}</button></div><div class="err" id="hErr"></div>`
-        : docHTML(doc)}
+        : docViewer(docHTML(doc), { id: 'fDv' })}
       ${unchecked && fm.status !== 'signed' ? `<div class="card warnc tight" id="fInspWait"><p class="small" style="margin:0">The vendors need to check the answers you noted at the inspection from their own sign-in before anyone can sign here. You can't confirm your own notes for them.</p><p class="small" style="margin:6px 0 0"><strong>${unchecked} ${unchecked === 1 ? 'answer is' : 'answers are'} still to check.</strong></p></div>` : ''}
       ${canSign && toSign.length && !unchecked ? `<h2>Sign in person</h2><p class="small">${isHH ? 'The landlord' : 'Each vendor'} can sign here on your phone, witnessed by you, or on their own phone from their agreement page.</p>
         ${toSign.map(p => `<div class="card tight" data-fsigner="${p.id}"><label class="choice cb" style="margin:0 0 8px"><input type="checkbox" data-fok="${p.id}"><span class="mark"></span><span><span class="ct">${nt(p.legal_name)} has checked it${isHH ? '' : ' and makes the Vendor Statement'}</span></span></label>
@@ -9911,6 +10111,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
           <div class="toolbar"><button class="btn primary" type="button" data-fsign="${p.id}">Save ${esc(callName(p) || p.legal_name)}'s signature</button></div></div>`).join('')}<div class="err" id="fErr"></div>` : ''}
       ${fs.length ? `<h2>Signatures</h2>${fs.map(s => `<div class="card tight"><div style="font-weight:600">${nt(s.signer_name)}${s.signer_role === 'agent' ? ' <span class="small">(licensee)</span>' : ''}</div><div class="small">${esc(fmtDT(s.signed_at))} · fingerprint ${esc(String(s.snapshot_sha256).slice(0, 16))}…${s.snapshot && s.snapshot.witnessed_by ? ' · witnessed by you' : ''}</div></div>`).join('')}` : ''}
     </div>`;
+    dvWire({ id: 'fDv' });
     $('#fBack').addEventListener('click', () => ag.property_id ? viewProperty(ag.property_id) : viewAgentDetail(ag.id));
     const fc = $('#fCounter');
     if (fc) { const pad = makePad($('#fSigA')); fc.addEventListener('click', async () => {
@@ -10821,7 +11022,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     main().innerHTML = `<div class="view-pad"><span class="agent-flag">Check it, then sign as licensee</span>
       <h1>Variation ${vr.number}</h1>
       <p class="lede">To the agency agreement for ${nt(ag.address)} (${nt(ag.ref)}), between McGuire Real Estate and ${nt(joinNames(signers.map(p => p.legal_name)))}.</p>
-      <div class="card" data-signed>${varTable(vr.summary)}${vr.reason ? `<p class="small" style="margin:10px 0 0">Reason: <span data-tr-block>${nlEsc(vr.reason)}</span></p>` : ''}</div>
+      ${docViewer(`<div class="card" data-signed data-dv-page>${varTable(vr.summary)}${vr.reason ? `<p class="small" style="margin:10px 0 0">Reason: <span data-tr-block>${nlEsc(vr.reason)}</span></p>` : ''}</div>`, { id: 'varDv' })}
       <p class="small">All other terms stay exactly as signed. It takes effect once everyone has signed.</p>
       <div class="toolbar"><button class="btn ghost" type="button" id="vPrev">Preview the PDF</button><button class="btn link" type="button" id="vBack">Change something</button></div>
       <h2>How will they sign?</h2>
@@ -10833,7 +11034,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <div class="card tight"><div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:8px"><h3 style="margin:0">Timothy McGuire, for McGuire Real Estate</h3><button class="btn link" type="button" id="vClr">Clear</button></div>
         <div class="sig-wrap"><canvas id="vSigA" aria-label="Your signature"></canvas><div class="sig-line"></div><span class="hint">Sign here</span></div>${saveNote('Save my signature and issue')}</div>
       <div class="err"></div></div>`;
-    $('#vSigA').scrollIntoView({ block: 'center' });
+    dvWire({ id: 'varDv' }); $('#vSigA').scrollIntoView({ block: 'center' });
     const pad = makePad($('#vSigA'));
     $('#vClr').addEventListener('click', () => pad.clear());
     $('#vPrev').addEventListener('click', () => openVarPdf(vid));
@@ -10869,7 +11070,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     main().innerHTML = `<div class="view-pad"><span class="agent-flag">Hand the device over to each person in turn</span>
       <h1>Changes to your agency agreement</h1>
       <p class="lede">Variation ${vr.number} to the agreement for ${nt(ag.address)}. Everything not listed here stays the same.</p>
-      <div class="card" data-signed>${varTable(vr.summary)}${vr.reason ? `<p class="small" style="margin:10px 0 0">Reason: <span data-tr-block>${nlEsc(vr.reason)}</span></p>` : ''}</div>
+      ${docViewer(`<div class="card" data-signed data-dv-page>${varTable(vr.summary)}${vr.reason ? `<p class="small" style="margin:10px 0 0">Reason: <span data-tr-block>${nlEsc(vr.reason)}</span></p>` : ''}</div>`, { id: 'varDv' })}
       <div class="toolbar"><button class="btn ghost" type="button" id="vPdf2">Read the variation (PDF)</button></div>
       ${todo.map(p => `<div class="card tight" data-vp="${p.id}"><div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:8px"><h3 style="margin:0">${nt(p.legal_name)}</h3><button class="btn link" type="button" data-vclr="${p.id}">Clear</button></div>
         <label class="choice cb"><input type="checkbox" data-vok="${p.id}"><span class="mark"></span><span><span class="ct">I've read these changes and agree to them</span><span class="cd">I was told I can get legal advice before signing, and given time to do so</span></span></label>
@@ -10878,7 +11079,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const pads = {};
     $$('[data-vcv]').forEach(cv => { pads[cv.dataset.vcv] = makePad(cv); });
     $$('[data-vclr]').forEach(b => b.addEventListener('click', () => pads[b.dataset.vclr].clear()));
-    $('#vPdf2').addEventListener('click', () => openVarPdf(vid));
+    dvWire({ id: 'varDv' }); $('#vPdf2').addEventListener('click', () => openVarPdf(vid));
     actions(true, 'Close', todo.length ? 'Save signatures' : 'Close');
     onBack = () => viewAgentDetail(agId);
     onNext = async () => {
@@ -10930,7 +11131,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     main().innerHTML = `<section class="screen active" data-signed data-signing>
       <h1>Changes to your agency agreement</h1>
       <p class="lede">As we discussed, here's what changes in your agreement for ${nt(A.address)}. Everything else stays exactly as you signed it.</p>
-      <div class="card" data-signed><h3>Variation ${vr.number}</h3>${varTable(vr.summary || [])}${vr.reason ? `<p class="small" style="margin:10px 0 0">Reason: <span data-tr-block>${nlEsc(vr.reason)}</span></p>` : ''}</div>
+      ${docViewer(`<div class="card" data-signed data-dv-page><h3>Variation ${vr.number}</h3>${varTable(vr.summary || [])}${vr.reason ? `<p class="small" style="margin:10px 0 0">Reason: <span data-tr-block>${nlEsc(vr.reason)}</span></p>` : ''}</div>`, { id: 'varDv' })}
       <div class="toolbar"><button class="btn ghost" type="button" data-vpdf="${vr.id}">Read the variation (PDF)</button></div>
       <div class="card note tight"><p class="small" style="margin:0">You're welcome to get legal advice before signing, and to take your time. If anything here isn't what we agreed, don't sign. Call or text Tim on 027 562 7207 and he'll fix it.</p></div>
       <h2>Sign</h2>
@@ -10939,6 +11140,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin:8px 0"><h3 style="margin:0">${esc(ME.legal_name)}</h3><button class="btn link" type="button" id="vClr">Clear</button></div>
         <div class="sig-wrap"><canvas id="vSigV" aria-label="Signature pad"></canvas><div class="sig-line"></div><span class="hint">Sign here with your finger or mouse</span></div>${saveNote('Save my signature and sign')}</div>
       <div class="err"></div></section>`;
+    dvWire({ id: 'varDv' });
     $$('[data-vpdf]').forEach(b => b.addEventListener('click', () => openVarPdf(b.dataset.vpdf)));
     const pad = makePad($('#vSigV'));
     $('#vClr').addEventListener('click', () => pad.clear());
@@ -12712,7 +12914,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const o = opts || {}, pdfjs = await drPdfjs();
     const key = o.key || 'blank'; holder._docs ||= {};
     const doc = holder._docs[key] ||= await pdfjs.getDocument(Object.assign({ data: o.bytes.slice(0), isEvalSupported: false }, PDF_OPTS)).promise;
-    const pg = await doc.getPage(n), w = drPageW(), vp1 = pg.getViewport({ scale: 1 }), scale = w / vp1.width, vp = pg.getViewport({ scale: scale * (window.devicePixelRatio || 1) });
+    const pg = await doc.getPage(n), w = o.width || drPageW(), vp1 = pg.getViewport({ scale: 1 }), scale = w / vp1.width, vp = pg.getViewport({ scale: scale * Math.min(window.devicePixelRatio || 1, Math.sqrt(12e6 / (w * w * vp1.height / vp1.width))) });   // a zoomed page stays inside what a phone can draw
     const cv = document.createElement('canvas'); cv.width = Math.round(vp.width); cv.height = Math.round(vp.height); cv.className = 'dr-cv'; cv.setAttribute('aria-hidden', 'true');
     const wrapEl = document.createElement('div'); wrapEl.className = 'dr-pg'; wrapEl.style.width = w + 'px'; wrapEl.style.aspectRatio = vp1.width + ' / ' + vp1.height; wrapEl.dataset.page = n; wrapEl.appendChild(cv);
     holder.innerHTML = ''; holder.appendChild(wrapEl);
@@ -13620,6 +13822,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   // ── the signing itself: the same screens in person (Tim's device) and by link ──
   // ctx: { mode: 'person'|'link', address, name, position, places, taps (Set), consent_at, receipts ([guide]), sig_png, init_png,
   //   status, stopped, cca_pages, pages ([[w, h]]), bytes, draftSha, marks, api: { consent, receipt, marks, tap, mark?, ask?, finish }, done(r), back? }
+  // whose zoom the signing viewer keeps: a link is the signer's own device; on Tim's device each signer of each document has their own
+  const sgWho = ctx => ctx.mode === 'link' ? 'me' : 'sg:' + String(ctx.draftSha || '').slice(0, 12) + ':' + (ctx.side || 'purchaser') + ':' + (ctx.position || 0);
   function signFlow(ctx) {
     const F = { page: null, marking: null, draft: null, pick: null };
     const req = () => ctx.places, done = () => req().filter(x => ctx.taps.has(x.id)).length;
@@ -13643,7 +13847,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <div class="toolbar"><button class="btn primary" type="button" id="sgAgreeGo">Continue</button></div></section>`;
     else if (step === 'guides' && VEND) body = ngChattelsHTML(ctx);
     else if (step === 'guides') body = `<section class="card" id="sgGuides"><h2>Before you sign</h2>
-      ${(ctx.cca_pages || []).length ? `<h3>Client and Customer Acknowledgement</h3><p class="small">This is in the agreement pack (page${ctx.cca_pages.length > 1 ? 's' : ''} ${ctx.cca_pages.join(', ')}). It explains who Tim acts for and what he must do for you. Read it here.</p><div id="sgCcaPages"></div>
+      ${(ctx.cca_pages || []).length ? `<h3>Client and Customer Acknowledgement</h3><p class="small">This is in the agreement pack (page${ctx.cca_pages.length > 1 ? 's' : ''} ${ctx.cca_pages.join(', ')}). It explains who Tim acts for and what he must do for you. Read it here.</p>${docViewer('<div id="sgCcaPages"></div>', { id: 'sgCcaDv', who: sgWho(ctx), render: true })}
         ${hasR('cca') ? '<p class="small okc" id="sgCcaDone">Received.</p>' : `<label class="choice cb"><input type="checkbox" id="sgCcaOk"><span class="mark"></span><span><span class="ct">I've read the Client and Customer Acknowledgement</span><span class="cd">This is recorded with the time</span></span></label>`}` : ''}
       <h3>Real Estate Authority guide to sale and purchase agreements</h3><p class="small">It explains the agreement you are about to sign.</p>${g2 ? guideViewer(g2) : `<p><a href="${REA_SP}" target="_blank" rel="noopener">Read the guide on the Real Estate Authority website</a></p>`}
       ${hasR('sale_purchase') ? '<p class="small" id="sgSpDone">Received.</p>' : `<label class="choice cb"><input type="checkbox" id="sgSpOk"><span class="mark"></span><span><span class="ct">I've received the Real Estate Authority guide to sale and purchase agreements</span><span class="cd">This is recorded with the time</span></span></label>`}
@@ -13660,14 +13864,14 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         <p class="small">Your places are highlighted on each page. Tap each one yourself to put your ${'initials or signature'} there.</p>
         <p class="sg-count" id="sgCount" role="status" aria-live="polite"><strong>${done()} of ${req().length}</strong> places done</p>
         <div class="sg-bar"><span style="width:${req().length ? Math.round(done() / req().length * 100) : 0}%"></span></div>
-        <div class="dr-nav"><button class="btn ghost" type="button" id="sgPrev">Previous</button><label class="sr" for="sgPgPick">Page</label><select id="sgPgPick">${ctx.pages.map((x, i) => { const n = i + 1, t = req().filter(y => y.page === n).length, l = req().filter(y => y.page === n && !ctx.taps.has(y.id)).length; return `<option value="${n}" ${n === F.page ? 'selected' : ''}>Page ${n}${t ? ` (${l ? l + ' to do' : 'done'})` : ''}</option>`; }).join('')}</select><button class="btn ghost" type="button" id="sgNext">Next</button></div>
         ${left ? '<div class="toolbar"><button class="btn link" type="button" id="sgGoNext">Go to the next place to do</button></div>' : ''}
         ${R2 && ctx.mode === 'link' && !ctx.link_changes ? `<div class="card note tight" id="ngNoChanges"><p class="small" style="margin:0">You can accept it as it stands by initialling and signing each place, or decline it. If you would like something changed, ask Tim below.</p>
           <div class="toolbar"><button class="btn ghost" type="button" id="ngDecline">Decline it as it stands</button></div><p class="small" id="ngDeclineOut" role="status"></p></div>
 ` : R2 ? `<div class="sg-marktools" id="sgTools"><p class="small" style="margin:0 0 4px">To accept it as it stands, just initial and sign each place. To counter, change the document:</p> ${[['strike', 'Line through text'], ['cross', 'Cross out a passage'], ['insert', 'Type words'], ['note', 'Write by hand'], ['reinstate', 'Reinstate']].map(([k, l]) => `<button class="btn ${F.marking === k ? 'primary' : 'ghost'}" type="button" data-tool="${k}">${l}</button>`).join('')}</div>
 ` : ctx.mode === 'person' ? `<div class="sg-marktools" id="sgTools"><span class="small">Mark the page:</span> ${[['note', 'Note'], ['strike', 'Line through text'], ['cross', 'Cross out a box'], ['reinstate', 'Reinstate']].map(([k, l]) => `<button class="btn ${F.marking === k ? 'primary' : 'ghost'}" type="button" data-tool="${k}">${l}</button>`).join('')}</div>
 ` : ''}
-        <div id="sgPage" class="dr-holder sg-holder"></div>
+        ${docViewer('<div id="sgPage" class="dr-holder sg-holder"></div>', { id: 'sgDv', who: sgWho(ctx), places: true, ids: { prev: 'sgPrev', next: 'sgNext' },
+          pick: `<label class="sr" for="sgPgPick">Page</label><select id="sgPgPick">${ctx.pages.map((x, i) => { const n = i + 1, t = req().filter(y => y.page === n).length, l = req().filter(y => y.page === n && !ctx.taps.has(y.id)).length; return `<option value="${n}" ${n === F.page ? 'selected' : ''}>Page ${n}${t ? ` (${l ? l + ' to do' : 'done'})` : ''}</option>`; }).join('')}</select>`, render: true })}
         <p class="small">${pagesWith.length} page${pagesWith.length === 1 ? '' : 's'} have places for you.</p>
         ${ctx.mode === 'link' && (!R2 || !ctx.link_changes) ? `<details class="card tight" id="sgAskBox"><summary class="small">Ask Tim for a change</summary><p class="small">You can't change the document here. Tell Tim what you would like changed and he'll be in touch. If the offer changes, everyone signs the new version.</p>
           <label class="sr" for="sgAskText">What you would like changed</label><textarea id="sgAskText" rows="3" maxlength="1000"></textarea><div class="toolbar"><button class="btn ghost" type="button" id="sgAskGo">Send to Tim</button></div><p class="small" id="sgAskOut" role="status"></p></details>` : ''}
@@ -13699,7 +13903,12 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     on('#sgAgreeGo', () => { if (!$('#sgAgree').checked) return err('Tick the box to agree to sign electronically, or stop here and call Tim.'); act(() => ctx.api.consent()); });
     if (step === 'guides' && VEND) on('#ngChatGo', () => act(async () => { if (!$('#ngChatOk').checked) throw new Error('Tick that you have read the reminder about chattels.'); await ctx.api.receipt({ guide: 'chattels' }); }));
     else if (step === 'guides') {
-      const box = $('#sgCcaPages'); if (box) (async () => { for (const n of ctx.cca_pages) { const h = document.createElement('div'); h.className = 'dr-holder'; box.appendChild(h); try { await drRender(h, n, [], { bytes: ctx.bytes, key: 'sg-' + ctx.draftSha }); } catch (_) { h.innerHTML = `<p class="small err">${drNoLib}</p>`; } } })();
+      // the Client and Customer Acknowledgement pages, in the shared signing viewer (drawn again, sharp, at each zoom)
+      const box = $('#sgCcaPages'); let CV = null;
+      const ccaPaint = async () => { if (!box) return; const docs = box._docs || {}; box.innerHTML = '';
+        for (const n of ctx.cca_pages) { const h = document.createElement('div'); h.className = 'dr-holder'; h.dataset.dvPage = n; h._docs = docs; box.appendChild(h); try { await drRender(h, n, [], { bytes: ctx.bytes, key: 'sg-' + ctx.draftSha, width: CV ? CV.pageW() : null }); } catch (_) { h.innerHTML = `<p class="small err">${drNoLib}</p>`; } }
+        box._docs = docs; if (CV) CV.painted(); };
+      if (box) { CV = dvWire({ id: 'sgCcaDv', render: ccaPaint }); ccaPaint(); }
       reaFill();
       on('#sgGuidesGo', () => act(async () => {
         const cc = $('#sgCcaOk'), sp = $('#sgSpOk');
@@ -13715,13 +13924,14 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         const s = sgPng($('#sgSig')), i = sgPng($('#sgInit')); await ctx.api.marks(s, i); }));
     }
     if (step === 'places') {
+      let V = null;
       const paint = async () => {
         const holder = $('#sgPage'); if (!holder) return;
         // each paint draws into its own holder and only the newest is shown, so a quick page change and tool change never mix
         const my = (F.seq = (F.seq || 0) + 1), tmp = document.createElement('div'); tmp._docs = holder._docs || (holder._docs = {});
         const mine = req().filter(x => x.page === F.page).map(x => Object.assign({}, x, { cls: 'sg-place ' + (ctx.taps.has(x.id) ? 'sg-done' : 'sg-todo'), label: x.label }));
-        let r; try { r = await drRender(tmp, F.page, mine, { bytes: ctx.bytes, key: 'sg-' + ctx.draftSha, button: !F.marking }); } catch (_) { holder.innerHTML = `<p class="small err">${drNoLib}</p>`; return; }
-        if (my !== F.seq) return; holder.innerHTML = ''; holder.appendChild(r.wrapEl);
+        let r; try { r = await drRender(tmp, F.page, mine, { bytes: ctx.bytes, key: 'sg-' + ctx.draftSha, button: !F.marking, width: V ? V.pageW() : null }); } catch (_) { holder.innerHTML = `<p class="small err">${drNoLib}</p>`; return; }
+        if (my !== F.seq) return; holder.innerHTML = ''; holder.appendChild(r.wrapEl); if (V) V.painted();
         // what has been done shows as the signer's own initials, signature or name
         $$('.sg-place', r.wrapEl).forEach(b => fillBox(b, req().find(x => x.id === b.dataset.id)));
         const pick = F.marking === 'reinstate' ? m => { F.pick = m; const s = $('#sgMarkSave'); if (s) s.disabled = false; toast(R2 ? 'Tap Save this change to reinstate it' : 'Tap Save this mark to reinstate it'); } : null;
@@ -13730,7 +13940,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         if (!F.marking) r.wrapEl.addEventListener('click', async e => { const b = e.target.closest('.sg-place'); if (!b || b.dataset.busy) return; if (ctx.taps.has(b.dataset.id)) { fillBox(b, req().find(x => x.id === b.dataset.id)); return counts(); } b.dataset.busy = '1'; err('');
           try { await ctx.api.tap(b.dataset.id); ctx.taps.add(b.dataset.id); } catch (x) { delete b.dataset.busy; return err(x.message); }
           ctx.last = { what: 'tap', place_id: b.dataset.id }; sgUndoRefresh(ctx);   // the undo box follows each tap (Offers fixes 3)
-          delete b.dataset.busy; const pl = req().find(x => x.id === b.dataset.id); fillBox(b, pl); $$(`#sgPage .sg-place[data-id="${CSS.escape(pl.id)}"]`).forEach(x => fillBox(x, pl)); counts(); });
+          delete b.dataset.busy; const pl = req().find(x => x.id === b.dataset.id); fillBox(b, pl); $$(`#sgPage .sg-place[data-id="${CSS.escape(pl.id)}"]`).forEach(x => fillBox(x, pl)); counts();
+          if (V && V.auto()) toNext(); });
         else if (F.marking !== 'reinstate') sgDrawLayer(r, F, ctx);
       };
       const fillBox = (b, pl) => { if (!b || !pl) return; const isDone = ctx.taps.has(pl.id); b.classList.toggle('sg-done', isDone); b.classList.toggle('sg-todo', !isDone); b.setAttribute('aria-pressed', isDone ? 'true' : 'false'); b.setAttribute('aria-label', (isDone ? 'Done: ' : '') + pl.label);
@@ -13742,10 +13953,14 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         $('#sgFinishGo').disabled = left > 0; const gn = $('#sgGoNext'); if (gn && !left) gn.remove(); };
       if (ctx._page) F.page = ctx._page;
       const sel = $('#sgPgPick'); if (sel) sel.value = String(F.page);
-      on('#sgPgPick', e => { F.page = +e.target.value; ctx._page = F.page; paint(); }, 'change');
-      on('#sgPrev', () => { if (F.page > 1) { F.page--; ctx._page = F.page; $('#sgPgPick').value = F.page; paint(); } });
-      on('#sgNext', () => { if (F.page < ctx.pages.length) { F.page++; ctx._page = F.page; $('#sgPgPick').value = F.page; paint(); } });
-      on('#sgGoNext', () => { const n = nextUndone(); if (!n) return; F.page = n.page; ctx._page = F.page; $('#sgPgPick').value = F.page; paint().then(() => { const b = $(`.sg-place[data-id="${CSS.escape(n.id)}"]`); if (b) { b.scrollIntoView({ block: 'center' }); b.focus({ preventScroll: true }); } }); });
+      // the shared signing viewer: page buttons, zoom (kept for this signer), full screen, and the glide to the next place
+      const toPage = async n => { F.page = n; ctx._page = F.page; const pk = $('#sgPgPick'); if (pk) pk.value = String(F.page); await paint(); };
+      V = dvWire({ id: 'sgDv', count: () => ctx.pages.length, current: () => F.page, go: toPage, render: () => paint() });
+      on('#sgPgPick', e => { toPage(+e.target.value).then(() => V && V.sync()); }, 'change');
+      // the next place still to do: on this page, or the page it is on, keeping the zoom
+      const toNext = async () => { const n = nextUndone(); if (!n) return; if (n.page !== F.page) { await toPage(n.page); if (V) V.sync(); }
+        const b = $(`#sgPage .sg-place[data-id="${CSS.escape(n.id)}"]`); if (b && V) await V.glide(b); else if (b) { b.scrollIntoView({ block: 'center' }); b.focus({ preventScroll: true }); } };
+      on('#sgGoNext', () => toNext());
       $$('[data-tool]').forEach(b => b.addEventListener('click', () => { F.marking = F.marking === b.dataset.tool ? null : b.dataset.tool; F.draft = null; F.pick = null; signFlowTools(ctx, F, paint); }));
       paint();
       on('#ngDecline', async () => { if (!confirm('Tell Tim you decline it as it stands?')) return;

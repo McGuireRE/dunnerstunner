@@ -5,6 +5,25 @@
 window.I18N_STRINGS = {
  "screens": [
   [
+   "viewer",
+   [
+    "Document controls",
+    "Previous page",
+    "Next page",
+    "Page {n} of {total}",
+    "Zoom out",
+    "Zoom in",
+    "Full screen",
+    "Close full screen",
+    "Move to the next place for me",
+    "The document. Drag or scroll to move around it.",
+    "Zoomed to {pct}%. It stays this size while you sign.",
+    "Back to the normal size.",
+    "On. After each place you sign, the page moves to the next one for you.",
+    "Off. The page stays where you leave it."
+   ]
+  ],
+  [
    "language",
    [
     "Read this part in {language}, to help you understand it",
