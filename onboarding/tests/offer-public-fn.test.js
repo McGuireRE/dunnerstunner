@@ -93,6 +93,10 @@ const path = require('path');
   expect(j.ok === false && j.reason === 'no_answer' && j.error === "The AI didn't give a usable answer. Try again, or write the condition yourself." && !j.wording, 'a text-only reply fails soft with a plain message: ' + JSON.stringify(j));
   expect(logs.at(-1).ok === false && logs.at(-1).error === 'no tool answer' && logs.at(-1).input_tokens === 120 && logs.at(-1).purpose === 'offer condition draft', 'a text-only reply is logged as not ok');
   expect(S.readOfferConditionResult({ content: [] }).noTool === true, 'readOfferConditionResult knows a reply with no tool answer');
+  modelAnswer = { ok: true, status: 200, body: { stop_reason: 'max_tokens', usage: { input_tokens: 120, output_tokens: 1000 }, content: [{ type: 'text', text: 'This agreement is' }] } };
+  r = await draft({ token: TOK, text: 'I need the chattels list confirmed' }); j = await r.json();
+  expect(j.ok === false && j.reason === 'no_answer' && logs.at(-1).ok === false && logs.at(-1).error === 'max_tokens', 'cut off with no tool answer is logged as max_tokens');
+  expect(S.buildOfferConditionRequest('I need the chattels list confirmed').max_tokens === 1000, 'condition help: max_tokens 1000');
   // condition timing (Tim, 24 November 2026): the helper writes the time as {timing}, filled in from the buyer's chosen timing
   expect(/\{timing\} exactly once/.test(m.system) && /working days of the date of the agreement/.test(m.system) && /on or before a date/.test(m.system) && /another condition is satisfied or waived/.test(m.system) && /Never write a date, a number of days/.test(m.system), 'the prompt asks for {timing}, covering all three ways of timing a condition');
   expect(!/by the condition date in the offer/.test(m.system), 'the old "by the condition date" instruction is gone');

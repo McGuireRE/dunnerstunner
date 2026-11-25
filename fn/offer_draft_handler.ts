@@ -15,7 +15,7 @@
 //                   links Tim can use himself, so it is a clear manual step when search isn't available.
 // The model calls and their ai_calls rows use prefill_shared.ts (Haiku, reading). The pack's text and web pages are data, never
 // instructions. Tested by onboarding/tests/offer-draft-fn.test.js with fakes, so no test calls a model or the database.
-import { buildClauseWriteRequest, buildLawyerLookupRequest, buildPackReadRequest, checkPackPages, CLAUSE_WRITE_PURPOSE, LAWYER_LOOKUP_PURPOSE, lawyerManualLinks, MODEL_DRAFT, MODEL_READ, NO_TOOL_ERROR, NO_TOOL_MESSAGE, PACK_READ_PURPOSE, readClauseWriteResult, readLawyerLookupResult, readPackReadResult } from "./prefill_shared.ts";
+import { buildClauseWriteRequest, buildLawyerLookupRequest, buildPackReadRequest, checkPackPages, CLAUSE_WRITE_PURPOSE, LAWYER_LOOKUP_PURPOSE, lawyerManualLinks, MODEL_DRAFT, MODEL_READ, NO_TOOL_MESSAGE, noToolError, PACK_READ_PURPOSE, readClauseWriteResult, readLawyerLookupResult, readPackReadResult } from "./prefill_shared.ts";
 
 export const MAX_BODY = 200000;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -74,10 +74,14 @@ export function makeHandler(d: Deps) {
       try { r = await d.callModel(request, 30000); } catch (e: any) { r = { ok: false, status: 0, body: { error: { message: String(e?.message || e) } } }; }
       const usage = r.body?.usage || {}, err = r.ok ? null : String(r.body?.error?.message || r.status).slice(0, 300);
       // a reply in text only (no tool answer) is logged as not ok, and Tim is told plainly
-      const res = r.ok ? readClauseWriteResult(r.body) : null, noTool = !!res?.noTool;
+      // the reserved row is always finished, even if reading the answer throws
+      let res: ReturnType<typeof readClauseWriteResult> | null = null, readErr: string | null = null;
+      if (r.ok) { try { res = readClauseWriteResult(r.body); } catch (e: any) { readErr = String(e?.message || e).slice(0, 300) || noToolError(r.body); } }
+      const noTool = !!res?.noTool;
       let done: { error: { message: string } | null } = { error: null };
-      try { done = await d.rpc("offer_agent_ai_done", { p_id: rid, p_ok: r.ok && !noTool, p_error: noTool ? NO_TOOL_ERROR : err, p_in: usage.input_tokens || 0, p_out: usage.output_tokens || 0 }); } catch (e: any) { done = { error: { message: String(e?.message || e) } }; }
+      try { done = await d.rpc("offer_agent_ai_done", { p_id: rid, p_ok: r.ok && !noTool && !readErr, p_error: readErr || (noTool ? noToolError(r.body) : err), p_in: usage.input_tokens || 0, p_out: usage.output_tokens || 0 }); } catch (e: any) { done = { error: { message: String(e?.message || e) } }; }
       if (done.error) console.error("offer_agent_ai_done failed for ai_calls row " + rid + ": " + done.error.message);   // the reservation still counts against the cap
+      if (readErr) return json({ ok: false, reason: "no_answer", message: "The AI didn't give a usable answer. Try again, or write the clause yourself." });
       if (!r.ok || !res) return json({ ok: false, reason: "failed", message: friendly(r.status, err || "") });
       if (noTool) return json({ ok: false, reason: "no_answer", message: res.why });
       if (!res.ok) return json({ ok: false, reason: "unsuitable", message: res.why });
@@ -93,7 +97,7 @@ export function makeHandler(d: Deps) {
       try { r = await d.callModel(request, 40000); } catch (e: any) { r = { ok: false, status: 0, body: { error: { message: String(e?.message || e) } } }; }
       const usage = r.body?.usage || {}, err = r.ok ? null : String(r.body?.error?.message || r.status).slice(0, 300);
       const read = r.ok ? readPackReadResult(r.body, pages) : null, noTool = !!read?.noTool;
-      await d.logAi({ purpose: PACK_READ_PURPOSE, model: MODEL_READ, ok: r.ok && !noTool, error: noTool ? NO_TOOL_ERROR : err, input_tokens: usage.input_tokens || 0, output_tokens: usage.output_tokens || 0 }, agent).catch(() => null);
+      await d.logAi({ purpose: PACK_READ_PURPOSE, model: MODEL_READ, ok: r.ok && !noTool, error: noTool ? noToolError(r.body) : err, input_tokens: usage.input_tokens || 0, output_tokens: usage.output_tokens || 0 }, agent).catch(() => null);
       if (!r.ok || !read) return json({ ok: false, reason: "failed", message: friendly(r.status, err || "") });
       if (noTool) return json({ ok: false, reason: "failed", message: NO_TOOL_MESSAGE });   // nothing saved; the screen counts the part as not read
       const res = { chattels: read.chattels, places: read.places, notes: read.notes };

@@ -717,7 +717,11 @@ offer-draft, offer-public and doc-prefill.
    again, or write the condition yourself.") and is logged in ai_calls as not ok with the error "no tool answer".
 2. No agreement blank ready. When a property has no usable blank (none loaded; loaded but its places not approved; or only an
    unchecked edition), a warning card (card warnc) shows on "Fill in an offer for a buyer" (before the form, entry not blocked),
-   on the Offers tile (when the form is on or there is an offer), on the offer page (#drNoBlank, now the card), and in "Needs
-   you" (one item per property with an offer that is not withdrawn or lapsed: "Offer waiting: no agreement blank ready"). The
+   on the Offers tile (when the form is on or there is a live offer), on the offer page (#drNoBlank, now the card), and in "Needs
+   you" (one item per property with a live offer: "Offer waiting: no agreement blank ready"). A live offer (one shared check,
+   so the tile and Needs you agree): from the form or entered by Tim, not spam, not withdrawn, lapsed or declined. Nothing is
+   shown for a property that has sold, settled or been withdrawn.
+   After review: the clause writer's reserved ai_calls row is always finished, even if reading the answer fails; a reply cut
+   off before any tool answer is logged as "max_tokens"; more room for the clause writer (1600) and condition help (1000). The
    button is "Load the agreement blank" (to the tile's blank section) or "Check the places on the blank" (opens the places
    checker). Agent screens only: the buyer's form is unchanged. Test: `tests/offers-noblank.test.js`.

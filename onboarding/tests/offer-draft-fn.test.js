@@ -161,6 +161,21 @@ const path = require('path');
   const dn3 = calls.filter(c => c[0] === 'offer_agent_ai_done').pop();
   expect(j.ok === false && j.reason === 'no_answer' && j.message === "The AI didn't give a usable answer. Try again, or write the clause yourself." && !j.wording, 'write_clause: a text-only reply fails soft with a plain message: ' + JSON.stringify(j));
   expect(dn3 && dn3[1].p_ok === false && dn3[1].p_error === 'no tool answer' && dn3[1].p_in === 300, 'write_clause: a text-only reply is recorded as not ok, "no tool answer"');
+  // ran out of room with no tool answer: logged as "max_tokens", not "no tool answer"; and a little more room than before
+  modelAnswer = { ok: true, status: 200, body: { stop_reason: 'max_tokens', usage: { input_tokens: 300, output_tokens: 1600 }, content: [{ type: 'text', text: 'The Vendor shall' }] } }; calls = [];
+  r = await post4({ text: 'All keys to be handed over at settlement please' }); j = await r.json();
+  const dn4 = calls.filter(c => c[0] === 'offer_agent_ai_done').pop();
+  expect(j.ok === false && j.reason === 'no_answer' && dn4 && dn4[1].p_ok === false && dn4[1].p_error === 'max_tokens', 'write_clause: cut off with no tool answer is logged as max_tokens: ' + JSON.stringify(dn4 && dn4[1]));
+  expect(S.buildClauseWriteRequest('All keys to be handed over at settlement please').max_tokens === 1600, 'write_clause: max_tokens 1600');
+  // the reader throwing: the reserved row is still finished, as not ok, and Tim gets the plain message
+  modelAnswer = { ok: true, status: 200, body: { usage: { input_tokens: 5, output_tokens: 5 }, get content() { throw new Error('bad reply shape'); } } }; calls = [];
+  r = await post4({ text: 'All keys to be handed over at settlement please' }); j = await r.json();
+  const dn5 = calls.filter(c => c[0] === 'offer_agent_ai_done').pop();
+  expect(j.ok === false && j.reason === 'no_answer' && /didn't give a usable answer/.test(j.message) && dn5 && dn5[1].p_id === 7 && dn5[1].p_ok === false && /bad reply shape/.test(dn5[1].p_error), 'write_clause: a reader that throws still finishes the row as not ok: ' + JSON.stringify([j, dn5 && dn5[1]]));
+  // read_pack cut off with no tool answer: logged as max_tokens
+  modelAnswer = { ok: true, status: 200, body: { stop_reason: 'max_tokens', usage: { input_tokens: 800, output_tokens: 3000 }, content: [{ type: 'text', text: 'Page 1' }] } }; logs = []; calls = [];
+  r = await post({ action: 'read_pack', blank_id: BLANK, pages, total_pages: 40 }); j = await r.json();
+  expect(j.ok === false && logs.length === 1 && logs[0][0].ok === false && logs[0][0].error === 'max_tokens' && !calls.length, 'read_pack: cut off with no tool answer is logged as max_tokens');
   { const rr = S.readClauseWriteResult({ content: [{ type: 'text', text: 'x' }] }); expect(rr.ok === false && rr.noTool === true, 'readClauseWriteResult knows a text-only reply'); }
   { const rr = S.readPackReadResult({ content: [] }, []); expect(rr.noTool === true && !rr.places.length, 'readPackReadResult knows a reply with no tool answer'); }
   // the shared helper: no forced tool_choice, the instruction added to the system prompt, the request otherwise unchanged

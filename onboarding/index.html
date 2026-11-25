@@ -8394,8 +8394,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       go: async () => { await viewProperty(pid); const f = $('#offSpam'); if (f) { f.open = true; f.scrollIntoView({ block: 'start' }); } } }); });
     fresh.filter(o => o.source === 'buyer' && !o.suspected_spam).forEach(o => { const pr = props.find(p => p.id === o.property_id); needs.push({ what: o.related_party ? 'New offer: a purchaser is connected with you' : 'New offer to read', where: (pr && pr.address) || 'Property', sub: money(+o.amount) + ', ' + fmtDT(o.received_at), go: () => viewOfferAgent(o.id), hot: true, offer: o.id }); });
     // offers waiting with no agreement blank ready to place them on (Tim, 25 November 2026): one item per property
-    const live = (await safe(sb.from('property_offers').select('property_id,status,source,suspected_spam'))).filter(o => o.source && o.source !== 'manual' && !o.suspected_spam && !['withdrawn', 'lapsed'].includes(o.status));
-    const livePids = [...new Set(live.map(o => o.property_id))].filter(pid => { const pr = props.find(p => p.id === pid); return !pr || !['settled', 'withdrawn'].includes(pr.stage); });
+    const live = (await safe(sb.from('property_offers').select('property_id,status,source,suspected_spam'))).filter(drLiveOffer);
+    const livePids = [...new Set(live.map(o => o.property_id))].filter(pid => { const pr = props.find(p => p.id === pid); return !pr || !DR_DONE_STAGES.includes(pr.stage); });
     if (livePids.length) {
       const bls = await safe(sb.from('offer_blanks').select('id,property_id,edition_checked,created_at').in('property_id', livePids).order('created_at', { ascending: false }));
       const mps = bls.length ? await safe(sb.from('offer_blank_maps').select('id,blank_id,approved').in('blank_id', bls.map(b => b.id))) : [];
@@ -12247,7 +12247,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const real = X.offers.filter(o => !o.suspected_spam), spam = X.offers.filter(o => o.suspected_spam);
     const fresh = real.filter(o => !o.read_at).length, prov = l ? l.province : OF.provinceFor(p.address);
     return `<div class="card ptile of-tile" id="offTile"><h3>Offers ${fresh ? `<span class="pill of-new">${fresh} new</span>` : ''}</h3>
-      ${on || real.length ? drBlankWarnHTML(X.blanks, 'tile', 'offNoBlank') : ''}
+      ${!DR_DONE_STAGES.includes(p.stage) && (on || X.offers.some(drLiveOffer)) ? drBlankWarnHTML(X.blanks, 'tile', 'offNoBlank') : ''}
       <p class="small" style="margin:0 0 6px" id="offState">${on ? 'The offer form is <strong>on</strong>. Anyone with the link or QR code can send you an offer. Nothing goes to the vendors.' : okStage ? 'The offer form is <strong>off</strong>. Switch it on when you want buyers to be able to send offers.' : 'The offer form opens once the agreement is signed and the property is on the market.'}</p>
       ${on ? `<div class="copybox of-link" id="offUrl" translate="no">${esc(offerUrl(l.token))}</div>` : ''}
       <div class="toolbar">${on ? '<button class="btn ghost" type="button" id="offCopy">Copy link</button><button class="btn ghost" type="button" id="offQrBtn">QR code</button><button class="btn ghost" type="button" id="offOff">Switch off</button>' : okStage ? '<button class="btn primary" type="button" id="offOn">Switch on</button>' : ''}
@@ -12346,6 +12346,10 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   const drUsable = blanks => blanks.find(b => b.edition_checked && b.approvedMap) || null;
   // Is there a blank offers can be placed on? (Tim, 25 November 2026: make it obvious up front.) 'ok'; 'none' (nothing loaded);
   // 'unapproved' (loaded, its places not approved yet); 'unchecked' (loaded, but no checked edition). Agent screens only.
+  // an offer still waiting to be dealt with: from the form or entered by Tim (not the old 'manual' rows), not spam, and not
+  // withdrawn, lapsed or declined. The Offers tile and "Needs you" both use this, so they agree.
+  const DR_DONE_STAGES = ['sold', 'settled', 'withdrawn'];   // no warning for a property that has sold, settled or been withdrawn
+  function drLiveOffer(o) { return !!(o && o.source && o.source !== 'manual' && !o.suspected_spam && !['withdrawn', 'lapsed', 'declined'].includes(o.status)); }
   function drBlankState(blanks) { blanks = blanks || []; return !blanks.length ? 'none' : drUsable(blanks) ? 'ok' : blanks.some(b => b.edition_checked) ? 'unapproved' : 'unchecked'; }
   // the warning card, for the offer entry ('entry'), the Offers tile ('tile') and the offer page ('offer'); '' when a blank is ready
   function drBlankWarnHTML(blanks, where, id) {

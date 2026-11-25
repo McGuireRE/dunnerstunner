@@ -36,7 +36,7 @@ const PK = 'https://packages.dunnerstunner.co.nz', OB = PK + '/onboarding/', PB 
   const blank = (id, pid, checked) => ({ id, property_id: pid, document_id: 'doc-' + id, sha256: 'ab'.repeat(32), size: 1000, file_name: 'Agreement pack ' + pid + '.pdf', pages: 10, sizes: [], edition: checked ? 'Eleventh Edition 2022 (4)' : 'Ninth Edition 2012', edition_checked: checked, created_at: now });
   const map = (id, bid, approved) => ({ id, blank_id: bid, version: 1, places: [], proposals: [], chattels: [], missing: [], approved, created_at: now });
   const seed = { agreements: [], agreement_people: [], agreement_events: [], signatures: [], lawyer_links: [], aml_files: [], aml_events: [], email_log: [], cancellation_requests: [], prelistings: [], agreement_variations: [], prior_agency_notices: [],
-    properties: [prop('P1', '1 Noblank Road, Testville', 'live'), prop('P2', '2 Unapproved Street, Testville', 'live'), prop('P3', '3 Ready Lane, Testville', 'live'), prop('P4', '4 Formon Avenue, Testville', 'live'), prop('P5', '5 Withdrawn Way, Testville', 'live'), prop('P6', '6 Quiet Close, Testville', 'live')],
+    properties: [prop('P1', '1 Noblank Road, Testville', 'live'), prop('P2', '2 Unapproved Street, Testville', 'live'), prop('P3', '3 Ready Lane, Testville', 'live'), prop('P4', '4 Formon Avenue, Testville', 'live'), prop('P5', '5 Withdrawn Way, Testville', 'live'), prop('P6', '6 Quiet Close, Testville', 'live'), prop('P7', '7 Sold Street, Testville', 'sold'), prop('P8', '8 Declined Drive, Testville', 'live')],
     property_people: [],
     offer_blanks: [blank('B2', 'P2', true), blank('B3', 'P3', true)],
     offer_blank_maps: [map('M2', 'B2', false), map('M3', 'B3', true)] };
@@ -62,8 +62,10 @@ const PK = 'https://packages.dunnerstunner.co.nz', OB = PK + '/onboarding/', PB 
   await p.goto(OB); await p.evaluate(([s, a]) => { localStorage.clear(); localStorage.setItem('mockAgents', JSON.stringify([a])); localStorage.setItem('mocksession', JSON.stringify({ user: { id: 'agent-1', email: a } })); localStorage.setItem('mockdb', JSON.stringify(s)); }, [seed, AGENT]);
   await p.goto(OB); await p.waitForTimeout(600);
   for (const pid of ['P1', 'P4']) await rpc(p, 'agent_offer_link', { p_property: pid, p_action: 'open' });
-  const ids = {}; for (const pid of ['P1', 'P2', 'P3', 'P5']) ids[pid] = (await rpc(p, 'agent_offer_add', { p_property: pid, p_offer: offer })).data;
-  let d = await db(p); d.property_offers.find(o => o.id === ids.P5).status = 'withdrawn'; await setDb(p, d);
+  const ids = {}; for (const pid of ['P1', 'P2', 'P3', 'P5', 'P7', 'P8']) ids[pid] = (await rpc(p, 'agent_offer_add', { p_property: pid, p_offer: offer })).data;
+  let d = await db(p); d.property_offers.find(o => o.id === ids.P5).status = 'withdrawn'; d.property_offers.find(o => o.id === ids.P8).status = 'declined';
+  // P8 also has a lapsed offer and a possible spam offer: still nothing live there
+  const o8 = d.property_offers.find(o => o.id === ids.P8); d.property_offers.push(Object.assign({}, o8, { id: 'o8-lapsed', status: 'lapsed' }), Object.assign({}, o8, { id: 'o8-spam', status: 'received', suspected_spam: true })); await setDb(p, d);
   expect(Object.values(ids).every(Boolean), 'offers added: ' + JSON.stringify(ids));
 
   // ── 2. "Needs you" on the Dashboard: one item per property with a live offer and no usable blank ──
@@ -73,7 +75,7 @@ const PK = 'https://packages.dunnerstunner.co.nz', OB = PK + '/onboarding/', PB 
   expect(out.needs.length === 2, 'two "Offer waiting: no agreement blank ready" items: ' + JSON.stringify(out.needs));
   expect(out.needs.some(t => /1 Noblank Road/.test(t) && /Load the REINZ agreement blank/.test(t)), 'P1: no blank loaded');
   expect(out.needs.some(t => /2 Unapproved Street/.test(t) && /places aren't approved yet/.test(t)), 'P2: places not approved');
-  expect(!out.needs.some(t => /Ready Lane|Withdrawn Way|Formon Avenue|Quiet Close/.test(t)), 'nothing for a usable blank, a withdrawn offer, or a property with no offer');
+  expect(!out.needs.some(t => /Ready Lane|Withdrawn Way|Formon Avenue|Quiet Close|Sold Street|Declined Drive/.test(t)), 'nothing for a usable blank, a withdrawn offer, a declined, lapsed or spam offer, a sold property, or a property with no offer');
   expect(!(await side(p)), 'Dashboard at 390 px: no sideways scroll');
   // Open goes to the property's Offers tile, at the warning
   await p.evaluate(() => { const li = [...document.querySelectorAll('ul.needs li')].find(x => /1 Noblank Road/.test(x.textContent) && /no agreement blank ready/.test(x.textContent)); li.querySelector('[data-need]').click(); });
@@ -93,6 +95,9 @@ const PK = 'https://packages.dunnerstunner.co.nz', OB = PK + '/onboarding/', PB 
   await openProp(p, 'P3'); expect(!(await p.$('#offNoBlank')) && !(await p.$('[data-blankwarn]')), 'P3 tile (usable blank): no card');
   await openProp(p, 'P4'); c = await card(p, '#offTile #offNoBlank'); expect(c && c.state === 'none', 'P4 tile (form on, no offers yet): the card shows');
   await openProp(p, 'P6'); expect(!(await p.$('#offNoBlank')), 'P6 tile (form off, no offers): no card');
+  await openProp(p, 'P5'); expect(!(await p.$('#offNoBlank')), 'P5 tile (form off, only a withdrawn offer): no card');
+  await openProp(p, 'P8'); expect(!(await p.$('#offNoBlank')), 'P8 tile (form off, only declined, lapsed and spam offers): no card');
+  await openProp(p, 'P7'); expect(!(await p.$('#offNoBlank')), 'P7 tile (sold): no card, agreeing with Needs you');
 
   // ── 4. "Fill in an offer for a buyer", from the tile and from Home's "Draft an offer" ──
   process.stderr.write('step 4\n');

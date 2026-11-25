@@ -10,7 +10,7 @@
 //           buyer types their own wording). Its body is capped at 4,000 characters before it is read.
 // Everything the caller sends is data. Tested by onboarding/tests/offer-public-fn.test.js with fakes for the database, the model and
 // email, so no test ever sends email or calls a model.
-import { buildOfferConditionRequest, MODEL_DRAFT, NO_TOOL_ERROR, OFFER_CONDITION_PURPOSE, readOfferConditionResult } from "./prefill_shared.ts";
+import { buildOfferConditionRequest, MODEL_DRAFT, noToolError, OFFER_CONDITION_PURPOSE, readOfferConditionResult } from "./prefill_shared.ts";
 
 export const MAX_BODY = 80000;
 export const MAX_DRAFT_BODY = 4000;
@@ -116,7 +116,7 @@ export function makeDraft(d: DraftDeps) {
     const usage = r.body?.usage || {};
     // a reply in text only (no tool answer) is logged as not ok, and the buyer is told plainly
     const res = r.ok ? readOfferConditionResult(r.body) : null, noTool = !!res?.noTool;
-    await d.logAi({ purpose: OFFER_CONDITION_PURPOSE, model: MODEL_DRAFT, ok: r.ok && !noTool, error: noTool ? NO_TOOL_ERROR : r.ok ? null : String(r.body?.error?.message || r.status).slice(0, 300), input_tokens: usage.input_tokens || 0, output_tokens: usage.output_tokens || 0 }).catch(() => null);
+    await d.logAi({ purpose: OFFER_CONDITION_PURPOSE, model: MODEL_DRAFT, ok: r.ok && !noTool, error: noTool ? noToolError(r.body) : r.ok ? null : String(r.body?.error?.message || r.status).slice(0, 300), input_tokens: usage.input_tokens || 0, output_tokens: usage.output_tokens || 0 }).catch(() => null);
     if (!r.ok || !res) return json({ ok: false, reason: "failed" });
     if (noTool) return json({ ok: false, reason: "no_answer", error: res.why });
     if (!res.ok) return json({ ok: false, reason: "unsuitable", why: res.why });
