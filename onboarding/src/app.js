@@ -5714,6 +5714,9 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   const ofChRows = (F, kind) => { const a = F[kind === 'add' ? 'chattels_add' : 'chattels_exclude'];
     return a.map((v, i) => `<div class="of-chrow"><label class="f" for="ofch_${kind}_${i}">Item ${i + 1}</label><div class="of-chin"><input type="text" id="ofch_${kind}_${i}" maxlength="200" data-ch="${kind}:${i}" value="${esc(v)}"><button class="btn link" type="button" data-chrm="${kind}:${i}">Remove</button></div></div>`).join('')
       + `<button class="btn link" type="button" data-chadd="${kind}">Add an item</button>`; };
+  // Tim's address on the offer and signing pages people use without signing in (the one his emails come from: fn/shared.ts TIM_EMAIL and
+  // offer_settings.agent_email; a test keeps them equal). The agency agreement's own documents keep their wording.
+  const OF_TIM_EMAIL = 'hello@timmcguire.co.nz';
   const OF_PRIVACY ='McGuire Real Estate Limited (Tim McGuire) collects these details to prepare your offer and to keep in touch with you about it. The terms of your offer, including the price, conditions, dates and the purchasers\' names, are presented to the sellers. Your own phone and email are used only by Tim, are not given to the sellers, and never go on the agreement: only the lawyers\' details do. Your details are stored securely with the records of this sale. You can ask Tim to see or correct the information held about you at any time: tim@mcguire.co.nz or 027 562 7207.';
   function ofFormHTML(ctx, F, restored) {
     const pub = ctx.mode === 'public', fix = ctx.mode === 'correct', S = F.settlement;
@@ -5896,7 +5899,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     if (ctx.mode === 'public') {
       btn.disabled = true; const r = await offerCall('offer-public', { action: 'submit', token: ctx.token, offer: payload, website: ($('#ofWebsite') || {}).value || '' }); btn.disabled = false;
       if (r && r.ok) { ofForget(ctx); return ofThanks(ctx, Object.assign({}, payload, { chattels_listed: ctx.chattels || [] }), r.ref); }
-      const callTim = ' Please call Tim on 027 562 7207 or email tim@mcguire.co.nz with your offer. What you typed is kept on this device.';
+      const callTim = ` Please call Tim on 027 562 7207 or email ${OF_TIM_EMAIL} with your offer. What you typed is kept on this device.`;
       $('#ofErr').textContent = r && r.error ? r.error
         : r && r.reason === 'busy_network' ? 'Several offers have already been sent from your internet connection in the last few minutes, so this one wasn\'t sent. Please try again in ten minutes.' + callTim
         : r && r.reason === 'busy_property' ? 'This property has had a very large number of offers through the form in a short time, so the form is pausing.' + callTim
@@ -5962,7 +5965,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     if (!info || info.ok !== true) {
       main().innerHTML = `<div class="login-card" id="ofClosed"><h1>This offer form isn't open</h1>
         <p class="lede">${info && info.reason === 'busy_network' ? 'There have been a lot of requests from your internet connection in the last hour. Please try again later.' : info && info.reason === 'network' ? 'We couldn\'t reach the form just now. Please check your connection and try again.' : 'The link may have changed, or offers on this property aren\'t open at the moment.'}</p>
-        <p>Please call or text Tim on <a href="tel:0275627207">027 562 7207</a>, or email <a href="mailto:tim@mcguire.co.nz">tim@mcguire.co.nz</a>.</p></div>`;
+        <p>Please call or text Tim on <a href="tel:0275627207">027 562 7207</a>, or email <a href="mailto:${OF_TIM_EMAIL}">${OF_TIM_EMAIL}</a>.</p></div>`;
       return;
     }
     ofOpen({ mode: 'public', token, address: info.address, province: info.province || OF.DEFAULT_PROVINCE, ksDays: +info.ks_days || OF.KS_DAYS_DEFAULT, wording: info.wording || {}, chattels: Array.isArray(info.chattels) ? info.chattels : [] });
@@ -7092,7 +7095,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const places = (g.places || []).concat(Rv.flatMap(r => r.places || [])), need = pos => places.filter(x => x.signer === pos), doneOf = s => T_.filter(t => t.signer_id === s.id && need(s.position).some(x => x.id === t.place_id)).length;
     const open = Mk.filter(m => !Rv.some(r => (r.marks || []).includes(m.id)));
     // everyone has finished: Round 1 is made and locked by the server
-    if (g.status === 'complete' && !rd && !(opts && opts.tried)) { main().innerHTML = '<div class="loading" id="sgLocking">Everyone has signed. Making and locking Round 1...</div>'; await offerCall('offer-sign', { action: 'lock', signing_id: sid }); return viewSigning(sid, { tried: true }); }
+    if (g.status === 'complete' && !rd && !(opts && opts.tried)) { main().innerHTML = '<div class="loading" id="sgLocking">Everyone has signed. Making and locking Round ' + RN + '...</div>'; await offerCall('offer-sign', { action: 'lock', signing_id: sid }); return viewSigning(sid, { tried: true }); }
     const stateOf = s => s.void_at ? (['cancelled', 'withdrawn'].includes(g.status) ? 'Stopped' : 'Replaced (kept, void)') : s.finished_at ? 'Finished ' + fmtDT(s.finished_at) : s.consent_at ? `Signing: ${doneOf(s)} of ${need(s.position).length} places` : g.method === 'link' ? (s.verified_at ? 'Code checked' : s.opened_at ? 'Opened the link' : s.link_sent_at ? 'Link sent ' + fmtDT(s.link_sent_at) : 'Not sent yet') : 'Not started';
     main().innerHTML = `<div class="view-pad dr-page" id="sgView"><div class="toolbar no-print"><button class="btn ghost" type="button" id="sgBackO">Back to the offer</button></div><span class="agent-flag">Only you see this</span>
       <h1>${RN > 1 ? `Round ${RN}: the ${ngSide(g.side)} sign` : 'Signing'}</h1><p class="lede">${nt(p.address)}</p>
@@ -7104,7 +7107,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       ${stale ? `<div class="card warnc tight" id="sgStale"><p class="small" style="margin:0">The offer has changed since this was released, so signing has stopped. Re-draft and approve it, then tap Ready to sign. Signatures already given on this version stay recorded, as replaced.</p></div>` : ''}
       ${rd ? `<section class="card okc" id="sgRound"><h2>Round ${rd.doc_round || 1} locked</h2><p class="small">Locked ${esc(fmtDT(rd.locked_at))}. Fingerprint <span translate="no">${esc(rd.sha256)}</span>, worked out by the server from the stored file. The approved draft is unchanged, with every signature, initial and mark added on top, and the execution record on a page of its own at the end. It can't be changed or removed.</p>
         <div class="toolbar"><button class="btn ghost" type="button" id="sgRoundDl">Download Round ${rd.doc_round || 1}</button><button class="btn ghost" type="button" id="sgChain">Check the timeline</button></div><p class="small" id="sgChainOut" role="status" aria-live="polite"></p></section>` : ''}
-      ${g.status === 'complete' && !rd ? `<div class="card warnc tight" id="sgLockFail"><p class="small" style="margin:0">Everyone has signed, but Round 1 wasn't locked yet.</p><div class="toolbar"><button class="btn primary" type="button" id="sgLockGo">Make and lock Round 1</button></div><p class="small err" id="sgLockErr" role="alert"></p></div>` : ''}
+      ${g.status === 'complete' && !rd ? `<div class="card warnc tight" id="sgLockFail"><p class="small" style="margin:0">Everyone has signed, but Round ${RN} wasn't locked yet.</p><div class="toolbar"><button class="btn primary" type="button" id="sgLockGo">Make and lock Round ${RN}</button></div><p class="small err" id="sgLockErr" role="alert"></p></div>` : ''}
       ${g.status === 'held' ? `<section class="card warnc" id="sgHeld"><h2>Check the change</h2><p class="small">A ${g.side === 'vendor' ? 'vendor' : 'purchaser'} marked the document on this screen. Look at each mark. If it's fine, re-approve: every ${g.side === 'vendor' ? 'vendor' : 'purchaser'} then initials beside it, and anyone who has finished signs again. If the offer itself needs changing, correct it and re-draft instead.</p>
         <ul class="dr-list">${open.map(m => `<li class="small" data-mark="${m.id}"><strong>Page ${m.page}:</strong> ${esc(sgMarkWords(m))} by ${nt(m.by_name)}, ${esc(fmtDT(m.at))}</li>`).join('')}</ul>
         <div class="dr-nav"><label class="sr" for="sgHeldPick">Page</label><select id="sgHeldPick">${[...new Set(open.map(m => m.page))].map(n => `<option value="${n}">Page ${n}</option>`).join('')}</select></div><div id="sgHeldCanvas" class="dr-holder"></div>
@@ -7132,7 +7135,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       try { const n = await mlPrepareLinks(g, p); toast(`${n} email${n === 1 ? '' : 's'} ready for you to read and send`); return viewSigning(sid); }
       catch (e) { $('#sgSendOut').textContent = e.message || 'That didn\'t work. Check you have signal, then try again.'; sg_.disabled = false; } });
     mlWire(sgDrafts, () => viewSigning(sid));
-    const lg = $('#sgLockGo'); if (lg) lg.addEventListener('click', async () => { lg.disabled = true; const r = await offerCall('offer-sign', { action: 'lock', signing_id: sid }); if (r && r.ok) return viewSigning(sid, { tried: true }); $('#sgLockErr').textContent = (r && r.error) || 'That didn\'t work. Try again.'; lg.disabled = false; });
+    const lg = $('#sgLockGo'); if (lg) lg.addEventListener('click', async () => { lg.disabled = true; const r = await offerCall('offer-sign', { action: 'lock', signing_id: sid }); if (r && r.ok) return viewSigning(sid, { tried: true }); $('#sgLockErr').textContent = ((r && r.error) ? r.error + (r.detail ? ' (For Tim: ' + r.detail + ')' : '') : '') || 'That didn\'t work. Try again.'; lg.disabled = false; });
     const dl = $('#sgRoundDl'); if (dl) dl.addEventListener('click', async () => { try { const { data, error } = await sb.storage.from('property-files').createSignedUrl(rd.path, 300); if (error || !data) throw new Error('Round 1 couldn\'t be opened. Check you have signal.');
       const bytes = new Uint8Array(await (await fetch(data.signedUrl)).arrayBuffer()); if (await REPO.sha256(bytes) !== rd.sha256) throw new Error('The stored round doesn\'t match its fingerprint.');
       const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' })); a.download = `Round-${rd.doc_round || 1}-${(p.address || 'agreement').replace(/[^A-Za-z0-9]+/g, '-').slice(0, 60)}.pdf`; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000); } catch (e) { toast(e.message); } });
@@ -7814,12 +7817,12 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
 
   // by link: the purchaser's own page (no account; the token, then a one-time code by email)
   async function viewSignRemote(token) {
-    document.title = 'Sign your offer · McGuire Real Estate';
     header('Sign your offer', '', 0); actions(false); $('#signOut').hidden = true;
+    document.title = 'Sign your offer · McGuire Real Estate';   // after header(), which resets the title (hotfix 1: the tab said "Your agency agreement")
     main().innerHTML = '<div class="loading">Loading...</div>';
     const call = async (action, extra) => { const r = await offerCall('offer-sign', Object.assign({ action, token, session: sgSes() }, extra || {})); if (!r || r.ok === false) { const e = new Error((r && r.error) || (r && r.reason === 'network' ? 'We couldn\'t reach the signing page just now. Check your connection and try again.' : 'That didn\'t work. Please try again.')); e.r = r; throw e; } return r; };
     const key = 'sgSes:' + token.slice(0, 12), sgSes = () => { try { return sessionStorage.getItem(key) || ''; } catch (_) { return ''; } }, setSes = v => { try { v ? sessionStorage.setItem(key, v) : sessionStorage.removeItem(key); } catch (_) { } };
-    const closed = (t, why) => { main().innerHTML = `<div class="login-card" id="sgClosed"><h1>${esc(t)}</h1><p class="lede">${esc(why)}</p><p>Please call or text Tim on <a href="tel:0275627207">027 562 7207</a>, or email <a href="mailto:tim@mcguire.co.nz">tim@mcguire.co.nz</a>.</p></div>`; };
+    const closed = (t, why) => { main().innerHTML = `<div class="login-card" id="sgClosed"><h1>${esc(t)}</h1><p class="lede">${esc(why)}</p><p>Please call or text Tim on <a href="tel:0275627207">027 562 7207</a>, or email <a href="mailto:${OF_TIM_EMAIL}">${OF_TIM_EMAIL}</a>.</p></div>`; };
     const info = await offerCall('offer-sign', { action: 'open', token });
     if (!info || info.ok !== true) return closed('This link isn\'t working', info && info.reason === 'network' ? 'We couldn\'t reach the signing page just now. Check your connection and try again.' : 'It may have been replaced by a newer link, or it has run out.');
     const VS = info.side === 'vendor', LR = (info.round || 1) > 1;

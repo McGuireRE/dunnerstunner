@@ -57,6 +57,12 @@ const D = require(path.join(__dirname, '..', 'src', 'draft-core.js'));
     ok(N.typedItems(struckL, [], 1).length === 0, 'struck typed words are not words to strike again');
     ok(N.typedItems(struckL, [{ id: 'r1', kind: 'reinstate', target: 'k3' }], 1).length === 1, 'reinstated: they are words again');
     ok(N.typedItems(L2, [], 2).length === 0, 'only the page\'s own typed words'); }
+  // hotfix 1 (seen live): the form's printed "$" beside a filled-in "$990,000" is not taken in when the drag starts on it
+  { const lp = { items: [{ s: 'Purchase price', x: 28.3, y: 342.5, w: 60, h: 9 }, { s: '$', x: 97.8, y: 342.5, w: 5, h: 9 }, { s: '$990,000', x: 107.1, y: 342.5, w: 37.5, h: 9 }] };
+    const r = S.snapStrike(lp, 98.5, 140, 345); out.label = r;
+    ok(r && r.text === '$990,000' && Math.abs(r.x0 - 107.1) < 0.2, 'a lone printed "$" before the figure is left out: ' + JSON.stringify(r));
+    ok(S.snapStrike(lp, 98, 101, 345).text === '$', 'a drag on the "$" alone still strikes it (nothing else is there)');
+    ok(S.snapStrike(lp, 30, 140, 345).text === 'Purchase price $ $990,000', 'a drag over the whole line keeps every word between the first and the last'); }
   // the struck words in the records
   { const base = { address: 'x', offer_ref: 'y', round: 1, draft: { number: 1, sha256: 'a' }, places_sha256: 'b', made_at: '2026-11-25T01:00:00Z', signers: [], replaced: [] };
     const now = S.executionLines(Object.assign({}, base, { marks: [{ kind: 'strike', page: 1, by: 'Ana', at: '2026-11-25T01:00:00Z', text: '$1,000,000' }] })).map(l => l.t).join('\n');

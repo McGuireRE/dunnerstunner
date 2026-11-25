@@ -168,8 +168,13 @@ let failTim = false;
     // a turned page, and a reader that fails: refused (never locked unchecked)
     marks2 = [good, insert]; pageTextOverride = async (b) => (await D.readPages(pdfjs, new Uint8Array(b))).map(p => Object.assign(p, { rot: 90 })); calls = [];
     r = await J(await post({ action: 'lock', signing_id: SID }, { Authorization: 'Bearer good' })); expect(r.status === 400 && !calls.some(c => c[0] === 'offer_round_lock'), 'a line on a turned page: not locked');
-    pageTextOverride = async () => { throw new Error('pdf.js missing'); }; calls = [];
-    r = await J(await post({ action: 'lock', signing_id: SID }, { Authorization: 'Bearer good' })); expect(r.status === 400 && /couldn't be checked/.test(r.j.error) && !calls.some(c => c[0] === 'offer_round_lock'), 'the words can\'t be read: not locked, said plainly');
+    pageTextOverride = async () => { throw new Error('Setting up fake worker failed'); }; calls = [];
+    const logged = [], ce = console.error; console.error = (...a) => logged.push(a.join(' '));
+    r = await J(await post({ action: 'lock', signing_id: SID }, { Authorization: 'Bearer good' })); console.error = ce;
+    expect(r.status === 400 && /couldn't be checked/.test(r.j.error) && !calls.some(c => c[0] === 'offer_round_lock'), 'the words can\'t be read: not locked, said plainly (fails safe)');
+    // hotfix 1: the cause is logged and, on Tim's own request, given as a short reason
+    expect(logged.some(l => /struck-words check failed: Error: Setting up fake worker failed/.test(l)) && !logged.some(l => /655,000|Purchase price/.test(l)), 'the cause goes to the function log, never the document\'s words: ' + JSON.stringify(logged));
+    expect(r.j.detail === 'pdf.js could not read the draft: Error: Setting up fake worker failed', 'and Tim\'s response says why: ' + JSON.stringify(r.j));
     // a line with no words recorded, arriving for a round being locked now: refused
     pageTextOverride = null; marks2 = [Object.assign({}, strike, { geometry: { x0: 100, x1: 160, y: 403 } }), insert]; calls = [];
     r = await J(await post({ action: 'lock', signing_id: SID }, { Authorization: 'Bearer good' })); expect(r.status === 400 && /no words recorded/.test(r.j.error) && !calls.some(c => c[0] === 'offer_round_lock'), 'a line with no words recorded: not locked');

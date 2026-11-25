@@ -19,13 +19,16 @@ import "../onboarding/src/nego-core.js";
 import "../onboarding/src/offers-core.js";
 import "../onboarding/src/draft-core.js";
 import { pageTextWith } from "./page_text.ts";
+// pdf.js and its worker, imported statically so both are in the bundle (offers hotfix 1: a dynamic load of the worker file failed live)
+import * as PDFJS from "npm:pdfjs-dist@6.2.108/legacy/build/pdf.mjs";
+import * as PDFJS_WORKER from "npm:pdfjs-dist@6.2.108/legacy/build/pdf.worker.mjs";
 import "../onboarding/src/mail-core.js";
 import { makeHandler } from "./offer_sign_handler.ts";
 import { netOf } from "./offer_public_handler.ts";
 
 const SIGN = (globalThis as any).SIGN, NEGO = (globalThis as any).NEGO, MAIL = (globalThis as any).MAIL, OFFERS = (globalThis as any).OFFERS;
 // the draft's words and each page's turn, read with pdf.js only when a round with a line through text is locked (Offers fixes 2 review)
-const pageText = pageTextWith(() => import("npm:pdfjs-dist@6.2.108/legacy/build/pdf.mjs"), (globalThis as any).DRAFT);
+const pageText = pageTextWith(async () => PDFJS, (globalThis as any).DRAFT, PDFJS_WORKER);
 Deno.serve(makeHandler({
   cors: corsFor,   // only the onboarding pages (packages.dunnerstunner.co.nz) and Tim's portal (portal.dunnerstunner.co.nz) call this
   appUrl: APP_URL,

@@ -261,7 +261,12 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   { const el = await p.$('#sgPage .sg-draw'); await el.scrollIntoViewIfNeeded(); const bx = await el.boundingBox(); await p.mouse.click(bx.x + bx.width * (priceBox.x / W), bx.y + bx.height * fy(priceBox.y - 22)); }
   await p.fill('#ngInsText', '$672,500'); await p.click('#sgMarkSave'); await p.waitForSelector('#sgPlaces'); await p.waitForSelector('#sgPage .dr-pg canvas');
   await tapAll(p); await finishInPerson(p);
+  // hotfix 1: if the round isn't locked when the last signer finishes, the page names the round being locked (here Round 3), not Round 1
+  await p.evaluate(() => localStorage.setItem('mockLockFail', '1'));
   await turnStart(p, 2); await consentDraw(p, 9); await tapAll(p); await finishInPerson(p);
+  await p.waitForSelector('#sgLockFail', { timeout: 30000 }); out.lockFail = (await p.textContent('#sgLockFail')).replace(/\s+/g, ' ').trim();
+  expect(/Everyone has signed, but Round 3 wasn't locked yet\./.test(out.lockFail) && /Make and lock Round 3/.test(out.lockFail) && !/Round 1/.test(out.lockFail), 'the lock-failed card names the round being locked: ' + out.lockFail);
+  await p.evaluate(() => localStorage.removeItem('mockLockFail')); await p.click('#sgLockGo');
   await p.waitForSelector('#sgRound', { timeout: 30000 });
   d = await db(p); const r3 = d.offer_rounds.find(r => r.offer_id === offA && r.doc_round === 3), sm3 = d.offer_sign_marks.find(m => m.signing_id === pr3.id && m.kind === 'strike');
   expect(sm3 && sm3.geometry.text === '$690,000', 'the line is recorded as striking the vendors\' typed figure: ' + JSON.stringify(sm3 && sm3.geometry));
@@ -305,6 +310,13 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   ar = await add('Dear Ana,\n\nThe vendor is on 021 000 1111.\n\nTim'); expect(ar.error && /a vendor's own phone or email/.test(ar.error.message), 'a real vendor\'s own phone is still refused: ' + (ar.error && ar.error.message));
   ar = await add('Dear Ana,\n\nThe vendor is vendor@example.com.\n\nTim'); expect(ar.error && /a vendor's own phone or email/.test(ar.error.message), 'and a vendor\'s own email');
 
+  // hotfix 1: the signing link page's tab title and Tim's address (a link that no longer works shows the same closing card)
+  { const z = await page(); await z.goto(BASE + '?sign=' + 'Zq3_kX9-aB4cD7eF0gH2iJ5kL8mN1oP6qR9sT3uV7wX'); await z.waitForSelector('#sgClosed', { timeout: 20000 });
+    const zt = await z.textContent('#sgClosed'), title = await z.title(); out.closed = { title, zt: zt.replace(/\s+/g, ' ') };
+    expect(title === 'Sign your offer · McGuire Real Estate', 'the signing link page\'s tab title: ' + title);
+    expect(/hello@timmcguire\.co\.nz/.test(zt) && !/tim@mcguire\.co\.nz/.test(zt) && await z.$('#sgClosed a[href="mailto:hello@timmcguire.co.nz"]'), 'it gives Tim\'s current address: ' + out.closed.zt);
+    const shared = require('fs').readFileSync(path.join(__dirname, '..', '..', 'fn', 'shared.ts'), 'utf8'); expect(/export const TIM_EMAIL = "hello@timmcguire\.co\.nz"/.test(shared), 'the same address as the one Tim\'s emails come from');
+    await z.close(); }
   // 025's column grant: Tim's screen may read the agent's phone and email, never the salt
   { const cs = await p.evaluate(async () => { const c = window.supabase.createClient(); const a = await c.from('offer_settings').select('agent_phone,agent_email'), b_ = await c.from('offer_settings').select('net_salt'); return { a: a.error ? 'error' : a.data[0], b: b_.error ? 'error' : 'read' }; });
     expect(cs.a && cs.a.agent_phone === '027 562 7207' && cs.b === 'error', 'the agent\'s phone and email can be read by Tim\'s screen; the salt never: ' + JSON.stringify(cs)); }

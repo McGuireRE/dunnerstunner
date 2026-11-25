@@ -280,6 +280,11 @@
     const words = []; let cur = null;
     chars.forEach((ch, i) => { if (/\s/.test(ch.c)) { cur = null; return; } if (!cur) { cur = { a: i, b: i }; words.push(cur); } else cur.b = i; });
     const hit = words.filter(wd => { for (let i = wd.a; i <= wd.b; i++) { const m = (chars[i].x0 + chars[i].x1) / 2; if (m >= lo && m <= hi) return true; } return false; });
+    // a printed currency sign on its own beside a filled-in figure ("$" then "$990,000") is the form's label, not words to strike
+    // (offers hotfix 1, seen live: 'This strikes through: "$ $990,000"')
+    const lone = wd => chars.slice(wd.a, wd.b + 1).map(ch => ch.c).join('') === '$';
+    while (hit.length > 1 && lone(hit[0])) hit.shift();
+    while (hit.length > 1 && lone(hit[hit.length - 1])) hit.pop();
     if (!hit.length) return null;
     const a = hit[0].a, b = hit[hit.length - 1].b, text = chars.slice(a, b + 1).map(ch => ch.c).join('').replace(/\s+/g, ' ').trim();
     const hts = chars.slice(a, b + 1).filter(ch => ch.it).map(ch => ch.it), h = Math.max(...hts.map(it => it.h || 9)), base = Math.min(...hts.map(it => it.y));

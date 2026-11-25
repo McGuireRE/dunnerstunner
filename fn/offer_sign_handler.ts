@@ -91,7 +91,11 @@ export function makeHandler(d: Deps) {
     const lines = all;
     if (!lines.length) return;
     if (!d.pageText || !d.sign) throw new Error("The struck words couldn't be checked, so the round wasn't locked. Tim will look into it.");
-    let pages: any[]; try { pages = await d.pageText(draft); } catch (_) { throw new Error("The struck words couldn't be checked, so the round wasn't locked. Tim will look into it."); }
+    // a failure to read the words refuses the lock (fails safe); the cause goes to the function's log and, for Tim only, a short reason
+    let pages: any[]; try { pages = await d.pageText(draft); } catch (e) {
+      const why = `${(e as Error)?.name || "Error"}: ${String((e as Error)?.message || e).slice(0, 200)}`;
+      console.error("offer-sign: reading the draft's words for the struck-words check failed:", why);   // pdf.js's own message; never the document's text
+      const err: any = new Error("The struck words couldn't be checked, so the round wasn't locked. Tim will look into it."); err.detail = "pdf.js could not read the draft: " + why; throw err; }
     for (const k of lines) {
       const g = k.geometry, pg0 = pages.find((x: any) => x.n === k.page), typed = d.nego && d.nego.typedItems ? d.nego.typedItems(earlier || [], marks || [], k.page) : [];
       const pg = pg0 ? Object.assign({}, pg0, { items: (pg0.items || []).concat(typed) }) : null, sn = pg && !pg.rot ? d.sign.snapStrike(pg, g.x0, g.x1, g.y) : null;
@@ -247,7 +251,7 @@ export function makeHandler(d: Deps) {
         return json({ ok: true });
       }
       const sid = String(body.signing_id || ""); if (!UUID.test(sid)) return json({ error: "Bad request" }, 400);
-      try { return json({ ok: true, round: await lockRound(sid, agent) }); } catch (e) { return json({ ok: false, error: plain((e as Error).message) }, 400); }
+      try { return json({ ok: true, round: await lockRound(sid, agent) }); } catch (e) { return json(Object.assign({ ok: false, error: plain((e as Error).message) }, (e as any).detail ? { detail: String((e as any).detail).slice(0, 300) } : {}), 400); }   // detail: Tim's own request only
     }
 
     // ── a purchaser, by their own link ──

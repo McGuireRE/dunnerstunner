@@ -716,6 +716,20 @@ Going live, with Tim's approval, in order:
    to a test vendor; a counter and an acceptance; check Tim's one email per round; the agreed copy and its two draft emails (fill the
    blanks, send); the lawyers' pack; a request from a test link (Tim's urgent email), Freeze now, Unfreeze and Withdraw now. Tim's solicitor confirms the method before the first real offer.
 
+## Offers hotfix 1 (live smoke test, 26 November 2026; branch `offers-hotfix-1`)
+
+Status: Built, awaiting review and Tim's approval. offer-sign to be redeployed; no database change.
+1. Every round with a line through text was refused at lock ("The struck words couldn't be checked"): in the edge bundle pdf.js
+   tried to load its worker file from disk. The entry now imports pdf.js and its worker statically and hands the worker to pdf.js
+   (`fn/page_text.ts`), so nothing is read from disk. Checked with a Deno bundle run with no file, network or system access
+   (`tests/page-text-bundle.test.js`), which fails the old way without the worker.
+2. A read failure still refuses the lock (fails safe); its cause now goes to the function log (never the document's words) and, on
+   Tim's own lock request, a short reason shown with the message.
+3. The lock-failed card names the round being locked ("Round 2 wasn't locked yet", "Make and lock Round 2"), not always Round 1.
+4. A line through a filled-in figure no longer takes in the form's printed "$" beside it ("$ $990,000" became "$990,000").
+5. The signing link page's tab title is "Sign your offer" (it said "Your agency agreement"), and the link and offer pages give
+   Tim's current address, hello@timmcguire.co.nz (the agency agreement's own documents keep their wording).
+
 ## Offers fixes 2 (raised by Tim 25 November 2026 from his test offer; branch `offers-fixes-2`)
 
 Status: Built, awaiting review and Tim's approval. Needs migration 025 (rollback test first, then applied with Tim's OK) and
