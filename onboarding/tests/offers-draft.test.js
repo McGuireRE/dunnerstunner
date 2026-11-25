@@ -203,6 +203,10 @@ const sha = b => crypto.createHash('sha256').update(Buffer.from(b)).digest('hex'
   await p.click('#drRedraft'); await p.waitForFunction(() => /Nothing changed, so this is the same as Draft 2/.test(document.body.textContent), null, { timeout: 30000 });
   await p.waitForSelector('#drReview h1:has-text("Draft 2")'); d = await db(p);
   expect(d.offer_drafts.length === 2 && d.offer_draft_approvals.length === 1 && await p.$('#drApproved') && !/duplicate key/.test(await p.textContent('body')), 're-draft with nothing changed: same draft, approval kept, no error');
+  // and the message sits right under the button Tim pressed, not elsewhere on the page (Tim, 26 November 2026)
+  const under = await p.evaluate(() => { const n = document.getElementById('bn-drRedraft'), b = document.getElementById('drRedraft'); if (!n || !b) return null;
+    const row = b.closest('.toolbar') || b; return { next: row.nextElementSibling === n, gap: n.getBoundingClientRect().top - row.getBoundingClientRect().bottom, text: n.textContent, kind: n.dataset.kind }; });
+  expect(under && under.next && under.gap >= 0 && under.gap < 24 && /Nothing changed/.test(under.text) && under.kind === 'ok', 'the result shows just under the button pressed: ' + JSON.stringify(under));
 
   // ── 7. a correction from phase 1, then re-draft after a change ──
   process.stderr.write('step 7\n');

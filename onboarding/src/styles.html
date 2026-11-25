@@ -247,6 +247,9 @@ details.acc .in li { margin: 4px 0; }
 .actions-in { max-width: 640px; margin: 0 auto; display: flex; gap: 10px; align-items: center; padding-block: 12px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
 .actions-in .btn.primary { flex: 1; }
 .err { color: var(--accent); font-size: 14.5px; font-weight: 500; margin-top: 10px; min-height: 0; }
+.btn-note { font-size: 14.5px; font-weight: 500; margin: 8px 0 0; color: var(--muted); }
+.btn-note[data-kind="ok"] { color: var(--ok-text); }
+.btn-note[data-kind="err"] { color: var(--accent); }
 .err:empty { display: none; }
 .chip-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .chip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 6px 12px; font-size: 15px; cursor: pointer; }

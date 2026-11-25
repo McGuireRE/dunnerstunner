@@ -256,6 +256,9 @@ details.acc .in li { margin: 4px 0; }
 .actions-in { max-width: 640px; margin: 0 auto; display: flex; gap: 10px; align-items: center; padding-block: 12px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
 .actions-in .btn.primary { flex: 1; }
 .err { color: var(--accent); font-size: 14.5px; font-weight: 500; margin-top: 10px; min-height: 0; }
+.btn-note { font-size: 14.5px; font-weight: 500; margin: 8px 0 0; color: var(--muted); }
+.btn-note[data-kind="ok"] { color: var(--ok-text); }
+.btn-note[data-kind="err"] { color: var(--accent); }
 .err:empty { display: none; }
 .chip-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .chip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 6px 12px; font-size: 15px; cursor: pointer; }
@@ -6450,6 +6453,15 @@ window.JOURNEY_MEDIA_HINTS = {
   const APP_TRANSLATION = false;
   const trs = (s, v) => I18N.tr(s, v);   // wording built in pieces (for example a spoken label) goes through the same approved translations
   function toast(msg) { const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(toast._t); toast._t = setTimeout(() => t.hidden = true, 3200); }
+  // what a button is doing, or what it did, shown right under that button (Tim, 26 November 2026): "Drafting...", then the result or
+  // the problem, so it is never somewhere else on the page. kind: 'busy', 'ok' or 'err'. Under the button's row of buttons if it has one.
+  function atBtn(btn, msg, kind) {
+    if (!btn) { if (msg) toast(msg); return null; }
+    const row = btn.closest('.toolbar') || btn, id = 'bn-' + (btn.id || 'x');
+    let n = document.getElementById(id);
+    if (!n) { n = document.createElement('p'); n.id = id; n.className = 'btn-note'; row.insertAdjacentElement('afterend', n); }
+    n.dataset.kind = kind || 'busy'; n.setAttribute('role', kind === 'err' ? 'alert' : 'status'); n.textContent = msg || ''; n.hidden = !msg; return n;
+  }
   // signature pads: a "not saved yet" marker after drawing, and a strong confirmation once saved
   function padUnsaved(cv, on) { const w = cv && cv.closest('.sig-wrap'); if (!w) return; if (PORTAL && on) portalPadStarted(cv); let u = w.querySelector('.unsaved'); if (on && !u) { u = document.createElement('span'); u.className = 'unsaved'; u.textContent = 'Not saved yet'; w.appendChild(u); } if (!on && u) u.remove(); }
   function sigSaved(cv, title, sub) {
@@ -13111,13 +13123,14 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       ${!ap && newest && (block.length || acks.length) && !stale ? `<p class="small">Approve is available once nothing needs you.${block.length ? ' Fill in each placeholder above and re-draft.' : ''}${acks.length ? ' Tick each check above.' : ''}</p>` : ''}
     </div>`;
     $$('[data-rich]').forEach(x => { x.dataset.base = drRichText(x); });   // the wording as shown: a change is anything different from this
-    const go = async (edits, note) => { const btns = $$('#drRedraft,#drRedraftChange'); btns.forEach(x => { x.disabled = true; }); $('#drRvErr').textContent = 'Drafting...';
-      try { const id = await drMakeDraft(d.offer_id, edits, note); toast('New draft made; the earlier one is kept'); viewDraftReview(id); return true; } catch (e) { if (e && e.sameDraft) { toast(e.message); viewDraftReview(e.sameDraft); return true; } $('#drRvErr').textContent = e.message || 'That didn\'t draft.'; btns.forEach(x => { x.disabled = false; }); return false; } };
+    const go = async (edits, note, by) => { const btns = $$('#drRedraft,#drRedraftChange'); btns.forEach(x => { x.disabled = true; }); $('#drRvErr').textContent = ''; atBtn(by, 'Drafting...', 'busy');
+      try { const id = await drMakeDraft(d.offer_id, edits, note); await viewDraftReview(id); atBtn($('#' + (by && by.id || 'drRedraft')), 'New draft made. The earlier one is kept.', 'ok'); return true; }
+      catch (e) { if (e && e.sameDraft) { await viewDraftReview(e.sameDraft); atBtn($('#' + (by && by.id || 'drRedraft')), e.message, 'ok'); return true; } atBtn(by, e.message || 'That didn\'t draft.', 'err'); btns.forEach(x => { x.disabled = false; }); return false; } };
     // a correction from this screen carries the offer's details as the screen loaded them (p_expected): the database refuses it if the
     // offer changed in between. If the correction saved but the new draft didn't, Tim is told so and can re-draft from here.
     const correctedButNotDrafted = (box, edits, note) => { const el = $(box); if (!el) return;
       el.innerHTML = `The offer was corrected, but the new draft wasn't made. <button class="btn link" type="button" id="drRedraftNow">Re-draft now</button>`;
-      $('#drRedraftNow').addEventListener('click', async () => { el.textContent = 'Drafting...'; if (!(await go(edits, note))) correctedButNotDrafted(box, edits, note); }); };
+      $('#drRedraftNow').addEventListener('click', async () => { el.textContent = 'Drafting...'; if (!(await go(edits, note, $('#drRedraftNow')))) correctedButNotDrafted(box, edits, note); }); };
     // what "Re-draft after a change" carries over: everything but Tim's edits to single values (phase 2, choice 10)
     const carry = () => { const c = { date_format: E.date_format, extra_terms: E.extra_terms, custom_ok: E.custom_ok, custom_wording: E.custom_wording, retired_numbers: E.retired_numbers };
       ['added_terms', 'term_order', 'term_timing', 'marks', 'moves'].forEach(k => { if (E[k] != null) c[k] = E[k]; }); Object.keys(c).forEach(k => { if (c[k] === undefined) delete c[k]; }); return c; };
@@ -13132,8 +13145,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       if (MK.marks.length) ed.marks = MK.marks; if (Object.keys(MK.moves).length) ed.moves = MK.moves; return ed; };
     $('#drRvBack').addEventListener('click', () => viewOfferAgent(d.offer_id));
     const sr = $('#sgReady'); if (sr) sr.addEventListener('click', () => viewSignRelease(did));
-    $('#drRedraft').addEventListener('click', () => go(collect(), $('#drNote').value.trim() || 'Re-drafted with your changes'));
-    const rc = $('#drRedraftChange'); if (rc) rc.addEventListener('click', () => go(carry(), $('#drNote').value.trim() || 'Re-drafted after a change'));
+    $('#drRedraft').addEventListener('click', () => go(collect(), $('#drNote').value.trim() || 'Re-drafted with your changes', $('#drRedraft')));
+    const rc = $('#drRedraftChange'); if (rc) rc.addEventListener('click', () => go(carry(), $('#drNote').value.trim() || 'Re-drafted after a change', rc));
     // line the conditions up from here: a correction to the offer (so the checks and the record follow), then a new draft
     const lg = $('#drLuGo'); if (lg) lg.addEventListener('click', async () => {
       const days = $('#drLuDays').value.trim(), date = $('#drLuDate').value, t = date ? { date } : { days };
@@ -13209,7 +13222,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       ed.added_terms = (ed.added_terms || []).concat({ id: 'add_' + key + '_1', key }); toast('Saved to your clause library'); return go(ed, 'Added ' + c.title + ' (saved to your library)'); });
     const ackBoxes = $$('[data-ack]'), canApprove = () => !ap && newest && !block.length && !stale && ackBoxes.every(x => x.checked);
     ackBoxes.forEach(x => x.addEventListener('change', () => { $('#drApproveDraft').disabled = !canApprove(); }));
-    $('#drApproveDraft').addEventListener('click', async () => { try { await must(sb.rpc('agent_draft_approve', { p_draft: did, p_sha256: d.sha256, p_checked: ackBoxes.filter(x => x.checked).map(x => x.dataset.ack) })); toast('Draft approved'); viewDraftReview(did); } catch (e) { $('#drRvErr').textContent = e.message || 'That didn\'t save.'; } });
+    $('#drApproveDraft').addEventListener('click', async () => { try { atBtn($('#drApproveDraft'), 'Approving...', 'busy'); await must(sb.rpc('agent_draft_approve', { p_draft: did, p_sha256: d.sha256, p_checked: ackBoxes.filter(x => x.checked).map(x => x.dataset.ack) })); await viewDraftReview(did); atBtn($('#drApproveDraft'), 'Draft approved.', 'ok'); } catch (e) { atBtn($('#drApproveDraft'), e.message || 'That didn\'t save.', 'err'); } });
     $('#drDownload').addEventListener('click', async () => { try { const bytes = await drDraftBytes(d); const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' })); a.download = `Draft-${d.number}-${(p.address || 'agreement').replace(/[^A-Za-z0-9]+/g, '-').slice(0, 60)}.pdf`; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000); } catch (e) { $('#drRvErr').textContent = e.message; } });
     // ── the pages: zoom, marks Tim draws, and filled places he moves or resizes (pointer events: mouse, finger and stylus) ──
     const PM = drPageMaps(d.placed), editable = newest && !ap, MIN_W = 10, MIN_H = 8;
