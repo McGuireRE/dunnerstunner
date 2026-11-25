@@ -53,10 +53,15 @@
   // the problem, so it is never somewhere else on the page. kind: 'busy', 'ok' or 'err'. Under the button's row of buttons if it has one.
   function atBtn(btn, msg, kind) {
     if (!btn) { if (msg) toast(msg); return null; }
-    const row = btn.closest('.toolbar') || btn, id = 'bn-' + (btn.id || 'x');
-    let n = document.getElementById(id), fresh = false;
+    // one note per button: found by the button's id, or kept with a button that has none (so two buttons never share a note)
+    atBtn.notes ||= new WeakMap();
+    let n = btn.id ? document.getElementById('bn-' + btn.id) : atBtn.notes.get(btn), fresh = false;
+    if (n && !n.isConnected) n = null;
     // one live region per button, its role fixed, so screen readers read each new message out (a new node is filled a moment later)
-    if (!n) { n = document.createElement('p'); n.id = id; n.className = 'btn-note'; n.setAttribute('role', 'status'); n.setAttribute('aria-live', 'polite'); row.insertAdjacentElement('afterend', n); fresh = true; }
+    if (!n) { n = document.createElement('p'); if (btn.id) n.id = 'bn-' + btn.id; n.className = 'btn-note'; n.setAttribute('role', 'status'); n.setAttribute('aria-live', 'polite');
+      const row = btn.closest('.toolbar'), host = row ? null : btn.closest('li,section,div');
+      if (row) row.insertAdjacentElement('afterend', n); else if (host) host.appendChild(n); else btn.insertAdjacentElement('afterend', n);
+      atBtn.notes.set(btn, n); fresh = true; }
     n.dataset.kind = kind || 'busy'; n.hidden = !msg; n._msg = msg || '';
     if (fresh) setTimeout(() => { n.textContent = n._msg; }, 60); else n.textContent = n._msg;
     return n;
