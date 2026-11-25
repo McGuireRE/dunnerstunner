@@ -410,6 +410,8 @@ agreements/<agreement id>/signatures/... (vendors may upload their own signature
   stopped round, for a signer, tap or change not of that round, and (round complete) for anything but Tim's start-again rows.
   `offer_mail_void_stale_reopened(signing, actor)` (internal) sets aside unsent `reopened` drafts that no longer ask for anything, after
   a change is undone or Tim starts the round again. Caps: 30 undos (sign_undone events) and 30 redos an hour per signer.
+- Before go-live: `guard_offer_sign_open_work` is security definer and takes the offer FOR KEY SHARE, then the signing FOR SHARE, so a
+  write during a round's lock waits and is refused. Race test: `tests/offer-undo-race.js` (local only, 26 November 2026: no errors).
 - Events: `sign_undone`, `sign_redrawn`, `round_reset`, `round_reverted` (with what was discarded), `agreement_held`,
   `agreement_hold_discarded`; `offer_unfrozen` may carry `reverted: true`.
 - Rollback test: `tests/offer-undo-rollback.sql` (built by `tests/offer-undo-rollback.js`). Local run 26 November 2026 on the stand-in

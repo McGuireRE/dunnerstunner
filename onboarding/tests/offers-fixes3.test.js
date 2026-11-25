@@ -295,6 +295,15 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   expect(notTim(await mails(p), 0).filter(m => m.kind !== 'offer_sign_link').length === 0, 'still nobody but Tim emailed');
   await toSigning(p, offA, g5);
   expect(/1 "please initial the change" email set aside, because the change it asked about was undone\. It was not sent/.test(await p.textContent('#sgStaleMail')), 'Tim\'s round page says so: ' + (await p.textContent('#sgStaleMail').catch(() => '')));
+  // who still has to finish again, and a fresh "please finish again" draft for them (a draft only: Tim reads and sends it himself)
+  expect(/Otherly Vendorperson still needs to finish again: send them their link\./.test(await p.textContent('#sgStaleMail')), 'the note names who still has to finish again: ' + (await p.textContent('#sgStaleMail')).replace(/\s+/g, ' '));
+  { const m1 = (await mails(p)).length; await p.click('[data-sgfinagain]'); await p.waitForSelector('#sgView'); await p.waitForFunction(() => /A draft is ready below/.test((document.querySelector('#sgStaleMail') || {}).textContent || ''));
+    d = await db(p); const fa = d.offer_mail_drafts.filter(m => m.signing_id === g5 && m.kind === 'reopened' && m.status === 'draft');
+    out.finishAgain = fa.map(m => ({ to: m.to_addr, subject: m.subject }));
+    expect(fa.length === 1 && fa[0].to_addr.join() === 'vendor2@example.com' && /^Please finish signing again: 1 Example Road/.test(fa[0].subject) && /finish signing again/.test(fa[0].body) && !/\u2014/.test(fa[0].body), 'a "please finish again" draft to that vendor alone: ' + JSON.stringify(out.finishAgain));
+    expect((await mails(p)).length === m1, 'making the draft sends nothing');
+    expect(!(await p.$('[data-sgfinagain]')) && await p.$('#sgMail [data-mlsend]'), 'the button gives way to the draft, which Tim sends from the page');
+    expect(!(await side(p)), 'the note: no sideways scroll at 390 px'); }
   await rpc(p, 'agent_offer_revert_sealed', { p_offer: offA, p_note: 'Back to Round 1 for the next step', p_request: null, p_unfreeze: false });
   await rpc(p, 'agent_offer_link_changes_default', { p_on: false });
 

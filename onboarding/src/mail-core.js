@@ -77,6 +77,14 @@
       `${s_(i.by) || 'Someone on your side'} has made a change to the document for ${addr} since you finished. Please open the link I sent you earlier, initial the change and finish again. You'll be asked for a new code.`,
       `It all comes to me before anything goes anywhere. Any questions, just call me on ${TIM_PHONE}.`, 'Tim'].join('\n\n') };
   }
+  // after a change was undone (Offers fixes 3): someone reopened by it, whose "please initial the change" draft was set aside, still has
+  // to finish again. A draft Tim reads and sends; the same side only, nothing about the other side.
+  function finishAgainDraft(i) {
+    const first = s_(i.first) || 'there', addr = s_(i.address) || 'the property';
+    return { subject: `Please finish signing again: ${addr}`, body: [`${i.side === 'vendor' ? 'Hello' : 'Dear'} ${first},`,
+      `The document for ${addr} changed after you finished signing, and that change has since been taken back. Please open the link I sent you earlier and finish signing again. You'll be asked for a new code.`,
+      `It all comes to me before anything goes anywhere. Any questions, just call me on ${TIM_PHONE}.`, 'Tim'].join('\n\n') };
+  }
   // Tim's own notice, once per submitted round. i: { side, round, docRound, address, signers: [names], changes: [{ kind, page, text, by }], portalUrl }
   const KIND = { strike: 'line through text', cross: 'crossed-out passage', insert: 'words added', note: 'handwritten note', reinstate: 'reinstatement' };
   function roundNotice(i) {
@@ -406,7 +414,7 @@
     return '<div style="font-family:Arial,sans-serif;font-size:15px;line-height:1.5;color:#1F1D1A;max-width:600px">' + String(text).split(/\n{2,}/).map(p => `<p>${para(p)}</p>`).join('') + '</div>';
   }
 
-  const MAIL = { LINK, BLANK_RE, get TIM_PHONE() { return TIM_PHONE; }, setAgent, allChanges, signLinkDraft, reopenedDraft, roundNotice, agreedDrafts, agreedPrice, agreedDates, agreedNotice, PRICE_BLANK, DEPOSIT_HOLDERS, depositRecommended, withdrawDrafts, requestNotice, firstWorkingDay, parseDate, longDate, toHtml, P_ACTION };
+  const MAIL = { LINK, BLANK_RE, get TIM_PHONE() { return TIM_PHONE; }, setAgent, allChanges, signLinkDraft, reopenedDraft, finishAgainDraft, roundNotice, agreedDrafts, agreedPrice, agreedDates, agreedNotice, PRICE_BLANK, DEPOSIT_HOLDERS, depositRecommended, withdrawDrafts, requestNotice, firstWorkingDay, parseDate, longDate, toHtml, P_ACTION };
   // also on the global object everywhere (a bundler may wrap this file as CommonJS: the offer-sign entry reads the globals; offers hotfix 2)
   if (typeof module !== 'undefined' && module.exports) module.exports = MAIL; root.MAIL = MAIL;
 })(typeof window !== 'undefined' ? window : globalThis);

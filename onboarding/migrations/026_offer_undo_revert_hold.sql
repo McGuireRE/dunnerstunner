@@ -91,10 +91,13 @@ create trigger guard_offer_confirm_holds before update or delete on public.offer
 -- undone work and a drawing again are written only for a round still open, whoever writes them (a function, or the service role directly):
 -- never for a sealed round (one with an offer_rounds row) or a stopped one, and only for that round's own signer, taps and changes.
 -- Once everyone has signed (complete), only Tim's start-again rows ('round') are taken. So a sealed round reads the same for ever.
-create or replace function public.guard_offer_sign_open_work() returns trigger language plpgsql set search_path = public as $$
+-- The rows are locked as everywhere: the offer first (FOR KEY SHARE, as every party step takes it), then the signing FOR SHARE, so a write
+-- arriving while a round is being locked (offer_round_lock holds the offer FOR UPDATE, then the signing) waits for it and is then refused.
+create or replace function public.guard_offer_sign_open_work() returns trigger language plpgsql security definer set search_path = public as $$
 declare g public.offer_signings;
 begin
-  select * into g from public.offer_signings where id = new.signing_id;
+  perform 1 from public.property_offers where id = (select offer_id from public.offer_signings where id = new.signing_id) for key share;
+  select * into g from public.offer_signings where id = new.signing_id for share;
   if g.id is null or exists (select 1 from public.offer_rounds r where r.signing_id = g.id) or g.status not in ('ready', 'signing', 'held', 'complete') then
     raise exception 'This round is sealed or stopped, so what was done on it is kept exactly as it is'; end if;
   if not exists (select 1 from public.offer_signers s where s.id = new.signer_id and s.signing_id = g.id) then raise exception 'That signer isn''t on this round'; end if;

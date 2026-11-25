@@ -762,6 +762,14 @@ After the independent review (26 November 2026), fixed on the same branch:
 - Undoing a change sets aside the unsent "please initial the change" drafts it made (void, with the reason, never removed; sent ones
   stay), so long as the signer has no other change left to initial; Tim's round page says how many and that they were not sent.
 - At most 30 undos and 30 places tapped again an hour per signer, with a plain message to call Tim.
+Before go-live (review READY at b01a70b; two notes):
+- Tim's note on the round page also names who still needs to finish again ("<name> still needs to finish again: send them their
+  link"), with "Make a \"please finish again\" email": a draft to that signer alone (`src/mail-core.js` `finishAgainDraft`), which Tim
+  reads and sends himself. Nothing is sent by making it.
+- `guard_offer_sign_open_work` takes the offer FOR KEY SHARE, then the signing FOR SHARE (the order everywhere), so a write arriving
+  while a round is being locked waits for the lock and is then refused. `tests/offer-undo-race.js` (local stand-in only) shows it: the
+  service role's undo and cleared drawing, and Tim's start-again, each wait and are refused, with no deadlock; the same test on the
+  previous 026 let an undo into the round as it was sealed.
 Tests: `tests/offers-fixes3.test.js` (new), `tests/offer-undo-rollback.sql` and `.js` (new; run on the local stand-in through 025:
 every line as expected, no capitals), `tests/offer-sign-fn.test.js` and `tests/mail-core.test.js` (extended), the mock (`tests/mock.js`)
 mirrors 026. 024's rollback test, 025's rollback test and 024's race test were also run with 026 applied: the same results.

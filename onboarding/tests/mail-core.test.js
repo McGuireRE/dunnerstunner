@@ -214,5 +214,8 @@ const base = () => ({
     ok(r3.subject === 'URGENT: a purchaser asks to go back to Round 2: 1 Example Road' && r3.ask === 'go back to Round 2 as it was signed' && /Nothing has been set aside yet/.test(r3.after) && /go back to Round 2, or let them carry on/.test(r3.after), 'going back: ' + JSON.stringify(r3));
     ok(r1.subject === 'URGENT: a purchaser asks to start the round again: an offer' && r1.ask === 'start this round again from the beginning', 'Round 1 has nothing sealed to go back to: ' + r1.subject);
     ok(![f, w, r3, r1].some(x => /\u2014/.test(JSON.stringify(x))), 'no em dashes'); }
+  { const v = M.finishAgainDraft({ first: 'Ula', address: '1 Example Road', side: 'vendor' }), q = M.finishAgainDraft({ first: '', address: '', side: 'purchaser' });
+    ok(v.subject === 'Please finish signing again: 1 Example Road' && /^Hello Ula,/.test(v.body) && /open the link I sent you earlier and finish signing again/.test(v.body) && /\nTim$/.test(v.body), 'finish again (vendor): ' + v.body);
+    ok(/^Dear there,/.test(q.body) && /the property/.test(q.subject) && !/\u2014/.test(v.body + q.body), 'finish again (purchaser, nothing known): ' + q.subject); }
   console.log(JSON.stringify(Object.assign(out, { errs }), null, 1));
 })().catch(e => { console.log(JSON.stringify({ errs: ['crashed: ' + (e.stack || e.message)] })); });
