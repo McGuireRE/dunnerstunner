@@ -4,13 +4,17 @@ Agreed with Tim on 23 November 2026. Tim's readable copy is the doc "Offers and 
 (https://claude.ai/artifact/UeHnyEdA6xhi1fPnyhxtNA). This file is the builder's copy. Build each phase the same way
 as `BUILD-PLAN.md`: builder, tests against the mock database, independent reviewer, then push and deploy.
 
-## Live status (25 November 2026)
+## Live status (26 November 2026)
 
 - Live: phases 1 (offer form), 2 (drafting onto the REINZ blank), 3 (signing) and 4 (counteroffers). Database 001 to 024.
   Phases 3 and 4 went live 25 November about 12:55 (main 121c783; offer-sign v1, offer-public v3).
 - Live: Offers fixes 1 (AI wording, no-blank warning), 25 November about 15:25 (main 06c2d22; offer-draft v3, offer-public v4,
   doc-prefill v5, all pinned to 06c2d22). Checked: the clause writer drafted a condition on the live site.
-- Edge functions and the commit each is pinned to: offer-sign 121c783; offer-public, offer-draft, doc-prefill 06c2d22.
+- Live: Offers fixes 2, hotfix 2 and migration 025 (25 and 26 November; offer-sign v5 at 92ebdd3).
+- Live: Offers fixes 3 (undo and start again in every turn, Tim's "Start this round again", "Unfreeze and go back", Confirm held
+  while frozen), 26 November about 10:55 NZT. Migration 026 applied (its live rollback test ran clean first); main 11e46da, pages
+  published from 4df62e2 (an empty commit: the first push didn't start a Pages build); offer-sign v6 pinned to 11e46da, OPTIONS 200.
+- Edge functions and the commit each is pinned to: offer-sign 11e46da; offer-public, offer-draft, doc-prefill 06c2d22.
 - Still to do: the test offer with Tim's own addresses (OFFERS-PLAN "Going live" step 5), then Tim's solicitor confirms the
   signing and counteroffer method before the first real offer. Phases 5 and 6 not built.
 - Older "Status:" lines in the phase sections below are kept as the build history; this section is the current state.
@@ -718,7 +722,7 @@ Going live, with Tim's approval, in order:
 
 ## Offers fixes 3 (Tim's decisions of 25 and 26 November 2026; branch `offers-fixes-3`, from main 92ebdd3)
 
-Status: Built, awaiting review and Tim's approval. Needs migration 026 (`026_offer_undo_revert_hold.sql`; its rollback test first,
+Status: Live 26 November 2026 (see Live status). Waiting on Tim's live checks (step 5). Was: needs migration 026 (`026_offer_undo_revert_hold.sql`; its rollback test first,
 then applied with Tim's OK) and offer-sign redeployed (pinned to the new commit). Mediation as always: no party learns of the other
 side's activity until Tim releases it, and nobody is emailed but Tim.
 1. Freeze blocks confirmation, held not sealed. While an offer is frozen, "Confirm the agreement" holds Tim's confirmation (the
