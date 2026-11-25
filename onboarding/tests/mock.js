@@ -277,6 +277,8 @@ function mkNotices(ag){ if((ag.answers||{}).prior!=='yes') return; (DB.prior_age
 const ok=d=>Promise.resolve({data:d,error:null}); const bad=m=>Promise.resolve({data:null,error:{message:m}});
 function rpc(name,a){ logCall('rpc:'+name); if(['agent_repo_add','agent_repo_set','agent_repo_share','agent_repo_archive','vendor_repo_list','agent_property_export'].includes(name)) return repoRpc(name,a); if(localStorage.getItem('trHang')==='1'&&['get_translations','set_my_language'].includes(name)) return new Promise(()=>{}); const before=new Map((DB.agreements||[]).map(x=>[x.id,JSON.parse(JSON.stringify(x))]));
   // mockSaveDelay = ms: the inspection save answers late, as on a slow connection (the work is done when the answer arrives)
+  // mockRpcDelay = ms: every function call answers late (the shared records' button notes: "Saving..." while it waits)
+  let rd=0; try{ rd=+localStorage.getItem('mockRpcDelay')||0; }catch(_){} if(rd) return new Promise(r=>setTimeout(()=>{ const out=rpcInner(name,a); save(); Promise.resolve(out).then(r); },rd));
   let dl=0; try{ dl=+localStorage.getItem('mockSaveDelay')||0; }catch(_){} if(dl&&name==='agent_inspection_save') return new Promise(r=>setTimeout(()=>{ const out=rpcInner(name,a); save(); r(out); },dl));
   const res=rpcInner(name,a); (DB.agreements||[]).forEach(x=>{ const o=before.get(x.id); if(o&&JSON.stringify(o)!==JSON.stringify(x)) syncAgreement(x,o); }); save(); return res; }
 function rpcInner(name,a){

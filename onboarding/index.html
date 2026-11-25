@@ -6432,6 +6432,10 @@ window.JOURNEY_MEDIA_HINTS = {
   };
   window.__sbLock = sbLock;
   const sb = window.supabase.createClient(SB_URL, SB_KEY, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, lock: sbLock } });
+  // LW0: calls in flight are counted, so the button that started them can say it is working (see busyTrack)
+  (() => { const wrap = r => { if (!r || typeof r.then !== 'function') return r; const t = r.then.bind(r); r.then = (ok, no) => { busyTrack(true); return t(v => { busyTrack(false); return ok ? ok(v) : v; }, e => { busyTrack(false); if (no) return no(e); throw e; }); }; return r; };
+    const rpc = sb.rpc.bind(sb); sb.rpc = (...a) => wrap(rpc(...a));
+    if (sb.functions && sb.functions.invoke) { const inv = sb.functions.invoke.bind(sb.functions); sb.functions.invoke = (...a) => wrap(inv(...a)); } })();
 
   /* ───────── helpers ───────── */
   const $ = (s, el = document) => el.querySelector(s);
@@ -6452,7 +6456,33 @@ window.JOURNEY_MEDIA_HINTS = {
   // Translations screen, and no automatic translating of plans and variations while this is false.
   const APP_TRANSLATION = false;
   const trs = (s, v) => I18N.tr(s, v);   // wording built in pieces (for example a spoken label) goes through the same approved translations
-  function toast(msg) { const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(toast._t); toast._t = setTimeout(() => t.hidden = true, 3200); }
+  function toastOnly(msg) { const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(toast._t); toast._t = setTimeout(() => t.hidden = true, 3200); }
+  // LW0, Tim's standing rule (26 November 2026): what a button is doing or has done shows at that button, never only in a toast or
+  // elsewhere on the page. Every button Tim or a vendor presses (outside the top bar, the footer menu and the Back and Continue bar) is
+  // remembered; while the database or a function is working for it, "Saving..." (or the button's data-busy) shows just under it; a
+  // message the page would have shown as a toast shows there instead (atBtn), and follows the button when the page redraws it. If the
+  // button is gone (the page moved on), the message falls back to a toast.
+  let LAST_BTN = null, LAST_AT = 0, INFLIGHT = 0;
+  const btnNote = b => document.getElementById('bn-' + ((b && b.id) || 'x'));
+  function btnKey(b) { if (!b) return null; if (b.id) return '#' + CSS.escape(b.id); const a = Array.from(b.attributes).find(x => /^data-/.test(x.name) && x.name !== 'data-busy'); return a ? `button[${a.name}="${CSS.escape(a.value)}"]` : null; }
+  const busyWord = b => b.dataset.busy || (/sign/i.test(b.textContent) ? 'Saving the signature...' : /send|email/i.test(b.textContent) ? 'Sending...' : /draft/i.test(b.textContent) ? 'Drafting...' : /upload|photo|file/i.test(b.textContent) ? 'Uploading...' : /look|check|find/i.test(b.textContent) ? 'Looking...' : 'Saving...');
+  function busyTrack(on) { INFLIGHT = Math.max(0, INFLIGHT + (on ? 1 : -1)); if (!INFLIGHT && LAST_BTN) { const n = btnNote(LAST_BTN); if (n && n.dataset.kind === 'busy' && n.textContent === busyWord(LAST_BTN)) n.hidden = true; } }
+  document.addEventListener('click', e => {
+    const b = e.target && e.target.closest ? e.target.closest('button.btn') : null;
+    if (!b || b.closest('header, .actions, #pNav, #pUpRow, #toast')) return;
+    LAST_BTN = b; LAST_AT = Date.now();
+    const n = btnNote(b); if (n && n.dataset.kind !== 'busy') n.hidden = true;
+    setTimeout(() => { if (LAST_BTN === b && INFLIGHT > 0 && b.isConnected) atBtn(b, busyWord(b), 'busy'); }, 150);
+  }, true);
+  const BTN_ERR = /n't|\bnot\b|no signal|failed|refused|can.t|try again|wrong|denied|only |add the|choose /i;
+  function toast(msg) {
+    const b = LAST_BTN; if (!msg || !b || Date.now() - LAST_AT > 20000) return toastOnly(msg);
+    const key = btnKey(b), kind = BTN_ERR.test(msg) ? 'err' : 'ok';
+    let tgt = b, fell = false; const at0 = LAST_AT;
+    const place = () => { if (!tgt.isConnected) tgt = key ? document.querySelector(key) : null; if (!tgt || !tgt.isConnected) return false; atBtn(tgt, msg, kind); LAST_BTN = tgt; return true; };
+    if (!place()) return toastOnly(msg);
+    [80, 450, 1300, 2600].forEach(ms => setTimeout(() => { if (fell || LAST_AT !== at0) return;   // a newer press has its own note const n = btnNote(tgt); if (n && n.isConnected && !n.hidden && n.textContent === msg) return; if (!place()) { fell = true; toastOnly(msg); } }, ms));
+  }
   // what a button is doing, or what it did, shown right under that button (Tim, 26 November 2026): "Drafting...", then the result or
   // the problem, so it is never somewhere else on the page. kind: 'busy', 'ok' or 'err'. Under the button's row of buttons if it has one.
   function atBtn(btn, msg, kind) {
@@ -6488,7 +6518,7 @@ window.JOURNEY_MEDIA_HINTS = {
   $('#back').addEventListener('click', () => onBack && onBack());
   $('#next').addEventListener('click', async () => { if (!onNext) return; const b = $('#next'); b.disabled = true; try { await onNext(); } finally { b.disabled = false; } });
   function top() { window.scrollTo({ top: 0 }); const h = $('h1', main()); if (h) { h.setAttribute('tabindex', '-1'); h.focus({ preventScroll: true }); } }
-  async function must(p) { const { data, error } = await p; if (error) { console.error(error); toast(error.message || 'Something went wrong'); throw error; } return data; }
+  async function must(p) { busyTrack(true); let r; try { r = await p; } finally { busyTrack(false); } const { data, error } = r; if (error) { console.error(error); toast(error.message || 'Something went wrong'); throw error; } return data; }
   async function sha256(text) { const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)); return Array.from(new Uint8Array(b)).map(x => x.toString(16).padStart(2, '0')).join(''); }
   const callName = p => (p.pref_name || '').trim() || (p.legal_name || '').trim().split(/\s+/)[0] || '';
   const joinNames = a => a.length < 2 ? a.join('') : a.slice(0, -1).join(', ') + ' and ' + a[a.length - 1];
@@ -7731,8 +7761,8 @@ function lawyerForm(id, title, blurb) {
       $('#pfAddP').addEventListener('click', () => { readPeople(); PF.people.push({ legal_name: '', pref_name: '', email: '', phone: '', source: 'agent' }); redraw(); });
       $('#pfSave').addEventListener('click', async () => {
         readPeople(); readProp();
-        if (!p.address) return $('#pfErr').textContent = 'Add the address.';
-        if (PF.people.some(x => x.email && !EMAIL_RE.test(x.email.trim()))) return $('#pfErr').textContent = 'Check the email addresses.';
+        if (!p.address) return atBtn($('#pfSave'), 'Add the address.', 'err');
+        if (PF.people.some(x => x.email && !EMAIL_RE.test(x.email.trim()))) return atBtn($('#pfSave'), 'Check the email addresses.', 'err');
         await propSave(); toast('Saved'); viewProperty(id);
       });
     }

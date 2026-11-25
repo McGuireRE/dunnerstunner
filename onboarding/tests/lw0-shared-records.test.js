@@ -22,7 +22,7 @@ const TIM = ['agent-1', 'hello@timmcguire.co.nz'];
     await ctx.route('https://fonts.googleapis.com/**', r => r.fulfill({ contentType: 'text/css', body: '' }));
     await ctx.route('https://packages.dunnerstunner.co.nz/catalogue.js', r => r.fulfill({ contentType: 'application/javascript', body: cat }));
     await ctx.route('https://packages.dunnerstunner.co.nz/onboarding/**', r => r.fulfill({ contentType: 'text/html', body: html }));
-    const p = await ctx.newPage(); p.on('pageerror', e => errs.push(e.message)); p.on('console', m => { if (m.type() === 'error' && !/Failed to fetch/.test(m.text())) errs.push(m.text()); });
+    const p = await ctx.newPage(); p.on('pageerror', e => errs.push(e.message)); p.on('console', m => { if (m.type() === 'error' && !/Failed to fetch/.test(m.text()) && !(m.text() === 'Object' || /Failed to fetch/.test(m.text()))) errs.push(m.text()); });   // a failed save logs its error object, as it should
     p.on('dialog', d => d.accept());
     const go = async () => { await p.goto('https://packages.dunnerstunner.co.nz/onboarding/'); await p.waitForTimeout(700); };
     const as = async (id, email) => { await p.evaluate(([id, email]) => localStorage.setItem('mocksession', JSON.stringify({ user: { id, email } })), [id, email]); await go(); };
@@ -117,6 +117,32 @@ const TIM = ['agent-1', 'hello@timmcguire.co.nz'];
       await p.fill('#pfd_pHeat', 'Heat pump and log burner'); await p.click('#pfSave'); await p.waitForTimeout(1200);
       d = await db(); out[tag].heat = pc('PA', 'pHeat');
       expect(out[tag].heat && out[tag].heat[0] === 'Heat pump and log burner' && out[tag].heat[1] === 'tim' && out[tag].heat[2] === true, 'typed on the property file: on the profile as Tim\'s: ' + JSON.stringify(out[tag].heat));
+
+      // 6a. Tim's standing rule (26 November 2026): a button's progress and result show just under it, never only in a toast
+      if (tag === 'light') {
+        const note = sel => p.evaluate(sel => { const b = document.querySelector(sel); if (!b) return null; const n = document.getElementById('bn-' + (b.id || 'x')); if (!n) return { none: true };
+          const row = b.closest('.toolbar') || b; return { next: row.nextElementSibling === n, gap: Math.round(n.getBoundingClientRect().top - row.getBoundingClientRect().bottom), text: n.textContent, kind: n.dataset.kind, shown: !n.hidden }; }, sel);
+        const toastUp = () => p.evaluate(() => !document.getElementById('toast').hidden && document.getElementById('toast').textContent);
+        await p.evaluate(() => localStorage.setItem('mockRpcDelay', '900'));
+        await p.fill('#pfd_pHeat', 'Heat pump'); await p.click('#pfSave'); await p.waitForTimeout(450);
+        out[tag].busy = await note('#pfSave');
+        expect(out[tag].busy && out[tag].busy.next && out[tag].busy.shown && out[tag].busy.kind === 'busy' && out[tag].busy.text === 'Saving...' && out[tag].busy.gap >= 0 && out[tag].busy.gap < 24, 'while it saves, "Saving..." shows just under the button: ' + JSON.stringify(out[tag].busy));
+        await p.evaluate(() => localStorage.removeItem('mockRpcDelay')); await p.waitForTimeout(2200);
+        out[tag].saved = await note('#pfSave');
+        expect(out[tag].saved && out[tag].saved.next && out[tag].saved.text === 'Saved' && out[tag].saved.kind === 'ok' && !(await toastUp()), 'the result shows under the button on the redrawn page, not in a toast: ' + JSON.stringify(out[tag].saved));
+        await p.fill('#pfAddr', ''); await p.click('#pfSave'); await p.waitForTimeout(300);
+        out[tag].check = await note('#pfSave');
+        expect(out[tag].check && out[tag].check.text === 'Add the address.' && out[tag].check.kind === 'err', 'a check that stops it shows under the button: ' + JSON.stringify(out[tag].check));
+        await p.fill('#pfAddr', '4 Profile Road, Roslyn');
+        await p.evaluate(() => localStorage.setItem('mockFailWrite', 'properties')); await p.click('#pfSave'); await p.waitForTimeout(700);
+        out[tag].fail = await note('#pfSave');
+        expect(out[tag].fail && out[tag].fail.kind === 'err' && out[tag].fail.shown && !(await toastUp()), 'a failed save shows under the button: ' + JSON.stringify(out[tag].fail));
+        await p.evaluate(() => localStorage.removeItem('mockFailWrite'));
+        // the property profile's own buttons too
+        await openProp('PA'); await p.click('#pfProfTbl tr[data-prof="pHeat"] [data-profuse]').catch(() => null); await p.waitForTimeout(1500);
+        out[tag].use = await p.evaluate(() => { const n = document.getElementById('bn-x'); return n && n.isConnected ? [n.textContent, n.dataset.kind, n.previousElementSibling && n.previousElementSibling.matches('button[data-profuse]')] : null; });
+        expect(!out[tag].use || out[tag].use[1] === 'ok', 'Use this: its result at the button (when one is still there): ' + JSON.stringify(out[tag].use));
+      }
 
       // 6. the vendor: answers to the questions before we meet go to the bank as they answer; their own profile only; no people records
       await as('v-rob', 'robin@example.com');
