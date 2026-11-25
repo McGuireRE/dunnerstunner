@@ -84,6 +84,15 @@ const path = require('path');
   modelAnswer = { ok: true, status: 200, body: { content: [{ type: 'tool_use', input: { wording: '', summary: '', unsuitable: true, why: 'That is not a condition.' } }] } };
   r = await draft({ token: TOK, text: 'Write me a poem about the sea please' }); j = await r.json(); expect(j.ok === false && j.reason === 'unsuitable' && j.why === 'That is not a condition.', 'unsuitable');
   r = await draft({ token: 'nope', text: 'I need the chattels list confirmed' }); j = await r.json(); expect(j.ok === false && j.reason === 'closed', 'draft with a non-token');
+  // Sonnet 5.5 refuses a forced tool_choice (25 Nov 2026): auto, with the instruction to answer only through draft_condition
+  expect(m.tool_choice && m.tool_choice.type === 'auto' && !m.tool_choice.name && m.tools.length === 1 && m.tools[0].name === 'draft_condition', 'no forced tool_choice: ' + JSON.stringify(m.tool_choice));
+  expect(m.system.endsWith('Answer only by calling the draft_condition tool, exactly once. Do not reply in plain text.') && m.system.startsWith(S.OFFER_CONDITION_SYSTEM), 'the instruction to answer through the tool is in the system prompt');
+  // a reply in text only (no tool answer): the buyer is told plainly, and the call is logged as not ok, "no tool answer"
+  modelAnswer = { ok: true, status: 200, body: { usage: { input_tokens: 120, output_tokens: 20 }, content: [{ type: 'text', text: 'This agreement is conditional on the chattels list.' }] } };
+  r = await draft({ token: TOK, text: 'I need the chattels list confirmed' }); j = await r.json();
+  expect(j.ok === false && j.reason === 'no_answer' && j.error === "The AI didn't give a usable answer. Try again, or write the condition yourself." && !j.wording, 'a text-only reply fails soft with a plain message: ' + JSON.stringify(j));
+  expect(logs.at(-1).ok === false && logs.at(-1).error === 'no tool answer' && logs.at(-1).input_tokens === 120 && logs.at(-1).purpose === 'offer condition draft', 'a text-only reply is logged as not ok');
+  expect(S.readOfferConditionResult({ content: [] }).noTool === true, 'readOfferConditionResult knows a reply with no tool answer');
   // condition timing (Tim, 24 November 2026): the helper writes the time as {timing}, filled in from the buyer's chosen timing
   expect(/\{timing\} exactly once/.test(m.system) && /working days of the date of the agreement/.test(m.system) && /on or before a date/.test(m.system) && /another condition is satisfied or waived/.test(m.system) && /Never write a date, a number of days/.test(m.system), 'the prompt asks for {timing}, covering all three ways of timing a condition');
   expect(!/by the condition date in the offer/.test(m.system), 'the old "by the condition date" instruction is gone');

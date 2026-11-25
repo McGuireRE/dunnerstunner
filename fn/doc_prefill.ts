@@ -6,7 +6,7 @@ import { createClient } from "npm:@supabase/supabase-js@2.45.4";
 import { unzipSync, strFromU8 } from "npm:fflate@0.8.2";
 import * as XLSX from "npm:xlsx@0.18.5";
 
-import { FIELD_KEYS, MAX_TOTAL, MODEL, SYSTEM, TOOL, TRANSLATE_KINDS, buildTranslateRequest, readTranslateResult } from "./prefill_shared.ts";
+import { FIELD_KEYS, MAX_TOTAL, MODEL, NO_TOOL_ERROR, NO_TOOL_MESSAGE, SYSTEM, TOOL, TRANSLATE_KINDS, answerByTool, buildTranslateRequest, readTranslateResult, toolUseOf } from "./prefill_shared.ts";
 
 function b64(bytes: Uint8Array) { let s = ""; for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000)); return btoa(s); }
 export function docxText(bytes: Uint8Array) {
@@ -46,7 +46,9 @@ Deno.serve(async (req) => {
       }
       const usage = out.usage || {};
       const cutOff = out.stop_reason === "max_tokens";   // the reply ran out of room part way
-      await dbT.from("ai_calls").insert({ purpose, model: request.model, ok: true, error: cutOff ? "max_tokens" : null, input_tokens: usage.input_tokens || 0, output_tokens: usage.output_tokens || 0, files: 0, agent: "agent" });
+      const noTool = !cutOff && !toolUseOf(out);           // a reply in text only: nothing to use, logged as not ok
+      await dbT.from("ai_calls").insert({ purpose, model: request.model, ok: !noTool, error: noTool ? NO_TOOL_ERROR : cutOff ? "max_tokens" : null, input_tokens: usage.input_tokens || 0, output_tokens: usage.output_tokens || 0, files: 0, agent: "agent" });
+      if (noTool) return json({ ok: false, reason: "no_tool", message: NO_TOOL_MESSAGE });
       const res = readTranslateResult(sources, out);
       if (cutOff) res.rejected = res.rejected.map((x) => (x.reason === "missing" ? { source: x.source, reason: "cut off" } : x));
       return json({ ok: true, model: request.model, cut_off: cutOff, translations: res.ok, rejected: res.rejected, usage: { input: usage.input_tokens, output: usage.output_tokens } });
@@ -80,7 +82,7 @@ Deno.serve(async (req) => {
     const r = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-      body: JSON.stringify({ model: MODEL, max_tokens: 4000, system: SYSTEM, tools: [TOOL], tool_choice: { type: "tool", name: "fill_agreement" }, messages: [{ role: "user", content }] }),
+      body: JSON.stringify(answerByTool({ model: MODEL, max_tokens: 4000, system: SYSTEM, tools: [TOOL], messages: [{ role: "user", content }] }, TOOL.name)),
     });
     const out = await r.json();
     if (!r.ok) {
@@ -89,10 +91,11 @@ Deno.serve(async (req) => {
       await db.from("ai_calls").insert({ purpose: "agreement prefill", model: MODEL, ok: false, error: msg, files: files.length, agent: "agent" });
       return json({ error: friendly }, 502);
     }
-    const use = (out.content || []).find((c: any) => c.type === "tool_use");
+    const use = toolUseOf(out);
     const usage = out.usage || {};
-    await db.from("ai_calls").insert({ purpose: "agreement prefill", model: MODEL, ok: true, input_tokens: usage.input_tokens || 0, output_tokens: usage.output_tokens || 0, files: files.length, agreement_id: body.agreement_id || null, agent: "agent" });
-    const res = use?.input || { documents: [], people: [], fields: [], flags: [] };
+    await db.from("ai_calls").insert({ purpose: "agreement prefill", model: MODEL, ok: !!use, error: use ? null : NO_TOOL_ERROR, input_tokens: usage.input_tokens || 0, output_tokens: usage.output_tokens || 0, files: files.length, agreement_id: body.agreement_id || null, agent: "agent" });
+    if (!use) return json({ error: NO_TOOL_MESSAGE + " Your files are saved, so you can read them again.", skipped }, 502);   // a reply in text only
+    const res = use.input || { documents: [], people: [], fields: [], flags: [] };
     res.fields = (res.fields || []).filter((f: any) => FIELD_KEYS.includes(f.key) && String(f.value ?? "").trim());
     return json({ ok: true, result: res, skipped, usage: { input: usage.input_tokens, output: usage.output_tokens } });
   } catch (e: any) {

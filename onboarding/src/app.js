@@ -1877,7 +1877,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       progress && progress(`Translating, part ${Math.min(++done, Math.max(total, done))} of ${Math.max(total, done + queue.length)}...`);
       const { data, error } = await sb.functions.invoke('doc-prefill', { body: { mode: 'translate', kind: scope, lang, sources: batch } });
       if (error || !data || data.ok === false) {
-        return { saved, skipped, rejected, cut, failed: true, message: saved ? `Stopped part way: ${saved} translated and stored. Try again for the rest.` : 'The translator could not be reached, or is not switched on yet. Nothing was changed.' };
+        const noTool = data && data.reason === 'no_tool';   // the AI replied without a usable answer
+        return { saved, skipped, rejected, cut, failed: true, message: saved ? `Stopped part way: ${saved} translated and stored. Try again for the rest.` : noTool ? 'The AI didn\'t give a usable answer. Try again. Nothing was changed.' : 'The translator could not be reached, or is not switched on yet. Nothing was changed.' };
       }
       const rej = data.rejected || [];
       rejected += rej.filter(x => x.reason !== 'cut off').length;

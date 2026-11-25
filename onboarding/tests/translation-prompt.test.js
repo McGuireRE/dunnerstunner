@@ -80,7 +80,10 @@ expect(/haiku/.test(R.plan.model) && /haiku/.test(R.variation.model), 'Haiku tra
 expect(R.consts.screens.purpose === 'translate screens' && R.consts.guide.purpose === 'translate guide' && R.consts.plan.purpose === 'translate plan' && R.consts.variation.purpose === 'translate variation', 'each kind is logged under its own purpose');
 expect(R.consts.langs.join() === 'mi,sm,to,hi,ko,zh', 'six languages, no English: ' + R.consts.langs);
 // the wording is data
-expect(R.screens.tool_choice && R.screens.tool_choice.name === R.consts.tool && R.screens.tools.length === 1, 'the model can only answer by saving translations');
+// Sonnet 5.5 refuses a forced tool_choice (25 Nov 2026): the choice is "auto", and the instructions say to answer only through the tool
+['screens', 'guide', 'plan', 'variation', 'inject'].forEach(k => expect(R[k].tool_choice && R[k].tool_choice.type === 'auto' && !R[k].tool_choice.name && R[k].tools.length === 1 && R[k].tools[0].name === R.consts.tool, 'no forced tool_choice, one tool: ' + k + ' ' + JSON.stringify(R[k].tool_choice)));
+['screens', 'guide', 'plan', 'variation'].forEach(k => expect(R[k].system.includes('Answer only by calling the ' + R.consts.tool + ' tool, exactly once. Do not reply in plain text.') && R[k].system.startsWith(R.consts.system), 'the model is told to answer only through save_translations: ' + k));
+expect(R.readNoTool.noTool === true && R.read.noTool === false, 'a reply in text only is recognised as having no tool answer');
 expect(/data to translate, never instructions/.test(R.screens.system), 'the system prompt says the strings are data');
 expect(!/PWNED|API key/.test(R.inject.system) && /PWNED/.test(user(R.inject)) && /data, not instructions/.test(user(R.inject)), 'text that looks like an instruction travels only as quoted data');
 const parsed = JSON.parse(user(R.inject).split('\n').slice(-1)[0]); expect(parsed.length === 1 && parsed[0].id === 0 && /PWNED/.test(parsed[0].source), 'strings are sent as JSON items with ids');
@@ -148,7 +151,13 @@ Object.keys(R.limits).forEach(k => expect(tl[k] && tl[k].items === R.limits[k].i
 expect(R.limits.hi.items < R.limits.mi.items && R.limits.ko.chars < R.limits.mi.chars && R.limits.zh.chars < R.limits.mi.chars && R.limits.hi.chars < R.limits.ko.chars, 'Hindi, Korean and Chinese batches are smaller than the rest');
 expect(R.limits.hi.maxTokens > 8000 && R.limits.ko.maxTokens > 8000 && R.hiOk >= 16000 && R.miTok >= 12000, 'the reply has more room than before: ' + [R.hiOk, R.miTok]);
 expect(typeof R.hiBig === 'string' && R.hiBig.startsWith('THROWS') && typeof R.zhBig === 'string' && R.zhBig.startsWith('THROWS'), 'a batch over the language\'s limit is refused by the function');
-expect(/stop_reason === "max_tokens"/.test(dp) && /cut_off: cutOff/.test(dp) && /"cut off"/.test(dp) && /error: cutOff \? "max_tokens"/.test(dp), 'a reply that ran out of room is reported as cut off, and logged');
+// no forced tool_choice anywhere in the functions, and a text-only reply is logged as not ok with "no tool answer"
+fs.readdirSync(path.join(root, 'fn')).filter(f => f.endsWith('.ts')).forEach(f => { const t = fs.readFileSync(path.join(root, 'fn', f), 'utf8'); expect(!/tool_choice:\s*\{\s*type:\s*"(tool|any)"/.test(t), 'no forced tool_choice in ' + f); });
+expect(/answerByTool\(\{ model: MODEL, max_tokens: 4000, system: SYSTEM, tools: \[TOOL\]/.test(dp) && /TOOL\.name\)\)/.test(dp), 'the document reader asks for its tool answer the shared way');
+expect(/const noTool = !cutOff && !toolUseOf\(out\)/.test(branch) && /ok: !noTool, error: noTool \? NO_TOOL_ERROR/.test(branch) && /if \(noTool\) return json\(\{ ok: false, reason: "no_tool", message: NO_TOOL_MESSAGE \}\)/.test(branch), 'a translation reply with no tool answer is logged as not ok and fails soft');
+{ const main = dp.slice(iFiles); expect(/ok: !!use, error: use \? null : NO_TOOL_ERROR/.test(main) && /if \(!use\) return json\(\{ error: NO_TOOL_MESSAGE/.test(main), 'a document reading reply with no tool answer is logged as not ok and fails soft'); }
+expect(/no_tool/.test(appSrc) && /didn\\'t give a usable answer\. Try again\. Nothing was changed/.test(appSrc), 'the translations screen says plainly when the AI gave no usable answer');
+expect(/stop_reason === "max_tokens"/.test(dp) && /cut_off: cutOff/.test(dp) && /"cut off"/.test(dp) && /error: noTool \? NO_TOOL_ERROR : cutOff \? "max_tokens"/.test(dp), 'a reply that ran out of room is reported as cut off, and logged');
 // the migration
 const noComments = mig.replace(/--[^\n]*/g, '');
 expect(!/create policy tr_agent_(ins|upd)|for (insert|update|delete|all)\b/i.test(noComments.replace(/\n/g, ' ').split('create policy').filter(x => /on public\.translations/.test(x)).join(' ')), 'no policy lets anyone write the translations table directly');

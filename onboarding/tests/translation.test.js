@@ -196,6 +196,10 @@ const DISRE = /This translation was made automatically by a computer and has not
     await p.evaluate(() => localStorage.setItem('translateMode', 'off')); await p.click('#trGo'); await p.waitForTimeout(600);
     expect(/could not be reached, or is not switched on yet/.test(await text(p, '#trMsg')), 'plain message when the translator is off: ' + await text(p, '#trMsg'));
     expect(((await h.db()).translations || []).length === 0, 'nothing stored when it fails');
+    // the AI replied in text only (no tool answer): a plain message, nothing stored
+    await p.evaluate(() => localStorage.setItem('translateMode', 'noTool')); await p.click('#trGo'); await p.waitForTimeout(600);
+    expect(/didn't give a usable answer\. Try again\. Nothing was changed/.test(await text(p, '#trMsg')), 'plain message when the AI gives no usable answer: ' + await text(p, '#trMsg'));
+    expect(((await h.db()).translations || []).length === 0, 'nothing stored when the AI gives no usable answer');
     // strings the checks reject are reported and not stored
     await p.evaluate(() => { localStorage.setItem('translateMode', 'rejectFirst'); localStorage.setItem('trReqs', '[]'); }); await p.click('#trGo'); await p.waitForTimeout(2500);
     expect(/1 could not be used/.test(await text(p, '#trMsg')) || /could not be used/.test(await text(p, 'main')), 'a rejected string is reported');
