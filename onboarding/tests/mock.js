@@ -864,7 +864,7 @@ function sgTap(s,place){ const g=sgReady(s); if(!s.consent_at) throw new Error('
   const ink=sgInk(s); if(!ink.sig_png||!ink.init_png) throw new Error('Draw your signature and initials first'); const req=sgRequired(g,s.position); if(!req.includes(place)) throw new Error("That place isn't yours to sign");
   const t0=OST().find(t=>t.signer_id===s.id&&t.place_id===place);
   if(!t0) OST().push({id:OST().length+1,signing_id:g.id,signer_id:s.id,place_id:place,at:now()});
-  else if(!tapLive(t0)) OSU().push({id:OSU().length+1,signing_id:g.id,signer_id:s.id,tap_id:t0.id,mark_id:null,action:'redo',scope:'tap',by_name:s.name,at:now()});   // 026: tapped again
+  else if(!tapLive(t0)){ if(OSU().filter(u=>u.signer_id===s.id&&u.action==='redo'&&Date.parse(u.at)>Date.now()-36e5).length>=30) throw new Error('You have tapped places again a lot in the last hour. Please call Tim on 027 562 7207'); OSU().push({id:OSU().length+1,signing_id:g.id,signer_id:s.id,tap_id:t0.id,mark_id:null,action:'redo',scope:'tap',by_name:s.name,at:now()}); }   // 026: tapped again
   return {done:liveTaps().filter(t=>t.signer_id===s.id&&req.includes(t.place_id)).length,of:req.length}; }
 function sgFinish(s,ua,net,idType,witness){ const g=sgReady(s); if(!s.consent_at||!sgInk(s).sig_png) throw new Error('Agree, read the guides and draw your signature and initials first');
   const LT=liveTaps(), req=sgRequired(g,s.position), miss=req.filter(p=>!LT.some(t=>t.signer_id===s.id&&t.place_id===p)).length; if(miss) throw new Error(`There ${miss===1?'is':'are'} still ${miss===1?'1 place':miss+' places'} to do`);
@@ -883,6 +883,7 @@ function sgUndo(s,scope,clear,by){ if(!['last','turn'].includes(scope)) throw ne
   if(g.status==='ready') throw new Error("Signing hasn't started yet"); if(g.status==='complete') throw new Error('Everyone has signed. The signed copy is being locked.');
   if(!['signing','held'].includes(g.status)) throw new Error("Signing isn't open, so there is nothing to undo");
   if(s.finished_at) throw new Error('You have finished signing, so your turn is closed. Tim can start the round again if something needs changing');
+  if(OE().filter(e=>e.offer_id===g.offer_id&&e.kind==='sign_undone'&&(e.detail||{}).signing_id===g.id&&(e.detail||{}).signer===s.position&&Date.parse(e.at)>Date.now()-36e5).length>=30) throw new Error('You have undone a lot in the last hour. Please call Tim on 027 562 7207');
   const myT=liveTaps().filter(x=>x.signer_id===s.id), myM=liveMarks().filter(m=>m.signer_id===s.id); let taps=[], marks=[];
   if(scope==='last'){ const all=myT.map(x=>({k:'tap',x,at:x.at,ref:String(x.id).padStart(20,'0')})).concat(myM.map(m=>({k:'change',x:m,at:m.at,ref:m.id}))).sort((a,z)=>a.at<z.at?1:a.at>z.at?-1:(a.ref<z.ref?1:-1));
     if(!all.length) throw new Error('There is nothing of yours to undo on this round'); if(all[0].k==='tap') taps=[all[0].x]; else marks=[all[0].x]; }
@@ -893,7 +894,12 @@ function sgUndo(s,scope,clear,by){ if(!['last','turn'].includes(scope)) throw ne
   let cleared=false; if(scope==='turn'&&clear&&sgInk(s).sig_png){ OSD().push({id:OSD().length+1,signing_id:g.id,signer_id:s.id,sig_png:null,init_png:null,by_name:by,at:now()}); cleared=true; }
   if(g.status==='held'&&!liveMarks().some(m=>m.signing_id===g.id&&!liveReviews().some(r=>r.signing_id===g.id&&(r.marks||[]).includes(m.id)))) g.status='signing';
   sgEv(g,by,'sign_undone',{signing_id:g.id,round:g.round_no||1,side:g.side||'purchaser',signer:s.position,scope,taps:taps.length,places:taps.map(x=>x.place_id),changes:marks.length,change_ids:ids,change_kinds:marks.map(m=>m.kind),ink_cleared:cleared});
+  if(marks.length) voidStaleReopened(g.id,by);
   const req=sgRequired(g,s.position); return {scope,taps:taps.length,changes:marks.length,ink_cleared:cleared,done:liveTaps().filter(x=>x.signer_id===s.id&&req.includes(x.place_id)).length,of:req.length}; }
+// 026: "please initial the change" drafts that no longer ask for anything (offer_mail_void_stale_reopened): set aside, never removed
+function voidStaleReopened(gid,by){ OMD().filter(m=>m.signing_id===gid&&m.kind==='reopened'&&m.status==='draft').forEach(m=>{ const s=OSR().find(x=>x.id===m.signer_id); if(!s) return;
+  const owed=liveMarks().some(k=>k.signing_id===gid&&k.at<=m.created_at&&!liveTaps().some(l=>l.signer_id===s.id&&l.place_id===`chg:${k.id}:s${s.position}`)); if(owed) return;
+  Object.assign(m,{status:'void',void_at:now(),void_by:by||'system',void_reason:'The change it asked them to initial was undone'}); OE().push({id:OE().length+1,property_id:m.property_id,offer_id:m.offer_id,at:now(),actor:by||'system',kind:'mail_set_aside',detail:{draft_id:m.id,kind:m.kind,reason:'change undone'}}); }); }
 // 026: a held confirmation settles itself when the agreement is made (completed, or superseded) or the offer is withdrawn (discarded)
 function holdSettle(oid,how,by,ag){ OCH().filter(x=>x.offer_id===oid&&!x.resolved_at).forEach(x=>Object.assign(x,{resolved_at:now(),resolved_by:by,resolved_as:how==='withdrawn'?'discarded':(x.round_id===ag.round_id&&x.accepted_at===ag.accepted_at&&x.date_text===ag.date_text?'completed':'superseded'),resolve_note:how==='withdrawn'?'The offer was withdrawn':null})); }
 const sgTry=f=>{ try{ const r=f(); save(); return ok(r===undefined?null:r); }catch(e){ save(); return bad(e.message); } };
@@ -1062,7 +1068,7 @@ function signRpc(name,a,me){ if(!me||!AGENTS.includes(me.email)) return bad('Onl
     if(!T_.length&&!M_.length&&!F_.length) throw new Error('Nothing has been done on this round yet, so there is nothing to start again');
     T_.forEach(x=>OSU().push({id:OSU().length+1,signing_id:g.id,signer_id:x.signer_id,tap_id:x.id,mark_id:null,action:'undo',scope:'round',by_name:me.email,at:now()}));
     M_.forEach(m=>OSU().push({id:OSU().length+1,signing_id:g.id,signer_id:m.signer_id,tap_id:null,mark_id:m.id,action:'undo',scope:'round',by_name:me.email,at:now()}));
-    if(['held','complete'].includes(g.status)) g.status='signing'; F_.forEach(x=>Object.assign(x,{finished_at:null,seen_sha256:null}));
+    if(['held','complete'].includes(g.status)) g.status='signing'; F_.forEach(x=>Object.assign(x,{finished_at:null,seen_sha256:null})); if(M_.length) voidStaleReopened(g.id,me.email);
     sgEv(g,me.email,'round_reset',{signing_id:g.id,round:g.round_no||1,side:g.side||'purchaser',reason:why,taps:T_.length,changes:M_.length,change_ids:M_.map(m=>m.id),reopened:F_.length}); return {ok:true,taps:T_.length,changes:M_.length,reopened:F_.length}; });
   if(name==='agent_offer_revert_sealed') return sgTry(()=>{ const why=reason(a.p_note,'Say why you are going back (3 to 500 characters)'); const o=PO().find(x=>x.id===a.p_offer); if(!o) throw new Error('No such offer');
     if(OAG().some(x=>x.offer_id===o.id)) throw new Error('The agreement has been made. Talk to the lawyers'); if(OHD().some(h=>h.offer_id===o.id&&h.kind==='withdraw')) throw new Error('This offer was withdrawn, so it stays stopped');

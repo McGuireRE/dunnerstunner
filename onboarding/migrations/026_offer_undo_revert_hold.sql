@@ -88,6 +88,26 @@ begin
   return new;
 end $$;
 create trigger guard_offer_confirm_holds before update or delete on public.offer_confirm_holds for each row execute function public.guard_offer_confirm_hold();
+-- undone work and a drawing again are written only for a round still open, whoever writes them (a function, or the service role directly):
+-- never for a sealed round (one with an offer_rounds row) or a stopped one, and only for that round's own signer, taps and changes.
+-- Once everyone has signed (complete), only Tim's start-again rows ('round') are taken. So a sealed round reads the same for ever.
+create or replace function public.guard_offer_sign_open_work() returns trigger language plpgsql set search_path = public as $$
+declare g public.offer_signings;
+begin
+  select * into g from public.offer_signings where id = new.signing_id;
+  if g.id is null or exists (select 1 from public.offer_rounds r where r.signing_id = g.id) or g.status not in ('ready', 'signing', 'held', 'complete') then
+    raise exception 'This round is sealed or stopped, so what was done on it is kept exactly as it is'; end if;
+  if not exists (select 1 from public.offer_signers s where s.id = new.signer_id and s.signing_id = g.id) then raise exception 'That signer isn''t on this round'; end if;
+  if tg_table_name = 'offer_sign_undos' then
+    if new.tap_id is not null and not exists (select 1 from public.offer_sign_taps t where t.id = new.tap_id and t.signing_id = g.id and t.signer_id = new.signer_id) then raise exception 'That step isn''t on this round'; end if;
+    if new.mark_id is not null and not exists (select 1 from public.offer_sign_marks m where m.id = new.mark_id and m.signing_id = g.id and m.signer_id = new.signer_id) then raise exception 'That step isn''t on this round'; end if;
+    if g.status = 'complete' and new.scope <> 'round' then raise exception 'Everyone has signed. Only Tim can start the round again now'; end if;
+  elsif g.status = 'complete' then raise exception 'Everyone has signed. Only Tim can start the round again now';
+  end if;
+  return new;
+end $$;
+create trigger offer_sign_undos_open before insert on public.offer_sign_undos for each row execute function public.guard_offer_sign_open_work();
+create trigger offer_sign_redraws_open before insert on public.offer_sign_redraws for each row execute function public.guard_offer_sign_open_work();
 
 -- ───── what stands: the views every reader of a round's work uses ─────
 -- a tap stands unless its newest undo row is an undo; tapped again, it stands from the time it was tapped again
@@ -158,6 +178,7 @@ begin
   select * into t from public.offer_sign_taps where signer_id = s.id and place_id = p_place;
   if t.id is null then insert into public.offer_sign_taps (signing_id, signer_id, place_id) values (g.id, s.id, p_place);
   elsif not exists (select 1 from public.offer_sign_taps_live l where l.id = t.id) then
+    if (select count(*) from public.offer_sign_undos u where u.signer_id = s.id and u.action = 'redo' and u.at > now() - interval '1 hour') >= 30 then raise exception 'You have tapped places again a lot in the last hour. Please call Tim on 027 562 7207'; end if;
     insert into public.offer_sign_undos (signing_id, signer_id, tap_id, action, scope, by_name) values (g.id, s.id, t.id, 'redo', 'tap', left(s.name, 254));
   end if;
   select count(*) into need from public.offer_sign_required(g.id, s.position) x;
@@ -600,6 +621,9 @@ begin
   if g.status = 'complete' then raise exception 'Everyone has signed. The signed copy is being locked.'; end if;
   if g.status <> 'signing' and g.status <> 'held' then raise exception 'Signing isn''t open, so there is nothing to undo'; end if;
   if s.finished_at is not null then raise exception 'You have finished signing, so your turn is closed. Tim can start the round again if something needs changing'; end if;
+  -- at most 30 undos an hour per signer (as changes are capped)
+  if (select count(*) from public.offer_events e where e.offer_id = g.offer_id and e.kind = 'sign_undone' and e.detail->>'signing_id' = g.id::text and (e.detail->>'signer')::int = s.position and e.at > now() - interval '1 hour') >= 30 then
+    raise exception 'You have undone a lot in the last hour. Please call Tim on 027 562 7207'; end if;
   if p_scope = 'last' then
     select x.k, x.tid, x.mid into k, tid, mid from (
       select 'tap' k, l.id tid, null::uuid mid, l.at, lpad(l.id::text, 20, '0') ref from public.offer_sign_taps_live l where l.signer_id = s.id
@@ -627,10 +651,29 @@ begin
     update public.offer_signings set status = 'signing' where id = g.id; end if;
   insert into public.offer_events (property_id, offer_id, actor, kind, detail) values (g.property_id, g.offer_id, by_, 'sign_undone',
     jsonb_build_object('signing_id', g.id, 'round', g.round_no, 'side', g.side, 'signer', s.position, 'scope', p_scope, 'taps', cardinality(taps_), 'places', to_jsonb(places_), 'changes', cardinality(marks_), 'change_ids', to_jsonb(marks_), 'change_kinds', to_jsonb(kinds_), 'ink_cleared', cleared));
+  if cardinality(marks_) > 0 then perform public.offer_mail_void_stale_reopened(g.id, by_); end if;
   perform set_config('offers.fn', '', true);
   select count(*) into need from public.offer_sign_required(g.id, s.position) x;
   select count(*) into done from public.offer_sign_taps_live t2 where t2.signer_id = s.id and t2.place_id in (select public.offer_sign_required(g.id, s.position));
   return jsonb_build_object('scope', p_scope, 'taps', cardinality(taps_), 'changes', cardinality(marks_), 'ink_cleared', cleared, 'done', done, 'of', need);
+end $$;
+-- "Please initial the change" drafts (024's reopened drafts, made when a change reopened someone who had finished) that no longer ask for
+-- anything: once a change is undone, an unsent draft whose signer has no change left to initial from before it was made is set aside
+-- (void, with the reason; never removed). Sent ones stay as they went. Tim sees them on the round's page.
+create or replace function public.offer_mail_void_stale_reopened(p_signing uuid, p_actor text) returns int language plpgsql security definer set search_path = public as $$
+declare m record; n int := 0;
+begin
+  perform set_config('offers.fn', 'on', true);
+  for m in select d.id, d.property_id, d.offer_id, d.kind from public.offer_mail_drafts d join public.offer_signers s on s.id = d.signer_id
+      where d.signing_id = p_signing and d.kind = 'reopened' and d.status = 'draft'
+        and not exists (select 1 from public.offer_sign_marks_live k where k.signing_id = p_signing and k.at <= d.created_at
+          and ('chg:' || k.id || ':s' || s.position) not in (select l.place_id from public.offer_sign_taps_live l where l.signer_id = s.id))
+      for update of d loop
+    update public.offer_mail_drafts set status = 'void', void_at = now(), void_by = left(coalesce(p_actor, 'system'), 254), void_reason = 'The change it asked them to initial was undone' where id = m.id;
+    insert into public.offer_events (property_id, offer_id, actor, kind, detail) values (m.property_id, m.offer_id, left(coalesce(p_actor, 'system'), 254), 'mail_set_aside', jsonb_build_object('draft_id', m.id, 'kind', m.kind, 'reason', 'change undone'));
+    n := n + 1;
+  end loop;
+  return n;
 end $$;
 -- on Tim's device, the signer whose turn it is
 create or replace function public.agent_signing_undo(p_signer uuid, p_scope text, p_clear boolean default false) returns jsonb language plpgsql security definer set search_path = public as $$
@@ -663,6 +706,7 @@ begin
   update public.offer_signers set finished_at = null, seen_sha256 = null where signing_id = g.id and finished_at is not null and void_at is null;
   get diagnostics nf = row_count;
   if nt = 0 and nm = 0 and nf = 0 then raise exception 'Nothing has been done on this round yet, so there is nothing to start again'; end if;
+  if nm > 0 then perform public.offer_mail_void_stale_reopened(g.id, me); end if;
   insert into public.offer_events (property_id, offer_id, actor, kind, detail) values (g.property_id, g.offer_id, me, 'round_reset',
     jsonb_build_object('signing_id', g.id, 'round', g.round_no, 'side', g.side, 'reason', why, 'taps', nt, 'changes', nm, 'change_ids', to_jsonb(ids), 'reopened', nf));
   perform set_config('offers.fn', '', true);
@@ -773,7 +817,7 @@ create trigger offer_agreements_settle_holds after insert on public.offer_agreem
 create trigger offer_holds_settle_confirm after insert on public.offer_holds for each row execute function public.offer_confirm_hold_settle();
 
 -- ───── execute rights ─────
-revoke execute on function public.guard_offer_confirm_hold(), public.offer_confirm_hold_settle(), public.offer_sign_ink(uuid), public.offer_revert_offered(public.offer_signings), public.offer_sign_do_undo(uuid, text, boolean, text),
+revoke execute on function public.guard_offer_confirm_hold(), public.offer_confirm_hold_settle(), public.guard_offer_sign_open_work(), public.offer_mail_void_stale_reopened(uuid, text), public.offer_sign_ink(uuid), public.offer_revert_offered(public.offer_signings), public.offer_sign_do_undo(uuid, text, boolean, text),
   public.offer_agreement_check_core(uuid, timestamptz, text, boolean) from public, anon, authenticated;
 revoke execute on function public.offer_sign_undo(text, text, text, boolean) from public, anon, authenticated;
 grant execute on function public.offer_sign_undo(text, text, text, boolean) to service_role;

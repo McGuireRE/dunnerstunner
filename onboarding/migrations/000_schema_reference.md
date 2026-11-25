@@ -406,6 +406,10 @@ agreements/<agreement id>/signatures/... (vendors may upload their own signature
   `agent_offer_confirm_held(offer)`, `agent_offer_confirm_hold_discard(offer, note)`, `offer_revert_offered(signing)` (internal: an
   `offer_unfrozen` event after the round's release on the offer's timeline). Lock order as everywhere: the offer first, then the
   signing, then the signer.
+- After review: `guard_offer_sign_open_work` (before insert on `offer_sign_undos` and `offer_sign_redraws`): refused for a sealed or
+  stopped round, for a signer, tap or change not of that round, and (round complete) for anything but Tim's start-again rows.
+  `offer_mail_void_stale_reopened(signing, actor)` (internal) sets aside unsent `reopened` drafts that no longer ask for anything, after
+  a change is undone or Tim starts the round again. Caps: 30 undos (sign_undone events) and 30 redos an hour per signer.
 - Events: `sign_undone`, `sign_redrawn`, `round_reset`, `round_reverted` (with what was discarded), `agreement_held`,
   `agreement_hold_discarded`; `offer_unfrozen` may carry `reverted: true`.
 - Rollback test: `tests/offer-undo-rollback.sql` (built by `tests/offer-undo-rollback.js`). Local run 26 November 2026 on the stand-in

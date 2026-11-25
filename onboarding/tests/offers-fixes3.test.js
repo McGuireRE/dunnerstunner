@@ -268,6 +268,36 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   expect(d.offer_requests.find(r => r.kind === 'revert').handled_as === 'revert' && d.offer_signings.find(g => g.id === g3).status === 'cancelled', 'Tim released it: the round stopped, the request handled');
   await q.goto(q.url()); await q.waitForSelector('#sgClosed'); expect(/This link isn't working/.test(await q.textContent('#sgClosed')), 'their old link no longer works');
 
+  // ── 5b. a change undone sets aside the "please initial the change" draft it made (never sent, kept); Tim's round page says so ──
+  process.stderr.write('step 5b\n');
+  await fresh(p); await rpc(p, 'agent_offer_link_changes_default', { p_on: true }); await pdfReady(p);
+  const pr5 = await rpcPresent(p, offA, 'link'); const g5 = pr5.id;
+  await toSigning(p, offA, g5); await prepAndSend(p);
+  { const links = (await mails(p)).filter(m => m.kind === 'offer_sign_link').slice(-2), tokOf = to => decodeURIComponent(new URL(links.find(m => m.to === to).link).searchParams.get('sign'));
+    const r = await p.evaluate(async ([t1, t2, sid]) => { const c = window.supabase.createClient(), I = async b => { const r = await c.functions.invoke('offer-sign', { body: b }); const d = r.data || (r.error && await r.error.context.json()); if (!d || d.ok === false) throw new Error(JSON.stringify(d)); return d; };
+      const cv = document.createElement('canvas'); cv.width = 240; cv.height = 70; const g_ = cv.getContext('2d'); g_.strokeStyle = '#123'; g_.lineWidth = 3; g_.beginPath(); for (let i = 0; i < 24; i++) g_.lineTo(10 + i * 9, 35 + Math.sin(i) * 20); g_.stroke(); const png = cv.toDataURL('image/png');
+      const enter = async (tok, to) => { await I({ action: 'send_code', token: tok }); const code = JSON.parse(localStorage.getItem('mockSignMail')).filter(m => m.kind === 'offer_sign_code' && m.to === to).pop().code;
+        const ses = (await I({ action: 'verify', token: tok, code })).session; await I({ action: 'consent', token: tok, session: ses }); await I({ action: 'receipt', token: tok, session: ses, guide: 'chattels' }); await I({ action: 'marks', token: tok, session: ses, sig: png, init: png }); return ses; };
+      const s2 = await enter(t2, 'vendor2@example.com'), st2 = await I({ action: 'state', token: t2, session: s2 });
+      for (const pl of st2.signing.places) await I({ action: 'tap', token: t2, session: s2, place: pl.id }); await I({ action: 'finish', token: t2, session: s2 });
+      const s1 = await enter(t1, 'vendor@example.com'), st1 = await I({ action: 'state', token: t1, session: s1 }), G = st1.signing;
+      const lay = G.layers, stn = window.NEGO.standing(lay, { doc_round: G.round, side: G.side, signing_id: 'c', marks: [] }), pages = G.pages.map((w, i) => ({ n: i + 1, w: w[0], h: w[1] }));
+      const ch = { id: crypto.randomUUID(), kind: 'insert', page: 1, geometry: { x: 120, y: 420, text: 'Settlement 1 March 2027', size: 9 } };
+      const places = window.NEGO.changePlaces(ch, [{ position: 1, name: '' }, { position: 2, name: '' }], pages, stn, G.side_places);
+      const cr = await I(Object.assign({ action: 'change', token: t1, session: s1, target: null, places }, ch));
+      const D1 = JSON.parse(localStorage.getItem('mockdb')), before = D1.offer_mail_drafts.filter(m => m.signing_id === sid && m.kind === 'reopened').map(m => m.status);
+      const u = await I({ action: 'undo', token: t1, session: s1, scope: 'last' });
+      const D2 = JSON.parse(localStorage.getItem('mockdb')), after = D2.offer_mail_drafts.filter(m => m.signing_id === sid && m.kind === 'reopened').map(m => m.status + ':' + (m.void_reason || ''));
+      return { reopened: cr.reopened, before, after, undone: u.changes }; }, [tokOf('vendor@example.com'), tokOf('vendor2@example.com'), g5]);
+    out.staleDraft = r;
+    expect(r.reopened === 1 && r.before.join() === 'draft' && r.undone === 1, 'the change reopened the vendor who had finished, with a draft for Tim to send: ' + JSON.stringify(r));
+    expect(r.after.join() === 'void:The change it asked them to initial was undone', 'undoing the change set the draft aside (kept, never sent): ' + JSON.stringify(r.after)); }
+  expect(notTim(await mails(p), 0).filter(m => m.kind !== 'offer_sign_link').length === 0, 'still nobody but Tim emailed');
+  await toSigning(p, offA, g5);
+  expect(/1 "please initial the change" email set aside, because the change it asked about was undone\. It was not sent/.test(await p.textContent('#sgStaleMail')), 'Tim\'s round page says so: ' + (await p.textContent('#sgStaleMail').catch(() => '')));
+  await rpc(p, 'agent_offer_revert_sealed', { p_offer: offA, p_note: 'Back to Round 1 for the next step', p_request: null, p_unfreeze: false });
+  await rpc(p, 'agent_offer_link_changes_default', { p_on: false });
+
   // ── 6. "Confirm the agreement" while frozen: held, not locked, sealed or dated, nothing emailed; discarded, held again, completed ──
   process.stderr.write('step 6\n');
   await pdfReady(p); const pr4 = await rpcPresent(p, offA, 'in_person'); const lk4 = await rpcRound(p, pr4.id); expect(lk4 && lk4.ok && lk4.round && lk4.round.formed, 'the vendors accept as it stands: formed ' + JSON.stringify(lk4));

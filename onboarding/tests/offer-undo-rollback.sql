@@ -113,12 +113,34 @@ begin
   if jsonb_array_length(rd->'taps') <> (select count(*) from public.offer_sign_required(g1, 1) x) + (select count(*) from public.offer_sign_required(g1, 2) x) then out := out || 'THE MATERIAL HOLDS AN UNDONE TAP; '; end if;
   r := pg_temp.rb_lock(g1, '{}');
   out := out || 'round 1 sealed: number=' || (r->>'number') || '; ';
+  -- a sealed round can't change through the new tables, whoever writes to them (here the service role, as the edge function runs)
+  declare before_ jsonb := public.offer_doc_layers((select document_id from public.offer_rounds where signing_id = g1), 1); after_ jsonb;
+  begin
+    execute 'set local role service_role';
+    begin insert into public.offer_sign_undos (signing_id, signer_id, tap_id, scope, by_name) select t.signing_id, t.signer_id, t.id, 'round', 'probe' from public.offer_sign_taps_live t where t.signing_id = g1 limit 1; out := out || 'AN UNDO WAS WRITTEN FOR A SEALED ROUND; ';
+    exception when others then out := out || 'sealed undo refused: ' || sqlerrm || '; '; end;
+    begin insert into public.offer_sign_redraws (signing_id, signer_id, sig_png, init_png, by_name) values (g1, s1, null, null, 'probe'); out := out || 'A DRAWING WAS CLEARED ON A SEALED ROUND; ';
+    exception when others then out := out || 'sealed redraw refused: ' || sqlerrm || '; '; end;
+    begin insert into public.offer_sign_undos (signing_id, signer_id, mark_id, scope, by_name) values (g1, s2, (select id from public.offer_sign_marks where signing_id = g1 limit 1), 'round', 'probe'); out := out || 'A SEALED MARK WAS UNDONE; ';
+    exception when others then out := out || 'sealed mark refused: ' || sqlerrm || '; '; end;
+    execute 'reset role';
+    after_ := public.offer_doc_layers((select document_id from public.offer_rounds where signing_id = g1), 1);
+    out := out || 'sealed layers unchanged=' || (before_ = after_) || ' taps=' || jsonb_array_length(after_->0->'taps') || ' ink kept=' || ((after_->0->'signers'->0->>'sig_png') is not null) || '; ';
+    if before_ <> after_ then out := out || 'THE SEALED ROUND''S LAYERS CHANGED; '; end if;
+  end;
   begin perform public.agent_signing_revert_round(g1, 'Start again'); out := out || 'A SEALED ROUND WAS STARTED AGAIN; '; exception when others then out := out || 'sealed stays: ' || sqlerrm || '; '; end;
 
   -- 5. Round 2 to the vendors, in person: Una makes a change (typed words) with both vendors' initials; Ula initials it; Una undoes it
   r := public.agent_round_present(o1, 'in_person', pg_temp.rb_places(2, true, true), true); g2 := (r->>'id')::uuid;
   perform pg_temp.rb_prep(g2);
   select id into v1 from public.offer_signers where signing_id = g2 and position = 1; select id into v2 from public.offer_signers where signing_id = g2 and position = 2;
+  -- an open round's undo can't point at another round's step (Round 1's sealed tap), nor be written for someone not on it
+  execute 'set local role service_role';
+  begin insert into public.offer_sign_undos (signing_id, signer_id, tap_id, scope, by_name) values (g2, v1, (select min(id) from public.offer_sign_taps where signing_id = g1), 'last', 'probe'); out := out || 'AN OPEN ROUND''S UNDO POINTED AT A SEALED TAP; ';
+  exception when others then out := out || 'another round''s step: ' || sqlerrm || '; '; end;
+  begin insert into public.offer_sign_redraws (signing_id, signer_id, sig_png, init_png, by_name) values (g2, s1, null, null, 'probe'); out := out || 'A DRAWING WAS CLEARED FOR SOMEONE NOT ON THE ROUND; ';
+  exception when others then out := out || 'not on the round: ' || sqlerrm || '; '; end;
+  execute 'reset role'; perform set_config('request.jwt.claims', agent, true);
   perform public.agent_round_change(v1, mk1, 'insert', 1, '{"x":100,"y":400,"text":"$690,000","size":9}', null, pg_temp.rb_change_places(2, mk1, 'insert', '{"x":100,"y":400,"text":"$690,000","size":9}'));
   perform public.agent_signing_tap(v2, 'chg:' || mk1 || ':s2');
   n := (select count(*) from public.offer_sign_required(g2, 2) x);
@@ -144,6 +166,13 @@ begin
   -- 6. Tim starts Round 2 again from its start: everything that stands undone, everyone who finished opened again, the round still open
   perform pg_temp.rb_finish(g2);
   out := out || 'vendors finished: status=' || (select status from public.offer_signings where id = g2) || '; ';
+  -- everyone has signed: only Tim's start-again rows are taken, not a signer's own
+  execute 'set local role service_role';
+  begin insert into public.offer_sign_undos (signing_id, signer_id, tap_id, scope, by_name) select g2, v1, l.id, 'last', 'probe' from public.offer_sign_taps_live l where l.signer_id = v1 limit 1; out := out || 'A SIGNER''S UNDO WAS TAKEN ONCE EVERYONE SIGNED; ';
+  exception when others then out := out || 'complete: ' || sqlerrm || '; '; end;
+  begin insert into public.offer_sign_redraws (signing_id, signer_id, sig_png, init_png, by_name) values (g2, v1, null, null, 'probe'); out := out || 'A DRAWING WAS CLEARED ONCE EVERYONE SIGNED; ';
+  exception when others then out := out || 'complete drawing: ' || sqlerrm || '; '; end;
+  execute 'reset role'; perform set_config('request.jwt.claims', agent, true);
   begin perform public.agent_signing_revert_round(g2, 'x'); out := out || 'A ROUND STARTED AGAIN WITH NO REASON; '; exception when others then out := out || 'reason: ' || sqlerrm || '; '; end;
   r := public.agent_signing_revert_round(g2, 'The vendors want to read it again');
   out := out || 'round started again: taps=' || (r->>'taps') || ' reopened=' || (r->>'reopened') || ' status=' || (select status from public.offer_signings where id = g2) || ' live taps=' || (select count(*) from public.offer_sign_taps_live where signing_id = g2) || ' drawings kept=' || (select count(*) from public.offer_signers where signing_id = g2 and sig_png is not null) || '; ';
@@ -172,6 +201,28 @@ begin
   perform public.offer_sign_tap(tok, ses, 'foot:p1:s1'); perform public.offer_sign_tap(tok, ses, 'foot:p2:s1');
   r := public.offer_sign_undo(tok, ses, 'last', false);
   out := out || 'link undo: taps=' || jsonb_array_length(public.offer_sign_state(tok, ses)->'taps') || ' last=' || (public.offer_sign_state(tok, ses)->'signer'->'last'->>'place_id') || '; ';
+  -- a "please initial the change" draft for Ula, made when Una's change reopened her (024), is set aside when Una undoes that change;
+  -- one for a change still standing stays
+  declare ka uuid := gen_random_uuid(); kb uuid := gen_random_uuid(); ga jsonb := '{"x":100,"y":400,"text":"$700,000","size":9}'; gb jsonb := '{"x":100,"y":200,"text":"Settlement 1 March 2027","size":9}'; ula uuid; dA uuid; dB uuid; un uuid;
+  begin
+    select id into ula from public.offer_signers where signing_id = g3 and position = 2; select id into un from public.offer_signers where signing_id = g3 and position = 1;
+    perform public.offer_sign_do_change(un, kb, 'insert', 1, gb, null, pg_temp.rb_change_places(2, kb, 'insert', gb));
+    dB := public.offer_mail_draft_sys(o1, ula, array['ula@example.com'], 'A change to initial', 'Please open the link I sent you earlier and initial the change. Tim');
+    perform public.offer_sign_do_change(un, ka, 'insert', 1, ga, null, pg_temp.rb_change_places(2, ka, 'insert', ga));
+    r := public.offer_sign_undo(tok, ses, 'last', false);
+    out := out || 'drafts after undoing the newer change: older draft=' || (select status from public.offer_mail_drafts where id = dB) || '; ';
+    dA := dB; r := public.offer_sign_undo(tok, ses, 'last', false);
+    out := out || 'after undoing the change it asked about: draft=' || (select status || ' (' || void_reason || ')' from public.offer_mail_drafts where id = dA) || ' kept=' || (select count(*) from public.offer_mail_drafts where id = dA) || '; ';
+  end;
+  -- at most 30 undos an hour per signer, and 30 places tapped again
+  declare k int := 0; msg text := 'none';
+  begin
+    loop k := k + 1; exit when k > 40;
+      begin perform public.offer_sign_tap(tok, ses, 'foot:p1:s1'); perform public.offer_sign_undo(tok, ses, 'last', false); exception when others then msg := sqlerrm; exit; end;
+    end loop;
+    out := out || 'cap after ' || k || ' rounds: ' || msg || '; ';
+    if msg = 'none' then out := out || 'NO CAP ON UNDO; '; end if;
+  end;
   execute 'reset role'; perform set_config('request.jwt.claims', agent, true);
   perform public.agent_offer_freeze(o1, 'A call from the purchasers', null, null); perform public.agent_offer_unfreeze(o1, 'All fine now');
   execute 'set local role service_role';

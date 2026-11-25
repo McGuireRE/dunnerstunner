@@ -755,6 +755,13 @@ side's activity until Tim releases it, and nobody is emailed but Tim.
   yourself.
 - Edge function: offer-sign gains `undo` (their link and session) and the urgent email for a request to go back
   (`src/mail-core.js` `requestNotice`, the same words for freeze and withdraw as before). No new imports; `page-text-bundle` passes.
+After the independent review (26 November 2026), fixed on the same branch:
+- A sealed round can't change through the new tables, whoever writes to them (the service role included): undo and redraw rows are
+  refused unless their round is still open (ready, signing, held or complete, with no sealed round row), the signer, tap or change is
+  that round's own, and once everyone has signed only Tim's start-again rows are taken (`guard_offer_sign_open_work`, before insert).
+- Undoing a change sets aside the unsent "please initial the change" drafts it made (void, with the reason, never removed; sent ones
+  stay), so long as the signer has no other change left to initial; Tim's round page says how many and that they were not sent.
+- At most 30 undos and 30 places tapped again an hour per signer, with a plain message to call Tim.
 Tests: `tests/offers-fixes3.test.js` (new), `tests/offer-undo-rollback.sql` and `.js` (new; run on the local stand-in through 025:
 every line as expected, no capitals), `tests/offer-sign-fn.test.js` and `tests/mail-core.test.js` (extended), the mock (`tests/mock.js`)
 mirrors 026. 024's rollback test, 025's rollback test and 024's race test were also run with 026 applied: the same results.
