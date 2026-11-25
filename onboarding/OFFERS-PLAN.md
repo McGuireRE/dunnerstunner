@@ -716,6 +716,46 @@ Going live, with Tim's approval, in order:
    to a test vendor; a counter and an acceptance; check Tim's one email per round; the agreed copy and its two draft emails (fill the
    blanks, send); the lawyers' pack; a request from a test link (Tim's urgent email), Freeze now, Unfreeze and Withdraw now. Tim's solicitor confirms the method before the first real offer.
 
+## Offers fixes 2 (raised by Tim 25 November 2026 from his test offer; branch `offers-fixes-2`)
+
+Status: Built, awaiting review and Tim's approval. Needs migration 025 (rollback test first, then applied with Tim's OK) and
+offer-sign redeployed (pinned to the new commit). Found in Tim's live test offer (signing and counteroffers, phases 3 and 4).
+1. Typed words invisible while signing. The page's translator guard wrapped figures such as "$690,000" in an HTML span inside the
+   SVG text, which browsers don't draw. The guard now never touches SVG, and the marks layer is marked not to be translated. The
+   words show on every screen that draws marks (signing, the working copy, the present screen, Tim's round views), at the place
+   and size the locked copy prints them.
+2. Line through text, precise (Tim: an underline-looking strike is ambiguous and could make him liable for the difference).
+   The line is snapped to the printed words it crosses (`SIGN.snapStrike`, from the page's own text as pdf.js reads it): whole
+   words, from the first letter to the last, through the middle of the letters (mid cap height for figures, mid x-height for
+   words). A drag over no text is refused ("Drag along the words you want to strike through."). The line, and a crossed-out box,
+   stay on the page until saved or cancelled. Before Save the signer sees 'This strikes through: "$655,000"'; the words are kept
+   with the mark (geometry.text) and listed in the round's execution record ("a line through text striking ..."), Tim's round
+   notice and his lists of marks. Records locked before this read exactly as before (so they redraw byte for byte). The locked
+   copy draws the stored line, so it is exactly where the screen showed it. Tim's own draft editor has no "Line through text" (its
+   strike-out is a box he draws), so it is unchanged.
+3. Agreed-copy emails fill what the portal knows. The agreed price after the negotiation (`MAIL.agreedPrice`, from the rounds'
+   change shapes: a struck price and one typed figure beside it, not itself struck; anything unclear, such as other typed words
+   naming a price or handwriting over it, leaves "[Tim to fill: the agreed price after negotiation]"); the deposit from it when the
+   agreement gives a percentage; each condition's due date and settlement day from the agreement date with working days and the
+   province's holidays (`MAIL.agreedDates`, the offer form's counter). A date written on the agreement stands. What was worked
+   out is shown once to Tim beside the editor ("Worked out for these emails (check each)"), never in the emails.
+4. Wording and a lost tick. The vendors' round says "each vendor" (send box, held box, no-email warning, the link page's title).
+   On the Present screen, changing "How they sign" keeps the "I've looked at Round N" tick.
+5. The email privacy check refused Tim's own sign-off where Tim is the vendor (or buyer). Migration 025: `offer_settings.agent_phone`
+   and `agent_email` (one place for Tim's own details), `offer_agent_own()`, and `offer_mail_side_hit` skipping the agent's own
+   email or phone (phones compared by NSN). A real party's own phone or email is still refused. Rollback test:
+   `tests/offer-mail-own-rollback.sql`.
+6. Tim is emailed the final dated agreed copy at once when he confirms the agreement (Tim: "it is most important that I get an
+   email once the document is finalised"): "Agreement confirmed: <address>", the locked copy attached (checked against its
+   fingerprint; a portal link instead above 15 MB), the date, purchasers and vendors, the agreed price after the negotiation (the
+   same `agreedPrice` as the parties' emails, with the round it changed in), each due date and settlement day, the deposit holder,
+   the fingerprint and the offer's portal address. Only ever to Tim, logged in email_log. "Email me the agreed copy again" on the
+   offer page sends it again (for the test agreement confirmed on 25 November). `offer_agreed_notice_material` (025) gives the
+   function what it needs.
+Open (Tim to decide; behaviour unchanged): whether "Confirm the agreement" should be blocked while an offer is frozen.
+Tests: `tests/offers-fixes2.test.js` (new), `tests/strike-snap.test.js` (new), `tests/mail-core.test.js`, `tests/offer-nego-fn.test.js`,
+`tests/offers-nego.test.js` (extended).
+
 ## Offers fixes 1 (raised by Tim 25 November 2026, built ahead of everything else; branch `offers-fixes-1`)
 
 Status: Live 25 November 2026 about 15:25, with Tim's approval, after an independent review (READY; its should-fix points fixed

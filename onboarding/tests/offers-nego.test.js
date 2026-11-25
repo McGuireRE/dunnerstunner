@@ -355,7 +355,14 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   expect(!(await pdfText(r2Pdf))[dateP.page - 1].includes(today), 'the date is not on Round 2');
   expect(d.properties.find(x => x.id === 'P1').stage === 'under_offer', 'the property is now under offer');
   // the agreed copy's emails: built straight away as drafts, nothing sent (Tim, 24 November 2026)
-  { const ml = await mails(p); expect(ml.length === MA, 'confirming the agreement sends nothing to anyone: ' + ml.slice(MA).map(m => m.kind + '>' + m.to).join(', ')); }
+  // ...except Tim himself: the locked dated agreed copy is emailed to him at once (Offers fixes 2, item 6), and nobody else
+  { const ml = (await mails(p)).slice(MA); out.timAgreed = ml.map(m => ({ kind: m.kind, to: m.to, subject: m.subject }));
+    expect(ml.length === 1 && ml[0].kind === 'offer_agreed_copy' && ml[0].to === 'tim', 'confirming the agreement emails Tim alone, and nobody else: ' + ml.map(m => m.kind + '>' + m.to).join(', '));
+    const tm = ml[0] || {}; expect(tm.subject === 'Agreement confirmed: 1 Example Road, Testville' && (tm.attachments || [])[0] && tm.attachments[0].sha256 === ag.sha256, 'Tim\'s email: the subject and the locked dated copy attached');
+    expect(/Purchasers: Ana Testbuyer and Bo Testbuyer\./.test(tm.body) && /Vendors: Testy Vendorperson and Otherly Vendorperson\./.test(tm.body) && tm.body.includes('Fingerprint (SHA-256): ' + ag.sha256) && tm.body.includes(`/properties/P1/offers/${offA}`), 'Tim\'s email: the parties as on the agreement, the fingerprint and the offer\'s portal address');
+    // in this negotiation other typed words also name a price ("Price $1 250 000"), so the price can't be worked out reliably: said so, never the first offer's
+    expect(/Price: not worked out here/.test(tm.body) && !/655,000/.test(tm.body), 'Tim\'s email: an unclear agreed price is said plainly, never the first offer\'s price');
+    expect(/Finance: due \w+day \d{1,2} \w+ \d{4}/.test(tm.body) && /Settlement day: \w+day \d{1,2} \w+ \d{4} \(worked out from the agreement date\)/.test(tm.body), 'Tim\'s email: the due date as written on the agreement, and settlement day worked out from the agreement date: ' + tm.body); }
   await p.waitForSelector('#mlAgreed [data-mlsend]', { timeout: 30000 });
   d = await db(p); { let mds = (d.offer_mail_drafts || []).filter(m => m.offer_id === offA && /^agreed_/.test(m.kind) && m.status === 'draft'), dp = mds.find(m => m.kind === 'agreed_purchasers'), dv = mds.find(m => m.kind === 'agreed_vendors');
     out.agreedDrafts = mds.map(m => ({ kind: m.kind, to: m.to_addr, cc: m.cc_addr, subject: m.subject }));
@@ -363,7 +370,14 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
     expect(dp.to_addr.join() === 'ana.p@example.com,bo.p@example.com' && dp.cc_addr.join() === 'pat@synthlaw.example' && dp.attach.path === ag.path && dp.attach.sha256 === ag.sha256, 'the purchasers\' email: to them, cc their lawyer, the agreed copy attached');
     expect(dv.to_addr.slice().sort().join() === 'vendor2@example.com,vendor@example.com' && dv.attach.sha256 === ag.sha256, 'the vendors\' email: to them, the agreed copy attached');
     expect(!/vendor@example|vendor2@example|000 1111/.test(dp.body) && !/ana\.p@|bo\.p@|buyer\.own@|777 6666|555 4444|999 8888/.test(dv.body), "neither side's email holds the other side's own details");
-    expect(/Pat Solicitor/.test(dv.body) && /Roadmap/.test(dp.body) && /Price: \$/.test(dp.body) && /Faithfully,\nTim/.test(dp.body), "each holds the other side's lawyer and the roadmap");
+    expect(/Pat Solicitor/.test(dv.body) && /Roadmap/.test(dp.body) && /Faithfully,\nTim/.test(dp.body), "each holds the other side's lawyer and the roadmap");
+    // Offers fixes 2: the price after the negotiation can't be read reliably here (other typed words name a price), so a marked blank, never the first offer's
+    expect(dp.body.includes('Price: [Tim to fill: the agreed price after negotiation]') && !/Price: \$655,000/.test(dp.body + dv.body), 'an unclear agreed price: a marked blank, never the first offer\'s price');
+    expect(!/\[Tim to fill: (the \w+ due date|settlement day)\]/.test(dp.body + dv.body) && /due \*\*\w+day \d{1,2} \w+ \d{4}\*\*/.test(dp.body), 'the due dates and settlement day are filled in from the agreement date');
+    expect(await p.$('#mlNotes') && /worked out from the agreement date/.test(await p.textContent('#mlNotes')) && !/worked out/.test(dp.body + dv.body), 'what was worked out is shown to Tim once, beside the editor, not in the emails');
+    // "Email me the agreed copy again": the same email, to Tim alone
+    { const n0 = (await mails(p)).length; await p.click('#ngAgMail'); await p.waitForFunction(() => /Sent to you/.test(document.querySelector('#ngAgMailOut').textContent), null, { timeout: 15000 });
+      const again = (await mails(p)).slice(n0); expect(again.length === 1 && again[0].kind === 'offer_agreed_copy_again' && again[0].to === 'tim' && again[0].attachments[0].sha256 === ag.sha256 && /Sent again, as you asked/.test(again[0].body), 'Email me the agreed copy again: once more to Tim, with the copy'); }
     // who holds the deposit (Tim, 24 November 2026): no KiwiSaver, so the NZ Real Estate Trust is recommended, preselected and recorded
     const dep = async () => { const d_ = await db(p); return (d_.offer_deposit_holders || []).filter(x => x.offer_id === offA).sort((a, z) => z.id - a.id)[0]; }, bodyP = async () => (await db(p)).offer_mail_drafts.find(m => m.offer_id === offA && m.kind === 'agreed_purchasers' && m.status === 'draft').body;
     await p.waitForSelector('#ngDepHolder');

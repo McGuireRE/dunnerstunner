@@ -176,6 +176,7 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   await markCycle('strike', () => drag(0.08, 0.30, 0.6, 0.30));
   d = await db(p); const st1 = d.offer_sign_marks.find(m => m.kind === 'strike');
   expect(st1 && st1.page === 2 && st1.geometry.x1 - st1.geometry.x0 > 100 && st1.by_name === 'Bo Testbuyer', 'the line through text recorded with who');
+  expect(st1 && typeof st1.geometry.text === 'string' && st1.geometry.text.length > 3, 'Round 1 too: the line is snapped to the words it crosses, and they are recorded (Offers fixes 2): ' + JSON.stringify(st1 && st1.geometry));
   expect(d.offer_events.some(e => e.kind === 'sign_marked' && e.detail.kind === 'strike'), 'and when, on the timeline');
   expect(d.offer_signings.find(x => x.id === gA.id).status === 'signing' && d.offer_sign_reviews.length === 1 && d.offer_sign_reviews[0].places.length === 4, 'Tim re-approved: every purchaser initials the mark');
   expect(/Signing: \d+ of \d+/.test(await p.textContent('#sgSigners [data-signer="1"]')), 'purchaser 1, who had finished, signs again');
@@ -212,7 +213,7 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   expect(rt.length > drPages && /Execution record/.test(rec) && !rt.slice(0, drPages).some(t => /Execution record/.test(t)), 'the execution record is on pages added at the end, never on the REINZ pages');
   expect(['Ana Maria Testbuyer', 'Bo Testbuyer', 'Cy Testbuyer', 'Di Testbuyer'].every(n => rec.includes(n)) && /saw them sign/.test(rec) && /Photo ID sighted: Passport/.test(rec) && /NZ driver licence/.test(rec) && /known to Tim McGuire personally/.test(rec) && /Identity: no choice recorded \(knowing them and an ID check are both optional\)/.test(rec), 'it names each signer, how they signed and the ID type (or that Tim knows them, or that no choice was made)');
   expect(/Fingerprint \(SHA-256\) of what they saw and signed: [0-9a-f]{64}/.test(rec) && rec.includes(drA.sha256), 'with the fingerprints of the draft and of what each saw');
-  expect(/line through text by Bo Testbuyer/.test(rec) && /reinstatement by Bo Testbuyer/.test(rec) && /note by Bo Testbuyer/.test(rec), 'and each mark, with who and when');
+  expect(/line through text striking "[^"]+" by Bo Testbuyer/.test(rec) && /reinstatement by Bo Testbuyer/.test(rec) && /note by Bo Testbuyer/.test(rec), 'and each mark, with who and when');
   out.leak = (rt.join(' ').match(/buyer\.own@|ana\.p@|bo\.p@|cy\.p@|di\.p@|999 8888|777 6666|555 4444|333 2222|111 0000|vendor@example|000 1111/g) || []);
   expect(!out.leak.length, 'no purchaser or vendor phone or email anywhere on Round 1');
   const raws = async bytes => { const dd = await PDFLib.PDFDocument.load(bytes); return dd.getPages().map(pg => { const c = pg.node.Contents(); const refs = c instanceof PDFLib.PDFArray ? c.asArray() : [c]; return refs.map(r => Buffer.from(dd.context.lookup(r).getContents()).toString('base64')); }); };

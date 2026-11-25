@@ -13,6 +13,8 @@ const S = require(path.join(__dirname, '..', 'src', 'sign-core.js'));
 const MAILC = require(path.join(__dirname, '..', 'src', 'mail-core.js'));
 const N = require(path.join(__dirname, '..', 'src', 'nego-core.js'));
 const D = require(path.join(__dirname, '..', 'src', 'draft-core.js'));
+const OFF = require(path.join(__dirname, '..', 'src', 'offers-core.js'));
+let failTim = false;
 (async () => {
   const errs = [], out = {};
   const expect = (ok, msg) => { if (!ok) errs.push(msg); };
@@ -34,7 +36,7 @@ const D = require(path.join(__dirname, '..', 'src', 'draft-core.js'));
   const insert = { id: MK.replace('5555', '6666'), kind: 'insert', page: 1, geometry: { x: 100, y: 386, text: '$690,000', size: 9 }, by: 'Vera Vendor', at: '2026-11-24T02:01:00Z' };
   const v2places = [{ id: 'foot:p1:s1', signer: 1, kind: 'initial', why: 'foot', ref: 'p1', page: 1, x: 470, y: 5, w: 26, h: 13 }, { id: 'block:vsig1:s1', signer: 1, kind: 'signature', why: 'block', ref: 'vsig1', page: 2, x: 330, y: 500, w: 150, h: 22 },
     { id: `chg:${strike.id}:s1`, signer: 1, kind: 'initial', why: 'change', ref: strike.id, page: 1, x: 165, y: 410, w: 26, h: 13 }, { id: `chg:${insert.id}:s1`, signer: 1, kind: 'initial', why: 'change', ref: insert.id, page: 1, x: 165, y: 384, w: 26, h: 13 }];
-  let marks2 = [strike, insert], calls = [], mails = [], files = {}, agent = 'agent@example.test', changeErr = null, outstandingLayers = false, reopen = null, noDatePlace = false;
+  let noticeOverride = null, marks2 = [strike, insert], calls = [], mails = [], files = {}, agent = 'agent@example.test', changeErr = null, outstandingLayers = false, reopen = null, noDatePlace = false;
   files[DRAFT] = draft;
   const vSigner = { id: 'v1', position: 1, name: 'Vera Vendor', sig_png: png, init_png: png, verified_at: '2026-11-24T01:30:00Z', consent_at: '2026-11-24T01:31:00Z', receipts: [{ guide: 'chattels', at: '2026-11-24T01:32:00Z' }], places: 4, ua: 'Phone', net: 'f'.repeat(64), seen_sha256: 'd'.repeat(64) };
   const material = () => ({ signing_id: SID, offer_id: OID, property_id: PID, address: '1 Example Road, Testville', offer_ref: 'Ana Testbuyer', method: 'link', number: 2, round: 2, side: 'vendor', document: 1, earlier: [L1], link_changes: true,
@@ -55,12 +57,16 @@ const D = require(path.join(__dirname, '..', 'src', 'draft-core.js'));
     if (fn === 'offer_agreement_material') return { data: { offer_id: OID, property_id: PID, address: '1 Example Road, Testville', offer_ref: 'Ana Testbuyer', document: 1, round: 3, number: 3, round_id: 'r3', date_text: args.p_date_text, accepted_at: args.p_accepted_at, made_at: '2026-11-24T05:00:00Z',
       draft: { path: DRAFT, sha256: draftSha }, round_sha256: 'e'.repeat(64), date_place: noDatePlace ? null : { id: 'date', kind: 'date', page: 1, x: 70, y: 730, w: 200, h: 10 }, layers: [L1, L2(), L3()], rounds: [{ number: 1, document: 1, round: 1, side: 'purchaser', changes: 0, sha256: 'a'.repeat(64), locked_at: '2026-11-24T01:00:00Z' }] }, error: null };
     if (fn === 'offer_agreement_lock') return { data: { id: 'ag1', sha256: args.p_sha256, existing: false }, error: null };
+    // Offers fixes 2: what the function needs to email Tim the locked agreed copy (the newest stored agreement, its size as stored)
+    if (fn === 'offer_agreed_notice_material') { const al_ = calls.filter(c => c[0] === 'offer_agreement_lock').pop(); if (!al_) return { data: null, error: null }; const ag_ = noticeOverride || {};
+      return { data: { offer_id: OID, property_id: PID, address: '1 Example Road, Testville', province: 'otago', kiwisaver: false, layers: [L1, L2(), L3()], price_place: { id: 'price', page: 1, x: 100, y: 398, w: 60, h: 12 }, deposit_holder: { holder: 'nzret', other: null, by_default: false },
+        agreement: Object.assign({ id: 'ag1', agreement_date: '2026-11-24', date_text: '24 November 2026', sha256: al_[1].p_sha256, path: al_[1].p_path, size_bytes: al_[1].p_size, terms: { price: 655000, as_drafted: { price: '$655,000' }, conditions: [{ key: 'finance', days: 10 }], settlement: { kind: 'relative', days: 15 }, changes: [] } }, ag_) }, error: null }; }
     return { data: null, error: { message: 'unknown' } };
   };
   const h = H.makeHandler({ cors: { 'Access-Control-Allow-Origin': 'https://packages.dunnerstunner.co.nz' }, appUrl: 'https://packages.dunnerstunner.co.nz/onboarding/', timEmail: 'tim@example.test',
     whoIsAgent: async (a) => (a === 'Bearer good' ? agent : null), rpc: db, signedUrl: async (p) => 'https://signed.example/' + encodeURIComponent(p),
     download: async (p) => files[p] || null, upload: async (p, b) => { if (files[p]) return { ok: false, exists: true }; files[p] = b; return { ok: true }; },
-    sendMail: async (kind, m) => { mails.push(Object.assign({ kind }, m)); }, renderRound: (d, m) => S.renderRound(PDFLib, d, m), renderWorking: (d, m) => N.renderWorking(PDFLib, d, m), nego: N, mail: MAILC, net: netOf });
+    sendMail: async (kind, m) => { if (failTim && m.to === 'tim@example.test') throw new Error('SMTP down'); mails.push(Object.assign({ kind }, m)); }, renderRound: (d, m) => S.renderRound(PDFLib, d, m), renderWorking: (d, m) => N.renderWorking(PDFLib, d, m), nego: N, mail: MAILC, offers: OFF, net: netOf });
   const post = (body, headers) => h(new Request('https://x.supabase.co/functions/v1/offer-sign', { method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json', 'user-agent': 'Phone browser', 'x-forwarded-for': '203.0.113.7' }, headers || {}), body: JSON.stringify(body) }));
   const J = async r => ({ status: r.status, j: await r.json() });
   const text = async bytes => (await D.readPages(pdfjs, new Uint8Array(bytes))).map(p => p.items.map(i => i.s).join(' '));
@@ -151,7 +157,7 @@ const D = require(path.join(__dirname, '..', 'src', 'draft-core.js'));
   outstandingLayers = false; noDatePlace = true; calls = [];
   r = await J(await post({ action: 'agree', offer_id: OID, accepted_at: '2026-11-24T05:00:00+13:00', date_text: '24 November 2026' }, { Authorization: 'Bearer good' }));
   expect(r.status === 400 && /no date place/.test(r.j.error) && !calls.some(c => c[0] === 'offer_agreement_lock'), 'no date place on the blank: no agreed copy, and no date put anywhere else');
-  noDatePlace = false;
+  noDatePlace = false; mails = [];
   r = await J(await post({ action: 'agree', offer_id: OID, accepted_at: '2026-11-24T05:00:00+13:00', date_text: '24 November 2026' }, { Authorization: 'Bearer good' }));
   const al = calls.find(c => c[0] === 'offer_agreement_lock');
   expect(r.j.ok && al && new RegExp(`^properties/${PID}/docs/offer-agreement-${OID}-[0-9a-f]{12}\\.pdf$`).test(al[1].p_path) && al[1].p_round === 'r3' && al[1].p_date_text === '24 November 2026', 'agreed: stored at its own place and locked against the newest round');
@@ -162,8 +168,36 @@ const D = require(path.join(__dirname, '..', 'src', 'draft-core.js'));
   expect(dateItem && Math.abs(dateItem.y - 730) < 2 && Math.abs(dateItem.x - 70) < 2, 'the date Tim typed is at the top, in the date place');
   expect(/The agreement as agreed/.test(apages.slice(2).map(p => p.items.map(i => i.s).join(' ')).join(' ')), 'with the agreement record at the end');
 
+  // ── Offers fixes 2, item 6: Tim is emailed the locked dated agreed copy at once, and again when he asks; never a party ──
+  { const am = mails.filter(m => m.kind === 'offer_agreed_copy'); out.agreedCopyMail = am.map(m => ({ to: m.to, subject: m.subject, attachments: (m.attachments || []).map(x => x.filename) }));
+    expect(r.j.agreement && r.j.agreement.emailed === true, 'agree says Tim was emailed');
+    expect(am.length === 1 && am[0].to === 'tim@example.test' && mails.every(m => m.to === 'tim@example.test'), 'one email, to Tim only: ' + mails.map(m => m.kind + '>' + m.to).join(', '));
+    expect(am[0] && am[0].subject === 'Agreement confirmed: 1 Example Road, Testville', 'the subject');
+    expect(am[0] && am[0].attachments && am[0].attachments.length === 1 && sha(am[0].attachments[0].content) === al[1].p_sha256 && am[0].attachments[0].contentType === 'application/pdf', 'the locked dated agreed copy attached, byte for byte');
+    const t = (am[0] || {}).html || '';
+    for (const w of ['Date of agreement: Tuesday 24 November 2026.', 'Purchasers: Ana Testbuyer.', 'Vendors: Vera Vendor.', 'Price: $690,000. Changed in the negotiation: typed in Round 2 in place of the struck price.', '1. Finance: due Tuesday 8 December 2026 (worked out from the agreement date)',
+      'Settlement day: Monday 11 January 2027 (worked out from the agreement date).',
+      'Deposit holder: Public Trust O/A NZ Real Estate Trust (your choice).', 'Fingerprint (SHA-256): ' + al[1].p_sha256, `https://portal.dunnerstunner.co.nz/properties/${PID}/offers/${OID}`]) expect(t.includes(w), "Tim's email holds: " + w);
+    expect(!/655,000/.test(t), "never the first offer's price");
+    // again, from the button: the same email, marked as sent again; refused without Tim's sign-in
+    mails = []; let q = await J(await post({ action: 'agreed_notice', offer_id: OID }, { Authorization: 'Bearer good' }));
+    expect(q.j.ok && q.j.attached === true && mails.length === 1 && mails[0].kind === 'offer_agreed_copy_again' && mails[0].to === 'tim@example.test' && /Sent again, as you asked/.test(mails[0].html), 'Email me the agreed copy again: the same email, to Tim');
+    mails = []; q = await J(await post({ action: 'agreed_notice', offer_id: OID })); expect(q.status === 403 && !mails.length, 'again: only Tim');
+    q = await J(await post({ action: 'agreed_notice', offer_id: 'x' }, { Authorization: 'Bearer good' })); expect(q.status === 400 && !mails.length, 'again: a bad offer id refused');
+    // too big to attach: a portal link instead, said plainly
+    noticeOverride = { size_bytes: H.ATTACH_MAX + 1 }; mails = []; q = await J(await post({ action: 'agreed_notice', offer_id: OID }, { Authorization: 'Bearer good' }));
+    expect(q.j.ok && q.j.attached === false && mails.length === 1 && !mails[0].attachments && /too big to attach/.test(mails[0].html) && mails[0].html.includes(`/properties/${PID}/offers/${OID}`), 'a copy too big to attach: the portal link instead, said so');
+    // a stored copy that doesn't match its fingerprint is never sent
+    noticeOverride = { sha256: 'f'.repeat(64) }; mails = []; q = await J(await post({ action: 'agreed_notice', offer_id: OID }, { Authorization: 'Bearer good' }));
+    expect(!q.j.ok && !mails.length && /fingerprint/.test(q.j.error), 'a copy that does not match its fingerprint: nothing sent'); noticeOverride = null;
+    // the email failing never undoes the agreement: agree still succeeds, and says the email didn't go
+    for (const k of Object.keys(files)) if (/offer-agreement-/.test(k)) delete files[k];
+    failTim = true; mails = []; q = await J(await post({ action: 'agree', offer_id: OID, accepted_at: '2026-11-24T05:00:00+13:00', date_text: '24 November 2026' }, { Authorization: 'Bearer good' })); failTim = false;
+    expect(q.j.ok && q.j.agreement.emailed === false, 'the email to Tim failing: the agreement stands, and the page is told it did not go'); }
+
   // ── the entry file ──
   const entry = fs.readFileSync(path.join(__dirname, '..', '..', 'fn', 'offer_sign.ts'), 'utf8');
   expect(/cors: corsFor/.test(entry) && /nego-core\.js/.test(entry) && /renderWorking/.test(entry) && /JWT verification still OFF/.test(entry), 'the entry uses the app-and-portal CORS and the negotiation core');
+  expect(/offers-core\.js/.test(entry) && /offers: OFFERS/.test(entry), 'the entry loads the working-day counter for Tim\'s agreement email (Offers fixes 2)');
   console.log(JSON.stringify(Object.assign(out, { errs }), null, 1));
 })().catch(e => { console.log(JSON.stringify({ errs: ['crashed: ' + (e.stack || e.message)] })); });

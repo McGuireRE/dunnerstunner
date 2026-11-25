@@ -73,9 +73,14 @@ const base = () => ({
   // never a guess: a missing due date, lawyer or settlement becomes a blank
   { const b = base(); delete b.terms.as_drafted.d_lim; b.vendorLawyer = {}; b.terms.as_drafted.settlement = '15 working days after confirmation'; b.terms.settlement = { kind: 'relative', days: 15 };
     const x = M.agreedDrafts(b);
-    has(x.purchasers.body, 'due **[Tim to fill: the LIM due date]**', 'a due date not on the agreement');
+    // Offers fixes 2: worked out from the agreement date with working days and Otago's holidays (the LIM rule runs the break to 15 January)
+    has(x.purchasers.body, '2. LIM: within 10 working days of the date of agreement, due **Tuesday 26 January 2027**.', 'a due date not on the agreement: worked out from the agreement date');
+    ok(x.notes.some(n => /^LIM due Tuesday 26 January 2027 \(worked out from the agreement date, Friday 18 December 2026: within 10 working days of the date of the agreement, with Otago holidays; check\)$/.test(n)), 'the worked-out LIM date is shown to Tim once, with how: ' + JSON.stringify(x.notes));
+    ok(!x.purchasers.body.includes('worked out') && !x.vendors.body.includes('worked out'), 'the "worked out" notes are for Tim\'s editor, not in the emails');
     has(x.purchasers.body, "The vendors' lawyer is: [Tim to fill: the lawyer (name, firm, email, phone)].", 'no vendors\' lawyer on file');
-    has(x.purchasers.body, '**[Tim to fill: settlement day] (the agreement says: 15 working days after confirmation)**', 'a settlement worked out from confirmation');
+    has(x.purchasers.body, 'Possession and Settlement day: **Wednesday 17 February 2027**', 'settlement: 15 working days after the last condition (Waitangi Day observed skipped)');
+    ok(x.notes.some(n => /^Settlement day Wednesday 17 February 2027 \(worked out from the agreement date, Friday 18 December 2026: 15 working days after the last condition, with Otago holidays; check\)$/.test(n)), 'the worked-out settlement day is shown to Tim once');
+    ok(!x.blanks.some(b => /settlement day|due date/.test(b)), 'no blank for dates the portal can work out');
     ok(!x.purchasers.body.includes('They all fall due on the same day'), 'no "same day" claim without both dates');
     ok(x.vendors.cc.length === 0, 'no lawyer address: no cc, Tim adds it'); }
   { const b = base(); b.terms.changes = [{ round: 2, side: 'vendor', kind: 'insert', page: 1, text: '$690,000' }]; const x = M.agreedDrafts(b);
@@ -90,6 +95,49 @@ const base = () => ({
     has(x.purchasers.body, 'Deposit ($65,500): payable to Public Trust O/A NZ Real Estate Trust once the agreement becomes unconditional.', 'unconditional: Tim\'s exact wording');
     ok(!x.blanks.includes('[Tim to fill: when the deposit is paid]'), 'no blank when the agreement says when');
     b.terms.deposit_printed = 'payable on signing'; b.terms.as_drafted.deposit = '$65,500'; has(M.agreedDrafts(b).purchasers.body, 'Deposit ($65,500): payable to Public Trust O/A NZ Real Estate Trust on signing.', 'on signing'); }
+  // Offers fixes 2: the agreed price after the negotiation, from the rounds' shapes (shared with Tim's own email)
+  { const box = { page: 1, x: 300, y: 600, w: 80, h: 10 }, strike = { id: 'k1', kind: 'strike', page: 1, geometry: { x0: 300, x1: 360, y: 603, text: '$655,000' } }, ins = (t, y, id) => ({ id: id || 'i1', kind: 'insert', page: 1, geometry: { x: 300, y: y || 588, text: t, size: 9 } });
+    const L = (...marks) => [{ doc_round: 1, side: 'purchaser', marks: [] }, { doc_round: 2, side: 'vendor', marks }];
+    const pr = (layers, terms) => M.agreedPrice({ terms: terms || base().terms, layers, priceBoxes: [box] });
+    let r = pr(L(strike, ins('$690,000'))); ok(r.text === '$690,000' && r.changed && r.round === 2 && !r.unsure, 'a struck price and the typed figure beside it: the typed figure, Round 2: ' + JSON.stringify(r));
+    r = pr(L()); ok(r.text === '$655,000' && !r.changed, 'no changes: the drafted price');
+    r = pr(L({ id: 'n1', kind: 'insert', page: 2, geometry: { x: 60, y: 200, text: 'Settlement 20/12/2026', size: 9 } })); ok(r.text === '$655,000' && !r.changed, 'a change elsewhere that is not about the price: the drafted price');
+    r = pr(L(ins('$690,000'))); ok(r.text === M.PRICE_BLANK && r.unsure, 'a figure typed by the price but the price not struck: a marked blank');
+    r = pr(L(strike, ins('$690,000'), ins('$700,000', 575, 'i2'))); ok(r.unsure, 'two standing figures by the price: a marked blank');
+    r = pr(L(strike, ins('$690,000'), { id: 'n2', kind: 'insert', page: 2, geometry: { x: 60, y: 200, text: 'Price $1 250 000', size: 9 } })); ok(r.unsure, 'other typed words about the price: a marked blank');
+    r = pr(L(strike, ins('$690,000'), { id: 'h1', kind: 'note', page: 1, geometry: { strokes: [[[305, 602], [340, 606]]] } })); ok(r.unsure, 'handwriting over the price: a marked blank');
+    r = pr(L(strike, ins('agreed'))); ok(r.unsure, 'typed words with no figure: a marked blank');
+    r = pr(L(strike, { id: 'r1', kind: 'reinstate', page: 1, target: 'k1', geometry: { x: 300, y: 614 } })); ok(r.text === '$655,000' && !r.changed, 'a reinstated price stands');
+    // a counter and a counter back: Round 2 types $690,000, Round 3 strikes it and types $672,500
+    const r3 = [{ doc_round: 1, side: 'purchaser', marks: [] }, { doc_round: 2, side: 'vendor', marks: [strike, ins('$690,000')] }, { doc_round: 3, side: 'purchaser', marks: [{ id: 'k2', kind: 'strike', page: 1, geometry: { x0: 300, x1: 345, y: 591 } }, ins('$672,500', 576, 'i3')] }];
+    r = pr(r3); ok(r.text === '$672,500' && r.round === 3, 'the last figure standing after a counter back: ' + JSON.stringify(r));
+    // the live data shape (25 November 2026): only the list of changes, no shapes, a strike with no words: never the first offer's price
+    r = M.agreedPrice({ terms: Object.assign(base().terms, { price: 1000000, as_drafted: { price: '$1,000,000' }, changes: [{ round: 2, kind: 'strike', page: 1, text: null }, { round: 2, kind: 'insert', page: 1, text: '$1,050,000' }] }) });
+    ok(r.unsure && r.text === '[Tim to fill: the agreed price after negotiation]', 'changes without shapes: a marked blank, never the first offer\'s price');
+    // the emails use it: price, the deposit as its percentage of the agreed price, Tim's note
+    const b = base(); b.terms.kiwisaver = false; b.details.kiwisaver = false; b.terms.as_drafted.deposit = ''; b.terms.deposit_printed = '10% of the purchase price payable upon the agreement becoming unconditional'; b.layers = L(strike, ins('$690,000')); b.priceBoxes = [box];
+    const x = M.agreedDrafts(b);
+    has(x.purchasers.body, 'Price: $690,000', 'the emails: the agreed price after the negotiation'); ok(!x.purchasers.body.includes('$655,000') && !x.vendors.body.includes('$655,000'), 'never the first offer\'s price');
+    has(x.purchasers.body, 'Deposit ($69,000): payable to Public Trust O/A NZ Real Estate Trust once the agreement becomes unconditional.', 'the deposit: 10% of the agreed price');
+    ok(x.notes.includes('Deposit $69,000 (worked out from 10% of the agreed price $690,000; check)') && x.notes.includes('Price $690,000 (the figure typed in Round 2 in place of the struck price; check)'), 'Tim\'s notes: ' + JSON.stringify(x.notes));
+    b.layers = L(strike, ins('$690,000'), ins('$700,000', 575, 'i2')); const y = M.agreedDrafts(b);
+    has(y.purchasers.body, 'Price: [Tim to fill: the agreed price after negotiation]', 'unclear: a marked blank'); has(y.purchasers.body, 'Deposit ([Tim to fill: the deposit amount])', 'no price, no deposit amount: a blank');
+    // Tim's own email when the agreement is confirmed (item 6)
+    const n = M.agreedNotice({ address: '12 Example Street, Dunedin', agreement: { agreement_date: '2026-12-18', date_text: '18 December 2026', sha256: 'ab'.repeat(32) }, purchasers: ['Ana Testbuyer', 'Bo Testbuyer'], vendors: ['Vera Vendorperson'],
+      terms: Object.assign(base().terms, { as_drafted: { price: '$655,000' }, settlement: { kind: 'relative', days: 15 } }), layers: L(strike, ins('$690,000')), priceBoxes: [box], labels: { finance: 'Finance', lim: 'LIM' }, depositHolder: { holder: 'nzret', by_default: false }, portalUrl: 'https://portal.dunnerstunner.co.nz/properties/P/offers/O', attached: true });
+    out.agreedNotice = n;
+    ok(n.subject === 'Agreement confirmed: 12 Example Street, Dunedin', 'Tim\'s email: the subject');
+    for (const t of ['Date of agreement: Friday 18 December 2026.', 'Purchasers: Ana Testbuyer and Bo Testbuyer.', 'Vendors: Vera Vendorperson.', 'Price: $690,000. Changed in the negotiation: typed in Round 2 in place of the struck price.',
+      '1. Finance: due Thursday 14 January 2027 (worked out from the agreement date)', '2. LIM: due Tuesday 26 January 2027 (worked out from the agreement date)', 'Settlement day: Wednesday 17 February 2027 (worked out from the agreement date).',
+      'Deposit holder: Public Trust O/A NZ Real Estate Trust (your choice).', 'Fingerprint (SHA-256): ' + 'ab'.repeat(32), 'The offer in the portal: https://portal.dunnerstunner.co.nz/properties/P/offers/O', 'The dated agreed copy is attached.']) has(n.body, t, 'Tim\'s email');
+    ok(!/655,000/.test(n.body) && !/[—–]/.test(n.body), 'Tim\'s email: never the first offer\'s price; no dashes');
+    const n2 = M.agreedNotice({ address: 'x', agreement: { agreement_date: '2026-12-18' }, terms: base().terms, layers: L(strike, ins('$690,000'), ins('$700,000', 575, 'i2')), priceBoxes: [box], tooBig: true });
+    ok(/Price: not worked out here/.test(n2.body) && /too big to attach/.test(n2.body) && /recommended one; you haven't chosen yet/.test(n2.body), 'unclear price, too big to attach, no holder chosen: said plainly'); }
+  // 025: the agent's phone in the database (offer_settings.agent_phone's default) is the one in Tim's sign-off
+  { const mig = require('fs').readFileSync(path.join(__dirname, '..', 'migrations', '025_offer_mail_agent_own.sql'), 'utf8'), m = /agent_phone text not null default '([^']+)'/.exec(mig);
+    ok(m && m[1] === M.TIM_PHONE, 'the agent phone in 025 is mail-core\'s TIM_PHONE: ' + (m && m[1]) + ' / ' + M.TIM_PHONE);
+    const sh = require('fs').readFileSync(path.join(__dirname, '..', '..', 'fn', 'shared.ts'), 'utf8'), e = /agent_email text not null default '([^']+)'/.exec(mig), te = /export const TIM_EMAIL = "([^"]+)"/.exec(sh);
+    ok(e && te && e[1] === te[1], 'the agent email in 025 is the one Tim\'s emails come from (fn/shared.ts TIM_EMAIL)'); }
   // the first working day
   ok(M.longDate(M.firstWorkingDay('2026-12-24', holidays)) === 'Tuesday 29 December 2026', 'over Christmas: weekends and public holidays skipped');
   { const b = base(); b.agreement.agreement_date = '2026-12-24'; has(M.agreedDrafts(b).purchasers.body, '[Tim to check: the first working day falls between 24 December and 5 January', 'in the Christmas break Tim checks the dates'); }

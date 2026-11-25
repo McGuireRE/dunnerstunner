@@ -21,12 +21,16 @@
 //               everyone on their side beside it; typed words are checked for the parties' own phone and email by the database.
 //   agree (Tim) once both sides have signed the same version with nothing outstanding: the agreed copy (the date he typed at the top,
 //               as an overlay, the time acceptance was communicated), stored, fingerprinted from the stored file and locked.
+//               Tim is then emailed the locked copy at once (Offers fixes 2), never a party.
+//   agreed_notice (Tim) "Email me the agreed copy again": the same email, to Tim only.
 // Every round from Round 2 on is made from the approved draft and every round's layers by the negotiation core (src/nego-core.js):
 // the other side's initials are lifted where a change was made, every change and its initials drawn, and the record appended.
 // Round 1: the approved draft (checked against its fingerprint), with each signer's signature, initials and marks added on top and the
 // execution record appended (src/sign-core.js renderRound), stored, fingerprinted from the stored file, then offer_round_lock.
 // Everything the caller sends is data. Tested by onboarding/tests/offer-sign-fn.test.js with fakes, so no test sends email.
 export const MAX_BODY = 700000;
+// the agreed copy goes to Tim as an attachment up to this size (Gmail takes 25 MB with the encoding); above it, a portal link instead
+export const ATTACH_MAX = 15 * 1024 * 1024;
 const TOKEN_RE = /^[A-Za-z0-9_-]{40,64}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 type Rpc = (fn: string, args: Record<string, unknown>) => Promise<{ data: any; error: { message: string } | null }>;
@@ -35,13 +39,14 @@ export type Deps = {
   appUrl: string;
   portalUrl?: string;   // Tim's portal (https://portal.dunnerstunner.co.nz/), for the address of a round in his notice
   mail?: any;           // src/mail-core.js (MAIL): the wording of drafts and of Tim's round notice
+  offers?: any;         // src/offers-core.js (OFFERS): working days and holidays, for the dates in Tim's agreement email
   timEmail: string;
   whoIsAgent: (authorization: string) => Promise<string | null>;
   rpc: Rpc;                                                          // the offer_sign_* functions, offer_round_*, offer_file_confirm, with the service role
   signedUrl: (path: string) => Promise<string | null>;              // a 10 minute link to a file in property-files
   download: (path: string) => Promise<Uint8Array | null>;
   upload: (path: string, bytes: Uint8Array) => Promise<{ ok: boolean; exists?: boolean }>;
-  sendMail: (kind: string, msg: { to: string; subject: string; html: string }) => Promise<void>;   // throws when it doesn't send
+  sendMail: (kind: string, msg: { to: string; subject: string; html: string; attachments?: { filename: string; content: Uint8Array; contentType?: string }[] }) => Promise<void>;   // throws when it doesn't send
   renderRound: (draft: Uint8Array, m: any) => Promise<{ bytes: Uint8Array }>;
   renderWorking: (draft: Uint8Array, m: any) => Promise<{ bytes: Uint8Array }>;   // NEGO.renderWorking with pdf-lib
   nego: any;                                                        // the negotiation core (standing, outstanding, roundLines, agreementLines)
@@ -57,7 +62,7 @@ export function executionRecord(m: any) {
     address: m.address, offer_ref: m.offer_ref, round: 1, draft: { number: m.draft?.number, sha256: m.draft?.sha256 }, places_sha256: m.places_sha256, made_at: m.made_at,
     signers: (m.signers || []).map((s: any) => ({ name: s.name, method: m.method, verified_at: s.verified_at, witnessed_by: s.witnessed_by, id_sighted: s.id_sighted, consent_at: s.consent_at, receipts: s.receipts || [],
       first_tap: s.first_tap, last_tap: s.last_tap, finished_at: s.finished_at, places: s.places, ua: s.ua, net: s.net, seen_sha256: s.seen_sha256 })),
-    marks: (m.marks || []).map((k: any) => ({ kind: k.kind, page: k.page, by: k.by, at: k.at, reviewed_at: k.reviewed_at })),
+    marks: (m.marks || []).map((k: any) => Object.assign({ kind: k.kind, page: k.page, by: k.by, at: k.at, reviewed_at: k.reviewed_at }, k.kind === "strike" && k.geometry?.text ? { text: k.geometry.text } : {})),   // the struck words (Offers fixes 2); marks before it have none
     replaced: m.replaced || [],
   };
 }
@@ -90,7 +95,7 @@ export function makeHandler(d: Deps) {
       formed = (m.marks || []).length === 0 && outstanding.length === 0 && Object.keys(sides).length === 2;
       const base = earlier[earlier.length - 1] || {};
       const rec = Object.assign({}, executionRecord(m), { number: n, document: m.document, round, side: m.side, base: { round: base.doc_round, sha256: base.sha256 }, link_changes: m.link_changes == null ? null : !!m.link_changes,
-        changes: (m.marks || []).map((k: any) => ({ kind: k.kind, page: k.page, by: k.by, at: k.at, text: k.kind === "insert" ? k.geometry?.text : undefined })), lifted, outstanding: outstanding.length });
+        changes: (m.marks || []).map((k: any) => ({ kind: k.kind, page: k.page, by: k.by, at: k.at, text: k.kind === "insert" || k.kind === "strike" ? k.geometry?.text || undefined : undefined })), lifted, outstanding: outstanding.length });
       // the record keeps the title and drawing version, so the round can be drawn again from its layers and come out byte for byte the same
       const title = `Round ${round} (signed by the ${m.side === "vendor" ? "vendors" : "purchasers"}): ${m.address || "agreement"}`;
       record = Object.assign({}, rec, { title, draw_version: N.DRAW_VERSION, check: { lifted, outstanding } });
@@ -133,7 +138,30 @@ export function makeHandler(d: Deps) {
     const ssha = await sha256(stored); if (ssha !== sha) throw new Error("A different file is already stored where the agreement goes. Tim will look into it.");
     await call("offer_file_confirm", { p_path: path, p_sha256: ssha, p_size: stored.length, p_actor: actor });
     const lk = await call("offer_agreement_lock", { p_offer: offerId, p_round: m.round_id, p_path: path, p_sha256: ssha, p_size: stored.length, p_accepted_at: acceptedAt, p_date_text: m.date_text, p_record: record, p_actor: actor });
-    return { sha256: lk.sha256, existing: !!lk.existing, property_id: m.property_id };
+    // Tim alone is emailed the locked, dated copy at once (Offers fixes 2); the agreement stands whether or not the email goes
+    let emailed: boolean | null = null;
+    if (!lk.existing) { try { await agreedNotice(offerId, false); emailed = true; } catch (_) { emailed = false; } }
+    return { sha256: lk.sha256, existing: !!lk.existing, property_id: m.property_id, emailed };
+  }
+  // Tim's own email once the agreement is confirmed (and again when he asks): the locked dated agreed copy attached, checked against its
+  // fingerprint, or a portal link when it is too big to attach; the date, the parties' names, the agreed price after the negotiation, the
+  // due dates and settlement day, the deposit holder and the fingerprint (src/mail-core.js agreedNotice). Only ever to Tim.
+  async function agreedNotice(offerId: string, again: boolean) {
+    const m = await call("offer_agreed_notice_material", { p_offer: offerId });
+    if (!m || !m.agreement) throw new Error("The agreement hasn't been made yet.");
+    if (!d.mail) throw new Error("The email wording isn't loaded.");
+    const A = m.agreement, layers = m.layers || [];
+    const names = (side: string) => ((layers.filter((L: any) => L.side === side).sort((a: any, b: any) => b.doc_round - a.doc_round)[0] || {}).signers || []).map((s: any) => s.name);
+    const pp = m.price_place, priceBoxes = pp ? (Array.isArray(pp.boxes) && pp.boxes.length ? pp.boxes : [pp]) : [];
+    const labels: Record<string, string> = {}; ((A.terms || {}).conditions || []).forEach((c: any) => { const i = d.offers && d.offers.condInfo ? d.offers.condInfo(c.key) : null; labels[c.key] = (i && i.label) || c.key; });
+    const portal = `${(d.portalUrl || "https://portal.dunnerstunner.co.nz/").replace(/\/?$/, "/")}properties/${m.property_id}/offers/${m.offer_id}`;
+    let file: Uint8Array | null = null;
+    if (+A.size_bytes <= ATTACH_MAX) { file = await d.download(A.path); if (!file || await sha256(file) !== A.sha256) throw new Error("The agreed copy doesn't match its fingerprint, so it wasn't emailed. Tim will look into it."); }
+    const nt = d.mail.agreedNotice({ address: m.address, agreement: A, purchasers: names("purchaser"), vendors: names("vendor"), terms: A.terms || {}, layers, priceBoxes, province: m.province, offers: d.offers, labels,
+      depositHolder: m.deposit_holder || null, kiwisaver: !!m.kiwisaver, portalUrl: portal, attached: !!file, tooBig: !file, again });
+    const name = `Agreement ${String(m.address || "").replace(/[^A-Za-z0-9 ,.-]+/g, "").slice(0, 80)}.pdf`;
+    await d.sendMail(again ? "offer_agreed_copy_again" : "offer_agreed_copy", Object.assign({ to: d.timEmail, subject: nt.subject, html: d.mail.toHtml(nt.body) }, file ? { attachments: [{ filename: name, content: file, contentType: "application/pdf" }] } : {}));
+    return { attached: !!file };
   }
 
   const handle = async (req: Request): Promise<Response> => {
@@ -146,7 +174,7 @@ export function makeHandler(d: Deps) {
     const action = String(body.action || ""), net = d.net(req), ua = (req.headers.get("user-agent") || "").slice(0, 400);
 
     // ── Tim ──
-    if (action === "send_mail" || action === "lock" || action === "agree") {
+    if (action === "send_mail" || action === "lock" || action === "agree" || action === "agreed_notice") {
       const auth = req.headers.get("Authorization") || "";
       let agent: string | null = null; if (/^Bearer\s+\S+/.test(auth)) { try { agent = await d.whoIsAgent(auth); } catch (_) { agent = null; } }
       if (!agent) return json({ error: "Only Tim can do this" }, 403);
@@ -154,6 +182,11 @@ export function makeHandler(d: Deps) {
         const oid = String(body.offer_id || ""), at = String(body.accepted_at || ""), dt = String(body.date_text || "").slice(0, 30);
         if (!UUID.test(oid) || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/.test(at)) return json({ error: "Bad request" }, 400);
         try { return json({ ok: true, agreement: await agree(oid, at, dt, agent) }); } catch (e) { return json({ ok: false, error: plain((e as Error).message) }, 400); }
+      }
+      // "Email me the agreed copy again": the same email to Tim himself, never to anyone else
+      if (action === "agreed_notice") {
+        const oid = String(body.offer_id || ""); if (!UUID.test(oid)) return json({ error: "Bad request" }, 400);
+        try { const r = await agreedNotice(oid, true); return json({ ok: true, attached: r.attached }); } catch (e) { return json({ ok: false, error: /SMTP|Email is not set up/i.test((e as Error).message) ? "It didn't send. Try again." : plain((e as Error).message) }, 400); }
       }
       // Tim presses Send on one draft (offer_mail_drafts, 024): it goes exactly as it stands, and the log keeps exactly what went.
       // A signing link's personal token is made now, for that signer only, and is never kept or returned anywhere.

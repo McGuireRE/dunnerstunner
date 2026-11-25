@@ -9,6 +9,9 @@
      reopenedDraft(i)        "please initial the change and finish again", to a signer whose side changed the document after they finished
      roundNotice(i)          Tim's own notice, once per submitted round: who, what changed, which round, and its portal address
      agreedDrafts(i)         the agreed copy's two emails: to the purchasers (cc their lawyer) and to the vendors (cc theirs)
+     agreedPrice(i)          the agreed price after the negotiation (a typed figure that replaced the struck price), or a marked blank
+     agreedDates(i)          each condition's due date and settlement day, from the agreement date with working days and the province's holidays
+     agreedNotice(i)         Tim's own email once the agreed copy is locked (sent at once, with the copy attached; never to a party)
      depositRecommended(ks)  who should hold the deposit: the vendors' lawyer if any KiwiSaver is part of it, else the NZ Real Estate Trust
      DEPOSIT_HOLDERS         the choices on Tim's page, with their wording
      withdrawDrafts(i)       after Tim records a withdrawal: to the side that directed it (cc their lawyer), and to the other side's lawyer
@@ -103,6 +106,84 @@
     if (c.days) return `within ${+c.days} working day${+c.days === 1 ? '' : 's'} of the date of agreement`;
     return blank('fill: the period');
   }
+  /* ───── the agreed price, after the negotiation (Offers fixes 2) ─────
+     The agreed terms keep the price as first drafted; a change in the negotiation governs. The price is the drafted one when no change
+     touches it. When a line through the price and typed words beside it give exactly one new figure (and nothing else is unclear: no
+     handwriting over the price, no other typed words about the price), that figure is the agreed price, from the round it was typed in.
+     Anything else is a marked blank for Tim, never a guess. i: { terms, layers (the document's rounds, each { doc_round, side, marks:
+     [{ id, kind, page, geometry, target }] }), priceBoxes: [{ page, x, y, w, h }] (where the price is on the draft) }
+     -> { text, figure, changed, round, unsure } */
+  const PRICE_BLANK = blank('fill: the agreed price after negotiation');
+  const MONEY_RE = /\$\s?\d{1,3}(?:[,\s]\d{3})+(?:\.\d{1,2})?|\$\s?\d+(?:\.\d{1,2})?|\b\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?\b/g;
+  const figures = t => (String(t || '').match(MONEY_RE) || []).map(x => Number(x.replace(/[^0-9.]/g, ''))).filter(n => n >= 1000);
+  const PRICE_WORD = /\b(purchase\s+)?price\b/i;
+  const numOf = t => { const f = figures(t); return f.length ? f[0] : null; };
+  function rectOfChange(c) {
+    const g = (c && c.geometry) || {};
+    if (c.kind === 'strike') return { x: Math.min(g.x0, g.x1), y: g.y - 4, w: Math.abs(g.x1 - g.x0), h: 8 };
+    if (c.kind === 'cross') return { x: g.x, y: g.y, w: g.w, h: g.h };
+    if (c.kind === 'insert') { const z = g.size || 9; return { x: g.x, y: g.y - 2, w: Math.max(8, String(g.text || '').length * z * 0.55), h: z + 4 }; }
+    if (c.kind === 'note') { const pts = (g.strokes || []).flat(); if (!pts.length) return null; const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]); return { x: Math.min(...xs), y: Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) }; }
+    return null;
+  }
+  const hits = (a, b, pad) => !!a && !!b && a.x < b.x + b.w + pad && a.x + a.w > b.x - pad && a.y < b.y + b.h + pad && a.y + a.h > b.y - pad;
+  function agreedPrice(i) {
+    const T = i.terms || {}, AD = T.as_drafted || {}, drafted = money(AD.price) || money(T.price);
+    const plain = { text: drafted || blank('fill: the price'), figure: numOf(drafted), changed: false, round: null, unsure: !drafted };
+    const unsure = why => ({ text: PRICE_BLANK, figure: null, changed: true, round: null, unsure: true, why });
+    if (!Array.isArray(i.layers)) {
+      // only the list of changes (no shapes): any line, cross or handwriting could be on the price, and typed words with a figure could be one
+      const tc = T.changes || []; if (!tc.length) return plain;
+      return tc.every(c => c.kind === 'insert' && !figures(c.text).length && !PRICE_WORD.test(String(c.text || ''))) ? plain : unsure('the changes have no shapes');
+    }
+    const ch = []; i.layers.slice().sort((a, b) => a.doc_round - b.doc_round).forEach(L => (L.marks || []).forEach(m => ch.push(Object.assign({}, m, { round: L.doc_round, side: L.side }))));
+    if (!ch.length) return plain;
+    const boxes = (i.priceBoxes || []).filter(b => b && typeof b.x === 'number');
+    if (!boxes.length) return unsure('no price place');
+    const back = new Set(ch.filter(c => c.kind === 'reinstate' && c.target).map(c => c.target));
+    const lines = ch.filter(c => (c.kind === 'strike' || c.kind === 'cross') && !back.has(c.id));
+    const at = (c, pad) => boxes.some(b => b.page === c.page && hits(rectOfChange(c), b, pad));
+    const nearIns = c => c.kind === 'insert' && boxes.some(b => b.page === c.page && (c.geometry || {}).y >= b.y - 30 && (c.geometry || {}).y <= b.y + b.h + 30 && (c.geometry || {}).x >= b.x - 60 && (c.geometry || {}).x <= b.x + b.w + 250);
+    const struck = lines.filter(c => at(c, 2)), notes = ch.filter(c => c.kind === 'note' && at(c, 20)), ins = ch.filter(nearIns);
+    const elsewhere = ch.filter(c => c.kind === 'insert' && !nearIns(c) && PRICE_WORD.test(String((c.geometry || {}).text || '')));
+    if (!struck.length && !ins.length && !notes.length && !elsewhere.length) return plain;
+    if (notes.length || elsewhere.length || !struck.length) return unsure('unclear');
+    // the typed figure still standing: not itself struck through by a later line
+    const through = (l, c) => { const g = c.geometry || {}, z = g.size || 9, r = rectOfChange(l), t = { x: g.x, y: g.y, w: rectOfChange(c).w, h: z * 0.75 };   // a line through the typed letters themselves
+      return l.page === c.page && (l.kind === 'strike' ? (l.geometry.y >= t.y && l.geometry.y <= t.y + t.h && r.x < t.x + t.w && r.x + r.w > t.x) : hits(r, t, 0)); };
+    const live = ins.filter(c => !lines.some(l => through(l, c)));
+    if (live.length !== 1) return unsure('more than one figure, or none');
+    const f = figures(live[0].geometry.text); if (f.length !== 1) return unsure('no single figure');
+    return { text: money(f[0]), figure: f[0], changed: true, round: live[0].round, unsure: false };
+  }
+  /* ───── the dates, from the agreement date (Offers fixes 2) ─────
+     A date written on the agreement for a condition (as drafted) stands. Otherwise it is worked out from the agreement date Tim
+     confirmed, with the agreement's working days and the property's province's holidays (src/offers-core.js, the same counter the offer
+     form uses). Settlement: the date on the agreement, else its working days after the last condition (or the agreement date).
+     i: { terms, agreementIso, province, offers (OFFERS, else the loaded one) } -> { due: { key: { iso, worked } }, settle: { iso, worked } } */
+  const offersLib = i => i.offers || root.OFFERS || (typeof require === 'function' ? (() => { try { return require('./offers-core.js'); } catch (_) { return null; } })() : null);
+  function agreedDates(i) {
+    const T = i.terms || {}, AD = T.as_drafted || {}, O = offersLib(i), conds = Array.isArray(T.conditions) ? T.conditions : [], agreed = s_(i.agreementIso), prov = i.province || (O && O.DEFAULT_PROVINCE) || 'otago';
+    const due = {};
+    conds.forEach(c => { const d = parseDate(AD['d_' + c.key]); if (d) { due[c.key] = { iso: iso(d), worked: false }; return; }
+      if (!O || !fromIso(agreed)) return; const r = O.conditionDate(c, agreed, prov, conds); if (r && r.date) due[c.key] = { iso: r.date, worked: true, how: O.timingPlain ? O.timingPlain(c) : '' }; });
+    let settle = null; const sd = parseDate(AD.settlement) || (T.settlement && T.settlement.kind === 'date' ? parseDate(T.settlement.date) : null);
+    if (sd) settle = { iso: iso(sd), worked: false };
+    else if (O && fromIso(agreed) && T.settlement && T.settlement.kind === 'relative' && Math.floor(+T.settlement.days) >= 1) {
+      const ds = Object.values(due).map(x => x.iso).sort(), from = conds.length ? (ds.length === conds.length ? ds[ds.length - 1] : null) : agreed;
+      if (from) settle = { iso: O.addWorkingDays(from, Math.floor(+T.settlement.days), { province: prov }), worked: true, how: `${Math.floor(+T.settlement.days)} working days after ${conds.length ? 'the last condition' : 'the agreement date'}` };
+    }
+    const pname = O && O.PROVINCES && O.PROVINCES[prov] ? O.PROVINCES[prov].name : prov;
+    return { due, settle, province: prov, provinceName: pname };
+  }
+  // the deposit amount: a figure on the agreement, or its percentage of the agreed price
+  function depositAmount(depText, price) {
+    const fig = (/\$\s?[\d,]+(\.\d+)?/.exec(depText) || [''])[0]; if (money(fig)) return { text: money(fig), worked: false };
+    const pc = /(\d{1,2}(?:\.\d+)?)\s?(%|per\s?cent)/i.exec(depText);
+    if (pc && price && price.figure && !price.unsure) { const v = Math.round(price.figure * +pc[1]) / 100; return { text: money(v), worked: true, how: `${pc[1]}% of the agreed price ${price.text}` }; }
+    return null;
+  }
+
   // input: { address, agreement: { agreement_date }, terms (offer_agreements.terms), details (the offer), vendors: [{ legal_name, pref_name, email, phone }],
   //   vendorLawyer: { person, firm, email, phone }, holidays: [{ day, label }], labels: { key: 'Finance', ... } }
   //   -> { purchasers: { to, cc, subject, body }, vendors: { ... }, blanks: [the marked blanks, once each] }
@@ -114,17 +195,25 @@
     const vend = (input.vendors || []).map(v => ({ name: s_(v.legal_name), call: s_(v.pref_name) || s_(v.legal_name).split(/\s+/)[0], email: s_(v.email), phone: s_(v.phone) }));
     const agreed = fromIso((input.agreement || {}).agreement_date), fwd = agreed ? firstWorkingDay(iso(agreed), input.holidays) : null;
     // each condition's due date: the date written on the agreement for it (as drafted), else a blank
-    const due = conds.map(c => { const d = parseDate(AD['d_' + c.key]); return { c, label: labels[c.key] || c.key, d, text: d ? longDate(d) : blank(`fill: the ${labels[c.key] || c.key} due date`) }; });
+    // each condition's due date and settlement day: on the agreement, else worked out from the agreement date (Offers fixes 2), shown once to Tim
+    const notes = [], DT = agreedDates({ terms: T, agreementIso: agreed ? iso(agreed) : '', province: input.province, offers: input.offers }), AGW = agreed ? longDate(agreed) : '';
+    const due = conds.map(c => { const x = DT.due[c.key], d = x ? fromIso(x.iso) : null, label = labels[c.key] || c.key;
+      if (x && x.worked) notes.push(`${label} due ${longDate(d)} (worked out from the agreement date, ${AGW}: ${x.how || 'its timing'}, with ${DT.provinceName} holidays; check)`);
+      return { c, label, d, text: d ? longDate(d) : blank(`fill: the ${label} due date`) }; });
     const lastDue = due.reduce((m, x) => x.d && (!m || x.d > m) ? x.d : m, null);
-    const settleD = parseDate(AD.settlement) || (T.settlement && T.settlement.kind === 'date' ? parseDate(T.settlement.date) : null);
+    const settleD = DT.settle ? fromIso(DT.settle.iso) : null;
+    if (DT.settle && DT.settle.worked) notes.push(`Settlement day ${longDate(settleD)} (worked out from the agreement date, ${AGW}: ${DT.settle.how}, with ${DT.provinceName} holidays; check)`);
     const settleText = settleD ? longDate(settleD) : blank('fill: settlement day') + (s_(AD.settlement) ? ` (the agreement says: ${s_(AD.settlement)})` : '');
     const endHol = settleD || lastDue;
     const hols = agreed && endHol ? (input.holidays || []).filter(h => { const x = fromIso(h.day); return x && x > agreed && x <= endHol; }) : [];
-    const price = money(AD.price) || money(T.price) || blank('fill: the price');
+    // the price as agreed: after the negotiation, when a typed figure replaced it (shared with Tim's own email, agreedNotice)
+    const PR = input.price || agreedPrice({ terms: T, layers: input.layers, priceBoxes: input.priceBoxes }), price = PR.text;
+    if (PR.changed && !PR.unsure) notes.push(`Price ${PR.text} (the figure typed in Round ${PR.round} in place of the struck price; check)`);
     // the deposit, in Tim's words: his trust account at the NZ Real Estate Trust, unless any part is KiwiSaver (then the vendors'
     // lawyer's trust account, not released before settlement). When it is paid only if the agreement's own deposit wording says so.
     const depText = [s_(AD.deposit), s_(T.deposit_printed)].join(' ');
-    const depAmt = money((/\$\s?[\d,]+(\.\d+)?/.exec(depText) || [''])[0]) || s_(AD.deposit) || blank('fill: the deposit amount');
+    const DA = depositAmount(depText, PR), depAmt = DA ? DA.text : (s_(AD.deposit) && !/%|per\s?cent/i.test(s_(AD.deposit)) ? s_(AD.deposit) : blank('fill: the deposit amount'));
+    if (DA && DA.worked) notes.push(`Deposit ${DA.text} (worked out from ${DA.how}; check)`);
     const depWhen = /unconditional/i.test(depText) ? 'once the agreement becomes unconditional' : /\b(on|upon) (signing|execution|acceptance)\b|\bwhen (this agreement is )?signed\b/i.test(depText) ? 'on signing' : blank('fill: when the deposit is paid');
     const ks = T.kiwisaver === true || D.kiwisaver === true;
     // who holds it: Tim's choice on his page (input.depositHolder), else the recommended one. With KiwiSaver it is never released before settlement.
@@ -191,7 +280,36 @@
         close].join('\n\n'),
     };
     const blanks = [...new Set((purchasers.body + '\n' + vendors.body).match(BLANK_RE) || [])];
-    return { purchasers, vendors, blanks };
+    return { purchasers, vendors, blanks, notes, price: PR };
+  }
+
+  /* ───── Tim's own email when the agreement is confirmed (Offers fixes 2; Tim: "it is most important that I get an email once the
+     document is finalised") ─────
+     Sent at once by the offer-sign function to Tim alone, with the locked dated agreed copy attached (or a portal link when it is too
+     big to attach). Never to a party. i: { address, agreement: { agreement_date, date_text, sha256 }, purchasers: [names], vendors: [names],
+     price (agreedPrice), terms, province, offers, labels, depositHolder: { holder, other, by_default }, kiwisaver, portalUrl, attached,
+     tooBig, again } -> { subject, body } */
+  function agreedNotice(i) {
+    const addr = s_(i.address) || 'the property', A = i.agreement || {}, agreed = fromIso(A.agreement_date), T = i.terms || {}, labels = i.labels || {};
+    const P = i.price || agreedPrice({ terms: T, layers: i.layers, priceBoxes: i.priceBoxes });
+    const DT = agreedDates({ terms: T, agreementIso: agreed ? iso(agreed) : '', province: i.province, offers: i.offers });
+    const conds = Array.isArray(T.conditions) ? T.conditions : [];
+    const worked = x => x && x.worked ? ' (worked out from the agreement date)' : '';
+    const dh = i.depositHolder && DEPOSIT_HOLDERS[i.depositHolder.holder] ? i.depositHolder : { holder: depositRecommended(!!i.kiwisaver), by_default: true };
+    const holder = dh.holder === 'other' ? (s_(dh.other) || 'other (not named yet)') : DEPOSIT_HOLDERS[dh.holder].payee;
+    const lines = [
+      `The agreement for ${addr} is confirmed and locked.${i.again ? ' (Sent again, as you asked.)' : ''} ${i.attached ? 'The dated agreed copy is attached.' : i.tooBig ? 'The dated agreed copy is too big to attach, so it is not attached: download it from the offer in the portal (link below).' : 'Download the dated agreed copy from the offer in the portal (link below).'}`,
+      `Date of agreement: ${agreed ? longDate(agreed) : s_(A.date_text) || 'not recorded'}.`,
+      `Purchasers: ${names(i.purchasers || []) || 'not recorded'}.`,
+      `Vendors: ${names(i.vendors || []) || 'not recorded'}.`,
+      P.unsure ? 'Price: not worked out here. A change in the negotiation may have altered it, so check the agreed copy.' : P.changed ? `Price: ${P.text}. Changed in the negotiation: typed in Round ${P.round} in place of the struck price.` : `Price: ${P.text}.`,
+      conds.length ? 'Conditions:\n' + conds.map((c, k) => { const x = DT.due[c.key]; return `${k + 1}. ${labels[c.key] || c.key}: due ${x ? longDate(fromIso(x.iso)) + worked(x) : 'not worked out (check the agreement)'}`; }).join('\n') : 'Conditions: none. The agreement is unconditional.',
+      `Settlement day: ${DT.settle ? longDate(fromIso(DT.settle.iso)) + worked(DT.settle) : 'not worked out (check the agreement)'}.`,
+      `Deposit holder: ${holder}${dh.by_default ? ' (the recommended one; you haven\'t chosen yet)' : ' (your choice)'}.`,
+      `Fingerprint (SHA-256): ${s_(A.sha256)}`,
+      i.portalUrl ? `The offer in the portal: ${i.portalUrl}` : '',
+      'Only you get this email. Nothing has gone to the purchasers, the vendors or their lawyers: their emails are made on the offer page (Build the emails) for you to read and send.'].filter(Boolean);
+    return { subject: `Agreement confirmed: ${addr}`, body: lines.join('\n\n') };
   }
 
   /* ───── who holds the deposit (Tim, 24 November 2026) ───── */
@@ -237,6 +355,6 @@
     return '<div style="font-family:Arial,sans-serif;font-size:15px;line-height:1.5;color:#1F1D1A;max-width:600px">' + String(text).split(/\n{2,}/).map(p => `<p>${para(p)}</p>`).join('') + '</div>';
   }
 
-  const MAIL = { LINK, BLANK_RE, signLinkDraft, reopenedDraft, roundNotice, agreedDrafts, DEPOSIT_HOLDERS, depositRecommended, withdrawDrafts, firstWorkingDay, parseDate, longDate, toHtml, P_ACTION };
+  const MAIL = { LINK, BLANK_RE, TIM_PHONE, signLinkDraft, reopenedDraft, roundNotice, agreedDrafts, agreedPrice, agreedDates, agreedNotice, PRICE_BLANK, DEPOSIT_HOLDERS, depositRecommended, withdrawDrafts, firstWorkingDay, parseDate, longDate, toHtml, P_ACTION };
   if (typeof module !== 'undefined' && module.exports) module.exports = MAIL; else root.MAIL = MAIL;
 })(typeof window !== 'undefined' ? window : globalThis);

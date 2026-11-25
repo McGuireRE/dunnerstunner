@@ -354,3 +354,21 @@ agreements/<agreement id>/signatures/... (vendors may upload their own signature
   `offer_sign_ask` (Ask Tim for a change, Decline) takes the offer first too, and 024 redefines 019's `agent_draft_approve` word for
   word (checked against the live body by fingerprint) with the offer FOR UPDATE first; `agent_offer_deposit_holder` takes it FOR UPDATE.
 
+
+## 025 The agent's own contact details, and the agreed copy emailed to Tim (Offers fixes 2, 25 November 2026; tested in a rollback block on a local PostgreSQL stand-in, NOT yet on the live project)
+- `offer_settings.agent_phone` (default 027 562 7207) and `offer_settings.agent_email` (default hello@timmcguire.co.nz): the phone and email
+  Tim's emails carry, in one place in the database (src/mail-core.js `TIM_PHONE` and fn/shared.ts `TIM_EMAIL` hold the same; a test keeps
+  mail-core's equal to the default).
+- `offer_agent_own()` → (emails text[], nsn text): every email in `agents` plus `agent_email`, and `agent_phone` as its national significant
+  number (`offer_nsn`). Service role and definer functions only.
+- `offer_mail_side_hit(offer, forbid, text)` redefined: as 024, except that a party email or phone equal to the agent's own is skipped
+  (Tim's sign-off in an email to the purchasers on a property where Tim is the vendor, and the other way round). A real party's own phone
+  or email is still refused; everything else is identical.
+- `offer_agreed_notice_material(offer)` → jsonb (service role only; read only): the agreement (date, date text, fingerprint, path, size,
+  terms), the address, the province, KiwiSaver, the draft's price place, the document's layers up to the agreed round (with every change's
+  shape), and the newest deposit holder. The offer-sign function uses it to email Tim the locked dated copy when he confirms the agreement
+  (and again from "Email me the agreed copy again"). Never used for an email to a party.
+- Rollback test: `tests/offer-mail-own-rollback.sql` (built by `tests/offer-mail-own-rollback.js`). Local run 25 November 2026 on the
+  stand-in (pg-standin, 010, 016 part A, 018, 019, 021, 022, 023, 024): every line as expected, no CAPITALS. `offer_agreed_notice_material`
+  was also run against the agreement 024's own rollback test makes (one block: 024, its checks to the agreement, then 025): it returned
+  the agreement, three layers with the vendors' two changes, and the province.

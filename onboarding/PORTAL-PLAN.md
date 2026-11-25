@@ -17,6 +17,14 @@ the database or the live site. The controller copies each queued request into th
 
 Order of work (set 24 November 2026, confirmed by Tim; reordered the same evening at his request):
 
+000. Offers fixes 2 (raised by Tim 25 November 2026 from his test offer; branch `offers-fixes-2`). Status: Built, awaiting review
+   and Tim's approval (needs migration 025 and offer-sign redeployed). (1) Typed words now show while signing. (2) Line through text
+   snapped to the words it crosses, kept on the page until saved, the struck words shown before Save and recorded. (3) The agreed-copy
+   emails fill the agreed price after the negotiation, the deposit, due dates and settlement day. (4) Side-aware wording; the Present
+   tick kept. (5) Tim's own phone and email never read as a party's in the email privacy check. (6) Tim emailed the dated agreed copy
+   as soon as he confirms the agreement, and again on request. Open: whether "Confirm the agreement" should be blocked while an offer
+   is frozen (Tim to decide; unchanged). See `OFFERS-PLAN.md`, "Offers fixes 2".
+
 00. Offers fixes 1 (raised by Tim 25 November 2026, built ahead of everything else; branch `offers-fixes-1`). Status: LIVE
    25 November 2026 (main 06c2d22), reviewed and approved by Tim. (a) The AI wording of conditions and clauses (and translation) always failed:
    Sonnet 5.5 refuses a forced tool_choice. Every AI request now lets the model choose and tells it to answer only through its

@@ -254,6 +254,39 @@
   }
   const NO_ROOM = 'No room on the signature page for every purchaser. Add a signature page in the portal, then load the blank again.';
   const MARK_NAMES = { note: 'note', strike: 'line through text', cross: 'crossed-out box', reinstate: 'reinstatement' };
+  // A line through text, snapped to the printed words it crosses (Offers fixes 2, Tim 25 November 2026: a strike that looks like an
+  // underline is ambiguous). page: { items: [{ s, x, y (baseline), w, h }] } as DRAFT.readPages gives them; x0, x1, y: the drag, in page
+  // points. The line of text is the one whose letters the drag passes through (nearest its middle); every word with a letter under the
+  // drag is struck whole, from its first letter to its last. The line goes through the middle of the letters: mid x-height for
+  // ordinary text, mid cap height for figures and capitals ("$1,000,000"). Returns { x0, x1, y, text } or null when no text is there.
+  const HV = [278,278,355,556,556,889,667,191,333,333,389,584,278,333,278,278,556,556,556,556,556,556,556,556,556,556,278,278,584,584,584,556,1015,667,667,722,722,667,611,778,722,278,500,667,556,833,722,778,667,778,722,667,611,722,667,944,667,667,611,278,278,278,469,556,333,556,556,500,556,556,278,556,556,222,222,500,222,833,556,556,556,556,333,500,278,556,500,722,500,500,500,334,260,334,584];
+  const chW = c => { const k = c.charCodeAt(0); return k >= 32 && k <= 126 ? HV[k - 32] : 556; };
+  function snapStrike(page, x0, x1, y) {
+    const items = ((page && page.items) || []).filter(it => it && String(it.s || '').trim() && it.w > 0);
+    const lo = Math.min(x0, x1) - 1, hi = Math.max(x0, x1) + 1, mid = it => it.y + (it.h || 9) * 0.35;
+    // the items whose letters the drag passes through, then the nearest line of them
+    const under = items.filter(it => { const h = it.h || 9; return y >= it.y - h * 0.3 && y <= it.y + h * 1.0 && it.x <= hi && it.x + it.w >= lo; });
+    if (!under.length) return null;
+    const best = under.reduce((b, it) => Math.abs(y - mid(it)) < Math.abs(y - mid(b)) ? it : b);
+    const line = items.filter(it => Math.abs(it.y - best.y) <= Math.max(1.5, Math.min(it.h || 9, best.h || 9) * 0.3)).sort((a, b) => a.x - b.x);
+    // every character of the line with where it falls (widths in proportion to Helvetica's, scaled to the item's measured width)
+    const chars = [];
+    line.forEach((it, j) => {
+      if (j) { const pv = line[j - 1]; if (it.x - (pv.x + pv.w) > 0.8) chars.push({ c: ' ', x0: pv.x + pv.w, x1: it.x, it: null }); }
+      const s = Array.from(String(it.s)), tot = s.reduce((a, c) => a + chW(c), 0) || 1; let at = it.x;
+      s.forEach(c => { const w = it.w * chW(c) / tot; chars.push({ c, x0: at, x1: at + w, it }); at += w; });
+    });
+    // words: runs of letters; a word is struck whole if any of its letters' middles is under the drag
+    const words = []; let cur = null;
+    chars.forEach((ch, i) => { if (/\s/.test(ch.c)) { cur = null; return; } if (!cur) { cur = { a: i, b: i }; words.push(cur); } else cur.b = i; });
+    const hit = words.filter(wd => { for (let i = wd.a; i <= wd.b; i++) { const m = (chars[i].x0 + chars[i].x1) / 2; if (m >= lo && m <= hi) return true; } return false; });
+    if (!hit.length) return null;
+    const a = hit[0].a, b = hit[hit.length - 1].b, text = chars.slice(a, b + 1).map(ch => ch.c).join('').replace(/\s+/g, ' ').trim();
+    const hts = chars.slice(a, b + 1).filter(ch => ch.it).map(ch => ch.it), h = Math.max(...hts.map(it => it.h || 9)), base = Math.min(...hts.map(it => it.y));
+    const share = /[a-z]/.test(text) ? 0.26 : 0.35, r1 = v => Math.round(v * 10) / 10;
+    let sx0 = chars[a].x0, sx1 = chars[b].x1; if (sx1 - sx0 < 6) { const c = (sx0 + sx1) / 2; sx0 = c - 3; sx1 = c + 3; }   // the database's shortest line
+    return { x0: r1(sx0), x1: r1(sx1), y: r1(base + h * share), text: text.slice(0, 300) };
+  }
   // a mark's rectangle: { note: { strokes: [[[x, y], ...], ...] }, strike: { x0, x1, y }, cross: { x, y, w, h }, reinstate: { x, y } }
   function markRect(m) {
     const g = m.geometry || {};
@@ -302,7 +335,7 @@
       if (s.net) add(`Network (kept only as a fingerprint): ${String(s.net).slice(0, 16)}`, { size: 7.5 });
       add(`Fingerprint (SHA-256) of what they saw and signed: ${s.seen_sha256 || ''}`, { size: 7.5 });
     });
-    if ((rec.marks || []).length) { add('Marks made while signing', { bold: true, gap: 8 }); rec.marks.forEach(m => add(`Page ${m.page}: ${MARK_NAMES[m.kind] || m.kind} by ${m.by}, ${NZ(m.at)}${m.reviewed_at ? '; checked and re-approved by Tim McGuire ' + NZ(m.reviewed_at) : ''}. Initialled by every purchaser.`, { size: 8.5 })); }
+    if ((rec.marks || []).length) { add('Marks made while signing', { bold: true, gap: 8 }); rec.marks.forEach(m => add(`Page ${m.page}: ${MARK_NAMES[m.kind] || m.kind}${m.kind === 'strike' && m.text ? ' striking "' + m.text + '"' : ''} by ${m.by}, ${NZ(m.at)}${m.reviewed_at ? '; checked and re-approved by Tim McGuire ' + NZ(m.reviewed_at) : ''}. Initialled by every purchaser.`, { size: 8.5 })); }
     if ((rec.replaced || []).length) { add('Earlier versions', { bold: true, gap: 8 }); rec.replaced.forEach(r => add(`Draft ${r.number} was replaced on ${NZ(r.at)} before signing was finished. Signatures given on it are kept but void.`, { size: 8.5 })); }
     add('Contact details are never printed here. "Email verified" means the code was sent to the purchaser\'s own email and typed back correctly.', { size: 7.5, gap: 8 });
     return L;
@@ -348,6 +381,6 @@
   const ccaPages = pages => (pages || []).filter(p => (p.items || []).map(i => i.s).join(' ').replace(/\s+/g, ' ').match(/client and customer acknowledg/i)).map(p => p.n);
 
   const SIGN = { sha256Hex, sha256Bytes, ZERO, chainHash, chainBody, verifyChain, canon, makePlaces, placesFor, markPlaces, markRect, markOk, MARK_NAMES, filledGroups, rectOfMap, overlap,
-    executionLines, renderRound, ID_TYPES, NO_ROOM, NEAR, textRects, placeRow, GUIDE_NAMES, ccaPages, NZ, IW, IH };
+    executionLines, renderRound, snapStrike, ID_TYPES, NO_ROOM, NEAR, textRects, placeRow, GUIDE_NAMES, ccaPages, NZ, IW, IH };
   if (typeof module !== 'undefined' && module.exports) module.exports = SIGN; else root.SIGN = SIGN;
 })(typeof window !== 'undefined' ? window : globalThis);

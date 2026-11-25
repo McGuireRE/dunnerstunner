@@ -342,7 +342,7 @@ function councilTable(op){ if(offline()) throw new Error('Failed to fetch'); if(
 const DRAFT_TABLES=['offer_blanks','offer_blank_maps','offer_blank_reads','offer_terms','offer_term_changes','offer_drafts','offer_draft_approvals','offer_lawyer_lookups','offer_file_hashes'];   // migration 019
 const OFFER_TABLES=['offer_links','offer_events','offer_settings','offer_clauses','offer_hits'].concat(DRAFT_TABLES,['offer_signings','offer_signers','offer_sign_taps','offer_sign_receipts','offer_sign_marks','offer_sign_reviews','offer_sign_asks','offer_rounds','offer_documents','offer_agreements','offer_mail_drafts','offer_mail_log','offer_holds','offer_requests','offer_deposit_holders']);   // and migrations 023 and 024
 const OL=()=>(DB.offer_links||=[]), OE=()=>chainArr(DB.offer_events||=[]), OH=()=>(DB.offer_hits||=[]), PO=()=>(DB.property_offers||=[]);
-const OSET=()=>{ DB.offer_settings||=[]; if(!DB.offer_settings.length) DB.offer_settings.push({id:true,ks_warn_working_days:15,ai_daily_cap:40,updated_at:now()}); return DB.offer_settings[0]; };
+const OSET=()=>{ DB.offer_settings||=[]; if(!DB.offer_settings.length) DB.offer_settings.push({id:true,ks_warn_working_days:15,ai_daily_cap:40,updated_at:now()}); const o_=DB.offer_settings[0]; if(o_.agent_phone==null) o_.agent_phone='027 562 7207'; if(o_.agent_email==null) o_.agent_email=AGENTS[0]; return o_; };   // 025: the agent's own phone and email
 const offerStageOk=s=>['signed','live','under_offer'].includes(s);
 const offerToken=()=>{ const b=new Uint8Array(32); crypto.getRandomValues(b); return btoa(String.fromCharCode(...b)).replace(/=+$/,'').replace(/\+/g,'-').replace(/\//g,'_'); };
 const TOKEN_RE=/^[A-Za-z0-9_-]{40,64}$/;
@@ -875,7 +875,10 @@ function mailSideHit(offerId,forbid,text){ const o=PO().find(x=>x.id===offerId);
   const own=forbid==='purchaser'?[{who:'a purchaser',email:d.email,phone:d.phone}].concat((d.purchasers||[]).map(q=>({who:'a purchaser',email:q.email,phone:q.phone})))
     :(DB.property_people||[]).filter(x=>x.property_id===o.property_id).map(x=>({who:'a vendor',email:x.email,phone:x.phone})).concat((DB.agreement_people||[]).filter(x=>(DB.agreements||[]).some(a=>a.id===x.agreement_id&&a.property_id===o.property_id)).map(x=>({who:'a vendor',email:x.email,phone:x.phone})))
       .concat(OSR().filter(x=>{ const g=OSG().find(y=>y.id===x.signing_id); return g&&g.offer_id===offerId&&g.side==='vendor'; }).map(x=>({who:'a vendor',email:x.email,phone:null})));
-  return D?D.holdsOwn(text,D.ownContacts(own.filter(x=>String(x.email||'').toLowerCase()!==law||!law))):null; }
+  // 025: the agent's own contact details are never a party's, even where the agent is the party (Tim selling his own property)
+  const st_=OSET(), ownE=AGENTS.concat([st_.agent_email]).map(x=>String(x||'').trim().toLowerCase()), ownP=D?D.nsn(st_.agent_phone):'';
+  const keep=own.map(x=>Object.assign({},x,{email:ownE.includes(String(x.email||'').trim().toLowerCase())?null:x.email,phone:D&&ownP&&D.nsn(x.phone)===ownP?null:x.phone}));
+  return D?D.holdsOwn(text,D.ownContacts(keep.filter(x=>String(x.email||'').toLowerCase()!==law||!law))):null; }
 const mailSide=(kind,signerId,offerId)=>kind==='agreed_purchasers'?'purchaser':kind==='agreed_vendors'?'vendor':kind==='withdraw_party'?wdSide(offerId):kind==='withdraw_lawyer'?({vendor:'purchaser',purchaser:'vendor'})[wdSide(offerId)]:((OSG().find(g=>g.id===(OSR().find(x=>x.id===signerId)||{}).signing_id))||{}).side||'purchaser';
 function mailCheck(offerId,kind,signerId,to,cc,subject,body,sending){ const allowed=mailAllowed(offerId,kind,signerId);
   if(sending&&(String(subject||'')+' '+String(body||'')).indexOf('[Tim to')>=0) throw new Error('Fill or delete the marked blanks first.');
@@ -1119,7 +1122,7 @@ async function sgLock(sid,actor){ if(localStorage.getItem('mockLockFail')==='1')
   const record={address:p.address,offer_ref:o.buyer_ref,round,draft:{number:d.number,sha256:d.sha256},places_sha256:g.places_sha256,made_at:now(),
     signers:signers.map(s=>({name:s.name,method:g.method,verified_at:s.verified_at,witnessed_by:s.witnessed_by,id_sighted:s.id_sighted,consent_at:s.consent_at,receipts:OSC().filter(r=>r.signer_id===s.id).map(r=>({guide:r.guide,version:r.version,sha256:r.sha256,pages:r.pages,at:r.at})),
       first_tap:(OST().filter(t=>t.signer_id===s.id)[0]||{}).at,last_tap:(OST().filter(t=>t.signer_id===s.id).slice(-1)[0]||{}).at,finished_at:s.finished_at,places:sgRequired(g,s.position).length,ua:s.user_agent,net:s.net_hash,seen_sha256:s.seen_sha256})),
-    marks:marks.map(m=>({kind:m.kind,page:m.page,by:m.by,at:m.at,reviewed_at:m.reviewed_at})),replaced:OSG().filter(x=>x.offer_id===g.offer_id&&x.status==='replaced').map(x=>({number:DB.offer_drafts.find(y=>y.id===x.draft_id).number,at:x.replaced_at}))};
+    marks:marks.map(m=>Object.assign({kind:m.kind,page:m.page,by:m.by,at:m.at,reviewed_at:m.reviewed_at},m.kind==='strike'&&(m.geometry||{}).text?{text:m.geometry.text}:{})),replaced:OSG().filter(x=>x.offer_id===g.offer_id&&x.status==='replaced').map(x=>({number:DB.offer_drafts.find(y=>y.id===x.draft_id).number,at:x.replaced_at}))};
   const L=await pdfLibLoad(); let r, lifted=[], outstanding=[], formed=false;
   if(round===1) r=await window.SIGN.renderRound(L,draft,{places,taps,signers,marks,record,title:'Round 1 (signed by the purchasers): '+p.address});
   else { const NG=window.NEGO, earlier=docLayers(doc.id,round-1), cur={doc_round:round,number:n,side,signing_id:g.id,places,taps,signers:signers.map(s=>({position:s.position,name:s.name,sig_png:s.sig_png,init_png:s.init_png})),marks};
@@ -1127,7 +1130,7 @@ async function sgLock(sid,actor){ if(localStorage.getItem('mockLockFail')==='1')
     lifted=st.lifted.filter(x=>x.by_round===round).map(x=>({side:x.side,signer:x.signer,who:x.who,kind:x.kind,why:x.why,page:x.page,round:x.round,by:x.by})); outstanding=NG.outstanding(st,sides);
     formed=!marks.length&&!outstanding.length&&Object.keys(sides).length===2; const base=earlier[earlier.length-1];
     const title=`Round ${round} (signed by the ${side==='vendor'?'vendors':'purchasers'}): `+p.address;
-    Object.assign(record,{number:n,document:doc.number,side,base:{round:base.doc_round,sha256:base.sha256},link_changes:g.link_changes==null?null:!!g.link_changes,changes:marks.map(m=>({kind:m.kind,page:m.page,by:m.by,at:m.at,text:m.kind==='insert'?m.geometry.text:undefined})),lifted,outstanding:outstanding.length});
+    Object.assign(record,{number:n,document:doc.number,side,base:{round:base.doc_round,sha256:base.sha256},link_changes:g.link_changes==null?null:!!g.link_changes,changes:marks.map(m=>({kind:m.kind,page:m.page,by:m.by,at:m.at,text:m.kind==='insert'||m.kind==='strike'?(m.geometry||{}).text||undefined:undefined})),lifted,outstanding:outstanding.length});
     r=await NG.renderWorking(L,draft,{ink:st.ink,changes:st.changes,lines:NG.roundLines(record),title}); Object.assign(record,{title,draw_version:NG.DRAW_VERSION,check:{lifted,outstanding}}); }
   const sha=hex(await crypto.subtle.digest('SHA-256',r.bytes)), path=`properties/${g.property_id}/docs/offer-round-${g.offer_id}-${n}-${sha.slice(0,12)}.pdf`, blob=new Blob([r.bytes],{type:'application/pdf'});
   SO()[path]={size:blob.size,mime:'application/pdf'}; (window.__repoBlobs||={})[path]=blob; await blobKeep(path,blob);
@@ -1161,14 +1164,25 @@ async function sgAgree(b,me){ const c=agreementCheck(b.offer_id,b.accepted_at,b.
     changes:OSM().filter(m=>docSigns.includes(m.signing_id)).map(m=>{ const g=OSG().find(x=>x.id===m.signing_id); return {round:g.round_no,side:g.side,kind:m.kind,page:m.page,text:m.geometry.text||null,by:m.by_name,at:m.at}; }).sort((x,y)=>x.round-y.round||(x.at<y.at?-1:1)),
     note:'Where a change made in the negotiation alters a term above, the change governs. Read with the signed rounds.'};
   const ev=OE()[OE().length-1]; OAG().push({id:uid(),offer_id:o.id,property_id:o.property_id,document_id:c.doc.id,round_id:c.last.id,path,sha256:sha,size_bytes:blob.size,agreement_date:c.iso,date_text:c.date_text,accepted_at:b.accepted_at,record,chain_last:ev.hash,confirmed_by:me.email,locked_at:now(),round_sha256:c.last.sha256,draw_version:NG.DRAW_VERSION,terms});
-  Object.assign(c.doc,{status:'agreed',agreed_at:now()}); Object.assign(o,{status:'accepted',status_at:b.accepted_at,status_by:me.email}); save(); return {sha256:sha,existing:false,property_id:o.property_id}; }
+  Object.assign(c.doc,{status:'agreed',agreed_at:now()}); Object.assign(o,{status:'accepted',status_at:b.accepted_at,status_by:me.email}); save();
+  // Offers fixes 2: Tim alone is emailed the locked dated copy at once (mirrors fn/offer_sign_handler.ts agreedNotice)
+  let emailed=null; try{ agreedNoticeMock(o.id,false); emailed=true; }catch(_){ emailed=false; } save(); return {sha256:sha,existing:false,property_id:o.property_id,emailed}; }
+// the email to Tim (src/mail-core.js agreedNotice) from the same data offer_agreed_notice_material (025) gives the function; nothing is sent
+function agreedNoticeMock(oid,again){ const ag=OAG().find(x=>x.offer_id===oid); if(!ag) throw new Error("The agreement hasn't been made yet."); const o=PO().find(x=>x.id===oid), p=PT().find(x=>x.id===o.property_id);
+  const doc=ODC().find(x=>x.id===ag.document_id), rd=ORN().find(x=>x.id===ag.round_id), layers=docLayers(doc.id,rd.doc_round), d=DB.offer_drafts.find(x=>x.id===doc.draft_id), pp=(d.placed||[]).find(x=>x.id==='price');
+  const names=side=>((layers.filter(L=>L.side===side).sort((a,z)=>z.doc_round-a.doc_round)[0]||{}).signers||[]).map(x=>x.name), labels={}; ((ag.terms||{}).conditions||[]).forEach(c=>{ const i=window.OFFERS.condInfo(c.key); labels[c.key]=(i&&i.label)||c.key; });
+  const dh=(DB.offer_deposit_holders||[]).filter(x=>x.offer_id===oid).sort((a,z)=>z.id-a.id)[0], big=localStorage.getItem('mockAgreedBig')==='1';
+  const nt=window.MAIL.agreedNotice({address:p.address,agreement:ag,purchasers:names('purchaser'),vendors:names('vendor'),terms:ag.terms||{},layers,priceBoxes:pp?(pp.boxes&&pp.boxes.length?pp.boxes:[pp]):[],province:o.province||((OL().find(l=>l.property_id===o.property_id))||{}).province||'otago',offers:window.OFFERS,labels,
+    depositHolder:dh?{holder:dh.holder,other:dh.other_text,by_default:dh.by_default}:null,kiwisaver:((ag.terms||{}).kiwisaver===true)||((o.details||{}).kiwisaver===true),portalUrl:`https://portal.dunnerstunner.co.nz/properties/${o.property_id}/offers/${o.id}`,attached:!big,tooBig:big,again});
+  sgMail(again?'offer_agreed_copy_again':'offer_agreed_copy','tim',{subject:nt.subject,body:nt.body,attachments:big?[]:[{name:'Agreement '+p.address+'.pdf',sha256:ag.sha256,path:ag.path}]}); return {attached:!big}; }
 async function signInvoke(o){ const b=(o&&o.body)||{}, me=S&&S.user, net='h:'+mockNet(), ua=navigator.userAgent;
   const res=(data,status)=>status&&status>=400?{data:null,error:{message:String(status),context:{json:async()=>data}}}:{data,error:null};
   const calls=JSON.parse(localStorage.getItem('signCalls')||'[]'); calls.push(b.action); localStorage.setItem('signCalls',JSON.stringify(calls));
   if(offline()) return {data:null,error:{message:'Failed to fetch'}};
   const fail=e=>{ save(); return res({ok:false,error:e.message},400); };
-  if(b.action==='send_mail'||b.action==='lock'||b.action==='agree'){ if(!me||!AGENTS.includes(me.email)) return res({error:'Only Tim can do this'},403);
+  if(b.action==='send_mail'||b.action==='lock'||b.action==='agree'||b.action==='agreed_notice'){ if(!me||!AGENTS.includes(me.email)) return res({error:'Only Tim can do this'},403);
     try{ if(b.action==='lock') return res({ok:true,round:await sgLock(b.signing_id,me.email)});
+      if(b.action==='agreed_notice'){ const r_=agreedNoticeMock(b.offer_id,true); save(); return res({ok:true,attached:r_.attached}); }
       if(b.action==='agree'){ if(!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/.test(String(b.accepted_at||''))) return res({error:'Bad request'},400); return res({ok:true,agreement:await sgAgree(b,me)}); }
       // send_mail (mirrors fn/offer_sign_handler.ts and 024): take moves the draft to 'sending' with a pending log row of exactly what
       // goes; a second Send is refused; done records the outcome. localStorage mockMailDoneFail='1': recording fails after the mail went.

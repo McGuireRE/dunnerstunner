@@ -165,7 +165,7 @@
     add(`This copy was made and locked by the server on ${NZ(rec.made_at)}. Its own fingerprint is recorded when it is locked, and it is never changed.`, { size: 8.5 });
     const ch = rec.changes || [];
     add(ch.length ? `Changes made in this round (${ch.length}), each initialled by everyone on this side:` : `No changes: the ${sideName(rec.side)} accepted Round ${rec.round - 1} as it stood.`, { bold: true, gap: 8 });
-    ch.forEach(c => add(`Page ${c.page}: ${KIND_WORDS[c.kind] || c.kind}${c.kind === 'insert' && c.text ? ' "' + c.text + '"' : ''} by ${c.by}, ${NZ(c.at)}.`, { size: 8.5 }));
+    ch.forEach(c => add(`Page ${c.page}: ${KIND_WORDS[c.kind] || c.kind}${c.kind === 'insert' && c.text ? ' "' + c.text + '"' : c.kind === 'strike' && c.text ? ' striking "' + c.text + '"' : ''} by ${c.by}, ${NZ(c.at)}.`, { size: 8.5 }));
     if ((rec.lifted || []).length) { add(`Lifted from this working copy at the place of a change (they still show on the earlier rounds):`, { bold: true, gap: 8 });
       rec.lifted.forEach(x => add(`Page ${x.page}: ${x.kind === 'signature' ? 'the signature' : 'the initials'} of ${x.who || 'one of the ' + sideName(x.side)} from Round ${x.round}.`, { size: 8.5 })); }
     (rec.signers || []).forEach((s, i) => {

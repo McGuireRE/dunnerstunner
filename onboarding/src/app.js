@@ -5520,7 +5520,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     if (!root || btTranslated()) return;
     const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, { acceptNode: n => {
       if (!n.nodeValue || n.nodeValue.length < 3) return NodeFilter.FILTER_REJECT;
-      const p = n.parentElement; if (!p || p.closest(NT_SKIP + ',[translate="no"],.tr-help,[contenteditable]')) return NodeFilter.FILTER_REJECT;
+      const p = n.parentElement; if (!p || p.closest(NT_SKIP + ',svg,[translate="no"],.tr-help,[contenteditable]')) return NodeFilter.FILTER_REJECT;   // never inside an SVG: an HTML span there isn't drawn (Offers fixes 2: typed words vanished while signing)
       NT_RE.lastIndex = 0; return NT_RE.test(n.nodeValue) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT; } });
     const hits = []; while (w.nextNode()) hits.push(w.currentNode);
     hits.forEach(n => {
@@ -7028,23 +7028,36 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       await sgRpc('agent_mail_draft_add', { p_offer: g.offer_id, p_kind: 'sign_link', p_signer: s.id, p_to: [s.email], p_cc: [], p_subject: w.subject, p_body: w.body, p_attach: null }); }
     return S_.length;
   }
-  // the agreed copy's two emails, built from the agreement's data only (MAIL.agreedDrafts); anything it can't fill is a marked blank
-  async function mlBuildAgreed(o, p) {
+  // the agreed copy's two emails, built from the agreement's data only (MAIL.agreedDrafts); anything it can't fill is a marked blank.
+  // Offers fixes 2: the price as agreed after the negotiation (the rounds' changes, MAIL.agreedPrice), the deposit from it, and each due
+  // date and settlement day worked out from the agreement date with the property's province's holidays; what was worked out is shown
+  // once to Tim in the editor (notes), never in the emails.
+  async function mlAgreedResult(o, p, dhGiven) {
     const ag = ((await ofSafe(sb.from('offer_agreements').select('*').eq('offer_id', o.id))) || [])[0]; if (!ag) throw new Error('The agreement hasn\'t been made yet.');
+    if (!p || !p.address) p = await must(sb.from('properties').select('id,address,stage').eq('id', o.property_id).single());
     const doc = ((await ofSafe(sb.from('offer_documents').select('id,draft_id').eq('id', ag.document_id))) || [])[0];
     const dr = doc ? ((await ofSafe(sb.from('offer_drafts').select('id,placed').eq('id', doc.draft_id))) || [])[0] : null;
     const pl = id => (((dr && dr.placed) || []).find(x => x.id === id) || {}).text || '';
+    const pr = ((dr && dr.placed) || []).find(x => x.id === 'price'), priceBoxes = pr ? (pr.boxes && pr.boxes.length ? pr.boxes : [pr]) : [];
     // the vendors are those who signed this negotiation (their newest round), called by their preferred names from the property file
-    const [owners, hol, vg] = await Promise.all([ofSafe(sb.from('property_people').select('legal_name,pref_name,email,phone,role,position').eq('property_id', p.id).order('position')), ofSafe(sb.from('non_working_days').select('day,label')),
-      ofSafe(sb.from('offer_signings').select('id,round_no').eq('offer_id', o.id).eq('side', 'vendor').order('round_no', { ascending: false }))]);
+    const [owners, hol, vg, lk, ly] = await Promise.all([ofSafe(sb.from('property_people').select('legal_name,pref_name,email,phone,role,position').eq('property_id', p.id).order('position')), ofSafe(sb.from('non_working_days').select('day,label')),
+      ofSafe(sb.from('offer_signings').select('id,round_no').eq('offer_id', o.id).eq('side', 'vendor').order('round_no', { ascending: false })), ofSafe(sb.from('offer_links').select('province').eq('property_id', p.id)),
+      sgRpc('agent_offer_layers', { p_offer: o.id, p_document: ag.document_id }).catch(() => null)]);
     const vs = vg && vg[0] ? ((await ofSafe(sb.from('offer_signers').select(SG_COLS).eq('signing_id', vg[0].id).order('position'))) || []).filter(x => !x.void_at) : [];
     const vendorsOf = vs.map(x => { const pp = (owners || []).find(q => (q.email && x.email && q.email.toLowerCase() === x.email.toLowerCase()) || q.legal_name === x.name) || {}; return { legal_name: x.name, pref_name: pp.pref_name || '', email: x.email, phone: pp.phone || '' }; });
     const labels = {}; (((ag.terms || {}).conditions) || []).forEach(c => { const i = OF.condInfo && OF.condInfo(c.key); labels[c.key] = (i && i.label) || c.key; });
+    const dh = dhGiven || ((await ofSafe(sb.from('offer_deposit_holders').select('*').eq('offer_id', o.id).order('id', { ascending: false }).limit(1))) || [])[0] || { holder: MAIL.depositRecommended(ngKs(o, ag)) };
+    const province = o.province || ((lk || [])[0] || {}).province || OF.DEFAULT_PROVINCE;
+    const r = MAIL.agreedDrafts({ address: p.address, agreement: ag, terms: ag.terms || {}, details: o.details || {}, vendors: vendorsOf, layers: ly && Array.isArray(ly.layers) ? ly.layers : undefined, priceBoxes, province, offers: OF,
+      vendorLawyer: { person: pl('vl_person'), firm: pl('vl_firm'), email: pl('vl_email') || pl('vl_service'), phone: pl('vl_phone') }, holidays: hol || [], labels, depositHolder: { holder: dh.holder, other: dh.other_text || dh.other || '' } });
+    return { r, ag, p };
+  }
+  async function mlBuildAgreed(o, p) {
+    const ag0 = ((await ofSafe(sb.from('offer_agreements').select('id').eq('offer_id', o.id))) || [])[0]; if (!ag0) throw new Error('The agreement hasn\'t been made yet.');
     // who holds the deposit: Tim's newest choice, kept with the agreement; none yet, the recommended one is recorded as his choice now
     let dh = ((await ofSafe(sb.from('offer_deposit_holders').select('*').eq('offer_id', o.id).order('id', { ascending: false }).limit(1))) || [])[0];
-    if (!dh) { await sgRpc('agent_offer_deposit_holder', { p_offer: o.id, p_holder: MAIL.depositRecommended(ngKs(o, ag)), p_other: null, p_default: true }); dh = { holder: MAIL.depositRecommended(ngKs(o, ag)) }; }   // kept as the recommendation, not as his choice
-    const r = MAIL.agreedDrafts({ address: p.address, agreement: ag, terms: ag.terms || {}, details: o.details || {}, vendors: vendorsOf,
-      vendorLawyer: { person: pl('vl_person'), firm: pl('vl_firm'), email: pl('vl_email') || pl('vl_service'), phone: pl('vl_phone') }, holidays: hol || [], labels, depositHolder: { holder: dh.holder, other: dh.other_text || '' } });
+    if (!dh) { const agT = ((await ofSafe(sb.from('offer_agreements').select('terms').eq('offer_id', o.id))) || [])[0]; await sgRpc('agent_offer_deposit_holder', { p_offer: o.id, p_holder: MAIL.depositRecommended(ngKs(o, agT)), p_other: null, p_default: true }); dh = { holder: MAIL.depositRecommended(ngKs(o, agT)) }; }   // kept as the recommendation, not as his choice
+    const { r, ag } = await mlAgreedResult(o, p, dh);
     const att = { path: ag.path, sha256: ag.sha256, name: `Agreement ${String(p.address || '').replace(/[^A-Za-z0-9 ,.-]+/g, '').slice(0, 80)}.pdf` };
     for (const [kind, m] of [['agreed_purchasers', r.purchasers], ['agreed_vendors', r.vendors]]) {
       if (!m.to.length) continue;   // nobody to send to: Tim adds the address on the property or the offer first
@@ -7088,20 +7101,20 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       ${rd ? `<section class="card okc" id="sgRound"><h2>Round ${rd.doc_round || 1} locked</h2><p class="small">Locked ${esc(fmtDT(rd.locked_at))}. Fingerprint <span translate="no">${esc(rd.sha256)}</span>, worked out by the server from the stored file. The approved draft is unchanged, with every signature, initial and mark added on top, and the execution record on a page of its own at the end. It can't be changed or removed.</p>
         <div class="toolbar"><button class="btn ghost" type="button" id="sgRoundDl">Download Round ${rd.doc_round || 1}</button><button class="btn ghost" type="button" id="sgChain">Check the timeline</button></div><p class="small" id="sgChainOut" role="status" aria-live="polite"></p></section>` : ''}
       ${g.status === 'complete' && !rd ? `<div class="card warnc tight" id="sgLockFail"><p class="small" style="margin:0">Everyone has signed, but Round 1 wasn't locked yet.</p><div class="toolbar"><button class="btn primary" type="button" id="sgLockGo">Make and lock Round 1</button></div><p class="small err" id="sgLockErr" role="alert"></p></div>` : ''}
-      ${g.status === 'held' ? `<section class="card warnc" id="sgHeld"><h2>Check the change</h2><p class="small">A purchaser marked the document on this screen. Look at each mark. If it's fine, re-approve: every purchaser then initials beside it, and anyone who has finished signs again. If the offer itself needs changing, correct it and re-draft instead.</p>
-        <ul class="dr-list">${open.map(m => `<li class="small" data-mark="${m.id}"><strong>Page ${m.page}:</strong> ${esc(SG.MARK_NAMES[m.kind] || m.kind)} by ${nt(m.by_name)}, ${esc(fmtDT(m.at))}</li>`).join('')}</ul>
+      ${g.status === 'held' ? `<section class="card warnc" id="sgHeld"><h2>Check the change</h2><p class="small">A ${g.side === 'vendor' ? 'vendor' : 'purchaser'} marked the document on this screen. Look at each mark. If it's fine, re-approve: every ${g.side === 'vendor' ? 'vendor' : 'purchaser'} then initials beside it, and anyone who has finished signs again. If the offer itself needs changing, correct it and re-draft instead.</p>
+        <ul class="dr-list">${open.map(m => `<li class="small" data-mark="${m.id}"><strong>Page ${m.page}:</strong> ${esc(sgMarkWords(m))} by ${nt(m.by_name)}, ${esc(fmtDT(m.at))}</li>`).join('')}</ul>
         <div class="dr-nav"><label class="sr" for="sgHeldPick">Page</label><select id="sgHeldPick">${[...new Set(open.map(m => m.page))].map(n => `<option value="${n}">Page ${n}</option>`).join('')}</select></div><div id="sgHeldCanvas" class="dr-holder"></div>
         <div class="toolbar"><button class="btn primary" type="button" id="sgReview">Re-approve and carry on</button></div><p class="small err" id="sgRevErr" role="alert"></p></section>` : ''}
       <section class="card" id="sgSigners"><h2>${g.side === 'vendor' ? 'Vendors' : 'Purchasers'}</h2>${S_.map(s => `<div class="fact" data-signer="${s.position}"><div class="k">${nt(s.name)}${g.method === 'link' && s.email ? ` <span class="small" translate="no">${esc(s.email)}</span>` : ''}</div><div class="v" style="font-weight:400;display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><span data-sgstate>${esc(stateOf(s))}</span>
           ${g.method === 'in_person' && ['ready', 'signing'].includes(g.status) && !stale && !s.finished_at && !s.void_at ? `<button class="btn ${S_.find(x => !x.finished_at) === s ? 'primary' : 'ghost'}" type="button" data-turn="${s.id}">Start ${esc(s.name.split(' ')[0])}'s turn</button>` : ''}</div></div>`).join('')}</section>
       ${mlPanelHTML(sgDrafts, 'Emails to send', 'sgMail')}
-      ${g.method === 'link' && ['ready', 'signing'].includes(g.status) && !stale ? `<section class="card" id="sgSend"><h2>${g.status === 'ready' ? 'Send the links' : 'The links'}</h2><p class="small">${g.status === 'ready' ? 'Nothing has been sent yet. Send emails each purchaser their own link; they get a one-time code by email when they open it.' : 'Each purchaser has their own link. Sending again makes new links for anyone still to sign; their old ones stop working.'}</p>
+      ${g.method === 'link' && ['ready', 'signing'].includes(g.status) && !stale ? `<section class="card" id="sgSend"><h2>${g.status === 'ready' ? 'Send the links' : 'The links'}</h2><p class="small">${g.status === 'ready' ? `Nothing has been sent yet. Send emails each ${g.side === 'vendor' ? 'vendor' : 'purchaser'} their own link; they get a one-time code by email when they open it.` : `Each ${g.side === 'vendor' ? 'vendor' : 'purchaser'} has their own link. Sending again makes new links for anyone still to sign; their old ones stop working.`}</p>
         <div class="toolbar"><button class="btn ${g.status === 'ready' ? 'primary' : 'ghost'}" type="button" id="sgSendGo">${g.status === 'ready' ? 'Prepare the emails' : 'Prepare the links again'}</button></div><p class="small" id="sgSendOut" role="status" aria-live="polite"></p></section>` : ''}
       ${['ready', 'signing'].includes(g.status) && !stale ? (() => { const begun = S_.filter(s => s.consent_at || T_.some(t => t.signer_id === s.id));
         return `<section class="card" id="sgMethod"><h2>How they sign</h2>${begun.length ? `<p class="small" style="margin:0" id="sgMethodNo">${esc(begun.map(s => s.name).join(', '))} ${begun.length > 1 ? 'have' : 'has'} started signing, so this can't be changed to ${g.method === 'link' ? 'in person' : 'by link'} now. To start again, correct the offer and re-draft it; everyone then signs the new version.</p>`
           : `<p class="small">${g.method === 'link' ? 'By personal link.' : 'In person, on this device.'} Nobody has started signing, so you can change this.${g.method === 'link' && g.sent_at ? ' The links already sent stop working.' : ''}</p><div class="toolbar"><button class="btn ghost" type="button" id="sgChange">Change to ${g.method === 'link' ? 'in person' : 'by link'}</button></div><p class="small err" id="sgChangeErr" role="alert"></p>`}</section>`; })() : ''}
       ${(asks || []).length ? `<section class="card" id="sgAsks"><h2>Asked for a change</h2>${asks.map(a => { const s = S_.find(x => x.id === a.signer_id) || {}; return `<div class="fact"><div class="k">${nt(s.name || '')} · ${esc(fmtDT(a.at))}</div><div class="v" style="font-weight:400">${esc(a.text)}</div></div>`; }).join('')}<p class="small">If it needs a change, correct the offer, re-draft and approve it, and tap Ready to sign. Everyone then signs the new version.</p></section>` : ''}
-      ${Mk.length ? `<details class="card tight" id="sgMarks"><summary class="small">Marks (${Mk.length})</summary>${Mk.map(m => `<p class="small" style="margin:2px 0">Page ${m.page}: ${esc(SG.MARK_NAMES[m.kind] || m.kind)} by ${nt(m.by_name)}, ${esc(fmtDT(m.at))}${Rv.some(r => (r.marks || []).includes(m.id)) ? ', re-approved' : ''}</p>`).join('')}</details>` : ''}
+      ${Mk.length ? `<details class="card tight" id="sgMarks"><summary class="small">Marks (${Mk.length})</summary>${Mk.map(m => `<p class="small" style="margin:2px 0">Page ${m.page}: ${esc(sgMarkWords(m))} by ${nt(m.by_name)}, ${esc(fmtDT(m.at))}${Rv.some(r => (r.marks || []).includes(m.id)) ? ', re-approved' : ''}</p>`).join('')}</details>` : ''}
     </div>`;
     $('#sgBackO').addEventListener('click', () => viewOfferAgent(g.offer_id));
     const nw = $('#sgNewer'); if (nw) nw.addEventListener('click', () => viewSigning(g.replaced_by));
@@ -7132,9 +7145,11 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     }
     top();
   }
+  // a mark in words for Tim's lists: what it is, and the words struck through or typed (Offers fixes 2)
+  const sgMarkWords = m => { const t = ((m && m.geometry) || {}).text; return (SG.MARK_NAMES[m.kind] || (m.kind === 'insert' ? 'typed words' : m.kind)) + (t && (m.kind === 'strike' || m.kind === 'insert') ? (m.kind === 'strike' ? ' striking "' : ' "') + t + '"' : ''); };
   // marks drawn over a rendered page (an overlay; the page itself is never changed)
   function sgMarksLayer(r, marks, onPick) {
-    const NS = 'http://www.w3.org/2000/svg', svg = document.createElementNS(NS, 'svg'); svg.setAttribute('viewBox', `0 0 ${r.W} ${r.H}`); svg.setAttribute('class', 'sg-marks'); svg.setAttribute('preserveAspectRatio', 'none');
+    const NS = 'http://www.w3.org/2000/svg', svg = document.createElementNS(NS, 'svg'); svg.setAttribute('viewBox', `0 0 ${r.W} ${r.H}`); svg.setAttribute('class', 'sg-marks'); svg.setAttribute('preserveAspectRatio', 'none'); svg.setAttribute('translate', 'no');
     const Y = y => r.H - y, ln = (x1, y1, x2, y2, w) => { const l = document.createElementNS(NS, 'line'); Object.entries({ x1, y1: Y(y1), x2, y2: Y(y2), 'stroke-width': w || 1.2 }).forEach(([k, v]) => l.setAttribute(k, v)); return l; };
     (marks || []).forEach(m => { const gEl = document.createElementNS(NS, 'g'); gEl.setAttribute('data-markid', m.id); gEl.setAttribute('class', 'sg-mark sg-k-' + m.kind); const geo = m.geometry || {};
       if (m.kind === 'note') (geo.strokes || []).forEach(st => { const pl = document.createElementNS(NS, 'polyline'); pl.setAttribute('points', st.map(q => q[0] + ',' + Y(q[1])).join(' ')); gEl.appendChild(pl); });
@@ -7258,7 +7273,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         if (!F.marking) r.wrapEl.addEventListener('click', async e => { const b = e.target.closest('.sg-place'); if (!b || b.dataset.busy) return; if (ctx.taps.has(b.dataset.id)) { fillBox(b, req().find(x => x.id === b.dataset.id)); return counts(); } b.dataset.busy = '1'; err('');
           try { await ctx.api.tap(b.dataset.id); ctx.taps.add(b.dataset.id); } catch (x) { delete b.dataset.busy; return err(x.message); }
           delete b.dataset.busy; const pl = req().find(x => x.id === b.dataset.id); fillBox(b, pl); $$(`#sgPage .sg-place[data-id="${CSS.escape(pl.id)}"]`).forEach(x => fillBox(x, pl)); counts(); });
-        else if (F.marking !== 'reinstate') sgDrawLayer(r, F);
+        else if (F.marking !== 'reinstate') sgDrawLayer(r, F, ctx);
       };
       const fillBox = (b, pl) => { if (!b || !pl) return; const isDone = ctx.taps.has(pl.id); b.classList.toggle('sg-done', isDone); b.classList.toggle('sg-todo', !isDone); b.setAttribute('aria-pressed', isDone ? 'true' : 'false'); b.setAttribute('aria-label', (isDone ? 'Done: ' : '') + pl.label);
         if (isDone && !b.querySelector('img,.sg-name')) { if (pl.kind === 'name') { const sp = document.createElement('span'); sp.className = 'sg-name'; sp.textContent = pl.name || ctx.name; b.appendChild(sp); } else { const im = document.createElement('img'); im.alt = ''; im.src = pl.kind === 'signature' ? ctx.sig_png : ctx.init_png; b.appendChild(im); } } };
@@ -7296,7 +7311,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   function signFlowTools(ctx, F, paint) {
     const tools = $('#sgTools'); if (!tools) return;
     $$('[data-tool]').forEach(b => { b.className = 'btn ' + (F.marking === b.dataset.tool ? 'primary' : 'ghost'); });
-    let hint = $('#sgMarkHint'); const tb = hint ? hint.nextElementSibling : null; if (hint) hint.remove(); if (tb) tb.remove();
+    let hint = $('#sgMarkHint'); const tb = hint ? hint.nextElementSibling : null; if (hint) hint.remove(); if (tb) tb.remove(); const sw = $('#sgStrikeWords'); if (sw) sw.remove();
     if (F.marking && (ctx.round || 1) > 1) return ngTools(ctx, F, paint, tools);
     if (F.marking) { tools.insertAdjacentHTML('afterend', `<p class="small" id="sgMarkHint">${{ note: 'Write or draw on the page with your finger or stylus.', strike: 'Drag along the line of text to strike it through.', cross: 'Drag from one corner of the passage or box to the other.', reinstate: 'Tap the line or crossed-out box to reinstate.' }[F.marking]} Any mark goes to Tim to check before signing carries on.</p><div class="toolbar"><button class="btn primary" type="button" id="sgMarkSave" disabled>Save this mark</button><button class="btn ghost" type="button" id="sgMarkCancel">Cancel</button></div>`);
       $('#sgMarkCancel').addEventListener('click', () => { F.marking = null; F.draft = null; F.pick = null; signFlowTools(ctx, F, paint); });
@@ -7307,27 +7322,46 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         try { await ctx.api.mark(m); toast('Sent to Tim to check'); ctx.reload(); } catch (x) { e.textContent = x.message; } }); }
     paint();
   }
-  // drawing a mark: a note (freehand), a line through text, or a crossed-out box, in page points
-  function sgDrawLayer(r, F) {
+  // drawing a mark: a note (freehand), a line through text, or a crossed-out box, in page points. What is drawn stays on the page until it
+  // is saved or cancelled (Offers fixes 2). A line through text is snapped to the printed words it crosses (SIGN.snapStrike, from the
+  // page's own text): through their middle, from the first letter to the last, and the signer is shown the words before Save.
+  function sgDrawLayer(r, F, ctx) {
     const cv = document.createElement('canvas'), wrap = r.wrapEl, rect0 = () => wrap.getBoundingClientRect(); cv.className = 'sg-draw'; wrap.appendChild(cv);
     const b = rect0(), dpr = window.devicePixelRatio || 1; cv.width = b.width * dpr; cv.height = b.height * dpr; const g = cv.getContext('2d'); g.scale(dpr, dpr); g.strokeStyle = '#0d2973'; g.lineWidth = 2; g.lineCap = 'round';
     const pt = e => { const q = rect0(); return [Math.round(Math.max(0, Math.min(r.W, (e.clientX - q.left) / q.width * r.W)) * 10) / 10, Math.round(Math.max(0, Math.min(r.H, r.H - (e.clientY - q.top) / q.height * r.H)) * 10) / 10]; };
     const px = p => { const q = rect0(); return [p[0] / r.W * q.width, (r.H - p[1]) / r.H * q.height]; };
-    let down = null, strokes = F.draft && F.draft.kind === 'note' ? F.draft.geometry.strokes : [], cur = null;
+    if (F.marking === 'strike' && ctx && ctx.bytes) ngPageItems(ctx).catch(() => null);   // read the page's words now, so the snap is quick
+    let down = null, strokes = F.draft && F.draft.kind === 'note' && F.draft.page === F.page ? F.draft.geometry.strokes : [], cur = null;
+    // the saved-to-be mark, as it will be stored (and drawn on the locked copy)
+    const drawDraft = () => { const d = F.draft; if (!d || d.page !== F.page || d.kind === 'note') return; const G = d.geometry; g.beginPath();
+      if (d.kind === 'strike') { const [x0, y0] = px([G.x0, G.y]), [x1] = px([G.x1, G.y]); g.moveTo(x0, y0); g.lineTo(x1, y0); }
+      else if (d.kind === 'cross') { const [x0, y0] = px([G.x, G.y]), [x1, y1] = px([G.x + G.w, G.y + G.h]); g.rect(Math.min(x0, x1), Math.min(y0, y1), Math.abs(x1 - x0), Math.abs(y1 - y0)); g.moveTo(x0, y0); g.lineTo(x1, y1); g.moveTo(x0, y1); g.lineTo(x1, y0); }
+      else if (d.kind === 'insert') { const [qx, qy] = px([G.x, G.y]); g.moveTo(qx, qy - 10); g.lineTo(qx, qy + 2); g.lineTo(qx + 14, qy + 2); }
+      g.stroke(); };
     const redraw = (a, z) => { g.clearRect(0, 0, cv.width, cv.height); strokes.forEach(st => { g.beginPath(); st.forEach((p, i) => { const [x, y] = px(p); i ? g.lineTo(x, y) : g.moveTo(x, y); }); g.stroke(); });
-      if (a && z) { const [x0, y0] = px(a), [x1, y1] = px(z); g.beginPath(); if (F.marking === 'strike') { g.moveTo(x0, y0); g.lineTo(x1, y0); } else { g.rect(Math.min(x0, x1), Math.min(y0, y1), Math.abs(x1 - x0), Math.abs(y1 - y0)); g.moveTo(x0, y0); g.lineTo(x1, y1); g.moveTo(x0, y1); g.lineTo(x1, y0); } g.stroke(); } };
-    redraw();
-    const ready = () => { const s = $('#sgMarkSave'); if (s) s.disabled = !F.draft; };
-    cv.addEventListener('pointerdown', e => { e.preventDefault(); cv.setPointerCapture(e.pointerId); down = pt(e); if (F.marking === 'note') { cur = [down]; strokes.push(cur); } });
+      if (a && z) { const [x0, y0] = px(a), [x1, y1] = px(z); g.beginPath(); if (F.marking === 'strike') { g.moveTo(x0, y0); g.lineTo(x1, y0); } else { g.rect(Math.min(x0, x1), Math.min(y0, y1), Math.abs(x1 - x0), Math.abs(y1 - y0)); g.moveTo(x0, y0); g.lineTo(x1, y1); g.moveTo(x0, y1); g.lineTo(x1, y0); } g.stroke(); }
+      else drawDraft(); };
+    // the words a line will strike, shown under Save (Save confirms them)
+    const words = t => { let w = $('#sgStrikeWords'); const sv = $('#sgMarkSave'); if (!w && sv) { w = document.createElement('p'); w.className = 'small'; w.id = 'sgStrikeWords'; w.setAttribute('role', 'status'); w.setAttribute('aria-live', 'polite'); sv.parentElement.insertAdjacentElement('afterend', w); }
+      if (w) { w.textContent = t ? `This strikes through: "${t}". Tap ${sv ? sv.textContent.trim() : 'Save'} to confirm, or drag again.` : ''; w.hidden = !t; } };
+    redraw(); words(F.draft && F.draft.kind === 'strike' && F.draft.page === F.page ? F.draft.geometry.text : '');
+    const ready = () => { const s = $('#sgMarkSave'); if (s) s.disabled = !F.draft || (F.marking === 'insert' && $('#ngInsText') && !$('#ngInsText').value.trim()); };
+    const say = t => { const e = $('#sgErr'); if (e) e.textContent = t || ''; };
+    cv.addEventListener('pointerdown', e => { e.preventDefault(); cv.setPointerCapture(e.pointerId); down = pt(e); say(''); if (F.marking === 'note') { cur = [down]; strokes.push(cur); } });
     cv.addEventListener('pointermove', e => { if (!down) return; const p = pt(e); if (F.marking === 'note') { cur.push(p); if (cur.length > 400) cur.shift(); redraw(); } else if (F.marking !== 'insert') redraw(down, p); });
-    const end = e => { if (!down) return; const p = pt(e);
+    let seq = 0;
+    const end = async e => { if (!down) return; const p = pt(e), d0 = down; down = null;
       if (F.marking === 'note') { if (cur && cur.length < 2) cur.push(p); F.draft = { kind: 'note', page: F.page, geometry: { strokes: strokes.slice(-60) } }; }
       else if (F.marking === 'insert') F.draft = { kind: 'insert', page: F.page, geometry: { x: p[0], y: p[1], text: '', size: 9 } };
-      else if (F.marking === 'strike') F.draft = { kind: 'strike', page: F.page, geometry: { x0: Math.min(down[0], p[0]), x1: Math.max(down[0], p[0]), y: down[1] } };
-      else F.draft = { kind: 'cross', page: F.page, geometry: { x: Math.min(down[0], p[0]), y: Math.min(down[1], p[1]), w: Math.abs(p[0] - down[0]), h: Math.abs(p[1] - down[1]) } };
-      down = null; cur = null; if (F.marking !== 'note') redraw();
-      if (F.marking === 'insert' && F.draft) { const [qx, qy] = px([F.draft.geometry.x, F.draft.geometry.y]); g.beginPath(); g.moveTo(qx, qy - 10); g.lineTo(qx, qy + 2); g.lineTo(qx + 14, qy + 2); g.stroke(); }
-      ready(); };
+      else if (F.marking === 'strike') {
+        const my = ++seq, mark = F.marking; F.draft = null; words(''); ready(); redraw(d0, [p[0], d0[1]]);
+        let sn = null; try { const pg = (await ngPageItems(ctx)).find(x => x.n === F.page); sn = pg ? SG.snapStrike(pg, d0[0], p[0], d0[1]) : null; } catch (_) { sn = null; }
+        if (my !== seq || F.marking !== mark) return;
+        if (!sn) { redraw(); say('Drag along the words you want to strike through.'); return; }
+        F.draft = { kind: 'strike', page: F.page, geometry: sn }; redraw(); words(sn.text); ready(); return;
+      }
+      else F.draft = { kind: 'cross', page: F.page, geometry: { x: Math.min(d0[0], p[0]), y: Math.min(d0[1], p[1]), w: Math.abs(p[0] - d0[0]), h: Math.abs(p[1] - d0[1]) } };
+      cur = null; redraw(); ready(); };
     cv.addEventListener('pointerup', end); cv.addEventListener('pointercancel', end);
   }
 
@@ -7568,7 +7602,10 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <p class="small warnc" id="ngDepWarn" role="alert" ${ks && dhNow !== 'vendor_lawyer' ? '' : 'hidden'}>KiwiSaver is part of this deposit. It normally goes to the vendors' lawyer's trust account, because it can't be released before settlement. You can still choose this; the emails keep that line.</p>
       ${dhRow ? `<p class="small" id="ngDepNow">${dhRow.by_default ? 'The recommendation, used for the emails; you haven\'t chosen yet' : 'Your choice, recorded'} ${esc(fmtDT(dhRow.chosen_at))}: ${esc(dhRow.holder === 'other' ? dhRow.other_text : MAIL.DEPOSIT_HOLDERS[dhRow.holder].label)}.</p>` : ''}
       <div class="toolbar"><button class="btn ghost" type="button" id="ngDepSave">Use this${agMail.some(m => m.status === 'draft') ? ' and rebuild the emails' : ''}</button></div><p class="small" id="ngDepOut" role="status" aria-live="polite"></p></section>` : '';
-    const agMailHTML = ag ? (agMail.some(m => m.status !== 'void') ? mlPanelHTML(agMail, 'Emails to the parties', 'mlAgreed', 'Built from the agreement. Nothing goes until you press Send. Fill in or delete each marked blank, read each one, then send it, or tick Reviewed on both and use Send all reviewed. The lawyers\' pack is separate.')
+    // what the portal worked out for the emails (dates, the price after the negotiation, the deposit), shown once to Tim with how (Offers fixes 2)
+    let agNotes = []; if (ag && agMail.some(m => m.status === 'draft')) { try { agNotes = (await mlAgreedResult(o, null)).r.notes || []; } catch (_) { agNotes = []; } }
+    const notesHTML = agNotes.length ? `<div class="card note tight" id="mlNotes"><p class="small" style="margin:0 0 4px"><strong>Worked out for these emails (check each):</strong></p><ul class="dr-list">${agNotes.map(n => `<li class="small">${esc(n)}</li>`).join('')}</ul></div>` : '';
+    const agMailHTML = ag ? (agMail.some(m => m.status !== 'void') ? notesHTML + mlPanelHTML(agMail, 'Emails to the parties', 'mlAgreed', 'Built from the agreement. Nothing goes until you press Send. Fill in or delete each marked blank, read each one, then send it, or tick Reviewed on both and use Send all reviewed. The lawyers\' pack is separate.')
       : `<section class="card" id="mlAgreed"><h2>Emails to the parties</h2><p class="small">One to the purchasers (cc their lawyer) and one to the vendors (cc theirs), each with the agreed copy and the other side's lawyer. Nothing is sent until you press Send.</p><div class="toolbar"><button class="btn primary" type="button" id="mlBuildAgreed">Build the emails</button></div><p class="small" id="mlBuildOut" role="status" aria-live="polite"></p></section>`) : '';
     const last = open ? R_.filter(r => r.document_id === open.id).sort((a, z) => z.doc_round - a.doc_round)[0] : null;
     const live = open ? (gs || []).find(g => g.document_id === open.id && ['ready', 'signing', 'held', 'complete'].includes(g.status)) : null;
@@ -7578,7 +7615,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const rRow = r => `<li class="small" data-round="${r.doc_round}"><strong>Round ${r.doc_round}</strong>, signed by the ${ngSide(r.side)}: ${r.doc_round === 1 ? 'the offer' : r.changes ? `${r.changes} change${r.changes === 1 ? '' : 's'} (a counteroffer)` : 'accepted with no changes'}. Locked ${esc(fmtDT(r.locked_at))}, fingerprint <span translate="no">${esc(drShort(r.sha256))}</span>. <button class="btn link" type="button" data-ngdl="${r.id}">Download</button></li>`;
     return `<h3 style="margin:14px 0 4px">Negotiation</h3>${depHTML}${agMailHTML}<div id="ngOffer">
       ${ag ? `<div class="card okc" id="ngAgreed"><h3 style="margin:0 0 4px">Agreement made</h3><p class="small" style="margin:0">Dated ${esc(ag.date_text)}. Acceptance communicated ${esc(fmtDT(ag.accepted_at))}. The agreed copy is locked, fingerprint <span translate="no">${esc(drShort(ag.sha256))}</span>. Other offers on the property haven't been touched: you decide what happens with them.</p>
-        <div class="toolbar"><button class="btn ghost" type="button" id="ngAgDl">Download the agreed copy</button></div></div>` : ''}
+        <div class="toolbar"><button class="btn ghost" type="button" id="ngAgDl">Download the agreed copy</button><button class="btn ghost" type="button" id="ngAgMail">Email me the agreed copy again</button></div><p class="small" id="ngAgMailOut" role="status" aria-live="polite"></p></div>` : ''}
       ${docs.map(dc => `<div class="card tight ng-doc" data-doc="${dc.number}"><p class="small" style="margin:0 0 4px"><strong>Document ${dc.number}</strong> ${dc.status === 'open' ? '<span class="pill">Open</span>' : dc.status === 'agreed' ? '<span class="pill okp">Agreed</span>' : `<span class="pill of-off">Closed, kept as history</span> ${esc(fmtDT(dc.closed_at))}: ${esc(dc.close_reason || '')}`}</p>
         <ul class="dr-list">${R_.filter(r => r.document_id === dc.id).sort((a, z) => a.doc_round - z.doc_round).map(rRow).join('')}
         ${(gs || []).filter(g => g.document_id === dc.id && !['locked'].includes(g.status)).map(g => `<li><button class="of-row" type="button" data-signing="${g.id}"><span class="of-r1"><strong>Round ${g.round_no}</strong>, the ${ngSide(g.side)}, ${g.method === 'link' ? 'by link' : 'in person'} ${sgDot(g.status)}</span></button></li>`).join('')}</ul></div>`).join('')}
@@ -7619,6 +7656,9 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     $$('[data-ngdl]').forEach(b => b.addEventListener('click', async () => { try { const r = (await must(sb.from('offer_rounds').select('*').eq('id', b.dataset.ngdl).single())), dc = await must(sb.from('offer_documents').select('number').eq('id', r.document_id).single());
       ngSave(await ngFile(r.path, r.sha256), `Document-${dc.number}-Round-${r.doc_round}-${ngSlug(p.address)}.pdf`, 'application/pdf'); } catch (e) { toast(e.message); } }));
     const ad = $('#ngAgDl'); if (ad) ad.addEventListener('click', async () => { try { const ag = (await must(sb.from('offer_agreements').select('*').eq('offer_id', o.id)))[0]; ngSave(await ngFile(ag.path, ag.sha256), `Agreement-${ngSlug(p.address)}.pdf`, 'application/pdf'); } catch (e) { toast(e.message); } });
+    // Tim's own copy by email again (only ever to Tim; offer-sign agreed_notice): the same email as when it was confirmed
+    const am = $('#ngAgMail'); if (am) am.addEventListener('click', async () => { am.disabled = true; const out = $('#ngAgMailOut'); out.textContent = 'Sending it to you...';
+      const r = await offerCall('offer-sign', { action: 'agreed_notice', offer_id: o.id }); out.textContent = r && r.ok ? 'Sent to you, with the agreed copy' + (r.attached === false ? ' as a portal link (too big to attach).' : ' attached.') : (r && r.error) || 'It didn\'t send. Try again.'; am.disabled = false; });
     const cl = $('#ngClose'); if (cl) cl.addEventListener('click', async () => { cl.disabled = true; try { await sgRpc('agent_document_close', { p_offer: o.id, p_reason: $('#ngFreshWhy').value.trim() }); toast('Filed as history. Correct the offer, then re-draft it'); reload(); } catch (e) { $('#ngFreshErr').textContent = e.message; cl.disabled = false; } });
     const acc_ = $('#ngAccAt'); if (acc_) { let edited = false; $('#ngDate').addEventListener('input', () => { edited = true; });
       acc_.addEventListener('change', () => { const t = new Date(acc_.value); if (!edited && !isNaN(t)) $('#ngDate').value = NG.fullDate(t.toLocaleDateString('en-CA', { timeZone: 'Pacific/Auckland' })); }); }
@@ -7630,7 +7670,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       const r = await offerCall('offer-sign', { action: 'agree', offer_id: o.id, accepted_at: at.toISOString(), date_text: dt });
       if (!r || !r.ok) { er.textContent = (r && r.error) || 'That didn\'t work. Try again.'; ag.disabled = false; return; }
       // the property's stage moves to Under offer with the existing stage function; other offers are left for Tim
-      let msg = 'Agreement confirmed and locked.';
+      let msg = 'Agreement confirmed and locked.' + (r.agreement && r.agreement.emailed === true ? ' The dated agreed copy has been emailed to you.' : r.agreement && r.agreement.emailed === false ? ' The email to you with the agreed copy didn\'t go: use "Email me the agreed copy again".' : '');
       try { await mlBuildAgreed(o, p); msg += ' The emails to both parties are built for you to read and send.'; } catch (_) { msg += ' Build the emails to the parties on the offer page.'; }
       if (p.stage !== 'under_offer') { try { await sgRpc('agent_set_stage', { pid: p.id, p_stage: 'under_offer', p_reason: null, p_confirmed: true }); msg += ' The property is now under offer.'; } catch (e) { msg += ' The stage didn\'t move (' + e.message + '). Change it on the property page.'; } }
       toast(msg); reload(); });
@@ -7673,7 +7713,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const pages = D_.pages.map(x => ({ n: x.n, w: x.w, h: x.h, items: x.items }));
     const M = NG.presentPlaces({ pages, placed: d.placed || [], mapPlaces: mp.places || [], side, signers: people, layers, resignEvery });
     const st = NG.standing(layers), changedPages = [...new Set(last.marks.map(m => m.page))];
-    const R = { method: (opt && opt.method) || 'in_person', page: changedPages[0] || 1, linkChanges: setg.link_changes_default === true };   // Tim presents: in person unless he chooses a link
+    const R = { method: (opt && opt.method) || 'in_person', page: changedPages[0] || 1, linkChanges: setg.link_changes_default === true, checked: false };   // checked: Tim's tick, kept when the page is drawn again   // Tim presents: in person unless he chooses a link
     const paint = () => {
       const noEmail = people.filter(x => !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x.email)), noName = people.filter(x => !x.name);
       main().innerHTML = `<div class="view-pad dr-page" id="ngPresentView"><div class="toolbar no-print"><button class="btn ghost" type="button" id="ngBack">Back to the offer</button></div><span class="agent-flag">Only you see this</span>
@@ -7682,23 +7722,23 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
           ${st.lifted.length ? `<p class="small" id="ngLifted">${st.lifted.length} initial${st.lifted.length === 1 ? '' : 's'} or signature${st.lifted.length === 1 ? '' : 's'} lifted at the place of a change. They still show on the round${st.lifted.length === 1 ? '' : 's'} they were signed in.</p>` : ''}
           <div class="dr-nav"><label class="sr" for="ngPick">Page</label><select id="ngPick">${pages.map(pg => `<option value="${pg.n}" ${pg.n === R.page ? 'selected' : ''}>Page ${pg.n}${changedPages.includes(pg.n) ? ' (changed)' : ''}</option>`).join('')}</select></div>
           <div id="ngCanvas" class="dr-holder"></div>
-          <label class="choice cb"><input type="checkbox" id="ngChecked"><span class="mark"></span><span><span class="ct">I've looked at Round ${last.doc_round} and it can go to the ${ngSide(side)}</span></span></label></section>
+          <label class="choice cb"><input type="checkbox" id="ngChecked" ${R.checked ? 'checked' : ''}><span class="mark"></span><span><span class="ct">I've looked at Round ${last.doc_round} and it can go to the ${ngSide(side)}</span></span></label></section>
         <section class="card" id="ngWho"><h2>Who signs</h2>${people.map(x => `<p class="small" style="margin:0 0 4px" data-ngwho="${x.position}"><strong>${nt(x.name || 'No legal name yet')}</strong>: ${M.counts[x.position] || 0} places${R.method === 'link' ? ` <span translate="no">(${esc(x.email || 'no email')})</span>` : ''}</p>`).join('')}
           ${ownersChanged ? `<div class="card warnc tight" id="ngOwners"><p class="small" style="margin:0">The owners on the property have changed since Round ${prevL.doc_round}. Start a fresh copy, so the right people sign.</p></div>` : ''}
           <p class="small">${M.first ? `It's their first round, so each initials the foot of every page and every filled box, and signs.` : `Each initials every change not yet initialled${resignEvery ? ', and signs again' : '. Their signatures from before stand, unless a change lifted one: then they sign again'}.`}${side === 'vendor' ? ' Before signing, the vendors read the reminder that every chattel must be in full working order at settlement, and are told they can talk to their lawyer at any time. They see the purchasers\' names and lawyer, as on the agreement, never their own contact details.' : ''}</p>
-          ${noName.length ? `<div class="card warnc tight"><p class="small" style="margin:0">Add each vendor's legal name on the property first.</p></div>` : ''}
+          ${noName.length ? `<div class="card warnc tight"><p class="small" style="margin:0">${side === 'vendor' ? 'Add each vendor\'s legal name on the property first.' : 'Add each purchaser\'s name on the offer first.'}</p></div>` : ''}
           ${M.blocking.length ? `<div class="card warnc tight" id="ngBlock"><ul class="dr-list">${M.blocking.map(b => `<li class="small"><strong>${esc(b.label)}</strong>: ${esc(b.why)}</li>`).join('')}</ul></div>` : ''}</section>
         <section class="card" id="ngHow"><h2>How they sign</h2><div class="choices">
           <label class="choice"><input type="radio" name="ngMethod" value="in_person" ${R.method === 'in_person' ? 'checked' : ''}><span class="mark"></span><span><span class="ct">In person, on this device</span><span class="cd">One at a time. You record that you saw them sign and the photo ID you sighted (the type only).</span></span></label>
           <label class="choice"><input type="radio" name="ngMethod" value="link" ${R.method === 'link' ? 'checked' : ''}><span class="mark"></span><span><span class="ct">By a personal link to each</span><span class="cd">Each gets their own link and a one-time code by email. Nothing is sent until you tap Send.</span></span></label></div>
           <label class="choice cb" style="margin-top:8px"><input type="checkbox" id="ngLinkChanges" ${R.linkChanges ? 'checked' : ''}><span class="mark"></span><span><span class="ct">Let them make changes from their link</span><span class="cd">Off: their link shows only accept or decline, and Ask Tim for a change. On your device they can always make changes.</span></span></label>
-          ${R.method === 'link' && noEmail.length ? `<div class="card warnc tight" id="ngNoEmail"><p class="small" style="margin:0">${esc(noEmail.map(x => x.name || 'A vendor').join(', '))} ${noEmail.length === 1 ? 'has' : 'have'} no email. Add it on the property, or sign in person.</p></div>` : ''}</section>
+          ${R.method === 'link' && noEmail.length ? `<div class="card warnc tight" id="ngNoEmail"><p class="small" style="margin:0">${esc(noEmail.map(x => x.name || (side === 'vendor' ? 'A vendor' : 'A purchaser')).join(', '))} ${noEmail.length === 1 ? 'has' : 'have'} no email. Add it on the property, or sign in person.</p></div>` : ''}</section>
         <div class="err" id="ngErr" role="alert"></div>
         <div class="toolbar"><button class="btn primary" type="button" id="ngGo" ${M.blocking.length || noName.length || ownersChanged ? 'disabled' : ''}>Present to the ${ngSide(side)}</button></div>
         <p class="small">${R.method === 'link' ? 'This authorises it. You send the links on the next screen.' : 'Signing then happens on this device.'}</p></div>`;
       $('#ngBack').addEventListener('click', () => viewOfferAgent(oid));
       $$('input[name="ngMethod"]').forEach(x => x.addEventListener('change', () => { R.method = x.value; paint(); }));
-      $('#ngLinkChanges').addEventListener('change', e => { R.linkChanges = e.target.checked; });
+      $('#ngLinkChanges').addEventListener('change', e => { R.linkChanges = e.target.checked; }); $('#ngChecked').addEventListener('change', e => { R.checked = e.target.checked; });
       $('#ngPick').addEventListener('change', e => { R.page = +e.target.value; canvas(); });
       $('#ngGo').addEventListener('click', async () => { const b = $('#ngGo'); b.disabled = true; $('#ngErr').textContent = '';
         try { const r = await sgRpc('agent_round_present', { p_offer: oid, p_method: R.method, p_places: M.places, p_checked: $('#ngChecked').checked, p_note: null, p_link_changes: R.linkChanges }); toast(`Round ${r.round || last.doc_round + 1} authorised`); viewSigning(r.id); }
@@ -7745,7 +7785,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const info = await offerCall('offer-sign', { action: 'open', token });
     if (!info || info.ok !== true) return closed('This link isn\'t working', info && info.reason === 'network' ? 'We couldn\'t reach the signing page just now. Check your connection and try again.' : 'It may have been replaced by a newer link, or it has run out.');
     const VS = info.side === 'vendor', LR = (info.round || 1) > 1;
-    if (VS) document.title = 'An offer on your property · McGuire Real Estate';
+    if (VS) { header('An offer on your property', '', 0); document.title = 'An offer on your property · McGuire Real Estate'; } else if (LR) { header('The vendors\' reply', '', 0); document.title = 'The vendors\' reply · McGuire Real Estate'; }   // header() resets the title, so the title goes after it
     if (info.finished) return closed('You\'ve signed', VS || LR ? 'Thank you. Tim has your signed copy. Nothing goes back until everyone on your side has signed and Tim has checked it.' : 'Thank you. Tim has your signed offer. Nothing goes to the sellers until everyone has signed and Tim has checked it.');
     if (info.stopped) return closed(info.stopped === SG_ASKED ? 'Your request has gone to Tim' : 'This version isn\'t being signed', info.stopped);
     if (!Object.keys(GUIDES).length) await Promise.race([loadGuides(), new Promise(r => setTimeout(r, 4000))]);

@@ -16,16 +16,18 @@ import { createClient } from "npm:@supabase/supabase-js@2.45.4";
 import * as PDFLib from "npm:pdf-lib@1.17.1";
 import "../onboarding/src/sign-core.js";
 import "../onboarding/src/nego-core.js";
+import "../onboarding/src/offers-core.js";
 import "../onboarding/src/mail-core.js";
 import { makeHandler } from "./offer_sign_handler.ts";
 import { netOf } from "./offer_public_handler.ts";
 
-const SIGN = (globalThis as any).SIGN, NEGO = (globalThis as any).NEGO, MAIL = (globalThis as any).MAIL;
+const SIGN = (globalThis as any).SIGN, NEGO = (globalThis as any).NEGO, MAIL = (globalThis as any).MAIL, OFFERS = (globalThis as any).OFFERS;
 Deno.serve(makeHandler({
   cors: corsFor,   // only the onboarding pages (packages.dunnerstunner.co.nz) and Tim's portal (portal.dunnerstunner.co.nz) call this
   appUrl: APP_URL,
   portalUrl: "https://portal.dunnerstunner.co.nz/",
   mail: MAIL,
+  offers: OFFERS,
   timEmail: TIM_EMAIL,
   whoIsAgent: async (authorization) => {
     const uc = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!, { global: { headers: { Authorization: authorization } }, auth: { persistSession: false } });
