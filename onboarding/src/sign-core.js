@@ -261,7 +261,8 @@
   // ordinary text, mid cap height for figures and capitals ("$1,000,000"). Returns { x0, x1, y, text } or null when no text is there.
   const HV = [278,278,355,556,556,889,667,191,333,333,389,584,278,333,278,278,556,556,556,556,556,556,556,556,556,556,278,278,584,584,584,556,1015,667,667,722,722,667,611,778,722,278,500,667,556,833,722,778,667,778,722,667,611,722,667,944,667,667,611,278,278,278,469,556,333,556,556,500,556,556,278,556,556,222,222,500,222,833,556,556,556,556,333,500,278,556,500,722,500,500,500,334,260,334,584];
   const chW = c => { const k = c.charCodeAt(0); return k >= 32 && k <= 126 ? HV[k - 32] : 556; };
-  function snapStrike(page, x0, x1, y) {
+  // opts.keepLoneSign: the rule before offers hotfix 1 (a printed "$" beside the figure kept), so lines made then still check out
+  function snapStrike(page, x0, x1, y, opts) {
     const items = ((page && page.items) || []).filter(it => it && String(it.s || '').trim() && it.w > 0);
     const lo = Math.min(x0, x1) - 1, hi = Math.max(x0, x1) + 1, mid = it => it.y + (it.h || 9) * 0.35;
     // the items whose letters the drag passes through, then the nearest line of them
@@ -283,8 +284,7 @@
     // a printed currency sign on its own beside a filled-in figure ("$" then "$990,000") is the form's label, not words to strike
     // (offers hotfix 1, seen live: 'This strikes through: "$ $990,000"')
     const lone = wd => chars.slice(wd.a, wd.b + 1).map(ch => ch.c).join('') === '$';
-    while (hit.length > 1 && lone(hit[0])) hit.shift();
-    while (hit.length > 1 && lone(hit[hit.length - 1])) hit.pop();
+    if (!(opts && opts.keepLoneSign)) { while (hit.length > 1 && lone(hit[0])) hit.shift(); while (hit.length > 1 && lone(hit[hit.length - 1])) hit.pop(); }
     if (!hit.length) return null;
     const a = hit[0].a, b = hit[hit.length - 1].b, text = chars.slice(a, b + 1).map(ch => ch.c).join('').replace(/\s+/g, ' ').trim();
     const hts = chars.slice(a, b + 1).filter(ch => ch.it).map(ch => ch.it), h = Math.max(...hts.map(it => it.h || 9)), base = Math.min(...hts.map(it => it.y));
@@ -387,5 +387,6 @@
 
   const SIGN = { sha256Hex, sha256Bytes, ZERO, chainHash, chainBody, verifyChain, canon, makePlaces, placesFor, markPlaces, markRect, markOk, MARK_NAMES, filledGroups, rectOfMap, overlap,
     executionLines, renderRound, snapStrike, ID_TYPES, NO_ROOM, NEAR, textRects, placeRow, GUIDE_NAMES, ccaPages, NZ, IW, IH };
-  if (typeof module !== 'undefined' && module.exports) module.exports = SIGN; else root.SIGN = SIGN;
+  // also on the global object everywhere (a bundler may wrap this file as CommonJS: the offer-sign entry reads the globals; offers hotfix 2)
+  if (typeof module !== 'undefined' && module.exports) module.exports = SIGN; root.SIGN = SIGN;
 })(typeof window !== 'undefined' ? window : globalThis);

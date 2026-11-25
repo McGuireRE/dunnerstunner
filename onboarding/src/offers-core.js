@@ -363,5 +363,6 @@
     holidays, notWorkingBecause, isWorkingDay, yearKnown, addWorkingDays, countWorkingDays, onOrBefore, CONDITIONS, CUSTOM, condInfo, wordingFor, NO_WORDING, DEPOSIT, depositText,
     ADVICE, CHATTEL_NOTE, parsePrice, priceWords, breakNote, GAP_DAYS, KS_DAYS_DEFAULT, SETTLE_DAYS_DEFAULT, conditionDate, checkDates, longDate, LIMITS, EMAIL_RE, PHONE_RE, validate, conditionsLine,
     MAX_CHAIN, condMode, NOUNS, nounFor, chainProblem, lineUp, sameTiming, timingPlain };
-  if (typeof module !== 'undefined' && module.exports) module.exports = OFFERS; else root.OFFERS = OFFERS;
+  // also on the global object everywhere (a bundler may wrap this file as CommonJS: the offer-sign entry reads the globals; offers hotfix 2)
+  if (typeof module !== 'undefined' && module.exports) module.exports = OFFERS; root.OFFERS = OFFERS;
 })(typeof window !== 'undefined' ? window : globalThis);

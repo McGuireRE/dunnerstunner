@@ -332,5 +332,6 @@
 
   const NEGO = { typedItems, textWidth, changeRect, atPlace, ROW_REACH, inkOf, standing, outstanding, formed, presentPlaces, changePlaces, initialsBeside, rectsOf, KIND_WORDS, fullDate, parseFullDate, roundLines, agreementLines,
     renderWorking, redrawRound, nextTermNo, timelineHtml, eventWords, zip, crc32, sideName, other, MONTHS, DRAW_VERSION, textWidth, initialsFor };
-  if (typeof module !== 'undefined' && module.exports) module.exports = NEGO; else root.NEGO = NEGO;
+  // also on the global object everywhere (a bundler may wrap this file as CommonJS: the offer-sign entry reads the globals; offers hotfix 2)
+  if (typeof module !== 'undefined' && module.exports) module.exports = NEGO; root.NEGO = NEGO;
 })(typeof window !== 'undefined' ? window : globalThis);

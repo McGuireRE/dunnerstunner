@@ -914,5 +914,6 @@
 
   const DRAFT = { placedFrom, termNo, refNo, EDITIONS, EDITION_RE, editionOk, readPages, lines, xAt, matchAll, readEdition, editionPages, buildMap, parseChattels, numberIn, daysWords, FRONT_CONDITIONS, LABELS,
     packText, packBatches, placeFromProposal, rectOf, nsn, phoneRuns, plainText, ownContacts, holdsOwn, pickVendorLawyer, PROPOSAL_KINDS, planDraft, ruleApplies, fullDate, PLACEHOLDERS, placeholderFor, isPlaceholder, winAnsi, renderDraft, wrap, INK, FONT_SIZE };
-  if (typeof module !== 'undefined' && module.exports) module.exports = DRAFT; else root.DRAFT = DRAFT;
+  // also on the global object everywhere (a bundler may wrap this file as CommonJS: the offer-sign entry reads the globals; offers hotfix 2)
+  if (typeof module !== 'undefined' && module.exports) module.exports = DRAFT; root.DRAFT = DRAFT;
 })(typeof window !== 'undefined' ? window : globalThis);

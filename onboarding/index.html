@@ -4207,7 +4207,8 @@ window.JOURNEY_MEDIA_HINTS = {
     holidays, notWorkingBecause, isWorkingDay, yearKnown, addWorkingDays, countWorkingDays, onOrBefore, CONDITIONS, CUSTOM, condInfo, wordingFor, NO_WORDING, DEPOSIT, depositText,
     ADVICE, CHATTEL_NOTE, parsePrice, priceWords, breakNote, GAP_DAYS, KS_DAYS_DEFAULT, SETTLE_DAYS_DEFAULT, conditionDate, checkDates, longDate, LIMITS, EMAIL_RE, PHONE_RE, validate, conditionsLine,
     MAX_CHAIN, condMode, NOUNS, nounFor, chainProblem, lineUp, sameTiming, timingPlain };
-  if (typeof module !== 'undefined' && module.exports) module.exports = OFFERS; else root.OFFERS = OFFERS;
+  // also on the global object everywhere (a bundler may wrap this file as CommonJS: the offer-sign entry reads the globals; offers hotfix 2)
+  if (typeof module !== 'undefined' && module.exports) module.exports = OFFERS; root.OFFERS = OFFERS;
 })(typeof window !== 'undefined' ? window : globalThis);
 
 </script>
@@ -5224,7 +5225,8 @@ window.JOURNEY_MEDIA_HINTS = {
 
   const DRAFT = { placedFrom, termNo, refNo, EDITIONS, EDITION_RE, editionOk, readPages, lines, xAt, matchAll, readEdition, editionPages, buildMap, parseChattels, numberIn, daysWords, FRONT_CONDITIONS, LABELS,
     packText, packBatches, placeFromProposal, rectOf, nsn, phoneRuns, plainText, ownContacts, holdsOwn, pickVendorLawyer, PROPOSAL_KINDS, planDraft, ruleApplies, fullDate, PLACEHOLDERS, placeholderFor, isPlaceholder, winAnsi, renderDraft, wrap, INK, FONT_SIZE };
-  if (typeof module !== 'undefined' && module.exports) module.exports = DRAFT; else root.DRAFT = DRAFT;
+  // also on the global object everywhere (a bundler may wrap this file as CommonJS: the offer-sign entry reads the globals; offers hotfix 2)
+  if (typeof module !== 'undefined' && module.exports) module.exports = DRAFT; root.DRAFT = DRAFT;
 })(typeof window !== 'undefined' ? window : globalThis);
 
 </script>
@@ -5492,7 +5494,8 @@ window.JOURNEY_MEDIA_HINTS = {
   // ordinary text, mid cap height for figures and capitals ("$1,000,000"). Returns { x0, x1, y, text } or null when no text is there.
   const HV = [278,278,355,556,556,889,667,191,333,333,389,584,278,333,278,278,556,556,556,556,556,556,556,556,556,556,278,278,584,584,584,556,1015,667,667,722,722,667,611,778,722,278,500,667,556,833,722,778,667,778,722,667,611,722,667,944,667,667,611,278,278,278,469,556,333,556,556,500,556,556,278,556,556,222,222,500,222,833,556,556,556,556,333,500,278,556,500,722,500,500,500,334,260,334,584];
   const chW = c => { const k = c.charCodeAt(0); return k >= 32 && k <= 126 ? HV[k - 32] : 556; };
-  function snapStrike(page, x0, x1, y) {
+  // opts.keepLoneSign: the rule before offers hotfix 1 (a printed "$" beside the figure kept), so lines made then still check out
+  function snapStrike(page, x0, x1, y, opts) {
     const items = ((page && page.items) || []).filter(it => it && String(it.s || '').trim() && it.w > 0);
     const lo = Math.min(x0, x1) - 1, hi = Math.max(x0, x1) + 1, mid = it => it.y + (it.h || 9) * 0.35;
     // the items whose letters the drag passes through, then the nearest line of them
@@ -5514,8 +5517,7 @@ window.JOURNEY_MEDIA_HINTS = {
     // a printed currency sign on its own beside a filled-in figure ("$" then "$990,000") is the form's label, not words to strike
     // (offers hotfix 1, seen live: 'This strikes through: "$ $990,000"')
     const lone = wd => chars.slice(wd.a, wd.b + 1).map(ch => ch.c).join('') === '$';
-    while (hit.length > 1 && lone(hit[0])) hit.shift();
-    while (hit.length > 1 && lone(hit[hit.length - 1])) hit.pop();
+    if (!(opts && opts.keepLoneSign)) { while (hit.length > 1 && lone(hit[0])) hit.shift(); while (hit.length > 1 && lone(hit[hit.length - 1])) hit.pop(); }
     if (!hit.length) return null;
     const a = hit[0].a, b = hit[hit.length - 1].b, text = chars.slice(a, b + 1).map(ch => ch.c).join('').replace(/\s+/g, ' ').trim();
     const hts = chars.slice(a, b + 1).filter(ch => ch.it).map(ch => ch.it), h = Math.max(...hts.map(it => it.h || 9)), base = Math.min(...hts.map(it => it.y));
@@ -5618,7 +5620,8 @@ window.JOURNEY_MEDIA_HINTS = {
 
   const SIGN = { sha256Hex, sha256Bytes, ZERO, chainHash, chainBody, verifyChain, canon, makePlaces, placesFor, markPlaces, markRect, markOk, MARK_NAMES, filledGroups, rectOfMap, overlap,
     executionLines, renderRound, snapStrike, ID_TYPES, NO_ROOM, NEAR, textRects, placeRow, GUIDE_NAMES, ccaPages, NZ, IW, IH };
-  if (typeof module !== 'undefined' && module.exports) module.exports = SIGN; else root.SIGN = SIGN;
+  // also on the global object everywhere (a bundler may wrap this file as CommonJS: the offer-sign entry reads the globals; offers hotfix 2)
+  if (typeof module !== 'undefined' && module.exports) module.exports = SIGN; root.SIGN = SIGN;
 })(typeof window !== 'undefined' ? window : globalThis);
 
 </script>
@@ -5957,7 +5960,8 @@ window.JOURNEY_MEDIA_HINTS = {
 
   const NEGO = { typedItems, textWidth, changeRect, atPlace, ROW_REACH, inkOf, standing, outstanding, formed, presentPlaces, changePlaces, initialsBeside, rectsOf, KIND_WORDS, fullDate, parseFullDate, roundLines, agreementLines,
     renderWorking, redrawRound, nextTermNo, timelineHtml, eventWords, zip, crc32, sideName, other, MONTHS, DRAW_VERSION, textWidth, initialsFor };
-  if (typeof module !== 'undefined' && module.exports) module.exports = NEGO; else root.NEGO = NEGO;
+  // also on the global object everywhere (a bundler may wrap this file as CommonJS: the offer-sign entry reads the globals; offers hotfix 2)
+  if (typeof module !== 'undefined' && module.exports) module.exports = NEGO; root.NEGO = NEGO;
 })(typeof window !== 'undefined' ? window : globalThis);
 
 </script>
@@ -6359,7 +6363,8 @@ window.JOURNEY_MEDIA_HINTS = {
   }
 
   const MAIL = { LINK, BLANK_RE, get TIM_PHONE() { return TIM_PHONE; }, setAgent, allChanges, signLinkDraft, reopenedDraft, roundNotice, agreedDrafts, agreedPrice, agreedDates, agreedNotice, PRICE_BLANK, DEPOSIT_HOLDERS, depositRecommended, withdrawDrafts, firstWorkingDay, parseDate, longDate, toHtml, P_ACTION };
-  if (typeof module !== 'undefined' && module.exports) module.exports = MAIL; else root.MAIL = MAIL;
+  // also on the global object everywhere (a bundler may wrap this file as CommonJS: the offer-sign entry reads the globals; offers hotfix 2)
+  if (typeof module !== 'undefined' && module.exports) module.exports = MAIL; root.MAIL = MAIL;
 })(typeof window !== 'undefined' ? window : globalThis);
 
 </script>
@@ -12083,7 +12088,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   // Tim's address on the offer and signing pages people use without signing in (the one his emails come from: fn/shared.ts TIM_EMAIL and
   // offer_settings.agent_email; a test keeps them equal). The agency agreement's own documents keep their wording.
   const OF_TIM_EMAIL = 'hello@timmcguire.co.nz';
-  const OF_PRIVACY ='McGuire Real Estate Limited (Tim McGuire) collects these details to prepare your offer and to keep in touch with you about it. The terms of your offer, including the price, conditions, dates and the purchasers\' names, are presented to the sellers. Your own phone and email are used only by Tim, are not given to the sellers, and never go on the agreement: only the lawyers\' details do. Your details are stored securely with the records of this sale. You can ask Tim to see or correct the information held about you at any time: tim@mcguire.co.nz or 027 562 7207.';
+  const OF_PRIVACY ='McGuire Real Estate Limited (Tim McGuire) collects these details to prepare your offer and to keep in touch with you about it. The terms of your offer, including the price, conditions, dates and the purchasers\' names, are presented to the sellers. Your own phone and email are used only by Tim, are not given to the sellers, and never go on the agreement: only the lawyers\' details do. Your details are stored securely with the records of this sale. You can ask Tim to see or correct the information held about you at any time: ' + OF_TIM_EMAIL + ' or 027 562 7207.';
   function ofFormHTML(ctx, F, restored) {
     const pub = ctx.mode === 'public', fix = ctx.mode === 'correct', S = F.settlement;
     const sec = (id, title, inner, opt) => `<section class="card of-sec" id="ofSec_${id}" data-sec="${id}"><h2>${title}${opt ? ` <span class="opt">${opt}</span>` : ''}</h2>${inner}<div class="err of-secerr" data-secerr="${id}" role="alert"></div></section>`;

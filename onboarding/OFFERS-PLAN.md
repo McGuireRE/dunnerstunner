@@ -716,6 +716,22 @@ Going live, with Tim's approval, in order:
    to a test vendor; a counter and an acceptance; check Tim's one email per round; the agreed copy and its two draft emails (fill the
    blanks, send); the lawyers' pack; a request from a test link (Tim's urgent email), Freeze now, Unfreeze and Withdraw now. Tim's solicitor confirms the method before the first real offer.
 
+## Offers hotfix 2 (26 November 2026; branch `offers-hotfix-2`)
+
+Status: Built, awaiting review and Tim's approval. offer-sign to be redeployed; no database change.
+Hotfix 1's top-level pdf.js import crashed the whole function on Supabase at start-up ("DOMMatrix is not defined"): even OPTIONS
+answered 500, and offer-sign was rolled back to 7bdc9c6 within two minutes.
+1. The struck-words check now reads the draft with unpdf 1.9.1's serverless pdf.js (no DOM globals, no worker file, no canvas),
+   loaded lazily inside the check only. A library problem can only refuse a lock with a line through text, never stop the function.
+   unpdf 1.9.1 (pdf.js 6.4) reads exactly the same words in the same places as the screen's pdf.js 6.2.108 (checked on the synthetic
+   blank and a drafted agreement); unpdf 1.4.0 (pdf.js 5.4) does not, so it was not used.
+2. `tests/page-text-bundle.test.js` bundles the real entry (fn/offer_sign.ts) and runs it with no file, network or system access and
+   without DOMMatrix, Path2D, ImageData and OffscreenCanvas: the module loads, OPTIONS answers 200, and the reader gives the words and
+   turns. The same run on 21b7dc7's code fails with "DOMMatrix is not defined", as it did live.
+3. The signing cores also set their global when a bundler wraps them as CommonJS (the entry reads the globals).
+4. A line made before hotfix 1 (with the form's printed "$" kept) still checks out at lock, so nothing already signed is stuck.
+5. The offer form's privacy notice gives hello@timmcguire.co.nz.
+
 ## Offers hotfix 1 (live smoke test, 26 November 2026; branch `offers-hotfix-1`)
 
 Status: Built, awaiting review and Tim's approval. offer-sign to be redeployed; no database change.

@@ -98,8 +98,10 @@ export function makeHandler(d: Deps) {
       const err: any = new Error("The struck words couldn't be checked, so the round wasn't locked. Tim will look into it."); err.detail = "pdf.js could not read the draft: " + why; throw err; }
     for (const k of lines) {
       const g = k.geometry, pg0 = pages.find((x: any) => x.n === k.page), typed = d.nego && d.nego.typedItems ? d.nego.typedItems(earlier || [], marks || [], k.page) : [];
-      const pg = pg0 ? Object.assign({}, pg0, { items: (pg0.items || []).concat(typed) }) : null, sn = pg && !pg.rot ? d.sign.snapStrike(pg, g.x0, g.x1, g.y) : null;
-      const same = sn && sn.text === g.text && Math.abs(sn.x0 - g.x0) <= 0.6 && Math.abs(sn.x1 - g.x1) <= 0.6 && Math.abs(sn.y - g.y) <= 0.6;
+      const pg = pg0 ? Object.assign({}, pg0, { items: (pg0.items || []).concat(typed) }) : null;
+      // the snap as the screen makes it now, or as it made it before offers hotfix 1 (a printed "$" kept), so nothing already signed is stuck
+      const fits = (sn: any) => !!sn && sn.text === g.text && Math.abs(sn.x0 - g.x0) <= 0.6 && Math.abs(sn.x1 - g.x1) <= 0.6 && Math.abs(sn.y - g.y) <= 0.6;
+      const same = !!pg && !pg.rot && (fits(d.sign.snapStrike(pg, g.x0, g.x1, g.y)) || fits(d.sign.snapStrike(pg, g.x0, g.x1, g.y, { keepLoneSign: true })));
       if (!same) throw new Error(`A line through text on page ${k.page} doesn't match the words on the document, so the round wasn't locked. Tim will look into it.`);
     }
   }

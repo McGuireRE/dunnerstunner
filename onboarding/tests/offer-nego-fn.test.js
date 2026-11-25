@@ -175,6 +175,13 @@ let failTim = false;
     // hotfix 1: the cause is logged and, on Tim's own request, given as a short reason
     expect(logged.some(l => /struck-words check failed: Error: Setting up fake worker failed/.test(l)) && !logged.some(l => /655,000|Purchase price/.test(l)), 'the cause goes to the function log, never the document\'s words: ' + JSON.stringify(logged));
     expect(r.j.detail === 'pdf.js could not read the draft: Error: Setting up fake worker failed', 'and Tim\'s response says why: ' + JSON.stringify(r.j));
+    // hotfix 2: a line made before hotfix 1 kept the form's printed "$" ("$ $990,000"); it still checks out, as does the line made now
+    { const lp = [{ n: 1, w: 595.32, h: 842.04, rot: 0, items: [{ s: 'Purchase price', x: 28.3, y: 342.5, w: 60, h: 9 }, { s: '$', x: 97.8, y: 342.5, w: 5, h: 9 }, { s: '$990,000', x: 107.1, y: 342.5, w: 37.5, h: 9 }] }, { n: 2, w: 595.32, h: 842.04, rot: 0, items: [] }];
+      for (const [what, keep] of [['a line made with the old rule', true], ['a line made now', false]]) {
+        const g = S.snapStrike(lp[0], 98.5, 140, 345, keep ? { keepLoneSign: true } : undefined);
+        marks2 = [Object.assign({}, strike, { geometry: g }), insert]; pageTextOverride = async () => lp; files = Object.fromEntries(Object.entries(files).filter(([k]) => !/offer-round-/.test(k))); calls = [];
+        r = await J(await post({ action: 'lock', signing_id: SID }, { Authorization: 'Bearer good' }));
+        expect(r.j.ok && calls.some(c => c[0] === 'offer_round_lock'), what + ' ("' + g.text + '"): checked and locked: ' + JSON.stringify(r.j)); } }
     // a line with no words recorded, arriving for a round being locked now: refused
     pageTextOverride = null; marks2 = [Object.assign({}, strike, { geometry: { x0: 100, x1: 160, y: 403 } }), insert]; calls = [];
     r = await J(await post({ action: 'lock', signing_id: SID }, { Authorization: 'Bearer good' })); expect(r.status === 400 && /no words recorded/.test(r.j.error) && !calls.some(c => c[0] === 'offer_round_lock'), 'a line with no words recorded: not locked');
@@ -257,6 +264,6 @@ let failTim = false;
   const entry = fs.readFileSync(path.join(__dirname, '..', '..', 'fn', 'offer_sign.ts'), 'utf8');
   expect(/cors: corsFor/.test(entry) && /nego-core\.js/.test(entry) && /renderWorking/.test(entry) && /JWT verification still OFF/.test(entry), 'the entry uses the app-and-portal CORS and the negotiation core');
   expect(/offers-core\.js/.test(entry) && /offers: OFFERS/.test(entry), 'the entry loads the working-day counter for Tim\'s agreement email (Offers fixes 2)');
-  expect(/sign: SIGN/.test(entry) && /pageText/.test(entry) && /page_text\.ts/.test(entry) && /pdfjs-dist@6\.2\.108/.test(entry) && /waitUntil/.test(entry) && /logMail/.test(entry) && /sendMail\(admin\(\), agreementId/.test(entry), 'the entry checks struck words with pdf.js, sends Tim\'s email after answering, and files email log rows with the agency agreement');
+  expect(/sign: SIGN/.test(entry) && /pageText/.test(entry) && /page_text\.ts/.test(entry) && /await import\("npm:unpdf@1\.9\.1"\)/.test(entry) && /waitUntil/.test(entry) && /logMail/.test(entry) && /sendMail\(admin\(\), agreementId/.test(entry), 'the entry checks struck words with unpdf\'s pdf.js (loaded lazily), sends Tim\'s email after answering, and files email log rows with the agency agreement');
   console.log(JSON.stringify(Object.assign(out, { errs }), null, 1));
 })().catch(e => { console.log(JSON.stringify({ errs: ['crashed: ' + (e.stack || e.message)] })); });

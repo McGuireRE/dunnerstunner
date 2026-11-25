@@ -278,6 +278,7 @@ const AGENT = 'agent-test@example.com';
   await q.fill('#ofEmail', 'x@example.com'); await q.fill('#ofPhone', '021 000 1111'); await q.click('input[name="of_seen_docs"][value="yes"] + .mark'); await q.fill('#ofPrice', '500000');
   await q.click('input[name="of_kiwisaver"][value="no"] + .mark'); await q.fill('#ofp0f', 'A'); await q.fill('#ofp0l', 'B'); await q.click('input[name="of_related"][value="no"] + .mark');
   await q.click('input[name="of_sign"][value="digital"] + .mark'); await q.click('label:has([data-fb="privacy"]) .mark'); await q.click('#ofSend'); await q.waitForTimeout(400);
+  { const pv = await q.textContent('.of-privacy'); expect(/hello@timmcguire\.co\.nz or 027 562 7207/.test(pv) && !/tim@mcguire/.test(pv), 'the privacy notice gives Tim\'s current address (offers hotfix 2): ' + pv); }
   out.busyMsg = await q.textContent('#ofErr'); expect(/from your internet connection/.test(out.busyMsg) && /call Tim on 027 562 7207 or email hello@timmcguire\.co\.nz/.test(out.busyMsg), 'the busy message names the limit and says to call or email Tim: ' + out.busyMsg);
   // the hidden field filled: told it was received (it was), kept and flagged, nobody emailed
   await q.evaluate(() => localStorage.setItem('mockNet', 'net-spam')); const mails0 = (await db(q)).email_log.length;

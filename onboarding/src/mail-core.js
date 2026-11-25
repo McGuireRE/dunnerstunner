@@ -395,5 +395,6 @@
   }
 
   const MAIL = { LINK, BLANK_RE, get TIM_PHONE() { return TIM_PHONE; }, setAgent, allChanges, signLinkDraft, reopenedDraft, roundNotice, agreedDrafts, agreedPrice, agreedDates, agreedNotice, PRICE_BLANK, DEPOSIT_HOLDERS, depositRecommended, withdrawDrafts, firstWorkingDay, parseDate, longDate, toHtml, P_ACTION };
-  if (typeof module !== 'undefined' && module.exports) module.exports = MAIL; else root.MAIL = MAIL;
+  // also on the global object everywhere (a bundler may wrap this file as CommonJS: the offer-sign entry reads the globals; offers hotfix 2)
+  if (typeof module !== 'undefined' && module.exports) module.exports = MAIL; root.MAIL = MAIL;
 })(typeof window !== 'undefined' ? window : globalThis);
