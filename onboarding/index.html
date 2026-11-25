@@ -12361,6 +12361,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   }
   // the card's button: the places checker for a loaded blank, otherwise the Offers tile's blank section
   function drBlankGoWire(pid, scope) {
+    if (!scope) return;   // the tile or page isn't shown
     $$('[data-blankgo]', scope).forEach(b => b.addEventListener('click', async () => {
       if (b.dataset.blankgo) return viewBlankMap(b.dataset.blankgo);
       if (!$('#drBlank')) await viewProperty(pid);
