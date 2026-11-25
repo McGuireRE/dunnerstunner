@@ -770,6 +770,10 @@ Before go-live (review READY at b01a70b; two notes):
   while a round is being locked waits for the lock and is then refused. `tests/offer-undo-race.js` (local stand-in only) shows it: the
   service role's undo and cleared drawing, and Tim's start-again, each wait and are refused, with no deadlock; the same test on the
   previous 026 let an undo into the round as it was sealed.
+- After the next review: a place tapped again and a signature drawn again take the signing (FOR UPDATE) before the signer, as finishing,
+  undoing and changes do, because their rows' guard reads the signing; one lock order everywhere (the offer, then the signing, then the
+  signer). The race test adds the same signer's re-tap at the same moment as their undo (48 pairs), finish (40) and change (40): no
+  deadlock (the previous 026 gave 13, 15 and 21).
 Tests: `tests/offers-fixes3.test.js` (new), `tests/offer-undo-rollback.sql` and `.js` (new; run on the local stand-in through 025:
 every line as expected, no capitals), `tests/offer-sign-fn.test.js` and `tests/mail-core.test.js` (extended), the mock (`tests/mock.js`)
 mirrors 026. 024's rollback test, 025's rollback test and 024's race test were also run with 026 applied: the same results.

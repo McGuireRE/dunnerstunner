@@ -6,6 +6,8 @@
 //      (guard_offer_sign_open_work: the offer FOR KEY SHARE, then the signing FOR SHARE), and are then refused as sealed. Neither
 //      deadlocks, and the sealed round keeps every tap.
 //   2. at the same moment Tim starts the round again (agent_signing_revert_round): it waits for the lock, and is then refused (sealed).
+//   3. a place tapped again (a redo row) by a signer at the same moment as that signer's undo, finish or change, with the real
+//      functions, at least 40 pairs of each (Round 2, twelve vendors in person): no deadlock (offer, then signing, then signer everywhere).
 // Any other error, a deadlock above all, fails the test. The scratch database is dropped afterwards.
 // Run: RACE_TEMPLATE=t25 PGHOST=/tmp/pg26 PGPORT=5499 PGUSER=postgres node onboarding/tests/offer-undo-race.js
 // (Named .js, not .test.js, so run-all.js doesn't run it.)
@@ -73,6 +75,54 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
     ok(![U, R, L, V].some(x => /deadlock/i.test(x.e || '')), 'no deadlock');
     const taps1 = (await psql(`select count(*) from public.offer_sign_taps_live where signing_id = '${g}'`)).o, rows = (await psql(`select count(*) from public.offer_sign_undos where signing_id = '${g}'`)).o + '/' + (await psql(`select count(*) from public.offer_sign_redraws where signing_id = '${g}'`)).o;
     out.after = { taps0, taps1, rows }; ok(taps0 === taps1 && rows === '0/0', 'the sealed round keeps every tap, and nothing was written: ' + JSON.stringify(out.after));
+    // 3. the same signer's steps at the same moment, with the real functions, many times: a place tapped again (a redo row, whose guard
+    //    reads the signing) against that signer's undo, finish or change. One lock order everywhere (the offer, then the signing, then
+    //    the signer): no deadlock. Round 2 to twelve vendors in person, so each pairing has its own signers (the hourly caps stay clear).
+    const r2 = await psql(`${AGENT}
+      do $s$ declare pid uuid := (select v::uuid from public.rc where k = 'pid'); o uuid := (select v::uuid from public.rc where k = 'o'); g2 uuid; pl jsonb := '[]'; k int; s public.offer_signers; png text := 'data:image/png;base64,' || repeat('iVBORw0KGgo', 30);
+      begin
+        insert into public.property_people (property_id, position, legal_name, email, phone, role) select pid, q, 'Vendor ' || q, 'v' || q || '@example.com', '', 'owner' from generate_series(1, 12) q;
+        for k in 1..12 loop pl := pl || jsonb_build_array(jsonb_build_object('id', 'foot:p1:s' || k, 'signer', k, 'kind', 'initial', 'why', 'foot', 'ref', 'p1', 'page', 1, 'x', 20 + k * 40, 'y', 5, 'w', 26, 'h', 13),
+          jsonb_build_object('id', 'block:vsig' || k || ':s' || k, 'signer', k, 'kind', 'signature', 'why', 'block', 'ref', 'vsig' || k, 'page', 1, 'x', 330, 'y', 40 + k * 30, 'w', 150, 'h', 22)); end loop;
+        g2 := (public.agent_round_present(o, 'in_person', pl, true)->>'id')::uuid;
+        perform public.agent_signing_start(g2);
+        for s in select * from public.offer_signers where signing_id = g2 order by position loop
+          perform public.offer_sign_do_consent(s.id, 'ua', null); perform public.offer_sign_do_receipt(s.id, 'chattels', null, null, null, null); perform public.offer_sign_do_marks(s.id, png, png); end loop;
+        insert into public.rc values ('g2', g2);
+      end $s$;
+      create function public.rx_cp(g uuid, mk uuid, geo jsonb) returns jsonb language sql as $b$
+        select jsonb_agg(jsonb_build_object('id', 'chg:' || mk || ':s' || s, 'signer', s, 'kind', 'initial', 'why', 'change', 'ref', mk::text, 'page', 1,
+          'x', (public.offer_change_rect('insert', geo)->>'x')::numeric + (public.offer_change_rect('insert', geo)->>'w')::numeric + 4, 'y', (public.offer_change_rect('insert', geo)->>'y')::numeric, 'w', 26, 'h', 13))
+        from generate_series(1, (select count(*)::int from public.offer_signers where signing_id = g and void_at is null)) s $b$;
+      select 'ok';`);
+    if (r2.c) throw new Error('Round 2 set-up failed: ' + r2.e);
+    const g2 = await v('g2'), vid = async n => (await psql(`select id from public.offer_signers where signing_id = '${g2}' and position = ${n}`)).o;
+    const one = async sql => { const r = await psql(sql); if (r.c) throw new Error(r.e); return r.o; };
+    const tap = (id, pl) => `select public.offer_sign_do_tap('${id}', '${pl}');`, undoQ = (id, sc) => `select public.offer_sign_do_undo('${id}', '${sc || 'last'}', false, 'race');`;
+    const pairs = { undo: 0, finish: 0, change: 0 }, dl = { undo: 0, finish: 0, change: 0 }, other = [];
+    const note = (kind, rs, okRe) => { rs.forEach(r => { if (/deadlock/i.test(r.e)) dl[kind]++; else if (r.c && !okRe.test(r.e)) other.push(kind + ': ' + r.e.split('\n')[0]); }); pairs[kind]++; };
+    // a place tapped again against the same signer's undo (vendors 1 to 4, 12 each)
+    for (let n = 1; n <= 4; n++) { const id = await vid(n), pl = 'foot:p1:s' + n;
+      for (let k = 0; k < 12; k++) { await one(tap(id, pl)); await one(undoQ(id));
+        note('undo', await Promise.all([psql(tap(id, pl)), psql(undoQ(id))]), /nothing of yours to undo/); } }
+    // a place tapped again against the same signer's finish (vendors 5 to 8, 10 each); a finished vendor is opened again by Tim
+    for (let n = 5; n <= 8; n++) { const id = await vid(n), a = 'foot:p1:s' + n, b = 'block:vsig' + n + ':s' + n;
+      for (let k = 0; k < 10; k++) {
+        if ((await one(`select finished_at is not null from public.offer_signers where id = '${id}'`)) === 't') await one(`${AGENT} select public.agent_signing_revert_round('${g2}', 'race: open again');`);
+        if ((await one(`select count(*) from public.offer_sign_taps_live where signer_id = '${id}'`)) !== '0') await one(undoQ(id, 'turn'));
+        await one(tap(id, b));
+        note('finish', await Promise.all([psql(tap(id, a)), psql(`select public.offer_sign_do_finish('${id}', 'ua', null, null, 'Tim');`)]), /still 1 place to do|finished signing/); } }
+    // a place tapped again against the same signer's change (vendors 9 to 12, 10 each)
+    for (let n = 9; n <= 12; n++) { const id = await vid(n), pl = 'foot:p1:s' + n;
+      for (let k = 0; k < 10; k++) {
+        if ((await one(`select count(*) from public.offer_sign_taps_live l where l.signer_id = '${id}'`)) !== '0' || (await one(`select count(*) from public.offer_sign_marks_live where signer_id = '${id}'`)) !== '0') await one(undoQ(id, 'turn'));
+        await one(tap(id, pl)); await one(undoQ(id));
+        const mk = require('crypto').randomUUID(), geo = JSON.stringify({ x: 100, y: 300 + (n - 9) * 40, text: 'Race ' + n + '.' + k, size: 9 });
+        note('change', await Promise.all([psql(tap(id, pl)), psql(`select public.offer_sign_do_change('${id}', '${mk}', 'insert', 1, '${geo}', null, public.rx_cp('${g2}', '${mk}', '${geo}'));`)]), /^$/); } }
+    out.pairs = pairs; out.deadlocks = dl; out.other = other.slice(0, 5);
+    ok(pairs.undo >= 40 && pairs.finish >= 40 && pairs.change >= 40, 'at least 40 pairs of each: ' + JSON.stringify(pairs));
+    ok(dl.undo === 0 && dl.finish === 0 && dl.change === 0, 'no deadlock: ' + JSON.stringify(dl));
+    ok(other.length === 0, 'no other errors: ' + JSON.stringify(other.slice(0, 3)));
   } catch (e) { errs.push('crashed: ' + (e.stack || e.message)); }
   finally { try { execFileSync('dropdb', [DB]); } catch (_) { } }
   console.log(JSON.stringify(Object.assign(out, { errs }), null, 1));

@@ -169,7 +169,10 @@ create or replace function public.offer_revert_offered(g public.offer_signings) 
 create or replace function public.offer_sign_do_tap(p_signer uuid, p_place text) returns jsonb language plpgsql security definer set search_path = public as $$
 declare s public.offer_signers; g public.offer_signings; done int; need int; t public.offer_sign_taps; ink jsonb;
 begin
-  perform public.offer_lock_by_signer(p_signer);   -- lock order: the offer, then the signing, then the signer
+  -- lock order (as finishing, undoing and changes): the offer FOR KEY SHARE, then the signing FOR UPDATE, then the signer. The signing
+  -- is taken here, before the signer, because a tap again writes a redo row, whose guard reads the signing.
+  perform public.offer_lock_by_signer(p_signer);
+  perform 1 from public.offer_signings where id = (select signing_id from public.offer_signers where id = p_signer) for update;
   select * into s from public.offer_signers where id = p_signer for update; g := public.offer_sign_ready(s);
   if s.consent_at is null then raise exception 'Agree to sign electronically first'; end if;
   if g.round_no = 1 and (not exists (select 1 from public.offer_sign_receipts where signer_id = s.id and guide = 'sale_purchase') or (coalesce(array_length(g.cca_pages, 1), 0) > 0 and not exists (select 1 from public.offer_sign_receipts where signer_id = s.id and guide = 'cca'))) then
@@ -192,7 +195,9 @@ end $$;
 create or replace function public.offer_sign_do_marks(p_signer uuid, p_sig text, p_init text) returns void language plpgsql security definer set search_path = public as $$
 declare s public.offer_signers; g public.offer_signings;
 begin
-  perform public.offer_lock_by_signer(p_signer);   -- lock order: the offer, then the signing, then the signer
+  -- lock order: the offer, then the signing (a drawing again writes a redraw row, whose guard reads it), then the signer
+  perform public.offer_lock_by_signer(p_signer);
+  perform 1 from public.offer_signings where id = (select signing_id from public.offer_signers where id = p_signer) for update;
   select * into s from public.offer_signers where id = p_signer for update; g := public.offer_sign_ready(s);
   if s.consent_at is null then raise exception 'Agree to sign electronically first'; end if;
   if coalesce(p_sig, '') !~ '^data:image/png;base64,[A-Za-z0-9+/=]+$' or length(p_sig) > 400000 or length(p_sig) < 200 then raise exception 'Please draw your signature'; end if;

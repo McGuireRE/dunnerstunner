@@ -412,6 +412,9 @@ agreements/<agreement id>/signatures/... (vendors may upload their own signature
   a change is undone or Tim starts the round again. Caps: 30 undos (sign_undone events) and 30 redos an hour per signer.
 - Before go-live: `guard_offer_sign_open_work` is security definer and takes the offer FOR KEY SHARE, then the signing FOR SHARE, so a
   write during a round's lock waits and is refused. Race test: `tests/offer-undo-race.js` (local only, 26 November 2026: no errors).
+- `offer_sign_do_tap` and `offer_sign_do_marks` take the signing FOR UPDATE after the offer and before the signer (their redo and redraw
+  rows' guard reads the signing), so the lock order is the offer, the signing, the signer on every path that writes undo or redraw rows.
+  The race test's 128 same-signer pairs (re-tap with undo, finish or change) ran with no deadlock.
 - Events: `sign_undone`, `sign_redrawn`, `round_reset`, `round_reverted` (with what was discarded), `agreement_held`,
   `agreement_hold_discarded`; `offer_unfrozen` may carry `reverted: true`.
 - Rollback test: `tests/offer-undo-rollback.sql` (built by `tests/offer-undo-rollback.js`). Local run 26 November 2026 on the stand-in
