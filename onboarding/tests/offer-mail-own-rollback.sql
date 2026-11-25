@@ -10,10 +10,12 @@ declare out text := ''; pid uuid; oid uuid; oid2 uuid; x text; good jsonb; befor
 begin
   -- a property Tim sells for himself: the vendor's phone on the property file is the agent's own mobile; their own other phone is on the agency agreement
   insert into public.properties (address, stage) values ('RB 25 Own Street, Dunedin', 'live') returning id into pid;
-  insert into public.property_people (property_id, position, legal_name, email, phone, role) values (pid, 1, 'Tess Vendor', 'rb-own-vendor@example.com', tim_phone, 'owner'),
-    (pid, 2, 'Agent As Vendor', a_email, '', 'owner');
+  -- the agreement first: on the live database, agreement people are copied back onto the property's owners, so the property file is written after it
   insert into public.agreements (property_id, status) values (pid, 'countersigned') returning id into x;
   insert into public.agreement_people (agreement_id, legal_name, email, phone) values (x::uuid, 'Tess Vendor', 'rb-own-vendor@example.com', '022 987 6543');
+  delete from public.property_people where property_id = pid;
+  insert into public.property_people (property_id, position, legal_name, email, phone, role) values (pid, 1, 'Tess Vendor', 'rb-own-vendor@example.com', tim_phone, 'owner'),
+    (pid, 2, 'Agent As Vendor', a_email, '', 'owner');
   good := jsonb_build_object('email', 'buyer@example.com', 'phone', '021 555 0100', 'seen_docs', 'yes', 'sign', 'in_person', 'price', '650000',
     'settlement', jsonb_build_object('kind', 'relative', 'days', 15), 'conditions', jsonb_build_array(jsonb_build_object('key', 'finance', 'days', 10)), 'kiwisaver', false,
     'purchasers', jsonb_build_array(jsonb_build_object('first', 'Ana', 'last', 'Testbuyer', 'email', 'ana@example.com', 'phone', '021 111 2222')),
