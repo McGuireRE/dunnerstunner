@@ -33,6 +33,7 @@ const MAILC = require(path.join(__dirname, '..', 'src', 'mail-core.js'));
     if (fn === 'offer_sign_state') return { data: { signer: { position: 1, name: 'Ana Testbuyer' }, signing: { status: 'signing', draft_path: consented ? 'properties/' + PID + '/docs/offer-draft-x.pdf' : null, places: [] }, taps: [] }, error: null };
     if (fn === 'offer_sign_tap') return tapError ? { data: null, error: { message: tapError } } : { data: { done: 3, of: 9 }, error: null };
     if (fn === 'offer_sign_ask') return { data: { ok: true, name: 'Ana Testbuyer', address: '1 Example Road', offer_id: OID }, error: null };
+    if (fn === 'offer_sign_undo') return args.p_scope === 'turn' || args.p_scope === 'last' ? { data: { scope: args.p_scope, taps: 1, changes: 0, ink_cleared: args.p_clear === true, done: 3, of: 8, secret: 'NOT-PASSED' }, error: null } : { data: null, error: { message: 'Choose undo your last step, or start your turn again' } };
     if (fn === 'offer_sign_request') return args.p_reason_key ? { data: { id: 'rq1', name: 'Vera Vendor', side: 'vendor', round: 2, kind: args.p_kind, reason: args.p_reason_key === 'other' ? args.p_reason : 'Our financial situation has changed', offer_id: OID, property_id: PID, address: '1 Example Road' }, error: null } : { data: null, error: { message: 'Choose a reason' } };
     if (fn === 'offer_sign_finish') return { data: { ok: true, complete: finishComplete, signing_id: SID }, error: null };
     if (fn === 'offer_mail_take') return takeErr ? { data: null, error: { message: takeErr } } : { data: Object.assign({ log_id: 77, id: args.p_draft, kind: 'sign_link', to: ['ana@example.com'], cc: [], subject: 'Your offer to sign: 1 Example Road', body: 'Kia ora Ana,\n\n[the signing link]\n\nTim', attach: null, token: TOK }, mailTake || {}), error: null };
@@ -93,6 +94,22 @@ const MAILC = require(path.join(__dirname, '..', 'src', 'mail-core.js'));
   expect(mails[0] && /&lt;b&gt;today/.test(mails[0].html) && /properties\/[^/]+\/offers\/[^"<]+/.test(mails[0].html) && /Freeze now or Withdraw now/.test(mails[0].html) && !/\u2014/.test(mails[0].html), 'the email links his offer page, made safe');
   mails = []; x = await J(await post({ action: 'request', token: TOK, session: SES, kind: 'freeze', reason_key: '' }));
   expect(x.j.ok === false && /Choose a reason/.test(x.j.error || '') && mails.length === 0, 'no reason: refused, nothing emailed');
+  // Offers fixes 3: going back to the last sealed round, from their own link: recorded, one urgent email to Tim, worded for going back
+  mails = []; calls = []; x = await J(await post({ action: 'request', token: TOK, session: SES, kind: 'revert', reason_key: 'material_change' }));
+  expect(x.j.ok && (calls.find(c => c[0] === 'offer_sign_request') || [])[1].p_kind === 'revert', 'a request to go back is passed on as revert');
+  expect(mails.length === 1 && mails[0].to === 'tim@example.test' && /^URGENT: a vendor asks to go back to Round 1: 1 Example Road$/.test(mails[0].subject), 'one urgent email to Tim, worded for going back: ' + (mails[0] && mails[0].subject));
+  expect(mails[0] && /asks to go back to Round 1 as it was signed on Round 2/.test(mails[0].html) && /Nothing has been set aside yet/.test(mails[0].html) && !/Freeze now or Withdraw now/.test(mails[0].html) && !/\u2014/.test(mails[0].html), 'the email says what they ask and what has not happened yet');
+  mails = []; calls = []; x = await J(await post({ action: 'request', token: TOK, session: SES, kind: 'rewind', reason_key: 'other', reason: 'x' }));
+  expect((calls.find(c => c[0] === 'offer_sign_request') || [])[1].p_kind === '', 'an unknown kind is passed on empty (the database refuses it)');
+  // undo: their last step or their whole turn, by their own link and session; nothing emailed; only the counts come back
+  mails = []; calls = []; x = await J(await post({ action: 'undo', token: TOK, session: SES, scope: 'last' }));
+  const uc = calls.find(c => c[0] === 'offer_sign_undo');
+  expect(x.j.ok && uc && uc[1].p_token === TOK && uc[1].p_session === SES && uc[1].p_scope === 'last' && uc[1].p_clear === false && x.j.done === 3 && x.j.of === 8 && !('secret' in x.j) && mails.length === 0, 'undo the last step: passed on with their session, the counts back, nobody emailed');
+  calls = []; x = await J(await post({ action: 'undo', token: TOK, session: SES, scope: 'turn', clear: true }));
+  expect(x.j.ok && x.j.ink_cleared === true && (calls.find(c => c[0] === 'offer_sign_undo') || [])[1].p_clear === true, 'start the turn again, clearing the drawing');
+  calls = []; x = await J(await post({ action: 'undo', token: TOK, session: SES, scope: 'everything' }));
+  expect(x.status === 400 && x.j.ok === false && !calls.some(c => c[0] === 'offer_sign_undo'), 'an unknown undo is refused before the database');
+  x = await J(await post({ action: 'undo', token: 'short', session: SES, scope: 'last' })); expect(x.j.ok === false, 'undo needs their link');
   // finish: not the last purchaser, nothing locked
   calls = []; x = await J(await post({ action: 'finish', token: TOK, session: SES })); expect(x.j.ok && x.j.complete === false && !calls.some(c => c[0] === 'offer_round_lock'), 'not the last: nothing locked');
   // the last purchaser: Round 1 made, stored, fingerprinted from the stored file and locked

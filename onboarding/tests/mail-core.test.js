@@ -206,5 +206,13 @@ const base = () => ({
   // the HTML
   const h = M.toHtml('Hello <b>x</b> & co\n\n**Roadmap**\n\nOpen: [the signing link]\n\nSee https://portal.dunnerstunner.co.nz/x.', 'https://packages.dunnerstunner.co.nz/onboarding/?sign=abc');
   ok(h.includes('Hello &lt;b&gt;x&lt;/b&gt; &amp; co') && h.includes('<strong>Roadmap</strong>') && h.includes('href="https://packages.dunnerstunner.co.nz/onboarding/?sign=abc"') && h.includes('<a href="https://portal.dunnerstunner.co.nz/x">') && !h.includes('[the signing link]'), 'escaped, bold, the link and web addresses as links');
+  // Offers fixes 3: the urgent request email's wording (shared by the edge function and the mock); freeze and withdraw read as before
+  { const f = M.requestNotice({ kind: 'freeze', side: 'purchaser', round: 1, address: '1 Example Road' }), w = M.requestNotice({ kind: 'withdraw', side: 'vendor', round: 2, address: '1 Example Road' });
+    ok(f.subject === 'URGENT: a purchaser asks to stop signing: 1 Example Road' && f.ask === 'stop signing for now' && /Freeze now or Withdraw now/.test(f.after), 'freeze wording as before: ' + f.subject);
+    ok(w.subject === 'URGENT: a vendor asks to withdraw: 1 Example Road' && w.ask === 'withdraw', 'withdraw wording as before: ' + w.subject);
+    const r3 = M.requestNotice({ kind: 'revert', side: 'purchaser', round: 3, address: '1 Example Road' }), r1 = M.requestNotice({ kind: 'revert', side: 'purchaser', round: 1, address: '' });
+    ok(r3.subject === 'URGENT: a purchaser asks to go back to Round 2: 1 Example Road' && r3.ask === 'go back to Round 2 as it was signed' && /Nothing has been set aside yet/.test(r3.after) && /go back to Round 2, or let them carry on/.test(r3.after), 'going back: ' + JSON.stringify(r3));
+    ok(r1.subject === 'URGENT: a purchaser asks to start the round again: an offer' && r1.ask === 'start this round again from the beginning', 'Round 1 has nothing sealed to go back to: ' + r1.subject);
+    ok(![f, w, r3, r1].some(x => /\u2014/.test(JSON.stringify(x))), 'no em dashes'); }
   console.log(JSON.stringify(Object.assign(out, { errs }), null, 1));
 })().catch(e => { console.log(JSON.stringify({ errs: ['crashed: ' + (e.stack || e.message)] })); });

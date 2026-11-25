@@ -12,7 +12,10 @@
 //   consent, receipt, marks, tap   the signing steps; each place is tapped by the signer themselves.
 //   ask         "Ask Tim for a change": a note emailed to Tim. A link signer can't mark the document.
 //   request     "Ask Tim to stop or withdraw": recorded, and an urgent email to Tim at once. It stops only this signer until Tim acts;
-//               nobody else is told anything.
+//               nobody else is told anything. Offers fixes 3 (migration 026): also "go back to the last sealed round", offered on the
+//               link only after a freeze on their round was lifted; the same urgent email, and Tim releases it from the offer page.
+//   undo        (026) the signer's last step that stands, or their whole turn ("Start my turn again", their drawing cleared only if
+//               they ask). Nothing is removed: the database keeps each undone step. Nobody is emailed.
 //   finish      once every place is done. When the last purchaser finishes, Round 1 is made and locked here and then.
 //   send (Tim)  a personal link emailed to each purchaser still to sign. The links' tokens are never returned to any page.
 //   lock (Tim)  makes and locks the round (in person, after the last signer; or again if locking didn't finish).
@@ -258,7 +261,7 @@ export function makeHandler(d: Deps) {
 
     // ── a purchaser, by their own link ──
     const token = typeof body.token === "string" ? body.token : "", session = typeof body.session === "string" ? body.session : "";
-    if (!["open", "send_code", "verify", "state", "consent", "receipt", "marks", "tap", "change", "ask", "request", "finish"].includes(action)) return json({ error: "Bad request" }, 400);
+    if (!["open", "send_code", "verify", "state", "consent", "receipt", "marks", "tap", "undo", "change", "ask", "request", "finish"].includes(action)) return json({ error: "Bad request" }, 400);
     if (!TOKEN_RE.test(token)) return json({ ok: false });
     try {
       if (action === "open") {
@@ -293,6 +296,12 @@ export function makeHandler(d: Deps) {
       }
       if (action === "marks") { await call("offer_sign_marks", { p_token: token, p_session: session, p_sig: String(body.sig || ""), p_init: String(body.init || "") }); return json({ ok: true }); }
       if (action === "tap") { const r = await call("offer_sign_tap", { p_token: token, p_session: session, p_place: String(body.place || "").slice(0, 140) }); return json({ ok: true, done: r.done, of: r.of }); }
+      if (action === "undo") {
+        const scope = body.scope === "turn" ? "turn" : body.scope === "last" ? "last" : "";
+        if (!scope) return json({ ok: false, error: "That didn't work. Please try again." }, 400);
+        const r = await call("offer_sign_undo", { p_token: token, p_session: session, p_scope: scope, p_clear: body.clear === true });
+        return json({ ok: true, scope: r.scope, taps: r.taps, changes: r.changes, ink_cleared: !!r.ink_cleared, done: r.done, of: r.of });
+      }
       if (action === "change") {
         const id = String(body.id || ""), target = body.target == null ? null : String(body.target);
         if (!UUID.test(id) || (target !== null && !UUID.test(target)) || !Number.isInteger(body.page) || !body.geometry || typeof body.geometry !== "object" || !Array.isArray(body.places)) return json({ ok: false, error: "That change didn't save. Please try again." }, 400);
@@ -320,14 +329,16 @@ export function makeHandler(d: Deps) {
         return json({ ok: true, emailed });
       }
       if (action === "request") {
-        const kind = body.kind === "withdraw" ? "withdraw" : body.kind === "freeze" ? "freeze" : "";
+        const kind = body.kind === "withdraw" ? "withdraw" : body.kind === "freeze" ? "freeze" : body.kind === "revert" ? "revert" : "";
         const r = await call("offer_sign_request", { p_token: token, p_session: session, p_kind: kind, p_reason_key: String(body.reason_key || ""), p_reason: String(body.reason || "").slice(0, 600), p_net: net });
         let emailed = true;
         const v = r.side === "vendor", page = `${(d.portalUrl || "https://portal.dunnerstunner.co.nz/").replace(/\/?$/, "/")}properties/${r.property_id}/offers/${r.offer_id}`;
-        const subject = `URGENT: ${v ? "a vendor" : "a purchaser"} asks to ${kind === "withdraw" ? "withdraw" : "stop signing"}: ${r.address || "an offer"}`;
-        const html = `<p style="color:#9B2C2C"><strong>Urgent.</strong></p><p><strong>${esc(r.name)}</strong> (${v ? "a vendor" : "a purchaser"}) asks to ${kind === "withdraw" ? "withdraw" : "stop signing for now"} on Round ${esc(r.round)} for <strong>${esc(r.address || "")}</strong>.</p>`
+        // the wording is shared with Tim's screen and the tests (src/mail-core.js requestNotice); the same words as before when it isn't loaded
+        const rn = d.mail && d.mail.requestNotice ? d.mail.requestNotice({ kind, side: r.side, round: r.round, address: r.address }) : null;
+        const subject = rn ? rn.subject : `URGENT: ${v ? "a vendor" : "a purchaser"} asks to ${kind === "withdraw" ? "withdraw" : "stop signing"}: ${r.address || "an offer"}`;
+        const html = `<p style="color:#9B2C2C"><strong>Urgent.</strong></p><p><strong>${esc(r.name)}</strong> (${v ? "a vendor" : "a purchaser"}) asks to ${rn ? esc(rn.ask) : kind === "withdraw" ? "withdraw" : "stop signing for now"} on Round ${esc(r.round)} for <strong>${esc(r.address || "")}</strong>.</p>`
           + `<p>Their reason:</p><blockquote style="border-left:3px solid #C9C4BD;margin:0;padding:4px 12px">${esc(r.reason)}</blockquote>`
-          + `<p>Nothing is frozen yet. Only their own link has stopped, and nobody else has been told. Open the offer to Freeze now or Withdraw now:</p><p><a href="${esc(page)}">${esc(page)}</a></p>`;
+          + `<p>${esc(rn ? rn.after : "Nothing is frozen yet. Only their own link has stopped, and nobody else has been told. Open the offer to Freeze now or Withdraw now:")}</p><p><a href="${esc(page)}">${esc(page)}</a></p>`;
         try { await d.sendMail("offer_sign_request", { to: d.timEmail, subject, html: wrap(html) }); } catch (_) { emailed = false; }
         return json({ ok: true, emailed });
       }

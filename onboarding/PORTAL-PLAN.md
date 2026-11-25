@@ -17,6 +17,14 @@ the database or the live site. The controller copies each queued request into th
 
 Order of work (set 24 November 2026, confirmed by Tim; reordered the same evening at his request):
 
+0000. Offers fixes 3 (Tim's decisions of 25 and 26 November 2026; branch `offers-fixes-3`, on main 92ebdd3). Status: Built, awaiting
+   review and Tim's approval (needs migration 026, rollback test first, and offer-sign redeployed). (1) Confirm the agreement while
+   frozen is held, not locked, sealed or dated; nothing emailed; completed or discarded once unfrozen. (2) Going back to the last
+   sealed round when unfreezing (Tim at once, after a confirm; a party from their own link, through Tim first). (3) Undo in every
+   signing turn (last step, or the whole turn with the drawing kept unless cleared), and Tim starting an open round again. Sealed
+   rounds, signatures and fingerprints never change; undone work is kept and listed on the timeline. See `OFFERS-PLAN.md`,
+   "Offers fixes 3". The `offer_private_hit` agent-is-a-party fix moves to 027.
+
 000. Offers fixes 2 (raised by Tim 25 November 2026 from his test offer; branch `offers-fixes-2`). Status: Built, awaiting review
    and Tim's approval (needs migration 025 and offer-sign redeployed). (1) Typed words now show while signing. (2) Line through text
    snapped to the words it crosses, kept on the page until saved, the struck words shown before Save and recorded. (3) The agreed-copy
@@ -24,8 +32,8 @@ Order of work (set 24 November 2026, confirmed by Tim; reordered the same evenin
    tick kept. (5) Tim's own phone and email never read as a party's in the email privacy check. (6) Tim emailed the dated agreed copy
    as soon as he confirms the agreement, and again on request. Open: whether "Confirm the agreement" should be blocked while an offer
    is frozen (Tim to decide; unchanged). Review fixes done on the same branch (stricter price reading, other changes blank the dates,
-   turned and unreadable pages, struck words checked by the function, run-time phone, integrity alarm). Later, 026: `offer_private_hit`
-   gets the same agent-is-a-party fix. See `OFFERS-PLAN.md`, "Offers fixes 2".
+   turned and unreadable pages, struck words checked by the function, run-time phone, integrity alarm). Later (027; 026 is now Offers fixes 3):
+   `offer_private_hit` gets the same agent-is-a-party fix. Decided 25 November: Confirm while frozen is held (Offers fixes 3). See `OFFERS-PLAN.md`, "Offers fixes 2".
 
 00. Offers fixes 1 (raised by Tim 25 November 2026, built ahead of everything else; branch `offers-fixes-1`). Status: LIVE
    25 November 2026 (main 06c2d22), reviewed and approved by Tim. (a) The AI wording of conditions and clauses (and translation) always failed:

@@ -377,3 +377,38 @@ agreements/<agreement id>/signatures/... (vendors may upload their own signature
   stand-in (pg-standin, 010, 016 part A, 018, 019, 021, 022, 023, 024): every line as expected, no CAPITALS. `offer_agreed_notice_material`
   was also run against the agreement 024's own rollback test makes (one block: 024, its checks to the agreement, then 025): it returned
   the agreement, three layers with the vendors' two changes, and the province.
+
+## 026 Undo, going back to the last sealed round, and Confirm held while frozen (Offers fixes 3, 26 November 2026; tested in a rollback block on a local PostgreSQL stand-in, NOT yet on the live project)
+- `offer_sign_undos` (append only, guard_offer_record, no truncate): signing, signer (whose work), `tap_id` or `mark_id` (one of
+  them), action `undo` | `redo` (a place tapped again), scope `last` | `turn` | `round` (Tim) | `tap` (a redo), by_name, at. Taps and
+  changes are never changed or removed; 023's triggers are unchanged.
+- `offer_sign_redraws` (append only): a signature and initials drawn again (both, or both null for "cleared"), only once every tap
+  of that signer has been undone. The first drawing stays in `offer_signers` (023's guard unchanged). `offer_sign_ink(signer)` gives
+  the drawing as it stands (the newest redraw, else the first).
+- Views, security invoker (Tim's own read rights apply; select only): `offer_sign_taps_live` (taps whose newest undo row is not an
+  undo; `at` is when it was last tapped), `offer_sign_marks_live` (changes not undone), `offer_sign_reviews_live` (initials places
+  whose marks are not all undone).
+- `offer_confirm_holds`: offer, property, document, round (the newest sealed round), the freeze it was held under, accepted_at,
+  date_text, agreement_date, held_by, held_at; resolved once (resolved_at, resolved_by, resolved_as `completed` | `discarded` |
+  `superseded`, resolve_note) by the functions or the settle trigger (`guard_offer_confirm_hold`). One unresolved per offer.
+  Triggers `offer_agreements_settle_holds` (completed, or superseded) and `offer_holds_settle_confirm` (a withdrawal: discarded).
+- `offer_requests`: kind gains `revert`, handled_as gains `revert`, reason_key gains `material_change` (checks widened, nothing
+  removed).
+- Redefined to read what stands (each otherwise as 023/024 has it): `offer_sign_required`, `offer_doc_layers` (ink as it stands),
+  `offer_sign_do_tap` (a redo for a place undone), `offer_sign_do_marks` (a redraw once every tap is undone), `offer_sign_do_finish`,
+  `agent_signing_review`, `offer_sign_do_change`, `agent_round_present`, `agent_signing_mark`, `offer_round_lock`, `offer_agreed_terms`,
+  `offer_round_material`, `offer_sign_state` (adds the signer's `last` step, `ever_tapped`, each change's `mine`, and `revert` when a
+  freeze on the round has been lifted), `offer_sign_request` (kind `revert`, offered only then). `offer_agreement_check` now calls
+  `offer_agreement_check_core(offer, accepted, date, ignore_freeze)` with false: the same for every caller as before.
+- New: `offer_sign_do_undo(signer, scope, clear, by)` (internal), `agent_signing_undo(signer, scope, clear)` (Tim's device),
+  `offer_sign_undo(token, session, scope, clear)` (service role), `agent_signing_revert_round(signing, reason)`,
+  `agent_offer_revert_sealed(offer, note, request, unfreeze)`, `agent_offer_confirm_hold(offer, accepted_at, date_text)`,
+  `agent_offer_confirm_held(offer)`, `agent_offer_confirm_hold_discard(offer, note)`, `offer_revert_offered(signing)` (internal: an
+  `offer_unfrozen` event after the round's release on the offer's timeline). Lock order as everywhere: the offer first, then the
+  signing, then the signer.
+- Events: `sign_undone`, `sign_redrawn`, `round_reset`, `round_reverted` (with what was discarded), `agreement_held`,
+  `agreement_hold_discarded`; `offer_unfrozen` may carry `reverted: true`.
+- Rollback test: `tests/offer-undo-rollback.sql` (built by `tests/offer-undo-rollback.js`). Local run 26 November 2026 on the stand-in
+  (pg-standin, 010, 016 part A, 018, 019, 021, 022, 023, 024, 025): every line as expected, no CAPITALS. Also run on the stand-in with
+  026 applied straight after 024: 024's own rollback test (output identical apart from the new tables in its truncate notice), 025's
+  rollback test (identical) and 024's race test (no errors).

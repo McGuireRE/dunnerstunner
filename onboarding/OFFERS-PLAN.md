@@ -716,6 +716,58 @@ Going live, with Tim's approval, in order:
    to a test vendor; a counter and an acceptance; check Tim's one email per round; the agreed copy and its two draft emails (fill the
    blanks, send); the lawyers' pack; a request from a test link (Tim's urgent email), Freeze now, Unfreeze and Withdraw now. Tim's solicitor confirms the method before the first real offer.
 
+## Offers fixes 3 (Tim's decisions of 25 and 26 November 2026; branch `offers-fixes-3`, from main 92ebdd3)
+
+Status: Built, awaiting review and Tim's approval. Needs migration 026 (`026_offer_undo_revert_hold.sql`; its rollback test first,
+then applied with Tim's OK) and offer-sign redeployed (pinned to the new commit). Mediation as always: no party learns of the other
+side's activity until Tim releases it, and nobody is emailed but Tim.
+1. Freeze blocks confirmation, held not sealed. While an offer is frozen, "Confirm the agreement" holds Tim's confirmation (the
+   acceptance time and the date text) instead of making the agreement: `offer_confirm_holds`, checked as the agreement would be (the
+   freeze set aside, a withdrawal never), one at a time. The offer page shows "Held while frozen: not locked, sealed or dated", with
+   the round, the acceptance time and the date. Nothing is emailed. While frozen it can only be discarded; once unfrozen, "Complete the
+   held confirmation" makes the agreement exactly as Confirm does (the offer-sign function, every check run again: the date no earlier
+   than acceptance and not after today; the newest sealed round still the one held), and Tim's own email with the dated copy goes then.
+   The database settles it: completed when that agreement is made (superseded if another is), discarded if the offer is withdrawn.
+2. Going back to the last sealed round. On the frozen panel, "Unfreeze and go back to Round N" (one confirm, then at once): every round
+   still out for signing stops (cancelled), what it held (taps, changes, finished signers) is listed on the timeline as discarded,
+   every row kept, and the freeze is lifted in the same step. Tim then presents Round N again, or starts a fresh copy. With nothing
+   sealed yet it goes back to before signing started (Tim releases the draft again). A party can ask for it from their own link only
+   after a freeze on their round has been lifted ("Go back to Round N as it was signed", or "Start this round again from the beginning"
+   in Round 1): it is a request like stop or withdraw (`offer_requests` kind `revert`, reason "Something important changed while
+   signing was paused" or their own), it stops only their link, Tim gets one urgent email, and it shows in red on Home and the offer
+   with "Go back to Round N" (Tim releases it) or "Let them carry on".
+3. Undo always available. In every signing turn, in person and by link, a "Made a mistake?" box: "Undo my last step" (the newest place
+   tapped or change made that still stands; the box names it, for example "Your initials on page 3") and "Start my turn again"
+   (everything they did this round taken back; their drawn signature and initials kept unless they tick to clear them, then they draw
+   again). A Round 1 mark waiting for Tim can be undone by its maker, and signing carries on. On the round's page Tim can "Start this
+   round again" (with a reason, one confirm): every tap and change on it undone, anyone who finished opened again, the same people and
+   links carrying on, drawn signatures kept. Undoing never removes anything: a tap or change stays exactly as made (023's triggers
+   unchanged) and an `offer_sign_undos` row records what was undone, by whom, when and how; a place tapped again adds a "redo" row.
+   A signature drawn again (only once every tap of theirs is undone) is an `offer_sign_redraws` row; the first drawing stays in
+   `offer_signers` as 023 requires. Every reader of a round's work (signing, finishing, locking, presenting, the agreed terms, the
+   link's state, Tim's screens) reads what stands through three views (`offer_sign_taps_live`, `_marks_live`, `_reviews_live`), so
+   undone work is never on a sealed round. A change someone else has since reinstated can't be undone by its maker (Tim can start the
+   round again). Frozen: nobody undoes. A further term number freed by an undone change can be used again.
+- The timeline (and the lawyers' pack) says each in words: "Undone (kept on the record) by ...", "Tim started the round again",
+  "Tim went back to the last sealed round ... discarded", "Confirmation held while frozen (not locked, sealed or dated)".
+- For Tim's information: undoing a change leaves anyone's initial already tapped beside it on the record but no longer needed; signers
+  reopened when that change was made sign Finish again. Opening a round again (Tim's restart) emails nobody: tell the link signers
+  yourself.
+- Edge function: offer-sign gains `undo` (their link and session) and the urgent email for a request to go back
+  (`src/mail-core.js` `requestNotice`, the same words for freeze and withdraw as before). No new imports; `page-text-bundle` passes.
+Tests: `tests/offers-fixes3.test.js` (new), `tests/offer-undo-rollback.sql` and `.js` (new; run on the local stand-in through 025:
+every line as expected, no capitals), `tests/offer-sign-fn.test.js` and `tests/mail-core.test.js` (extended), the mock (`tests/mock.js`)
+mirrors 026. 024's rollback test, 025's rollback test and 024's race test were also run with 026 applied: the same results.
+
+Going live, with Tim's approval, in order:
+1. Live rollback test: `node onboarding/tests/offer-undo-rollback.js > /tmp/r26.sql`, run on the live project. Every line lower case,
+   no CAPITALS, nothing left behind (no `offer_sign_undos` table afterwards).
+2. Apply 026 (`026_offer_undo_revert_hold`).
+3. Merge `offers-fixes-3` into main and push.
+4. Redeploy offer-sign pinned to that commit (JWT verification OFF, as now). offer-public, offer-draft and doc-prefill are unchanged.
+5. Tim checks on the live site: an undo in person and by link, Start this round again, Freeze then Unfreeze and go back, and Confirm
+   while frozen (held, then completed).
+
 ## Offers hotfix 2 (26 November 2026; branch `offers-hotfix-2`)
 
 Status: Built, awaiting review and Tim's approval. offer-sign to be redeployed; no database change.
@@ -807,9 +859,9 @@ the function's check, so the line is snapped to them and recorded as striking th
 words (rounds locked before are never checked again). 025 grants Tim's screen select on `agent_phone` and `agent_email`; the alarm's
 own "what" wins over its detail; the function waits for Tim's email itself where the runtime can't carry work on; the page watches
 only this offer's email, from the server's lock time.
-Later (026): `offer_private_hit` (the check on typed words in a counteroffer) has the same agent-is-a-party problem as item 5; to be
-fixed the same way in 026.
-Open (Tim to decide; behaviour unchanged): whether "Confirm the agreement" should be blocked while an offer is frozen.
+Later (027; 026 is Offers fixes 3): `offer_private_hit` (the check on typed words in a counteroffer) has the same agent-is-a-party
+problem as item 5; to be fixed the same way.
+Decided by Tim, 25 November 2026: "Confirm the agreement" while an offer is frozen is held, not made (Offers fixes 3).
 Tests: `tests/offers-fixes2.test.js` (new), `tests/strike-snap.test.js` (new), `tests/mail-core.test.js`, `tests/offer-nego-fn.test.js`,
 `tests/offers-nego.test.js` (extended).
 

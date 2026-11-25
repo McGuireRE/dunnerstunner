@@ -278,8 +278,11 @@
     sign_cancelled: 'Signing stopped', sign_replaced: 'Replaced by a newer draft', sign_change_asked: 'Asked Tim for a change', round_locked: 'Round locked', round_presented: 'Tim authorised presentation',
     round_change: 'A change was made', document_closed: 'Document closed for a fresh copy', agreement_formed: 'Agreement formed',
     party_request: 'Asked Tim to stop', offer_frozen: 'Tim froze the offer', offer_unfrozen: 'Tim unfroze the offer', request_carry_on: 'Tim let them carry on', offer_withdrawn_now: 'Withdrawn',
-    deposit_holder_chosen: 'Deposit holder chosen' };
+    deposit_holder_chosen: 'Deposit holder chosen',
+    sign_undone: 'Undone (kept on the record)', sign_redrawn: 'Signature and initials drawn again', round_reset: 'Tim started the round again', round_reverted: 'Tim went back to the last sealed round',
+    agreement_held: 'Confirmation held while frozen (not locked, sealed or dated)', agreement_hold_discarded: 'Held confirmation discarded' };
   const escH = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const nOf = (n, w) => `${n || 0} ${w}${(n || 0) === 1 ? '' : 's'}`;
   // a plain description of one event, never contact details (events never hold them)
   function eventWords(e) {
     const d = e.detail || {}, w = EVENT_WORDS[e.kind] || e.kind;
@@ -289,9 +292,16 @@
     if (e.kind === 'status') return `${w} ${d.to}${d.note ? ': ' + d.note : ''}`;
     if (e.kind === 'withdrawn') return `The ${sideName(d.side)} withdrew, at ${NZ(d.at)}${d.note ? ': ' + d.note : ''}`;
     // freeze and withdrawal (Tim, 24 November 2026): who asked, why, and when and how Tim was told
-    if (e.kind === 'party_request') return `${e.actor} (${d.side === 'vendor' ? 'a vendor' : 'a purchaser'}) asked Tim to ${d.kind === 'withdraw' ? 'withdraw' : 'stop for now'}, from their link on Round ${d.round}: ${d.reason || ''}`;
+    if (e.kind === 'party_request') return `${e.actor} (${d.side === 'vendor' ? 'a vendor' : 'a purchaser'}) asked Tim to ${d.kind === 'withdraw' ? 'withdraw' : d.kind === 'revert' ? 'go back to the last sealed round' : 'stop for now'}, from their link on Round ${d.round}: ${d.reason || ''}`;
     if (e.kind === 'offer_frozen') return `${w}. Every signing stopped. Asked by ${d.asked_by || 'Tim'}: ${d.reason || ''}`;
-    if (e.kind === 'offer_unfrozen') return `${w}. Signing can carry on: ${d.note || ''}`;
+    if (e.kind === 'offer_unfrozen') return `${w}. Signing can carry on${d.reverted ? ' from the last sealed round' : ''}: ${d.note || ''}`;
+    // Offers fixes 3: undone work, rounds started again or set aside, and a confirmation held while frozen (nothing is ever removed)
+    if (e.kind === 'sign_undone') { const bits = [d.taps ? d.taps + (d.taps === 1 ? ' place' : ' places') : '', d.changes ? d.changes + (d.changes === 1 ? ' change' : ' changes') + (d.change_kinds && d.change_kinds.length ? ' (' + d.change_kinds.map(k => KIND_WORDS[k] || k).join(', ') + ')' : '') : ''].filter(Boolean).join(' and ');
+      return `${w} by ${e.actor} on Round ${d.round || 1}: ${d.scope === 'turn' ? 'started their turn again' : 'their last step'}${bits ? ', ' + bits : ''}${d.ink_cleared ? ', signature and initials cleared' : ''}`; }
+    if (e.kind === 'round_reset') return `${w} (Round ${d.round || 1}, the ${sideName(d.side || 'purchaser')}): ${nOf(d.taps, 'place')} and ${nOf(d.changes, 'change')} undone, ${d.reopened || 0} to sign again. ${d.reason || ''}`;
+    if (e.kind === 'round_reverted') return `${w}${d.to_round ? ' (Round ' + d.to_round + ')' : ' (nothing sealed yet)'}: ${(d.discarded || []).map(x => `Round ${x.round} (the ${sideName(x.side)}) stopped, ${nOf(x.taps, 'place')}, ${nOf(x.changes, 'change')} and ${nOf(x.finished, 'finished signer')} discarded`).join('; ')}. ${d.reason || ''}`;
+    if (e.kind === 'agreement_held') return `${w}: Round ${d.round}, dated ${d.date}, acceptance communicated ${NZ(d.accepted_at)}`;
+    if (e.kind === 'agreement_hold_discarded') return `${w}${d.note ? ': ' + d.note : ''}`;
     if (e.kind === 'request_carry_on') return `${w}: ${d.note || ''}`;
     if (e.kind === 'offer_withdrawn_now') return `${w} with immediate effect, directed by ${d.person} for the ${sideName(d.side)}: ${d.reason || ''}. Tim was told ${NZ(d.told_at)}, ${({ in_person: 'in person', phone: 'by phone', email: 'by email', link_request: 'by their request from their link' })[d.told_how] || d.told_how}. Never presented or signed again`;
     if (e.kind === 'deposit_holder_chosen' && d.by_default) return `Deposit holder: the recommended one, used for the emails (not changed by Tim): ${d.holder === 'nzret' ? 'Public Trust O/A NZ Real Estate Trust' : "the vendors' lawyer's trust account"}`;

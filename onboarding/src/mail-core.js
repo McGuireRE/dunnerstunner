@@ -8,6 +8,7 @@
      signLinkDraft(i)        a signer's personal link (the link itself goes in at [the signing link] when Tim sends it)
      reopenedDraft(i)        "please initial the change and finish again", to a signer whose side changed the document after they finished
      roundNotice(i)          Tim's own notice, once per submitted round: who, what changed, which round, and its portal address
+     requestNotice(i)        Tim's urgent email when a party asks from their link to stop, withdraw or go back to the last sealed round
      agreedDrafts(i)         the agreed copy's two emails: to the purchasers (cc their lawyer) and to the vendors (cc theirs)
      agreedPrice(i)          the agreed price after the negotiation (a typed figure that replaced the struck price), or a marked blank
      agreedDates(i)          each condition's due date and settlement day, from the agreement date with working days and the province's holidays
@@ -386,6 +387,17 @@
     return { party, lawyer };
   }
 
+  // Tim's urgent email when a party asks from their own link (024; Offers fixes 3 adds going back to the last sealed round): the subject,
+  // what they ask for, and what has (and hasn't) happened. Only ever to Tim.
+  function requestNotice(i) {
+    const v = i.side === 'vendor', who = v ? 'a vendor' : 'a purchaser', back = (+i.round || 1) - 1, addr = s_(i.address) || 'an offer';
+    const ask = i.kind === 'withdraw' ? 'withdraw' : i.kind === 'revert' ? (back >= 1 ? `go back to Round ${back} as it was signed` : 'start this round again from the beginning') : 'stop signing for now';
+    const short = i.kind === 'withdraw' ? 'withdraw' : i.kind === 'revert' ? (back >= 1 ? `go back to Round ${back}` : 'start the round again') : 'stop signing';
+    const after = i.kind === 'revert' ? `Nothing has been set aside yet. Only their own link has stopped, and nobody else has been told. Open the offer to ${back >= 1 ? `go back to Round ${back}` : 'start the round again'}, or let them carry on:`
+      : 'Nothing is frozen yet. Only their own link has stopped, and nobody else has been told. Open the offer to Freeze now or Withdraw now:';
+    return { subject: `URGENT: ${who} asks to ${short}: ${addr}`, who, ask, after };
+  }
+
   // a draft's text as the email's HTML: escaped, paragraphs at blank lines, line breaks kept, **bold**, the link at [the signing link]
   function toHtml(text, link) {
     const esc = t => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -394,7 +406,7 @@
     return '<div style="font-family:Arial,sans-serif;font-size:15px;line-height:1.5;color:#1F1D1A;max-width:600px">' + String(text).split(/\n{2,}/).map(p => `<p>${para(p)}</p>`).join('') + '</div>';
   }
 
-  const MAIL = { LINK, BLANK_RE, get TIM_PHONE() { return TIM_PHONE; }, setAgent, allChanges, signLinkDraft, reopenedDraft, roundNotice, agreedDrafts, agreedPrice, agreedDates, agreedNotice, PRICE_BLANK, DEPOSIT_HOLDERS, depositRecommended, withdrawDrafts, firstWorkingDay, parseDate, longDate, toHtml, P_ACTION };
+  const MAIL = { LINK, BLANK_RE, get TIM_PHONE() { return TIM_PHONE; }, setAgent, allChanges, signLinkDraft, reopenedDraft, roundNotice, agreedDrafts, agreedPrice, agreedDates, agreedNotice, PRICE_BLANK, DEPOSIT_HOLDERS, depositRecommended, withdrawDrafts, requestNotice, firstWorkingDay, parseDate, longDate, toHtml, P_ACTION };
   // also on the global object everywhere (a bundler may wrap this file as CommonJS: the offer-sign entry reads the globals; offers hotfix 2)
   if (typeof module !== 'undefined' && module.exports) module.exports = MAIL; root.MAIL = MAIL;
 })(typeof window !== 'undefined' ? window : globalThis);

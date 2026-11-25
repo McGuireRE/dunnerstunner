@@ -6016,7 +6016,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     ofOpen({ mode: 'correct', openSigning: openSg, oid, pid: o.property_id, address: p.address, province: o.province || OF.DEFAULT_PROVINCE, ksDays: await ofKs(), wording: await ofWording(), asAt: o.as_at, chattels: (o.details || {}).chattels_listed || [] }, ofShape(o.details));
   }
   const OF_EVENT = { submitted: 'Received', read: 'Opened', corrected: 'Corrected', status: 'Status changed', gap_override: 'Short date gap accepted', gap_override_cleared: 'Gap acceptance cleared',
-    party_request: 'A party asked you to stop or withdraw', offer_frozen: 'Frozen', offer_unfrozen: 'Unfrozen', request_carry_on: 'Let them carry on', offer_withdrawn_now: 'Withdrawn now', deposit_holder_chosen: 'Deposit holder chosen' };
+    party_request: 'A party asked you to stop or withdraw', offer_frozen: 'Frozen', offer_unfrozen: 'Unfrozen', request_carry_on: 'Let them carry on', offer_withdrawn_now: 'Withdrawn now', deposit_holder_chosen: 'Deposit holder chosen',
+    sign_undone: 'A signer undid a step', sign_redrawn: 'A signer drew their signature again', round_reset: 'You started a round again', round_reverted: 'Went back to the last sealed round', agreement_held: 'Confirmation held while frozen', agreement_hold_discarded: 'Held confirmation discarded' };
   async function viewOfferAgent(oid) {
     header('Offer', '', 0); actions(false);
     main().innerHTML = '<div class="loading">Loading...</div>';
@@ -7086,9 +7087,12 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const g = await must(sb.from('offer_signings').select('*').eq('id', sid).single());
     const sgDrafts = (await ofSafe(sb.from('offer_mail_drafts').select('*').eq('signing_id', sid).order('created_at'))) || [];   // its emails (drafts and sent)
     const [o, p, d, signers, taps, marks, reviews, asks, rounds] = await Promise.all([must(sb.from('property_offers').select('*').eq('id', g.offer_id).single()), must(sb.from('properties').select('id,address').eq('id', g.property_id).single()),
-      must(sb.from('offer_drafts').select('*').eq('id', g.draft_id).single()), ofSafe(sb.from('offer_signers').select(SG_COLS).eq('signing_id', sid).order('position')), ofSafe(sb.from('offer_sign_taps').select('signer_id,place_id,at').eq('signing_id', sid)),
-      ofSafe(sb.from('offer_sign_marks').select('*').eq('signing_id', sid).order('at')), ofSafe(sb.from('offer_sign_reviews').select('*').eq('signing_id', sid).order('at')), ofSafe(sb.from('offer_sign_asks').select('*').eq('signing_id', sid).order('at')),
+      must(sb.from('offer_drafts').select('*').eq('id', g.draft_id).single()), ofSafe(sb.from('offer_signers').select(SG_COLS).eq('signing_id', sid).order('position')), ofSafe(sb.from('offer_sign_taps_live').select('signer_id,place_id,at').eq('signing_id', sid)),
+      ofSafe(sb.from('offer_sign_marks_live').select('*').eq('signing_id', sid).order('at')), ofSafe(sb.from('offer_sign_reviews_live').select('*').eq('signing_id', sid).order('at')), ofSafe(sb.from('offer_sign_asks').select('*').eq('signing_id', sid).order('at')),
       ofSafe(sb.from('offer_rounds').select('*').eq('signing_id', sid))]);
+    // what was undone on this round (Offers fixes 3): kept, and counted here; the timeline says what, by whom and when
+    const undone = ((await ofSafe(sb.from('offer_sign_undos').select('id,action,tap_id,mark_id,scope,by_name,at').eq('signing_id', sid))) || []).filter(u => u.action === 'undo');
+    const wentBack = ((await ofSafe(sb.from('offer_events').select('kind,detail,at').eq('offer_id', g.offer_id).eq('kind', 'round_reverted'))) || []).find(e => ((e.detail || {}).discarded || []).some(x => x.signing_id === sid));
     const allD = (await ofSafe(sb.from('offer_drafts').select('id,number').eq('offer_id', g.offer_id))) || [];
     const stale = !['locked', 'replaced', 'cancelled'].includes(g.status) && (d.number !== Math.max(...allD.map(x => x.number)) || JSON.stringify(drCanon(o.details)) !== JSON.stringify(drCanon(d.details)));
     const rd = (rounds || [])[0], S_ = signers || [], T_ = taps || [], Mk = marks || [], Rv = reviews || [], RN = g.round_no || 1;
@@ -7103,7 +7107,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       ${RN > 1 && Mk.length ? `<p class="small" id="ngChanges">${Mk.length} change${Mk.length === 1 ? '' : 's'} made so far in this round.</p>` : ''}
       ${g.status === 'replaced' ? `<div class="card warnc tight" id="sgReplaced"><p class="small" style="margin:0">Replaced by a newer draft ${esc(fmtDT(g.replaced_at))}. The signatures and initials given on this version are kept, but they are void. Everyone signs the new version.</p>${g.replaced_by ? '<div class="toolbar"><button class="btn ghost" type="button" id="sgNewer">Open the new signing</button></div>' : ''}</div>` : ''}
       ${g.status === 'withdrawn' ? `<div class="card note tight" id="sgWithdrawn"><p class="small" style="margin:0">Stopped because ${o.status === 'declined' ? 'the vendors declined the offer (or withdrew their counteroffer)' : o.status === 'lapsed' ? 'the offer lapsed' : 'the offer was withdrawn'}. What was signed is kept. Any links sent no longer work.</p></div>` : ''}
-      ${g.status === 'cancelled' ? `<div class="card note tight" id="sgCancelled"><p class="small" style="margin:0">${S_.some(s => s.consent_at) ? 'Stopped: the document was closed for a fresh copy. What was signed is kept.' : 'Stopped before anyone signed, so it could be released again another way.'} Any links sent no longer work.</p></div>` : ''}
+      ${g.status === 'cancelled' ? `<div class="card note tight" id="sgCancelled"><p class="small" style="margin:0">${wentBack ? `Stopped ${esc(fmtDT(wentBack.at))}: you went back to ${(wentBack.detail || {}).to_round ? 'Round ' + wentBack.detail.to_round + ' as it was sealed' : 'before signing started'} (${esc((wentBack.detail || {}).reason || '')}). What was done on this round is set aside, kept on the record and listed on the timeline as discarded.` : S_.some(s => s.consent_at) ? 'Stopped: the document was closed for a fresh copy. What was signed is kept.' : 'Stopped before anyone signed, so it could be released again another way.'} Any links sent no longer work.</p></div>` : ''}
       ${stale ? `<div class="card warnc tight" id="sgStale"><p class="small" style="margin:0">The offer has changed since this was released, so signing has stopped. Re-draft and approve it, then tap Ready to sign. Signatures already given on this version stay recorded, as replaced.</p></div>` : ''}
       ${rd ? `<section class="card okc" id="sgRound"><h2>Round ${rd.doc_round || 1} locked</h2><p class="small">Locked ${esc(fmtDT(rd.locked_at))}. Fingerprint <span translate="no">${esc(rd.sha256)}</span>, worked out by the server from the stored file. The approved draft is unchanged, with every signature, initial and mark added on top, and the execution record on a page of its own at the end. It can't be changed or removed.</p>
         <div class="toolbar"><button class="btn ghost" type="button" id="sgRoundDl">Download Round ${rd.doc_round || 1}</button><button class="btn ghost" type="button" id="sgChain">Check the timeline</button></div><p class="small" id="sgChainOut" role="status" aria-live="polite"></p></section>` : ''}
@@ -7121,9 +7125,15 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         return `<section class="card" id="sgMethod"><h2>How they sign</h2>${begun.length ? `<p class="small" style="margin:0" id="sgMethodNo">${esc(begun.map(s => s.name).join(', '))} ${begun.length > 1 ? 'have' : 'has'} started signing, so this can't be changed to ${g.method === 'link' ? 'in person' : 'by link'} now. To start again, correct the offer and re-draft it; everyone then signs the new version.</p>`
           : `<p class="small">${g.method === 'link' ? 'By personal link.' : 'In person, on this device.'} Nobody has started signing, so you can change this.${g.method === 'link' && g.sent_at ? ' The links already sent stop working.' : ''}</p><div class="toolbar"><button class="btn ghost" type="button" id="sgChange">Change to ${g.method === 'link' ? 'in person' : 'by link'}</button></div><p class="small err" id="sgChangeErr" role="alert"></p>`}</section>`; })() : ''}
       ${(asks || []).length ? `<section class="card" id="sgAsks"><h2>Asked for a change</h2>${asks.map(a => { const s = S_.find(x => x.id === a.signer_id) || {}; return `<div class="fact"><div class="k">${nt(s.name || '')} · ${esc(fmtDT(a.at))}</div><div class="v" style="font-weight:400">${esc(a.text)}</div></div>`; }).join('')}<p class="small">If it needs a change, correct the offer, re-draft and approve it, and tap Ready to sign. Everyone then signs the new version.</p></section>` : ''}
+      ${undone.length ? `<p class="small" id="sgUndone">${undone.length} step${undone.length === 1 ? '' : 's'} undone on this round (${undone.filter(u => u.tap_id).length} place${undone.filter(u => u.tap_id).length === 1 ? '' : 's'}, ${undone.filter(u => u.mark_id).length} change${undone.filter(u => u.mark_id).length === 1 ? '' : 's'}). Kept on the record; the timeline says who and when.</p>` : ''}
+      ${['ready', 'signing', 'held', 'complete'].includes(g.status) && !rd && !stale ? `<details class="card tight" id="sgResetBox"><summary class="small">Start this round again</summary><p class="small">Every place tapped and every change made on Round ${RN} is taken back (kept on the record, marked as undone), and anyone who has finished signs again. Drawn signatures are kept. The same people and links carry on, and nobody is emailed. Nothing sealed changes.</p>
+        <label class="f" for="sgResetWhy">Why</label><input type="text" id="sgResetWhy" maxlength="500"><div class="toolbar"><button class="btn ghost" type="button" id="sgResetGo">Start Round ${RN} again</button></div><p class="small err" id="sgResetErr" role="alert"></p></details>` : ''}
       ${Mk.length ? `<details class="card tight" id="sgMarks"><summary class="small">Marks (${Mk.length})</summary>${Mk.map(m => `<p class="small" style="margin:2px 0">Page ${m.page}: ${esc(sgMarkWords(m))} by ${nt(m.by_name)}, ${esc(fmtDT(m.at))}${Rv.some(r => (r.marks || []).includes(m.id)) ? ', re-approved' : ''}</p>`).join('')}</details>` : ''}
     </div>`;
     $('#sgBackO').addEventListener('click', () => viewOfferAgent(g.offer_id));
+    const rs = $('#sgResetGo'); if (rs) rs.addEventListener('click', async () => { const why = $('#sgResetWhy').value.trim(); if (why.length < 3) return ($('#sgResetErr').textContent = 'Say why you are starting it again.');
+      if (!confirm(`Start Round ${RN} again? Everything done on it is taken back, and anyone who finished signs again. Nobody is emailed.`)) return;
+      rs.disabled = true; try { const r = await sgRpc('agent_signing_revert_round', { p_signing: sid, p_reason: why }); toast(`Round ${RN} is back at its start${r.reopened ? `. ${r.reopened} to sign again` : ''}`); viewSigning(sid); } catch (e) { $('#sgResetErr').textContent = e.message; rs.disabled = false; } });
     const nw = $('#sgNewer'); if (nw) nw.addEventListener('click', () => viewSigning(g.replaced_by));
     const chg = $('#sgChange'); if (chg) chg.addEventListener('click', async () => { chg.disabled = true;
       try { await sgRpc('agent_signing_cancel', { p_signing: sid, p_reason: 'Changed to ' + (g.method === 'link' ? 'in person' : 'by link') }); toast('Stopped. Choose how they sign');
@@ -7187,7 +7197,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const g2 = GUIDES.sale_purchase;
     let body = '';
     if (step === 'stopped') body = `<div class="card warnc" id="sgStopped"><p style="margin:0">${esc(ctx.stopped)}</p></div>`;
-    else if (step === 'held') body = `<div class="card note" id="sgHeldMsg"><h2 style="margin-top:0">Sent to Tim to check</h2><p class="small" style="margin:0">${ctx.mode === 'person' ? 'A change was marked on the document. Tim checks it and re-approves before signing carries on. Everyone then initials beside it.' : 'Tim is checking a change to the document. Signing carries on once he has. Come back to this link then.'}</p>${ctx.back ? '<div class="toolbar"><button class="btn primary" type="button" id="sgToTim">Back to Tim\'s screen</button></div>' : ''}</div>`;
+    else if (step === 'held') body = `<div class="card note" id="sgHeldMsg"><h2 style="margin-top:0">Sent to Tim to check</h2><p class="small" style="margin:0">${ctx.mode === 'person' ? 'A change was marked on the document. Tim checks it and re-approves before signing carries on. Everyone then initials beside it.' : 'Tim is checking a change to the document. Signing carries on once he has. Come back to this link then.'}</p>${ctx.back ? '<div class="toolbar"><button class="btn primary" type="button" id="sgToTim">Back to Tim\'s screen</button></div>' : ''}</div>${ctx.api.undo && ctx.last && ctx.last.what === 'change' ? sgUndoHTML(ctx, false) : ''}`;
     else if (step === 'consent') body = `<section class="card" id="sgConsent"><h2>Signing electronically</h2>
       <p class="small">You're about to sign the agreement for ${nt(ctx.address)} on screen. Your drawn signature and initials, and each place you tap, have the same effect as signing on paper. A record of when and how you signed is kept with the signed copy.</p>
       <p class="small">You can stop at any time, and you can ask for a paper copy instead.</p>
@@ -7200,7 +7210,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <h3>Real Estate Authority guide to sale and purchase agreements</h3><p class="small">It explains the agreement you are about to sign.</p>${g2 ? guideViewer(g2) : `<p><a href="${REA_SP}" target="_blank" rel="noopener">Read the guide on the Real Estate Authority website</a></p>`}
       ${hasR('sale_purchase') ? '<p class="small" id="sgSpDone">Received.</p>' : `<label class="choice cb"><input type="checkbox" id="sgSpOk"><span class="mark"></span><span><span class="ct">I've received the Real Estate Authority guide to sale and purchase agreements</span><span class="cd">This is recorded with the time</span></span></label>`}
       <div class="toolbar"><button class="btn primary" type="button" id="sgGuidesGo">Continue</button></div></section>`;
-    else if (step === 'draw') body = `<section class="card" id="sgDraw"><h2>Your signature and initials</h2><p class="small">Draw them once with your finger or a stylus. You then put them in each place yourself, one tap at a time.</p>
+    else if (step === 'draw') body = `<section class="card" id="sgDraw"><h2>Your signature and initials</h2><p class="small">${ctx.ever_tapped ? 'You cleared your signature and initials when you started your turn again. Draw them again, then put them in each place yourself.' : 'Draw them once with your finger or a stylus. You then put them in each place yourself, one tap at a time.'}</p>
       <div style="display:flex;justify-content:space-between;align-items:baseline"><h3 style="margin:0">Signature</h3><button class="btn link" type="button" id="sgClrS">Clear</button></div>
       <div class="sig-wrap"><canvas id="sgSig" aria-label="Signature pad"></canvas><div class="sig-line"></div><span class="hint">Sign here</span></div>
       <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:10px"><h3 style="margin:0">Initials</h3><button class="btn link" type="button" id="sgClrI">Clear</button></div>
@@ -7224,6 +7234,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         ${ctx.mode === 'link' && (!R2 || !ctx.link_changes) ? `<details class="card tight" id="sgAskBox"><summary class="small">Ask Tim for a change</summary><p class="small">You can't change the document here. Tell Tim what you would like changed and he'll be in touch. If the offer changes, everyone signs the new version.</p>
           <label class="sr" for="sgAskText">What you would like changed</label><textarea id="sgAskText" rows="3" maxlength="1000"></textarea><div class="toolbar"><button class="btn ghost" type="button" id="sgAskGo">Send to Tim</button></div><p class="small" id="sgAskOut" role="status"></p></details>` : ''}
         </section>
+        ${ctx.api.undo ? sgUndoHTML(ctx, true) : ''}
         <section class="card" id="sgFinish"><h2>Finish</h2>${left ? `<p class="small" id="sgLeft">${left} place${left === 1 ? '' : 's'} still to do. You can finish once every place is done.</p>` : '<p class="small" id="sgAllDone">Every place is done.</p>'}
           ${ctx.mode === 'person' ? `<label class="choice cb"><input type="checkbox" id="sgSaw"><span class="mark"></span><span><span class="ct">Tim: I saw ${esc(ctx.name)} sign</span></span></label>
             <fieldset class="sg-idwho" id="sgIdWho"><legend class="f">Identity <span class="opt">(optional: choose one, or leave it)</span></legend>
@@ -7238,7 +7249,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       ${R2 ? ngIntroHTML(ctx) : ''}
       ${ctx.mode === 'person' ? `<p class="small">${esc(ctx.name)} uses this screen. Only their own places can be done here.</p>` : `<p class="small">Signing as ${nt(ctx.name)}.</p><details class="small" id="sgDocCheck"><summary>Details</summary><p class="small" style="margin:4px 0 0">Document check code: <span translate="no">${esc(drShort(ctx.draftSha))}</span>. It is worked out from the document itself, so anyone can later confirm the copy you signed is exactly this one.</p></details>`}
       ${step === 'stopped' ? '' : stepBar}${body}<p class="err" id="sgErr" role="alert"></p>
-      ${ctx.mode === 'link' && step !== 'stopped' && ctx.api.request ? sgRequestHTML() : ''}
+      ${ctx.mode === 'link' && step !== 'stopped' && ctx.api.request ? sgRequestHTML(ctx) : ''}
       ${ctx.back ? '<div class="toolbar no-print"><button class="btn ghost" type="button" id="sgBackTim">Back to Tim\'s screen</button></div>' : ''}</div>`;
     const on = (sel, f, ev) => { const el = $(sel); if (el) el.addEventListener(ev || 'click', f); };
     const act = async (f, then) => { err(''); try { await f(); } catch (e) { return err(e.message); } return then ? then() : ctx.reload(); };
@@ -7246,6 +7257,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const handBack = () => { if (confirm("Hand the device back to Tim? Anything drawn and not finished on this turn is kept.")) ctx.back(); };
     on('#sgBackTim', handBack); on('#sgToTim', handBack);
     sgRequestWire(ctx);
+    sgUndoWire(ctx, err);
     on('#sgAgreeGo', () => { if (!$('#sgAgree').checked) return err('Tick the box to agree to sign electronically, or stop here and call Tim.'); act(() => ctx.api.consent()); });
     if (step === 'guides' && VEND) on('#ngChatGo', () => act(async () => { if (!$('#ngChatOk').checked) throw new Error('Tick that you have read the reminder about chattels.'); await ctx.api.receipt({ guide: 'chattels' }); }));
     else if (step === 'guides') {
@@ -7279,6 +7291,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         // a place already done (a tap that finished while the page was being drawn again) is simply shown as done
         if (!F.marking) r.wrapEl.addEventListener('click', async e => { const b = e.target.closest('.sg-place'); if (!b || b.dataset.busy) return; if (ctx.taps.has(b.dataset.id)) { fillBox(b, req().find(x => x.id === b.dataset.id)); return counts(); } b.dataset.busy = '1'; err('');
           try { await ctx.api.tap(b.dataset.id); ctx.taps.add(b.dataset.id); } catch (x) { delete b.dataset.busy; return err(x.message); }
+          ctx.last = { what: 'tap', place_id: b.dataset.id }; sgUndoRefresh(ctx);   // the undo box follows each tap (Offers fixes 3)
           delete b.dataset.busy; const pl = req().find(x => x.id === b.dataset.id); fillBox(b, pl); $$(`#sgPage .sg-place[data-id="${CSS.escape(pl.id)}"]`).forEach(x => fillBox(x, pl)); counts(); });
         else if (F.marking !== 'reinstate') sgDrawLayer(r, F, ctx);
       };
@@ -7313,6 +7326,28 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       F.rerender = paint;
     }
     top();
+  }
+  /* Undo (Offers fixes 3, Tim 26 November 2026): in every signing turn, in person and by link. "Undo my last step" takes back the newest
+     place tapped or change made; "Start my turn again" takes back everything done this round (the drawing is kept unless they tick to
+     clear it). Nothing is removed: the database keeps each undone step and the timeline says what, by whom and when. Nobody is told. */
+  const sgLastWords = ctx => { const l = ctx.last; if (!l) return '';
+    if (l.what === 'tap') { const pl = (ctx.places || []).find(x => x.id === l.place_id); return pl ? `${pl.kind === 'signature' ? 'Your signature' : pl.kind === 'name' ? 'Your name' : 'Your initials'} on page ${pl.page}` : 'The last place you tapped'; }
+    return `Your ${(SG.MARK_NAMES[l.kind] || (l.kind === 'insert' ? 'typed words' : 'change')).toLowerCase()} on page ${l.page}`; };
+  const sgUndoHTML = (ctx, turn) => `<section class="card tight" id="sgUndoBox"><h3 style="margin:0 0 4px">Made a mistake?</h3>
+    ${ctx.last ? `<p class="small" style="margin:0" id="sgUndoWhat">Your last step: ${esc(sgLastWords(ctx))}.</p>` : '<p class="small" style="margin:0" id="sgUndoWhat">Nothing to undo yet.</p>'}
+    <div class="toolbar"><button class="btn ghost" type="button" id="sgUndoLast" ${ctx.last ? '' : 'disabled'}>Undo my last step</button></div>
+    ${turn ? `<details class="tight" id="sgUndoTurnBox"><summary class="small">Start my turn again</summary><p class="small">Everything you have done on this round is taken back: each place you tapped${(ctx.round || 1) > 1 ? ' and each change you made' : ''}. It stays on the record, marked as undone. Your signature and initials are kept unless you tick below.</p>
+      <label class="choice cb"><input type="checkbox" id="sgUndoClear"><span class="mark"></span><span><span class="ct">Clear my signature and initials too, so I can draw them again</span></span></label>
+      <div class="toolbar"><button class="btn ghost" type="button" id="sgUndoTurn">Start my turn again</button></div></details>` : ''}
+    <p class="small" id="sgUndoOut" role="status" aria-live="polite"></p></section>`;
+  const sgUndoRefresh = ctx => { const w = $('#sgUndoWhat'), l = $('#sgUndoLast'); if (w) w.textContent = ctx.last ? `Your last step: ${sgLastWords(ctx)}.` : 'Nothing to undo yet.'; if (l) l.disabled = !ctx.last; };
+  function sgUndoWire(ctx, err) {
+    const go = async (scope, clear, b) => { err(''); b.disabled = true; $('#sgUndoOut').textContent = 'Undoing...';
+      try { const r = await ctx.api.undo(scope, clear); toast(scope === 'turn' ? 'Your turn is back at its start' + (r && r.ink_cleared ? '. Draw your signature and initials again' : '') : 'Undone'); ctx.reload(); }
+      catch (e) { b.disabled = false; $('#sgUndoOut').textContent = ''; err(e.message); } };
+    const l = $('#sgUndoLast'); if (l) l.addEventListener('click', () => go('last', false, l));
+    const tb = $('#sgUndoTurn'); if (tb) tb.addEventListener('click', () => { const clear = !!($('#sgUndoClear') || {}).checked;
+      if (!confirm(`Start your turn again? Everything you have done on this round is taken back${clear ? ', and your signature and initials are cleared' : ''}.`)) return; go('turn', clear, tb); });
   }
   // switching a marking tool repaints the toolbar and the page in place
   function signFlowTools(ctx, F, paint) {
@@ -7380,14 +7415,19 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     cv.addEventListener('pointerup', end); cv.addEventListener('pointercancel', end);
   }
 
+  const sgLastOf = list => { const l = (list || []).slice().sort((a, z) => a.at < z.at ? 1 : a.at > z.at ? -1 : (String(a.ref) < String(z.ref) ? 1 : -1))[0]; if (!l) return null; const o = Object.assign({}, l); delete o.ref; return o; };
   // in person: one purchaser's turn on Tim's device
   async function viewSignTurn(sid, signerId) {
     header('Signing', '', 0); actions(false);
     main().innerHTML = '<div class="loading">Loading...</div>';
     const g = await must(sb.from('offer_signings').select('*').eq('id', sid).single());
-    const [d, p, s, taps, rcs, rvs, marks] = await Promise.all([must(sb.from('offer_drafts').select('*').eq('id', g.draft_id).single()), must(sb.from('properties').select('id,address').eq('id', g.property_id).single()),
-      must(sb.from('offer_signers').select(SG_COLS + ',sig_png,init_png').eq('id', signerId).single()), ofSafe(sb.from('offer_sign_taps').select('place_id').eq('signer_id', signerId)),
-      ofSafe(sb.from('offer_sign_receipts').select('guide').eq('signer_id', signerId)), ofSafe(sb.from('offer_sign_reviews').select('places').eq('signing_id', sid)), ofSafe(sb.from('offer_sign_marks').select('*').eq('signing_id', sid))]);
+    // what stands (026): taps and changes not undone, the initials places of changes that stand, and the signer's drawing as it stands
+    const [d, p, s, taps, rcs, rvs, marks, rds, tapsEver] = await Promise.all([must(sb.from('offer_drafts').select('*').eq('id', g.draft_id).single()), must(sb.from('properties').select('id,address').eq('id', g.property_id).single()),
+      must(sb.from('offer_signers').select(SG_COLS + ',sig_png,init_png').eq('id', signerId).single()), ofSafe(sb.from('offer_sign_taps_live').select('id,place_id,at').eq('signer_id', signerId)),
+      ofSafe(sb.from('offer_sign_receipts').select('guide').eq('signer_id', signerId)), ofSafe(sb.from('offer_sign_reviews_live').select('places').eq('signing_id', sid)), ofSafe(sb.from('offer_sign_marks_live').select('*').eq('signing_id', sid)),
+      ofSafe(sb.from('offer_sign_redraws').select('id,sig_png,init_png').eq('signer_id', signerId).order('id', { ascending: false })), ofSafe(sb.from('offer_sign_taps').select('id').eq('signer_id', signerId))]);
+    const ink = (rds || [])[0] || { sig_png: s.sig_png, init_png: s.init_png };
+    const last = sgLastOf((taps || []).map(x => ({ what: 'tap', place_id: x.place_id, at: x.at, ref: String(x.id).padStart(20, '0') })).concat((marks || []).filter(m => m.signer_id === signerId).map(m => ({ what: 'change', kind: m.kind, page: m.page, at: m.at, ref: m.id }))));
     // the signer must be in this signing (an address or a stale button could name another)
     if (s.signing_id !== sid) { if (PORTAL) { portalView(''); return viewPortalMissing(); } main().innerHTML = '<div class="view-pad"><p class="err">That signer isn\'t part of this signing.</p></div>'; return; }
     let bytes; try { bytes = await drDraftBytes(d); } catch (e) { main().innerHTML = `<div class="view-pad"><p class="err">${esc(e.message)}</p></div>`; return; }
@@ -7404,10 +7444,12 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       sideSigners: ((await ofSafe(sb.from('offer_signers').select(SG_COLS).eq('signing_id', sid).order('position'))) || []).filter(x => !x.void_at).map(x => ({ position: x.position, name: x.name })),
       side_places: (g.places || []).concat((rvs || []).flatMap(r => r.places || [])), terms: ngTermsOf(d) } : {};
     signFlow({ mode: 'person', address: p.address, name: s.name, position: s.position, places: (g.places || []).concat((rvs || []).flatMap(r => r.places || [])).filter(x => x.signer === s.position), taps: new Set((taps || []).map(t => t.place_id)),
-      consent_at: s.consent_at, receipts: (rcs || []).map(r => r.guide), sig_png: s.sig_png, init_png: s.init_png, status: g.status, stopped: stale, cca_pages: g.cca_pages || [], pages: g.pages, bytes, draftSha: g.draft_sha256, marks: marks || [], round: RN, side: g.side || 'purchaser', ...R2x,
+      consent_at: s.consent_at, receipts: (rcs || []).map(r => r.guide), sig_png: ink.sig_png, init_png: ink.init_png, status: g.status, stopped: stale, cca_pages: g.cca_pages || [], pages: g.pages, bytes, draftSha: g.draft_sha256, marks: marks || [], round: RN, side: g.side || 'purchaser', ...R2x,
+      last, ever_tapped: (tapsEver || []).length > 0,
       api: { change: c => sgRpc('agent_round_change', Object.assign({ p_id: c.id, p_kind: c.kind, p_page: c.page, p_geometry: c.geometry, p_target: c.target || null, p_places: c.places }, P_)), consent: () => sgRpc('agent_signing_consent', Object.assign({ p_ua: ua }, P_)), receipt: r => sgRpc('agent_signing_receipt', Object.assign({ p_guide: r.guide, p_version: r.version || null, p_file: r.file || null, p_sha256: r.sha256 || null, p_pages: r.pages || null }, P_)),
         marks: (a, b) => sgRpc('agent_signing_marks', Object.assign({ p_sig: a, p_init: b }, P_)), tap: pl => sgRpc('agent_signing_tap', Object.assign({ p_place: pl }, P_)),
-        mark: m => sgRpc('agent_signing_mark', Object.assign({ p_kind: m.kind, p_page: m.page, p_geometry: m.geometry, p_target: m.target || null }, P_)), finish: o2 => sgRpc('agent_signing_finish', Object.assign({ p_id_sighted: o2.id, p_ua: ua }, P_)) },
+        mark: m => sgRpc('agent_signing_mark', Object.assign({ p_kind: m.kind, p_page: m.page, p_geometry: m.geometry, p_target: m.target || null }, P_)), finish: o2 => sgRpc('agent_signing_finish', Object.assign({ p_id_sighted: o2.id, p_ua: ua }, P_)),
+        undo: (scope, clear) => sgRpc('agent_signing_undo', Object.assign({ p_scope: scope, p_clear: !!clear }, P_)) },
       reload: () => viewSignTurn(sid, signerId), back: () => { SG_HANDBACK = sid; viewSigning(sid); }, done: r => { toast(`${s.name} has finished`); SG_HANDBACK = sid; viewSigning(sid); } });
   }
 
@@ -7505,13 +7547,16 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
      who directed it, and builds two emails for Tim to read and send. A party's own request from their link comes here, in red. */
   const HD_HOW = [['in_person', 'In person'], ['phone', 'By phone'], ['email', 'By email'], ['link_request', 'Their request from their link']];
   async function hdUrgent() {
-    const rq = (await ofSafe(sb.from('offer_requests').select('id,offer_id,property_id,side,kind,reason,at,signer_id').is('handled_at', null).order('at', { ascending: false }))) || [];
+    const rq = (await ofSafe(sb.from('offer_requests').select('id,offer_id,property_id,signing_id,side,kind,reason,at,signer_id').is('handled_at', null).order('at', { ascending: false }))) || [];
     if (!rq.length) return [];
     const ps = (await ofSafe(sb.from('properties').select('id,address').in('id', [...new Set(rq.map(r => r.property_id))]))) || [];
-    return rq.map(r => Object.assign({}, r, { address: (ps.find(p => p.id === r.property_id) || {}).address || 'Property' }));
+    const gs = rq.some(r => r.kind === 'revert') ? ((await ofSafe(sb.from('offer_signings').select('id,round_no').in('id', [...new Set(rq.map(r => r.signing_id).filter(Boolean))]))) || []) : [];
+    return rq.map(r => Object.assign({}, r, { address: (ps.find(p => p.id === r.property_id) || {}).address || 'Property', round: ((gs.find(g => g.id === r.signing_id) || {}).round_no) || null }));
   }
+  // what a party asks for, in Tim's words (Offers fixes 3 adds going back to the last sealed round)
+  const hdAsk = r => r.kind === 'withdraw' ? 'withdraw' : r.kind === 'revert' ? (r.round > 1 ? `go back to Round ${r.round - 1} as it was signed` : 'start their round again from the beginning') : 'stop signing for now';
   const hdUrgentHTML = (list, id) => `<section class="card urgentc" id="${id}" role="alert"><h2 style="margin:0 0 4px">Urgent</h2>${list.map((u, i) => `<div class="fact"><div class="k">${esc(fmtDT(u.at))} · ${nt(u.address)}</div>
-    <div class="v" style="font-weight:400"><strong>${u.side === 'vendor' ? 'A vendor' : 'A purchaser'} asks to ${u.kind === 'withdraw' ? 'withdraw' : 'stop signing for now'}.</strong> ${esc(u.reason)}</div>
+    <div class="v" style="font-weight:400"><strong>${u.side === 'vendor' ? 'A vendor' : 'A purchaser'} asks to ${esc(hdAsk(u))}.</strong> ${esc(u.reason)}</div>
     <div class="toolbar"><button class="btn primary" type="button" data-hdgo="${i}">Open the offer</button></div></div>`).join('')}<p class="small" style="margin:4px 0 0">Only their own link has stopped. Nobody else has been told.</p></section>`;
   const hdUrgentWire = list => $$('[data-hdgo]').forEach(b => b.addEventListener('click', () => viewOfferAgent(list[+b.dataset.hdgo].offer_id)));
   // the people on each side, for "who directed it"
@@ -7526,11 +7571,17 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     return { purchaser: purch, vendor: vend };
   }
   async function hdOfferHTML(o) {
-    const [holds, reqs, ags] = await Promise.all([ofSafe(sb.from('offer_holds').select('*').eq('offer_id', o.id).order('made_at')), ofSafe(sb.from('offer_requests').select('*').eq('offer_id', o.id).order('at')),
-      ofSafe(sb.from('offer_agreements').select('id').eq('offer_id', o.id))]);
+    const [holds, reqs, ags, sgs, rds_] = await Promise.all([ofSafe(sb.from('offer_holds').select('*').eq('offer_id', o.id).order('made_at')), ofSafe(sb.from('offer_requests').select('*').eq('offer_id', o.id).order('at')),
+      ofSafe(sb.from('offer_agreements').select('id').eq('offer_id', o.id)), ofSafe(sb.from('offer_signings').select('id,round_no,side,status,document_id').eq('offer_id', o.id)),
+      ofSafe(sb.from('offer_rounds').select('id,doc_round,document_id').eq('offer_id', o.id))]);
     const H_ = holds || [], wdH = H_.find(h => h.kind === 'withdraw'), frz = H_.find(h => h.kind === 'freeze' && !h.lifted_at), open = (reqs || []).filter(r => !r.handled_at), ag = (ags || [])[0];
     const sn = s => s === 'vendor' ? 'vendors' : 'purchasers', reqName = async r => ((await ofSafe(sb.from('offer_signers').select('name').eq('id', r.signer_id))) || [{}])[0].name || (r.side === 'vendor' ? 'A vendor' : 'A purchaser');
-    HD[o.id] = { open, people: await hdPeople(o), names: {} };
+    // going back (Offers fixes 3): the round still out for signing, and the last sealed round of the open document (0: none sealed yet)
+    const liveG = (sgs || []).filter(g => ['ready', 'signing', 'held', 'complete'].includes(g.status)).sort((a, z) => (z.round_no || 1) - (a.round_no || 1))[0] || null;
+    const backTo = liveG ? (liveG.document_id ? Math.max(0, ...(rds_ || []).filter(r => r.document_id === liveG.document_id).map(r => r.doc_round)) : 0) : null;
+    const backWords = backTo >= 1 ? `Round ${backTo} as it was sealed` : 'before signing started (nothing is sealed yet)';
+    HD[o.id] = { open, people: await hdPeople(o), names: {}, backTo };
+    open.forEach(r => { r.round = ((sgs || []).find(g => g.id === r.signing_id) || {}).round_no || null; });
     for (const r of open) HD[o.id].names[r.id] = await reqName(r);
     if (wdH) {
       const wm = (await ofSafe(sb.from('offer_mail_drafts').select('*').eq('offer_id', o.id).in('kind', ['withdraw_party', 'withdraw_lawyer']).order('created_at'))) || [];
@@ -7541,15 +7592,20 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     }
     if (ag) return '';
     const nowLocal = (() => { const t = new Date(); t.setMinutes(t.getMinutes() - t.getTimezoneOffset()); return t.toISOString().slice(0, 16); })();
-    const reqCards = open.map(r => `<section class="card urgentc" data-hdreq="${r.id}"><h2 style="margin:0 0 4px">Urgent: ${nt(HD[o.id].names[r.id])} asks to ${r.kind === 'withdraw' ? 'withdraw' : 'stop signing for now'}</h2>
+    const reqCards = open.map(r => `<section class="card urgentc" data-hdreq="${r.id}"><h2 style="margin:0 0 4px">Urgent: ${nt(HD[o.id].names[r.id])} asks to ${esc(hdAsk(r))}</h2>
       <p class="small" style="margin:0">${esc(fmtDT(r.at))}, from their own link (${r.side === 'vendor' ? 'a vendor' : 'a purchaser'}): <strong>${esc(r.reason)}</strong></p>
       <p class="small" style="margin:4px 0 0">Only their own link has stopped. Nobody else has been told. Contact them straight away.</p>
-      <div class="toolbar"><button class="btn primary" type="button" data-hdfreeze="${r.id}">Freeze now</button><button class="btn primary" type="button" data-hdwd="${r.id}">Withdraw now</button></div>
+      ${r.kind === 'revert' ? `<p class="small" style="margin:4px 0 0">Going back stops Round ${esc(r.round || '')} and sets aside what was done on it (kept on the record and listed on the timeline). The offer carries on from ${esc(backWords)}: you then present it again, or start a fresh copy. Nobody is emailed.</p>
+      <label class="f" for="hdBackWhy-${r.id}">Why you are going back</label><input type="text" id="hdBackWhy-${r.id}" maxlength="500" value="${esc(r.reason)}">
+      <div class="toolbar"><button class="btn primary" type="button" data-hdback="${r.id}">Go back to ${esc(backTo >= 1 ? 'Round ' + backTo : 'the start')}</button></div>`
+      : `<div class="toolbar"><button class="btn primary" type="button" data-hdfreeze="${r.id}">Freeze now</button><button class="btn primary" type="button" data-hdwd="${r.id}">Withdraw now</button></div>`}
       <details class="tight"><summary class="small">Let them carry on</summary><label class="f" for="hdCarry-${r.id}">What you agreed with them</label><input type="text" id="hdCarry-${r.id}" maxlength="500"><div class="toolbar"><button class="btn ghost" type="button" data-hdcarry="${r.id}">Let them carry on</button></div></details>
       <p class="small err" data-hderr="${r.id}" role="alert"></p></section>`).join('');
     const reasonSel = `<select id="hdWdWhy"><option value="">Choose a reason</option>${SG_REQ_REASONS.map(([k, l]) => `<option value="${esc(k === 'other' ? '' : l)}" data-k="${k}">${esc(l)}</option>`).join('')}</select>`;
     return `${reqCards}<section class="card ${frz ? 'urgentc' : 'tight'}" id="hdPanel">${frz ? `<h2 style="margin:0 0 4px">Frozen</h2><p class="small" style="margin:0" id="hdFrozen">Since ${esc(fmtDT(frz.made_at))}. Asked by ${esc(frz.person || 'Tim')}: ${esc(frz.reason)}. Nobody can sign, initial, change or get a code on any round. Their links say only that this version is no longer being signed. Nobody was emailed.</p>
-        <label class="f" for="hdUnNote">Why it carries on</label><input type="text" id="hdUnNote" maxlength="500"><div class="toolbar"><button class="btn ghost" type="button" id="hdUnfreeze">Unfreeze</button></div>`
+        <label class="f" for="hdUnNote">Why it carries on</label><input type="text" id="hdUnNote" maxlength="500"><div class="toolbar"><button class="btn ghost" type="button" id="hdUnfreeze">Unfreeze</button></div>
+        ${liveG ? `<details class="tight" id="hdBackBox"><summary class="small">Unfreeze and go back to ${esc(backTo >= 1 ? 'Round ' + backTo : 'the start')}</summary><p class="small">If something material changed while it was frozen. Round ${esc(liveG.round_no || 1)} (the ${ngSide(liveG.side)}) stops: its marks, initials and signatures not yet sealed are set aside, kept on the record and listed on the timeline as discarded. The offer carries on from ${esc(backWords)}: you then present it again, or start a fresh copy. Nothing sealed changes, and nobody is emailed. Uses the reason above.</p>
+          <div class="toolbar"><button class="btn primary" type="button" id="hdUnBack">Unfreeze and go back</button></div></details>` : ''}`
       : `<h3 style="margin:0 0 4px">Stop this offer</h3><p class="small" style="margin:0">Freeze now stops all signing on every round at once. Nobody is emailed, and nothing signed changes. You can unfreeze it.</p>
         <label class="f" for="hdFrWho">Who asked <span class="opt">(optional)</span></label><input type="text" id="hdFrWho" maxlength="250"><label class="f" for="hdFrWhy">Why <span class="opt">(optional)</span></label><input type="text" id="hdFrWhy" maxlength="500">
         <div class="toolbar"><button class="btn primary" type="button" id="hdFreeze">Freeze now</button></div>`}
@@ -7575,6 +7631,13 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const fz = $('#hdFreeze'); if (fz) fz.addEventListener('click', () => freeze($('#hdFrWhy').value.trim() || 'Tim froze it', $('#hdFrWho').value.trim()));
     const uf = $('#hdUnfreeze'); if (uf) uf.addEventListener('click', async () => { const n = $('#hdUnNote').value.trim(); if (n.length < 3) return err('Say why it carries on.');
       if (!confirm('Unfreeze this offer? Signing can carry on where it was.')) return; try { await sgRpc('agent_offer_unfreeze', { p_offer: o.id, p_note: n }); toast('Unfrozen. Signing can carry on.'); reload(); } catch (e) { err(e.message); } });
+    // going back to the last sealed round (Offers fixes 3): on unfreezing, or releasing a party's request; one confirm, then immediate
+    const back = async (note, request, unfreeze) => { if (!note || note.length < 3) return err('Say why you are going back.');
+      const to = st.backTo >= 1 ? `Round ${st.backTo} as it was sealed` : 'before signing started';
+      if (!confirm(`${unfreeze ? 'Unfreeze and go' : 'Go'} back to ${to}? The round out for signing stops and what was done on it is set aside (kept on the record). Nobody is emailed.`)) return;
+      try { const r = await sgRpc('agent_offer_revert_sealed', { p_offer: o.id, p_note: note, p_request: request || null, p_unfreeze: !!unfreeze }); toast(`${unfreeze ? 'Unfrozen. ' : ''}Back to ${r.to_round ? 'Round ' + r.to_round : 'the start'}. Present it again when you are ready.`); reload(); } catch (e) { err(e.message); } };
+    const ub = $('#hdUnBack'); if (ub) ub.addEventListener('click', () => back($('#hdUnNote').value.trim(), null, true));
+    $$('[data-hdback]').forEach(b => b.addEventListener('click', () => { const id = b.dataset.hdback; back((($('#hdBackWhy-' + id) || {}).value || '').trim(), id, false); }));
     const withdraw = async (a) => { if (!confirm(`Withdraw this offer now, for the ${a.side === 'vendor' ? 'vendors' : 'purchasers'} (${a.person})? All signing stops for good. Nobody is emailed until you send the emails yourself.`)) return;
       try { await sgRpc('agent_offer_withdraw_now', { p_offer: o.id, p_side: a.side, p_person: a.person, p_reason: a.reason, p_told_at: a.at, p_told_how: a.how, p_request: a.request || null });
         let msg = 'Withdrawn.'; try { await hdBuildMail(o, p); msg += ' The emails are built for you to read and send.'; } catch (_) { msg += ' Build the emails on the offer page.'; } toast(msg); reload(); } catch (e) { err(e.message); } };
@@ -7634,6 +7697,10 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const last = open ? R_.filter(r => r.document_id === open.id).sort((a, z) => z.doc_round - a.doc_round)[0] : null;
     const live = open ? (gs || []).find(g => g.document_id === open.id && ['ready', 'signing', 'held', 'complete'].includes(g.status)) : null;
     const formed = last && last.doc_round > 1 && !last.changes && !(last.outstanding || []).length && !live;
+    // Confirm while frozen (Tim, 25 November 2026): held, not locked, sealed or dated; nothing emailed; completed or discarded once unfrozen
+    const [hl, chs] = formed && !ag ? await Promise.all([ofSafe(sb.from('offer_holds').select('kind,lifted_at').eq('offer_id', o.id)), ofSafe(sb.from('offer_confirm_holds').select('*').eq('offer_id', o.id).is('resolved_at', null))]) : [[], []];
+    const frozenNow = (hl || []).some(h => h.kind === 'freeze' && !h.lifted_at), held = (chs || [])[0] || null;
+    NG_HELD[o.id] = { frozen: frozenNow, held };
     const nowLocal = (() => { const t = new Date(); t.setMinutes(t.getMinutes() - t.getTimezoneOffset()); return t.toISOString().slice(0, 16); })();
     const today = NG.fullDate(new Date().toLocaleDateString('en-CA', { timeZone: 'Pacific/Auckland' }));
     const rRow = r => `<li class="small" data-round="${r.doc_round}"><strong>Round ${r.doc_round}</strong>, signed by the ${ngSide(r.side)}: ${r.doc_round === 1 ? 'the offer' : r.changes ? `${r.changes} change${r.changes === 1 ? '' : 's'} (a counteroffer)` : 'accepted with no changes'}. Locked ${esc(fmtDT(r.locked_at))}, fingerprint <span translate="no">${esc(drShort(r.sha256))}</span>. <button class="btn link" type="button" data-ngdl="${r.id}">Download</button></li>`;
@@ -7644,7 +7711,12 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         <ul class="dr-list">${R_.filter(r => r.document_id === dc.id).sort((a, z) => a.doc_round - z.doc_round).map(rRow).join('')}
         ${(gs || []).filter(g => g.document_id === dc.id && !['locked'].includes(g.status)).map(g => `<li><button class="of-row" type="button" data-signing="${g.id}"><span class="of-r1"><strong>Round ${g.round_no}</strong>, the ${ngSide(g.side)}, ${g.method === 'link' ? 'by link' : 'in person'} ${sgDot(g.status)}</span></button></li>`).join('')}</ul></div>`).join('')}
       ${open && !off && !ag ? (live ? `<p class="small" id="ngLive">Round ${live.round_no} is with the ${ngSide(live.side)}. Open it above to see where they are.</p>`
+        : formed && held ? `<div class="card warnc" id="ngHeld"><h3 style="margin:0 0 4px">Held while frozen: not locked, sealed or dated</h3><p class="small" style="margin:0">You pressed Confirm the agreement while the offer was frozen, so it was held, not made. Nothing was emailed.</p>
+          <p class="small" style="margin:6px 0 0"><strong>Round ${last.doc_round}</strong>. Acceptance communicated ${esc(fmtDT(held.accepted_at))}. The date at the top: <strong>${esc(held.date_text)}</strong>. Held ${esc(fmtDT(held.held_at))}.</p>
+          ${frozenNow ? '<p class="small" style="margin:6px 0 0" id="ngHeldFrozen">Unfreeze the offer to complete it. The date is checked again then: no earlier than acceptance, and not after that day.</p>' : '<p class="small" style="margin:6px 0 0">Completing it locks, seals and dates the agreed copy exactly as Confirm does, with the date checked again: no earlier than acceptance, and not after today.</p>'}
+          <div class="toolbar">${frozenNow ? '' : '<button class="btn primary" type="button" id="ngHeldGo">Complete the held confirmation</button>'}<button class="btn ghost" type="button" id="ngHeldDrop">Discard it</button></div><p class="small err" id="ngAgErr" role="alert"></p></div>`
         : formed ? `<div class="card okc" id="ngFormed"><h3 style="margin:0 0 4px">The agreement is formed</h3><p class="small" style="margin:0">Both sides have signed the same version (Round ${last.doc_round}), every change initialled by everyone, every signature there. Check it, then confirm.</p>
+          ${frozenNow ? '<p class="small warnc" style="margin:6px 0 0" id="ngFrozenNote">The offer is frozen. Confirm now holds your confirmation: it is not locked, sealed or dated, and nothing is emailed. Once you unfreeze it, you complete it or discard it.</p>' : ''}
           <label class="f" for="ngAccAt">When acceptance was communicated</label><input type="datetime-local" id="ngAccAt" value="${nowLocal}">
           <label class="f" for="ngDate">The date at the top of the agreement <span class="opt">(in full, with the month name)</span></label><input type="text" id="ngDate" value="${esc(today)}" maxlength="20">
           <p class="small" style="margin:2px 0 0">The day acceptance was communicated, filled in for you; it can be no earlier than that, and not after today. This is the only time the date is added. It goes on as an overlay; the signed rounds are unchanged.</p>
@@ -7656,6 +7728,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         <label class="f" for="ngFreshWhy">Why</label><textarea id="ngFreshWhy" rows="2" maxlength="500"></textarea><div class="toolbar"><button class="btn ghost" type="button" id="ngClose">Close this document</button></div><p class="small err" id="ngFreshErr" role="alert"></p></details>` : ''}
       ${R_.length ? `<div class="toolbar"><button class="btn ghost" type="button" id="ngPack">Lawyers' pack (every round and the timeline)</button></div><p class="small" id="ngPackOut" role="status" aria-live="polite"></p>` : ''}</div>`;
   }
+  const NG_HELD = {};
   // a stored file, checked against its fingerprint
   async function ngFile(path, sha) { const { data, error } = await sb.storage.from('property-files').createSignedUrl(path, 300); if (error || !data) throw new Error('A file couldn\'t be opened. Check you have signal.');
     const bytes = new Uint8Array(await (await fetch(data.signedUrl)).arrayBuffer()); if (await REPO.sha256(bytes) !== sha) throw new Error('A stored file doesn\'t match its fingerprint.'); return bytes; }
@@ -7686,20 +7759,32 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const cl = $('#ngClose'); if (cl) cl.addEventListener('click', async () => { cl.disabled = true; try { await sgRpc('agent_document_close', { p_offer: o.id, p_reason: $('#ngFreshWhy').value.trim() }); toast('Filed as history. Correct the offer, then re-draft it'); reload(); } catch (e) { $('#ngFreshErr').textContent = e.message; cl.disabled = false; } });
     const acc_ = $('#ngAccAt'); if (acc_) { let edited = false; $('#ngDate').addEventListener('input', () => { edited = true; });
       acc_.addEventListener('change', () => { const t = new Date(acc_.value); if (!edited && !isNaN(t)) $('#ngDate').value = NG.fullDate(t.toLocaleDateString('en-CA', { timeZone: 'Pacific/Auckland' })); }); }
+    const HS = NG_HELD[o.id] || {};
     const ag = $('#ngAgree'); if (ag) ag.addEventListener('click', async () => { const er = $('#ngAgErr'); er.textContent = '';
       if (!$('#ngAgCheck').checked) return (er.textContent = 'Tick that you have looked at the final round.');
       const dt = $('#ngDate').value.trim().replace(/\s+/g, ' '); if (!NG.parseFullDate(dt)) return (er.textContent = 'Type the date in full with the month name, for example 24 November 2026.');
       const at = new Date($('#ngAccAt').value); if (isNaN(at)) return (er.textContent = 'Check when acceptance was communicated.');
-      ag.disabled = true; er.textContent = 'Making the agreed copy...';
-      const r = await offerCall('offer-sign', { action: 'agree', offer_id: o.id, accepted_at: at.toISOString(), date_text: dt });
-      if (!r || !r.ok) { er.textContent = (r && r.error) || 'That didn\'t work. Try again.'; ag.disabled = false; return; }
+      // frozen: held, not locked, sealed or dated, and nothing emailed (the database checks it as the agreement would be, the freeze aside)
+      if (HS.frozen) { ag.disabled = true; try { await sgRpc('agent_offer_confirm_hold', { p_offer: o.id, p_accepted_at: at.toISOString(), p_date_text: dt }); toast('Held while frozen: not locked, sealed or dated. Nothing was emailed.'); reload(); } catch (e) { er.textContent = e.message; ag.disabled = false; } return; }
+      confirmAgreement(at.toISOString(), dt, ag, er); });
+    // completing a held confirmation once unfrozen: what was held, checked again by the database and then by the offer-sign function
+    const hg = $('#ngHeldGo'); if (hg) hg.addEventListener('click', async () => { const er = $('#ngAgErr'); er.textContent = '';
+      if (!confirm('Complete the held confirmation? The agreed copy is then locked, sealed and dated.')) return;
+      hg.disabled = true; let h; try { h = await sgRpc('agent_offer_confirm_held', { p_offer: o.id }); } catch (e) { er.textContent = e.message; hg.disabled = false; return; }
+      confirmAgreement(h.accepted_at, h.date_text, hg, er); });
+    const hdp = $('#ngHeldDrop'); if (hdp) hdp.addEventListener('click', async () => { if (!confirm('Discard the held confirmation? Nothing is locked, sealed or dated, and nothing is emailed.')) return;
+      try { await sgRpc('agent_offer_confirm_hold_discard', { p_offer: o.id, p_note: null }); toast('Discarded. Confirm the agreement again when you are ready.'); reload(); } catch (e) { $('#ngAgErr').textContent = e.message; } });
+    async function confirmAgreement(atIso, dt, btn, er) {
+      btn.disabled = true; er.textContent = 'Making the agreed copy...';
+      const r = await offerCall('offer-sign', { action: 'agree', offer_id: o.id, accepted_at: atIso, date_text: dt });
+      if (!r || !r.ok) { er.textContent = (r && r.error) || 'That didn\'t work. Try again.'; btn.disabled = false; return; }
       // the property's stage moves to Under offer with the existing stage function; other offers are left for Tim
       // the email to Tim goes after the agreement is locked (the function answers first): a follow-up check says when it went or failed
       let msg = 'Agreement confirmed and locked.' + (r.agreement && r.agreement.emailed === false ? ' The email to you with the agreed copy didn\'t go: use "Email me the agreed copy again".' : '');
       if (r.agreement && !r.agreement.existing && r.agreement.emailed !== false) ngAgreedMailWatch(o, p);
       try { await mlBuildAgreed(o, p); msg += ' The emails to both parties are built for you to read and send.'; } catch (_) { msg += ' Build the emails to the parties on the offer page.'; }
       if (p.stage !== 'under_offer') { try { await sgRpc('agent_set_stage', { pid: p.id, p_stage: 'under_offer', p_reason: null, p_confirmed: true }); msg += ' The property is now under offer.'; } catch (e) { msg += ' The stage didn\'t move (' + e.message + '). Change it on the property page.'; } }
-      toast(msg); reload(); });
+      toast(msg); reload(); }
     const pk = $('#ngPack'); if (pk) pk.addEventListener('click', () => ngPack(o, p));
   }
   // after Confirm: watch the email log for Tim's own agreed-copy email (sent by the function after it answered) and say how it went
@@ -7795,12 +7880,16 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   const SG_ASKED = 'Your request has gone to Tim. He will contact you straight away.';
   const SG_REQ_REASONS = [['finance_changed', 'Our financial situation has changed'], ['contract_elsewhere', 'We have entered a contract elsewhere'], ['incapacitated', 'One of our party is incapacitated'],
     ['property_integrity', 'We have concerns about the integrity of the property'], ['property_viability', 'We have concerns about the viability of the property'], ['other', 'Other (type it in)']];
-  const sgRequestHTML = () => `<details class="card tight" id="sgReqBox"><summary class="small">Ask Tim to stop or withdraw</summary>
+  const SG_REQ_BACK = ['material_change', 'Something important changed while signing was paused'];   // offered with going back only
+  // going back to the last sealed round (Offers fixes 3): offered only once a pause on their round has been lifted; it goes to Tim first
+  const sgRevertWords = r => r && r.round >= 1 ? `Go back to Round ${r.round} as it was signed` : 'Start this round again from the beginning';
+  const sgRequestHTML = ctx => `<details class="card tight" id="sgReqBox" ${ctx && ctx.revert ? 'open' : ''}><summary class="small">${ctx && ctx.revert ? 'Ask Tim to go back, stop or withdraw' : 'Ask Tim to stop or withdraw'}</summary>
     <p class="small">If something has changed and you need to stop, tell Tim here. It goes straight to him and he will contact you. Nothing is sent to anyone else.</p>
     <fieldset><legend class="f">What would you like?</legend>
+      ${ctx && ctx.revert ? `<label class="choice"><input type="radio" name="sgReqKind" value="revert"><span class="mark"></span><span><span class="ct">${esc(sgRevertWords(ctx.revert))}</span><span class="cd">Signing was paused on this round. Everything done on it since is set aside (kept on the record), and Tim carries on from the last signed round. He checks with you first.</span></span></label>` : ''}
       <label class="choice"><input type="radio" name="sgReqKind" value="freeze"><span class="mark"></span><span><span class="ct">Stop for now, while I talk to Tim</span></span></label>
       <label class="choice"><input type="radio" name="sgReqKind" value="withdraw"><span class="mark"></span><span><span class="ct">Withdraw</span></span></label></fieldset>
-    <label class="f" for="sgReqWhy">Why</label><select id="sgReqWhy"><option value="">Choose a reason</option>${SG_REQ_REASONS.map(([k, l]) => `<option value="${k}">${esc(l)}</option>`).join('')}</select>
+    <label class="f" for="sgReqWhy">Why</label><select id="sgReqWhy"><option value="">Choose a reason</option>${(ctx && ctx.revert ? [SG_REQ_BACK].concat(SG_REQ_REASONS) : SG_REQ_REASONS).map(([k, l]) => `<option value="${k}">${esc(l)}</option>`).join('')}</select>
     <div id="sgReqOtherBox" hidden><label class="f" for="sgReqOther">Your reason</label><textarea id="sgReqOther" rows="2" maxlength="500"></textarea></div>
     <div class="toolbar"><button class="btn ghost" type="button" id="sgReqGo">Send to Tim now</button></div><p class="small" id="sgReqOut" role="status"></p></details>`;
   function sgRequestWire(ctx) {
@@ -7808,7 +7897,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     $('#sgReqWhy').addEventListener('change', () => { $('#sgReqOtherBox').hidden = $('#sgReqWhy').value !== 'other'; });
     go.addEventListener('click', async () => {
       const out = $('#sgReqOut'), kind = (document.querySelector('input[name="sgReqKind"]:checked') || {}).value, key = $('#sgReqWhy').value, other = $('#sgReqOther').value.trim();
-      if (!kind) return (out.textContent = 'Choose stop for now, or withdraw.'); if (!key) return (out.textContent = 'Choose a reason.'); if (key === 'other' && other.length < 3) return (out.textContent = 'Type your reason.');
+      if (!kind) return (out.textContent = ctx && ctx.revert ? 'Choose go back, stop for now, or withdraw.' : 'Choose stop for now, or withdraw.'); if (!key) return (out.textContent = 'Choose a reason.'); if (key === 'other' && other.length < 3) return (out.textContent = 'Type your reason.');
       go.disabled = true; out.textContent = 'Sending...';
       try { await ctx.api.request({ kind, reason_key: key, reason: key === 'other' ? other : '' }); main().innerHTML = `<div class="login-card" id="sgReqSent"><h1>Your request has gone to Tim</h1><p class="lede">${esc(SG_ASKED)}</p><p>You can also call or text Tim on <a href="tel:0275627207">027 562 7207</a>.</p></div>`; top(); }
       catch (e) { go.disabled = false; out.textContent = e.message; }
@@ -7838,7 +7927,9 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       signFlow({ mode: 'link', address: G.address, name: S.name, position: S.position, places: G.places || [], taps: new Set(st.taps || []), consent_at: S.consent_at, receipts: (S.receipts || []).map(r => r.guide), sig_png: S.sig_png, init_png: S.init_png,
         status: G.status, stopped: G.stopped, cca_pages: G.cca_pages || [], pages: G.pages, bytes, draftSha: G.draft_sha256, marks: (G.round || 1) > 1 ? G.marks || [] : [],
         round: G.round || 1, side: G.side || 'purchaser', link_changes: !!G.link_changes, layers: G.layers || [], parties: G.parties || null, side_places: G.side_places || [], terms: G.terms || null, sideSigners: Array.from({ length: G.signers || 1 }, (_, i) => ({ position: i + 1, name: '' })),
-        api: { change: c => call('change', c), consent: () => call('consent'), receipt: r => call('receipt', r), marks: (a, b) => call('marks', { sig: a, init: b }), tap: pl => call('tap', { place: pl }), ask: (t, decline) => call('ask', { text: t, decline: !!decline }), request: r => call('request', r), finish: () => call('finish') },
+        last: S.last || null, ever_tapped: !!S.ever_tapped, revert: G.revert || null,
+        api: { change: c => call('change', c), consent: () => call('consent'), receipt: r => call('receipt', r), marks: (a, b) => call('marks', { sig: a, init: b }), tap: pl => call('tap', { place: pl }), ask: (t, decline) => call('ask', { text: t, decline: !!decline }), request: r => call('request', r), finish: () => call('finish'),
+          undo: (scope, clear) => call('undo', { scope, clear: !!clear }) },
         reload: start, done: r => { setSes(''); main().innerHTML = `<div class="login-card" id="sgThanks"><h1>Thank you, ${esc(S.name.split(' ')[0])}</h1><p class="lede">You've signed every place.${r && r.complete && r.locked ? ' Everyone has now signed, and the signed copy is locked.' : r && r.complete ? ' Everyone has now signed. Tim will lock the signed copy and let you know.' : ' Tim will let you know once everyone has signed.'}</p><p class="small">${VS || LR ? `Nothing goes back to the ${VS ? 'purchasers' : 'vendors'} until Tim has checked it.` : 'Nothing goes to the sellers until Tim has checked it.'} Any questions, call or text Tim on <a href="tel:0275627207">027 562 7207</a>.</p></div>`; top(); } });
     };
     const codeStep = (msg) => {
