@@ -130,7 +130,8 @@ const base = () => ({
     for (const t of ['Date of agreement: Friday 18 December 2026.', 'Purchasers: Ana Testbuyer and Bo Testbuyer.', 'Vendors: Vera Vendorperson.', 'Price: $690,000. Changed in the negotiation: typed in Round 2 in place of the struck price.',
       '1. Finance: due Thursday 14 January 2027 (worked out from the agreement date)', '2. LIM: due Tuesday 26 January 2027 (worked out from the agreement date)', 'Settlement day: Wednesday 17 February 2027 (worked out from the agreement date).',
       'Deposit holder: Public Trust O/A NZ Real Estate Trust (your choice).', 'Fingerprint (SHA-256): ' + 'ab'.repeat(32), 'The offer in the portal: https://portal.dunnerstunner.co.nz/properties/P/offers/O', 'The dated agreed copy is attached.']) has(n.body, t, 'Tim\'s email');
-    ok(!/655,000/.test(n.body) && !/[—–]/.test(n.body), 'Tim\'s email: never the first offer\'s price; no dashes');
+    ok(!/^Price:.*655,000/m.test(n.body) && !/[—–]/.test(n.body), 'Tim\'s email: never the first offer\'s price; no dashes');
+    ok(/Changes made in the negotiation \(2\):\n1\. Round 2, page 1: line through "\$655,000"\n2\. Round 2, page 1: typed "\$690,000"/.test(n.body), 'Tim\'s email lists every change: ' + n.body);
     const n2 = M.agreedNotice({ address: 'x', agreement: { agreement_date: '2026-12-18' }, terms: base().terms, layers: L(strike, ins('$690,000'), ins('$700,000', 575, 'i2')), priceBoxes: [box], tooBig: true });
     ok(/Price: not worked out here/.test(n2.body) && /too big to attach/.test(n2.body) && /recommended one; you haven't chosen yet/.test(n2.body), 'unclear price, too big to attach, no holder chosen: said plainly'); }
   // 025: the agent's phone in the database (offer_settings.agent_phone's default) is the one in Tim's sign-off
@@ -138,6 +139,35 @@ const base = () => ({
     ok(m && m[1] === M.TIM_PHONE, 'the agent phone in 025 is mail-core\'s TIM_PHONE: ' + (m && m[1]) + ' / ' + M.TIM_PHONE);
     const sh = require('fs').readFileSync(path.join(__dirname, '..', '..', 'fn', 'shared.ts'), 'utf8'), e = /agent_email text not null default '([^']+)'/.exec(mig), te = /export const TIM_EMAIL = "([^"]+)"/.exec(sh);
     ok(e && te && e[1] === te[1], 'the agent email in 025 is the one Tim\'s emails come from (fn/shared.ts TIM_EMAIL)'); }
+  // review of Offers fixes 2: strict reading of the price change, other changes blank what they could affect
+  { const terms = { price: 1000000, as_drafted: { price: '$1,000,000', settlement: '20 February 2027', deposit: '$50,000', d_finance: '10 December 2026' }, conditions: [{ key: 'finance', days: 10 }], settlement: { kind: 'date', date: '2027-02-20' } };
+    const box = [{ page: 2, x: 300, y: 500, w: 60, h: 10 }], L = (...m) => [{ doc_round: 1, side: 'purchaser', marks: [] }, { doc_round: 2, side: 'vendor', marks: m }];
+    const pr = layers => M.agreedPrice({ terms, layers, priceBoxes: box });
+    for (const gap of [12, 13, 14, 16]) { const r = pr(L({ id: 's', kind: 'strike', page: 2, geometry: { x0: 310, x1: 350, y: 500 + gap + 2.6, text: 'chattels' } }, { id: 'i', kind: 'insert', page: 2, geometry: { x: 380, y: 500 + gap, text: '$5,000', size: 9 } }));
+      ok(r.unsure, `a line through the words on the line above the price (${gap} pt) is not a line through the price: ` + r.text); }
+    { const r = pr(L({ id: 's', kind: 'strike', page: 2, geometry: { x0: 300, x1: 360, y: 503.5, text: 'Purchase' } }, { id: 'i', kind: 'insert', page: 2, geometry: { x: 365, y: 500, text: '$1,050,000', size: 9 } })); ok(r.unsure, 'struck words without the drafted figure: not the price'); }
+    const strike = { id: 's', kind: 'strike', page: 2, geometry: { x0: 300, x1: 360, y: 503.5, text: '$1,000,000' } }, ins = t => ({ id: 'i', kind: 'insert', page: 2, geometry: { x: 365, y: 500, text: t, size: 9 } });
+    for (const t of ['$1,050,000 plus GST', '$1,050,000 incl GST', '$1,050,000 + chattels $20,000', '$1,050,000 if settlement 1 March', '1.05m', '$1.05 million']) ok(pr(L(strike, ins(t))).unsure, 'typed words that are more than a figure: a marked blank: ' + t);
+    for (const t of ['$1,050,000', '1,050,000', '$1 050 000', '1050000', '$1,050,000.00']) { const r = pr(L(strike, ins(t))); ok(!r.unsure && r.figure === 1050000, 'only a figure: read: ' + t + ' -> ' + r.text); }
+    for (const t of ['$105,000', '$2,500,000']) ok(pr(L(strike, ins(t))).unsure, 'a figure under half or over double the drafted price: a marked blank: ' + t);
+    { const r = pr(L({ id: 's', kind: 'strike', page: 2, geometry: { x0: 302, x1: 350, y: 503.5 } }, ins('$1,050,000'))); ok(!r.unsure && r.text === '$1,050,000', 'a line from before the words were recorded, across the drafted figure: read'); }
+    { const r = pr(L({ id: 's', kind: 'strike', page: 2, geometry: { x0: 345, x1: 360, y: 503.5 } }, ins('$1,050,000'))); ok(r.unsure, 'an old line only at the end of the place: not the price'); }
+    // other changes (the reviewer's dates.js): the settlement day and the deposit changed by typed words; they all become blanks, and each change is listed for Tim
+    const other = [{ id: 'a', kind: 'strike', page: 2, geometry: { x0: 300, x1: 380, y: 404, text: '20 February 2027' } }, { id: 'b', kind: 'insert', page: 2, geometry: { x: 390, y: 403, text: '6 March 2027', size: 9 } },
+      { id: 'c', kind: 'strike', page: 2, geometry: { x0: 300, x1: 340, y: 454, text: '$50,000' } }, { id: 'd', kind: 'insert', page: 2, geometry: { x: 350, y: 453, text: '$100,000', size: 9 } }];
+    const x = M.agreedDrafts({ address: '1 Test St', agreement: { agreement_date: '2026-11-25' }, terms, details: { email: 'p@x.nz' }, vendors: [], layers: L(...other), priceBoxes: box, province: 'otago', holidays: [], labels: { finance: 'Finance' } });
+    ok(x.purchasers.body.includes('Price: $1,000,000') && x.purchasers.body.includes('Deposit ([Tim to fill: the deposit amount])') && x.purchasers.body.includes('due **[Tim to fill: the Finance due date]**') && x.purchasers.body.includes('**[Tim to fill: settlement day]**'), 'other changes: the deposit, settlement day and condition dates become marked blanks');
+    ok(!/20 February 2027|10 December 2026|\$50,000/.test(x.purchasers.body), 'none of the as-drafted values those changes may have replaced');
+    ok(['Change: Round 2, page 2: line through "20 February 2027"', 'Change: Round 2, page 2: typed "6 March 2027"', 'Change: Round 2, page 2: line through "$50,000"', 'Change: Round 2, page 2: typed "$100,000"'].every(n => x.notes.includes(n)) && /left as blanks/.test(x.notes[0]), 'Tim\'s notes list every change: ' + JSON.stringify(x.notes));
+    // the price change alone, resolved: the dates stay, each with a check note
+    const y = M.agreedDrafts({ address: '1 Test St', agreement: { agreement_date: '2026-11-25' }, terms, details: { email: 'p@x.nz' }, vendors: [], layers: L(strike, ins('$1,050,000')), priceBoxes: box, province: 'otago', holidays: [], labels: { finance: 'Finance' } });
+    ok(y.purchasers.body.includes('Price: $1,050,000') && y.purchasers.body.includes('due **Thursday 10 December 2026**') && y.purchasers.body.includes('**Saturday 20 February 2027**') && y.purchasers.body.includes('Deposit ($50,000)'), 'only the price changed: the other terms as on the agreement');
+    ok(y.notes.includes('Finance due Thursday 10 December 2026 (as written on the agreement; check)') && y.notes.includes('Settlement day Saturday 20 February 2027 (as written on the agreement; check)'), 'every date has a check note: ' + JSON.stringify(y.notes));
+    // a change with no words recorded (the live data shape) is listed as such
+    ok(M.agreedDrafts({ address: 'x', agreement: {}, terms: Object.assign({}, terms, { changes: [{ round: 2, kind: 'strike', page: 1, text: null }] }), details: {}, vendors: [] }).notes.includes('Change: Round 2, page 1: line through (the words struck were not recorded)'), 'a strike with no words recorded says so'); }
+  // Tim's phone from the database at run time (offer_settings.agent_phone): every draft's sign-off follows it
+  { const was = M.TIM_PHONE; M.setAgent({ phone: '021 444 5555' }); ok(/021 444 5555/.test(M.signLinkDraft({ first: 'A', address: 'x', side: 'purchaser' }).body) && M.TIM_PHONE === '021 444 5555', 'setAgent: the sign-off uses the phone from the database');
+    M.setAgent({ phone: 'not a phone' }); ok(M.TIM_PHONE === '021 444 5555', 'a value that isn\'t a phone is ignored'); M.setAgent({ phone: was }); }
   // the first working day
   ok(M.longDate(M.firstWorkingDay('2026-12-24', holidays)) === 'Tuesday 29 December 2026', 'over Christmas: weekends and public holidays skipped');
   { const b = base(); b.agreement.agreement_date = '2026-12-24'; has(M.agreedDrafts(b).purchasers.body, '[Tim to check: the first working day falls between 24 December and 5 January', 'in the Christmas break Tim checks the dates'); }

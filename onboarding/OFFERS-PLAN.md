@@ -752,6 +752,27 @@ offer-sign redeployed (pinned to the new commit). Found in Tim's live test offer
    the fingerprint and the offer's portal address. Only ever to Tim, logged in email_log. "Email me the agreed copy again" on the
    offer page sends it again (for the test agreement confirmed on 25 November). `offer_agreed_notice_material` (025) gives the
    function what it needs.
+After the independent review (25 November 2026), fixed on the same branch:
+- The agreed price is read only from a line through the price itself (inside the price place's own height; its recorded words hold
+  the drafted figure, or, for a line from before the words were recorded, it runs across most of the drafted figure), and typed
+  words that are a money figure and nothing else ("plus GST", "if settlement 1 March" and the like give the marked blank). A figure
+  under half or over double the drafted price gives the marked blank.
+- Any change the price doesn't account for blanks the deposit, settlement day and each condition's date in the parties' emails and
+  Tim's own email; Tim's notes (and his email) list every change by round and page, with the struck and typed words. Every date
+  shown has a "check" note.
+- A page turned sideways (/Rotate) takes no marks ("Changes can't be marked on this page, because it is turned sideways. Ask Tim for
+  a change instead."); a page with no words to read says to use a crossed-out box or a note, or ask Tim.
+- The offer-sign function checks the struck words against the draft itself (pdf.js, `fn/page_text.ts`) before locking a round; a
+  mismatch, a turned page or words it can't read refuses the lock in plain words.
+- Tim's phone in every email is read from `offer_settings.agent_phone` at run time (Tim's screen, and the function through
+  `offer_agent_contact`).
+- An agreed copy that doesn't match its fingerprint when it is to be emailed is an integrity alarm: recorded on the offer's timeline
+  (`offer_integrity_alarm`) and in email_log, and Tim is told plainly; nothing is sent.
+- Confirm answers once the copy is locked; Tim's email goes after (EdgeRuntime.waitUntil) and his page checks the email log and says
+  when it went or failed. Agreed-copy email_log rows carry the property's agency agreement. Typed words show on the page as they are
+  typed. Dark mode checked for the new text.
+Later (026): `offer_private_hit` (the check on typed words in a counteroffer) has the same agent-is-a-party problem as item 5; to be
+fixed the same way in 026.
 Open (Tim to decide; behaviour unchanged): whether "Confirm the agreement" should be blocked while an offer is frozen.
 Tests: `tests/offers-fixes2.test.js` (new), `tests/strike-snap.test.js` (new), `tests/mail-core.test.js`, `tests/offer-nego-fn.test.js`,
 `tests/offers-nego.test.js` (extended).

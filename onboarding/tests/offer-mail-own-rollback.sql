@@ -65,5 +65,14 @@ begin
     || ' side_hit(authenticated)=' || has_function_privilege('authenticated', 'public.offer_mail_side_hit(uuid, text, text)', 'execute') || '; ';
   if has_function_privilege('anon', 'public.offer_agreed_notice_material(uuid)', 'execute') or has_function_privilege('authenticated', 'public.offer_agreed_notice_material(uuid)', 'execute') or not has_function_privilege('service_role', 'public.offer_agreed_notice_material(uuid)', 'execute')
     or has_function_privilege('authenticated', 'public.offer_agent_own()', 'execute') or has_function_privilege('authenticated', 'public.offer_mail_side_hit(uuid, text, text)', 'execute') then out := out || 'PRIVILEGES WRONG; '; end if;
+  -- 7. the agent's contact as written (for the function's wording), and the integrity alarm on the offer's timeline
+  out := out || 'contact=' || public.offer_agent_contact()::text || '; ';
+  if public.offer_agent_contact()->>'phone' <> tim_phone then out := out || 'CONTACT PHONE WRONG; '; end if;
+  perform public.offer_integrity_alarm(oid, 'agreed copy fingerprint mismatch', jsonb_build_object('path', 'x', 'sha256', repeat('a', 64)));
+  out := out || 'alarm=' || coalesce((select kind || ' ' || (detail->>'what') || ' chained=' || (hash is not null) from public.offer_events where offer_id = oid order by id desc limit 1), 'NONE') || '; ';
+  if not exists (select 1 from public.offer_events where offer_id = oid and kind = 'integrity_alarm' and detail->>'what' = 'agreed copy fingerprint mismatch') then out := out || 'ALARM NOT RECORDED; '; end if;
+  begin perform public.offer_integrity_alarm(oid, repeat('x', 500), '"not an object"'); out := out || 'alarm with odd detail kept: ' || (select length(detail->>'what') from public.offer_events where offer_id = oid order by id desc limit 1) || '; ';
+  exception when others then out := out || 'ODD ALARM REFUSED: ' || sqlerrm || '; '; end;
+  if has_function_privilege('authenticated', 'public.offer_integrity_alarm(uuid, text, jsonb)', 'execute') or has_function_privilege('authenticated', 'public.offer_agent_contact()', 'execute') or not has_function_privilege('service_role', 'public.offer_agent_contact()', 'execute') then out := out || 'ALARM OR CONTACT PRIVILEGES WRONG; '; end if;
   raise exception 'ROLLBACK %', out;
 end $t$;

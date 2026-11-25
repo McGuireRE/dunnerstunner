@@ -3,11 +3,12 @@
 // Eleventh Edition 2022 (4) pack, with filler text and invented names around them. Nothing here is the form's wording.
 // make({ edition, clause22: false, filledDeposit, filledSettlement, twoLineSettlement, printedTerms, vendorLawyer: false, generalTerms (20),
 //   ftAppendix (the further terms page is the appendix, with 21.x and 22.0 printed on it, as the portal does), pageNoOffset (printed page numbers),
-//   pageNoFormat (n => the printed page number, e.g. '22 of 22'), laterNumbers (false: no page number after page 3, as the separate documents in a real pack), cca: true })
+//   pageNoFormat (n => the printed page number, e.g. '22 of 22'), laterNumbers (false: no page number after page 3, as the separate documents in a real pack), cca: true,
+//   rotateLim (the inserted LIM page turned sideways), scanPage (an image-only page at the end) })
 // footnote: printed text beneath the third purchaser signature line (no room for a fourth)
 // cca: a synthetic Client and Customer Acknowledgement page in the pack (page 10, before the inserted page), for signing (phase 3)
 // Only the short label words the anchor finder needs are used; everything else is made-up filler. -> Uint8Array
-const { PDFDocument, StandardFonts, rgb } = require('/opt/npm-tools/node_modules/pdf-lib');
+const { PDFDocument, StandardFonts, rgb, degrees } = require('/opt/npm-tools/node_modules/pdf-lib');
 async function make(o) {
   o = Object.assign({ edition: 'Eleventh Edition 2022 (4)', clause22: true, filledDeposit: true, filledSettlement: true, vendorLawyer: true, pack: true, generalTerms: 20, pageNoOffset: 0, pageNoFormat: null, laterNumbers: true }, o || {});
   const doc = await PDFDocument.create(); doc.setProducer('synthetic test blank'); doc.setTitle('Synthetic blank for tests');
@@ -87,7 +88,10 @@ async function make(o) {
   if (o.pack) { page(); t('Synthetic pack page', 120, 760, 13, true); t('Property Address: 1 Example Road, Testville', 30, 740);
     t('The purchaser acknowledges the synthetic LIM report filler has been received.', 30, 700); t('The purchaser acknowledges the synthetic as is where is filler.', 30, 680); t('Witnessed filler:', 30, 600); t('Date:', 330, 600);
     if (o.cca) { page(); t('CLIENT AND CUSTOMER ACKNOWLEDGEMENT', 120, 760, 13, true); t('Synthetic filler about the agent acting for the vendor.', 30, 730); t('Synthetic filler about the guide.', 30, 715); }
-    pg = doc.addPage([W, H]); n++; t('A synthetic inserted LIM page without the edition string.', 30, 760); }
+    pg = doc.addPage([W, H]); n++; t('A synthetic inserted LIM page without the edition string.', 30, 760);
+    // Offers fixes 2 review: a pack page turned sideways (/Rotate 90), and a scanned page with no words to read, at the end
+    if (o.rotateLim) pg.setRotation(degrees(90));
+    if (o.scanPage) { pg = doc.addPage([W, H]); n++; pg.drawRectangle({ x: 60, y: 300, width: 400, height: 300, color: rgb(0.85, 0.85, 0.85) }); } }
   return await doc.save();
 }
 // The band picture the drafting needs for a continuation page (renderDraft's opts.bandImage), as Tim's screen makes it with pdf.js:

@@ -120,6 +120,10 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   seed.property_people = [{ id: 'PP1', property_id: 'P1', position: 1, legal_name: 'Testy Vendorperson', pref_name: '', email: 'vendor@example.com', phone: '027 562 7207', user_id: 'v-1', role: 'owner', source: 'agreement', name_from: 'agreement' }];
   seed.agreement_people = [{ id: 'AP1', agreement_id: 'A1', position: 1, legal_name: 'Testy Vendorperson', pref_name: '', email: 'vendor@example.com', phone: '021 000 1111', user_id: 'v-1', signed_at: now }];
   const visibleText = (pg, sel) => pg.$$eval(sel, els => els.map(e => { const b = e.getBoundingClientRect(); return { t: e.textContent, w: b.width, h: b.height, kids: e.children.length, html: e.innerHTML }; }));
+  // the contrast of an element's text against the first solid background behind it (WCAG ratio)
+  const contrast = (pg, sel) => pg.$eval(sel, el => { const rgb = c => (c.match(/[\d.]+/g) || []).map(Number), lum = ([r, g, b]) => [r, g, b].map(v => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }).reduce((a, v, i) => a + v * [0.2126, 0.7152, 0.0722][i], 0);
+    let b = el, bg = null; while (b) { const c = rgb(getComputedStyle(b).backgroundColor); if (c.length >= 3 && (c.length < 4 || c[3] > 0.5)) { bg = c; break; } b = b.parentElement; } bg = bg || [255, 255, 255];
+    const fg = rgb(getComputedStyle(el).color), L1 = lum(fg), L2 = lum(bg); return Math.round((Math.max(L1, L2) + 0.05) / (Math.min(L1, L2) + 0.05) * 10) / 10; });
   const inkPixels = (pg) => pg.$eval('#sgPage canvas.sg-draw', c => { const g = c.getContext('2d'), d = g.getImageData(0, 0, c.width, c.height).data; let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i]) n++; return n; });
 
   // ── 1. set-up: an offer, the blank approved, Round 1 signed by both purchasers (through Tim's database calls) and locked ──
@@ -128,7 +132,7 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   await rpc(p, 'agent_offer_link', { p_property: 'P1', p_action: 'open' });
   const offA = (await rpc(p, 'agent_offer_add', { p_property: 'P1', p_offer: offer() })).data;
   await openProp(p);
-  const blank = Buffer.from(await SB.make({ cca: true }));
+  const blank = Buffer.from(await SB.make({ cca: true, rotateLim: true, scanPage: true }));
   await p.setInputFiles('#drFile', { name: 'Agreement pack.pdf', mimeType: 'application/pdf', buffer: blank });
   await p.waitForSelector('#drMap', { timeout: 30000 }); await p.click('#drApprove'); await p.waitForSelector('#offTile');
   await draftAndApprove(p, offA); await p.click('#sgReady'); await p.waitForSelector('#sgReleaseView', { timeout: 30000 }); await p.click('#sgRelease'); await p.waitForSelector('#sgView');
@@ -148,18 +152,41 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   await p.click('#ngGo'); await p.waitForSelector('#sgSendGo');
   const sendTxt = await p.textContent('#sgSend'); out.sendTxt = sendTxt.replace(/\s+/g, ' ').trim();
   expect(/each vendor their own link/.test(sendTxt) && !/purchaser/i.test(sendTxt), 'the vendors\' round by link: "Send emails each vendor their own link", nothing about purchasers: ' + out.sendTxt);
+  // Tim's phone in the drafts comes from the database row (offer_settings.agent_phone), read when the drafts are made
+  const setPhone = ph => p.evaluate(v => { const D = window.__mockDB; D.offer_settings = D.offer_settings || []; if (!D.offer_settings.length) D.offer_settings.push({ id: true }); D.offer_settings[0].agent_phone = v; localStorage.setItem('mockdb', JSON.stringify(D)); }, ph);
+  await setPhone('021 444 5555');
   await prepAndSend(p);
   const vLink = (await mails(p)).filter(m => m.kind === 'offer_sign_link').pop();
+  expect(vLink && /021 444 5555/.test(vLink.body) && !/027 562 7207/.test(vLink.body), 'the link email signs off with the phone in the database row');
+  await setPhone('027 562 7207');
   expect(vLink && vLink.to === 'vendor@example.com', 'the vendor\'s link went (Tim\'s own phone in its sign-off is fine, though the vendor\'s phone on file is Tim\'s)');
 
   // ── 3. the vendor counters by link: strike the price (snapped, kept on the page, the words shown), type a new one (visible) ──
   process.stderr.write('step 3\n');
-  let q = await page(); await q.goto(vLink.link); await q.waitForSelector('#sgCode');
+  let q = await page('dark'); await q.goto(vLink.link); await q.waitForSelector('#sgCode');
   expect(/An offer on your property/.test(await q.evaluate(() => document.title)), 'the vendor\'s link page is titled for a vendor');
   await q.click('#sgSendCode'); await q.waitForFunction(() => /Sent/.test(document.querySelector('#sgCodeMsg').textContent));
   const code = (await mails(q)).filter(m => m.kind === 'offer_sign_code' && m.to === 'vendor@example.com').pop(); await q.fill('#sgCodeIn', code.code); await q.click('#sgCodeGo');
   await q.waitForSelector('#sgConsent'); await tick(q, '#sgAgree'); await q.click('#sgAgreeGo'); await q.waitForSelector('#ngChattels'); await tick(q, '#ngChatOk'); await q.click('#ngChatGo');
   await q.waitForSelector('#sgDraw'); await draw(q, '#sgSig', 5); await draw(q, '#sgInit', 6); await q.click('#sgDrawGo'); await q.waitForSelector('#sgPlaces');
+  // review: a page turned sideways takes no marks; a page with no words to read can't have a line snapped to it
+  { const dB = new Uint8Array(await blob(p, drA.path)), pdoc = await pdfjs.getDocument({ data: dB.slice(0), verbosity: 0 }).promise, rots = [];
+    for (let k = 1; k <= pdoc.numPages; k++) rots.push((await pdoc.getPage(k)).rotate || 0);
+    const rpages = await D.readPages(pdfjs, dB), rotP = rots.findIndex(x => x === 90) + 1, scanP = (rpages.find(x => !x.items.length) || {}).n; out.rotScan = { rots, rotP, scanP };
+    expect(rotP > 0 && scanP > 0, 'the draft keeps the turned page and the page with no words: ' + JSON.stringify(out.rotScan));
+    await q.selectOption('#sgPgPick', String(rotP)); await q.waitForSelector(`#sgPage .dr-pg[data-page="${rotP}"] canvas`);
+    await q.click('[data-tool="strike"]'); await q.waitForSelector('#sgPage .sg-draw', { state: 'attached' });
+    await q.waitForFunction(() => /turned sideways/.test(document.querySelector('#sgErr').textContent), null, { timeout: 15000 });
+    { const el = await q.$('#sgPage .sg-draw'); await el.scrollIntoViewIfNeeded(); const bx = await el.boundingBox(); await q.mouse.move(bx.x + bx.width * 0.2, bx.y + bx.height * 0.5); await q.mouse.down(); await q.mouse.move(bx.x + bx.width * 0.5, bx.y + bx.height * 0.5, { steps: 4 }); await q.mouse.up(); }
+    await q.waitForTimeout(400);
+    expect(/Changes can't be marked on this page, because it is turned sideways/.test(await q.textContent('#sgErr')) && await q.$eval('#sgMarkSave', b => b.disabled), 'a page turned sideways: no mark, said plainly');
+    await q.click('#sgMarkCancel'); await q.waitForTimeout(200);
+    await q.selectOption('#sgPgPick', String(scanP)); await q.waitForSelector(`#sgPage .dr-pg[data-page="${scanP}"] canvas`);
+    await q.click('[data-tool="strike"]'); await q.waitForSelector('#sgPage .sg-draw', { state: 'attached' });
+    { const el = await q.$('#sgPage .sg-draw'); await el.scrollIntoViewIfNeeded(); const bx = await el.boundingBox(); await q.mouse.move(bx.x + bx.width * 0.2, bx.y + bx.height * 0.5); await q.mouse.down(); await q.mouse.move(bx.x + bx.width * 0.6, bx.y + bx.height * 0.5, { steps: 4 }); await q.mouse.up(); }
+    await q.waitForFunction(() => /can't be read/.test(document.querySelector('#sgErr').textContent), null, { timeout: 15000 });
+    expect(/The words on this page can't be read, so a line can't be placed through them. Use a crossed-out box or a note, or ask Tim\./.test(await q.textContent('#sgErr')), 'a page with no words to read: said plainly, with what to do instead');
+    await q.click('#sgMarkCancel'); await q.evaluate(() => { document.querySelector('#sgErr').textContent = ''; }); }
   await q.selectOption('#sgPgPick', String(priceBox.page)); await q.waitForSelector(`#sgPage .dr-pg[data-page="${priceBox.page}"] canvas`);
   const W = 595.32, H = 842.04, fy = y => 1 - y / H;
   const drag = async (fx0, fy0, fx1, fy1) => { const el = await q.$('#sgPage .sg-draw'); await el.scrollIntoViewIfNeeded(); const bx = await el.boundingBox(); await q.mouse.move(bx.x + bx.width * fx0, bx.y + bx.height * fy0); await q.mouse.down(); await q.mouse.move(bx.x + bx.width * fx1, bx.y + bx.height * fy1, { steps: 6 }); await q.mouse.up(); };
@@ -174,6 +201,7 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   await drag((pit.x + pit.w * 0.3) / W, fy(pit.y + 0.5), (pit.x + pit.w * 0.7) / W, fy(pit.y + 0.5));
   await q.waitForFunction(() => /This strikes through:/.test((document.querySelector('#sgStrikeWords') || {}).textContent || ''), null, { timeout: 15000 });
   const words = await q.textContent('#sgStrikeWords'); out.strikeWords = words;
+  out.wordsDark = await contrast(q, '#sgStrikeWords'); expect(out.wordsDark >= 4.5, 'dark mode: the struck words are readable (contrast ' + out.wordsDark + ')');
   expect(/This strikes through: "\$?655,000"/.test(words), 'before Save the vendor is shown the words the line strikes: ' + words);
   expect(await inkPixels(q) > 20, 'the line stays on the page after the finger lifts, until it is saved or cancelled');
   expect(!(await q.$eval('#sgMarkSave', b => b.disabled)), 'Save confirms it');
@@ -190,7 +218,9 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   // typed words: shown on the page where they go, at their size
   await q.click('[data-tool="insert"]'); await q.waitForSelector('#sgPage .sg-draw', { state: 'attached' });
   { const el = await q.$('#sgPage .sg-draw'); await el.scrollIntoViewIfNeeded(); const bx = await el.boundingBox(); await q.mouse.click(bx.x + bx.width * (priceBox.x / W), bx.y + bx.height * fy(priceBox.y - 10)); }
-  await q.fill('#ngInsText', '$690,000'); await q.click('#sgMarkSave'); await q.waitForSelector('#sgPlaces'); await q.waitForSelector('#sgPage .dr-pg canvas');
+  { const before = await inkPixels(q); await q.fill('#ngInsText', '$690,000'); await q.waitForTimeout(150); const after = await inkPixels(q);
+    expect(after > before + 20, 'the typed words show on the page as they are typed, before Save: ' + before + ' -> ' + after); }
+  await q.click('#sgMarkSave'); await q.waitForSelector('#sgPlaces'); await q.waitForSelector('#sgPage .dr-pg canvas');
   await q.waitForSelector('#sgPage text.sg-ins', { state: 'attached' }); await q.waitForTimeout(400);   // after the page's translator guard has run
   let ti = await visibleText(q, '#sgPage text.sg-ins'); out.insOnSigning = ti;
   expect(ti.length === 1 && ti[0].t === '$690,000' && ti[0].w > 5 && ti[0].h > 3 && ti[0].kids === 0, 'the typed words are drawn on the signing page (plain SVG text, no HTML span inside it): ' + JSON.stringify(ti));
@@ -221,10 +251,13 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   const M0 = (await mails(p)).length;
   await tick(p, '#ngAgCheck'); await p.click('#ngAgree'); await p.waitForSelector('#ngAgreed', { timeout: 30000 });
   d = await db(p); const ag = d.offer_agreements.find(x => x.offer_id === offA);
+  await p.waitForFunction(() => /The dated agreed copy has been emailed to you/.test(document.body.textContent), null, { timeout: 30000 }).catch(() => null);
+  expect(/The dated agreed copy has been emailed to you/.test(await p.evaluate(() => document.body.textContent)), 'after Confirm, the page checks the email log and says the copy has been emailed');
+  { const el = (await db(p)).email_log.filter(x => x.kind === 'offer_agreed_copy'); expect(el.length === 1 && el[0].agreement_id === 'A1', 'the email log row is filed with the property\'s agency agreement'); }
   const tm = (await mails(p)).slice(M0); out.timMail = tm.map(m => ({ kind: m.kind, to: m.to, subject: m.subject, body: m.body }));
   expect(tm.length === 1 && tm[0].kind === 'offer_agreed_copy' && tm[0].to === 'tim' && tm[0].attachments[0].sha256 === ag.sha256, 'Tim alone is emailed the locked dated copy at once');
   const tb = (tm[0] || {}).body || '';
-  expect(tb.includes('Price: $690,000. Changed in the negotiation: typed in Round 2 in place of the struck price.') && !/655,000/.test(tb), 'Tim\'s email: the agreed price is the typed figure, with the round it was changed in; never the first offer\'s: ' + tb);
+  expect(tb.includes('Price: $690,000. Changed in the negotiation: typed in Round 2 in place of the struck price.') && !/^Price:.*655,000/m.test(tb) && /Changes made in the negotiation \(2\):\n1\. Round 2, page 1: line through "\$655,000"\n2\. Round 2, page 1: typed "\$690,000"/.test(tb), 'Tim\'s email: every change listed; the agreed price is the typed figure, with the round it was changed in; never the first offer\'s: ' + tb);
   expect(tb.includes('Purchasers: Ana Testbuyer and Bo Testbuyer.') && tb.includes('Vendors: Testy Vendorperson.') && /Date of agreement: \w+day \d{1,2} \w+ \d{4}\./.test(tb) && /Settlement day: \w+day/.test(tb) && /Deposit holder: /.test(tb), 'Tim\'s email: the date, the parties, settlement day and the deposit holder');
   await p.waitForSelector('#mlAgreed [data-mlsend]', { timeout: 30000 });
   d = await db(p); const dp = d.offer_mail_drafts.find(m => m.offer_id === offA && m.kind === 'agreed_purchasers' && m.status === 'draft'), dv = d.offer_mail_drafts.find(m => m.offer_id === offA && m.kind === 'agreed_vendors' && m.status === 'draft');
@@ -234,6 +267,10 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   const notes = await p.textContent('#mlNotes'); out.notes = notes.replace(/\s+/g, ' ');
   expect(/Price \$690,000 \(the figure typed in Round 2 in place of the struck price; check\)/.test(notes) && /Settlement day \w+day \d{1,2} \w+ \d{4} \(worked out from the agreement date/.test(notes) && !/worked out/.test(dp.body + dv.body), 'what was worked out, shown once to Tim beside the editor, with how; never in the emails: ' + out.notes);
   expect(!(await side(p)), 'the offer page at 390 px: no sideways scroll');
+  await p.emulateMedia({ colorScheme: 'dark' }); await p.waitForTimeout(200);
+  out.darkNotes = await contrast(p, '#mlNotes li'); out.darkAgMail = await contrast(p, '#ngAgMail');
+  expect(out.darkNotes >= 4.5 && out.darkAgMail >= 4.5, 'dark mode: the worked-out notes and "Email me the agreed copy again" are readable: ' + out.darkNotes + ', ' + out.darkAgMail);
+  await p.emulateMedia({ colorScheme: 'light' });
 
   // ── 6. the privacy check (025): Tim's own phone in an email to the purchasers passes where Tim is the vendor; a vendor's own phone doesn't ──
   process.stderr.write('step 6\n');

@@ -63,7 +63,7 @@ function q(table){ logCall('from:'+table);
   const b={
     select(c){ if(op==='select'){sel=c||'*';} else wantSel=true; return b;},
     insert(p){op='insert';payload=p;return b;}, update(p){op='update';payload=p;return b;}, delete(){op='delete';return b;},
-    eq(k,v){filters.push(r=>r[k]===v);return b;}, neq(k,v){filters.push(r=>r[k]!==v);return b;}, gt(k,v){filters.push(r=>r[k]>v);return b;}, is(k,v){filters.push(r=>(v===null?r[k]==null:r[k]===v));return b;}, in(k,vs){filters.push(r=>vs.includes(r[k]));return b;},
+    eq(k,v){filters.push(r=>r[k]===v);return b;}, neq(k,v){filters.push(r=>r[k]!==v);return b;}, gt(k,v){filters.push(r=>r[k]>v);return b;}, gte(k,v){filters.push(r=>r[k]>=v);return b;}, is(k,v){filters.push(r=>(v===null?r[k]==null:r[k]===v));return b;}, in(k,vs){filters.push(r=>vs.includes(r[k]));return b;},
     order(k,o){order=[k,o&&o.ascending===false?-1:1];return b;}, limit(){return b;}, single(){single=true;return b;},
     then(res,rej){ if(localStorage.getItem('trHang')==='1'&&table==='user_language') return; try{ res(run()); }catch(e){ res({data:null,error:{message:e.message}}); } }
   };
@@ -803,7 +803,7 @@ function chainPush(arr,e){ const X=window.SIGN; if(!X) return; e.chain=e.offer_i
   e.seq=prev?prev.seq+1:1; e.prev_hash=prev?prev.hash:X.ZERO; e.at=e.at||now(); e.detail=e.detail||{}; e.body=X.chainBody(e); e.hash=X.chainHash(e.prev_hash,e.body); }
 function chainArr(a){ if(!a.__c){ Object.defineProperty(a,'push',{value:function(...xs){ xs.forEach(x=>chainPush(this,x)); return Array.prototype.push.apply(this,xs); },enumerable:false}); Object.defineProperty(a,'__c',{value:true,enumerable:false}); } return a; }
 function sgMail(kind,to,extra){ const l=JSON.parse(localStorage.getItem('mockSignMail')||'[]'); if(localStorage.getItem('mockMailFail')===to) throw new Error('SMTP down');
-  l.push(Object.assign({kind,to,at:now()},extra||{})); localStorage.setItem('mockSignMail',JSON.stringify(l)); (DB.email_log||=[]).push({id:DB.email_log.length+1,agreement_id:null,at:now(),kind,recipients:to,subject:(extra&&extra.subject)||kind,ok:true,mock:true}); }
+  l.push(Object.assign({kind,to,at:now()},extra||{})); localStorage.setItem('mockSignMail',JSON.stringify(l)); (DB.email_log||=[]).push({id:DB.email_log.length+1,agreement_id:(extra&&extra.agreement_id)||null,at:now(),kind,recipients:to,subject:(extra&&extra.subject)||kind,ok:true,mock:true}); }
 const sgEv=(g,actor,kind,detail)=>OE().push({id:OE().length+1,property_id:g.property_id,offer_id:g.offer_id,at:now(),actor,kind,detail:detail||{}});
 // 024 freeze and withdrawal: offer_holds, offer_requests (Tim, 24 November 2026)
 const OHD=()=>(DB.offer_holds||=[]), ORQ=()=>(DB.offer_requests||=[]), ODH=()=>(DB.offer_deposit_holders||=[]);
@@ -1174,7 +1174,8 @@ function agreedNoticeMock(oid,again){ const ag=OAG().find(x=>x.offer_id===oid); 
   const dh=(DB.offer_deposit_holders||[]).filter(x=>x.offer_id===oid).sort((a,z)=>z.id-a.id)[0], big=localStorage.getItem('mockAgreedBig')==='1';
   const nt=window.MAIL.agreedNotice({address:p.address,agreement:ag,purchasers:names('purchaser'),vendors:names('vendor'),terms:ag.terms||{},layers,priceBoxes:pp?(pp.boxes&&pp.boxes.length?pp.boxes:[pp]):[],province:o.province||((OL().find(l=>l.property_id===o.property_id))||{}).province||'otago',offers:window.OFFERS,labels,
     depositHolder:dh?{holder:dh.holder,other:dh.other_text,by_default:dh.by_default}:null,kiwisaver:((ag.terms||{}).kiwisaver===true)||((o.details||{}).kiwisaver===true),portalUrl:`https://portal.dunnerstunner.co.nz/properties/${o.property_id}/offers/${o.id}`,attached:!big,tooBig:big,again});
-  sgMail(again?'offer_agreed_copy_again':'offer_agreed_copy','tim',{subject:nt.subject,body:nt.body,attachments:big?[]:[{name:'Agreement '+p.address+'.pdf',sha256:ag.sha256,path:ag.path}]}); return {attached:!big}; }
+  const agency=(DB.agreements||[]).filter(x=>x.property_id===o.property_id&&['signed','countersigned'].includes(x.status)).sort((a,z)=>String(z.created_at).localeCompare(String(a.created_at)))[0];
+  sgMail(again?'offer_agreed_copy_again':'offer_agreed_copy','tim',{subject:nt.subject,body:nt.body,agreement_id:agency?agency.id:null,attachments:big?[]:[{name:'Agreement '+p.address+'.pdf',sha256:ag.sha256,path:ag.path}]}); return {attached:!big}; }
 async function signInvoke(o){ const b=(o&&o.body)||{}, me=S&&S.user, net='h:'+mockNet(), ua=navigator.userAgent;
   const res=(data,status)=>status&&status>=400?{data:null,error:{message:String(status),context:{json:async()=>data}}}:{data,error:null};
   const calls=JSON.parse(localStorage.getItem('signCalls')||'[]'); calls.push(b.action); localStorage.setItem('signCalls',JSON.stringify(calls));

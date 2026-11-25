@@ -36,7 +36,7 @@ let failTim = false;
   const insert = { id: MK.replace('5555', '6666'), kind: 'insert', page: 1, geometry: { x: 100, y: 386, text: '$690,000', size: 9 }, by: 'Vera Vendor', at: '2026-11-24T02:01:00Z' };
   const v2places = [{ id: 'foot:p1:s1', signer: 1, kind: 'initial', why: 'foot', ref: 'p1', page: 1, x: 470, y: 5, w: 26, h: 13 }, { id: 'block:vsig1:s1', signer: 1, kind: 'signature', why: 'block', ref: 'vsig1', page: 2, x: 330, y: 500, w: 150, h: 22 },
     { id: `chg:${strike.id}:s1`, signer: 1, kind: 'initial', why: 'change', ref: strike.id, page: 1, x: 165, y: 410, w: 26, h: 13 }, { id: `chg:${insert.id}:s1`, signer: 1, kind: 'initial', why: 'change', ref: insert.id, page: 1, x: 165, y: 384, w: 26, h: 13 }];
-  let noticeOverride = null, marks2 = [strike, insert], calls = [], mails = [], files = {}, agent = 'agent@example.test', changeErr = null, outstandingLayers = false, reopen = null, noDatePlace = false;
+  let contactPhone = '027 562 7207', logs = [], mailAid = [], alarms = [], pageTextOverride = null, noticeOverride = null, marks2 = [strike, insert], calls = [], mails = [], files = {}, agent = 'agent@example.test', changeErr = null, outstandingLayers = false, reopen = null, noDatePlace = false;
   files[DRAFT] = draft;
   const vSigner = { id: 'v1', position: 1, name: 'Vera Vendor', sig_png: png, init_png: png, verified_at: '2026-11-24T01:30:00Z', consent_at: '2026-11-24T01:31:00Z', receipts: [{ guide: 'chattels', at: '2026-11-24T01:32:00Z' }], places: 4, ua: 'Phone', net: 'f'.repeat(64), seen_sha256: 'd'.repeat(64) };
   const material = () => ({ signing_id: SID, offer_id: OID, property_id: PID, address: '1 Example Road, Testville', offer_ref: 'Ana Testbuyer', method: 'link', number: 2, round: 2, side: 'vendor', document: 1, earlier: [L1], link_changes: true,
@@ -48,6 +48,8 @@ let failTim = false;
     calls.push([fn, args]);
     if (fn === 'offer_sign_change') return changeErr ? { data: null, error: { message: changeErr } } : { data: Object.assign({ id: args.p_id, reopened: 0, reopened_signers: [], by: 'Vera Vendor', round: 2, side: 'vendor', address: '1 Example Road', offer_id: OID }, reopen || {}), error: null };
     if (fn === 'offer_mail_draft_sys') return { data: 'draft-1', error: null };
+    if (fn === 'offer_agent_contact') return { data: { phone: contactPhone, email: 'tim@example.test' }, error: null };
+    if (fn === 'offer_integrity_alarm') { alarms.push(args); return { data: null, error: null }; }
     if (fn === 'offer_sign_issue') return { data: { address: '1 Example Road', side: 'vendor', round: 2, links: [{ signer_id: 's1', position: 1, name: 'Vera Vendor', email: 'vera@example.com', token: TOK }] }, error: null };
     if (fn === 'offer_sign_open') return { data: { ok: true, first: 'Vera', address: '1 Example Road', finished: false, stopped: null, held: false, email_hint: 'v***@example.com', side: 'vendor', round: 2, email: 'vera@example.com' }, error: null };
     if (fn === 'offer_sign_finish') return { data: { ok: true, complete: true, signing_id: SID }, error: null };
@@ -59,14 +61,15 @@ let failTim = false;
     if (fn === 'offer_agreement_lock') return { data: { id: 'ag1', sha256: args.p_sha256, existing: false }, error: null };
     // Offers fixes 2: what the function needs to email Tim the locked agreed copy (the newest stored agreement, its size as stored)
     if (fn === 'offer_agreed_notice_material') { const al_ = calls.filter(c => c[0] === 'offer_agreement_lock').pop(); if (!al_) return { data: null, error: null }; const ag_ = noticeOverride || {};
-      return { data: { offer_id: OID, property_id: PID, address: '1 Example Road, Testville', province: 'otago', kiwisaver: false, layers: [L1, L2(), L3()], price_place: { id: 'price', page: 1, x: 100, y: 398, w: 60, h: 12 }, deposit_holder: { holder: 'nzret', other: null, by_default: false },
+      return { data: { offer_id: OID, property_id: PID, address: '1 Example Road, Testville', province: 'otago', kiwisaver: false, layers: [L1, L2(), L3()], price_place: { id: 'price', page: 1, x: 100, y: 398, w: 60, h: 12 }, agency_agreement_id: 'agency-1', deposit_holder: { holder: 'nzret', other: null, by_default: false },
         agreement: Object.assign({ id: 'ag1', agreement_date: '2026-11-24', date_text: '24 November 2026', sha256: al_[1].p_sha256, path: al_[1].p_path, size_bytes: al_[1].p_size, terms: { price: 655000, as_drafted: { price: '$655,000' }, conditions: [{ key: 'finance', days: 10 }], settlement: { kind: 'relative', days: 15 }, changes: [] } }, ag_) }, error: null }; }
     return { data: null, error: { message: 'unknown' } };
   };
   const h = H.makeHandler({ cors: { 'Access-Control-Allow-Origin': 'https://packages.dunnerstunner.co.nz' }, appUrl: 'https://packages.dunnerstunner.co.nz/onboarding/', timEmail: 'tim@example.test',
     whoIsAgent: async (a) => (a === 'Bearer good' ? agent : null), rpc: db, signedUrl: async (p) => 'https://signed.example/' + encodeURIComponent(p),
     download: async (p) => files[p] || null, upload: async (p, b) => { if (files[p]) return { ok: false, exists: true }; files[p] = b; return { ok: true }; },
-    sendMail: async (kind, m) => { if (failTim && m.to === 'tim@example.test') throw new Error('SMTP down'); mails.push(Object.assign({ kind }, m)); }, renderRound: (d, m) => S.renderRound(PDFLib, d, m), renderWorking: (d, m) => N.renderWorking(PDFLib, d, m), nego: N, mail: MAILC, offers: OFF, net: netOf });
+    sendMail: async (kind, m, aid) => { if (failTim && m.to === 'tim@example.test') throw new Error('SMTP down'); mails.push(Object.assign({ kind }, m)); mailAid.push([kind, aid]); }, renderRound: (d, m) => S.renderRound(PDFLib, d, m), renderWorking: (d, m) => N.renderWorking(PDFLib, d, m), nego: N, mail: MAILC, offers: OFF, net: netOf,
+    sign: S, pageText: async (b) => pageTextOverride ? pageTextOverride(b) : (await D.readPages(pdfjs, new Uint8Array(b))).map(p => Object.assign(p, { rot: 0 })), logMail: async (row) => { logs.push(row); } });
   const post = (body, headers) => h(new Request('https://x.supabase.co/functions/v1/offer-sign', { method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json', 'user-agent': 'Phone browser', 'x-forwarded-for': '203.0.113.7' }, headers || {}), body: JSON.stringify(body) }));
   const J = async r => ({ status: r.status, j: await r.json() });
   const text = async bytes => (await D.readPages(pdfjs, new Uint8Array(bytes))).map(p => p.items.map(i => i.s).join(' '));
@@ -84,6 +87,12 @@ let failTim = false;
   // a draft for them, which Tim reads and sends himself
   reopen = { reopened: 1, reopened_signers: [{ id: 'sig-val', position: 2, name: 'Val Vendor', email: 'val@example.com' }] }; calls = [];
   r = await J(await post({ action: 'change', token: TOK, session: SES, id: MK, kind: 'strike', page: 1, geometry: { x0: 100, x1: 160, y: 403 }, places: [] }));
+  { // Tim's phone in the drafts comes from the database at run time (offer_settings.agent_phone via offer_agent_contact)
+    contactPhone = '021 444 5555'; calls = [];
+    await J(await post({ action: 'change', token: TOK, session: SES, id: MK, kind: 'strike', page: 1, geometry: { x0: 100, x1: 160, y: 403 }, places: [] }));
+    const ds = calls.find(c => c[0] === 'offer_mail_draft_sys'); expect(ds && /021 444 5555/.test(ds[1].p_body) && !/027 562 7207/.test(ds[1].p_body), 'the reopened draft signs off with the phone in the database');
+    contactPhone = '027 562 7207'; MAILC.setAgent({ phone: '027 562 7207' }); calls = [];
+    r = await J(await post({ action: 'change', token: TOK, session: SES, id: MK, kind: 'strike', page: 1, geometry: { x0: 100, x1: 160, y: 403 }, places: [] })); }
   const dsys = calls.find(c => c[0] === 'offer_mail_draft_sys');
   expect(r.j.ok && r.j.reopened === 1 && !mails.length, 'a change that reopens a signer: no email to anyone, not even Tim');
   expect(dsys && dsys[1].p_offer === OID && dsys[1].p_signer === 'sig-val' && dsys[1].p_to.join() === 'val@example.com' && /A change to initial/.test(dsys[1].p_subject) && /link I sent you earlier/.test(dsys[1].p_body) && /^Hello Val,/.test(dsys[1].p_body), 'a draft for Val, in Tim\'s voice, for him to send');
@@ -144,6 +153,23 @@ let failTim = false;
   mails = []; r = await J(await h2(new Request('https://x/f', { method: 'POST', headers: { Authorization: 'Bearer good' }, body: JSON.stringify({ action: 'lock', signing_id: SID }) })));
   expect(r.j.ok && r.j.round.formed === true && /nothing outstanding/.test((mails.find(m => m.kind === 'offer_round_locked') || {}).html || ''), 'the vendors accepting Round 1 as it stood: Tim is told the agreement can be confirmed');
 
+  // ── Offers fixes 2 review: the struck words a signer's device recorded are checked against the draft before a round is locked ──
+  { const pages = await D.readPages(pdfjs, new Uint8Array(draft)), sn = S.snapStrike(pages[0], 110, 150, 402.5); out.serverSnap = sn;
+    const good = Object.assign({}, strike, { geometry: sn });
+    marks2 = [good, insert]; files = Object.fromEntries(Object.entries(files).filter(([k]) => !/offer-round-/.test(k))); calls = [];
+    r = await J(await post({ action: 'lock', signing_id: SID }, { Authorization: 'Bearer good' }));
+    expect(sn && /655,000/.test(sn.text) && r.j.ok && calls.some(c => c[0] === 'offer_round_lock'), 'words that match the draft: the round locks: ' + JSON.stringify(r.j));
+    const tries = [['words changed on the device', Object.assign({}, sn, { text: '$1,000,000' })], ['the line moved off the words', Object.assign({}, sn, { y: sn.y + 9 })], ['the line shortened', Object.assign({}, sn, { x1: sn.x1 - 8 })]];
+    for (const [what, g] of tries) { marks2 = [Object.assign({}, strike, { geometry: g }), insert]; files = Object.fromEntries(Object.entries(files).filter(([k]) => !/offer-round-/.test(k))); calls = [];
+      r = await J(await post({ action: 'lock', signing_id: SID }, { Authorization: 'Bearer good' }));
+      expect(r.status === 400 && /doesn't match the words on the document, so the round wasn't locked/.test(r.j.error) && !calls.some(c => c[0] === 'offer_round_lock'), what + ': refused plainly, not locked: ' + JSON.stringify(r.j)); }
+    // a turned page, and a reader that fails: refused (never locked unchecked)
+    marks2 = [good, insert]; pageTextOverride = async (b) => (await D.readPages(pdfjs, new Uint8Array(b))).map(p => Object.assign(p, { rot: 90 })); calls = [];
+    r = await J(await post({ action: 'lock', signing_id: SID }, { Authorization: 'Bearer good' })); expect(r.status === 400 && !calls.some(c => c[0] === 'offer_round_lock'), 'a line on a turned page: not locked');
+    pageTextOverride = async () => { throw new Error('pdf.js missing'); }; calls = [];
+    r = await J(await post({ action: 'lock', signing_id: SID }, { Authorization: 'Bearer good' })); expect(r.status === 400 && /couldn't be checked/.test(r.j.error) && !calls.some(c => c[0] === 'offer_round_lock'), 'the words can\'t be read: not locked, said plainly');
+    pageTextOverride = null; marks2 = [strike, insert]; }
+
   // ── agree ──
   r = await J(await post({ action: 'agree', offer_id: OID, accepted_at: '2026-11-24T05:00:00Z', date_text: '24 November 2026' }));
   expect(r.status === 403, 'agree needs Tim');
@@ -171,6 +197,7 @@ let failTim = false;
   // ── Offers fixes 2, item 6: Tim is emailed the locked dated agreed copy at once, and again when he asks; never a party ──
   { const am = mails.filter(m => m.kind === 'offer_agreed_copy'); out.agreedCopyMail = am.map(m => ({ to: m.to, subject: m.subject, attachments: (m.attachments || []).map(x => x.filename) }));
     expect(r.j.agreement && r.j.agreement.emailed === true, 'agree says Tim was emailed');
+    expect(mailAid.some(([k, aid]) => k === 'offer_agreed_copy' && aid === 'agency-1'), 'the email log row is filed with the property\'s agency agreement');
     expect(am.length === 1 && am[0].to === 'tim@example.test' && mails.every(m => m.to === 'tim@example.test'), 'one email, to Tim only: ' + mails.map(m => m.kind + '>' + m.to).join(', '));
     expect(am[0] && am[0].subject === 'Agreement confirmed: 1 Example Road, Testville', 'the subject');
     expect(am[0] && am[0].attachments && am[0].attachments.length === 1 && sha(am[0].attachments[0].content) === al[1].p_sha256 && am[0].attachments[0].contentType === 'application/pdf', 'the locked dated agreed copy attached, byte for byte');
@@ -189,15 +216,26 @@ let failTim = false;
     expect(q.j.ok && q.j.attached === false && mails.length === 1 && !mails[0].attachments && /too big to attach/.test(mails[0].html) && mails[0].html.includes(`/properties/${PID}/offers/${OID}`), 'a copy too big to attach: the portal link instead, said so');
     // a stored copy that doesn't match its fingerprint is never sent
     noticeOverride = { sha256: 'f'.repeat(64) }; mails = []; q = await J(await post({ action: 'agreed_notice', offer_id: OID }, { Authorization: 'Bearer good' }));
-    expect(!q.j.ok && !mails.length && /fingerprint/.test(q.j.error), 'a copy that does not match its fingerprint: nothing sent'); noticeOverride = null;
+    expect(!q.j.ok && !mails.length && /^Warning: the stored agreed copy doesn't match its fingerprint/.test(q.j.error), 'a copy that does not match its fingerprint: nothing sent, Tim told plainly: ' + q.j.error);
+    expect(alarms.length === 1 && alarms[0].p_offer === OID && /fingerprint mismatch/.test(alarms[0].p_what) && logs.length === 1 && logs[0].ok === false && logs[0].agreement_id === 'agency-1' && /fingerprint/.test(logs[0].error), 'and recorded: an integrity alarm on the offer\'s timeline and an email_log row');
+    noticeOverride = null;
     // the email failing never undoes the agreement: agree still succeeds, and says the email didn't go
     for (const k of Object.keys(files)) if (/offer-agreement-/.test(k)) delete files[k];
     failTim = true; mails = []; q = await J(await post({ action: 'agree', offer_id: OID, accepted_at: '2026-11-24T05:00:00+13:00', date_text: '24 November 2026' }, { Authorization: 'Bearer good' })); failTim = false;
     expect(q.j.ok && q.j.agreement.emailed === false, 'the email to Tim failing: the agreement stands, and the page is told it did not go'); }
+  { // with a background runner (the edge runtime's waitUntil), agree answers first and the email goes after
+    let held = null; const hb = H.makeHandler({ cors: {}, appUrl: 'x', timEmail: 'tim@example.test', whoIsAgent: async (a) => (a === 'Bearer good' ? agent : null), rpc: db, signedUrl: async () => null,
+      download: async (p) => files[p] || null, upload: async (p, b) => { if (files[p]) return { ok: false, exists: true }; files[p] = b; return { ok: true }; }, sendMail: async (kind, m) => { mails.push(Object.assign({ kind }, m)); },
+      renderRound: () => null, renderWorking: (d, m) => N.renderWorking(PDFLib, d, m), nego: N, mail: MAILC, offers: OFF, net: netOf, background: w => { held = w; } });
+    for (const k of Object.keys(files)) if (/offer-agreement-/.test(k)) delete files[k];
+    mails = []; const rb = await J(await hb(new Request('https://x/f', { method: 'POST', headers: { Authorization: 'Bearer good' }, body: JSON.stringify({ action: 'agree', offer_id: OID, accepted_at: '2026-11-24T05:00:00+13:00', date_text: '24 November 2026' }) })));
+    expect(rb.j.ok && rb.j.agreement.emailed === null && held && !mails.length, 'agree answers before the email to Tim is sent');
+    expect(await held === true && mails.length === 1 && mails[0].kind === 'offer_agreed_copy', 'then the email goes'); }
 
   // ── the entry file ──
   const entry = fs.readFileSync(path.join(__dirname, '..', '..', 'fn', 'offer_sign.ts'), 'utf8');
   expect(/cors: corsFor/.test(entry) && /nego-core\.js/.test(entry) && /renderWorking/.test(entry) && /JWT verification still OFF/.test(entry), 'the entry uses the app-and-portal CORS and the negotiation core');
   expect(/offers-core\.js/.test(entry) && /offers: OFFERS/.test(entry), 'the entry loads the working-day counter for Tim\'s agreement email (Offers fixes 2)');
+  expect(/sign: SIGN/.test(entry) && /pageText/.test(entry) && /page_text\.ts/.test(entry) && /pdfjs-dist@6\.2\.108/.test(entry) && /waitUntil/.test(entry) && /logMail/.test(entry) && /sendMail\(admin\(\), agreementId/.test(entry), 'the entry checks struck words with pdf.js, sends Tim\'s email after answering, and files email log rows with the agency agreement');
   console.log(JSON.stringify(Object.assign(out, { errs }), null, 1));
 })().catch(e => { console.log(JSON.stringify({ errs: ['crashed: ' + (e.stack || e.message)] })); });

@@ -8,6 +8,10 @@
 --                                             significant number, compared as offer_nsn does)
 --   offer_mail_side_hit                        as 024, except that a party email or phone equal to the agent's own is skipped. Everything
 --                                             else is identical: a real vendor's (or purchaser's) own phone or email is still refused.
+--   offer_agent_contact()                      the agent's phone and email as written, for the offer-sign function's email wording (after review)
+--   offer_agreed_notice_material(offer)        what the offer-sign function needs to email Tim the agreed copy (item 6), with the property's
+--                                             agency agreement so the email_log row is filed with it
+--   offer_integrity_alarm(offer, what, detail) an integrity alarm on the offer's timeline (a stored copy that doesn't match its fingerprint)
 -- Nothing here touches agreements, signatures, signed records or their triggers.
 
 alter table public.offer_settings add column if not exists agent_phone text not null default '027 562 7207' check (length(agent_phone) between 6 and 40);
@@ -40,7 +44,11 @@ begin
   return null;
 end $$;
 
-revoke execute on function public.offer_agent_own(), public.offer_mail_side_hit(uuid, text, text) from public, anon, authenticated;
+-- the agent's phone and email as written, for the offer-sign function's email wording (so the row is the one source; Tim's screen reads the row itself)
+create or replace function public.offer_agent_contact() returns jsonb language sql stable security definer set search_path = public as $$
+  select jsonb_build_object('phone', s.agent_phone, 'email', s.agent_email) from public.offer_settings s limit 1 $$;
+revoke execute on function public.offer_agent_own(), public.offer_agent_contact(), public.offer_mail_side_hit(uuid, text, text) from public, anon, authenticated;
+grant execute on function public.offer_agent_contact() to service_role;
 
 -- Offers fixes 2, item 6 (Tim: "it is most important that I get an email once the document is finalised"): what the offer-sign function
 -- needs to email Tim himself the locked, dated agreed copy as soon as he confirms the agreement, and again when he asks. Read only;
@@ -51,9 +59,22 @@ create or replace function public.offer_agreed_notice_material(p_offer uuid) ret
     'agreement', jsonb_build_object('id', a.id, 'agreement_date', a.agreement_date, 'date_text', a.date_text, 'sha256', a.sha256, 'path', a.path, 'size_bytes', a.size_bytes, 'accepted_at', a.accepted_at, 'terms', a.terms),
     'price_place', (select x from public.offer_drafts d, jsonb_array_elements(d.placed) x where d.id = doc.draft_id and x->>'id' = 'price' limit 1),
     'layers', public.offer_doc_layers(a.document_id, r.doc_round),
-    'deposit_holder', (select jsonb_build_object('holder', h.holder, 'other', h.other_text, 'by_default', h.by_default) from public.offer_deposit_holders h where h.offer_id = o.id order by h.id desc limit 1))
+    'deposit_holder', (select jsonb_build_object('holder', h.holder, 'other', h.other_text, 'by_default', h.by_default) from public.offer_deposit_holders h where h.offer_id = o.id order by h.id desc limit 1),
+    -- the property's agency agreement, so the email log row is filed with it
+    'agency_agreement_id', (select ag.id from public.agreements ag where ag.property_id = o.property_id and ag.status in ('signed', 'countersigned') order by ag.created_at desc limit 1))
   from public.offer_agreements a join public.property_offers o on o.id = a.offer_id join public.properties p on p.id = o.property_id
     join public.offer_documents doc on doc.id = a.document_id join public.offer_rounds r on r.id = a.round_id
   where a.offer_id = p_offer $$;
 revoke execute on function public.offer_agreed_notice_material(uuid) from public, anon, authenticated;
 grant execute on function public.offer_agreed_notice_material(uuid) to service_role;
+
+-- an integrity alarm on the offer's timeline (offer_events, hash-chained, never changed): a stored file that doesn't match its fingerprint
+-- when the offer-sign function reads it (the agreed copy before it is emailed to Tim). Service role only.
+create or replace function public.offer_integrity_alarm(p_offer uuid, p_what text, p_detail jsonb) returns void language plpgsql security definer set search_path = public as $$
+begin
+  insert into public.offer_events (property_id, offer_id, actor, kind, detail)
+    select o.property_id, o.id, 'system', 'integrity_alarm', jsonb_build_object('what', left(coalesce(p_what, ''), 200)) || coalesce(case when jsonb_typeof(p_detail) = 'object' then p_detail end, '{}'::jsonb)
+    from public.property_offers o where o.id = p_offer;
+end $$;
+revoke execute on function public.offer_integrity_alarm(uuid, text, jsonb) from public, anon, authenticated;
+grant execute on function public.offer_integrity_alarm(uuid, text, jsonb) to service_role;

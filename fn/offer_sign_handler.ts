@@ -46,7 +46,11 @@ export type Deps = {
   signedUrl: (path: string) => Promise<string | null>;              // a 10 minute link to a file in property-files
   download: (path: string) => Promise<Uint8Array | null>;
   upload: (path: string, bytes: Uint8Array) => Promise<{ ok: boolean; exists?: boolean }>;
-  sendMail: (kind: string, msg: { to: string; subject: string; html: string; attachments?: { filename: string; content: Uint8Array; contentType?: string }[] }) => Promise<void>;   // throws when it doesn't send
+  sendMail: (kind: string, msg: { to: string; subject: string; html: string; attachments?: { filename: string; content: Uint8Array; contentType?: string }[] }, agreementId?: string | null) => Promise<void>;   // throws when it doesn't send; logged in email_log (with the agency agreement when given)
+  sign?: any;                                                       // src/sign-core.js (SIGN): the snap of a line through text, checked again here before a round is locked
+  pageText?: (bytes: Uint8Array) => Promise<{ n: number; rot: number; items: any[] }[]>;   // the draft's words and each page's turn (pdf.js), for that check
+  logMail?: (row: { kind: string; agreement_id: string | null; recipients: string; subject: string; ok: boolean; error: string | null }) => Promise<void>;   // an email_log row for an email not sent
+  background?: (work: Promise<unknown>) => void;                     // work carried on after the answer (EdgeRuntime.waitUntil)
   renderRound: (draft: Uint8Array, m: any) => Promise<{ bytes: Uint8Array }>;
   renderWorking: (draft: Uint8Array, m: any) => Promise<{ bytes: Uint8Array }>;   // NEGO.renderWorking with pdf-lib
   nego: any;                                                        // the negotiation core (standing, outstanding, roundLines, agreementLines)
@@ -75,12 +79,29 @@ export function makeHandler(d: Deps) {
 
   // who is on each side, from the newest round each side signed (for the "nothing outstanding" check)
   const sidesOf = (layers: any[]) => { const o: Record<string, any[]> = {}; layers.slice().sort((a, b) => a.doc_round - b.doc_round).forEach((L) => { o[L.side] = (L.signers || []).map((s: any) => ({ position: s.position, name: s.name })); }); return o; };
+  // Tim's phone for the emails' wording, from the database (offer_settings.agent_phone, 025) when it can be read
+  const agentLoad = async () => { if (!d.mail || !d.mail.setAgent) return; try { const r = await d.rpc("offer_agent_contact", {}); if (!r.error && r.data && r.data.phone) d.mail.setAgent({ phone: r.data.phone }); } catch (_) { /* the default stands */ } };
+  // the words a signer's device recorded for a line through text are checked against the draft itself before a round is locked:
+  // the same snap from the stored line must give the same words in the same place, on a page that isn't turned (Offers fixes 2 review)
+  async function checkStrikes(draft: Uint8Array, marks: any[]) {
+    const lines = (marks || []).filter((k: any) => k.kind === "strike" && k.geometry && k.geometry.text != null);
+    if (!lines.length) return;
+    if (!d.pageText || !d.sign) throw new Error("The struck words couldn't be checked, so the round wasn't locked. Tim will look into it.");
+    let pages: any[]; try { pages = await d.pageText(draft); } catch (_) { throw new Error("The struck words couldn't be checked, so the round wasn't locked. Tim will look into it."); }
+    for (const k of lines) {
+      const g = k.geometry, pg = pages.find((x: any) => x.n === k.page), sn = pg && !pg.rot ? d.sign.snapStrike(pg, g.x0, g.x1, g.y) : null;
+      const same = sn && sn.text === g.text && Math.abs(sn.x0 - g.x0) <= 0.6 && Math.abs(sn.x1 - g.x1) <= 0.6 && Math.abs(sn.y - g.y) <= 0.6;
+      if (!same) throw new Error(`A line through text on page ${k.page} doesn't match the words on the document, so the round wasn't locked. Tim will look into it.`);
+    }
+  }
   // a round: made here from the approved draft and what the database holds, stored, fingerprinted from the stored file, then locked.
   // Round 1 as phase 3 made it; from Round 2 on, the working copy from every round's layers (src/nego-core.js).
   async function lockRound(signingId: string, actor: string) {
     const m = await call("offer_round_material", { p_signing: signingId });
     const draft = await d.download(m.draft.path);
     if (!draft || await sha256(draft) !== m.draft.sha256) throw new Error("The approved draft doesn't match its fingerprint, so the round wasn't made. Tim will look into it.");
+    await checkStrikes(draft, m.marks || []);
+    await agentLoad();
     const n = m.number || 1, round = m.round || 1;
     let bytes: Uint8Array, record: any, formed = false;
     if (round === 1) {
@@ -138,9 +159,11 @@ export function makeHandler(d: Deps) {
     const ssha = await sha256(stored); if (ssha !== sha) throw new Error("A different file is already stored where the agreement goes. Tim will look into it.");
     await call("offer_file_confirm", { p_path: path, p_sha256: ssha, p_size: stored.length, p_actor: actor });
     const lk = await call("offer_agreement_lock", { p_offer: offerId, p_round: m.round_id, p_path: path, p_sha256: ssha, p_size: stored.length, p_accepted_at: acceptedAt, p_date_text: m.date_text, p_record: record, p_actor: actor });
-    // Tim alone is emailed the locked, dated copy at once (Offers fixes 2); the agreement stands whether or not the email goes
+    // Tim alone is emailed the locked, dated copy (Offers fixes 2); the agreement stands whether or not the email goes. With a background
+    // runner the answer goes first and the email after it (emailed null: Tim's page then watches the email log); without one, now.
     let emailed: boolean | null = null;
-    if (!lk.existing) { try { await agreedNotice(offerId, false); emailed = true; } catch (_) { emailed = false; } }
+    if (!lk.existing) { const send = agreedNotice(offerId, false).then(() => true, () => false);
+      if (d.background) d.background(send); else emailed = await send; }
     return { sha256: lk.sha256, existing: !!lk.existing, property_id: m.property_id, emailed };
   }
   // Tim's own email once the agreement is confirmed (and again when he asks): the locked dated agreed copy attached, checked against its
@@ -155,12 +178,19 @@ export function makeHandler(d: Deps) {
     const pp = m.price_place, priceBoxes = pp ? (Array.isArray(pp.boxes) && pp.boxes.length ? pp.boxes : [pp]) : [];
     const labels: Record<string, string> = {}; ((A.terms || {}).conditions || []).forEach((c: any) => { const i = d.offers && d.offers.condInfo ? d.offers.condInfo(c.key) : null; labels[c.key] = (i && i.label) || c.key; });
     const portal = `${(d.portalUrl || "https://portal.dunnerstunner.co.nz/").replace(/\/?$/, "/")}properties/${m.property_id}/offers/${m.offer_id}`;
+    await agentLoad();
     let file: Uint8Array | null = null;
-    if (+A.size_bytes <= ATTACH_MAX) { file = await d.download(A.path); if (!file || await sha256(file) !== A.sha256) throw new Error("The agreed copy doesn't match its fingerprint, so it wasn't emailed. Tim will look into it."); }
+    // the stored copy is checked against its fingerprint first; a mismatch is an integrity alarm: recorded on the offer's timeline and in the
+    // email log, and Tim is told plainly; nothing is sent
+    const fileOk = async () => { const f = await d.download(A.path); if (f && await sha256(f) === A.sha256) return f;
+      try { await call("offer_integrity_alarm", { p_offer: offerId, p_what: "agreed copy fingerprint mismatch", p_detail: { path: A.path, sha256: A.sha256, found: f ? await sha256(f) : null } }); } catch (_) { /* told below either way */ }
+      try { if (d.logMail) await d.logMail({ kind: again ? "offer_agreed_copy_again" : "offer_agreed_copy", agreement_id: m.agency_agreement_id || null, recipients: d.timEmail, subject: `Agreement confirmed: ${m.address || ""}`, ok: false, error: "The stored agreed copy doesn't match its fingerprint" }); } catch (_) { /* as above */ }
+      throw new Error("Warning: the stored agreed copy doesn't match its fingerprint, so it wasn't emailed. This has been recorded on the offer. Don't use any copy until it is checked."); };
+    if (+A.size_bytes <= ATTACH_MAX) file = await fileOk();
     const nt = d.mail.agreedNotice({ address: m.address, agreement: A, purchasers: names("purchaser"), vendors: names("vendor"), terms: A.terms || {}, layers, priceBoxes, province: m.province, offers: d.offers, labels,
       depositHolder: m.deposit_holder || null, kiwisaver: !!m.kiwisaver, portalUrl: portal, attached: !!file, tooBig: !file, again });
     const name = `Agreement ${String(m.address || "").replace(/[^A-Za-z0-9 ,.-]+/g, "").slice(0, 80)}.pdf`;
-    await d.sendMail(again ? "offer_agreed_copy_again" : "offer_agreed_copy", Object.assign({ to: d.timEmail, subject: nt.subject, html: d.mail.toHtml(nt.body) }, file ? { attachments: [{ filename: name, content: file, contentType: "application/pdf" }] } : {}));
+    await d.sendMail(again ? "offer_agreed_copy_again" : "offer_agreed_copy", Object.assign({ to: d.timEmail, subject: nt.subject, html: d.mail.toHtml(nt.body) }, file ? { attachments: [{ filename: name, content: file, contentType: "application/pdf" }] } : {}), m.agency_agreement_id || null);
     return { attached: !!file };
   }
 
@@ -186,7 +216,7 @@ export function makeHandler(d: Deps) {
       // "Email me the agreed copy again": the same email to Tim himself, never to anyone else
       if (action === "agreed_notice") {
         const oid = String(body.offer_id || ""); if (!UUID.test(oid)) return json({ error: "Bad request" }, 400);
-        try { const r = await agreedNotice(oid, true); return json({ ok: true, attached: r.attached }); } catch (e) { return json({ ok: false, error: /SMTP|Email is not set up/i.test((e as Error).message) ? "It didn't send. Try again." : plain((e as Error).message) }, 400); }
+        try { const r = await agreedNotice(oid, true); return json({ ok: true, attached: r.attached }); } catch (e) { const msg = (e as Error).message || ""; return json({ ok: false, error: /SMTP|Email is not set up/i.test(msg) ? "It didn't send. Try again." : /^Warning: /.test(msg) ? msg : plain(msg) }, 400); }
       }
       // Tim presses Send on one draft (offer_mail_drafts, 024): it goes exactly as it stands, and the log keeps exactly what went.
       // A signing link's personal token is made now, for that signer only, and is never kept or returned anywhere.
@@ -259,6 +289,7 @@ export function makeHandler(d: Deps) {
         // anyone on this side who had finished now has a change to initial: a draft for each, which Tim reads and sends himself. No email
         // goes to anyone now, Tim included: he hears once, when the round is submitted (Tim, 24 November 2026).
         if (r.reopened > 0) {
+          await agentLoad();
           for (const x of r.reopened_signers || []) { if (!x.email || !x.id) continue;
             try { const w = d.mail ? d.mail.reopenedDraft({ first: String(x.name || "").split(" ")[0], address: r.address, by: r.by, side: r.side }) : { subject: `A change to initial: ${r.address || "the offer"}`, body: `Please open the link I sent you earlier and initial the change. Tim` };
               await call("offer_mail_draft_sys", { p_offer: r.offer_id, p_signer: x.id, p_to: [x.email], p_subject: w.subject, p_body: w.body }); } catch (_) { /* Tim sees the reopened signer on the round's page either way */ } }

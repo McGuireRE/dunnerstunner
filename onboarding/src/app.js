@@ -7018,8 +7018,11 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         try { const v = val(m.id); if (changed(m, v)) { bad.push(m.id); out(m.id, 'Changed since you ticked Reviewed: save it and tick again, or press Send.'); continue; } await send(m); ok++; } catch (e) { bad.push(m.id); out(m.id, e.message); if (e.maybe) { maybe = true; break; } } }
       toast(`${ok} sent${bad.length ? `, ${bad.length} not sent` : ''}`); if (!bad.length || maybe) after(); else lock_(false); }));
   }
+  // Tim's phone for every draft's sign-off, from the database (offer_settings.agent_phone, 025) when it can be read; else mail-core's default
+  async function mlAgentLoad() { try { const st = ((await ofSafe(sb.from('offer_settings').select('agent_phone'))) || [])[0]; if (st && st.agent_phone) MAIL.setAgent({ phone: st.agent_phone }); } catch (_) { } }
   // the signing links: one draft per signer still to sign, in Tim's voice (src/mail-core.js), for him to read and send
   async function mlPrepareLinks(g, p) {
+    await mlAgentLoad();
     const S_ = ((await ofSafe(sb.from('offer_signers').select(SG_COLS).eq('signing_id', g.id).order('position'))) || []).filter(s => !s.void_at && !s.finished_at && s.email);
     // called by their preferred names: a vendor's from the property file; a purchaser's first name as they gave it
     const pp = (await ofSafe(sb.from('property_people').select('legal_name,pref_name,email').eq('property_id', g.property_id))) || [];
@@ -7053,6 +7056,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     return { r, ag, p };
   }
   async function mlBuildAgreed(o, p) {
+    await mlAgentLoad();
     const ag0 = ((await ofSafe(sb.from('offer_agreements').select('id').eq('offer_id', o.id))) || [])[0]; if (!ag0) throw new Error('The agreement hasn\'t been made yet.');
     // who holds the deposit: Tim's newest choice, kept with the agreement; none yet, the recommended one is recorded as his choice now
     let dh = ((await ofSafe(sb.from('offer_deposit_holders').select('*').eq('offer_id', o.id).order('id', { ascending: false }).limit(1))) || [])[0];
@@ -7330,14 +7334,19 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const b = rect0(), dpr = window.devicePixelRatio || 1; cv.width = b.width * dpr; cv.height = b.height * dpr; const g = cv.getContext('2d'); g.scale(dpr, dpr); g.strokeStyle = '#0d2973'; g.lineWidth = 2; g.lineCap = 'round';
     const pt = e => { const q = rect0(); return [Math.round(Math.max(0, Math.min(r.W, (e.clientX - q.left) / q.width * r.W)) * 10) / 10, Math.round(Math.max(0, Math.min(r.H, r.H - (e.clientY - q.top) / q.height * r.H)) * 10) / 10]; };
     const px = p => { const q = rect0(); return [p[0] / r.W * q.width, (r.H - p[1]) / r.H * q.height]; };
-    if (F.marking === 'strike' && ctx && ctx.bytes) ngPageItems(ctx).catch(() => null);   // read the page's words now, so the snap is quick
+    // the page's words (for the snap) and its turn, read now; a turned page takes no marks at all
+    const pgInfo = async () => { try { return (await ngPageItems(ctx)).find(x => x.n === F.page) || null; } catch (_) { return null; } };
+    let turned = false; if (ctx && ctx.bytes) pgInfo().then(pg => { if (pg && pg.rot) { turned = true; F.draft = null; const e = $('#sgErr'); if (e) e.textContent = SG_ROT_MSG; } });
     let down = null, strokes = F.draft && F.draft.kind === 'note' && F.draft.page === F.page ? F.draft.geometry.strokes : [], cur = null;
     // the saved-to-be mark, as it will be stored (and drawn on the locked copy)
     const drawDraft = () => { const d = F.draft; if (!d || d.page !== F.page || d.kind === 'note') return; const G = d.geometry; g.beginPath();
       if (d.kind === 'strike') { const [x0, y0] = px([G.x0, G.y]), [x1] = px([G.x1, G.y]); g.moveTo(x0, y0); g.lineTo(x1, y0); }
       else if (d.kind === 'cross') { const [x0, y0] = px([G.x, G.y]), [x1, y1] = px([G.x + G.w, G.y + G.h]); g.rect(Math.min(x0, x1), Math.min(y0, y1), Math.abs(x1 - x0), Math.abs(y1 - y0)); g.moveTo(x0, y0); g.lineTo(x1, y1); g.moveTo(x0, y1); g.lineTo(x1, y0); }
-      else if (d.kind === 'insert') { const [qx, qy] = px([G.x, G.y]); g.moveTo(qx, qy - 10); g.lineTo(qx, qy + 2); g.lineTo(qx + 14, qy + 2); }
+      else if (d.kind === 'insert') { const [qx, qy] = px([G.x, G.y]); g.moveTo(qx, qy - 10); g.lineTo(qx, qy + 2); g.lineTo(qx + 14, qy + 2);
+        // the words as they are typed, at the place and size they will have (9 point)
+        const tt = (($('#ngInsText') || {}).value || '').trim(); if (tt) { const q = rect0(), fs = (G.size || 9) / r.W * q.width; g.save(); g.fillStyle = '#0d2973'; g.font = `${fs}px Helvetica, Arial, sans-serif`; g.fillText(tt, qx, qy); g.restore(); } }
       g.stroke(); };
+    F.redrawDraft = () => redraw();
     const redraw = (a, z) => { g.clearRect(0, 0, cv.width, cv.height); strokes.forEach(st => { g.beginPath(); st.forEach((p, i) => { const [x, y] = px(p); i ? g.lineTo(x, y) : g.moveTo(x, y); }); g.stroke(); });
       if (a && z) { const [x0, y0] = px(a), [x1, y1] = px(z); g.beginPath(); if (F.marking === 'strike') { g.moveTo(x0, y0); g.lineTo(x1, y0); } else { g.rect(Math.min(x0, x1), Math.min(y0, y1), Math.abs(x1 - x0), Math.abs(y1 - y0)); g.moveTo(x0, y0); g.lineTo(x1, y1); g.moveTo(x0, y1); g.lineTo(x1, y0); } g.stroke(); }
       else drawDraft(); };
@@ -7347,17 +7356,18 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     redraw(); words(F.draft && F.draft.kind === 'strike' && F.draft.page === F.page ? F.draft.geometry.text : '');
     const ready = () => { const s = $('#sgMarkSave'); if (s) s.disabled = !F.draft || (F.marking === 'insert' && $('#ngInsText') && !$('#ngInsText').value.trim()); };
     const say = t => { const e = $('#sgErr'); if (e) e.textContent = t || ''; };
-    cv.addEventListener('pointerdown', e => { e.preventDefault(); cv.setPointerCapture(e.pointerId); down = pt(e); say(''); if (F.marking === 'note') { cur = [down]; strokes.push(cur); } });
+    cv.addEventListener('pointerdown', e => { e.preventDefault(); if (turned) { say(SG_ROT_MSG); return; } cv.setPointerCapture(e.pointerId); down = pt(e); say(''); if (F.marking === 'note') { cur = [down]; strokes.push(cur); } });
     cv.addEventListener('pointermove', e => { if (!down) return; const p = pt(e); if (F.marking === 'note') { cur.push(p); if (cur.length > 400) cur.shift(); redraw(); } else if (F.marking !== 'insert') redraw(down, p); });
     let seq = 0;
     const end = async e => { if (!down) return; const p = pt(e), d0 = down; down = null;
+      if (ctx && ctx.bytes) { const pg0 = await pgInfo(); if (pg0 && pg0.rot) { turned = true; F.draft = null; strokes = []; cur = null; redraw(); ready(); say(SG_ROT_MSG); return; } }
       if (F.marking === 'note') { if (cur && cur.length < 2) cur.push(p); F.draft = { kind: 'note', page: F.page, geometry: { strokes: strokes.slice(-60) } }; }
       else if (F.marking === 'insert') F.draft = { kind: 'insert', page: F.page, geometry: { x: p[0], y: p[1], text: '', size: 9 } };
       else if (F.marking === 'strike') {
         const my = ++seq, mark = F.marking; F.draft = null; words(''); ready(); redraw(d0, [p[0], d0[1]]);
-        let sn = null; try { const pg = (await ngPageItems(ctx)).find(x => x.n === F.page); sn = pg ? SG.snapStrike(pg, d0[0], p[0], d0[1]) : null; } catch (_) { sn = null; }
+        let sn = null, pg = null; try { pg = await pgInfo(); sn = pg ? SG.snapStrike(pg, d0[0], p[0], d0[1]) : null; } catch (_) { sn = null; }
         if (my !== seq || F.marking !== mark) return;
-        if (!sn) { redraw(); say('Drag along the words you want to strike through.'); return; }
+        if (!sn) { redraw(); say(pg && !(pg.items || []).length ? SG_SCAN_MSG : 'Drag along the words you want to strike through.'); return; }
         F.draft = { kind: 'strike', page: F.page, geometry: sn }; redraw(); words(sn.text); ready(); return;
       }
       else F.draft = { kind: 'cross', page: F.page, geometry: { x: Math.min(d0[0], p[0]), y: Math.min(d0[1], p[1]), w: Math.abs(p[0] - d0[0]), h: Math.abs(p[1] - d0[1]) } };
@@ -7441,13 +7451,21 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     return svg;
   }
   // the pages with their printed words (for placing initials beside a change clear of them), read once
-  async function ngPageItems(ctx) { if (!ctx._items) ctx._items = (await DR.readPages(await drPdfjs(), ctx.bytes, PDF_OPTS)).map(p => ({ n: p.n, w: p.w, h: p.h, items: p.items })); return ctx._items; }
+  const NG_ITEMS = new Map();   // the pages' words and turns, read once per document (keyed by its fingerprint), across reloads of the signing screen
+  async function ngPageItems(ctx) { const key = ctx.draftSha || null; if (!ctx._items && key && NG_ITEMS.has(key)) ctx._items = NG_ITEMS.get(key);
+    if (!ctx._items) { ctx._items = (async () => { const lib = await drPdfjs(), ps = (await DR.readPages(lib, ctx.bytes, PDF_OPTS)).map(p => ({ n: p.n, w: p.w, h: p.h, items: p.items, rot: 0 }));
+      // each page's turn (/Rotate): marks are never made on a turned page, as the screen and the locked copy would disagree (Offers fixes 2 review)
+      try { const doc = await lib.getDocument(Object.assign({ data: new Uint8Array(ctx.bytes).slice(0), isEvalSupported: false, disableFontFace: true, useSystemFonts: false, verbosity: 0 }, PDF_OPTS)).promise;
+        for (const p of ps) { const pg = await doc.getPage(p.n); p.rot = ((pg.rotate || 0) % 360 + 360) % 360; } try { if (doc.destroy) await doc.destroy(); else if (doc.cleanup) await doc.cleanup(); } catch (_) { } } catch (_) { ps.forEach(p => { p.rot = null; }); }
+      return ps; })(); if (key) { NG_ITEMS.set(key, ctx._items); ctx._items.catch(() => NG_ITEMS.delete(key)); } } return ctx._items; }
+  const SG_ROT_MSG = 'Changes can\'t be marked on this page, because it is turned sideways. Ask Tim for a change instead.';
+  const SG_SCAN_MSG = 'The words on this page can\'t be read, so a line can\'t be placed through them. Use a crossed-out box or a note, or ask Tim.';
   // the change tools from Round 2 on (both on Tim's device and by link): each change goes in with everyone's initials beside it
   function ngTools(ctx, F, paint, tools) {
     const hint = { strike: 'Drag along the line of text to strike it through.', cross: 'Drag from one corner of the passage or box to the other.', insert: 'Tap where the words go, then type them below.', note: 'Write or draw on the page with your finger or stylus.', reinstate: 'Tap a line or crossed-out passage to reinstate it.' }[F.marking];
     tools.insertAdjacentHTML('afterend', `<p class="small" id="sgMarkHint">${hint} Everyone on your side initials each change, and the ${ngSide(ctx.side === 'vendor' ? 'purchaser' : 'vendor')}' initials at that place are lifted from this copy (they stay on the earlier rounds).</p><div class="toolbar">${F.marking === 'insert' ? `<label class="sr" for="ngInsText">Words to add</label><input type="text" id="ngInsText" maxlength="290" placeholder="Words to add, for example $690,000"><label class="chk" style="flex-basis:100%"><input type="checkbox" id="ngInsTerm"> A new further term, numbered ${esc(ngNextTerm(ctx).label)}</label>` : ''}<button class="btn primary" type="button" id="sgMarkSave" disabled>Save this change</button><button class="btn ghost" type="button" id="sgMarkCancel">Cancel</button></div>`);
     $('#sgMarkCancel').addEventListener('click', () => { F.marking = null; F.draft = null; F.pick = null; signFlowTools(ctx, F, paint); });
-    const it = $('#ngInsText'); if (it) it.addEventListener('input', () => { $('#sgMarkSave').disabled = !(F.draft && it.value.trim()); });
+    const it = $('#ngInsText'); if (it) it.addEventListener('input', () => { $('#sgMarkSave').disabled = !(F.draft && it.value.trim()); if (F.redrawDraft) F.redrawDraft(); });   // the words show on the page as they are typed
     $('#sgMarkSave').addEventListener('click', async () => { const e = $('#sgErr'); e.textContent = '';
       let m = F.marking === 'reinstate' ? (F.pick ? { kind: 'reinstate', page: F.page, target: F.pick.id, geometry: { x: Math.round(SG.markRect(F.pick).x * 10) / 10, y: Math.round((SG.markRect(F.pick).y + SG.markRect(F.pick).h + 2) * 10) / 10 } } : null) : F.draft;
       if (!m) return (e.textContent = 'Change the page first.');
@@ -7576,6 +7594,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       partyTo = [...new Set([...(vs || []).map(x => x.email), ...(pp || []).map(x => x.email)].filter(Boolean).map(x => x.toLowerCase()))]; partyFirst = (pp || []).map(x => x.pref_name || String(x.legal_name || '').split(/\s+/)[0]); own = vl; other = d.lawyer || {}; }
     // did that side make a counteroffer (a round of theirs with changes)? The vendors withdraw one only if they made one; otherwise they declined
     const counter = ((await ofSafe(sb.from('offer_rounds').select('id,side,changes').eq('offer_id', o.id))) || []).some(r => r.side === h.side && r.changes > 0);
+    await mlAgentLoad();
     const w = MAIL.withdrawDrafts({ side: h.side, counter, address: p.address, when: h.told_at, partyFirst, partyTo, ownLawyer: own, otherLawyer: other });
     let made = 0;
     for (const [kind, m] of [['withdraw_party', w.party], ['withdraw_lawyer', w.lawyer]]) { if (!m.to.length) continue; await sgRpc('agent_mail_draft_add', { p_offer: o.id, p_kind: kind, p_signer: null, p_to: m.to, p_cc: m.cc, p_subject: m.subject, p_body: m.body, p_attach: null }); made++; }
@@ -7667,14 +7686,27 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       const dt = $('#ngDate').value.trim().replace(/\s+/g, ' '); if (!NG.parseFullDate(dt)) return (er.textContent = 'Type the date in full with the month name, for example 24 November 2026.');
       const at = new Date($('#ngAccAt').value); if (isNaN(at)) return (er.textContent = 'Check when acceptance was communicated.');
       ag.disabled = true; er.textContent = 'Making the agreed copy...';
-      const r = await offerCall('offer-sign', { action: 'agree', offer_id: o.id, accepted_at: at.toISOString(), date_text: dt });
+      const t0 = new Date(Date.now() - 5000).toISOString(), r = await offerCall('offer-sign', { action: 'agree', offer_id: o.id, accepted_at: at.toISOString(), date_text: dt });
       if (!r || !r.ok) { er.textContent = (r && r.error) || 'That didn\'t work. Try again.'; ag.disabled = false; return; }
       // the property's stage moves to Under offer with the existing stage function; other offers are left for Tim
-      let msg = 'Agreement confirmed and locked.' + (r.agreement && r.agreement.emailed === true ? ' The dated agreed copy has been emailed to you.' : r.agreement && r.agreement.emailed === false ? ' The email to you with the agreed copy didn\'t go: use "Email me the agreed copy again".' : '');
+      // the email to Tim goes after the agreement is locked (the function answers first): a follow-up check says when it went or failed
+      let msg = 'Agreement confirmed and locked.' + (r.agreement && r.agreement.emailed === false ? ' The email to you with the agreed copy didn\'t go: use "Email me the agreed copy again".' : '');
+      if (r.agreement && !r.agreement.existing && r.agreement.emailed !== false) ngAgreedMailWatch(t0);
       try { await mlBuildAgreed(o, p); msg += ' The emails to both parties are built for you to read and send.'; } catch (_) { msg += ' Build the emails to the parties on the offer page.'; }
       if (p.stage !== 'under_offer') { try { await sgRpc('agent_set_stage', { pid: p.id, p_stage: 'under_offer', p_reason: null, p_confirmed: true }); msg += ' The property is now under offer.'; } catch (e) { msg += ' The stage didn\'t move (' + e.message + '). Change it on the property page.'; } }
       toast(msg); reload(); });
     const pk = $('#ngPack'); if (pk) pk.addEventListener('click', () => ngPack(o, p));
+  }
+  // after Confirm: watch the email log for Tim's own agreed-copy email (sent by the function after it answered) and say how it went
+  async function ngAgreedMailWatch(since) {
+    await new Promise(res => setTimeout(res, 3600));   // after the "Agreement confirmed" message has been read
+    for (let k = 0; k < 20; k++) {
+      const rows = (await ofSafe(sb.from('email_log').select('kind,ok,at').eq('kind', 'offer_agreed_copy').gte('at', since))) || [];
+      if (rows.some(x => x.ok)) return toast('The dated agreed copy has been emailed to you.');
+      if (rows.length) return toast('The email to you with the agreed copy didn\'t go. Use "Email me the agreed copy again" on the offer page.');
+      await new Promise(res => setTimeout(res, 1500));
+    }
+    toast('No word yet on the email with the agreed copy. If it doesn\'t arrive, use "Email me the agreed copy again" on the offer page.');
   }
   // the lawyers' pack: every locked round across every document, the agreed copy, and the timeline as a readable page, in one zip.
   // Each file inside is the locked copy byte for byte (checked against its fingerprint first). Agent only.

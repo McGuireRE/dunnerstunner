@@ -17,16 +17,24 @@ import * as PDFLib from "npm:pdf-lib@1.17.1";
 import "../onboarding/src/sign-core.js";
 import "../onboarding/src/nego-core.js";
 import "../onboarding/src/offers-core.js";
+import "../onboarding/src/draft-core.js";
+import { pageTextWith } from "./page_text.ts";
 import "../onboarding/src/mail-core.js";
 import { makeHandler } from "./offer_sign_handler.ts";
 import { netOf } from "./offer_public_handler.ts";
 
 const SIGN = (globalThis as any).SIGN, NEGO = (globalThis as any).NEGO, MAIL = (globalThis as any).MAIL, OFFERS = (globalThis as any).OFFERS;
+// the draft's words and each page's turn, read with pdf.js only when a round with a line through text is locked (Offers fixes 2 review)
+const pageText = pageTextWith(() => import("npm:pdfjs-dist@6.2.108/legacy/build/pdf.mjs"), (globalThis as any).DRAFT);
 Deno.serve(makeHandler({
   cors: corsFor,   // only the onboarding pages (packages.dunnerstunner.co.nz) and Tim's portal (portal.dunnerstunner.co.nz) call this
   appUrl: APP_URL,
   portalUrl: "https://portal.dunnerstunner.co.nz/",
   mail: MAIL,
+  sign: SIGN,
+  pageText,
+  logMail: async (row) => { await admin().from("email_log").insert(row); },
+  background: (work) => { const rt = (globalThis as any).EdgeRuntime; if (rt && typeof rt.waitUntil === "function") rt.waitUntil(work); },
   offers: OFFERS,
   timEmail: TIM_EMAIL,
   whoIsAgent: async (authorization) => {
@@ -41,7 +49,7 @@ Deno.serve(makeHandler({
   download: async (path) => { const { data, error } = await admin().storage.from("property-files").download(path); return error || !data ? null : new Uint8Array(await data.arrayBuffer()); },
   upload: async (path, bytes) => { const { error } = await admin().storage.from("property-files").upload(path, new Blob([bytes as BlobPart], { type: "application/pdf" }), { contentType: "application/pdf", upsert: false });
     return error ? { ok: false, exists: /exists/i.test(error.message || "") } : { ok: true }; },
-  sendMail: (kind, msg) => sendMail(admin(), null, kind, msg),
+  sendMail: (kind, msg, agreementId) => sendMail(admin(), agreementId || null, kind, msg),
   renderRound: (draft, m) => SIGN.renderRound(PDFLib, draft, m),
   renderWorking: (draft, m) => NEGO.renderWorking(PDFLib, draft, m),
   nego: NEGO,
