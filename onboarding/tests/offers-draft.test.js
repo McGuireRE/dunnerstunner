@@ -198,6 +198,11 @@ const sha = b => crypto.createHash('sha256').update(Buffer.from(b)).digest('hex'
   expect(d.offer_events.some(e => e.kind === 'draft_approved' && e.detail.sha256 === dr2.sha256), 'approval in offer_events');
   const [dl] = await Promise.all([p.waitForEvent('download'), p.click('#drDownload')]); const dlp = await dl.path(); const dlb = fs.readFileSync(dlp);
   expect(sha(dlb) === dr2.sha256 && /^Draft-2-/.test(dl.suggestedFilename()), 'the download is the approved draft, byte for byte');
+  // Tim, 26 November 2026: "Re-draft with my changes" with nothing changed once failed with a database error. Now it says so and
+  // stays on the same draft, approval kept, with no copy made
+  await p.click('#drRedraft'); await p.waitForFunction(() => /Nothing changed, so this is the same as Draft 2/.test(document.body.textContent), null, { timeout: 30000 });
+  await p.waitForSelector('#drReview h1:has-text("Draft 2")'); d = await db(p);
+  expect(d.offer_drafts.length === 2 && d.offer_draft_approvals.length === 1 && await p.$('#drApproved') && !/duplicate key/.test(await p.textContent('body')), 're-draft with nothing changed: same draft, approval kept, no error');
 
   // ── 7. a correction from phase 1, then re-draft after a change ──
   process.stderr.write('step 7\n');
@@ -384,7 +389,9 @@ const sha = b => crypto.createHash('sha256').update(Buffer.from(b)).digest('hex'
   const bad = await rpc(q, 'agent_draft_add', { p_offer: off2, p_map: dr9.map_id, p_path: dr9.path, p_sha256: dr9.sha256, p_size: dr9.size_bytes, p_placed: dr9.placed, p_needs: dr9.needs, p_edits: Object.assign({}, dr9.edits, { marks: [{ id: 'x1', type: 'strike', page: 99, x: 1, y: 1, w: 20, h: 20 }] }), p_note: null });
   expect(bad.error && /couldn't be kept: a mark or moved place off the page/.test(bad.error.message), 'a mark off the blank is refused by the server');
   // a re-draft after a change keeps the marks, the added clauses and the order
-  await q.click('#drRedraftChange'); dr9 = await waitDraft(++dn);
+  // (nothing has changed here, so since 26 November 2026 it stays on the same draft and says so instead of making a copy)
+  await q.click('#drRedraftChange'); await q.waitForFunction(n => new RegExp('Nothing changed, so this is the same as Draft ' + n).test(document.body.textContent), dn, { timeout: 30000 });
+  expect((await db(q)).offer_drafts.filter(x => x.offer_id === off2).length === (await db(q)).offer_drafts.filter(x => x.offer_id === off2 && x.number <= dn).length, 'no copy made');
   expect(dr9.edits.marks.length === 2 && dr9.edits.added_terms.some(a => a.id === 'add_std_pool_1') && dr9.edits.moves.price && dr9.edits.retired_numbers.includes(keysNo), 'kept through a re-draft after a change');
 
   // too many further terms for the page: the continuation page made on Tim's screen, its bands pictures rendered with pdf.js

@@ -6540,8 +6540,20 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       const blob = await new Promise(res => out.toBlob(res, 'image/png')); if (!blob) throw new Error('No band picture');
       return new Uint8Array(await blob.arrayBuffer()); };
     const r = await DR.renderDraft(PDFLib, bytes, plan, { title: 'Draft agreement: ' + (o.buyer_ref || 'offer'), bandImage });
-    const sha = await REPO.sha256(r.bytes), prev = (await ofSafe(sb.from('offer_drafts').select('number').eq('offer_id', oid).order('number', { ascending: false }))) || [], n = ((prev[0] || {}).number || 0) + 1;
-    const pth = `properties/${o.property_id}/docs/offer-draft-${oid}-${n}-${sha.slice(0, 12)}.pdf`;
+    // the drafts already made: this must load, so a new draft never takes an earlier one's number or place (Tim, 26 November 2026)
+    let prev;
+    try { prev = (await must(sb.from('offer_drafts').select('id,number,path,sha256,map_id,details').eq('offer_id', oid).order('number', { ascending: false }))) || []; }
+    catch (_) { throw new Error('The earlier drafts couldn\'t be loaded, so nothing was drafted. Check you have signal, then try again.'); }
+    const sha = await REPO.sha256(r.bytes);
+    // nothing changed: the same file, on the same approved places, for the offer as it stands, so Tim is taken to that draft
+    // instead of a copy of it (a draft on superseded places, or before a correction, is still re-drafted)
+    // only the newest draft counts: going back to an older one's wording is a new draft, as only the newest can be approved
+    const same = [prev[0]].find(x => x && x.sha256 === sha && x.map_id === map.id && JSON.stringify(drCanon(x.details || {})) === JSON.stringify(drCanon(o.details || {})));
+    if (same) { DR_CACHE['draft-' + same.id] = { bytes: r.bytes }; const e = new Error(`Nothing changed, so this is the same as Draft ${same.number}.`); e.sameDraft = same.id; throw e; }
+    let n = ((prev[0] || {}).number || 0) + 1;
+    const used = new Set(prev.map(x => x.path)), at = k => `properties/${o.property_id}/docs/offer-draft-${oid}-${k}-${sha.slice(0, 12)}.pdf`;
+    while (used.has(at(n))) n++;
+    const pth = at(n);
     const up = await sb.storage.from('property-files').upload(pth, new Blob([r.bytes], { type: 'application/pdf' }), { contentType: 'application/pdf', upsert: false });
     if (up.error && !/exists/i.test(up.error.message || '')) throw new Error('The draft didn\'t save. Check you have signal, then try again.');
     await drConfirm(pth, sha);
@@ -6699,7 +6711,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     </div>`;
     $$('[data-rich]').forEach(x => { x.dataset.base = drRichText(x); });   // the wording as shown: a change is anything different from this
     const go = async (edits, note) => { const btns = $$('#drRedraft,#drRedraftChange'); btns.forEach(x => { x.disabled = true; }); $('#drRvErr').textContent = 'Drafting...';
-      try { const id = await drMakeDraft(d.offer_id, edits, note); toast('New draft made; the earlier one is kept'); viewDraftReview(id); return true; } catch (e) { $('#drRvErr').textContent = e.message || 'That didn\'t draft.'; btns.forEach(x => { x.disabled = false; }); return false; } };
+      try { const id = await drMakeDraft(d.offer_id, edits, note); toast('New draft made; the earlier one is kept'); viewDraftReview(id); return true; } catch (e) { if (e && e.sameDraft) { toast(e.message); viewDraftReview(e.sameDraft); return true; } $('#drRvErr').textContent = e.message || 'That didn\'t draft.'; btns.forEach(x => { x.disabled = false; }); return false; } };
     // a correction from this screen carries the offer's details as the screen loaded them (p_expected): the database refuses it if the
     // offer changed in between. If the correction saved but the new draft didn't, Tim is told so and can re-draft from here.
     const correctedButNotDrafted = (box, edits, note) => { const el = $(box); if (!el) return;
