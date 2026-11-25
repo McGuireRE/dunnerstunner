@@ -4,6 +4,17 @@ Agreed with Tim on 23 November 2026. Tim's readable copy is the doc "Offers and 
 (https://claude.ai/artifact/UeHnyEdA6xhi1fPnyhxtNA). This file is the builder's copy. Build each phase the same way
 as `BUILD-PLAN.md`: builder, tests against the mock database, independent reviewer, then push and deploy.
 
+## Live status (25 November 2026)
+
+- Live: phases 1 (offer form), 2 (drafting onto the REINZ blank), 3 (signing) and 4 (counteroffers). Database 001 to 024.
+  Phases 3 and 4 went live 25 November about 12:55 (main 121c783; offer-sign v1, offer-public v3).
+- Live: Offers fixes 1 (AI wording, no-blank warning), 25 November about 15:25 (main 06c2d22; offer-draft v3, offer-public v4,
+  doc-prefill v5, all pinned to 06c2d22). Checked: the clause writer drafted a condition on the live site.
+- Edge functions and the commit each is pinned to: offer-sign 121c783; offer-public, offer-draft, doc-prefill 06c2d22.
+- Still to do: the test offer with Tim's own addresses (OFFERS-PLAN "Going live" step 5), then Tim's solicitor confirms the
+  signing and counteroffer method before the first real offer. Phases 5 and 6 not built.
+- Older "Status:" lines in the phase sections below are kept as the build history; this section is the current state.
+
 Replaces: the Jotform "Prepare My Offer" form, retyping each offer into the REINZ eForms portal, and Adobe signing.
 
 ## Rules that never bend
@@ -707,8 +718,8 @@ Going live, with Tim's approval, in order:
 
 ## Offers fixes 1 (raised by Tim 25 November 2026, built ahead of everything else; branch `offers-fixes-1`)
 
-Status: Built, awaiting review and Tim's approval to go live. No database change. Edge functions to redeploy once pushed:
-offer-draft, offer-public and doc-prefill.
+Status: Live 25 November 2026 about 15:25, with Tim's approval, after an independent review (READY; its should-fix points fixed
+before release). No database change. offer-draft, offer-public and doc-prefill redeployed, pinned to 06c2d22.
 1. AI wording always failed. Sonnet 5.5 refuses tool_choice "tool" and "any", so Tim's clause writer, the buyer's condition help
    and translation all failed (seen in ai_calls). Every request (translation, offer condition, clause writer, pack reading,
    document prefill) now goes through one helper in `fn/prefill_shared.ts` (answerByTool): tool_choice "auto", and a line in the
