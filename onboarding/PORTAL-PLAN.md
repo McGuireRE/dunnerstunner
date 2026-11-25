@@ -17,6 +17,13 @@ the database or the live site. The controller copies each queued request into th
 
 Order of work (set 24 November 2026, confirmed by Tim; reordered the same evening at his request):
 
+00. Offers fixes 1 (raised by Tim 25 November 2026, built ahead of everything else; branch `offers-fixes-1`). Status: Built,
+   awaiting review and Tim's approval to go live. (a) The AI wording of conditions and clauses (and translation) always failed:
+   Sonnet 5.5 refuses a forced tool_choice. Every AI request now lets the model choose and tells it to answer only through its
+   tool; a reply without one fails soft and is logged as "no tool answer". (b) A prominent warning when a property has an
+   offer (or its offer form on) but no REINZ agreement blank ready: on "Fill in an offer for a buyer", the Offers tile, the offer
+   page and "Needs you". See `OFFERS-PLAN.md`, "Offers fixes 1".
+
 0. Offers phases 3 (signing) and 4 (counteroffers) live, with the email review changes below, each live step approved by Tim.
    Tim may use it on a live listing at short notice. See `OFFERS-PLAN.md`, "Going live", and `EMAIL-VOICE.md`.
 1. SW. Site-wide settings (below): language menu, light and dark, text size and contrast, full screen, and the greeting

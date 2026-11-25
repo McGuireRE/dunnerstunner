@@ -8393,6 +8393,17 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     Object.entries(spamBy).forEach(([pid, n]) => { const pr = props.find(p => p.id === pid); needs.push({ what: `${n} possible spam ${n === 1 ? 'offer' : 'offers'} to check`, where: (pr && pr.address) || 'Property', sub: 'Sent with the hidden field filled in', spam: true,
       go: async () => { await viewProperty(pid); const f = $('#offSpam'); if (f) { f.open = true; f.scrollIntoView({ block: 'start' }); } } }); });
     fresh.filter(o => o.source === 'buyer' && !o.suspected_spam).forEach(o => { const pr = props.find(p => p.id === o.property_id); needs.push({ what: o.related_party ? 'New offer: a purchaser is connected with you' : 'New offer to read', where: (pr && pr.address) || 'Property', sub: money(+o.amount) + ', ' + fmtDT(o.received_at), go: () => viewOfferAgent(o.id), hot: true, offer: o.id }); });
+    // offers waiting with no agreement blank ready to place them on (Tim, 25 November 2026): one item per property
+    const live = (await safe(sb.from('property_offers').select('property_id,status,source,suspected_spam'))).filter(o => o.source && o.source !== 'manual' && !o.suspected_spam && !['withdrawn', 'lapsed'].includes(o.status));
+    const livePids = [...new Set(live.map(o => o.property_id))].filter(pid => { const pr = props.find(p => p.id === pid); return !pr || !['settled', 'withdrawn'].includes(pr.stage); });
+    if (livePids.length) {
+      const bls = await safe(sb.from('offer_blanks').select('id,property_id,edition_checked,created_at').in('property_id', livePids).order('created_at', { ascending: false }));
+      const mps = bls.length ? await safe(sb.from('offer_blank_maps').select('id,blank_id,approved').in('blank_id', bls.map(b => b.id))) : [];
+      livePids.forEach(pid => { const mine = bls.filter(b => b.property_id === pid).map(b => Object.assign({}, b, { approvedMap: mps.find(m => m.blank_id === b.id && m.approved) || null })), st = drBlankState(mine); if (st === 'ok') return;
+        const pr = props.find(p => p.id === pid);
+        needs.push({ what: 'Offer waiting: no agreement blank ready', where: (pr && pr.address) || 'Property', sub: st === 'none' ? 'Load the REINZ agreement blank' : st === 'unapproved' ? 'Its places aren\'t approved yet' : 'Its edition hasn\'t been checked yet', hot: true, noBlank: pid,
+          go: async () => { await viewProperty(pid); const t = $('#offNoBlank') || $('#offTile'); if (t) t.scrollIntoView({ block: 'start' }); } }); });
+    }
     insps.forEach(x => { const pr = props.find(p => p.id === x.property_id); needs.push({ what: 'Inspection started, not finished', where: (pr && pr.address) || 'Property', sub: 'Started ' + fmtDT(x.started_at), go: () => { INS = null; viewInspection(x.id); }, insp: x.id }); });
     crs.forEach(r => needs.push({ what: 'Call them about cancelling', where: addr(r.agreement_id), sub: 'Request from ' + r.requested_by, go: () => viewAgentDetail(r.agreement_id), hot: true }));
     pls.forEach(p => { if (p.status === 'submitted') needs.push({ what: 'Write their updated plan', where: p.address, sub: 'Questionnaire answers are in', go: () => viewPrelistingAgent(p.id) }); if (p.status === 'question') needs.push({ what: 'Answer their question', where: p.address, sub: 'About the updated plan', go: () => viewPrelistingAgent(p.id), hot: true }); if (p.status === 'accepted') { const a = rows.find(r => r.id === p.agreement_id); if (!a || a.status === 'draft') needs.push({ what: 'Add your fee and send the agreement', where: p.address, sub: 'They\'ve accepted the plan', go: () => viewPrelistingAgent(p.id) }); } });
@@ -11867,6 +11878,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       ${pub ? '' : `<div class="toolbar no-print"><button class="btn ghost" type="button" id="ofBack">${fix ? 'Back to the offer' : 'Back to the property'}</button></div><span class="agent-flag">Only you see this</span>`}
       <h1>${fix ? 'Correct this offer' : pub ? 'Make an offer' : 'Fill in an offer for a buyer'}</h1>
       <p class="lede of-addr">${nt(ctx.address || '')}</p>
+      ${ctx.mode === 'agent' ? ctx.blankWarn || '' : ''}
       ${pub ? `<p>Tell Tim the details of your offer, and he will prepare the agreement for you. Nothing here is binding and nothing is signed on this page. Tim recommends you get legal advice before you sign anything.</p>
         <p class="small">What you type is kept on this device as you go, so you can come back to it later. Questions? Call or text Tim on <a href="tel:0275627207">027 562 7207</a>.</p>` : fix ? `<p class="small">The buyer's original offer stays as they sent it. Your correction and your note are recorded with it.</p>` : `<p class="small">For a buyer who gave you their offer by phone or in person. It goes straight onto the property's Offers tile.</p>`}
       ${restored ? `<div class="card note tight" id="ofRestored"><p class="small" style="margin:0">We kept what you typed on this device on ${esc(fmtDT(restored.at))}. <button class="btn link" type="button" id="ofReset">Start again</button></p></div>` : ''}
@@ -11927,6 +11939,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   }
   function ofWire(ctx, F) {
     const root = $('#ofForm'), ov = $('#ofOv');
+    if (ctx.mode === 'agent') drBlankGoWire(ctx.pid, root);
     let pinned = false;
     const save = () => ofStore(ctx, F);
     const light = () => {   // the parts that follow every change
@@ -12119,7 +12132,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     main().innerHTML = '<div class="loading">Loading...</div>';
     const p = await must(sb.from('properties').select('id,address,stage').eq('id', pid).single());
     const l = ((await ofSafe(sb.from('offer_links').select('province,chattels').eq('property_id', pid))) || [])[0];
-    ofOpen({ mode: 'agent', pid, address: p.address, province: (l && l.province) || OF.provinceFor(p.address), ksDays: await ofKs(), wording: await ofWording(), chattels: (l && l.chattels) || [] });
+    const blankWarn = drBlankWarnHTML(await drLoadBlanks(pid), 'entry', 'ofNoBlank');   // shown before the form; Tim can still take the details
+    ofOpen({ mode: 'agent', pid, blankWarn, address: p.address, province: (l && l.province) || OF.provinceFor(p.address), ksDays: await ofKs(), wording: await ofWording(), chattels: (l && l.chattels) || [] });
   }
   // Home's "Draft an offer": choose the property. Properties that can take offers come first; the rest are listed quietly with why.
   async function viewOfferPick() {
@@ -12233,6 +12247,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const real = X.offers.filter(o => !o.suspected_spam), spam = X.offers.filter(o => o.suspected_spam);
     const fresh = real.filter(o => !o.read_at).length, prov = l ? l.province : OF.provinceFor(p.address);
     return `<div class="card ptile of-tile" id="offTile"><h3>Offers ${fresh ? `<span class="pill of-new">${fresh} new</span>` : ''}</h3>
+      ${on || real.length ? drBlankWarnHTML(X.blanks, 'tile', 'offNoBlank') : ''}
       <p class="small" style="margin:0 0 6px" id="offState">${on ? 'The offer form is <strong>on</strong>. Anyone with the link or QR code can send you an offer. Nothing goes to the vendors.' : okStage ? 'The offer form is <strong>off</strong>. Switch it on when you want buyers to be able to send offers.' : 'The offer form opens once the agreement is signed and the property is on the market.'}</p>
       ${on ? `<div class="copybox of-link" id="offUrl" translate="no">${esc(offerUrl(l.token))}</div>` : ''}
       <div class="toolbar">${on ? '<button class="btn ghost" type="button" id="offCopy">Copy link</button><button class="btn ghost" type="button" id="offQrBtn">QR code</button><button class="btn ghost" type="button" id="offOff">Switch off</button>' : okStage ? '<button class="btn primary" type="button" id="offOn">Switch on</button>' : ''}
@@ -12275,6 +12290,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     on('#offNgResign', async e => { try { await must(sb.rpc('agent_offer_negotiation_setting', { p_resign_every_round: e.target.checked })); toast('Saved'); } catch (_) { e.target.checked = !e.target.checked; } }, 'change');
     on('#offKsSave', async () => { try { await must(sb.rpc('agent_offer_settings', { p_ks_days: +$('#offKs').value })); toast('Saved'); } catch (_) { } });
     drTileWire(p, X);
+    drBlankGoWire(pid, $('#offTile'));
     on('#offWSave', async () => { try { for (const t of $$('[data-offw]')) { const k = t.dataset.offw; if ((X.wording[k] || '') !== t.value.trim()) { await must(sb.rpc('agent_offer_clause', { p_key: k, p_wording: t.value.trim() || null })); X.wording[k] = t.value.trim(); } } toast('Wording saved'); } catch (_) { } });
   }
 
@@ -12328,6 +12344,29 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   }
   // the blank and map an offer is drafted on: the newest blank whose places are approved
   const drUsable = blanks => blanks.find(b => b.edition_checked && b.approvedMap) || null;
+  // Is there a blank offers can be placed on? (Tim, 25 November 2026: make it obvious up front.) 'ok'; 'none' (nothing loaded);
+  // 'unapproved' (loaded, its places not approved yet); 'unchecked' (loaded, but no checked edition). Agent screens only.
+  function drBlankState(blanks) { blanks = blanks || []; return !blanks.length ? 'none' : drUsable(blanks) ? 'ok' : blanks.some(b => b.edition_checked) ? 'unapproved' : 'unchecked'; }
+  // the warning card, for the offer entry ('entry'), the Offers tile ('tile') and the offer page ('offer'); '' when a blank is ready
+  function drBlankWarnHTML(blanks, where, id) {
+    const st = drBlankState(blanks); if (st === 'ok') return '';
+    const until = st === 'none' ? 'until you load the blank and approve its places' : st === 'unapproved' ? 'until you check and approve the places on the blank' : 'until a checked edition of the blank is loaded and its places approved';
+    const say = where === 'entry' ? `You can take the offer details now, but it can't be placed on the agreement ${until}.`
+      : where === 'tile' ? `Offers can still come in and be taken down, but they can't be placed on the agreement ${until}.`
+      : `This offer can't be placed on the agreement ${until}.`;
+    const head = st === 'none' ? 'No REINZ agreement blank is ready for this property.' : st === 'unapproved' ? 'The agreement blank is loaded, but its places aren\'t approved yet.' : 'The agreement blank is loaded, but its edition hasn\'t been checked yet.';
+    const nb = st === 'unapproved' ? (blanks.find(b => b.edition_checked) || {}).id || '' : '';
+    return `<div class="card warnc dr-nb no-print"${id ? ` id="${id}"` : ''} data-blankwarn="${st}" role="note"><h3 style="margin:0 0 4px">${head}</h3><p class="small" style="margin:0">${say}</p>
+      <div class="toolbar"><button class="btn primary" type="button" data-blankgo="${esc(nb)}">${st === 'unapproved' ? 'Check the places on the blank' : 'Load the agreement blank'}</button></div></div>`;
+  }
+  // the card's button: the places checker for a loaded blank, otherwise the Offers tile's blank section
+  function drBlankGoWire(pid, scope) {
+    $$('[data-blankgo]', scope).forEach(b => b.addEventListener('click', async () => {
+      if (b.dataset.blankgo) return viewBlankMap(b.dataset.blankgo);
+      if (!$('#drBlank')) await viewProperty(pid);
+      const t = $('#drBlank'); if (t) t.scrollIntoView({ block: 'start' });
+    }));
+  }
 
   // ── the Offers tile: load the blank ──
   function drTileHTML(X) {
@@ -12583,7 +12622,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const law = (o.details || {}).lawyer || {};
     return `<h2>The agreement</h2><div class="card tight" id="drOffer">
       ${use ? `<p class="small" style="margin:0 0 6px">Drafted on ${esc(use.file_name)} (${esc(use.edition)}), places version ${use.approvedMap.version}.</p><div class="toolbar"><button class="btn primary" type="button" id="drDraftBtn">${drafts.length ? 'Re-draft after a change' : 'Draft on the agreement'}</button></div>`
-        : `<p class="small" style="margin:0" id="drNoBlank">${blanks.length ? 'Check and approve the places on the agreement blank first, on the property\'s Offers tile.' : 'Load the agreement blank for this property first, on its Offers tile.'}</p>`}
+        : drBlankWarnHTML(blanks, 'offer', 'drNoBlank')}
       <p class="small err" id="drDraftErr" role="alert"></p>
       ${drafts.length ? `<ul class="dr-list" id="drDrafts">${drafts.map((x, i) => { const ap = apps.find(a => a.draft_id === x.id); const nb = (x.needs || []).filter(n => n.blocking).length;
         return `<li><button class="of-row" type="button" data-draft="${x.id}"><span class="of-r1"><strong>Draft ${x.number}</strong>${i === 0 ? ' <span class="pill">Newest</span>' : ''}${ap ? ' <span class="pill okp">Approved</span>' : nb ? ` <span class="pill of-warnp">${nb} need${nb === 1 ? 's' : ''} you</span>` : ''}</span><span class="small">${esc(fmtDT(x.created_at))} · <span translate="no">${esc(drShort(x.sha256))}</span>${x.note ? ' · ' + esc(x.note) : ''}</span></button></li>`; }).join('')}</ul>` : ''}
@@ -12600,6 +12639,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     $$('[data-draft]').forEach(x => x.addEventListener('click', () => viewDraftReview(x.dataset.draft)));
     const lb = $('#drLawBtn'); if (lb) lb.addEventListener('click', () => drLawLookup(o));
     $$('[data-signing]').forEach(x => x.addEventListener('click', () => viewSigning(x.dataset.signing)));
+    drBlankGoWire(o.property_id, $('#drOffer'));
   }
   async function drLawLookup(o) {
     const box = $('#drLaw'), law = (o.details || {}).lawyer || {}; box.innerHTML = '<p class="small">Looking on public pages (the firm\'s website and the Law Society)...</p>';

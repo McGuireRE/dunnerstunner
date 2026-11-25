@@ -704,3 +704,20 @@ Going live, with Tim's approval, in order:
 5. Test with Tim's own addresses: a test offer signed in person in the portal and by link (Prepare the emails, read, Send); present
    to a test vendor; a counter and an acceptance; check Tim's one email per round; the agreed copy and its two draft emails (fill the
    blanks, send); the lawyers' pack; a request from a test link (Tim's urgent email), Freeze now, Unfreeze and Withdraw now. Tim's solicitor confirms the method before the first real offer.
+
+## Offers fixes 1 (raised by Tim 25 November 2026, built ahead of everything else; branch `offers-fixes-1`)
+
+Status: Built, awaiting review and Tim's approval to go live. No database change. Edge functions to redeploy once pushed:
+offer-draft, offer-public and doc-prefill.
+1. AI wording always failed. Sonnet 5.5 refuses tool_choice "tool" and "any", so Tim's clause writer, the buyer's condition help
+   and translation all failed (seen in ai_calls). Every request (translation, offer condition, clause writer, pack reading,
+   document prefill) now goes through one helper in `fn/prefill_shared.ts` (answerByTool): tool_choice "auto", and a line in the
+   system prompt: "Answer only by calling the X tool, exactly once. Do not reply in plain text." Haiku too, so a model change
+   can't break it the same way. A reply with no tool answer gives a plain message ("The AI didn't give a usable answer. Try
+   again, or write the condition yourself.") and is logged in ai_calls as not ok with the error "no tool answer".
+2. No agreement blank ready. When a property has no usable blank (none loaded; loaded but its places not approved; or only an
+   unchecked edition), a warning card (card warnc) shows on "Fill in an offer for a buyer" (before the form, entry not blocked),
+   on the Offers tile (when the form is on or there is an offer), on the offer page (#drNoBlank, now the card), and in "Needs
+   you" (one item per property with an offer that is not withdrawn or lapsed: "Offer waiting: no agreement blank ready"). The
+   button is "Load the agreement blank" (to the tile's blank section) or "Check the places on the blank" (opens the places
+   checker). Agent screens only: the buyer's form is unchanged. Test: `tests/offers-noblank.test.js`.
