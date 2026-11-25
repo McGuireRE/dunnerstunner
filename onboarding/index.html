@@ -6458,9 +6458,12 @@ window.JOURNEY_MEDIA_HINTS = {
   function atBtn(btn, msg, kind) {
     if (!btn) { if (msg) toast(msg); return null; }
     const row = btn.closest('.toolbar') || btn, id = 'bn-' + (btn.id || 'x');
-    let n = document.getElementById(id);
-    if (!n) { n = document.createElement('p'); n.id = id; n.className = 'btn-note'; row.insertAdjacentElement('afterend', n); }
-    n.dataset.kind = kind || 'busy'; n.setAttribute('role', kind === 'err' ? 'alert' : 'status'); n.textContent = msg || ''; n.hidden = !msg; return n;
+    let n = document.getElementById(id), fresh = false;
+    // one live region per button, its role fixed, so screen readers read each new message out (a new node is filled a moment later)
+    if (!n) { n = document.createElement('p'); n.id = id; n.className = 'btn-note'; n.setAttribute('role', 'status'); n.setAttribute('aria-live', 'polite'); row.insertAdjacentElement('afterend', n); fresh = true; }
+    n.dataset.kind = kind || 'busy'; n.hidden = !msg; n._msg = msg || '';
+    if (fresh) setTimeout(() => { n.textContent = n._msg; }, 60); else n.textContent = n._msg;
+    return n;
   }
   // signature pads: a "not saved yet" marker after drawing, and a strong confirmation once saved
   function padUnsaved(cv, on) { const w = cv && cv.closest('.sig-wrap'); if (!w) return; if (PORTAL && on) portalPadStarted(cv); let u = w.querySelector('.unsaved'); if (on && !u) { u = document.createElement('span'); u.className = 'unsaved'; u.textContent = 'Not saved yet'; w.appendChild(u); } if (!on && u) u.remove(); }
@@ -12901,7 +12904,9 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       ${law.firm || law.person ? '<div class="toolbar"><button class="btn ghost" type="button" id="drLawBtn">Find the lawyer\'s details</button></div>' : ''}<div id="drLaw" aria-live="polite"></div></div>`;
   }
   function drOfferWire(o) {
-    const b = $('#drDraftBtn'); if (b) b.addEventListener('click', async () => { b.disabled = true; $('#drDraftErr').textContent = 'Drafting...'; try { const id = await drMakeDraft(o.id, null, null); viewDraftReview(id); } catch (e) { $('#drDraftErr').textContent = e.message || 'That didn\'t draft.'; b.disabled = false; } });
+    const b = $('#drDraftBtn'); if (b) b.addEventListener('click', async () => { b.disabled = true; $('#drDraftErr').textContent = ''; atBtn(b, 'Drafting...', 'busy');
+      try { const id = await drMakeDraft(o.id, null, null); await viewDraftReview(id); }
+      catch (e) { if (e && e.sameDraft) { await viewDraftReview(e.sameDraft); toast(e.message); return; } atBtn(b, e.message || 'That didn\'t draft.', 'err'); b.disabled = false; } });
     $$('[data-draft]').forEach(x => x.addEventListener('click', () => viewDraftReview(x.dataset.draft)));
     const lb = $('#drLawBtn'); if (lb) lb.addEventListener('click', () => drLawLookup(o));
     $$('[data-signing]').forEach(x => x.addEventListener('click', () => viewSigning(x.dataset.signing)));
@@ -12972,7 +12977,11 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     await drConfirm(pth, sha);
     // what was placed, where (with Tim's drawn boxes, moved places and each page added for the further terms): DR.placedFrom
     const placed = DR.placedFrom(plan, r);
-    const res = await must(sb.rpc('agent_draft_add', { p_offer: oid, p_map: map.id, p_path: pth, p_sha256: sha, p_size: r.bytes.length, p_placed: placed, p_needs: plan.needs, p_edits: Object.assign({}, edits || {}, { date_format: plan.date_format, retired_numbers: plan.retired_numbers, term_last: plan.term_last }), p_note: note || null }));
+    let res;
+    try { res = await must(sb.rpc('agent_draft_add', { p_offer: oid, p_map: map.id, p_path: pth, p_sha256: sha, p_size: r.bytes.length, p_placed: placed, p_needs: plan.needs, p_edits: Object.assign({}, edits || {}, { date_format: plan.date_format, retired_numbers: plan.retired_numbers, term_last: plan.term_last }), p_note: note || null })); }
+    catch (e) { // another screen drafted this offer at the same moment: say so in plain words, never the database's own
+      if (/duplicate key|offer_drafts_/i.test((e && e.message) || '')) throw new Error('Another screen made a draft of this offer at the same moment. Go back to the offer to see the newest draft.');
+      throw e; }
     DR_CACHE['draft-' + res.id] = { bytes: r.bytes };
     return res.id;
   }
@@ -13123,9 +13132,14 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       ${!ap && newest && (block.length || acks.length) && !stale ? `<p class="small">Approve is available once nothing needs you.${block.length ? ' Fill in each placeholder above and re-draft.' : ''}${acks.length ? ' Tick each check above.' : ''}</p>` : ''}
     </div>`;
     $$('[data-rich]').forEach(x => { x.dataset.base = drRichText(x); });   // the wording as shown: a change is anything different from this
-    const go = async (edits, note, by) => { const btns = $$('#drRedraft,#drRedraftChange'); btns.forEach(x => { x.disabled = true; }); $('#drRvErr').textContent = ''; atBtn(by, 'Drafting...', 'busy');
-      try { const id = await drMakeDraft(d.offer_id, edits, note); await viewDraftReview(id); atBtn($('#' + (by && by.id || 'drRedraft')), 'New draft made. The earlier one is kept.', 'ok'); return true; }
-      catch (e) { if (e && e.sameDraft) { await viewDraftReview(e.sameDraft); atBtn($('#' + (by && by.id || 'drRedraft')), e.message, 'ok'); return true; } atBtn(by, e.message || 'That didn\'t draft.', 'err'); btns.forEach(x => { x.disabled = false; }); return false; } };
+    // by: the control Tim pressed. Progress and problems show under it; with none (the AI clause writer), in the screen's message line,
+    // which stays until the next action. After the new screen is drawn the result goes under the same control if it is there again.
+    const go = async (edits, note, by) => { const btns = $$('#drRedraft,#drRedraftChange'); btns.forEach(x => { x.disabled = true; }); $('#drRvErr').textContent = '';
+      const say = (msg, kind) => { if (by) atBtn(by, msg, kind); else $('#drRvErr').textContent = kind === 'err' || kind === 'busy' ? msg : ''; };
+      const after = (msg) => { const again = by && by.id ? $('#' + by.id) : null; if (again) atBtn(again, msg, 'ok'); else toast(msg); };
+      say('Drafting...', 'busy');
+      try { const id = await drMakeDraft(d.offer_id, edits, note); await viewDraftReview(id); after('New draft made. The earlier one is kept.'); return true; }
+      catch (e) { if (e && e.sameDraft) { await viewDraftReview(e.sameDraft); after(e.message); return true; } say(e.message || 'That didn\'t draft.', 'err'); btns.forEach(x => { x.disabled = false; }); return false; } };
     // a correction from this screen carries the offer's details as the screen loaded them (p_expected): the database refuses it if the
     // offer changed in between. If the correction saved but the new draft didn't, Tim is told so and can re-draft from here.
     const correctedButNotDrafted = (box, edits, note) => { const el = $(box); if (!el) return;
@@ -13155,7 +13169,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       if (await ocOpenSigning(d.offer_id) && !confirm(OC_WARN)) return;
       lg.disabled = true; $('#drLuErr').textContent = '';
       try { await must(sb.rpc('agent_offer_correct', { p_offer: d.offer_id, p_expected: o.details, p_details: ofPayload(ofShape(det)), p_note: 'Lined up the conditions: all ' + say }));
-        if (!(await go(carry(), 'Conditions lined up: all ' + say))) correctedButNotDrafted('#drLuErr', carry(), 'Conditions lined up: all ' + say); }
+        if (!(await go(carry(), 'Conditions lined up: all ' + say, lg))) correctedButNotDrafted('#drLuErr', carry(), 'Conditions lined up: all ' + say); }
       catch (e) { lg.disabled = false; $('#drLuErr').textContent = e.message || 'That didn\'t save.'; } });
     // ── further terms: reorder (drag, or up and down), remove, add from the library, timing chips ──
     const tl = $('#drTermList');
@@ -13176,7 +13190,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         else if (t.extra) { const objs = ed.extra_terms.filter(x => typeof x === 'object' && x.id !== id), strs = (E.extra_terms || []).filter(x => typeof x === 'string'), si = /^ft_extra_(\d+)$/.exec(id);
           const keep = si ? strs.filter((x, i) => (E.extra_terms || []).indexOf(x) !== +si[1] - 1) : strs; ed.extra_terms = objs.concat(keep); Object.keys(ed.items).forEach(k => { if (/^ft_extra_\d+$/.test(k)) delete ed.items[k]; }); }
         delete ed.items[id]; if (ed.term_timing) delete ed.term_timing[id]; if (ed.term_order) ed.term_order = ed.term_order.filter(x => x !== id);
-        go(ed, `Removed further term ${DR.termNo(t.number, ft.number_style || 'dot')}, ${t.title}`); }));
+        go(ed, `Removed further term ${DR.termNo(t.number, ft.number_style || 'dot')}, ${t.title}`, b); }));
       // the timing chips
       let chip = null; const ced = $('#drChipEd'), mode = () => (($$('input[name="dr_cm"]').find(x => x.checked)) || {}).value || 'days';
       const showMode = () => { const m = mode(), lit = chip && chip.dataset.chip === 'lit'; $('#drCmDaysW').hidden = m === 'date'; $('#drCmDateW').hidden = m !== 'date'; $('#drCmAfterW').hidden = m !== 'after'; if (typeof showAfter === 'function') showAfter(); };
@@ -13208,14 +13222,14 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
           return (async () => { if (await ocOpenSigning(d.offer_id) && !confirm(OC_WARN)) { done.disabled = false; $('#drCmErr').textContent = ''; return; }
             try { await must(sb.rpc('agent_offer_correct', { p_offer: d.offer_id, p_expected: o.details, p_details: ofPayload(ofShape(det)), p_note: `Changed the timing of ${label} on the draft: ${say_}` }));
               const ed = collect(); if (ed.term_timing) { delete ed.term_timing[id]; if (!Object.keys(ed.term_timing).length) delete ed.term_timing; }
-              const nt_ = `Timing of ${label} changed: ${say_}`; if (!(await go(ed, nt_))) { done.disabled = true; correctedButNotDrafted('#drCmErr', ed, nt_); /* the offer is corrected: only Re-draft now from here */ } } catch (e) { done.disabled = false; $('#drCmErr').textContent = e.message || 'That didn\'t save.'; } })(); }
+              const nt_ = `Timing of ${label} changed: ${say_}`; if (!(await go(ed, nt_, $('#drCmDone')))) { done.disabled = true; correctedButNotDrafted('#drCmErr', ed, nt_); /* the offer is corrected: only Re-draft now from here */ } } catch (e) { done.disabled = false; $('#drCmErr').textContent = e.message || 'That didn\'t save.'; } })(); }
         if (chip.dataset.chip === 'lit') { const hadDay = /^[A-Z][a-z]+day /.test(chip.dataset.val), v = m === 'date' ? (hadDay ? `${['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][OF.dow(dt)]} ${DR.fullDate(dt)}` : DR.fullDate(dt)) : `${n} working ${n === 1 ? 'day' : 'days'}`; chip.dataset.val = v; chip.textContent = v; }
         else { const t = m === 'after' ? { after: $('#drCmAfter').value, days: n } : m === 'date' ? { date: dt } : { days: n }; TT[id] = t;
           $$('.dr-chip[data-chip="timing"],.dr-chip[data-chip="date"]', li).forEach(c => { c.textContent = OF.timingPlain(Object.assign({ key: id }, t)) + ' (re-draft to apply)'; }); }
         ced.hidden = true; chip = null; });
     }
     const addGo = $('#drAddTermGo'); if (addGo) addGo.addEventListener('click', () => { const k = $('#drAddTerm').value; if (!k) return toast('Choose a clause first'); const t = (libTerms || []).find(x => x.key === k);
-      const ed = collect(), list = ed.added_terms || [], id = 'add_' + k + '_' + (list.filter(a => a.key === k).length + 1); ed.added_terms = list.concat({ id, key: k }); go(ed, 'Added ' + (t ? t.title : k) + ' from your library'); });
+      const ed = collect(), list = ed.added_terms || [], id = 'add_' + k + '_' + (list.filter(a => a.key === k).length + 1); ed.added_terms = list.concat({ id, key: k }); go(ed, 'Added ' + (t ? t.title : k) + ' from your library', addGo); });
     drAiWire(async (kind, c) => { const ed = collect();
       if (kind === 'offer') { ed.extra_terms = (ed.extra_terms || []).concat({ id: 'ft_ai_' + Date.now().toString(36), title: c.title, text: c.text, ai: true }); return go(ed, 'Added a clause written with AI help: ' + c.title); }
       const key = drNewKey(c.title, libTerms); await must(sb.rpc('agent_offer_term', { p_key: key, p_title: c.title, p_wording: c.text, p_rule: {}, p_position: 100, p_active: true }));
