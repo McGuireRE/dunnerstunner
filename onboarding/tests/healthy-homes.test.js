@@ -60,7 +60,8 @@ expect(hh.status==='ready'&&hh.agent_data.c.ins3.a==='N'&&hh.agent_data.ws.area=
 // 3. Aroha signs in person on Tim's phone, witnessed
 out.pads=await p.$$eval('[data-fsigner]',e=>e.map(x=>x.dataset.fsigner)); expect(out.pads.length===2,'a pad for each landlord');
 await p.click('[data-fsign="P1"]'); await p.waitForTimeout(200); out.e2=await p.textContent('#fErr'); expect(/Tick the box/.test(out.e2),'they confirm they checked it');
-await pick('[data-fok="P1"]'); await draw('#fpad_P1'); await p.click('[data-fsign="P1"]'); await p.waitForTimeout(3600);
+await pick('[data-fok="P1"]'); await draw('#fpad_P1'); await p.click('[data-fsign="P1"]'); await p.waitForTimeout(300); out.idErr=await p.textContent('#fErr'); expect(/photo ID you checked/.test(out.idErr),'029: in person, Tim logs the photo ID he checked first');
+await p.selectOption('[data-idtype="fP1"]','passport'); await pick('[data-idok="fP1"]'); await p.click('[data-fsign="P1"]'); await p.waitForTimeout(3600); out.e3=await p.textContent('#fErr');
 d=await db(); expect(d.form_signatures.length===1&&d.form_signatures[0].snapshot.witnessed_by==='Timothy McGuire'&&d.form_signatures[0].snapshot.agent_data.res.req==='3.6','Aroha\'s signature covers Tim\'s measurements, witnessed');
 const locked=await p.evaluate(async()=>{ const c=window.supabase.createClient(); const r=await c.from('property_forms').update({agent_data:{}}).eq('id','F2'); return r.error&&r.error.message; });
 expect(/can no longer be changed/.test(locked||''),'once signed, the measurements cannot change');
@@ -79,6 +80,8 @@ await go();
 await p.click('[data-form="healthy_homes"]'); await p.waitForTimeout(500);
 out.mH1=await p.textContent('main h1'); expect(/Healthy Homes/.test(out.mH1),'Mere checks and signs');
 out.mSees=await p.evaluate(()=>document.querySelector('main').textContent.includes('No underfloor insulation, quote arranged')); expect(out.mSees,'Mere sees Tim\'s notes');
+// the signing viewer (Tim, 26 November 2026)
+if(!await p.$('#vfDv .dv-frame [data-dv-page]')) errs.push('the landlord\'s Healthy Homes signing is not in the shared signing viewer');
 await pick('#vfOk'); await draw('#vfSig'); await p.click('#next'); await p.waitForTimeout(3600);
 d=await db(); hh=d.property_forms.find(f=>f.id==='F2');
 expect(hh.status==='signed'&&hh.document_id&&d.property_documents.some(x=>x.kind==='Healthy Homes checklist and statement'&&x.source==='generated'),'signed by both landlords and filed on the property');

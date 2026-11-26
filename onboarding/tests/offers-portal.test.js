@@ -126,7 +126,7 @@ const PK = 'https://packages.dunnerstunner.co.nz', PB = PK + '/portal/', OB = PK
   c = await chrome(); expect(!c.nav && !c.up, 'drawing on the purchaser\'s pad: still in person');
   await draw('#sgInit', 4); await p.click('#sgDrawGo'); await p.waitForSelector('#sgPlaces');
   expect(await p.$('#sgTools'), "on Tim's device the page can be marked (the marking canvas is the signer's too)");
-  await tapAll(); await tick('#sgSaw'); await p.$eval('input[name="sgIdWho"][value="known"]', e => e.click()); await p.click('#sgFinishGo');
+  await tapAll(); await p.selectOption('#sgIdType', 'passport'); await tick('#sgSaw'); await p.click('#sgFinishGo');
   // the turn has ended: Tim's page waits behind a cover until he says it is him
   await p.waitForSelector('#sgHandback', { timeout: 30000 }); await wait();
   c = await chrome(); out.cover = (await p.textContent('#main')).replace(/\s+/g, ' ').trim();

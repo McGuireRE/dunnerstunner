@@ -32,6 +32,8 @@ const MAILC = require(path.join(__dirname, '..', 'src', 'mail-core.js'));
     if (fn === 'offer_sign_verify') return args.p_code === '123456' ? { data: { ok: true, session: SES }, error: null } : { data: { ok: false, reason: 'wrong' }, error: null };
     if (fn === 'offer_sign_state') return { data: { signer: { position: 1, name: 'Ana Testbuyer' }, signing: { status: 'signing', draft_path: consented ? 'properties/' + PID + '/docs/offer-draft-x.pdf' : null, places: [] }, taps: [] }, error: null };
     if (fn === 'offer_sign_tap') return tapError ? { data: null, error: { message: tapError } } : { data: { done: 3, of: 9 }, error: null };
+    if (fn === 'offer_sign_mark') return args.p_kind === 'own_name' && args.p_geometry.text !== 'Ana Testbuyer' ? { data: null, error: { message: 'Only your own name, exactly as it is on the agreement, can be added' } }
+      : { data: { id: 'mk1', held: args.p_kind !== 'own_signature', name: 'Ana Testbuyer', round: args.p_kind === 'own_signature' ? 2 : 1, side: 'purchaser', kind: args.p_kind, page: args.p_page, address: '1 Example Road' }, error: null };
     if (fn === 'offer_sign_ask') return { data: { ok: true, name: 'Ana Testbuyer', address: '1 Example Road', offer_id: OID }, error: null };
     if (fn === 'offer_sign_undo') return args.p_scope === 'turn' || args.p_scope === 'last' ? { data: { scope: args.p_scope, taps: 1, changes: 0, ink_cleared: args.p_clear === true, done: 3, of: 8, secret: 'NOT-PASSED' }, error: null } : { data: null, error: { message: 'Choose undo your last step, or start your turn again' } };
     if (fn === 'offer_sign_request') return args.p_reason_key ? { data: { id: 'rq1', name: 'Vera Vendor', side: 'vendor', round: 2, kind: args.p_kind, reason: args.p_reason_key === 'other' ? args.p_reason : 'Our financial situation has changed', offer_id: OID, property_id: PID, address: '1 Example Road' }, error: null } : { data: null, error: { message: 'Choose a reason' } };
@@ -86,6 +88,21 @@ const MAILC = require(path.join(__dirname, '..', 'src', 'mail-core.js'));
   // ask Tim for a change
   mails = []; x = await J(await post({ action: 'ask', token: TOK, session: SES, text: 'Can settlement move a week? <script>alert(1)</script>' }));
   expect(x.j.ok && x.j.emailed && mails.length === 1 && mails[0].to === 'tim@example.test' && /&lt;script&gt;/.test(mails[0].html) && !/<script>/.test(mails[0].html), 'Tim is emailed the request, made safe');
+  // 029: added text or her own initials, name or signature from her link. Round 1: held for Tim, who alone is emailed (the words made
+  // safe); from Round 2 on her own mark tells nobody. A bad shape is refused before the database; its refusal is passed on plainly.
+  mails = []; calls = []; x = await J(await post({ action: 'mark', token: TOK, session: SES, kind: 'insert', page: 1, geometry: { x: 100, y: 200, text: 'Add the <b>curtains</b>', size: 9 } }));
+  { const mc = calls.find(c => c[0] === 'offer_sign_mark');
+    expect(x.j.ok && x.j.held && x.j.emailed && mc && mc[1].p_session === SES && mc[1].p_kind === 'insert' && mails.length === 1 && mails[0].to === 'tim@example.test' && /&lt;b&gt;curtains/.test(mails[0].html) && /held until you check it/.test(mails[0].html), 'a mark from a link in Round 1: held, Tim alone emailed, the words made safe'); }
+  mails = []; x = await J(await post({ action: 'mark', token: TOK, session: SES, kind: 'own_signature', page: 3, geometry: { x: 100, y: 200, w: 90, h: 24 } }));
+  expect(x.j.ok && x.j.held === false && x.j.emailed === null && !mails.length, 'a signer\'s own mark in a later round: not held, nobody emailed');
+  x = await J(await post({ action: 'mark', token: TOK, session: SES, kind: 'own_name', page: 1, geometry: { x: 1, y: 1, w: 90, h: 13, text: 'Someone Else', size: 9 } }));
+  expect(x.j.ok === false && /your own name/.test(x.j.error), 'the database\'s refusal is shown plainly');
+  mails = []; calls = []; x = await J(await post({ action: 'mark', token: TOK, session: SES, kind: 'reinstate', page: 1, geometry: { x: 10, y: 10 }, target: SID }));
+  { const mc = calls.find(c => c[0] === 'offer_sign_mark'); expect(x.j.ok && x.j.held && mc && mc[1].p_kind === 'reinstate' && mc[1].p_target === SID && mails.length === 1 && /reinstated a line or box/.test(mails[0].html), 'a reinstatement from a link: its target passed on, held, Tim emailed'); }
+  calls = []; x = await J(await post({ action: 'mark', token: TOK, session: SES, kind: 'smudge', page: 1, geometry: { x: 1 } }));
+  expect(x.j.ok === false && !calls.some(c => c[0] === 'offer_sign_mark'), 'an unknown kind never reaches the database');
+  calls = []; x = await J(await post({ action: 'mark', token: TOK, session: SES, kind: 'reinstate', page: 1, geometry: { x: 1 }, target: 'not-a-uuid' }));
+  expect(x.j.ok === false && !calls.some(c => c[0] === 'offer_sign_mark'), 'a bad target never reaches the database');
   // ask Tim to stop or withdraw: recorded, then one urgent email to Tim alone, at once; the reason made safe; nobody else emailed
   mails = []; calls = []; x = await J(await post({ action: 'request', token: TOK, session: SES, kind: 'withdraw', reason_key: 'other', reason: 'We bought elsewhere <b>today</b>' }));
   const rqc = calls.find(c => c[0] === 'offer_sign_request');

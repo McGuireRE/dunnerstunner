@@ -59,7 +59,7 @@
     if (n && !n.isConnected) n = null;
     // one live region per button, its role fixed, so screen readers read each new message out (a new node is filled a moment later)
     if (!n) { n = document.createElement('p'); if (btn.id) n.id = 'bn-' + btn.id; n.className = 'btn-note'; n.setAttribute('role', 'status'); n.setAttribute('aria-live', 'polite');
-      const row = btn.closest('.toolbar'), host = row ? null : btn.closest('li,section,div');
+      const row = btn.closest('.toolbar'), host = row || btn.tagName === 'LABEL' ? null : btn.closest('li,section,div');   // a tick box's note sits just under it
       if (row) row.insertAdjacentElement('afterend', n); else if (host) host.appendChild(n); else btn.insertAdjacentElement('afterend', n);
       atBtn.notes.set(btn, n); fresh = true; }
     n.dataset.kind = kind || 'busy'; n.hidden = !msg; n._msg = msg || '';
@@ -76,7 +76,196 @@
     w.appendChild(o);
     return new Promise(r => setTimeout(r, 2500));
   }
+  /* the ID check on Tim's device (Tim, 26 November 2026: "If on a device, I will verify that each signed separately, but will only do so
+     with their identification logged."): the photo ID type and Tim's tick for each person, never the ID number. The time is taken when
+     he saves; the database checks it (029). Used for the agency agreement, its notices, variations and forms; offers have their own. */
+  const ID_PHOTO = [['nz_driver_licence', 'NZ driver licence'], ['passport', 'Passport'], ['nz_firearms_licence', 'NZ firearms licence'], ['kiwi_access_card', 'Kiwi Access Card'], ['other_photo_id', 'Other photo ID']];
+  const idCheckHTML = (key, name) => `<div class="id-check" data-idc="${esc(key)}"><label class="f" for="idt_${esc(key)}">Photo ID you checked for ${esc(name)} <span class="opt">(the type only; no number is kept)</span></label>
+    <select id="idt_${esc(key)}" data-idtype="${esc(key)}"><option value="">Choose</option>${ID_PHOTO.map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select>
+    <label class="choice cb" style="margin-top:8px"><input type="checkbox" data-idok="${esc(key)}"><span class="mark"></span><span><span class="ct">Tim: I checked ${esc(name)}'s ID and watched them sign</span></span></label>
+    <div class="toolbar" style="margin-top:4px"><button class="btn link" type="button" data-noid="${esc(key)}" data-noname="${esc(name)}">Sign without an ID check</button></div></div>`;
+  /* Tim may still choose to sign without an ID check (Tim, 26 November 2026, 17:57), after a clear warning: the first tap shows it right
+     under the button, the second confirms; the save then records "Signed in person without an identity check" with his name and the time. */
+  const ID_NONE_NOTE = 'Signed in person without an identity check';
+  document.addEventListener('click', e => { const b = e.target.closest && e.target.closest('[data-noid]'); if (!b) return;
+    const nm = b.dataset.noname || 'this person';
+    if (b.dataset.confirmed === '1') { delete b.dataset.confirmed; delete b.dataset.armed; b.textContent = 'Sign without an ID check'; atBtn(b, 'The ID check is needed again.', 'ok'); return; }
+    if (b.dataset.armed !== '1') { b.dataset.armed = '1'; b.textContent = 'Yes, sign without an ID check'; atBtn(b, `No identification has been checked for ${nm}. Finish anyway? Tap again to sign without an ID check.`, 'err'); return; }
+    b.dataset.confirmed = '1'; b.textContent = 'No ID check (tap to undo)';
+    const card = b.closest('[data-signer],[data-fsigner],[data-vp]'), save = card && card.querySelector('[data-signnow],[data-fsign]');
+    atBtn(b, save ? `Signing for ${nm} without an ID check.` : `No ID check for ${nm}: now save the signatures.`, 'err'); if (save) save.click(); });
+  // the check as it goes in the signed snapshot, or a plain message; the AML file for this person is linked where there is one
+  async function idCheckRead(key, name, personId) {
+    const t = ($(`[data-idtype="${CSS.escape(key)}"]`) || {}).value || '', ok = !!($(`[data-idok="${CSS.escape(key)}"]`) || {}).checked, nb = $(`[data-noid="${CSS.escape(key)}"]`);
+    if (!t && nb && nb.dataset.confirmed === '1') return { check: { type: 'none', warned: true, by: 'Tim McGuire', at: new Date().toISOString(), note: ID_NONE_NOTE } };
+    if (!t) return { err: `Choose the photo ID you checked for ${name}, or tap Sign without an ID check.` };
+    if (!ok) return { err: `Tick that you checked ${name}'s ID and watched them sign.` };
+    const c = { type: t, checked: true, by: 'Tim McGuire', at: new Date().toISOString() };
+    if (personId) { try { const { data } = await sb.from('aml_files').select('id').eq('person_id', personId).limit(1); if (data && data[0]) c.aml_file_id = data[0].id; } catch (_) { } }
+    return { check: c };
+  }
+  /* a signer with no email, on Tim's device (Tim, 26 November 2026): they can sign there, but no copy is emailed to them, so Tim is
+     reminded right under the save button to print or hand them their signed copy; his tick is recorded on the agreement's timeline
+     ("Copy handed over by Tim", with the time). Nothing signed changes. By link an email is still needed. */
+  const copyNoteHTML = (key, name) => `<div class="card note tight sg-copy" data-copyfor="${esc(key)}"><p class="small" style="margin:0 0 6px">${esc(name)} has no email, so no copy is emailed to them. Print or hand them their signed copy.</p>
+    <label class="choice cb" style="margin:0"><input type="checkbox" data-tcopy="${esc(key)}"><span class="mark"></span><span><span class="ct">I've handed ${esc(name)} their signed copy</span></span></label></div>`;
+  async function copyHanded(agreementId, personId, name, what) {
+    await must(sb.from('agreement_events').insert({ agreement_id: agreementId, actor: SESSION.user.email, kind: 'copy_handed_over', detail: { person_id: personId, name, document: what, note: 'Copy handed over by Tim' } }));
+  }
   const saveNote = label => `<p class="sig-save-note">When you're happy with it, press <strong>${esc(label)}</strong>. Your signature isn't saved until you do.</p>`;
+  /* ───── the signing viewer: one document viewer for every signing screen (Tim, 26 November 2026) ─────
+     Used wherever someone reads a document to sign it, by link or on Tim's screen: offers and counteroffers, the agency agreement,
+     its prior-agency cancellation notices, variations, the Vendor Declaration and the Healthy Homes checklist. It only changes how
+     the document is shown on screen: what is signed, its fingerprint, the signing places and every signed record are untouched.
+       docViewer(inner, o)  the HTML: a bar (Previous page, Next page, Zoom out, Zoom in, Full screen) over a frame holding the document
+       dvWire(o)            wires it once it is on the page, and returns the viewer (V): V.zoom, V.pageW(), V.go(n), V.sync(),
+                            V.painted(), V.glide(el), V.auto()
+     o: { id, who (whose zoom: a signer, or 'me' for this device), places (show "Move to the next place for me"), pick (extra HTML in
+          the bar, such as a page list), ids ({ prev, next }), count () / current () / go (n) for a document shown a page at a time,
+          render () to draw it again at the new zoom (PDF pages are drawn sharp at each size; other documents are scaled with CSS zoom) }
+     Pages of a document shown whole are its [data-dv-page] elements. The zoom and the tick are kept per signer on this device
+     (localStorage), so they hold after each place, when the page is drawn again, on the next page and on coming back. */
+  const DV_STEPS = [1, 1.25, 1.5, 2, 2.5, 3], DV_MAX = 3;
+  const DV_POS = {};   // where each viewer was scrolled to, by page, so a redraw lands back in the same place
+  const dvStore = (k, v) => { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, String(v)); } catch (_) { } return null; };
+  const dvZoomOf = who => { const z = parseFloat(dvStore('dvZoom:' + (who || 'me'))); return z >= 1 && z <= DV_MAX ? z : 1; };
+  const dvAutoOf = who => dvStore('dvAuto:' + (who || 'me')) === '1';
+  const dvCalm = () => { try { return matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (_) { return false; } };
+  const dvClamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  function docViewer(inner, o) {
+    const id = o.id, ids = o.ids || {}, z = dvZoomOf(o.who);
+    return `<div class="dv" id="${id}" data-who="${esc(o.who || 'me')}">
+      <div class="toolbar dv-bar" role="toolbar" aria-label="Document controls">
+        <span class="dv-grp"><button class="btn dv-btn" type="button" id="${ids.prev || id + 'Prev'}" data-dv="prev">Previous page</button><button class="btn dv-btn" type="button" id="${ids.next || id + 'Next'}" data-dv="next">Next page</button></span>
+        <span class="dv-pgv" id="${id}Pg" aria-live="polite">Page 1 of 1</span>${o.pick ? `<span class="dv-grp dv-pick">${o.pick}</span>` : ''}
+        <span class="dv-grp"><button class="btn dv-btn dv-sq" type="button" id="${id}Out" data-dv="out" aria-label="Zoom out"><span aria-hidden="true" data-no-tr translate="no">&minus;</span></button><span class="dv-zv" id="${id}Zv" role="status" data-no-tr translate="no">${Math.round(z * 100)}%</span><button class="btn dv-btn dv-sq" type="button" id="${id}In" data-dv="in" aria-label="Zoom in"><span aria-hidden="true" data-no-tr translate="no">+</span></button></span>
+        <span class="dv-grp"><button class="btn dv-btn" type="button" id="${id}Full" data-dv="full">Full screen</button><button class="btn dv-btn" type="button" id="${id}Close" data-dv="close" hidden>Close full screen</button></span>
+      </div>
+      ${o.places ? `<label class="choice cb dv-auto" id="${id}AutoL"><input type="checkbox" id="${id}Auto" ${dvAutoOf(o.who) ? 'checked' : ''}><span class="mark"></span><span><span class="ct">Move to the next place for me</span></span></label>` : ''}
+      <div class="dv-frame${z > 1 ? ' dv-zoomed' : ''}" id="${id}Frame" tabindex="0" role="region" aria-label="The document. Drag or scroll to move around it."><div class="dv-doc${o.render ? ' dv-drawn' : ''}"${!o.render && z > 1 ? ` style="zoom:${z}"` : ''}>${inner}</div></div></div>`;
+  }
+  // a viewer left full screen when its screen was replaced leaves nothing behind
+  function dvTidy() { if (!document.querySelector('.dv.dv-full')) document.body.classList.remove('dv-lock'); }
+  let DV_KEYS = false;
+  function dvGlobal() {
+    if (DV_KEYS) return; DV_KEYS = true;
+    document.addEventListener('keydown', e => { if (e.key !== 'Escape') return; const f = document.querySelector('.dv.dv-full'); if (f && f._dv) { e.preventDefault(); f._dv.close(); } });
+    const fc = () => { const el = document.fullscreenElement || document.webkitFullscreenElement; $$('.dv.dv-full').forEach(f => { if (f._dv && f._dv.native && f !== el) f._dv.close(true); }); };
+    document.addEventListener('fullscreenchange', fc); document.addEventListener('webkitfullscreenchange', fc);
+  }
+  function dvWire(o) {
+    const root = $('#' + o.id); if (!root) return null;
+    dvGlobal(); dvTidy();
+    const who = root.dataset.who, frame = $('.dv-frame', root), docEl = $('.dv-doc', root), posKey = o.id + '|' + who;
+    const B = k => $(`[data-dv="${k}"]`, root);
+    const V = { root, frame, zoom: dvZoomOf(who), native: false, o };
+    root._dv = V;
+    const pageEls = () => $$('[data-dv-page]', docEl);
+    let goneTo = 0, goneAt = 0;
+    const htmlCur = () => { const els = pageEls(); if (!els.length) return 1; if (Date.now() - goneAt < 900) return goneTo;
+      const top = Math.max(frame.getBoundingClientRect().top, 0) + 60; let n = 1; els.forEach((e, i) => { if (e.getBoundingClientRect().top <= top) n = i + 1; }); return n; };
+    const count = () => o.count ? o.count() : Math.max(1, pageEls().length), cur = () => o.current ? o.current() : htmlCur();
+    V.isFull = () => root.classList.contains('dv-full');
+    // the width a page is drawn at: the frame's own width (wider in full screen), times the zoom
+    V.pageW = () => Math.round(Math.max(240, Math.min((frame.clientWidth || drPageW()) - 2, V.isFull() ? 1100 : 760)) * V.zoom);
+    V.auto = () => { const a = $('#' + o.id + 'Auto'); return !!(a && a.checked); };
+    V.sync = () => { const n = count(), c = dvClamp(cur(), 1, n), pv = $('#' + o.id + 'Pg');
+      if (pv) pv.textContent = trs('Page {n} of {total}', { n: c, total: n });
+      B('prev').disabled = c <= 1; B('next').disabled = c >= n;
+      const zv = $('#' + o.id + 'Zv'); if (zv) zv.textContent = Math.round(V.zoom * 100) + '%';
+      B('out').disabled = V.zoom <= 1; B('in').disabled = V.zoom >= DV_MAX;
+      frame.classList.toggle('dv-zoomed', V.zoom > 1); frame.classList.toggle('dv-canpan', frame.scrollWidth > frame.clientWidth + 1 || frame.scrollHeight > frame.clientHeight + 1); };
+    const note = (b, msg, kind) => { const n = atBtn(b, msg, kind || 'ok'); clearTimeout(V._nt); V._nt = setTimeout(() => { if (n) n.hidden = true; }, 3000); };
+    // the zoom: kept on the frame's point under a finger or the pointer (the middle otherwise), so nothing jumps away
+    const anchorOf = (cx, cy) => { const r = frame.getBoundingClientRect(), ax = cx == null ? frame.clientWidth / 2 : cx - r.left, ay = cy == null ? frame.clientHeight / 2 : cy - r.top;
+      return { ax, ay, fx: (frame.scrollLeft + ax) / Math.max(1, frame.scrollWidth), fy: (frame.scrollTop + ay) / Math.max(1, frame.scrollHeight) }; };
+    const toAnchor = a => { if (!a) return; frame.scrollLeft = a.fx * frame.scrollWidth - a.ax; frame.scrollTop = a.fy * frame.scrollHeight - a.ay; };
+    V.setZoom = async (z, cx, cy) => {
+      z = Math.round(dvClamp(z, 1, DV_MAX) * 20) / 20; docEl.style.transform = ''; if (z === V.zoom) return V.sync();
+      const a = anchorOf(cx, cy); V.zoom = z; dvStore('dvZoom:' + who, z);
+      if (!o.render) docEl.style.zoom = z === 1 ? '' : String(z);
+      frame.classList.toggle('dv-zoomed', z > 1);
+      if (o.render) await o.render();
+      toAnchor(a); V.sync();
+    };
+    const step = dir => { const i = DV_STEPS.findIndex(s => s >= V.zoom - 0.001); const at = i < 0 ? DV_STEPS.length - 1 : i;
+      return dir > 0 ? (DV_STEPS[at] > V.zoom + 0.001 ? DV_STEPS[at] : DV_STEPS[Math.min(at + 1, DV_STEPS.length - 1)]) : (DV_STEPS[Math.max(0, (DV_STEPS[at] < V.zoom - 0.001 ? at : at - 1))] || 1); };
+    B('in').addEventListener('click', async () => { await V.setZoom(step(1)); note(B('in'), trs('Zoomed to {pct}%. It stays this size while you sign.', { pct: Math.round(V.zoom * 100) })); });
+    B('out').addEventListener('click', async () => { await V.setZoom(step(-1)); note(B('out'), V.zoom > 1 ? trs('Zoomed to {pct}%. It stays this size while you sign.', { pct: Math.round(V.zoom * 100) }) : trs('Back to the normal size.')); });
+    // pages: shown one at a time (o.go), or a whole document moved through by scrolling
+    V.go = async n => { n = dvClamp(n, 1, count());
+      if (o.go) { await o.go(n); frame.scrollTop = 0; frame.scrollLeft = 0; root.scrollIntoView({ block: 'nearest' }); }
+      else { const el = pageEls()[n - 1]; goneTo = n; goneAt = Date.now(); if (el) el.scrollIntoView({ block: 'start', behavior: dvCalm() ? 'auto' : 'smooth' }); }
+      V.sync(); };
+    B('prev').addEventListener('click', () => V.go(cur() - 1));
+    B('next').addEventListener('click', () => V.go(cur() + 1));
+    // full screen: the browser's own where it has one, otherwise the viewer fills the window (an iPhone); Close or Escape to leave
+    const fullUI = on => { root.classList.toggle('dv-full', on); document.body.classList.toggle('dv-lock', on); B('full').hidden = on; B('close').hidden = !on; };
+    V.open = async () => {
+      const req = root.requestFullscreen || root.webkitRequestFullscreen; V.native = false;
+      if (req) { try { await req.call(root); V.native = true; } catch (_) { V.native = false; } }
+      const a = anchorOf(); fullUI(true); if (o.render) await o.render(); toAnchor(a); V.sync(); B('close').focus({ preventScroll: true });
+    };
+    V.close = async fromBrowser => {
+      if (!V.isFull()) return;
+      if (V.native && !fromBrowser) { const fe = document.fullscreenElement || document.webkitFullscreenElement, ex = document.exitFullscreen || document.webkitExitFullscreen; if (fe && ex) { try { await ex.call(document); } catch (_) { } } }
+      V.native = false; const a = anchorOf(); fullUI(false); if (o.render) await o.render(); toAnchor(a); V.sync(); B('full').focus({ preventScroll: true });
+    };
+    B('full').addEventListener('click', () => V.open());
+    B('close').addEventListener('click', () => V.close());
+    const au = $('#' + o.id + 'Auto');
+    if (au) au.addEventListener('change', () => { dvStore('dvAuto:' + who, au.checked ? '1' : '0'); note(au.closest('label'), au.checked ? trs('On. After each place you sign, the page moves to the next one for you.') : trs('Off. The page stays where you leave it.')); });
+    // a gentle glide to a place (in the frame, and the screen), keeping the zoom; at once for anyone who prefers less motion
+    V.glide = el => new Promise(res => { if (!el || !el.isConnected) return res();
+      const fr = frame.getBoundingClientRect(), r = el.getBoundingClientRect();
+      const maxL = frame.scrollWidth - frame.clientWidth, maxT = frame.scrollHeight - frame.clientHeight;
+      const l0 = frame.scrollLeft, t0 = frame.scrollTop, inside = frame.contains(el);
+      const l1 = !inside ? l0 : dvClamp(l0 + (r.left + r.width / 2) - (fr.left + frame.clientWidth / 2), 0, Math.max(0, maxL)), t1 = !inside ? t0 : dvClamp(t0 + (r.top + r.height / 2) - (fr.top + frame.clientHeight / 2), 0, Math.max(0, maxT));
+      const w0 = window.scrollY, elTop = r.top - (t1 - t0), w1 = V.isFull() ? w0 : Math.max(0, w0 + elTop + r.height / 2 - window.innerHeight / 2);
+      const end = () => { try { el.focus({ preventScroll: true }); } catch (_) { } V.sync(); res(); };
+      if (dvCalm()) { frame.scrollLeft = l1; frame.scrollTop = t1; if (w1 !== w0) window.scrollTo(0, w1); return end(); }
+      const t00 = performance.now(), dur = 520, ease = x => x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
+      const tick = now => { const k = ease(Math.min(1, (now - t00) / dur)); frame.scrollLeft = l0 + (l1 - l0) * k; frame.scrollTop = t0 + (t1 - t0) * k; if (w1 !== w0) window.scrollTo(0, w0 + (w1 - w0) * k);
+        if (k < 1) requestAnimationFrame(tick); else end(); };
+      requestAnimationFrame(tick);
+    });
+    // after each redraw of a page: back to where this page was scrolled to
+    V.painted = () => { const p = DV_POS[posKey]; if (p && p.page === cur() && p.z === V.zoom) { frame.scrollLeft = p.l; frame.scrollTop = p.t; } V.sync(); };
+    frame.addEventListener('scroll', () => { DV_POS[posKey] = { page: cur(), z: V.zoom, l: frame.scrollLeft, t: frame.scrollTop }; }, { passive: true });
+    if (!o.go) { let q = 0; const onS = () => { if (!root.isConnected) return window.removeEventListener('scroll', onS); if (q) return; q = requestAnimationFrame(() => { q = 0; V.sync(); }); };
+      window.addEventListener('scroll', onS, { passive: true }); frame.addEventListener('scroll', onS, { passive: true }); }
+    // drag to pan with a mouse (a finger scrolls the frame by itself); never while marking the page, and a drag is never a tap
+    let pan = null, swallow = false;
+    const noPan = t => t.closest('button,a,input,select,textarea,label,.sg-draw,.dr-drawing,.dr-editing,.sig-wrap');
+    frame.addEventListener('pointerdown', e => { if (e.pointerType !== 'mouse' || e.button !== 0 || noPan(e.target)) return;
+      if (frame.scrollWidth <= frame.clientWidth + 1 && frame.scrollHeight <= frame.clientHeight + 1) return;
+      pan = { x: e.clientX, y: e.clientY, l: frame.scrollLeft, t: frame.scrollTop, on: false, id: e.pointerId }; });
+    frame.addEventListener('pointermove', e => { if (!pan || e.pointerId !== pan.id) return; const dx = e.clientX - pan.x, dy = e.clientY - pan.y;
+      if (!pan.on && Math.hypot(dx, dy) > 4) { pan.on = true; frame.classList.add('dv-panning'); try { frame.setPointerCapture(e.pointerId); } catch (_) { } }
+      if (pan.on) { frame.scrollLeft = pan.l - dx; frame.scrollTop = pan.t - dy; e.preventDefault(); } });
+    const panEnd = () => { if (pan && pan.on) { swallow = true; setTimeout(() => { swallow = false; }, 0); } pan = null; frame.classList.remove('dv-panning'); };
+    frame.addEventListener('pointerup', panEnd); frame.addEventListener('pointercancel', panEnd);
+    frame.addEventListener('click', e => { if (swallow) { e.stopPropagation(); e.preventDefault(); swallow = false; } }, true);
+    // pinch on a phone, ctrl or a trackpad pinch on a computer: shown at once, then drawn sharp at the new size
+    let pinch = null, wheelT = 0, wheelZ = null, wheelAt = null;
+    const preview = (s, cx, cy) => { const r = docEl.getBoundingClientRect(); docEl.style.transformOrigin = `${cx - r.left}px ${cy - r.top}px`; docEl.style.transform = `scale(${s})`; };
+    const dist = t => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+    frame.addEventListener('touchstart', e => { if (e.touches.length === 2 && !frame.querySelector('.dr-drawing,.dr-editing')) { pinch = { d: dist(e.touches), z: V.zoom, cx: (e.touches[0].clientX + e.touches[1].clientX) / 2, cy: (e.touches[0].clientY + e.touches[1].clientY) / 2, s: 1 }; } }, { passive: true });
+    frame.addEventListener('touchmove', e => { if (!pinch || e.touches.length !== 2) return; e.preventDefault();
+      pinch.s = dvClamp(dist(e.touches) / pinch.d, 1 / pinch.z, DV_MAX / pinch.z); preview(pinch.s, pinch.cx, pinch.cy); }, { passive: false });
+    const pinchEnd = e => { if (!pinch || (e.touches && e.touches.length >= 2)) return; const p = pinch; pinch = null; V.setZoom(p.z * p.s, p.cx, p.cy); };
+    frame.addEventListener('touchend', pinchEnd); frame.addEventListener('touchcancel', pinchEnd);
+    frame.addEventListener('gesturestart', e => e.preventDefault());   // Safari's own page zoom stays out of the frame
+    frame.addEventListener('wheel', e => { if (!e.ctrlKey && !e.metaKey) return; e.preventDefault();
+      wheelZ = dvClamp((wheelZ || V.zoom) * Math.exp(-e.deltaY * 0.01), 1, DV_MAX); wheelAt = [e.clientX, e.clientY]; preview(wheelZ / V.zoom, e.clientX, e.clientY);
+      clearTimeout(wheelT); wheelT = setTimeout(() => { const z = wheelZ; wheelZ = null; V.setZoom(z, wheelAt[0], wheelAt[1]); }, 160); }, { passive: false });
+    // keyboard: + and - zoom, Page Up and Page Down move between pages, while the document has focus
+    frame.addEventListener('keydown', e => { if (e.target !== frame) return;
+      if (e.key === '+' || e.key === '=') { e.preventDefault(); V.setZoom(step(1)); } else if (e.key === '-') { e.preventDefault(); V.setZoom(step(-1)); }
+      else if (e.key === 'PageDown' && o.go) { e.preventDefault(); V.go(cur() + 1); } else if (e.key === 'PageUp' && o.go) { e.preventDefault(); V.go(cur() - 1); } });
+    V.sync();
+    return V;
+  }
   function header(name, count, pct) {
     const wasPitch = PITCH_ON; PITCH_ON = false; document.title = DEFAULT_TITLE;   // every other screen leaves the journey page and its title behind
     if (IS_AGENT) { try { localStorage.removeItem('inspOpen'); } catch (_) { } inspTidy(); }
@@ -461,7 +650,7 @@
       'We have appointed McGuire Real Estate Limited. Please reply to us, with a copy to Tim McGuire at tim@mcguire.co.nz.',
     ];
   }
-  const noticeHTML = (address, sellers, x) => `<div class="card tight notice"><h3 style="margin:0 0 6px">Notice cancelling your agency with ${esc(x.agency)}</h3>${noticeParas(address, sellers, x).map(p => `<p class="small" style="margin:0 0 6px">${esc(p)}</p>`).join('')}</div>`;
+  const noticeHTML = (address, sellers, x) => `<div class="card tight notice" data-dv-page><h3 style="margin:0 0 6px">Notice cancelling your agency with ${esc(x.agency)}</h3>${noticeParas(address, sellers, x).map(p => `<p class="small" style="margin:0 0 6px">${esc(p)}</p>`).join('')}</div>`;
   const noticeSnapshot = (address, sellers, an) => priorList(an).map((x, i) => ({ idx: (an.priorAgencies || []).indexOf(x), agency: x.agency, agent: x.agent || '', kind: x.kind || '', dated: x.dated || '', text: noticeParas(address, sellers, x) }));
 
   /* ───────── auth ───────── */
@@ -979,8 +1168,8 @@
     return `
     <h1>Review and sign</h1>
     <p class="lede">Here's your front page, built from your answers.</p>
-    <div class="card"><table class="sum">${rows.map(r => `<tr><td>${r[0] ? `<span class="clause">${r[0]}</span> ` : ''}${r[1]}</td><td style="white-space:normal">${r[2]}</td></tr>`).join('')}</table></div>
-    ${priorList(ANS).length ? `<h2>Cancelling your previous agency</h2><p class="small">Signed with the same signature, then checked and sent by Tim.</p>${priorList(ANS).map(x => noticeHTML(A.address, fp.client, x)).join('')}` : ''}
+    ${docViewer(`<div class="card" data-dv-page><table class="sum">${rows.map(r => `<tr><td>${r[0] ? `<span class="clause">${r[0]}</span> ` : ''}${r[1]}</td><td style="white-space:normal">${r[2]}</td></tr>`).join('')}</table></div>
+    ${priorList(ANS).length ? `<h2>Cancelling your previous agency</h2><p class="small">Signed with the same signature, then checked and sent by Tim.</p>${priorList(ANS).map(x => noticeHTML(A.address, fp.client, x)).join('')}` : ''}`, { id: 'agDv' })}
     <h2>Signatures</h2>
     ${P.filter(p => p.legal_name).map(p => {
       const mine = ME && p.id === ME.id;
@@ -1005,7 +1194,7 @@
     const end = () => { drawing = false; if (padDrawn) padUnsaved(cv, true); }; cv.addEventListener('pointerup', end); cv.addEventListener('pointercancel', end);
     return () => { ctx.clearRect(0, 0, cv.width, cv.height); padDrawn = false; padUnsaved(cv, false); const h = cv.parentElement.querySelector('.hint'); if (h) h.hidden = false; };
   }
-  BIND[9] = () => { wirePdf(A.id); const clear = initPad('sig0'); const c = $('#clearSig'); if (c && clear) c.addEventListener('click', clear); if (!$('#sig0')) actions(true, 'Back', 'See status'); };
+  BIND[9] = () => { dvWire({ id: 'agDv' }); wirePdf(A.id); const clear = initPad('sig0'); const c = $('#clearSig'); if (c && clear) c.addEventListener('click', clear); if (!$('#sig0')) actions(true, 'Back', 'See status'); };
   NEXT[9] = async () => {
     if (!$('#sig0')) return true;
     if (!padDrawn) return err('Please sign in the box.');
@@ -2821,7 +3010,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <p class="lede">Go through the agreement together, record what's been explained, then sign here or send it to their phones.</p>
       ${parked ? `<div class="card warnc"><h3>Paused for legal advice</h3><p class="small" style="margin:0">Sent to ${esc(L.lawyer || 'their lawyer')}${L.firm ? ', ' + esc(L.firm) : ''}. Once they've heard back, record it below and carry on.</p></div>` : ''}
       <h2>Front page</h2>
-      <div class="card"><table class="sum">${rows.map(r => `<tr><td>${r[0] ? `<span class="clause">${r[0]}</span> ` : ''}${r[1]}</td><td style="white-space:normal">${r[2]}</td></tr>`).join('')}</table></div>
+      ${docViewer(`<div class="card" data-dv-page><table class="sum">${rows.map(r => `<tr><td>${r[0] ? `<span class="clause">${r[0]}</span> ` : ''}${r[1]}</td><td style="white-space:normal">${r[2]}</td></tr>`).join('')}</table></div>`, { id: 'tFrontDv', places: named.length > 1 })}
       <div class="toolbar">${pdfBtn('Open the full agreement (PDF)')}</div>
       <h2>The agreement in plain English</h2><p class="small">Tick each section once you've been through it together. <strong id="tGuideCount">${guide.length} of ${GUIDE.length}</strong></p>
       <div class="toolbar" style="margin-top:0"><button class="btn ghost" type="button" data-tickall="guide">Tick all: we've been through these</button></div>
@@ -2834,14 +3023,15 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         <label class="f">Lawyer's email</label><input type="email" id="tLawE"><label class="f">Lawyer's phone <span class="opt">(optional)</span></label><input type="tel" id="tLawP" autocomplete="off"><div class="toolbar"><button class="btn primary" type="button" id="tLawGo">Send to lawyer and pause</button></div></div>
       <h2>Identity</h2>
       <div class="card tight"><p class="small" style="margin:0">${manual ? 'You verify each seller yourself. Use the AML file for each person on the agreement page.' : `${esc(T.c.aml)} sends each seller a link to verify on their phone.`} They can sign now; you can't act until everyone is verified.</p></div>
-      ${priorList(T.an).length ? `<h2>Cancelling the previous agency</h2><p class="small">Each seller also signs ${priorList(T.an).length > 1 ? 'these notices' : 'this notice'} with the same signature. You check and send ${priorList(T.an).length > 1 ? 'them' : 'it'} from the agreement page.</p>${priorList(T.an).map(x => noticeHTML(T.ag.address, fp.client || '(names to come)', x)).join('')}` : ''}
+      ${priorList(T.an).length ? `<h2>Cancelling the previous agency</h2><p class="small">Each seller also signs ${priorList(T.an).length > 1 ? 'these notices' : 'this notice'} with the same signature. You check and send ${priorList(T.an).length > 1 ? 'them' : 'it'} from the agreement page.</p>${docViewer(priorList(T.an).map(x => noticeHTML(T.ag.address, fp.client || '(names to come)', x)).join(''), { id: 'tNoticeDv' })}` : ''}
       <h2>Signatures</h2>
-      ${named.length ? named.map(p => p.signed_at ? `<div class="card tight" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><h3 style="margin:0">${nt(p.legal_name)}</h3><span class="signed-badge">✓ Signed ${esc(fmtDT(p.signed_at))}</span></div>`
+      ${named.length ? named.map(p => p.signed_at ? `<div class="card tight" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><h3 style="margin:0">${nt(p.legal_name)}</h3><span class="signed-badge">✓ Signed ${esc(fmtDT(p.signed_at))}</span>${EMAIL_RE.test(p.email || '') ? '' : `<div data-tcopyrow="${p.id}" style="flex-basis:100%"></div>`}</div>`
         : `<div class="card tight" data-signer="${p.id || ''}"><div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:8px"><h3 style="margin:0">${nt(p.legal_name)}</h3><button class="btn link" type="button" data-clear="${p.id}">Clear</button></div>
           ${priorList(T.an).length ? `<label class="choice cb" style="margin:0 0 10px"><input type="checkbox" data-tnotice="${p.id}"><span class="mark"></span><span><span class="ct">Also sign the notice${priorList(T.an).length > 1 ? 's' : ''} cancelling the agency with ${esc(joinNames(priorList(T.an).map(x => x.agency)))}</span></span></label>` : ''}
+          ${idCheckHTML(p.id, p.legal_name)}
           <div class="sig-wrap"><canvas id="pad_${p.id}" aria-label="Signature pad for ${esc(p.legal_name)}"></canvas><div class="sig-line"></div><span class="hint">${esc(callName(p) || p.legal_name)} signs here</span></div>
           ${saveNote(`Save ${callName(p) || p.legal_name}'s signature`)}
-          <div class="toolbar"><button class="btn primary" type="button" data-signnow="${p.id}">Save ${esc(callName(p) || p.legal_name)}'s signature</button></div></div>`).join('') : '<p class="small">Add the sellers on page 1 first.</p>'}
+          <div class="toolbar"><button class="btn primary" type="button" data-signnow="${p.id}">Save ${esc(callName(p) || p.legal_name)}'s signature</button></div>${EMAIL_RE.test(p.email || '') ? '' : copyNoteHTML(p.id, p.legal_name)}</div>`).join('') : '<p class="small">Add the sellers on page 1 first.</p>'}
       <p class="small">By signing they agree to the Sole and Exclusive Agency Agreement ${esc(AGREEMENT_VERSION.split('-')[0])}, including the Terms and Conditions, the Property Description and the Verification of Ownership. Each signer is emailed their copy once everyone has signed, which starts the cooling-off period.</p>
       ${named.some(p => !p.signed_at) ? `<div class="card note"><h3>Or let them sign on their own phones</h3><p class="small">They'll get a link, check what you've filled in together, and sign in their own time. Anyone who's already signed here stays signed.</p><div class="toolbar"><button class="btn ghost" type="button" id="tSendPhones">Send to sign on their phones</button></div></div>` : ''}
       <div id="tDone"></div>`;
@@ -2863,6 +3053,15 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     if (['have', 'waive'].includes(pick) && (T.ag.legal || {}).choice !== pick) { await must(sb.rpc('agent_set_legal', { a: T.id, choice: pick })); T.ag.legal = Object.assign({}, T.ag.legal, { choice: pick }); }
   }
   function tBind3() {
+    const FV = dvWire({ id: 'tFrontDv' }); dvWire({ id: 'tNoticeDv' });
+    // a signer with no email: whether Tim has handed them their signed copy, or a tick to say he has
+    { const rows = $$('[data-tcopyrow]'); if (rows.length && T.id) (async () => { const ev = (await ofSafe(sb.from('agreement_events').select('kind,detail,at').eq('agreement_id', T.id).eq('kind', 'copy_handed_over'))) || [];
+      const fill = r => { const pid = r.dataset.tcopyrow, p = T.people.find(x => x.id === pid) || {}, e = ev.find(x => (x.detail || {}).person_id === pid && (x.detail || {}).document === 'agency agreement');
+        r.innerHTML = e ? `<p class="small" style="margin:6px 0 0" data-tcopydone="${pid}">Copy handed over by Tim, ${esc(fmtDT(e.at))}.</p>` : copyNoteHTML('later' + pid, p.legal_name || 'They');
+        const c = r.querySelector('[data-tcopy]'); if (c) c.addEventListener('change', async () => { if (!c.checked) return; try { await copyHanded(T.id, pid, p.legal_name, 'agency agreement'); ev.push({ detail: { person_id: pid, document: 'agency agreement' }, at: new Date().toISOString() }); fill(r); } catch (_) { c.checked = false; } }); };
+      rows.forEach(fill); })(); }
+    // after a signature is saved, "Move to the next place for me" glides on to the next person still to sign
+    if (T.glideNext) { T.glideNext = false; const nx = $('[data-signer]'); if (FV && FV.auto() && nx) setTimeout(() => FV.glide(nx), 60); }
     if (T.id) wirePdf(T.id); else $$('[data-pdf]').forEach(b => b.addEventListener('click', async () => { tCollect(); if (await tSave()) openPdf(T.id); }));
     const tak = $('#tak1'); if (tak && GUIDES.agency) tak.addEventListener('change', () => { if (tak.checked) T.an._reaAgencyAt = new Date().toISOString(); });
     const tak2 = $('#tak2'); if (tak2 && GUIDES.sale_purchase) tak2.addEventListener('change', () => { if (tak2.checked) T.an._reaSaleAt = new Date().toISOString(); });
@@ -2886,8 +3085,9 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       tCollect();
       const e = tReadyToSign(); if (e) return tErr(e);
       const person = T.people.find(x => x.id === pid);
-      if (!person || !EMAIL_RE.test(person.email || '')) return tErr(`Add an email for ${person ? person.legal_name : 'this person'} on page 1, so they get their signed copy.`);
+      if (!person) return tErr('Add the sellers on page 1 first.');   // on Tim's device an email isn't needed: no copy is emailed, Tim hands it over
       if (!pad || !pad.drawn()) return tErr('Please sign in the box first.');
+      const idc = await idCheckRead(pid, person.legal_name, pid); if (idc.err) { atBtn(b, idc.err, 'err'); return tErr(idc.err); }
       const tn = $(`[data-tnotice="${pid}"]`); if (tn && !tn.checked) return tErr('Tick the box to sign the cancellation notice as well, or stop and sort out the previous agency first.');
       b.disabled = true;
       try {
@@ -2898,9 +3098,10 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         await must(sb.storage.from('private').upload(path, blob, { contentType: 'image/png' }));
         const cfg = tConfig();
         const snapshot = { agreement_version: AGREEMENT_VERSION, agreement_ref: T.ag.ref, front_page: tFront(), config: cfg, answers: T.an, people: T.people.map(p => ({ legal_name: p.legal_name, email: p.email })), signer: { name: person.legal_name, email: person.email }, notices: noticeSnapshot(T.ag.address, tFront().client, T.an), signed_at_client: new Date().toISOString() };
-        Object.assign(snapshot, await signExtras(T.id, T.an));
+        Object.assign(snapshot, await signExtras(T.id, T.an), { id_check: idc.check });
         const res = await must(sb.rpc('agent_sign_in_person', { a: T.id, pid, p_image_path: path, p_snapshot: snapshot, p_user_agent: navigator.userAgent }));
         await sigSaved($('#pad_' + pid), `${person.legal_name} has signed`, 'Signature saved');
+        if (($(`[data-tcopy="${pid}"]`) || {}).checked) await copyHanded(T.id, pid, person.legal_name, 'agency agreement');
         T.people = await must(sb.from('agreement_people').select('*').eq('agreement_id', T.id).order('position'));
         T.ag = Object.assign(T.ag, await must(sb.from('agreements').select('id,ref,status,legal,sent_at,cooling_off_until').eq('id', T.id).single()));
         if (res && res.remaining === 0) {
@@ -2908,7 +3109,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
           toast(fe ? 'All signed. The copy email didn\'t send; resend it from the agreement page.' : 'All signed. Copies are on their way.');
           return viewAgentDetail(T.id);
         }
-        toast(person.legal_name + ' has signed'); tShow(2);
+        toast(person.legal_name + ' has signed'); T.glideNext = true; tShow(2);
       } catch (x) { b.disabled = false; }
     }));
     const sp = $('#tSendPhones');
@@ -2917,6 +3118,9 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       const unsigned = T.people.filter(p => (p.legal_name || '').trim() && !p.signed_at);
       for (const p of [0, 1]) { const e = tValidate(p); if (e) return tErr(e + ` (page ${p + 1})`); }
       if (unsigned.some(p => !EMAIL_RE.test(p.email || ''))) return tErr('Add an email on page 1 for everyone still to sign, so they can sign in.');
+      // signing at a distance: each person needs their own email (Tim, 26 November 2026); the database refuses a shared one too (029)
+      { const named_ = T.people.filter(p => (p.legal_name || '').trim()), ems = named_.map(p => String(p.email || '').trim().toLowerCase()).filter(Boolean);
+        if (new Set(ems).size !== ems.length) { const m = 'Two people share an email. Each person needs their own email to sign on their own phone, or they can sign here with you.'; atBtn(sp, m, 'err'); return tErr(m); } }
       const guideDone = (T.an.guide || []).length >= GUIDE.length, acksDone = (T.an.acks || []).length >= acksList(T.c).length, legal = ['have', 'waive'].includes(T.legalPick || (T.ag.legal || {}).choice);
       T.an._step = !guideDone ? 6 : (!acksDone || !legal) ? 7 : 9;
       if (!(await tSave())) return;
@@ -3246,9 +3450,9 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   // the same document on screen, as tiles
   function docHTML(doc) {
     return `${(doc.head || []).length ? `<div class="card tight"><div class="facts">${doc.head.map(([k, v]) => `<div class="fact"><div class="k">${esc(k.replace(/:$/, ''))}</div><div class="v">${esc(v || '')}</div></div>`).join('')}</div></div>` : ''}
-      ${doc.pages.map(pg => `<h2>${esc(pg.title)}${pg.sub && /^Page/.test(pg.sub) ? ` <span class="opt small">${esc(pg.sub)}</span>` : ''}</h2>${(pg.intro || []).map(t => `<p class="small">${esc(t)}</p>`).join('')}
+      ${doc.pages.map(pg => `<div data-dv-page><h2>${esc(pg.title)}${pg.sub && /^Page/.test(pg.sub) ? ` <span class="opt small">${esc(pg.sub)}</span>` : ''}</h2>${(pg.intro || []).map(t => `<p class="small">${esc(t)}</p>`).join('')}
         ${(pg.sections || []).map(s => `<div class="card tight"><h3>${esc(s.title)}</h3>${s.rows.map(r => `<div class="fact"><div class="k">${esc(r[0])}</div><div class="v" style="font-weight:400">${esc([r[1], r[2]].filter(Boolean).join('. ') || 'Not answered')}</div></div>`).join('')}</div>`).join('')}
-        ${(pg.after || []).map((t, i) => i === 0 && t === 'Vendor Statement' ? `<h2>${esc(t)}</h2>` : `<p class="small">${esc(t)}</p>`).join('')}`).join('')}`;
+        ${(pg.after || []).map((t, i) => i === 0 && t === 'Vendor Statement' ? `<h2>${esc(t)}</h2>` : `<p class="small">${esc(t)}</p>`).join('')}</div>`).join('')}`;
   }
   const signersOf = people => people.filter(p => p.legal_name && p.signed_at);
 
@@ -3429,13 +3633,14 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       const mine = iSigned(fm);
       h = `<h1>${isHH ? 'Check and sign your Healthy Homes checklist' : locked ? 'Check and sign the Vendor Declaration' : 'Vendor Statement and signing'}</h1>
         <p class="lede">${locked && !isHH ? 'These answers are already signed by someone else on the agreement, so they can\'t change here. If anything is wrong, call Tim before signing.' : isHH ? 'Tim filled this in on site. Check it, and call him on 027 562 7207 if anything is wrong before you sign.' : 'Here\'s your declaration. Check it, then sign below. Everyone on the agreement signs it, each on their own phone.'}</p>
-        ${locked || isHH ? docHTML(doc) : `${docHTML({ pages: [{ title: 'Vendor Statement', after: VD_STATEMENT }] })}<details class="card tight"><summary class="small">See all your answers</summary>${docHTML(doc)}</details>`}
+        ${docViewer(locked || isHH ? docHTML(doc) : `${docHTML({ pages: [{ title: 'Vendor Statement', after: VD_STATEMENT }] })}<details class="card tight"><summary class="small">See all your answers</summary>${docHTML(doc)}</details>`, { id: 'vfDv' })}
         ${mine ? '<div class="card okc tight"><p class="small" style="margin:0">You\'ve signed this.</p></div>' : `<h2>Sign</h2><div class="card tight">
           <label class="choice cb"><input type="checkbox" id="vfOk"><span class="mark"></span><span><span class="ct">${isHH ? 'I\'ve checked this checklist and statement' : 'I declare the Vendor Statement is true, and my answers are correct to the best of my knowledge'}</span></span></label>
           <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin:8px 0"><h3 style="margin:0">${esc(ME.legal_name)}</h3><button class="btn link" type="button" id="vfClr">Clear</button></div>
           <div class="sig-wrap"><canvas id="vfSig" aria-label="Signature pad"></canvas><div class="sig-line"></div><span class="hint">Sign here with your finger or mouse</span></div>${saveNote('Save my signature and sign')}</div>`}`;
     }
     main().innerHTML = `<section class="screen active" data-signed${i === 3 && !iSigned(fm) ? ' data-signing' : ''}>${h}<div class="err"></div></section>`;
+    dvWire({ id: 'vfDv' });
     const fu = () => { const c = $('input[name="vfFile"]:checked'); if ($('#vfChWrap')) $('#vfChWrap').hidden = !(c && c.value === 'changed'); };
     $$('input[name="vfFile"]').forEach(r => r.addEventListener('change', fu));
     const tu = () => { const c = $('input[name="vfTen"]:checked'); if ($('#vfHHWrap')) $('#vfHHWrap').hidden = !(c && c.value !== 'no'); };
@@ -3515,15 +3720,16 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         <h2>Compliance Statement: Data Capture <span class="opt small">Page 3</span></h2><p class="small">${esc(HH_ST_INTRO)}</p>
         ${HH_ST.map(([t, items]) => `<div class="card tight"><h3>${esc(t)}</h3>${items.map(([k, q]) => `<label class="f">${esc(q)}</label><input type="text" data-hs="${k}" value="${esc(ad.st[k] || '')}">`).join('')}</div>`).join('')}
         <div class="toolbar"><button class="btn ghost" type="button" id="hSave">Save</button><button class="btn primary" type="button" id="hReady">${fm.status === 'ready' ? 'Save, still ready to sign' : 'Ready for the landlord to sign'}</button></div><div class="err" id="hErr"></div>`
-        : docHTML(doc)}
+        : docViewer(docHTML(doc), { id: 'fDv' })}
       ${unchecked && fm.status !== 'signed' ? `<div class="card warnc tight" id="fInspWait"><p class="small" style="margin:0">The vendors need to check the answers you noted at the inspection from their own sign-in before anyone can sign here. You can't confirm your own notes for them.</p><p class="small" style="margin:6px 0 0"><strong>${unchecked} ${unchecked === 1 ? 'answer is' : 'answers are'} still to check.</strong></p></div>` : ''}
       ${canSign && toSign.length && !unchecked ? `<h2>Sign in person</h2><p class="small">${isHH ? 'The landlord' : 'Each vendor'} can sign here on your phone, witnessed by you, or on their own phone from their agreement page.</p>
         ${toSign.map(p => `<div class="card tight" data-fsigner="${p.id}"><label class="choice cb" style="margin:0 0 8px"><input type="checkbox" data-fok="${p.id}"><span class="mark"></span><span><span class="ct">${nt(p.legal_name)} has checked it${isHH ? '' : ' and makes the Vendor Statement'}</span></span></label>
           <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:8px"><h3 style="margin:0">${nt(p.legal_name)}</h3><button class="btn link" type="button" data-fclr="${p.id}">Clear</button></div>
-          <div class="sig-wrap"><canvas id="fpad_${p.id}" aria-label="Signature pad for ${esc(p.legal_name)}"></canvas><div class="sig-line"></div><span class="hint">${esc(callName(p) || p.legal_name)} signs here</span></div>${saveNote(`Save ${callName(p) || p.legal_name}'s signature`)}
-          <div class="toolbar"><button class="btn primary" type="button" data-fsign="${p.id}">Save ${esc(callName(p) || p.legal_name)}'s signature</button></div></div>`).join('')}<div class="err" id="fErr"></div>` : ''}
+          ${idCheckHTML('f' + p.id, p.legal_name)}<div class="sig-wrap"><canvas id="fpad_${p.id}" aria-label="Signature pad for ${esc(p.legal_name)}"></canvas><div class="sig-line"></div><span class="hint">${esc(callName(p) || p.legal_name)} signs here</span></div>${saveNote(`Save ${callName(p) || p.legal_name}'s signature`)}
+          <div class="toolbar"><button class="btn primary" type="button" data-fsign="${p.id}">Save ${esc(callName(p) || p.legal_name)}'s signature</button></div>${EMAIL_RE.test(p.email || '') ? '' : copyNoteHTML('f' + p.id, p.legal_name)}</div>`).join('')}<div class="err" id="fErr"></div>` : ''}
       ${fs.length ? `<h2>Signatures</h2>${fs.map(s => `<div class="card tight"><div style="font-weight:600">${nt(s.signer_name)}${s.signer_role === 'agent' ? ' <span class="small">(licensee)</span>' : ''}</div><div class="small">${esc(fmtDT(s.signed_at))} · fingerprint ${esc(String(s.snapshot_sha256).slice(0, 16))}…${s.snapshot && s.snapshot.witnessed_by ? ' · witnessed by you' : ''}</div></div>`).join('')}` : ''}
     </div>`;
+    dvWire({ id: 'fDv' });
     $('#fBack').addEventListener('click', () => ag.property_id ? viewProperty(ag.property_id) : viewAgentDetail(ag.id));
     const fc = $('#fCounter');
     if (fc) { const pad = makePad($('#fSigA')); fc.addEventListener('click', async () => {
@@ -3565,12 +3771,14 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       const pid = b.dataset.fsign, p = signers.find(x => x.id === pid), er = $('#fErr');
       if (!$(`[data-fok="${pid}"]`).checked) { er.textContent = `Tick the box once ${callName(p) || p.legal_name} has checked it.`; return; }
       if (!pads[pid].drawn()) { er.textContent = 'Please sign in the box first.'; return; }
+      const idc = await idCheckRead('f' + pid, p.legal_name, pid); if (idc.err) { er.textContent = idc.err; atBtn(b, idc.err, 'err'); return; }
       b.disabled = true;
       try {
         const path = await uploadSig($('#fpad_' + pid), ag.id, 'form-' + fid + '-' + pid);
         const d = isHH ? hhDoc(fm.agent_data, ag.address, names) : vdDoc(fm.data || {}, ag.address, names, new Date());
-        const res = await must(sb.rpc('agent_form_sign_in_person', { f: fid, pid, p_image_path: path, p_snapshot: { document: d.title, doc: d, property: ag.address, agreement_ref: ag.ref, signer: { name: p.legal_name, email: p.email }, signed_at_client: new Date().toISOString() }, p_user_agent: navigator.userAgent }));
+        const res = await must(sb.rpc('agent_form_sign_in_person', { f: fid, pid, p_image_path: path, p_snapshot: { document: d.title, doc: d, property: ag.address, agreement_ref: ag.ref, signer: { name: p.legal_name, email: p.email }, id_check: idc.check, signed_at_client: new Date().toISOString() }, p_user_agent: navigator.userAgent }));
         await sigSaved($('#fpad_' + pid), `${p.legal_name} has signed`, 'Signature saved');
+        if (($(`[data-tcopy="f${pid}"]`) || {}).checked) await copyHanded(ag.id, pid, p.legal_name, isHH ? 'Healthy Homes checklist' : 'Vendor Declaration');
         if (res && res.remaining === 0 && isHH) { const { error: fe } = await sb.functions.invoke('notify', { body: { type: 'form_signed', agreement_id: ag.id, form_id: fid } }); toast(fe ? 'All signed. The PDF didn\'t file; try again below.' : 'All signed. Filed, and emailed to you.'); }
         else if (res && res.remaining === 0) toast('All the vendors have signed. Countersign it below.');
         viewFormAgent(fid);
@@ -4434,7 +4642,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     main().innerHTML = `<div class="view-pad"><span class="agent-flag">Check it, then sign as licensee</span>
       <h1>Variation ${vr.number}</h1>
       <p class="lede">To the agency agreement for ${nt(ag.address)} (${nt(ag.ref)}), between McGuire Real Estate and ${nt(joinNames(signers.map(p => p.legal_name)))}.</p>
-      <div class="card" data-signed>${varTable(vr.summary)}${vr.reason ? `<p class="small" style="margin:10px 0 0">Reason: <span data-tr-block>${nlEsc(vr.reason)}</span></p>` : ''}</div>
+      ${docViewer(`<div class="card" data-signed data-dv-page>${varTable(vr.summary)}${vr.reason ? `<p class="small" style="margin:10px 0 0">Reason: <span data-tr-block>${nlEsc(vr.reason)}</span></p>` : ''}</div>`, { id: 'varDv' })}
       <p class="small">All other terms stay exactly as signed. It takes effect once everyone has signed.</p>
       <div class="toolbar"><button class="btn ghost" type="button" id="vPrev">Preview the PDF</button><button class="btn link" type="button" id="vBack">Change something</button></div>
       <h2>How will they sign?</h2>
@@ -4446,7 +4654,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <div class="card tight"><div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:8px"><h3 style="margin:0">Timothy McGuire, for McGuire Real Estate</h3><button class="btn link" type="button" id="vClr">Clear</button></div>
         <div class="sig-wrap"><canvas id="vSigA" aria-label="Your signature"></canvas><div class="sig-line"></div><span class="hint">Sign here</span></div>${saveNote('Save my signature and issue')}</div>
       <div class="err"></div></div>`;
-    $('#vSigA').scrollIntoView({ block: 'center' });
+    dvWire({ id: 'varDv' }); $('#vSigA').scrollIntoView({ block: 'center' });
     const pad = makePad($('#vSigA'));
     $('#vClr').addEventListener('click', () => pad.clear());
     $('#vPrev').addEventListener('click', () => openVarPdf(vid));
@@ -4482,16 +4690,16 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     main().innerHTML = `<div class="view-pad"><span class="agent-flag">Hand the device over to each person in turn</span>
       <h1>Changes to your agency agreement</h1>
       <p class="lede">Variation ${vr.number} to the agreement for ${nt(ag.address)}. Everything not listed here stays the same.</p>
-      <div class="card" data-signed>${varTable(vr.summary)}${vr.reason ? `<p class="small" style="margin:10px 0 0">Reason: <span data-tr-block>${nlEsc(vr.reason)}</span></p>` : ''}</div>
+      ${docViewer(`<div class="card" data-signed data-dv-page>${varTable(vr.summary)}${vr.reason ? `<p class="small" style="margin:10px 0 0">Reason: <span data-tr-block>${nlEsc(vr.reason)}</span></p>` : ''}</div>`, { id: 'varDv' })}
       <div class="toolbar"><button class="btn ghost" type="button" id="vPdf2">Read the variation (PDF)</button></div>
       ${todo.map(p => `<div class="card tight" data-vp="${p.id}"><div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:8px"><h3 style="margin:0">${nt(p.legal_name)}</h3><button class="btn link" type="button" data-vclr="${p.id}">Clear</button></div>
         <label class="choice cb"><input type="checkbox" data-vok="${p.id}"><span class="mark"></span><span><span class="ct">I've read these changes and agree to them</span><span class="cd">I was told I can get legal advice before signing, and given time to do so</span></span></label>
-        <div class="sig-wrap"><canvas data-vcv="${p.id}" aria-label="Signature of ${esc(p.legal_name)}"></canvas><div class="sig-line"></div><span class="hint">Sign here</span></div>${saveNote('Save signatures')}</div>`).join('') || '<p class="small">Everyone has signed.</p>'}
+        ${idCheckHTML('v' + p.id, p.legal_name)}<div class="sig-wrap"><canvas data-vcv="${p.id}" aria-label="Signature of ${esc(p.legal_name)}"></canvas><div class="sig-line"></div><span class="hint">Sign here</span></div>${saveNote('Save signatures')}${EMAIL_RE.test(p.email || '') ? '' : copyNoteHTML('v' + p.id, p.legal_name)}</div>`).join('') || '<p class="small">Everyone has signed.</p>'}
       <div class="err"></div></div>`;
     const pads = {};
     $$('[data-vcv]').forEach(cv => { pads[cv.dataset.vcv] = makePad(cv); });
     $$('[data-vclr]').forEach(b => b.addEventListener('click', () => pads[b.dataset.vclr].clear()));
-    $('#vPdf2').addEventListener('click', () => openVarPdf(vid));
+    dvWire({ id: 'varDv' }); $('#vPdf2').addEventListener('click', () => openVarPdf(vid));
     actions(true, 'Close', todo.length ? 'Save signatures' : 'Close');
     onBack = () => viewAgentDetail(agId);
     onNext = async () => {
@@ -4499,11 +4707,13 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       const ready = todo.filter(p => pads[p.id].drawn());
       if (!ready.length) return tErr('Each person ticks the box and signs.');
       for (const p of ready) if (!$(`[data-vok="${p.id}"]`).checked) return tErr(`${p.legal_name} needs to tick the box before signing.`);
+      const idcs = {}; for (const p of ready) { const r_ = await idCheckRead('v' + p.id, p.legal_name, p.id); if (r_.err) { atBtn($(`[data-idok="v${p.id}"]`).closest('label'), r_.err, 'err'); return tErr(r_.err); } idcs[p.id] = r_.check; }
       let res = null; const shown = [];
       for (const p of ready) {
         const path = await uploadSig($(`[data-vcv="${p.id}"]`), agId, vid + '-' + p.id);
-        res = await must(sb.rpc('agent_sign_variation_in_person', { v: vid, pid: p.id, p_image_path: path, p_snapshot: varSnapshot(ag, vr, { name: p.legal_name, email: p.email, role: 'client' }), p_user_agent: navigator.userAgent }));
+        res = await must(sb.rpc('agent_sign_variation_in_person', { v: vid, pid: p.id, p_image_path: path, p_snapshot: Object.assign(varSnapshot(ag, vr, { name: p.legal_name, email: p.email, role: 'client' }), { id_check: idcs[p.id] }), p_user_agent: navigator.userAgent }));
         shown.push(sigSaved($(`[data-vcv="${p.id}"]`), `${p.legal_name} has signed`, 'Signature saved'));
+        if (($(`[data-tcopy="v${p.id}"]`) || {}).checked) await copyHanded(agId, p.id, p.legal_name, 'variation ' + vr.number);
       }
       await Promise.all(shown);
       if (res && res.remaining === 0) {
@@ -4543,7 +4753,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     main().innerHTML = `<section class="screen active" data-signed data-signing>
       <h1>Changes to your agency agreement</h1>
       <p class="lede">As we discussed, here's what changes in your agreement for ${nt(A.address)}. Everything else stays exactly as you signed it.</p>
-      <div class="card" data-signed><h3>Variation ${vr.number}</h3>${varTable(vr.summary || [])}${vr.reason ? `<p class="small" style="margin:10px 0 0">Reason: <span data-tr-block>${nlEsc(vr.reason)}</span></p>` : ''}</div>
+      ${docViewer(`<div class="card" data-signed data-dv-page><h3>Variation ${vr.number}</h3>${varTable(vr.summary || [])}${vr.reason ? `<p class="small" style="margin:10px 0 0">Reason: <span data-tr-block>${nlEsc(vr.reason)}</span></p>` : ''}</div>`, { id: 'varDv' })}
       <div class="toolbar"><button class="btn ghost" type="button" data-vpdf="${vr.id}">Read the variation (PDF)</button></div>
       <div class="card note tight"><p class="small" style="margin:0">You're welcome to get legal advice before signing, and to take your time. If anything here isn't what we agreed, don't sign. Call or text Tim on 027 562 7207 and he'll fix it.</p></div>
       <h2>Sign</h2>
@@ -4552,6 +4762,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin:8px 0"><h3 style="margin:0">${esc(ME.legal_name)}</h3><button class="btn link" type="button" id="vClr">Clear</button></div>
         <div class="sig-wrap"><canvas id="vSigV" aria-label="Signature pad"></canvas><div class="sig-line"></div><span class="hint">Sign here with your finger or mouse</span></div>${saveNote('Save my signature and sign')}</div>
       <div class="err"></div></section>`;
+    dvWire({ id: 'varDv' });
     $$('[data-vpdf]').forEach(b => b.addEventListener('click', () => openVarPdf(b.dataset.vpdf)));
     const pad = makePad($('#vSigV'));
     $('#vClr').addEventListener('click', () => pad.clear());
@@ -6325,7 +6536,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const o = opts || {}, pdfjs = await drPdfjs();
     const key = o.key || 'blank'; holder._docs ||= {};
     const doc = holder._docs[key] ||= await pdfjs.getDocument(Object.assign({ data: o.bytes.slice(0), isEvalSupported: false }, PDF_OPTS)).promise;
-    const pg = await doc.getPage(n), w = drPageW(), vp1 = pg.getViewport({ scale: 1 }), scale = w / vp1.width, vp = pg.getViewport({ scale: scale * (window.devicePixelRatio || 1) });
+    const pg = await doc.getPage(n), w = o.width || drPageW(), vp1 = pg.getViewport({ scale: 1 }), scale = w / vp1.width, vp = pg.getViewport({ scale: scale * Math.min(window.devicePixelRatio || 1, Math.sqrt(12e6 / (w * w * vp1.height / vp1.width))) });   // a zoomed page stays inside what a phone can draw
     const cv = document.createElement('canvas'); cv.width = Math.round(vp.width); cv.height = Math.round(vp.height); cv.className = 'dr-cv'; cv.setAttribute('aria-hidden', 'true');
     const wrapEl = document.createElement('div'); wrapEl.className = 'dr-pg'; wrapEl.style.width = w + 'px'; wrapEl.style.aspectRatio = vp1.width + ' / ' + vp1.height; wrapEl.dataset.page = n; wrapEl.appendChild(cv);
     holder.innerHTML = ''; holder.appendChild(wrapEl);
@@ -6959,6 +7170,85 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   // the draft's bytes and pages (checked against its fingerprint)
   async function sgDraftPages(d) { const bytes = await drDraftBytes(d); return { bytes, pages: await DR.readPages(await drPdfjs(), bytes, PDF_OPTS) }; }
 
+  /* ───── Tim's own changes to the signing places, before a round goes out (Tim, 26 November 2026) ─────
+     On "Ready to sign" (Round 1) and "Present" (Round 2 on), in the shared signing viewer: tap a place to move it, make it bigger or smaller,
+     or remove it; or add a place for a signer (initials or a signature). Places that must stay can't be removed, and the screen says why
+     under the button: a signature in the block, the foot of each page, a signer's last initials in the chattels box, and initials beside a
+     change. Added places go through the same checks in the database; what Tim changed is recorded on the round's timeline (029).
+       sgEditor(o) -> { html, wire(), edits() }   o: { id, holderId, pickId, bytes, key, pages: [{ n, w, h }], signers: [{ position, name }],
+          places (the array to change, in place), page, mapPlaces, overlay (r, page) (optional: the earlier rounds' ink), onChange () } */
+  const SG_IW = 26, SG_IH = 13, SG_SW = 150, SG_SH = 22;
+  function sgEditor(o) {
+    const E = { sel: null, mode: null, added: [], moved: [], removed: [], page: o.page || 1, kind: 'initial', signer: (o.signers[0] || {}).position || 1, proposed: o.places.length, proposedSha: SG.sha256Hex(SG.canon(o.places)) };
+    const area = SG.chattelsArea(o.mapPlaces || []), dp = (o.mapPlaces || []).find(x => x.id === 'date') || (o.mapPlaces || []).find(x => x.kind === 'date');
+    const nameOf = n => (o.signers.find(x => x.position === n) || {}).name || 'Signer ' + n;
+    const pl = id => o.places.find(x => x.id === id);
+    const why = x => {
+      if (!x || x.added_by_tim) return '';
+      if (x.why === 'foot') return 'The foot of every page needs each signer\'s initials, so this place stays. You can move it.';
+      if (x.why === 'block') return 'Each signer\'s place in the signature block is needed, so it stays. You can move it.';
+      if (x.why === 'change' || x.why === 'mark') return 'Initials beside a change are needed, so they stay. You can move them, keeping them beside the change.';
+      if (area && x.kind === 'initial' && SG.insideOf(x, area) && o.places.filter(y => y.signer === x.signer && y.kind === 'initial' && SG.insideOf(y, area)).length <= 1)
+        return `Each signer initials the chattels box, and this is ${nameOf(x.signer)}'s last place there. Add another inside the box first.`;
+      return ''; };
+    const html = () => `<section class="card" id="${o.id}"><h2>Signing places</h2>
+      <p class="small">These are made for you. Tap a place to move it, make it bigger or smaller, or remove it, or add a place. Nothing is saved until you go on.</p>
+      <div class="toolbar sg-ed-add"><label class="sr" for="${o.id}Who">Who</label><select id="${o.id}Who">${o.signers.map(x => `<option value="${x.position}" ${x.position === E.signer ? 'selected' : ''}>${esc(x.name || 'Signer ' + x.position)}</option>`).join('')}</select>
+        <label class="sr" for="${o.id}Kind">What</label><select id="${o.id}Kind"><option value="initial" ${E.kind === 'initial' ? 'selected' : ''}>Initials</option><option value="signature" ${E.kind === 'signature' ? 'selected' : ''}>Signature</option></select>
+        <button class="btn ghost" type="button" id="${o.id}Add">${E.mode === 'add' ? 'Tap the page where it goes' : 'Add a place'}</button></div>
+      <div class="card tight sg-ed-sel" id="${o.id}Sel" ${E.sel ? '' : 'hidden'}><p class="small" style="margin:0 0 6px" id="${o.id}SelWhat"></p>
+        <div class="toolbar"><button class="btn ghost" type="button" id="${o.id}Move">${E.mode === 'move' ? 'Tap the page where it goes' : 'Move'}</button><button class="btn ghost" type="button" id="${o.id}Smaller">Smaller</button><button class="btn ghost" type="button" id="${o.id}Bigger">Bigger</button><button class="btn ghost" type="button" id="${o.id}Remove">Remove</button><button class="btn link" type="button" id="${o.id}Done">Done</button></div></div>
+      ${docViewer(`<div id="${o.holderId}" class="dr-holder"></div>`, { id: o.id + 'Dv', pick: `<label class="sr" for="${o.pickId}">Page</label><select id="${o.pickId}">${o.pages.map(pg => `<option value="${pg.n}" ${pg.n === E.page ? 'selected' : ''}>Page ${pg.n} (${o.places.filter(x => x.page === pg.n).length})</option>`).join('')}</select>`, render: true })}
+      <p class="small" id="${o.id}Sum" role="status" aria-live="polite">${sum()}</p></section>`;
+    const sum = () => { const a = E.added.length, m = E.moved.length, r = E.removed.length; return a + m + r ? `Your changes: ${a} added, ${m} moved or resized, ${r} removed.` : 'No changes yet.'; };
+    let V = null;
+    const say = (btn, t, k) => atBtn(btn, t, k || 'err');
+    const clearOf = (r, x) => {   // a place stays on the page, off the date, and off other signers' places
+      const pg = o.pages.find(q => q.n === r.page); if (!pg || r.x < 0 || r.y < 0 || r.x + r.w > pg.w || r.y + r.h > pg.h) return 'Keep it inside the page.';
+      if (dp && dp.page === r.page && SG.overlap(r, { x: dp.x, y: dp.y - 2, w: dp.w || 100, h: (dp.h || 10) + 2 }) > 0) return 'That is where the date goes once the agreement is made. Put the place somewhere else.';
+      if (o.places.some(y => y !== x && y.page === r.page && y.signer !== r.signer && SG.overlap(r, y) > 0.5)) return 'That would sit on another signer\'s place. Put it in a clear space.';
+      if (x && area && x.kind === 'initial' && SG.insideOf(x, area) && !SG.insideOf(r, area) && o.places.filter(y => y.signer === x.signer && y.kind === 'initial' && SG.insideOf(y, area)).length <= 1)
+        return `This is ${nameOf(x.signer)}'s last place in the chattels box. Keep it inside the box.`;
+      return ''; };
+    const touched = x => { if (!x.added_by_tim && !E.moved.includes(x.id)) E.moved.push(x.id); };
+    const changed = () => { const sm = $('#' + o.id + 'Sum'); if (sm) sm.textContent = sum(); if (o.onChange) o.onChange(); };
+    const selWire = () => { const box = $('#' + o.id + 'Sel'), x = pl(E.sel); if (!box) return; box.hidden = !x; if (!x) return;
+      $('#' + o.id + 'SelWhat').textContent = `${x.label || (x.kind === 'signature' ? 'Signature' : 'Initials')}, for ${nameOf(x.signer)}, page ${x.page}.`;
+      $('#' + o.id + 'Move').textContent = E.mode === 'move' ? 'Tap the page where it goes' : 'Move'; };
+    const paint = async () => { const holder = $('#' + o.holderId); if (!holder) return;
+      try { const r = await drRender(holder, E.page, o.places.map(x => Object.assign({}, x, { cls: 'sg-place sg-s' + ((x.signer - 1) % 4 + 1) + (x.id === E.sel ? ' sg-ed-on' : ''), badge: String(x.signer) })), { bytes: o.bytes, key: o.key, button: true, width: V ? V.pageW() : null });
+        if (o.overlay) o.overlay(r, E.page);
+        r.wrapEl.addEventListener('click', e => { const q = r.wrapEl.getBoundingClientRect(), at = [(e.clientX - q.left) / q.width * r.W, r.H - (e.clientY - q.top) / q.height * r.H];
+          if (E.mode === 'add') { e.preventDefault(); const k = E.kind, w = k === 'signature' ? SG_SW : SG_IW, h = k === 'signature' ? SG_SH : SG_IH, rx = Math.round((at[0] - w / 2) * 10) / 10, ry = Math.round((at[1] - h / 2) * 10) / 10;
+            const ref = 'tim' + Math.random().toString(36).slice(2, 8), x = { id: `ack:${ref}:s${E.signer}`, signer: E.signer, kind: k, why: 'ack', ref, page: E.page, x: rx, y: ry, w, h, label: `${k === 'signature' ? 'Sign' : 'Initial'}: a place Tim added on page ${E.page}`, added_by_tim: true };
+            const bad = clearOf(x, null); if (bad) return say($('#' + o.id + 'Add'), bad);
+            o.places.push(x); E.added.push(x.id); E.mode = null; E.sel = x.id; $('#' + o.id + 'Add').textContent = 'Add a place'; say($('#' + o.id + 'Add'), `Added for ${nameOf(E.signer)}.`, 'ok'); selWire(); changed(); return paint(); }
+          if (E.mode === 'move') { e.preventDefault(); const x = pl(E.sel); if (!x) return; const nx = Object.assign({}, x, { page: E.page, x: Math.round((at[0] - x.w / 2) * 10) / 10, y: Math.round((at[1] - x.h / 2) * 10) / 10 });
+            const bad = clearOf(nx, x); if (bad) return say($('#' + o.id + 'Move'), bad);
+            Object.assign(x, { page: nx.page, x: nx.x, y: nx.y }); touched(x); E.mode = null; say($('#' + o.id + 'Move'), 'Moved.', 'ok'); selWire(); changed(); return paint(); }
+          const b = e.target.closest('.dr-box'); if (!b) return; E.sel = b.dataset.id; selWire(); paint(); });
+        if (V) V.painted(); } catch (_) { holder.innerHTML = `<p class="small err">${drNoLib}</p>`; } };
+    const wire = () => {
+      V = dvWire({ id: o.id + 'Dv', count: () => o.pages.length, current: () => E.page, go: async n => { E.page = n; const pk = $('#' + o.pickId); if (pk) pk.value = String(n); await paint(); }, render: () => paint() });
+      const pk = $('#' + o.pickId); if (pk) pk.addEventListener('change', e => { E.page = +e.target.value; paint().then(() => V && V.sync()); });
+      $('#' + o.id + 'Who').addEventListener('change', e => { E.signer = +e.target.value; });
+      $('#' + o.id + 'Kind').addEventListener('change', e => { E.kind = e.target.value; });
+      $('#' + o.id + 'Add').addEventListener('click', e => { E.mode = E.mode === 'add' ? null : 'add'; e.target.textContent = E.mode === 'add' ? 'Tap the page where it goes' : 'Add a place'; if (E.mode) say(e.target, `Tap the page where ${nameOf(E.signer)}'s ${E.kind === 'signature' ? 'signature' : 'initials'} go.`, 'ok'); });
+      $('#' + o.id + 'Move').addEventListener('click', e => { if (!pl(E.sel)) return; E.mode = E.mode === 'move' ? null : 'move'; selWire(); if (E.mode) say(e.target, 'Tap the page where it goes.', 'ok'); });
+      const size = (k, btn) => { const x = pl(E.sel); if (!x) return; const f = k > 0 ? 1.25 : 0.8, w = Math.round(x.w * f * 10) / 10, h = Math.round(x.h * f * 10) / 10;
+        if (w < 10 || h < 6) return say(btn, 'That is as small as it goes.'); if (w > 300 || h > 120) return say(btn, 'That is as big as it goes.');
+        const nx = Object.assign({}, x, { x: Math.round((x.x - (w - x.w) / 2) * 10) / 10, y: Math.round((x.y - (h - x.h) / 2) * 10) / 10, w, h }), bad = clearOf(nx, x); if (bad) return say(btn, bad);
+        Object.assign(x, { x: nx.x, y: nx.y, w, h }); touched(x); say(btn, k > 0 ? 'Made bigger.' : 'Made smaller.', 'ok'); changed(); paint(); };
+      $('#' + o.id + 'Bigger').addEventListener('click', e => size(1, e.target)); $('#' + o.id + 'Smaller').addEventListener('click', e => size(-1, e.target));
+      $('#' + o.id + 'Remove').addEventListener('click', e => { const x = pl(E.sel); if (!x) return; const w = why(x); if (w) return say(e.target, w);
+        o.places.splice(o.places.indexOf(x), 1); if (x.added_by_tim) E.added = E.added.filter(id => id !== x.id); else { E.moved = E.moved.filter(id => id !== x.id); E.removed.push({ id: x.id, label: x.label || '' }); }
+        E.sel = null; E.mode = null; selWire(); toast('Place removed'); changed(); paint(); });
+      $('#' + o.id + 'Done').addEventListener('click', () => { E.sel = null; E.mode = null; selWire(); paint(); });
+      selWire(); paint(); };
+    // what the screen proposed (how many places, and their fingerprint) goes with the changes, so the timeline holds both (029 review)
+    return { html, wire, edits: () => ({ added: E.added.slice(), moved: E.moved.filter(id => !E.added.includes(id)), removed: E.removed.slice(), proposed: E.proposed, proposed_sha256: E.proposedSha }), state: E };
+  }
+
   // "Ready to sign": the places made from the draft and map, the method, and nothing sent
   async function viewSignRelease(did, opt) {
     header('Ready to sign', '', 0); actions(false);
@@ -6975,6 +7265,9 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const pages = D_.pages, signers = ((d.details || {}).purchasers || []).map((x, i) => ({ position: i + 1, name: [x.first, x.last].map(v => String(v || '').trim()).filter(Boolean).join(' ') || 'Purchaser ' + (i + 1), email: String(x.email || '').trim() }));
     const M = SG.makePlaces({ pages, placed: d.placed || [], mapPlaces: mp.places || [], signers }), cca = SG.ccaPages(pages);
     const R = { method: (opt && opt.method) || ((d.details || {}).sign === 'digital' ? 'link' : 'in_person'), page: (M.places.find(x => x.kind === 'signature') || { page: 1 }).page };
+    // Tim can add, move, resize or remove places before it goes out (029), in the shared viewer
+    const ED = sgEditor({ id: 'sgEd', holderId: 'sgCanvas', pickId: 'sgPick', bytes: D_.bytes, key: 'draft-' + d.id, pages, signers, places: M.places, page: R.page, mapPlaces: mp.places || [],
+      onChange: () => signers.forEach(s => { const el = $(`[data-sgsum="${s.position}"]`); if (el) el.innerHTML = `<strong>${nt(s.name)}</strong>: ${M.places.filter(x => x.signer === s.position).length} places (${counts(s.position).map(([k, n]) => `${n} ${esc(SG_WHY[k])}`).join(', ')})`; }) });
     const counts = pos => Object.keys(SG_WHY).map(k => [k, M.places.filter(x => x.signer === pos && x.why === k).length]).filter(x => x[1]);
     const paint = () => {
       const noEmail = signers.filter(s => !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(s.email));
@@ -6985,8 +7278,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
           ${signers.map(s => `<p class="small" style="margin:0 0 4px" data-sgsum="${s.position}"><strong>${nt(s.name)}</strong>: ${M.counts[s.position] || 0} places (${counts(s.position).map(([k, n]) => `${n} ${esc(SG_WHY[k])}`).join(', ')})</p>`).join('')}
           ${M.blocking.length ? `<div class="card warnc tight" id="sgBlock"><p class="small" style="margin:0 0 4px"><strong>Signing can't be released yet</strong></p><ul class="dr-list">${M.blocking.map(b => `<li class="small dr-need" data-block="${esc(b.id)}"><strong>${esc(b.label)}</strong>: ${esc(b.why)}</li>`).join('')}</ul></div>` : ''}
           ${M.warnings.length ? `<div class="card note tight" id="sgWarn">${M.warnings.map(w => `<p class="small" style="margin:0">${esc(w)}</p>`).join('')}</div>` : ''}
-          <div class="dr-nav"><label class="sr" for="sgPick">Page</label><select id="sgPick">${pages.map(pg => `<option value="${pg.n}" ${pg.n === R.page ? 'selected' : ''}>Page ${pg.n} (${M.places.filter(x => x.page === pg.n).length})</option>`).join('')}</select></div>
-          <div id="sgCanvas" class="dr-holder"></div></section>
+          </section>${ED.html()}
         <section class="card" id="sgGuidesSum"><h2>Read before signing</h2>
           <p class="small">Each purchaser receipts the Client and Customer Acknowledgement and the Real Estate Authority guide to sale and purchase agreements before they sign.</p>
           <label class="f" for="sgCca">Client and Customer Acknowledgement: page numbers in this document</label><input type="text" id="sgCca" inputmode="numeric" value="${esc(cca.join(', '))}">
@@ -7001,17 +7293,15 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         <p class="small">${R.method === 'link' ? 'This gets the signing ready. You send the links on the next screen.' : 'Signing then happens on this device.'}</p></div>`;
       $('#sgBack').addEventListener('click', () => viewDraftReview(did));
       $$('input[name="sgMethod"]').forEach(x => x.addEventListener('change', () => { R.method = x.value; paint(); }));
-      $('#sgPick').addEventListener('change', e => { R.page = +e.target.value; canvas(); });
       $('#sgRelease').addEventListener('click', async () => {
         const btn = $('#sgRelease'); btn.disabled = true; $('#sgRelErr').textContent = '';
         const cc = $('#sgCca').value.split(/[\s,]+/).filter(Boolean).map(Number);
         if (cc.some(x => !Number.isInteger(x) || x < 1 || x > pages.length)) { $('#sgRelErr').textContent = 'Check the acknowledgement page numbers.'; btn.disabled = false; return; }
-        try { const r = await sgRpc('agent_signing_release', { p_draft: did, p_method: R.method, p_pages: pages.map(x => [x.w, x.h]), p_places: M.places, p_cca_pages: cc }); toast('Ready to sign'); viewSigning(r.id); }
-        catch (e) { $('#sgRelErr').textContent = e.message; btn.disabled = false; }
+        try { const r = await sgRpc('agent_signing_release_edited', { p_draft: did, p_method: R.method, p_pages: pages.map(x => [x.w, x.h]), p_places: M.places, p_cca_pages: cc, p_edits: ED.edits() }); toast('Ready to sign'); viewSigning(r.id); }
+        catch (e) { $('#sgRelErr').textContent = e.message; atBtn(btn, e.message, 'err'); btn.disabled = false; }
       });
-      canvas();
+      ED.wire();
     };
-    const canvas = async () => { try { await drRender($('#sgCanvas'), R.page, M.places.map(x => Object.assign({}, x, { cls: 'sg-place sg-s' + ((x.signer - 1) % 4 + 1), badge: String(x.signer) })), { bytes: D_.bytes, key: 'draft-' + d.id }); } catch (_) { $('#sgCanvas').innerHTML = `<p class="small err">${drNoLib}</p>`; } };
     paint(); top();
   }
 
@@ -7257,7 +7547,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       $('#sgReview').addEventListener('click', async () => { const b = $('#sgReview'); b.disabled = true;
         const live = S_.filter(s => !s.void_at).map(s => ({ position: s.position, name: s.name })), pgs = (g.pages || []).map((x, i) => ({ n: i + 1, w: x[0], h: x[1] }));
         const add = SG.markPlaces(open, live, pgs, places);
-        try { await sgRpc('agent_signing_review', { p_signing: sid, p_places: add }); toast('Re-approved. Everyone initials the change'); viewSigning(sid); } catch (e) { $('#sgRevErr').textContent = e.message; b.disabled = false; } });
+        try { await sgRpc('agent_signing_review', { p_signing: sid, p_places: add }); toast(add.length ? 'Re-approved. Everyone initials the change' : 'Re-approved. Signing carries on'); viewSigning(sid); } catch (e) { $('#sgRevErr').textContent = e.message; b.disabled = false; } });
     }
     top();
   }
@@ -7274,6 +7564,9 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       else if (m.kind === 'cross') { const rc = document.createElementNS(NS, 'rect'); Object.entries({ x: geo.x, y: Y(geo.y + geo.h), width: geo.w, height: geo.h }).forEach(([k, v]) => rc.setAttribute(k, v)); gEl.appendChild(rc); gEl.appendChild(ln(geo.x, geo.y, geo.x + geo.w, geo.y + geo.h)); gEl.appendChild(ln(geo.x, geo.y + geo.h, geo.x + geo.w, geo.y)); }
       else if (m.kind === 'reinstate') { const t = document.createElementNS(NS, 'text'); t.setAttribute('x', geo.x); t.setAttribute('y', Y(geo.y + 2)); t.textContent = 'Reinstated'; gEl.appendChild(t); }
       else if (m.kind === 'insert') { const t = document.createElementNS(NS, 'text'); t.setAttribute('x', geo.x); t.setAttribute('y', Y(geo.y)); t.setAttribute('class', 'sg-ins'); t.style.fontSize = (geo.size || 9) + 'px'; t.textContent = geo.text || ''; gEl.appendChild(t); }
+      // 029: a signer's own name (words) or their own initials or signature (their own ink, copied in by the database)
+      else if (m.kind === 'own_name') { const z = Math.max(3, Math.min(geo.size || 9, (geo.w - 1) / Math.max(1, NG.textWidth(geo.text || '', 1)))), t = document.createElementNS(NS, 'text'); t.setAttribute('x', geo.x); t.setAttribute('y', Y(geo.y + Math.max(0, (geo.h - z) / 2) + 1)); t.setAttribute('class', 'sg-ins'); t.style.fontSize = z + 'px'; t.textContent = geo.text || ''; gEl.appendChild(t); }
+      else if (SG.isOwn(m) && (m.ink || m.ink_png)) { const im = document.createElementNS(NS, 'image'); Object.entries({ href: m.ink || m.ink_png, x: geo.x, y: Y(geo.y + geo.h), width: geo.w, height: geo.h, preserveAspectRatio: 'xMidYMid meet' }).forEach(([k, v]) => im.setAttribute(k, v)); gEl.appendChild(im); }
       if (onPick && ['strike', 'cross'].includes(m.kind)) { gEl.style.cursor = 'pointer'; gEl.addEventListener('click', e => { e.stopPropagation(); onPick(m); }); }
       svg.appendChild(gEl); });
     r.wrapEl.appendChild(svg); return svg;
@@ -7282,6 +7575,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   // ── the signing itself: the same screens in person (Tim's device) and by link ──
   // ctx: { mode: 'person'|'link', address, name, position, places, taps (Set), consent_at, receipts ([guide]), sig_png, init_png,
   //   status, stopped, cca_pages, pages ([[w, h]]), bytes, draftSha, marks, api: { consent, receipt, marks, tap, mark?, ask?, finish }, done(r), back? }
+  // whose zoom the signing viewer keeps: a link is the signer's own device; on Tim's device each signer of each document has their own
+  const sgWho = ctx => ctx.mode === 'link' ? 'me' : 'sg:' + String(ctx.draftSha || '').slice(0, 12) + ':' + (ctx.side || 'purchaser') + ':' + (ctx.position || 0);
   function signFlow(ctx) {
     const F = { page: null, marking: null, draft: null, pick: null };
     const req = () => ctx.places, done = () => req().filter(x => ctx.taps.has(x.id)).length;
@@ -7297,7 +7592,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const g2 = GUIDES.sale_purchase;
     let body = '';
     if (step === 'stopped') body = `<div class="card warnc" id="sgStopped"><p style="margin:0">${esc(ctx.stopped)}</p></div>`;
-    else if (step === 'held') body = `<div class="card note" id="sgHeldMsg"><h2 style="margin-top:0">Sent to Tim to check</h2><p class="small" style="margin:0">${ctx.mode === 'person' ? 'A change was marked on the document. Tim checks it and re-approves before signing carries on. Everyone then initials beside it.' : 'Tim is checking a change to the document. Signing carries on once he has. Come back to this link then.'}</p>${ctx.back ? '<div class="toolbar"><button class="btn primary" type="button" id="sgToTim">Back to Tim\'s screen</button></div>' : ''}</div>${ctx.api.undo && ctx.last && ctx.last.what === 'change' ? sgUndoHTML(ctx, false) : ''}`;
+    else if (step === 'held') body = `<div class="card note" id="sgHeldMsg"><h2 style="margin-top:0">Sent to Tim to check</h2><p class="small" style="margin:0">${ctx.mode === 'person' ? 'A change was marked on the document. Tim checks it and re-approves before signing carries on. Everyone then initials beside it (a signer\'s own initials, name or signature needs nobody else\'s).' : 'Tim is checking a change to the document. Signing carries on once he has. Come back to this link then.'}</p>${ctx.back ? '<div class="toolbar"><button class="btn primary" type="button" id="sgToTim">Back to Tim\'s screen</button></div>' : ''}</div>${ctx.api.undo && ctx.last && ctx.last.what === 'change' ? sgUndoHTML(ctx, false) : ''}`;
     else if (step === 'consent') body = `<section class="card" id="sgConsent"><h2>Signing electronically</h2>
       <p class="small">You're about to sign the agreement for ${nt(ctx.address)} on screen. Your drawn signature and initials, and each place you tap, have the same effect as signing on paper. A record of when and how you signed is kept with the signed copy.</p>
       <p class="small">You can stop at any time, and you can ask for a paper copy instead.</p>
@@ -7305,7 +7600,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <div class="toolbar"><button class="btn primary" type="button" id="sgAgreeGo">Continue</button></div></section>`;
     else if (step === 'guides' && VEND) body = ngChattelsHTML(ctx);
     else if (step === 'guides') body = `<section class="card" id="sgGuides"><h2>Before you sign</h2>
-      ${(ctx.cca_pages || []).length ? `<h3>Client and Customer Acknowledgement</h3><p class="small">This is in the agreement pack (page${ctx.cca_pages.length > 1 ? 's' : ''} ${ctx.cca_pages.join(', ')}). It explains who Tim acts for and what he must do for you. Read it here.</p><div id="sgCcaPages"></div>
+      ${(ctx.cca_pages || []).length ? `<h3>Client and Customer Acknowledgement</h3><p class="small">This is in the agreement pack (page${ctx.cca_pages.length > 1 ? 's' : ''} ${ctx.cca_pages.join(', ')}). It explains who Tim acts for and what he must do for you. Read it here.</p>${docViewer('<div id="sgCcaPages"></div>', { id: 'sgCcaDv', who: sgWho(ctx), render: true })}
         ${hasR('cca') ? '<p class="small okc" id="sgCcaDone">Received.</p>' : `<label class="choice cb"><input type="checkbox" id="sgCcaOk"><span class="mark"></span><span><span class="ct">I've read the Client and Customer Acknowledgement</span><span class="cd">This is recorded with the time</span></span></label>`}` : ''}
       <h3>Real Estate Authority guide to sale and purchase agreements</h3><p class="small">It explains the agreement you are about to sign.</p>${g2 ? guideViewer(g2) : `<p><a href="${REA_SP}" target="_blank" rel="noopener">Read the guide on the Real Estate Authority website</a></p>`}
       ${hasR('sale_purchase') ? '<p class="small" id="sgSpDone">Received.</p>' : `<label class="choice cb"><input type="checkbox" id="sgSpOk"><span class="mark"></span><span><span class="ct">I've received the Real Estate Authority guide to sale and purchase agreements</span><span class="cd">This is recorded with the time</span></span></label>`}
@@ -7322,28 +7617,27 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         <p class="small">Your places are highlighted on each page. Tap each one yourself to put your ${'initials or signature'} there.</p>
         <p class="sg-count" id="sgCount" role="status" aria-live="polite"><strong>${done()} of ${req().length}</strong> places done</p>
         <div class="sg-bar"><span style="width:${req().length ? Math.round(done() / req().length * 100) : 0}%"></span></div>
-        <div class="dr-nav"><button class="btn ghost" type="button" id="sgPrev">Previous</button><label class="sr" for="sgPgPick">Page</label><select id="sgPgPick">${ctx.pages.map((x, i) => { const n = i + 1, t = req().filter(y => y.page === n).length, l = req().filter(y => y.page === n && !ctx.taps.has(y.id)).length; return `<option value="${n}" ${n === F.page ? 'selected' : ''}>Page ${n}${t ? ` (${l ? l + ' to do' : 'done'})` : ''}</option>`; }).join('')}</select><button class="btn ghost" type="button" id="sgNext">Next</button></div>
         ${left ? '<div class="toolbar"><button class="btn link" type="button" id="sgGoNext">Go to the next place to do</button></div>' : ''}
         ${R2 && ctx.mode === 'link' && !ctx.link_changes ? `<div class="card note tight" id="ngNoChanges"><p class="small" style="margin:0">You can accept it as it stands by initialling and signing each place, or decline it. If you would like something changed, ask Tim below.</p>
           <div class="toolbar"><button class="btn ghost" type="button" id="ngDecline">Decline it as it stands</button></div><p class="small" id="ngDeclineOut" role="status"></p></div>
-` : R2 ? `<div class="sg-marktools" id="sgTools"><p class="small" style="margin:0 0 4px">To accept it as it stands, just initial and sign each place. To counter, change the document:</p> ${[['strike', 'Line through text'], ['cross', 'Cross out a passage'], ['insert', 'Type words'], ['note', 'Write by hand'], ['reinstate', 'Reinstate']].map(([k, l]) => `<button class="btn ${F.marking === k ? 'primary' : 'ghost'}" type="button" data-tool="${k}">${l}</button>`).join('')}</div>
-` : ctx.mode === 'person' ? `<div class="sg-marktools" id="sgTools"><span class="small">Mark the page:</span> ${[['note', 'Note'], ['strike', 'Line through text'], ['cross', 'Cross out a box'], ['reinstate', 'Reinstate']].map(([k, l]) => `<button class="btn ${F.marking === k ? 'primary' : 'ghost'}" type="button" data-tool="${k}">${l}</button>`).join('')}</div>
-` : ''}
-        <div id="sgPage" class="dr-holder sg-holder"></div>
+          <div class="sg-marktools" id="sgTools"><span class="small">Add to the page:</span> ${sgToolBtns(F, SG_ADD.filter(([k]) => k !== 'insert'))}</div>
+` : R2 ? `<div class="sg-marktools" id="sgTools"><p class="small" style="margin:0 0 4px">To accept it as it stands, just initial and sign each place. To counter, change the document:</p> ${sgToolBtns(F, [['strike', 'Line through text'], ['cross', 'Cross out a passage'], ['note', 'Write by hand'], ['reinstate', 'Reinstate']].concat(SG_ADD))}</div>
+` : `<div class="sg-marktools" id="sgTools"><span class="small">Mark the page:</span> ${sgToolBtns(F, [['note', 'Note'], ['strike', 'Line through text'], ['cross', 'Cross out a box'], ['reinstate', 'Reinstate']].concat(SG_ADD))}</div>
+`}
+        ${docViewer('<div id="sgPage" class="dr-holder sg-holder"></div>', { id: 'sgDv', who: sgWho(ctx), places: true, ids: { prev: 'sgPrev', next: 'sgNext' },
+          pick: `<label class="sr" for="sgPgPick">Page</label><select id="sgPgPick">${ctx.pages.map((x, i) => { const n = i + 1, t = req().filter(y => y.page === n).length, l = req().filter(y => y.page === n && !ctx.taps.has(y.id)).length; return `<option value="${n}" ${n === F.page ? 'selected' : ''}>Page ${n}${t ? ` (${l ? l + ' to do' : 'done'})` : ''}</option>`; }).join('')}</select>`, render: true })}
         <p class="small">${pagesWith.length} page${pagesWith.length === 1 ? '' : 's'} have places for you.</p>
-        ${ctx.mode === 'link' && (!R2 || !ctx.link_changes) ? `<details class="card tight" id="sgAskBox"><summary class="small">Ask Tim for a change</summary><p class="small">You can't change the document here. Tell Tim what you would like changed and he'll be in touch. If the offer changes, everyone signs the new version.</p>
+        ${ctx.mode === 'link' && (!R2 || !ctx.link_changes) ? `<details class="card tight" id="sgAskBox"><summary class="small">Ask Tim for a change</summary><p class="small">${R2 ? 'You can\'t change the document here.' : 'You can mark the page above, or'} ${R2 ? 'Tell' : 'tell'} Tim what you would like changed and he'll be in touch. If the offer changes, everyone signs the new version.</p>
           <label class="sr" for="sgAskText">What you would like changed</label><textarea id="sgAskText" rows="3" maxlength="1000"></textarea><div class="toolbar"><button class="btn ghost" type="button" id="sgAskGo">Send to Tim</button></div><p class="small" id="sgAskOut" role="status"></p></details>` : ''}
         </section>
         ${ctx.api.undo ? sgUndoHTML(ctx, true) : ''}
         <section class="card" id="sgFinish"><h2>Finish</h2>${left ? `<p class="small" id="sgLeft">${left} place${left === 1 ? '' : 's'} still to do. You can finish once every place is done.</p>` : '<p class="small" id="sgAllDone">Every place is done.</p>'}
-          ${ctx.mode === 'person' ? `<label class="choice cb"><input type="checkbox" id="sgSaw"><span class="mark"></span><span><span class="ct">Tim: I saw ${esc(ctx.name)} sign</span></span></label>
-            <fieldset class="sg-idwho" id="sgIdWho"><legend class="f">Identity <span class="opt">(optional: choose one, or leave it)</span></legend>
-              <label class="choice"><input type="radio" name="sgIdWho" value="" checked><span class="mark"></span><span><span class="ct">Neither</span></span></label>
-              <label class="choice"><input type="radio" name="sgIdWho" value="known"><span class="mark"></span><span><span class="ct">Known to the agent</span></span></label>
-              <label class="choice"><input type="radio" name="sgIdWho" value="checked"><span class="mark"></span><span><span class="ct">ID checked</span></span></label>
-              <label class="f" for="sgIdType">What was seen <span class="opt">(the type only; no number is kept)</span></label><select id="sgIdType"><option value="">Choose</option>${SG_ID.filter(([k]) => k !== 'known_to_tim').map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select></fieldset>` : ''}
+          ${ctx.mode === 'person' ? `<div class="sg-idwho" id="sgIdWho"><label class="f" for="sgIdType">Photo ID you checked for ${esc(ctx.name)} <span class="opt">(the type only; no number is kept)</span></label>
+              <select id="sgIdType"><option value="">Choose</option>${SG_ID.filter(([k]) => k !== 'known_to_tim').map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select>
+              <label class="choice cb" style="margin-top:8px"><input type="checkbox" id="sgSaw"><span class="mark"></span><span><span class="ct">Tim: I checked ${esc(ctx.name)}'s ID and watched them sign</span></span></label></div>` : ''}
           <p class="small" id="sgToTimOnly"><strong>When you confirm, this goes straight to Tim McGuire, the agent. He will be in touch with the other party; they are not told until he does.</strong></p>
-          <div class="toolbar"><button class="btn primary" type="button" id="sgFinishGo" ${left ? 'disabled' : ''}>Finish signing</button></div></section>`;
+          <div class="toolbar"><button class="btn primary" type="button" id="sgFinishGo" ${left ? 'disabled' : ''}>Finish signing</button></div>
+          ${ctx.mode === 'person' ? `<div class="toolbar" style="margin-top:4px"><button class="btn link" type="button" id="sgNoIdGo" ${left ? 'disabled' : ''}>Finish without an ID check</button></div>` : ''}</section>`;
     }
     main().innerHTML = `<div class="view-pad dr-page sg-flow" id="sgFlow"><h1>${ctx.mode === 'person' ? esc(ctx.name) + ' signs' : VEND ? 'An offer on your property' : R2 ? 'The vendors\' reply to your offer' : 'Your offer to sign'}</h1><p class="lede">${nt(ctx.address)}</p>
       ${R2 ? ngIntroHTML(ctx) : ''}
@@ -7361,7 +7655,12 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     on('#sgAgreeGo', () => { if (!$('#sgAgree').checked) return err('Tick the box to agree to sign electronically, or stop here and call Tim.'); act(() => ctx.api.consent()); });
     if (step === 'guides' && VEND) on('#ngChatGo', () => act(async () => { if (!$('#ngChatOk').checked) throw new Error('Tick that you have read the reminder about chattels.'); await ctx.api.receipt({ guide: 'chattels' }); }));
     else if (step === 'guides') {
-      const box = $('#sgCcaPages'); if (box) (async () => { for (const n of ctx.cca_pages) { const h = document.createElement('div'); h.className = 'dr-holder'; box.appendChild(h); try { await drRender(h, n, [], { bytes: ctx.bytes, key: 'sg-' + ctx.draftSha }); } catch (_) { h.innerHTML = `<p class="small err">${drNoLib}</p>`; } } })();
+      // the Client and Customer Acknowledgement pages, in the shared signing viewer (drawn again, sharp, at each zoom)
+      const box = $('#sgCcaPages'); let CV = null;
+      const ccaPaint = async () => { if (!box) return; const docs = box._docs || {}; box.innerHTML = '';
+        for (const n of ctx.cca_pages) { const h = document.createElement('div'); h.className = 'dr-holder'; h.dataset.dvPage = n; h._docs = docs; box.appendChild(h); try { await drRender(h, n, [], { bytes: ctx.bytes, key: 'sg-' + ctx.draftSha, width: CV ? CV.pageW() : null }); } catch (_) { h.innerHTML = `<p class="small err">${drNoLib}</p>`; } }
+        box._docs = docs; if (CV) CV.painted(); };
+      if (box) { CV = dvWire({ id: 'sgCcaDv', render: ccaPaint }); ccaPaint(); }
       reaFill();
       on('#sgGuidesGo', () => act(async () => {
         const cc = $('#sgCcaOk'), sp = $('#sgSpOk');
@@ -7377,13 +7676,14 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         const s = sgPng($('#sgSig')), i = sgPng($('#sgInit')); await ctx.api.marks(s, i); }));
     }
     if (step === 'places') {
+      let V = null;
       const paint = async () => {
         const holder = $('#sgPage'); if (!holder) return;
         // each paint draws into its own holder and only the newest is shown, so a quick page change and tool change never mix
         const my = (F.seq = (F.seq || 0) + 1), tmp = document.createElement('div'); tmp._docs = holder._docs || (holder._docs = {});
         const mine = req().filter(x => x.page === F.page).map(x => Object.assign({}, x, { cls: 'sg-place ' + (ctx.taps.has(x.id) ? 'sg-done' : 'sg-todo'), label: x.label }));
-        let r; try { r = await drRender(tmp, F.page, mine, { bytes: ctx.bytes, key: 'sg-' + ctx.draftSha, button: !F.marking }); } catch (_) { holder.innerHTML = `<p class="small err">${drNoLib}</p>`; return; }
-        if (my !== F.seq) return; holder.innerHTML = ''; holder.appendChild(r.wrapEl);
+        let r; try { r = await drRender(tmp, F.page, mine, { bytes: ctx.bytes, key: 'sg-' + ctx.draftSha, button: !F.marking, width: V ? V.pageW() : null }); } catch (_) { holder.innerHTML = `<p class="small err">${drNoLib}</p>`; return; }
+        if (my !== F.seq) return; holder.innerHTML = ''; holder.appendChild(r.wrapEl); if (V) V.painted();
         // what has been done shows as the signer's own initials, signature or name
         $$('.sg-place', r.wrapEl).forEach(b => fillBox(b, req().find(x => x.id === b.dataset.id)));
         const pick = F.marking === 'reinstate' ? m => { F.pick = m; const s = $('#sgMarkSave'); if (s) s.disabled = false; toast(R2 ? 'Tap Save this change to reinstate it' : 'Tap Save this mark to reinstate it'); } : null;
@@ -7392,7 +7692,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         if (!F.marking) r.wrapEl.addEventListener('click', async e => { const b = e.target.closest('.sg-place'); if (!b || b.dataset.busy) return; if (ctx.taps.has(b.dataset.id)) { fillBox(b, req().find(x => x.id === b.dataset.id)); return counts(); } b.dataset.busy = '1'; err('');
           try { await ctx.api.tap(b.dataset.id); ctx.taps.add(b.dataset.id); } catch (x) { delete b.dataset.busy; return err(x.message); }
           ctx.last = { what: 'tap', place_id: b.dataset.id }; sgUndoRefresh(ctx);   // the undo box follows each tap (Offers fixes 3)
-          delete b.dataset.busy; const pl = req().find(x => x.id === b.dataset.id); fillBox(b, pl); $$(`#sgPage .sg-place[data-id="${CSS.escape(pl.id)}"]`).forEach(x => fillBox(x, pl)); counts(); });
+          delete b.dataset.busy; const pl = req().find(x => x.id === b.dataset.id); fillBox(b, pl); $$(`#sgPage .sg-place[data-id="${CSS.escape(pl.id)}"]`).forEach(x => fillBox(x, pl)); counts();
+          if (V && V.auto()) toNext(); });
         else if (F.marking !== 'reinstate') sgDrawLayer(r, F, ctx);
       };
       const fillBox = (b, pl) => { if (!b || !pl) return; const isDone = ctx.taps.has(pl.id); b.classList.toggle('sg-done', isDone); b.classList.toggle('sg-todo', !isDone); b.setAttribute('aria-pressed', isDone ? 'true' : 'false'); b.setAttribute('aria-label', (isDone ? 'Done: ' : '') + pl.label);
@@ -7401,13 +7702,17 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       const counts = () => { const n = done(), t = req().length, left = t - n; $('#sgCount').innerHTML = `<strong>${n} of ${t}</strong> places done`; $('.sg-bar span').style.width = (t ? Math.round(n / t * 100) : 0) + '%';
         $$('#sgPgPick option').forEach(op => { const pn = +op.value, tt = req().filter(y => y.page === pn).length, l = req().filter(y => y.page === pn && !ctx.taps.has(y.id)).length; op.textContent = `Page ${pn}${tt ? ` (${l ? l + ' to do' : 'done'})` : ''}`; });
         const fin = $('#sgFinish p'); if (fin) { fin.id = left ? 'sgLeft' : 'sgAllDone'; fin.textContent = left ? `${left} place${left === 1 ? '' : 's'} still to do. You can finish once every place is done.` : 'Every place is done.'; }
-        $('#sgFinishGo').disabled = left > 0; const gn = $('#sgGoNext'); if (gn && !left) gn.remove(); };
+        $('#sgFinishGo').disabled = left > 0; { const ni = $('#sgNoIdGo'); if (ni) ni.disabled = left > 0; } const gn = $('#sgGoNext'); if (gn && !left) gn.remove(); };
       if (ctx._page) F.page = ctx._page;
       const sel = $('#sgPgPick'); if (sel) sel.value = String(F.page);
-      on('#sgPgPick', e => { F.page = +e.target.value; ctx._page = F.page; paint(); }, 'change');
-      on('#sgPrev', () => { if (F.page > 1) { F.page--; ctx._page = F.page; $('#sgPgPick').value = F.page; paint(); } });
-      on('#sgNext', () => { if (F.page < ctx.pages.length) { F.page++; ctx._page = F.page; $('#sgPgPick').value = F.page; paint(); } });
-      on('#sgGoNext', () => { const n = nextUndone(); if (!n) return; F.page = n.page; ctx._page = F.page; $('#sgPgPick').value = F.page; paint().then(() => { const b = $(`.sg-place[data-id="${CSS.escape(n.id)}"]`); if (b) { b.scrollIntoView({ block: 'center' }); b.focus({ preventScroll: true }); } }); });
+      // the shared signing viewer: page buttons, zoom (kept for this signer), full screen, and the glide to the next place
+      const toPage = async n => { F.page = n; ctx._page = F.page; const pk = $('#sgPgPick'); if (pk) pk.value = String(F.page); await paint(); };
+      V = dvWire({ id: 'sgDv', count: () => ctx.pages.length, current: () => F.page, go: toPage, render: () => paint() });
+      on('#sgPgPick', e => { toPage(+e.target.value).then(() => V && V.sync()); }, 'change');
+      // the next place still to do: on this page, or the page it is on, keeping the zoom
+      const toNext = async () => { const n = nextUndone(); if (!n) return; if (n.page !== F.page) { await toPage(n.page); if (V) V.sync(); }
+        const b = $(`#sgPage .sg-place[data-id="${CSS.escape(n.id)}"]`); if (b && V) await V.glide(b); else if (b) { b.scrollIntoView({ block: 'center' }); b.focus({ preventScroll: true }); } };
+      on('#sgGoNext', () => toNext());
       $$('[data-tool]').forEach(b => b.addEventListener('click', () => { F.marking = F.marking === b.dataset.tool ? null : b.dataset.tool; F.draft = null; F.pick = null; signFlowTools(ctx, F, paint); }));
       paint();
       on('#ngDecline', async () => { if (!confirm('Tell Tim you decline it as it stands?')) return;
@@ -7415,14 +7720,17 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       on('#sgAskGo', async () => { const t = $('#sgAskText').value.trim(); if (t.length < 3) return ($('#sgAskOut').textContent = 'Say what you would like changed.');
         try { await ctx.api.ask(t); $('#sgAskText').value = ''; $('#sgAskOut').textContent = 'Sent to Tim. He\'ll be in touch.'; } catch (e) { $('#sgAskOut').textContent = e.message; } });
       on('#sgFinishGo', () => act(async () => { let o = {};
-        // identity is Tim's free choice (Tim, 24 November 2026): known to the agent, an ID check with what was seen, or neither
-        if (ctx.mode === 'person') { if (!$('#sgSaw').checked) throw new Error('Tim: tick that you saw them sign.');
-          const who = ($('input[name="sgIdWho"]:checked') || {}).value || '', seen = $('#sgIdType').value;
-          let id = who === 'known' ? 'known_to_tim' : who === 'checked' ? seen : null;
-          if (who === 'checked' && !seen) throw new Error('Choose what ID you saw, or choose Neither.');
-          if (!who && seen) id = seen;   // a type chosen without the button: an ID check
-          o = { id }; }
+        // identity on Tim's device (Tim, 26 November 2026): the photo ID he checked for this person, and his tick that he watched them sign
+        if (ctx.mode === 'person') { const seen = $('#sgIdType').value;
+          if (!seen) throw new Error(`Choose the photo ID you checked for ${ctx.name}, or use Finish without an ID check.`);
+          if (!$('#sgSaw').checked) throw new Error(`Tim: tick that you checked ${ctx.name}'s ID and watched them sign.`);
+          o = { id: seen, checked: true }; }
         const r = await ctx.api.finish(o); ctx.finished = r; }, () => ctx.done(ctx.finished)));
+      // Tim may still finish without an ID check (Tim, 26 November 2026, 17:57): a clear warning right under the button, and a second
+      // tap to confirm; the record then says "Signed in person without an identity check" with his name and the time
+      on('#sgNoIdGo', () => { const b = $('#sgNoIdGo');
+        if (b.dataset.armed !== '1') { b.dataset.armed = '1'; b.textContent = 'Yes, finish without an ID check'; atBtn(b, `No identification has been checked for ${ctx.name}. Finish anyway? Tap again to finish without an ID check.`, 'err'); return; }
+        act(async () => { const r = await ctx.api.finish({ id: 'no_id_warned', checked: true }); ctx.finished = r; }, () => ctx.done(ctx.finished)); });
       F.rerender = paint;
     }
     top();
@@ -7432,6 +7740,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
      clear it). Nothing is removed: the database keeps each undone step and the timeline says what, by whom and when. Nobody is told. */
   const sgLastWords = ctx => { const l = ctx.last; if (!l) return '';
     if (l.what === 'tap') { const pl = (ctx.places || []).find(x => x.id === l.place_id); return pl ? `${pl.kind === 'signature' ? 'Your signature' : pl.kind === 'name' ? 'Your name' : 'Your initials'} on page ${pl.page}` : 'The last place you tapped'; }
+    if (SG.isOwn(l)) return `The ${({ own_initials: 'initials', own_name: 'name', own_signature: 'signature' })[l.kind]} you added on page ${l.page}`;
+    if (l.kind === 'insert') return `The text you added on page ${l.page}`;
     return `Your ${(SG.MARK_NAMES[l.kind] || (l.kind === 'insert' ? 'typed words' : 'change')).toLowerCase()} on page ${l.page}`; };
   const sgUndoHTML = (ctx, turn) => `<section class="card tight" id="sgUndoBox"><h3 style="margin:0 0 4px">Made a mistake?</h3>
     ${ctx.last ? `<p class="small" style="margin:0" id="sgUndoWhat">Your last step: ${esc(sgLastWords(ctx))}.</p>` : '<p class="small" style="margin:0" id="sgUndoWhat">Nothing to undo yet.</p>'}
@@ -7449,12 +7759,42 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const tb = $('#sgUndoTurn'); if (tb) tb.addEventListener('click', () => { const clear = !!($('#sgUndoClear') || {}).checked;
       if (!confirm(`Start your turn again? Everything you have done on this round is taken back${clear ? ', and your signature and initials are cleared' : ''}.`)) return; go('turn', clear, tb); });
   }
+  // the four ways to add to the page (Tim, 26 November 2026), in every round, in person and by link. Added text is a change; a signer's own
+  // initials, name or signature use only their own ink and exact name (the database checks it), and nobody else initials them.
+  const SG_ADD = [['insert', 'Add text'], ['own_initials', 'Add my initials'], ['own_name', 'Add my name'], ['own_signature', 'Add my signature']];
+  const sgToolBtns = (F, list) => list.map(([k, l]) => `<button class="btn ${F.marking === k ? 'primary' : 'ghost'}" type="button" data-tool="${k}">${l}</button>`).join('');
+  const SG_OWN_SIZE = { own_initials: [34, 16], own_signature: [110, 28], own_name: [0, 13] };
+  const SG_ADD_HINT = { insert: 'Tap where the words go, then type them below.', own_initials: 'Tap where your initials go. They are your own initials, as you drew them.', own_name: 'Tap where your name goes. It is your name exactly as it is on the agreement.', own_signature: 'Tap where your signature goes. It is your own signature, as you drew it.' };
+  // the box a signer's own mark takes, centred where they tapped, kept inside the page
+  function sgOwnGeo(kind, p, pw, ph, name) {
+    const [w0, h] = SG_OWN_SIZE[kind], w = kind === 'own_name' ? Math.min(380, Math.max(40, Math.round(NG.textWidth(name || '', 9) + 6))) : w0, r = v => Math.round(v * 10) / 10;
+    const x = Math.max(0, Math.min(pw - w, p[0] - w / 2)), y = Math.max(0, Math.min(ph - h, p[1] - h / 2));
+    return Object.assign({ x: r(x), y: r(y), w, h }, kind === 'own_name' ? { text: name, size: 9 } : {});
+  }
+  // save one of the four: Round 1 holds signing for Tim (a mark); from Round 2 on a signer's own mark (not a change). Feedback under Save.
+  async function sgSaveAdded(ctx, F, btn) {
+    let m = F.draft; if (!m || m.page !== F.page) { atBtn(btn, 'Tap the page first, where it goes.', 'err'); return false; }
+    if (m.kind === 'insert') { const t = (($('#ngInsText') || {}).value || '').trim().replace(/\s+/g, ' '); if (!t) { atBtn(btn, 'Type the words to add.', 'err'); return false; }
+      const who = ctx.own ? DR.holdsOwn(t, ctx.own) : ''; if (who) { atBtn(btn, `Those words hold ${who}'s own phone or email, so they can't go on the agreement. Only the lawyers' details go on it.`, 'err'); return false; }
+      m = Object.assign({}, m, { geometry: Object.assign({}, m.geometry, { text: t }) }); }
+    const pw = ctx.pages[F.page - 1]; if (!SG.markOk(m, { w: pw[0], h: pw[1] })) { atBtn(btn, 'That doesn\'t sit on the page. Try again.', 'err'); return false; }
+    btn.disabled = true; atBtn(btn, 'Saving...', 'ok');
+    try { const r = await ctx.api.mark(m); toast(r && r.held === false ? 'Added' : 'Sent to Tim to check'); ctx.reload(); return true; }
+    catch (x) { btn.disabled = false; atBtn(btn, x.message, 'err'); return false; }
+  }
   // switching a marking tool repaints the toolbar and the page in place
   function signFlowTools(ctx, F, paint) {
     const tools = $('#sgTools'); if (!tools) return;
     $$('[data-tool]').forEach(b => { b.className = 'btn ' + (F.marking === b.dataset.tool ? 'primary' : 'ghost'); });
     let hint = $('#sgMarkHint'); const tb = hint ? hint.nextElementSibling : null; if (hint) hint.remove(); if (tb) tb.remove(); const sw = $('#sgStrikeWords'); if (sw) sw.remove();
-    if (F.marking && (ctx.round || 1) > 1) return ngTools(ctx, F, paint, tools);
+    if (F.marking && (ctx.round || 1) > 1 && !SG.isOwn({ kind: F.marking })) return ngTools(ctx, F, paint, tools);
+    if (F.marking && SG_ADD.some(([k]) => k === F.marking)) {
+      const R1 = (ctx.round || 1) === 1;
+      tools.insertAdjacentHTML('afterend', `<p class="small" id="sgMarkHint">${SG_ADD_HINT[F.marking]} ${R1 ? (F.marking === 'insert' ? 'It goes to Tim to check before signing carries on, then everyone on your side initials it.' : 'It goes to Tim to check before signing carries on. Nobody else initials it.') : 'It is yours alone, so nobody else initials it, and it doesn\'t change the agreement.'}</p><div class="toolbar">${F.marking === 'insert' ? '<label class="sr" for="ngInsText">Words to add</label><input type="text" id="ngInsText" maxlength="290" placeholder="Words to add">' : ''}<button class="btn primary" type="button" id="sgMarkSave" disabled>${R1 ? 'Save this mark' : 'Save'}</button><button class="btn ghost" type="button" id="sgMarkCancel">Cancel</button></div>`);
+      $('#sgMarkCancel').addEventListener('click', () => { F.marking = null; F.draft = null; F.pick = null; signFlowTools(ctx, F, paint); });
+      const it = $('#ngInsText'); if (it) it.addEventListener('input', () => { $('#sgMarkSave').disabled = !(F.draft && it.value.trim()); if (F.redrawDraft) F.redrawDraft(); });
+      $('#sgMarkSave').addEventListener('click', () => sgSaveAdded(ctx, F, $('#sgMarkSave')));
+      return paint(); }
     if (F.marking) { tools.insertAdjacentHTML('afterend', `<p class="small" id="sgMarkHint">${{ note: 'Write or draw on the page with your finger or stylus.', strike: 'Drag along the line of text to strike it through.', cross: 'Drag from one corner of the passage or box to the other.', reinstate: 'Tap the line or crossed-out box to reinstate.' }[F.marking]} Any mark goes to Tim to check before signing carries on.</p><div class="toolbar"><button class="btn primary" type="button" id="sgMarkSave" disabled>Save this mark</button><button class="btn ghost" type="button" id="sgMarkCancel">Cancel</button></div>`);
       $('#sgMarkCancel').addEventListener('click', () => { F.marking = null; F.draft = null; F.pick = null; signFlowTools(ctx, F, paint); });
       $('#sgMarkSave').addEventListener('click', async () => { const e = $('#sgErr'); e.textContent = '';
@@ -7477,7 +7817,13 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     let turned = false; if (ctx && ctx.bytes) pgInfo().then(pg => { if (pg && pg.rot) { turned = true; F.draft = null; const e = $('#sgErr'); if (e) e.textContent = SG_ROT_MSG; } });
     let down = null, strokes = F.draft && F.draft.kind === 'note' && F.draft.page === F.page ? F.draft.geometry.strokes : [], cur = null;
     // the saved-to-be mark, as it will be stored (and drawn on the locked copy)
-    const drawDraft = () => { const d = F.draft; if (!d || d.page !== F.page || d.kind === 'note') return; const G = d.geometry; g.beginPath();
+    const drawDraft = () => { const d = F.draft; if (!d || d.page !== F.page || d.kind === 'note') return; const G = d.geometry;
+      // 029: a signer's own initials, signature or name where it will go, inside a dashed box
+      if (SG.isOwn(d)) { const [x0, y0] = px([G.x, G.y + G.h]), [x1, y1] = px([G.x + G.w, G.y]); g.save(); g.setLineDash([3, 2]); g.strokeRect(x0, y0, x1 - x0, y1 - y0); g.restore();
+        if (d.kind === 'own_name') { const q = rect0(), fs = (G.size || 9) / r.W * q.width; g.save(); g.fillStyle = '#0d2973'; g.font = `${fs}px Helvetica, Arial, sans-serif`; g.fillText(G.text || '', x0 + 2, y1 - (y1 - y0 - fs) / 2 - 1); g.restore(); }
+        else { const src = d.kind === 'own_initials' ? ctx && ctx.init_png : ctx && ctx.sig_png; if (src) { const im = new Image(); im.onload = () => { if (F.draft !== d) return; const k = Math.min((x1 - x0) / im.width, (y1 - y0) / im.height), w = im.width * k, h = im.height * k; g.drawImage(im, x0 + (x1 - x0 - w) / 2, y0 + (y1 - y0 - h) / 2, w, h); }; im.src = src; } }
+        return; }
+      g.beginPath();
       if (d.kind === 'strike') { const [x0, y0] = px([G.x0, G.y]), [x1] = px([G.x1, G.y]); g.moveTo(x0, y0); g.lineTo(x1, y0); }
       else if (d.kind === 'cross') { const [x0, y0] = px([G.x, G.y]), [x1, y1] = px([G.x + G.w, G.y + G.h]); g.rect(Math.min(x0, x1), Math.min(y0, y1), Math.abs(x1 - x0), Math.abs(y1 - y0)); g.moveTo(x0, y0); g.lineTo(x1, y1); g.moveTo(x0, y1); g.lineTo(x1, y0); }
       else if (d.kind === 'insert') { const [qx, qy] = px([G.x, G.y]); g.moveTo(qx, qy - 10); g.lineTo(qx, qy + 2); g.lineTo(qx + 14, qy + 2);
@@ -7495,12 +7841,13 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const ready = () => { const s = $('#sgMarkSave'); if (s) s.disabled = !F.draft || (F.marking === 'insert' && $('#ngInsText') && !$('#ngInsText').value.trim()); };
     const say = t => { const e = $('#sgErr'); if (e) e.textContent = t || ''; };
     cv.addEventListener('pointerdown', e => { e.preventDefault(); if (turned) { say(SG_ROT_MSG); return; } cv.setPointerCapture(e.pointerId); down = pt(e); say(''); if (F.marking === 'note') { cur = [down]; strokes.push(cur); } });
-    cv.addEventListener('pointermove', e => { if (!down) return; const p = pt(e); if (F.marking === 'note') { cur.push(p); if (cur.length > 400) cur.shift(); redraw(); } else if (F.marking !== 'insert') redraw(down, p); });
+    cv.addEventListener('pointermove', e => { if (!down) return; const p = pt(e); if (F.marking === 'note') { cur.push(p); if (cur.length > 400) cur.shift(); redraw(); } else if (F.marking !== 'insert' && !SG.isOwn({ kind: F.marking })) redraw(down, p); });
     let seq = 0;
     const end = async e => { if (!down) return; const p = pt(e), d0 = down; down = null;
       if (ctx && ctx.bytes) { const pg0 = await pgInfo(); if (pg0 && pg0.rot) { turned = true; F.draft = null; strokes = []; cur = null; redraw(); ready(); say(SG_ROT_MSG); return; } }
       if (F.marking === 'note') { if (cur && cur.length < 2) cur.push(p); F.draft = { kind: 'note', page: F.page, geometry: { strokes: strokes.slice(-60) } }; }
       else if (F.marking === 'insert') F.draft = { kind: 'insert', page: F.page, geometry: { x: p[0], y: p[1], text: '', size: 9 } };
+      else if (SG.isOwn({ kind: F.marking })) F.draft = { kind: F.marking, page: F.page, geometry: sgOwnGeo(F.marking, p, r.W, r.H, ctx && ctx.name) };   // 029
       else if (F.marking === 'strike') {
         const my = ++seq, mark = F.marking; F.draft = null; words(''); ready(); redraw(d0, [p[0], d0[1]]);
         // the printed words, and from Round 2 on the earlier rounds' typed words still standing (a counter-counteroffer strikes the other side's figure)
@@ -7548,7 +7895,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       last, ever_tapped: (tapsEver || []).length > 0,
       api: { change: c => sgRpc('agent_round_change', Object.assign({ p_id: c.id, p_kind: c.kind, p_page: c.page, p_geometry: c.geometry, p_target: c.target || null, p_places: c.places }, P_)), consent: () => sgRpc('agent_signing_consent', Object.assign({ p_ua: ua }, P_)), receipt: r => sgRpc('agent_signing_receipt', Object.assign({ p_guide: r.guide, p_version: r.version || null, p_file: r.file || null, p_sha256: r.sha256 || null, p_pages: r.pages || null }, P_)),
         marks: (a, b) => sgRpc('agent_signing_marks', Object.assign({ p_sig: a, p_init: b }, P_)), tap: pl => sgRpc('agent_signing_tap', Object.assign({ p_place: pl }, P_)),
-        mark: m => sgRpc('agent_signing_mark', Object.assign({ p_kind: m.kind, p_page: m.page, p_geometry: m.geometry, p_target: m.target || null }, P_)), finish: o2 => sgRpc('agent_signing_finish', Object.assign({ p_id_sighted: o2.id, p_ua: ua }, P_)),
+        mark: m => sgRpc('agent_signing_mark', Object.assign({ p_kind: m.kind, p_page: m.page, p_geometry: m.geometry, p_target: m.target || null }, P_)), finish: o2 => sgRpc('agent_signing_finish_checked', Object.assign({ p_id_type: o2.id, p_checked: o2.checked === true, p_ua: ua }, P_)),
         undo: (scope, clear) => sgRpc('agent_signing_undo', Object.assign({ p_scope: scope, p_clear: !!clear }, P_)) },
       reload: () => viewSignTurn(sid, signerId), back: () => { SG_HANDBACK = sid; viewSigning(sid); }, done: r => { toast(`${s.name} has finished`); SG_HANDBACK = sid; viewSigning(sid); } });
   }
@@ -7590,7 +7937,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   const ngStanding = ctx => NG.standing(ctx.layers || [], { doc_round: ctx.round, side: ctx.side, signing_id: 'current', marks: ctx.marks || [] });
   // ink and changes drawn over a rendered page (an overlay; the page itself is never changed)
   function ngLayer(r, st, page, onPick) {
-    const svg = sgMarksLayer(r, (st.changes || []).filter(m => m.page === page), onPick), NS = 'http://www.w3.org/2000/svg';
+    const svg = sgMarksLayer(r, (st.changes || []).concat(st.own || []).filter(m => m.page === page), onPick), NS = 'http://www.w3.org/2000/svg';
     (st.ink || []).filter(k => k.page === page).forEach(k => { const el = k.kind === 'name' || !k.png ? document.createElementNS(NS, 'text') : document.createElementNS(NS, 'image');
       if (k.kind === 'name' || !k.png) { el.setAttribute('x', k.x); el.setAttribute('y', r.H - k.y - 2); el.setAttribute('class', 'ng-name'); el.textContent = k.name || k.who || ''; }
       else { el.setAttribute('href', k.png); el.setAttribute('x', k.x); el.setAttribute('y', r.H - k.y - k.h); el.setAttribute('width', k.w); el.setAttribute('height', k.h); el.setAttribute('preserveAspectRatio', 'xMidYMid meet'); }
@@ -7942,6 +8289,9 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const pages = D_.pages.map(x => ({ n: x.n, w: x.w, h: x.h, items: x.items }));
     const M = NG.presentPlaces({ pages, placed: d.placed || [], mapPlaces: mp.places || [], side, signers: people, layers, resignEvery });
     const st = NG.standing(layers), changedPages = [...new Set(last.marks.map(m => m.page))];
+    // the places for this round, which Tim can add to, move, resize or remove (029), over the working copy
+    const ED = sgEditor({ id: 'ngEd', holderId: 'ngEdPage', pickId: 'ngEdPick', bytes: D_.bytes, key: 'draft-' + d.id, pages, signers: people.map(x => ({ position: x.position, name: x.name })), places: M.places, page: changedPages[0] || (M.places[0] || { page: 1 }).page,
+      mapPlaces: mp.places || [], overlay: (r, pg) => ngLayer(r, st, pg, null), onChange: () => people.forEach(x => { const el = $(`[data-ngwho="${x.position}"] .ng-n`); if (el) el.textContent = M.places.filter(q => q.signer === x.position).length; }) });
     const R = { method: (opt && opt.method) || 'in_person', page: changedPages[0] || 1, linkChanges: setg.link_changes_default === true, checked: false };   // checked: Tim's tick, kept when the page is drawn again   // Tim presents: in person unless he chooses a link
     const paint = () => {
       const noEmail = people.filter(x => !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x.email)), noName = people.filter(x => !x.name);
@@ -7952,11 +8302,12 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
           <div class="dr-nav"><label class="sr" for="ngPick">Page</label><select id="ngPick">${pages.map(pg => `<option value="${pg.n}" ${pg.n === R.page ? 'selected' : ''}>Page ${pg.n}${changedPages.includes(pg.n) ? ' (changed)' : ''}</option>`).join('')}</select></div>
           <div id="ngCanvas" class="dr-holder"></div>
           <label class="choice cb"><input type="checkbox" id="ngChecked" ${R.checked ? 'checked' : ''}><span class="mark"></span><span><span class="ct">I've looked at Round ${last.doc_round} and it can go to the ${ngSide(side)}</span></span></label></section>
-        <section class="card" id="ngWho"><h2>Who signs</h2>${people.map(x => `<p class="small" style="margin:0 0 4px" data-ngwho="${x.position}"><strong>${nt(x.name || 'No legal name yet')}</strong>: ${M.counts[x.position] || 0} places${R.method === 'link' ? ` <span translate="no">(${esc(x.email || 'no email')})</span>` : ''}</p>`).join('')}
+        <section class="card" id="ngWho"><h2>Who signs</h2>${people.map(x => `<p class="small" style="margin:0 0 4px" data-ngwho="${x.position}"><strong>${nt(x.name || 'No legal name yet')}</strong>: <span class="ng-n">${M.places.filter(q => q.signer === x.position).length}</span> places${R.method === 'link' ? ` <span translate="no">(${esc(x.email || 'no email')})</span>` : ''}</p>`).join('')}
           ${ownersChanged ? `<div class="card warnc tight" id="ngOwners"><p class="small" style="margin:0">The owners on the property have changed since Round ${prevL.doc_round}. Start a fresh copy, so the right people sign.</p></div>` : ''}
           <p class="small">${M.first ? `It's their first round, so each initials the foot of every page and every filled box, and signs.` : `Each initials every change not yet initialled${resignEvery ? ', and signs again' : '. Their signatures from before stand, unless a change lifted one: then they sign again'}.`}${side === 'vendor' ? ' Before signing, the vendors read the reminder that every chattel must be in full working order at settlement, and are told they can talk to their lawyer at any time. They see the purchasers\' names and lawyer, as on the agreement, never their own contact details.' : ''}</p>
           ${noName.length ? `<div class="card warnc tight"><p class="small" style="margin:0">${side === 'vendor' ? 'Add each vendor\'s legal name on the property first.' : 'Add each purchaser\'s name on the offer first.'}</p></div>` : ''}
-          ${M.blocking.length ? `<div class="card warnc tight" id="ngBlock"><ul class="dr-list">${M.blocking.map(b => `<li class="small"><strong>${esc(b.label)}</strong>: ${esc(b.why)}</li>`).join('')}</ul></div>` : ''}</section>
+          ${M.blocking.length ? `<div class="card warnc tight" id="ngBlock"><ul class="dr-list">${M.blocking.map(b => `<li class="small" data-block="${esc(b.id)}"><strong>${esc(b.label)}</strong>: ${esc(b.why)}</li>`).join('')}</ul></div>` : ''}</section>
+        ${ED.html()}
         <section class="card" id="ngHow"><h2>How they sign</h2><div class="choices">
           <label class="choice"><input type="radio" name="ngMethod" value="in_person" ${R.method === 'in_person' ? 'checked' : ''}><span class="mark"></span><span><span class="ct">In person, on this device</span><span class="cd">One at a time. You record that you saw them sign and the photo ID you sighted (the type only).</span></span></label>
           <label class="choice"><input type="radio" name="ngMethod" value="link" ${R.method === 'link' ? 'checked' : ''}><span class="mark"></span><span><span class="ct">By a personal link to each</span><span class="cd">Each gets their own link and a one-time code by email. Nothing is sent until you tap Send.</span></span></label></div>
@@ -7970,9 +8321,9 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       $('#ngLinkChanges').addEventListener('change', e => { R.linkChanges = e.target.checked; }); $('#ngChecked').addEventListener('change', e => { R.checked = e.target.checked; });
       $('#ngPick').addEventListener('change', e => { R.page = +e.target.value; canvas(); });
       $('#ngGo').addEventListener('click', async () => { const b = $('#ngGo'); b.disabled = true; $('#ngErr').textContent = '';
-        try { const r = await sgRpc('agent_round_present', { p_offer: oid, p_method: R.method, p_places: M.places, p_checked: $('#ngChecked').checked, p_note: null, p_link_changes: R.linkChanges }); toast(`Round ${r.round || last.doc_round + 1} authorised`); viewSigning(r.id); }
-        catch (e) { $('#ngErr').textContent = e.message; b.disabled = false; } });
-      canvas();
+        try { const r = await sgRpc('agent_round_present_edited', { p_offer: oid, p_method: R.method, p_places: M.places, p_checked: $('#ngChecked').checked, p_note: null, p_link_changes: R.linkChanges, p_edits: ED.edits() }); toast(`Round ${r.round || last.doc_round + 1} authorised`); viewSigning(r.id); }
+        catch (e) { $('#ngErr').textContent = e.message; atBtn(b, e.message, 'err'); b.disabled = false; } });
+      canvas(); ED.wire();
     };
     const canvas = async () => { try { const r = await drRender($('#ngCanvas'), R.page, [], { bytes: D_.bytes, key: 'draft-' + d.id }); ngLayer(r, st, R.page, null); } catch (_) { $('#ngCanvas').innerHTML = `<p class="small err">${drNoLib}</p>`; } };
     paint(); top();
@@ -8028,11 +8379,11 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       let bytes = null; if (st.signing.draft_url) { try { bytes = new Uint8Array(await (await fetch(st.signing.draft_url)).arrayBuffer()); if (await REPO.sha256(bytes) !== st.signing.draft_sha256) throw new Error('x'); } catch (_) { return closed('The document didn\'t open', 'Check your connection and open the link again.'); } }
       const S = st.signer, G = st.signing;
       signFlow({ mode: 'link', address: G.address, name: S.name, position: S.position, places: G.places || [], taps: new Set(st.taps || []), consent_at: S.consent_at, receipts: (S.receipts || []).map(r => r.guide), sig_png: S.sig_png, init_png: S.init_png,
-        status: G.status, stopped: G.stopped, cca_pages: G.cca_pages || [], pages: G.pages, bytes, draftSha: G.draft_sha256, marks: (G.round || 1) > 1 ? G.marks || [] : [],
+        status: G.status, stopped: G.stopped, cca_pages: G.cca_pages || [], pages: G.pages, bytes, draftSha: G.draft_sha256, marks: G.marks || [],
         round: G.round || 1, side: G.side || 'purchaser', link_changes: !!G.link_changes, layers: G.layers || [], parties: G.parties || null, side_places: G.side_places || [], terms: G.terms || null, sideSigners: Array.from({ length: G.signers || 1 }, (_, i) => ({ position: i + 1, name: '' })),
         last: S.last || null, ever_tapped: !!S.ever_tapped, revert: G.revert || null,
         api: { change: c => call('change', c), consent: () => call('consent'), receipt: r => call('receipt', r), marks: (a, b) => call('marks', { sig: a, init: b }), tap: pl => call('tap', { place: pl }), ask: (t, decline) => call('ask', { text: t, decline: !!decline }), request: r => call('request', r), finish: () => call('finish'),
-          undo: (scope, clear) => call('undo', { scope, clear: !!clear }) },
+          mark: m => call('mark', { kind: m.kind, page: m.page, geometry: m.geometry, target: m.target || null }), undo: (scope, clear) => call('undo', { scope, clear: !!clear }) },
         reload: start, done: r => { setSes(''); main().innerHTML = `<div class="login-card" id="sgThanks"><h1>Thank you, ${esc(S.name.split(' ')[0])}</h1><p class="lede">You've signed every place.${r && r.complete && r.locked ? ' Everyone has now signed, and the signed copy is locked.' : r && r.complete ? ' Everyone has now signed. Tim will lock the signed copy and let you know.' : ' Tim will let you know once everyone has signed.'}</p><p class="small">${VS || LR ? `Nothing goes back to the ${VS ? 'purchasers' : 'vendors'} until Tim has checked it.` : 'Nothing goes to the sellers until Tim has checked it.'} Any questions, call or text Tim on <a href="tel:0275627207">027 562 7207</a>.</p></div>`; top(); } });
     };
     const codeStep = (msg) => {
