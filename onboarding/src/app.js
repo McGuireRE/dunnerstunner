@@ -8812,6 +8812,17 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     await fvPut(v);
     return v;
   }
+  // one chattels list: Tim's edit on a draft agreement comes back to the first visit's lists (the database does it; the phone shows it)
+  async function fvFromProfile(v) {
+    const facts = await profileLoad(v.pid); if (!facts.length) return;
+    let changed = false;
+    ['chattels_std', 'chattels_featured', 'chattels_removed'].forEach(k => { const f = facts.find(x => x.key === k && x.value_id), cur = v.facts[k];
+      if (!f || f.source !== 'agreement' || (cur && FVC.dirty(cur))) return;
+      if (JSON.stringify((cur || {}).value) !== JSON.stringify(f.value)) { v.facts[k] = { value: f.value, rev: 0, srev: 0 }; changed = true; } });
+    const ch = facts.find(x => x.key === 'chattels' && x.value_id), had = JSON.stringify(v.agChattels || null);
+    v.agChattels = ch && ch.source === 'agreement' && Array.isArray(ch.value) ? ch.value : null;
+    if (changed || had !== JSON.stringify(v.agChattels || null)) await fvPut(v);
+  }
   // the visit's own address: under its property once the property is on file, else under Processes
   function fvAddress(v, sec) { if (!PORTAL || FVS.cur !== v.id) return; const s = sec != null ? sec : (FVS.sec || ''); portalAt((v.server && okId(v.pid) ? `properties/${v.pid}/first-visit/${v.id}` : `processes/first-visit/${v.id}`) + (s ? '/' + s : '')); }
 
@@ -8822,6 +8833,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     if (!v && navigator.onLine) v = await fvFromServer(id).catch(() => null);
     if (!v) { main().innerHTML = `<div class="view-pad" id="fvMissing"><h1>First visit not found</h1><p class="lede">It isn't on this phone, and it couldn't be read from the property. Check you have signal, then try again.</p><div class="toolbar"><button class="btn primary" type="button" id="fvMissStart">Start a first visit</button></div></div>`; $('#fvMissStart').addEventListener('click', () => viewFirstVisitStart()); return; }
     await fvExtras();
+    if (v.server && navigator.onLine) await fvFromProfile(v);
     FVS.cur = v.id; FVS.sec = FV_SECS.some(s => s[0] === sec) ? sec : '';
     fvDraw(v);
     if (fvPending(v)) fvSync(v);
@@ -8888,7 +8900,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     if (sec === 'property') return `
       <h2>The property</h2>
       <p class="small">Tap what you see. Each goes on the property profile as yours, marked "First visit". Bedrooms come only from your call on each room${nb == null ? '' : `: <strong>${esc(String(nb))}</strong>`}.</p>
-      ${PLISTS.FACT_GROUPS.map(([g, keys]) => `<details class="card tight fv-group" ${g === 'The property' || g === 'Counts' ? 'open' : ''}><summary><strong>${esc(g)}</strong></summary>${keys.map(k => fvFactHTML(v, k)).join('')}</details>`).join('')}`;
+      ${PLISTS.FACT_GROUPS.map(([g, keys]) => `<details class="card tight fv-group" ${g === 'The property' || g === 'Counts' ? 'open' : ''}><summary><strong>${esc(g)}</strong></summary>${keys.map(k => fvFactHTML(v, k)).join('')}${g === 'Chattels' ? `<div id="fvChatAg">${fvChatAgHTML(v)}</div>` : ''}</details>`).join('')}`;
     if (sec === 'documents') return `
       <h2>Documents</h2>
       <p class="small">Snap them or choose files. They go into the property's photos and documents. When you are back, the document reader can read them; it suggests, and you tick before anything is used.</p>
@@ -8930,6 +8942,17 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <div class="toolbar"><button class="btn ghost" type="button" id="fvSendQ">Send Questions before we meet</button></div></div>`;
     return '';
   }
+  // one chattels list (Tim, 27 November 2026): what the agency agreement will say, and whether Tim's own edit on the draft holds instead
+  function fvChatAgHTML(v) {
+    const val = k => (v.facts[k] || {}).value, a = FVC.chattelsAgreement(val('chattels_std'), val('chattels_featured'), val('chattels_removed'));
+    const ag = v.agChattels;
+    return `<div class="fv-chatag"><h3>On the agency agreement</h3>
+      ${!a.chattels.length && !a.chatOther ? '<p class="small">Tap the chattels above. They fill a draft agency agreement (never one sent or signed) and the property file, so an agreement started later begins with them.</p>'
+        : `<p class="small"><strong>Chattels:</strong> ${esc(a.chattels.join(', ') || 'none of its usual list')}${a.chatOther ? `<br><strong>Anything else:</strong> ${esc(a.chatOther)}` : ''}</p>
+           <p class="small">These fill a draft agency agreement (never one sent or signed) and the property file. If you change the chattels on the draft agreement, your change there wins.</p>`}
+      ${ag ? `<p class="small fv-agwins"><strong>You changed them on the draft agreement:</strong> ${esc(ag.join(', '))}. That is the list used.</p>` : ''}</div>`;
+  }
+  function fvChatAgPaint(v) { const el = $('#fvChatAg'); if (el) el.innerHTML = fvChatAgHTML(v); }
   function fvPersonHTML(v, p, n) {
     const id = 'fvp' + n;
     return `<div class="card tight fv-person" data-fvperson="${esc(p.key)}">
@@ -9108,10 +9131,10 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const chips = $('[data-fvchips]', box); if (!chips) return;
     $$('input', chips).forEach(i => i.addEventListener('change', () => { const on = $$('input:checked', chips).map(x => x.value);
       if (kind === 'one') st.value = on[0] || null; else if (kind === 'chattels') { const had = new Map((st.value || []).map(FVC.chattelRead)); st.value = on.map(nm => FVC.chattelText(nm, had.get(nm) || 1)); } else st.value = on;
-      fvTouch(v, st, true); if (kind === 'chattels') fvRedrawFact(v, k); }));
+      fvTouch(v, st, true); if (kind === 'chattels') fvRedrawFact(v, k); if (/^chattels_/.test(k)) fvChatAgPaint(v); }));
     $$('[data-fvchat]', box).forEach(c => $$('[data-fvchn]', c).forEach(b => b.addEventListener('click', () => {
       const nm = c.dataset.fvchat; st.value = (st.value || []).map(s => { const [a, n] = FVC.chattelRead(s); return a === nm ? FVC.chattelText(a, Math.max(1, Math.min(99, n + +b.dataset.fvchn))) : s; });
-      $('output', c).textContent = FVC.chattelRead(st.value.find(s => FVC.chattelRead(s)[0] === nm))[1]; fvTouch(v, st, true); })));
+      $('output', c).textContent = FVC.chattelRead(st.value.find(s => FVC.chattelRead(s)[0] === nm))[1]; fvTouch(v, st, true); fvChatAgPaint(v); })));
     const oc = $('[data-fvoneclear]', box); if (oc) oc.addEventListener('click', () => { $$('input', chips).forEach(i => { i.checked = false; }); st.value = null; fvTouch(v, st, true); atBtn(oc, 'Cleared.', 'ok'); });
     fvOwnWire(box, (name, it) => { if (kind === 'one') st.value = it; else st.value = (st.value || []).concat([kind === 'chattels' ? FVC.chattelText(it, 1) : it]); fvTouch(v, st, true); fvRedrawFact(v, k); });
   }

@@ -43,5 +43,18 @@
     Object.values(v.answers || {}).forEach(a => { if (dirty(a)) n++; });
     return n;
   }
-  root.FVC = { bedrooms, wording, nextLabel, chattelText, chattelRead, dirty, pending };
+  // one chattels list (Tim, 27 November 2026): the first visit's three lists as the agency agreement says them, the same as the database
+  // (fv_chattels_agreement, migration 031): the agreement's own chips, in its order, and everything else in "Anything else staying or going?"
+  const CHATTEL_MAP = { 'Fixed floor coverings': 'Fixed floor coverings', 'Blinds': 'Blinds', 'Curtains': 'Curtains', 'Light fittings': 'Light fittings', 'Stove': 'Stove',
+    'Rangehood': 'Rangehood', 'Dishwasher': 'Dishwasher', 'Heat pumps': 'Heat pump', 'Extractor fan': 'Extractor fans', 'Smoke detectors': 'Smoke alarms',
+    'Garage door remote': 'Garage door remote', 'Clothesline': 'Clothesline', 'Refrigerator': 'Fridge' };
+  const AGREEMENT_CHATTELS = ['Fixed floor coverings', 'Blinds', 'Curtains', 'Light fittings', 'Stove', 'Rangehood', 'Dishwasher', 'Heat pump', 'Extractor fans', 'Smoke alarms', 'Garage door remote', 'Clothesline', 'Fridge', 'Washing machine'];
+  function chattelsAgreement(std, feat, rem) {
+    const arr = x => Array.isArray(x) ? x : [], gone = arr(rem).map(x => chattelRead(x)[0]), stay = [], chips = [], extra = [];
+    arr(std).concat(arr(feat)).forEach(x => { const [nm, n] = chattelRead(x); if (gone.includes(nm) || stay.includes(nm)) return; stay.push(nm);
+      if (CHATTEL_MAP[nm]) { chips.push(CHATTEL_MAP[nm]); if (n > 1) extra.push(x); } else extra.push(x); });
+    const other = [extra.length ? 'Also staying: ' + extra.join(', ') + '.' : '', gone.length ? 'Going with the vendors: ' + gone.join(', ') + '.' : ''].filter(Boolean).join(' ');
+    return { chattels: AGREEMENT_CHATTELS.filter(c => chips.includes(c)), chatOther: other || null };
+  }
+  root.FVC = { bedrooms, wording, nextLabel, chattelText, chattelRead, dirty, pending, chattelsAgreement, CHATTEL_MAP, AGREEMENT_CHATTELS };
 })(typeof window !== 'undefined' ? window : globalThis);

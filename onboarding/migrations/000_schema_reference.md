@@ -556,4 +556,8 @@ signatures and fingerprints are not touched.
   `agent_fv_person(visit, key, name, email, phone, owner, decision_maker, here)`, `agent_fv_answer(visit, person, question, value)`,
   `agent_fv_room(visit, room)`, `agent_fv_fact(visit, key, value)`, `agent_tap_extra(list, item, on)`. Internal: `fv_rooms_profile`
   (pBed and rooms_summary from Tim's calls only), `fv_fact_keys`, `fv_today`, `room_class_ok`.
+- One chattels list: `fv_chattels_profile` (from `agent_fv_fact`) writes the profile's `chattels` and `chatOther` from the first visit's lists
+  (`fv_chattels_agreement`, `fv_chattel_map`, `fv_agreement_chattels`) and an unsigned draft through `profile_sync_draft`; Tim's later draft
+  edit wins. Trigger `profile_fv_chattels` (after update of answers on agreements, drafts only, `fv_chattels_from_agreement`) brings the
+  agreement's chips back to `chattels_std` and `chattels_featured`. Helpers `fv_chosen`, `fv_chattel_name`, `fv_chattel_count` are internal.
 

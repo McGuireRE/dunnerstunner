@@ -17,6 +17,8 @@
 --     why they wanted to talk and the client heart are also not vendor_visible.
 --   * Photos and documents: property_documents, as LW0 says (the app files them through agent_repo_add with the room and a caption).
 -- Tim's own additions to the tap lists: tap_list_extras.
+-- One chattels list (Tim, 27 November 2026): the first visit's chattels fill an unsigned draft agency agreement's chattels (and the
+-- property file, so a later agreement starts with them); his later edits on the agreement win and come back to the lists (section 4b).
 -- RLS on every new table: Tim reads; nobody writes them directly (only these functions, which check is_agent). Vendors read none of them.
 
 -- ───── 1. new facts on the property profile (Appendix D) ─────
@@ -355,9 +357,11 @@ begin
       update public.property_profile set value_id = vid, chosen_by = 'profile', chosen_at = clock_timestamp(), ticked = false, ticked_at = null, ticked_by = null
        where property_id = v.property_id and key = p_key;
     end if;
+    if p_key in ('chattels_std', 'chattels_featured', 'chattels_removed') then perform public.fv_chattels_profile(v.property_id, v.id); end if;
     return jsonb_build_object('key', p_key, 'cleared', cv.id is not null and cv.source = 'tim' and cv.source_ref = v.id);
   end if;
   vid := public.profile_record(v.property_id, p_key, val, 'tim', v.id, public.fv_today(), 'First visit', null, null, coalesce(auth.jwt()->>'email', 'agent'), 'check');
+  if p_key in ('chattels_std', 'chattels_featured', 'chattels_removed') then perform public.fv_chattels_profile(v.property_id, v.id); end if;   -- one chattels list
   return jsonb_build_object('key', p_key, 'value_id', vid,
     'chosen', exists (select 1 from public.property_profile where property_id = v.property_id and key = p_key and value_id = vid));
 end $$;
@@ -379,6 +383,107 @@ begin
   return to_jsonb(r);
 end $$;
 
+-- ───── 4b. one chattels list (Tim, 27 November 2026) ─────
+-- The chattels tapped at the first visit (standard, featured, to be removed) fill the agency agreement's chattels: the profile's
+-- 'chattels' (the agreement's own chips) and 'chatOther' (everything else staying, with counts, and what goes with the vendors), as Tim's
+-- own entry, and through LW0's profile_sync_draft only an unsigned draft (never one sent, parked or signed). The property file follows,
+-- so an agreement started later begins with them (and later the S&P chattels). Tim's later edits on the agreement win: once he has
+-- changed the chattels on a draft after the first visit noted them, the first visit's list is kept beside and changes nothing. The
+-- agreement's chips come back to the first visit's lists (fv_chattels_from_agreement), with their counts kept. No loops: the first
+-- visit writes the agreement only from agent_fv_fact, and the agreement writes back only when its chips say something the first
+-- visit's lists don't already say.
+create or replace function public.fv_chattel_map() returns jsonb language sql immutable as $$
+  select '{"Fixed floor coverings":"Fixed floor coverings","Blinds":"Blinds","Curtains":"Curtains","Light fittings":"Light fittings","Stove":"Stove","Rangehood":"Rangehood","Dishwasher":"Dishwasher","Heat pumps":"Heat pump","Extractor fan":"Extractor fans","Smoke detectors":"Smoke alarms","Garage door remote":"Garage door remote","Clothesline":"Clothesline","Refrigerator":"Fridge"}'::jsonb;
+$$;
+-- the agreement's chips, in its own order (CHATTELS in src/app.js)
+create or replace function public.fv_agreement_chattels() returns text[] language sql immutable as $$
+  select array['Fixed floor coverings', 'Blinds', 'Curtains', 'Light fittings', 'Stove', 'Rangehood', 'Dishwasher', 'Heat pump', 'Extractor fans', 'Smoke alarms', 'Garage door remote', 'Clothesline', 'Fridge', 'Washing machine'];
+$$;
+create or replace function public.fv_chattel_name(s text) returns text language sql immutable as $$ select regexp_replace(coalesce(s, ''), ' \(\d{1,3}\)$', '') $$;
+create or replace function public.fv_chattel_count(s text) returns int language sql immutable as $$ select coalesce(substring(coalesce(s, '') from ' \((\d{1,3})\)$')::int, 1) $$;
+-- the first visit's three lists as the agreement says them: {"chattels": [its chips], "chatOther": "Also staying: ... Going with the vendors: ..."}
+create or replace function public.fv_chattels_agreement(p_std jsonb, p_feat jsonb, p_rem jsonb) returns jsonb language plpgsql immutable as $$
+declare m jsonb := public.fv_chattel_map(); stay text[] := '{}'; gone text[] := '{}'; chips text[] := '{}'; extra text[] := '{}'; x text; nm text; other text;
+begin
+  select coalesce(array_agg(public.fv_chattel_name(e)), '{}') into gone from jsonb_array_elements_text(case when jsonb_typeof(p_rem) = 'array' then p_rem else '[]'::jsonb end) e;
+  for x in select e from jsonb_array_elements_text(case when jsonb_typeof(p_std) = 'array' then p_std else '[]'::jsonb end) e
+           union all select e from jsonb_array_elements_text(case when jsonb_typeof(p_feat) = 'array' then p_feat else '[]'::jsonb end) e loop
+    nm := public.fv_chattel_name(x);
+    if nm = any (gone) or nm = any (stay) then continue; end if;
+    stay := stay || nm;
+    if m ? nm then chips := chips || (m->>nm); if public.fv_chattel_count(x) > 1 then extra := extra || x; end if;
+    else extra := extra || x; end if;
+  end loop;
+  other := concat_ws(' ', case when array_length(extra, 1) > 0 then 'Also staying: ' || array_to_string(extra, ', ') || '.' end,
+                          case when array_length(gone, 1) > 0 then 'Going with the vendors: ' || array_to_string(gone, ', ') || '.' end);
+  return jsonb_build_object('chattels', to_jsonb(array(select c from unnest(public.fv_agreement_chattels()) with ordinality a(c, n) where c = any (chips) order by n)),
+                            'chatOther', nullif(other, ''));
+end $$;
+-- the profile's chosen value for one fact, or null
+create or replace function public.fv_chosen(p_property uuid, p_key text) returns public.property_fact_values language sql stable security definer set search_path = public as $$
+  select f.* from public.property_profile c join public.property_fact_values f on f.id = c.value_id where c.property_id = p_property and c.key = p_key;
+$$;
+create or replace function public.fv_chattels_profile(p_property uuid, p_visit uuid) returns void
+language plpgsql security definer set search_path = public as $$
+declare a jsonb; k text; v jsonb; cv public.property_fact_values; first_at timestamptz; vid uuid; by_ text := coalesce(auth.jwt()->>'email', 'agent');
+begin
+  a := public.fv_chattels_agreement((public.fv_chosen(p_property, 'chattels_std')).value, (public.fv_chosen(p_property, 'chattels_featured')).value, (public.fv_chosen(p_property, 'chattels_removed')).value);
+  select min(recorded_at) into first_at from public.property_fact_values where property_id = p_property and source_ref = p_visit and key in ('chattels_std', 'chattels_featured', 'chattels_removed');
+  foreach k in array array['chattels', 'chatOther'] loop
+    v := a -> k; cv := public.fv_chosen(p_property, k);
+    -- Tim changed the chattels on a draft agreement after the first visit noted them: his agreement wins; this list sits beside
+    if cv.id is not null and cv.source = 'agreement' and cv.recorded_at > coalesce(first_at, '-infinity'::timestamptz) then
+      if not public.jblank(v) then perform public.profile_record(p_property, k, v, 'tim', p_visit, public.fv_today(), 'First visit chattels', null, null, by_, 'never'); end if;
+      continue;
+    end if;
+    if public.jblank(v) or v = '[]'::jsonb then
+      -- nothing left to say: what the first visit wrote is cleared (on the profile, the file, and an unsigned draft that still says it)
+      if cv.id is not null and cv.source = 'tim' and cv.source_ref = p_visit and cv.value is not null then
+        perform public.profile_write_back(p_property, k, null);
+        insert into public.property_fact_values (property_id, key, value, source, source_name, source_ref, as_of, recorded_by)
+        values (p_property, k, null, 'tim', 'First visit chattels', p_visit, public.fv_today(), by_) returning id into vid;
+        update public.property_profile set value_id = vid, chosen_by = 'profile', chosen_at = clock_timestamp(), ticked = false, ticked_at = null, ticked_by = null where property_id = p_property and key = k;
+        update public.agreements a2 set answers = a2.answers - k where a2.property_id = p_property and a2.status = 'draft' and a2.signed_at is null
+           and (a2.answers -> k) is not distinct from cv.value and not exists (select 1 from public.agreement_people x where x.agreement_id = a2.id and x.signed_at is not null);
+      end if;
+      continue;
+    end if;
+    perform public.profile_record(p_property, k, v, 'tim', p_visit, public.fv_today(), 'First visit chattels', null, null, by_, 'check');
+    perform public.profile_sync_draft(p_property, k);   -- an unsigned draft agreement only; never one sent, parked or signed
+  end loop;
+end $$;
+-- the agreement's chips back to the first visit's lists: a draft's chattels that say something the lists don't (Tim's edit on the
+-- agreement) become the lists' values from the agreement (his choice, LW0's 'agreement' rule), counts kept; items with no chip stay
+create or replace function public.fv_chattels_from_agreement() returns trigger language plpgsql security definer set search_path = public as $$
+declare m jsonb := public.fv_chattel_map(); inv jsonb; ach text[]; std jsonb; feat jsonb; rem jsonb; nstd jsonb := '[]'; nfeat jsonb := '[]'; x text; nm text; cnt jsonb := '{}'; c text; std_names text[];
+begin
+  if new.property_id is null or new.status <> 'draft' or jsonb_typeof(coalesce(new.answers, '{}'::jsonb) -> 'chattels') is distinct from 'array'
+     or (new.answers -> 'chattels') is not distinct from (coalesce(old.answers, '{}'::jsonb) -> 'chattels') then return null; end if;
+  begin
+    std := coalesce((public.fv_chosen(new.property_id, 'chattels_std')).value, '[]'); feat := coalesce((public.fv_chosen(new.property_id, 'chattels_featured')).value, '[]');
+    rem := coalesce((public.fv_chosen(new.property_id, 'chattels_removed')).value, '[]');
+    if jsonb_array_length(std) + jsonb_array_length(feat) = 0 then return null; end if;   -- the first visit noted no chattels here
+    select array_agg(e) into ach from jsonb_array_elements_text(new.answers -> 'chattels') e;
+    if (select coalesce(array_agg(e order by e), '{}') from jsonb_array_elements_text(public.fv_chattels_agreement(std, feat, rem) -> 'chattels') e)
+       = (select coalesce(array_agg(e order by e), '{}') from unnest(coalesce(ach, '{}')) e) then return null; end if;   -- already says the same: nothing to bring back
+    select jsonb_object_agg(value, key) into inv from jsonb_each_text(m);
+    select coalesce(array_agg(e), '{}') into std_names from jsonb_array_elements_text('["Fixed floor coverings","Blinds","Curtains","Light fittings","Stove","Rangehood","Dishwasher","Heat pumps","Extractor fan","Smoke detectors","Garage door remote"]') e;
+    for x in select e from jsonb_array_elements_text(std) e union all select e from jsonb_array_elements_text(feat) e loop cnt := cnt || jsonb_build_object(public.fv_chattel_name(x), x); end loop;
+    -- what has no chip on the agreement stays as it was
+    for x in select e from jsonb_array_elements_text(std) e loop if not (m ? public.fv_chattel_name(x)) then nstd := nstd || to_jsonb(x); end if; end loop;
+    for x in select e from jsonb_array_elements_text(feat) e loop if not (m ? public.fv_chattel_name(x)) then nfeat := nfeat || to_jsonb(x); end if; end loop;
+    foreach c in array coalesce(ach, '{}') loop
+      nm := coalesce(inv->>c, c);
+      x := coalesce(cnt->>nm, nm);
+      if nm = any (std_names) then nstd := nstd || to_jsonb(x); else nfeat := nfeat || to_jsonb(x); end if;
+    end loop;
+    perform public.profile_record(new.property_id, 'chattels_std', nstd, 'agreement', new.id, public.fv_today(), 'Agency agreement ' || coalesce(new.ref, ''), null, null, coalesce(auth.jwt()->>'email', 'agent'), 'agreement');
+    perform public.profile_record(new.property_id, 'chattels_featured', nfeat, 'agreement', new.id, public.fv_today(), 'Agency agreement ' || coalesce(new.ref, ''), null, null, coalesce(auth.jwt()->>'email', 'agent'), 'agreement');
+  exception when others then perform public.shared_note('fv_chattels_from_agreement', jsonb_build_object('agreement', new.id, 'error', sqlerrm)); end;
+  return null;
+end $$;
+create trigger profile_fv_chattels after update of answers on public.agreements for each row execute function public.fv_chattels_from_agreement();
+
 -- ───── 5. privileges ─────
 revoke execute on function public.agent_fv_start(uuid, uuid, text, text, uuid, timestamptz), public.agent_fv_set(uuid, jsonb),
   public.agent_fv_person(uuid, uuid, text, text, text, boolean, boolean, boolean), public.agent_fv_answer(uuid, uuid, text, jsonb),
@@ -387,3 +492,5 @@ grant execute on function public.agent_fv_start(uuid, uuid, text, text, uuid, ti
   public.agent_fv_person(uuid, uuid, text, text, text, boolean, boolean, boolean), public.agent_fv_answer(uuid, uuid, text, jsonb),
   public.agent_fv_room(uuid, jsonb), public.agent_fv_fact(uuid, text, jsonb), public.agent_tap_extra(text, text, boolean) to authenticated;
 revoke execute on function public.fv_rooms_profile(uuid, uuid), public.fv_fact_keys(), public.fv_today(), public.room_class_ok(text) from public, anon, authenticated;
+revoke execute on function public.fv_chattel_map(), public.fv_agreement_chattels(), public.fv_chattel_name(text), public.fv_chattel_count(text), public.fv_chattels_agreement(jsonb, jsonb, jsonb),
+  public.fv_chosen(uuid, text), public.fv_chattels_profile(uuid, uuid), public.fv_chattels_from_agreement() from public, anon, authenticated;

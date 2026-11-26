@@ -23,6 +23,18 @@ expect(FVC.bedrooms([room('living', '')]) === null, 'a living room not called: n
 expect(FVC.nextLabel([room('bedroom')].map(r => Object.assign(r, { label: 'Bedroom' })), 'bedroom', 'Bedroom') === 'Bedroom 2' && FVC.nextLabel([], 'living', 'Living') === 'Living', 'rooms number themselves');
 expect(FVC.chattelText('Heat pumps', 2) === 'Heat pumps (2)' && FVC.chattelText('Oven', 1) === 'Oven' && JSON.stringify(FVC.chattelRead('Heat pumps (2)')) === '["Heat pumps",2]', 'chattels with counts');
 expect(FVC.pending({ server: true, meta: { rev: 1, srev: 1 }, people: [{ rev: 2, srev: 1 }], rooms: [{ rev: 0, srev: 0 }], facts: { a: { rev: 1, srev: 0 } }, answers: {} }) === 2, 'pending counts what is still to send');
+// one chattels list: the same as the database's fv_chattels_agreement (the rollback test's own case), and the same map
+out.chat = FVC.chattelsAgreement(['Heat pumps (2)', 'Blinds', 'Oven'], ['Woodburner', 'Refrigerator', 'Freezer'], ['Freezer']);
+expect(JSON.stringify(out.chat) === JSON.stringify({ chattels: ['Blinds', 'Heat pump', 'Fridge'], chatOther: 'Also staying: Heat pumps (2), Oven, Woodburner. Going with the vendors: Freezer.' }), 'chattels for the agreement: ' + JSON.stringify(out.chat));
+expect(JSON.stringify(FVC.chattelsAgreement([], [], [])) === JSON.stringify({ chattels: [], chatOther: null }), 'no chattels: nothing');
+{ const m31 = fs.readFileSync(path.join(__dirname, '..', 'migrations', '031_first_visit.sql'), 'utf8');
+  const sqlMap = JSON.parse((m31.match(/fv_chattel_map\(\)[\s\S]*?select '(\{[^']*\})'::jsonb/) || [])[1] || 'null');
+  expect(JSON.stringify(sqlMap) === JSON.stringify(FVC.CHATTEL_MAP), 'the database\'s chattel map is the page\'s');
+  const app0 = fs.readFileSync(path.join(SRC, 'app.js'), 'utf8'), ch = JSON.parse((app0.match(/const CHATTELS = (\[[^\]]*\]);/) || [])[1].replace(/'/g, '"'));
+  expect(JSON.stringify(ch) === JSON.stringify(FVC.AGREEMENT_CHATTELS), 'the agreement\'s chips are the agreement form\'s own list');
+  const sqlAg = [...((m31.match(/fv_agreement_chattels\(\)[\s\S]*?array\[([^\]]*)\]/) || [])[1] || '').matchAll(/'([^']+)'/g)].map(m => m[1]);
+  expect(JSON.stringify(sqlAg) === JSON.stringify(ch), 'and the database\'s');
+  Object.keys(FVC.CHATTEL_MAP).forEach(k => expect(PLISTS.STANDARD_CHATTELS.includes(k) || PLISTS.FEATURED_CHATTELS.includes(k), 'a mapped chattel is on Tim\'s lists: ' + k)); }
 // Tim's lists
 const L = PLISTS;
 out.featured = L.FEATURED_CHATTELS.length; expect(out.featured >= 48, 'about 50 featured chattels: ' + out.featured);

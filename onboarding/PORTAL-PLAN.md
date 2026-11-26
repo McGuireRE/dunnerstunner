@@ -179,9 +179,14 @@ Shared code: the lists are `src/property-lists.js` (for the profile, appraisal, 
 `src/fv-core.js` (the same as the database's). The upload queue gained a caption, a hold for a visit not yet filed, and the keys it added.
 Later passes left as hooks (FV_HOOKS in app.js): GT2 recording with consent, GT3 AI field suggestions.
 
-Open for Tim: whether the first visit's chattel lists should also fill the agreement's chattels (today they are separate profile facts,
-`chattels_std`, `chattels_featured`, `chattels_removed`; the agreement keeps its own list); whether people at the door default to owners (they
-do, with an "Owner" tick to untick); "Plans" are filed as Building plans (he can change the kind on the property file). Not covered: the
+Tim's answers (27 November 2026): ONE chattels list. The chattels tapped at the first visit (standard, featured, to be removed) fill the
+agency agreement's chattels: its own chips (`chattels`) and "Anything else staying or going?" (`chatOther`: what else stays, with counts, and
+what goes with the vendors), on the property profile as his own ("First visit chattels"), the property file (so an agreement started later
+begins with them, and later the S&P chattels), and an unsigned draft through LW0's `profile_sync_draft` (never one sent, parked or signed).
+His later edits on the draft win (LW0: his draft edits are his choice): the agreement's chips come back to the first visit's lists (counts
+kept), and a later first-visit tap is kept beside, changing nothing. No loops. The page shows what the agreement will say, and when his
+agreement edit holds. (Words he types in the agreement's "Anything else" box stay there and on the profile; they aren't read back into the
+tap lists.) People at the door default to owners, untick to undo: confirmed. "Plans" filed as Building plans: fine. Not covered: the
 portal itself still needs signal to open after a reload (the visit is safe on the phone and carries on once it opens); a photo's caption is
 set as it is added (later changes on the property file).
 

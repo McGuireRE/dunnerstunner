@@ -9,7 +9,7 @@ do $t$
 declare out text := ''; r jsonb; fv1 uuid := gen_random_uuid(); fv2 uuid := gen_random_uuid(); fv3 uuid := gen_random_uuid(); fv4 uuid := gen_random_uuid();
   p1 uuid := gen_random_uuid(); p2 uuid; p3 uuid; pid uuid; k1 uuid := gen_random_uuid(); k2 uuid := gen_random_uuid(); k3 uuid := gen_random_uuid(); k4 uuid := gen_random_uuid();
   r1 uuid := gen_random_uuid(); r2 uuid := gen_random_uuid(); r3 uuid := gen_random_uuid(); r4 uuid := gen_random_uuid(); r5 uuid := gen_random_uuid(); r6 uuid := gen_random_uuid();
-  n int; n2 int; x text; sig0 bigint; sigsha text; pre_signed text; pp1 uuid; c1 uuid; ph uuid := gen_random_uuid();
+  n int; n2 int; x text; ag2 uuid; ag3 uuid; fv5 uuid := gen_random_uuid(); p5 uuid; a3 jsonb; sig0 bigint; sigsha text; pre_signed text; pp1 uuid; c1 uuid; ph uuid := gen_random_uuid();
   agent text := json_build_object('email', (select email from public.agents order by created_at limit 1), 'sub', '22222222-2222-2222-2222-222222222222', 'role', 'authenticated')::text;
   vendor text := '{"email":"rb-lw1-vendor@example.com","sub":"11111111-1111-1111-1111-1111111110b1","role":"authenticated"}';
 begin
@@ -18,6 +18,11 @@ begin
   select md5(string_agg(id::text || coalesce(contact_id::text, '-') || legal_name || email, ',' order by id)) into pre_signed from public.agreement_people where signed_at is not null;
   -- a property already on file, with a council bedroom count beside (as LW0 keeps it) and the vendor as one of its people
   insert into public.properties (address) values ('3 Lw1 Known Street, Rollbackville') returning id into p2;
+  -- a draft agreement on it (not sent, nobody signed), and another property whose agreement has been sent
+  insert into public.agreements (address, property_id, answers) values ('3 Lw1 Known Street, Rollbackville', p2, '{}') returning id into ag2;
+  insert into public.properties (address) values ('8 Lw1 Sent Street, Rollbackville') returning id into p5;
+  insert into public.agreements (address, property_id, answers) values ('8 Lw1 Sent Street, Rollbackville', p5, '{"chattels":["Stove"]}') returning id into ag3;
+  update public.agreements set status = 'sent' where id = ag3;
   insert into public.property_people (property_id, legal_name, email, source, name_from, role) values (p2, 'Robin Lw1', 'rb-lw1-vendor@example.com', 'agent', 'agent', 'owner');
   perform public.profile_record(p2, 'pBed', '"5"', 'council', null, '2026-2027', 'Dunedin City Council rates', '5', null, 'test', 'auto');
 
@@ -131,6 +136,38 @@ begin
   r := public.agent_fv_fact(fv2, 'pType', '""');                   -- the first visit's own value is no longer the chosen one: nothing changes
   if (select description->>'pType' from public.properties where id = p2) is distinct from 'Townhouse' then out := out || 'A BLANK ON THE FIRST VISIT CLEARED TIM''S LATER ENTRY; '; end if;
 
+  execute 'reset role';   -- (the checks below read internal helpers; the functions still run as Tim, by his claims)
+  -- 5b. one chattels list: the first visit's chattels fill the unsigned draft (and the file), never a sent agreement; Tim's later edit
+  -- on the draft wins and comes back to the lists; no loops
+  perform public.agent_fv_fact(fv2, 'chattels_std', '["Heat pumps (2)","Blinds","Oven"]');
+  perform public.agent_fv_fact(fv2, 'chattels_featured', '["Woodburner","Refrigerator","Freezer"]');
+  perform public.agent_fv_fact(fv2, 'chattels_removed', '["Freezer"]');
+  out := out || 'draft chattels=' || coalesce((select answers->>'chattels' from public.agreements where id = ag2), 'none') || ' other=' || coalesce((select answers->>'chatOther' from public.agreements where id = ag2), 'none')
+    || ' file=' || coalesce((select description->>'chattels' from public.properties where id = p2), 'none') || '; ';
+  if (select answers->'chattels' from public.agreements where id = ag2) is distinct from '["Blinds","Heat pump","Fridge"]'::jsonb then out := out || 'THE DRAFT DID NOT GET THE FIRST VISIT''S CHATTELS; '; end if;
+  if (select answers->>'chatOther' from public.agreements where id = ag2) is distinct from 'Also staying: Heat pumps (2), Oven, Woodburner. Going with the vendors: Freezer.' then out := out || 'THE DRAFT''S OTHER CHATTELS ARE WRONG; '; end if;
+  if (select description->'chattels' from public.properties where id = p2) is distinct from '["Blinds","Heat pump","Fridge"]'::jsonb then out := out || 'THE FILE DID NOT FOLLOW THE CHATTELS; '; end if;
+  if (select (public.fv_chosen(p2, 'chattels_std')).source) <> 'tim' then out := out || 'THE DRAFT WROTE BACK OVER THE FIRST VISIT; '; end if;
+  -- a sent agreement is never changed
+  r := public.agent_fv_start(fv5, p5, null, 'address', null, now());
+  perform public.agent_fv_fact(fv5, 'chattels_std', '["Blinds","Dishwasher"]');
+  out := out || 'sent agreement chattels=' || (select answers->>'chattels' from public.agreements where id = ag3) || '; ';
+  if (select answers->'chattels' from public.agreements where id = ag3) is distinct from '["Stove"]'::jsonb then out := out || 'A SENT AGREEMENT WAS CHANGED; '; end if;
+  -- Tim edits the chattels on the draft: his choice; it comes back to the first visit's lists (counts kept, items with no chip kept)
+  update public.agreements set answers = answers || '{"chattels":["Blinds","Heat pump","Stove"]}' where id = ag2;
+  out := out || 'after Tim''s edit: profile=' || coalesce(((public.fv_chosen(p2, 'chattels')).value)::text, 'none') || '/' || coalesce((public.fv_chosen(p2, 'chattels')).source, '-')
+    || ' std=' || coalesce(((public.fv_chosen(p2, 'chattels_std')).value)::text, 'none') || '/' || coalesce((public.fv_chosen(p2, 'chattels_std')).source, '-')
+    || ' featured=' || coalesce(((public.fv_chosen(p2, 'chattels_featured')).value)::text, 'none') || '; ';
+  if (public.fv_chosen(p2, 'chattels')).source <> 'agreement' then out := out || 'TIM''S AGREEMENT EDIT IS NOT THE CHATTELS; '; end if;
+  if (public.fv_chosen(p2, 'chattels_std')).value is distinct from '["Oven","Blinds","Heat pumps (2)","Stove"]'::jsonb then out := out || 'THE AGREEMENT''S CHATTELS DID NOT COME BACK TO THE LISTS; '; end if;
+  if (public.fv_chosen(p2, 'chattels_featured')).value is distinct from '["Woodburner","Freezer"]'::jsonb then out := out || 'THE FEATURED LIST LOST AN ITEM OR KEPT AN UNTICKED ONE; '; end if;
+  -- the first visit changes its list afterwards: the agreement edit wins, the visit's list sits beside
+  select count(*) into n from public.property_fact_values where property_id = p2;
+  perform public.agent_fv_fact(fv2, 'chattels_featured', '["Woodburner","Spa pool"]');
+  out := out || 'later visit tap: draft=' || (select answers->>'chattels' from public.agreements where id = ag2) || ' new values=' || ((select count(*) from public.property_fact_values where property_id = p2) - n) || '; ';
+  if (select answers->'chattels' from public.agreements where id = ag2) is distinct from '["Blinds","Heat pump","Stove"]'::jsonb then out := out || 'A LATER VISIT TAP OVERWROTE TIM''S AGREEMENT EDIT; '; end if;
+  if (select count(*) from public.property_fact_values where property_id = p2) - n > 4 then out := out || 'THE CHATTELS LOOPED; '; end if;
+  execute 'set local role authenticated';
   -- 6. notes, "Now or come back?", and Tim's own tap-list items
   r := public.agent_fv_set(fv2, '{"notes":"Lovely people","decision":"book","next_note":"Tuesday 4pm, with their son"}');
   out := out || 'decision=' || (r->>'decision') || ' at=' || ((r->>'decision_at') is not null)::text || '; ';

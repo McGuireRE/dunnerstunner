@@ -30,7 +30,10 @@ const expect = (c, m) => { if (!c) errs.push(m); };
       prop('P2', '5 Roslyn Terrace, Dunedin')],
     property_people: [{ id: 'PP1', property_id: 'P1', position: 1, legal_name: 'Robin Rowe', pref_name: 'Rob', email: 'robin@example.com', phone: '021 555 0101', role: 'owner', source: 'agent', name_from: 'agent', created_at: now }],
     prelistings: [{ id: 'L2', address: '5 Roslyn Terrace, Dunedin', property_id: 'P2', contact_name: 'Sam Seller', contact_email: 'sam@example.com', status: 'submitted', appraisal: {}, answers: {}, plan: {}, created_at: now, updated_at: now }],
-    agreements: [], agreement_people: [], agreement_events: [], signatures: [], lawyer_links: [], aml_files: [], aml_events: [], email_log: [], cancellation_requests: [], prior_agency_notices: [],
+    // a draft agency agreement on P1 (nobody has signed), and P2's agreement already sent
+    agreements: [{ id: 'A1', ref: 'MRE-2026-1101', address: '12 Pine Hill Road, Dunedin', property_id: 'P1', status: 'draft', config: {}, answers: {}, legal: {}, created_at: now, updated_at: now },
+      { id: 'A2', ref: 'MRE-2026-1102', address: '5 Roslyn Terrace, Dunedin', property_id: 'P2', status: 'sent', config: {}, answers: { chattels: ['Stove'] }, legal: {}, created_at: now, updated_at: now, sent_at: now }],
+    agreement_people: [], agreement_events: [], signatures: [], lawyer_links: [], aml_files: [], aml_events: [], email_log: [], cancellation_requests: [], prior_agency_notices: [],
   });
   for (const scheme of ['light', 'dark']) {
     const tag = scheme; out[tag] = {};
@@ -133,8 +136,11 @@ const expect = (c, m) => { if (!c) errs.push(m); };
       await p.click('[data-fvfact="pBath"] [data-fvcnt="1"]'); await p.click('[data-fvfact="pBath"] [data-fvcnt="1"]');
       expect((await p.textContent('[data-fvfact="pBath"] output')) === '2', tag + ': a count steps up');
       await p.click('summary:has-text("Outdoors and outlook")'); await p.click('[data-fvfact="outlook"] input[value="Harbour views"] + span');
-      await p.click('summary:has-text("Chattels")'); await p.click('[data-fvfact="chattels_featured"] input[value="Woodburner"] + span'); await wait(200);
+      await p.click('summary:has-text("Chattels")'); await p.click('[data-fvfact="chattels_std"] input[value="Heat pumps"] + span'); await wait(200);
+      await p.click('[data-fvfact="chattels_featured"] input[value="Woodburner"] + span'); await wait(200);
       await p.click('[data-fvfact="chattels_featured"] [data-fvchat="Woodburner"] [data-fvchn="1"]'); await wait(150);
+      out[tag].chatAg = (await p.textContent('#fvChatAg')).replace(/\s+/g, ' ');
+      expect(/Chattels: Heat pump/.test(out[tag].chatAg) && /Anything else: Also staying: Woodburner \(2\)\./.test(out[tag].chatAg), tag + ': the page shows what the agreement will say: ' + out[tag].chatAg);
       // Tim's own item, without signal: on this phone, said under the button
       await p.fill('[data-fvfact="outlook"] [data-fvown-in]', 'Lighthouse views'); await p.click('#fvown_outlook'); await wait(400);
       out[tag].ownNote = await note('fvown_outlook');
@@ -226,6 +232,12 @@ const expect = (c, m) => { if (!c) errs.push(m); };
       expect((chosen('pBath') || [])[0] === '2', tag + ': bathrooms counted');
       expect(JSON.stringify((chosen('outlook') || [])[0]) === JSON.stringify(['Harbour views', 'Lighthouse views']), tag + ': outlook with his own item: ' + JSON.stringify(chosen('outlook')));
       expect(JSON.stringify((chosen('chattels_featured') || [])[0]) === JSON.stringify(['Woodburner (2)']), tag + ': chattels with counts: ' + JSON.stringify(chosen('chattels_featured')));
+      // one chattels list: the unsigned draft agreement and the file follow; the sent agreement never does
+      const a1 = d.agreements.find(x => x.id === 'A1'), a2 = d.agreements.find(x => x.id === 'A2');
+      out[tag].a1 = [a1.answers.chattels, a1.answers.chatOther];
+      expect(JSON.stringify(a1.answers.chattels) === '["Heat pump"]' && a1.answers.chatOther === 'Also staying: Woodburner (2).', tag + ': the draft agreement has the first visit\'s chattels: ' + JSON.stringify(out[tag].a1));
+      expect(JSON.stringify(d.properties.find(x => x.id === 'P1').description.chattels) === '["Heat pump"]', tag + ': the property file follows, so a later agreement starts with them');
+      expect(JSON.stringify(a2.answers.chattels) === '["Stove"]', tag + ': a sent agreement is never changed');
       // photos and documents in the one store, with room and caption; the room points at its photo
       const docs = (d.property_documents || []).filter(x => x.property_id === 'P1');
       const photo = docs.find(x => x.kind === 'Photo');
@@ -233,6 +245,13 @@ const expect = (c, m) => { if (!c) errs.push(m); };
       expect(photo && (room1.photo_keys || []).includes(photo.client_key), tag + ': the room points at its photo');
       expect(docs.some(x => x.kind === 'Record of title' && String(x.path).startsWith('properties/P1/docs/')), tag + ': the title filed to the property');
 
+      // Tim changes the chattels on the draft agreement: his change wins, and comes back to the first visit's lists
+      await p.evaluate(async () => { const c = window.supabase.createClient('x', 'y'); const { data } = await c.from('agreements').select('*').eq('id', 'A1'); await c.from('agreements').update({ answers: Object.assign({}, data[0].answers, { chattels: ['Heat pump', 'Blinds'] }) }).eq('id', 'A1'); });
+      await p.reload(); await wait(1500); await step('property'); await p.click('summary:has-text("Chattels")');
+      expect(await p.isChecked('[data-fvfact="chattels_std"] input[value="Blinds"]') && await p.isChecked('[data-fvfact="chattels_std"] input[value="Heat pumps"]'), tag + ': the agreement\'s chattels come back to the lists');
+      expect(/You changed them on the draft agreement: Heat pump, Blinds/.test(await p.textContent('#fvChatAg')), tag + ': the page says the agreement\'s list is the one used');
+      await p.click('[data-fvfact="chattels_featured"] input[value="Spa pool"] + span'); await wait(2500);
+      d = await db(); expect(JSON.stringify(d.agreements.find(x => x.id === 'A1').answers.chattels) === '["Heat pump","Blinds"]', tag + ': a later tap on the first visit never overwrites his agreement edit: ' + JSON.stringify(d.agreements.find(x => x.id === 'A1').answers.chattels));
       // Who's here, now online: the people already on file, tap to say they are here (never typed again, never twice)
       await step('who'); await wait(500);
       expect(!(await p.$('#fvOnFile [data-fvhere]')), tag + ': Rob is already here, so not offered again');
