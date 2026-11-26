@@ -19,6 +19,9 @@ as `BUILD-PLAN.md`: builder, tests against the mock database, independent review
 - Live: Signing viewer, chattels initials, four more marks, Tim's own places and identity checks, 27 November 2026 about 5:15am NZT.
   Migration 029 applied (its live rollback test ran clean first: 75 checks, no capitals); main 1b730e7; offer-sign v7 pinned to 1b730e7,
   OPTIONS 200; live page byte-identical to the build.
+- Live: Agreed emails filled in (contact details, both lawyers, cc both addresses, Still needed, lawyer phone), 27 November 2026
+  about 7:10am NZT. Migration 030 applied (its live rollback test ran clean first: 27 checks, no capitals); main 4e00a47; page only,
+  no function change; live page byte-identical to the build.
 - Edge functions and the commit each is pinned to: offer-sign 1b730e7; offer-public, offer-draft, doc-prefill 06c2d22.
 - Still to do: the test offer with Tim's own addresses (OFFERS-PLAN "Going live" step 5), then Tim's solicitor confirms the
   signing and counteroffer method before the first real offer. Phases 5 and 6 not built.
