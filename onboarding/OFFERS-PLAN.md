@@ -16,7 +16,10 @@ as `BUILD-PLAN.md`: builder, tests against the mock database, independent review
   published from 4df62e2 (an empty commit: the first push didn't start a Pages build); offer-sign v6 pinned to 11e46da, OPTIONS 200.
 - Live: Offers hotfix 3 (re-draft with nothing changed stays on the same draft; drafting messages under the button pressed),
   26 November about 12:35 NZT, main ad6548c; page only, no database or function change.
-- Edge functions and the commit each is pinned to: offer-sign 11e46da; offer-public, offer-draft, doc-prefill 06c2d22.
+- Live: Signing viewer, chattels initials, four more marks, Tim's own places and identity checks, 27 November 2026 about 5:15am NZT.
+  Migration 029 applied (its live rollback test ran clean first: 75 checks, no capitals); main 1b730e7; offer-sign v7 pinned to 1b730e7,
+  OPTIONS 200; live page byte-identical to the build.
+- Edge functions and the commit each is pinned to: offer-sign 1b730e7; offer-public, offer-draft, doc-prefill 06c2d22.
 - Still to do: the test offer with Tim's own addresses (OFFERS-PLAN "Going live" step 5), then Tim's solicitor confirms the
   signing and counteroffer method before the first real offer. Phases 5 and 6 not built.
 - Older "Status:" lines in the phase sections below are kept as the build history; this section is the current state.
@@ -721,6 +724,130 @@ Going live, with Tim's approval, in order:
 5. Test with Tim's own addresses: a test offer signed in person in the portal and by link (Prepare the emails, read, Send); present
    to a test vendor; a counter and an acceptance; check Tim's one email per round; the agreed copy and its two draft emails (fill the
    blanks, send); the lawyers' pack; a request from a test link (Tim's urgent email), Freeze now, Unfreeze and Withdraw now. Tim's solicitor confirms the method before the first real offer.
+
+## Signing: full screen, zoom and page buttons; chattels initials; four more marks; Tim's own places (Tim, 26 November 2026; branch `signing-viewer`, from `offers-hotfix-3` 96a8178)
+
+Status: built, awaiting review (26 November 2026). Nothing pushed, deployed or applied. Needs migration 029
+(`029_signing_places_marks.sql`; 027 and 028 are kept for other work) and the offer-sign edge function redeployed (it gains the `mark`
+action and draws the new marks). Mediation as always: nothing reaches the other side until Tim presents it.
+
+A. One shared document viewer (`docViewer` and `dvWire` in `src/app.js`, styles under "the signing viewer" in `src/styles.html`) on every
+screen where someone reads a document to sign it, by email link or on Tim's screen:
+- Offers and counteroffers: the signing places in every round, in person and by link (the vendors' rounds too), and the Client and
+  Customer Acknowledgement pages read before signing. Also Tim's own Ready to sign and Present screens (the places he can change, D).
+- The agency agreement: the vendor's own phone (the front page and each prior-agency cancellation notice, one page each) and Tim's
+  in-person signing (the front page, and the notices in their own viewer).
+- Variations: Tim signing and issuing, signing together on Tim's device, and the vendor's own phone.
+- The Vendor Declaration and the Healthy Homes checklist on the vendor's phone, and Tim's form screen once it shows the finished document.
+What it does:
+- A bar of buttons in the highlight colour (the accent fill with its own text colour, light and dark): Previous page, Next page, the
+  page it is on ("Page 2 of 11"), Zoom out, the size, Zoom in, Full screen. Buttons at least 44 px, labelled, with a clear focus ring.
+- Full screen: the browser's own where it has one, otherwise the viewer fills the window (an iPhone). Close full screen, or Escape.
+- Zoom from 100% to 300%: the buttons, a pinch on a phone, ctrl or a trackpad pinch on a computer, and + or - with the document
+  focused. Offer pages are drawn again, sharp, at each size; the other documents are scaled and re-flow. The zoom is kept per signer
+  on the device (on Tim's device each purchaser of each document has their own), so it holds after each place, when the page is drawn
+  again, on the next page, and on coming back to the screen.
+- Pan by dragging with a mouse, or scrolling with a finger, inside the document's own frame: the page itself never scrolls sideways
+  at 390 px, even at 300%.
+- "Move to the next place for me" (off until ticked, remembered per signer): after each place, a gentle glide to the next place
+  still to do, onto the next page when a page is finished, keeping the zoom; at once for anyone who asks their device for less motion.
+  Also on Tim's in-person agreement signing with two or more vendors: after one signs, it moves on to the next still to sign.
+- Feedback (the zoom, the tick) shows just under what was pressed (`atBtn`; a tick box's note sits under the tick). Wording in
+  `src/strings.js` (groups "viewer" and "marks").
+
+B. The chattels box always has initials. Whenever a side signs the whole agreement (Round 1, the vendors' first round, and every round
+when "Everyone signs again every round" is on), each signer has initials inside the chattels area of the blank's map. Initials already
+there (beside chattels added or struck out) count; otherwise they are proposed side by side inside the box, clear of printed words where
+there is room (`SIGN.chattelsArea`, `chattelsBoxes`). A map with no chattels area is said plainly and release waits. Tim can't remove a
+signer's last initials there, nor move them out of the box. The database refuses a round without them, whoever writes it (029).
+
+C. Four more ways to mark the page, in every round, in person and by link: "Add text", "Add my initials", "Add my name", "Add my
+signature". Round 1 under "Mark the page:", beside the note, line, cross and reinstate, in person and by link alike (Tim, 26 November
+2026: link signers in Round 1 get every tool, each holding the round for Tim exactly as on his device); from
+Round 2 in "To counter, change the document" (the old "Type words" is now "Add text"; it is the same change, with the further term
+numbering). With changes from a link switched off, the link offers only the signer's own initials, name or signature.
+- Added text is a change: in Round 1 it holds signing for Tim, who checks it and re-approves, then everyone on that side initials beside
+  it; from Round 2 on it is a counter change with initials beside it, and by link only when Tim allowed changes.
+- A signer's own initials, name or signature use only their own ink as it stands and their exact name: the database copies the ink in
+  itself and refuses anything else. In Round 1 it holds signing for Tim like every mark, but nobody else initials it. From Round 2 on it
+  is not a change: it holds nothing, lifts nothing, asks nobody to initial it, and doesn't count as the round changing the document.
+- Every new mark sits inside the page, clear of the date place and of other signers' places (from Round 2 a signer's own mark also
+  keeps clear of earlier rounds' places). Undo (Offers fixes 3) works on them. 30 an hour per signer; by link 60 an hour per network.
+- After the first review (26 November 2026): while a signer's own initials or signature stand on the page, they can't draw their
+  signature and initials again, however it is written (`offer_sign_do_marks`, replaced from 026 with that one check, and a trigger on
+  `offer_sign_redraws`); "Start my turn again" takes the marks back first, so a round never shows two drawings for one person. A name's
+  box must be wide enough for the name at its size, and the drawing shrinks a name to its box if ever it wouldn't fit. A later round's
+  places never cover a signer's own mark from an earlier round (`guard_offer_signing_own_clear`, whoever inserts it). A signer's own
+  mark from Round 2 doesn't open again anyone on their side who had already finished (it isn't a change).
+- By link in Round 1, any mark (the note, a line through text, a crossed-out box, a reinstatement, or one of the four) holds the round,
+  is checked by the database exactly as on Tim's screen (`offer_sign_do_mark`, the offer-sign `mark` action with a reinstatement's
+  target), and Tim alone is emailed ("A purchaser marked the offer"). Nobody else is told until Tim releases it.
+- Shown on screen in the marks layer, drawn on the locked Round 1 and on every later round's working copy and the agreed copy
+  (`SIGN.drawAdded`; earlier rounds draw exactly as before), listed on the execution record and the round's record ("Added by a signer
+  in this round"), and on the timeline (`sign_marked` in Round 1, `sign_own_mark` later).
+
+D. Tim's own changes to the signing places before a round goes out, on Ready to sign (Round 1) and Present (Round 2 on), in the shared
+viewer (`sgEditor`): tap a place to move it, make it bigger or smaller, or remove it; or add initials or a signature for any signer.
+Required places can't be removed and the reason shows under Remove: a signature in the block, the foot of each page, a signer's last
+initials in the chattels box, initials beside a change. A place is kept inside the page, off the date place and off another signer's
+place. Added places pass the same checks in the database; what Tim added, moved or resized, and removed is recorded on the round's
+timeline (`sign_places_edited`, through `agent_signing_release_edited` and `agent_round_present_edited`). After the first review, the database
+also keeps each place Tim added or moved off every other signer's place, and records what it compared: the places sent (their
+fingerprint and count by kind), each added or moved place found and clear, each removed place absent, the own marks kept clear, and
+the screen's own count and fingerprint of what it proposed.
+
+
+E. Identity (Tim, 26 November 2026: "Separate emails matter for signing at a distance. If on a device, I will verify that each signed
+separately, but will only do so with their identification logged.")
+- By an emailed link, each signer has their own email. Offers: already refused by 023 and 024 (two signers with one email can't be
+  released or presented by link). The agency agreement, its notices, variations and forms: "Send to their phones" says so plainly, and
+  the database refuses a signature from a link when someone else on the agreement has the same email (`guard_signature_identity` on
+  `signatures`, `variation_signatures` and `form_signatures`, whoever writes it).
+- On Tim's device signers may share an email or have none (offers), but each turn finishes only once Tim has logged the photo ID he
+  checked for that person (the type: NZ driver licence, passport, NZ firearms licence, Kiwi Access Card or other photo ID; never its
+  number) and ticked "I checked <name>'s ID and watched them sign". "Known to Tim personally" is no longer a choice on his device.
+  - Offers: `agent_signing_finish_checked` (023's `agent_signing_finish` now refuses, so no page can skip the check); the server's time
+    is on the timeline (`sign_id_checked`), on each round's execution record ("Tim McGuire checked this person's photo ID ... and watched
+    them sign: <time>") and on the agreed copy's record ("Identity checked in person"). Earlier rounds' records read as before.
+  - The agency agreement (and its notices, signed with it), variations and forms on Tim's device: the same choice and tick under each
+    person's name, above their pad; the check goes in the signed snapshot (type, Tim's tick, his name and the time, and the AML file for
+    that person where there is one) and the database refuses an in-person signature without it, with an ID number, or with a time more
+    than 15 minutes from now.
+- Tim's answers (26 November 2026): "known to Tim personally" is not offered, as built. On his device a vendor with no email can sign
+  the agency agreement (and its notices), variations and forms: no copy is emailed to them; right under the save button Tim is reminded
+  to print or hand them their signed copy, and his tick is recorded on the agreement's timeline ("Copy handed over by Tim", with the
+  time: `agreement_events` kind `copy_handed_over`); nothing signed changes. By link an email is still needed.
+- Tim, 26 November 2026, 17:57: in person a contract may still be signed without an ID check, but only after a clear warning. The ID
+  check stays the normal path; "Finish without an ID check" (offers) or "Sign without an ID check" (the agreement, notices, variations
+  and forms) shows "No identification has been checked for <name>. Finish anyway?" right under the button, and a second tap confirms.
+  The record then says plainly "Signed in person without an identity check", with Tim's name and the time: offers in the timeline
+  (`sign_no_id_check`), each round's execution record and the agreed copy's record; the agreement, notices, variations and forms in
+  the signed snapshot (`id_check` { type: none, warned, by, at, note }). An empty or missing choice is refused by the database
+  (`agent_signing_finish_checked` with `no_id_warned`, and `guard_signature_identity`). Still no ID numbers stored, and by link the
+  own-email rule stays.
+
+Nothing signed changes: sealed rounds, agreements, signatures, taps, marks and fingerprints are kept exactly as they are; every trigger
+stays. Lock order everywhere: the offer, then the signing, then the signer.
+Migration 029 (`029_signing_places_marks.sql`, additive): kinds `own_initials`, `own_name`, `own_signature` on offer_sign_marks (the
+check widened, nothing removed) and a column `ink_png` (only on a signer's own initials or signature); the view `offer_sign_marks_live`
+gains it; triggers `guard_offer_mark_place` (marks) and `guard_offer_signing_chattels` (signings), before insert; new functions
+`offer_sign_do_mark`, `offer_sign_mark` (service role), `agent_signing_release_edited`, `agent_round_present_edited` and small
+helpers; replaced word for word apart from what is named: `agent_signing_mark`, `agent_signing_review`, `offer_round_lock`,
+`agent_round_present`, `offer_agreed_terms`, `offer_doc_layers`, `offer_round_material`, `offer_sign_state`.
+Tests: `tests/signing-marks.test.js` (new: B, C and D in the browser, and the cores' PDF drawing), `tests/signing-viewer.test.js` (A),
+`tests/signing-marks-rollback.sql` and `.js` (new; run on a local PostgreSQL 16 stand-in through 026: every line as expected, no
+CAPITALS), `tests/signing-marks-race.js` (new, local stand-in only: own marks against the same signer's undo, drawing again
+and finish, 80 pairs, and against the round being locked: no deadlock, never an own mark with a later drawing, a late mark refused), `tests/signing-marks-with-026.js` (026's own rollback test run again with 029 applied: the same results, apart from the
+counts that include the chattels initials), `tests/offer-sign-fn.test.js` (the `mark` action), and `offers-sign`, `offers-nego`
+(their link tool checks follow C). The mock (`tests/mock.js`) mirrors 029.
+Not covered: while Tim is still filling in a Healthy Homes checklist (before the first signature), his screen shows the form to fill,
+not the document, so it has no viewer until then. Full screen is left when a screen is drawn again from scratch (undo, a held change):
+the browser only allows it after a tap, so the signer taps Full screen again. The draft review and the blank's places screens keep
+their own page controls (they are not signing screens).
+Going live, with Tim's approval, in order: (1) the rollback test on the live project (`node onboarding/tests/signing-marks-rollback.js`,
+every line lower case, nothing left behind); (2) apply 029; (3) merge and push; (4) redeploy offer-sign pinned to that commit (JWT off,
+as now). In-flight Round 1 signings released before 029 carry on; a new release, presentation or a change of method needs the chattels
+initials, which the screens now make.
 
 ## Offers fixes 3 (Tim's decisions of 25 and 26 November 2026; branch `offers-fixes-3`, from main 92ebdd3)
 

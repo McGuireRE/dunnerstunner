@@ -5,6 +5,57 @@
 window.I18N_STRINGS = {
  "screens": [
   [
+   "viewer",
+   [
+    "Document controls",
+    "Previous page",
+    "Next page",
+    "Page {n} of {total}",
+    "Zoom out",
+    "Zoom in",
+    "Full screen",
+    "Close full screen",
+    "Move to the next place for me",
+    "The document. Drag or scroll to move around it.",
+    "Zoomed to {pct}%. It stays this size while you sign.",
+    "Back to the normal size.",
+    "On. After each place you sign, the page moves to the next one for you.",
+    "Off. The page stays where you leave it."
+   ]
+  ],
+  [
+   "marks",
+   [
+    "Mark the page:",
+    "Add to the page:",
+    "Add text",
+    "Add my initials",
+    "Add my name",
+    "Add my signature",
+    "Words to add",
+    "Save this mark",
+    "Save",
+    "Cancel",
+    "Tap where the words go, then type them below.",
+    "Tap where your initials go. They are your own initials, as you drew them.",
+    "Tap where your name goes. It is your name exactly as it is on the agreement.",
+    "Tap where your signature goes. It is your own signature, as you drew it.",
+    "It goes to Tim to check before signing carries on, then everyone on your side initials it.",
+    "It goes to Tim to check before signing carries on. Nobody else initials it.",
+    "It is yours alone, so nobody else initials it, and it doesn't change the agreement.",
+    "Tap the page first, where it goes.",
+    "Type the words to add.",
+    "That doesn't sit on the page. Try again.",
+    "Saving...",
+    "Added",
+    "Sent to Tim to check",
+    "That would sit on someone else's place to sign or initial. Put it in a clear space",
+    "That is where the date goes once the agreement is made. Put it somewhere else",
+    "Only your own name, exactly as it is on the agreement, can be added",
+    "Draw your signature and initials first"
+   ]
+  ],
+  [
    "language",
    [
     "Read this part in {language}, to help you understand it",

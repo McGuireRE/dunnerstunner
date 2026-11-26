@@ -35,6 +35,9 @@ await tick('[data-tmulti=guide]');
 await tick('[data-tmulti=acks]');
 await tick('input[name=tLegal][value=have]');
 await p.screenshot({path:require('path').join(__dirname,'out','t3.png'),fullPage:true});
+// 029 (Tim, 26 November 2026): in person, Tim logs the photo ID he checked for each person and ticks that he watched them sign
+await b1.click(); await p.waitForTimeout(300); const eId=await p.textContent('.err');
+await p.selectOption('[data-idtype]','passport'); await tick('[data-idok]');
 await b1.click(); await p.waitForTimeout(3200);
 const e4=await p.textContent('.err'); console.log('E4',e4); const after=(await p.textContent('main')).replace(/\s+/g,' ').slice(0,300);
 const db1=await p.evaluate(()=>JSON.parse(localStorage.getItem('mockdb')));
@@ -46,6 +49,11 @@ const det=(await p.textContent('main')).replace(/\s+/g,' ').slice(0,200);
 await p.screenshot({path:require('path').join(__dirname,'out','t4_detail.png'),fullPage:true});
 // Peter on his phone
 await p.evaluate(()=>localStorage.setItem('mocksession',JSON.stringify({user:{id:'v-peter',email:'peter@example.com'}}))); await go();
-const ph1=await p.textContent('h1'); await p.screenshot({path:require('path').join(__dirname,'out','t5_peter.png')});
+const ph1=await p.textContent('h1');
+// 029 (Tim, 26 November 2026): signing at a distance, each person needs their own email; with another's email, the database refuses
+{ const keep=await p.evaluate(()=>{ const d=JSON.parse(localStorage.getItem('mockdb')), me=d.agreement_people.find(x=>x.user_id==='v-peter'), other=d.agreement_people.find(x=>x.agreement_id===me.agreement_id&&x.id!==me.id), k=me.email; me.email=other.email.toUpperCase(); localStorage.setItem('mockdb',JSON.stringify(d)); return k; });
+  await go(); const r=await p.evaluate(async()=>{ const d=JSON.parse(localStorage.getItem('mockdb')), me=d.agreement_people.find(x=>x.user_id==='v-peter'); const res=await window.supabase.createClient().rpc('vendor_sign',{a:me.agreement_id,p_image_path:'x',p_snapshot:{},p_user_agent:'t'}); return res.error&&res.error.message; });
+  await p.evaluate(k=>{ const d=JSON.parse(localStorage.getItem('mockdb')); d.agreement_people.find(x=>x.user_id==='v-peter').email=k; localStorage.setItem('mockdb',JSON.stringify(d)); },keep); await go();
+  if(!/own email/.test(r||'')) errs.push('by link, a shared email is refused: '+r); } await p.screenshot({path:require('path').join(__dirname,'out','t5_peter.png')});
 console.log(JSON.stringify({e0,h2,calc,h3,e3,after,status1:ag.status,signed1:db1.agreement_people.map(x=>[x.legal_name,!!x.signed_at]),legal:ag.legal,status2:db2.agreements[0].status,step:db2.agreements[0].answers._step,interested:db2.agreements[0].answers.interested,det,ph1,errs},null,1));
 await b.close();})();

@@ -39,7 +39,7 @@ await tick('[data-tmulti=acks]');
 await tick('input[name=tLegal][value=have]');
 await p.screenshot({path:require('path').join(__dirname,'out','t3.png'),fullPage:true});
 await b1.click(); await p.waitForTimeout(300); const eNotice=await p.textContent('.err'); const noticeCards=await p.$$eval('.notice h3',e=>e.map(x=>x.textContent));
-await tick('[data-tnotice]'); await b1.click(); await p.waitForTimeout(3200);
+await tick('[data-tnotice]'); await p.selectOption('[data-idtype]','passport'); await tick('[data-idok]'); await b1.click(); await p.waitForTimeout(3200);
 const e4=await p.textContent('.err'); console.log('E4',e4); const after=(await p.textContent('main')).replace(/\s+/g,' ').slice(0,300);
 const db1=await p.evaluate(()=>JSON.parse(localStorage.getItem('mockdb')));
 const ag=db1.agreements[0];

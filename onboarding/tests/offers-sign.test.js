@@ -149,12 +149,11 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   const tapped = await tapAll(p, 5); expect(tapped === 5 && await count(p) === 5, 'each tap does one place');
   d = await db(p); expect(d.offer_sign_taps.filter(t => t.signer_id === d.offer_signers.find(s => s.signing_id === gA.id && s.position === 1).id).length === 5, 'each tap recorded on the server');
   await tapAll(p); expect(await count(p) === out.need1 && !(await p.isDisabled('#sgFinishGo')), 'all places done: Finish is available');
-  await p.click('#sgFinishGo'); expect(/saw them sign/.test(await p.textContent('#sgErr')), 'Tim must record that he saw them sign');
-  await tick(p, '#sgSaw');
-  // identity is a free choice: Neither is chosen at the start; picking "ID checked" asks only what was seen
-  expect(await p.isChecked('input[name="sgIdWho"][value=""]') && await p.$('input[name="sgIdWho"][value="known"]') && await p.$('input[name="sgIdWho"][value="checked"]'), 'the choice offers Known to the agent, ID checked, or neither (the starting choice)');
-  await p.$eval('input[name="sgIdWho"][value="checked"]', e => e.click()); await p.click('#sgFinishGo'); expect(/Choose what ID you saw, or choose Neither/.test(await p.textContent('#sgErr')), 'ID checked asks what was seen');
-  await p.selectOption('#sgIdType', 'passport'); await p.click('#sgFinishGo'); await p.waitForSelector('#sgHandback'); await p.click('#sgImTim'); await p.waitForSelector('#sgView');
+  // 029 (Tim, 26 November 2026): on his device each person's photo ID is logged (the type, never the number) with his tick
+  await p.click('#sgFinishGo'); expect(/Choose the photo ID you checked/.test(await p.textContent('#sgErr')), 'Tim must log the photo ID he checked');
+  expect(!(await p.$('#sgIdType option[value="known_to_tim"]')) && (await p.$$('#sgIdType option')).length === 6, 'a photo ID is always checked: "known to Tim" is not a choice');
+  await p.selectOption('#sgIdType', 'passport'); await p.click('#sgFinishGo'); expect(/checked .*ID and watched them sign/.test(await p.textContent('#sgErr')), 'and tick that he checked it and watched them sign');
+  await tick(p, '#sgSaw'); await p.click('#sgFinishGo'); await p.waitForSelector('#sgHandback'); await p.click('#sgImTim'); await p.waitForSelector('#sgView');
   d = await db(p); const s1 = d.offer_signers.find(s => s.signing_id === gA.id && s.position === 1);
   expect(s1.finished_at && s1.id_sighted === 'passport' && s1.witnessed_by && /^[0-9a-f]{64}$/.test(s1.seen_sha256), 'finished: witnessed, the ID type only, and the fingerprint of what they saw');
   expect(/Finished/.test(await p.textContent('#sgSigners [data-signer="1"]')), 'Tim sees purchaser 1 has finished');
@@ -194,16 +193,23 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
 
   // ── 5. everyone finishes; Round 1 is made and locked ──
   process.stderr.write('step 5\n');
-  await turnStart(p, 2); await p.waitForSelector('#sgPlaces'); await tapAll(p); await tick(p, '#sgSaw'); await p.selectOption('#sgIdType', 'nz_driver_licence'); await p.click('#sgFinishGo'); await p.waitForSelector('#sgHandback'); await p.click('#sgImTim'); await p.waitForSelector('#sgView');
+  await turnStart(p, 2); await p.waitForSelector('#sgPlaces'); await tapAll(p); await p.selectOption('#sgIdType', 'nz_driver_licence'); await tick(p, '#sgSaw'); await p.click('#sgFinishGo'); await p.waitForSelector('#sgHandback'); await p.click('#sgImTim'); await p.waitForSelector('#sgView');
   await turnStart(p, 1); await p.waitForSelector('#sgPlaces');
   expect(await count(p) === out.need1 && +(await p.textContent('#sgCount')).match(/of (\d+)/)[1] === out.need1 + 3, 'purchaser 1 picks up where they left off, with the three marks to initial');
-  await tapAll(p); await tick(p, '#sgSaw'); await p.selectOption('#sgIdType', 'passport'); await p.click('#sgFinishGo'); await p.waitForSelector('#sgHandback'); await p.click('#sgImTim'); await p.waitForSelector('#sgView');
-  // purchaser 3: known to the agent; purchaser 4: no choice at all (optional, never blocks)
-  for (const n of [3, 4]) { await turnStart(p, n); await agreeReadDraw(p, n); await tapAll(p); await tick(p, '#sgSaw'); if (n === 3) await p.$eval('input[name="sgIdWho"][value="known"]', e => e.click()); await p.click('#sgFinishGo'); await p.waitForSelector('#sgHandback'); await p.click('#sgImTim'); await p.waitForSelector('#sgView'); }
+  await tapAll(p); await p.selectOption('#sgIdType', 'passport'); await tick(p, '#sgSaw'); await p.click('#sgFinishGo'); await p.waitForSelector('#sgHandback'); await p.click('#sgImTim'); await p.waitForSelector('#sgView');
+  // purchaser 3: her own ID check; purchaser 4: Tim chooses to finish without one (Tim, 26 November 2026, 17:57): a warning right under
+  // the button on the first tap, and a second tap to confirm
+  await turnStart(p, 3); await agreeReadDraw(p, 3); await tapAll(p); await p.selectOption('#sgIdType', 'kiwi_access_card'); await tick(p, '#sgSaw'); await p.click('#sgFinishGo'); await p.waitForSelector('#sgHandback'); await p.click('#sgImTim'); await p.waitForSelector('#sgView');
+  await turnStart(p, 4); await agreeReadDraw(p, 4); await tapAll(p); await p.click('#sgNoIdGo'); await p.waitForTimeout(250);
+  { const w = await p.evaluate(() => { const n = document.getElementById('bn-sgNoIdGo'); return n && !n.hidden ? n.textContent : ''; }); out.noIdWarn = w;
+    expect(/No identification has been checked for Di Testbuyer\. Finish anyway\?/.test(w) && await p.$('#sgFinish'), 'finishing without an ID check: the first tap only warns, right under the button'); }
+  await p.click('#sgNoIdGo'); await p.waitForSelector('#sgHandback'); await p.click('#sgImTim'); await p.waitForSelector('#sgView');
   { const d0 = await db(p), s3 = d0.offer_signers.find(s => s.signing_id === gA.id && s.position === 3), s4 = d0.offer_signers.find(s => s.signing_id === gA.id && s.position === 4);
-    expect(s3.id_sighted === 'known_to_tim' && s3.finished_at, 'known to the agent: recorded');
-    expect(s4.id_sighted == null && s4.finished_at, 'no identity choice: finished, and recorded as none');
-    const ev4 = d0.offer_events.find(e => e.kind === 'sign_finished' && e.detail.signing_id === gA.id && e.detail.signer === 4); expect(ev4 && ev4.detail.id_sighted == null && 'id_sighted' in ev4.detail, 'the audit trail records that no choice was made'); }
+    expect(s3.id_sighted === 'kiwi_access_card' && s3.finished_at && s4.id_sighted == null && s4.finished_at, 'purchaser 3\'s photo ID type is recorded; purchaser 4 finished without one');
+    const ev3 = d0.offer_events.find(e => e.kind === 'sign_id_checked' && e.detail.signing_id === gA.id && e.detail.signer === 3); expect(ev3 && ev3.detail.id_type === 'kiwi_access_card' && ev3.detail.checked_by === 'Tim McGuire' && ev3.detail.watched === true && ev3.at, 'the audit trail records Tim\'s ID check, with its time');
+    const ev4 = d0.offer_events.find(e => e.kind === 'sign_no_id_check' && e.detail.signing_id === gA.id && e.detail.signer === 4); expect(ev4 && ev4.detail.note === 'Signed in person without an identity check' && ev4.detail.by === 'Tim McGuire' && ev4.detail.warned === true && ev4.at, 'the audit trail says plainly "Signed in person without an identity check", by Tim, with the time');
+    const r1 = await rpc(p, 'agent_signing_finish_checked', { p_signer: s4.id, p_id_type: '', p_checked: true, p_ua: 'x' }); expect(r1.error && /photo ID you checked/.test(r1.error.message), 'an empty ID choice is refused');
+    const r0 = await rpc(p, 'agent_signing_finish', { p_signer: s4.id, p_id_sighted: 'passport', p_ua: 'x' }); expect(r0.error && /photo ID you checked/.test(r0.error.message), 'the old finish without the check is refused'); }
   await p.waitForSelector('#sgRound', { timeout: 30000 });
   d = await db(p); const rA = d.offer_rounds.find(r => r.offer_id === offA);
   expect(rA && rA.number === 1 && d.offer_signings.find(x => x.id === gA.id).status === 'locked', 'Round 1 locked when the last purchaser finished');
@@ -211,7 +217,7 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   const rt = await pdfText(roundPdf); out.roundPages = rt.length;
   const rec = rt.slice(drPages).join(' ');
   expect(rt.length > drPages && /Execution record/.test(rec) && !rt.slice(0, drPages).some(t => /Execution record/.test(t)), 'the execution record is on pages added at the end, never on the REINZ pages');
-  expect(['Ana Maria Testbuyer', 'Bo Testbuyer', 'Cy Testbuyer', 'Di Testbuyer'].every(n => rec.includes(n)) && /saw them sign/.test(rec) && /Photo ID sighted: Passport/.test(rec) && /NZ driver licence/.test(rec) && /known to Tim McGuire personally/.test(rec) && /Identity: no choice recorded \(knowing them and an ID check are both optional\)/.test(rec), 'it names each signer, how they signed and the ID type (or that Tim knows them, or that no choice was made)');
+  expect(['Ana Maria Testbuyer', 'Bo Testbuyer', 'Cy Testbuyer', 'Di Testbuyer'].every(n => rec.includes(n)) && /saw them sign/.test(rec) && /Photo ID sighted: Passport/.test(rec) && /NZ driver licence/.test(rec) && /Kiwi Access Card/.test(rec) && (rec.match(/Tim McGuire checked this person's photo ID \(/g) || []).length === 3 && /Signed in person without an identity check: Tim McGuire chose to finish without one after a warning/.test(rec), 'it names each signer, how they signed, the ID type and Tim\'s ID check with its time for each, and says plainly who signed without one (029)');
   expect(/Fingerprint \(SHA-256\) of what they saw and signed: [0-9a-f]{64}/.test(rec) && rec.includes(drA.sha256), 'with the fingerprints of the draft and of what each saw');
   expect(/line through text striking "[^"]+" by Bo Testbuyer/.test(rec) && /reinstatement by Bo Testbuyer/.test(rec) && /note by Bo Testbuyer/.test(rec), 'and each mark, with who and when');
   out.leak = (rt.join(' ').match(/buyer\.own@|ana\.p@|bo\.p@|cy\.p@|di\.p@|999 8888|777 6666|555 4444|333 2222|111 0000|vendor@example|000 1111/g) || []);
@@ -270,7 +276,8 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   await draw(q, '#sgSig', 5); await draw(q, '#sgInit', 6); await q.click('#sgDrawGo'); await q.waitForSelector('#sgPlaces');
   // plain words for a signer: no "fingerprint"; the check code sits behind Details, with what it is for
   expect(!/fingerprint/i.test(await q.textContent('#main')) && await q.$('#sgDocCheck') && /Document check code/.test(await q.textContent('#sgDocCheck')) && !(await q.$eval('#sgDocCheck', e => e.open)), 'the signer sees "Document check code" behind Details, never "fingerprint"');
-  expect(!(await q.$('#sgTools')) && await q.$('#sgAskBox'), 'a link signer cannot mark the document, but can ask Tim for a change');
+  // 029 (Tim, 26 November 2026): by link in Round 1 a purchaser has every tool Tim's screen has (each holds signing for Tim)
+  expect(JSON.stringify(await q.$$eval('#sgTools [data-tool]', b => b.map(x => x.dataset.tool))) === JSON.stringify(['note', 'strike', 'cross', 'reinstate', 'insert', 'own_initials', 'own_name', 'own_signature']) && await q.$('#sgAskBox'), 'a link signer has every marking tool (note, line, cross, reinstate, added text, their own initials, name or signature), and can ask Tim for a change');
   const allMine = await q.$$eval('#sgPgPick option', o => o.length); expect(allMine >= 1, 'the pages are there to read');
   d = await db(q); const eve = d.offer_signers.find(s => s.signing_id === gB.id && s.position === 1), fin = d.offer_signers.find(s => s.signing_id === gB.id && s.position === 2);
   const finPlace = gB.places.find(x => x.signer === 2).id;

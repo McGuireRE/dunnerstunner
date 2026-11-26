@@ -422,6 +422,34 @@ agreements/<agreement id>/signatures/... (vendors may upload their own signature
   026 applied straight after 024: 024's own rollback test (output identical apart from the new tables in its truncate notice), 025's
   rollback test (identical) and 024's race test (no errors).
 
+## 029 Signing places, chattels initials and four more marks (26 November 2026; tested in a rollback block on a local PostgreSQL stand-in, NOT yet on the live project)
+- `offer_sign_marks`: kinds widened (nothing removed) with `own_initials`, `own_name`, `own_signature`; new column `ink_png` (only on a
+  signer's own initials or signature: the database copies in that signer's own ink as it stands, `offer_sign_ink`); `offer_sign_marks_live`
+  gains the column. Typed words (`insert`) may now be a Round 1 mark too. By link in Round 1 every mark kind (note, strike, cross, reinstate
+  too) goes through `offer_sign_mark` (with a reinstatement's target) and holds the round as on Tim's screen.
+- Triggers, before insert: `guard_offer_mark_place` (typed words and a signer's own marks sit inside the page, off the date place and off
+  other signers' places; a signer's own mark carries exactly their own ink or name), `guard_offer_signing_chattels` (a side signing the
+  whole agreement has each signer's initials inside the map's chattels area; refused with a plain message when the map has none).
+- Functions: `offer_sign_do_mark` (inner), `offer_sign_mark` (service role, a link), `agent_signing_release_edited` and
+  `agent_round_present_edited` (Tim's own changes to the places, recorded as `sign_places_edited`); helpers `offer_own_kind`,
+  `offer_own_ok`, `offer_mark_rect`, `offer_hits_date`, `offer_overlap`, `offer_chattels_rect`, `offer_places_edits_ok`. Replaced word for
+  word apart from the named lines: `agent_signing_mark`, `agent_signing_review`, `offer_round_lock`, `agent_round_present`,
+  `offer_agreed_terms`, `offer_doc_layers`, `offer_round_material`, `offer_sign_state`. A signer's own mark is not a change (not counted,
+  not initialled by others, not in the agreed terms' changes).
+- Events: `sign_marked` (now with `by_link` and `text`), `sign_own_mark`, `sign_places_edited`.
+- Rollback test: `tests/signing-marks-rollback.sql` (built by `tests/signing-marks-rollback.js`). Local run 26 November 2026 on the
+  stand-in through 026: every line as expected, no CAPITALS. `tests/signing-marks-with-026.js`: 026's own rollback test with 029 applied
+  straight after it gives the same lines (the counts include the chattels initials).
+- Identity (Tim, 26 November 2026): `agent_signing_finish_checked` (offers in person: a photo ID type and Tim's tick; event
+  `sign_id_checked`; 023's `agent_signing_finish` now refuses), `offer_photo_id_ok`; trigger `guard_signature_identity` on `signatures`,
+  `variation_signatures` and `form_signatures` (in person: `snapshot.id_check` with type, tick, by, time, optional AML file, never a number;
+  by link: no one else on the agreement with the same email). Layers and round material carry each signer's `id_checked_at`.
+  The stand-in needs `tests/pg-standin-signatures.sql` for these tables.
+  An explicit choice after a warning, to sign in person without an identity check, also passes (offers: `no_id_warned`, event
+  `sign_no_id_check`, `no_id_check_at` on layers and round material; the agreement's tables: `id_check.type` none with `warned` and the
+  note). An empty choice is refused. A vendor with no email may sign on Tim's device; Tim's handing over of the copy is an
+  `agreement_events` row of kind `copy_handed_over`.
+
 ## 028 The shared records (LW0, 26 November 2026; tested in a rollback block, NOT yet on the live project)
 One home for each fact. Every new table has RLS; nobody writes them directly; every trigger here catches its own errors and records them
 in `shared_record_log` (agent reads), so this layer can never stop a vendor's questionnaire, a signing or an offer. Signed records,

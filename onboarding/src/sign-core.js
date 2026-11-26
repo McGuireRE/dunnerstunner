@@ -138,6 +138,29 @@
     });
     return [...groups.values()].map(g => Object.assign(g, { rect: union(g.boxes) }));
   }
+  /* ───── the chattels box (Tim, 26 November 2026: it always has initials) ─────
+     Whenever a side signs the whole agreement, each signer initials inside the chattels area of the blank's map (its 'chattels' place),
+     side by side, clear of printed words and other places where there is room. The database checks the same (029). */
+  const CHATTELS_MSG = 'The places on the blank have no chattels area, so nobody can initial the chattels. Add the chattels area to the places on the blank, then load it again.';
+  function chattelsArea(mapPlaces) {
+    const p = (mapPlaces || []).find(x => x && x.id === 'chattels' && [x.x, x.y, x.w, x.h, x.page].every(v => typeof v === 'number') && x.w > 0 && x.h > 0);
+    if (!p) return null; const r = (p.kind === 'area' || p.kind === 'never') ? { x: p.x, y: p.y + 9 - p.h, w: p.w, h: p.h } : { x: p.x, y: p.y, w: p.w, h: p.h };
+    return Object.assign({ page: p.page }, r);
+  }
+  const insideOf = (p, a) => !!a && p.page === a.page && p.x >= a.x - 1 && p.x + p.w <= a.x + a.w + 1 && p.y >= a.y - 1 && p.y + p.h <= a.y + a.h + 1;
+  // the boxes for some signers inside the area: one row (or rows) of initials, the first spot clear of printed words and of what is already
+  // there; failing that, clear of other places only (Tim is told, and can move them); failing that, null
+  function chattelsBoxes(n, area, page, obstacles, text) {
+    const obs = (obstacles || []).filter(b => !b.page || b.page === area.page).map(b => inset(b, 0.5, 1)), txt = (text || []).map(b => inset(b, 0.3, 0.8));
+    for (const strict of [true, false]) for (const [iw, ih] of SIZES) for (const lay of layouts(n, iw, ih, true).concat(layouts(n, iw, ih, false))) {
+      if (lay.w > area.w - 2 || lay.h > area.h - 2) continue;
+      for (let y = area.y + 1; y + lay.h <= area.y + area.h - 1; y += 3) for (let x = area.x + area.w - 1 - lay.w; x >= area.x + 1; x -= 4) {
+        const r = { x, y, w: lay.w, h: lay.h }; if (obs.some(b => overlap(r, b) > 0)) continue; if (strict && txt.some(b => overlap(r, b) > 0)) continue;
+        return { boxes: gridBoxes(n, r, lay), clear: strict };
+      }
+    }
+    return null;
+  }
   // input: { pages: [{ n, w, h, items? }], placed (the approved draft's placed items), mapPlaces (its map's places),
   //   signers: [{ position, name }], side? ('vendor': the vendors' own signature block, no acknowledgements; phase 4), obstacles?
   //   ([{ page, x, y, w, h }]: ink already on the page, kept clear) } -> { places: [{ id, signer, kind, why, ref, page, x, y, w, h, label, name? }], warnings,
@@ -236,6 +259,16 @@
       // ink already on the page (the other side's, from an earlier round) is never covered
       if ((input.obstacles || []).some(k => k && k.page === b.page && out.some(x => x.ref === it.id && x.page === k.page && overlap(x, k) > 0.5)))
         block('ack:' + it.id, lbl, `Page ${b.page}: the box you marked already holds the other side's initials or signature. Draw a separate box for ${vendor ? 'the vendors' : 'the purchasers'}.`); });
+    // 4c. the chattels box: every signer initials inside it (an initial already there counts); a map with no chattels area is said plainly
+    if (input.chattels !== false) {
+      const area = chattelsArea(map), pg = area && P(area.page);
+      if (!area || !pg) block('chattels', 'Chattels', CHATTELS_MSG);
+      else { const need = signers.filter(s => !out.some(x => x.signer === s.position && x.kind === 'initial' && insideOf(x, area)));
+        if (need.length) { const res = chattelsBoxes(need.length, area, pg, ob(area.page), text(area.page));
+          if (!res) block('chattels', 'Chattels', `Page ${area.page}: there is no clear space inside the chattels box for every signer's initials.`);
+          else { if (!res.clear) warnings.push(`Page ${area.page}: the initials in the chattels box touch printed words. Move them if you like.`);
+            res.boxes.forEach((b, i) => push(need[i].position, 'initial', 'filled', 'chattels_box', area.page, b, 'Initial the chattels box', { chattels: true })); } } }
+    }
     // 5. the foot of every page, outside any box (last, so it keeps clear of everything above)
     pages.forEach(pg => row('foot', 'p' + pg.n, pg.n, { x: pg.w - MARGIN, y: FOOT_Y, w: 1, h: IH }, `Initial the foot of page ${pg.n}`, { foot: true, minY: 2, maxY: 28 }));
     const counts = {}; signers.forEach(s => { counts[s.position] = out.filter(p => p.signer === s.position).length; });
@@ -247,13 +280,16 @@
   function markPlaces(marks, signers, pages, existing) {
     const n = (signers || []).length, ps = (pages || []), out = [], obs = {};
     (existing || []).forEach(p => (obs[p.page] ||= []).push(p));
-    (marks || []).forEach(m => { const pg = ps.find(p => p.n === m.page); if (!pg || !n) return; const target = markRect(m);
+    (marks || []).forEach(m => { if (isOwn(m)) return; const pg = ps.find(p => p.n === m.page); if (!pg || !n) return; const target = markRect(m);
       const res = placeRow(n, target, pg, obs[m.page] ||= [], null);
       res.boxes.forEach((b, i) => { const pl = { id: `mark:${m.id}:s${signers[i].position}`, signer: signers[i].position, kind: 'initial', why: 'mark', ref: m.id, page: m.page, x: b.x, y: b.y, w: b.w, h: b.h, label: `Initial the ${MARK_NAMES[m.kind] || 'mark'} on page ${m.page}` }; out.push(pl); obs[m.page].push(pl); }); });
     return out;
   }
   const NO_ROOM = 'No room on the signature page for every purchaser. Add a signature page in the portal, then load the blank again.';
-  const MARK_NAMES = { note: 'note', strike: 'line through text', cross: 'crossed-out box', reinstate: 'reinstatement' };
+  const MARK_NAMES = { note: 'note', strike: 'line through text', cross: 'crossed-out box', reinstate: 'reinstatement', insert: 'added text', own_initials: 'their own initials', own_name: 'their own name', own_signature: 'their own signature' };
+  // a signer's own initials, name or signature (029): checked by Tim in Round 1 like every mark, but nobody else initials it, and from
+  // Round 2 on it is not a change
+  const OWN_KINDS = ['own_initials', 'own_name', 'own_signature'], isOwn = m => !!m && OWN_KINDS.includes(m.kind);
   // A line through text, snapped to the printed words it crosses (Offers fixes 2, Tim 25 November 2026: a strike that looks like an
   // underline is ambiguous). page: { items: [{ s, x, y (baseline), w, h }] } as DRAFT.readPages gives them; x0, x1, y: the drag, in page
   // points. The line of text is the one whose letters the drag passes through (nearest its middle); every word with a letter under the
@@ -295,6 +331,8 @@
   // a mark's rectangle: { note: { strokes: [[[x, y], ...], ...] }, strike: { x0, x1, y }, cross: { x, y, w, h }, reinstate: { x, y } }
   function markRect(m) {
     const g = m.geometry || {};
+    if (isOwn(m)) return { x: g.x, y: g.y, w: g.w, h: g.h };
+    if (m.kind === 'insert') { const size = g.size || 9; let w = 0; for (const c of ansi(g.text || '')) w += chW(c); return { x: g.x, y: g.y - 2, w: Math.max(8, w * size / 1000), h: size + 4 }; }
     if (m.kind === 'note') { const pts = (g.strokes || []).flat(); if (!pts.length) return { x: 0, y: 0, w: 1, h: 1 }; const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]); return { x: Math.min(...xs), y: Math.min(...ys), w: Math.max(4, Math.max(...xs) - Math.min(...xs)), h: Math.max(4, Math.max(...ys) - Math.min(...ys)) }; }
     if (m.kind === 'strike') return { x: Math.min(g.x0, g.x1), y: g.y - 4, w: Math.abs(g.x1 - g.x0), h: 8 };
     if (m.kind === 'cross') return { x: g.x, y: g.y, w: g.w, h: g.h };
@@ -302,8 +340,10 @@
   }
   // a mark's shape, checked (the database checks the same): points inside the page, a sensible size
   function markOk(m, page) {
-    if (!m || !page || !['note', 'strike', 'cross', 'reinstate'].includes(m.kind)) return false;
+    if (!m || !page || !['note', 'strike', 'cross', 'reinstate', 'insert'].concat(OWN_KINDS).includes(m.kind)) return false;
     const g = m.geometry || {}, inX = v => typeof v === 'number' && v >= 0 && v <= page.w, inY = v => typeof v === 'number' && v >= 0 && v <= page.h;
+    if (isOwn(m)) return inX(g.x) && inY(g.y) && typeof g.w === 'number' && typeof g.h === 'number' && g.w >= 8 && g.h >= 4 && g.x + g.w <= page.w && g.y + g.h <= page.h && (m.kind !== 'own_name' || (typeof g.text === 'string' && g.size >= 6 && g.size <= 14));
+    if (m.kind === 'insert') return inX(g.x) && inY(g.y) && typeof g.text === 'string' && g.text.trim().length >= 1 && g.text.length <= 300 && g.text === g.text.trim() && g.size >= 6 && g.size <= 14;
     if (m.kind === 'note') return Array.isArray(g.strokes) && g.strokes.length >= 1 && g.strokes.length <= 60 && g.strokes.every(s => Array.isArray(s) && s.length >= 2 && s.length <= 400 && s.every(p => Array.isArray(p) && inX(p[0]) && inY(p[1])));
     if (m.kind === 'strike') return inX(g.x0) && inX(g.x1) && inY(g.y) && Math.abs(g.x1 - g.x0) >= 6;
     if (m.kind === 'cross') return inX(g.x) && inY(g.y) && inX(g.x + g.w) && inY(g.y + g.h) && g.w >= 6 && g.h >= 6;
@@ -331,7 +371,11 @@
     add(`This copy was made and locked by the server on ${NZ(rec.made_at)}. Its own fingerprint is recorded by the server when it is locked, and it is never changed.`, { size: 8.5 });
     (rec.signers || []).forEach((s, i) => {
       add(`Purchaser ${i + 1}: ${s.name}`, { bold: true, gap: 8 });
-      if (s.method === 'in_person') { add(`Signed in person on Tim McGuire's device. ${s.witnessed_by || 'Tim McGuire'} saw them sign.`); add(s.id_sighted === 'known_to_tim' ? 'Identity: known to Tim McGuire personally (no photo ID was needed).' : !s.id_sighted ? 'Identity: no choice recorded (knowing them and an ID check are both optional).' : `Photo ID sighted: ${ID_TYPES[s.id_sighted] || s.id_sighted} (the type only; no ID number is kept).`); }
+      // 029 (Tim, 26 November 2026, 17:57): Tim may choose, after a warning, to finish without an ID check; the record says so plainly
+      if (s.method === 'in_person' && s.no_id_check_at) add(`Signed in person on Tim McGuire's device. Signed in person without an identity check: Tim McGuire chose to finish without one after a warning, ${NZ(s.no_id_check_at)}.`);
+      else if (s.method === 'in_person') { add(`Signed in person on Tim McGuire's device. ${s.witnessed_by || 'Tim McGuire'} saw them sign.`); add(s.id_sighted === 'known_to_tim' ? 'Identity: known to Tim McGuire personally (no photo ID was needed).' : !s.id_sighted ? 'Identity: no choice recorded (knowing them and an ID check are both optional).' : `Photo ID sighted: ${ID_TYPES[s.id_sighted] || s.id_sighted} (the type only; no ID number is kept).`);
+        // 029 (Tim, 26 November 2026): on his device each signer's photo ID is logged, with his tick that he checked it and watched them sign
+        if (s.id_checked_at) add(`Tim McGuire checked this person's photo ID (${ID_TYPES[s.id_sighted] || s.id_sighted}) and watched them sign: ${NZ(s.id_checked_at)}.`, { size: 8.5 }); }
       else { add('Signed by a personal link sent only to them.'); add(`Email verified with a one-time code on ${NZ(s.verified_at)}.`); }
       add(`Agreed to sign electronically: ${NZ(s.consent_at)}.`);
       (s.receipts || []).forEach(r => add(`Received the ${GUIDE_NAMES[r.guide] || r.guide}${r.version ? ', version ' + r.version : ''}${r.pages && r.pages.length ? ' (page' + (r.pages.length > 1 ? 's ' : ' ') + r.pages.join(', ') + ' of this document)' : ''}: ${NZ(r.at)}.`, { size: 8.5 }));
@@ -340,7 +384,7 @@
       if (s.net) add(`Network (kept only as a fingerprint): ${String(s.net).slice(0, 16)}`, { size: 7.5 });
       add(`Fingerprint (SHA-256) of what they saw and signed: ${s.seen_sha256 || ''}`, { size: 7.5 });
     });
-    if ((rec.marks || []).length) { add('Marks made while signing', { bold: true, gap: 8 }); rec.marks.forEach(m => add(`Page ${m.page}: ${MARK_NAMES[m.kind] || m.kind}${m.kind === 'strike' && m.text ? ' striking "' + m.text + '"' : ''} by ${m.by}, ${NZ(m.at)}${m.reviewed_at ? '; checked and re-approved by Tim McGuire ' + NZ(m.reviewed_at) : ''}. Initialled by every purchaser.`, { size: 8.5 })); }
+    if ((rec.marks || []).length) { add('Marks made while signing', { bold: true, gap: 8 }); rec.marks.forEach(m => add(`Page ${m.page}: ${MARK_NAMES[m.kind] || m.kind}${m.kind === 'strike' && m.text ? ' striking "' + m.text + '"' : m.kind === 'insert' && m.text ? ' "' + m.text + '"' : ''} by ${m.by}, ${NZ(m.at)}${m.reviewed_at ? '; checked and re-approved by Tim McGuire ' + NZ(m.reviewed_at) : ''}.${isOwn(m) ? ' Their own mark, so no one else initials it.' : ' Initialled by every purchaser.'}`, { size: 8.5 })); }
     if ((rec.replaced || []).length) { add('Earlier versions', { bold: true, gap: 8 }); rec.replaced.forEach(r => add(`Draft ${r.number} was replaced on ${NZ(r.at)} before signing was finished. Signatures given on it are kept but void.`, { size: 8.5 })); }
     add('Contact details are never printed here. "Email verified" means the code was sent to the purchaser\'s own email and typed back correctly.', { size: 7.5, gap: 8 });
     return L;
@@ -352,6 +396,15 @@
     if (typeof atob === 'function') { const b = atob(m[1]); const u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return u; }
     return new Uint8Array(Buffer.from(m[1], 'base64')); };
   function wrapText(font, text, size, w) { const out = []; let cur = ''; String(text).split(/\s+/).filter(Boolean).forEach(wd => { const t = cur ? cur + ' ' + wd : wd; if (font.widthOfTextAtSize(t, size) <= w || !cur) cur = t; else { out.push(cur); cur = wd; } }); if (cur) out.push(cur); return out.length ? out : ['']; }
+  // typed words and a signer's own initials, name or signature (029), drawn the same on Round 1 and on every later round's working copy
+  async function drawAdded(doc, pg, k, font, ink) {
+    const g = k.geometry || {};
+    if (k.kind === 'insert') return pg.drawText(ansi(g.text), { x: g.x, y: g.y, size: g.size || 9, font, color: ink });
+    // a name never runs past its box: drawn smaller if it wouldn't fit at its size
+    if (k.kind === 'own_name') { const t = ansi(g.text), w1 = font.widthOfTextAtSize(t, 1) || 1, z = Math.max(3, Math.min(g.size || 9, (g.w - 1) / w1)); return pg.drawText(t, { x: g.x, y: g.y + Math.max(0, (g.h - z) / 2) + 1, size: z, font, color: ink }); }
+    const b = pngBytes(k.ink); if (!b) return; const im = await doc.embedPng(b), s = Math.min(g.w / im.width, g.h / im.height), w = im.width * s, h = im.height * s;
+    pg.drawImage(im, { x: g.x + (g.w - w) / 2, y: g.y + (g.h - h) / 2, width: w, height: h });
+  }
   // m: { places, taps: [{ place_id, signer }], signers: [{ position, name, sig_png, init_png }], marks: [{ id, kind, page, geometry, by }], record (for executionLines), title }
   async function renderRound(PDFLib, draftBytes, m) {
     const doc = await PDFLib.PDFDocument.load(draftBytes, { updateMetadata: false });
@@ -372,6 +425,7 @@
       else if (k.kind === 'strike') pg.drawLine({ start: { x: g.x0, y: g.y }, end: { x: g.x1, y: g.y }, thickness: 1, color: ink });
       else if (k.kind === 'cross') { pg.drawRectangle({ x: g.x, y: g.y, width: g.w, height: g.h, borderColor: ink, borderWidth: 0.9 }); pg.drawLine({ start: { x: g.x, y: g.y }, end: { x: g.x + g.w, y: g.y + g.h }, thickness: 0.9, color: ink }); pg.drawLine({ start: { x: g.x, y: g.y + g.h }, end: { x: g.x + g.w, y: g.y }, thickness: 0.9, color: ink }); }
       else if (k.kind === 'reinstate') { pg.drawText('Reinstated', { x: g.x, y: g.y + 2, size: 7, font: bold, color: ink }); pg.drawCircle({ x: g.x - 3, y: g.y + 4.5, size: 1.6, color: ink }); }
+      else if (k.kind === 'insert' || isOwn(k)) await drawAdded(doc, pg, k, font, ink);
     }
     // the execution record, on pages of its own at the end
     const W = 595.32, H = 841.92, lines = executionLines(m.record || {}); let pg = doc.addPage([W, H]), y = H - 56;
@@ -386,7 +440,8 @@
   const ccaPages = pages => (pages || []).filter(p => (p.items || []).map(i => i.s).join(' ').replace(/\s+/g, ' ').match(/client and customer acknowledg/i)).map(p => p.n);
 
   const SIGN = { sha256Hex, sha256Bytes, ZERO, chainHash, chainBody, verifyChain, canon, makePlaces, placesFor, markPlaces, markRect, markOk, MARK_NAMES, filledGroups, rectOfMap, overlap,
-    executionLines, renderRound, snapStrike, ID_TYPES, NO_ROOM, NEAR, textRects, placeRow, GUIDE_NAMES, ccaPages, NZ, IW, IH };
+    executionLines, renderRound, snapStrike, ID_TYPES, NO_ROOM, NEAR, textRects, placeRow, GUIDE_NAMES, ccaPages, NZ, IW, IH,
+    chattelsArea, chattelsBoxes, insideOf, CHATTELS_MSG, OWN_KINDS, isOwn, drawAdded };
   // also on the global object everywhere (a bundler may wrap this file as CommonJS: the offer-sign entry reads the globals; offers hotfix 2)
   if (typeof module !== 'undefined' && module.exports) module.exports = SIGN; root.SIGN = SIGN;
 })(typeof window !== 'undefined' ? window : globalThis);
