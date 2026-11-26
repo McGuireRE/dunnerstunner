@@ -396,7 +396,8 @@
   async function drawAdded(doc, pg, k, font, ink) {
     const g = k.geometry || {};
     if (k.kind === 'insert') return pg.drawText(ansi(g.text), { x: g.x, y: g.y, size: g.size || 9, font, color: ink });
-    if (k.kind === 'own_name') { const z = g.size || 9; return pg.drawText(ansi(g.text), { x: g.x, y: g.y + Math.max(0, (g.h - z) / 2) + 1, size: z, font, color: ink }); }
+    // a name never runs past its box: drawn smaller if it wouldn't fit at its size
+    if (k.kind === 'own_name') { const t = ansi(g.text), w1 = font.widthOfTextAtSize(t, 1) || 1, z = Math.max(3, Math.min(g.size || 9, (g.w - 1) / w1)); return pg.drawText(t, { x: g.x, y: g.y + Math.max(0, (g.h - z) / 2) + 1, size: z, font, color: ink }); }
     const b = pngBytes(k.ink); if (!b) return; const im = await doc.embedPng(b), s = Math.min(g.w / im.width, g.h / im.height), w = im.width * s, h = im.height * s;
     pg.drawImage(im, { x: g.x + (g.w - w) / 2, y: g.y + (g.h - h) / 2, width: w, height: h });
   }

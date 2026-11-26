@@ -214,7 +214,7 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   await p.click('#sgRelease'); await p.waitForSelector('#sgView').catch(async e => { throw new Error('release refused: ' + await p.textContent('#sgRelErr')); });
   d = await db(p); const g1 = d.offer_signings.find(x => x.offer_id === oid);
   const ev = d.offer_events.find(e => e.kind === 'sign_places_edited' && e.detail.signing_id === g1.id); out.editEv = ev && ev.detail;
-  expect(ev && ev.detail.added === 1 && ev.detail.removed === removedN + 1 && ev.detail.moved === 1 && ev.detail.added_ids[0] === added && ev.detail.removed_places.some(x => x.id === rem), 'D: the round\'s timeline records what Tim added, moved and removed');
+  expect(ev && ev.detail.added === 1 && ev.detail.removed === removedN + 1 && ev.detail.moved === 1 && ev.detail.added_ids[0] === added && ev.detail.removed_places.some(x => x.id === rem) && ev.detail.checked && ev.detail.checked.sent === g1.places.length && typeof ev.detail.checked.proposed_screen === 'number' && /^[0-9a-f]{64}$/.test(ev.detail.checked.proposed_sha256_screen), 'D: the round\'s timeline records what Tim added, moved and removed');
   expect(g1.places.some(x => x.id === added) && !g1.places.some(x => x.id === rem) && [1, 2, 3, 4].every(n => g1.places.some(x => x.signer === n && x.kind === 'initial' && SGd.insideOf(x, A))), 'D and B: the released places are as Tim left them, chattels initials for everyone');
 
   // ── 2. C in person, Round 1: own initials (held, nobody initials them), added text (held, everyone initials it) ──
@@ -281,6 +281,9 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   d = await db(p); const ml = (await mails(p)).filter(m => m.kind === 'offer_sign_marked'), mkL = d.offer_sign_marks.find(m => m.signing_id === gL.id);
   expect(r.ok && r.held && d.offer_signings.find(x => x.id === gL.id).status === 'held' && mkL.ink_png === PNG1, 'C by link: her own initials hold the round for Tim, in her own ink');
   out.markMails = ml.map(m => m.to); out.markR = r; out.allKinds = (await mails(p)).map(m => m.kind); expect(ml.length === 1 && ml[0].to === 'tim', 'C by link: Tim alone is emailed that she marked the page');
+  // with her own initials on the page she can't draw again (a sealed round never shows two drawings for one person: 029 review)
+  r = await invoke(p, Object.assign({ action: 'marks', sig: await inkPng(300, 80, 9), init: await inkPng(120, 50, 9) }, A_));
+  expect(r.ok === false, 'C by link: no drawing again while her mark waits for Tim');
   const stL = await invoke(p, Object.assign({ action: 'state' }, A_));
   expect(stL.signing.marks.length === 1 && stL.signing.marks[0].ink === PNG1 && stL.signing.marks[0].mine, 'C by link: her screen shows the mark, with her ink');
   // by link in Round 1, every tool Tim's screen has: a crossed-out box and its reinstatement hold the round for Tim too, Tim alone emailed
@@ -327,10 +330,18 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   expect(nm && nm.geometry.text === 'Testy Vendorperson' && d.offer_signings.find(x => x.id === g2.id).status === 'signing' && !d.offer_sign_reviews.some(r => r.signing_id === g2.id && r.marks.includes(nm.id)), 'C: in Round 2 a vendor adds their own name: exactly their name, nothing held, nobody to initial it');
   expect(d.offer_events.some(e => e.kind === 'sign_own_mark' && e.detail.kind === 'own_name' && e.detail.round === 2), 'C: on the timeline as their own mark');
   expect(await p.evaluate(() => !!document.querySelector('#sgPage .sg-k-own_name')), 'C: shown in the on-screen layer');
+  // the reviewer's case: a vendor adds her own signature in Round 2 and then tries to draw again: refused, so the sealed round never
+  // shows two drawings for her
+  { const v1 = d.offer_signers.find(x => x.signing_id === g2.id && x.position === 1), ps = g2.places.concat(gL.places).filter(x => x.page === 1).concat([nm.geometry]);
+    let gs = null; for (let y = 600; y > 120 && !gs; y -= 31) for (let x = 60; x < 420 && !gs; x += 47) { const rr = { x, y, w: 110, h: 28 }; if (!ps.some(q => SGd.overlap(q, rr) > 0)) gs = rr; }
+    let r2 = await rpc(p, 'agent_signing_mark', { p_signer: v1.id, p_kind: 'own_signature', p_page: 1, p_geometry: gs, p_target: null });
+    expect(!r2.error && r2.data && r2.data.held === false, 'C: her own signature added in Round 2 (' + (r2.error && r2.error.message) + ')');
+    r2 = await rpc(p, 'agent_signing_marks', { p_signer: v1.id, p_sig: await (async () => { return (await db(p)).offer_signers.find(x => x.id === v1.id).init_png; })(), p_init: (await db(p)).offer_signers.find(x => x.id === v1.id).init_png });
+    expect(r2.error && /kept as you first used them/.test(r2.error.message), 'C: with her own signature on the page, she can\'t draw again (029 review)'); }
   await tapAll(p); await tick(p, '#sgSaw'); await p.selectOption('#sgIdType', 'passport'); await p.click('#sgFinishGo'); await p.waitForSelector('#sgHandback', { timeout: 20000 }); await p.click('#sgImTim'); await p.waitForSelector('#sgView', { timeout: 20000 });
   for (let i = 0; i < 20 && !((await db(p)).offer_rounds || []).some(x => x.signing_id === g2.id); i++) await p.waitForTimeout(500);
   d = await db(p); const rd2 = d.offer_rounds.find(x => x.signing_id === g2.id); out.round2 = rd2 && { changes: rd2.changes, own: (rd2.execution.own || []).length };
-  expect(rd2 && rd2.changes === 0 && (rd2.execution.own || []).length === 1 && !(rd2.execution.changes || []).length, 'C: Round 2 locks with no changes: the vendor\'s own name is listed apart, not as a change');
+  expect(rd2 && rd2.changes === 0 && (rd2.execution.own || []).length === 2 && !(rd2.execution.changes || []).length, 'C: Round 2 locks with no changes: the vendor\'s own name is listed apart, not as a change');
   expect(!(await side(p)), 'no sideways scroll at the end'); await shot(p, 'marks_r2');
 
   console.log(JSON.stringify(Object.assign(out, { errs }), null, 1));

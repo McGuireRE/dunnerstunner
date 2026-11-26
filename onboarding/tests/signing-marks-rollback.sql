@@ -104,6 +104,7 @@ begin
   begin perform public.agent_signing_mark(s2, 'own_signature', 1, '{"x":90,"y":726,"w":80,"h":20}', null); out := out || 'A SIGNATURE SAT ON THE DATE; '; exception when others then out := out || 'on the date: ' || sqlerrm || '; '; end;
   begin perform public.agent_signing_mark(s2, 'own_initials', 1, '{"x":580,"y":300,"w":30,"h":14}', null); out := out || 'INITIALS OFF THE PAGE; '; exception when others then out := out || 'off the page: ' || sqlerrm || '; '; end;
   begin perform public.agent_signing_mark(s2, 'insert', 1, '{"x":100,"y":200,"text":"call 021 111 2222","size":9}', null); out := out || 'A PURCHASER''S PHONE WENT ON; '; exception when others then out := out || 'privacy: ' || sqlerrm || '; '; end;
+  begin perform public.agent_signing_mark(s2, 'own_name', 2, '{"x":100,"y":300,"w":8,"h":12,"text":"Bo Markbuyer","size":14}', null); out := out || 'A NAME IN A BOX TOO NARROW FOR IT; '; exception when others then out := out || 'name fits its box: ' || sqlerrm || '; '; end;
   perform public.agent_signing_mark(s2, 'own_name', 2, '{"x":100,"y":300,"w":120,"h":12,"text":"Bo Markbuyer","size":9}', null);
   r := public.agent_signing_mark(s2, 'insert', 1, '{"x":100,"y":200,"text":"Subject to a builder''s report","size":9}', null); mk2 := (r->>'id')::uuid;
   -- the service role (as the edge function runs) can't put someone else's ink in a mark, nor write one outside the page
@@ -141,8 +142,15 @@ begin
     out := out || 'PRESENTED WITHOUT THE VENDORS'' CHATTELS INITIALS; '; exception when others then out := out || 'vendors need chattels: ' || sqlerrm || '; '; end;
   pl := pg_temp.rb_places(2, true, true, true) || jsonb_build_array(
       jsonb_build_object('id', 'chg:' || mk2 || ':s1', 'signer', 1, 'kind', 'initial', 'why', 'change', 'ref', mk2::text, 'page', 1, 'x', 100, 'y', 215, 'w', 26, 'h', 13), jsonb_build_object('id', 'chg:' || mk2 || ':s2', 'signer', 2, 'kind', 'initial', 'why', 'change', 'ref', mk2::text, 'page', 1, 'x', 130, 'y', 215, 'w', 26, 'h', 13));
-  r := public.agent_round_present_edited(o1, 'in_person', pl, true, null, false, ('{"moved":["chg:' || mk2 || ':s2"]}')::jsonb); g2 := (r->>'id')::uuid;
-  out := out || 'presented: edits recorded=' || (select count(*) from public.offer_events where offer_id = o1 and kind = 'sign_places_edited' and detail->>'signing_id' = g2::text) || '; ';
+  -- Tim's added place on another signer's place, or a place over Ana's own initials from Round 1, is refused (029 review)
+  begin perform public.agent_round_present_edited(o1, 'in_person', pl || jsonb_build_array(jsonb_build_object('id', 'ack:tim-b1:s1', 'signer', 1, 'kind', 'initial', 'why', 'ack', 'ref', 'tim-b1', 'page', 1, 'x', 556, 'y', 5, 'w', 26, 'h', 13)), true, null, false, '{"added":["ack:tim-b1:s1"]}'::jsonb);
+    out := out || 'AN ADDED PLACE SAT ON ANOTHER SIGNER''S PLACE; '; exception when others then out := out || 'added on another''s place: ' || sqlerrm || '; '; end;
+  begin perform public.agent_round_present(o1, 'in_person', pl || jsonb_build_array(jsonb_build_object('id', 'ack:tim-b2:s1', 'signer', 1, 'kind', 'initial', 'why', 'ack', 'ref', 'tim-b2', 'page', 1, 'x', 102, 'y', 301, 'w', 26, 'h', 13)), true);
+    out := out || 'A PLACE COVERED ANA''S OWN INITIALS; '; exception when others then out := out || 'own marks kept clear: ' || sqlerrm || '; '; end;
+  r := public.agent_round_present_edited(o1, 'in_person', pl, true, null, false, ('{"moved":["chg:' || mk2 || ':s2"],"proposed":22,"proposed_sha256":"' || repeat('ab', 32) || '"}')::jsonb); g2 := (r->>'id')::uuid;
+  out := out || 'presented: edits recorded=' || (select count(*) from public.offer_events where offer_id = o1 and kind = 'sign_places_edited' and detail->>'signing_id' = g2::text)
+    || ' checked=' || (select (detail->'checked'->>'sent') || ' sent, ' || (detail->'checked'->>'added_or_moved_clear') || ' clear, own kept clear ' || (detail->'checked'->>'own_marks_kept_clear') || ', sent sha ok=' || ((detail->'checked'->>'sent_sha256') = (select places_sha256 from public.offer_signings where id = g2)) || ', screen said ' || (detail->'checked'->>'proposed_screen')
+      from public.offer_events where offer_id = o1 and kind = 'sign_places_edited' and detail->>'signing_id' = g2::text) || '; ';
   perform pg_temp.rb_prep(g2);
   select id into v1 from public.offer_signers where signing_id = g2 and position = 1; select id into v2 from public.offer_signers where signing_id = g2 and position = 2;
   begin perform public.offer_sign_do_mark(v1, 'cross', 1, '{"x":100,"y":150,"w":60,"h":20}', null, null, true); out := out || 'A ROUND 2 CROSS WENT IN AS A MARK; '; exception when others then out := out || 'round 2 cross is a change: ' || sqlerrm || '; '; end;
@@ -150,6 +158,12 @@ begin
   begin perform public.agent_signing_mark(v1, 'own_signature', 2, '{"x":75,"y":598,"w":40,"h":16}', null); out := out || 'UNA''S SIGNATURE COVERED ANA''S ROUND 1 CHATTELS INITIALS; '; exception when others then out := out || 'clear of earlier ink: ' || sqlerrm || '; '; end;
   r := public.agent_signing_mark(v1, 'own_signature', 1, '{"x":300,"y":600,"w":80,"h":20}', null);
   out := out || 'una''s signature: held=' || (r->>'held') || ' status=' || (select status from public.offer_signings where id = g2) || ' event=' || (select kind from public.offer_events where offer_id = o1 order by seq desc limit 1) || ' places for others=' || (select count(*) from public.offer_sign_reviews where signing_id = g2) || '; ';
+  -- with her own signature on the page she can't draw again (the sealed round would show two drawings for her), however it is written
+  begin perform public.offer_sign_do_marks(v1, png2, png2); out := out || 'REDRAWN WITH HER OWN SIGNATURE STANDING; '; exception when others then out := out || 'no redraw: ' || sqlerrm || '; '; end;
+  execute 'set local role service_role';
+  begin insert into public.offer_sign_redraws (signing_id, signer_id, sig_png, init_png, by_name) values (g2, v1, png2, png2, 'probe'); out := out || 'A REDRAW ROW WENT IN WITH HER OWN SIGNATURE STANDING; '; exception when others then out := out || 'no redraw row: ' || sqlerrm || '; '; end;
+  execute 'reset role';
+  out := out || 'her drawing stays=' || ((public.offer_sign_ink(v1)->>'sig_png') = png) || '; ';
   perform pg_temp.rb_finish(g2);
   r := pg_temp.rb_lock(g2, '{"lifted": [], "outstanding": []}');
   out := out || 'round 2 sealed, changes counted=' || (select changes from public.offer_rounds where signing_id = g2) || ' offer=' || (select status from public.property_offers where id = o1) || '; ';

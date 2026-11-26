@@ -7118,7 +7118,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
           places (the array to change, in place), page, mapPlaces, overlay (r, page) (optional: the earlier rounds' ink), onChange () } */
   const SG_IW = 26, SG_IH = 13, SG_SW = 150, SG_SH = 22;
   function sgEditor(o) {
-    const E = { sel: null, mode: null, added: [], moved: [], removed: [], page: o.page || 1, kind: 'initial', signer: (o.signers[0] || {}).position || 1 };
+    const E = { sel: null, mode: null, added: [], moved: [], removed: [], page: o.page || 1, kind: 'initial', signer: (o.signers[0] || {}).position || 1, proposed: o.places.length, proposedSha: SG.sha256Hex(SG.canon(o.places)) };
     const area = SG.chattelsArea(o.mapPlaces || []), dp = (o.mapPlaces || []).find(x => x.id === 'date') || (o.mapPlaces || []).find(x => x.kind === 'date');
     const nameOf = n => (o.signers.find(x => x.position === n) || {}).name || 'Signer ' + n;
     const pl = id => o.places.find(x => x.id === id);
@@ -7184,7 +7184,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         E.sel = null; E.mode = null; selWire(); toast('Place removed'); changed(); paint(); });
       $('#' + o.id + 'Done').addEventListener('click', () => { E.sel = null; E.mode = null; selWire(); paint(); });
       selWire(); paint(); };
-    return { html, wire, edits: () => ({ added: E.added.slice(), moved: E.moved.filter(id => !E.added.includes(id)), removed: E.removed.slice() }), state: E };
+    // what the screen proposed (how many places, and their fingerprint) goes with the changes, so the timeline holds both (029 review)
+    return { html, wire, edits: () => ({ added: E.added.slice(), moved: E.moved.filter(id => !E.added.includes(id)), removed: E.removed.slice(), proposed: E.proposed, proposed_sha256: E.proposedSha }), state: E };
   }
 
   // "Ready to sign": the places made from the draft and map, the method, and nothing sent
@@ -7465,7 +7466,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       else if (m.kind === 'reinstate') { const t = document.createElementNS(NS, 'text'); t.setAttribute('x', geo.x); t.setAttribute('y', Y(geo.y + 2)); t.textContent = 'Reinstated'; gEl.appendChild(t); }
       else if (m.kind === 'insert') { const t = document.createElementNS(NS, 'text'); t.setAttribute('x', geo.x); t.setAttribute('y', Y(geo.y)); t.setAttribute('class', 'sg-ins'); t.style.fontSize = (geo.size || 9) + 'px'; t.textContent = geo.text || ''; gEl.appendChild(t); }
       // 029: a signer's own name (words) or their own initials or signature (their own ink, copied in by the database)
-      else if (m.kind === 'own_name') { const t = document.createElementNS(NS, 'text'); t.setAttribute('x', geo.x); t.setAttribute('y', Y(geo.y + Math.max(0, (geo.h - (geo.size || 9)) / 2) + 1)); t.setAttribute('class', 'sg-ins'); t.style.fontSize = (geo.size || 9) + 'px'; t.textContent = geo.text || ''; gEl.appendChild(t); }
+      else if (m.kind === 'own_name') { const z = Math.max(3, Math.min(geo.size || 9, (geo.w - 1) / Math.max(1, NG.textWidth(geo.text || '', 1)))), t = document.createElementNS(NS, 'text'); t.setAttribute('x', geo.x); t.setAttribute('y', Y(geo.y + Math.max(0, (geo.h - z) / 2) + 1)); t.setAttribute('class', 'sg-ins'); t.style.fontSize = z + 'px'; t.textContent = geo.text || ''; gEl.appendChild(t); }
       else if (SG.isOwn(m) && (m.ink || m.ink_png)) { const im = document.createElementNS(NS, 'image'); Object.entries({ href: m.ink || m.ink_png, x: geo.x, y: Y(geo.y + geo.h), width: geo.w, height: geo.h, preserveAspectRatio: 'xMidYMid meet' }).forEach(([k, v]) => im.setAttribute(k, v)); gEl.appendChild(im); }
       if (onPick && ['strike', 'cross'].includes(m.kind)) { gEl.style.cursor = 'pointer'; gEl.addEventListener('click', e => { e.stopPropagation(); onPick(m); }); }
       svg.appendChild(gEl); });

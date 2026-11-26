@@ -855,6 +855,7 @@ function sgReceipt(s,guide,version,file,sha,pages){ const g=sgReady(s); if(!s.co
   const sp=guide==='sale_purchase'; OSC().push({id:OSC().length+1,signing_id:g.id,signer_id:s.id,guide,version:sp?version:null,file:sp?file:null,sha256:sp?(sha||null):null,pages:guide==='cca'?g.cca_pages.slice():[],at:now()}); sgEv(g,s.name,'sign_receipt',{signing_id:g.id,signer:s.position,guide,version:sp?version||null:null}); }
 function sgMarks(s,sig,init){ const g=sgReady(s); if(!s.consent_at) throw new Error('Agree to sign electronically first'); if(!PNG_RE.test(sig||'')||sig.length>400000||sig.length<200) throw new Error('Please draw your signature');
   if(!PNG_RE.test(init||'')||init.length>200000||init.length<150) throw new Error('Please draw your initials'); if(liveTaps().some(t=>t.signer_id===s.id)) throw new Error('Your signature and initials are kept as you first used them');
+  if(liveMarks().some(m=>m.signer_id===s.id&&['own_initials','own_signature'].includes(m.kind))) throw new Error('Your signature and initials are kept as you first used them');   // 029 review: never two drawings for one person
   // 026: every tap undone: the first drawing stays as it was, and this one is added
   if(OST().some(t=>t.signer_id===s.id)||OSD().some(r=>r.signer_id===s.id)){ OSD().push({id:OSD().length+1,signing_id:g.id,signer_id:s.id,sig_png:sig,init_png:init,by_name:s.name,at:now()}); sgEv(g,s.name,'sign_redrawn',{signing_id:g.id,signer:s.position,round:g.round_no||1,side:g.side||'purchaser'}); return; }
   s.sig_png=sig; s.init_png=init; s.marks_at=now(); }
@@ -965,7 +966,7 @@ const ovl=(a,b)=>Math.max(0,Math.min(a.x+a.w,b.x+b.w)-Math.max(a.x,b.x))*Math.ma
 function hitsDate(draftId,page,rc){ const dp=datePlaceOf(draftId); if(!dp||dp.page!==page) return false; const d={x:dp.x,y:dp.y-2,w:dp.w||100,h:(dp.h||10)+2}; return ovl(d,rc)>0; }
 function ownOk(kind,g,w,h){ const num=(v,lo,hi)=>typeof v==='number'&&v>=lo&&v<=hi; if(!g||typeof g!=='object'||!isOwnK(kind)) return false;
   if(!(num(g.x,0,w)&&num(g.y,0,h)&&num(g.w,8,400)&&num(g.h,4,160))||g.x+g.w>w||g.y+g.h>h) return false; if(kind==='own_initials'&&(g.w>200||g.h>100)) return false;
-  if(kind==='own_name'&&(typeof g.text!=='string'||!num(g.size,6,14)||g.h>60)) return false; return JSON.stringify(g).length<=2000; }
+  if(kind==='own_name'&&(typeof g.text!=='string'||!num(g.size,6,14)||g.h>60)) return false; if(kind==='own_name'&&g.w<g.text.length*g.size*0.35) return false; return JSON.stringify(g).length<=2000; }
 function insOk(g,w,h){ return !!g&&typeof g.text==='string'&&g.text.trim().length>=1&&g.text.length<=300&&g.text===g.text.trim()&&!/[\u0001-\u001F\u007F]/.test(g.text)&&g.x>=0&&g.x<=w&&g.y>=0&&g.y<=h&&g.size>=6&&g.size<=14; }
 // guard_offer_mark_place, as the trigger runs it before every mark of these kinds goes in
 function markPlaceGuard(g,s,m){ if(!['insert',...OWN_K].includes(m.kind)) return; const [w,h]=g.pages[m.page-1]||[0,0], geo=m.geometry||{};
@@ -1002,13 +1003,20 @@ function sgDoMark(s,kind,page,geo,net,link,target){ const old_=['note','strike',
   else sgEv(g,s.name,'sign_own_mark',{signing_id:g.id,round:g.round_no,side:g.side,mark_id:m.id,kind,page,signer:s.position,by_link:!!link,text:kind==='own_name'?geo.text:null});
   return {id:m.id,held:(g.round_no||1)===1,name:s.name,round:g.round_no||1,side:g.side||'purchaser',kind,page,address:(PT().find(x=>x.id===g.property_id)||{}).address}; }
 // Tim's own changes to the places (offer_places_edits_ok), recorded on the round's timeline (sign_places_edited)
-function placesEditsOk(pl,e,draftId){ e=e||{}; if(typeof e!=='object'||JSON.stringify(e).length>60000) throw new Error('Please check the places you changed'); const A=e.added||[], M=e.moved||[], R=e.removed||[];
-  A.concat(M).forEach(id=>{ const q=pl.find(x=>x.id===id); if(!q) throw new Error("Please check the places you changed: one of them isn't in the list"); if(hitsDate(draftId,q.page,q)) throw new Error('That is where the date goes once the agreement is made. Put the place somewhere else'); });
+// (the database also keeps a later round's places off a signer's own marks from earlier rounds: ownClearCheck, as guard_offer_signing_own_clear)
+const docOwnMarks=docId=>{ const sig=ORN().filter(r=>r.document_id===docId).map(r=>r.signing_id); return liveMarks().filter(m=>sig.includes(m.signing_id)&&isOwnK(m.kind)); };
+function ownClearCheck(pl,docId){ if(!docId) return; const om=docOwnMarks(docId); if(pl.some(x=>om.some(m=>m.page===x.page&&ovl(x,{x:m.geometry.x,y:m.geometry.y,w:m.geometry.w,h:m.geometry.h})>0.5))) throw new Error("A signing place would cover a signer's own initials, name or signature from an earlier round. Move it to a clear space"); }
+function placesEditsOk(pl,e,draftId,docId){ e=e||{}; if(typeof e!=='object'||JSON.stringify(e).length>60000) throw new Error('Please check the places you changed'); const A=e.added||[], M=e.moved||[], R=e.removed||[];
+  ownClearCheck(pl,docId);
+  A.concat(M).forEach(id=>{ const q=pl.find(x=>x.id===id); if(!q) throw new Error("Please check the places you changed: one of them isn't in the list"); if(hitsDate(draftId,q.page,q)) throw new Error('That is where the date goes once the agreement is made. Put the place somewhere else');
+    if(pl.some(y=>y.signer!==q.signer&&y.page===q.page&&ovl(y,q)>0.5)) throw new Error("A place you added or moved sits on another signer's place. Put it in a clear space"); });
   A.forEach(id=>{ if(!/^ack:tim[A-Za-z0-9-]{1,60}:s[0-9]{1,2}$/.test(id)) throw new Error('Please check the places you added'); });
   R.forEach(x=>{ if(!x||typeof x!=='object'||String(x.id||'').length<3||String(x.id).length>140||String(x.label||'').length>400||pl.some(q=>q.id===x.id)) throw new Error('Please check the places you removed'); });
-  return {added:A,moved:M,removed:R}; }
+  const byWhy={}; pl.forEach(x=>{ byWhy[x.why]=(byWhy[x.why]||0)+1; });
+  return {added:A,moved:M,removed:R,checked:{sent_sha256:shaS(JSON.stringify(pl)),sent:pl.length,sent_by_why:byWhy,added_or_moved_clear:A.length+M.length,removed_absent:R.length,own_marks_kept_clear:docId?docOwnMarks(docId).length:0,
+    proposed_sha256_screen:/^[0-9a-f]{64}$/.test(String(e.proposed_sha256||''))?e.proposed_sha256:null,proposed_screen:typeof e.proposed==='number'?e.proposed:null}}; }
 function placesEditedEv(r,ed,me){ if(r.existing||!(ed.added.length+ed.moved.length+ed.removed.length)) return; const g=OSG().find(x=>x.id===r.id);
-  sgEv(g,me.email,'sign_places_edited',{signing_id:g.id,round:g.round_no||1,side:g.side||'purchaser',added:ed.added.length,moved:ed.moved.length,removed:ed.removed.length,added_ids:ed.added,moved_ids:ed.moved,removed_places:ed.removed,places_sha256:g.places_sha256}); }
+  sgEv(g,me.email,'sign_places_edited',{signing_id:g.id,round:g.round_no||1,side:g.side||'purchaser',added:ed.added.length,moved:ed.moved.length,removed:ed.removed.length,added_ids:ed.added,moved_ids:ed.moved,removed_places:ed.removed,places_sha256:g.places_sha256,checked:ed.checked}); }
 function signRpc(name,a,me){ if(!me||!AGENTS.includes(me.email)) return bad('Only Tim can do this');
   const person=id=>{ const s=OSR().find(x=>x.id===id); if(!s) throw new Error('No such signer'); const g_=OSG().find(g=>g.id===s.signing_id); if(g_.method!=='in_person') throw new Error('This purchaser signs by their own link'); if(s.void_at||['cancelled','replaced','withdrawn'].includes(g_.status)) throw new Error('This signing has stopped, so this turn is closed'); return s; };
   if(name==='agent_mail_draft_add') return sgTry(()=>mailInsert(me.email,a));
@@ -1075,10 +1083,10 @@ function signRpc(name,a,me){ if(!me||!AGENTS.includes(me.email)) return bad('Onl
     let re=0; OSR().filter(s=>s.signing_id===g.id&&s.finished_at&&!s.void_at).forEach(s=>{ s.finished_at=null; s.seen_sha256=null; re++; }); g.status='signing';
     sgEv(g,me.email,'sign_reviewed',{signing_id:g.id,marks:ms,places:pl.length,reopened:re}); return {ok:true,marks:ms.length,reopened:re}; });
   if(name==='agent_round_present') return sgTry(()=>roundPresent(a,me));
-  if(name==='agent_signing_release_edited'){ let ed; try{ ed=placesEditsOk(a.p_places||[],a.p_edits,a.p_draft); }catch(e){ return bad(e.message); }
+  if(name==='agent_signing_release_edited'){ let ed; try{ ed=placesEditsOk(a.p_places||[],a.p_edits,a.p_draft,null); }catch(e){ return bad(e.message); }
     return signRpc('agent_signing_release',a,me).then(r=>{ if(r.error) return r; placesEditedEv(r.data,ed,me); save(); return {data:Object.assign({},r.data,{edited:ed}),error:null}; }); }
   if(name==='agent_round_present_edited') return sgTry(()=>{ const doc=ODC().find(x=>x.offer_id===a.p_offer&&x.status==='open'); if(!doc) return roundPresent(a,me);
-    const ed=placesEditsOk(a.p_places||[],a.p_edits,doc.draft_id), r=roundPresent(a,me); placesEditedEv(r,ed,me); return Object.assign({},r,{edited:ed}); });
+    const ed=placesEditsOk(a.p_places||[],a.p_edits,doc.draft_id,doc.id), r=roundPresent(a,me); placesEditedEv(r,ed,me); return Object.assign({},r,{edited:ed}); });
   if(name==='agent_round_change') return sgTry(()=>sgChange(person(a.p_signer),a));
   if(name==='agent_offer_layers') return sgTry(()=>{ const doc=ODC().filter(x=>x.offer_id===a.p_offer&&(a.p_document?x.id===a.p_document:['open','agreed'].includes(x.status))).sort((x,y)=>y.number-x.number)[0]; return doc?{document:doc,layers:docLayers(doc.id,1e5)}:{document:null,layers:[]}; });
   if(name==='agent_document_close') return sgTry(()=>{ const o=PO().find(x=>x.id===a.p_offer); if(!o) throw new Error('No such offer'); const doc=ODC().find(x=>x.offer_id===o.id&&x.status==='open'); if(!doc) throw new Error('There is no open document to close');
@@ -1203,7 +1211,7 @@ function roundPresent(a,me){ if(!['in_person','link'].includes(a.p_method)) thro
   const docSigns=ORN().filter(r=>r.document_id===doc.id).map(r=>r.signing_id);
   pl.filter(p=>p.why==='change').forEach(p=>{ const m=liveMarks().find(k=>k.id===p.ref&&docSigns.includes(k.signing_id)); if(!m||p.page!==m.page||gapOf(p,chgRect(m.kind,m.geometry))>60) throw new Error('Please check the signing places: initials for a change go beside it'); });
   const g={id:uid(),offer_id:o.id,property_id:o.property_id,draft_id:doc.draft_id,draft_sha256:doc.draft_sha256,method:a.p_method,pages:base.pages,places:JSON.parse(JSON.stringify(pl)),places_sha256:shaS(JSON.stringify(pl)),cca_pages:[],status:'ready',round_no:last.doc_round+1,side,document_id:doc.id,base_round_id:last.id,link_changes:(a.p_link_changes!=null?!!a.p_link_changes:OSET().link_changes_default===true),released_by:me.email,released_at:now(),sent_at:null,held_at:null,completed_at:null,locked_at:null,replaced_at:null,replaced_by:null};
-  chattelsCheck(g); OSG().push(g); ppl.forEach((x,i)=>OSR().push({id:uid(),signing_id:g.id,position:i+1,name:x.name.slice(0,250),email:x.email,person_id:x.person,token_hash:null,link_sent_at:null,link_expires_at:null,code_hash:null,code_expires_at:null,code_tries:0,codes_sent:0,codes_window_at:null,session_hash:null,session_expires_at:null,opened_at:null,verified_at:null,consent_at:null,sig_png:null,init_png:null,marks_at:null,id_sighted:null,witnessed_by:null,finished_at:null,seen_sha256:null,user_agent:null,net_hash:null,void_at:null}));
+  chattelsCheck(g); ownClearCheck(g.places,doc.id); OSG().push(g); ppl.forEach((x,i)=>OSR().push({id:uid(),signing_id:g.id,position:i+1,name:x.name.slice(0,250),email:x.email,person_id:x.person,token_hash:null,link_sent_at:null,link_expires_at:null,code_hash:null,code_expires_at:null,code_tries:0,codes_sent:0,codes_window_at:null,session_hash:null,session_expires_at:null,opened_at:null,verified_at:null,consent_at:null,sig_png:null,init_png:null,marks_at:null,id_sighted:null,witnessed_by:null,finished_at:null,seen_sha256:null,user_agent:null,net_hash:null,void_at:null}));
   sgEv(g,me.email,'round_presented',{signing_id:g.id,document:doc.number,round:g.round_no,side,method:a.p_method,checked_round:last.doc_round,checked_sha256:last.sha256,signers:n,places:pl.length,places_sha256:g.places_sha256,note:String(a.p_note||'').trim().slice(0,300)||null,link_changes:g.link_changes});
   return {id:g.id,existing:false,round:g.round_no,side,link_changes:g.link_changes}; }
 // a change (offer_sign_do_change): Round 2 on, by a signer of the countering side, with everyone's initials beside it

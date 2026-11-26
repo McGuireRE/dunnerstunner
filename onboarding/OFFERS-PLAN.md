@@ -768,6 +768,12 @@ numbering). With changes from a link switched off, the link offers only the sign
   is not a change: it holds nothing, lifts nothing, asks nobody to initial it, and doesn't count as the round changing the document.
 - Every new mark sits inside the page, clear of the date place and of other signers' places (from Round 2 a signer's own mark also
   keeps clear of earlier rounds' places). Undo (Offers fixes 3) works on them. 30 an hour per signer; by link 60 an hour per network.
+- After the first review (26 November 2026): while a signer's own initials or signature stand on the page, they can't draw their
+  signature and initials again, however it is written (`offer_sign_do_marks`, replaced from 026 with that one check, and a trigger on
+  `offer_sign_redraws`); "Start my turn again" takes the marks back first, so a round never shows two drawings for one person. A name's
+  box must be wide enough for the name at its size, and the drawing shrinks a name to its box if ever it wouldn't fit. A later round's
+  places never cover a signer's own mark from an earlier round (`guard_offer_signing_own_clear`, whoever inserts it). A signer's own
+  mark from Round 2 doesn't open again anyone on their side who had already finished (it isn't a change).
 - By link in Round 1, any mark (the note, a line through text, a crossed-out box, a reinstatement, or one of the four) holds the round,
   is checked by the database exactly as on Tim's screen (`offer_sign_do_mark`, the offer-sign `mark` action with a reinstatement's
   target), and Tim alone is emailed ("A purchaser marked the offer"). Nobody else is told until Tim releases it.
@@ -780,7 +786,10 @@ viewer (`sgEditor`): tap a place to move it, make it bigger or smaller, or remov
 Required places can't be removed and the reason shows under Remove: a signature in the block, the foot of each page, a signer's last
 initials in the chattels box, initials beside a change. A place is kept inside the page, off the date place and off another signer's
 place. Added places pass the same checks in the database; what Tim added, moved or resized, and removed is recorded on the round's
-timeline (`sign_places_edited`, through `agent_signing_release_edited` and `agent_round_present_edited`).
+timeline (`sign_places_edited`, through `agent_signing_release_edited` and `agent_round_present_edited`). After the first review, the database
+also keeps each place Tim added or moved off every other signer's place, and records what it compared: the places sent (their
+fingerprint and count by kind), each added or moved place found and clear, each removed place absent, the own marks kept clear, and
+the screen's own count and fingerprint of what it proposed.
 
 Nothing signed changes: sealed rounds, agreements, signatures, taps, marks and fingerprints are kept exactly as they are; every trigger
 stays. Lock order everywhere: the offer, then the signing, then the signer.
@@ -792,7 +801,8 @@ helpers; replaced word for word apart from what is named: `agent_signing_mark`, 
 `agent_round_present`, `offer_agreed_terms`, `offer_doc_layers`, `offer_round_material`, `offer_sign_state`.
 Tests: `tests/signing-marks.test.js` (new: B, C and D in the browser, and the cores' PDF drawing), `tests/signing-viewer.test.js` (A),
 `tests/signing-marks-rollback.sql` and `.js` (new; run on a local PostgreSQL 16 stand-in through 026: every line as expected, no
-CAPITALS), `tests/signing-marks-with-026.js` (026's own rollback test run again with 029 applied: the same results, apart from the
+CAPITALS), `tests/signing-marks-race.js` (new, local stand-in only: own marks against the same signer's undo, drawing again
+and finish, 80 pairs, and against the round being locked: no deadlock, never an own mark with a later drawing, a late mark refused), `tests/signing-marks-with-026.js` (026's own rollback test run again with 029 applied: the same results, apart from the
 counts that include the chattels initials), `tests/offer-sign-fn.test.js` (the `mark` action), and `offers-sign`, `offers-nego`
 (their link tool checks follow C). The mock (`tests/mock.js`) mirrors 029.
 Not covered: while Tim is still filling in a Healthy Homes checklist (before the first signature), his screen shows the form to fill,

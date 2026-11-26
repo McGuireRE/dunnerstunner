@@ -44,6 +44,8 @@ begin
   if (g->>'x')::numeric + (g->>'w')::numeric > p_w or (g->>'y')::numeric + (g->>'h')::numeric > p_h then return false; end if;
   if p_kind = 'own_initials' and ((g->>'w')::numeric > 200 or (g->>'h')::numeric > 100) then return false; end if;
   if p_kind = 'own_name' and (jsonb_typeof(g->'text') <> 'string' or not public.offer_num_ok(g->'size', 6, 14) or (g->>'h')::numeric > 60) then return false; end if;
+  -- a name's box is wide enough for the words at the size they are drawn (and the drawing shrinks them to the box if ever they don't fit)
+  if p_kind = 'own_name' and (g->>'w')::numeric < length(g->>'text') * (g->>'size')::numeric * 0.35 then return false; end if;
   if length(g::text) > 2000 then return false; end if;
   return true;
 end $$;
@@ -123,6 +125,16 @@ begin
   return new;
 end $$;
 create trigger offer_signings_chattels before insert on public.offer_signings for each row execute function public.guard_offer_signing_chattels();
+-- a later round's places never cover a signer's own initials, name or signature standing on the document's sealed rounds (whoever inserts it)
+create or replace function public.guard_offer_signing_own_clear() returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if new.document_id is null then return new; end if;
+  if exists (select 1 from jsonb_array_elements(new.places) x, public.offer_sign_marks_live m join public.offer_rounds rr on rr.signing_id = m.signing_id
+      where rr.document_id = new.document_id and public.offer_own_kind(m.kind) and m.page = (x->>'page')::int and public.offer_overlap(x, public.offer_mark_rect(m.kind, m.geometry)) > 0.5) then
+    raise exception 'A signing place would cover a signer''s own initials, name or signature from an earlier round. Move it to a clear space'; end if;
+  return new;
+end $$;
+create trigger offer_signings_own_clear before insert on public.offer_signings for each row execute function public.guard_offer_signing_own_clear();
 
 -- ───── the four marks ─────
 -- one mark of the new kinds by one signer, in person (Tim's screen, p_link false) or by their link (p_link true, with the network for the
@@ -199,16 +211,30 @@ end $$;
 -- p_edits: { added: [place id], moved: [place id], removed: [{ id, label }] }, as Tim's screen made them from the places proposed for him.
 -- Each place is checked by 023's and 024's functions exactly as before (and the chattels rule above); a place Tim added or moved is also
 -- kept off the date place. What he changed is recorded on the round's timeline.
-create or replace function public.offer_places_edits_ok(p_places jsonb, p_edits jsonb, p_draft uuid) returns jsonb language plpgsql stable security definer set search_path = public as $$
-declare e jsonb := coalesce(p_edits, '{}'::jsonb); x jsonb; id_ text; pl jsonb;
+create or replace function public.offer_places_edits_ok(p_places jsonb, p_edits jsonb, p_draft uuid, p_document uuid) returns jsonb language plpgsql stable security definer set search_path = public as $$
+declare e jsonb := coalesce(p_edits, '{}'::jsonb); x jsonb; id_ text; pl jsonb; r jsonb; own_n int := 0; n_ch int := 0;
 begin
   if jsonb_typeof(e) <> 'object' or length(e::text) > 60000 then raise exception 'Please check the places you changed'; end if;
+  if jsonb_typeof(coalesce(e->'added', '[]'::jsonb)) <> 'array' or jsonb_typeof(coalesce(e->'moved', '[]'::jsonb)) <> 'array' or jsonb_typeof(coalesce(e->'removed', '[]'::jsonb)) <> 'array' then raise exception 'Please check the places you changed'; end if;
+  -- a signer's own initials, name or signature standing on the document's sealed rounds: no place of the new round may cover it
+  if p_document is not null then
+    for x in select * from jsonb_array_elements(p_places) loop
+      if exists (select 1 from public.offer_sign_marks_live m join public.offer_rounds rr on rr.signing_id = m.signing_id
+          where rr.document_id = p_document and public.offer_own_kind(m.kind) and m.page = (x->>'page')::int and public.offer_overlap(x, public.offer_mark_rect(m.kind, m.geometry)) > 0.5) then
+        raise exception 'A signing place would cover a signer''s own initials, name or signature from an earlier round. Move it to a clear space'; end if;
+    end loop;
+    select count(*) into own_n from public.offer_sign_marks_live m join public.offer_rounds rr on rr.signing_id = m.signing_id where rr.document_id = p_document and public.offer_own_kind(m.kind);
+  end if;
+  -- each place Tim added or moved: in the list, off the date place, and off every other signer's place
   for x in select * from jsonb_array_elements(coalesce(e->'added', '[]'::jsonb) || coalesce(e->'moved', '[]'::jsonb)) loop
     id_ := x #>> '{}';
     select q into pl from jsonb_array_elements(p_places) q where q->>'id' = id_ limit 1;
     if pl is null then raise exception 'Please check the places you changed: one of them isn''t in the list'; end if;
-    if public.offer_hits_date(p_draft, (pl->>'page')::int, jsonb_build_object('x', (pl->>'x')::numeric, 'y', (pl->>'y')::numeric, 'w', (pl->>'w')::numeric, 'h', (pl->>'h')::numeric)) then
-      raise exception 'That is where the date goes once the agreement is made. Put the place somewhere else'; end if;
+    r := jsonb_build_object('x', (pl->>'x')::numeric, 'y', (pl->>'y')::numeric, 'w', (pl->>'w')::numeric, 'h', (pl->>'h')::numeric);
+    if public.offer_hits_date(p_draft, (pl->>'page')::int, r) then raise exception 'That is where the date goes once the agreement is made. Put the place somewhere else'; end if;
+    if exists (select 1 from jsonb_array_elements(p_places) q where q->>'signer' <> pl->>'signer' and (q->>'page')::int = (pl->>'page')::int and public.offer_overlap(q, r) > 0.5) then
+      raise exception 'A place you added or moved sits on another signer''s place. Put it in a clear space'; end if;
+    n_ch := n_ch + 1;
   end loop;
   for x in select * from jsonb_array_elements(coalesce(e->'added', '[]'::jsonb)) loop
     if (x #>> '{}') !~ '^ack:tim[A-Za-z0-9-]{1,60}:s[0-9]{1,2}$' then raise exception 'Please check the places you added'; end if;
@@ -217,19 +243,26 @@ begin
     if jsonb_typeof(x) <> 'object' or length(coalesce(x->>'id', '')) not between 3 and 140 or length(coalesce(x->>'label', '')) > 400 then raise exception 'Please check the places you removed'; end if;
     if exists (select 1 from jsonb_array_elements(p_places) q where q->>'id' = x->>'id') then raise exception 'Please check the places you removed'; end if;
   end loop;
-  return jsonb_build_object('added', coalesce(e->'added', '[]'::jsonb), 'moved', coalesce(e->'moved', '[]'::jsonb), 'removed', coalesce(e->'removed', '[]'::jsonb));
+  -- what the server compared: the places sent (their fingerprint, counted by kind of place), each added or moved place found and clear,
+  -- each removed place absent; and the screen's own fingerprint of what it proposed (as the screen gives it; the server can't make it)
+  return jsonb_build_object('added', coalesce(e->'added', '[]'::jsonb), 'moved', coalesce(e->'moved', '[]'::jsonb), 'removed', coalesce(e->'removed', '[]'::jsonb),
+    'checked', jsonb_build_object('sent_sha256', public.offer_sha(p_places::text), 'sent', jsonb_array_length(p_places),
+      'sent_by_why', (select coalesce(jsonb_object_agg(w, c), '{}'::jsonb) from (select q->>'why' w, count(*) c from jsonb_array_elements(p_places) q group by 1) z),
+      'added_or_moved_clear', n_ch, 'removed_absent', jsonb_array_length(coalesce(e->'removed', '[]'::jsonb)), 'own_marks_kept_clear', own_n,
+      'proposed_sha256_screen', case when coalesce(e->>'proposed_sha256', '') ~ '^[0-9a-f]{64}$' then e->>'proposed_sha256' end,
+      'proposed_screen', case when jsonb_typeof(e->'proposed') = 'number' then e->'proposed' end));
 end $$;
 create or replace function public.agent_signing_release_edited(p_draft uuid, p_method text, p_pages jsonb, p_places jsonb, p_cca_pages int[], p_edits jsonb) returns jsonb language plpgsql security definer set search_path = public as $$
 declare me text := public.offer_agent(); r jsonb; ed jsonb; g public.offer_signings;
 begin
-  ed := public.offer_places_edits_ok(p_places, p_edits, p_draft);
+  ed := public.offer_places_edits_ok(p_places, p_edits, p_draft, null);
   r := public.agent_signing_release(p_draft, p_method, p_pages, p_places, p_cca_pages);
   if (r->>'existing')::boolean is true then return r; end if;
   if jsonb_array_length(ed->'added') + jsonb_array_length(ed->'moved') + jsonb_array_length(ed->'removed') > 0 then
     select * into g from public.offer_signings where id = (r->>'id')::uuid;
     perform set_config('offers.fn', 'on', true);
     insert into public.offer_events (property_id, offer_id, actor, kind, detail) values (g.property_id, g.offer_id, me, 'sign_places_edited', jsonb_build_object('signing_id', g.id, 'round', 1, 'side', 'purchaser',
-      'added', jsonb_array_length(ed->'added'), 'moved', jsonb_array_length(ed->'moved'), 'removed', jsonb_array_length(ed->'removed'), 'added_ids', ed->'added', 'moved_ids', ed->'moved', 'removed_places', ed->'removed', 'places_sha256', g.places_sha256));
+      'added', jsonb_array_length(ed->'added'), 'moved', jsonb_array_length(ed->'moved'), 'removed', jsonb_array_length(ed->'removed'), 'added_ids', ed->'added', 'moved_ids', ed->'moved', 'removed_places', ed->'removed', 'places_sha256', g.places_sha256, 'checked', ed->'checked'));
     perform set_config('offers.fn', '', true);
   end if;
   return r || jsonb_build_object('edited', ed);
@@ -239,14 +272,14 @@ declare me text := public.offer_agent(); r jsonb; ed jsonb; g public.offer_signi
 begin
   select * into doc from public.offer_documents where offer_id = p_offer and status = 'open';
   if doc.id is null then return public.agent_round_present(p_offer, p_method, p_places, p_checked, p_note, p_link_changes); end if;   -- its own message
-  ed := public.offer_places_edits_ok(p_places, p_edits, doc.draft_id);
+  ed := public.offer_places_edits_ok(p_places, p_edits, doc.draft_id, doc.id);
   r := public.agent_round_present(p_offer, p_method, p_places, p_checked, p_note, p_link_changes);
   if (r->>'existing')::boolean is true then return r; end if;
   if jsonb_array_length(ed->'added') + jsonb_array_length(ed->'moved') + jsonb_array_length(ed->'removed') > 0 then
     select * into g from public.offer_signings where id = (r->>'id')::uuid;
     perform set_config('offers.fn', 'on', true);
     insert into public.offer_events (property_id, offer_id, actor, kind, detail) values (g.property_id, g.offer_id, me, 'sign_places_edited', jsonb_build_object('signing_id', g.id, 'round', g.round_no, 'side', g.side,
-      'added', jsonb_array_length(ed->'added'), 'moved', jsonb_array_length(ed->'moved'), 'removed', jsonb_array_length(ed->'removed'), 'added_ids', ed->'added', 'moved_ids', ed->'moved', 'removed_places', ed->'removed', 'places_sha256', g.places_sha256));
+      'added', jsonb_array_length(ed->'added'), 'moved', jsonb_array_length(ed->'moved'), 'removed', jsonb_array_length(ed->'removed'), 'added_ids', ed->'added', 'moved_ids', ed->'moved', 'removed_places', ed->'removed', 'places_sha256', g.places_sha256, 'checked', ed->'checked'));
     perform set_config('offers.fn', '', true);
   end if;
   return r || jsonb_build_object('edited', ed);
@@ -508,10 +541,44 @@ begin
   perform set_config('offers.fn', '', true);
   return jsonb_build_object('ok', true, 'marks', coalesce(array_length(ms, 1), 0), 'reopened', reopened);
 end $$;
+-- 026's drawing step: a drawing again is also refused while the signer's own initials or signature stand (029)
+create or replace function public.offer_sign_do_marks(p_signer uuid, p_sig text, p_init text) returns void language plpgsql security definer set search_path = public as $$
+declare s public.offer_signers; g public.offer_signings;
+begin
+  -- lock order: the offer, then the signing (a drawing again writes a redraw row, whose guard reads it), then the signer
+  perform public.offer_lock_by_signer(p_signer);
+  perform 1 from public.offer_signings where id = (select signing_id from public.offer_signers where id = p_signer) for update;
+  select * into s from public.offer_signers where id = p_signer for update; g := public.offer_sign_ready(s);
+  if s.consent_at is null then raise exception 'Agree to sign electronically first'; end if;
+  if coalesce(p_sig, '') !~ '^data:image/png;base64,[A-Za-z0-9+/=]+$' or length(p_sig) > 400000 or length(p_sig) < 200 then raise exception 'Please draw your signature'; end if;
+  if coalesce(p_init, '') !~ '^data:image/png;base64,[A-Za-z0-9+/=]+$' or length(p_init) > 200000 or length(p_init) < 150 then raise exception 'Please draw your initials'; end if;
+  if exists (select 1 from public.offer_sign_taps_live t where t.signer_id = s.id) then raise exception 'Your signature and initials are kept as you first used them'; end if;
+  -- 029: nor while their own initials or signature stand on the page (start the turn again first: that undoes them), so a round never
+  -- shows two drawings for one person
+  if exists (select 1 from public.offer_sign_marks_live m where m.signer_id = s.id and m.kind in ('own_initials', 'own_signature')) then raise exception 'Your signature and initials are kept as you first used them'; end if;
+  if exists (select 1 from public.offer_sign_taps t where t.signer_id = s.id) or exists (select 1 from public.offer_sign_redraws r where r.signer_id = s.id) then
+    -- every tap undone: the first drawing stays as it was (023's rule), and this one is added
+    insert into public.offer_sign_redraws (signing_id, signer_id, sig_png, init_png, by_name) values (g.id, s.id, p_sig, p_init, left(s.name, 254));
+    insert into public.offer_events (property_id, offer_id, actor, kind, detail) values (g.property_id, g.offer_id, s.name, 'sign_redrawn', jsonb_build_object('signing_id', g.id, 'signer', s.position, 'round', g.round_no, 'side', g.side));
+    return;
+  end if;
+  perform set_config('offers.fn', 'on', true);
+  update public.offer_signers set sig_png = p_sig, init_png = p_init, marks_at = now() where id = s.id;
+  perform set_config('offers.fn', '', true);
+end $$;
+-- and whoever writes a drawing again (the service role included): never while that signer's own initials or signature stand
+create or replace function public.guard_offer_redraw_own() returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if exists (select 1 from public.offer_sign_marks_live m where m.signer_id = new.signer_id and m.kind in ('own_initials', 'own_signature')) then
+    raise exception 'Your signature and initials are kept as you first used them'; end if;
+  return new;
+end $$;
+create trigger offer_sign_redraws_own before insert on public.offer_sign_redraws for each row execute function public.guard_offer_redraw_own();
+
 
 -- ───── execute rights ─────
-revoke execute on function public.guard_offer_mark_place(), public.guard_offer_signing_chattels(), public.offer_hits_date(uuid, int, jsonb), public.offer_chattels_rect(uuid),
-  public.offer_sign_do_mark(uuid, text, int, jsonb, uuid, text, boolean), public.offer_places_edits_ok(jsonb, jsonb, uuid) from public, anon, authenticated;
+revoke execute on function public.guard_offer_mark_place(), public.guard_offer_redraw_own(), public.guard_offer_signing_own_clear(), public.guard_offer_signing_chattels(), public.offer_hits_date(uuid, int, jsonb), public.offer_chattels_rect(uuid),
+  public.offer_sign_do_mark(uuid, text, int, jsonb, uuid, text, boolean), public.offer_places_edits_ok(jsonb, jsonb, uuid, uuid) from public, anon, authenticated;
 revoke execute on function public.offer_sign_mark(text, text, text, text, int, jsonb, uuid) from public, anon, authenticated;
 grant execute on function public.offer_sign_mark(text, text, text, text, int, jsonb, uuid) to service_role;
 revoke execute on function public.agent_signing_release_edited(uuid, text, jsonb, jsonb, int[], jsonb), public.agent_round_present_edited(uuid, text, jsonb, boolean, text, boolean, jsonb) from public, anon;
