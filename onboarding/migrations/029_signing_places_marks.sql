@@ -23,6 +23,7 @@
 --   * Identity (Tim, 26 November 2026): on Tim's device each signer's turn finishes only once he logs the photo ID he checked (its type,
 --     never its number) and ticks that he watched them sign (offers: agent_signing_finish_checked; the agency agreement, notices,
 --     variations and forms: the check in the signed snapshot, guard_signature_identity); by an emailed link, each signer has their own email.
+--     Or, Tim's explicit choice after a warning, to sign in person without an identity check (recorded plainly); an empty choice is refused.
 -- Replaced, word for word as 026 has them apart from what is named: agent_signing_mark (the new kinds go to offer_sign_do_mark),
 -- agent_signing_review (a signer's own initials, name or signature need nobody's initials), offer_round_lock and agent_round_present (a
 -- signer's own marks are not changes), offer_agreed_terms (the same), offer_doc_layers, offer_round_material and offer_sign_state (each
@@ -295,7 +296,7 @@ create or replace function public.offer_doc_layers(p_document uuid, p_upto int) 
   select coalesce(jsonb_agg(jsonb_build_object('round_id', r.id, 'number', r.number, 'doc_round', r.doc_round, 'side', r.side, 'signing_id', r.signing_id, 'sha256', r.sha256, 'locked_at', r.locked_at, 'changes', r.changes,
       'places', g.places || coalesce((select jsonb_agg(e) from public.offer_sign_reviews_live v, jsonb_array_elements(v.places) e where v.signing_id = g.id), '[]'::jsonb),
       'taps', (select coalesce(jsonb_agg(jsonb_build_object('place_id', t.place_id, 'signer', s.position) order by t.id), '[]'::jsonb) from public.offer_sign_taps_live t join public.offer_signers s on s.id = t.signer_id where t.signing_id = g.id),
-      'signers', (select coalesce(jsonb_agg(jsonb_build_object('position', s.position, 'name', s.name, 'sig_png', public.offer_sign_ink(s.id)->>'sig_png', 'init_png', public.offer_sign_ink(s.id)->>'init_png') || case when s.id_sighted is not null then jsonb_build_object('id_sighted', s.id_sighted, 'id_checked_at', (select max(e.at) from public.offer_events e where e.offer_id = g.offer_id and e.kind = 'sign_id_checked' and e.detail->>'signer_id' = s.id::text)) else '{}'::jsonb end order by s.position), '[]'::jsonb) from public.offer_signers s where s.signing_id = g.id and s.void_at is null),
+      'signers', (select coalesce(jsonb_agg(jsonb_build_object('position', s.position, 'name', s.name, 'sig_png', public.offer_sign_ink(s.id)->>'sig_png', 'init_png', public.offer_sign_ink(s.id)->>'init_png') || jsonb_strip_nulls(jsonb_build_object('id_sighted', s.id_sighted, 'id_checked_at', (select max(e.at) from public.offer_events e where e.offer_id = g.offer_id and e.kind = 'sign_id_checked' and e.detail->>'signer_id' = s.id::text), 'no_id_check_at', (select max(e.at) from public.offer_events e where e.offer_id = g.offer_id and e.kind = 'sign_no_id_check' and e.detail->>'signer_id' = s.id::text))) order by s.position), '[]'::jsonb) from public.offer_signers s where s.signing_id = g.id and s.void_at is null),
       'marks', (select coalesce(jsonb_agg(jsonb_build_object('id', m.id, 'kind', m.kind, 'page', m.page, 'geometry', m.geometry, 'target', m.target, 'by', m.by_name, 'at', m.at) || case when m.ink_png is not null then jsonb_build_object('ink', m.ink_png) else '{}'::jsonb end order by m.at, m.id), '[]'::jsonb) from public.offer_sign_marks_live m where m.signing_id = g.id)
     ) order by r.doc_round), '[]'::jsonb)
   from public.offer_rounds r join public.offer_signings g on g.id = r.signing_id where r.document_id = p_document and r.doc_round <= p_upto $$;
@@ -318,7 +319,7 @@ begin
         'finished_at', s.finished_at, 'seen_sha256', s.seen_sha256, 'ua', s.user_agent, 'net', s.net_hash,
         'receipts', (select coalesce(jsonb_agg(jsonb_build_object('guide', r.guide, 'version', r.version, 'sha256', r.sha256, 'pages', to_jsonb(r.pages), 'at', r.at) order by r.id), '[]'::jsonb) from public.offer_sign_receipts r where r.signer_id = s.id),
         'first_tap', (select min(t.at) from public.offer_sign_taps_live t where t.signer_id = s.id), 'last_tap', (select max(t.at) from public.offer_sign_taps_live t where t.signer_id = s.id),
-        'places', (select count(*) from public.offer_sign_required(g.id, s.position) x), 'id_checked_at', (select max(e.at) from public.offer_events e where e.offer_id = g.offer_id and e.kind = 'sign_id_checked' and e.detail->>'signer_id' = s.id::text)) order by s.position) from public.offer_signers s where s.signing_id = g.id and s.void_at is null),
+        'places', (select count(*) from public.offer_sign_required(g.id, s.position) x), 'id_checked_at', (select max(e.at) from public.offer_events e where e.offer_id = g.offer_id and e.kind = 'sign_id_checked' and e.detail->>'signer_id' = s.id::text), 'no_id_check_at', (select max(e.at) from public.offer_events e where e.offer_id = g.offer_id and e.kind = 'sign_no_id_check' and e.detail->>'signer_id' = s.id::text)) order by s.position) from public.offer_signers s where s.signing_id = g.id and s.void_at is null),
     'taps', (select coalesce(jsonb_agg(jsonb_build_object('place_id', t.place_id, 'signer', s.position, 'at', t.at) order by t.id), '[]'::jsonb) from public.offer_sign_taps_live t join public.offer_signers s on s.id = t.signer_id where t.signing_id = g.id),
     'marks', (select coalesce(jsonb_agg(jsonb_build_object('id', m.id, 'kind', m.kind, 'page', m.page, 'geometry', m.geometry, 'target', m.target, 'by', m.by_name, 'at', m.at,
         'reviewed_at', (select min(r.at) from public.offer_sign_reviews_live r where r.signing_id = g.id and r.kind = 'review' and m.id = any (r.marks))) || case when m.ink_png is not null then jsonb_build_object('ink', m.ink_png) else '{}'::jsonb end order by m.at, m.id), '[]'::jsonb) from public.offer_sign_marks_live m where m.signing_id = g.id),
@@ -586,19 +587,27 @@ create trigger offer_sign_redraws_own before insert on public.offer_sign_redraws
 -- the photo ID types Tim can log (023's list, without "known to Tim personally": an ID is now always checked in person)
 create or replace function public.offer_photo_id_ok(t text) returns boolean language sql immutable as $$
   select coalesce(t, '') in ('nz_driver_licence', 'passport', 'nz_firearms_licence', 'kiwi_access_card', 'other_photo_id') $$;
--- offers in person: Tim logs the ID he checked and ticks that he checked it and watched them sign; then the turn finishes (023's finish)
+-- offers in person: Tim logs the ID he checked and ticks that he checked it and watched them sign; then the turn finishes (023's finish).
+-- Or, his explicit choice after a warning (Tim, 26 November 2026, 17:57): p_id_type 'no_id_warned' with p_checked true (he confirmed
+-- the warning): the turn finishes, and the record says plainly that it was signed in person without an identity check. An empty or
+-- missing choice is refused.
 create or replace function public.agent_signing_finish_checked(p_signer uuid, p_id_type text, p_checked boolean, p_ua text) returns jsonb language plpgsql security definer set search_path = public as $$
-declare me text := public.offer_agent(); s public.offer_signers; g public.offer_signings; r jsonb;
+declare me text := public.offer_agent(); s public.offer_signers; g public.offer_signings; r jsonb; none_ boolean := p_id_type = 'no_id_warned';
 begin
   perform public.offer_lock_by_signer(p_signer);   -- lock order: the offer, then the signing, then the signer (as 023's finish)
   s := public.offer_sign_person(p_signer);
-  if not public.offer_photo_id_ok(p_id_type) then raise exception 'Choose the photo ID you checked for %', s.name; end if;
-  if p_checked is not true then raise exception 'Tick that you checked %''s ID and watched them sign', s.name; end if;
+  if not none_ and not public.offer_photo_id_ok(p_id_type) then raise exception 'Choose the photo ID you checked for %', s.name; end if;
+  if p_checked is not true then raise exception '%', case when none_ then 'Confirm that you are finishing for ' || s.name || ' without an ID check' else 'Tick that you checked ' || s.name || '''s ID and watched them sign' end; end if;
   select * into g from public.offer_signings where id = s.signing_id;
-  r := public.offer_sign_do_finish(p_signer, p_ua, null, p_id_type, 'Tim McGuire');
+  r := public.offer_sign_do_finish(p_signer, p_ua, null, case when none_ then null else p_id_type end, 'Tim McGuire');
   perform set_config('offers.fn', 'on', true);
-  insert into public.offer_events (property_id, offer_id, actor, kind, detail) values (g.property_id, g.offer_id, me, 'sign_id_checked',
-    jsonb_build_object('signing_id', g.id, 'round', g.round_no, 'side', g.side, 'signer', s.position, 'signer_id', s.id, 'id_type', p_id_type, 'checked_by', 'Tim McGuire', 'watched', true));
+  if none_ then
+    insert into public.offer_events (property_id, offer_id, actor, kind, detail) values (g.property_id, g.offer_id, me, 'sign_no_id_check',
+      jsonb_build_object('signing_id', g.id, 'round', g.round_no, 'side', g.side, 'signer', s.position, 'signer_id', s.id, 'by', 'Tim McGuire', 'warned', true, 'note', 'Signed in person without an identity check'));
+  else
+    insert into public.offer_events (property_id, offer_id, actor, kind, detail) values (g.property_id, g.offer_id, me, 'sign_id_checked',
+      jsonb_build_object('signing_id', g.id, 'round', g.round_no, 'side', g.side, 'signer', s.position, 'signer_id', s.id, 'id_type', p_id_type, 'checked_by', 'Tim McGuire', 'watched', true));
+  end if;
   perform set_config('offers.fn', '', true);
   return r;
 end $$;
@@ -611,16 +620,18 @@ end $$;
 -- the agency agreement, its variations and notices (signed with it), and forms: one rule for every signature row, whoever writes it.
 -- In person (Tim's device): the snapshot holds Tim's ID check: { type (a photo ID type), checked: true, by, at (within 15 minutes of
 -- now), aml_file_id (optional: the AML file for this person, where the ID details are kept) } and nothing else, so no ID number is
--- ever stored here. By the signer's own link: no one else on the agreement has the same email.
+-- ever stored here; or his explicit choice after a warning: { type: 'none', warned: true, by, at, note: 'Signed in person without an
+-- identity check' }. An empty or missing choice is refused. By the signer's own link: no one else on the agreement has the same email.
 create or replace function public.guard_signature_identity() returns trigger language plpgsql security definer set search_path = public as $$
 declare idc jsonb := new.snapshot->'id_check'; em text;
 begin
   if coalesce(new.signer_role, '') <> 'client' then return new; end if;
   if coalesce(new.snapshot->>'signing_method', '') ilike 'in person%' then
-    if jsonb_typeof(idc) is distinct from 'object' or not public.offer_photo_id_ok(idc->>'type') or (idc->'checked') is distinct from 'true'::jsonb
-       or coalesce(idc->>'by', '') = '' or length(idc->>'by') > 120 then
-      raise exception 'Choose the photo ID you checked for %, and tick that you checked it and watched them sign', new.signer_name; end if;
-    if exists (select 1 from jsonb_object_keys(idc) k where k not in ('type', 'checked', 'by', 'at', 'aml_file_id')) then raise exception 'Only the ID type is kept here, never its number'; end if;
+    if jsonb_typeof(idc) is distinct from 'object' or coalesce(idc->>'by', '') = '' or length(idc->>'by') > 120
+       or not coalesce((public.offer_photo_id_ok(idc->>'type') and (idc->'checked') = 'true'::jsonb and not idc ? 'warned')
+            or (idc->>'type' = 'none' and (idc->'warned') = 'true'::jsonb and idc->>'note' = 'Signed in person without an identity check' and not idc ? 'checked' and not idc ? 'aml_file_id'), false) then
+      raise exception 'Choose the photo ID you checked for %, and tick that you checked it and watched them sign (or confirm finishing without an ID check)', new.signer_name; end if;
+    if exists (select 1 from jsonb_object_keys(idc) k where k not in ('type', 'checked', 'by', 'at', 'aml_file_id', 'warned', 'note')) then raise exception 'Only the ID type is kept here, never its number'; end if;
     begin if abs(extract(epoch from ((idc->>'at')::timestamptz - now()))) > 900 then raise exception 'x'; end if;
     exception when others then raise exception 'Please record the ID check again, at the time you check it'; end;
     if idc ? 'aml_file_id' and not exists (select 1 from public.aml_files f where f.id::text = idc->>'aml_file_id' and f.person_id = new.person_id) then

@@ -445,3 +445,7 @@ agreements/<agreement id>/signatures/... (vendors may upload their own signature
   `variation_signatures` and `form_signatures` (in person: `snapshot.id_check` with type, tick, by, time, optional AML file, never a number;
   by link: no one else on the agreement with the same email). Layers and round material carry each signer's `id_checked_at`.
   The stand-in needs `tests/pg-standin-signatures.sql` for these tables.
+  An explicit choice after a warning, to sign in person without an identity check, also passes (offers: `no_id_warned`, event
+  `sign_no_id_check`, `no_id_check_at` on layers and round material; the agreement's tables: `id_check.type` none with `warned` and the
+  note). An empty choice is refused. A vendor with no email may sign on Tim's device; Tim's handing over of the copy is an
+  `agreement_events` row of kind `copy_handed_over`.

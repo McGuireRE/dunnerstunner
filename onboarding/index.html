@@ -5682,7 +5682,9 @@ window.JOURNEY_MEDIA_HINTS = {
     add(`This copy was made and locked by the server on ${NZ(rec.made_at)}. Its own fingerprint is recorded by the server when it is locked, and it is never changed.`, { size: 8.5 });
     (rec.signers || []).forEach((s, i) => {
       add(`Purchaser ${i + 1}: ${s.name}`, { bold: true, gap: 8 });
-      if (s.method === 'in_person') { add(`Signed in person on Tim McGuire's device. ${s.witnessed_by || 'Tim McGuire'} saw them sign.`); add(s.id_sighted === 'known_to_tim' ? 'Identity: known to Tim McGuire personally (no photo ID was needed).' : !s.id_sighted ? 'Identity: no choice recorded (knowing them and an ID check are both optional).' : `Photo ID sighted: ${ID_TYPES[s.id_sighted] || s.id_sighted} (the type only; no ID number is kept).`);
+      // 029 (Tim, 26 November 2026, 17:57): Tim may choose, after a warning, to finish without an ID check; the record says so plainly
+      if (s.method === 'in_person' && s.no_id_check_at) add(`Signed in person on Tim McGuire's device. Signed in person without an identity check: Tim McGuire chose to finish without one after a warning, ${NZ(s.no_id_check_at)}.`);
+      else if (s.method === 'in_person') { add(`Signed in person on Tim McGuire's device. ${s.witnessed_by || 'Tim McGuire'} saw them sign.`); add(s.id_sighted === 'known_to_tim' ? 'Identity: known to Tim McGuire personally (no photo ID was needed).' : !s.id_sighted ? 'Identity: no choice recorded (knowing them and an ID check are both optional).' : `Photo ID sighted: ${ID_TYPES[s.id_sighted] || s.id_sighted} (the type only; no ID number is kept).`);
         // 029 (Tim, 26 November 2026): on his device each signer's photo ID is logged, with his tick that he checked it and watched them sign
         if (s.id_checked_at) add(`Tim McGuire checked this person's photo ID (${ID_TYPES[s.id_sighted] || s.id_sighted}) and watched them sign: ${NZ(s.id_checked_at)}.`, { size: 8.5 }); }
       else { add('Signed by a personal link sent only to them.'); add(`Email verified with a one-time code on ${NZ(s.verified_at)}.`); }
@@ -5958,7 +5960,9 @@ window.JOURNEY_MEDIA_HINTS = {
       rec.lifted.forEach(x => add(`Page ${x.page}: ${x.kind === 'signature' ? 'the signature' : 'the initials'} of ${x.who || 'one of the ' + sideName(x.side)} from Round ${x.round}.`, { size: 8.5 })); }
     (rec.signers || []).forEach((s, i) => {
       add(`${rec.side === 'vendor' ? 'Vendor' : 'Purchaser'} ${i + 1}: ${s.name}`, { bold: true, gap: 8 });
-      if (s.method === 'in_person') { add(`Signed in person on Tim McGuire's device. ${s.witnessed_by || 'Tim McGuire'} saw them sign.`); add(s.id_sighted === 'known_to_tim' ? 'Identity: known to Tim McGuire personally (no photo ID was needed).' : !s.id_sighted ? 'Identity: no choice recorded (knowing them and an ID check are both optional).' : `Photo ID sighted: ${SIGN.ID_TYPES[s.id_sighted] || s.id_sighted} (the type only; no ID number is kept).`);
+      // 029 (Tim, 26 November 2026, 17:57): Tim may choose, after a warning, to finish without an ID check; the record says so plainly
+      if (s.method === 'in_person' && s.no_id_check_at) add(`Signed in person on Tim McGuire's device. Signed in person without an identity check: Tim McGuire chose to finish without one after a warning, ${NZ(s.no_id_check_at)}.`);
+      else if (s.method === 'in_person') { add(`Signed in person on Tim McGuire's device. ${s.witnessed_by || 'Tim McGuire'} saw them sign.`); add(s.id_sighted === 'known_to_tim' ? 'Identity: known to Tim McGuire personally (no photo ID was needed).' : !s.id_sighted ? 'Identity: no choice recorded (knowing them and an ID check are both optional).' : `Photo ID sighted: ${SIGN.ID_TYPES[s.id_sighted] || s.id_sighted} (the type only; no ID number is kept).`);
         // 029 (Tim, 26 November 2026): on his device each signer's photo ID is logged, with his tick that he checked it and watched them sign
         if (s.id_checked_at) add(`Tim McGuire checked this person's photo ID (${SIGN.ID_TYPES[s.id_sighted] || s.id_sighted}) and watched them sign: ${NZ(s.id_checked_at)}.`, { size: 8.5 }); }
       else { add('Signed by a personal link sent only to them.'); add(`Email verified with a one-time code on ${NZ(s.verified_at)}.`); }
@@ -5986,7 +5990,7 @@ window.JOURNEY_MEDIA_HINTS = {
     add(`This copy was made and locked by the server on ${NZ(rec.made_at)}.`, { size: 8.5 });
     // 029: each in-person signer's photo ID check (type and time), round by round; only when there are any, so earlier records read as before
     if ((rec.id_checks || []).length) { add('Identity checked in person', { bold: true, gap: 8 });
-      rec.id_checks.forEach(c => add(`Round ${c.round}: ${c.who}, ${SIGN.ID_TYPES[c.id_sighted] || c.id_sighted} checked by Tim McGuire, who watched them sign: ${NZ(c.at)}.`, { size: 8.5 })); }
+      rec.id_checks.forEach(c => add(c.none ? `Round ${c.round}: ${c.who} signed in person without an identity check (Tim McGuire chose this after a warning): ${NZ(c.at)}.` : `Round ${c.round}: ${c.who}, ${SIGN.ID_TYPES[c.id_sighted] || c.id_sighted} checked by Tim McGuire, who watched them sign: ${NZ(c.at)}.`, { size: 8.5 })); }
     add('Every locked round of this offer', { bold: true, gap: 8 });
     (rec.rounds || []).forEach(r => add(`Document ${r.document}, Round ${r.round} (number ${r.number}): signed by the ${sideName(r.side)}, ${r.changes ? r.changes + (r.changes === 1 ? ' change' : ' changes') : 'no changes'}, locked ${NZ(r.locked_at)}. SHA-256 ${r.sha256}`, { size: 8 }));
     return L;
@@ -6635,15 +6639,35 @@ window.JOURNEY_MEDIA_HINTS = {
   const ID_PHOTO = [['nz_driver_licence', 'NZ driver licence'], ['passport', 'Passport'], ['nz_firearms_licence', 'NZ firearms licence'], ['kiwi_access_card', 'Kiwi Access Card'], ['other_photo_id', 'Other photo ID']];
   const idCheckHTML = (key, name) => `<div class="id-check" data-idc="${esc(key)}"><label class="f" for="idt_${esc(key)}">Photo ID you checked for ${esc(name)} <span class="opt">(the type only; no number is kept)</span></label>
     <select id="idt_${esc(key)}" data-idtype="${esc(key)}"><option value="">Choose</option>${ID_PHOTO.map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select>
-    <label class="choice cb" style="margin-top:8px"><input type="checkbox" data-idok="${esc(key)}"><span class="mark"></span><span><span class="ct">Tim: I checked ${esc(name)}'s ID and watched them sign</span></span></label></div>`;
+    <label class="choice cb" style="margin-top:8px"><input type="checkbox" data-idok="${esc(key)}"><span class="mark"></span><span><span class="ct">Tim: I checked ${esc(name)}'s ID and watched them sign</span></span></label>
+    <div class="toolbar" style="margin-top:4px"><button class="btn link" type="button" data-noid="${esc(key)}" data-noname="${esc(name)}">Sign without an ID check</button></div></div>`;
+  /* Tim may still choose to sign without an ID check (Tim, 26 November 2026, 17:57), after a clear warning: the first tap shows it right
+     under the button, the second confirms; the save then records "Signed in person without an identity check" with his name and the time. */
+  const ID_NONE_NOTE = 'Signed in person without an identity check';
+  document.addEventListener('click', e => { const b = e.target.closest && e.target.closest('[data-noid]'); if (!b) return;
+    const nm = b.dataset.noname || 'this person';
+    if (b.dataset.confirmed === '1') { delete b.dataset.confirmed; delete b.dataset.armed; b.textContent = 'Sign without an ID check'; atBtn(b, 'The ID check is needed again.', 'ok'); return; }
+    if (b.dataset.armed !== '1') { b.dataset.armed = '1'; b.textContent = 'Yes, sign without an ID check'; atBtn(b, `No identification has been checked for ${nm}. Finish anyway? Tap again to sign without an ID check.`, 'err'); return; }
+    b.dataset.confirmed = '1'; b.textContent = 'No ID check (tap to undo)';
+    const card = b.closest('[data-signer],[data-fsigner],[data-vp]'), save = card && card.querySelector('[data-signnow],[data-fsign]');
+    atBtn(b, save ? `Signing for ${nm} without an ID check.` : `No ID check for ${nm}: now save the signatures.`, 'err'); if (save) save.click(); });
   // the check as it goes in the signed snapshot, or a plain message; the AML file for this person is linked where there is one
   async function idCheckRead(key, name, personId) {
-    const t = ($(`[data-idtype="${CSS.escape(key)}"]`) || {}).value || '', ok = !!($(`[data-idok="${CSS.escape(key)}"]`) || {}).checked;
-    if (!t) return { err: `Choose the photo ID you checked for ${name}.` };
+    const t = ($(`[data-idtype="${CSS.escape(key)}"]`) || {}).value || '', ok = !!($(`[data-idok="${CSS.escape(key)}"]`) || {}).checked, nb = $(`[data-noid="${CSS.escape(key)}"]`);
+    if (!t && nb && nb.dataset.confirmed === '1') return { check: { type: 'none', warned: true, by: 'Tim McGuire', at: new Date().toISOString(), note: ID_NONE_NOTE } };
+    if (!t) return { err: `Choose the photo ID you checked for ${name}, or tap Sign without an ID check.` };
     if (!ok) return { err: `Tick that you checked ${name}'s ID and watched them sign.` };
     const c = { type: t, checked: true, by: 'Tim McGuire', at: new Date().toISOString() };
     if (personId) { try { const { data } = await sb.from('aml_files').select('id').eq('person_id', personId).limit(1); if (data && data[0]) c.aml_file_id = data[0].id; } catch (_) { } }
     return { check: c };
+  }
+  /* a signer with no email, on Tim's device (Tim, 26 November 2026): they can sign there, but no copy is emailed to them, so Tim is
+     reminded right under the save button to print or hand them their signed copy; his tick is recorded on the agreement's timeline
+     ("Copy handed over by Tim", with the time). Nothing signed changes. By link an email is still needed. */
+  const copyNoteHTML = (key, name) => `<div class="card note tight sg-copy" data-copyfor="${esc(key)}"><p class="small" style="margin:0 0 6px">${esc(name)} has no email, so no copy is emailed to them. Print or hand them their signed copy.</p>
+    <label class="choice cb" style="margin:0"><input type="checkbox" data-tcopy="${esc(key)}"><span class="mark"></span><span><span class="ct">I've handed ${esc(name)} their signed copy</span></span></label></div>`;
+  async function copyHanded(agreementId, personId, name, what) {
+    await must(sb.from('agreement_events').insert({ agreement_id: agreementId, actor: SESSION.user.email, kind: 'copy_handed_over', detail: { person_id: personId, name, document: what, note: 'Copy handed over by Tim' } }));
   }
   const saveNote = label => `<p class="sig-save-note">When you're happy with it, press <strong>${esc(label)}</strong>. Your signature isn't saved until you do.</p>`;
   /* ───── the signing viewer: one document viewer for every signing screen (Tim, 26 November 2026) ─────
@@ -9550,13 +9574,13 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <div class="card tight"><p class="small" style="margin:0">${manual ? 'You verify each seller yourself. Use the AML file for each person on the agreement page.' : `${esc(T.c.aml)} sends each seller a link to verify on their phone.`} They can sign now; you can't act until everyone is verified.</p></div>
       ${priorList(T.an).length ? `<h2>Cancelling the previous agency</h2><p class="small">Each seller also signs ${priorList(T.an).length > 1 ? 'these notices' : 'this notice'} with the same signature. You check and send ${priorList(T.an).length > 1 ? 'them' : 'it'} from the agreement page.</p>${docViewer(priorList(T.an).map(x => noticeHTML(T.ag.address, fp.client || '(names to come)', x)).join(''), { id: 'tNoticeDv' })}` : ''}
       <h2>Signatures</h2>
-      ${named.length ? named.map(p => p.signed_at ? `<div class="card tight" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><h3 style="margin:0">${nt(p.legal_name)}</h3><span class="signed-badge">✓ Signed ${esc(fmtDT(p.signed_at))}</span></div>`
+      ${named.length ? named.map(p => p.signed_at ? `<div class="card tight" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><h3 style="margin:0">${nt(p.legal_name)}</h3><span class="signed-badge">✓ Signed ${esc(fmtDT(p.signed_at))}</span>${EMAIL_RE.test(p.email || '') ? '' : `<div data-tcopyrow="${p.id}" style="flex-basis:100%"></div>`}</div>`
         : `<div class="card tight" data-signer="${p.id || ''}"><div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:8px"><h3 style="margin:0">${nt(p.legal_name)}</h3><button class="btn link" type="button" data-clear="${p.id}">Clear</button></div>
           ${priorList(T.an).length ? `<label class="choice cb" style="margin:0 0 10px"><input type="checkbox" data-tnotice="${p.id}"><span class="mark"></span><span><span class="ct">Also sign the notice${priorList(T.an).length > 1 ? 's' : ''} cancelling the agency with ${esc(joinNames(priorList(T.an).map(x => x.agency)))}</span></span></label>` : ''}
           ${idCheckHTML(p.id, p.legal_name)}
           <div class="sig-wrap"><canvas id="pad_${p.id}" aria-label="Signature pad for ${esc(p.legal_name)}"></canvas><div class="sig-line"></div><span class="hint">${esc(callName(p) || p.legal_name)} signs here</span></div>
           ${saveNote(`Save ${callName(p) || p.legal_name}'s signature`)}
-          <div class="toolbar"><button class="btn primary" type="button" data-signnow="${p.id}">Save ${esc(callName(p) || p.legal_name)}'s signature</button></div></div>`).join('') : '<p class="small">Add the sellers on page 1 first.</p>'}
+          <div class="toolbar"><button class="btn primary" type="button" data-signnow="${p.id}">Save ${esc(callName(p) || p.legal_name)}'s signature</button></div>${EMAIL_RE.test(p.email || '') ? '' : copyNoteHTML(p.id, p.legal_name)}</div>`).join('') : '<p class="small">Add the sellers on page 1 first.</p>'}
       <p class="small">By signing they agree to the Sole and Exclusive Agency Agreement ${esc(AGREEMENT_VERSION.split('-')[0])}, including the Terms and Conditions, the Property Description and the Verification of Ownership. Each signer is emailed their copy once everyone has signed, which starts the cooling-off period.</p>
       ${named.some(p => !p.signed_at) ? `<div class="card note"><h3>Or let them sign on their own phones</h3><p class="small">They'll get a link, check what you've filled in together, and sign in their own time. Anyone who's already signed here stays signed.</p><div class="toolbar"><button class="btn ghost" type="button" id="tSendPhones">Send to sign on their phones</button></div></div>` : ''}
       <div id="tDone"></div>`;
@@ -9579,6 +9603,12 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   }
   function tBind3() {
     const FV = dvWire({ id: 'tFrontDv' }); dvWire({ id: 'tNoticeDv' });
+    // a signer with no email: whether Tim has handed them their signed copy, or a tick to say he has
+    { const rows = $$('[data-tcopyrow]'); if (rows.length && T.id) (async () => { const ev = (await ofSafe(sb.from('agreement_events').select('kind,detail,at').eq('agreement_id', T.id).eq('kind', 'copy_handed_over'))) || [];
+      const fill = r => { const pid = r.dataset.tcopyrow, p = T.people.find(x => x.id === pid) || {}, e = ev.find(x => (x.detail || {}).person_id === pid && (x.detail || {}).document === 'agency agreement');
+        r.innerHTML = e ? `<p class="small" style="margin:6px 0 0" data-tcopydone="${pid}">Copy handed over by Tim, ${esc(fmtDT(e.at))}.</p>` : copyNoteHTML('later' + pid, p.legal_name || 'They');
+        const c = r.querySelector('[data-tcopy]'); if (c) c.addEventListener('change', async () => { if (!c.checked) return; try { await copyHanded(T.id, pid, p.legal_name, 'agency agreement'); ev.push({ detail: { person_id: pid, document: 'agency agreement' }, at: new Date().toISOString() }); fill(r); } catch (_) { c.checked = false; } }); };
+      rows.forEach(fill); })(); }
     // after a signature is saved, "Move to the next place for me" glides on to the next person still to sign
     if (T.glideNext) { T.glideNext = false; const nx = $('[data-signer]'); if (FV && FV.auto() && nx) setTimeout(() => FV.glide(nx), 60); }
     if (T.id) wirePdf(T.id); else $$('[data-pdf]').forEach(b => b.addEventListener('click', async () => { tCollect(); if (await tSave()) openPdf(T.id); }));
@@ -9603,7 +9633,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       tCollect();
       const e = tReadyToSign(); if (e) return tErr(e);
       const person = T.people.find(x => x.id === pid);
-      if (!person || !EMAIL_RE.test(person.email || '')) return tErr(`Add an email for ${person ? person.legal_name : 'this person'} on page 1, so they get their signed copy.`);
+      if (!person) return tErr('Add the sellers on page 1 first.');   // on Tim's device an email isn't needed: no copy is emailed, Tim hands it over
       if (!pad || !pad.drawn()) return tErr('Please sign in the box first.');
       const idc = await idCheckRead(pid, person.legal_name, pid); if (idc.err) { atBtn(b, idc.err, 'err'); return tErr(idc.err); }
       const tn = $(`[data-tnotice="${pid}"]`); if (tn && !tn.checked) return tErr('Tick the box to sign the cancellation notice as well, or stop and sort out the previous agency first.');
@@ -9619,6 +9649,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         Object.assign(snapshot, await signExtras(T.id, T.an), { id_check: idc.check });
         const res = await must(sb.rpc('agent_sign_in_person', { a: T.id, pid, p_image_path: path, p_snapshot: snapshot, p_user_agent: navigator.userAgent }));
         await sigSaved($('#pad_' + pid), `${person.legal_name} has signed`, 'Signature saved');
+        if (($(`[data-tcopy="${pid}"]`) || {}).checked) await copyHanded(T.id, pid, person.legal_name, 'agency agreement');
         T.people = await must(sb.from('agreement_people').select('*').eq('agreement_id', T.id).order('position'));
         T.ag = Object.assign(T.ag, await must(sb.from('agreements').select('id,ref,status,legal,sent_at,cooling_off_until').eq('id', T.id).single()));
         if (res && res.remaining === 0) {
@@ -10243,7 +10274,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         ${toSign.map(p => `<div class="card tight" data-fsigner="${p.id}"><label class="choice cb" style="margin:0 0 8px"><input type="checkbox" data-fok="${p.id}"><span class="mark"></span><span><span class="ct">${nt(p.legal_name)} has checked it${isHH ? '' : ' and makes the Vendor Statement'}</span></span></label>
           <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:8px"><h3 style="margin:0">${nt(p.legal_name)}</h3><button class="btn link" type="button" data-fclr="${p.id}">Clear</button></div>
           ${idCheckHTML('f' + p.id, p.legal_name)}<div class="sig-wrap"><canvas id="fpad_${p.id}" aria-label="Signature pad for ${esc(p.legal_name)}"></canvas><div class="sig-line"></div><span class="hint">${esc(callName(p) || p.legal_name)} signs here</span></div>${saveNote(`Save ${callName(p) || p.legal_name}'s signature`)}
-          <div class="toolbar"><button class="btn primary" type="button" data-fsign="${p.id}">Save ${esc(callName(p) || p.legal_name)}'s signature</button></div></div>`).join('')}<div class="err" id="fErr"></div>` : ''}
+          <div class="toolbar"><button class="btn primary" type="button" data-fsign="${p.id}">Save ${esc(callName(p) || p.legal_name)}'s signature</button></div>${EMAIL_RE.test(p.email || '') ? '' : copyNoteHTML('f' + p.id, p.legal_name)}</div>`).join('')}<div class="err" id="fErr"></div>` : ''}
       ${fs.length ? `<h2>Signatures</h2>${fs.map(s => `<div class="card tight"><div style="font-weight:600">${nt(s.signer_name)}${s.signer_role === 'agent' ? ' <span class="small">(licensee)</span>' : ''}</div><div class="small">${esc(fmtDT(s.signed_at))} · fingerprint ${esc(String(s.snapshot_sha256).slice(0, 16))}…${s.snapshot && s.snapshot.witnessed_by ? ' · witnessed by you' : ''}</div></div>`).join('')}` : ''}
     </div>`;
     dvWire({ id: 'fDv' });
@@ -10295,6 +10326,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         const d = isHH ? hhDoc(fm.agent_data, ag.address, names) : vdDoc(fm.data || {}, ag.address, names, new Date());
         const res = await must(sb.rpc('agent_form_sign_in_person', { f: fid, pid, p_image_path: path, p_snapshot: { document: d.title, doc: d, property: ag.address, agreement_ref: ag.ref, signer: { name: p.legal_name, email: p.email }, id_check: idc.check, signed_at_client: new Date().toISOString() }, p_user_agent: navigator.userAgent }));
         await sigSaved($('#fpad_' + pid), `${p.legal_name} has signed`, 'Signature saved');
+        if (($(`[data-tcopy="f${pid}"]`) || {}).checked) await copyHanded(ag.id, pid, p.legal_name, isHH ? 'Healthy Homes checklist' : 'Vendor Declaration');
         if (res && res.remaining === 0 && isHH) { const { error: fe } = await sb.functions.invoke('notify', { body: { type: 'form_signed', agreement_id: ag.id, form_id: fid } }); toast(fe ? 'All signed. The PDF didn\'t file; try again below.' : 'All signed. Filed, and emailed to you.'); }
         else if (res && res.remaining === 0) toast('All the vendors have signed. Countersign it below.');
         viewFormAgent(fid);
@@ -11210,7 +11242,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <div class="toolbar"><button class="btn ghost" type="button" id="vPdf2">Read the variation (PDF)</button></div>
       ${todo.map(p => `<div class="card tight" data-vp="${p.id}"><div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:8px"><h3 style="margin:0">${nt(p.legal_name)}</h3><button class="btn link" type="button" data-vclr="${p.id}">Clear</button></div>
         <label class="choice cb"><input type="checkbox" data-vok="${p.id}"><span class="mark"></span><span><span class="ct">I've read these changes and agree to them</span><span class="cd">I was told I can get legal advice before signing, and given time to do so</span></span></label>
-        ${idCheckHTML('v' + p.id, p.legal_name)}<div class="sig-wrap"><canvas data-vcv="${p.id}" aria-label="Signature of ${esc(p.legal_name)}"></canvas><div class="sig-line"></div><span class="hint">Sign here</span></div>${saveNote('Save signatures')}</div>`).join('') || '<p class="small">Everyone has signed.</p>'}
+        ${idCheckHTML('v' + p.id, p.legal_name)}<div class="sig-wrap"><canvas data-vcv="${p.id}" aria-label="Signature of ${esc(p.legal_name)}"></canvas><div class="sig-line"></div><span class="hint">Sign here</span></div>${saveNote('Save signatures')}${EMAIL_RE.test(p.email || '') ? '' : copyNoteHTML('v' + p.id, p.legal_name)}</div>`).join('') || '<p class="small">Everyone has signed.</p>'}
       <div class="err"></div></div>`;
     const pads = {};
     $$('[data-vcv]').forEach(cv => { pads[cv.dataset.vcv] = makePad(cv); });
@@ -11229,6 +11261,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         const path = await uploadSig($(`[data-vcv="${p.id}"]`), agId, vid + '-' + p.id);
         res = await must(sb.rpc('agent_sign_variation_in_person', { v: vid, pid: p.id, p_image_path: path, p_snapshot: Object.assign(varSnapshot(ag, vr, { name: p.legal_name, email: p.email, role: 'client' }), { id_check: idcs[p.id] }), p_user_agent: navigator.userAgent }));
         shown.push(sigSaved($(`[data-vcv="${p.id}"]`), `${p.legal_name} has signed`, 'Signature saved'));
+        if (($(`[data-tcopy="v${p.id}"]`) || {}).checked) await copyHanded(agId, p.id, p.legal_name, 'variation ' + vr.number);
       }
       await Promise.all(shown);
       if (res && res.remaining === 0) {
@@ -14113,7 +14146,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
               <select id="sgIdType"><option value="">Choose</option>${SG_ID.filter(([k]) => k !== 'known_to_tim').map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select>
               <label class="choice cb" style="margin-top:8px"><input type="checkbox" id="sgSaw"><span class="mark"></span><span><span class="ct">Tim: I checked ${esc(ctx.name)}'s ID and watched them sign</span></span></label></div>` : ''}
           <p class="small" id="sgToTimOnly"><strong>When you confirm, this goes straight to Tim McGuire, the agent. He will be in touch with the other party; they are not told until he does.</strong></p>
-          <div class="toolbar"><button class="btn primary" type="button" id="sgFinishGo" ${left ? 'disabled' : ''}>Finish signing</button></div></section>`;
+          <div class="toolbar"><button class="btn primary" type="button" id="sgFinishGo" ${left ? 'disabled' : ''}>Finish signing</button></div>
+          ${ctx.mode === 'person' ? `<div class="toolbar" style="margin-top:4px"><button class="btn link" type="button" id="sgNoIdGo" ${left ? 'disabled' : ''}>Finish without an ID check</button></div>` : ''}</section>`;
     }
     main().innerHTML = `<div class="view-pad dr-page sg-flow" id="sgFlow"><h1>${ctx.mode === 'person' ? esc(ctx.name) + ' signs' : VEND ? 'An offer on your property' : R2 ? 'The vendors\' reply to your offer' : 'Your offer to sign'}</h1><p class="lede">${nt(ctx.address)}</p>
       ${R2 ? ngIntroHTML(ctx) : ''}
@@ -14178,7 +14212,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       const counts = () => { const n = done(), t = req().length, left = t - n; $('#sgCount').innerHTML = `<strong>${n} of ${t}</strong> places done`; $('.sg-bar span').style.width = (t ? Math.round(n / t * 100) : 0) + '%';
         $$('#sgPgPick option').forEach(op => { const pn = +op.value, tt = req().filter(y => y.page === pn).length, l = req().filter(y => y.page === pn && !ctx.taps.has(y.id)).length; op.textContent = `Page ${pn}${tt ? ` (${l ? l + ' to do' : 'done'})` : ''}`; });
         const fin = $('#sgFinish p'); if (fin) { fin.id = left ? 'sgLeft' : 'sgAllDone'; fin.textContent = left ? `${left} place${left === 1 ? '' : 's'} still to do. You can finish once every place is done.` : 'Every place is done.'; }
-        $('#sgFinishGo').disabled = left > 0; const gn = $('#sgGoNext'); if (gn && !left) gn.remove(); };
+        $('#sgFinishGo').disabled = left > 0; { const ni = $('#sgNoIdGo'); if (ni) ni.disabled = left > 0; } const gn = $('#sgGoNext'); if (gn && !left) gn.remove(); };
       if (ctx._page) F.page = ctx._page;
       const sel = $('#sgPgPick'); if (sel) sel.value = String(F.page);
       // the shared signing viewer: page buttons, zoom (kept for this signer), full screen, and the glide to the next place
@@ -14198,10 +14232,15 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       on('#sgFinishGo', () => act(async () => { let o = {};
         // identity on Tim's device (Tim, 26 November 2026): the photo ID he checked for this person, and his tick that he watched them sign
         if (ctx.mode === 'person') { const seen = $('#sgIdType').value;
-          if (!seen) throw new Error(`Choose the photo ID you checked for ${ctx.name}.`);
+          if (!seen) throw new Error(`Choose the photo ID you checked for ${ctx.name}, or use Finish without an ID check.`);
           if (!$('#sgSaw').checked) throw new Error(`Tim: tick that you checked ${ctx.name}'s ID and watched them sign.`);
           o = { id: seen, checked: true }; }
         const r = await ctx.api.finish(o); ctx.finished = r; }, () => ctx.done(ctx.finished)));
+      // Tim may still finish without an ID check (Tim, 26 November 2026, 17:57): a clear warning right under the button, and a second
+      // tap to confirm; the record then says "Signed in person without an identity check" with his name and the time
+      on('#sgNoIdGo', () => { const b = $('#sgNoIdGo');
+        if (b.dataset.armed !== '1') { b.dataset.armed = '1'; b.textContent = 'Yes, finish without an ID check'; atBtn(b, `No identification has been checked for ${ctx.name}. Finish anyway? Tap again to finish without an ID check.`, 'err'); return; }
+        act(async () => { const r = await ctx.api.finish({ id: 'no_id_warned', checked: true }); ctx.finished = r; }, () => ctx.done(ctx.finished)); });
       F.rerender = paint;
     }
     top();

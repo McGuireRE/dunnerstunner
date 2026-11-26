@@ -169,8 +169,9 @@ const ok=d=>Promise.resolve({data:d,error:null}); const bad=m=>Promise.resolve({
 // 029 guard_signature_identity (Tim, 26 November 2026): in person, Tim's photo ID check is in the snapshot (type, never a number, at now);
 // by the signer's own link, nobody else on the agreement has the same email
 const PHOTO_IDS=['nz_driver_licence','passport','nz_firearms_licence','kiwi_access_card','other_photo_id'];
-function idCheckErr(snap,name,personId){ const c=(snap||{}).id_check; if(!c||typeof c!=='object'||!PHOTO_IDS.includes(c.type)||c.checked!==true||!String(c.by||'').trim()) return `Choose the photo ID you checked for ${name}, and tick that you checked it and watched them sign`;
-  if(Object.keys(c).some(k=>!['type','checked','by','at','aml_file_id'].includes(k))) return 'Only the ID type is kept here, never its number';
+function idCheckErr(snap,name,personId){ const c=(snap||{}).id_check; const photo=!!c&&PHOTO_IDS.includes(c.type)&&c.checked===true&&!('warned' in c), none=!!c&&c.type==='none'&&c.warned===true&&c.note==='Signed in person without an identity check'&&!('checked' in c)&&!('aml_file_id' in c);
+  if(!c||typeof c!=='object'||!String(c.by||'').trim()||!(photo||none)) return `Choose the photo ID you checked for ${name}, and tick that you checked it and watched them sign (or confirm finishing without an ID check)`;
+  if(Object.keys(c).some(k=>!['type','checked','by','at','aml_file_id','warned','note'].includes(k))) return 'Only the ID type is kept here, never its number';
   if(!(Math.abs(Date.parse(c.at)-Date.now())<=9e5)) return 'Please record the ID check again, at the time you check it';
   if(c.aml_file_id&&!(DB.aml_files||[]).some(f=>f.id===c.aml_file_id&&f.person_id===personId)) return "That AML file isn't this person's"; return null; }
 function ownEmailErr(agreementId,person){ const em=String((person||{}).email||'').trim().toLowerCase(); if(!em||(DB.agreement_people||[]).some(x=>x.agreement_id===agreementId&&x.id!==person.id&&String(x.email||'').trim().toLowerCase()===em)) return 'Each person signs from their own email. Ask Tim to give each person their own email, or sign in person with him'; return null; }
@@ -822,6 +823,7 @@ const reviewLive=r=>!(r.marks||[]).length||(r.marks||[]).some(k=>!OSU().some(u=>
 const liveReviews=()=>OSV().filter(reviewLive);
 const LIVE_VIEWS={offer_sign_taps_live:liveTaps,offer_sign_marks_live:()=>liveMarks().map(m=>Object.assign({},m)),offer_sign_reviews_live:()=>liveReviews().map(r=>Object.assign({},r))};
 const idCheckedAt=s=>{ const e=OE().filter(x=>x.kind==='sign_id_checked'&&(x.detail||{}).signer_id===s.id).pop(); return e?e.at:null; };
+const noIdAt=s=>{ const e=OE().filter(x=>x.kind==='sign_no_id_check'&&(x.detail||{}).signer_id===s.id).pop(); return e?e.at:null; };
 const sgInk=s=>{ const r=OSD().filter(x=>x.signer_id===s.id).sort((a,b)=>b.id-a.id)[0]; return r?{sig_png:r.sig_png,init_png:r.init_png,redrawn_at:r.at}:{sig_png:s.sig_png,init_png:s.init_png,redrawn_at:null}; };
 // has a freeze on the offer been lifted since this round was released (offer_revert_offered: from the offer's timeline, in order)
 function revertOffered(g){ const ev=OE().filter(e=>e.offer_id===g.offer_id), rel=ev.filter(e=>['sign_released','round_presented'].includes(e.kind)&&(e.detail||{}).signing_id===g.id).map(e=>e.seq).sort((a,b)=>b-a)[0];
@@ -1075,8 +1077,10 @@ function signRpc(name,a,me){ if(!me||!AGENTS.includes(me.email)) return bad('Onl
   if(name==='agent_signing_tap') return sgTry(()=>sgTap(person(a.p_signer),a.p_place));
   // 029 (Tim, 26 November 2026): in person, each turn finishes only once Tim logs the photo ID he checked and ticks that he watched them sign
   if(name==='agent_signing_finish') return bad('Choose the photo ID you checked, and tick that you checked it and watched them sign');
-  if(name==='agent_signing_finish_checked') return sgTry(()=>{ const s=person(a.p_signer); if(!PHOTO_IDS.includes(a.p_id_type)) throw new Error('Choose the photo ID you checked for '+s.name);
-    if(a.p_checked!==true) throw new Error(`Tick that you checked ${s.name}'s ID and watched them sign`); const g=OSG().find(x=>x.id===s.signing_id); const r=sgFinish(s,a.p_ua,null,a.p_id_type,'Tim McGuire');
+  // or, after a warning, Tim's explicit choice to finish without one ('no_id_warned'); an empty choice is refused (029, 17:57)
+  if(name==='agent_signing_finish_checked') return sgTry(()=>{ const s=person(a.p_signer), none=a.p_id_type==='no_id_warned'; if(!none&&!PHOTO_IDS.includes(a.p_id_type)) throw new Error('Choose the photo ID you checked for '+s.name);
+    if(a.p_checked!==true) throw new Error(none?`Confirm that you are finishing for ${s.name} without an ID check`:`Tick that you checked ${s.name}'s ID and watched them sign`); const g=OSG().find(x=>x.id===s.signing_id); const r=sgFinish(s,a.p_ua,null,none?null:a.p_id_type,'Tim McGuire');
+    if(none){ sgEv(g,me.email,'sign_no_id_check',{signing_id:g.id,round:g.round_no||1,side:g.side||'purchaser',signer:s.position,signer_id:s.id,by:'Tim McGuire',warned:true,note:'Signed in person without an identity check'}); return r; }
     sgEv(g,me.email,'sign_id_checked',{signing_id:g.id,round:g.round_no||1,side:g.side||'purchaser',signer:s.position,signer_id:s.id,id_type:a.p_id_type,checked_by:'Tim McGuire',watched:true}); return r; });
   if(name==='agent_signing_mark') return sgTry(()=>{ const s=person(a.p_signer), g=OSG().find(x=>x.id===s.signing_id);
     if(['insert',...OWN_K].includes(a.p_kind)){ if(a.p_target) throw new Error('Only a reinstatement points at another mark'); return sgDoMark(s,a.p_kind,a.p_page,a.p_geometry,null,false); } if((g.round_no||1)>1) throw new Error('In a counteroffer, use the change tools'); if(s.void_at) throw new Error('This version has been replaced'); const w=sgCurrent(g); if(w) throw new Error(w);
@@ -1186,7 +1190,7 @@ const docLast=docId=>ORN().filter(r=>r.document_id===docId).sort((a,b)=>b.doc_ro
 function docLayers(docId,upto){ return ORN().filter(r=>r.document_id===docId&&r.doc_round<=upto).sort((a,b)=>a.doc_round-b.doc_round).map(r=>{ const g=OSG().find(x=>x.id===r.signing_id);
   return {round_id:r.id,number:r.number,doc_round:r.doc_round,side:r.side,signing_id:g.id,sha256:r.sha256,locked_at:r.locked_at,changes:r.changes,places:sgAllPlaces(g),
     taps:liveTaps().filter(t=>t.signing_id===g.id).map(t=>({place_id:t.place_id,signer:OSR().find(s=>s.id===t.signer_id).position})),
-    signers:OSR().filter(s=>s.signing_id===g.id&&!s.void_at).sort((x,y)=>x.position-y.position).map(s=>Object.assign({position:s.position,name:s.name,sig_png:sgInk(s).sig_png,init_png:sgInk(s).init_png},s.id_sighted?{id_sighted:s.id_sighted,id_checked_at:idCheckedAt(s)}:{})),marks:sgMarksOf(g.id)}; }); }
+    signers:OSR().filter(s=>s.signing_id===g.id&&!s.void_at).sort((x,y)=>x.position-y.position).map(s=>Object.assign({position:s.position,name:s.name,sig_png:sgInk(s).sig_png,init_png:sgInk(s).init_png},s.id_sighted?{id_sighted:s.id_sighted,id_checked_at:idCheckedAt(s)}:{},noIdAt(s)?{no_id_check_at:noIdAt(s)}:{})),marks:sgMarksOf(g.id)}; }); }
 function stopSignings(oid,docId,actor,reason,status){ let n=0; const st=status||'cancelled'; OSG().filter(g=>g.offer_id===oid&&['ready','signing','held','complete'].includes(g.status)&&(!docId||g.document_id===docId)).forEach(g=>{
   OSR().filter(s=>s.signing_id===g.id&&!s.void_at).forEach(s=>Object.assign(s,{void_at:now(),token_hash:null,session_hash:null,code_hash:null})); g.status=st;
   sgEv(g,actor,st==='withdrawn'?'sign_withdrawn':'sign_cancelled',{signing_id:g.id,round:g.round_no||1,side:g.side||'purchaser',method:g.method,links_sent:!!g.sent_at,reason}); n++; }); return n; }
@@ -1289,7 +1293,7 @@ async function sgLock(sid,actor){ if(localStorage.getItem('mockLockFail')==='1')
   const n=(ORN().filter(r=>r.offer_id===g.offer_id).map(r=>r.number).sort((a,b)=>b-a)[0]||0)+1;
   const record={address:p.address,offer_ref:o.buyer_ref,round,draft:{number:d.number,sha256:d.sha256},places_sha256:g.places_sha256,made_at:now(),
     signers:signers.map(s=>Object.assign({name:s.name,method:g.method,verified_at:s.verified_at,witnessed_by:s.witnessed_by,id_sighted:s.id_sighted,consent_at:s.consent_at,receipts:OSC().filter(r=>r.signer_id===s.id).map(r=>({guide:r.guide,version:r.version,sha256:r.sha256,pages:r.pages,at:r.at})),
-      first_tap:LT.filter(t=>t.signer_id===s.id).map(t=>t.at).sort()[0],last_tap:LT.filter(t=>t.signer_id===s.id).map(t=>t.at).sort().slice(-1)[0],finished_at:s.finished_at,places:sgRequired(g,s.position).length,ua:s.user_agent,net:s.net_hash,seen_sha256:s.seen_sha256},idCheckedAt(s)?{id_checked_at:idCheckedAt(s)}:{})),
+      first_tap:LT.filter(t=>t.signer_id===s.id).map(t=>t.at).sort()[0],last_tap:LT.filter(t=>t.signer_id===s.id).map(t=>t.at).sort().slice(-1)[0],finished_at:s.finished_at,places:sgRequired(g,s.position).length,ua:s.user_agent,net:s.net_hash,seen_sha256:s.seen_sha256},idCheckedAt(s)?{id_checked_at:idCheckedAt(s)}:{},noIdAt(s)?{no_id_check_at:noIdAt(s)}:{})),
     marks:marks.map(m=>Object.assign({kind:m.kind,page:m.page,by:m.by,at:m.at,reviewed_at:m.reviewed_at},['strike','insert'].includes(m.kind)&&(m.geometry||{}).text?{text:m.geometry.text}:{})),replaced:OSG().filter(x=>x.offer_id===g.offer_id&&x.status==='replaced').map(x=>({number:DB.offer_drafts.find(y=>y.id===x.draft_id).number,at:x.replaced_at}))};
   const L=await pdfLibLoad(); let r, lifted=[], outstanding=[], formed=false; const chg=marks.filter(m=>!isOwnK(m.kind)), own=marks.filter(m=>isOwnK(m.kind));
   if(round===1) r=await window.SIGN.renderRound(L,draft,{places,taps,signers:signers.map(s=>Object.assign({},s,sgInk(s))),marks,record,title:'Round 1 (signed by the purchasers): '+p.address});
@@ -1320,7 +1324,7 @@ async function sgAgree(b,me){ const c=agreementCheck(b.offer_id,b.accepted_at,b.
   const rounds=ORN().filter(r=>r.offer_id===o.id).sort((a,z)=>a.number-z.number).map(r=>({number:r.number,document:(ODC().find(x=>x.id===r.document_id)||{}).number,round:r.doc_round,side:r.side,changes:r.changes,sha256:r.sha256,locked_at:r.locked_at}));
   if(!dp) throw new Error("The agreement blank has no date place, so the date can't be added. Add it to the places on the blank first.");
   const record={address:p.address,offer_ref:o.buyer_ref,date_text:c.date_text,accepted_at:b.accepted_at,confirmed_by:'Tim McGuire',made_at:now(),document:c.doc.number,round:c.last.doc_round,rounds,base:{round:c.last.doc_round,sha256:c.last.sha256},draw_version:NG.DRAW_VERSION};
-  { const idc=layers.flatMap(L=>(L.signers||[]).filter(s=>s.id_checked_at).map(s=>({round:L.doc_round,who:s.name,id_sighted:s.id_sighted,at:s.id_checked_at}))); if(idc.length) record.id_checks=idc; }   // 029
+  { const idc=layers.flatMap(L=>(L.signers||[]).filter(s=>s.id_checked_at||s.no_id_check_at).map(s=>s.no_id_check_at?{round:L.doc_round,who:s.name,none:true,at:s.no_id_check_at}:{round:L.doc_round,who:s.name,id_sighted:s.id_sighted,at:s.id_checked_at})); if(idc.length) record.id_checks=idc; }   // 029
   const L=await pdfLibLoad(), r=await NG.renderWorking(L,draft,{ink:st.ink,changes:st.changes,own:st.own,lines:NG.agreementLines(record),date:{text:c.date_text,place:dp},title:'Agreement: '+p.address});
   const sha=hex(await crypto.subtle.digest('SHA-256',r.bytes)), path=`properties/${o.property_id}/docs/offer-agreement-${o.id}-${sha.slice(0,12)}.pdf`, blob=new Blob([r.bytes],{type:'application/pdf'});
   SO()[path]={size:blob.size,mime:'application/pdf'}; (window.__repoBlobs||={})[path]=blob; await blobKeep(path,blob); (DB.offer_file_hashes||=[]).push({path,sha256:sha,size_bytes:blob.size,confirmed_by:me.email,confirmed_at:now()});

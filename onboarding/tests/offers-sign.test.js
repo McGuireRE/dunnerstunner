@@ -197,11 +197,18 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   await turnStart(p, 1); await p.waitForSelector('#sgPlaces');
   expect(await count(p) === out.need1 && +(await p.textContent('#sgCount')).match(/of (\d+)/)[1] === out.need1 + 3, 'purchaser 1 picks up where they left off, with the three marks to initial');
   await tapAll(p); await p.selectOption('#sgIdType', 'passport'); await tick(p, '#sgSaw'); await p.click('#sgFinishGo'); await p.waitForSelector('#sgHandback'); await p.click('#sgImTim'); await p.waitForSelector('#sgView');
-  // purchasers 3 and 4: each their own ID check
-  for (const n of [3, 4]) { await turnStart(p, n); await agreeReadDraw(p, n); await tapAll(p); await p.selectOption('#sgIdType', n === 3 ? 'kiwi_access_card' : 'other_photo_id'); await tick(p, '#sgSaw'); await p.click('#sgFinishGo'); await p.waitForSelector('#sgHandback'); await p.click('#sgImTim'); await p.waitForSelector('#sgView'); }
+  // purchaser 3: her own ID check; purchaser 4: Tim chooses to finish without one (Tim, 26 November 2026, 17:57): a warning right under
+  // the button on the first tap, and a second tap to confirm
+  await turnStart(p, 3); await agreeReadDraw(p, 3); await tapAll(p); await p.selectOption('#sgIdType', 'kiwi_access_card'); await tick(p, '#sgSaw'); await p.click('#sgFinishGo'); await p.waitForSelector('#sgHandback'); await p.click('#sgImTim'); await p.waitForSelector('#sgView');
+  await turnStart(p, 4); await agreeReadDraw(p, 4); await tapAll(p); await p.click('#sgNoIdGo'); await p.waitForTimeout(250);
+  { const w = await p.evaluate(() => { const n = document.getElementById('bn-sgNoIdGo'); return n && !n.hidden ? n.textContent : ''; }); out.noIdWarn = w;
+    expect(/No identification has been checked for Di Testbuyer\. Finish anyway\?/.test(w) && await p.$('#sgFinish'), 'finishing without an ID check: the first tap only warns, right under the button'); }
+  await p.click('#sgNoIdGo'); await p.waitForSelector('#sgHandback'); await p.click('#sgImTim'); await p.waitForSelector('#sgView');
   { const d0 = await db(p), s3 = d0.offer_signers.find(s => s.signing_id === gA.id && s.position === 3), s4 = d0.offer_signers.find(s => s.signing_id === gA.id && s.position === 4);
-    expect(s3.id_sighted === 'kiwi_access_card' && s3.finished_at && s4.id_sighted === 'other_photo_id' && s4.finished_at, 'each purchaser\'s photo ID type is recorded');
-    const ev4 = d0.offer_events.find(e => e.kind === 'sign_id_checked' && e.detail.signing_id === gA.id && e.detail.signer === 4); expect(ev4 && ev4.detail.id_type === 'other_photo_id' && ev4.detail.checked_by === 'Tim McGuire' && ev4.detail.watched === true && ev4.at, 'the audit trail records Tim\'s ID check, with its time');
+    expect(s3.id_sighted === 'kiwi_access_card' && s3.finished_at && s4.id_sighted == null && s4.finished_at, 'purchaser 3\'s photo ID type is recorded; purchaser 4 finished without one');
+    const ev3 = d0.offer_events.find(e => e.kind === 'sign_id_checked' && e.detail.signing_id === gA.id && e.detail.signer === 3); expect(ev3 && ev3.detail.id_type === 'kiwi_access_card' && ev3.detail.checked_by === 'Tim McGuire' && ev3.detail.watched === true && ev3.at, 'the audit trail records Tim\'s ID check, with its time');
+    const ev4 = d0.offer_events.find(e => e.kind === 'sign_no_id_check' && e.detail.signing_id === gA.id && e.detail.signer === 4); expect(ev4 && ev4.detail.note === 'Signed in person without an identity check' && ev4.detail.by === 'Tim McGuire' && ev4.detail.warned === true && ev4.at, 'the audit trail says plainly "Signed in person without an identity check", by Tim, with the time');
+    const r1 = await rpc(p, 'agent_signing_finish_checked', { p_signer: s4.id, p_id_type: '', p_checked: true, p_ua: 'x' }); expect(r1.error && /photo ID you checked/.test(r1.error.message), 'an empty ID choice is refused');
     const r0 = await rpc(p, 'agent_signing_finish', { p_signer: s4.id, p_id_sighted: 'passport', p_ua: 'x' }); expect(r0.error && /photo ID you checked/.test(r0.error.message), 'the old finish without the check is refused'); }
   await p.waitForSelector('#sgRound', { timeout: 30000 });
   d = await db(p); const rA = d.offer_rounds.find(r => r.offer_id === offA);
@@ -210,7 +217,7 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   const rt = await pdfText(roundPdf); out.roundPages = rt.length;
   const rec = rt.slice(drPages).join(' ');
   expect(rt.length > drPages && /Execution record/.test(rec) && !rt.slice(0, drPages).some(t => /Execution record/.test(t)), 'the execution record is on pages added at the end, never on the REINZ pages');
-  expect(['Ana Maria Testbuyer', 'Bo Testbuyer', 'Cy Testbuyer', 'Di Testbuyer'].every(n => rec.includes(n)) && /saw them sign/.test(rec) && /Photo ID sighted: Passport/.test(rec) && /NZ driver licence/.test(rec) && /Kiwi Access Card/.test(rec) && (rec.match(/Tim McGuire checked this person's photo ID \(/g) || []).length === 4, 'it names each signer, how they signed, the ID type, and Tim\'s ID check with its time for each (029)');
+  expect(['Ana Maria Testbuyer', 'Bo Testbuyer', 'Cy Testbuyer', 'Di Testbuyer'].every(n => rec.includes(n)) && /saw them sign/.test(rec) && /Photo ID sighted: Passport/.test(rec) && /NZ driver licence/.test(rec) && /Kiwi Access Card/.test(rec) && (rec.match(/Tim McGuire checked this person's photo ID \(/g) || []).length === 3 && /Signed in person without an identity check: Tim McGuire chose to finish without one after a warning/.test(rec), 'it names each signer, how they signed, the ID type and Tim\'s ID check with its time for each, and says plainly who signed without one (029)');
   expect(/Fingerprint \(SHA-256\) of what they saw and signed: [0-9a-f]{64}/.test(rec) && rec.includes(drA.sha256), 'with the fingerprints of the draft and of what each saw');
   expect(/line through text striking "[^"]+" by Bo Testbuyer/.test(rec) && /reinstatement by Bo Testbuyer/.test(rec) && /note by Bo Testbuyer/.test(rec), 'and each mark, with who and when');
   out.leak = (rt.join(' ').match(/buyer\.own@|ana\.p@|bo\.p@|cy\.p@|di\.p@|999 8888|777 6666|555 4444|333 2222|111 0000|vendor@example|000 1111/g) || []);

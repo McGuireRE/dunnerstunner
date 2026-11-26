@@ -371,7 +371,9 @@
     add(`This copy was made and locked by the server on ${NZ(rec.made_at)}. Its own fingerprint is recorded by the server when it is locked, and it is never changed.`, { size: 8.5 });
     (rec.signers || []).forEach((s, i) => {
       add(`Purchaser ${i + 1}: ${s.name}`, { bold: true, gap: 8 });
-      if (s.method === 'in_person') { add(`Signed in person on Tim McGuire's device. ${s.witnessed_by || 'Tim McGuire'} saw them sign.`); add(s.id_sighted === 'known_to_tim' ? 'Identity: known to Tim McGuire personally (no photo ID was needed).' : !s.id_sighted ? 'Identity: no choice recorded (knowing them and an ID check are both optional).' : `Photo ID sighted: ${ID_TYPES[s.id_sighted] || s.id_sighted} (the type only; no ID number is kept).`);
+      // 029 (Tim, 26 November 2026, 17:57): Tim may choose, after a warning, to finish without an ID check; the record says so plainly
+      if (s.method === 'in_person' && s.no_id_check_at) add(`Signed in person on Tim McGuire's device. Signed in person without an identity check: Tim McGuire chose to finish without one after a warning, ${NZ(s.no_id_check_at)}.`);
+      else if (s.method === 'in_person') { add(`Signed in person on Tim McGuire's device. ${s.witnessed_by || 'Tim McGuire'} saw them sign.`); add(s.id_sighted === 'known_to_tim' ? 'Identity: known to Tim McGuire personally (no photo ID was needed).' : !s.id_sighted ? 'Identity: no choice recorded (knowing them and an ID check are both optional).' : `Photo ID sighted: ${ID_TYPES[s.id_sighted] || s.id_sighted} (the type only; no ID number is kept).`);
         // 029 (Tim, 26 November 2026): on his device each signer's photo ID is logged, with his tick that he checked it and watched them sign
         if (s.id_checked_at) add(`Tim McGuire checked this person's photo ID (${ID_TYPES[s.id_sighted] || s.id_sighted}) and watched them sign: ${NZ(s.id_checked_at)}.`, { size: 8.5 }); }
       else { add('Signed by a personal link sent only to them.'); add(`Email verified with a one-time code on ${NZ(s.verified_at)}.`); }

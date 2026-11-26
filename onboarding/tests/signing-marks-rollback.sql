@@ -173,10 +173,18 @@ begin
   begin perform public.agent_signing_finish_checked(v2, 'passport', false, 'ua'); out := out || 'FINISHED WITHOUT THE TICK; '; exception when others then out := out || 'the tick: ' || sqlerrm || '; '; end;
   perform public.agent_signing_finish_checked(v2, 'nz_driver_licence', true, 'ua');
   out := out || 'ula checked: id=' || (select id_sighted from public.offer_signers where id = v2) || ' event=' || (select detail->>'id_type' || ' by ' || (detail->>'checked_by') from public.offer_events where offer_id = o1 and kind = 'sign_id_checked' and detail->>'signer_id' = v2::text) || '; ';
+  -- or Tim's explicit choice after a warning (Tim, 26 November 2026, 17:57): Una finishes without an ID check; an empty choice is refused
+  declare p_ text;
+  begin for p_ in select public.offer_sign_required(g2, 1) loop perform public.offer_sign_do_tap(v1, p_); end loop; end;
+  begin perform public.agent_signing_finish_checked(v1, '', true, 'ua'); out := out || 'FINISHED WITH AN EMPTY ID CHOICE; '; exception when others then out := out || 'empty choice: ' || sqlerrm || '; '; end;
+  begin perform public.agent_signing_finish_checked(v1, 'no_id_warned', false, 'ua'); out := out || 'FINISHED WITHOUT ID UNCONFIRMED; '; exception when others then out := out || 'no ID needs his confirmation: ' || sqlerrm || '; '; end;
+  perform public.agent_signing_finish_checked(v1, 'no_id_warned', true, 'ua');
+  out := out || 'una without an ID check: id=' || coalesce((select id_sighted from public.offer_signers where id = v1), 'none') || ' event=' || (select detail->>'note' || ' by ' || (detail->>'by') from public.offer_events where offer_id = o1 and kind = 'sign_no_id_check' and detail->>'signer_id' = v1::text) || '; ';
   perform pg_temp.rb_finish(g2);
   r := pg_temp.rb_lock(g2, '{"lifted": [], "outstanding": []}');
   rd := public.offer_doc_layers((select document_id from public.offer_rounds where signing_id = g2), 2);
-  out := out || 'layers keep the check: ' || (select (e->>'id_sighted') || ' at ' || ((e->>'id_checked_at') is not null) from jsonb_array_elements(rd->1->'signers') e where (e->>'position')::int = 2) || '; ';
+  out := out || 'layers keep the check: ' || (select (e->>'id_sighted') || ' at ' || ((e->>'id_checked_at') is not null) from jsonb_array_elements(rd->1->'signers') e where (e->>'position')::int = 2)
+    || ', and the choice without one: ' || (select ((e->>'no_id_check_at') is not null)::text || ' id=' || coalesce(e->>'id_sighted', 'none') from jsonb_array_elements(rd->1->'signers') e where (e->>'position')::int = 1) || '; ';
   out := out || 'round 2 sealed, changes counted=' || (select changes from public.offer_rounds where signing_id = g2) || ' offer=' || (select status from public.property_offers where id = o1) || '; ';
   -- nothing changed in Round 2 (her own signature isn't a change), so the agreement can be confirmed rather than presenting again
   begin perform public.agent_round_present(o1, 'in_person', pg_temp.rb_places(2, false, false, false), true); out := out || 'PRESENTED AFTER A ROUND THAT CHANGED NOTHING; '; exception when others then out := out || 'nothing changed: ' || sqlerrm || '; '; end;
@@ -224,6 +232,11 @@ begin
     begin insert into public.variation_signatures (agreement_id, person_id, signer_role, signer_name, snapshot) values (ag, pa, 'client', 'Ali Shared', jsonb_build_object('signing_method', 'In person, on the licensee''s device', 'id_check', okc || jsonb_build_object('at', now() - interval '2 hours'))); out := out || 'AN OLD ID CHECK WAS TAKEN; ';
     exception when others then out := out || 'checked now: ' || sqlerrm || '; '; end;
     insert into public.form_signatures (agreement_id, person_id, signer_role, signer_name, snapshot) values (ag, pa, 'client', 'Ali Shared', jsonb_build_object('signing_method', 'In person, on the licensee''s device', 'id_check', okc));
+    -- Tim's explicit choice after a warning passes; "none" without the warning doesn't
+    begin insert into public.signatures (agreement_id, person_id, signer_role, signer_name, snapshot) values (ag, pa, 'client', 'Ali Shared', jsonb_build_object('signing_method', 'In person, on the licensee''s device', 'id_check', jsonb_build_object('type', 'none', 'by', 'Tim McGuire', 'at', now()))); out := out || 'NO ID WITHOUT THE WARNING; ';
+    exception when others then out := out || 'none needs the warning: ' || sqlerrm || '; '; end;
+    insert into public.variation_signatures (agreement_id, person_id, signer_role, signer_name, snapshot) values (ag, pa, 'client', 'Ali Shared', jsonb_build_object('signing_method', 'In person, on the licensee''s device', 'id_check', jsonb_build_object('type', 'none', 'warned', true, 'by', 'Tim McGuire', 'at', now(), 'note', 'Signed in person without an identity check')));
+    out := out || 'no ID check, warned: kept=' || (select snapshot->'id_check'->>'note' from public.variation_signatures where person_id = pa limit 1) || '; ';
     out := out || 'in person with the check: shared email fine=' || (select count(*) from public.form_signatures where person_id = pa) || '; ';
     begin insert into public.signatures (agreement_id, person_id, signer_role, signer_name, snapshot) values (ag, pb, 'client', 'Bea Shared', '{"signing_method":"On their own device"}'); out := out || 'SIGNED BY LINK WITH A SHARED EMAIL; ';
     exception when others then out := out || 'by link, own email: ' || sqlerrm || '; '; end;

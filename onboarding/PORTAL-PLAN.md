@@ -466,8 +466,18 @@ separately, but will only do so with their identification logged.")
     person's name, above their pad; the check goes in the signed snapshot (type, Tim's tick, his name and the time, and the AML file for
     that person where there is one) and the database refuses an in-person signature without it, with an ID number, or with a time more
     than 15 minutes from now.
-- Still for Tim: the agency agreement still asks for an email for each person on his device, because their signed copy is emailed to
-  them. Say if a person with no email should be able to sign there (they would get no emailed copy).
+- Tim's answers (26 November 2026): "known to Tim personally" is not offered, as built. On his device a vendor with no email can sign
+  the agency agreement (and its notices), variations and forms: no copy is emailed to them; right under the save button Tim is reminded
+  to print or hand them their signed copy, and his tick is recorded on the agreement's timeline ("Copy handed over by Tim", with the
+  time: `agreement_events` kind `copy_handed_over`); nothing signed changes. By link an email is still needed.
+- Tim, 26 November 2026, 17:57: in person a contract may still be signed without an ID check, but only after a clear warning. The ID
+  check stays the normal path; "Finish without an ID check" (offers) or "Sign without an ID check" (the agreement, notices, variations
+  and forms) shows "No identification has been checked for <name>. Finish anyway?" right under the button, and a second tap confirms.
+  The record then says plainly "Signed in person without an identity check", with Tim's name and the time: offers in the timeline
+  (`sign_no_id_check`), each round's execution record and the agreed copy's record; the agreement, notices, variations and forms in
+  the signed snapshot (`id_check` { type: none, warned, by, at, note }). An empty or missing choice is refused by the database
+  (`agent_signing_finish_checked` with `no_id_warned`, and `guard_signature_identity`). Still no ID numbers stored, and by link the
+  own-email rule stays.
 
 Nothing signed changes: sealed rounds, agreements, signatures, taps, marks and fingerprints are kept exactly as they are; every trigger
 stays. Lock order everywhere: the offer, then the signing, then the signer.

@@ -199,7 +199,9 @@
       rec.lifted.forEach(x => add(`Page ${x.page}: ${x.kind === 'signature' ? 'the signature' : 'the initials'} of ${x.who || 'one of the ' + sideName(x.side)} from Round ${x.round}.`, { size: 8.5 })); }
     (rec.signers || []).forEach((s, i) => {
       add(`${rec.side === 'vendor' ? 'Vendor' : 'Purchaser'} ${i + 1}: ${s.name}`, { bold: true, gap: 8 });
-      if (s.method === 'in_person') { add(`Signed in person on Tim McGuire's device. ${s.witnessed_by || 'Tim McGuire'} saw them sign.`); add(s.id_sighted === 'known_to_tim' ? 'Identity: known to Tim McGuire personally (no photo ID was needed).' : !s.id_sighted ? 'Identity: no choice recorded (knowing them and an ID check are both optional).' : `Photo ID sighted: ${SIGN.ID_TYPES[s.id_sighted] || s.id_sighted} (the type only; no ID number is kept).`);
+      // 029 (Tim, 26 November 2026, 17:57): Tim may choose, after a warning, to finish without an ID check; the record says so plainly
+      if (s.method === 'in_person' && s.no_id_check_at) add(`Signed in person on Tim McGuire's device. Signed in person without an identity check: Tim McGuire chose to finish without one after a warning, ${NZ(s.no_id_check_at)}.`);
+      else if (s.method === 'in_person') { add(`Signed in person on Tim McGuire's device. ${s.witnessed_by || 'Tim McGuire'} saw them sign.`); add(s.id_sighted === 'known_to_tim' ? 'Identity: known to Tim McGuire personally (no photo ID was needed).' : !s.id_sighted ? 'Identity: no choice recorded (knowing them and an ID check are both optional).' : `Photo ID sighted: ${SIGN.ID_TYPES[s.id_sighted] || s.id_sighted} (the type only; no ID number is kept).`);
         // 029 (Tim, 26 November 2026): on his device each signer's photo ID is logged, with his tick that he checked it and watched them sign
         if (s.id_checked_at) add(`Tim McGuire checked this person's photo ID (${SIGN.ID_TYPES[s.id_sighted] || s.id_sighted}) and watched them sign: ${NZ(s.id_checked_at)}.`, { size: 8.5 }); }
       else { add('Signed by a personal link sent only to them.'); add(`Email verified with a one-time code on ${NZ(s.verified_at)}.`); }
@@ -227,7 +229,7 @@
     add(`This copy was made and locked by the server on ${NZ(rec.made_at)}.`, { size: 8.5 });
     // 029: each in-person signer's photo ID check (type and time), round by round; only when there are any, so earlier records read as before
     if ((rec.id_checks || []).length) { add('Identity checked in person', { bold: true, gap: 8 });
-      rec.id_checks.forEach(c => add(`Round ${c.round}: ${c.who}, ${SIGN.ID_TYPES[c.id_sighted] || c.id_sighted} checked by Tim McGuire, who watched them sign: ${NZ(c.at)}.`, { size: 8.5 })); }
+      rec.id_checks.forEach(c => add(c.none ? `Round ${c.round}: ${c.who} signed in person without an identity check (Tim McGuire chose this after a warning): ${NZ(c.at)}.` : `Round ${c.round}: ${c.who}, ${SIGN.ID_TYPES[c.id_sighted] || c.id_sighted} checked by Tim McGuire, who watched them sign: ${NZ(c.at)}.`, { size: 8.5 })); }
     add('Every locked round of this offer', { bold: true, gap: 8 });
     (rec.rounds || []).forEach(r => add(`Document ${r.document}, Round ${r.round} (number ${r.number}): signed by the ${sideName(r.side)}, ${r.changes ? r.changes + (r.changes === 1 ? ' change' : ' changes') : 'no changes'}, locked ${NZ(r.locked_at)}. SHA-256 ${r.sha256}`, { size: 8 }));
     return L;
