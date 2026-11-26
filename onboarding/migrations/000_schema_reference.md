@@ -463,5 +463,8 @@ agreements/<agreement id>/signatures/... (vendors may upload their own signature
   `l_phone` runs the old function. Execute: authenticated and service_role, not anon (as the old ones). Tim's own forward from the
   agreement page inserts the row with the phone itself (his `agent_all_lawyer` policy).
 - Rollback test: `tests/agreed-mail-rollback.sql` (built by `tests/agreed-mail-rollback.js`). Local run 26 November 2026 on the stand-in
-  (pg-standin, 010, 016 part A, 018, 019, 021 to 026): every line as expected, no CAPITALS. The stand-in lacks the agency-agreement
-  functions, so the block first adds them as they are live (only where missing), then checks them unchanged by fingerprint.
+  (pg-standin, 010, 016 part A, 018, 019, 021 to 026, pg-standin-signatures, 029, then `tests/pg-standin-agency.sql`): every line as
+  expected, no CAPITALS. `pg-standin-agency.sql` brings the agency agreement's tables, auth.users and their triggers and functions to
+  the live definitions (read 27 November 2026; 28 functions checked identical to live by fingerprint); the block itself makes only
+  fixtures, including a made-up auth.users row for the vendor (live's agreement_people.user_id key), and has 029's guard: a fixture
+  error shows in CAPITALS. The first live run (before this) stopped at that key, nothing kept.

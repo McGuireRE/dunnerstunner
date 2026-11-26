@@ -5,10 +5,10 @@
 -- Needs 024 to 026 (and what they build on) applied first. The fixture (one agreed offer with its draft, document, round and agreement,
 -- and a second offer) is written in replica mode, so the foreign keys and fixed-record guards don't ask for a whole signing history;
 -- the mode is switched back before the migration, and every check runs with all triggers live.
--- Part 2 (the vendors' lawyer's phone): the local stand-in has only a skeleton of the agency-agreement tables, so the block first adds
--- what the live project has (the lawyer_links and agreements columns, agreement_events, simple is_party, require_open and log_event)
--- and the three four-argument lawyer functions exactly as they are live (read 26 November 2026). On the live project these steps change
--- nothing that matters: the columns and functions are already there, and the stand-in helpers are only created if missing.
+-- Part 2 (the vendors' lawyer's phone) writes the agency agreement's tables in the normal way, with every trigger and key live. The local
+-- stand-in needs tests/pg-standin-agency.sql for them (those tables, auth.users and the lawyer functions as live; run once after 029).
+-- The vendor is a made-up auth.users row (no email), made in the block and rolled back with it: agreement_people.user_id references
+-- auth.users on live. A fixture that doesn't fit the schema shows as a line in CAPITALS, never as a rule working.
 do $t$
 declare out text := ''; pid uuid := gen_random_uuid(); oid uuid := gen_random_uuid(); oid2 uuid := gen_random_uuid(); drid uuid := gen_random_uuid(); dr2 uuid := gen_random_uuid();
   docid uuid := gen_random_uuid(); rid uuid := gen_random_uuid(); agid uuid := gen_random_uuid(); aid uuid := gen_random_uuid(); x text; e text;
@@ -42,71 +42,8 @@ begin
   exception when others then out := out || '024 cc refused: ' || sqlerrm || '; '; end;
   foreach k in array kinds loop before_ := before_ || coalesce(array_to_string(public.offer_mail_allowed(oid, k, null), ','), ''); end loop;
 
-  -- Part 2 stand-in (only what is missing; see the header)
-  alter table public.lawyer_links add column if not exists token text, add column if not exists sent_by text, add column if not exists expires_at timestamptz;
-  alter table public.agreements add column if not exists legal jsonb not null default '{}', add column if not exists sent_at timestamptz;
-  alter table public.agreement_people add column if not exists pref_name text;
-  create table if not exists public.agreement_events (id bigserial primary key, agreement_id uuid, actor text, kind text, detail jsonb, at timestamptz default now());
-  if to_regprocedure('public.log_event(uuid, text, text, jsonb)') is null then
-    execute $f$create function public.log_event(a uuid, actor text, kind text, detail jsonb) returns void language sql security definer set search_path = public as 'insert into public.agreement_events (agreement_id, actor, kind, detail) values (a, actor, kind, detail)'$f$; end if;
-  if to_regprocedure('public.is_party(uuid)') is null then
-    execute $f$create function public.is_party(a uuid) returns boolean language sql stable security definer set search_path = public as 'select exists (select 1 from public.agreement_people where agreement_id = a and user_id = auth.uid())'$f$; end if;
-  if to_regprocedure('public.require_open(uuid)') is null then
-    execute $f$create function public.require_open(a uuid) returns void language plpgsql security definer set search_path = public as 'begin if not public.is_party(a) then raise exception ''Not your agreement''; end if; end'$f$; end if;
-  if to_regprocedure('public.agent_send_to_lawyer(uuid, text, text, text)') is null then
-    execute $f$CREATE OR REPLACE FUNCTION public.agent_send_to_lawyer(a uuid, l_name text, l_firm text, l_email text)
- RETURNS uuid
- LANGUAGE plpgsql
- SECURITY DEFINER
- SET search_path TO 'public'
-AS $function$
-declare lid uuid; who text;
-begin
-  if not public.is_agent() then raise exception 'Not allowed'; end if;
-  select string_agg(coalesce(nullif(pref_name,''), split_part(legal_name,' ',1)), ' and ') into who from public.agreement_people where agreement_id = a and legal_name <> '';
-  insert into public.lawyer_links (agreement_id, lawyer_name, firm, email, sent_by) values (a, l_name, coalesce(l_firm,''), l_email, coalesce(who, 'Your client')) returning id into lid;
-  update public.agreements set status = 'parked', sent_at = coalesce(sent_at, now()), legal = legal || jsonb_build_object('status','sent','lawyer',l_name,'firm',l_firm,'sent_at',now()) where id = a and status in ('draft','sent','parked');
-  perform public.log_event(a, coalesce(auth.jwt()->>'email','agent'), 'sent_to_lawyer', jsonb_build_object('lawyer', l_name, 'firm', l_firm, 'email', l_email, 'recorded', 'at appointment'));
-  return lid;
-end $function$$f$;
-    execute $f$CREATE OR REPLACE FUNCTION public.vendor_forward_to_lawyer(a uuid, l_name text, l_firm text, l_email text)
- RETURNS uuid
- LANGUAGE plpgsql
- SECURITY DEFINER
- SET search_path TO 'public'
-AS $function$
-declare lid uuid; who text;
-begin
-  if not public.is_party(a) then raise exception 'Not your agreement'; end if;
-  if not exists (select 1 from public.agreements where id = a and status in ('signed','countersigned','ended')) then
-    raise exception 'The agreement has not been signed yet';
-  end if;
-  if coalesce(trim(l_name),'') = '' or l_email !~ '^[^@\s]+@[^@\s]+\.[^@\s]+$' then raise exception 'Add the lawyer''s name and a valid email'; end if;
-  select coalesce(nullif(legal_name,''), email) into who from public.agreement_people where agreement_id = a and user_id = auth.uid() limit 1;
-  insert into public.lawyer_links (agreement_id, lawyer_name, firm, email, sent_by, expires_at)
-  values (a, l_name, coalesce(l_firm,''), l_email, who, now() + interval '90 days') returning id into lid;
-  perform public.log_event(a, coalesce(auth.jwt()->>'email','vendor'), 'forwarded_to_lawyer', jsonb_build_object('lawyer', l_name, 'firm', l_firm, 'email', l_email, 'by', who));
-  return lid;
-end $function$$f$;
-    execute $f$CREATE OR REPLACE FUNCTION public.vendor_send_to_lawyer(a uuid, l_name text, l_firm text, l_email text)
- RETURNS uuid
- LANGUAGE plpgsql
- SECURITY DEFINER
- SET search_path TO 'public'
-AS $function$
-declare lid uuid; who text;
-begin
-  perform public.require_open(a);
-  select coalesce(nullif(legal_name,''), email) into who from public.agreement_people where agreement_id = a and user_id = auth.uid() limit 1;
-  insert into public.lawyer_links (agreement_id, lawyer_name, firm, email, sent_by) values (a, l_name, coalesce(l_firm,''), l_email, who) returning id into lid;
-  update public.agreements set status = 'parked', legal = legal || jsonb_build_object('status','sent','lawyer',l_name,'firm',l_firm,'sent_at',now()) where id = a;
-  perform public.log_event(a, coalesce(auth.jwt()->>'email','vendor'), 'sent_to_lawyer', jsonb_build_object('lawyer', l_name, 'firm', l_firm, 'email', l_email));
-  return lid;
-end $function$$f$;
-    revoke execute on function public.agent_send_to_lawyer(uuid, text, text, text), public.vendor_forward_to_lawyer(uuid, text, text, text), public.vendor_send_to_lawyer(uuid, text, text, text) from public, anon;
-    grant execute on function public.agent_send_to_lawyer(uuid, text, text, text), public.vendor_forward_to_lawyer(uuid, text, text, text), public.vendor_send_to_lawyer(uuid, text, text, text) to authenticated;
-  end if;
   -- a vendor on two agency agreements (one signed, one not), and an agent
+  insert into auth.users (id) values (vuser);   -- made up, no email; rolled back with the block
   insert into public.agreements (id, property_id, status) values (aid2, pid, 'sent');
   insert into public.agreement_people (agreement_id, user_id, legal_name, email, phone) values (aid, vuser, 'Vera Vendor', 'rb-vera@example.com', '022 987 6543'), (aid2, vuser, 'Vera Vendor', 'rb-vera@example.com', '022 987 6543');
   insert into public.agents (email, name) values ('rb-agent@example.com', 'RB Agent') on conflict do nothing;
@@ -191,5 +128,7 @@ end $function$$f$;
   out := out || 'new functions: signed-in users and the service role only; ';
   -- 10. the vendors' email may still go to that lawyer (the agency agreement in force), and only as before
   if not ('sam@counsel.example' = any(public.offer_mail_allowed(oid, 'agreed_vendors', null))) then out := out || 'THE AGENCY AGREEMENT''S LAWYER IS NOT ALLOWED ON THE VENDORS'' EMAIL; '; else out := out || 'the vendors'' email may go to the agency agreement''s lawyer; '; end if;
+  -- 029's guard: an error from a fixture that doesn't fit the schema can't pass as a rule working
+  if out ~* 'null value in column|violates foreign key|violates unique|does not exist' then out := out || 'A FIXTURE DID NOT MATCH THE SCHEMA; '; end if;
   raise exception 'ROLLBACK %', out;
 end $t$;

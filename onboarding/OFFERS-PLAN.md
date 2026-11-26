@@ -1058,6 +1058,10 @@ and the mirror (a vendors' lawyer address that is a purchaser's own); Tim's own 
 whose address can't go on their side's email (a second purchaser's email known only from signing, a vendor who signed in person
 with no signing email) gets a note for Tim: they won't receive it. When the contact page has only part of the vendors' lawyer
 (a phone, say), the agency agreement's lawyer fills the rest and the page's phone is kept; Tim is told which part came from where.
+030's rollback test, first run on live (27 November 2026, by the lead, nothing kept): it stopped at a fixture (live's
+agreement_people.user_id references auth.users). Fixed: the stand-in now matches live for every table the fixtures write
+(`tests/pg-standin-agency.sql`), the vendor is a made-up auth.users row made and rolled back in the block, and 029's guard turns a
+fixture error into a line in CAPITALS. 030 itself is unchanged.
 Tests: `tests/mail-core.test.js` (extended: the live case, signers, the contract's lawyer, differing notices address, Still
 needed, privacy left-outs), `tests/offers-nego.test.js` (extended: built on the page, then rebuilt with an agency agreement
 lawyer and a different notices address), `tests/agreed-mail-rollback.sql` / `.js` (030, local stand-in: every line as expected),
