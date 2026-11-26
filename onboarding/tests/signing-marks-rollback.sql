@@ -231,6 +231,11 @@ begin
     exception when others then out := out || 'no number: ' || sqlerrm || '; '; end;
     begin insert into public.variation_signatures (agreement_id, person_id, signer_role, signer_name, snapshot) values (ag, pa, 'client', 'Ali Shared', jsonb_build_object('signing_method', 'In person, on the licensee''s device', 'id_check', okc || jsonb_build_object('at', now() - interval '2 hours'))); out := out || 'AN OLD ID CHECK WAS TAKEN; ';
     exception when others then out := out || 'checked now: ' || sqlerrm || '; '; end;
+    -- a check with no time at all is refused too, for a photo ID and for "none"
+    begin insert into public.signatures (agreement_id, person_id, signer_role, signer_name, snapshot) values (ag, pa, 'client', 'Ali Shared', jsonb_build_object('signing_method', 'In person, on the licensee''s device', 'id_check', okc - 'at')); out := out || 'AN ID CHECK WITH NO TIME WAS TAKEN; ';
+    exception when others then out := out || 'photo ID needs a time: ' || sqlerrm || '; '; end;
+    begin insert into public.signatures (agreement_id, person_id, signer_role, signer_name, snapshot) values (ag, pa, 'client', 'Ali Shared', jsonb_build_object('signing_method', 'In person, on the licensee''s device', 'id_check', jsonb_build_object('type', 'none', 'warned', true, 'by', 'Tim McGuire', 'note', 'Signed in person without an identity check'))); out := out || 'NO ID WITH NO TIME WAS TAKEN; ';
+    exception when others then out := out || 'none needs a time: ' || sqlerrm || '; '; end;
     insert into public.form_signatures (agreement_id, person_id, signer_role, signer_name, snapshot) values (ag, pa, 'client', 'Ali Shared', jsonb_build_object('signing_method', 'In person, on the licensee''s device', 'id_check', okc));
     -- Tim's explicit choice after a warning passes; "none" without the warning doesn't
     begin insert into public.signatures (agreement_id, person_id, signer_role, signer_name, snapshot) values (ag, pa, 'client', 'Ali Shared', jsonb_build_object('signing_method', 'In person, on the licensee''s device', 'id_check', jsonb_build_object('type', 'none', 'by', 'Tim McGuire', 'at', now()))); out := out || 'NO ID WITHOUT THE WARNING; ';

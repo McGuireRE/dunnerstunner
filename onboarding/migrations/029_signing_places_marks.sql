@@ -632,7 +632,7 @@ begin
             or (idc->>'type' = 'none' and (idc->'warned') = 'true'::jsonb and idc->>'note' = 'Signed in person without an identity check' and not idc ? 'checked' and not idc ? 'aml_file_id'), false) then
       raise exception 'Choose the photo ID you checked for %, and tick that you checked it and watched them sign (or confirm finishing without an ID check)', new.signer_name; end if;
     if exists (select 1 from jsonb_object_keys(idc) k where k not in ('type', 'checked', 'by', 'at', 'aml_file_id', 'warned', 'note')) then raise exception 'Only the ID type is kept here, never its number'; end if;
-    begin if abs(extract(epoch from ((idc->>'at')::timestamptz - now()))) > 900 then raise exception 'x'; end if;
+    begin if idc->>'at' is null or abs(extract(epoch from ((idc->>'at')::timestamptz - now()))) > 900 then raise exception 'x'; end if;
     exception when others then raise exception 'Please record the ID check again, at the time you check it'; end;
     if idc ? 'aml_file_id' and not exists (select 1 from public.aml_files f where f.id::text = idc->>'aml_file_id' and f.person_id = new.person_id) then
       raise exception 'That AML file isn''t this person''s'; end if;
