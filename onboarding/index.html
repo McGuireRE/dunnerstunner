@@ -840,6 +840,62 @@ body.portal #pfBack, body.portal #toList, body.portal #toProp, body.portal #fBac
   padding: max(8px, env(safe-area-inset-top, 0px)) max(10px, env(safe-area-inset-right, 0px)) max(8px, env(safe-area-inset-bottom, 0px)) max(10px, env(safe-area-inset-left, 0px)); }
 .dv.dv-full .dv-frame, .dv:fullscreen .dv-frame { flex: 1 1 auto; max-height: none; min-height: 0; }
 body.dv-lock { overflow: hidden; }
+/* appraisal views (032): one appraisal on one page, for showing on screen. Tables become labelled cards on a phone (no sideways scroll). */
+.apv-doc { overflow-wrap: anywhere; }
+.apv-doc h1 { margin-bottom: 6px; }
+.apv-by { color: var(--muted); font-size: 15px; }
+.apv-lede { font-size: 19px; }
+.apv-note { font-size: 14.5px; color: var(--muted); }
+.apv-list { padding-left: 22px; margin: 0 0 14px; }
+.apv-list li { margin: 6px 0; }
+.apv-fig { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.apv-ed-h { font-weight: 600; margin: 14px 0 0; }
+.apv-tbl { width: 100%; border-collapse: collapse; margin: 10px 0 18px; font-size: 15.5px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.apv-tbl th, .apv-tbl td { text-align: left; vertical-align: top; padding: 9px 10px; border-bottom: 1px solid var(--line); }
+.apv-tbl th { font-size: 13.5px; font-weight: 600; color: var(--muted); background: var(--bg); }
+.apv-tbl tr:last-child td { border-bottom: 0; }
+.apv-ranges td:last-child { font-weight: 600; color: var(--accent); white-space: nowrap; }
+.apv-tbl tr.apv-rec td { background: var(--ok-soft); }
+.apv-tag { display: inline-block; font-size: 12px; font-weight: 600; letter-spacing: .03em; text-transform: uppercase; color: var(--ok-text); border: 1px solid var(--ok); border-radius: 999px; padding: 1px 8px; margin: 0 4px 4px 0; }
+@media (max-width: 600px) {
+  .apv-tbl, .apv-tbl tbody, .apv-tbl tr, .apv-tbl td { display: block; width: 100%; }
+  .apv-tbl thead { display: none; }
+  .apv-tbl tr { border-bottom: 1px solid var(--line); padding: 6px 0; }
+  .apv-tbl tr:last-child { border-bottom: 0; }
+  .apv-tbl td { border: 0; padding: 4px 12px; }
+  .apv-tbl td[data-h]:not([data-h=""])::before { content: attr(data-h); display: block; font-size: 12.5px; font-weight: 600; color: var(--muted); }
+  .apv-ranges td:last-child { white-space: normal; }
+}
+.apv-wave { margin: 16px 0 20px; padding: 16px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
+.apv-wave figcaption strong { display: block; font-size: 17px; }
+.apv-wave figcaption span { display: block; font-size: 14.5px; color: var(--muted); }
+.apv-wmark { margin: 10px 0 0; font-size: 14px; font-weight: 600; color: var(--ink); }
+.apv-wmark::before { content: ""; display: inline-block; width: 18px; border-top: 2px dashed var(--muted); vertical-align: middle; margin-right: 6px; }
+.apv-wgrid { display: grid; grid-template-columns: repeat(var(--n), minmax(0, 1fr)); gap: 8px; align-items: end; margin-top: 8px; }
+.apv-wcol { display: flex; flex-direction: column; align-items: stretch; min-width: 0; }
+.apv-wcol.after-mark { border-left: 2px dashed var(--muted); padding-left: 6px; }
+.apv-wbar-wrap { height: 170px; display: flex; flex-direction: column; justify-content: flex-end; align-items: stretch; }
+.apv-wbar { background: var(--line); border-radius: 6px 6px 0 0; min-height: 4px; }
+.apv-wcol.on .apv-wbar { background: var(--accent); }
+.apv-wpct { text-align: center; font-weight: 600; font-size: 15px; margin-bottom: 4px; }
+.apv-wlab { text-align: center; font-size: 13px; color: var(--muted); margin-top: 6px; }
+.apv-wtrickle { font-size: 12px; color: var(--muted); text-align: center; line-height: 1.25; margin-bottom: 4px; }
+.apv-wdots { border-top: 3px dotted var(--muted); margin-bottom: 8px; }
+.apv-wcap { font-size: 14.5px; color: var(--muted); margin: 12px 0 0; }
+.apv-exit { margin-top: 28px; font-size: 14px; }
+/* presentation mode: no menu, no up link, no top-bar buttons, larger type */
+body.apv-present #pNav, body.apv-present #pUpRow, body.apv-present .agent-nav, body.apv-present .step-count, body.apv-present .bar { display: none !important; }
+body.apv-present main { max-width: 760px; padding-bottom: 48px; }
+.apv-show .apv-doc { font-size: 19.5px; line-height: 1.6; }
+.apv-show .apv-doc h1 { font-size: clamp(36px, 8vw, 52px); }
+.apv-show .apv-doc h2 { font-size: clamp(28px, 6vw, 34px); margin-top: 40px; }
+.apv-show .apv-lede { font-size: 22px; }
+.apv-show .apv-tbl { font-size: 17px; }
+@media print {
+  body.apv-present header.top, .apv .agent-flag, #apvEdit, #apvTools, .apv-exit { display: none !important; }
+  .apv-tbl tr, .apv-wave { break-inside: avoid; }
+  .apv-doc h2 { break-after: avoid; }
+}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script src="../catalogue.js"></script>
@@ -6616,6 +6672,95 @@ window.JOURNEY_MEDIA_HINTS = {
 
 </script>
 <script>
+// Appraisal views (migration 032): draws one appraisal record (sections in JSON, plus the fields Tim edits) as plain HTML.
+// No database, no page state: the portal page in app.js loads the record, draws it with APPR.render and saves the fields.
+// This is the seed of the full Appraisal page, so nothing here knows about any one property.
+//
+// Section types: heading, para (cls 'lede' for the opening), list (ordered), table (head, rows), note (small print),
+// ranges (the options table from fields.ranges), method (the recommended method's sentence), wave (the buyer-wave graph),
+// methods (the ways-to-sell table, with the recommended one marked).
+// Text may hold **bold**, [words](https://link), a bare https:// link, and the tokens {{range:<key>}}, {{bedrooms}} and {{method}}.
+(function () {
+  'use strict';
+  const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const dollars = n => '$' + Math.round(Number(n) || 0).toLocaleString('en-NZ');
+  const fmtRange = r => r ? dollars(r.low) + ' to ' + dollars(r.high) : '';
+  const rangeOf = (f, k) => ((f && f.ranges) || []).find(r => r && String(r.key) === String(k));
+  // the wording rules for anything a vendor sees: condition is "current condition", never "as is"; no fee or commission
+  const BANNED = [/\bas[\s-]+is\b/i, /\bfees?\b/i, /\bcommissions?\b/i];
+  const wordingProblem = t => { const s = String(t || ''); if (BANNED[0].test(s)) return 'Please write "current condition" rather than "as is".'; if (BANNED[1].test(s) || BANNED[2].test(s)) return 'Fees and commission are never shown on an appraisal.'; return ''; };
+
+  // one line of text: escaped first, then tokens, bold and links
+  function inline(text, f) {
+    let s = esc(text);
+    s = s.replace(/\{\{range:([A-Za-z0-9_-]{1,20})\}\}/g, (m, k) => { const r = rangeOf(f, k); return r ? '<span class="apv-fig" data-range="' + esc(k) + '">' + esc(fmtRange(r)) + '</span>' : ''; });
+    s = s.replace(/\{\{bedrooms\}\}/g, () => '<span data-f="bedrooms">' + esc((f && f.bedrooms) || '') + '</span>');
+    s = s.replace(/\{\{method\}\}/g, () => '<span data-f="method">' + esc(((f && f.method) || {}).name || '') + '</span>');
+    s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    s = s.replace(/\[([^\]]+)\]\((https:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+    s = s.replace(/(^|[\s(])(https:\/\/[^\s<)]+)/g, (m, a, u) => a + '<a href="' + u + '" target="_blank" rel="noopener">' + u + '</a>');
+    return s;
+  }
+  // a table that never scrolls sideways: on a phone each row becomes a card, each cell labelled by its column
+  function table(head, rows, opts) {
+    const o = opts || {};
+    return '<table class="apv-tbl' + (o.cls ? ' ' + o.cls : '') + '">' + (head && head.length ? '<thead><tr>' + head.map(h => '<th scope="col">' + inline(h, o.f) + '</th>').join('') + '</tr></thead>' : '')
+      + '<tbody>' + rows.map((r, i) => '<tr' + (o.rowAttr ? o.rowAttr(r, i) : '') + '>' + r.map((c, j) => '<td data-h="' + esc(head && head[j] ? String(head[j]).replace(/\*\*/g, '') : '') + '">' + (j === 0 && o.firstExtra ? o.firstExtra(r, i) : '') + inline(c, o.f) + '</td>').join('') + '</tr>').join('') + '</tbody></table>';
+  }
+  function wave(sec) {
+    const bars = (sec.bars || []).filter(b => b && isFinite(+b.pct));
+    const peak = Math.max(1, ...bars.map(b => +b.pct)); const mk = +sec.marker || 0;
+    const early = bars.slice(0, mk).reduce((s, b) => s + (+b.pct), 0);
+    const sub = String(sec.subtitle || '').replace(/\{\{early\}\}/g, String(early));
+    const cols = bars.map((b, i) => '<div class="apv-wcol' + (i < mk ? ' on' : '') + (mk && i === mk ? ' after-mark' : '') + '"><div class="apv-wbar-wrap"><span class="apv-wpct">' + esc(b.pct) + '%</span><div class="apv-wbar" style="height:' + Math.round(+b.pct / peak * 100) + '%" title="' + esc((b.label || '') + ': about ' + b.pct + '% of interested buyers') + '"></div></div><span class="apv-wlab">' + esc(b.label) + '</span></div>').join('')
+      + (sec.tail ? '<div class="apv-wcol tail"><div class="apv-wbar-wrap"><span class="apv-wtrickle">' + esc(sec.trickle || '') + '</span><div class="apv-wdots"></div></div><span class="apv-wlab">' + esc(sec.tail) + '</span></div>' : '');
+    return '<figure class="apv-wave" role="img" aria-label="' + esc(sec.title || '') + '"><figcaption><strong>' + esc(sec.title || '') + '</strong><span>' + esc(sub) + '</span></figcaption>'
+      + (mk ? '<p class="apv-wmark">' + esc(sec.markerLabel || '') + '</p>' : '')
+      + '<div class="apv-wgrid" style="--mk:' + mk + ';--n:' + (bars.length + (sec.tail ? 1 : 0)) + '">' + cols + '</div>'
+      + (sec.caption ? '<p class="apv-wcap">' + inline(sec.caption) + '</p>' : '') + '</figure>';
+  }
+  const methodMatch = (name, rowName) => !!name && String(rowName || '').toLowerCase().indexOf(String(name).toLowerCase()) === 0;
+  function section(sec, f) {
+    if (!sec || typeof sec !== 'object') return '';
+    switch (sec.type) {
+      case 'heading': return '<h2>' + inline(sec.text, f) + '</h2>';
+      case 'para': return '<p' + (sec.cls === 'lede' ? ' class="apv-lede"' : '') + '>' + inline(sec.text, f) + '</p>';
+      case 'note': return '<p class="apv-note">' + inline(sec.text, f) + '</p>';
+      case 'byline': return '<p class="apv-by">' + inline(sec.text, f) + '</p>';
+      case 'list': { const t = sec.ordered ? 'ol' : 'ul'; return '<' + t + ' class="apv-list">' + (sec.items || []).map(x => '<li>' + inline(x, f) + '</li>').join('') + '</' + t + '>'; }
+      case 'table': return table(sec.head || [], sec.rows || [], { f });
+      case 'ranges': return table(sec.head || ['Option', 'What it involves', 'Range'], ((f && f.ranges) || []).map(r => [r.option || '', r.involves || '', fmtRange(r)]),
+        { f, cls: 'apv-ranges', rowAttr: (r, i) => ' data-range-row="' + esc(((f.ranges || [])[i] || {}).key || '') + '"' });
+      case 'method': return '<p class="apv-method" data-f="method-text">' + inline(((f && f.method) || {}).text || '', f) + '</p>';
+      case 'methods': { const nm = ((f && f.method) || {}).name;
+        return table(sec.head || [], sec.rows || [], { f, cls: 'apv-methods', rowAttr: r => methodMatch(nm, r[0]) ? ' class="apv-rec"' : '', firstExtra: r => methodMatch(nm, r[0]) ? '<span class="apv-tag">Recommended</span> ' : '' }); }
+      case 'wave': return wave(sec);
+      default: return '';
+    }
+  }
+  function render(rec) {
+    const f = (rec && rec.fields) || {};
+    return '<article class="apv-doc"><h1>' + esc((rec && rec.title) || 'Market appraisal') + '</h1>' + ((rec && rec.sections) || []).map(s => section(s, f)).join('') + '</article>';
+  }
+  // the method names for the editor: the first cell of each row of the ways-to-sell table, up to its first comma
+  function methodNames(rec) {
+    const s = ((rec && rec.sections) || []).find(x => x && x.type === 'methods');
+    return s ? (s.rows || []).map(r => String(r[0] || '').split(',')[0].trim()).filter(Boolean) : [];
+  }
+  // checks the fields Tim typed; returns a problem in plain words, or ''
+  function checkFields(f) {
+    for (const r of (f.ranges || [])) {
+      if (!(r.low > 0 && r.high > 0)) return 'Each range needs a low and a high figure.';
+      if (r.low >= r.high) return 'The low figure must be below the high figure (' + (r.option || r.key) + ').';
+    }
+    if (!String(f.bedrooms || '').trim()) return 'Bedrooms can\'t be empty.';
+    return wordingProblem(f.bedrooms) || wordingProblem((f.method || {}).name) || wordingProblem((f.method || {}).text);
+  }
+  window.APPR = { render, fmtRange, dollars, inline, methodNames, checkFields, wordingProblem };
+})();
+
+</script>
+<script>
 (function () {
   'use strict';
   /* ───────── config ───────── */
@@ -6949,6 +7094,7 @@ window.JOURNEY_MEDIA_HINTS = {
   }
   function header(name, count, pct) {
     const wasPitch = PITCH_ON; PITCH_ON = false; document.title = DEFAULT_TITLE;   // every other screen leaves the journey page and its title behind
+    document.body.classList.remove('apv-present');   // an appraisal's presentation mode ends with any other screen
     if (IS_AGENT) { try { localStorage.removeItem('inspOpen'); } catch (_) { } inspTidy(); }
     if (IS_AGENT || wasPitch) setAgentNav(); $('#stepName').textContent = name || ''; JDIRTY = false; $('#stepName').dataset.count = count || ''; $('#stepCount').textContent = count || ''; $('#barFill').style.width = (pct || 0) + '%'; }
   function actions(show, backLabel, nextLabel) {
@@ -15316,6 +15462,9 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     R('processes/inspection', 'viewInspectStart', () => RAW.viewInspectStart()),
     R('processes/offer', 'viewOfferPick', () => RAW.viewOfferPick()),
     R('processes/forms', 'forms', () => viewPortalForms()),
+    R('appraisals', 'appraisals', () => viewPortalAppraisals()),
+    R('appraisals/:id', 'appraisal', a => viewAppraisalView(a, false)),
+    R('appraisals/:id/present', 'appraisal', a => viewAppraisalView(a, true)),
     R('translations', 'viewTranslations', () => APP_TRANSLATION ? RAW.viewTranslations() : viewPortalMissing()),
   ];
   // open the page for an address (after sign-in, a typed or saved address, back and forward, the menu and links)
@@ -15355,6 +15504,9 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     if ((m = new RegExp(`^properties/${id}/offers/(clauses|blank/${id})$`).exec(path))) return [`properties/${m[1]}/offers`, 'Property file'];
     if ((m = new RegExp(`^properties/${id}/.+$`).exec(path))) return [`properties/${m[1]}`, 'Property file'];
     if (new RegExp(`^properties/${id}$`).test(path)) return ['properties', 'Properties'];
+    if ((m = new RegExp(`^appraisals/${id}/present$`).exec(path))) return [`appraisals/${m[1]}`, 'Appraisal'];
+    if (new RegExp(`^appraisals/${id}$`).test(path)) return ['appraisals', 'Appraisals'];
+    if (path === 'appraisals') return ['', 'Home'];
     if (/^processes\/.+/.test(path)) return ['processes', 'Processes'];
     if (/^people\/.+/.test(path)) return ['people', 'People'];
     if (path === 'translations') return ['', 'Home'];
@@ -15449,7 +15601,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <h2 id="d-needs">Needs you</h2>
       <div id="pNeeds"><div class="loading">Loading...</div></div>
       <h2>Shortcuts</h2>
-      <div class="p-short">${plink('processes/appraisal', 'Questions before we meet')}${plink('processes/inspection', 'Disclosures check')}${plink('processes/agreement', 'Let\'s agree')}${plink('processes/offer', 'Draft an offer')}${plink('properties', 'Properties')}</div>
+      <div class="p-short">${plink('processes/appraisal', 'Questions before we meet')}${plink('processes/inspection', 'Disclosures check')}${plink('processes/agreement', 'Let\'s agree')}${plink('processes/offer', 'Draft an offer')}${plink('properties', 'Properties')}${plink('appraisals', 'Appraisals')}</div>
     </div>`;
     top();
     const { needs } = await dashData();
@@ -15519,6 +15671,60 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <p class="small" id="pPeopleNone" hidden>No one matches.</p>` : '<div class="card tight"><p class="small" style="margin:0">No people on the property files yet.</p></div>'}
     </div>`;
     const qb = $('#pPeopleQ'); if (qb) qb.addEventListener('input', () => { const v = qb.value.trim().toLowerCase(); let n = 0; $$('#pPeopleList li').forEach(li => { const show = !v || li.dataset.q.includes(v); li.hidden = !show; if (show) n++; }); $('#pPeopleNone').hidden = n > 0; });
+    top();
+  }
+  // Appraisal views (migration 032, 27 November 2026): one appraisal on one page, ready to show on screen. Tim edits only the
+  // figures he firms up after his walk-through (each range, the bedrooms, the recommended method); the wording comes from the
+  // record's sections. Presentation mode drops every editing control and the menu, with large type, and prints cleanly.
+  async function viewPortalAppraisals() {
+    header('Appraisals', '', 0); actions(false);
+    main().innerHTML = '<div class="loading">Loading...</div>';
+    let rows = []; try { rows = (await must(sb.from('appraisal_views').select('id,title,address,status,updated_at').order('updated_at', { ascending: false }))) || []; } catch (_) { rows = []; }
+    if (!$('#main .loading')) return;   // Tim has moved on
+    rows = rows.filter(r => okId(r.id));
+    main().innerHTML = `<div class="view-pad" id="apvList"><span class="agent-flag">Only you see this</span><h1>Appraisals</h1>
+      ${rows.length ? `<div class="card tight"><ul class="needs">${rows.map(r => `<li><div class="what"><strong translate="no">${esc(r.title || r.address || 'Appraisal')}</strong><span class="small">Updated ${esc(fmtDT(r.updated_at))}</span></div><span class="needbtns">${plink(`appraisals/${r.id}`, 'Open', 'btn ghost')}${plink(`appraisals/${r.id}/present`, 'Present', 'btn primary')}</span></li>`).join('')}</ul></div>`
+        : '<div class="card note tight"><p class="small" style="margin:0">No appraisals here yet.</p></div>'}
+    </div>`;
+    top();
+  }
+  async function viewAppraisalView(id, present) {
+    header(present ? '' : 'Appraisal', '', 0); actions(false);
+    main().innerHTML = '<div class="loading">Loading...</div>';
+    let rec = null; try { const d = await must(sb.from('appraisal_views').select('*').eq('id', id)); rec = Array.isArray(d) ? d[0] : d; } catch (_) { rec = null; }
+    if (!$('#main .loading')) return;
+    if (!rec) return viewPortalMissing();
+    document.body.classList.toggle('apv-present', !!present);
+    const f = rec.fields || {};
+    const draw = () => { const d = $('#apvDoc'); if (d) d.innerHTML = APPR.render(rec); };
+    const names = APPR.methodNames(rec);
+    const m = f.method || {};
+    const opts = names.concat(m.name && !names.includes(m.name) ? [m.name] : []);
+    const editor = present ? '' : `<details class="acc no-print" id="apvEdit" open><summary>Your figures after the walk-through</summary><div class="in" data-apv-edit>
+        ${(f.ranges || []).map((r, i) => `<p class="apv-ed-h">${esc(r.option || r.key)}</p><div class="row2"><div><label class="f" for="apvLo${i}">Low</label><input type="text" inputmode="numeric" id="apvLo${i}" value="${esc(r.low)}"></div><div><label class="f" for="apvHi${i}">High</label><input type="text" inputmode="numeric" id="apvHi${i}" value="${esc(r.high)}"></div></div>`).join('')}
+        <label class="f" for="apvBeds">Bedrooms, as it should read</label><input type="text" id="apvBeds" value="${esc(f.bedrooms || '')}">
+        <label class="f" for="apvMethod">Recommended sale method</label><select id="apvMethod">${opts.map(n => `<option${n === m.name ? ' selected' : ''}>${esc(n)}</option>`).join('')}</select>
+        <label class="f" for="apvMethodText">How you'd sell it (the sentence shown)</label><textarea id="apvMethodText">${esc(m.text || '')}</textarea>
+        <div class="toolbar"><button class="btn primary" type="button" id="apvSave">Save</button></div>
+      </div></details>
+      <div class="toolbar no-print" id="apvTools">${plink(`appraisals/${rec.id}/present`, 'Present on screen', 'btn ghost')}<button class="btn ghost" type="button" id="apvPrint">Print</button></div>`;
+    main().innerHTML = `<div class="view-pad apv${present ? ' apv-show' : ''}" id="apvPage">${present ? '' : '<span class="agent-flag no-print">Only you see this</span>'}${editor}<div id="apvDoc"></div>
+      ${present ? `<p class="apv-exit no-print">${plink(`appraisals/${rec.id}`, 'Finish presenting')}</p>` : ''}</div>`;
+    draw();
+    const pb = $('#apvPrint'); if (pb) pb.addEventListener('click', () => window.print());
+    const sv = $('#apvSave');
+    if (sv) sv.addEventListener('click', async () => {
+      const n = id_ => Math.round(num($('#' + id_).value));
+      const next = JSON.parse(JSON.stringify(f));
+      (next.ranges || []).forEach((r, i) => { r.low = n('apvLo' + i); r.high = n('apvHi' + i); });
+      next.bedrooms = $('#apvBeds').value.trim();
+      next.method = Object.assign({}, next.method || {}, { name: $('#apvMethod').value, text: $('#apvMethodText').value.trim() });
+      const bad = APPR.checkFields(next); if (bad) { atBtn(sv, bad, 'err'); return; }
+      let saved = null;
+      try { const d = await must(sb.from('appraisal_views').update({ fields: next }).eq('id', rec.id).select()); saved = Array.isArray(d) ? d[0] : d; } catch (_) { atBtn(sv, 'Not saved. Check you have signal, then try again.', 'err'); return; }
+      rec.fields = (saved && saved.fields) || next; Object.assign(f, rec.fields); JDIRTY = false; draw();
+      atBtn(sv, 'Saved. The appraisal below shows your figures.', 'ok');
+    });
     top();
   }
   function viewPortalMissing(msg) {

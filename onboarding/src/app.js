@@ -331,6 +331,7 @@
   }
   function header(name, count, pct) {
     const wasPitch = PITCH_ON; PITCH_ON = false; document.title = DEFAULT_TITLE;   // every other screen leaves the journey page and its title behind
+    document.body.classList.remove('apv-present');   // an appraisal's presentation mode ends with any other screen
     if (IS_AGENT) { try { localStorage.removeItem('inspOpen'); } catch (_) { } inspTidy(); }
     if (IS_AGENT || wasPitch) setAgentNav(); $('#stepName').textContent = name || ''; JDIRTY = false; $('#stepName').dataset.count = count || ''; $('#stepCount').textContent = count || ''; $('#barFill').style.width = (pct || 0) + '%'; }
   function actions(show, backLabel, nextLabel) {
@@ -8698,6 +8699,9 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     R('processes/inspection', 'viewInspectStart', () => RAW.viewInspectStart()),
     R('processes/offer', 'viewOfferPick', () => RAW.viewOfferPick()),
     R('processes/forms', 'forms', () => viewPortalForms()),
+    R('appraisals', 'appraisals', () => viewPortalAppraisals()),
+    R('appraisals/:id', 'appraisal', a => viewAppraisalView(a, false)),
+    R('appraisals/:id/present', 'appraisal', a => viewAppraisalView(a, true)),
     R('translations', 'viewTranslations', () => APP_TRANSLATION ? RAW.viewTranslations() : viewPortalMissing()),
   ];
   // open the page for an address (after sign-in, a typed or saved address, back and forward, the menu and links)
@@ -8737,6 +8741,9 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     if ((m = new RegExp(`^properties/${id}/offers/(clauses|blank/${id})$`).exec(path))) return [`properties/${m[1]}/offers`, 'Property file'];
     if ((m = new RegExp(`^properties/${id}/.+$`).exec(path))) return [`properties/${m[1]}`, 'Property file'];
     if (new RegExp(`^properties/${id}$`).test(path)) return ['properties', 'Properties'];
+    if ((m = new RegExp(`^appraisals/${id}/present$`).exec(path))) return [`appraisals/${m[1]}`, 'Appraisal'];
+    if (new RegExp(`^appraisals/${id}$`).test(path)) return ['appraisals', 'Appraisals'];
+    if (path === 'appraisals') return ['', 'Home'];
     if (/^processes\/.+/.test(path)) return ['processes', 'Processes'];
     if (/^people\/.+/.test(path)) return ['people', 'People'];
     if (path === 'translations') return ['', 'Home'];
@@ -8831,7 +8838,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <h2 id="d-needs">Needs you</h2>
       <div id="pNeeds"><div class="loading">Loading...</div></div>
       <h2>Shortcuts</h2>
-      <div class="p-short">${plink('processes/appraisal', 'Questions before we meet')}${plink('processes/inspection', 'Disclosures check')}${plink('processes/agreement', 'Let\'s agree')}${plink('processes/offer', 'Draft an offer')}${plink('properties', 'Properties')}</div>
+      <div class="p-short">${plink('processes/appraisal', 'Questions before we meet')}${plink('processes/inspection', 'Disclosures check')}${plink('processes/agreement', 'Let\'s agree')}${plink('processes/offer', 'Draft an offer')}${plink('properties', 'Properties')}${plink('appraisals', 'Appraisals')}</div>
     </div>`;
     top();
     const { needs } = await dashData();
@@ -8901,6 +8908,60 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <p class="small" id="pPeopleNone" hidden>No one matches.</p>` : '<div class="card tight"><p class="small" style="margin:0">No people on the property files yet.</p></div>'}
     </div>`;
     const qb = $('#pPeopleQ'); if (qb) qb.addEventListener('input', () => { const v = qb.value.trim().toLowerCase(); let n = 0; $$('#pPeopleList li').forEach(li => { const show = !v || li.dataset.q.includes(v); li.hidden = !show; if (show) n++; }); $('#pPeopleNone').hidden = n > 0; });
+    top();
+  }
+  // Appraisal views (migration 032, 27 November 2026): one appraisal on one page, ready to show on screen. Tim edits only the
+  // figures he firms up after his walk-through (each range, the bedrooms, the recommended method); the wording comes from the
+  // record's sections. Presentation mode drops every editing control and the menu, with large type, and prints cleanly.
+  async function viewPortalAppraisals() {
+    header('Appraisals', '', 0); actions(false);
+    main().innerHTML = '<div class="loading">Loading...</div>';
+    let rows = []; try { rows = (await must(sb.from('appraisal_views').select('id,title,address,status,updated_at').order('updated_at', { ascending: false }))) || []; } catch (_) { rows = []; }
+    if (!$('#main .loading')) return;   // Tim has moved on
+    rows = rows.filter(r => okId(r.id));
+    main().innerHTML = `<div class="view-pad" id="apvList"><span class="agent-flag">Only you see this</span><h1>Appraisals</h1>
+      ${rows.length ? `<div class="card tight"><ul class="needs">${rows.map(r => `<li><div class="what"><strong translate="no">${esc(r.title || r.address || 'Appraisal')}</strong><span class="small">Updated ${esc(fmtDT(r.updated_at))}</span></div><span class="needbtns">${plink(`appraisals/${r.id}`, 'Open', 'btn ghost')}${plink(`appraisals/${r.id}/present`, 'Present', 'btn primary')}</span></li>`).join('')}</ul></div>`
+        : '<div class="card note tight"><p class="small" style="margin:0">No appraisals here yet.</p></div>'}
+    </div>`;
+    top();
+  }
+  async function viewAppraisalView(id, present) {
+    header(present ? '' : 'Appraisal', '', 0); actions(false);
+    main().innerHTML = '<div class="loading">Loading...</div>';
+    let rec = null; try { const d = await must(sb.from('appraisal_views').select('*').eq('id', id)); rec = Array.isArray(d) ? d[0] : d; } catch (_) { rec = null; }
+    if (!$('#main .loading')) return;
+    if (!rec) return viewPortalMissing();
+    document.body.classList.toggle('apv-present', !!present);
+    const f = rec.fields || {};
+    const draw = () => { const d = $('#apvDoc'); if (d) d.innerHTML = APPR.render(rec); };
+    const names = APPR.methodNames(rec);
+    const m = f.method || {};
+    const opts = names.concat(m.name && !names.includes(m.name) ? [m.name] : []);
+    const editor = present ? '' : `<details class="acc no-print" id="apvEdit" open><summary>Your figures after the walk-through</summary><div class="in" data-apv-edit>
+        ${(f.ranges || []).map((r, i) => `<p class="apv-ed-h">${esc(r.option || r.key)}</p><div class="row2"><div><label class="f" for="apvLo${i}">Low</label><input type="text" inputmode="numeric" id="apvLo${i}" value="${esc(r.low)}"></div><div><label class="f" for="apvHi${i}">High</label><input type="text" inputmode="numeric" id="apvHi${i}" value="${esc(r.high)}"></div></div>`).join('')}
+        <label class="f" for="apvBeds">Bedrooms, as it should read</label><input type="text" id="apvBeds" value="${esc(f.bedrooms || '')}">
+        <label class="f" for="apvMethod">Recommended sale method</label><select id="apvMethod">${opts.map(n => `<option${n === m.name ? ' selected' : ''}>${esc(n)}</option>`).join('')}</select>
+        <label class="f" for="apvMethodText">How you'd sell it (the sentence shown)</label><textarea id="apvMethodText">${esc(m.text || '')}</textarea>
+        <div class="toolbar"><button class="btn primary" type="button" id="apvSave">Save</button></div>
+      </div></details>
+      <div class="toolbar no-print" id="apvTools">${plink(`appraisals/${rec.id}/present`, 'Present on screen', 'btn ghost')}<button class="btn ghost" type="button" id="apvPrint">Print</button></div>`;
+    main().innerHTML = `<div class="view-pad apv${present ? ' apv-show' : ''}" id="apvPage">${present ? '' : '<span class="agent-flag no-print">Only you see this</span>'}${editor}<div id="apvDoc"></div>
+      ${present ? `<p class="apv-exit no-print">${plink(`appraisals/${rec.id}`, 'Finish presenting')}</p>` : ''}</div>`;
+    draw();
+    const pb = $('#apvPrint'); if (pb) pb.addEventListener('click', () => window.print());
+    const sv = $('#apvSave');
+    if (sv) sv.addEventListener('click', async () => {
+      const n = id_ => Math.round(num($('#' + id_).value));
+      const next = JSON.parse(JSON.stringify(f));
+      (next.ranges || []).forEach((r, i) => { r.low = n('apvLo' + i); r.high = n('apvHi' + i); });
+      next.bedrooms = $('#apvBeds').value.trim();
+      next.method = Object.assign({}, next.method || {}, { name: $('#apvMethod').value, text: $('#apvMethodText').value.trim() });
+      const bad = APPR.checkFields(next); if (bad) { atBtn(sv, bad, 'err'); return; }
+      let saved = null;
+      try { const d = await must(sb.from('appraisal_views').update({ fields: next }).eq('id', rec.id).select()); saved = Array.isArray(d) ? d[0] : d; } catch (_) { atBtn(sv, 'Not saved. Check you have signal, then try again.', 'err'); return; }
+      rec.fields = (saved && saved.fields) || next; Object.assign(f, rec.fields); JDIRTY = false; draw();
+      atBtn(sv, 'Saved. The appraisal below shows your figures.', 'ok');
+    });
     top();
   }
   function viewPortalMissing(msg) {

@@ -831,4 +831,60 @@ body.portal #pfBack, body.portal #toList, body.portal #toProp, body.portal #fBac
   padding: max(8px, env(safe-area-inset-top, 0px)) max(10px, env(safe-area-inset-right, 0px)) max(8px, env(safe-area-inset-bottom, 0px)) max(10px, env(safe-area-inset-left, 0px)); }
 .dv.dv-full .dv-frame, .dv:fullscreen .dv-frame { flex: 1 1 auto; max-height: none; min-height: 0; }
 body.dv-lock { overflow: hidden; }
+/* appraisal views (032): one appraisal on one page, for showing on screen. Tables become labelled cards on a phone (no sideways scroll). */
+.apv-doc { overflow-wrap: anywhere; }
+.apv-doc h1 { margin-bottom: 6px; }
+.apv-by { color: var(--muted); font-size: 15px; }
+.apv-lede { font-size: 19px; }
+.apv-note { font-size: 14.5px; color: var(--muted); }
+.apv-list { padding-left: 22px; margin: 0 0 14px; }
+.apv-list li { margin: 6px 0; }
+.apv-fig { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.apv-ed-h { font-weight: 600; margin: 14px 0 0; }
+.apv-tbl { width: 100%; border-collapse: collapse; margin: 10px 0 18px; font-size: 15.5px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.apv-tbl th, .apv-tbl td { text-align: left; vertical-align: top; padding: 9px 10px; border-bottom: 1px solid var(--line); }
+.apv-tbl th { font-size: 13.5px; font-weight: 600; color: var(--muted); background: var(--bg); }
+.apv-tbl tr:last-child td { border-bottom: 0; }
+.apv-ranges td:last-child { font-weight: 600; color: var(--accent); white-space: nowrap; }
+.apv-tbl tr.apv-rec td { background: var(--ok-soft); }
+.apv-tag { display: inline-block; font-size: 12px; font-weight: 600; letter-spacing: .03em; text-transform: uppercase; color: var(--ok-text); border: 1px solid var(--ok); border-radius: 999px; padding: 1px 8px; margin: 0 4px 4px 0; }
+@media (max-width: 600px) {
+  .apv-tbl, .apv-tbl tbody, .apv-tbl tr, .apv-tbl td { display: block; width: 100%; }
+  .apv-tbl thead { display: none; }
+  .apv-tbl tr { border-bottom: 1px solid var(--line); padding: 6px 0; }
+  .apv-tbl tr:last-child { border-bottom: 0; }
+  .apv-tbl td { border: 0; padding: 4px 12px; }
+  .apv-tbl td[data-h]:not([data-h=""])::before { content: attr(data-h); display: block; font-size: 12.5px; font-weight: 600; color: var(--muted); }
+  .apv-ranges td:last-child { white-space: normal; }
+}
+.apv-wave { margin: 16px 0 20px; padding: 16px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
+.apv-wave figcaption strong { display: block; font-size: 17px; }
+.apv-wave figcaption span { display: block; font-size: 14.5px; color: var(--muted); }
+.apv-wmark { margin: 10px 0 0; font-size: 14px; font-weight: 600; color: var(--ink); }
+.apv-wmark::before { content: ""; display: inline-block; width: 18px; border-top: 2px dashed var(--muted); vertical-align: middle; margin-right: 6px; }
+.apv-wgrid { display: grid; grid-template-columns: repeat(var(--n), minmax(0, 1fr)); gap: 8px; align-items: end; margin-top: 8px; }
+.apv-wcol { display: flex; flex-direction: column; align-items: stretch; min-width: 0; }
+.apv-wcol.after-mark { border-left: 2px dashed var(--muted); padding-left: 6px; }
+.apv-wbar-wrap { height: 170px; display: flex; flex-direction: column; justify-content: flex-end; align-items: stretch; }
+.apv-wbar { background: var(--line); border-radius: 6px 6px 0 0; min-height: 4px; }
+.apv-wcol.on .apv-wbar { background: var(--accent); }
+.apv-wpct { text-align: center; font-weight: 600; font-size: 15px; margin-bottom: 4px; }
+.apv-wlab { text-align: center; font-size: 13px; color: var(--muted); margin-top: 6px; }
+.apv-wtrickle { font-size: 12px; color: var(--muted); text-align: center; line-height: 1.25; margin-bottom: 4px; }
+.apv-wdots { border-top: 3px dotted var(--muted); margin-bottom: 8px; }
+.apv-wcap { font-size: 14.5px; color: var(--muted); margin: 12px 0 0; }
+.apv-exit { margin-top: 28px; font-size: 14px; }
+/* presentation mode: no menu, no up link, no top-bar buttons, larger type */
+body.apv-present #pNav, body.apv-present #pUpRow, body.apv-present .agent-nav, body.apv-present .step-count, body.apv-present .bar { display: none !important; }
+body.apv-present main { max-width: 760px; padding-bottom: 48px; }
+.apv-show .apv-doc { font-size: 19.5px; line-height: 1.6; }
+.apv-show .apv-doc h1 { font-size: clamp(36px, 8vw, 52px); }
+.apv-show .apv-doc h2 { font-size: clamp(28px, 6vw, 34px); margin-top: 40px; }
+.apv-show .apv-lede { font-size: 22px; }
+.apv-show .apv-tbl { font-size: 17px; }
+@media print {
+  body.apv-present header.top, .apv .agent-flag, #apvEdit, #apvTools, .apv-exit { display: none !important; }
+  .apv-tbl tr, .apv-wave { break-inside: avoid; }
+  .apv-doc h2 { break-after: avoid; }
+}
 </style>

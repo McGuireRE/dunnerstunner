@@ -248,6 +248,8 @@ function q(table){ logCall('from:'+table);
     // localStorage mockFailWrite = a table name: writing to it fails, as with no signal
     if(op!=='select'&&localStorage.getItem('mockFailWrite')===table) throw new Error('Failed to fetch');
     // 026: the views of what stands (read only; security invoker, so the same rules as the tables they read)
+    // migration 032: appraisal views are Tim's alone (is_agent() select, insert and update); nobody deletes a row
+    if(table==='appraisal_views'&&(!isAgentMe()||op==='delete')) throw new Error('permission denied for table appraisal_views');
     const T=LIVE_VIEWS[table]?LIVE_VIEWS[table]():(DB[table]||=[]);
     // photos and documents (migration 016): vendors see none of it; guard_property_document() on every write
     if(['property_documents','property_document_events','repo_kinds'].includes(table)){ const r0=repoTable(table,op,payload,op==='update'?T.filter(r=>filters.every(f=>f(r))):[],single); if(r0) return r0; }
