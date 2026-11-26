@@ -1511,6 +1511,7 @@ function lawyerForm(id, title, blurb) {
     const inForce = ags.filter(a => !['ended', 'cancelled'].includes(a.status)), live = inForce[0] || null, govAg = inForce.find(a => a.status === 'countersigned') || null;   // ags are newest first
     let pforms = []; if (live) { try { const { data, error } = await sb.from('property_forms').select('*').eq('agreement_id', live.id); if (!error) pforms = data || []; } catch (_) { } }
     let pinsp = []; try { const { data, error } = await sb.from('property_inspections').select('id,status,started_at,finished_at,sent_at,facts,declaration').eq('property_id', id).order('started_at', { ascending: false }); if (!error) pinsp = (data || []).filter(x => !p.cycle_at || x.started_at >= p.cycle_at); } catch (_) { }
+    let pfv = []; try { const { data, error } = await sb.from('first_visits').select('id,started_at,decision').eq('property_id', id).order('started_at', { ascending: false }); if (!error) pfv = data || []; } catch (_) { }
     let pevents = []; try { const { data, error } = await sb.from('property_events').select('at,actor,kind,detail').eq('property_id', id).order('at', { ascending: false }); if (!error) pevents = data || []; } catch (_) { }
     const OFX = await offersLoad(id);   // the Offers tile (offers phase 1): agent only
     const pl = pls.find(x => x.status !== 'closed' && (!p.cycle_at || x.created_at >= p.cycle_at)) || null;   // only this round's pre-listing
@@ -1547,6 +1548,7 @@ function lawyerForm(id, title, blurb) {
           ${ags.map(a => { const ppl = a.agreement_people || [], ver = ppl.filter(x => x.id_verified_at).length; return `<div class="fact"><div class="k">Agreement ${esc(a.ref)}</div><div class="v" style="font-weight:400;display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><span><span class="pill ${a.status}">${esc(a.status)}</span> <span class="small">ID checks ${ver} of ${ppl.length}</span></span><button class="btn link" type="button" data-agopen="${a.id}">Open</button></div></div>`; }).join('')}
           ${!pls.length && !ags.length ? '<p class="small" style="margin:0">No appraisal page or agreement yet.</p>' : ''}
         </div>
+        ${fvTileHTML(id, pfv)}
         ${inspTileHTML(pinsp)}
         ${formsTileHTML(pforms, live)}
         ${stageTileHTML(p, govAg, pevents)}
@@ -1583,6 +1585,7 @@ function lawyerForm(id, title, blurb) {
     $('#pfBack').addEventListener('click', viewAgentDashboard);
     const jt = $('#jToggle'); if (jt) jt.addEventListener('click', () => { const l = $('#jListA'); const on = !l.classList.contains('open'); l.classList.toggle('open', on); const tl = $('#jTile'); if (tl) tl.classList.toggle('jopen', on); jt.setAttribute('aria-expanded', on); jt.textContent = on ? 'Show the current stop only' : 'Show every stop'; });
     $$('[data-agopen]').forEach(b => b.addEventListener('click', () => viewAgentDetail(b.dataset.agopen)));
+    fvTileWire(id);
     wireStageTile(id, p, inForce);
     offersTileWire(p, OFX);
     crWireProperty(p);
@@ -1689,7 +1692,8 @@ function lawyerForm(id, title, blurb) {
     }
     if (blob.size > REPO.MAX_BYTES) throw new Error('Files can be up to 25 MB.');
     const key = crypto.randomUUID(), sha = await REPO.sha256(await blob.arrayBuffer()), p = REPO.paths(ctx.pid, key, kind, name, mime, !!thumb);
-    return { key, pid: ctx.pid, inspection_id: ctx.inspection_id || null, room: ctx.room || '', kind, name: name.slice(0, 200), title: REPO.titleFrom(file.name),
+    // LW1: a caption, and hold (the first visit's id) while the visit's property isn't on file yet: nothing is sent until it is
+    return { key, pid: ctx.pid, inspection_id: ctx.inspection_id || null, room: ctx.room || '', caption: ctx.caption || '', hold: ctx.hold || null, kind, name: name.slice(0, 200), title: REPO.titleFrom(file.name),
       mime, size: blob.size, sha256: sha, blob, thumb, width, height, taken_at: new Date(file.lastModified || Date.now()).toISOString(),
       path: p.path, thumb_path: p.thumb, state: 'waiting', error: '', added_at: new Date().toISOString(), tries: 0, by: rqMe() };
   }
@@ -1705,16 +1709,16 @@ function lawyerForm(id, title, blurb) {
   }
   async function rqAdd(files, ctx) {
     await rqLoad();
-    const refused = []; let n = 0;
+    const refused = [], keys = []; let n = 0;
     for (const f of Array.from(files || [])) {
-      try { const it = await rqPrepare(f, ctx); RQ.items.set(it.key, it); try { await rqPut(it); } catch (e) { it.memOnly = true; RQ.noStore = true; } n++; rqPaint(); }
+      try { const it = await rqPrepare(f, ctx); RQ.items.set(it.key, it); try { await rqPut(it); } catch (e) { it.memOnly = true; RQ.noStore = true; } n++; keys.push(it.key); rqPaint(); }
       catch (e) { refused.push(`${f.name}: ${e.message}`); }
     }
     try { if (n && navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (_) { }
     if (refused.length) { toast(refused.length === 1 ? refused[0] : `${refused.length} files couldn't be added. ${refused[0]}`, 'err'); $$('[data-rq-refused]').forEach(el => { el.textContent = refused.join(' '); }); }
     else $$('[data-rq-refused]').forEach(el => { el.textContent = ''; });
     rqPaint(); rqPump();
-    return { added: n, refused };
+    return { added: n, refused, keys };
   }
   async function rqUpload(path, blob, mime) {
     const { error } = await sb.storage.from(RBUCKET).upload(path, blob, { contentType: mime, upsert: false, cacheControl: '3600' });
@@ -1728,7 +1732,7 @@ function lawyerForm(id, title, blurb) {
       await rqUpload(it.path, it.blob, it.mime);
       if (it.thumb_path && it.thumb) await rqUpload(it.thumb_path, it.thumb, 'image/jpeg');
       const { data, error } = await bgRpc('agent_repo_add', { p_property: it.pid, p_item: { key: it.key, kind: it.kind, title: it.title, name: it.name, path: it.path, thumb_path: it.thumb_path,
-        mime_type: it.mime, size_bytes: it.size, sha256: it.sha256, room: it.room, taken_at: it.taken_at, width: it.width, height: it.height, inspection_id: it.inspection_id } });
+        mime_type: it.mime, size_bytes: it.size, sha256: it.sha256, room: it.room, caption: it.caption || '', taken_at: it.taken_at, width: it.width, height: it.height, inspection_id: it.inspection_id } });
       if (error) throw error;
       it.state = 'saved'; it.doc_id = data && data.id; it.blob = null;
       try { await rqDel(it.key); } catch (_) { }
@@ -1754,7 +1758,7 @@ function lawyerForm(id, title, blurb) {
       do {
         RQ.again = false;
         for (const it of [...RQ.items.values()].sort((a, b) => a.added_at < b.added_at ? -1 : 1)) {
-          if (it.state !== 'waiting' || it.error || it.auth || !rqMine(it)) continue;
+          if (it.state !== 'waiting' || it.error || it.auth || it.hold || !rqMine(it)) continue;   // hold: a first visit's property isn't on file yet
           if (!navigator.onLine) break;
           if ((await rqSend(it)) === 'net') break;
         }
@@ -1772,7 +1776,7 @@ function lawyerForm(id, title, blurb) {
       ${th ? `<img class="repo-th" src="${esc(th)}" alt="">` : `<span class="repo-ic" aria-hidden="true">${repoIcon(it.mime)}</span>`}
       <span class="rq-t"><span class="rq-n">${esc(it.title || it.name)}</span><span class="small">${esc(it.kind)}${it.room ? ' · ' + esc(it.room) : ''} · ${esc(REPO.sizeText(it.size))}</span>
       ${it.error ? `<span class="small rq-err">${esc(it.error)}</span>` : ''}</span>
-      <span class="rq-s"><span class="rq-chip">${esc(RQ_SAY[it.state] || it.state)}</span>
+      <span class="rq-s"><span class="rq-chip">${esc(it.hold && it.state === 'waiting' ? 'On this phone' : RQ_SAY[it.state] || it.state)}</span>
       ${it.state === 'failed' || it.error ? `<button class="btn link" type="button" data-rq-retry="${esc(it.key)}">Try again</button>` : ''}
       ${it.state === 'failed' ? `<button class="btn link" type="button" data-rq-drop="${esc(it.key)}">Don't send</button>` : ''}</span></li>`;
   }
@@ -1781,8 +1785,8 @@ function lawyerForm(id, title, blurb) {
     $$('[data-rq]').forEach(box => {
       const pid = box.dataset.rq, iid = box.dataset.rqInsp || null;
       const list = [...RQ.items.values()].filter(x => x.pid === pid && (!iid || x.inspection_id === iid)).sort((a, b) => a.added_at < b.added_at ? -1 : 1);
-      const n = s => list.filter(x => x.state === s).length, wait = n('waiting'), fail = n('failed'), up = n('uploading');
-      const sum = !list.length ? '' : wait && !navigator.onLine ? `${wait} waiting for signal. ${wait === 1 ? 'It sends' : 'They send'} by ${wait === 1 ? 'itself' : 'themselves'} when the signal returns.`
+      const n = s => list.filter(x => x.state === s && !(s === 'waiting' && x.hold)).length, wait = n('waiting'), fail = n('failed'), up = n('uploading'), held = list.filter(x => x.hold && x.state === 'waiting').length;
+      const sum = !list.length ? '' : held && !wait && !up && !fail ? `${held} kept on this phone. ${held === 1 ? 'It sends' : 'They send'} once the visit is filed to its property.` : wait && !navigator.onLine ? `${wait} waiting for signal. ${wait === 1 ? 'It sends' : 'They send'} by ${wait === 1 ? 'itself' : 'themselves'} when the signal returns.`
         : up || wait ? `Sending ${up + wait}...` : fail ? `${fail} didn't save. Try again, or choose not to send.` : 'All saved.';
       box.innerHTML = list.length ? `<p class="small rq-sum" role="status">${esc(sum)}${(wait || fail) && navigator.onLine ? ' <button class="btn link" type="button" data-rq-send>Send now</button>' : ''}${RQ.noStore ? ' This browser can\'t keep them if the page closes, so keep it open until they are saved.' : ''}</p><ul class="rq-list">${list.map(rqRowHTML).join('')}</ul>` : '';
     });
@@ -8554,6 +8558,583 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     if (sgSes()) start(); else codeStep();
   }
 
+  /* ═════════════════ LW1: THE FIRST VISIT (migration 031) ═════════════════
+     Tim's central plan, "Listing workflow" and the LW1 bullets (25 to 27 November 2026); storyboard "First visit page". Rapport, not
+     detail: loose, fast notes, and nothing is compulsory. Steps: start (an address, an appointment, or nothing), who's here, room by
+     room, the property (Appendix D tap lists), documents, the ideal buyers (Appendix F), and "Now or come back?".
+     Works fully offline: every tap and keystroke is kept on the phone first (IndexedDB 'mre-fv'), and sent by itself when there is
+     signal, each item with its own key so a retry never files anything twice. Photos and documents go through the one upload queue
+     (property_documents), held on the phone until the visit's property is on file.
+     Nothing is kept on the page as a copy: everything is sent to the LW0 shared records (the property's people and person record, the
+     property profile as Tim's own entries, the question bank, the photo and document store) and property_rooms.
+     Later passes (not built here): GT2 recording with consent and GT3 AI field suggestions hook in at FV_HOOKS. */
+  const FV_HOOKS = { record: null, suggest: null };   // GT2 and GT3 fill these; the page shows nothing for them until then
+  const FV_SECS = [['', 'Start'], ['who', "Who's here"], ['rooms', 'Room by room'], ['property', 'The property'], ['documents', 'Documents'], ['buyers', 'Ideal buyers'], ['finish', 'Now or come back?']];
+  const FVS = { db: null, mem: new Map(), cur: null, running: new Set(), again: new Set(), extras: null, saveT: null, syncT: null, noStore: false };
+  const fvMe = () => String((SESSION && SESSION.user && SESSION.user.email) || '').toLowerCase();
+  function fvDb() {
+    if (!FVS.db) FVS.db = new Promise((res, rej) => {
+      try { const r = indexedDB.open('mre-fv', 1); r.onupgradeneeded = () => { if (!r.result.objectStoreNames.contains('visits')) r.result.createObjectStore('visits', { keyPath: 'id' }); }; r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }
+      catch (e) { rej(e); }
+    });
+    return FVS.db;
+  }
+  async function fvStore(mode, fn) {
+    const db = await fvDb();
+    return new Promise((res, rej) => { const tx = db.transaction('visits', mode); let out; const q = fn(tx.objectStore('visits')); if (q) q.onsuccess = () => { out = q.result; }; tx.oncomplete = () => res(out); tx.onerror = () => rej(tx.error); tx.onabort = () => rej(tx.error || new Error('aborted')); });
+  }
+  // the phone's copy: IndexedDB, or (where a browser has none) this tab's memory, said plainly on the page
+  async function fvPut(v) { v.updated_at = new Date().toISOString(); FVS.mem.set(v.id, v); try { await fvStore('readwrite', s => s.put(JSON.parse(JSON.stringify(v)))); } catch (e) { FVS.noStore = true; } }
+  async function fvGet(id) { if (FVS.mem.has(id)) return FVS.mem.get(id); try { const v = await fvStore('readonly', s => s.get(id)); if (v) FVS.mem.set(id, v); return v || null; } catch (_) { FVS.noStore = true; return null; } }
+  async function fvAll() { let L = []; try { L = (await fvStore('readonly', s => s.getAll())) || []; } catch (_) { FVS.noStore = true; } L.forEach(v => { if (!FVS.mem.has(v.id)) FVS.mem.set(v.id, v); }); return [...FVS.mem.values()].filter(v => v.by === fvMe()); }
+  const fvUid = () => crypto.randomUUID();
+  function fvNew(o) {
+    return { id: fvUid(), by: fvMe(), pid: o.pid || null, address: o.address || '', from: o.from || 'nothing', prelisting_id: o.prelisting_id || null, started_at: new Date().toISOString(),
+      server: false, meta: { notes: '', decision: '', next_note: '', rev: 0, srev: 0 }, people: [], rooms: [], facts: {}, answers: {}, who: 'all', err: '' };
+  }
+  const fvPending = v => FVC.pending(v);
+  // a change: kept on the phone at once (a moment later while typing), then sent when there is signal
+  function fvTouch(v, item, now) {
+    if (item) { item.rev = (item.rev || 0) + 1; delete item.err; delete item.errRev; }
+    clearTimeout(FVS.saveT); const go = () => { fvPut(v).then(() => { fvSyncPaint(v); fvSyncSoon(v); }); };
+    if (now) go(); else FVS.saveT = setTimeout(go, 350);
+    fvSyncPaint(v);
+  }
+  // a press saved on the phone: said under the button at once, then whether it reached the property (Tim's rule: feedback at the button)
+  async function fvSaveNote(v, btn, lead) {
+    atBtn(btn, (lead || '') + 'Saved on this phone. Uploading...', 'busy');
+    await fvPut(v); const st = await fvSync(v);
+    const b2 = btn.isConnected ? btn : (btn.id && document.getElementById(btn.id));
+    if (!b2) return;
+    atBtn(b2, (lead || '') + (st === 'ok' ? 'Saved to the property.' : st === 'err' ? 'Saved on this phone, but it didn\'t upload. The reason is at the top.' : st === 'busy' ? 'Saved on this phone. Uploading...' : st === 'noaddr' ? 'Saved on this phone. It files to the property once you add the address.' : 'Saved on this phone. It uploads by itself when the signal returns.'), st === 'err' ? 'err' : 'ok');
+  }
+  function fvSyncSoon(v, ms) { clearTimeout(FVS.syncT); FVS.syncT = setTimeout(() => fvSync(v), ms == null ? 900 : ms); }
+  const fvOffline = () => !navigator.onLine;
+  // the visit's photos and documents waiting in the upload queue: moved to the property on file, then let go
+  async function fvRelease(v, from) {
+    await rqLoad();
+    for (const it of RQ.items.values()) {
+      if (it.hold !== v.id) continue;
+      if (it.pid !== v.pid) { const p = REPO.paths(v.pid, it.key, it.kind, it.name, it.mime, !!it.thumb_path); it.pid = v.pid; it.path = p.path; it.thumb_path = p.thumb; }
+      it.hold = null; try { await rqPut(it); } catch (_) { }
+    }
+    rqPaint(); rqPump();
+  }
+  // send what has changed, one item at a time. A network failure stops it (it tries again when the signal returns); any other answer
+  // is kept with that item, said on the page, and not tried again until Tim changes it or taps Try again.
+  async function fvSync(v, manual) {
+    if (!v || !IS_AGENT) return 'none';
+    if (FVS.running.has(v.id)) { FVS.again.add(v.id); return 'busy'; }
+    if (fvOffline()) { fvSyncPaint(v); return 'offline'; }
+    FVS.running.add(v.id); fvSyncPaint(v);
+    let state = 'ok';
+    const call = async (name, args, item) => {
+      const rev = item ? item.rev : 0;
+      if (item && !manual && item.errRev === rev) return 'skip';
+      let r; try { r = await bgRpc(name, args); } catch (e) { r = { error: e }; }
+      if (r.error) {
+        if (netErr(r.error)) { state = 'offline'; throw 'net'; }
+        if (item) { item.err = String(r.error.message || r.error); item.errRev = rev; } else v.err = String(r.error.message || r.error);
+        state = 'err'; return 'err';
+      }
+      if (item) { item.srev = rev; delete item.err; delete item.errRev; }
+      return r.data;
+    };
+    try {
+      do {
+        FVS.again.delete(v.id);
+        if (!v.server) {
+          if (!v.address && !v.pid) { state = 'noaddr'; break; }
+          const r = await call('agent_fv_start', { p_id: v.id, p_property: v.pid || null, p_address: v.address || null, p_from: v.from, p_prelisting: v.prelisting_id, p_started_at: v.started_at });
+          if (r === 'err') break;
+          const was = v.pid; v.pid = r.property_id; v.server = true; v.err = ''; v.matched = !!r.matched;
+          await fvPut(v); await fvRelease(v, was);
+          if (FVS.cur === v.id) fvAddress(v);   // under its property now
+        }
+        if (FVC.dirty(v.meta)) await call('agent_fv_set', { p_id: v.id, p_patch: { notes: v.meta.notes || '', decision: v.meta.decision || '', next_note: v.meta.next_note || '' } }, v.meta);
+        let later = 0;
+        for (const p of v.people) if (FVC.dirty(p)) {
+          // a person is sent once Tim has stopped typing them in (a half-typed email would otherwise be filed, and a known email is never replaced)
+          if (p.wait_until && p.wait_until > Date.now()) { later = Math.max(later, p.wait_until - Date.now()); continue; }
+          if (p.email && !EMAIL_RE.test(p.email)) { p.err = 'Check the email address.'; p.errRev = p.rev; continue; }
+          const r = await call('agent_fv_person', { p_visit: v.id, p_key: p.key, p_name: p.name || '', p_email: p.email || '', p_phone: p.phone || '', p_owner: p.owner !== false, p_decision_maker: p.dm == null ? null : !!p.dm, p_here: p.here !== false }, p);
+          if (r && typeof r === 'object') { p.filed = !!r.filed; p.pp_id = r.property_person_id || null; p.contact_id = r.contact_id || null; p.sent = true; }
+        }
+        for (const rm of v.rooms) if (FVC.dirty(rm)) {
+          await call('agent_fv_room', { p_visit: v.id, p_room: { id: rm.id, base: rm.base, label: rm.label, position: rm.position, notes: rm.notes || '', measurements: rm.measurements || '', features: rm.features || [], use_now: rm.use_now || '',
+            tim_class: rm.tim_class || '', tim_note: rm.tim_note || '', vendor_view: rm.vendor_view || '', photo_keys: rm.photo_keys || [], archived: !!rm.archived } }, rm);
+        }
+        for (const [k, f] of Object.entries(v.facts)) if (FVC.dirty(f)) await call('agent_fv_fact', { p_visit: v.id, p_key: k, p_value: ijblank(f.value) ? null : f.value }, f);
+        for (const a of Object.values(v.answers)) if (FVC.dirty(a)) {
+          const who = a.person ? v.people.find(p => p.key === a.person) : null;
+          if (a.person && !(who && who.sent)) continue;   // their person goes first
+          await call('agent_fv_answer', { p_visit: v.id, p_person: a.person || null, p_question: a.q, p_value: ijblank(a.value) ? null : a.value }, a);
+        }
+        await fvPut(v);
+        if (later) setTimeout(() => fvSync(v), later + 50);
+      } while (FVS.again.has(v.id) && state === 'ok' && !fvOffline());
+    } catch (e) { if (e !== 'net') { console.error(e); state = 'err'; } }
+    finally { FVS.running.delete(v.id); try { await fvPut(v); } catch (_) { } fvSyncPaint(v); }
+    if (FVS.again.has(v.id) && state === 'ok') fvSyncSoon(v, 50);
+    return state;
+  }
+  async function fvSyncAll() { if (!IS_AGENT) return; for (const v of await fvAll()) if (fvPending(v)) await fvSync(v); }
+  window.addEventListener('online', () => { if (IS_AGENT) fvSyncAll(); });
+  window.addEventListener('offline', () => { if (FVS.cur) { const v = FVS.mem.get(FVS.cur); if (v) fvSyncPaint(v); } });
+  setInterval(() => { if (IS_AGENT && navigator.onLine) fvSyncAll(); }, 30000);
+  // how it stands, said plainly, at the top of every step
+  function fvSyncText(v) {
+    const n = fvPending(v), errs = [v.meta, ...v.people, ...v.rooms, ...Object.values(v.facts), ...Object.values(v.answers)].filter(x => x && x.err).length + (v.err ? 1 : 0);
+    if (!v.server && !v.address && !v.pid) return ['wait', 'Saved on this phone. Add the address when you have it, and it files itself to the property.'];
+    if (FVS.running.has(v.id)) return ['busy', 'Uploading...'];
+    if (errs) return ['err', `${errs === 1 ? 'One thing' : errs + ' things'} didn't save. ${v.err || ([v.meta, ...v.people, ...v.rooms, ...Object.values(v.facts), ...Object.values(v.answers)].find(x => x && x.err) || {}).err || ''}`];
+    if (n && fvOffline()) return ['wait', `Saved on this phone. ${n === 1 ? 'One change uploads' : n + ' changes upload'} by itself when the signal returns.`];
+    if (n) return ['wait', `Saved on this phone. ${n === 1 ? 'One change' : n + ' changes'} still to upload.`];
+    return ['ok', 'All saved to the property.'];
+  }
+  function fvSyncPaint(v) {
+    const el = $('#fvSync'); if (!el || FVS.cur !== v.id) return;
+    const [k, t] = fvSyncText(v);
+    el.dataset.state = k; $('.fv-sync-t', el).textContent = t + (FVS.noStore ? ' This browser can\'t keep it if the page closes, so keep it open until it is uploaded.' : '');
+    const b = $('#fvSendNow', el); if (b) b.hidden = !(k === 'err' || (k === 'wait' && !fvOffline() && (v.server || v.address)));
+  }
+
+  // Tim's own additions to the tap lists (tap_list_extras), kept on the phone as well for working offline
+  async function fvExtras() {
+    if (FVS.extras) return FVS.extras;
+    let L = null; try { L = JSON.parse(localStorage.getItem('fvExtras') || 'null'); } catch (_) { }
+    FVS.extras = L || {};
+    try { const { data, error } = await sb.from('tap_list_extras').select('list,item,archived_at'); if (!error && Array.isArray(data)) { const o = {}; data.filter(x => !x.archived_at).forEach(x => { (o[x.list] ||= []).push(x.item); }); FVS.extras = o; localStorage.setItem('fvExtras', JSON.stringify(o)); } } catch (_) { }
+    return FVS.extras;
+  }
+  const fvList = (name, base) => { const ex = (FVS.extras || {})[name] || []; return base.concat(ex.filter(x => !base.some(b => b.toLowerCase() === x.toLowerCase()))); };
+  async function fvAddExtra(name, item, btn) {
+    const it = String(item || '').replace(/\s+/g, ' ').trim(); if (!it) { atBtn(btn, 'Type the item first.', 'err'); return false; }
+    FVS.extras ||= {}; (FVS.extras[name] ||= []); if (!FVS.extras[name].some(x => x.toLowerCase() === it.toLowerCase())) FVS.extras[name].push(it);
+    try { localStorage.setItem('fvExtras', JSON.stringify(FVS.extras)); } catch (_) { }
+    const { error } = await bgRpc('agent_tap_extra', { p_list: name, p_item: it, p_on: true }).catch(e => ({ error: e }));
+    const msg = error ? (netErr(error) ? `Added on this phone. "${it}" joins your list for good once you have signal and add it again.` : 'Added here, but not to your list: ' + (error.message || error)) : `Added "${it}" to your list.`, kind = error && !netErr(error) ? 'err' : 'ok';
+    atBtn(btn, msg, kind);
+    return { msg, kind };
+  }
+
+  // dictation: the browser's own speech to text where it has it, else the phone keyboard's microphone. No recording, no AI.
+  function fvDictate(btn) {
+    const ta = btn.closest('.fv-field') && $('textarea,input[type=text]', btn.closest('.fv-field')); if (!ta) return;
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) { atBtn(btn, 'This browser can\'t take dictation here. Tap in the box and use the microphone on your keyboard instead.', 'ok'); ta.focus(); return; }
+    if (btn._rec) { try { btn._rec.stop(); } catch (_) { } return; }
+    let rec; try { rec = new SR(); } catch (_) { atBtn(btn, 'Dictation didn\'t start. Use the microphone on your keyboard instead.', 'err'); return; }
+    rec.lang = 'en-NZ'; rec.interimResults = false; rec.continuous = true;
+    rec.onresult = e => { let t = ''; for (let i = e.resultIndex; i < e.results.length; i++) if (e.results[i].isFinal) t += e.results[i][0].transcript; t = t.trim(); if (!t) return;
+      ta.value = (ta.value ? ta.value.replace(/\s*$/, ' ') : '') + t; ta.dispatchEvent(new Event('input', { bubbles: true })); };
+    const end = msg => { btn._rec = null; btn.textContent = 'Dictate'; btn.classList.remove('on'); if (msg) atBtn(btn, msg, 'ok'); };
+    rec.onerror = e => end(e && e.error === 'not-allowed' ? 'The microphone is blocked for this site. Use the microphone on your keyboard instead.' : 'Dictation stopped. Tap Dictate to carry on.');
+    rec.onend = () => end('Added to your notes.');
+    try { rec.start(); btn._rec = rec; btn.textContent = 'Stop dictating'; btn.classList.add('on'); atBtn(btn, 'Listening... speak, then tap Stop dictating.', 'busy'); } catch (_) { end('Dictation didn\'t start. Use the microphone on your keyboard instead.'); }
+  }
+  const fvField = (id, label, val, o = {}) => `<div class="fv-field">${label ? `<label class="f" for="${id}">${label}</label>` : ''}${o.area !== false
+      ? `<textarea id="${id}" ${o.attrs || ''} maxlength="${o.max || 4000}" rows="${o.rows || 3}" placeholder="${esc(o.ph || '')}">${esc(val || '')}</textarea>`
+      : `<input type="text" id="${id}" ${o.attrs || ''} maxlength="${o.max || 500}" value="${esc(val || '')}" placeholder="${esc(o.ph || '')}">`}
+    ${o.dict === false ? '' : `<div class="toolbar fv-dict"><button class="btn link" type="button" data-fvdict id="${id}_d">Dictate</button></div>`}</div>`;
+  const fvChips = (name, list, cur, o = {}) => `<div class="ipick fv-chips" data-fvchips="${esc(name)}">${list.map(x => { const [val, lab] = Array.isArray(x) ? x : [x, x];
+    return `<label class="ichip"><input type="${o.one ? 'radio' : 'checkbox'}" name="fvc_${esc(name)}" value="${esc(val)}" ${(o.one ? cur === val : (cur || []).includes(val)) ? 'checked' : ''}><span>${esc(lab)}</span></label>`; }).join('')}</div>`;
+  const fvOwn = name => `<div class="fv-own"><input type="text" maxlength="80" placeholder="Add your own" data-fvown-in="${esc(name)}" aria-label="Add your own item"><div class="toolbar"><button class="btn ghost" type="button" data-fvown="${esc(name)}" id="fvown_${esc(name)}">Add</button></div></div>`;
+
+  // the start: from an address (a property on file, or a new one), an appointment (Questions before we meet), or nothing at all.
+  // Addresses on file are kept on this phone too, so a visit started without signal still finds its property.
+  async function viewFirstVisitStart(pidGiven) {
+    header('First visit', '', 0); actions(false); FVS.cur = null;
+    main().innerHTML = '<div class="loading">Loading...</div>';
+    let props = null, pls = [];
+    try { const { data, error } = await sb.from('properties').select('id,address,stage,updated_at').order('updated_at', { ascending: false }); if (!error && data) { props = data; try { localStorage.setItem('fvProps', JSON.stringify(data.map(p => ({ id: p.id, address: p.address })))); } catch (_) { } } } catch (_) { }
+    if (!props) { try { props = JSON.parse(localStorage.getItem('fvProps') || '[]'); } catch (_) { props = []; } }
+    try { const { data, error } = await sb.from('prelistings').select('id,address,contact_name,contact_email,status,property_id,created_at').neq('status', 'closed').order('created_at', { ascending: false }); if (!error && data) pls = data; } catch (_) { }
+    const mine = (await fvAll()).sort((a, b) => (a.updated_at || '') < (b.updated_at || '') ? 1 : -1);
+    if (pidGiven) { const p = props.find(x => x.id === pidGiven); return fvBegin({ from: 'address', pid: pidGiven, address: p ? p.address : '' }); }
+    const norm = s => String(s || '').toLowerCase().replace(/[,.]/g, ' ').replace(/\s+/g, ' ').trim();
+    main().innerHTML = `<div class="view-pad" id="fvStart">
+      <span class="agent-flag">Only you see this</span>
+      <h1>First visit</h1>
+      <p class="lede">Rapport, not detail. Loose, fast notes; nothing here is compulsory. It all saves on this phone first and uploads itself.</p>
+      ${mine.length ? `<h2>Carry on</h2>${mine.slice(0, 8).map(v => { const n = fvPending(v); return `<div class="card tight fv-carry"><div><strong>${esc(v.address || 'No address yet')}</strong><br><span class="small">Started ${esc(fmtDT(v.started_at))}${n ? ` · ${n} change${n === 1 ? '' : 's'} on this phone` : ' · all saved'}</span></div><button class="btn ghost" type="button" data-fvopen="${esc(v.id)}">Carry on</button></div>`; }).join('')}` : ''}
+      <h2>From an address</h2>
+      <label class="f" for="fvAddr" style="margin-top:0">Address</label><input type="text" id="fvAddr" autocomplete="off" placeholder="Street, suburb, Dunedin">
+      <div id="fvMatches"></div>
+      <div class="toolbar"><button class="btn primary" type="button" id="fvStartAddr">Start with this address</button></div>
+      ${pls.length ? `<h2>From an appointment</h2><p class="small">Their Questions before we meet. Their name and email come with them.</p>${pls.slice(0, 10).map(l => `<div class="card tight fv-carry"><div><strong>${esc(l.address || 'Address to come')}</strong><br><span class="small">${esc(l.contact_name || l.contact_email || '')}</span></div><button class="btn ghost" type="button" data-fvpl="${esc(l.id)}">Start</button></div>`).join('')}` : ''}
+      <h2>With nothing at all</h2>
+      <p class="small">A spur-of-the-moment visit. Add the address whenever you have it.</p>
+      <div class="toolbar"><button class="btn ghost" type="button" id="fvStartNone">Start with nothing</button></div>
+    </div>`;
+    const draw = () => {
+      const q = norm($('#fvAddr').value); let m = [];
+      if (q.length >= 3) m = props.filter(p => { const a = norm(p.address); return a && (a.includes(q) || q.includes(a)); }).slice(0, 6);
+      $('#fvMatches').innerHTML = m.length ? `<p class="small" style="margin:12px 0 6px">Already on file. Choose it to keep one record of the property:</p>${m.map(p => `<div class="card tight fv-carry"><div><strong>${esc(p.address)}</strong></div><button class="btn ${norm(p.address) === q ? 'primary' : 'ghost'}" type="button" data-fvprop="${esc(p.id)}">Start here</button></div>`).join('')}` : '';
+      $$('[data-fvprop]').forEach(b => b.addEventListener('click', () => { const p = props.find(x => x.id === b.dataset.fvprop); fvBegin({ from: 'address', pid: p.id, address: p.address }, b); }));
+    };
+    $('#fvAddr').addEventListener('input', draw);
+    $('#fvStartAddr').addEventListener('click', () => {
+      const b = $('#fvStartAddr'), a = $('#fvAddr').value.replace(/\s+/g, ' ').trim();
+      if (a.length < 3) return atBtn(b, 'Type the address, or start with nothing.', 'err');
+      const same = props.find(p => norm(p.address) === norm(a));
+      fvBegin(same ? { from: 'address', pid: same.id, address: same.address } : { from: 'address', address: a }, b);
+    });
+    $('#fvStartNone').addEventListener('click', () => fvBegin({ from: 'nothing' }, $('#fvStartNone')));
+    $$('[data-fvpl]').forEach(b => b.addEventListener('click', () => { const l = pls.find(x => x.id === b.dataset.fvpl);
+      fvBegin({ from: 'appointment', prelisting_id: l.id, pid: l.property_id || null, address: l.address || '', person: { name: l.contact_name || '', email: l.contact_email || '' } }, b); }));
+    $$('[data-fvopen]').forEach(b => b.addEventListener('click', () => viewFirstVisit(b.dataset.fvopen)));
+    top();
+  }
+  async function fvBegin(o, btn) {
+    const v = fvNew(o);
+    if (o.person && (o.person.name || o.person.email)) v.people.push({ key: fvUid(), name: o.person.name, email: o.person.email, phone: '', owner: true, dm: null, here: true, rev: 1, srev: 0 });
+    await fvPut(v);
+    if (btn) atBtn(btn, 'Started. Saved on this phone.', 'ok');
+    fvSync(v);
+    return viewFirstVisit(v.id);
+  }
+  // a visit not on this phone (started on another device): read from the database into the phone's copy
+  async function fvFromServer(id) {
+    const { data: rows, error } = await sb.from('first_visits').select('*').eq('id', id).limit(1);
+    if (error || !rows || !rows[0]) return null;
+    const r = rows[0], v = fvNew({ pid: r.property_id, from: r.started_from, prelisting_id: r.prelisting_id }); v.id = r.id; v.server = true; v.started_at = r.started_at;
+    v.meta = { notes: r.notes || '', decision: r.decision || '', next_note: r.next_note || '', rev: 0, srev: 0 };
+    const safe = async q => { try { const { data, error } = await q; return error ? [] : data || []; } catch (_) { return []; } };
+    const [pr, people, pps, rooms, ans, facts] = await Promise.all([safe(sb.from('properties').select('id,address').eq('id', r.property_id)), safe(sb.from('first_visit_people').select('*').eq('first_visit_id', id)),
+      safe(sb.from('property_people').select('id,legal_name,email,phone,role').eq('property_id', r.property_id)), safe(sb.from('property_rooms').select('*').eq('property_id', r.property_id)),
+      safe(sb.from('qa_answers').select('question_key,source,source_ref,value').eq('property_id', r.property_id)), profileLoad(r.property_id)]);
+    v.address = (pr[0] || {}).address || '';
+    v.people = people.map(x => { const p = pps.find(y => y.id === x.property_person_id) || {}; return { key: x.id, name: p.legal_name || '', email: p.email || '', phone: p.phone || '', owner: (p.role || 'owner') === 'owner', dm: x.decision_maker, here: x.here, rev: 0, srev: 0, sent: true, filed: !!x.property_person_id, pp_id: x.property_person_id, contact_id: x.contact_id }; });
+    v.rooms = rooms.map(x => ({ id: x.id, base: x.base, label: x.label, position: x.position, notes: x.notes || '', measurements: x.measurements || '', features: x.features || [], use_now: x.use_now || '', tim_class: x.tim_class || '', tim_note: x.tim_note || '', vendor_view: x.vendor_view || '', photo_keys: x.photo_keys || [], archived: !!x.archived_at, rev: 0, srev: 0 }));
+    ans.filter(a => a.source === 'first_visit').forEach(a => { const who = a.source_ref === id ? 'all' : a.source_ref; if (who !== 'all' && !v.people.some(p => p.key === who)) return; v.answers[who + ':' + a.question_key] = { person: who === 'all' ? null : who, q: a.question_key, value: a.value, rev: 0, srev: 0 }; });
+    facts.filter(f => f.value_id && f.source === 'tim' && f.source_name === 'First visit').forEach(f => { v.facts[f.key] = { value: f.value, rev: 0, srev: 0 }; });
+    await fvPut(v);
+    return v;
+  }
+  // the visit's own address: under its property once the property is on file, else under Processes
+  function fvAddress(v, sec) { if (!PORTAL || FVS.cur !== v.id) return; const s = sec != null ? sec : (FVS.sec || ''); portalAt((v.server && okId(v.pid) ? `properties/${v.pid}/first-visit/${v.id}` : `processes/first-visit/${v.id}`) + (s ? '/' + s : '')); }
+
+  async function viewFirstVisit(id, sec) {
+    header('First visit', '', 0); actions(false);
+    main().innerHTML = '<div class="loading">Loading...</div>';
+    let v = await fvGet(id);
+    if (!v && navigator.onLine) v = await fvFromServer(id).catch(() => null);
+    if (!v) { main().innerHTML = `<div class="view-pad" id="fvMissing"><h1>First visit not found</h1><p class="lede">It isn't on this phone, and it couldn't be read from the property. Check you have signal, then try again.</p><div class="toolbar"><button class="btn primary" type="button" id="fvMissStart">Start a first visit</button></div></div>`; $('#fvMissStart').addEventListener('click', () => viewFirstVisitStart()); return; }
+    await fvExtras();
+    FVS.cur = v.id; FVS.sec = FV_SECS.some(s => s[0] === sec) ? sec : '';
+    fvDraw(v);
+    if (fvPending(v)) fvSync(v);
+  }
+  function fvDraw(v) {
+    const sec = FVS.sec || '', i = FV_SECS.findIndex(s => s[0] === sec);
+    header('First visit', '', Math.round(((i + 1) / FV_SECS.length) * 100)); actions(false); FVS.cur = v.id;
+    const nb = FVC.bedrooms(v.rooms);
+    main().innerHTML = `<div class="view-pad fv" id="fvPage" data-visit="${esc(v.id)}">
+      <span class="agent-flag">Only you see this</span>
+      <h1>${esc(v.address || 'First visit')}</h1>
+      <div class="fv-sync" id="fvSync" role="status"><span class="fv-sync-t"></span><div class="toolbar"><button class="btn link" type="button" id="fvSendNow" hidden>Send now</button></div></div>
+      <nav class="fv-steps" aria-label="Steps">${FV_SECS.map(([k, l], n) => `<button type="button" class="fv-step${k === sec ? ' on' : ''}" data-fvsec="${k}" ${k === sec ? 'aria-current="step"' : ''}>${n + 1}. ${esc(l)}</button>`).join('')}</nav>
+      <section id="fvSec" data-sec="${esc(sec || 'start')}">${fvSecHTML(v, sec, nb)}</section>
+      <div class="toolbar fv-nav">${i > 0 ? `<button class="btn ghost" type="button" id="fvPrev">Back: ${esc(FV_SECS[i - 1][1])}</button>` : ''}${i < FV_SECS.length - 1 ? `<button class="btn primary" type="button" id="fvNext">Next: ${esc(FV_SECS[i + 1][1])}</button>` : ''}</div>
+    </div>`;
+    fvAddress(v, sec);
+    fvSyncPaint(v);
+    $$('[data-fvsec]').forEach(b => b.addEventListener('click', () => fvGo(v, b.dataset.fvsec)));
+    const pv = $('#fvPrev'), nx = $('#fvNext');
+    if (pv) pv.addEventListener('click', () => fvGo(v, FV_SECS[i - 1][0]));
+    if (nx) nx.addEventListener('click', () => fvGo(v, FV_SECS[i + 1][0]));
+    $('#fvSendNow').addEventListener('click', async () => { const b = $('#fvSendNow'); atBtn(b, 'Uploading...', 'busy'); const st = await fvSync(v, true);
+      atBtn(b, st === 'offline' ? 'No signal yet. It is all on this phone and uploads by itself when the signal returns.' : st === 'err' ? 'Some of it didn\'t save. The reason is above.' : st === 'noaddr' ? 'Add the address first.' : 'All saved to the property.', st === 'err' ? 'err' : 'ok'); });
+    $$('[data-fvdict]').forEach(b => b.addEventListener('click', () => fvDictate(b)));
+    fvWire(v, sec);
+    rqPaint();
+    top();
+  }
+  function fvGo(v, sec) { FVS.sec = sec || ''; FVS.openRoom = FVS.openRoom || null; fvDraw(v); }
+
+  const fvAns = (v, who, q) => { const a = v.answers[(who || 'all') + ':' + q]; return a ? a.value : null; };
+  function fvSetAns(v, who, q, value) {
+    const k = (who || 'all') + ':' + q; const a = v.answers[k] || (v.answers[k] = { person: who && who !== 'all' ? who : null, q, value: null, rev: 0, srev: 0 });
+    a.value = value; fvTouch(v, a);
+  }
+  const fvName = p => p.name || p.email || p.phone || 'Someone';
+  function fvSecHTML(v, sec, nb) {
+    if (sec === '') return `
+      <h2>Start</h2>
+      ${!v.server ? `<label class="f" for="fvAddrEdit">Address${v.address ? '' : ' <span class="opt">(whenever you have it)</span>'}</label><input type="text" id="fvAddrEdit" maxlength="300" value="${esc(v.address || '')}" placeholder="Street, suburb, Dunedin">
+        <div class="toolbar"><button class="btn ghost" type="button" id="fvAddrSave">${v.address ? 'Save the address' : 'Add the address'}</button></div>`
+      : `<p class="small">Filed to the property${v.matched ? ' already on file at this address' : ''}. ${plink(`properties/${v.pid}`, 'Open the property file')}</p>`}
+      ${v.from === 'appointment' ? '<p class="small">Started from their Questions before we meet.</p>' : ''}
+      ${fvField('fvNotes', 'Your notes on the visit <span class="opt">(only you see these)</span>', v.meta.notes, { rows: 5, max: 20000, ph: 'Anything at all, as it comes' })}
+      <p class="small">Dictate where your browser offers it, or use the microphone on your keyboard. Nothing is recorded.</p>`;
+    if (sec === 'who') return `
+      <h2>Who's here</h2>
+      <p class="small">All optional. Names and numbers file to the person record; the same person is never made twice.</p>
+      <div id="fvPeople">${v.people.map((p, n) => fvPersonHTML(v, p, n)).join('') || '<p class="small">Nobody added yet.</p>'}</div>
+      <div class="toolbar"><button class="btn ghost" type="button" id="fvAddPerson">Add someone</button></div>
+      <div id="fvOnFile"></div>`;
+    if (sec === 'rooms') {
+      const L = v.rooms.filter(r => !r.archived).sort((a, b) => a.position - b.position), w = FVC.wording(v.rooms);
+      return `
+      <h2>Room by room</h2>
+      <div class="card tight fv-beds" id="fvBeds"><strong>Bedrooms, your call:</strong> ${nb == null ? 'not called yet. Make your call on each bedroom below.' : esc(String(nb))}${w ? `<br><span class="small">On the profile and the listing: "${esc(w)}"</span>` : ''}</div>
+      <p class="small">Tap a room to add it, then tap it in the list to note it. Add more as you find them.</p>
+      <div class="fv-addrooms" id="fvAddRooms">${PLISTS.ROOMS.map(([b, l]) => `<button class="btn ghost fv-chipbtn" type="button" data-fvaddroom="${b}">${esc(l)}</button>`).join('')}</div>
+      <details class="fv-more"><summary>More spaces</summary><div class="fv-addrooms">${PLISTS.EXTRA_ROOMS.map(([b, l]) => `<button class="btn ghost fv-chipbtn" type="button" data-fvaddroom="${b}">${esc(l)}</button>`).join('')}</div></details>
+      <div id="fvRoomMsg"></div>
+      <div id="fvRooms">${L.map(r => fvRoomHTML(v, r)).join('') || '<p class="small">No rooms yet.</p>'}</div>`;
+    }
+    if (sec === 'property') return `
+      <h2>The property</h2>
+      <p class="small">Tap what you see. Each goes on the property profile as yours, marked "First visit". Bedrooms come only from your call on each room${nb == null ? '' : `: <strong>${esc(String(nb))}</strong>`}.</p>
+      ${PLISTS.FACT_GROUPS.map(([g, keys]) => `<details class="card tight fv-group" ${g === 'The property' || g === 'Counts' ? 'open' : ''}><summary><strong>${esc(g)}</strong></summary>${keys.map(k => fvFactHTML(v, k)).join('')}</details>`).join('')}`;
+    if (sec === 'documents') return `
+      <h2>Documents</h2>
+      <p class="small">Snap them or choose files. They go into the property's photos and documents. When you are back, the document reader can read them; it suggests, and you tick before anything is used.</p>
+      <div class="fv-docs">${[['Record of title', 'Title'], ['Building plans', 'Plans'], ['LIM report', 'LIM'], ['Code compliance certificate', 'CCC'], ['', 'Something else']].map(([k, l], n) => `<label class="btn ghost fv-file" id="fvDoc${n}"><input type="file" accept="image/*,application/pdf" multiple data-fvdoc="${esc(k)}" hidden>${esc(l)}</label>`).join('')}</div>
+      <div id="fvDocMsg"></div>
+      <div data-rq="${esc(v.pid || v.id)}"></div>
+      ${v.server ? `<p class="small">${plink(`properties/${v.pid}/documents`, 'See them on the property file')}</p>` : ''}`;
+    if (sec === 'buyers') {
+      const who = v.people.some(p => p.key === v.who) ? v.who : 'all';
+      return `
+      <h2>Ideal buyers</h2>
+      <p class="small">Brainstorm together, any time. Picked up again at the appraisal. It files to the question bank for the property.</p>
+      <label class="f" for="fvWho">Whose words</label><select id="fvWho"><option value="all">Everyone here</option>${v.people.map(p => `<option value="${esc(p.key)}" ${p.key === who ? 'selected' : ''}>${esc(fvName(p))}</option>`).join('')}</select>
+      <h3>Their story</h3>
+      ${PLISTS.STORY.map(([q, t]) => fvField('fvq_' + q, esc(t), fvAns(v, who, q), { attrs: `data-fvq="${q}"`, rows: 2 })).join('')}
+      <h3>Let's imagine the ideal buyers</h3>
+      ${PLISTS.IDEAL_BUYER.map(([q, t]) => fvField('fvq_' + q, esc(t), fvAns(v, who, q), { attrs: `data-fvq="${q}"`, area: false, max: 500 })).join('')}
+      <h3>Ideal for</h3>
+      ${fvChips('ideal_for', fvList('ideal_for', PLISTS.IDEAL_FOR), fvAns(v, who, 'ideal_for') || [])}
+      ${fvOwn('ideal_for')}`;
+    }
+    // Now or come back?
+    const dms = v.people.filter(p => p.dm && p.here !== false).map(fvName);
+    return `
+      <h2>Now or come back?</h2>
+      <p class="small">${dms.length ? `Decision makers here: <strong>${esc(dms.join(', '))}</strong>.` : 'Mark the decision makers on Who\'s here if it helps.'}</p>
+      <div class="fv-decide">
+        <button class="btn ${v.meta.decision === 'present_now' ? 'primary' : 'ghost'}" type="button" id="fvNow" data-fvdec="present_now">Present now<span class="small">The decision makers are here</span></button>
+        <button class="btn ${v.meta.decision === 'book' ? 'primary' : 'ghost'}" type="button" id="fvBook" data-fvdec="book">Book the presentation<span class="small">Someone is missing</span></button>
+      </div>
+      <div id="fvDecided">${fvDecidedHTML(v)}</div>`;
+  }
+  function fvDecidedHTML(v) {
+    if (v.meta.decision === 'present_now') return `<div class="card tight"><h3>Present now</h3><p class="small">The on-the-spot appraisal report and the staged presentation come in later steps (the appraisal report and presentation mode). For now, talk it through from the property profile.</p>
+      ${v.server ? `<div class="toolbar">${plink(`properties/${v.pid}/records`, 'Open the property profile', 'btn primary')}</div>` : '<p class="small">The property profile opens once the visit is filed to its property.</p>'}</div>`;
+    if (v.meta.decision === 'book') return `<div class="card tight"><h3>Book the presentation</h3>
+      ${fvField('fvNextNote', 'When suits them <span class="opt">(in your words)</span>', v.meta.next_note, { area: false, max: 2000, ph: 'For example Tuesday 4pm, with their son', dict: false })}
+      <p class="small">Booking with calendar links and reminders comes with appointment confirmations (later). You can send their Questions before we meet now.</p>
+      <div class="toolbar"><button class="btn ghost" type="button" id="fvSendQ">Send Questions before we meet</button></div></div>`;
+    return '';
+  }
+  function fvPersonHTML(v, p, n) {
+    const id = 'fvp' + n;
+    return `<div class="card tight fv-person" data-fvperson="${esc(p.key)}">
+      <div class="row2 stack"><div><label class="f" for="${id}n">Name</label><input type="text" id="${id}n" data-fvpf="name" maxlength="200" value="${esc(p.name || '')}" placeholder="As they introduce themselves"></div>
+        <div><label class="f" for="${id}ph">Phone</label><input type="tel" id="${id}ph" data-fvpf="phone" maxlength="40" value="${esc(p.phone || '')}"></div></div>
+      <label class="f" for="${id}e">Email <span class="opt">(optional)</span></label><input type="email" id="${id}e" data-fvpf="email" maxlength="200" value="${esc(p.email || '')}">
+      <div class="ipick fv-toggles"><label class="ichip"><input type="checkbox" data-fvpb="owner" ${p.owner !== false ? 'checked' : ''}><span>Owner</span></label><label class="ichip"><input type="checkbox" data-fvpb="dm" ${p.dm ? 'checked' : ''}><span>Decides</span></label></div>
+      ${fvField(id + 'w', 'Why they want to talk <span class="opt">(only you see this)</span>', fvAns(v, p.key, 'why_talk'), { attrs: `data-fvpq="why_talk"`, rows: 2 })}
+      ${fvField(id + 'h', 'Client heart: motivation, family, worries <span class="opt">(only you see this)</span>', fvAns(v, p.key, 'client_heart'), { attrs: `data-fvpq="client_heart"`, rows: 2 })}
+      ${p.err ? `<p class="small rq-err">${esc(p.err)}</p>` : p.sent && !p.filed ? '<p class="small">Add a name or email to file them to the person record.</p>' : ''}
+    </div>`;
+  }
+  const fvHabitable = base => !!(PLISTS.ROOMS.concat(PLISTS.EXTRA_ROOMS).find(r => r[0] === base) || [0, 0, 1])[2];
+  function fvRoomHTML(v, r) {
+    const open = FVS.openRoom === r.id, cls = (PLISTS.ROOM_CLASSES.find(c => c[0] === r.tim_class) || [])[1];
+    const local = [...RQ.items.values()].filter(x => (r.photo_keys || []).includes(x.key));
+    const head = `<button type="button" class="fv-roomhead" data-fvroom="${esc(r.id)}" aria-expanded="${open}"><strong>${esc(r.label)}</strong><span class="small">${[cls ? 'Your call: ' + cls : fvHabitable(r.base) ? 'Not called yet' : '', (r.features || []).length ? r.features.length + ' feature' + (r.features.length === 1 ? '' : 's') : '', (r.photo_keys || []).length ? r.photo_keys.length + ' photo' + (r.photo_keys.length === 1 ? '' : 's') : '', r.notes ? 'notes' : ''].filter(Boolean).join(' · ') || 'Tap to note it'}</span></button>`;
+    if (!open) return `<div class="card tight fv-room" data-fvroomid="${esc(r.id)}">${head}</div>`;
+    const id = 'fvr_' + r.id.slice(0, 8);
+    return `<div class="card tight fv-room open" data-fvroomid="${esc(r.id)}">${head}
+      <label class="f" for="${id}l">Name of the room</label><input type="text" id="${id}l" data-fvrf="label" maxlength="60" value="${esc(r.label)}">
+      ${fvField(id + 'n', 'Notes', r.notes, { attrs: 'data-fvrf="notes"', rows: 3, max: 20000 })}
+      ${fvHabitable(r.base) ? `<h3>What you call it</h3><p class="small">Your judgement alone. The bedroom count comes only from these calls.</p>
+        ${fvChips('class_' + r.id, PLISTS.ROOM_CLASSES, r.tim_class || '', { one: true })}
+        <div class="toolbar"><button class="btn link" type="button" data-fvclear="${esc(r.id)}" id="${id}cc">Clear your call</button></div>
+        ${fvField(id + 'u', 'How it is used now', r.use_now, { attrs: 'data-fvrf="use_now"', area: false, max: 500, dict: false })}
+        ${fvField(id + 't', 'Your compliance note <span class="opt">(why it isn\'t called a bedroom)</span>', r.tim_note, { attrs: 'data-fvrf="tim_note"', rows: 2 })}
+        ${fvField(id + 'v', 'The vendor\'s view', r.vendor_view, { attrs: 'data-fvrf="vendor_view"', rows: 2 })}` : ''}
+      <h3>Features</h3>
+      ${fvChips('feat_' + r.id, fvList('room_features', PLISTS.ROOM_FEATURES), r.features || [])}
+      ${fvOwn('room_features')}
+      <h3>Photos</h3>
+      <label class="f" for="${id}c">Caption for the next photos <span class="opt">(optional)</span></label><input type="text" id="${id}c" maxlength="200" data-fvcap placeholder="For example the view from the window">
+      <div class="toolbar"><label class="btn ghost fv-file" id="${id}p"><input type="file" accept="image/*" multiple data-fvphoto="${esc(r.id)}" hidden>Add photos</label></div>
+      ${local.length ? `<div class="fv-thumbs">${local.map(x => { const t = rqThumb(x); return t ? `<img src="${esc(t)}" alt="${esc(x.caption || r.label)}">` : ''; }).join('')}</div>` : ''}
+      ${fvField(id + 'm', 'Measurements <span class="opt">(optional, any time)</span>', r.measurements, { attrs: 'data-fvrf="measurements"', area: false, max: 500, dict: false })}
+      ${r.err ? `<p class="small rq-err">${esc(r.err)}</p>` : ''}
+      <div class="toolbar"><button class="btn link" type="button" data-fvarch="${esc(r.id)}" id="${id}x">Take this room off the list</button></div>
+    </div>`;
+  }
+  function fvFactHTML(v, k) {
+    const f = PLISTS.FACTS.find(x => x[0] === k); if (!f) return '';
+    const [, label, kind, list] = f, cur = (v.facts[k] || {}).value;
+    if (kind === 'count') return `<div class="fv-count" data-fvfact="${k}"><span class="fv-count-l">${esc(label)}</span><span class="fv-step-ctl"><button class="btn ghost" type="button" data-fvcnt="-1" aria-label="One fewer ${esc(label)}">−</button><output aria-live="polite">${ijblank(cur) ? 'not noted' : esc(String(cur))}</output><button class="btn ghost" type="button" data-fvcnt="1" aria-label="One more ${esc(label)}">+</button><button class="btn link" type="button" data-fvcnt="0">Clear</button></span></div>`;
+    if (kind === 'chattels') {
+      const have = (cur || []).map(FVC.chattelRead);
+      return `<div class="fv-fact" data-fvfact="${k}"><h3>${esc(label)}</h3>${fvChips(k, fvList(k, list), have.map(x => x[0]))}
+        <div class="fv-chatn">${have.map(([nm, n]) => `<span class="fv-chat" data-fvchat="${esc(nm)}">${esc(nm)} <button class="btn link" type="button" data-fvchn="-1" aria-label="One fewer">−</button><output>${n}</output><button class="btn link" type="button" data-fvchn="1" aria-label="One more">+</button></span>`).join('')}</div>${fvOwn(k)}</div>`;
+    }
+    return `<div class="fv-fact" data-fvfact="${k}"><h3>${esc(label)}</h3>${fvChips(k, fvList(k, list), kind === 'one' ? (cur || '') : (cur || []), { one: kind === 'one' })}${kind === 'one' ? `<div class="toolbar"><button class="btn link" type="button" data-fvoneclear="${k}" id="fvoc_${k}">Clear</button></div>` : ''}${fvOwn(k)}</div>`;
+  }
+
+  function fvWire(v, sec) {
+    const sec$ = $('#fvSec');
+    if (sec === '') {
+      const n = $('#fvNotes'); n.addEventListener('input', () => { v.meta.notes = n.value; fvTouch(v, v.meta); });
+      const as = $('#fvAddrSave');
+      if (as) as.addEventListener('click', () => {
+        const a = $('#fvAddrEdit').value.replace(/\s+/g, ' ').trim();
+        if (a.length < 3) return atBtn(as, 'Type the address.', 'err');
+        v.address = a; if (v.from === 'nothing') v.from = 'nothing';
+        // a property on file at this address (from this phone's list): the visit files there
+        let props = []; try { props = JSON.parse(localStorage.getItem('fvProps') || '[]'); } catch (_) { }
+        const norm = s => String(s || '').toLowerCase().replace(/[,.]/g, ' ').replace(/\s+/g, ' ').trim(), same = props.find(p => norm(p.address) === norm(a));
+        if (same) v.pid = same.id; else if (!v.pid) v.pid = fvUid();
+        fvPut(v).then(() => { $('h1', main()).textContent = a; fvSaveNote(v, as, 'Address saved. '); });
+      });
+    }
+    if (sec === 'who') {
+      const wireP = card => {
+        const p = v.people.find(x => x.key === card.dataset.fvperson); if (!p) return;
+        $$('[data-fvpf]', card).forEach(i => { i.addEventListener('input', () => { p[i.dataset.fvpf] = i.value.trim(); p.wait_until = Date.now() + 6000; fvTouch(v, p); });
+          i.addEventListener('blur', () => { if (p.wait_until) { p.wait_until = 0; fvPut(v).then(() => fvSyncSoon(v, 300)); } }); });
+        $$('[data-fvpb]', card).forEach(i => i.addEventListener('change', () => { if (i.dataset.fvpb === 'owner') p.owner = i.checked; else p.dm = i.checked; fvTouch(v, p, true); }));
+        $$('[data-fvpq]', card).forEach(i => i.addEventListener('input', () => fvSetAns(v, p.key, i.dataset.fvpq, i.value.trim() ? i.value : null)));
+        $$('[data-fvdict]', card).forEach(b => { if (!b._w) { b._w = 1; b.addEventListener('click', () => fvDictate(b)); } });
+      };
+      $$('[data-fvperson]').forEach(wireP);
+      $('#fvAddPerson').addEventListener('click', () => {
+        const p = { key: fvUid(), name: '', email: '', phone: '', owner: true, dm: null, here: true, rev: 0, srev: 0 }; v.people.push(p); fvTouch(v, p, true);
+        const box = $('#fvPeople'); if (v.people.length === 1) box.innerHTML = '';
+        box.insertAdjacentHTML('beforeend', fvPersonHTML(v, p, v.people.length - 1)); const card = box.lastElementChild; wireP(card);
+        $$('[data-fvdict]', card).forEach(b => { b._w = 1; });
+        atBtn($('#fvAddPerson'), 'Added. Type what they tell you; all of it is optional.', 'ok'); $('[data-fvpf="name"]', card).focus();
+      });
+      // the people already on file for this property: tap to say they are here (never typed again, never a second record)
+      if (v.server && navigator.onLine) (async () => {
+        let pps = []; try { const { data, error } = await sb.from('property_people').select('id,legal_name,pref_name,email,phone,role').eq('property_id', v.pid).neq('role', 'former'); if (!error) pps = data || []; } catch (_) { }
+        pps = pps.filter(x => !v.people.some(p => p.pp_id === x.id || (x.email && (p.email || '').toLowerCase() === x.email.toLowerCase())));
+        const box = $('#fvOnFile'); if (!box || !pps.length) return;
+        box.innerHTML = `<h3>Already on file</h3><p class="small">Tap anyone who is here.</p>${pps.map(x => `<div class="card tight fv-carry"><div><strong>${esc(x.pref_name || x.legal_name || x.email)}</strong><br><span class="small">${esc(x.role === 'contact' ? 'In touch' : 'Owner')}</span></div><button class="btn ghost" type="button" data-fvhere="${esc(x.id)}">Here</button></div>`).join('')}`;
+        $$('[data-fvhere]', box).forEach(b => b.addEventListener('click', () => { const x = pps.find(y => y.id === b.dataset.fvhere);
+          v.people.push({ key: fvUid(), name: x.legal_name || x.pref_name || '', email: x.email || '', phone: x.phone || '', owner: x.role !== 'contact', dm: null, here: true, rev: 1, srev: 0 });
+          fvTouch(v, null, true); atBtn(b, 'Added as here.', 'ok'); setTimeout(() => fvDraw(v), 400); }));
+      })();
+    }
+    if (sec === 'rooms') {
+      $$('[data-fvaddroom]').forEach(b => b.addEventListener('click', () => {
+        const base = b.dataset.fvaddroom, def = PLISTS.ROOMS.concat(PLISTS.EXTRA_ROOMS).find(x => x[0] === base);
+        const r = { id: fvUid(), base, label: FVC.nextLabel(v.rooms, base, def[1]), position: v.rooms.reduce((m, x) => Math.max(m, x.position || 0), 0) + 1, notes: '', measurements: '', features: [], use_now: '', tim_class: '', tim_note: '', vendor_view: '', photo_keys: [], archived: false, rev: 0, srev: 0 };
+        v.rooms.push(r); FVS.openRoom = r.id; fvTouch(v, r, true); fvDraw(v);
+        const nb = $(`[data-fvaddroom="${base}"]`); atBtn(nb, `${r.label} added. Note it below.`, 'ok');
+        const el = $(`[data-fvroomid="${r.id}"]`); if (el) el.scrollIntoView({ block: 'start' });
+      }));
+      $$('[data-fvroom]').forEach(b => b.addEventListener('click', () => { FVS.openRoom = FVS.openRoom === b.dataset.fvroom ? null : b.dataset.fvroom; fvDraw(v); const el = $(`[data-fvroomid="${b.dataset.fvroom}"]`); if (el) el.scrollIntoView({ block: 'start' }); }));
+      const card = $('.fv-room.open'); const r = card && v.rooms.find(x => x.id === card.dataset.fvroomid);
+      if (r) {
+        $$('[data-fvrf]', card).forEach(i => i.addEventListener('input', () => { const k = i.dataset.fvrf; r[k] = k === 'label' ? i.value.slice(0, 60) : i.value; if (k === 'label') { const s = $('.fv-roomhead strong', card); if (s) s.textContent = r.label || 'Room'; } fvTouch(v, r); }));
+        const cls = $(`[data-fvchips="class_${CSS.escape(r.id)}"]`, card);
+        if (cls) $$('input', cls).forEach(i => i.addEventListener('change', () => { r.tim_class = i.value; fvTouch(v, r, true); fvBedsPaint(v); }));
+        const cc = $('[data-fvclear]', card); if (cc) cc.addEventListener('click', () => { r.tim_class = ''; $$('input', cls).forEach(i => { i.checked = false; }); fvTouch(v, r, true); fvBedsPaint(v); atBtn(cc, 'Your call on this room is cleared.', 'ok'); });
+        const ft = $(`[data-fvchips="feat_${CSS.escape(r.id)}"]`, card);
+        $$('input', ft).forEach(i => i.addEventListener('change', () => { r.features = $$('input:checked', ft).map(x => x.value); fvTouch(v, r, true); }));
+        const ph = $('[data-fvphoto]', card);
+        ph.addEventListener('change', async () => {
+          const lab = ph.closest('label'), files = Array.from(ph.files || []); if (!files.length) return;
+          if (!v.pid) { v.pid = fvUid(); await fvPut(v); }
+          atBtn(lab, 'Getting them ready...', 'busy');
+          const res = await rqAdd(files, { pid: v.pid, kind: 'Photo', room: r.label.slice(0, 60), caption: ($('[data-fvcap]', card).value || '').trim(), hold: v.server ? null : v.id });
+          r.photo_keys = (r.photo_keys || []).concat(res.keys || []); fvTouch(v, r, true); ph.value = '';
+          setTimeout(() => { fvDraw(v); const l2 = $(`#${lab.id}`); atBtn(l2, res.refused.length ? `${res.added} added. ${res.refused[0]}` : `${res.added} photo${res.added === 1 ? '' : 's'} added. ${fvOffline() || !v.server ? 'Kept on this phone; uploads by itself.' : 'Uploading.'}`, res.refused.length ? 'err' : 'ok'); }, 50);
+        });
+        const ar = $('[data-fvarch]', card); ar.addEventListener('click', () => {
+          if (ar.dataset.armed !== '1') { ar.dataset.armed = '1'; ar.textContent = 'Yes, take it off'; return atBtn(ar, 'It is kept on file, just off the list. Tap again to take it off.', 'ok'); }
+          r.archived = true; FVS.openRoom = null; fvTouch(v, r, true); fvDraw(v); atBtn($('#fvAddRooms button'), `${r.label} taken off the list.`, 'ok');
+        });
+        fvOwnWire(card, (name, it) => { if (name === 'room_features') { r.features = (r.features || []).concat([it]); fvTouch(v, r, true); fvDraw(v); } });
+      }
+    }
+    if (sec === 'property') {
+      $$('[data-fvfact]').forEach(box => {
+        const k = box.dataset.fvfact, f = PLISTS.FACTS.find(x => x[0] === k), kind = f[2], st = v.facts[k] || (v.facts[k] = { value: null, rev: 0, srev: 0 });
+        if (kind === 'count') { $$('[data-fvcnt]', box).forEach(b => b.addEventListener('click', () => { const d = +b.dataset.fvcnt, c = ijblank(st.value) ? 0 : +st.value || 0;
+          st.value = d === 0 ? null : String(Math.max(0, Math.min(99, c + d))); $('output', box).textContent = ijblank(st.value) ? 'not noted' : st.value; fvTouch(v, st, true); })); return; }
+        fvWireFactsOnly(v, box);
+      });
+    }
+    if (sec === 'documents') {
+      $$('[data-fvdoc]').forEach(inp => inp.addEventListener('change', async () => {
+        const lab = inp.closest('label'), files = Array.from(inp.files || []); if (!files.length) return;
+        if (!v.pid) { v.pid = fvUid(); await fvPut(v); $('[data-rq]', sec$).dataset.rq = v.pid; }
+        atBtn(lab, 'Getting them ready...', 'busy');
+        const res = await rqAdd(files, { pid: v.pid, kind: inp.dataset.fvdoc, hold: v.server ? null : v.id }); inp.value = '';
+        atBtn(lab, res.refused.length ? `${res.added} added. ${res.refused[0]}` : `${res.added} added. ${fvOffline() || !v.server ? 'Kept on this phone; uploads by itself.' : 'Uploading.'}`, res.refused.length ? 'err' : 'ok');
+      }));
+    }
+    if (sec === 'buyers') {
+      const who = () => $('#fvWho').value;
+      $('#fvWho').addEventListener('change', () => { v.who = who(); fvPut(v); fvDraw(v); });
+      $$('[data-fvq]').forEach(i => i.addEventListener('input', () => fvSetAns(v, who() === 'all' ? null : who(), i.dataset.fvq, i.value.trim() ? i.value : null)));
+      const ch = $('[data-fvchips="ideal_for"]');
+      $$('input', ch).forEach(i => i.addEventListener('change', () => fvSetAns(v, who() === 'all' ? null : who(), 'ideal_for', $$('input:checked', ch).map(x => x.value))));
+      fvOwnWire(sec$, (name, it) => { const cur = fvAns(v, who(), 'ideal_for') || []; fvSetAns(v, who() === 'all' ? null : who(), 'ideal_for', cur.concat([it])); fvDraw(v); });
+    }
+    if (sec === 'finish') {
+      $$('[data-fvdec]').forEach(b => b.addEventListener('click', () => {
+        v.meta.decision = v.meta.decision === b.dataset.fvdec ? '' : b.dataset.fvdec; fvTouch(v, v.meta, true);
+        $$('[data-fvdec]').forEach(x => { x.classList.toggle('primary', x.dataset.fvdec === v.meta.decision); x.classList.toggle('ghost', x.dataset.fvdec !== v.meta.decision); });
+        $('#fvDecided').innerHTML = fvDecidedHTML(v); fvWireDecided(v);
+        fvSaveNote(v, b, v.meta.decision ? '' : 'Choice cleared. ');
+      }));
+      fvWireDecided(v);
+    }
+  }
+  function fvWireDecided(v) {
+    const nn = $('#fvNextNote'); if (nn) nn.addEventListener('input', () => { v.meta.next_note = nn.value; fvTouch(v, v.meta); });
+    const sq = $('#fvSendQ'); if (sq) sq.addEventListener('click', () => {
+      if (!v.server) return atBtn(sq, 'The visit has to be filed to its property first. Add the address and check you have signal.', 'err');
+      if (fvOffline()) return atBtn(sq, 'No signal. Sending their questions needs a connection.', 'err');
+      viewPrelistingAgent(null, v.pid);
+    });
+  }
+  function fvRedrawFact(v, k) { const box = $(`[data-fvfact="${k}"]`); if (!box) return; box.outerHTML = fvFactHTML(v, k); const nb = $(`[data-fvfact="${k}"]`); if (nb) fvWireFactsOnly(v, nb); }
+  function fvWireFactsOnly(v, box) {
+    const k = box.dataset.fvfact, f = PLISTS.FACTS.find(x => x[0] === k), kind = f[2], st = v.facts[k] || (v.facts[k] = { value: null, rev: 0, srev: 0 });
+    const chips = $('[data-fvchips]', box); if (!chips) return;
+    $$('input', chips).forEach(i => i.addEventListener('change', () => { const on = $$('input:checked', chips).map(x => x.value);
+      if (kind === 'one') st.value = on[0] || null; else if (kind === 'chattels') { const had = new Map((st.value || []).map(FVC.chattelRead)); st.value = on.map(nm => FVC.chattelText(nm, had.get(nm) || 1)); } else st.value = on;
+      fvTouch(v, st, true); if (kind === 'chattels') fvRedrawFact(v, k); }));
+    $$('[data-fvchat]', box).forEach(c => $$('[data-fvchn]', c).forEach(b => b.addEventListener('click', () => {
+      const nm = c.dataset.fvchat; st.value = (st.value || []).map(s => { const [a, n] = FVC.chattelRead(s); return a === nm ? FVC.chattelText(a, Math.max(1, Math.min(99, n + +b.dataset.fvchn))) : s; });
+      $('output', c).textContent = FVC.chattelRead(st.value.find(s => FVC.chattelRead(s)[0] === nm))[1]; fvTouch(v, st, true); })));
+    const oc = $('[data-fvoneclear]', box); if (oc) oc.addEventListener('click', () => { $$('input', chips).forEach(i => { i.checked = false; }); st.value = null; fvTouch(v, st, true); atBtn(oc, 'Cleared.', 'ok'); });
+    fvOwnWire(box, (name, it) => { if (kind === 'one') st.value = it; else st.value = (st.value || []).concat([kind === 'chattels' ? FVC.chattelText(it, 1) : it]); fvTouch(v, st, true); fvRedrawFact(v, k); });
+  }
+  function fvOwnWire(scope, after) {
+    $$('[data-fvown]', scope).forEach(b => { if (b._w) return; b._w = 1; b.addEventListener('click', async () => {
+      const name = b.dataset.fvown, inp = $(`[data-fvown-in="${CSS.escape(name)}"]`, b.closest('.fv-own')), it = (inp.value || '').replace(/\s+/g, ' ').trim();
+      const res = await fvAddExtra(name, it, b); if (!res) return; inp.value = ''; const keep = b.id; after(name, it); const nb = keep && document.getElementById(keep); if (nb && nb !== b) atBtn(nb, res.msg, res.kind);   // the page redrew: the message follows the button
+    }); });
+  }
+  function fvBedsPaint(v) { const el = $('#fvBeds'); if (!el) return; const nb = FVC.bedrooms(v.rooms), w = FVC.wording(v.rooms);
+    el.innerHTML = `<strong>Bedrooms, your call:</strong> ${nb == null ? 'not called yet. Make your call on each bedroom below.' : esc(String(nb))}${w ? `<br><span class="small">On the profile and the listing: "${esc(w)}"</span>` : ''}`; }
+
+  // the property file's First visit tile: this property's visits, and a way to start one here
+  function fvTileHTML(pid, visits) {
+    return `<div class="card ptile" id="fvTile"><h3>First visit</h3>
+      ${visits.length ? visits.map(x => `<div class="fact"><div class="v" style="font-weight:400;display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><span>${esc(fmtDT(x.started_at))}${x.decision ? ` <span class="small">${x.decision === 'present_now' ? 'Presented now' : 'Presentation to book'}</span>` : ''}</span><button class="btn link" type="button" data-fvopen="${esc(x.id)}">Open</button></div></div>`).join('') : '<p class="small">Rapport, not detail: loose notes, rooms, photos and their story.</p>'}
+      <div class="toolbar"><button class="btn ghost" type="button" id="fvStartHere">Start a first visit here</button></div></div>`;
+  }
+  function fvTileWire(pid) {
+    $$('#fvTile [data-fvopen]').forEach(b => b.addEventListener('click', () => viewFirstVisit(b.dataset.fvopen)));
+    const s = $('#fvStartHere'); if (s) s.addEventListener('click', () => viewFirstVisitStart(pid));
+  }
+
   /* ═════════════════ PORTAL (PORTAL-PLAN.md, phase P1): an address for every page, and a footer menu ═════════════════
      Only when the app runs as the portal. One table of addresses (ROUTES) opens each page; opening a page any other way (a
      button, a Needs you item) goes through the same view functions, which are wrapped so each sets its own address
@@ -8626,6 +9207,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     viewSignTurn: async (sid, signer) => { const r = okId(signer) ? await rowOf('offer_signings', sid, 'id,property_id,offer_id') : null; return r && okId(r.offer_id) ? under(r.property_id, `offers/${r.offer_id}/signing/${sid}/turn/${signer}`) : null; },
     viewRoundPresent: async oid => okId(oid) ? under(await pidOf('property_offers', oid), `offers/${oid}/present`) : null,
     viewInspectStart: () => 'processes/inspection',
+    viewFirstVisitStart: pid => okId(pid) ? null : 'processes/first-visit',   // from a property: the visit it starts sets its own address
+    viewFirstVisit: () => null,   // sets its own address where it is drawn (fvAddress)
     viewTranslations: () => APP_TRANSLATION ? 'translations' : null,
     // these set their own address where they are drawn: viewTable (tShow), viewInspection (inspDraw), viewInspectionFinish
     viewTable: () => null, viewInspection: () => null, viewInspectionFinish: () => null,
@@ -8697,6 +9280,11 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     R('processes/appraisal', 'viewPrelistingAgent', () => RAW.viewPrelistingAgent(null)),
     R('processes/agreement', 'viewTable', () => RAW.viewTable(null)),
     R('processes/inspection', 'viewInspectStart', () => RAW.viewInspectStart()),
+    // LW1: the first visit. A visit whose property isn't on file yet lives under Processes; once filed, under its property
+    R('processes/first-visit', 'viewFirstVisitStart', () => RAW.viewFirstVisitStart()),
+    R('processes/first-visit/:id(?:/(who|rooms|property|documents|buyers|finish))?', 'viewFirstVisit', (v, s) => RAW.viewFirstVisit(v, s)),
+    R('properties/:id/first-visit/new', 'viewFirstVisitStart', p => RAW.viewFirstVisitStart(p)),
+    R('properties/:id/first-visit/:id(?:/(who|rooms|property|documents|buyers|finish))?', 'viewFirstVisit', (p, v, s) => RAW.viewFirstVisit(v, s)),
     R('processes/offer', 'viewOfferPick', () => RAW.viewOfferPick()),
     R('processes/forms', 'forms', () => viewPortalForms()),
     R('appraisals', 'appraisals', () => viewPortalAppraisals()),
@@ -8816,7 +9404,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   }
   // after sign-in: the address on screen, or the one asked for before the sign-in link, or an unfinished inspection, or Home
   async function portalBoot() {
-    inspSyncAll();
+    inspSyncAll(); fvSyncAll();
     let path = portalPath();
     const back = portalReturnTake();
     if (!path && back) { path = back; try { history.replaceState({ portal: path }, '', PORTAL_BASE + path); } catch (_) { } }
@@ -8853,7 +9441,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <p class="small">Start something new. Each one carries on at its property's own page.</p>
       <h2 id="pProcList">Listing, in order</h2>
       <div class="home-tiles">
-        <div class="home-tile soon" id="soonFirst" aria-disabled="true"><span class="kick">Coming soon</span><span class="ttl">First visit</span><span class="txt">Loose notes, photos and client details from the walk-through and the conversation. Nothing compulsory. Not built yet.</span></div>
+        <button class="home-tile" type="button" id="homeFirst"><span class="kick">At the property</span><span class="ttl">First visit</span><span class="txt">Loose notes, rooms, photos and client details from the walk-through and the conversation. Nothing compulsory, and it works without signal.</span><span class="go">Start or carry on →</span></button>
         <div class="home-tile soon" id="soonReport" aria-disabled="true"><span class="kick">Coming soon</span><span class="ttl">Appraisal report</span><span class="txt">Your written opinion of price with its evidence, from the property profile. Not built yet.</span></div>
         ${TILE_BEGIN}
         ${TILE_INSPECT}
@@ -8867,7 +9455,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         <div class="home-tile soon" id="soonDesk" aria-disabled="true"><span class="kick">Coming soon</span><span class="ttl">Desktop analysis</span><span class="txt">For someone weighing up the market who hasn't decided to sell: a lighter look from the information they supply, less in depth than a market value opinion. Not built yet.</span></div>
       </div>
     </div>`;
-    [['homeBegin', 'processes/appraisal'], ['homeInspect', 'processes/inspection'], ['homeAgree', 'processes/agreement'], ['homeOffer', 'processes/offer'], ['homeForms', 'processes/forms']]
+    [['homeFirst', 'processes/first-visit'], ['homeBegin', 'processes/appraisal'], ['homeInspect', 'processes/inspection'], ['homeAgree', 'processes/agreement'], ['homeOffer', 'processes/offer'], ['homeForms', 'processes/forms']]
       .forEach(([id, p]) => $('#' + id).addEventListener('click', () => portalNav(p)));
     top();
   }
@@ -8976,7 +9564,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     portalMount();
     Object.assign(RAW, { viewAgentDashboard, viewProperty, viewAgentDetail, viewPrelistingAgent, viewAml, viewVariation, viewVarIssue, viewVarTogether, viewFormAgent,
       viewOfferAgent, viewOfferCorrect, viewOfferNew, viewOfferPick, viewBlankMap, viewClauseLibrary, viewDraftReview, viewInspectStart, viewTranslations,
-      viewTable, viewInspection, viewInspectionFinish, viewSignRelease, viewSigning, viewSignTurn, viewRoundPresent });
+      viewTable, viewInspection, viewInspectionFinish, viewSignRelease, viewSigning, viewSignTurn, viewRoundPresent, viewFirstVisitStart, viewFirstVisit });
     viewAgentHome = portalWrap('viewAgentHome', viewPortalHome);
     viewAgentDashboard = portalWrap('viewAgentDashboard', viewAgentDashboard); viewProperty = portalWrap('viewProperty', viewProperty);
     viewAgentDetail = portalWrap('viewAgentDetail', viewAgentDetail); viewPrelistingAgent = portalWrap('viewPrelistingAgent', viewPrelistingAgent);
@@ -8986,6 +9574,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     viewOfferPick = portalWrap('viewOfferPick', viewOfferPick); viewBlankMap = portalWrap('viewBlankMap', viewBlankMap); viewClauseLibrary = portalWrap('viewClauseLibrary', viewClauseLibrary);
     viewDraftReview = portalWrap('viewDraftReview', viewDraftReview); viewInspectStart = portalWrap('viewInspectStart', viewInspectStart); viewTranslations = portalWrap('viewTranslations', viewTranslations);
     viewTable = portalWrap('viewTable', viewTable); viewInspection = portalWrap('viewInspection', viewInspection); viewInspectionFinish = portalWrap('viewInspectionFinish', viewInspectionFinish);
+    viewFirstVisitStart = portalWrap('viewFirstVisitStart', viewFirstVisitStart); viewFirstVisit = portalWrap('viewFirstVisit', viewFirstVisit);
     viewSignRelease = portalWrap('viewSignRelease', viewSignRelease); viewSigning = portalWrap('viewSigning', viewSigning); viewSignTurn = portalWrap('viewSignTurn', viewSignTurn); viewRoundPresent = portalWrap('viewRoundPresent', viewRoundPresent);
   }
   // the onboarding app's own links (an offer form, a signing link, a lawyer's link) always open there, never in the portal

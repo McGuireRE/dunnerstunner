@@ -890,4 +890,47 @@ body.apv-present main { max-width: 760px; padding-bottom: 48px; }
   .apv-tbl tr, .apv-wave { break-inside: avoid; }
   .apv-doc h2 { break-after: avoid; }
 }
+/* LW1: the first visit. Phone first: everything wraps, nothing scrolls sideways at 390 px. */
+.fv h2 { margin-top: 18px; }
+.fv-sync { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; margin: 8px 0 12px; font-size: 15px; background: var(--surface); }
+.fv-sync .toolbar { margin: 0; }
+.fv-sync[data-state="ok"] { border-color: var(--ok); }
+.fv-sync[data-state="err"] { border-color: var(--accent); }
+.fv-sync-t { flex: 1 1 200px; min-width: 0; overflow-wrap: anywhere; }
+.fv-steps { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; }
+.fv-step { font: inherit; font-size: 14px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 999px; padding: 7px 12px; min-height: 40px; cursor: pointer; }
+.fv-step.on { border-color: var(--accent); background: var(--accent-soft); font-weight: 600; }
+.fv-field textarea, .fv-field input[type=text] { width: 100%; box-sizing: border-box; }
+.fv-dict { margin-top: 2px; }
+.fv-dict .btn.on { font-weight: 700; }
+.fv-carry { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+.fv-carry > div { min-width: 0; flex: 1 1 180px; overflow-wrap: anywhere; }
+.fv-addrooms { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+.fv-chipbtn { min-height: 44px; }
+.fv-more summary { cursor: pointer; padding: 6px 0; font-weight: 500; }
+.fv-room { padding: 0; }
+.fv-roomhead { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; text-align: left; font: inherit; color: inherit; background: none; border: 0; padding: 12px 14px; cursor: pointer; min-height: 48px; }
+.fv-room.open { padding: 0 14px 12px; }
+.fv-room.open .fv-roomhead { margin: 0 -14px; width: calc(100% + 28px); }
+.fv-thumbs { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+.fv-thumbs img { width: 72px; height: 72px; object-fit: cover; border-radius: 8px; }
+.fv-file { cursor: pointer; display: inline-flex; align-items: center; min-height: 44px; }
+.fv-docs { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+.fv-group summary { cursor: pointer; padding: 4px 0; }
+.fv-fact h3 { margin: 14px 0 6px; font-size: 16px; }
+.fv-count { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.fv-count-l { flex: 1 1 140px; min-width: 0; }
+.fv-step-ctl { display: inline-flex; align-items: center; gap: 6px; }
+.fv-step-ctl .btn.ghost { min-width: 44px; min-height: 44px; padding: 0 10px; }
+.fv-step-ctl output { min-width: 64px; text-align: center; font-weight: 600; }
+.fv-chatn { display: flex; flex-wrap: wrap; gap: 6px 12px; margin: 8px 0; }
+.fv-chat { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--line); border-radius: 8px; padding: 2px 8px; font-size: 14.5px; }
+.fv-own { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 8px 0; }
+.fv-own input { flex: 1 1 160px; min-width: 0; }
+.fv-own .toolbar { margin: 0; }
+.fv-decide { display: grid; grid-template-columns: 1fr; gap: 10px; margin: 10px 0; }
+.fv-decide .btn { display: flex; flex-direction: column; align-items: flex-start; text-align: left; min-height: 64px; white-space: normal; }
+.fv-decide .btn .small { font-weight: 400; color: inherit; }
+@media (min-width: 640px) { .fv-decide { grid-template-columns: 1fr 1fr; } }
+.fv-beds { margin: 8px 0; }
 </style>

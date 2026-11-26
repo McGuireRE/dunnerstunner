@@ -22,6 +22,11 @@ LW0. The shared records map, names and order (Tim's central plan, "Listing workf
    review). See "LW0. The shared records" below. The two P1 follow-ups (a refreshed form stays in signing mode; plainer "Couldn't save"
    wording) are done in it.
 
+LW1. The First visit page (Tim's central plan, the LW1 bullets, "Rooms, room by room", "Property description fields, from Tim's own
+   forms", "Ideal buyers page", 25 to 27 November 2026; storyboard "First visit page"; branch `lw1-first-visit`, from main 39fa6e6). Status:
+   Built, awaiting review and Tim's approval (needs migration 031 applied after review, its rollback test run on the live project first).
+   Replaces GT1 and IP1. See "LW1. The First visit" below.
+
 0000. Offers fixes 3 (Tim's decisions of 25 and 26 November 2026; branch `offers-fixes-3`, on main 92ebdd3). Status: Built, awaiting
    review and Tim's approval (needs migration 026, rollback test first, and offer-sign redeployed). (1) Confirm the agreement while
    frozen is held, not locked, sealed or dated; nothing emailed; completed or discarded once unfrozen. (2) Going back to the last
@@ -130,6 +135,55 @@ Ids in addresses are the database ids. Addresses never contain a name, email or 
 | P4. People | onboarding-core | People pages on the `crm_*` tables, linked to properties |
 | P5. Import and feeds | onboarding-core | Import the cleaned LockedOn contacts; feeds out to LockedOn and ActivePipe |
 | P6. Assessments | to be agreed | An improvements and preparation assessment, and a desktop analysis. Design still to be agreed with Tim |
+
+### LW1. The First visit
+
+Status: Built 27 November 2026 on branch `lw1-first-visit` (from main 39fa6e6), awaiting review and Tim's approval. Migration 031
+(`migrations/031_first_visit.sql`) is written and tested in a rollback block on a local stand-in built through 028 (no capitals); it is NOT
+applied. Before it is applied its rollback test (`tests/first-visit-rollback.js` with `.sql`) runs on the live project. Tests:
+`first-visit.test.js` (the whole flow in the portal at 390 px, light and dark), `fv-core.test.js` (the lists and the rules, no browser),
+`portal-routes.test.js` updated (First visit is a real tile now; `processes/first-visit` opens directly).
+
+The page (Tim, 25 to 27 November 2026): rapport, not detail; nothing is compulsory. Addresses: `processes/first-visit` (the start),
+`processes/first-visit/<visit>` for a visit whose property isn't on file yet, then `properties/<id>/first-visit/<visit>`, each with an
+optional step (`who`, `rooms`, `property`, `documents`, `buyers`, `finish`); `properties/<id>/first-visit/new` starts one there. Also a
+"First visit" tile on the property file and on Processes ("Listing, in order", first).
+1. Start: from an address (a property on file is offered first, so it is never filed twice; the phone keeps the list of addresses for
+   working without signal), from an appointment (an open Questions before we meet: its address and person come with it), or from nothing
+   (the address can be added whenever; until then everything stays on the phone). Tim's own notes on the visit (agent only).
+2. Who's here: name, phone, email, owner or not, who decides; why they want to talk and the client heart per person (agent only). Each
+   person goes to the property's people through `merge_property_person` with the informal 'appraisal' source (a name typed at the door never
+   replaces a checked one; the same email is the same person) and so to one person record and the property and person link (LW0). People
+   already on file are offered to tap as "here".
+3. Room by room: tap to add (living, dining, kitchen, bedroom, bathroom, ensuite, toilet, laundry, garage; "More spaces" from Appendix D).
+   Each room: notes (typed or dictated), features from a tap list, photos (with a caption) into `property_documents` with the room,
+   measurements (optional, any time: Tim's answer on the storyboard), and for habitable rooms Tim's call (bedroom, study, office, living,
+   studio, sleepout, flexible room), how it is used now, his compliance note and the vendor's view. The bedroom count and the wording ("3
+   bedrooms plus study and sleepout") come only from his calls: written to the profile (pBed and the new `rooms_summary`, source tim,
+   "First visit: your call on each room") once he has called a room a bedroom, or made a call on every room tapped as a bedroom.
+4. The property: Appendix D as tap lists (property type, tenure, counts, build, extra spaces, standard and featured chattels with counts,
+   chattels to be removed, outdoor features, outlook), each saved to the property profile as Tim's own entry ("First visit"), with the
+   disclosures check's rule (an official title figure holds). Tim can add his own items to any list (`tap_list_extras`).
+5. Documents: title, plans, LIM, CCC or anything else, snapped or chosen, into the one store; read later by the existing reader (AI suggests,
+   Tim ticks).
+6. Ideal buyers (Appendix F): their story, the ideal buyers, and "ideal for" tags, for everyone there or one person, into the question bank
+   (source 'first_visit', Tim's notes, never the vendor's own words). The AI summary in Tim's voice is LW3.
+7. Now or come back?: "Present now" (a clear placeholder: the report and presentation are LW3 and LW4; the property profile opens) or "Book
+   the presentation" (when suits them, in his words; "Send Questions before we meet" opens the existing page). Booking itself is LW5.
+Offline: every change is kept on the phone first (IndexedDB `mre-fv`) and uploads by itself when the signal returns, each item with its own
+key so nothing is filed twice; photos and documents wait in the upload queue until the visit's property is on file (moved to the property
+already on file at the same address if the phone made its own). The state is said plainly at the top ("Saved on this phone. 3 changes upload
+by themselves when the signal returns", "All saved to the property", or what didn't save, with Send now). Dictation is the browser's own
+speech to text where it has it, else the keyboard's microphone; nothing is recorded, no AI. Messages at the button throughout.
+Shared code: the lists are `src/property-lists.js` (for the profile, appraisal, agreement and listing to reuse); the rules are
+`src/fv-core.js` (the same as the database's). The upload queue gained a caption, a hold for a visit not yet filed, and the keys it added.
+Later passes left as hooks (FV_HOOKS in app.js): GT2 recording with consent, GT3 AI field suggestions.
+
+Open for Tim: whether the first visit's chattel lists should also fill the agreement's chattels (today they are separate profile facts,
+`chattels_std`, `chattels_featured`, `chattels_removed`; the agreement keeps its own list); whether people at the door default to owners (they
+do, with an "Owner" tick to untick); "Plans" are filed as Building plans (he can change the kind on the property file). Not covered: the
+portal itself still needs signal to open after a reload (the visit is safe on the phone and carries on once it opens); a photo's caption is
+set as it is added (later changes on the property file).
 
 ### LW0. The shared records
 

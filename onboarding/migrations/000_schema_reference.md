@@ -542,3 +542,18 @@ signatures and fingerprints are not touched.
 - Rollback test: `tests/shared-records-rollback.sql` (built by `tests/shared-records-rollback.js`); quick local stand-in
   `tests/lw0-standin-030.sql` (run on the stand-in built through 030: brings every table, policy and helper 028 builds on to its live
   definition, including 012's own `agent_inspection_save` and the questionnaire's triggers). Applying 028 needs 030 first.
+
+## 031 The First visit (LW1, 27 November 2026; tested in a rollback block on a local PostgreSQL stand-in through 028, NOT yet on the live project)
+- `first_visits` (id made on the phone, property_id, started_from address/appointment/nothing, prelisting_id, notes, decision present_now/book,
+  decision_at, next_note, started_at, created_by), `first_visit_people` (id made on the phone, first_visit_id, property_person_id, contact_id,
+  decision_maker, here), `property_rooms` (id made on the phone, property_id, first_visit_id, base, label, position, notes, measurements,
+  features, use_now, tim_class bedroom/study/office/living/studio/sleepout/flexible, tim_note, vendor_view, photo_keys (property_documents
+  client keys), archived_at), `tap_list_extras` (list, item, archived_at). RLS on all four: Tim reads; nobody writes directly; vendors none.
+- `profile_keys` gains rooms_summary, dwellings, living_dining, extra_spaces, ensuites, toilets, garaging, parking_spaces, cladding, roofing,
+  insulation, flooring, glazing, levels, chattels_std, chattels_featured, chattels_removed, outdoor, outlook. `qa_questions` gains why_talk and
+  client_heart (not vendor_visible), story_* (six), ib_* (eight) and ideal_for.
+- Functions (agent only): `agent_fv_start(id, property, address, from, prelisting, started_at)`, `agent_fv_set(id, patch)`,
+  `agent_fv_person(visit, key, name, email, phone, owner, decision_maker, here)`, `agent_fv_answer(visit, person, question, value)`,
+  `agent_fv_room(visit, room)`, `agent_fv_fact(visit, key, value)`, `agent_tap_extra(list, item, on)`. Internal: `fv_rooms_profile`
+  (pBed and rooms_summary from Tim's calls only), `fv_fact_keys`, `fv_today`, `room_class_ok`.
+

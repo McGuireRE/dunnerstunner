@@ -47,9 +47,9 @@ function personSync(ap,old){ const ag=(DB.agreements||[]).find(x=>x.id===ap.agre
 // only what changed, so the result is the same as the triggers' (same choice rules: Tim's own entries chosen and ticked, an
 // agreement's value chosen only when nothing ticked stands, a record never replacing a person's entry, a cleared value handing over to
 // the newest other one). Nobody writes these tables directly; vendors read only their own profile (never Relab) and their own answers.
-const PROFILE_KEYS=['pType','pYear','pBed','pBath','pFloor','pLand','pBuild','pPark','pHeat','pLove','chattels','chatOther','title_ref','legal_description','title_type','capital_value','land_value','improvements_value','valuation_ref','rates_council','rates_orc','zone','land_use','owners_relab'];
-const PROFILE_LABEL={pType:'Type of property',pYear:'Year built',pBed:'Bedrooms',pBath:'Bathrooms',pFloor:'Floor area (m²)',pLand:'Land area (m²)',pBuild:'Construction',pPark:'Parking',pHeat:'Heating',pLove:'What they love about it',chattels:'Chattels',chatOther:'Other chattels',title_ref:'Title reference',legal_description:'Legal description',title_type:'Title type',capital_value:'Capital value',land_value:'Land value',improvements_value:'Value of improvements',valuation_ref:'Valuation reference',rates_council:'City or district rates',rates_orc:'Regional rates',zone:'District plan zone',land_use:'Land use',owners_relab:'Owners (Relab)'};
-const SHARED_TABLES=['property_fact_values','property_profile','person_links','crm_contacts','crm_contact_methods','crm_property_links','property_person_roles','qa_answers','qa_questions','profile_keys','shared_record_log'];
+const PROFILE_KEYS=['rooms_summary','dwellings','living_dining','extra_spaces','ensuites','toilets','garaging','parking_spaces','cladding','roofing','insulation','flooring','glazing','levels','chattels_std','chattels_featured','chattels_removed','outdoor','outlook','pType','pYear','pBed','pBath','pFloor','pLand','pBuild','pPark','pHeat','pLove','chattels','chatOther','title_ref','legal_description','title_type','capital_value','land_value','improvements_value','valuation_ref','rates_council','rates_orc','zone','land_use','owners_relab'];
+const PROFILE_LABEL={rooms_summary:'Rooms (your wording)',dwellings:'Dwellings',living_dining:'Living and dining areas',extra_spaces:'Extra spaces',ensuites:'Ensuites',toilets:'Toilets',garaging:'Garaging',parking_spaces:'Parking spaces',cladding:'Cladding',roofing:'Roofing',insulation:'Insulation',flooring:'Flooring',glazing:'Glazing',levels:'Levels',chattels_std:'Standard chattels',chattels_featured:'Featured chattels',chattels_removed:'Chattels to be removed before settlement',outdoor:'Outdoor features',outlook:'Outlook',pType:'Type of property',pYear:'Year built',pBed:'Bedrooms',pBath:'Bathrooms',pFloor:'Floor area (m²)',pLand:'Land area (m²)',pBuild:'Construction',pPark:'Parking',pHeat:'Heating',pLove:'What they love about it',chattels:'Chattels',chatOther:'Other chattels',title_ref:'Title reference',legal_description:'Legal description',title_type:'Title type',capital_value:'Capital value',land_value:'Land value',improvements_value:'Value of improvements',valuation_ref:'Valuation reference',rates_council:'City or district rates',rates_orc:'Regional rates',zone:'District plan zone',land_use:'Land use',owners_relab:'Owners (Relab)'};
+const SHARED_TABLES=['first_visits','first_visit_people','property_rooms','tap_list_extras','property_fact_values','property_profile','person_links','crm_contacts','crm_contact_methods','crm_property_links','property_person_roles','qa_answers','qa_questions','profile_keys','shared_record_log'];
 const QA_PL={spoke:'other_agents_spoken',spokeFeel:'other_agents_feel',choose:'agent_choice_same_fee',chooseWhy:'agent_choice_why',ideas:'plan_ideas',conf:'plan_confidence',likeMost:'plan_like_most',easyYes:'easy_yes',meet:'meeting_times'};
 const FV=()=>(DB.property_fact_values||=[]), PRF=()=>(DB.property_profile||=[]), CT=()=>(DB.crm_contacts||=[]), CM=()=>(DB.crm_contact_methods||=[]), PLK=()=>(DB.person_links||=[]), CPL=()=>(DB.crm_property_links||=[]), QA=()=>(DB.qa_answers||=[]);
 const recKind=s=>['council','reinz','relab','title','reader'].includes(s)?'record':'person';
@@ -191,6 +191,75 @@ function sharedSync(){
         profileRecord(dc.property_id,k,v,srcOf(x),dc.id,lwToday(),tk?dc.kind+(x.source?' ('+x.source+')':''):'From the '+String(dc.kind).toLowerCase()+', not checked',null,'agent',!tk||LW0_BACKFILL?'never':'official'); }); }); });
   seen._done=1; LW0_BACKFILL=false;
 }
+// ── LW1, the first visit (mirrors migrations/031_first_visit.sql) ──
+// first_visits, first_visit_people, property_rooms and tap_list_extras: Tim reads them; nobody writes them directly (they are in
+// SHARED_TABLES above); vendors read none. The functions: who's here through mergePerson (the informal 'appraisal' source) and LW0's
+// person links; answers to the question bank (source 'first_visit', Tim's notes, never the vendor's words); rooms, with the bedroom
+// count and the room wording from Tim's calls only; tap-list facts as Tim's own entries ("First visit", the check's rule). With no
+// signal (mockOffline, or the browser offline) every call fails as it would.
+const FVQ=['goals','timing','timing_when','reason_selling','motivation','price_thoughts','appraised_before','plans_after','also_buying','best_of_home','best_of_area','other_agents_spoken','other_agents_feel','preferred_agent','agent_choice_same_fee','agent_choice_why','plan_ideas','plan_confidence','plan_like_most','easy_yes','meeting_times','privacy','own_words','tim_price_fit','tim_motivation_fit','tim_time_fit','tim_notes',
+  'why_talk','client_heart','story_bought','story_surprised','story_setting','story_layout','story_location','story_use','ib_stage','ib_pets','ib_hobbies','ib_children','ib_mobility','ib_vehicles','ib_leanings','ib_situation','ideal_for'];
+const FV_FACTS=['pType','title_type','dwellings','living_dining','pBath','ensuites','toilets','garaging','parking_spaces','cladding','roofing','insulation','flooring','glazing','levels','extra_spaces','chattels_std','chattels_featured','chattels_removed','outdoor','outlook'];
+const FVT=()=>(DB.first_visits||=[]), FVP=()=>(DB.first_visit_people||=[]), PRM=()=>(DB.property_rooms||=[]), TLE=()=>(DB.tap_list_extras||=[]);
+const ROOM_CLASS=['bedroom','study','office','living','studio','sleepout','flexible'];
+function fvRoomsProfile(pid,vid,by){ const L=PRM().filter(r=>r.property_id===pid&&!r.archived_at), nb=L.filter(r=>r.tim_class==='bedroom').length;
+  if(nb===0&&(L.some(r=>r.base==='bedroom'&&!r.tim_class)||!L.some(r=>r.base==='bedroom'||r.tim_class))) return;
+  const ONE={study:'study',office:'office',studio:'studio',sleepout:'sleepout',flexible:'flexible room'}, MANY={study:'studies',office:'offices',studio:'studios',sleepout:'sleepouts',flexible:'flexible rooms'};
+  const g={}; L.slice().sort((a,b)=>(a.position||0)-(b.position||0)).forEach(r=>{ if(ONE[r.tim_class]) g[r.tim_class]=(g[r.tim_class]||0)+1; });
+  const parts=Object.keys(g).map(c=>g[c]>1?g[c]+' '+MANY[c]:ONE[c]), extra=!parts.length?'':parts.length===1?parts[0]:parts.slice(0,-1).join(', ')+' and '+parts[parts.length-1];
+  profileRecord(pid,'pBed',String(nb),'tim',vid,lwToday(),'First visit: your call on each room',null,by,'check');
+  profileRecord(pid,'rooms_summary',nb+' bedroom'+(nb===1?'':'s')+(extra?' plus '+extra:''),'tim',vid,lwToday(),'First visit: your call on each room',null,by,'check'); }
+function fvRpc(name,a,me){
+  if(offline()) return bad('Failed to fetch');
+  if(!me||!AGENTS.includes(me.email)) return bad('Agent only');
+  const nrm=x=>String(x||'').replace(/\s+/g,' ').trim().toLowerCase();
+  if(name==='agent_fv_start'){ if(!a.p_id) return bad('The visit needs its own key'); const ex=FVT().find(v=>v.id===a.p_id); if(ex) return ok({id:ex.id,property_id:ex.property_id,created_property:false,matched:false,existing:true});
+    if(!['address','appointment','nothing'].includes(a.p_from||'nothing')) return bad('Start from an address, an appointment or nothing');
+    const pl=a.p_prelisting?(DB.prelistings||[]).find(x=>x.id===a.p_prelisting):null; if(a.p_prelisting&&!pl) return bad('That appointment was not found');
+    let pid=null, made=false, matched=false; const addr=String(a.p_address||'').replace(/\s+/g,' ').trim();
+    if(a.p_property&&PT().some(p=>p.id===a.p_property)) pid=a.p_property;
+    else if(pl&&pl.property_id){ pid=pl.property_id; matched=a.p_property!==pid; }
+    else { if(addr.length<3) return bad('Add the address'); const same=PT().find(p=>nrm(p.address)===nrm(addr)); if(same){ pid=same.id; matched=true; } else { const p=newProp(addr); if(a.p_property) p.id=a.p_property; pid=p.id; made=true; } }
+    if(pl&&pl.property_id&&pl.property_id!==pid) return bad('That appointment is for another property');
+    FVT().push({id:a.p_id,property_id:pid,started_from:a.p_from||'nothing',prelisting_id:pl?pl.id:null,notes:null,decision:null,decision_at:null,next_note:null,started_at:a.p_started_at||now(),created_by:me.email,created_at:now(),updated_at:now()});
+    save(); return ok({id:a.p_id,property_id:pid,created_property:made,matched,existing:false}); }
+  const v=FVT().find(x=>x.id===(a.p_visit||a.p_id));
+  if(name==='agent_tap_extra'){ const it=String(a.p_item||'').replace(/\s+/g,' ').trim(); if(!/^[a-z][a-z_]{1,40}$/.test(a.p_list||'')) return bad('Not a list'); if(!it||it.length>80) return bad('Add up to 80 characters');
+    let r=TLE().find(x=>x.list===a.p_list&&nrm(x.item)===nrm(it)); if(a.p_on!==false){ if(!r){ r={id:TLE().length+1,list:a.p_list,item:it,created_by:me.email,created_at:now(),archived_at:null}; TLE().push(r); } else r.archived_at=null; } else if(r) r.archived_at=r.archived_at||now(); save(); return ok(r||null); }
+  if(!v) return bad('Visit not found');
+  if(name==='agent_fv_set'){ const p=a.p_patch||{}; if(p.decision&&!['present_now','book'].includes(p.decision)) return bad('Choose present now or book the presentation');
+    if('notes' in p) v.notes=p.notes||null; if('decision' in p){ if((p.decision||null)!==v.decision) v.decision_at=p.decision?now():null; v.decision=p.decision||null; } if('next_note' in p) v.next_note=p.next_note||null; v.updated_at=now(); save(); return ok(Object.assign({},v)); }
+  if(name==='agent_fv_person'){ const nm=String(a.p_name||'').replace(/\s+/g,' ').trim(), em=String(a.p_email||'').trim().toLowerCase(), ph=String(a.p_phone||'').trim();
+    if(em&&!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em)) return bad('Check the email address');
+    let x=FVP().find(f=>f.id===a.p_key); if(x&&x.first_visit_id!==v.id) return bad('That person is on another visit');
+    const pp=x&&x.property_person_id?PP().find(r=>r.id===x.property_person_id):null; let ppid=null;
+    if(pp&&pp.role!=='former'){ const signed=(DB.agreement_people||[]).some(ap=>ap.signed_at&&(DB.agreements||[]).some(g=>g.id===ap.agreement_id&&g.property_id===pp.property_id)&&((pp.email&&(ap.email||'').toLowerCase()===pp.email.toLowerCase())||norm(ap.legal_name)===norm(pp.legal_name)));
+      if(!signed){ if(nm&&(pp.name_from||pp.source)==='appraisal') pp.legal_name=nm; if(em&&!pp.email) pp.email=em; if(ph) pp.phone=ph; pp.updated_at=now(); } ppid=pp.id; }
+    else if(nm||em){ const n0=PP().filter(r=>r.property_id===v.property_id).length; ppid=mergePerson(v.property_id,nm,'',em,ph,null,'appraisal');
+      if(ppid&&a.p_owner===false&&PP().filter(r=>r.property_id===v.property_id).length>n0){ const r=PP().find(y=>y.id===ppid); if(r.role==='owner') r.role='contact'; } }
+    save();   // LW0's trigger: the person record and the property and person link
+    const cid=ppid?(PP().find(r=>r.id===ppid)||{}).contact_id||null:null;
+    if(!x){ x={id:a.p_key,first_visit_id:v.id,created_at:now()}; FVP().push(x); }
+    Object.assign(x,{property_person_id:ppid||x.property_person_id||null,contact_id:cid||x.contact_id||null,decision_maker:a.p_decision_maker==null?null:!!a.p_decision_maker,here:a.p_here!==false,updated_at:now()});
+    save(); return ok({key:x.id,property_person_id:x.property_person_id,contact_id:x.contact_id,filed:!!x.property_person_id}); }
+  if(name==='agent_fv_answer'){ if(!FVQ.includes(a.p_question)) return bad('Not a question in the bank'); let ref=v.id, cid=null;
+    if(a.p_person){ const x=FVP().find(f=>f.id===a.p_person&&f.first_visit_id===v.id); if(!x) return bad('Send the person first'); ref=x.id; cid=x.contact_id; }
+    qaPut(a.p_question,v.property_id,cid,a.p_value==null?null:a.p_value,'first_visit',ref,false,me.email); save(); return ok({question:a.p_question,ref}); }
+  if(name==='agent_fv_room'){ const r=a.p_room||{}; if(!r.id) return bad('The room needs its own key'); let x=PRM().find(y=>y.id===r.id); if(x&&x.property_id!==v.property_id) return bad('That room is on another property');
+    const cls=r.tim_class||null; if(cls&&!ROOM_CLASS.includes(cls)) return bad('Choose bedroom, study, office, living, studio, sleepout or flexible room');
+    if(!Array.isArray(r.features||[])) return bad('Check the features');
+    const row={base:r.base||'other',label:String(r.label||'').trim().slice(0,60)||'Room',position:+r.position||0,notes:r.notes||null,measurements:r.measurements||null,features:r.features||[],use_now:r.use_now||null,tim_class:cls,tim_note:r.tim_note||null,vendor_view:r.vendor_view||null,photo_keys:r.photo_keys||[],updated_at:now(),updated_by:me.email};
+    if(!x){ x=Object.assign({id:r.id,property_id:v.property_id,first_visit_id:v.id,created_by:me.email,created_at:now(),archived_at:null},row); PRM().push(x); } else Object.assign(x,row);
+    x.archived_at=r.archived?(x.archived_at||now()):null; fvRoomsProfile(v.property_id,v.id,me.email); save(); return ok(Object.assign({},x)); }
+  if(name==='agent_fv_fact'){ if(a.p_key==='pBed') return bad('Bedrooms come only from your call on each room'); if(!FV_FACTS.includes(a.p_key)) return bad('Not a fact the first visit records');
+    let val=a.p_value; if(typeof val==='number') val=String(val);
+    if(jblank(val)||(Array.isArray(val)&&!val.length)||(typeof val==='string'&&!val.trim())){ const c=PRF().find(x=>x.property_id===v.property_id&&x.key===a.p_key), cv=c&&FV().find(f=>f.id===c.value_id);
+      const ours=!!(cv&&cv.source==='tim'&&cv.source_ref===v.id&&cv.value!=null);
+      if(ours){ profileWriteBack(v.property_id,a.p_key,null); const row={id:uid(),property_id:v.property_id,key:a.p_key,value:null,source:'tim',source_name:'First visit',source_ref:v.id,as_of:lwToday(),recorded_at:stamp(),recorded_by:me.email}; FV().push(row); Object.assign(c,{value_id:row.id,chosen_by:'profile',chosen_at:stamp(),ticked:false,ticked_at:null,ticked_by:null}); }
+      save(); return ok({key:a.p_key,cleared:ours}); }
+    const vid=profileRecord(v.property_id,a.p_key,val,'tim',v.id,lwToday(),'First visit',null,me.email,'check'); save();
+    return ok({key:a.p_key,value_id:vid,chosen:PRF().some(x=>x.property_id===v.property_id&&x.key===a.p_key&&x.value_id===vid)}); }
+  return bad('unknown rpc '+name); }
 function sharedRpc(name,a,me){
   const agent=me&&AGENTS.includes(me.email);
   if(name==='my_property_profile'){ if(!propParty(a.p_property)) return bad('Not found'); return ok({property_id:a.p_property,facts:profileRead(a.p_property,true)}); }
@@ -366,6 +435,7 @@ function rpcInner(name,a){
   const me=S&&S.user; const ag=a&&a.a?DB.agreements.find(x=>x.id===a.a):null;
   const mine=()=>DB.agreement_people.find(p=>p.agreement_id===a.a&&p.user_id===me.id);
   if(['agent_property_profile','agent_profile_choose','agent_profile_tick','agent_profile_set','agent_person_link_resolve','my_property_profile'].includes(name)) return sharedRpc(name,a,me);
+  if(name.startsWith('agent_fv_')||name==='agent_tap_extra') return fvRpc(name,a,me);
   if(name.startsWith('agent_council_')) return councilRpc(name,a,me);
   if(SIGN_RPCS.includes(name)) return signRpc(name,a,me);
   if(DRAFT_RPCS.includes(name)) return draftRpc(name,a,me);

@@ -12,6 +12,7 @@ css, body, js = read('styles.html'), read('body.html'), read('app.js')
 strings, i18n, repo = read('strings.js'), read('i18n.js'), read('repo-core.js')
 offers, qr, draft, sign, nego, mail = read('offers-core.js'), read('qr.js'), read('draft-core.js'), read('sign-core.js'), read('nego-core.js'), read('mail-core.js')
 appr = read('appraisal-core.js')   # appraisal views (032): draws an appraisal record
+plists, fvcore = read('property-lists.js'), read('fv-core.js')
 for k, f in [('__LOGO_LIGHT__', 'logo-light.png'), ('__LOGO_DARK__', 'logo-dark.png')]:
     body = body.replace(k, 'data:image/png;base64,' + base64.b64encode(open(os.path.join(here, f), 'rb').read()).decode())
 html = f'''<!doctype html>
@@ -60,6 +61,12 @@ html = f'''<!doctype html>
 {appr}
 </script>
 <script>
+{plists}
+</script>
+<script>
+{fvcore}
+</script>
+<script>
 {js}
 </script>
 </body>
@@ -72,7 +79,7 @@ print('built', os.path.normpath(out), len(html), 'bytes')
 
 # The portal bundle: the styles and page markup go in first, then each script runs as its own script element, in the same
 # order as index.html, so the app behaves the same. It runs only after the shell has said it is the portal (window.MRE_PORTAL).
-parts = [strings, i18n, repo, offers, qr, draft, sign, nego, mail, appr, js]   # every script of index.html, in its order (the signing and negotiation cores too)
+parts = [strings, i18n, repo, offers, qr, draft, sign, nego, mail, appr, plists, fvcore, js]   # every script of index.html, in its order (the signing and negotiation cores too)
 bundle = ('/* McGuire Real Estate portal: built by onboarding/src/build.py from onboarding/src. Do not edit by hand. */\n'
           '(function () {\n'
           '  if (!window.MRE_PORTAL) return;\n'
