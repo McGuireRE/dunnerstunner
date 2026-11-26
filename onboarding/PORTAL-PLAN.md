@@ -133,7 +133,9 @@ Ids in addresses are the database ids. Addresses never contain a name, email or 
 
 ### LW0. The shared records
 
-Status: built, awaiting review (26 November 2026, branch `lw0-shared-records`) and Tim's approval. Migration 028 (`migrations/028_shared_records.sql`)
+Status: LIVE 27 November 2026 about 9:20am NZT. Migration 028 applied (sha256 bdbe470c..., its live rollback test ran clean first:
+75 checks, no capitals); backfill made 10 people from 25 links, 43 profile facts, 0 problems, signatures and signed people unchanged;
+main 8eb363b; live page byte-identical to the build. History: built 26 November 2026 on branch `lw0-shared-records`. Migration 028 (`migrations/028_shared_records.sql`)
 is written and tested in a rollback block on a local stand-in (every check passed after the first review's fixes); it still has to be run
 in a rollback block on the live project before it is applied. It is NOT applied. Before it is applied Tim sees what the backfill would do:
 `tests/lw0-backfill-preview.sql`, run on a copy of the live records, writes `tests/out/lw0-backfill-preview.txt` (not committed). Tests: `lw0-shared-records.test.js`,
