@@ -512,7 +512,8 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
     await v.fill('#sgCodeIn', (await mails(v)).filter(m => m.kind === 'offer_sign_code' && m.to === 'vendor@example.com').pop().code); await v.click('#sgCodeGo');
     await v.waitForSelector('#sgConsent'); await tick(v, '#sgAgree'); await v.click('#sgAgreeGo'); await v.waitForSelector('#ngChattels'); await tick(v, '#ngChatOk'); await v.click('#ngChatGo');
     await v.waitForSelector('#sgDraw'); await draw(v, '#sgSig', 2); await draw(v, '#sgInit', 3); await v.click('#sgDrawGo'); await v.waitForSelector('#sgPlaces');
-    expect(!(await v.$('#sgTools')) && await v.$('#ngNoChanges') && await v.$('#ngDecline') && await v.$('#sgAskBox'), 'with the switch off, the link shows accept or decline and Ask Tim for a change, and no change tools');
+    // 029 (Tim, 26 November 2026): a signer's own initials, name or signature is always allowed by link (not a change); no change tools
+    expect(JSON.stringify(await v.$$eval('#sgTools [data-tool]', b => b.map(x => x.dataset.tool))) === JSON.stringify(['own_initials', 'own_name', 'own_signature']) && await v.$('#ngNoChanges') && await v.$('#ngDecline') && await v.$('#sgAskBox'), 'with the switch off, the link shows accept or decline and Ask Tim for a change, only their own initials, name or signature to add, and no change tools');
     const sesV = await v.evaluate(() => Object.keys(sessionStorage).filter(k => /^sgSes:/.test(k)).map(k => sessionStorage.getItem(k))[0]);
     const rc = await invoke(v, { action: 'change', token: cLink.split('sign=')[1], session: sesV, id: '7a7a7a7a-0000-4000-8000-000000000001', kind: 'strike', page: 1, geometry: { x0: 100, x1: 180, y: 300 }, places: [] });
     expect(rc.ok === false && /hasn't switched on changes from this link/.test(rc.error), 'a change from the link is refused, and said plainly');

@@ -797,7 +797,7 @@ function draftInvoke(o){ const b=(o&&o.body)||{}; const me=S&&S.user; const res=
 // ever sent: each is kept in email_log (mock: true) and in localStorage mockSignMail ({kind, to, code?, link?}) for the tests to read.
 // localStorage mockMailFail = an address: email to it fails.
 const SIGN_TABLES=['offer_signings','offer_signers','offer_sign_taps','offer_sign_receipts','offer_sign_marks','offer_sign_reviews','offer_sign_asks','offer_rounds','offer_documents','offer_agreements','offer_mail_drafts','offer_mail_log','offer_holds','offer_requests','offer_deposit_holders','offer_sign_undos','offer_sign_redraws','offer_confirm_holds','offer_sign_taps_live','offer_sign_marks_live','offer_sign_reviews_live'];
-const SIGN_RPCS=['agent_signing_undo','agent_signing_revert_round','agent_offer_revert_sealed','agent_offer_confirm_hold','agent_offer_confirm_held','agent_offer_confirm_hold_discard','agent_offer_freeze','agent_offer_unfreeze','agent_offer_withdraw_now','agent_offer_request_carry_on','agent_offer_deposit_holder','agent_mail_draft_unstick','agent_mail_draft_add','agent_mail_draft_edit','agent_mail_draft_review','agent_mail_draft_void','agent_signing_turn_ok','agent_signing_cancel','agent_signing_release','agent_signing_start','agent_signing_consent','agent_signing_receipt','agent_signing_marks','agent_signing_tap','agent_signing_finish','agent_signing_mark','agent_signing_review','agent_offer_chain_check','agent_round_present','agent_round_change','agent_offer_layers','agent_document_close','agent_negotiation_withdraw','agent_offer_negotiation_setting','agent_offer_link_changes_default'];
+const SIGN_RPCS=['agent_signing_undo','agent_signing_revert_round','agent_offer_revert_sealed','agent_offer_confirm_hold','agent_offer_confirm_held','agent_offer_confirm_hold_discard','agent_offer_freeze','agent_offer_unfreeze','agent_offer_withdraw_now','agent_offer_request_carry_on','agent_offer_deposit_holder','agent_mail_draft_unstick','agent_mail_draft_add','agent_mail_draft_edit','agent_mail_draft_review','agent_mail_draft_void','agent_signing_turn_ok','agent_signing_cancel','agent_signing_release','agent_signing_start','agent_signing_consent','agent_signing_receipt','agent_signing_marks','agent_signing_tap','agent_signing_finish','agent_signing_mark','agent_signing_review','agent_offer_chain_check','agent_round_present','agent_round_change','agent_offer_layers','agent_document_close','agent_negotiation_withdraw','agent_offer_negotiation_setting','agent_offer_link_changes_default','agent_signing_release_edited','agent_round_present_edited'];
 const OSG=()=>(DB.offer_signings||=[]), OSR=()=>(DB.offer_signers||=[]), OST=()=>(DB.offer_sign_taps||=[]), OSC=()=>(DB.offer_sign_receipts||=[]), OSM=()=>(DB.offer_sign_marks||=[]), OSV=()=>(DB.offer_sign_reviews||=[]), OSA=()=>(DB.offer_sign_asks||=[]), ORN=()=>(DB.offer_rounds||=[]);
 const shaS=t=>window.SIGN.sha256Hex(String(t));
 // 026 (Offers fixes 3): undone work is kept. A tap or change is never changed or removed; undoing one adds an offer_sign_undos row, and a
@@ -953,6 +953,58 @@ function mailInsert(actor,a){ const o=PO().find(x=>x.id===a.p_offer); if(!o) thr
   OMD().filter(m=>m.offer_id===o.id&&m.kind===a.p_kind&&m.status==='draft'&&(m.signer_id||null)===(a.p_signer||null)).forEach(m=>Object.assign(m,{status:'void',void_at:now(),void_by:actor,void_reason:'A newer draft replaced it'}));
   const m={id:uid(),offer_id:o.id,property_id:o.property_id,signing_id:g?g.id:null,signer_id:a.p_signer||null,agreement_id:ag?ag.id:null,kind:a.p_kind,to_addr:a.p_to,cc_addr:a.p_cc||[],subject:a.p_subject,body:a.p_body,attach:ag?a.p_attach:null,status:'draft',reviewed_at:null,reviewed_by:null,created_at:now(),created_by:actor,edited_at:null,sent_at:null,sent_by:null};
   OMD().push(m); OE().push({id:OE().length+1,property_id:o.property_id,offer_id:o.id,at:now(),actor,kind:'mail_drafted',detail:{draft_id:m.id,kind:m.kind,signing_id:m.signing_id,to:(m.to_addr||[]).length,cc:(m.cc_addr||[]).length}}); return m.id; }
+// 029 (signing: places, chattels initials and four more marks): a signer's own initials, name or signature is checked by Tim in Round 1
+// but initialled by nobody, and from Round 2 on it is not a change. Every new mark sits inside the page, clear of the date place and of
+// other signers' places (guard_offer_mark_place); a side signing the whole agreement initials inside the chattels box (guard_offer_signing_chattels).
+const OWN_K=['own_initials','own_name','own_signature'], isOwnK=k=>OWN_K.includes(k);
+function chattelsRectOf(draftId){ const d=(DB.offer_drafts||[]).find(x=>x.id===draftId), m=d&&(DB.offer_blank_maps||[]).find(x=>x.id===d.map_id); return m?window.SIGN.chattelsArea(m.places||[]):null; }
+function chattelsCheck(g){ const whole=(g.round_no||1)===1||!ORN().some(r=>r.document_id===g.document_id&&r.side===(g.side||'purchaser'))||!!OSET().resign_every_round; if(!whole) return;
+  const cr=chattelsRectOf(g.draft_id); if(!cr) throw new Error('The places on the blank have no chattels area, so nobody can initial the chattels. Add the chattels area to the places on the blank, then load it again');
+  [...new Set(g.places.filter(e=>e.kind==='signature'&&e.why==='block').map(e=>e.signer))].forEach(sn=>{ if(!g.places.some(e=>e.signer===sn&&e.kind==='initial'&&window.SIGN.insideOf(e,cr))) throw new Error(`Please check the signing places: everyone initials the chattels, inside the chattels box (signer ${sn} has no initials there)`); }); }
+const ovl=(a,b)=>Math.max(0,Math.min(a.x+a.w,b.x+b.w)-Math.max(a.x,b.x))*Math.max(0,Math.min(a.y+a.h,b.y+b.h)-Math.max(a.y,b.y));
+function hitsDate(draftId,page,rc){ const dp=datePlaceOf(draftId); if(!dp||dp.page!==page) return false; const d={x:dp.x,y:dp.y-2,w:dp.w||100,h:(dp.h||10)+2}; return ovl(d,rc)>0; }
+function ownOk(kind,g,w,h){ const num=(v,lo,hi)=>typeof v==='number'&&v>=lo&&v<=hi; if(!g||typeof g!=='object'||!isOwnK(kind)) return false;
+  if(!(num(g.x,0,w)&&num(g.y,0,h)&&num(g.w,8,400)&&num(g.h,4,160))||g.x+g.w>w||g.y+g.h>h) return false; if(kind==='own_initials'&&(g.w>200||g.h>100)) return false;
+  if(kind==='own_name'&&(typeof g.text!=='string'||!num(g.size,6,14)||g.h>60)) return false; return JSON.stringify(g).length<=2000; }
+function insOk(g,w,h){ return !!g&&typeof g.text==='string'&&g.text.trim().length>=1&&g.text.length<=300&&g.text===g.text.trim()&&!/[\u0001-\u001F\u007F]/.test(g.text)&&g.x>=0&&g.x<=w&&g.y>=0&&g.y<=h&&g.size>=6&&g.size<=14; }
+// guard_offer_mark_place, as the trigger runs it before every mark of these kinds goes in
+function markPlaceGuard(g,s,m){ if(!['insert',...OWN_K].includes(m.kind)) return; const [w,h]=g.pages[m.page-1]||[0,0], geo=m.geometry||{};
+  if(isOwnK(m.kind)){ if(!ownOk(m.kind,geo,w,h)) throw new Error("That doesn't sit on the page. Put it inside the page"); const ink=sgInk(s);
+    if(m.kind==='own_initials'&&m.ink_png!==ink.init_png) throw new Error('Only your own initials, as you drew them, can be added');
+    if(m.kind==='own_signature'&&m.ink_png!==ink.sig_png) throw new Error('Only your own signature, as you drew it, can be added');
+    if(m.kind==='own_name'&&geo.text!==s.name) throw new Error('Only your own name, exactly as it is on the agreement, can be added'); }
+  else if(!insOk(geo,w,h)) throw new Error("That doesn't sit on the page");
+  const rc=isOwnK(m.kind)?{x:geo.x,y:geo.y,w:geo.w,h:geo.h}:chgRect(m.kind,geo);
+  if(hitsDate(g.draft_id,m.page,rc)) throw new Error('That is where the date goes once the agreement is made. Put it somewhere else');
+  const docSigns=g.document_id?ORN().filter(r=>r.document_id===g.document_id).map(r=>r.signing_id):[];
+  const pls=sgAllPlaces(g).filter(e=>e.signer!==s.position).concat(isOwnK(m.kind)?docSigns.flatMap(id=>sgAllPlaces(OSG().find(x=>x.id===id))):[]);
+  if(pls.some(e=>e.page===m.page&&ovl(e,rc)>0.5)) throw new Error("That would sit on someone else's place to sign or initial. Put it in a clear space"); }
+// offer_sign_do_mark: added text (Round 1) or a signer's own initials, name or signature (any round), in person or by link
+function sgDoMark(s,kind,page,geo,net,link){ if(!['insert',...OWN_K].includes(kind)) throw new Error('Choose what to add'); let g=OSG().find(x=>x.id===s.signing_id);
+  if((g.round_no||1)>1&&kind==='insert') throw new Error('In a counteroffer, added text is a change: use the change tools');
+  if((g.round_no||1)>1) g=sgReady(s,false);
+  else { if(holdActive(g.offer_id)) throw new Error(NEUTRAL_STOP); if(s.void_at) throw new Error('This version has been replaced. Tim will send you the new one.'); const w=sgCurrent(g); if(w) throw new Error(w);
+    if(ORQ().some(r=>r.signer_id===s.id&&!r.handled_at)) throw new Error(ASKED_STOP); if(!['signing','held'].includes(g.status)) throw new Error("Signing isn't open"); if(s.finished_at) throw new Error('You have finished signing. Thank you.'); }
+  if((g.method==='link')!==!!link) throw new Error('Please try that again'); if(!s.consent_at) throw new Error('Agree to sign electronically first');
+  const ink=sgInk(s); if(isOwnK(kind)&&(!ink.sig_png||!ink.init_png)) throw new Error('Draw your signature and initials first');
+  if(OSM().filter(m=>m.signer_id===s.id&&Date.parse(m.at)>Date.now()-36e5).length>=30) throw new Error('You have marked the page a lot in the last hour. Please call Tim on 027 562 7207');
+  if(link){ if(hits('sign_change',net,null,36e5)>=60) throw new Error('A lot of changes have been made from here in the last hour. Please call Tim on 027 562 7207'); OH().push({at:now(),kind:'sign_change',net}); }
+  if(!(page>=1&&page<=g.pages.length)) throw new Error("That page isn't in the document"); const [w,h]=g.pages[page-1];
+  if(kind==='insert'){ if(!insOk(geo,w,h)) throw new Error("That doesn't sit on the page"); const who=privateHit(PO().find(x=>x.id===g.offer_id),geo.text); if(who) throw new Error(`Those words hold ${who}'s own phone or email, so they can't go on the agreement. Only the lawyers' details go on it`); }
+  else if(!ownOk(kind,geo,w,h)) throw new Error("That doesn't sit on the page. Put it inside the page");
+  const m={id:uid(),signing_id:g.id,signer_id:s.id,by_name:s.name,kind,page,geometry:geo,target:null,at:now(),ink_png:kind==='own_initials'?ink.init_png:kind==='own_signature'?ink.sig_png:null};
+  markPlaceGuard(g,s,m); OSM().push(m);
+  if((g.round_no||1)===1){ g.status='held'; g.held_at=now(); sgEv(g,s.name,'sign_marked',{signing_id:g.id,mark_id:m.id,kind,page,signer:s.position,target:null,by_link:!!link,text:['insert','own_name'].includes(kind)?geo.text:null}); }
+  else sgEv(g,s.name,'sign_own_mark',{signing_id:g.id,round:g.round_no,side:g.side,mark_id:m.id,kind,page,signer:s.position,by_link:!!link,text:kind==='own_name'?geo.text:null});
+  return {id:m.id,held:(g.round_no||1)===1,name:s.name,round:g.round_no||1,side:g.side||'purchaser',kind,page,address:(PT().find(x=>x.id===g.property_id)||{}).address}; }
+// Tim's own changes to the places (offer_places_edits_ok), recorded on the round's timeline (sign_places_edited)
+function placesEditsOk(pl,e,draftId){ e=e||{}; if(typeof e!=='object'||JSON.stringify(e).length>60000) throw new Error('Please check the places you changed'); const A=e.added||[], M=e.moved||[], R=e.removed||[];
+  A.concat(M).forEach(id=>{ const q=pl.find(x=>x.id===id); if(!q) throw new Error("Please check the places you changed: one of them isn't in the list"); if(hitsDate(draftId,q.page,q)) throw new Error('That is where the date goes once the agreement is made. Put the place somewhere else'); });
+  A.forEach(id=>{ if(!/^ack:tim[A-Za-z0-9-]{1,60}:s[0-9]{1,2}$/.test(id)) throw new Error('Please check the places you added'); });
+  R.forEach(x=>{ if(!x||typeof x!=='object'||String(x.id||'').length<3||String(x.id).length>140||String(x.label||'').length>400||pl.some(q=>q.id===x.id)) throw new Error('Please check the places you removed'); });
+  return {added:A,moved:M,removed:R}; }
+function placesEditedEv(r,ed,me){ if(r.existing||!(ed.added.length+ed.moved.length+ed.removed.length)) return; const g=OSG().find(x=>x.id===r.id);
+  sgEv(g,me.email,'sign_places_edited',{signing_id:g.id,round:g.round_no||1,side:g.side||'purchaser',added:ed.added.length,moved:ed.moved.length,removed:ed.removed.length,added_ids:ed.added,moved_ids:ed.moved,removed_places:ed.removed,places_sha256:g.places_sha256}); }
 function signRpc(name,a,me){ if(!me||!AGENTS.includes(me.email)) return bad('Only Tim can do this');
   const person=id=>{ const s=OSR().find(x=>x.id===id); if(!s) throw new Error('No such signer'); const g_=OSG().find(g=>g.id===s.signing_id); if(g_.method!=='in_person') throw new Error('This purchaser signs by their own link'); if(s.void_at||['cancelled','replaced','withdrawn'].includes(g_.status)) throw new Error('This signing has stopped, so this turn is closed'); return s; };
   if(name==='agent_mail_draft_add') return sgTry(()=>mailInsert(me.email,a));
@@ -984,7 +1036,7 @@ function signRpc(name,a,me){ if(!me||!AGENTS.includes(me.email)) return bad('Onl
     if(a.p_method==='link') ppl.forEach((p,i)=>{ const em=String(p.email||'').trim().toLowerCase(); if(!em||!/^[^@\s<>"]+@[^@\s<>"]+\.[^@\s<>"]+$/.test(em)) throw new Error(`Purchaser ${i+1} has no email to send a link to. Add it with Correct details, or sign in person`);
       if(ppl.filter(q=>String(q.email||'').trim().toLowerCase()===em).length>1) throw new Error('Two purchasers have the same email. Each needs their own to sign by link'); });
     const g={id:uid(),offer_id:o.id,property_id:o.property_id,draft_id:d.id,draft_sha256:d.sha256,method:a.p_method,pages,places:JSON.parse(JSON.stringify(a.p_places)),places_sha256:shaS(JSON.stringify(a.p_places)),cca_pages:cca,status:'ready',round_no:1,side:'purchaser',document_id:null,base_round_id:null,released_by:me.email,released_at:now(),sent_at:null,held_at:null,completed_at:null,locked_at:null,replaced_at:null,replaced_by:null};
-    OSG().push(g); ppl.forEach((p,i)=>OSR().push({id:uid(),signing_id:g.id,position:i+1,name:([p.first,p.last].map(x=>String(x||'').trim()).filter(Boolean).join(' ')||'Purchaser '+(i+1)).slice(0,250),email:String(p.email||'').trim().toLowerCase()||null,
+    chattelsCheck(g); OSG().push(g); ppl.forEach((p,i)=>OSR().push({id:uid(),signing_id:g.id,position:i+1,name:([p.first,p.last].map(x=>String(x||'').trim()).filter(Boolean).join(' ')||'Purchaser '+(i+1)).slice(0,250),email:String(p.email||'').trim().toLowerCase()||null,
       token_hash:null,link_sent_at:null,link_expires_at:null,code_hash:null,code_expires_at:null,code_tries:0,codes_sent:0,codes_window_at:null,session_hash:null,session_expires_at:null,opened_at:null,verified_at:null,consent_at:null,sig_png:null,init_png:null,marks_at:null,id_sighted:null,witnessed_by:null,finished_at:null,seen_sha256:null,user_agent:null,net_hash:null,void_at:null}));
     OSG().filter(x=>x.offer_id===o.id&&x.id!==g.id&&['ready','signing','held','complete'].includes(x.status)).forEach(x=>{ const c=OSR().filter(s=>s.signing_id===x.id&&s.finished_at).length;
       OSR().filter(s=>s.signing_id===x.id).forEach(s=>Object.assign(s,{void_at:now(),token_hash:null,session_hash:null,code_hash:null})); Object.assign(x,{status:'replaced',replaced_at:now(),replaced_by:g.id}); sgEv(x,me.email,'sign_replaced',{signing_id:x.id,replaced_by:g.id,finished:c}); });
@@ -1001,7 +1053,8 @@ function signRpc(name,a,me){ if(!me||!AGENTS.includes(me.email)) return bad('Onl
   if(name==='agent_signing_marks') return sgTry(()=>sgMarks(person(a.p_signer),a.p_sig,a.p_init));
   if(name==='agent_signing_tap') return sgTry(()=>sgTap(person(a.p_signer),a.p_place));
   if(name==='agent_signing_finish') return sgTry(()=>{ const s=person(a.p_signer); const idv=a.p_id_sighted==null||a.p_id_sighted===''?null:a.p_id_sighted; if(idv!==null&&!SIGN_ID_TYPES.includes(idv)) throw new Error('That ID choice isn\'t one of the list'); return sgFinish(s,a.p_ua,null,idv,'Tim McGuire'); });
-  if(name==='agent_signing_mark') return sgTry(()=>{ const s=person(a.p_signer), g=OSG().find(x=>x.id===s.signing_id); if((g.round_no||1)>1) throw new Error('In a counteroffer, use the change tools'); if(s.void_at) throw new Error('This version has been replaced'); const w=sgCurrent(g); if(w) throw new Error(w);
+  if(name==='agent_signing_mark') return sgTry(()=>{ const s=person(a.p_signer), g=OSG().find(x=>x.id===s.signing_id);
+    if(['insert',...OWN_K].includes(a.p_kind)){ if(a.p_target) throw new Error('Only a reinstatement points at another mark'); return sgDoMark(s,a.p_kind,a.p_page,a.p_geometry,null,false); } if((g.round_no||1)>1) throw new Error('In a counteroffer, use the change tools'); if(s.void_at) throw new Error('This version has been replaced'); const w=sgCurrent(g); if(w) throw new Error(w);
     if(!['signing','held'].includes(g.status)) throw new Error("Signing isn't open"); if(!s.consent_at) throw new Error('Agree to sign electronically first');
     if(!(a.p_page>=1&&a.p_page<=g.pages.length)) throw new Error("That page isn't in the document"); const [w_,h_]=g.pages[a.p_page-1];
     const m={id:uid(),signing_id:g.id,signer_id:s.id,by_name:s.name,kind:a.p_kind,page:a.p_page,geometry:a.p_geometry,target:a.p_kind==='reinstate'?a.p_target:null,at:now()};
@@ -1012,11 +1065,16 @@ function signRpc(name,a,me){ if(!me||!AGENTS.includes(me.email)) return bad('Onl
   if(name==='agent_signing_review') return sgTry(()=>{ const g=OSG().find(x=>x.id===a.p_signing); if(!g) throw new Error('No such signing'); if(g.status!=='held') throw new Error('Nothing is waiting for you to check'); const w=sgCurrent(g); if(w) throw new Error(w);
     const ms=liveMarks().filter(m=>m.signing_id===g.id&&!liveReviews().some(r=>r.signing_id===g.id&&r.marks.includes(m.id))).map(m=>m.id), n=OSR().filter(s=>s.signing_id===g.id).length, pl=a.p_places||[];
     if(!sgPlacesOk(pl,g.pages,n,false)) throw new Error('Please check the places for the initials');
-    if(pl.length!==ms.length*n||pl.some(x=>x.why!=='mark'||x.kind!=='initial'||!ms.includes(x.ref)||x.id!==`mark:${x.ref}:s${x.signer}`)) throw new Error('Each purchaser initials each mark once');
+    const need=ms.filter(id=>!isOwnK((OSM().find(m=>m.id===id)||{}).kind));   // 029: a signer's own mark needs nobody's initials
+    if(pl.length!==need.length*n||pl.some(x=>x.why!=='mark'||x.kind!=='initial'||!need.includes(x.ref)||x.id!==`mark:${x.ref}:s${x.signer}`)) throw new Error('Each purchaser initials each mark once');
     OSV().push({id:OSV().length+1,signing_id:g.id,marks:ms,places:JSON.parse(JSON.stringify(pl)),places_sha256:shaS(JSON.stringify(pl)),reviewed_by:me.email,at:now()});
     let re=0; OSR().filter(s=>s.signing_id===g.id&&s.finished_at&&!s.void_at).forEach(s=>{ s.finished_at=null; s.seen_sha256=null; re++; }); g.status='signing';
     sgEv(g,me.email,'sign_reviewed',{signing_id:g.id,marks:ms,places:pl.length,reopened:re}); return {ok:true,marks:ms.length,reopened:re}; });
   if(name==='agent_round_present') return sgTry(()=>roundPresent(a,me));
+  if(name==='agent_signing_release_edited'){ let ed; try{ ed=placesEditsOk(a.p_places||[],a.p_edits,a.p_draft); }catch(e){ return bad(e.message); }
+    return signRpc('agent_signing_release',a,me).then(r=>{ if(r.error) return r; placesEditedEv(r.data,ed,me); save(); return {data:Object.assign({},r.data,{edited:ed}),error:null}; }); }
+  if(name==='agent_round_present_edited') return sgTry(()=>{ const doc=ODC().find(x=>x.offer_id===a.p_offer&&x.status==='open'); if(!doc) return roundPresent(a,me);
+    const ed=placesEditsOk(a.p_places||[],a.p_edits,doc.draft_id), r=roundPresent(a,me); placesEditedEv(r,ed,me); return Object.assign({},r,{edited:ed}); });
   if(name==='agent_round_change') return sgTry(()=>sgChange(person(a.p_signer),a));
   if(name==='agent_offer_layers') return sgTry(()=>{ const doc=ODC().filter(x=>x.offer_id===a.p_offer&&(a.p_document?x.id===a.p_document:['open','agreed'].includes(x.status))).sort((x,y)=>y.number-x.number)[0]; return doc?{document:doc,layers:docLayers(doc.id,1e5)}:{document:null,layers:[]}; });
   if(name==='agent_document_close') return sgTry(()=>{ const o=PO().find(x=>x.id===a.p_offer); if(!o) throw new Error('No such offer'); const doc=ODC().find(x=>x.offer_id===o.id&&x.status==='open'); if(!doc) throw new Error('There is no open document to close');
@@ -1098,7 +1156,7 @@ function signRpc(name,a,me){ if(!me||!AGENTS.includes(me.email)) return bad('Onl
 // ── presentation and counteroffers (mirrors migrations/024_offer_negotiation.sql) ──
 const ODC=()=>(DB.offer_documents||=[]), OAG=()=>(DB.offer_agreements||=[]);
 const sgAllPlaces=g=>g.places.concat(liveReviews().filter(r=>r.signing_id===g.id).flatMap(r=>r.places));
-const sgMarksOf=gid=>liveMarks().filter(m=>m.signing_id===gid).map(m=>({id:m.id,kind:m.kind,page:m.page,geometry:m.geometry,target:m.target,by:m.by_name,at:m.at}));
+const sgMarksOf=gid=>liveMarks().filter(m=>m.signing_id===gid).map(m=>Object.assign({id:m.id,kind:m.kind,page:m.page,geometry:m.geometry,target:m.target,by:m.by_name,at:m.at},m.ink_png?{ink:m.ink_png}:{}));
 const docLast=docId=>ORN().filter(r=>r.document_id===docId).sort((a,b)=>b.doc_round-a.doc_round)[0];
 function docLayers(docId,upto){ return ORN().filter(r=>r.document_id===docId&&r.doc_round<=upto).sort((a,b)=>a.doc_round-b.doc_round).map(r=>{ const g=OSG().find(x=>x.id===r.signing_id);
   return {round_id:r.id,number:r.number,doc_round:r.doc_round,side:r.side,signing_id:g.id,sha256:r.sha256,locked_at:r.locked_at,changes:r.changes,places:sgAllPlaces(g),
@@ -1137,11 +1195,11 @@ function roundPresent(a,me){ if(!['in_person','link'].includes(a.p_method)) thro
   if(a.p_method==='link'){ ppl.forEach(x=>{ if(!x.email||!/^[^@\s<>"]+@[^@\s<>"]+\.[^@\s<>"]+$/.test(x.email)) throw new Error(`${x.name} has no email to send a link to. Add it, or sign in person`); }); if(new Set(ppl.map(x=>x.email)).size!==n) throw new Error('Two people have the same email. Each needs their own to sign by link'); }
   const first=!prev, pl=a.p_places||[], resign=!!OSET().resign_every_round;
   if(!sgPlacesOk(pl,base.pages,n,first)||((first||resign)&&ppl.some((_,i)=>!pl.some(p=>p.signer===i+1&&p.kind==='signature'&&p.why==='block')))) throw new Error('Please check the signing places: everyone signs'+(first?', and initials the foot of every page':''));
-  liveMarks().filter(m=>m.signing_id===last.signing_id).forEach(m=>ppl.forEach((_,i)=>{ if(!pl.some(p=>p.id===`chg:${m.id}:s${i+1}`&&p.why==='change'&&p.kind==='initial')) throw new Error(`Please check the signing places: everyone initials each change made in Round ${last.doc_round}`); }));
+  liveMarks().filter(m=>m.signing_id===last.signing_id&&!isOwnK(m.kind)).forEach(m=>ppl.forEach((_,i)=>{ if(!pl.some(p=>p.id===`chg:${m.id}:s${i+1}`&&p.why==='change'&&p.kind==='initial')) throw new Error(`Please check the signing places: everyone initials each change made in Round ${last.doc_round}`); }));
   const docSigns=ORN().filter(r=>r.document_id===doc.id).map(r=>r.signing_id);
   pl.filter(p=>p.why==='change').forEach(p=>{ const m=liveMarks().find(k=>k.id===p.ref&&docSigns.includes(k.signing_id)); if(!m||p.page!==m.page||gapOf(p,chgRect(m.kind,m.geometry))>60) throw new Error('Please check the signing places: initials for a change go beside it'); });
   const g={id:uid(),offer_id:o.id,property_id:o.property_id,draft_id:doc.draft_id,draft_sha256:doc.draft_sha256,method:a.p_method,pages:base.pages,places:JSON.parse(JSON.stringify(pl)),places_sha256:shaS(JSON.stringify(pl)),cca_pages:[],status:'ready',round_no:last.doc_round+1,side,document_id:doc.id,base_round_id:last.id,link_changes:(a.p_link_changes!=null?!!a.p_link_changes:OSET().link_changes_default===true),released_by:me.email,released_at:now(),sent_at:null,held_at:null,completed_at:null,locked_at:null,replaced_at:null,replaced_by:null};
-  OSG().push(g); ppl.forEach((x,i)=>OSR().push({id:uid(),signing_id:g.id,position:i+1,name:x.name.slice(0,250),email:x.email,person_id:x.person,token_hash:null,link_sent_at:null,link_expires_at:null,code_hash:null,code_expires_at:null,code_tries:0,codes_sent:0,codes_window_at:null,session_hash:null,session_expires_at:null,opened_at:null,verified_at:null,consent_at:null,sig_png:null,init_png:null,marks_at:null,id_sighted:null,witnessed_by:null,finished_at:null,seen_sha256:null,user_agent:null,net_hash:null,void_at:null}));
+  chattelsCheck(g); OSG().push(g); ppl.forEach((x,i)=>OSR().push({id:uid(),signing_id:g.id,position:i+1,name:x.name.slice(0,250),email:x.email,person_id:x.person,token_hash:null,link_sent_at:null,link_expires_at:null,code_hash:null,code_expires_at:null,code_tries:0,codes_sent:0,codes_window_at:null,session_hash:null,session_expires_at:null,opened_at:null,verified_at:null,consent_at:null,sig_png:null,init_png:null,marks_at:null,id_sighted:null,witnessed_by:null,finished_at:null,seen_sha256:null,user_agent:null,net_hash:null,void_at:null}));
   sgEv(g,me.email,'round_presented',{signing_id:g.id,document:doc.number,round:g.round_no,side,method:a.p_method,checked_round:last.doc_round,checked_sha256:last.sha256,signers:n,places:pl.length,places_sha256:g.places_sha256,note:String(a.p_note||'').trim().slice(0,300)||null,link_changes:g.link_changes});
   return {id:g.id,existing:false,round:g.round_no,side,link_changes:g.link_changes}; }
 // a change (offer_sign_do_change): Round 2 on, by a signer of the countering side, with everyone's initials beside it
@@ -1167,7 +1225,7 @@ function sgChange(s,a){ const g=sgReady(s,true); if((g.round_no||1)<2) throw new
   const n=OSR().filter(x=>x.signing_id===g.id&&!x.void_at).length, pl=a.p_places||[];
   if(!sgPlacesOk(pl,g.pages,n,false)||pl.length!==n||pl.some(x=>x.why!=='change'||x.kind!=='initial'||x.ref!==id||x.id!==`chg:${id}:s${x.signer}`)) throw new Error('Everyone on your side initials each change once');
   if(pl.some(x=>x.page!==a.p_page||gapOf(x,rc)>60)) throw new Error("Each person's initials go beside the change, on its page");
-  OSM().push({id,signing_id:g.id,signer_id:s.id,by_name:s.name,kind:a.p_kind,page:a.p_page,geometry:geo,target:a.p_kind==='reinstate'?a.p_target:null,at:now()});
+  { const m={id,signing_id:g.id,signer_id:s.id,by_name:s.name,kind:a.p_kind,page:a.p_page,geometry:geo,target:a.p_kind==='reinstate'?a.p_target:null,at:now(),ink_png:null}; markPlaceGuard(g,s,m); OSM().push(m); }   // 029: typed words clear of others' places
   OSV().push({id:OSV().length+1,signing_id:g.id,marks:[id],places:JSON.parse(JSON.stringify(pl)),places_sha256:shaS(JSON.stringify(pl)),kind:'change',reviewed_by:null,changed_by:s.name,at:now()});
   const back=OSR().filter(x=>x.signing_id===g.id&&x.finished_at&&!x.void_at&&x.id!==s.id).sort((x,y)=>x.position-y.position).map(x=>({id:x.id,position:x.position,name:x.name,email:g.method==='link'?x.email:null}));
   let re=0; OSR().filter(x=>x.signing_id===g.id&&x.finished_at&&!x.void_at).forEach(x=>{ x.finished_at=null; x.seen_sha256=null; re++; });
@@ -1202,31 +1260,31 @@ async function sgLock(sid,actor){ if(localStorage.getItem('mockLockFail')==='1')
   const draft=new Uint8Array(await bl.arrayBuffer()); if(hex(await crypto.subtle.digest('SHA-256',draft))!==d.sha256) throw new Error("The approved draft doesn't match its fingerprint, so the round wasn't made. Tim will look into it.");
   const signers=OSR().filter(s=>s.signing_id===g.id&&!s.void_at).sort((a,b)=>a.position-b.position), places=sgAllPlaces(g);
   const LT=liveTaps(), taps=LT.filter(t=>t.signing_id===g.id).map(t=>({place_id:t.place_id,signer:OSR().find(s=>s.id===t.signer_id).position,at:t.at}));
-  const marks=liveMarks().filter(m=>m.signing_id===g.id).map(m=>({id:m.id,kind:m.kind,page:m.page,geometry:m.geometry,target:m.target,by:m.by_name,at:m.at,reviewed_at:(liveReviews().find(r=>r.signing_id===g.id&&(r.kind||'review')==='review'&&r.marks.includes(m.id))||{}).at||null}));
+  const marks=liveMarks().filter(m=>m.signing_id===g.id).map(m=>Object.assign(m.ink_png?{ink:m.ink_png}:{},{id:m.id,kind:m.kind,page:m.page,geometry:m.geometry,target:m.target,by:m.by_name,at:m.at,reviewed_at:(liveReviews().find(r=>r.signing_id===g.id&&(r.kind||'review')==='review'&&r.marks.includes(m.id))||{}).at||null}));
   const n=(ORN().filter(r=>r.offer_id===g.offer_id).map(r=>r.number).sort((a,b)=>b-a)[0]||0)+1;
   const record={address:p.address,offer_ref:o.buyer_ref,round,draft:{number:d.number,sha256:d.sha256},places_sha256:g.places_sha256,made_at:now(),
     signers:signers.map(s=>({name:s.name,method:g.method,verified_at:s.verified_at,witnessed_by:s.witnessed_by,id_sighted:s.id_sighted,consent_at:s.consent_at,receipts:OSC().filter(r=>r.signer_id===s.id).map(r=>({guide:r.guide,version:r.version,sha256:r.sha256,pages:r.pages,at:r.at})),
       first_tap:LT.filter(t=>t.signer_id===s.id).map(t=>t.at).sort()[0],last_tap:LT.filter(t=>t.signer_id===s.id).map(t=>t.at).sort().slice(-1)[0],finished_at:s.finished_at,places:sgRequired(g,s.position).length,ua:s.user_agent,net:s.net_hash,seen_sha256:s.seen_sha256})),
-    marks:marks.map(m=>Object.assign({kind:m.kind,page:m.page,by:m.by,at:m.at,reviewed_at:m.reviewed_at},m.kind==='strike'&&(m.geometry||{}).text?{text:m.geometry.text}:{})),replaced:OSG().filter(x=>x.offer_id===g.offer_id&&x.status==='replaced').map(x=>({number:DB.offer_drafts.find(y=>y.id===x.draft_id).number,at:x.replaced_at}))};
-  const L=await pdfLibLoad(); let r, lifted=[], outstanding=[], formed=false;
+    marks:marks.map(m=>Object.assign({kind:m.kind,page:m.page,by:m.by,at:m.at,reviewed_at:m.reviewed_at},['strike','insert'].includes(m.kind)&&(m.geometry||{}).text?{text:m.geometry.text}:{})),replaced:OSG().filter(x=>x.offer_id===g.offer_id&&x.status==='replaced').map(x=>({number:DB.offer_drafts.find(y=>y.id===x.draft_id).number,at:x.replaced_at}))};
+  const L=await pdfLibLoad(); let r, lifted=[], outstanding=[], formed=false; const chg=marks.filter(m=>!isOwnK(m.kind)), own=marks.filter(m=>isOwnK(m.kind));
   if(round===1) r=await window.SIGN.renderRound(L,draft,{places,taps,signers:signers.map(s=>Object.assign({},s,sgInk(s))),marks,record,title:'Round 1 (signed by the purchasers): '+p.address});
   else { const NG=window.NEGO, earlier=docLayers(doc.id,round-1), cur={doc_round:round,number:n,side,signing_id:g.id,places,taps,signers:signers.map(s=>({position:s.position,name:s.name,sig_png:sgInk(s).sig_png,init_png:sgInk(s).init_png})),marks};
     const all=earlier.concat([cur]), st=NG.standing(all), sides={}; all.forEach(x=>{ sides[x.side]=x.signers.map(s=>({position:s.position,name:s.name})); });
     lifted=st.lifted.filter(x=>x.by_round===round).map(x=>({side:x.side,signer:x.signer,who:x.who,kind:x.kind,why:x.why,page:x.page,round:x.round,by:x.by})); outstanding=NG.outstanding(st,sides);
-    formed=!marks.length&&!outstanding.length&&Object.keys(sides).length===2; const base=earlier[earlier.length-1];
+    formed=!chg.length&&!outstanding.length&&Object.keys(sides).length===2; const base=earlier[earlier.length-1];
     const title=`Round ${round} (signed by the ${side==='vendor'?'vendors':'purchasers'}): `+p.address;
-    Object.assign(record,{number:n,document:doc.number,side,base:{round:base.doc_round,sha256:base.sha256},link_changes:g.link_changes==null?null:!!g.link_changes,changes:marks.map(m=>({kind:m.kind,page:m.page,by:m.by,at:m.at,text:m.kind==='insert'||m.kind==='strike'?(m.geometry||{}).text||undefined:undefined})),lifted,outstanding:outstanding.length});
-    r=await NG.renderWorking(L,draft,{ink:st.ink,changes:st.changes,lines:NG.roundLines(record),title}); Object.assign(record,{title,draw_version:NG.DRAW_VERSION,check:{lifted,outstanding}}); }
+    Object.assign(record,{number:n,document:doc.number,side,base:{round:base.doc_round,sha256:base.sha256},link_changes:g.link_changes==null?null:!!g.link_changes,changes:chg.map(m=>({kind:m.kind,page:m.page,by:m.by,at:m.at,text:m.kind==='insert'||m.kind==='strike'?(m.geometry||{}).text||undefined:undefined})),...(own.length?{own:own.map(m=>({kind:m.kind,page:m.page,by:m.by,at:m.at}))}:{}),lifted,outstanding:outstanding.length});
+    r=await NG.renderWorking(L,draft,{ink:st.ink,changes:st.changes,own:st.own,lines:NG.roundLines(record),title}); Object.assign(record,{title,draw_version:NG.DRAW_VERSION,check:{lifted,outstanding}}); }
   const sha=hex(await crypto.subtle.digest('SHA-256',r.bytes)), path=`properties/${g.property_id}/docs/offer-round-${g.offer_id}-${n}-${sha.slice(0,12)}.pdf`, blob=new Blob([r.bytes],{type:'application/pdf'});
   SO()[path]={size:blob.size,mime:'application/pdf'}; (window.__repoBlobs||={})[path]=blob; await blobKeep(path,blob);
   (DB.offer_file_hashes||=[]).push({path,sha256:sha,size_bytes:blob.size,confirmed_by:actor,confirmed_at:now()});
   if(round===1){ doc={id:uid(),offer_id:g.offer_id,property_id:g.property_id,number:ODC().filter(x=>x.offer_id===g.offer_id).length+1,draft_id:g.draft_id,draft_sha256:g.draft_sha256,status:'open',opened_at:now(),closed_at:null,closed_by:null,close_reason:null,agreed_at:null}; ODC().push(doc); }
-  sgEv(g,actor,'round_locked',{signing_id:g.id,number:n,document:doc.number,round,side,changes:marks.length,sha256:sha,draft_sha256:g.draft_sha256,places_sha256:g.places_sha256,path,lifted:lifted.length,outstanding:outstanding.length});
+  sgEv(g,actor,'round_locked',{signing_id:g.id,number:n,document:doc.number,round,side,changes:chg.length,sha256:sha,draft_sha256:g.draft_sha256,places_sha256:g.places_sha256,path,lifted:lifted.length,outstanding:outstanding.length});
   const ev=OE()[OE().length-1]; ORN().push({id:uid(),offer_id:g.offer_id,property_id:g.property_id,signing_id:g.id,number:n,draft_id:g.draft_id,draft_sha256:g.draft_sha256,places_sha256:g.places_sha256,path,sha256:sha,size_bytes:blob.size,execution:record,chain_last:ev.hash,locked_by:actor,locked_at:now(),
-    document_id:doc.id,doc_round:round,side,base_round_id:g.base_round_id||null,changes:marks.length,lifted,outstanding});
-  g.status='locked'; g.locked_at=now(); if(round>1&&marks.length&&['received','countered'].includes(o.status)) o.status='countered';
+    document_id:doc.id,doc_round:round,side,base_round_id:g.base_round_id||null,changes:chg.length,lifted,outstanding});
+  g.status='locked'; g.locked_at=now(); if(round>1&&chg.length&&['received','countered'].includes(o.status)) o.status='countered';
   // Tim alone, once per submitted round, with who, what changed and the round's portal address (024; src/mail-core.js roundNotice)
-  { const nt=window.MAIL.roundNotice({side:side||'purchaser',round,address:p.address,signers:signers.map(x=>x.name),changes:marks.map(m=>({kind:m.kind,page:m.page,text:(m.geometry||{}).text,by:m.by||m.by_name})),portalUrl:`https://portal.dunnerstunner.co.nz/properties/${g.property_id}/offers/${g.offer_id}/signing/${g.id}`});
+  { const nt=window.MAIL.roundNotice({side:side||'purchaser',round,address:p.address,signers:signers.map(x=>x.name),changes:chg.map(m=>({kind:m.kind,page:m.page,text:(m.geometry||{}).text,by:m.by||m.by_name})),portalUrl:`https://portal.dunnerstunner.co.nz/properties/${g.property_id}/offers/${g.offer_id}/signing/${g.id}`});
     try{ sgMail('offer_round_locked','tim',{subject:nt.subject,body:nt.body,formed,round,signing_id:g.id}); }catch(_){} } save(); return {number:n,round,sha256:sha,existing:false,formed}; }
 // the agreed copy (the edge function's "agree"): every round's layers, nothing outstanding, the date Tim typed at the top
 async function sgAgree(b,me){ const c=agreementCheck(b.offer_id,b.accepted_at,b.date_text), o=PO().find(x=>x.id===b.offer_id), p=PT().find(x=>x.id===o.property_id), NG=window.NEGO;
@@ -1237,7 +1295,7 @@ async function sgAgree(b,me){ const c=agreementCheck(b.offer_id,b.accepted_at,b.
   const rounds=ORN().filter(r=>r.offer_id===o.id).sort((a,z)=>a.number-z.number).map(r=>({number:r.number,document:(ODC().find(x=>x.id===r.document_id)||{}).number,round:r.doc_round,side:r.side,changes:r.changes,sha256:r.sha256,locked_at:r.locked_at}));
   if(!dp) throw new Error("The agreement blank has no date place, so the date can't be added. Add it to the places on the blank first.");
   const record={address:p.address,offer_ref:o.buyer_ref,date_text:c.date_text,accepted_at:b.accepted_at,confirmed_by:'Tim McGuire',made_at:now(),document:c.doc.number,round:c.last.doc_round,rounds,base:{round:c.last.doc_round,sha256:c.last.sha256},draw_version:NG.DRAW_VERSION};
-  const L=await pdfLibLoad(), r=await NG.renderWorking(L,draft,{ink:st.ink,changes:st.changes,lines:NG.agreementLines(record),date:{text:c.date_text,place:dp},title:'Agreement: '+p.address});
+  const L=await pdfLibLoad(), r=await NG.renderWorking(L,draft,{ink:st.ink,changes:st.changes,own:st.own,lines:NG.agreementLines(record),date:{text:c.date_text,place:dp},title:'Agreement: '+p.address});
   const sha=hex(await crypto.subtle.digest('SHA-256',r.bytes)), path=`properties/${o.property_id}/docs/offer-agreement-${o.id}-${sha.slice(0,12)}.pdf`, blob=new Blob([r.bytes],{type:'application/pdf'});
   SO()[path]={size:blob.size,mime:'application/pdf'}; (window.__repoBlobs||={})[path]=blob; await blobKeep(path,blob); (DB.offer_file_hashes||=[]).push({path,sha256:sha,size_bytes:blob.size,confirmed_by:me.email,confirmed_at:now()});
   sgEv({property_id:o.property_id,offer_id:o.id},me.email,'agreement_formed',{document:c.doc.number,round:c.last.doc_round,number:c.last.number,date:c.date_text,accepted_at:b.accepted_at,sha256:sha,path});
@@ -1246,7 +1304,7 @@ async function sgAgree(b,me){ const c=agreementCheck(b.offer_id,b.accepted_at,b.
   const terms={price:d.details.price,settlement:d.details.settlement,conditions:d.details.conditions,kiwisaver:d.details.kiwisaver,lawyer_approval:d.details.lawyer_approval,
     as_drafted:Object.fromEntries(pl.filter(x=>['price','deposit','settlement','purchaser'].includes(x.id)||/^[cd]_/.test(x.id)).map(x=>[x.id,x.text!=null?x.text:x.value!=null?x.value:null])),deposit_printed:dep?dep.printed||null:null,
     further_terms:(pl.find(x=>x.id==='further_terms')||{}).terms||null,
-    changes:liveMarks().filter(m=>docSigns.includes(m.signing_id)).map(m=>{ const g=OSG().find(x=>x.id===m.signing_id); return {round:g.round_no,side:g.side,kind:m.kind,page:m.page,text:m.geometry.text||null,by:m.by_name,at:m.at}; }).sort((x,y)=>x.round-y.round||(x.at<y.at?-1:1)),
+    changes:liveMarks().filter(m=>docSigns.includes(m.signing_id)&&!isOwnK(m.kind)).map(m=>{ const g=OSG().find(x=>x.id===m.signing_id); return {round:g.round_no,side:g.side,kind:m.kind,page:m.page,text:m.geometry.text||null,by:m.by_name,at:m.at}; }).sort((x,y)=>x.round-y.round||(x.at<y.at?-1:1)),
     note:'Where a change made in the negotiation alters a term above, the change governs. Read with the signed rounds.'};
   const ev=OE()[OE().length-1]; OAG().push({id:uid(),offer_id:o.id,property_id:o.property_id,document_id:c.doc.id,round_id:c.last.id,path,sha256:sha,size_bytes:blob.size,agreement_date:c.iso,date_text:c.date_text,accepted_at:b.accepted_at,record,chain_last:ev.hash,confirmed_by:me.email,locked_at:now(),round_sha256:c.last.sha256,draw_version:NG.DRAW_VERSION,terms});
   holdSettle(o.id,'agreed',me.email,OAG()[OAG().length-1]);   // 026: offer_confirm_hold_settle
@@ -1310,7 +1368,7 @@ async function signInvoke(o){ const b=(o&&o.body)||{}, me=S&&S.user, net='h:'+mo
         signing:{status:g.status,stopped:sgStopFor(s,g),pages:g.pages,cca_pages:g.cca_pages,draft_sha256:d.sha256,address:p.address,draft_url:bl&&s.consent_at?URL.createObjectURL(bl):null,
           places:g.places.filter(x=>x.signer===s.position).concat(liveReviews().filter(r=>r.signing_id===g.id).flatMap(r=>r.places.filter(x=>x.signer===s.position))),
           round:g.round_no||1,side:g.side||'purchaser',link_changes:!!g.link_changes,terms:{last:(d.edits||{}).term_last??null,retired:(d.edits||{}).retired_numbers||[],style:((d.placed||[]).find(x=>x.id==='further_terms')||{}).number_style||((d.edits||{}).term_last!=null?'dot0':null)},signers:OSR().filter(x=>x.signing_id===g.id&&!x.void_at).length,parties:g.side==='vendor'?offerParties(PO().find(x=>x.id===g.offer_id)):null,
-          layers:(g.round_no||1)>1&&s.consent_at?docLayers(g.document_id,g.round_no-1):[],marks:(g.round_no||1)>1?sgMarksOf(g.id).map(m=>Object.assign(m,{mine:(OSM().find(k=>k.id===m.id)||{}).signer_id===s.id})):[],side_places:(g.round_no||1)>1?sgAllPlaces(g):[],
+          layers:(g.round_no||1)>1&&s.consent_at?docLayers(g.document_id,g.round_no-1):[],marks:sgMarksOf(g.id).map(m=>Object.assign(m,{mine:(OSM().find(k=>k.id===m.id)||{}).signer_id===s.id})),side_places:(g.round_no||1)>1?sgAllPlaces(g):[],
           revert:revertOffered(g)?{round:(g.round_no||1)-1}:null},taps:liveTaps().filter(t=>t.signer_id===s.id).sort((a,z)=>a.id-z.id).map(t=>t.place_id)}); }
     if(b.action==='undo'){ const r=sgUndo(s,b.scope==='turn'?'turn':b.scope==='last'?'last':b.scope,b.clear===true,s.name); save(); return res(Object.assign({ok:true},r)); }
     if(b.action==='consent'){ sgConsent(s,ua,net); save(); return res({ok:true}); }
@@ -1324,6 +1382,11 @@ async function signInvoke(o){ const b=(o&&o.body)||{}, me=S&&S.user, net='h:'+mo
       // 024: a draft for each reopened link signer, which Tim sends himself; no email to anyone now, Tim included (he hears once per round)
       if(r.reopened>0) (r.reopened_signers||[]).forEach(x=>{ if(!x.email||!x.id) return; try{ const w=window.MAIL.reopenedDraft({first:String(x.name||'').split(' ')[0],address:r.address,by:r.by,side:g.side}); mailInsert('system',{p_offer:g.offer_id,p_kind:'reopened',p_signer:x.id,p_to:[x.email],p_cc:[],p_subject:w.subject,p_body:w.body}); }catch(_){} }); save();
       return res({ok:true,id:r.id,reopened:r.reopened}); }
+    // 029: added text or the signer's own initials, name or signature from their link; in Round 1 it holds the round and Tim alone is told
+    if(b.action==='mark'){ if(!['insert',...OWN_K].includes(String(b.kind))||!Number.isInteger(b.page)||!b.geometry||typeof b.geometry!=='object'||Array.isArray(b.geometry)) return res({ok:false,error:"That didn't save. Please try again."},400);
+      const r=sgDoMark(s,b.kind,b.page,b.geometry,net,true); save(); let emailed=null;
+      if(r.held){ emailed=true; try{ sgMail('offer_sign_marked','tim',{mark_kind:b.kind,page:b.page,subject:'A purchaser marked the offer: '+p.address,text:b.kind==='insert'?b.geometry.text:null}); }catch(_){ emailed=false; } }
+      save(); return res({ok:true,id:r.id,held:r.held,emailed}); }
     if(b.action==='ask'){ if(s.void_at||['locked','replaced'].includes(g.status)) throw new Error('This version is no longer being signed'); if(holdActive(g.offer_id)) throw new Error(NEUTRAL_STOP); if(ORQ().some(r=>r.signer_id===s.id&&!r.handled_at)) throw new Error(ASKED_STOP); const t=String(b.text||'').trim(); if(t.length<3||t.length>1000) throw new Error('Please say what you would like changed (up to 1,000 characters)');
       OSA().push({id:OSA().length+1,signing_id:g.id,signer_id:s.id,text:t,at:now()}); sgEv(g,s.name,'sign_change_asked',{signing_id:g.id,signer:s.position,length:t.length,round:g.round_no||1,side:g.side||'purchaser'}); let emailed=true;
       const v=g.side==='vendor', later=(g.round_no||1)>1, decline=b.decline===true&&later, who=v?'vendor':later?'purchaser':'buyer';   // worded by side; a decline has its own subject

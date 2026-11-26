@@ -69,7 +69,7 @@ export function executionRecord(m: any) {
     address: m.address, offer_ref: m.offer_ref, round: 1, draft: { number: m.draft?.number, sha256: m.draft?.sha256 }, places_sha256: m.places_sha256, made_at: m.made_at,
     signers: (m.signers || []).map((s: any) => ({ name: s.name, method: m.method, verified_at: s.verified_at, witnessed_by: s.witnessed_by, id_sighted: s.id_sighted, consent_at: s.consent_at, receipts: s.receipts || [],
       first_tap: s.first_tap, last_tap: s.last_tap, finished_at: s.finished_at, places: s.places, ua: s.ua, net: s.net, seen_sha256: s.seen_sha256 })),
-    marks: (m.marks || []).map((k: any) => Object.assign({ kind: k.kind, page: k.page, by: k.by, at: k.at, reviewed_at: k.reviewed_at }, k.kind === "strike" && k.geometry?.text ? { text: k.geometry.text } : {})),   // the struck words (Offers fixes 2); marks before it have none
+    marks: (m.marks || []).map((k: any) => Object.assign({ kind: k.kind, page: k.page, by: k.by, at: k.at, reviewed_at: k.reviewed_at }, (k.kind === "strike" || k.kind === "insert") && k.geometry?.text ? { text: k.geometry.text } : {})),   // the struck words (Offers fixes 2), and added text (029); marks before it have none
     replaced: m.replaced || [],
   };
 }
@@ -127,14 +127,17 @@ export function makeHandler(d: Deps) {
       const st = N.standing(earlier.concat([L])), sides = sidesOf(earlier.concat([L]));
       const lifted = st.lifted.filter((x: any) => x.by_round === round).map((x: any) => ({ side: x.side, signer: x.signer, who: x.who, kind: x.kind, why: x.why, page: x.page, round: x.round, by: x.by }));
       const outstanding = N.outstanding(st, sides);
-      formed = (m.marks || []).length === 0 && outstanding.length === 0 && Object.keys(sides).length === 2;
+      // a signer's own initials, name or signature (029) is not a change
+      const isOwn = (k: any) => !!(d.sign && d.sign.isOwn ? d.sign.isOwn(k) : ["own_initials", "own_name", "own_signature"].includes(k && k.kind));
+      const chg = (m.marks || []).filter((k: any) => !isOwn(k)), own = (m.marks || []).filter(isOwn);
+      formed = chg.length === 0 && outstanding.length === 0 && Object.keys(sides).length === 2;
       const base = earlier[earlier.length - 1] || {};
       const rec = Object.assign({}, executionRecord(m), { number: n, document: m.document, round, side: m.side, base: { round: base.doc_round, sha256: base.sha256 }, link_changes: m.link_changes == null ? null : !!m.link_changes,
-        changes: (m.marks || []).map((k: any) => ({ kind: k.kind, page: k.page, by: k.by, at: k.at, text: k.kind === "insert" || k.kind === "strike" ? k.geometry?.text || undefined : undefined })), lifted, outstanding: outstanding.length });
+        changes: chg.map((k: any) => ({ kind: k.kind, page: k.page, by: k.by, at: k.at, text: k.kind === "insert" || k.kind === "strike" ? k.geometry?.text || undefined : undefined })), ...(own.length ? { own: own.map((k: any) => ({ kind: k.kind, page: k.page, by: k.by, at: k.at })) } : {}), lifted, outstanding: outstanding.length });
       // the record keeps the title and drawing version, so the round can be drawn again from its layers and come out byte for byte the same
       const title = `Round ${round} (signed by the ${m.side === "vendor" ? "vendors" : "purchasers"}): ${m.address || "agreement"}`;
       record = Object.assign({}, rec, { title, draw_version: N.DRAW_VERSION, check: { lifted, outstanding } });
-      bytes = (await d.renderWorking(draft, { ink: st.ink, changes: st.changes, lines: N.roundLines(rec), title })).bytes;
+      bytes = (await d.renderWorking(draft, { ink: st.ink, changes: st.changes, own: st.own, lines: N.roundLines(rec), title })).bytes;
     }
     const sha = await sha256(bytes), path = `properties/${m.property_id}/docs/offer-round-${m.offer_id}-${n}-${sha.slice(0, 12)}.pdf`;
     const up = await d.upload(path, bytes); if (!up.ok && !up.exists) throw new Error("The round couldn't be stored. Try again.");
@@ -149,7 +152,7 @@ export function makeHandler(d: Deps) {
     if (!lk.existing) {
       const portal = `${(d.portalUrl || "https://portal.dunnerstunner.co.nz/").replace(/\/?$/, "/")}properties/${m.property_id}/offers/${m.offer_id}/signing/${signingId}`;
       const nt = d.mail ? d.mail.roundNotice({ side: m.side || "purchaser", round, docRound: m.doc_round, address: m.address, signers: (m.signers || []).map((s: any) => s.name),
-        changes: (m.marks || []).map((c: any) => ({ kind: c.kind, page: c.page, text: c.geometry && c.geometry.text, by: c.by_name || c.by })), portalUrl: portal }) : null;
+        changes: (m.marks || []).filter((c: any) => !["own_initials", "own_name", "own_signature"].includes(c.kind)).map((c: any) => ({ kind: c.kind, page: c.page, text: c.geometry && c.geometry.text, by: c.by_name || c.by })), portalUrl: portal }) : null;
       const extra = `<p>${esc(next)}</p><p>Fingerprint: <code>${esc(ssha.slice(0, 16))}</code></p>`;
       try { await d.sendMail("offer_round_locked", { to: d.timEmail, subject: nt ? nt.subject : `Round ${round} submitted: ${m.address || "an offer"}`, html: nt ? d.mail.toHtml(nt.body).replace(/<\/div>$/, extra + "</div>") : wrap(`<p>Round ${round} for ${esc(m.address || "")} is signed and locked.</p>${extra}<p><a href="${esc(portal)}">${esc(portal)}</a></p>`) }); } catch (_) { /* the round is locked either way */ }
     }
@@ -166,7 +169,7 @@ export function makeHandler(d: Deps) {
     // drawn again from Round N's own layers; its fingerprint and the drawing version are recorded on the copy and with the agreement
     const record = { address: m.address, offer_ref: m.offer_ref, date_text: m.date_text, accepted_at: m.accepted_at, confirmed_by: "Tim McGuire", made_at: m.made_at, document: m.document, round: m.round, rounds: m.rounds || [],
       base: { round: m.round, sha256: m.round_sha256 }, draw_version: N.DRAW_VERSION };
-    const { bytes } = await d.renderWorking(draft, { ink: st.ink, changes: st.changes, lines: N.agreementLines(record), date: { text: m.date_text, place: m.date_place || null }, title: `Agreement: ${m.address || ""}` });
+    const { bytes } = await d.renderWorking(draft, { ink: st.ink, changes: st.changes, own: st.own, lines: N.agreementLines(record), date: { text: m.date_text, place: m.date_place || null }, title: `Agreement: ${m.address || ""}` });
     const sha = await sha256(bytes), path = `properties/${m.property_id}/docs/offer-agreement-${m.offer_id}-${sha.slice(0, 12)}.pdf`;
     const up = await d.upload(path, bytes); if (!up.ok && !up.exists) throw new Error("The agreement couldn't be stored. Try again.");
     const stored = await d.download(path); if (!stored) throw new Error("The agreement couldn't be read back. Try again.");
@@ -261,7 +264,7 @@ export function makeHandler(d: Deps) {
 
     // ── a purchaser, by their own link ──
     const token = typeof body.token === "string" ? body.token : "", session = typeof body.session === "string" ? body.session : "";
-    if (!["open", "send_code", "verify", "state", "consent", "receipt", "marks", "tap", "undo", "change", "ask", "request", "finish"].includes(action)) return json({ error: "Bad request" }, 400);
+    if (!["open", "send_code", "verify", "state", "consent", "receipt", "marks", "tap", "undo", "change", "mark", "ask", "request", "finish"].includes(action)) return json({ error: "Bad request" }, 400);
     if (!TOKEN_RE.test(token)) return json({ ok: false });
     try {
       if (action === "open") {
@@ -315,6 +318,18 @@ export function makeHandler(d: Deps) {
               await call("offer_mail_draft_sys", { p_offer: r.offer_id, p_signer: x.id, p_to: [x.email], p_subject: w.subject, p_body: w.body }); } catch (_) { /* Tim sees the reopened signer on the round's page either way */ } }
         }
         return json({ ok: true, id: r.id, reopened: r.reopened });
+      }
+      // 029: added text or the signer's own initials, name or signature, from their link. In Round 1 it holds signing for Tim, who is told
+      // at once (as for a request to change), and nobody else; from Round 2 on only their own mark, which is not a change and tells nobody
+      if (action === "mark") {
+        const kind = ["insert", "own_initials", "own_name", "own_signature"].includes(String(body.kind)) ? String(body.kind) : "";
+        if (!kind || !Number.isInteger(body.page) || !body.geometry || typeof body.geometry !== "object" || Array.isArray(body.geometry) || JSON.stringify(body.geometry).length > 2000) return json({ ok: false, error: "That didn't save. Please try again." }, 400);
+        const r = await call("offer_sign_mark", { p_token: token, p_session: session, p_net: net, p_kind: kind, p_page: body.page, p_geometry: body.geometry });
+        let emailed = null;
+        if (r.held) { emailed = true; const what = ({ insert: "added text", own_initials: "added their own initials", own_name: "added their own name", own_signature: "added their own signature" } as Record<string, string>)[kind];
+          const words = kind === "insert" ? `<blockquote style="border-left:3px solid #C9C4BD;margin:0;padding:4px 12px">${esc(String(body.geometry.text || "").slice(0, 300))}</blockquote>` : "";
+          try { await d.sendMail("offer_sign_marked", { to: d.timEmail, subject: `A purchaser marked the offer: ${r.address || "an offer"}`, html: wrap(`<p><strong>${esc(r.name)}</strong> ${esc(what)} on page ${esc(r.page)} of their offer for <strong>${esc(r.address || "")}</strong>, from their signing link.</p>${words}<p>Signing is held until you check it on the signing page and re-approve it. Nobody else has been told.</p>`) }); } catch (_) { emailed = false; } }
+        return json({ ok: true, id: r.id, held: !!r.held, emailed });
       }
       if (action === "ask") {
         const r = await call("offer_sign_ask", { p_token: token, p_session: session, p_text: String(body.text || "").slice(0, 1200) });

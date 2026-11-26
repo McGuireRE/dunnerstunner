@@ -181,7 +181,7 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   await p.click('#sgDvClose'); await p.waitForTimeout(500); const f2 = await dv(p, 'sgDv');
   expect(!f2.full && !f2.native && !f2.lock && f2.zoom === '150%' && await p.isVisible('#sgDvFull'), 'Close full screen leaves it, zoom kept'); expect(!(await side(p)), 'after full screen: no sideways scroll');
   // "Move to the next place for me": ticked, remembered, and then a tap glides to the next place still to do
-  await tick(p, '#sgDvAuto'); expect(/moves to the next one for you/.test(await p.textContent('#bn-sgDvAutoL')), 'the tick is confirmed just under it');
+  await tick(p, '#sgDvAuto'); await p.waitForTimeout(200); expect(/moves to the next one for you/.test(await p.textContent('#bn-sgDvAutoL')) && await p.evaluate(() => document.getElementById('bn-sgDvAutoL').previousElementSibling.id === 'sgDvAutoL'), 'the tick is confirmed just under it');
   const nextOf = () => p.evaluate(() => { const t = [...document.querySelectorAll('#sgPage .sg-todo')]; return t.map(x => x.dataset.id); });
   { const todo = await nextOf(); if (todo.length >= 2) { const c1 = await count(p); await p.$eval(`#sgPage .sg-place[data-id="${todo[0]}"]`, el => el.click());
       await p.waitForFunction(c => +document.querySelector('#sgCount').textContent.match(/(\d+) of/)[1] > c, c1); await p.waitForTimeout(900);

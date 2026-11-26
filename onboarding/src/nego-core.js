@@ -82,9 +82,12 @@
   // current (optional): the round being signed, whose changes already lift ink on the working copy (its own taps are added only when
   // opts.withCurrentInk is set, as when the round is locked).
   function standing(layers, current, opts) {
-    let ink = []; const changes = [], lifted = [];
+    let ink = []; const changes = [], lifted = [], own = [];
     const apply = (L, withInk) => {
-      const marks = (L.marks || []).map(m => Object.assign({}, m, { round: L.doc_round, side: L.side, signing_id: L.signing_id }));
+      // a signer's own initials, name or signature (029) is drawn on the working copy, but it is not a change: it lifts nothing and asks
+      // nobody for initials
+      const all = (L.marks || []).map(m => Object.assign({}, m, { round: L.doc_round, side: L.side, signing_id: L.signing_id }));
+      own.push(...all.filter(m => SIGN.isOwn(m))); const marks = all.filter(m => !SIGN.isOwn(m));
       marks.forEach(c => { ink = ink.filter(k => { if (k.side !== c.side && atPlace(k, c)) { lifted.push({ ink: k.key, side: k.side, signer: k.signer, who: k.who, kind: k.kind, why: k.why, ref: k.ref, page: k.page, round: k.round, by: c.id, by_round: c.round }); return false; } return true; }); });
       changes.push(...marks);
       if (!withInk) return;
@@ -94,7 +97,7 @@
     };
     (layers || []).slice().sort((a, b) => a.doc_round - b.doc_round).forEach(L => apply(L, true));
     if (current) apply(current, !!(opts && opts.withCurrentInk));
-    return { ink, changes, lifted };
+    return { ink, changes, lifted, own };
   }
   // what is missing before the agreement is formed. sides: { purchaser: [{ position, name }], vendor: [...] }
   function outstanding(st, sides) {
@@ -141,6 +144,14 @@
       signers.forEach(s => { const standingSig = st.ink.some(k => k.side === side && k.signer === s.position && k.kind === 'signature' && k.why === 'block'); if (standingSig && !input.resignEvery) return;
         const blockPl = (mine.places || []).filter(p => p.signer === s.position && p.why === 'block'); blockPl.forEach(p => places.push(Object.assign({}, p)));
         if (!blockPl.some(p => p.kind === 'signature')) blocking.push({ id: 'sig:' + s.position, label: 'Signatures', why: `${s.name} has no signature place from an earlier round.` }); });
+      // signing the whole agreement again every round (Tim's setting): everyone initials the chattels box again too (029)
+      if (input.resignEvery) {
+        const area = SIGN.chattelsArea(input.mapPlaces), pg = area && pages.find(p => p.n === area.page);
+        if (!area || !pg) blocking.push({ id: 'chattels', label: 'Chattels', why: SIGN.CHATTELS_MSG });
+        else { const res = SIGN.chattelsBoxes(signers.length, area, pg, rectsOf(st).concat(places), SIGN.textRects(pg));
+          if (!res) blocking.push({ id: 'chattels', label: 'Chattels', why: `Page ${area.page}: there is no clear space inside the chattels box for every signer's initials.` });
+          else res.boxes.forEach((b, i) => places.push({ id: `filled:chattels_box:s${signers[i].position}`, signer: signers[i].position, kind: 'initial', why: 'filled', ref: 'chattels_box', page: area.page, x: b.x, y: b.y, w: b.w, h: b.h, label: 'Initial the chattels box', chattels: true })); }
+      }
     }
     // everyone initials each change not yet initialled by them (the other side's, and their own where the other side lifted them)
     const obs = rectsOf(st).concat(places);
@@ -155,7 +166,7 @@
   }
 
   /* ───── words ───── */
-  const KIND_WORDS = { note: 'a note', strike: 'a line through text', cross: 'a crossed-out box', reinstate: 'a reinstatement', insert: 'typed words' };
+  const KIND_WORDS = { note: 'a note', strike: 'a line through text', cross: 'a crossed-out box', reinstate: 'a reinstatement', insert: 'typed words', own_initials: 'their own initials', own_name: 'their own name', own_signature: 'their own signature' };
   const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
   // "2026-11-24" -> "24 November 2026"
   const fullDate = iso => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || '')); return m ? `${+m[3]} ${MONTHS[+m[2] - 1]} ${m[1]}` : ''; };
@@ -181,6 +192,9 @@
     const ch = rec.changes || [];
     add(ch.length ? `Changes made in this round (${ch.length}), each initialled by everyone on this side:` : `No changes: the ${sideName(rec.side)} accepted Round ${rec.round - 1} as it stood.`, { bold: true, gap: 8 });
     ch.forEach(c => add(`Page ${c.page}: ${KIND_WORDS[c.kind] || c.kind}${c.kind === 'insert' && c.text ? ' "' + c.text + '"' : c.kind === 'strike' && c.text ? ' striking "' + c.text + '"' : ''} by ${c.by}, ${NZ(c.at)}.`, { size: 8.5 }));
+    // 029: a signer's own initials, name or signature added in this round (not changes); only when there are any, so earlier records read as before
+    if ((rec.own || []).length) { add('Added by a signer in this round (their own mark, not a change, so no one else initials it):', { bold: true, gap: 8 });
+      rec.own.forEach(c => add(`Page ${c.page}: ${KIND_WORDS[c.kind] || c.kind} by ${c.by}, ${NZ(c.at)}.`, { size: 8.5 })); }
     if ((rec.lifted || []).length) { add(`Lifted from this working copy at the place of a change (they still show on the earlier rounds):`, { bold: true, gap: 8 });
       rec.lifted.forEach(x => add(`Page ${x.page}: ${x.kind === 'signature' ? 'the signature' : 'the initials'} of ${x.who || 'one of the ' + sideName(x.side)} from Round ${x.round}.`, { size: 8.5 })); }
     (rec.signers || []).forEach((s, i) => {
@@ -240,6 +254,8 @@
       else if (c.kind === 'reinstate') { pg.drawText('Reinstated', { x: g.x, y: g.y + 2, size: 7, font: bold, color: ink }); pg.drawCircle({ x: g.x - 3, y: g.y + 4.5, size: 1.6, color: ink }); }
       else if (c.kind === 'insert') pg.drawText(ansi(g.text), { x: g.x, y: g.y, size: g.size || 9, font, color: ink });
     }
+    // 029: a signer's own initials, name or signature (none on any round before it, so earlier rounds draw exactly as they did)
+    for (const k of m.own || []) { const pg = pages[k.page - 1]; if (pg) await SIGN.drawAdded(doc, pg, k, font, ink); }
     if (m.date && m.date.text) { const p = m.date.place, pg = p && pages[p.page - 1];
       if (!pg || typeof p.x !== 'number' || typeof p.y !== 'number') throw new Error('The agreement blank has no date place, so the date can\'t be added. Add it to the places on the blank first.');
       pg.drawText(ansi(m.date.text), { x: p.x, y: p.y, size: 10, font, color: ink }); }
@@ -253,7 +269,7 @@
 
   // a locked round drawn again from the layers up to it and its stored execution record: the same bytes, if nothing has changed
   async function redrawRound(PDFLib, draftBytes, layers, execution) {
-    const st = standing(layers); return renderWorking(PDFLib, draftBytes, { ink: st.ink, changes: st.changes, lines: roundLines(execution), title: execution.title });
+    const st = standing(layers); return renderWorking(PDFLib, draftBytes, { ink: st.ink, changes: st.changes, own: st.own, lines: roundLines(execution), title: execution.title });
   }
 
   /* ───── a new further term in a counteroffer ───── */
