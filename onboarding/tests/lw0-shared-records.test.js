@@ -42,12 +42,13 @@ const TIM = ['agent-1', 'hello@timmcguire.co.nz'];
           { id: 'PA', address: '4 Profile Road, Roslyn', ownership: {}, description: {}, disclosures: {}, provenance: {}, stage: 'appraisal', stage_at: now, created_at: now, updated_at: now,
             found: { land_area: { key: 'land_area', field: 'pLand', written: true, value: 640, display: '640 m²', as_of_label: '2026-2027 rating year', source_name: 'Dunedin City Council rates', label: 'Land area' },
                      capital_value: { key: 'capital_value', value: 780000, display: '$780,000', as_of: '2026-2027', source_name: 'Dunedin City Council rates', label: 'Capital value' } } },
-          { id: 'PB', address: '9 Signed Street, Maori Hill', ownership: {}, description: {}, disclosures: {}, found: {}, provenance: {}, stage: 'signed', stage_at: now, created_at: now, updated_at: now }],
+          { id: 'PB', address: '9 Signed Street, Maori Hill', ownership: {}, description: {}, disclosures: {}, found: {}, provenance: {}, stage: 'signed', stage_at: now, created_at: now, updated_at: now },
+          { id: 'PC', address: '7 Typed Terrace, Opoho', ownership: {}, description: { pHeat: 'Wood burner' }, disclosures: {}, found: {}, provenance: {}, stage: 'appraisal', stage_at: now, created_at: now, updated_at: now }],
         property_people: [
           { id: 'PPA1', property_id: 'PA', position: 1, legal_name: 'Robin Rowe', pref_name: 'Rob', email: 'robin@example.com', phone: '021 555 0101', role: 'owner', source: 'agent', name_from: 'agent', created_at: now },
           { id: 'PPA2', property_id: 'PA', position: 2, legal_name: 'Jordan Rowe', pref_name: '', email: 'robin@example.com', phone: '', role: 'owner', source: 'agent', name_from: 'agent', created_at: now },
           { id: 'PPB1', property_id: 'PB', position: 1, legal_name: 'Sam Signer', pref_name: '', email: 'sam@example.com', phone: '', user_id: 'v-sam', role: 'owner', source: 'agreement', name_from: 'agreement', created_at: now }],
-        agreements: [{ id: 'AB', ref: 'MRE-2026-1009', address: '9 Signed Street, Maori Hill', property_id: 'PB', status: 'signed', config: {}, answers: { pBed: '3' }, legal: {}, agreement_version: 'v3.15-26102026', created_at: now, updated_at: now }],
+        agreements: [{ id: 'AC2', ref: 'MRE-2026-1012', address: '7 Typed Terrace, Opoho', property_id: 'PC', status: 'draft', config: {}, answers: { pHeat: 'Heat pump' }, legal: {}, agreement_version: 'v3.15-26102026', created_at: now, updated_at: now }, { id: 'AB', ref: 'MRE-2026-1009', address: '9 Signed Street, Maori Hill', property_id: 'PB', status: 'signed', config: {}, answers: { pBed: '3' }, legal: {}, agreement_version: 'v3.15-26102026', created_at: now, updated_at: now }],
         agreement_people: [{ id: 'APB1', agreement_id: 'AB', position: 1, legal_name: 'Sam Signer', pref_name: '', email: 'sam@example.com', phone: '', user_id: 'v-sam', signed_at: now, contact_id: null }],
         prelistings: [{ id: 'LA', address: '4 Profile Road, Roslyn', property_id: 'PA', contact_name: 'Rob', contact_email: 'robin@example.com', status: 'appraisal', appraisal: { method: 'Auction' }, answers: {}, plan: {}, created_at: now, updated_at: now }],
         agreement_events: [], signatures: [], lawyer_links: [], aml_files: [], aml_events: [], email_log: [], cancellation_requests: [] })); }, now);
@@ -75,6 +76,12 @@ const TIM = ['agent-1', 'hello@timmcguire.co.nz'];
       expect(d.agreement_people.find(x => x.id === 'APB1').contact_id === null, 'a signed person\'s own row is left alone (linked aside)');
       expect((d.crm_property_links || []).some(x => x.property_id === 'PA' && x.role === 'owner' && x.contact_id === linkOf('property_people', 'PPA1').contact_id), 'the owner role on the property, in the one home');
       expect(d.property_people.find(x => x.id === 'PPA1').contact_id === linkOf('property_people', 'PPA1').contact_id, 'property_people carries its contact');
+
+      // 2a. the backfill takes each property file's own values as Tim's: chosen; a different value elsewhere is shown beside; the file is unchanged
+      out[tag].pcHeat = (() => { const c = (d.property_profile || []).find(x => x.property_id === 'PC' && x.key === 'pHeat'); const v = c && (d.property_fact_values || []).find(f => f.id === c.value_id); return c && v ? [v.value, v.source, c.ticked] : null; })();
+      out[tag].pcRow = (await rpc('agent_property_profile', { p_property: 'PC' })).data.facts.find(x => x.key === 'pHeat');
+      expect(out[tag].pcHeat && out[tag].pcHeat[0] === 'Wood burner' && out[tag].pcHeat[1] === 'tim' && out[tag].pcRow.others.some(o => o.value === 'Heat pump' && o.source === 'agreement') && d.properties.find(x => x.id === 'PC').description.pHeat === 'Wood burner',
+        'the file\'s own value on the profile, the agreement\'s beside it, the file unchanged: ' + JSON.stringify(out[tag].pcRow));
 
       // 3. the property page shows the profile; the disclosures check reads it first and offers its value
       await openProp('PA');
@@ -110,6 +117,15 @@ const TIM = ['agent-1', 'hello@timmcguire.co.nz'];
       expect(await p.isVisible('#pfProfTick'), 'Tick all offered while something is not ticked');
       await p.click('#pfProfTick'); await p.waitForTimeout(700); d = await db();
       expect((d.property_profile || []).filter(x => x.property_id === 'PA').every(x => x.ticked) && !(await p.isVisible('#pfProfTick')), 'Tick all ticks every fact');
+
+      // 4a. Tim's decision (26 November 2026): a ticked value is never overwritten. A later disclosures check answer that differs is shown beside it
+      await p.click('[data-inspopen]'); await p.waitForTimeout(900);
+      await p.click('.insp-tab:has-text("Inside")').catch(() => null); await p.waitForTimeout(300);
+      await p.click('[data-ik="f:pBed"] input[value="3"] + span'); await p.waitForTimeout(1400);
+      d = await db(); out[tag].bed4 = pc('PA', 'pBed');
+      out[tag].bedOthers = (await rpc('agent_property_profile', { p_property: 'PA' })).data.facts.find(x => x.key === 'pBed').others.map(o => o.value + '/' + o.source);
+      expect(out[tag].bed4 && out[tag].bed4[0] === '5' && out[tag].bed4[1] === 'agreement' && out[tag].bed4[2] === true && out[tag].bedOthers.includes('3/inspection') && d.properties.find(x => x.id === 'PA').description.pBed === '5',
+        'the ticked 5 stays, on the file too; the check\'s 3 is shown beside it: ' + JSON.stringify([out[tag].bed4, out[tag].bedOthers]));
 
       // 5. Tim's own entry on the property file goes to the profile (a property with no agreement, so the file can be edited)
       await p.evaluate(() => { const d = JSON.parse(localStorage.getItem('mockdb')); d.agreements = d.agreements.filter(a => a.id !== 'AA'); localStorage.setItem('mockdb', JSON.stringify(d)); });
@@ -157,6 +173,35 @@ const TIM = ['agent-1', 'hello@timmcguire.co.nz'];
         out[tag].skip = await p.evaluate(() => { const w = document.createElement('div'); w.id = 'sgFlow'; w.innerHTML = '<button class="btn" type="button" id="lw0Probe">Probe</button>'; document.getElementById('main').appendChild(w); document.getElementById('lw0Probe').click(); return new Promise(r => setTimeout(() => r(!document.getElementById('bn-lw0Probe')), 300)); });
         expect(out[tag].skip, 'the signing viewer keeps its own messages');
         await p.evaluate(() => { const d = JSON.parse(localStorage.getItem('mockdb')); d.agreements = d.agreements.filter(a => a.id !== 'AC'); localStorage.setItem('mockdb', JSON.stringify(d)); });
+        // a failed profile save is reported under Save, in plain words (the file itself saved)
+        await go(); await openProp('PA');
+        await p.evaluate(() => localStorage.setItem('mockFailRpc', 'agent_profile_set'));
+        await p.fill('#pfd_pHeat', 'Heat pump, gas fire'); await p.click('#pfSave'); await p.waitForTimeout(900);
+        out[tag].profFail = await note('#pfSave');
+        expect(out[tag].profFail && out[tag].profFail.kind === 'err' && out[tag].profFail.shown && /property file is saved, but the property profile didn't take the heating/.test(out[tag].profFail.text), 'a profile save that failed, under the button: ' + JSON.stringify(out[tag].profFail));
+        await p.evaluate(() => localStorage.removeItem('mockFailRpc'));
+        await p.click('#pfSave'); await p.waitForTimeout(1500);
+        d = await db(); out[tag].heatAgain = pc('PA', 'pHeat');
+        expect(out[tag].heatAgain && out[tag].heatAgain[0] === 'Heat pump, gas fire', 'the next Save sends it again: ' + JSON.stringify(out[tag].heatAgain));
+        // the kind is given by the caller, never guessed from the words
+        out[tag].kind = await p.evaluate(() => new Promise(r => { const m = document.getElementById('main'); const b = document.createElement('button'); b.className = 'btn'; b.type = 'button'; b.id = 'lw0K'; b.textContent = 'Probe'; m.prepend(b); b.click();
+          window.__btnFeedback.toast('Only three left, choose one'); setTimeout(() => { const n = document.getElementById('bn-lw0K'); r(n ? [n.textContent, n.dataset.kind] : null); }, 200); }));
+        expect(out[tag].kind && out[tag].kind[1] === 'ok', 'words like "only" or "choose" don\'t make a message an error: ' + JSON.stringify(out[tag].kind));
+        // a message whose button has gone is never lost when another button is pressed straight after: it shows in the toast
+        out[tag].lost = await p.evaluate(() => new Promise(r => { const m = document.getElementById('main'); const t = document.getElementById('toast'); t.hidden = true;
+          const a = document.createElement('button'); a.className = 'btn'; a.type = 'button'; a.id = 'lw0A'; a.textContent = 'A'; m.prepend(a); a.click(); a.remove();
+          window.__btnFeedback.toast('Done with A');
+          setTimeout(() => { const b = document.createElement('button'); b.className = 'btn'; b.type = 'button'; b.id = 'lw0B'; b.textContent = 'B'; m.prepend(b); b.click(); }, 30);
+          setTimeout(() => r(!t.hidden && t.textContent), 300); }));
+        expect(out[tag].lost === 'Done with A', 'a message with no button left, then another press: still shown: ' + JSON.stringify(out[tag].lost));
+        // background saving (the disclosures check saves by itself) is never credited to the last button pressed
+        await go(); await openProp('PA'); await p.click('[data-inspopen]'); await p.waitForTimeout(900);
+        await p.click('.insp-tab:has-text("Inside")').catch(() => null); await p.waitForTimeout(300);
+        await p.evaluate(() => { localStorage.setItem('mockSaveDelay', '1200'); const b = document.createElement('button'); b.className = 'btn'; b.type = 'button'; b.id = 'lw0Idle'; b.textContent = 'Save nothing'; document.getElementById('main').prepend(b); b.click(); });
+        await p.click('[data-ik="f:pBath"] input[value="2"] + span').catch(() => null); await p.waitForTimeout(500);
+        out[tag].bg = await p.evaluate(() => { const n = document.getElementById('bn-lw0Idle'); return n ? [n.textContent, !n.hidden] : null; });
+        expect(!out[tag].bg || !out[tag].bg[1], 'the check saving in the background shows nothing under the last button: ' + JSON.stringify(out[tag].bg));
+        await p.waitForTimeout(1300); await p.evaluate(() => localStorage.removeItem('mockSaveDelay'));
         // the message lines of the offer form, the clause library, Ready to sign and presenting a round sit just under their buttons
         const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'app.js'), 'utf8');
         out[tag].under = ['ofSend', 'drLibSave', 'sgRelease', 'ngGo'].map(id => { const m = new RegExp('id="' + id + '"[^\\n]*?</div>\\s*<div class="err" id="(\\w+)"').exec(src); return id + ':' + (m ? m[1] : 'NOT UNDER'); });

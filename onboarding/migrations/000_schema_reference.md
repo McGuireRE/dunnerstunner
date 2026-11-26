@@ -430,22 +430,35 @@ signatures and fingerprints are not touched.
   false for `owners_relab`; `ql_column` the Quiet List column for the same fact), `property_fact_values` (every value from every source:
   council, reinz, relab, inspection, agreement, tim, first_visit, questionnaire, quiet_list; with display, source name, `as_of`,
   `recorded_at`, `recorded_by`; never changed or removed, `guard_fact_value`), `property_profile` (per property and fact: the chosen value,
-  `chosen_by` auto or tim, `ticked`). `profile_record` (internal) decides: Tim's own entry is chosen and ticked; an automatic value is
-  chosen only when nothing ticked stands, never a record over a person's entry, and the same value changes nothing; a source clearing its
-  chosen value hands over to the newest other value. Triggers: `profile_from_found` (council values Tim used are his; one that waited is a
-  value only), `profile_from_inspection` (Tim's answers chosen and ticked unless the agreement in force differs; his choice there applied),
-  `profile_from_agreement` (page 1 as an automatic value). Read: `agent_property_profile(p)`, `my_property_profile(p)` (a party to the
-  property, never Relab). Write: `agent_profile_set(p, key, value)`, `agent_profile_choose(p, key, value_id)` (both write back to
-  `properties.description`, title_ref or legal_description, never to an agreement), `agent_profile_tick(p, keys or null, on)`.
+  `chosen_by` auto or tim, `ticked`). `profile_record` (internal) decides, with p_choose: `tim` (Tim chose it here: chosen and ticked);
+  `offer` (a disclosures check answer, council values in the backfill: chosen and ticked unless Tim ticked a different value from another
+  source, which then stays, with this one shown beside it); `auto` (chosen only when nothing ticked stands, never over the property file's own
+  value, never a record over a person's entry); `never` (kept as a value only). A source clearing its chosen value hands over to what the
+  property file still says, else the newest other value. Whatever is chosen is written back to the file (`profile_sync_file`, internal;
+  never to an agreement; skipped during the backfill, so applying 028 changes no property file). `profile_file_value` (internal). Values that
+  are the same in another type (640 and "640") are not shown as different. Triggers: `profile_from_found` (council values Tim used are his;
+  one that waited is a value only), `profile_from_inspection` (answers offered; his choice on the check applied), `profile_from_agreement`
+  (page 1 as an automatic value). Read: `agent_property_profile(p)`, `my_property_profile(p)` (a party to the property, never Relab). Write:
+  `agent_profile_set(p, key, value)` (Tim's entry on the file; a cleared value clears the choice, nothing stays ticked),
+  `agent_profile_choose(p, key, value_id)`, `agent_profile_tick(p, keys or null, on)`.
 - Person: `person_links` (source property_people, agreement_people, prelisting, offer_signer, lawyer_link, ql_listing or ql_seller_lead,
   and its row; contact; property; role; `matched_by` email, name, record, new or tim; `doubt` and `doubt_contact_id` for Tim). Matching
-  (`person_find`, `person_link`, internal): the same email and a name that fits (an informal name fits on its first name or preferred
-  name; a contact known only informally fits any name); with no email, the same legal name on the same property; two checked names on one
-  email are kept apart with a doubt. Triggers: `person_link_pp` (before; fills `property_people.contact_id`), `person_link_ap` (before; fills
-  `agreement_people.contact_id` only while unsigned), `person_link_after` on prelistings, offer_signers (insert), lawyer_links and
-  ql_seller_leads; `aml_file_contact` (a new AML file gets its person's contact). `agent_person_link_resolve(link, same)`.
-- Property and person link: `crm_property_links` is the home (role check gains trustee, executor and contact); property_people stays the
-  working list of this round's owners and is kept in step by `person_link_pp`. View `property_person_roles` (security invoker, agent only).
+  (`person_find`, `person_link`, `person_name_fits`, `person_joint`, `person_nick_fits`, `person_short_same`, all internal): the same email
+  and a name that fits; with no email, the same legal name on the same property (a similar name there is kept apart and flagged). A name
+  fits a checked legal name if it is the same person's name (`same_person_name`, or the same surname with a first name that fits: "Tim" for
+  "Timothy"); an informal name also fits as the preferred name or a first name alone. A contact known only informally is filled by a name
+  only when nothing contradicts it ("Bron" and "Bronwyn McGuire", never "Timothy John Smith"). A name that doesn't fit is never joined: a
+  separate person with a doubt for Tim. A name holding two people ("A and B", "A & B") is never stored as one legal name and is flagged to be
+  split. One email (or one name on a property) is matched at a time (advisory lock), so rows written together never make two records of
+  one person. Triggers: `person_link_pp` (before; fills `property_people.contact_id`), `person_unlink_pp` (after delete: the link goes and
+  the role it gave ends), `person_link_ap` (before; fills `agreement_people.contact_id` only while unsigned), `person_link_after` on
+  prelistings, offer_signers (insert), lawyer_links and ql_seller_leads; `aml_file_contact` (a new AML file gets its person's contact).
+  `agent_person_link_resolve(link, same)`: joining moves the row's working list with it (property_people, an unsigned agreement person, the
+  Quiet List listing, answers filed with the row; never a signed row), ends the old record's role and archives a record left with nothing.
+- Property and person link: `crm_property_links` is the home (role check gains trustee, executor and contact). It follows the name lists
+  one way: property_people (and the other lists) write it through `person_link`, `person_unlink_pp` and `agent_person_link_resolve`; nothing
+  edits it directly yet (People, P4, must write through these functions). property_people stays the working list of this round's owners
+  (signing and vendor access read it). View `property_person_roles` (security invoker, agent only).
 - Question bank: `qa_questions` (27 questions: goals, timing, price, plans, home and area, agents, the old questionnaire's nine, own words,
   and four of Tim's own, `vendor_visible` false) and `qa_answers` (question, property, contact, value, source appointment_confirmation,
   first_visit, questionnaire, quiet_list_seller_form, quiet_list_listing, seller_profile or tim; `source_ref`; `by_vendor`; `answered_at`;
@@ -458,7 +471,10 @@ signatures and fingerprints are not touched.
 - Photos and documents: `agent_ql_set_photos(listing, docs)` (photos of the listing's property only), `ql_listing_photos(listing)`,
   `inspection_photos(inspection)`. `property_inspections.photos` is no longer used (commented); no files move.
 - Backfill: every name list linked (signed agreement people through person_links only), unlocked AML files filed with their contact and
-  locked files' summary copied to the contact, council values, agreements and inspections into the profile, questionnaire answers into
-  the bank.
+  locked files' summary copied to the contact; each property file's own values on the profile first (as Tim's, "Property file"), then
+  council values, agreements and inspections (a different value shown beside the file's); questionnaire answers into the bank. No property
+  file changes. Preview from a copy of the live records: `tests/lw0-backfill-preview.sql` (result in `tests/out`, not committed).
+- Privileges: every new definer function is closed to PUBLIC and anon; `profile_vendor_key` and `qa_mine` (read inside the vendor
+  policies) are open to signed-in users only; the internal helpers to nobody but the functions that call them.
 - Rollback test: `tests/shared-records-rollback.sql` (built by `tests/shared-records-rollback.js`); quick local stand-in
   `tests/lw0-standin.sql` (simplified inspection functions; the live run uses the real ones).

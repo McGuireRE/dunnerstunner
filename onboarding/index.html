@@ -6432,12 +6432,14 @@ window.JOURNEY_MEDIA_HINTS = {
   };
   window.__sbLock = sbLock;
   const sb = window.supabase.createClient(SB_URL, SB_KEY, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, lock: sbLock } });
-  // LW0: calls in flight are counted, so the button that started them can say it is working (see busyTrack)
-  // A plain promise is counted from now until it settles; a query builder (the real client) from when it is awaited.
+  // LW0: calls started while a press is live are counted, so the button pressed can say it is working (see busyTrack). A plain promise is
+  // counted from now until it settles; a query builder (the real client) from when it is awaited. bgRpc is the same call, never counted:
+  // background work (the disclosures check saving, the upload queue) uses it and reports in its own place.
+  const bgRpc = sb.rpc.bind(sb);
   (() => { const wrap = r => { if (!r || typeof r.then !== 'function') return r;
-      if (r instanceof Promise) { busyTrack(true); return r.finally(() => busyTrack(false)); }
-      const t = r.then.bind(r); r.then = (ok, no) => { busyTrack(true); return t(v => { busyTrack(false); return ok ? ok(v) : v; }, e => { busyTrack(false); if (no) return no(e); throw e; }); }; return r; };
-    const rpc = sb.rpc.bind(sb); sb.rpc = (...a) => wrap(rpc(...a));
+      if (r instanceof Promise) { const c = busyTrack(true); return r.finally(() => busyTrack(false, c)); }
+      const t = r.then.bind(r); r.then = (ok, no) => { const c = busyTrack(true); return t(v => { busyTrack(false, c); return ok ? ok(v) : v; }, e => { busyTrack(false, c); if (no) return no(e); throw e; }); }; return r; };
+    sb.rpc = (...a) => wrap(bgRpc(...a));
     if (sb.functions && sb.functions.invoke) { const inv = sb.functions.invoke.bind(sb.functions); sb.functions.invoke = (...a) => wrap(inv(...a)); } })();
 
   /* ───────── helpers ───────── */
@@ -6474,42 +6476,50 @@ window.JOURNEY_MEDIA_HINTS = {
   const busyWord = b => { const t = b.textContent || ''; return b.dataset.busy || (/signature|countersign/i.test(t) ? 'Saving the signature...' : /ready to sign|release/i.test(t) ? 'Getting it ready to sign...' : /send|email/i.test(t) ? 'Sending...' : /draft/i.test(t) ? 'Drafting...'
     : /save|done|\badd\b|\buse\b|keep|confirm|approve|tick|update|change|remove|mark|make an/i.test(t) ? 'Saving...' : /upload|photo/i.test(t) ? 'Uploading...' : /look|check|find|search/i.test(t) ? 'Looking...'
     : /download|open|view/i.test(t) ? 'Opening...' : 'Working...'); };
-  const recent = () => LAST_BTN && LAST_BTN.isConnected && Date.now() - LAST_AT < 20000;
+  // a press is "live" for 20 seconds: calls and messages in that time are its own. Background work (the disclosures check saving every
+  // 15 seconds, the upload queue, reconnecting) goes through bgRpc and toastOnly, so it is never credited to the last button pressed.
+  const pressLive = () => !!LAST_BTN && Date.now() - LAST_AT < 20000;
   // the automatic "Saving..." note: shown while the database works for the button just pressed, unless the page wrote its own note there
-  function autoBusy() { if (!recent() || !INFLIGHT) return; const n = btnNote(LAST_BTN); if (n && !n.hidden && !n._auto) return; const m = atBtn(LAST_BTN, busyWord(LAST_BTN), 'busy'); if (m) m._auto = true; }
-  function busyTrack(on) {
-    INFLIGHT = Math.max(0, INFLIGHT + (on ? 1 : -1));
-    if (on) { clearTimeout(busyTrack._t); busyTrack._t = setTimeout(autoBusy, 150); return; }
+  function autoBusy() { if (!pressLive() || !LAST_BTN.isConnected || !INFLIGHT) return; const n = btnNote(LAST_BTN); if (n && !n.hidden && !n._auto) return; const m = atBtn(LAST_BTN, busyWord(LAST_BTN), 'busy'); if (m) m._auto = true; }
+  // counts a call only if a press is live when it starts; returns that press (0 if not counted), so its end is counted against the same press
+  function busyTrack(on, counted) {
+    if (on) { if (!pressLive()) return 0; INFLIGHT++; clearTimeout(busyTrack._t); busyTrack._t = setTimeout(autoBusy, 150); return LAST_AT; }
+    if (!counted || counted !== LAST_AT) return 0;   // not counted, or counted for an earlier press
+    INFLIGHT = Math.max(0, INFLIGHT - 1);
     if (!INFLIGHT) { clearTimeout(busyTrack._t); busyTrack._t = setTimeout(() => { if (INFLIGHT || !LAST_BTN) return; const n = btnNote(LAST_BTN); if (n && n._auto && n.dataset.kind === 'busy') n.hidden = true; }, 250); }
+    return 0;
   }
   document.addEventListener('click', e => {
     const b = e.target && e.target.closest ? e.target.closest('button') : null;
     if (!b) return;
     if (!b.matches('.btn') || b.closest(BTN_SKIP)) { if (b.closest(BTN_SKIP)) LAST_BTN = null; return; }
-    LAST_BTN = b; LAST_AT = Date.now();
+    LAST_BTN = b; LAST_AT = Date.now(); INFLIGHT = 0;   // calls started for an earlier press no longer count
     const n = btnNote(b); if (n && n.dataset.kind !== 'busy') n.hidden = true;   // a fresh press: the last result goes
-    clearTimeout(busyTrack._t); busyTrack._t = setTimeout(autoBusy, 150);
+    clearTimeout(busyTrack._t);
   }, true);
-  const BTN_ERR = /n't|\bnot\b|no signal|failed|refused|can.t|try again|wrong|denied|only |add the|choose |check the|problem|went wrong/i;
-  // a message the page would have shown in a toast goes under the button just pressed. If the page redraws, it follows the button onto
-  // the new page; if the button is gone for good (the page moved on), it falls back to the toast.
-  function toast(msg) {
-    if (!msg || !recent()) return toastOnly(msg);
-    const b = LAST_BTN, key = btnKey(b), kind = BTN_ERR.test(msg) ? 'err' : 'ok', at0 = LAST_AT;
-    let tgt = b;
-    const place = () => { if (!tgt || !tgt.isConnected) tgt = key ? document.querySelector(key) : null; if (!tgt || !tgt.isConnected || tgt.closest(BTN_SKIP)) return false; atBtn(tgt, msg, kind); LAST_BTN = tgt; return true; };
-    place();
+  // A message the page would have shown in a toast goes under the button just pressed. If the page redraws, it follows the button onto
+  // the new page. It falls back to the toast if the button is gone for good, or if another button is pressed before it found a place.
+  // kind: 'ok' (the default) or 'err', always given by the caller (never guessed from the words).
+  function toast(msg, kind) {
+    if (!msg || !pressLive()) return toastOnly(msg);
+    const key = btnKey(LAST_BTN), at0 = LAST_AT, k = kind === 'err' ? 'err' : 'ok';
+    let tgt = LAST_BTN, done = false;
+    const place = () => { if (!tgt || !tgt.isConnected) tgt = key ? document.querySelector(key) : null; if (!tgt || !tgt.isConnected || tgt.closest(BTN_SKIP)) return false;
+      atBtn(tgt, msg, k); if (LAST_AT === at0) LAST_BTN = tgt; return true; };
+    done = place();
     const ticks = [80, 450, 1300, 2600];
     ticks.forEach((ms, i) => setTimeout(() => {
-      if (LAST_AT !== at0) return;                     // a newer press has its own note
-      if (tgt && tgt.isConnected && btnNote(tgt)) return;   // still there, with this message or a newer one
-      if (!place() && i === ticks.length - 1) toastOnly(msg);
+      if (LAST_AT !== at0) { if (!done) { done = true; toastOnly(msg); } return; }   // a newer press: an unplaced message still shows
+      if (tgt && tgt.isConnected && btnNote(tgt)) { done = true; return; }          // still there, with this message or a newer one
+      done = place();
+      if (!done && i === ticks.length - 1) { done = true; toastOnly(msg); }
     }, ms));
   }
+  window.__btnFeedback = { toast: (m, k) => toast(m, k) };   // for the tests: the same routing a page's own message takes
   // what a button is doing, or what it did, shown right under that button (Tim, 26 November 2026): "Drafting...", then the result or
   // the problem, so it is never somewhere else on the page. kind: 'busy', 'ok' or 'err'. Under the button's row of buttons if it has one.
   function atBtn(btn, msg, kind) {
-    if (!btn) { if (msg) toast(msg); return null; }
+    if (!btn) { if (msg) toast(msg, kind === 'err' ? 'err' : 'ok'); return null; }
     // one note per button: found by the button's id, or kept with a button that has none (so two buttons never share a note)
     atBtn.notes ||= new WeakMap();
     let n = btn.id ? document.getElementById('bn-' + btn.id) : atBtn.notes.get(btn), fresh = false;
@@ -6549,7 +6559,7 @@ window.JOURNEY_MEDIA_HINTS = {
   $('#back').addEventListener('click', () => onBack && onBack());
   $('#next').addEventListener('click', async () => { if (!onNext) return; const b = $('#next'); b.disabled = true; try { await onNext(); } finally { b.disabled = false; } });
   function top() { window.scrollTo({ top: 0 }); const h = $('h1', main()); if (h) { h.setAttribute('tabindex', '-1'); h.focus({ preventScroll: true }); } }
-  async function must(p) { busyTrack(true); let r; try { r = await p; } finally { busyTrack(false); } const { data, error } = r; if (error) { console.error(error); toast(error.message || 'Something went wrong'); throw error; } return data; }
+  async function must(p) { const c = busyTrack(true); let r; try { r = await p; } finally { busyTrack(false, c); } const { data, error } = r; if (error) { console.error(error); toast(error.message || 'Something went wrong', 'err'); throw error; } return data; }
   async function sha256(text) { const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)); return Array.from(new Uint8Array(b)).map(x => x.toString(16).padStart(2, '0')).join(''); }
   const callName = p => (p.pref_name || '').trim() || (p.legal_name || '').trim().split(/\s+/)[0] || '';
   const joinNames = a => a.length < 2 ? a.join('') : a.slice(0, -1).join(', ') + ' and ' + a[a.length - 1];
@@ -6729,7 +6739,7 @@ window.JOURNEY_MEDIA_HINTS = {
       if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Could not create the PDF');
       const url = URL.createObjectURL(await r.blob());
       if (w) w.location.href = url; else location.href = url;
-    } catch (e) { if (w) w.close(); toast(e.message); }
+    } catch (e) { if (w) w.close(); toast(e.message, 'err'); }
   }
   const pdfBtn = (label = 'Read the full agreement (PDF)') => `<button class="btn ghost" type="button" data-pdf="1">${label}</button>`;
   function wirePdf(id) { $$('[data-pdf]').forEach(b => b.addEventListener('click', () => openPdf(id))); }
@@ -7598,7 +7608,7 @@ function lawyerForm(id, title, blurb) {
     if (!pid || !read || !(read.files || []).length) return;
     const kindOf = name => ((read.documents || []).find(d => d.file === name) || {}).kind || null;
     const rr = { flags: read.flags || [], documents: read.documents || [], at: new Date().toISOString() };
-    try { await must(sb.from('property_documents').insert(read.files.map(f => ({ property_id: pid, name: f.name, path: f.path, kind: kindOf(f.name), source: 'dropped', read_result: rr, created_by: SESSION.user.email })))); } catch (e) { toast("The documents couldn't be filed on the property. Try dropping them in again."); console.warn('file docs', e); }
+    try { await must(sb.from('property_documents').insert(read.files.map(f => ({ property_id: pid, name: f.name, path: f.path, kind: kindOf(f.name), source: 'dropped', read_result: rr, created_by: SESSION.user.email })))); } catch (e) { toast("The documents couldn't be filed on the property. Try dropping them in again.", 'err'); console.warn('file docs', e); }
   }
   const propFlags = docs => { const seen = new Set(), out = []; docs.forEach(d => ((d.read_result || {}).flags || []).forEach(f => { if (!seen.has(f.text)) { seen.add(f.text); out.push(f); } })); return out; };
 
@@ -7616,14 +7626,16 @@ function lawyerForm(id, title, blurb) {
     viewProperty(PF.p.id);
   }
   async function propSave() {
-    const p = PF.p;
+    const p = PF.p, profFail = [];
     await must(sb.from('properties').update({ address: p.address, title_ref: p.title_ref || null, owners_on_title: p.owners_on_title || null, ownership: p.ownership, description: p.description, disclosures: p.disclosures }).eq('id', p.id));
     // LW0: what Tim typed here is his own entry on the property profile (chosen and ticked); the file already has it
     if (PF.was) {
       const was = PF.was, changed = DESC_FIELDS.map(([k]) => k).filter(k => String(was.description[k] ?? '') !== String(p.description[k] ?? '')).map(k => [k, p.description[k] ?? null]);
       if ((was.title_ref || '') !== (p.title_ref || '')) changed.push(['title_ref', p.title_ref || null]);
-      for (const [k, v] of changed) { try { await sb.rpc('agent_profile_set', { p_property: p.id, p_key: k, p_value: v }); } catch (_) { } }
-      PF.was = { description: Object.assign({}, p.description), title_ref: p.title_ref || '' };
+      // a value that didn't reach the profile stays "changed", so the next Save sends it again; Tim is told under the button
+      for (const [k, v] of changed) { let error = null; try { ({ error } = await sb.rpc('agent_profile_set', { p_property: p.id, p_key: k, p_value: v })); } catch (e) { error = e; }
+        if (error) { profFail.push(k); continue; }
+        if (k === 'title_ref') was.title_ref = p.title_ref || ''; else if (p.description[k] == null) delete was.description[k]; else was.description[k] = p.description[k]; }
     }
     let pos = 1;
     for (const x of PF.people) {
@@ -7637,6 +7649,8 @@ function lawyerForm(id, title, blurb) {
     }
     // a removed owner is set aside, not deleted, so the history stays and they lose access
     for (const id of PF.removed || []) await must(sb.from('property_people').update({ role: 'former' }).eq('id', id));
+    if (profFail.length) { const lb = profFail.map(k => k === 'title_ref' ? 'title reference' : ((DESC_FIELDS.find(([x]) => x === k) || [])[1] || k).toLowerCase());
+      const e = new Error(`The property file is saved, but the property profile didn't take the ${joinNames(lb)}. Check you have signal, then tap Save again.`); e.plain = true; throw e; }
   }
 
   /* AFTER SIGNING: Tim moves a countersigned property on the market, under offer, sold, settled or withdrawn. The database checks
@@ -7795,7 +7809,7 @@ function lawyerForm(id, title, blurb) {
         if (!p.address) return atBtn($('#pfSave'), 'Add the address.', 'err');
         if (PF.people.some(x => x.email && !EMAIL_RE.test(x.email.trim()))) return atBtn($('#pfSave'), 'Check the email addresses.', 'err');
         const sv = $('#pfSave');
-        try { await propSave(); } catch (e) { atBtn(sv, /fetch|network|signal/i.test((e && e.message) || '') || !navigator.onLine ? 'Not saved yet. Everything you typed is still here. Check you have signal, then tap Save again.' : 'Not saved yet: ' + ((e && e.message) || 'something went wrong') + '. Everything you typed is still here.', 'err'); return; }
+        try { await propSave(); } catch (e) { atBtn(sv, e && e.plain ? e.message : /fetch|network|signal/i.test((e && e.message) || '') || !navigator.onLine ? 'Not saved yet. Everything you typed is still here. Check you have signal, then tap Save again.' : 'Not saved yet: ' + ((e && e.message) || 'something went wrong') + '. Everything you typed is still here.', 'err'); return; }
         toast('Saved'); viewProperty(id);
       });
     }
@@ -7897,7 +7911,7 @@ function lawyerForm(id, title, blurb) {
       catch (e) { refused.push(`${f.name}: ${e.message}`); }
     }
     try { if (n && navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (_) { }
-    if (refused.length) { toast(refused.length === 1 ? refused[0] : `${refused.length} files couldn't be added. ${refused[0]}`); $$('[data-rq-refused]').forEach(el => { el.textContent = refused.join(' '); }); }
+    if (refused.length) { toast(refused.length === 1 ? refused[0] : `${refused.length} files couldn't be added. ${refused[0]}`, 'err'); $$('[data-rq-refused]').forEach(el => { el.textContent = refused.join(' '); }); }
     else $$('[data-rq-refused]').forEach(el => { el.textContent = ''; });
     rqPaint(); rqPump();
     return { added: n, refused };
@@ -7913,7 +7927,7 @@ function lawyerForm(id, title, blurb) {
       if (!it.blob) throw new Error('The file is no longer on this phone. Add it again.');
       await rqUpload(it.path, it.blob, it.mime);
       if (it.thumb_path && it.thumb) await rqUpload(it.thumb_path, it.thumb, 'image/jpeg');
-      const { data, error } = await sb.rpc('agent_repo_add', { p_property: it.pid, p_item: { key: it.key, kind: it.kind, title: it.title, name: it.name, path: it.path, thumb_path: it.thumb_path,
+      const { data, error } = await bgRpc('agent_repo_add', { p_property: it.pid, p_item: { key: it.key, kind: it.kind, title: it.title, name: it.name, path: it.path, thumb_path: it.thumb_path,
         mime_type: it.mime, size_bytes: it.size, sha256: it.sha256, room: it.room, taken_at: it.taken_at, width: it.width, height: it.height, inspection_id: it.inspection_id } });
       if (error) throw error;
       it.state = 'saved'; it.doc_id = data && data.id; it.blob = null;
@@ -8056,7 +8070,7 @@ function lawyerForm(id, title, blurb) {
   async function repoOpen(d) {
     const w = window.open('', '_blank');
     try { const u = await repoLink(d.bucket || 'private', d.path); if (w) w.location.href = u; }
-    catch (e) { if (w) w.close(); toast(netErr(e) ? 'No signal. It opens once the signal returns.' : 'It couldn\'t be opened. Try again.'); }
+    catch (e) { if (w) w.close(); toast(netErr(e) ? 'No signal. It opens once the signal returns.' : 'It couldn\'t be opened. Try again.', 'err'); }
   }
   async function repoRefresh(pid) {
     const box = document.getElementById('repoSaved'); if (!box || !REPO_VIEW || REPO_VIEW.pid !== pid) return;
@@ -8434,7 +8448,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     }));
     $$('[data-trc-go]', box).forEach(b => b.addEventListener('click', async () => {
       b.disabled = true; const code = b.dataset.trcGo, have = new Set((await trRows(scope, code, ref)).map(r => r.source)), bad = trFailed(code, scope);
-      if (TR_ALL.running) { toast('Translate everything is running. Wait for it to finish or stop it first.'); b.disabled = false; return; }
+      if (TR_ALL.running) { toast('Translate everything is running. Wait for it to finish or stop it first.', 'err'); b.disabled = false; return; }
       const r = await trTranslate(scope, ref, code, sources.filter(s => !have.has(s) && !bad.has(trHash(s)))); toast(r.message); redraw();
     }));
     $$('[data-trc-ok]', box).forEach(b => b.addEventListener('click', async () => {
@@ -8607,7 +8621,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       if (b.dataset.sure !== '1') { b.dataset.sure = '1'; b.textContent = 'Tap again to remove'; return; }
       b.disabled = true; const k = b.dataset.crRm, label = ((p.found || {})[k] || {}).label || 'It';
       const { data, error } = await sb.rpc('agent_council_remove', { p_property: p.id, p_key: k });
-      if (error) { b.disabled = false; toast(netErr(error) ? 'No signal. Nothing was changed.' : error.message); return; }
+      if (error) { b.disabled = false; toast(netErr(error) ? 'No signal. Nothing was changed.' : error.message, 'err'); return; }
       toast(data.agreement_holds ? `Removed. The agreement ${data.agreement_holds} still says it, so the file keeps that value.` : data.restored ? `Removed. ${label} is back to what it was before.` : 'Removed.');
       viewProperty(p.id);
     }));
@@ -8628,7 +8642,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     crAddressHook($('#insAddr'), $('#crInsp'), () => ({ pid: null, useLabel: 'Start the disclosures check and use these',
       before: async () => { const a = $('#insAddr').value.replace(/\s+/g, ' ').trim(); if (made && madeFor === a) return made;
         const { data, error } = await sb.rpc('agent_inspection_start', { p_property: null, p_address: a });
-        if (error) { toast(netErr(error) ? 'No signal. Starting needs a connection for a moment.' : error.message); return null; } iid = data.inspection_id; made = data.property_id; madeFor = a; return made; },
+        if (error) { toast(netErr(error) ? 'No signal. Starting needs a connection for a moment.' : error.message, 'err'); return null; } iid = data.inspection_id; made = data.property_id; madeFor = a; return made; },
       onUsed: () => { INS = null; viewInspection(iid); } }));
   }
   // Let's begin: values are used once the appraisal page (and so the property file) exists
@@ -8773,7 +8787,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     $$('[data-need]').forEach(b => b.addEventListener('click', () => needs[+b.dataset.need].go()));
     $$('[data-needgive]').forEach(b => b.addEventListener('click', async () => {
       const i = +b.dataset.needgive, d = ($(`[data-needdate="${i}"]`) || {}).value || '', today = new Date().toLocaleDateString('en-CA', { timeZone: 'Pacific/Auckland' });
-      if (!d || d > today) return toast('Choose the day it was given: today or earlier.');
+      if (!d || d > today) return toast('Choose the day it was given: today or earlier.', 'err');
       b.disabled = true; try { await needs[i].give(d); toast('Recorded. The review date is now 90 days on.'); redraw(); } catch (_) { b.disabled = false; }
     }));
     $$('[data-needdone]').forEach(b => b.addEventListener('click', async () => { b.disabled = true; try { await needs[+b.dataset.needdone].done(); toast('Ticked off'); redraw(); } catch (_) { b.disabled = false; } }));
@@ -9337,7 +9351,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       tCollect(); if (!(await tSave())) return;
       await must(sb.rpc('agent_send_to_lawyer', { a: T.id, l_name: n, l_firm: fm, l_email: e }));
       const { data, error } = await sb.functions.invoke('notify', { body: { type: 'lawyer', agreement_id: T.id } });
-      toast(error || (data && data.ok === false) ? 'Saved, but the lawyer email didn\'t send. Try again from the agreement page.' : 'Sent to ' + n);
+      toast(error || (data && data.ok === false) ? 'Saved, but the lawyer email didn\'t send. Try again from the agreement page.' : 'Sent to ' + n, error || (data && data.ok === false) ? 'err' : 'ok');
       viewAgentDetail(T.id);
     });
     $$('[data-signer]').forEach(card => { const pid = card.dataset.signer; T.pads[pid] = makePad($('#pad_' + pid)); });
@@ -9366,7 +9380,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         T.ag = Object.assign(T.ag, await must(sb.from('agreements').select('id,ref,status,legal,sent_at,cooling_off_until').eq('id', T.id).single()));
         if (res && res.remaining === 0) {
           const { error: fe } = await sb.functions.invoke('notify', { body: { type: 'signed', agreement_id: T.id } });
-          toast(fe ? 'All signed. The copy email didn\'t send; resend it from the agreement page.' : 'All signed. Copies are on their way.');
+          toast(fe ? 'All signed. The copy email didn\'t send; resend it from the agreement page.' : 'All signed. Copies are on their way.', fe ? 'err' : 'ok');
           return viewAgentDetail(T.id);
         }
         toast(person.legal_name + ' has signed'); tShow(2);
@@ -9492,7 +9506,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     actions(false);
     $('#toList').addEventListener('click', viewAgentList);
     const tpb = $('#toProp'); if (tpb) tpb.addEventListener('click', () => viewProperty(ag.property_id));
-    const cm = $('#copyMsg'); if (cm) cm.addEventListener('click', async () => { try { await navigator.clipboard.writeText(msg); toast('Copied'); } catch { toast('Select the text and copy it'); } });
+    const cm = $('#copyMsg'); if (cm) cm.addEventListener('click', async () => { try { await navigator.clipboard.writeText(msg); toast('Copied'); } catch { toast('Select the text and copy it', 'err'); } });
     const ed = $('#editAg'); if (ed) ed.addEventListener('click', () => viewTable(id));
     const sa = $('#saveAdj'); if (sa) sa.addEventListener('click', async () => {
       for (const row of $$('[data-pc]')) await must(sb.from('agreement_people').update({ phone: $('[data-pcphone]', row).value.trim(), pref_name: $('[data-pcpref]', row).value.trim() }).eq('id', row.dataset.pc));
@@ -9507,7 +9521,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const pla = $('#plAns'); if (pla) pla.addEventListener('click', () => viewPrelistingAgent(cfg.prelisting_id));
     wirePdf(id); const cpb = $('#campPdf'); if (cpb) cpb.addEventListener('click', () => openPdf(id, 'campaign'));
     if ($('#afwd')) { const sender = async (n, fm, e) => { await must(sb.from('lawyer_links').insert({ agreement_id: id, lawyer_name: n, firm: fm, email: e, sent_by: 'Tim McGuire', expires_at: new Date(Date.now() + 90 * 864e5).toISOString() })); await must(sb.from('agreement_events').insert({ agreement_id: id, actor: SESSION.user.email, kind: 'forwarded_to_lawyer', detail: { lawyer: n, email: e } })); }; sender.agId = id; wireLawyerForm('afwd', sender); }
-    const callNotify = async (type) => { const { data, error } = await sb.functions.invoke('notify', { body: { type, agreement_id: id } }); if (error || (data && data.ok === false)) toast('Email failed. See the Emails list below.'); else toast('Email sent'); viewAgentDetail(id); };
+    const callNotify = async (type) => { const { data, error } = await sb.functions.invoke('notify', { body: { type, agreement_id: id } }); if (error || (data && data.ok === false)) toast('Email failed. See the Emails list below.', 'err'); else toast('Email sent'); viewAgentDetail(id); };
     $$('[data-sendlaw]').forEach(b => b.addEventListener('click', () => { b.disabled = true; callNotify('lawyer'); }));
     const sc = $('#sendCopy'); if (sc) sc.addEventListener('click', () => { sc.disabled = true; callNotify('signed'); });
     $$('[data-aml]').forEach(b => b.addEventListener('click', () => viewAml(id, b.dataset.aml)));
@@ -9995,11 +10009,11 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         await must(sb.rpc('agent_form_countersign', { f: fid, p_image_path: path, p_snapshot: { document: doc.title, doc, property: ag.address, agreement_ref: ag.ref, signer: { name: 'Timothy McGuire', role: 'licensee' }, signed_at_client: new Date().toISOString() }, p_user_agent: navigator.userAgent }));
         await sigSaved($('#fSigA'), 'Countersigned', 'Your signature is saved');
         const { data, error } = await sb.functions.invoke('notify', { body: { type: 'form_signed', agreement_id: ag.id, form_id: fid } });
-        toast(error || (data && data.ok === false) ? 'Countersigned. The PDF didn\'t file; try again below.' : 'Countersigned. Filed, and emailed to you.');
+        toast(error || (data && data.ok === false) ? 'Countersigned. The PDF didn\'t file; try again below.' : 'Countersigned. Filed, and emailed to you.', error || (data && data.ok === false) ? 'err' : 'ok');
         viewFormAgent(fid);
       } catch (_) { fc.disabled = false; }
     }); }
-    const ff = $('#fFile'); if (ff) ff.addEventListener('click', async () => { ff.disabled = true; const { data, error } = await sb.functions.invoke('notify', { body: { type: 'form_signed', agreement_id: ag.id, form_id: fm.id } }); toast(error || (data && data.ok === false) ? 'That didn\'t work. Try again shortly.' : 'Filed, and emailed to you'); viewFormAgent(fid); });
+    const ff = $('#fFile'); if (ff) ff.addEventListener('click', async () => { ff.disabled = true; const { data, error } = await sb.functions.invoke('notify', { body: { type: 'form_signed', agreement_id: ag.id, form_id: fm.id } }); toast(error || (data && data.ok === false) ? 'That didn\'t work. Try again shortly.' : 'Filed, and emailed to you', error || (data && data.ok === false) ? 'err' : 'ok'); viewFormAgent(fid); });
     if (editable) {
       const read = () => {
         $$('.hhq').forEach(q => { const k = q.dataset.hk, r = $(`input[name="hc_${k}"]:checked`, q); ad.c[k] = { a: r ? r.value : '', n: $('[data-hn]', q).value.trim() }; });
@@ -10032,7 +10046,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         const d = isHH ? hhDoc(fm.agent_data, ag.address, names) : vdDoc(fm.data || {}, ag.address, names, new Date());
         const res = await must(sb.rpc('agent_form_sign_in_person', { f: fid, pid, p_image_path: path, p_snapshot: { document: d.title, doc: d, property: ag.address, agreement_ref: ag.ref, signer: { name: p.legal_name, email: p.email }, signed_at_client: new Date().toISOString() }, p_user_agent: navigator.userAgent }));
         await sigSaved($('#fpad_' + pid), `${p.legal_name} has signed`, 'Signature saved');
-        if (res && res.remaining === 0 && isHH) { const { error: fe } = await sb.functions.invoke('notify', { body: { type: 'form_signed', agreement_id: ag.id, form_id: fid } }); toast(fe ? 'All signed. The PDF didn\'t file; try again below.' : 'All signed. Filed, and emailed to you.'); }
+        if (res && res.remaining === 0 && isHH) { const { error: fe } = await sb.functions.invoke('notify', { body: { type: 'form_signed', agreement_id: ag.id, form_id: fid } }); toast(fe ? 'All signed. The PDF didn\'t file; try again below.' : 'All signed. Filed, and emailed to you.', fe ? 'err' : 'ok'); }
         else if (res && res.remaining === 0) toast('All the vendors have signed. Countersign it below.');
         viewFormAgent(fid);
       } catch (_) { b.disabled = false; }
@@ -10325,7 +10339,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       const email = SESSION && SESSION.user && SESSION.user.email;
       if (PORTAL && email) portalRemember();
       const { error } = email ? await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: SIGNIN_URL } }) : { error: true };
-      toast(error ? 'Couldn\'t send a sign-in link. Try again when you have signal.' : 'Check your email for a sign-in link. Your answers stay on this phone and save once you\'re signed in.');
+      toast(error ? 'Couldn\'t send a sign-in link. Try again when you have signal.' : 'Check your email for a sign-in link. Your answers stay on this phone and save once you\'re signed in.', error ? 'err' : 'ok');
       return;
     }
     inspSyncOne(id);
@@ -10353,7 +10367,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       sent[kind][k] = v; n++; size += w;
     }
     const stamps = {}; ['facts', 'decl', 'notes'].forEach(kind => Object.keys(sent[kind]).forEach(k => { const sk = KIND_P[kind] + ':' + k; if (sent.t[sk]) stamps[sk] = sent.t[sk]; }));
-    let res; try { res = await sb.rpc('agent_inspection_save', { iid: id, p_facts: sent.facts, p_decl: sent.decl, p_notes: sent.notes, p_stamps: stamps }); } catch (e) { res = { error: e }; }
+    let res; try { res = await bgRpc('agent_inspection_save', { iid: id, p_facts: sent.facts, p_decl: sent.decl, p_notes: sent.notes, p_stamps: stamps }); } catch (e) { res = { error: e }; }
     if (ep !== INS_EPOCH) return 'stopped';
     const cur = live() || c; cur.pending.t ||= {};
     if (res.error) {
@@ -10366,7 +10380,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         if (!isame(cur.pending[kind][k], sent[kind][k])) { INS_STATE[id] = { kind: 'ok' }; return 'refused'; }   // changed since: the new answer goes instead
         delete cur.pending[kind][k]; delete cur.pending.t[m[1] + ':' + k];
         const note = `${inspLabel(k)} (${m[3] || 'refused'})`;
-        INS_STATE[id] = { kind: 'ok', refused: note }; toast('Not saved: ' + note);
+        INS_STATE[id] = { kind: 'ok', refused: note }; toastOnly('Not saved: ' + note);
         if (INS && INS.id === id) inspKeep(id); else inspLS(id, pendingCount(cur.pending) ? cur : null);
         return 'refused';
       }
@@ -10417,13 +10431,16 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     INS = { id, row: base, pending, conflicts: base.conflicts || {}, offline: !row,
       facts: Object.assign({}, base.facts, pending.facts), decl: Object.assign({}, base.declaration, pending.decl), notes: Object.assign({}, base.notes, pending.notes) };
     if (!row) INS_STATE[id] = { kind: 'net' };
-    INS.profile = await profileLoad(base.property_id);   // LW0: the property profile is read first; its values are offered, never copied in by themselves
+    // LW0: the property profile is read first; its values are offered, never copied in by themselves. Opened from the phone's copy with
+    // no signal, the page doesn't wait for it: it is read in the background and offered once it arrives.
+    if (row) INS.profile = await profileLoad(base.property_id);
+    else { INS.profile = []; const me = INS; profileLoad(base.property_id).then(f => { if (INS === me && f.length) { me.profile = f; if ($('.view-pad.insp [data-ik]')) inspDraw(); } }).catch(() => { }); }
     return INS;
   }
 
   async function inspStart(pid, addr) {
     const { data, error } = await sb.rpc('agent_inspection_start', { p_property: pid || null, p_address: addr || null });
-    if (error) { toast(netErr(error) ? 'No signal. Starting needs a connection for a moment; after that it works without one.' : error.message); return null; }
+    if (error) { toast(netErr(error) ? 'No signal. Starting needs a connection for a moment; after that it works without one.' : error.message, 'err'); return null; }
     await viewInspection(data.inspection_id);
     return true;
   }
@@ -10815,7 +10832,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Could not create the PDF');
       const url = URL.createObjectURL(await r.blob());
       if (w) w.location.href = url; else location.href = url;
-    } catch (e) { if (w) w.close(); toast(e.message); }
+    } catch (e) { if (w) w.close(); toast(e.message, 'err'); }
   }
   async function uploadSig(cv, agId, tag) {
     const blob = await new Promise(res => cv.toBlob(res, 'image/png'));
@@ -10865,8 +10882,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     $$('[data-vedit]').forEach(b => b.addEventListener('click', () => viewVariation(agId, b.dataset.vedit)));
     $$('[data-vtogether]').forEach(b => b.addEventListener('click', () => viewVarTogether(agId, b.dataset.vtogether)));
     $$('[data-vpdf]').forEach(b => b.addEventListener('click', () => openVarPdf(b.dataset.vpdf)));
-    $$('[data-vsend]').forEach(b => b.addEventListener('click', async () => { b.disabled = true; const { data, error } = await sb.functions.invoke('notify', { body: { type: 'variation_sent', agreement_id: agId, variation_id: b.dataset.vsend } }); toast(error || (data && data.ok === false) ? 'Email failed. See the Emails list below.' : 'Emailed to them to sign'); viewAgentDetail(agId); }));
-    $$('[data-vcopy]').forEach(b => b.addEventListener('click', async () => { b.disabled = true; const { data, error } = await sb.functions.invoke('notify', { body: { type: 'variation_signed', agreement_id: agId, variation_id: b.dataset.vcopy } }); toast(error || (data && data.ok === false) ? 'Email failed. See the Emails list below.' : 'Signed copy emailed'); viewAgentDetail(agId); }));
+    $$('[data-vsend]').forEach(b => b.addEventListener('click', async () => { b.disabled = true; const { data, error } = await sb.functions.invoke('notify', { body: { type: 'variation_sent', agreement_id: agId, variation_id: b.dataset.vsend } }); toast(error || (data && data.ok === false) ? 'Email failed. See the Emails list below.' : 'Emailed to them to sign', error || (data && data.ok === false) ? 'err' : 'ok'); viewAgentDetail(agId); }));
+    $$('[data-vcopy]').forEach(b => b.addEventListener('click', async () => { b.disabled = true; const { data, error } = await sb.functions.invoke('notify', { body: { type: 'variation_signed', agreement_id: agId, variation_id: b.dataset.vcopy } }); toast(error || (data && data.ok === false) ? 'Email failed. See the Emails list below.' : 'Signed copy emailed', error || (data && data.ok === false) ? 'err' : 'ok'); viewAgentDetail(agId); }));
     $$('[data-vwd]').forEach(b => b.addEventListener('click', async () => {
       if (b.dataset.sure !== '1') { b.dataset.sure = '1'; b.textContent = 'Tap again to confirm'; return; }
       await must(sb.rpc('agent_withdraw_variation', { v: b.dataset.vwd })); toast('Done'); viewAgentDetail(agId);
@@ -10971,7 +10988,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       try { trAuto('variation', vid, trVarSources(await must(sb.from('agreement_variations').select('summary,reason').eq('id', vid).single()))); } catch (_) { }
       if (mode === 'remote') {
         const { data, error } = await sb.functions.invoke('notify', { body: { type: 'variation_sent', agreement_id: agId, variation_id: vid } });
-        toast(error || (data && data.ok === false) ? 'Issued, but the email failed. Use "Email it to them to sign".' : 'Issued and emailed to them to sign');
+        toast(error || (data && data.ok === false) ? 'Issued, but the email failed. Use "Email it to them to sign".' : 'Issued and emailed to them to sign', error || (data && data.ok === false) ? 'err' : 'ok');
         return viewAgentDetail(agId);
       }
       viewVarTogether(agId, vid);
@@ -11017,7 +11034,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       await Promise.all(shown);
       if (res && res.remaining === 0) {
         const { data, error } = await sb.functions.invoke('notify', { body: { type: 'variation_signed', agreement_id: agId, variation_id: vid } });
-        toast(error || (data && data.ok === false) ? 'Signed. The copy email failed, so send it from the agreement page.' : 'Signed by everyone. Copies emailed.');
+        toast(error || (data && data.ok === false) ? 'Signed. The copy email failed, so send it from the agreement page.' : 'Signed by everyone. Copies emailed.', error || (data && data.ok === false) ? 'err' : 'ok');
       } else toast('Saved. Others still to sign.');
       viewAgentDetail(agId);
     };
@@ -11106,7 +11123,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       b.disabled = true;
       await must(sb.from('prior_agency_notices').update({ email, reviewed_at: new Date().toISOString() }).eq('id', b.dataset.nsend));
       const { data, error } = await sb.functions.invoke('notify', { body: { type: 'prior_notice', agreement_id: agId, notice_id: b.dataset.nsend } });
-      toast(error || (data && data.ok === false) ? 'The email didn\'t send. See the notice for why.' : 'Notice sent to ' + email);
+      toast(error || (data && data.ok === false) ? 'The email didn\'t send. See the notice for why.' : 'Notice sent to ' + email, error || (data && data.ok === false) ? 'err' : 'ok');
       viewAgentDetail(agId);
     }));
     $$('[data-nmark]').forEach(b => b.addEventListener('click', async () => {
@@ -11125,7 +11142,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Could not create the PDF');
       const url = URL.createObjectURL(await r.blob());
       if (w) w.location.href = url; else location.href = url;
-    } catch (e) { if (w) w.close(); toast(e.message); }
+    } catch (e) { if (w) w.close(); toast(e.message, 'err'); }
   }
 
   /* ═════════════════ PRE-LISTING: appraisal → questionnaire → updated plan → signing ═════════════════ */
@@ -11388,13 +11405,13 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       const row = readAp(); delete row.contact_email; if (row.appraisal.link && !/^https:\/\//.test(row.appraisal.link)) delete row.appraisal.link;
       await must(sb.from('prelistings').update(Object.assign(row, { status: 'plan', plan: { intro: $('#plIntro').value.trim(), pairs: ps }, plan_published_at: new Date().toISOString(), question: null })).eq('id', id));
       const { data, error } = await plNotify('pl_plan', id);
-      toast(error || (data && data.ok === false) ? 'Published. The email didn\'t send, so let them know it\'s ready.' : 'Published and emailed to them');
+      toast(error || (data && data.ok === false) ? 'Published. The email didn\'t send, so let them know it\'s ready.' : 'Published and emailed to them', error || (data && data.ok === false) ? 'err' : 'ok');
       const planNow = { intro: $('#plIntro').value.trim(), pairs: ps };
       trAuto('plan', id, trPlanSources(planNow), () => { if ($('#trPlan')) trPanelDraw($('#trPlan'), 'plan', id, trPlanSources(planNow)); });
       viewPrelistingAgent(id);
     });
-    const em = $('#plEmail'); if (em) em.addEventListener('click', async () => { em.disabled = true; const { data, error } = await plNotify('pl_invite', id); if (error || (data && data.ok === false)) toast('The email didn\'t send. Copy the message instead.'); else { toast('Emailed'); viewPrelistingAgent(id); } em.disabled = false; });
-    const cp = $('#plCopy'); if (cp) cp.addEventListener('click', async () => { try { await navigator.clipboard.writeText(msg); toast('Copied'); } catch { toast('Select the text and copy it'); } });
+    const em = $('#plEmail'); if (em) em.addEventListener('click', async () => { em.disabled = true; const { data, error } = await plNotify('pl_invite', id); if (error || (data && data.ok === false)) toast('The email didn\'t send. Copy the message instead.', 'err'); else { toast('Emailed'); viewPrelistingAgent(id); } em.disabled = false; });
+    const cp = $('#plCopy'); if (cp) cp.addEventListener('click', async () => { try { await navigator.clipboard.writeText(msg); toast('Copied'); } catch { toast('Select the text and copy it', 'err'); } });
     const oa = $('#plOpenAg'); if (oa) oa.addEventListener('click', () => viewTable(pl.agreement_id));
     const cl = $('#plClose'); if (cl && pl.status !== 'closed') cl.addEventListener('click', async () => { if (cl.dataset.sure !== '1') { cl.dataset.sure = '1'; cl.textContent = 'Tap again to close it'; return; } await must(sb.from('prelistings').update({ status: 'closed' }).eq('id', id)); toast('Closed'); viewAgentList(); });
     top();
@@ -12805,7 +12822,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     await drConfirm(pth, sha);
     const r = await must(sb.rpc('agent_blank_add', { p_document: doc.id, p_pages: pages.length, p_sizes: pages.map(x => [x.w, x.h]), p_edition: edition }));
     DR_CACHE[r.id] = { bytes, pages };
-    if (!r.edition_checked) { toast('Blank kept, but its edition hasn\'t been checked'); return viewProperty(pid); }
+    if (!r.edition_checked) { toast('Blank kept, but its edition hasn\'t been checked', 'err'); return viewProperty(pid); }
     toast('Blank loaded'); return viewBlankMap(r.id);
   }
 
@@ -13347,7 +13364,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
           $$('.dr-chip[data-chip="timing"],.dr-chip[data-chip="date"]', li).forEach(c => { c.textContent = OF.timingPlain(Object.assign({ key: id }, t)) + ' (re-draft to apply)'; }); }
         ced.hidden = true; chip = null; });
     }
-    const addGo = $('#drAddTermGo'); if (addGo) addGo.addEventListener('click', () => { const k = $('#drAddTerm').value; if (!k) return toast('Choose a clause first'); const t = (libTerms || []).find(x => x.key === k);
+    const addGo = $('#drAddTermGo'); if (addGo) addGo.addEventListener('click', () => { const k = $('#drAddTerm').value; if (!k) return toast('Choose a clause first', 'err'); const t = (libTerms || []).find(x => x.key === k);
       const ed = collect(), list = ed.added_terms || [], id = 'add_' + k + '_' + (list.filter(a => a.key === k).length + 1); ed.added_terms = list.concat({ id, key: k }); go(ed, 'Added ' + (t ? t.title : k) + ' from your library', addGo); });
     drAiWire(async (kind, c) => { const ed = collect();
       if (kind === 'offer') { ed.extra_terms = (ed.extra_terms || []).concat({ id: 'ft_ai_' + Date.now().toString(36), title: c.title, text: c.text, ai: true }); return go(ed, 'Added a clause written with AI help: ' + c.title); }
@@ -13568,7 +13585,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     $$('[data-mlsend]').forEach(b => b.addEventListener('click', async () => { const m = byId(b.dataset.mlsend); if (!m || busy) return; lock_(true); out(m.id, 'Sending...');
       try { await send(m); JDIRTY = false; toast('Sent'); after(); } catch (e) { out(m.id, e.message); if (e.maybe) return after(); lock_(false); } }));
     $$('[data-mlunstick]').forEach(b => b.addEventListener('click', async () => { if (!confirm('Only do this once you have checked it did not arrive. Make it a draft again?')) return; b.disabled = true;
-      try { await sgRpc('agent_mail_draft_unstick', { p_draft: b.dataset.mlunstick }); toast('It is a draft again'); after(); } catch (e) { toast(e.message); b.disabled = false; } }));
+      try { await sgRpc('agent_mail_draft_unstick', { p_draft: b.dataset.mlunstick }); toast('It is a draft again'); after(); } catch (e) { toast(e.message, 'err'); b.disabled = false; } }));
     $$('[data-mlsave]').forEach(b => b.addEventListener('click', async () => { const m = byId(b.dataset.mlsave); if (!m) return; b.disabled = true;
       try { await save(m); JDIRTY = false; toast('Saved'); after(); } catch (e) { out(m.id, e.message); b.disabled = false; } }));
     $$('[data-mlvoid]').forEach(b => b.addEventListener('click', async () => { const m = byId(b.dataset.mlvoid); if (!m || !confirm('Set this email aside? It won\'t be sent.')) return; b.disabled = true;
@@ -13576,10 +13593,10 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     $$('[data-mlrev]').forEach(c => c.addEventListener('change', async () => { const m = byId(c.dataset.mlrev); if (!m) return;
       try { if (c.checked) await save(m); await sgRpc('agent_mail_draft_review', { p_draft: m.id, p_reviewed: c.checked }); m.reviewed_at = c.checked ? new Date().toISOString() : null; } catch (e) { c.checked = !c.checked; out(m.id, e.message); } }));
     $$('[data-mlall]').forEach(b => b.addEventListener('click', async () => { if (busy) return; const todo = D_.filter(m => m.status === 'draft' && ($(`[data-mlrev="${m.id}"]`) || {}).checked);
-      if (!todo.length) return toast('Tick Reviewed on each email you want to send first.'); lock_(true); let ok = 0, maybe = false; const bad = [];
+      if (!todo.length) return toast('Tick Reviewed on each email you want to send first.', 'err'); lock_(true); let ok = 0, maybe = false; const bad = [];
       for (const m of todo) { if (m.status !== 'draft') continue;   // already sending or sent: skipped
         try { const v = val(m.id); if (changed(m, v)) { bad.push(m.id); out(m.id, 'Changed since you ticked Reviewed: save it and tick again, or press Send.'); continue; } await send(m); ok++; } catch (e) { bad.push(m.id); out(m.id, e.message); if (e.maybe) { maybe = true; break; } } }
-      toast(`${ok} sent${bad.length ? `, ${bad.length} not sent` : ''}`); if (!bad.length || maybe) after(); else lock_(false); }));
+      toast(`${ok} sent${bad.length ? `, ${bad.length} not sent` : ''}`, bad.length ? 'err' : 'ok'); if (!bad.length || maybe) after(); else lock_(false); }));
   }
   // Tim's phone for every draft's sign-off, from the database (offer_settings.agent_phone, 025) when it can be read; else mail-core's default
   async function mlAgentLoad() { try { const st = ((await ofSafe(sb.from('offer_settings').select('agent_phone'))) || [])[0]; if (st && st.agent_phone) MAIL.setAgent({ phone: st.agent_phone }); } catch (_) { } }
@@ -13709,7 +13726,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       try { await sgRpc('agent_signing_cancel', { p_signing: sid, p_reason: 'Changed to ' + (g.method === 'link' ? 'in person' : 'by link') }); toast('Stopped. Choose how they sign');
         const m = g.method === 'link' ? 'in_person' : 'link'; if (RN > 1) viewRoundPresent(g.offer_id, { method: m }); else viewSignRelease(g.draft_id, { method: m }); }
       catch (e) { $('#sgChangeErr').textContent = e.message; chg.disabled = false; } });
-    $$('[data-turn]').forEach(b => b.addEventListener('click', async () => { b.disabled = true; try { if (g.status === 'ready') await sgRpc('agent_signing_start', { p_signing: sid }); viewSignTurn(sid, b.dataset.turn); } catch (e) { toast(e.message); b.disabled = false; } }));
+    $$('[data-turn]').forEach(b => b.addEventListener('click', async () => { b.disabled = true; try { if (g.status === 'ready') await sgRpc('agent_signing_start', { p_signing: sid }); viewSignTurn(sid, b.dataset.turn); } catch (e) { toast(e.message, 'err'); b.disabled = false; } }));
     // Prepare: one draft per signer, shown above for Tim to read, change and send himself (nothing is sent here)
     const sg_ = $('#sgSendGo'); if (sg_) sg_.addEventListener('click', async () => { sg_.disabled = true; $('#sgSendOut').textContent = 'Preparing...';
       try { const n = await mlPrepareLinks(g, p); toast(`${n} email${n === 1 ? '' : 's'} ready for you to read and send`); return viewSigning(sid); }
@@ -13718,7 +13735,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const lg = $('#sgLockGo'); if (lg) lg.addEventListener('click', async () => { lg.disabled = true; const r = await offerCall('offer-sign', { action: 'lock', signing_id: sid }); if (r && r.ok) return viewSigning(sid, { tried: true }); $('#sgLockErr').textContent = ((r && r.error) ? r.error + (r.detail ? ' (For Tim: ' + r.detail + ')' : '') : '') || 'That didn\'t work. Try again.'; lg.disabled = false; });
     const dl = $('#sgRoundDl'); if (dl) dl.addEventListener('click', async () => { try { const { data, error } = await sb.storage.from('property-files').createSignedUrl(rd.path, 300); if (error || !data) throw new Error('Round 1 couldn\'t be opened. Check you have signal.');
       const bytes = new Uint8Array(await (await fetch(data.signedUrl)).arrayBuffer()); if (await REPO.sha256(bytes) !== rd.sha256) throw new Error('The stored round doesn\'t match its fingerprint.');
-      const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' })); a.download = `Round-${rd.doc_round || 1}-${(p.address || 'agreement').replace(/[^A-Za-z0-9]+/g, '-').slice(0, 60)}.pdf`; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000); } catch (e) { toast(e.message); } });
+      const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' })); a.download = `Round-${rd.doc_round || 1}-${(p.address || 'agreement').replace(/[^A-Za-z0-9]+/g, '-').slice(0, 60)}.pdf`; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000); } catch (e) { toast(e.message, 'err'); } });
     const ch = $('#sgChain'); if (ch) ch.addEventListener('click', async () => { try { const r = await sgRpc('agent_offer_chain_check', { p_offer: g.offer_id });
       $('#sgChainOut').textContent = r.ok ? `Timeline checked: ${r.events} events, each following on from the one before.${r.before ? ` (${r.before} from before the check began.)` : ''}` : 'The timeline doesn\'t check out: ' + ((r.problems || [])[0] || {}).why; } catch (e) { $('#sgChainOut').textContent = e.message; } });
     if (g.status === 'held') {
@@ -14322,8 +14339,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
           if ((NG_MAIL[o.id] || []).some(m => m.status === 'draft')) await mlBuildAgreed(o, p);   // drafts not yet sent follow the choice; a sent email is kept as it went
           toast('Saved. The emails follow it.'); reload(); } catch (e) { out.textContent = e.message; b.disabled = false; } }); }
     $$('[data-ngdl]').forEach(b => b.addEventListener('click', async () => { try { const r = (await must(sb.from('offer_rounds').select('*').eq('id', b.dataset.ngdl).single())), dc = await must(sb.from('offer_documents').select('number').eq('id', r.document_id).single());
-      ngSave(await ngFile(r.path, r.sha256), `Document-${dc.number}-Round-${r.doc_round}-${ngSlug(p.address)}.pdf`, 'application/pdf'); } catch (e) { toast(e.message); } }));
-    const ad = $('#ngAgDl'); if (ad) ad.addEventListener('click', async () => { try { const ag = (await must(sb.from('offer_agreements').select('*').eq('offer_id', o.id)))[0]; ngSave(await ngFile(ag.path, ag.sha256), `Agreement-${ngSlug(p.address)}.pdf`, 'application/pdf'); } catch (e) { toast(e.message); } });
+      ngSave(await ngFile(r.path, r.sha256), `Document-${dc.number}-Round-${r.doc_round}-${ngSlug(p.address)}.pdf`, 'application/pdf'); } catch (e) { toast(e.message, 'err'); } }));
+    const ad = $('#ngAgDl'); if (ad) ad.addEventListener('click', async () => { try { const ag = (await must(sb.from('offer_agreements').select('*').eq('offer_id', o.id)))[0]; ngSave(await ngFile(ag.path, ag.sha256), `Agreement-${ngSlug(p.address)}.pdf`, 'application/pdf'); } catch (e) { toast(e.message, 'err'); } });
     // Tim's own copy by email again (only ever to Tim; offer-sign agreed_notice): the same email as when it was confirmed
     const am = $('#ngAgMail'); if (am) am.addEventListener('click', async () => { am.disabled = true; const out = $('#ngAgMailOut'); out.textContent = 'Sending it to you...';
       const r = await offerCall('offer-sign', { action: 'agreed_notice', offer_id: o.id }); out.textContent = r && r.ok ? 'Sent to you, with the agreed copy' + (r.attached === false ? ' as a portal link (too big to attach).' : ' attached.') : (r && r.error) || 'It didn\'t send. Try again.'; am.disabled = false; });
@@ -14368,10 +14385,10 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     for (let k = 0; k < 20; k++) {
       const rows = ((await ofSafe(sb.from('email_log').select('kind,ok,at,subject').eq('kind', 'offer_agreed_copy').eq('subject', subject).gte('at', since))) || []);
       if (rows.some(x => x.ok)) return toast('The dated agreed copy has been emailed to you.');
-      if (rows.length) return toast('The email to you with the agreed copy didn\'t go. Use "Email me the agreed copy again" on the offer page.');
+      if (rows.length) return toast('The email to you with the agreed copy didn\'t go. Use "Email me the agreed copy again" on the offer page.', 'err');
       await new Promise(res => setTimeout(res, 1500));
     }
-    toast('No word yet on the email with the agreed copy. If it doesn\'t arrive, use "Email me the agreed copy again" on the offer page.');
+    toast('No word yet on the email with the agreed copy. If it doesn\'t arrive, use "Email me the agreed copy again" on the offer page.', 'err');
   }
   // the lawyers' pack: every locked round across every document, the agreed copy, and the timeline as a readable page, in one zip.
   // Each file inside is the locked copy byte for byte (checked against its fingerprint first). Agent only.
@@ -14810,16 +14827,20 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     main().innerHTML = `<div class="view-pad" id="pProc">
       <h1>Processes</h1>
       <p class="small">Start something new. Each one carries on at its property's own page.</p>
+      <h2 id="pProcList">Listing, in order</h2>
       <div class="home-tiles">
         <div class="home-tile soon" id="soonFirst" aria-disabled="true"><span class="kick">Coming soon</span><span class="ttl">First visit</span><span class="txt">Loose notes, photos and client details from the walk-through and the conversation. Nothing compulsory. Not built yet.</span></div>
         <div class="home-tile soon" id="soonReport" aria-disabled="true"><span class="kick">Coming soon</span><span class="ttl">Appraisal report</span><span class="txt">Your written opinion of price with its evidence, from the property profile. Not built yet.</span></div>
-        <div class="home-tile soon" id="soonDesk" aria-disabled="true"><span class="kick">Coming soon</span><span class="ttl">Desktop analysis</span><span class="txt">A lighter look from the information a vendor supplies, less in depth than a market value opinion. Not built yet.</span></div>
         ${TILE_BEGIN}
         ${TILE_INSPECT}
         ${TILE_AGREE}
         <button class="home-tile" type="button" id="homeForms"><span class="kick">After signing</span><span class="ttl">Forms</span><span class="txt">The Vendor Declaration and the Healthy Homes checklist for each property: fill in, countersign and file.</span><span class="go">Choose the form →</span></button>
         ${TILE_OFFER}
         <div class="home-tile soon" id="soonPrep" aria-disabled="true"><span class="kick">Coming soon</span><span class="ttl">Improvements and preparation assessment</span><span class="txt">What to improve and prepare before selling. Not built yet.</span></div>
+      </div>
+      <h2 id="pProcApart">Separate from listing</h2>
+      <div class="home-tiles">
+        <div class="home-tile soon" id="soonDesk" aria-disabled="true"><span class="kick">Coming soon</span><span class="ttl">Desktop analysis</span><span class="txt">For someone weighing up the market who hasn't decided to sell: a lighter look from the information they supply, less in depth than a market value opinion. Not built yet.</span></div>
       </div>
     </div>`;
     [['homeBegin', 'processes/appraisal'], ['homeInspect', 'processes/inspection'], ['homeAgree', 'processes/agreement'], ['homeOffer', 'processes/offer'], ['homeForms', 'processes/forms']]

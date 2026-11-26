@@ -120,7 +120,7 @@ const out = {}; const errs = [];
     'properties/P1/offers/blank/B1': async () => (await p.textContent('#stepName')) === 'Places on the blank',
     'properties/P1/offers/O1/draft/D1': async () => (await p.textContent('#stepName')) === 'Draft agreement' && !!(await p.$('#drReview')),
     'people': async () => !!(await p.$('#pPeople')),
-    'processes': async () => (await p.$$('#pProc button.home-tile')).length === 5 && JSON.stringify(await p.$$eval('#pProc .home-tile.soon', l => l.map(x => [x.tagName, x.querySelector('.kick').textContent, x.querySelector('.ttl').textContent]))) === JSON.stringify([['DIV', 'Coming soon', 'First visit'], ['DIV', 'Coming soon', 'Appraisal report'], ['DIV', 'Coming soon', 'Desktop analysis'], ['DIV', 'Coming soon', 'Improvements and preparation assessment']]) && !/appraisal/i.test(await p.$$eval('#pProc #soonDesk, #pProc #soonPrep', l => l.map(x => x.textContent).join(' '))),
+    'processes': async () => (await p.$$('#pProc button.home-tile')).length === 5 && JSON.stringify(await p.$$eval('#pProc .home-tile.soon', l => l.map(x => [x.tagName, x.querySelector('.kick').textContent, x.querySelector('.ttl').textContent]))) === JSON.stringify([['DIV', 'Coming soon', 'First visit'], ['DIV', 'Coming soon', 'Appraisal report'], ['DIV', 'Coming soon', 'Improvements and preparation assessment'], ['DIV', 'Coming soon', 'Desktop analysis']]) && !/appraisal/i.test(await p.$$eval('#pProc #soonDesk, #pProc #soonPrep', l => l.map(x => x.textContent).join(' '))),
     'processes/appraisal': async () => (await p.inputValue('#plAddr')) === '',
     'processes/agreement': async () => !!(await p.$('.ttabs')) && (await p.inputValue('#tAddr')) === '',
     'processes/inspection': async () => !!(await p.$('#insAddr')),
@@ -179,7 +179,9 @@ const out = {}; const errs = [];
   await menu('People'); out.m5 = await at(p);
   await menu('Processes'); out.m6 = await at(p);
   out.procOrder = await p.$$eval('#pProc .home-tile', els => els.map(e => e.id));
-  expect(JSON.stringify(out.procOrder) === JSON.stringify(['soonFirst', 'soonReport', 'soonDesk', 'homeBegin', 'homeInspect', 'homeAgree', 'homeForms', 'homeOffer', 'soonPrep']), 'Processes are in the order they are used for a property: ' + out.procOrder);
+  out.deskApart = await p.$eval('#soonDesk', e => { const g = e.closest('.home-tiles'); return !!g && g.previousElementSibling && g.previousElementSibling.id === 'pProcApart' && !g.querySelector('#homeBegin'); });
+  expect(out.deskApart, 'Desktop analysis is listed apart from the listing steps (Tim, 26 November 2026)');
+  expect(JSON.stringify(out.procOrder) === JSON.stringify(['soonFirst', 'soonReport', 'homeBegin', 'homeInspect', 'homeAgree', 'homeForms', 'homeOffer', 'soonPrep', 'soonDesk']), 'Processes are in the order they are used for a property: ' + out.procOrder);
   await p.click('#soonPrep'); await wait(p, 400); await p.click('#soonDesk'); await wait(p, 400); await p.click('#soonFirst'); await wait(p, 400); await p.click('#soonReport'); await wait(p, 400);
   out.soonStays = await at(p); expect(out.soonStays === '/portal/processes', 'the Coming soon tiles do nothing when tapped: ' + out.soonStays);
   await p.click('#homeBegin'); await wait(p, 700); out.m7 = [await at(p), (await chrome(p)).up];
@@ -433,7 +435,7 @@ const out = {}; const errs = [];
 
   // ── 9. Addresses hold database ids only ──
   out.seen = Array.from(seen);
-  const bad = out.seen.filter(u => !/^\/[A-Za-z0-9_\/-]*$/.test(u) || NAMES.some(n => u.toLowerCase().includes(n.toLowerCase().replace(/\s+/g, '')) || u.toLowerCase().includes(n.toLowerCase().split(' ')[0])) || /@|%40/.test(u) || u.includes('0210000000'));   // the seeded phone number, by its digits (random ids can hold long digit runs)
+  const bad = out.seen.filter(u => !/^\/[A-Za-z0-9_\/-]*$/.test(u) || NAMES.some(n => u.toLowerCase().includes(n.toLowerCase().replace(/\s+/g, '')) || (/^[a-z]+$/i.test(n.split(' ')[0]) && u.toLowerCase().split(/[\/_-]/).includes(n.toLowerCase().split(' ')[0]))) || /@|%40/.test(u) || u.includes('0210000000'));   // a first name as a word of the address (random hex ids can hold "021" or a short name, which made this check flaky); the seeded phone number by its digits
   expect(out.seen.length > 20 && !bad.length, 'every address is ids and words only: ' + JSON.stringify(bad));
 
   console.log(JSON.stringify(Object.assign(out, { errs }), null, 1)); await b.close();

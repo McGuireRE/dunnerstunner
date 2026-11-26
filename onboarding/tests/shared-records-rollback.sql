@@ -4,7 +4,7 @@
 -- refused was allowed, or a value was wrong. Needs 026 (and everything before it) applied. The agent is simulated with
 -- request.jwt.claims; a vendor likewise. Test rows use example.com addresses only, and nothing sends email.
 do $t$
-declare out text := ''; r jsonb; pid uuid; iid uuid; aid uuid; plid uuid; pp1 uuid; pp2 uuid; c1 uuid; c2 uuid; lk uuid; n int; n2 int; x text; vid uuid; qid uuid;
+declare out text := ''; bp uuid; ba uuid; bron uuid; c3 uuid; pp3 uuid; r jsonb; pid uuid; iid uuid; aid uuid; plid uuid; pp1 uuid; pp2 uuid; c1 uuid; c2 uuid; lk uuid; n int; n2 int; x text; vid uuid; qid uuid;
   sig0 bigint; sigsha text; apc text; pre_signed text;
   agent text := json_build_object('email', (select email from public.agents order by created_at limit 1), 'sub', '22222222-2222-2222-2222-222222222222', 'role', 'authenticated')::text;
   vendor text := '{"email":"rb-lw0-vendor@example.com","sub":"11111111-1111-1111-1111-1111111110a1","role":"authenticated"}';
@@ -13,6 +13,10 @@ begin
   -- what must never change: every signature and every signed person
   select count(*), md5(string_agg(snapshot_sha256, ',' order by id)) into sig0, sigsha from public.signatures;
   select md5(string_agg(id::text || coalesce(contact_id::text, '-') || legal_name || email, ',' order by id)) into pre_signed from public.agreement_people where signed_at is not null;
+
+  -- before 028: a property file Tim filled in himself, and a draft agreement saying something else about the bedrooms
+  insert into public.properties (address, description, title_ref) values ('2 Lw0 Backfill Lane, Rollbackville', '{"pHeat":"Wood burner","pBed":"2"}', 'OT1/LW0') returning id into bp;
+  insert into public.agreements (address, property_id, answers) values ('2 Lw0 Backfill Lane, Rollbackville', bp, '{"pBed":"3"}') returning id into ba;
 
   execute $mig$__MIGRATION__$mig$;
 
@@ -27,8 +31,40 @@ begin
   if (select md5(string_agg(id::text || coalesce(contact_id::text, '-') || legal_name || email, ',' order by id)) from public.agreement_people where signed_at is not null) is distinct from pre_signed then out := out || 'A SIGNED PERSON CHANGED; '; end if;
   -- description and profile agree after the backfill, wherever the profile holds a chosen description fact
   select count(*) into n from public.property_profile c join public.property_fact_values f on f.id = c.value_id join public.properties p on p.id = c.property_id
-   where c.key = any (public.desc_keys()) and (p.description -> c.key) is distinct from f.value;
-  out := out || 'profile differs from file on ' || n || ' facts; ';
+   where c.key = any (public.desc_keys()) and (p.description ->> c.key) is distinct from (f.value #>> '{}');
+  -- every value a property file holds is on its profile: chosen, or shown beside the chosen one
+  select count(*) into n2 from public.properties p, jsonb_each(p.description) d
+   where d.key = any (public.desc_keys()) and not public.jblank(d.value)
+     and not exists (select 1 from jsonb_array_elements(public.profile_read(p.id, false)) px where px->>'key' = d.key
+                       and ((px->>'value_id') is not null and (px->'value' #>> '{}') = (d.value #>> '{}')
+                            or exists (select 1 from jsonb_array_elements(px->'others') o where (o->'value' #>> '{}') = (d.value #>> '{}'))));
+  out := out || 'profile differs from file on ' || n || ' chosen facts (shown beside); file values missing from the profile=' || n2 || '; ';
+  if n2 > 0 then out := out || 'A FILE VALUE IS NOT ON THE PROFILE; '; end if;
+  r := public.profile_read(bp, false);
+  out := out || 'backfilled file: ' || (select string_agg(px->>'key' || '=' || (px->'value' #>> '{}') || '/' || (px->>'source') || coalesce('/' || (px->>'source_name'), '') || '/' || (px->>'ticked')
+      || coalesce(' others ' || (select string_agg((o->'value' #>> '{}') || '/' || (o->>'source'), ',') from jsonb_array_elements(px->'others') o), ''), ', ' order by px->>'key') from jsonb_array_elements(r) px)
+    || ' file unchanged=' || ((select description from public.properties where id = bp) = '{"pHeat":"Wood burner","pBed":"2"}'::jsonb)::text || '; ';
+  if (select description from public.properties where id = bp) <> '{"pHeat":"Wood burner","pBed":"2"}'::jsonb then out := out || 'THE BACKFILL CHANGED A PROPERTY FILE; '; end if;
+
+  -- privileges: nothing new is open to anon or PUBLIC; the internal helpers are closed to signed-in users too
+  select string_agg(p.proname, ',' order by p.proname) into x from pg_proc p
+   where p.pronamespace = 'public'::regnamespace and p.proname = any (array['shared_note','profile_record','profile_read','profile_write_back','profile_sync_file','profile_vendor_key',
+     'agent_property_profile','my_property_profile','agent_profile_set','agent_profile_choose','agent_profile_tick','profile_from_found','profile_from_inspection','profile_from_agreement',
+     'person_name_fits','person_find','person_link','person_link_pp','person_unlink_pp','person_link_ap','person_link_after','aml_file_contact','agent_person_link_resolve','qa_mine','qa_put',
+     'qa_from_prelisting','qa_from_seller_lead','qa_from_profile','agent_qa_answer','ql_listing_before','ql_listing_after','agent_ql_set_photos','ql_listing_photos','inspection_photos',
+     'guard_fact_value','person_joint','person_nick_fits','person_short_same','profile_file_value','person_first','profile_source_kind','agreement_role','qa_prelisting_map','ql_num'])
+     and (has_function_privilege('anon', p.oid, 'EXECUTE') or exists (select 1 from aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a where a.grantee = 0 and a.privilege_type = 'EXECUTE'));
+  out := out || 'open to anon or PUBLIC: ' || coalesce(upper(x), 'none') || '; ';
+  select string_agg(p.proname, ',' order by p.proname) into x from pg_proc p
+   where p.pronamespace = 'public'::regnamespace and p.proname = any (array['person_name_fits','person_find','person_link','profile_record','profile_read','profile_write_back','profile_sync_file','qa_put','shared_note','person_joint','person_unlink_pp','profile_file_value'])
+     and has_function_privilege('authenticated', p.oid, 'EXECUTE');
+  out := out || 'internal open to signed-in users: ' || coalesce(upper(x), 'none') || '; ';
+  begin execute 'set local role anon'; perform public.qa_mine('questionnaire', gen_random_uuid(), null); out := out || 'ANON RAN QA_MINE; '; exception when others then out := out || 'anon qa_mine: refused; '; end;
+  execute 'reset role';
+  begin execute 'set local role anon'; perform public.profile_vendor_key('pBed'); out := out || 'ANON RAN PROFILE_VENDOR_KEY; '; exception when others then out := out || 'anon profile_vendor_key: refused; '; end;
+  execute 'reset role';
+  begin execute 'set local role anon'; perform public.person_name_fits(gen_random_uuid(), 'x', false); out := out || 'ANON RAN PERSON_NAME_FITS; '; exception when others then out := out || 'anon person_name_fits: refused; '; end;
+  execute 'reset role';
 
   execute 'set local role authenticated'; perform set_config('request.jwt.claims', agent, true);
 
@@ -58,13 +94,20 @@ begin
   out := out || 'chose agreement: file pBed=' || (select description->>'pBed' from public.properties where id = pid) || ' agreement answers kept=' || (select answers->>'pBed' from public.agreements where id = aid) || '; ';
   -- the inspection saving the same fact again (Tim) chooses it once more: his newest entry
   perform public.agent_inspection_save(iid, '{"pBed":"5"}'::jsonb, null, null, null);
-  out := out || 'after a new inspection answer: ' || ((select f from jsonb_array_elements(public.agent_property_profile(pid)->'facts') f where f->>'key' = 'pBed')->>'value') || '; ';
+  r := (select f from jsonb_array_elements(public.agent_property_profile(pid)->'facts') f where f->>'key' = 'pBed');
+  out := out || 'after a different check answer: ticked ' || (r->>'value') || '/' || (r->>'source') || '/' || (r->>'ticked') || ' beside it ' || coalesce((select string_agg((o->>'value') || '/' || (o->>'source'), ',' order by o->>'source') from jsonb_array_elements(r->'others') o), 'none')
+    || ' file=' || (select description->>'pBed' from public.properties where id = pid) || '; ';
+  if r->>'value' <> '4' or not (r->'others') @> '[{"value":"5","source":"inspection"}]' then out := out || 'A TICKED VALUE WAS OVERWRITTEN OR THE NEW ONE IS NOT SHOWN; '; end if;
   -- untick all, then a record source can't take a person's place, and choosing something not on the property is refused
   perform public.agent_profile_tick(pid, null, false);
   out := out || 'ticked after untick all=' || (select count(*) from public.property_profile where property_id = pid and ticked) || '; ';
   begin perform public.agent_profile_choose(pid, 'pBed', gen_random_uuid()); out := out || 'CHOSE A VALUE NOT ON THE PROPERTY; '; exception when others then out := out || 'choose: ' || sqlerrm || '; '; end;
   perform public.agent_profile_set(pid, 'pHeat', '"Heat pump"');
   out := out || 'Tim typed: ' || ((select f from jsonb_array_elements(public.agent_property_profile(pid)->'facts') f where f->>'key' = 'pHeat')->>'source') || ' file=' || (select description->>'pHeat' from public.properties where id = pid) || '; ';
+  perform public.agent_profile_set(pid, 'pLand', null);
+  r := (select f from jsonb_array_elements(public.agent_property_profile(pid)->'facts') f where f->>'key' = 'pLand');
+  out := out || 'Tim cleared land on the file: chosen=' || coalesce(r->>'value_id', 'none') || ' ticked=' || (r->>'ticked') || ' still listed=' || (select string_agg((o->'value' #>> '{}') || '/' || (o->>'source'), ',' order by o->>'source') from jsonb_array_elements(r->'others') o)
+    || ' file=' || coalesce((select description->>'pLand' from public.properties where id = pid), 'empty') || '; ';
   -- clearing on the inspection: the chosen value from the inspection goes, the newest other value takes its place
   perform public.agent_inspection_save(iid, '{"pType":""}'::jsonb, null, null, null);
   out := out || 'cleared pType: ' || coalesce(((select f from jsonb_array_elements(public.agent_property_profile(pid)->'facts') f where f->>'key' = 'pType')->>'value'), 'gone') || '; ';
@@ -82,6 +125,44 @@ begin
   -- an informal name (typed at an appraisal) joins the person with that email
   insert into public.prelistings (address, contact_name, contact_email, property_id) values ('1 Lw0 Test Street, Rollbackville', 'Robin', 'rb-lw0-vendor@example.com', pid) returning id into plid;
   out := out || 'questions before we meet: contact=' || case when (select contact_id from public.person_links where source = 'prelisting' and source_id = plid) = c1 then 'Robin' else 'WRONG' end || '; ';
+  -- someone known only by a first name ("Bron", from the questions before we meet): a different checked name on her email is someone else
+  insert into public.prelistings (address, contact_name, contact_email, property_id) values ('1 Lw0 Test Street, Rollbackville', 'Bron', 'rb-lw0-bron@example.com', pid) returning id into lk;
+  bron := (select contact_id from public.person_links where source = 'prelisting' and source_id = lk);
+  insert into public.property_people (property_id, position, legal_name, email, source, name_from) values (pid, 3, 'Timothy John Smith', 'rb-lw0-bron@example.com', 'agreement', 'agreement') returning id, contact_id into pp3, c3;
+  out := out || 'Bron, then Timothy John Smith on her email: ' || case when c3 is distinct from bron then 'kept apart' else 'JOINED' end
+    || ' doubt=' || coalesce(left((select doubt from public.person_links where source = 'property_people' and source_id = pp3), 30), 'NONE')
+    || ' Bron''s legal name=' || coalesce((select legal_name from public.crm_contacts where id = bron), 'still none') || '; ';
+  -- a checked name that fits her ("Bronwyn ..."): joins, and fills her legal name
+  insert into public.property_people (property_id, position, legal_name, email, source, name_from) values (pid, 4, 'Bronwyn Lw0 Testing', 'rb-lw0-bron@example.com', 'agreement', 'agreement') returning contact_id into c3;
+  out := out || 'Bronwyn on her email: ' || case when c3 = bron then 'joined' else 'NOT JOINED' end || ' legal name=' || coalesce((select legal_name from public.crm_contacts where id = bron), 'NONE') || '; ';
+  -- an informal "Robin Other" on Robin's email: a first name alone may fit, two words that differ never do
+  insert into public.prelistings (address, contact_name, contact_email, property_id) values ('1 Lw0 Test Street, Rollbackville', 'Robin Brown', 'rb-lw0-vendor@example.com', pid) returning id into lk;
+  out := out || 'informal Robin Brown on Robin Lw0 Testing''s email: ' || case when (select contact_id from public.person_links where source = 'prelisting' and source_id = lk) = c1 then 'JOINED' else 'kept apart' end
+    || ' doubt=' || coalesce(left((select doubt from public.person_links where source = 'prelisting' and source_id = lk), 30), 'NONE') || '; ';
+  -- one name holding two people: flagged to be split, never one legal name; writing the row again makes no second record
+  insert into public.property_people (property_id, position, legal_name, email, source, name_from) values (pid, 5, 'Sam Lw0 Pair and Alex Lw0 Pair', 'rb-lw0-pair@example.com', 'agreement', 'agreement') returning id, contact_id into pp3, c3;
+  out := out || 'two people in one name: legal name=' || coalesce((select legal_name from public.crm_contacts where id = c3), 'none') || ' doubt=' || coalesce(left((select doubt from public.person_links where source = 'property_people' and source_id = pp3), 35), 'NONE');
+  update public.property_people set phone = '021 555 0199' where id = pp3;
+  out := out || ' after writing it again: ' || case when (select contact_id from public.property_people where id = pp3) = c3 then 'same record' else 'A SECOND RECORD' end || '; ';
+  insert into public.property_people (property_id, position, legal_name, email, source, name_from) values (pid, 6, 'A & B Lw0', '', 'agreement', 'agreement') returning id into pp3;
+  out := out || 'A & B: ' || coalesce(left((select doubt from public.person_links where source = 'property_people' and source_id = pp3), 35), 'NOT FLAGGED') || '; ';
+  -- two signers with the same email and name written at once: one record
+  execute 'reset role';
+  select count(distinct public.person_link('offer_signer', gen_random_uuid(), pid, 'Sam Lw0 Signer', null, 'rb-lw0-sam@example.com', null, false, 'purchaser', true)) into n from generate_series(1, 2);
+  out := out || 'two signers, one email, at once: records=' || n || '; ';
+  execute 'set local role authenticated'; perform set_config('request.jwt.claims', agent, true);
+  -- Tim says two records are the same person: the property's people row follows, the old record's role ends and it is archived
+  insert into public.property_people (property_id, position, legal_name, email, source, name_from) values (pid, 7, 'Robyn Lw0 Testing', 'rb-lw0-vendor@example.com', 'agreement', 'agreement') returning id, contact_id into pp3, c3;
+  select id into lk from public.person_links where source = 'property_people' and source_id = pp3;
+  if (select doubt_contact_id from public.person_links where id = lk) is distinct from c1 then out := out || 'NO DOUBT TO JOIN; '; end if;
+  perform public.agent_person_link_resolve(lk, true);
+  out := out || 'joined by Tim: row=' || case when (select contact_id from public.property_people where id = pp3) = c1 then 'follows' else 'LEFT ON THE OLD RECORD' end
+    || ' old record=' || (select status from public.crm_contacts where id = c3) || ' old role current=' || coalesce((select bool_or(is_current)::text from public.crm_property_links where contact_id = c3), 'none') || '; ';
+  -- a row removed from the property's people: its link goes and the role it gave ends
+  execute 'reset role';
+  delete from public.property_people where id = pp3;
+  out := out || 'row removed: link=' || (select count(*) from public.person_links where source = 'property_people' and source_id = pp3) || ' Robin still owner=' || coalesce((select is_current::text from public.crm_property_links where contact_id = c1 and property_id = pid and role = 'owner'), 'none') || '; ';
+  execute 'set local role authenticated'; perform set_config('request.jwt.claims', agent, true);
   -- an owner set aside: the role ends, the person stays
   update public.property_people set role = 'former' where id = pp2;
   out := out || 'former: ' || (select string_agg(role || '/' || is_current::text, ',') from public.crm_property_links where contact_id = c2 and property_id = pid) || '; ';
@@ -90,6 +171,9 @@ begin
   -- a buyer signing on an offer would be linked by name on the property when there is no email (no offer is made here; the matcher is checked)
   execute 'reset role';
   out := out || 'no email, same name on the property: ' || case when (public.person_find('Robin Lw0 Testing', null, null, pid, false, 'offer_signer')).contact_id = c1 then 'matched' else 'NOT MATCHED' end || '; ';
+  r := to_jsonb(public.person_find('Rob Lw0 Testing', null, null, pid, false, 'offer_signer'));
+  out := out || 'no email, a similar name on the property: ' || case when r->>'matched_by' = 'new' and (r->>'doubt_contact')::uuid = c1 then 'kept apart, flagged' else 'NOT FLAGGED ' || r::text end || '; ';
+  out := out || 'Tim for Timothy, same surname, same email: ' || case when public.person_name_fits(c1, 'Rob Lw0 Testing', false) then 'fits' else 'DOES NOT FIT' end || '; ';
   begin execute 'set local role authenticated'; perform public.person_find('x', null, null, pid, false, 'x'); out := out || 'A SIGNED-IN USER RAN THE MATCHER; '; exception when others then out := out || 'matcher: internal; '; end;
   execute 'reset role';
 
@@ -131,6 +215,7 @@ begin
   out := out || 'quiet list: ' || (select concat_ws(',', 'beds=' || beds, 'land=' || land_m2, 'rv=' || rv, 'type=' || coalesce(property_type, 'none'), 'vendor=' || case when vendor_contact_id = c1 then 'Robin' else 'WRONG' end) from public.ql_listings where id = lk)
     || ' note in bank=' || (select count(*) from public.qa_answers where source_ref = lk and question_key = 'tim_notes' and not by_vendor) || '; ';
   update public.ql_listings set beds = 6 where id = lk;
+  out := out || 'listing beds 6: file pBed=' || (select description->>'pBed' from public.properties where id = pid) || '; ';
   out := out || 'listing beds 6: profile ' || ((select f from jsonb_array_elements(public.profile_read(pid, false)) f where f->>'key' = 'pBed')->>'value') || ' with others ' || (select string_agg(o->>'value' || '/' || (o->>'source'), ',' order by o->>'source') from jsonb_array_elements(public.profile_read(pid, false)) f, jsonb_array_elements(f->'others') o where f->>'key' = 'pBed') || '; ';
   execute 'set local role authenticated'; perform set_config('request.jwt.claims', agent, true);
   begin perform public.agent_ql_set_photos(lk, array[gen_random_uuid()]); out := out || 'A PHOTO FROM NOWHERE WAS USED; '; exception when others then out := out || 'photos: ' || sqlerrm || '; '; end;

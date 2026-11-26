@@ -134,8 +134,9 @@ Ids in addresses are the database ids. Addresses never contain a name, email or 
 ### LW0. The shared records
 
 Status: built, awaiting review (26 November 2026, branch `lw0-shared-records`) and Tim's approval. Migration 028 (`migrations/028_shared_records.sql`)
-is written and tested in a rollback block on a local stand-in (re-run after the merge with main: every check passed); the first builder
-reported a rollback run on the live project too, which the reviewer repeats before it is applied. It is NOT applied. Tests: `lw0-shared-records.test.js`,
+is written and tested in a rollback block on a local stand-in (every check passed after the first review's fixes); it still has to be run
+in a rollback block on the live project before it is applied. It is NOT applied. Before it is applied Tim sees what the backfill would do:
+`tests/lw0-backfill-preview.sql`, run on a copy of the live records, writes `tests/out/lw0-backfill-preview.txt` (not committed). Tests: `lw0-shared-records.test.js`,
 `tests/shared-records-rollback.sql` (with `.js`), `tests/lw0-standin.sql`; `portal-routes.test.js`, `inspection.test.js` and
 `council-lookup.test.js` updated for the new names and order.
 
@@ -145,17 +146,25 @@ sources disagree both are shown and Tim chooses; nothing he ticked is overwritte
 The five records:
 1. Property profile: `property_fact_values` (every value from every source, dated, never changed) and `property_profile` (the chosen
    value per fact, and whether Tim ticked it), over `profile_keys`. Filled by the council lookup, the disclosures check, agreements, the
-   Quiet List and Tim. Choosing a value writes it back to the property file, never to an agreement. On screen: a "Property profile" card on
+   Quiet List, the property file itself and Tim. Whatever is chosen is written back to the property file, never to an agreement, so the
+   file and the profile always agree; the file's own values are on the profile as Tim's ("Property file"); clearing a field on the file
+   clears it on the profile (nothing stays ticked). A ticked value is never overwritten (Tim, 26 November 2026): a later answer that differs,
+   for example on the disclosures check, is shown beside it for him to choose. On screen: a "Property profile" card on
    the property file (source and date per fact, the other source's value with "Use this", "Tick all"); the disclosures check offers the
    profile's value for a fact it hasn't noted ("On the property profile: ... Use this"); Tim's typing on the property file is saved to the
    profile as his.
 2. Person: `crm_contacts` is the one person record. `person_links` ties every name list to it (the property's people, the agreement's
-   people, the questions before we meet, offer signers, the vendors' lawyers, the Quiet List). Same email with a fitting name is one person;
-   no email, the same legal name on the same property; two different checked names on one email are kept apart and flagged for Tim.
-   Signed records are linked aside, never changed.
+   people, the questions before we meet, offer signers, the vendors' lawyers, the Quiet List). Same email with a fitting name is one person
+   ("Tim McGuire" fits "Timothy John McGuire"; "Bron" fits "Bronwyn McGuire"); no email, the same legal name on the same property. Tim's
+   decision (26 November 2026): the same email with different names is different people, flagged for him. An informal name fills a record
+   only when the record has no other name yet and nothing contradicts it. A name holding two people ("Tim McGuire and Bronwyn McGuire",
+   "A & B") is flagged for him to split, never stored as one legal name. Signed records are linked aside, never changed.
 3. Property and person link: `crm_property_links` is the home (agent only, roles and dates; trustee, executor and contact added).
-   `property_people` stays as the working list of this round's owners (signing and vendor access read it) and is kept in step by
-   trigger. Least disruptive: nothing that signs or grants access had to change.
+   `property_people` stays as the working list of this round's owners (signing and vendor access read it). The two are kept in step one
+   way: the name lists write `crm_property_links` (a role added, changed, set aside or removed follows by trigger), and when Tim says two
+   records are the same person, the row's working list follows (the property's people, an unsigned agreement person, the Quiet List
+   listing, the answers; never a signed row). Nothing edits `crm_property_links` directly yet; People (P4) must write through the same
+   functions. Least disruptive: nothing that signs or grants access had to change.
 4. Question bank: `qa_questions` and `qa_answers`. The old questionnaire's nine questions are in it; every answer to the questions before
    we meet is saved to it as the vendor answers, with the person, the property, the source and the date. The Quiet List seller form,
    Tim's Quiet List notes and seller profiles also save to it. The copy emailed to Tim and "What I heard from you" come later (LW3, LW5).
@@ -165,10 +174,9 @@ The five records:
 Who sees what: vendors read their own property profile (never Relab) and their own answers to questions that are theirs; people records,
 links, roles, AML and Tim's notes are agent only. Nobody writes these tables directly.
 
-Names and order (no new screens): "Let's begin" and "pre-listing" are now "Questions before we meet" everywhere Tim sees them (the address
-`/processes/appraisal` still opens it); "Inspect a property" is the "Disclosures check". Processes: First visit (coming soon), Appraisal
-report (coming soon), Questions before we meet, Disclosures check, Let's agree (Listing), Forms, Draft an offer, then the two assessments
-(coming soon). Signed records and their wording are unchanged: the Vendor Declaration's "Noted ... at the inspection" lines and the
+Names and order (no new screens): "Let's begin" and "pre-listing" are now "Questions before we meet" (name confirmed by Tim, 26 November
+2026) everywhere Tim sees them (the address
+`/processes/appraisal` still opens it); "Inspect a property" is the "Disclosures check". Processes: see "Processes order" below. Signed records and their wording are unchanged: the Vendor Declaration's "Noted ... at the inspection" lines and the
 campaign schedule's "Pre-listing period" (printed into agreements) stay as they are.
 
 P1 follow-ups: a vendor signing a form on Tim's device stays in signing mode after a reload (no menu, Stop signing shown); a failed save
@@ -185,15 +193,23 @@ Feedback at the button (Tim's rule, 26 November 2026), swept in LW0 with the one
 - Moved under their buttons: the message lines of the offer form (Send my offer), the clause library (Save the library), Ready to sign
   (signing release) and Present to the vendors or purchasers. The property file's Save, "Use this" and "Tick all" on the property profile
   report at the button, or in the fact's own row once the page has redrawn.
-- Processes order: First visit (coming soon), Appraisal report (coming soon), Desktop analysis (coming soon), Questions before we meet,
-  Disclosures check, Let's agree, Forms, Draft an offer, Improvements and preparation assessment (coming soon). The disclosures check's own
+- Only work started by the press shows under it: background saving (the disclosures check every 15 seconds, the upload queue,
+  reconnecting) reports in its own place. A message whose button has gone falls back to the toast, even if another button is pressed
+  straight after. Whether a message is a problem is said by the code that sends it, never guessed from its words.
+- Processes order: "Listing, in order": First visit (coming soon), Appraisal report (coming soon), Questions before we meet, Disclosures
+  check, Let's agree, Forms, Draft an offer, Improvements and preparation assessment (coming soon). Then, "Separate from listing": Desktop
+  analysis (coming soon), its own process and offer for people weighing up the market who haven't decided to sell (Tim, 26 November 2026). The disclosures check's own
   headings now say "Disclosures check finished" and "Disclosures check not found".
 
 Merged with main ad6548c (Offers hotfix 3 final) on 26 November 2026: main's drafting code and `offers-draft.test.js` taken whole; the two
 early hotfix 3 commits on this branch are superseded by it.
 
-Open for Tim: see the build report (doubts on today's test people; whether "What I heard from you" may show answers to Tim's own questions;
-the name "Questions before we meet"; migration 028's rollback test to be run on the live project by the reviewer before it is applied).
+First review (26 November 2026, not ready) fixed on the same branch: names on one email, the backfill preview, two-way links where safe,
+the profile and the file agreeing, ticked values kept, function privileges, button feedback for background work, the disclosures check
+opening offline without waiting, two signers at once, the flaky address check, and Desktop analysis apart from the listing steps.
+
+Open for Tim: the backfill preview (what each of today's names becomes; the people flagged for him); whether "What I heard from you" may
+show answers to Tim's own questions; migration 028's rollback test to be run on the live project before it is applied.
 
 ### P1. Shell and addresses
 

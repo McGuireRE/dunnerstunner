@@ -25,6 +25,11 @@
 --   5. Photos and documents: property_documents stays the one store. ql_listings.photo_doc_ids points the Quiet List at it
 --      (agent_ql_set_photos, ql_listing_photos); inspection photos are the store's items with inspection_id (inspection_photos). No
 --      files move.
+-- After the first review (26 November 2026, Tim's decisions): one email never joins two different names (an informal name joins only a
+-- contact it fits, with nothing contradicting it; otherwise a separate person, flagged for Tim; a name holding two people is flagged
+-- to be split); a ticked value is never overwritten by a later source; the property file and the profile always agree (the file's own
+-- values are on the profile as Tim's, whatever is chosen is written back, clearing a field on the file clears it on the profile); Tim
+-- joining two records moves every working list with it, and a property's person removed ends their role.
 -- Every trigger here catches its own errors and records them in shared_record_log, so a slip in this layer can never stop a vendor's
 -- questionnaire, a signing or an offer.
 -- RLS on every new table. Tim reads everything; vendors read only their own property profile (never anything from Relab) and their
@@ -142,21 +147,25 @@ create policy pp_vendor on public.property_profile for select to authenticated
          and exists (select 1 from public.property_fact_values v where v.id = value_id and v.source <> 'relab'));
 
 -- record one value from one source, and decide whether it becomes the profile's value.
---   p_choose 'auto': chosen when nothing is chosen yet, or when what is chosen is not ticked and is from the same source, or a person's
---                    entry replacing another person's entry or a record; a record never replaces a person's entry by itself; the same
---                    value as the one chosen changes nothing.
---   p_choose 'tim':  Tim entered or accepted it himself: chosen and ticked.
+--   p_choose 'auto':  chosen when nothing is chosen yet, or when what is chosen is not ticked and is from the same source, or a person's
+--                     entry replacing another person's entry or a record; a record never replaces a person's entry by itself; nothing
+--                     automatic replaces what the property file says (Tim's own entries, source 'tim'); the same value changes nothing.
+--   p_choose 'offer': a value Tim gave in another place (a disclosures check answer; council values in the backfill): chosen and
+--                     ticked, unless Tim has ticked a different value from another source. Then his ticked value stays and this one
+--                     is shown beside it for him to choose (Tim, 26 November 2026: a ticked value is never overwritten).
+--   p_choose 'tim':   Tim chose it himself, here and now: chosen and ticked.
 --   p_choose 'never': kept as a value only (for example an inspection answer that differs from the agreement in force).
 -- A source clearing its value: if that source's value was chosen (and not ticked by Tim, unless Tim cleared it), the newest value from
 -- another source is chosen instead, or the fact has no value.
+-- Whatever is chosen is written back to the property file (profile_sync_file), so the file and the profile always say the same.
 create or replace function public.profile_record(p_property uuid, p_key text, p_value jsonb, p_source text, p_ref uuid, p_as_of text,
   p_source_name text, p_display text, p_label text, p_by text, p_choose text) returns uuid
 language plpgsql security definer set search_path = public as $$
 declare v jsonb := case when public.jblank(p_value) then null else p_value end; last public.property_fact_values; vid uuid;
-  c public.property_profile; cv public.property_fact_values; alt uuid; move boolean := false;
+  c public.property_profile; cv public.property_fact_values; alt uuid; move boolean := false; ch text := p_choose; fv jsonb;
 begin
   if p_property is null or p_key is null then return null; end if;
-  if p_choose not in ('auto', 'tim', 'never') then raise exception 'profile_record: bad choice'; end if;
+  if ch not in ('auto', 'offer', 'tim', 'never') then raise exception 'profile_record: bad choice'; end if;
   if not exists (select 1 from public.profile_keys where key = p_key) and p_source <> 'council' then return null; end if;
   select * into last from public.property_fact_values where property_id = p_property and key = p_key and source = p_source order by recorded_at desc, id desc limit 1;
   if last.id is not null and last.value is not distinct from v and coalesce(last.display, '') = coalesce(p_display, '') and last.source_ref is not distinct from p_ref then
@@ -170,31 +179,47 @@ begin
   select * into c from public.property_profile where property_id = p_property and key = p_key for update;
   if c.property_id is not null then select * into cv from public.property_fact_values where id = c.value_id; end if;
   if v is null then
-    if c.property_id is not null and cv.source = p_source and (not c.ticked or p_choose = 'tim') then
-      select x.id into alt from (select distinct on (f.source) f.id, f.value, f.recorded_at from public.property_fact_values f
-                                  where f.property_id = p_property and f.key = p_key and f.source <> p_source order by f.source, f.recorded_at desc, f.id desc) x
-       where x.value is not null order by x.recorded_at desc limit 1;
+    if c.property_id is not null and cv.source = p_source and (not c.ticked or ch = 'tim') then
+      -- what the property file still says takes its place (the file is never changed by a source going), else the newest other value
+      fv := public.profile_file_value(p_property, p_key);
+      if not public.jblank(fv) and p_source <> 'tim' then
+        alt := public.profile_record(p_property, p_key, fv, 'tim', null, to_char(now() at time zone 'Pacific/Auckland', 'FMDD Mon YYYY'), 'Property file', null, null, coalesce(p_by, 'agent'), 'never');
+      else
+        select x.id into alt from (select distinct on (f.source) f.id, f.value, f.recorded_at from public.property_fact_values f
+                                    where f.property_id = p_property and f.key = p_key and f.source <> p_source order by f.source, f.recorded_at desc, f.id desc) x
+         where x.value is not null order by x.recorded_at desc limit 1;
+      end if;
       if alt is null then delete from public.property_profile where property_id = p_property and key = p_key;
       else update public.property_profile set value_id = alt, chosen_by = 'auto', chosen_at = now(), ticked = false, ticked_at = null, ticked_by = null where property_id = p_property and key = p_key; end if;
     end if;
     return vid;
   end if;
-  if p_choose = 'never' then return vid; end if;
-  if p_choose = 'tim' then
+  if ch = 'never' then return vid; end if;
+  if ch = 'offer' then
+    if c.property_id is not null and cv.source <> p_source and c.ticked and (cv.value #>> '{}') is distinct from (v #>> '{}') then
+      perform public.profile_sync_file(p_property, p_key);   -- Tim's value stays, on the file too; this one is shown beside it
+      return vid;
+    end if;
+    ch := 'tim';
+  end if;
+  if ch = 'tim' then
     insert into public.property_profile as pp (property_id, key, value_id, chosen_by, ticked, ticked_at, ticked_by)
     values (p_property, p_key, vid, 'tim', true, now(), coalesce(p_by, auth.jwt()->>'email', 'agent'))
     on conflict (property_id, key) do update set value_id = excluded.value_id, chosen_by = 'tim', chosen_at = now(), ticked = true, ticked_at = now(), ticked_by = excluded.ticked_by;
+    perform public.profile_sync_file(p_property, p_key);
     return vid;
   end if;
   if c.property_id is null then move := true;
-  elsif cv.value is not distinct from v then move := false;
+  elsif (cv.value #>> '{}') is not distinct from (v #>> '{}') then move := false;
   elsif c.ticked then move := false;
   elsif cv.source = p_source then move := true;
+  elsif cv.source = 'tim' then move := false;   -- what the property file says is Tim's own entry
   elsif public.profile_source_kind(p_source) = 'record' and public.profile_source_kind(cv.source) = 'person' then move := false;
   else move := true; end if;
   if move then
     insert into public.property_profile (property_id, key, value_id, chosen_by) values (p_property, p_key, vid, 'auto')
     on conflict (property_id, key) do update set value_id = excluded.value_id, chosen_by = 'auto', chosen_at = now(), ticked = false, ticked_at = null, ticked_by = null;
+    perform public.profile_sync_file(p_property, p_key);
   end if;
   return vid;
 end $$;
@@ -215,7 +240,7 @@ language sql stable security definer set search_path = public as $$
            cv.id as value_id, cv.value, cv.display, cv.source, cv.source_name, cv.as_of, cv.recorded_at,
            coalesce(c.ticked, false) as ticked, c.chosen_by,
            coalesce((select jsonb_agg(jsonb_build_object('value_id', l.id, 'value', l.value, 'display', l.display, 'source', l.source, 'source_name', l.source_name, 'as_of', l.as_of, 'recorded_at', l.recorded_at) order by l.recorded_at desc)
-                       from latest l where l.key = k.key and l.value is not null and (cv.id is null or (l.id <> cv.id and l.value is distinct from cv.value))), '[]'::jsonb) as others
+                       from latest l where l.key = k.key and l.value is not null and (cv.id is null or (l.id <> cv.id and (l.value #>> '{}') is distinct from (cv.value #>> '{}')))), '[]'::jsonb) as others
       from keys k
       left join public.profile_keys pk on pk.key = k.key
       left join public.property_profile c on c.property_id = p_property and c.key = k.key
@@ -253,6 +278,36 @@ begin
 end $$;
 revoke execute on function public.profile_write_back(uuid, text, jsonb) from public, anon, authenticated;
 
+-- what the property file says for one fact (null if it isn't a file fact or the file is empty there)
+create or replace function public.profile_file_value(p_property uuid, p_key text) returns jsonb
+language sql stable security definer set search_path = public as $$
+  select case when p_key = any (public.desc_keys()) then p.description -> p_key when p_key = 'title_ref' then to_jsonb(nullif(trim(p.title_ref), ''))
+              when p_key = 'legal_description' then to_jsonb(nullif(trim(p.legal_description), '')) end
+    from public.properties p where p.id = p_property;
+$$;
+revoke execute on function public.profile_file_value(uuid, text) from public, anon, authenticated;
+
+-- the property file follows the profile: the chosen value is written back when the file says something else (never an agreement).
+-- The backfill sets app.profile_backfill, so applying 028 changes no property file: where they differ, the file's value is shown
+-- beside the profile's for Tim to choose.
+create or replace function public.profile_sync_file(p_property uuid, p_key text) returns void
+language plpgsql security definer set search_path = public as $$
+declare f public.property_fact_values; p public.properties; cur text;
+begin
+  if coalesce(current_setting('app.profile_backfill', true), '') = 'on' then return; end if;
+  select v.* into f from public.property_profile c join public.property_fact_values v on v.id = c.value_id where c.property_id = p_property and c.key = p_key;
+  if f.id is null or f.value is null then return; end if;
+  select * into p from public.properties where id = p_property;
+  if p.id is null then return; end if;
+  cur := case when p_key = any (public.desc_keys()) then p.description ->> p_key when p_key = 'title_ref' then p.title_ref when p_key = 'legal_description' then p.legal_description end;
+  if not (p_key = any (public.desc_keys()) or p_key in ('title_ref', 'legal_description')) then return; end if;
+  if cur is not distinct from (f.value #>> '{}') then return; end if;
+  begin
+    perform public.profile_write_back(p_property, p_key, f.value);
+  exception when others then perform public.shared_note('profile_sync_file', jsonb_build_object('property', p_property, 'key', p_key, 'error', sqlerrm)); end;
+end $$;
+revoke execute on function public.profile_sync_file(uuid, text) from public, anon, authenticated;
+
 create or replace function public.agent_profile_set(p_property uuid, p_key text, p_value jsonb) returns jsonb
 language plpgsql security definer set search_path = public as $$
 declare vid uuid;
@@ -262,7 +317,10 @@ begin
   if not exists (select 1 from public.profile_keys where key = p_key) then raise exception 'Not a property fact'; end if;
   if p_value is not null and length(p_value::text) > 6000 then raise exception 'Too long'; end if;
   perform 1 from public.properties where id = p_property for update;
+  -- Tim cleared it on the property file: nothing is chosen for it now, and nothing stays ticked; other sources' values stay listed
+  if public.jblank(p_value) then perform public.profile_write_back(p_property, p_key, null); end if;
   vid := public.profile_record(p_property, p_key, p_value, 'tim', null, to_char(now() at time zone 'Pacific/Auckland', 'FMDD Mon YYYY'), 'Tim', null, null, null, 'tim');
+  if public.jblank(p_value) then delete from public.property_profile where property_id = p_property and key = p_key; end if;
   perform public.profile_write_back(p_property, p_key, case when public.jblank(p_value) then null else p_value end);
   return public.agent_property_profile(p_property);
 end $$;
@@ -311,8 +369,9 @@ begin
 end $$;
 create trigger profile_from_found after update of found on public.properties for each row execute function public.profile_from_found();
 
--- Inspect a property: Tim's own answers, chosen and ticked, unless the agreement in force holds a different value (then kept as a
--- value until he chooses on the inspection, as now); his choice there is applied here too
+-- Inspect a property (the disclosures check): Tim's own answers, chosen and ticked, unless the agreement in force holds a different
+-- value (then kept as a value until he chooses on the check, as now) or Tim has ticked a different value from another source (then
+-- his ticked value stays and the answer is shown beside it); his choice on the check is applied here too
 create or replace function public.profile_from_inspection() returns trigger language plpgsql security definer set search_path = public as $$
 declare k text; v jsonb; r jsonb; f public.property_fact_values; asof text := to_char(now() at time zone 'Pacific/Auckland', 'FMDD Mon YYYY');
 begin
@@ -322,7 +381,7 @@ begin
       v := new.facts -> k;
       if tg_op = 'UPDATE' and v is not distinct from (old.facts -> k) then continue; end if;
       perform public.profile_record(new.property_id, k, v, 'inspection', new.id, asof, 'Inspect a property', null, null, new.created_by,
-        case when coalesce(new.conflicts, '{}'::jsonb) ? k then 'never' else 'tim' end);
+        case when coalesce(new.conflicts, '{}'::jsonb) ? k then 'never' else 'offer' end);
     end loop;
     if tg_op = 'UPDATE' then
       for k, r in select * from jsonb_each(coalesce(new.resolved, '{}'::jsonb)) loop
@@ -335,6 +394,7 @@ begin
         elsif f.id is not null then
           insert into public.property_profile (property_id, key, value_id, chosen_by, ticked, ticked_at, ticked_by) values (new.property_id, k, f.id, 'tim', true, now(), coalesce(auth.jwt()->>'email', new.created_by))
           on conflict (property_id, key) do update set value_id = excluded.value_id, chosen_by = 'tim', chosen_at = now(), ticked = true, ticked_at = now(), ticked_by = excluded.ticked_by;
+          perform public.profile_sync_file(new.property_id, k);
         end if;
       end loop;
     end if;
@@ -389,32 +449,70 @@ revoke insert, update, delete, truncate on public.person_links from anon, authen
 
 create or replace function public.person_first(s text) returns text language sql immutable as $$ select split_part(public.norm_name(s), ' ', 1) $$;
 
--- does this name fit this contact? An informal name (typed by Tim at an appraisal, a Quiet List form) fits on its first name or the
--- preferred name; a checked name must be the same person's name (same_person_name, migration 003); a contact known only informally
--- fits any name
-create or replace function public.person_name_fits(p_contact uuid, p_name text, p_informal boolean) returns boolean
-language sql stable security definer set search_path = public as $$
-  select public.norm_name(p_name) = '' or exists (select 1 from public.crm_contacts c where c.id = p_contact and (
-    c.legal_name is null
-    or public.same_person_name(c.legal_name, p_name)
-    or public.norm_name(c.legal_name) = public.norm_name(p_name)
-    or (p_informal and (public.person_first(c.legal_name) = public.person_first(p_name) or public.norm_name(c.preferred_name) = public.norm_name(p_name)
-                        or public.norm_name(c.display_name) = public.norm_name(p_name)))));
+-- one name holding two people ("Tim McGuire and Bronwyn McGuire", "A & B", "A + B"): flagged for Tim to split, never one legal name
+create or replace function public.person_joint(s text) returns boolean language sql immutable as $$
+  select coalesce(s, '') ~* '(\s(and|&)\s|&|\+)';
 $$;
+-- two first names that can be the same person: the same, or one a short form at the start of the other ("Bron" and "Bronwyn"),
+-- at least three letters
+create or replace function public.person_nick_fits(a text, b text) returns boolean language sql immutable as $$
+  select coalesce(a, '') <> '' and coalesce(b, '') <> '' and (a = b or (least(length(a), length(b)) >= 3 and (a like b || '%' or b like a || '%')));
+$$;
+-- two full names that can be the same person: the same surname, and first names that fit ("Tim McGuire", "Timothy John McGuire")
+create or replace function public.person_short_same(a text, b text) returns boolean language sql immutable as $$
+  select position(' ' in public.norm_name(a)) > 0 and position(' ' in public.norm_name(b)) > 0
+     and regexp_replace(public.norm_name(a), '^.* ', '') = regexp_replace(public.norm_name(b), '^.* ', '')
+     and public.person_nick_fits(public.person_first(a), public.person_first(b));
+$$;
+-- does this name fit this contact? (Tim, 26 November 2026: the same email with different names is different people, flagged.)
+--   A contact with a checked legal name: a checked name must be the same person's name (same_person_name, migration 003, or the same
+--   surname with a first name that fits, "Tim" for "Timothy"); an informal
+--   name (typed at an appraisal, a Quiet List form) fits if it is their preferred or shown name, or a first name alone that fits theirs.
+--   A contact known only informally (no legal name yet): a name fits only if nothing contradicts it: the same words, or a first name
+--   alone that fits ("Bron" and "Bronwyn McGuire"). "Bron" never fits "Timothy John Smith", and "John Brown" never fits "John Smith".
+--   A name holding two people never fits anyone, and a contact holding two people is never joined by a fit.
+create or replace function public.person_name_fits(p_contact uuid, p_name text, p_informal boolean) returns boolean
+language plpgsql stable set search_path = public as $$
+declare c public.crm_contacts; nm text := public.norm_name(p_name); one boolean := position(' ' in public.norm_name(p_name)) = 0; n text; known boolean := false;
+begin
+  if nm = '' then return true; end if;
+  if public.person_joint(p_name) then return false; end if;
+  select * into c from public.crm_contacts where id = p_contact;
+  if c.id is null then return false; end if;
+  if c.legal_name is not null then
+    if public.same_person_name(c.legal_name, p_name) or public.norm_name(c.legal_name) = nm then return true; end if;
+    if public.person_short_same(c.legal_name, p_name) then return true; end if;   -- "Tim McGuire" and "Timothy John McGuire"
+    if not p_informal then return false; end if;
+    if public.norm_name(c.preferred_name) = nm or public.norm_name(c.display_name) = nm then return true; end if;
+    return one and public.person_nick_fits(nm, public.person_first(c.legal_name));
+  end if;
+  if public.person_joint(c.display_name) then return false; end if;
+  foreach n in array array[c.display_name, c.preferred_name] loop
+    if n is null or position('@' in n) > 0 or public.norm_name(n) = '' then continue; end if;
+    known := true;
+    if public.norm_name(n) = nm then return true; end if;
+    if (one or position(' ' in public.norm_name(n)) = 0) and public.person_nick_fits(public.person_first(n), public.person_first(nm)) then return true; end if;
+    if public.person_short_same(n, p_name) then return true; end if;
+  end loop;
+  return not known;   -- known by email alone: nothing contradicts the name
+end $$;
 
 -- find or make the contact for one person. Returns the contact, how it matched and any doubt.
 create or replace function public.person_find(p_name text, p_pref text, p_email text, p_property uuid, p_informal boolean, p_source text,
   out contact_id uuid, out matched_by text, out doubt text, out doubt_contact uuid)
 language plpgsql security definer set search_path = public as $$
 declare em text := lower(trim(coalesce(p_email, ''))); nm text := trim(regexp_replace(coalesce(p_name, ''), '\s+', ' ', 'g'));
-  c record; fits uuid[] := '{}'; best uuid; other uuid; n int := 0;
+  c record; fits uuid[] := '{}'; best uuid; other uuid; n int := 0; joint boolean := public.person_joint(nm);
 begin
+  -- one at a time per email (and per name on a property), so two rows written at the same moment never make two records of one person
+  if em <> '' then perform pg_advisory_xact_lock(hashtext('lw0-person:' || em));
+  elsif nm <> '' and p_property is not null then perform pg_advisory_xact_lock(hashtext('lw0-person:' || p_property::text || ':' || public.norm_name(nm))); end if;
   if em <> '' then
     for c in select ct.id, ct.legal_name from public.crm_contacts ct
               where ct.archived_at is null and exists (select 1 from public.crm_contact_methods m where m.contact_id = ct.id and m.kind = 'email' and m.value_norm = em)
               order by ct.created_at, ct.id loop
       n := n + 1; if other is null then other := c.id; end if;
-      if public.person_name_fits(c.id, nm, p_informal) then
+      if not joint and public.person_name_fits(c.id, nm, p_informal) then
         fits := fits || c.id;
         if best is null and c.legal_name is not null and nm <> '' and (public.same_person_name(c.legal_name, nm) or public.norm_name(c.legal_name) = public.norm_name(nm)) then best := c.id; end if;
       end if;
@@ -422,15 +520,23 @@ begin
     if array_length(fits, 1) = 1 then contact_id := fits[1]; matched_by := 'email'; return; end if;
     if array_length(fits, 1) > 1 then
       contact_id := coalesce(best, fits[1]); matched_by := 'email';
-      if best is null then doubt := 'The same email belongs to more than one person. Check this is the right one.'; doubt_contact := (select x from unnest(fits) x where x <> contact_id limit 1); end if;
+      if best is null then
+        -- a checked name before one known only informally; still a doubt for Tim, as the name fits more than one person
+        contact_id := coalesce((select ct.id from public.crm_contacts ct where ct.id = any (fits) and ct.legal_name is not null order by ct.created_at, ct.id limit 1), fits[1]);
+        doubt := 'The same email belongs to more than one person. Check this is the right one.'; doubt_contact := (select x from unnest(fits) x where x <> contact_id limit 1);
+      end if;
       return;
     end if;
-    if n > 0 and p_informal then
-      contact_id := other; matched_by := 'email';
-      doubt := 'Same email as this person, but the name given here (' || left(nm, 80) || ') does not match. Check it is the same person.'; return;
+    -- the same email, but the name doesn't fit: never joined; a separate person, flagged for Tim (Tim, 26 November 2026)
+    if n > 0 then
+      doubt := 'Same email as another person with a different name, so kept as a separate person. Check whether they are the same.';
+      -- the likeliest one for Tim to compare with: the same surname first, then a checked name, then the oldest
+      doubt_contact := coalesce((select ct.id from public.crm_contacts ct
+          where ct.archived_at is null and exists (select 1 from public.crm_contact_methods m where m.contact_id = ct.id and m.kind = 'email' and m.value_norm = em)
+          order by (position(' ' in nm) > 0 and regexp_replace(public.norm_name(ct.legal_name), '^.* ', '') = regexp_replace(public.norm_name(nm), '^.* ', '')) desc nulls last,
+                   (ct.legal_name is not null) desc, ct.created_at, ct.id limit 1), other);
     end if;
-    if n > 0 then doubt := 'Same email as another person with a different name, so kept as a separate person. Check whether they are the same.'; doubt_contact := other; end if;
-  elsif nm <> '' and p_property is not null then
+  elsif nm <> '' and p_property is not null and not joint then
     select array_agg(distinct l.contact_id) into fits from public.person_links l join public.crm_contacts ct on ct.id = l.contact_id
      where l.property_id = p_property and ct.archived_at is null
        and (public.norm_name(ct.legal_name) = public.norm_name(nm) or (p_informal and public.norm_name(ct.display_name) = public.norm_name(nm)));
@@ -439,10 +545,18 @@ begin
       if array_length(fits, 1) > 1 then doubt := 'More than one person on this property has this name. Check this is the right one.'; doubt_contact := fits[2]; end if;
       return;
     end if;
+    -- not the same name, but a similar one on this property: a separate person, flagged for Tim
+    select l.contact_id into other from public.person_links l join public.crm_contacts ct on ct.id = l.contact_id
+     where l.property_id = p_property and ct.archived_at is null and public.person_short_same(coalesce(ct.legal_name, ct.display_name), nm)
+     order by ct.created_at, ct.id limit 1;
+    if other is not null then doubt := 'A similar name is already on this property, so kept as a separate person. Check whether they are the same.'; doubt_contact := other; end if;
   end if;
   if nm = '' and em = '' then return; end if;
+  if joint then
+    doubt := 'This name looks like more than one person (' || left(nm, 80) || '). Split it into one record each.'; doubt_contact := other;
+  end if;
   insert into public.crm_contacts (kind, display_name, legal_name, preferred_name, lead_source, marketing_consent)
-  values ('person', left(coalesce(nullif(trim(coalesce(p_pref, '')), ''), nullif(nm, ''), em), 200), case when p_informal then null else nullif(nm, '') end,
+  values ('person', left(coalesce(nullif(trim(coalesce(p_pref, '')), ''), nullif(nm, ''), em), 200), case when p_informal or joint then null else nullif(nm, '') end,
           nullif(trim(coalesce(p_pref, '')), ''), p_source, 'unknown')
   returning id into contact_id;
   matched_by := 'new';
@@ -464,7 +578,9 @@ begin
     keep := l.matched_by = 'tim'
       or (p_contact is not null and l.contact_id = p_contact)
       or (p_contact is null and (em = '' or exists (select 1 from public.crm_contact_methods m where m.contact_id = l.contact_id and m.kind = 'email' and m.value_norm = em))
-          and public.person_name_fits(l.contact_id, nm, p_informal));
+          and (public.person_name_fits(l.contact_id, nm, p_informal)
+               -- the same words as before on a record kept apart (for example a name holding two people, waiting for Tim to split it)
+               or exists (select 1 from public.crm_contacts ct where ct.id = l.contact_id and ct.legal_name is null and public.norm_name(ct.display_name) = public.norm_name(nm))));
   end if;
   if keep then
     cid := l.contact_id;
@@ -494,11 +610,12 @@ begin
             not exists (select 1 from public.crm_contact_methods where contact_id = cid and kind in ('mobile', 'phone')), p_source)
     on conflict (contact_id, kind, value_norm) do nothing;
   end if;
-  -- a checked name fills in a contact known only informally; a legal name already on the contact is never replaced
-  update public.crm_contacts set legal_name = coalesce(legal_name, case when not p_informal then nullif(nm, '') end),
+  -- a checked name fills in a contact known only informally (it fits: nothing contradicts it); a legal name already on the contact is
+  -- never replaced; a name holding two people is never stored as one legal name
+  update public.crm_contacts set legal_name = coalesce(legal_name, case when not p_informal and not public.person_joint(nm) then nullif(nm, '') end),
          preferred_name = coalesce(preferred_name, nullif(trim(coalesce(p_pref, '')), '')),
-         display_name = case when legal_name is null and not p_informal and nm <> '' and display_name = em then nm else display_name end
-   where id = cid and ((legal_name is null and not p_informal and nm <> '') or (preferred_name is null and trim(coalesce(p_pref, '')) <> ''));
+         display_name = case when legal_name is null and not p_informal and not public.person_joint(nm) and nm <> '' and display_name = em then nm else display_name end
+   where id = cid and ((legal_name is null and not p_informal and not public.person_joint(nm) and nm <> '') or (preferred_name is null and trim(coalesce(p_pref, '')) <> ''));
   if p_property is not null and p_role is not null then
     insert into public.crm_property_links as x (contact_id, property_id, role, is_current, started_on, ended_on, source)
     values (cid, p_property, p_role, coalesce(p_current, true), current_date, case when not coalesce(p_current, true) then current_date end, p_source)
@@ -520,6 +637,25 @@ begin
   return new;
 end $$;
 create trigger person_link_pp before insert or update of legal_name, pref_name, email, phone, role, name_from on public.property_people for each row execute function public.person_link_pp();
+-- a row removed from property_people (the app sets people aside as 'former' instead; this covers anything else): the role it gave ends,
+-- unless another of the property's current rows still gives it, and its link goes with it
+create or replace function public.person_unlink_pp() returns trigger language plpgsql security definer set search_path = public as $$
+declare l public.person_links;
+begin
+  begin
+    select * into l from public.person_links where source = 'property_people' and source_id = old.id;
+    if l.id is not null then
+      delete from public.person_links where id = l.id;
+      if l.role is not null and not exists (select 1 from public.person_links x join public.property_people pp on pp.id = x.source_id
+                                             where x.source = 'property_people' and x.contact_id = l.contact_id and pp.property_id = old.property_id and pp.role <> 'former' and x.role = l.role) then
+        update public.crm_property_links set is_current = false, ended_on = coalesce(ended_on, current_date)
+         where contact_id = l.contact_id and property_id = old.property_id and role = l.role and source = 'property_people';
+      end if;
+    end if;
+  exception when others then perform public.shared_note('person_unlink_pp', jsonb_build_object('row', old.id, 'error', sqlerrm)); end;
+  return null;
+end $$;
+create trigger person_unlink_pp after delete on public.property_people for each row execute function public.person_unlink_pp();
 
 -- agreement_people: linked through person_links; contact_id is filled only while the person has not signed
 create or replace function public.agreement_role(p_capacity text) returns text language sql immutable as $$
@@ -578,7 +714,9 @@ begin
 end $$;
 create trigger aml_file_contact before insert on public.aml_files for each row execute function public.aml_file_contact();
 
--- Tim settles a doubt: the same person (the link moves to the other contact, and a contact left with nothing is archived) or two
+-- Tim settles a doubt: the same person (the link moves to the other contact, every working list that pointed at the old contact for
+-- this row follows it: the property's people, an unsigned agreement person, the Quiet List listing, the answers filed with this row;
+-- signed rows are never touched; the old contact's role from this row ends, and a contact left with nothing is archived) or two
 -- different people (the doubt is cleared). Either way the link is then his, and no later match moves it.
 create or replace function public.agent_person_link_resolve(p_link uuid, p_same boolean) returns jsonb
 language plpgsql security definer set search_path = public as $$
@@ -595,9 +733,20 @@ begin
     insert into public.crm_contact_methods (contact_id, kind, label, value, value_norm, is_primary, opted_out_at, bounced_at, source)
       select target, m.kind, m.label, m.value, m.value_norm, false, m.opted_out_at, m.bounced_at, m.source from public.crm_contact_methods m where m.contact_id = l.contact_id
       on conflict (contact_id, kind, value_norm) do nothing;
+    -- the working lists follow (never a signed row)
+    if l.source = 'property_people' then update public.property_people set contact_id = target where id = l.source_id and contact_id is not distinct from l.contact_id;
+    elsif l.source = 'agreement_people' then update public.agreement_people set contact_id = target where id = l.source_id and signed_at is null and contact_id is not distinct from l.contact_id;
+    elsif l.source = 'ql_listing' then update public.ql_listings set vendor_contact_id = target where id = l.source_id and vendor_contact_id is not distinct from l.contact_id;
+    elsif l.source = 'prelisting' then update public.qa_answers set contact_id = target where source = 'questionnaire' and source_ref = l.source_id and contact_id is not distinct from l.contact_id;
+    elsif l.source = 'ql_seller_lead' then update public.qa_answers set contact_id = target where source = 'quiet_list_seller_form' and source_ref = l.source_id and contact_id is not distinct from l.contact_id;
+    end if;
     if l.property_id is not null and l.role is not null then
       insert into public.crm_property_links (contact_id, property_id, role, is_current, started_on, source) values (target, l.property_id, l.role, true, current_date, l.source)
       on conflict (contact_id, property_id, role) do update set is_current = true, ended_on = null;
+      -- the old contact's role from this row ends, unless another of their rows still gives it
+      if not exists (select 1 from public.person_links x where x.contact_id = l.contact_id and x.property_id = l.property_id and x.role = l.role) then
+        update public.crm_property_links set is_current = false, ended_on = coalesce(ended_on, current_date) where contact_id = l.contact_id and property_id = l.property_id and role = l.role;
+      end if;
     end if;
     if not exists (select 1 from public.person_links where contact_id = l.contact_id) and not exists (select 1 from public.aml_files where contact_id = l.contact_id) then
       update public.crm_property_links set is_current = false, ended_on = coalesce(ended_on, current_date) where contact_id = l.contact_id;
@@ -889,12 +1038,18 @@ grant execute on function public.agent_property_profile(uuid), public.agent_prof
 revoke execute on function public.profile_from_found(), public.profile_from_inspection(), public.profile_from_agreement(), public.person_link_pp(), public.person_link_ap(),
   public.person_link_after(), public.aml_file_contact(), public.qa_from_prelisting(), public.qa_from_seller_lead(), public.qa_from_profile(), public.ql_listing_before(),
   public.ql_listing_after(), public.guard_fact_value() from public, anon, authenticated;
-revoke execute on function public.profile_vendor_key(text), public.person_name_fits(uuid, text, boolean), public.qa_mine(text, uuid, uuid) from anon;
+-- read inside the vendor policies, so signed-in users need them; nobody else (not PUBLIC, not anon)
+revoke execute on function public.profile_vendor_key(text), public.qa_mine(text, uuid, uuid) from public, anon;
+grant execute on function public.profile_vendor_key(text), public.qa_mine(text, uuid, uuid) to authenticated;
+-- internal helpers: only the functions above call them
+revoke execute on function public.person_name_fits(uuid, text, boolean), public.person_unlink_pp(), public.profile_source_kind(text), public.person_first(text),
+  public.person_joint(text), public.person_nick_fits(text, text), public.person_short_same(text, text), public.profile_file_value(uuid, text), public.agreement_role(text), public.qa_prelisting_map(), public.ql_num(jsonb) from public, anon, authenticated;
 
 -- ───── backfill (today's records are test records; nothing signed is changed) ─────
 do $bf$
 declare r record; k text; v jsonb; q text; cid uuid;
 begin
+  perform set_config('app.profile_backfill', 'on', true);
   -- people, checked names first: agreement people (signed ones through person_links only), then the property's people, then the rest
   for r in select ap.*, a.property_id as pid, a.status as ag_status, a.answers->>'capacity' as cap from public.agreement_people ap join public.agreements a on a.id = ap.agreement_id order by a.created_at, ap.position loop
     cid := public.person_link('agreement_people', r.id, r.pid, r.legal_name, r.pref_name, r.email, r.phone, false, public.agreement_role(r.cap), r.ag_status not in ('ended', 'cancelled'));
@@ -927,12 +1082,23 @@ begin
     update public.crm_contacts c set aml_status = 'verified', aml_checked_at = r.locked_at, aml_cdd_level = r.data->>'cdd', aml_risk = r.data->>'risk', aml_pep = r.data->>'pep', aml_latest_file_id = r.id
      where c.id = r.cid2 and (c.aml_checked_at is null or c.aml_checked_at <= r.locked_at);
   end loop;
-  -- the property profile: council values Tim used, then agreements and inspections in the order they were made
+  -- the property profile: first what each property file says (Tim's own entries, chosen, not ticked), then council values Tim used,
+  -- agreements and inspections in the order they were made. Where they differ from the file, the file's value stays chosen and the
+  -- other is shown beside it (a value Tim accepted elsewhere that matches the file takes its place, with its own source and date).
+  for r in select * from public.properties loop
+    for k, v in select * from jsonb_each(coalesce(r.description, '{}'::jsonb)) loop
+      if k = any (public.desc_keys()) and not public.jblank(v) then
+        perform public.profile_record(r.id, k, v, 'tim', null, to_char(r.updated_at at time zone 'Pacific/Auckland', 'FMDD Mon YYYY'), 'Property file', null, null, 'backfill', 'auto');
+      end if;
+    end loop;
+    if coalesce(trim(r.title_ref), '') <> '' then perform public.profile_record(r.id, 'title_ref', to_jsonb(r.title_ref), 'tim', null, to_char(r.updated_at at time zone 'Pacific/Auckland', 'FMDD Mon YYYY'), 'Property file', null, null, 'backfill', 'auto'); end if;
+    if coalesce(trim(r.legal_description), '') <> '' then perform public.profile_record(r.id, 'legal_description', to_jsonb(r.legal_description), 'tim', null, to_char(r.updated_at at time zone 'Pacific/Auckland', 'FMDD Mon YYYY'), 'Property file', null, null, 'backfill', 'auto'); end if;
+  end loop;
   for r in select * from public.properties loop
     for k, v in select * from jsonb_each(coalesce(r.found, '{}'::jsonb)) loop
       perform public.profile_record(r.id, coalesce(case when v->>'field' in ('title_ref', 'legal_description') or v->>'field' = any (public.desc_keys()) then v->>'field' end, k), v->'value', 'council', null,
         coalesce(v->>'as_of_label', v->>'as_of', left(v->>'fetched_at', 10)), v->>'source_name', v->>'display', v->>'label', 'backfill',
-        case when coalesce(v->>'field', '') <> '' and coalesce((v->>'written')::boolean, false) = false then 'never' else 'tim' end);
+        case when coalesce(v->>'field', '') <> '' and coalesce((v->>'written')::boolean, false) = false then 'never' else 'offer' end);
     end loop;
   end loop;
   for r in select * from public.agreements where property_id is not null and status not in ('ended', 'cancelled') order by created_at loop
@@ -946,7 +1112,7 @@ begin
     for k, v in select * from jsonb_each(coalesce(r.facts, '{}'::jsonb)) loop
       if k = any (public.desc_keys()) and not public.jblank(v) then
         perform public.profile_record(r.property_id, k, v, 'inspection', r.id, to_char(coalesce(public.stamp_ts(r.stamps->>('f:' || k)), r.updated_at) at time zone 'Pacific/Auckland', 'FMDD Mon YYYY'),
-          'Inspect a property', null, null, r.created_by, case when coalesce(r.conflicts, '{}'::jsonb) ? k then 'never' else 'tim' end);
+          'Inspect a property', null, null, r.created_by, case when coalesce(r.conflicts, '{}'::jsonb) ? k then 'never' else 'offer' end);
       end if;
     end loop;
   end loop;
@@ -957,4 +1123,5 @@ begin
       perform public.qa_put(q, r.property_id, cid, r.answers -> k, 'questionnaire', r.id, true, 'backfill');
     end loop;
   end loop;
+  perform set_config('app.profile_backfill', 'off', true);
 end $bf$;
