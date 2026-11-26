@@ -464,8 +464,10 @@ signatures and fingerprints are not touched.
   beside it); `profile_sync_draft` (internal) writes the chosen value to an agreement still a draft with nobody signed (never sent,
   parked or signed) when an official figure is chosen or holds, and when Tim chooses with `agent_profile_choose`; `official` (a record of title, cross lease or
   unit title document, or survey plan among `property_documents`, source `title`, from the reader's `read_result.fields` for land area and
-  title reference, trigger `profile_from_document`: wins over an informal value, never over one Tim ticked or cleared, which it sits beside;
-  an archived document's figures go); `beside` (the backfill's council values and check answers: chosen and ticked unless Tim ticked a
+  title reference that Tim ticked in the import review (`ticked`, with the value he `used`), trigger `profile_from_document`: chosen and
+  ticked over a check answer or an informal value whichever came first, never over a fact he cleared or a value he chose on the profile
+  once an official figure was there, which it sits beside; figures he didn't tick are suggestions, source `reader` ("not checked"), listed
+  only; an archived document's figures go); `property_profile.chosen_by` `profile` marks Tim's own choice on the profile or file; `beside` (the backfill's council values and check answers: chosen and ticked unless Tim ticked a
   different value from another source or the chosen value is the property file's own, including a fact Tim cleared there; that then
   stays, with this one beside it; the backfill only lists official figures); `auto` (chosen only when nothing ticked stands, never over the property file's own
   value, never a record over a person's entry); `never` (kept as a value only). A source clearing its chosen value hands over to what the

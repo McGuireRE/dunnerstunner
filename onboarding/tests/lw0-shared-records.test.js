@@ -136,9 +136,24 @@ const TIM = ['agent-1', 'hello@timmcguire.co.nz'];
       d = await db(); out[tag].pd = await factOf('PD', 'pLand');
       expect(out[tag].pd.value === '790' && out[tag].pd.source === 'inspection' && out[tag].pd.ticked && (out[tag].pd.others || []).some(o => o.value === '800') && d.properties.find(x => x.id === 'PD').description.pLand === '790',
         'file 800, check 790: the check answer on the profile (ticked) and the file, 800 beside it: ' + JSON.stringify(out[tag].pd));
+      // 4b2. the AI suggests, Tim ticks: a record of title read with a hectares slip he didn't tick is only a suggestion, written nowhere
+      const addDoc = (id, pid, fields) => p.evaluate(([id, pid, fields, now]) => { const d = JSON.parse(localStorage.getItem('mockdb')); (d.property_documents ||= []).push({ id, property_id: pid, kind: 'Record of title', folder: 'title', name: id + '.pdf', path: pid + '/' + id + '.pdf', source: 'dropped',
+        read_result: { fields }, created_at: now, created_by: 'agent' }); localStorage.setItem('mockdb', JSON.stringify(d)); }, [id, pid, fields, now]);
+      await addDoc('DD1', 'PD', [{ key: 'pLand', value: '0.0812 ha', source: 'Record of title OT8/1', ticked: false }]); await go(); d = await db();
+      out[tag].slip = await factOf('PD', 'pLand');
+      expect(out[tag].slip.value === '790' && d.properties.find(x => x.id === 'PD').description.pLand === '790' && (out[tag].slip.others || []).some(o => o.value === '0.0812 ha' && o.source === 'reader' && /not checked/.test(o.source_name || '')),
+        'an unticked reading (0.0812 ha) stays a suggestion beside, written nowhere: ' + JSON.stringify(out[tag].slip));
+      await openProp('PD'); out[tag].slipRow = await profRow('pLand');
+      expect(/From the record of title, not checked says 0\.0812 ha/.test(out[tag].slipRow || ''), 'shown as not checked on the property page: ' + out[tag].slipRow);
+      // 4b3. the same title, the land area ticked in the import review: the official figure takes precedence over his earlier check answer
+      await addDoc('DD2', 'PD', [{ key: 'pLand', value: '812 m²', used: '812', source: 'Record of title OT8/1', ticked: true }]); await go(); d = await db();
+      out[tag].pdOff = await factOf('PD', 'pLand');
+      expect(out[tag].pdOff.value === '812' && out[tag].pdOff.source === 'title' && (out[tag].pdOff.others || []).some(o => o.value === '790' && o.source === 'inspection') && d.properties.find(x => x.id === 'PD').description.pLand === '812',
+        'a ticked official figure takes precedence over the earlier check answer, which sits beside it: ' + JSON.stringify(out[tag].pdOff));
+
       // 4c. ...except where a record of title among the property's documents gives the official figure: it stays, and Tim is told under his answer
       await p.evaluate(now => { const d = JSON.parse(localStorage.getItem('mockdb')); (d.property_documents ||= []).push({ id: 'DE', property_id: 'PE', kind: 'Record of title', folder: 'title', name: 'title.pdf', path: 'PE/title.pdf', source: 'dropped',
-        read_result: { fields: [{ key: 'pLand', value: '812 m²', source: 'Record of title OT9/1' }] }, created_at: now, created_by: 'agent' }); localStorage.setItem('mockdb', JSON.stringify(d)); }, now);
+        read_result: { fields: [{ key: 'pLand', value: '812 m²', used: '812', source: 'Record of title OT9/1', ticked: true }] }, created_at: now, created_by: 'agent' }); localStorage.setItem('mockdb', JSON.stringify(d)); }, now);
       await go(); d = await db(); out[tag].pe0 = [(await factOf('PE', 'pLand')).value, (await factOf('PE', 'pLand')).source, d.properties.find(x => x.id === 'PE').description.pLand];
       out[tag].pe0.push(d.agreements.find(x => x.id === 'AE').answers.pLand);
       expect(JSON.stringify(out[tag].pe0) === JSON.stringify(['812', 'title', '812', '812']), 'the record of title\'s land area on the profile, the file and the unsigned draft agreement: ' + JSON.stringify(out[tag].pe0));
@@ -157,6 +172,10 @@ const TIM = ['agent-1', 'hello@timmcguire.co.nz'];
       await openProp('PE'); await p.click('#pfProfTbl tr[data-prof="pLand"] [data-profuse]'); await p.waitForTimeout(1500);
       d = await db(); out[tag].peChose = [(await factOf('PE', 'pLand')).value, d.properties.find(x => x.id === 'PE').description.pLand, d.agreements.find(x => x.id === 'AE').answers.pLand];
       expect(JSON.stringify(out[tag].peChose) === JSON.stringify(['790', '790', '790']), 'Tim chose 790: the profile, the file and the unsigned draft follow: ' + JSON.stringify(out[tag].peChose));
+      // the title read again (ticked 812) after that: his explicit later choice holds
+      await p.evaluate(() => { const d = JSON.parse(localStorage.getItem('mockdb')); const x = d.property_documents.find(y => y.id === 'DE'); x.read_result = { fields: [{ key: 'pLand', value: '812 m2', used: '812', source: 'Record of title OT9/1', ticked: true }] }; localStorage.setItem('mockdb', JSON.stringify(d)); });
+      await go(); d = await db(); out[tag].peHold = [(await factOf('PE', 'pLand')).value, d.properties.find(x => x.id === 'PE').description.pLand, d.agreements.find(x => x.id === 'AE').answers.pLand];
+      expect(JSON.stringify(out[tag].peHold) === JSON.stringify(['790', '790', '790']), 'read again after his choice: his 790 holds everywhere: ' + JSON.stringify(out[tag].peHold));
 
       // 5. Tim's own entry on the property file goes to the profile (a property with no agreement, so the file can be edited)
       await p.evaluate(() => { const d = JSON.parse(localStorage.getItem('mockdb')); d.agreements = d.agreements.filter(a => a.id !== 'AA'); localStorage.setItem('mockdb', JSON.stringify(d)); });

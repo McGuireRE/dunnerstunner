@@ -91,7 +91,7 @@ revoke insert, update, delete, truncate on public.profile_keys from anon, authen
 
 -- where a value can come from; 'record' sources are public or bought records, 'person' sources are someone's own entry
 create or replace function public.profile_source_kind(s text) returns text language sql immutable as $$
-  select case when s in ('council', 'reinz', 'relab', 'title') then 'record' else 'person' end;
+  select case when s in ('council', 'reinz', 'relab', 'title', 'reader') then 'record' else 'person' end;
 $$;
 
 create table public.property_fact_values (
@@ -101,7 +101,7 @@ create table public.property_fact_values (
   value jsonb,                                -- null: this source cleared it
   display text,                               -- the words the source gave, where it gave any (council records)
   label text,                                 -- the source's own name for the fact (council records that aren't in profile_keys)
-  source text not null check (source in ('council', 'reinz', 'relab', 'title', 'inspection', 'agreement', 'tim', 'first_visit', 'questionnaire', 'quiet_list')),
+  source text not null check (source in ('council', 'reinz', 'relab', 'title', 'reader', 'inspection', 'agreement', 'tim', 'first_visit', 'questionnaire', 'quiet_list')),
   source_name text,                           -- for example "Dunedin City Council rates"
   source_ref uuid,                            -- the lookup, inspection, agreement or listing it came from
   as_of text,                                 -- the date the source gives for it (for example "2026-2027 rating year")
@@ -116,7 +116,7 @@ create table public.property_profile (
   property_id uuid not null references public.properties(id) on delete cascade,
   key text not null,
   value_id uuid not null references public.property_fact_values(id),
-  chosen_by text not null default 'auto' check (chosen_by in ('auto', 'tim')),
+  chosen_by text not null default 'auto' check (chosen_by in ('auto', 'tim', 'profile')),   -- profile: Tim chose it on the profile or typed or cleared it on the file
   chosen_at timestamptz not null default now(),
   ticked boolean not null default false,
   ticked_at timestamptz,
@@ -216,10 +216,10 @@ begin
     -- the official figure from the property's documents, if there is one and it says something else
     select * into off from public.property_fact_values where property_id = p_property and key = p_key and source = 'title' order by recorded_at desc, id desc limit 1;
     if off.id is not null and off.value is not null and (off.value #>> '{}') is distinct from (v #>> '{}')
-       and (c.property_id is null or cv.source = 'title' or not c.ticked) then
-      insert into public.property_profile (property_id, key, value_id, chosen_by) values (p_property, p_key, off.id, 'auto')
+       and (c.property_id is null or c.chosen_by <> 'profile') then
+      insert into public.property_profile (property_id, key, value_id, chosen_by, ticked, ticked_at, ticked_by) values (p_property, p_key, off.id, 'auto', true, now(), 'official')
       on conflict (property_id, key) do update set value_id = excluded.value_id, chosen_by = case when property_profile.value_id = excluded.value_id then property_profile.chosen_by else 'auto' end,
-        ticked = case when property_profile.value_id = excluded.value_id then property_profile.ticked else false end;
+        ticked = true;
       perform public.profile_sync_file(p_property, p_key);   -- the official figure stays, on the file and the unsigned draft; his answer beside it
       perform public.profile_sync_draft(p_property, p_key);
       return vid;
@@ -227,15 +227,17 @@ begin
     ch := 'tim';
   end if;
   if ch = 'official' then
+    -- a fact Tim cleared, or a value he chose on the profile himself once an official figure was already there: the official figure
+    -- is shown beside it, marked, for him to choose. Anything else (a check answer, the file's value, an automatic one) gives way.
     if c.property_id is not null and cv.source <> p_source and (cv.value #>> '{}') is distinct from (v #>> '{}')
-       and (c.ticked or (cv.source = 'tim' and cv.value is null)) then
-      return vid;   -- Tim ticked a different value, or cleared it: the official figure is shown beside it, marked, for him to choose
+       and ((cv.source = 'tim' and cv.value is null)
+            or (c.chosen_by = 'profile' and exists (select 1 from public.property_fact_values t where t.property_id = p_property and t.key = p_key
+                                                     and t.source = 'title' and t.recorded_at < c.chosen_at))) then
+      return vid;
     end if;
-    insert into public.property_profile (property_id, key, value_id, chosen_by) values (p_property, p_key, vid, 'auto')
-    on conflict (property_id, key) do update set value_id = excluded.value_id, chosen_by = 'auto', chosen_at = now(),
-      ticked = case when property_profile.value_id = excluded.value_id then property_profile.ticked else false end,
-      ticked_at = case when property_profile.value_id = excluded.value_id then property_profile.ticked_at end,
-      ticked_by = case when property_profile.value_id = excluded.value_id then property_profile.ticked_by end;
+    -- ticked: Tim ticked it in the import review
+    insert into public.property_profile (property_id, key, value_id, chosen_by, ticked, ticked_at, ticked_by) values (p_property, p_key, vid, 'auto', true, now(), coalesce(p_by, 'agent'))
+    on conflict (property_id, key) do update set value_id = excluded.value_id, chosen_by = 'auto', chosen_at = now(), ticked = true, ticked_at = now(), ticked_by = excluded.ticked_by;
     perform public.profile_sync_file(p_property, p_key);
     perform public.profile_sync_draft(p_property, p_key);   -- the official figure goes on an unsigned draft agreement too
     return vid;
@@ -382,11 +384,12 @@ begin
     perform public.profile_write_back(p_property, p_key, null);
     insert into public.property_fact_values (property_id, key, value, source, source_name, as_of, recorded_by)
     values (p_property, p_key, null, 'tim', 'Tim', to_char(now() at time zone 'Pacific/Auckland', 'FMDD Mon YYYY'), coalesce(auth.jwt()->>'email', 'agent')) returning id into vid;
-    insert into public.property_profile (property_id, key, value_id, chosen_by, ticked) values (p_property, p_key, vid, 'tim', false)
-    on conflict (property_id, key) do update set value_id = excluded.value_id, chosen_by = 'tim', chosen_at = now(), ticked = false, ticked_at = null, ticked_by = null;
+    insert into public.property_profile (property_id, key, value_id, chosen_by, chosen_at, ticked) values (p_property, p_key, vid, 'profile', clock_timestamp(), false)
+    on conflict (property_id, key) do update set value_id = excluded.value_id, chosen_by = 'profile', chosen_at = clock_timestamp(), ticked = false, ticked_at = null, ticked_by = null;
     return public.agent_property_profile(p_property);
   end if;
   vid := public.profile_record(p_property, p_key, p_value, 'tim', null, to_char(now() at time zone 'Pacific/Auckland', 'FMDD Mon YYYY'), 'Tim', null, null, null, 'tim');
+  update public.property_profile set chosen_by = 'profile', chosen_at = clock_timestamp() where property_id = p_property and key = p_key and value_id = vid;
   perform public.profile_write_back(p_property, p_key, p_value);
   return public.agent_property_profile(p_property);
 end $$;
@@ -399,9 +402,10 @@ begin
   perform 1 from public.properties where id = p_property for update;
   select * into f from public.property_fact_values where id = p_value_id and property_id = p_property and key = p_key;
   if f.id is null or f.value is null then raise exception 'That value is not on this property'; end if;
-  insert into public.property_profile (property_id, key, value_id, chosen_by, ticked, ticked_at, ticked_by)
-  values (p_property, p_key, f.id, 'tim', true, now(), coalesce(auth.jwt()->>'email', 'agent'))
-  on conflict (property_id, key) do update set value_id = excluded.value_id, chosen_by = 'tim', chosen_at = now(), ticked = true, ticked_at = now(), ticked_by = excluded.ticked_by;
+  -- chosen_at is the moment itself, so a later official figure can tell it came after this choice
+  insert into public.property_profile (property_id, key, value_id, chosen_by, chosen_at, ticked, ticked_at, ticked_by)
+  values (p_property, p_key, f.id, 'profile', clock_timestamp(), true, now(), coalesce(auth.jwt()->>'email', 'agent'))
+  on conflict (property_id, key) do update set value_id = excluded.value_id, chosen_by = 'profile', chosen_at = clock_timestamp(), ticked = true, ticked_at = now(), ticked_by = excluded.ticked_by;
   perform public.profile_write_back(p_property, p_key, f.value);
   perform public.profile_sync_draft(p_property, p_key);   -- and an unsigned draft agreement (Tim, 26 November 2026)
   return public.agent_property_profile(p_property);
@@ -489,15 +493,17 @@ end $$;
 create trigger profile_from_agreement after insert or update of answers, property_id, status on public.agreements for each row execute function public.profile_from_agreement();
 
 -- the property's documents: a record of title, a cross lease or unit title document, or a survey plan is the official source for the
--- land area and the title reference (Tim, 26 November 2026). What the document reader found in it (read_result.fields, the same answer
--- form as doc_prefill) goes on the profile as an official figure ('title'). A document archived or no longer one of these: its
--- figures go, and what the file says (or the newest other value) takes their place.
+-- land area and the title reference (Tim, 26 November 2026). The AI suggests and Tim ticks: what the document reader found in it
+-- (read_result.fields, doc_prefill's answer form) counts as official ('title') only where Tim ticked it in the import review
+-- ("ticked": true, with the value he used); anything he didn't tick is a suggestion ('reader', "not checked"), shown beside and never
+-- chosen or written anywhere until he chooses it on the profile. A document archived or no longer one of these: its figures go, and
+-- what the file says (or the newest other value) takes their place.
 create or replace function public.profile_official_kinds() returns text[] language sql immutable as $$
   select array['Record of title', 'Cross lease or unit title document', 'Survey plan'];
 $$;
 create or replace function public.profile_from_document_row(d public.property_documents, p_on boolean) returns void
 language plpgsql security definer set search_path = public as $$
-declare x jsonb; k text; v jsonb;
+declare x jsonb; k text; v jsonb; tk boolean; src text;
 begin
   if d.property_id is null then return; end if;
   for x in select e from jsonb_array_elements(case when jsonb_typeof(d.read_result -> 'fields') = 'array' then d.read_result -> 'fields' else '[]'::jsonb end) e loop
@@ -505,15 +511,19 @@ begin
     if k is null then continue; end if;
     -- a reading of several documents at once: only figures it says came from the title or plan
     if coalesce(x->>'source', '') !~* '(title|survey|plan|cross lease|unit title|\mct\M|\mdp\M)' then continue; end if;
-    v := case when k = 'pLand' then to_jsonb(coalesce(public.ql_num(x->'value')::text, x->>'value')) else to_jsonb(trim(x->>'value')) end;
+    tk := coalesce((x->>'ticked')::boolean, false);
+    src := case when tk then 'title' else 'reader' end;
+    v := case when not tk then to_jsonb(trim(x->>'value'))   -- a suggestion: as the reader gave it
+              when k = 'pLand' then to_jsonb(coalesce(public.ql_num(coalesce(x->'used', x->'value'))::text, coalesce(x->>'used', x->>'value')))
+              else to_jsonb(trim(coalesce(x->>'used', x->>'value'))) end;
     if not p_on then
-      if exists (select 1 from public.property_fact_values f where f.property_id = d.property_id and f.key = k and f.source = 'title' and f.source_ref = d.id) then
-        perform public.profile_record(d.property_id, k, null, 'title', d.id, null, d.kind, null, null, coalesce(d.created_by, 'agent'), 'auto');
+      if exists (select 1 from public.property_fact_values f where f.property_id = d.property_id and f.key = k and f.source = src and f.source_ref = d.id) then
+        perform public.profile_record(d.property_id, k, null, src, d.id, null, d.kind, null, null, coalesce(d.created_by, 'agent'), 'auto');
       end if;
     elsif not public.jblank(v) then
-      perform public.profile_record(d.property_id, k, v, 'title', d.id, coalesce(to_char(d.issued_on, 'FMDD Mon YYYY'), to_char(d.created_at at time zone 'Pacific/Auckland', 'FMDD Mon YYYY')),
-        d.kind || coalesce(' (' || nullif(x->>'source', '') || ')', ''), null, null, coalesce(d.created_by, 'agent'),
-        case when coalesce(current_setting('app.profile_backfill', true), '') = 'on' then 'never' else 'official' end);   -- the backfill only lists it
+      perform public.profile_record(d.property_id, k, v, src, d.id, coalesce(to_char(d.issued_on, 'FMDD Mon YYYY'), to_char(d.created_at at time zone 'Pacific/Auckland', 'FMDD Mon YYYY')),
+        case when tk then d.kind || coalesce(' (' || nullif(x->>'source', '') || ')', '') else 'From the ' || lower(d.kind) || ', not checked' end, null, null, coalesce(d.created_by, 'agent'),
+        case when not tk or coalesce(current_setting('app.profile_backfill', true), '') = 'on' then 'never' else 'official' end);   -- a suggestion, or the backfill: listed only
     end if;
   end loop;
 end $$;

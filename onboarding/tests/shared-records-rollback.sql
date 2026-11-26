@@ -142,13 +142,20 @@ begin
   out := out || 'file 800, then the check 790: chosen ' || (r->>'value') || '/' || (r->>'source') || '/' || (r->>'ticked') || ' beside it ' || coalesce((select string_agg((o->>'value') || '/' || (o->>'source'), ',') from jsonb_array_elements(r->'others') o), 'none')
     || ' file=' || (select description->>'pLand' from public.properties where id = p3) || '; ';
   if r->>'value' <> '790' or (r->>'ticked')::boolean is not true or (select description->>'pLand' from public.properties where id = p3) <> '790' then out := out || 'THE CHECK ANSWER DID NOT TAKE; '; end if;
-  -- a record of title arriving afterwards with 812: Tim's ticked 790 stays; the official figure is shown beside it, marked
-  insert into public.property_documents (property_id, kind, name, path, read_result, created_by) values (p3, 'Record of title', 'title.pdf', 'lw0/title.pdf',
-    '{"fields":[{"key":"pLand","value":"812 m²","source":"Record of title OT1/LW0"},{"key":"pBed","value":"9","source":"Record of title"}]}', 'agent');
+  -- the AI suggests, Tim ticks: a record of title read with a hectares slip (0.0812) he didn't tick stays a suggestion, written nowhere
+  insert into public.property_documents (property_id, kind, name, path, read_result, created_by) values (p3, 'Record of title', 'title-a.pdf', 'lw0/title-a.pdf',
+    '{"fields":[{"key":"pLand","value":"0.0812 ha","source":"Record of title OT1/LW0","ticked":false}]}', 'agent');
   r := (select f from jsonb_array_elements(public.agent_property_profile(p3)->'facts') f where f->>'key' = 'pLand');
-  out := out || 'title 812 after Tim ticked 790: chosen ' || (r->>'value') || ' beside it ' || coalesce((select string_agg((o->>'value') || '/' || (o->>'source'), ',' order by o->>'source') from jsonb_array_elements(r->'others') o), 'none')
-    || ' file=' || (select description->>'pLand' from public.properties where id = p3) || ' other facts from it=' || (select count(*) from public.property_fact_values where property_id = p3 and source = 'title' and key <> 'pLand') || '; ';
-  if r->>'value' <> '790' then out := out || 'THE OFFICIAL FIGURE OVERWROTE A TICKED VALUE; '; end if;
+  out := out || 'unticked reading 0.0812 ha: chosen ' || (r->>'value') || '/' || (r->>'source') || ' beside it ' || coalesce((select string_agg((o->>'value') || '/' || (o->>'source') || '/' || coalesce(o->>'source_name', ''), ',' order by o->>'source') from jsonb_array_elements(r->'others') o), 'none')
+    || ' file=' || (select description->>'pLand' from public.properties where id = p3) || '; ';
+  if r->>'value' <> '790' or (select description->>'pLand' from public.properties where id = p3) <> '790' or not (r->'others') @> '[{"value":"0.0812 ha","source":"reader"}]' then out := out || 'AN UNTICKED READING WAS USED OR NOT SHOWN; '; end if;
+  -- the same title read again, the land area ticked by Tim in the import review: the official figure wins over his earlier check answer
+  insert into public.property_documents (property_id, kind, name, path, read_result, created_by) values (p3, 'Record of title', 'title.pdf', 'lw0/title.pdf',
+    '{"fields":[{"key":"pLand","value":"812 m²","used":"812","source":"Record of title OT1/LW0","ticked":true},{"key":"pBed","value":"9","source":"Record of title","ticked":true}]}', 'agent');
+  r := (select f from jsonb_array_elements(public.agent_property_profile(p3)->'facts') f where f->>'key' = 'pLand');
+  out := out || 'ticked title 812 after the check 790: chosen ' || (r->>'value') || '/' || (r->>'source') || ' beside it ' || coalesce((select string_agg((o->>'value') || '/' || (o->>'source'), ',' order by o->>'source') from jsonb_array_elements(r->'others') o), 'none')
+    || ' file=' || (select description->>'pLand' from public.properties where id = p3) || ' other facts from it=' || (select count(*) from public.property_fact_values where property_id = p3 and source in ('title', 'reader') and key <> 'pLand') || '; ';
+  if r->>'value' <> '812' or r->>'source' <> 'title' or (select description->>'pLand' from public.properties where id = p3) <> '812' or not (r->'others') @> '[{"value":"790","source":"inspection"}]' then out := out || 'THE TICKED OFFICIAL FIGURE DID NOT TAKE PRECEDENCE; '; end if;
   -- the title already there (812), then the check says 790: the official figure stays chosen and on the file; 790 beside it
   r := public.agent_inspection_start(null, '4 Lw0 Title Road, Rollbackville'); p4 := (r->>'property_id')::uuid; i4 := (r->>'inspection_id')::uuid;
   -- an unsigned draft agreement saying 800, and a signed one saying 700 (never touched)
@@ -157,7 +164,7 @@ begin
   insert into public.agreements (address, property_id, status, answers, signed_at) values ('4 Lw0 Title Road, Rollbackville', p4, 'signed', '{"pLand":"700"}', now()) returning id into sa;
   execute 'set local role authenticated'; perform set_config('request.jwt.claims', agent, true);
   insert into public.property_documents (property_id, kind, name, path, read_result, created_by) values (p4, 'Survey plan', 'plan.pdf', 'lw0/plan.pdf',
-    '{"fields":[{"key":"pLand","value":"812","source":"Survey plan DP 608"}]}', 'agent') returning id into lk;
+    '{"fields":[{"key":"pLand","value":"812","source":"Survey plan DP 608","ticked":true}]}', 'agent') returning id into lk;
   out := out || 'survey plan 812: file=' || coalesce((select description->>'pLand' from public.properties where id = p4), 'empty') || ' draft=' || (select answers->>'pLand' from public.agreements where id = da) || ' signed=' || (select answers->>'pLand' from public.agreements where id = sa) || '; ';
   perform public.agent_inspection_save(i4, '{"pLand":"790"}'::jsonb, null, null, null);
   r := (select f from jsonb_array_elements(public.agent_property_profile(p4)->'facts') f where f->>'key' = 'pLand');
@@ -172,6 +179,11 @@ begin
   perform public.agent_profile_choose(p4, 'pLand', ((select o from jsonb_array_elements(r->'others') o where o->>'source' = 'inspection' limit 1)->>'value_id')::uuid);
   out := out || 'Tim chose 790: file=' || (select description->>'pLand' from public.properties where id = p4) || ' draft=' || (select answers->>'pLand' from public.agreements where id = da) || ' signed=' || (select answers->>'pLand' from public.agreements where id = sa) || '; ';
   if (select description->>'pLand' from public.properties where id = p4) <> '790' or (select answers->>'pLand' from public.agreements where id = da) <> '790' or (select answers->>'pLand' from public.agreements where id = sa) <> '700' then out := out || 'HIS CHOICE DID NOT REACH THE FILE AND THE DRAFT, OR TOUCHED THE SIGNED ONE; '; end if;
+  -- the plan read again (ticked 812) after Tim chose 790 on the profile: his explicit later choice holds; 812 is beside it
+  update public.property_documents set read_result = '{"fields":[{"key":"pLand","value":"812 m2","used":"812","source":"Survey plan DP 608","ticked":true}]}' where id = lk;
+  r := (select f from jsonb_array_elements(public.agent_property_profile(p4)->'facts') f where f->>'key' = 'pLand');
+  out := out || 'plan read again after his choice: chosen ' || (r->>'value') || '/' || (r->>'source') || ' file=' || (select description->>'pLand' from public.properties where id = p4) || ' draft=' || (select answers->>'pLand' from public.agreements where id = da) || '; ';
+  if r->>'value' <> '790' or (select description->>'pLand' from public.properties where id = p4) <> '790' or (select answers->>'pLand' from public.agreements where id = da) <> '790' then out := out || 'THE OFFICIAL FIGURE OVERRODE HIS LATER CHOICE; '; end if;
   -- the plan archived: its figure goes, and the file's value takes its place
   update public.property_documents set archived_at = now() where id = lk;
   r := (select f from jsonb_array_elements(public.agent_property_profile(p4)->'facts') f where f->>'key' = 'pLand');

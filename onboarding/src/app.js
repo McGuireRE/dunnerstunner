@@ -1389,17 +1389,22 @@ function lawyerForm(id, title, blurb) {
   let PF = null;
 
   // documents read by the AI are kept on the property, so later steps can use them again
-  async function saveReadDocs(pid, read) {
+  // ticked: the reader's figures Tim ticked in the import review (the field objects themselves), with the value he used
+  async function saveReadDocs(pid, read, ticked) {
     if (!pid || !read || !(read.files || []).length) return;
     const kindOf = name => ((read.documents || []).find(d => d.file === name) || {}).kind || null;
-    // the reader's figures are kept too: from a record of title or survey plan they are the official ones on the property profile (LW0)
-    const rr = { flags: read.flags || [], documents: read.documents || [], fields: (read.fields || []).filter(f => f && ['pLand', 'title'].includes(f.key)), at: new Date().toISOString() };
+    // the reader's figures are kept too. The AI suggests and Tim ticks: from a record of title or survey plan, only the ones he ticked
+    // count as official on the property profile (LW0); the rest are shown beside as "not checked" and used nowhere until he chooses them
+    const tk = ticked || new Map();
+    const fields = (read.fields || []).map(f => f && ['pLand', 'title'].includes(f.key) ? Object.assign({ key: f.key, value: f.value, source: f.source, ticked: tk.has(f) }, tk.has(f) ? { used: tk.get(f) } : {}) : null).filter(Boolean);
+    const rr = { flags: read.flags || [], documents: read.documents || [], fields, at: new Date().toISOString() };
     try { await must(sb.from('property_documents').insert(read.files.map(f => ({ property_id: pid, name: f.name, path: f.path, kind: kindOf(f.name), source: 'dropped', read_result: rr, created_by: SESSION.user.email })))); } catch (e) { toast("The documents couldn't be filed on the property. Try dropping them in again.", 'err'); console.warn('file docs', e); }
   }
   const propFlags = docs => { const seen = new Set(), out = []; docs.forEach(d => ((d.read_result || {}).flags || []).forEach(f => { if (!seen.has(f.text)) { seen.add(f.text); out.push(f); } })); return out; };
 
   async function propApplyImport(fields, people) {
-    $$('[data-impf]:checked').forEach(cb => { const f = fields[+cb.dataset.impf]; impSet(f.key, impNorm(f.key, f.value)); });
+    const ticked = new Map();   // which of the reader's figures Tim ticked, and the value he used
+    $$('[data-impf]:checked').forEach(cb => { const f = fields[+cb.dataset.impf], v = impNorm(f.key, f.value); impSet(f.key, v); ticked.set(f, v); });
     $$('[data-impp]:checked').forEach(cb => {
       const p = people[+cb.dataset.impp], m = impMatch(p);
       if (m >= 0) { const x = PF.people[m]; ['legal_name', 'pref_name', 'phone'].forEach(k => { if (p[k]) x[k] = p[k]; }); if (p.email && !x.user_id) x.email = p.email.toLowerCase(); x._dirty = true; if (!x.source) x.source = 'title'; if (p.legal_name && /title/i.test(p.source || '')) x._name_from = 'title'; }
@@ -1407,7 +1412,7 @@ function lawyerForm(id, title, blurb) {
     });
     const read = IMP; IMP = null;
     await propSave();
-    await saveReadDocs(PF.p.id, read);
+    await saveReadDocs(PF.p.id, read, ticked);
     toast('Added to the property file. Check each one.');
     viewProperty(PF.p.id);
   }
@@ -2918,7 +2923,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       if (IMPT.kind === 'property') return propApplyImport(fields, people);
       tCollect();
       const imp = Object.assign({ files: [], sources: {}, flags: [] }, T.c.import || {});
-      $$('[data-impf]:checked').forEach(cb => { const f = fields[+cb.dataset.impf]; impSet(f.key, impNorm(f.key, f.value)); imp.sources[f.key] = f.source; });
+      const ticked = new Map();   // which of the reader's figures Tim ticked, and the value he used
+      $$('[data-impf]:checked').forEach(cb => { const f = fields[+cb.dataset.impf], v = impNorm(f.key, f.value); impSet(f.key, v); imp.sources[f.key] = f.source; ticked.set(f, v); });
       $$('[data-impp]:checked').forEach(cb => {
         const p = people[+cb.dataset.impp], m = impMatch(p);
         if (m >= 0) { const x = T.people[m]; if (x.signed_at) return; ['legal_name', 'pref_name', 'phone'].forEach(k => { if (p[k]) x[k] = p[k]; }); if (p.email && !x.user_id) x.email = p.email.toLowerCase(); }
@@ -2928,7 +2934,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       const seen = new Set(imp.flags.map(f => f.text)); (IMP.flags || []).forEach(f => { if (!seen.has(f.text)) imp.flags.push(f); });
       imp.at = new Date().toISOString();
       T.c.import = imp; const read = IMP; IMP = null;
-      if (T.ag.address && await tSave()) { await saveReadDocs(T.ag.property_id, read); toast('Filled in and saved. Check each one.'); } else toast('Filled in. Check each one, then save.');
+      if (T.ag.address && await tSave()) { await saveReadDocs(T.ag.property_id, read, ticked); toast('Filled in and saved. Check each one.'); } else toast('Filled in. Check each one, then save.');
       tShow(0);
     });
   }
@@ -4283,7 +4289,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   }
 
   /* ───────── LW0: the property profile (migration 028), one home for each fact ───────── */
-  const PROFILE_SRC = { title: 'Official record', council: 'Council records', inspection: 'Disclosures check', agreement: 'Agency agreement', tim: 'You', quiet_list: 'The Quiet List', relab: 'Relab', reinz: 'REINZ', first_visit: 'First visit', questionnaire: 'Their answers' };
+  const PROFILE_SRC = { title: 'Official record', reader: 'Read from a document, not checked', council: 'Council records', inspection: 'Disclosures check', agreement: 'Agency agreement', tim: 'You', quiet_list: 'The Quiet List', relab: 'Relab', reinz: 'REINZ', first_visit: 'First visit', questionnaire: 'Their answers' };
   async function profileLoad(pid) {
     if (!okId(pid) && !(typeof pid === 'string' && pid)) return [];
     try { const { data, error } = await sb.rpc('agent_property_profile', { p_property: pid }); if (error || !data) return []; return Array.isArray(data.facts) ? data.facts : []; } catch (_) { return []; }
@@ -4291,7 +4297,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   const profileFact = (facts, k) => (facts || []).find(x => x.key === k && x.value_id && !ijblank(x.value)) || null;
   const profileVal = x => x.display || (Array.isArray(x.value) ? x.value.join(', ') : typeof x.value === 'string' ? x.value : String(x.value));
   // a figure from a record of title or survey plan is marked as the official one, with the document it came from
-  const profileSrcName = x => x.source === 'title' ? 'Official: ' + String(x.source_name || 'record of title').replace(/ \(.*\)$/, '').toLowerCase() : (PROFILE_SRC[x.source] || x.source);
+  const profileSrcName = x => x.source === 'reader' ? (x.source_name || PROFILE_SRC.reader) : x.source === 'title' ? 'Official: ' + String(x.source_name || 'record of title').replace(/ \(.*\)$/, '').toLowerCase() : (PROFILE_SRC[x.source] || x.source);
   const profileWhen = x => [profileSrcName(x), x.as_of].filter(Boolean).join(', ');
   // the official figure for a fact (chosen, or shown beside the chosen value), if the property's documents hold one
   const profileOfficial = (facts, k) => { const x = (facts || []).find(f => f.key === k); if (!x) return null; if (x.source === 'title' && x.value_id) return x; return (x.others || []).find(o => o.source === 'title') || null; };
