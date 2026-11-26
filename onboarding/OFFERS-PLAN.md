@@ -1062,6 +1062,9 @@ with no signing email) gets a note for Tim: they won't receive it. When the cont
 agreement_people.user_id references auth.users). Fixed: the stand-in now matches live for every table the fixtures write
 (`tests/pg-standin-agency.sql`), the vendor is a made-up auth.users row made and rolled back in the block, and 029's guard turns a
 fixture error into a line in CAPITALS. 030 itself is unchanged.
+Second live run (efb0d3c): one line, "logged NOT LOGGED" for the vendor's forward. Not 030: on live only the agent may read
+agreement_events (RLS), and the test read the log while still signed in as the vendor. The stand-in now has live's RLS on the agency
+agreement's tables and reproduced it; the test reads the log after the role is reset. 030 unchanged.
 Tests: `tests/mail-core.test.js` (extended: the live case, signers, the contract's lawyer, differing notices address, Still
 needed, privacy left-outs), `tests/offers-nego.test.js` (extended: built on the page, then rebuilt with an agency agreement
 lawyer and a different notices address), `tests/agreed-mail-rollback.sql` / `.js` (030, local stand-in: every line as expected),

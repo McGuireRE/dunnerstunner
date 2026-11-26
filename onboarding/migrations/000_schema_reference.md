@@ -467,4 +467,6 @@ agreements/<agreement id>/signatures/... (vendors may upload their own signature
   expected, no CAPITALS. `pg-standin-agency.sql` brings the agency agreement's tables, auth.users and their triggers and functions to
   the live definitions (read 27 November 2026; 28 functions checked identical to live by fingerprint); the block itself makes only
   fixtures, including a made-up auth.users row for the vendor (live's agreement_people.user_id key), and has 029's guard: a fixture
-  error shows in CAPITALS. The first live run (before this) stopped at that key, nothing kept.
+  error shows in CAPITALS. The first live run (before this) stopped at that key, nothing kept. The second (efb0d3c) read the vendor's log
+  as the vendor, which live's RLS on agreement_events doesn't allow; the stand-in now has live's RLS and policies on those four
+  tables, and the test reads the log after the role is reset.

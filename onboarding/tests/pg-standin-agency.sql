@@ -447,3 +447,27 @@ begin
     if not exists (select 1 from pg_trigger where tgname = r.name and tgrelid = r.tbl::regclass) then execute format('create trigger %I %s', r.name, r.def); end if;
   end loop;
 end $g$;
+
+-- Row Level Security on these four tables, as live (read 27 November 2026): the agent everything (the events: read and insert), a party
+-- reads their own agreement, people and lawyer links; a party never reads the record of events. Grants to signed-in users as live.
+alter table public.agreements enable row level security;
+alter table public.agreement_people enable row level security;
+alter table public.agreement_events enable row level security;
+alter table public.lawyer_links enable row level security;
+grant select, insert, update, delete on public.agreements, public.agreement_people, public.agreement_events, public.lawyer_links to authenticated;
+do $p$
+declare r record;
+begin
+  for r in select * from (values
+    ('public.agreements', 'agent_all_agreements', 'for all to authenticated using (public.is_agent()) with check (public.is_agent())'),
+    ('public.agreements', 'party_read_agreements', 'for select to authenticated using (public.is_party(id))'),
+    ('public.agreement_people', 'agent_all_people', 'for all to authenticated using (public.is_agent()) with check (public.is_agent())'),
+    ('public.agreement_people', 'party_read_people', 'for select to authenticated using (public.is_party(agreement_id))'),
+    ('public.agreement_events', 'agent_insert_events', 'for insert to authenticated with check (public.is_agent())'),
+    ('public.agreement_events', 'agent_read_events', 'for select to authenticated using (public.is_agent())'),
+    ('public.lawyer_links', 'agent_all_lawyer', 'for all to authenticated using (public.is_agent()) with check (public.is_agent())'),
+    ('public.lawyer_links', 'party_read_lawyer', 'for select to authenticated using (public.is_party(agreement_id))')) v(tbl, name, def)
+  loop
+    if not exists (select 1 from pg_policy where polname = r.name and polrelid = r.tbl::regclass) then execute format('create policy %I on %s %s', r.name, r.tbl, r.def); end if;
+  end loop;
+end $p$;

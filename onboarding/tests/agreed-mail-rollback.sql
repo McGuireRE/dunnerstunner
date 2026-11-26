@@ -18,7 +18,7 @@ declare out text := ''; pid uuid := gen_random_uuid(); oid uuid := gen_random_uu
   placed jsonb := jsonb_build_array(jsonb_build_object('id', 'pl_email', 'text', 'Pat.Contract@law.example'), jsonb_build_object('id', 'pl_service', 'text', 'notices@law.example'),
     jsonb_build_object('id', 'vl_email', 'text', 'sam@counsel.example'), jsonb_build_object('id', 'price', 'text', '$650,000'));
   allowed_ text[]; h text := repeat('a1', 32); aid2 uuid := gen_random_uuid(); vuser uuid := gen_random_uuid(); lid uuid; old_ text[]; new_ text[];
-  vendor text; agentc text;
+  vendor text; agentc text; fwd_ph text;
 begin
   set local session_replication_role = replica;
   insert into public.properties (id, address, stage) values (pid, 'RB 30 Mail Street, Dunedin', 'under_offer');
@@ -106,7 +106,10 @@ begin
   lid := public.vendor_forward_to_lawyer(a => aid, l_name => 'Sam Counsel', l_firm => 'Counsel and Co', l_email => 'sam@counsel.example');
   out := out || 'no phone: ' || coalesce((select coalesce(phone, 'null') from public.lawyer_links where id = lid), 'NO ROW') || '; ';
   lid := public.vendor_forward_to_lawyer(a => aid, l_name => 'Sam Counsel', l_firm => 'Counsel and Co', l_email => 'sam@counsel.example', l_phone => ' 03 455 0000 ');
-  out := out || 'forward with phone: ' || coalesce((select phone from public.lawyer_links where id = lid), 'MISSING') || ', logged ' || coalesce((select detail->>'phone' from public.agreement_events where agreement_id = aid and kind = 'forwarded_to_lawyer' order by id desc limit 1), 'NOT LOGGED') || '; ';
+  -- the link is read here (a party reads their own lawyer links); the record of events only after the role is reset, since on live only
+  -- the agent may read agreement_events (RLS), so a vendor never sees the log, even though it is written
+  fwd_ph := (select phone from public.lawyer_links where id = lid);
+  out := out || 'forward with phone: ' || coalesce(fwd_ph, 'MISSING') || '; ';
   lid := public.vendor_forward_to_lawyer(a => aid, l_name => 'Sam Counsel', l_firm => '', l_email => 'sam@counsel.example', l_phone => '  ');
   out := out || 'a blank phone: ' || coalesce((select coalesce(phone, 'null') from public.lawyer_links where id = lid), 'NO ROW') || '; ';
   begin perform public.vendor_forward_to_lawyer(a => aid, l_name => 'Sam', l_firm => '', l_email => 'sam@counsel.example', l_phone => 'ring Sam'); out := out || 'A WORDY PHONE WAS ACCEPTED; ';
@@ -122,6 +125,7 @@ begin
   lid := public.agent_send_to_lawyer(a => aid2, l_name => 'Sam Counsel', l_firm => 'Counsel and Co', l_email => 'sam@counsel.example', l_phone => '03 455 0001');
   out := out || 'agent send: ' || coalesce((select phone from public.lawyer_links where id = lid), 'MISSING') || ', logged ' || coalesce((select detail->>'phone' from public.agreement_events where agreement_id = aid2 and kind = 'sent_to_lawyer' order by id desc limit 1), 'NOT LOGGED') || '; ';
   execute 'reset role';
+  out := out || 'the vendor''s forward logged ' || coalesce((select detail->>'phone' from public.agreement_events where agreement_id = aid and kind = 'forwarded_to_lawyer' and detail->>'phone' is not null order by id desc limit 1), 'NOT LOGGED') || '; ';
   -- 9. who can run the new ones: signed-in users and the service role, never anon
   foreach x in array array['public.vendor_send_to_lawyer(uuid,text,text,text,text)', 'public.vendor_forward_to_lawyer(uuid,text,text,text,text)', 'public.agent_send_to_lawyer(uuid,text,text,text,text)'] loop
     if has_function_privilege('anon', x, 'execute') or not has_function_privilege('authenticated', x, 'execute') or not has_function_privilege('service_role', x, 'execute') then out := out || 'WRONG PRIVILEGES ON ' || upper(x) || '; '; end if; end loop;
