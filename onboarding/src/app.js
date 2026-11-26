@@ -7136,7 +7136,9 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       const links = newest ? ((await ofSafe(sb.from('lawyer_links').select('*').eq('agreement_id', newest.id))) || []) : [];   // with the phone (030) once it is there
       const parties = (ppl || []).concat(apl).map(x => ({ who: 'a vendor', email: x.email, phone: x.phone }));
       const V = newest ? DR.pickVendorLawyer(prop, [newest], links, parties) : null;
-      if (V) { vendorLawyer = { person: t_(V.person), firm: t_(V.firm), email: t_(V.email), phone: t_(V.phone), service: '' }; sources.push(`The vendors' lawyer isn't on the agreement's contact page: taken from ${V.source}. Check they are acting on this sale.`); }
+      // field by field: what the page does have (a phone, say) is kept; the rest comes from the agency agreement's lawyer (review of 8bf2243)
+      if (V) { const pg = vendorLawyer; vendorLawyer = { person: t_(V.person), firm: t_(V.firm), email: t_(V.email), phone: pg.phone || t_(V.phone), service: pg.service };
+        sources.push(`The vendors' lawyer isn't named on the agreement's contact page: their ${['name', 'firm', 'email'].concat(pg.phone ? [] : V.phone ? ['phone'] : []).join(', ')} taken from ${V.source}${pg.phone ? ', the phone from the contact page' : ''}. Check they are acting on this sale.`); }
     }
     const purchaserSigners = signers.filter(x => sideOf(x.signing_id) === 'purchaser' && !x.void_at && x.email).map(x => ({ name: x.name, email: x.email }));
     const law = t_(L.email).toLowerCase();

@@ -923,6 +923,13 @@ your lawyer" (after), Tim's "Send to lawyer and pause" at the appointment and hi
 2: `lawyer_links.phone` and five-argument lawyer functions). The phone shows in the agreement page's lawyer links, goes on a drafted
 contract's contact page (vendor's lawyers: contact details) when the vendors' lawyer comes from the agency agreement, and fills the
 agreed emails. Links recorded before have no phone, so it stays "Still needed" for them.
+After the review of 8bf2243 (four points, all fixed): an email whose cc ends up empty (no lawyer address on record, or the only
+one left out for privacy) never says it is cc'd: it says "Your lawyer:" / "Your lawyer is ..." with a line for Tim to add the lawyer
+to the cc, listed under Still needed. 030 refuses, as the purchasers' cc, a lawyer address on the contract that is a vendor's own,
+and the mirror (a vendors' lawyer address that is a purchaser's own); Tim's own address is never a party's. Anyone on the agreement
+whose address can't go on their side's email (a second purchaser's email known only from signing, a vendor who signed in person
+with no signing email) gets a note for Tim: they won't receive it. When the contact page has only part of the vendors' lawyer
+(a phone, say), the agency agreement's lawyer fills the rest and the page's phone is kept; Tim is told which part came from where.
 Tests: `tests/mail-core.test.js` (extended: the live case, signers, the contract's lawyer, differing notices address, Still
 needed, privacy left-outs), `tests/offers-nego.test.js` (extended: built on the page, then rebuilt with an agency agreement
 lawyer and a different notices address), `tests/agreed-mail-rollback.sql` / `.js` (030, local stand-in: every line as expected),

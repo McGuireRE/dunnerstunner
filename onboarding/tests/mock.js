@@ -907,16 +907,24 @@ const sgTry=f=>{ try{ const r=f(); save(); return ok(r===undefined?null:r); }cat
 // ── emails as drafts (mirrors 024: offer_mail_drafts, offer_mail_log and their functions) ──
 const OMD=()=>(DB.offer_mail_drafts||=[]), OML=()=>(DB.offer_mail_log||=[]);
 const lowAll=a=>(a||[]).map(x=>String(x||'').trim().toLowerCase()).filter(Boolean);
+// 030 after review: each side's own addresses (Tim's own never a party's; the offer's lawyer email isn't the purchasers' own)
+const agentOwnE=()=>AGENTS.concat([OSET().agent_email]).map(x=>String(x||'').trim().toLowerCase()).filter(Boolean);
+function vendorOwnE(offerId){ const o=PO().find(x=>x.id===offerId)||{}; return lowAll([...(DB.property_people||[]).filter(x=>x.property_id===o.property_id).map(x=>x.email),
+  ...(DB.agreement_people||[]).filter(x=>(DB.agreements||[]).some(a=>a.id===x.agreement_id&&a.property_id===o.property_id)).map(x=>x.email),
+  ...OSR().filter(x=>{ const g=OSG().find(y=>y.id===x.signing_id); return g&&g.offer_id===offerId&&g.side==='vendor'; }).map(x=>x.email)]).filter(e=>!agentOwnE().includes(e)); }
+function purchaserOwnE(offerId){ const d=(PO().find(x=>x.id===offerId)||{}).details||{}, law=String((d.lawyer||{}).email||'').trim().toLowerCase();
+  return lowAll([d.email,...(d.purchasers||[]).map(q=>q.email)]).filter(e=>e!==law&&!agentOwnE().includes(e)); }
 function mailAllowed(offerId,kind,signerId){ const o=PO().find(x=>x.id===offerId); if(!o) return [];
   if(kind==='sign_link'||kind==='reopened'){ const sr=OSR().find(x=>x.id===signerId), g=sr&&OSG().find(x=>x.id===sr.signing_id); return sr&&g&&g.offer_id===offerId?lowAll([sr.email]):[]; }
   const d=o.details||{};
   // 030 (Agreed emails filled in): also the purchasers' lawyer's email and email for notices on the agreed draft's contact page
   if(kind==='agreed_purchasers'){ const ag=OAG().find(x=>x.offer_id===offerId), doc=ag&&ODC().find(x=>x.id===ag.document_id), dr=doc&&DB.offer_drafts.find(x=>x.id===doc.draft_id);
-    return lowAll([d.email,...(d.purchasers||[]).map(q=>q.email),(d.lawyer||{}).email,...((dr&&dr.placed)||[]).filter(x=>['pl_email','pl_service'].includes(x.id)).map(x=>x.text)]).filter(x=>x.indexOf('@')>0); }
+    return lowAll([d.email,...(d.purchasers||[]).map(q=>q.email),(d.lawyer||{}).email,...lowAll(((dr&&dr.placed)||[]).filter(x=>['pl_email','pl_service'].includes(x.id)).map(x=>x.text)).filter(e=>!vendorOwnE(offerId).includes(e))]).filter(x=>x.indexOf('@')>0); }
   if(kind==='agreed_vendors'){ const ag=OAG().find(x=>x.offer_id===offerId), doc=ag&&ODC().find(x=>x.id===ag.document_id), dr=doc&&DB.offer_drafts.find(x=>x.id===doc.draft_id), ags=(DB.agreements||[]).filter(x=>x.property_id===o.property_id).map(x=>x.id);
     const inForce=(DB.agreements||[]).filter(x=>x.property_id===o.property_id&&['signed','countersigned'].includes(x.status)).sort((x,y)=>String(y.created_at).localeCompare(String(x.created_at)))[0];   // 024: the vendor signers and the lawyer of the agreement in force
-    return lowAll([...OSR().filter(x=>{ const g=OSG().find(y=>y.id===x.signing_id); return g&&g.offer_id===offerId&&g.side==='vendor'&&!x.void_at; }).map(x=>x.email),...(DB.lawyer_links||[]).filter(x=>inForce&&x.agreement_id===inForce.id).map(x=>x.email),
-      ...((dr&&dr.placed)||[]).filter(x=>['vl_email','vl_service'].includes(x.id)).map(x=>x.text)]).filter(x=>x.indexOf('@')>0); }
+    const po=purchaserOwnE(offerId);   // 030 after review: the vendors' lawyer is never a purchaser's own address
+    return lowAll([...OSR().filter(x=>{ const g=OSG().find(y=>y.id===x.signing_id); return g&&g.offer_id===offerId&&g.side==='vendor'&&!x.void_at; }).map(x=>x.email),...lowAll((DB.lawyer_links||[]).filter(x=>inForce&&x.agreement_id===inForce.id).map(x=>x.email)).filter(e=>!po.includes(e)),
+      ...lowAll(((dr&&dr.placed)||[]).filter(x=>['vl_email','vl_service'].includes(x.id)).map(x=>x.text)).filter(e=>!po.includes(e))]).filter(x=>x.indexOf('@')>0); }
   if(kind==='withdraw_party'||kind==='withdraw_lawyer'){ let side=wdSide(offerId); if(!side) return []; if(kind==='withdraw_lawyer') side=side==='vendor'?'purchaser':'vendor'; const party=kind==='withdraw_party';
     if(side==='purchaser') return lowAll([party&&d.email,...(party?(d.purchasers||[]).map(q=>q.email):[]),(d.lawyer||{}).email]).filter(x=>x.indexOf('@')>0);
     const inForce=(DB.agreements||[]).filter(x=>x.property_id===o.property_id&&['signed','countersigned'].includes(x.status)).sort((x,y)=>String(y.created_at).localeCompare(String(x.created_at)))[0];

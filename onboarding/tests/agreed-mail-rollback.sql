@@ -134,6 +134,26 @@ end $function$$f$;
   exception when others then out := out || 'stranger refused (' || sqlerrm || '); '; end;
   begin perform public.offer_mail_check(oid, 'agreed_purchasers', null, array['rb-ana@example.com'], array['pat.contract@law.example'], 'Congratulations!', 'The vendor is at rb-vera@example.com'); out := out || 'THE VENDOR''S OWN EMAIL WAS ACCEPTED; ';
   exception when others then out := out || 'privacy guard unchanged (' || sqlerrm || '); '; end;
+  -- 4b. after review: a purchasers' lawyer address on the agreed draft that is a vendor's own is refused; the mirror for the vendors'
+  -- lawyer (on the draft, or the agency agreement's lawyer link) that is a purchaser's own; Tim's own address is never a party's
+  set local session_replication_role = replica;
+  update public.offer_drafts d0 set placed = d0.placed || jsonb_build_array(jsonb_build_object('id', 'pl_service', 'text', 'RB-Vera@example.com'), jsonb_build_object('id', 'pl_service', 'text', 'rb-agent@example.com'),
+    jsonb_build_object('id', 'vl_service', 'text', 'rb-ana@example.com')) where d0.id = drid;
+  insert into public.property_people (property_id, position, legal_name, email, phone, role) values (pid, 2, 'Agent On File', 'rb-agent@example.com', '', 'contact');
+  insert into public.lawyer_links (agreement_id, lawyer_name, firm, email) values (aid, 'Buyer Self', '', 'rb-buyer@example.com');
+  set local session_replication_role = origin;
+  allowed_ := public.offer_mail_allowed(oid, 'agreed_purchasers', null);
+  if 'rb-vera@example.com' = any(allowed_) then out := out || 'A VENDOR''S OWN ADDRESS ALLOWED AS THE PURCHASERS'' LAWYER; '; else out := out || 'a vendor''s own address on the contract''s purchasers'' lawyer: refused; '; end if;
+  if not ('rb-agent@example.com' = any(allowed_)) then out := out || 'TIM''S OWN ADDRESS REFUSED; '; else out := out || 'Tim''s own address still allowed; '; end if;
+  if not ('pat.contract@law.example' = any(allowed_) and 'notices@law.example' = any(allowed_) and 'rb-ana@example.com' = any(allowed_)) then out := out || 'THE PURCHASERS'' OWN OR THEIR LAWYER LOST; '; end if;
+  allowed_ := public.offer_mail_allowed(oid, 'agreed_vendors', null); out := out || 'vendors now=' || array_to_string(allowed_, ',') || '; ';
+  if 'rb-ana@example.com' = any(allowed_) or 'rb-buyer@example.com' = any(allowed_) then out := out || 'A PURCHASER''S OWN ADDRESS ALLOWED AS THE VENDORS'' LAWYER; '; else out := out || 'a purchaser''s own address as the vendors'' lawyer (draft or lawyer link): refused; '; end if;
+  if not ('sam@counsel.example' = any(allowed_)) then out := out || 'THE VENDORS'' LAWYER LOST; '; end if;
+  if has_function_privilege('authenticated', 'public.offer_vendor_own_emails(uuid)', 'execute') or has_function_privilege('authenticated', 'public.offer_purchaser_own_emails(uuid)', 'execute') then out := out || 'THE OWN-ADDRESS LISTS ARE RUNNABLE BY SIGNED-IN USERS; '; end if;
+  -- the fixture back as it was, for part 2
+  set local session_replication_role = replica;
+  delete from public.lawyer_links where email = 'rb-buyer@example.com'; delete from public.property_people where property_id = pid and position = 2;
+  set local session_replication_role = origin;
   -- 5. still not runnable by anyone but the database's own functions
   if has_function_privilege('authenticated', 'public.offer_mail_allowed(uuid, text, uuid)', 'execute') or has_function_privilege('anon', 'public.offer_mail_allowed(uuid, text, uuid)', 'execute') then out := out || 'OFFER_MAIL_ALLOWED RUNNABLE BY A SIGNED-IN USER; ';
   else out := out || 'not runnable by anon or signed-in users; '; end if;

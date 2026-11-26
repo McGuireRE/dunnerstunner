@@ -138,6 +138,23 @@ const base = () => ({
     const x = M.agreedDrafts(b);
     ok(x.vendors.to.join() === 'val@vendor.example', "To: only the vendors' own signer addresses: " + x.vendors.to);
     has(x.vendors.body, "Vera Vendorperson: vera@vendor.example, 021 000 1111\nVal Vendorperson: val@vendor.example, [Tim to fill: Val Vendorperson's phone]", 'both vendors\' details shown, as signed'); }
+  { // review of 8bf2243: an email never says it is cc'd when its cc is empty (the lawyer's address left out for privacy, or none)
+    const b = base(); b.purchaserLawyer = { person: 'Pat Solicitor', firm: 'Synthetic Law', email: 'vera@vendor.example', phone: '03 477 1234' };
+    b.hide = { purchasers: { emails: ['vera@vendor.example'] }, vendors: {} };
+    let x = M.agreedDrafts(b);
+    ok(x.purchasers.cc.length === 0 && !x.purchasers.body.includes("This email is cc'd") && x.purchasers.body.includes("Your lawyer:\nPat Solicitor, Synthetic Law\nPhone: 03 477 1234\n[Tim to add: the purchasers' lawyer to the cc"), "purchasers: their lawyer's only address is a vendor's own: no cc, no cc claim, Tim asked to add one: " + x.purchasers.body.split('They are')[0].slice(-200));
+    ok(x.stillNeeded.some(t => /^the purchasers' lawyer to the cc/.test(t)), 'Still needed: the cc');
+    const c = base(); c.vendorLawyer = { person: 'Sam Counsel', firm: 'Counsel and Co' }; x = M.agreedDrafts(c);
+    has(x.vendors.body, "Congratulations on your agreement for the sale of 12 Example Street, Dunedin. Your lawyer is Sam Counsel of Counsel and Co. [Tim to add: the vendors' lawyer to the cc", 'vendors: no lawyer email: no cc claim');
+    ok(x.vendors.cc.length === 0 && x.stillNeeded.some(t => /^the vendors' lawyer to the cc/.test(t)), 'vendors: Still needed the cc');
+    c.vendorLawyer = {}; x = M.agreedDrafts(c); ok(!x.stillNeeded.some(t => /to the cc/.test(t)) && x.stillNeeded.includes("the vendors' lawyer (name, firm, email, phone)"), 'a lawyer missing altogether: one item, the cc in it'); }
+  { // review of 8bf2243: a purchaser whose email is known only from signing isn't on the To line: Tim is told they won't get it
+    const b = base(); b.details.purchasers[1] = { first: 'Bo', last: 'Testbuyer' }; b.purchaserSigners = [{ name: 'Bo Testbuyer', email: 'bo.signer@buyer.example' }];
+    let x = M.agreedDrafts(b);
+    ok(x.notes.some(n => n === "Bo Testbuyer won't receive the email to the purchasers: their email (bo.signer@buyer.example) isn't on the offer. Add it there, or send it to them yourself."), 'the note: ' + JSON.stringify(x.notes.filter(n => /receive/.test(n))));
+    ok(!x.notes.some(n => /Ana Testbuyer won't/.test(n)), 'nobody else noted');
+    b.purchaserSigners = []; x = M.agreedDrafts(b); ok(x.notes.some(n => /^Bo Testbuyer won't receive the email to the purchasers: no email for them is on record\./.test(n)), 'no email at all: noted too');
+    const c = base(); c.vendors[0].to = ''; x = M.agreedDrafts(c); ok(x.notes.some(n => /^Vera Vendorperson won't receive the email to the vendors: their email \(vera@vendor\.example\) isn't on the signing\./.test(n)), 'a vendor signed in person with no signing email: noted'); }
   { // the lawyers' details come with where they came from, for Tim (sources)
     const b = base(); b.sources = ["The vendors' lawyer isn't on the agreement's contact page: taken from the lawyer the agency agreement was sent to. Check they are acting on this sale."];
     ok(M.agreedDrafts(b).notes.includes(b.sources[0]), 'the source note is passed to Tim'); }

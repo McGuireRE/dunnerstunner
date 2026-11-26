@@ -425,7 +425,10 @@ agreements/<agreement id>/signatures/... (vendors may upload their own signature
 ## 030 The agreed emails' lawyer cc (Agreed emails filled in, 26 November 2026; tested in a rollback block on a local PostgreSQL stand-in, NOT yet on the live project)
 - `offer_mail_allowed` redefined: as 024 (checked against the live body 26 November 2026), except that the `agreed_purchasers` branch
   also allows the agreed draft's `pl_email` and `pl_service` (the purchasers' lawyer as the contract's contact page has them; only text
-  holding an @). Every other kind is unchanged; execute still revoked from public, anon and authenticated. Nothing else changes.
+  holding an @), unless it is a vendor's own address. After review: in `agreed_vendors`, a vendors' lawyer address (on the agreed draft,
+  or the agency agreement's lawyer link) that is a purchaser's own is no longer allowed. New internal `offer_vendor_own_emails(offer)`
+  and `offer_purchaser_own_emails(offer)` (each side's own addresses as `offer_mail_side_hit` reads them; Tim's own never a party's;
+  the offer's lawyer email not the purchasers'). Every other kind is unchanged; execute revoked from public, anon and authenticated.
 - Part 2 (Tim, 26 November 2026): `lawyer_links.phone` (text, optional; check `^[0-9+()\-. ]{6,40}$`, as the offer form's phones).
   Five-argument `vendor_send_to_lawyer`, `vendor_forward_to_lawyer` and `agent_send_to_lawyer` (`l_phone`) beside the four-argument ones,
   which are kept word for word; each is the old body with the phone checked (`offer_phone_ok`), stored and logged. A call without

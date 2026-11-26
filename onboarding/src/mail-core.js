@@ -327,14 +327,21 @@
     const inspect = 'Pre-settlement inspection: around five working days before settlement, I\'ll attend the property with you so you can check everything is as it should be, including the chattels in working order.';
     const close = 'It has been great working with you thus far, and I look forward to ensuring everything continues smoothly.\n\nFaithfully,\nTim';
     const pNames = names(purch.map(q => q.first || q.last));
+    // cc: the lawyer's email and, when it is a different address, the email for notices too (Tim, 26 November 2026). With no address
+    // that can go on it (none on record, or left out for privacy), the email never says it is cc'd: Tim is asked to add one.
+    const pCc = uniq([pLawP.email, pLawP.service]), vCc = uniq([vLawV.email, vLawV.service]);
+    const noCc = who => blank(`add: ${who} to the cc (no email for them on record can go on this email), then delete this line`);
+    const pTo = uniq(purch.map(q => q.to).concat(purch.some(q => q.to) ? [] : [D.email]));
+    // someone on the agreement who won't get it: no address for them that this email may go to (024 allows only the offer's own)
+    const missOut = (q, side) => notes.push(`${q.full} won't receive the email to the ${side}: ${q.email ? `their email (${q.email}) isn't on the ${side === 'purchasers' ? 'offer' : 'signing'}` : 'no email for them is on record'}. Add it there, or send it to them yourself.`);
+    purch.forEach((q, k) => { if (!q.to && !(k === 0 && pTo.length && !purch.some(x => x.to))) missOut(q, 'purchasers'); });
     const purchasers = {
-      // cc: the lawyer's email and, when it is a different address, the email for notices too (Tim, 26 November 2026)
-      to: uniq(purch.map(q => q.to).concat(purch.some(q => q.to) ? [] : [D.email])), cc: uniq([pLawP.email, pLawP.service]),
+      to: pTo, cc: pCc,
       subject: `Congratulations! ${addr}`,
       body: [...top, `Dear ${pNames || blank('fill: their first names')},`,
         `Congratulations on your agreement to purchase ${addr}. It sure is a desirable property! The agreement is attached.`,
         'The contact details you have supplied me are:\n' + (purch.length ? purch.map(q => contactLine(q, 'purchasers')).join('\n') : blank("fill: the purchasers' names and contact details")),
-        `This email is cc'd to your lawyer:\n${lawyerBlock(pLawP, pWho)}`,
+        pCc.length ? `This email is cc'd to your lawyer:\n${lawyerBlock(pLawP, pWho)}` : `Your lawyer:\n${lawyerBlock(pLawP, pWho)}\n${noCc(pWho)}`,
         'They are the person who will guide you through the remaining stages of your property purchase. Keep me in the loop with any questions or progress.',
         `The vendors' lawyer is:\n${lawyerBlock(vLawP, vWho)}`,
         `The property marketing homepage with documents is here: ${blank('add: the property page link, or delete this line')}`,
@@ -344,11 +351,12 @@
         close].join('\n\n'),
     };
     const vNames = names(vend.map(v => v.call));
+    vend.forEach(v => { if (!v.to) missOut(v, 'vendors'); });
     const vendors = {
-      to: uniq(vend.map(v => v.to)), cc: uniq([vLawV.email, vLawV.service]),
+      to: uniq(vend.map(v => v.to)), cc: vCc,
       subject: `Congratulations! ${addr}`,
       body: [...top, `Hello ${vNames || blank('fill: their first names')},`,
-        `Congratulations on your agreement for the sale of ${addr}. This email is cc'd to your lawyer, ${vLawV.person || blank("fill: the vendors' lawyer's name")} of ${vLawV.firm || blank("fill: the vendors' lawyer's firm")}.`,
+        `Congratulations on your agreement for the sale of ${addr}. ${vCc.length ? 'This email is cc\'d to your lawyer,' : 'Your lawyer is'} ${vLawV.person || blank("fill: the vendors' lawyer's name")} of ${vLawV.firm || blank("fill: the vendors' lawyer's firm")}.${vCc.length ? '' : ' ' + noCc(vWho)}`,
         `They will handle all legal notices regarding the agreement and ensure everything proceeds correctly. Keep us in the loop with any developments as soon as possible. That way ${vLawV.person.split(/\s+/)[0] || blank("fill: the vendors' lawyer's first name")} and I can be responsive and ensure you get the best possible outcome.`,
         'The agreement is attached.',
         ...(conds.length ? ['Until the purchaser confirms the agreement, you have tasked me with marketing the property. The advertising will remain active and I will continue to discuss the property with potential purchasers.'] : []),
@@ -378,7 +386,7 @@
     const all = [...new Set((String(text || '').match(BLANK_RE) || []).filter(b => /^\[Tim to (fill|add):/.test(b)).map(b => b.replace(/^\[Tim to (fill|add):\s*/, '').replace(/\]$/, '').trim()))];
     // a lawyer missing altogether is one item: their name, firm, email, phone and first name are part of it
     const whole = all.map(t => (/^(.+) \(name, firm, email, phone\)$/.exec(t) || [])[1]).filter(Boolean);
-    return all.filter(t => !whole.some(w => t.startsWith(w + "'s ")));
+    return all.filter(t => !whole.some(w => t.startsWith(w + "'s ") || t.startsWith(w + ' to the cc')));
   }
 
   /* ───── Tim's own email when the agreement is confirmed (Offers fixes 2; Tim: "it is most important that I get an email once the
