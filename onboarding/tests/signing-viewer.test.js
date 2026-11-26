@@ -258,6 +258,7 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
     await tk('#tFrontDvAuto');
     await tk('[data-tmulti=guide]'); await tk('[data-tmulti=acks]'); await tk('input[name=tLegal][value=have]');
     const first = await q.$eval('[data-signer]', e => e.dataset.signer); await pad('#pad_' + first); await tk(`[data-tnotice="${first}"]`);
+    await q.selectOption(`[data-idtype="${first}"]`, 'passport'); await tk(`[data-idok="${first}"]`);   // 029: Tim's ID check in person
     await q.click(`[data-signnow="${first}"]`); await q.waitForFunction(f => !document.querySelector(`[data-signnow="${f}"]`) && document.querySelector('#tFrontDv'), first, { timeout: 20000 }); await q.waitForTimeout(1200);
     const z2 = await dv(q, 'tFrontDv'); out.agAfter = z2;
     expect(z2.zoom === '150%' && z2.cssZoom === '1.5' && z2.auto === true, 'after a vendor signs and the screen is drawn again, the zoom and the tick hold');

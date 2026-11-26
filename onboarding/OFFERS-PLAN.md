@@ -791,6 +791,26 @@ also keeps each place Tim added or moved off every other signer's place, and rec
 fingerprint and count by kind), each added or moved place found and clear, each removed place absent, the own marks kept clear, and
 the screen's own count and fingerprint of what it proposed.
 
+
+E. Identity (Tim, 26 November 2026: "Separate emails matter for signing at a distance. If on a device, I will verify that each signed
+separately, but will only do so with their identification logged.")
+- By an emailed link, each signer has their own email. Offers: already refused by 023 and 024 (two signers with one email can't be
+  released or presented by link). The agency agreement, its notices, variations and forms: "Send to their phones" says so plainly, and
+  the database refuses a signature from a link when someone else on the agreement has the same email (`guard_signature_identity` on
+  `signatures`, `variation_signatures` and `form_signatures`, whoever writes it).
+- On Tim's device signers may share an email or have none (offers), but each turn finishes only once Tim has logged the photo ID he
+  checked for that person (the type: NZ driver licence, passport, NZ firearms licence, Kiwi Access Card or other photo ID; never its
+  number) and ticked "I checked <name>'s ID and watched them sign". "Known to Tim personally" is no longer a choice on his device.
+  - Offers: `agent_signing_finish_checked` (023's `agent_signing_finish` now refuses, so no page can skip the check); the server's time
+    is on the timeline (`sign_id_checked`), on each round's execution record ("Tim McGuire checked this person's photo ID ... and watched
+    them sign: <time>") and on the agreed copy's record ("Identity checked in person"). Earlier rounds' records read as before.
+  - The agency agreement (and its notices, signed with it), variations and forms on Tim's device: the same choice and tick under each
+    person's name, above their pad; the check goes in the signed snapshot (type, Tim's tick, his name and the time, and the AML file for
+    that person where there is one) and the database refuses an in-person signature without it, with an ID number, or with a time more
+    than 15 minutes from now.
+- Still for Tim: the agency agreement still asks for an email for each person on his device, because their signed copy is emailed to
+  them. Say if a person with no email should be able to sign there (they would get no emailed copy).
+
 Nothing signed changes: sealed rounds, agreements, signatures, taps, marks and fingerprints are kept exactly as they are; every trigger
 stays. Lock order everywhere: the offer, then the signing, then the signer.
 Migration 029 (`029_signing_places_marks.sql`, additive): kinds `own_initials`, `own_name`, `own_signature` on offer_sign_marks (the

@@ -338,7 +338,7 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
     expect(!r2.error && r2.data && r2.data.held === false, 'C: her own signature added in Round 2 (' + (r2.error && r2.error.message) + ')');
     r2 = await rpc(p, 'agent_signing_marks', { p_signer: v1.id, p_sig: await (async () => { return (await db(p)).offer_signers.find(x => x.id === v1.id).init_png; })(), p_init: (await db(p)).offer_signers.find(x => x.id === v1.id).init_png });
     expect(r2.error && /kept as you first used them/.test(r2.error.message), 'C: with her own signature on the page, she can\'t draw again (029 review)'); }
-  await tapAll(p); await tick(p, '#sgSaw'); await p.selectOption('#sgIdType', 'passport'); await p.click('#sgFinishGo'); await p.waitForSelector('#sgHandback', { timeout: 20000 }); await p.click('#sgImTim'); await p.waitForSelector('#sgView', { timeout: 20000 });
+  await tapAll(p); await p.selectOption('#sgIdType', 'passport'); await tick(p, '#sgSaw'); await p.click('#sgFinishGo'); await p.waitForSelector('#sgHandback', { timeout: 20000 }); await p.click('#sgImTim'); await p.waitForSelector('#sgView', { timeout: 20000 });
   for (let i = 0; i < 20 && !((await db(p)).offer_rounds || []).some(x => x.signing_id === g2.id); i++) await p.waitForTimeout(500);
   d = await db(p); const rd2 = d.offer_rounds.find(x => x.signing_id === g2.id); out.round2 = rd2 && { changes: rd2.changes, own: (rd2.execution.own || []).length };
   expect(rd2 && rd2.changes === 0 && (rd2.execution.own || []).length === 2 && !(rd2.execution.changes || []).length, 'C: Round 2 locks with no changes: the vendor\'s own name is listed apart, not as a change');

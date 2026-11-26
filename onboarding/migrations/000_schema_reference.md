@@ -440,3 +440,8 @@ agreements/<agreement id>/signatures/... (vendors may upload their own signature
 - Rollback test: `tests/signing-marks-rollback.sql` (built by `tests/signing-marks-rollback.js`). Local run 26 November 2026 on the
   stand-in through 026: every line as expected, no CAPITALS. `tests/signing-marks-with-026.js`: 026's own rollback test with 029 applied
   straight after it gives the same lines (the counts include the chattels initials).
+- Identity (Tim, 26 November 2026): `agent_signing_finish_checked` (offers in person: a photo ID type and Tim's tick; event
+  `sign_id_checked`; 023's `agent_signing_finish` now refuses), `offer_photo_id_ok`; trigger `guard_signature_identity` on `signatures`,
+  `variation_signatures` and `form_signatures` (in person: `snapshot.id_check` with type, tick, by, time, optional AML file, never a number;
+  by link: no one else on the agreement with the same email). Layers and round material carry each signer's `id_checked_at`.
+  The stand-in needs `tests/pg-standin-signatures.sql` for these tables.

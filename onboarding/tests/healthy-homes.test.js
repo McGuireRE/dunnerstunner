@@ -60,7 +60,8 @@ expect(hh.status==='ready'&&hh.agent_data.c.ins3.a==='N'&&hh.agent_data.ws.area=
 // 3. Aroha signs in person on Tim's phone, witnessed
 out.pads=await p.$$eval('[data-fsigner]',e=>e.map(x=>x.dataset.fsigner)); expect(out.pads.length===2,'a pad for each landlord');
 await p.click('[data-fsign="P1"]'); await p.waitForTimeout(200); out.e2=await p.textContent('#fErr'); expect(/Tick the box/.test(out.e2),'they confirm they checked it');
-await pick('[data-fok="P1"]'); await draw('#fpad_P1'); await p.click('[data-fsign="P1"]'); await p.waitForTimeout(3600);
+await pick('[data-fok="P1"]'); await draw('#fpad_P1'); await p.click('[data-fsign="P1"]'); await p.waitForTimeout(300); out.idErr=await p.textContent('#fErr'); expect(/photo ID you checked/.test(out.idErr),'029: in person, Tim logs the photo ID he checked first');
+await p.selectOption('[data-idtype="fP1"]','passport'); await pick('[data-idok="fP1"]'); await p.click('[data-fsign="P1"]'); await p.waitForTimeout(3600); out.e3=await p.textContent('#fErr');
 d=await db(); expect(d.form_signatures.length===1&&d.form_signatures[0].snapshot.witnessed_by==='Timothy McGuire'&&d.form_signatures[0].snapshot.agent_data.res.req==='3.6','Aroha\'s signature covers Tim\'s measurements, witnessed');
 const locked=await p.evaluate(async()=>{ const c=window.supabase.createClient(); const r=await c.from('property_forms').update({agent_data:{}}).eq('id','F2'); return r.error&&r.error.message; });
 expect(/can no longer be changed/.test(locked||''),'once signed, the measurements cannot change');

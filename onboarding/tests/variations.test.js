@@ -10,7 +10,7 @@ await ctx.route('https://packages.dunnerstunner.co.nz/catalogue.js',r=>r.fulfill
 await ctx.route('https://packages.dunnerstunner.co.nz/onboarding/**',r=>r.fulfill({contentType:'text/html',body:html}));
 const p=await ctx.newPage(); const errs=[]; p.on('pageerror',e=>errs.push(e.message)); p.on('console',m=>{if(m.type()==='error')errs.push(m.text())});
 const go=async()=>{await p.goto('https://packages.dunnerstunner.co.nz/onboarding/');await p.waitForTimeout(500);};
-const draw=async sel=>{const el=await p.$(sel); await el.scrollIntoViewIfNeeded(); const bx=await el.boundingBox(); await p.mouse.move(bx.x+20,bx.y+40); await p.mouse.down(); await p.mouse.move(bx.x+120,bx.y+90,{steps:6}); await p.mouse.move(bx.x+220,bx.y+50,{steps:6}); await p.mouse.up();};
+const draw=async sel=>{const el=await p.$(sel); await el.evaluate(e=>e.scrollIntoView({block:'center'})); const bx=await el.boundingBox(); await p.mouse.move(bx.x+20,bx.y+40); await p.mouse.down(); await p.mouse.move(bx.x+120,bx.y+90,{steps:6}); await p.mouse.move(bx.x+220,bx.y+50,{steps:6}); await p.mouse.up();};
 const tick=async sel=>p.$$eval(sel,els=>els.forEach(e=>{e.checked=true;e.dispatchEvent(new Event('change',{bubbles:true}));}));
 const out={};
 await go(); await p.evaluate(()=>{localStorage.clear();localStorage.setItem('mocksession',JSON.stringify({user:{id:'agent-1',email:'hello@timmcguire.co.nz'}}));
@@ -32,7 +32,10 @@ out.togetherH1=await p.textContent('h1'); await vwr('signing together');
 await p.click('#next'); await p.waitForTimeout(200); out.noTogErr=await p.textContent('.err');
 for (const id of ['P1','P2']) { await draw(`[data-vcv="${id}"]`); }
 await p.click('#next'); await p.waitForTimeout(200); out.tickErr=await p.textContent('.err');
-await tick('[data-vok]'); await p.click('#next'); await p.waitForTimeout(3200);
+await tick('[data-vok]'); await p.click('#next'); await p.waitForTimeout(300); out.idErr=await p.textContent('.err');
+// 029: each person's photo ID logged by Tim, with his tick
+for (const id of ['P1','P2']) { await p.selectOption(`[data-idtype="v${id}"]`,'nz_driver_licence'); await tick(`[data-idok="v${id}"]`); }
+await p.click('#next'); await p.waitForTimeout(3200);
 await p.screenshot({path:require('path').join(__dirname,'out','v3_detail.png'),fullPage:true});
 out.inForce=await p.$eval('[data-var]',e=>e.textContent.replace(/\s+/g,' ').slice(0,300));
 out.terms=await p.evaluate(()=>{const h=[...document.querySelectorAll('h3')].find(x=>x.textContent.includes('Terms now in force'));return h?h.parentElement.textContent.replace(/\s+/g,' '):null;});
@@ -58,4 +61,7 @@ const db=await p.evaluate(()=>JSON.parse(localStorage.getItem('mockdb')));
 out.statuses=db.agreement_variations.map(v=>v.number+':'+v.status); out.sigs=db.variation_signatures.length;
 out.summary1=db.agreement_variations[0].summary;
 out.inv2=await p.evaluate(()=>localStorage.getItem('inv'));
+// 029 (Tim, 26 November 2026): in person, the ID check went first, and each signature on Tim's device carries its photo ID type and his tick, never a number
+if(!/photo ID you checked/.test(out.idErr||'')) errs.push('in person, the variation asks for the photo ID Tim checked: '+out.idErr);
+{ const ip=db.variation_signatures.filter(x=>/In person/.test(String((x.snapshot||{}).signing_method||''))||(x.snapshot||{}).id_check); if(!ip.length||!ip.every(x=>x.snapshot.id_check&&x.snapshot.id_check.type==='nz_driver_licence'&&x.snapshot.id_check.checked===true&&!('number' in x.snapshot.id_check))) errs.push('each in-person variation signature carries Tim\'s ID check'); out.idChecks=ip.length; }
 console.log(JSON.stringify(Object.assign(out,{errs}),null,1)); await b.close();})();

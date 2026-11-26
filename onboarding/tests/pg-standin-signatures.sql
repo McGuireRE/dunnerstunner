@@ -1,0 +1,7 @@
+-- Added to the local PostgreSQL stand-in (tests/pg-standin.sql) for migration 029's identity rule: the agency agreement's signature
+-- tables and AML files, with the live columns that rule reads (never the live project). Run once on the stand-in before 029.
+alter table public.agreement_people add column if not exists signed_at timestamptz;
+create table if not exists public.aml_files (id uuid primary key default gen_random_uuid(), agreement_id uuid, person_id uuid, data jsonb not null default '{}'::jsonb, created_at timestamptz default now());
+create table if not exists public.signatures (id uuid primary key default gen_random_uuid(), agreement_id uuid, person_id uuid, signer_role text, signer_name text, image_path text, snapshot jsonb, snapshot_sha256 text, user_agent text, signed_at timestamptz default now());
+create table if not exists public.variation_signatures (id uuid primary key default gen_random_uuid(), variation_id uuid, agreement_id uuid, person_id uuid, signer_role text, signer_name text, image_path text, snapshot jsonb, snapshot_sha256 text, user_agent text, signed_at timestamptz default now());
+create table if not exists public.form_signatures (id uuid primary key default gen_random_uuid(), form_id uuid, agreement_id uuid, person_id uuid, signer_role text, signer_name text, image_path text, snapshot jsonb, snapshot_sha256 text, user_agent text, signed_at timestamptz default now());

@@ -4,7 +4,8 @@
 -- case; a line in CAPITALS means something that should have been refused was allowed, or a value was wrong. Needs 026 (and everything it
 -- builds on) applied first. The agent is simulated with request.jwt.claims; the offer-sign edge function with service_role. The blank, map,
 -- draft and approval are set up directly, as 024's and 026's own tests do.
--- Local run: 26 November 2026, on a local PostgreSQL 16 stand-in (tests/pg-standin.sql, then 010, 016 part A, 018, 019, 021 to 026):
+-- Local run: 26 November 2026, on a local PostgreSQL 16 stand-in (tests/pg-standin.sql, then 010, 016 part A, 018, 019, 021 to 026, and
+-- tests/pg-standin-signatures.sql for the agreement's signature tables):
 -- every line as expected, no CAPITALS. Not yet run on the live project (a go-live step, with Tim's approval).
 do $t$
 declare out text := ''; r jsonb; pid uuid; o1 uuid; o2 uuid; o3 uuid; bl uuid; m uuid; m0 uuid; d1 uuid; d2 uuid; d3 uuid; g1 uuid; g2 uuid; g3 uuid; gl uuid; s1 uuid; s2 uuid; v1 uuid; v2 uuid; x text; mk uuid; mk2 uuid;
@@ -164,8 +165,18 @@ begin
   begin insert into public.offer_sign_redraws (signing_id, signer_id, sig_png, init_png, by_name) values (g2, v1, png2, png2, 'probe'); out := out || 'A REDRAW ROW WENT IN WITH HER OWN SIGNATURE STANDING; '; exception when others then out := out || 'no redraw row: ' || sqlerrm || '; '; end;
   execute 'reset role';
   out := out || 'her drawing stays=' || ((public.offer_sign_ink(v1)->>'sig_png') = png) || '; ';
+  -- identity in person (Tim, 26 November 2026): Ula's turn finishes only once Tim logs the photo ID he checked and ticks that he watched
+  declare p_ text;
+  begin for p_ in select public.offer_sign_required(g2, 2) loop perform public.offer_sign_do_tap(v2, p_); end loop; end;
+  begin perform public.agent_signing_finish(v2, 'passport', 'ua'); out := out || 'FINISHED WITHOUT THE ID CHECK; '; exception when others then out := out || 'old finish asks for the check: ' || sqlerrm || '; '; end;
+  begin perform public.agent_signing_finish_checked(v2, 'known_to_tim', true, 'ua'); out := out || 'FINISHED ON KNOWN TO TIM; '; exception when others then out := out || 'a photo ID: ' || sqlerrm || '; '; end;
+  begin perform public.agent_signing_finish_checked(v2, 'passport', false, 'ua'); out := out || 'FINISHED WITHOUT THE TICK; '; exception when others then out := out || 'the tick: ' || sqlerrm || '; '; end;
+  perform public.agent_signing_finish_checked(v2, 'nz_driver_licence', true, 'ua');
+  out := out || 'ula checked: id=' || (select id_sighted from public.offer_signers where id = v2) || ' event=' || (select detail->>'id_type' || ' by ' || (detail->>'checked_by') from public.offer_events where offer_id = o1 and kind = 'sign_id_checked' and detail->>'signer_id' = v2::text) || '; ';
   perform pg_temp.rb_finish(g2);
   r := pg_temp.rb_lock(g2, '{"lifted": [], "outstanding": []}');
+  rd := public.offer_doc_layers((select document_id from public.offer_rounds where signing_id = g2), 2);
+  out := out || 'layers keep the check: ' || (select (e->>'id_sighted') || ' at ' || ((e->>'id_checked_at') is not null) from jsonb_array_elements(rd->1->'signers') e where (e->>'position')::int = 2) || '; ';
   out := out || 'round 2 sealed, changes counted=' || (select changes from public.offer_rounds where signing_id = g2) || ' offer=' || (select status from public.property_offers where id = o1) || '; ';
   -- nothing changed in Round 2 (her own signature isn't a change), so the agreement can be confirmed rather than presenting again
   begin perform public.agent_round_present(o1, 'in_person', pg_temp.rb_places(2, false, false, false), true); out := out || 'PRESENTED AFTER A ROUND THAT CHANGED NOTHING; '; exception when others then out := out || 'nothing changed: ' || sqlerrm || '; '; end;
@@ -199,6 +210,28 @@ begin
   -- Tim's in-person mark function can't act on a link signer's turn
   execute 'reset role'; perform set_config('request.jwt.claims', agent, true);
   begin perform public.agent_signing_mark((select id from public.offer_signers where signing_id = gl and position = 1), 'own_initials', 1, '{"x":100,"y":100,"w":30,"h":14}', null); out := out || 'TIM MARKED FOR A LINK SIGNER; '; exception when others then out := out || 'in person only: ' || sqlerrm || '; '; end;
+
+  -- 6. identity for the agency agreement, its variations, notices and forms (one rule on each signature table, whoever writes it):
+  -- in person, Tim's ID check is in the snapshot (the type, never a number); by a signer's own link, their own email
+  declare ag uuid := (select id from public.agreements where property_id = pid limit 1); pa uuid; pb uuid; okc jsonb := jsonb_build_object('type', 'passport', 'checked', true, 'by', 'Tim McGuire', 'at', now());
+  begin
+    insert into public.agreement_people (agreement_id, legal_name, email, phone) values (ag, 'Ali Shared', 'shared@example.com', '') returning id into pa;
+    insert into public.agreement_people (agreement_id, legal_name, email, phone) values (ag, 'Bea Shared', 'Shared@example.com ', '') returning id into pb;
+    begin insert into public.signatures (agreement_id, person_id, signer_role, signer_name, snapshot) values (ag, pa, 'client', 'Ali Shared', '{"signing_method":"In person, on the licensee''s device"}'); out := out || 'SIGNED IN PERSON WITH NO ID CHECK; ';
+    exception when others then out := out || 'in person needs the check: ' || sqlerrm || '; '; end;
+    begin insert into public.signatures (agreement_id, person_id, signer_role, signer_name, snapshot) values (ag, pa, 'client', 'Ali Shared', jsonb_build_object('signing_method', 'In person, on the licensee''s device', 'id_check', okc || '{"number":"AB123456"}')); out := out || 'AN ID NUMBER WAS KEPT; ';
+    exception when others then out := out || 'no number: ' || sqlerrm || '; '; end;
+    begin insert into public.variation_signatures (agreement_id, person_id, signer_role, signer_name, snapshot) values (ag, pa, 'client', 'Ali Shared', jsonb_build_object('signing_method', 'In person, on the licensee''s device', 'id_check', okc || jsonb_build_object('at', now() - interval '2 hours'))); out := out || 'AN OLD ID CHECK WAS TAKEN; ';
+    exception when others then out := out || 'checked now: ' || sqlerrm || '; '; end;
+    insert into public.form_signatures (agreement_id, person_id, signer_role, signer_name, snapshot) values (ag, pa, 'client', 'Ali Shared', jsonb_build_object('signing_method', 'In person, on the licensee''s device', 'id_check', okc));
+    out := out || 'in person with the check: shared email fine=' || (select count(*) from public.form_signatures where person_id = pa) || '; ';
+    begin insert into public.signatures (agreement_id, person_id, signer_role, signer_name, snapshot) values (ag, pb, 'client', 'Bea Shared', '{"signing_method":"On their own device"}'); out := out || 'SIGNED BY LINK WITH A SHARED EMAIL; ';
+    exception when others then out := out || 'by link, own email: ' || sqlerrm || '; '; end;
+    update public.agreement_people set email = 'bea@example.com' where id = pb;
+    insert into public.variation_signatures (agreement_id, person_id, signer_role, signer_name, snapshot) values (ag, pb, 'client', 'Bea Shared', '{"signing_method":"On their own device"}');
+    insert into public.signatures (agreement_id, person_id, signer_role, signer_name, snapshot) values (ag, pb, 'agent', 'Timothy McGuire', '{}');
+    out := out || 'own email by link and Tim''s own countersignature: ok; ';
+  end;
 
   -- 5. who may call what: a vendor signed in can't use Tim's functions or the link's; the link's function is the service role's alone
   execute 'set local role authenticated'; perform set_config('request.jwt.claims', vendor, true);

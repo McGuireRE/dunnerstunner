@@ -67,7 +67,8 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   const consentDraw = async (p, k) => { await p.waitForSelector('#sgConsent'); await tick(p, '#sgAgree'); await p.click('#sgAgreeGo'); await p.waitForSelector('#sgDraw');
     const bg = await p.$eval('#sgDraw .sig-wrap', e => getComputedStyle(e).backgroundColor); expect(bg === 'rgb(255, 255, 255)', 'the signature pad is white (' + bg + ')');
     await draw(p, '#sgSig', k); await draw(p, '#sgInit', k + 3); await p.click('#sgDrawGo'); await p.waitForSelector('#sgPlaces'); };
-  const finishInPerson = async (p, id) => { await tick(p, '#sgSaw'); if (id === 'known_to_tim') await p.$eval('input[name="sgIdWho"][value="known"]', e => e.click()); else if (id !== 'none') await p.selectOption('#sgIdType', id || 'passport'); await p.click('#sgFinishGo'); await p.waitForSelector('#sgHandback'); await p.click('#sgImTim'); await p.waitForSelector('#sgView'); };
+  // 029 (Tim, 26 November 2026): on his device every turn finishes with the photo ID he checked and his tick
+  const finishInPerson = async (p, id) => { await p.selectOption('#sgIdType', !id || id === 'known_to_tim' || id === 'none' ? 'passport' : id); await tick(p, '#sgSaw'); await p.click('#sgFinishGo'); await p.waitForSelector('#sgHandback'); await p.click('#sgImTim'); await p.waitForSelector('#sgView'); };
   // Tim prepares the link emails (drafts: nothing is sent), then sends them from the page: one at a time, or ticking Reviewed and Send all reviewed
   // Tim mediates (24 November 2026): mail since a point, to anyone but Tim, codes aside (a signer asks for their own code)
   // what a vendor sees on their own page (dashboard and journey map), as text
@@ -101,7 +102,7 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
       M(await c.rpc('agent_round_change', { p_signer: ss[0].id, p_id: id, p_kind: ch.kind, p_page: ch.page, p_geometry: ch.geometry, p_target: ch.target || null, p_places: places })); }
     const D3 = JSON.parse(localStorage.getItem('mockdb')), all = D3.offer_signings.find(x => x.id === sid);
     for (const s of ss) { const mine = all.places.concat(D3.offer_sign_reviews.filter(r => r.signing_id === sid).flatMap(r => r.places)).filter(x => x.signer === s.position);
-      for (const pl of mine) M(await c.rpc('agent_signing_tap', { p_signer: s.id, p_place: pl.id })); M(await c.rpc('agent_signing_finish', { p_signer: s.id, p_id_sighted: 'passport', p_ua: 'ua' })); }
+      for (const pl of mine) M(await c.rpc('agent_signing_tap', { p_signer: s.id, p_place: pl.id })); M(await c.rpc('agent_signing_finish_checked', { p_signer: s.id, p_checked: true, p_id_type: 'passport', p_ua: 'ua' })); }
     const r = await c.functions.invoke('offer-sign', { body: { action: 'lock', signing_id: sid } }); return r.data || (r.error && await r.error.context.json()); }, [sid, opts || null]);
   // Tim presents the newest round through his database call, with the places the present screen makes
   const rpcPresent = async (p, oid, method) => p.evaluate(async ([oid, method]) => { const c = window.supabase.createClient(), M = r => { if (r.error) throw new Error(r.error.message); return r.data; };

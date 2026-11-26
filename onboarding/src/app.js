@@ -76,6 +76,22 @@
     w.appendChild(o);
     return new Promise(r => setTimeout(r, 2500));
   }
+  /* the ID check on Tim's device (Tim, 26 November 2026: "If on a device, I will verify that each signed separately, but will only do so
+     with their identification logged."): the photo ID type and Tim's tick for each person, never the ID number. The time is taken when
+     he saves; the database checks it (029). Used for the agency agreement, its notices, variations and forms; offers have their own. */
+  const ID_PHOTO = [['nz_driver_licence', 'NZ driver licence'], ['passport', 'Passport'], ['nz_firearms_licence', 'NZ firearms licence'], ['kiwi_access_card', 'Kiwi Access Card'], ['other_photo_id', 'Other photo ID']];
+  const idCheckHTML = (key, name) => `<div class="id-check" data-idc="${esc(key)}"><label class="f" for="idt_${esc(key)}">Photo ID you checked for ${esc(name)} <span class="opt">(the type only; no number is kept)</span></label>
+    <select id="idt_${esc(key)}" data-idtype="${esc(key)}"><option value="">Choose</option>${ID_PHOTO.map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select>
+    <label class="choice cb" style="margin-top:8px"><input type="checkbox" data-idok="${esc(key)}"><span class="mark"></span><span><span class="ct">Tim: I checked ${esc(name)}'s ID and watched them sign</span></span></label></div>`;
+  // the check as it goes in the signed snapshot, or a plain message; the AML file for this person is linked where there is one
+  async function idCheckRead(key, name, personId) {
+    const t = ($(`[data-idtype="${CSS.escape(key)}"]`) || {}).value || '', ok = !!($(`[data-idok="${CSS.escape(key)}"]`) || {}).checked;
+    if (!t) return { err: `Choose the photo ID you checked for ${name}.` };
+    if (!ok) return { err: `Tick that you checked ${name}'s ID and watched them sign.` };
+    const c = { type: t, checked: true, by: 'Tim McGuire', at: new Date().toISOString() };
+    if (personId) { try { const { data } = await sb.from('aml_files').select('id').eq('person_id', personId).limit(1); if (data && data[0]) c.aml_file_id = data[0].id; } catch (_) { } }
+    return { check: c };
+  }
   const saveNote = label => `<p class="sig-save-note">When you're happy with it, press <strong>${esc(label)}</strong>. Your signature isn't saved until you do.</p>`;
   /* ───── the signing viewer: one document viewer for every signing screen (Tim, 26 November 2026) ─────
      Used wherever someone reads a document to sign it, by link or on Tim's screen: offers and counteroffers, the agency agreement,
@@ -2984,6 +3000,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       ${named.length ? named.map(p => p.signed_at ? `<div class="card tight" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><h3 style="margin:0">${nt(p.legal_name)}</h3><span class="signed-badge">✓ Signed ${esc(fmtDT(p.signed_at))}</span></div>`
         : `<div class="card tight" data-signer="${p.id || ''}"><div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:8px"><h3 style="margin:0">${nt(p.legal_name)}</h3><button class="btn link" type="button" data-clear="${p.id}">Clear</button></div>
           ${priorList(T.an).length ? `<label class="choice cb" style="margin:0 0 10px"><input type="checkbox" data-tnotice="${p.id}"><span class="mark"></span><span><span class="ct">Also sign the notice${priorList(T.an).length > 1 ? 's' : ''} cancelling the agency with ${esc(joinNames(priorList(T.an).map(x => x.agency)))}</span></span></label>` : ''}
+          ${idCheckHTML(p.id, p.legal_name)}
           <div class="sig-wrap"><canvas id="pad_${p.id}" aria-label="Signature pad for ${esc(p.legal_name)}"></canvas><div class="sig-line"></div><span class="hint">${esc(callName(p) || p.legal_name)} signs here</span></div>
           ${saveNote(`Save ${callName(p) || p.legal_name}'s signature`)}
           <div class="toolbar"><button class="btn primary" type="button" data-signnow="${p.id}">Save ${esc(callName(p) || p.legal_name)}'s signature</button></div></div>`).join('') : '<p class="small">Add the sellers on page 1 first.</p>'}
@@ -3035,6 +3052,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       const person = T.people.find(x => x.id === pid);
       if (!person || !EMAIL_RE.test(person.email || '')) return tErr(`Add an email for ${person ? person.legal_name : 'this person'} on page 1, so they get their signed copy.`);
       if (!pad || !pad.drawn()) return tErr('Please sign in the box first.');
+      const idc = await idCheckRead(pid, person.legal_name, pid); if (idc.err) { atBtn(b, idc.err, 'err'); return tErr(idc.err); }
       const tn = $(`[data-tnotice="${pid}"]`); if (tn && !tn.checked) return tErr('Tick the box to sign the cancellation notice as well, or stop and sort out the previous agency first.');
       b.disabled = true;
       try {
@@ -3045,7 +3063,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         await must(sb.storage.from('private').upload(path, blob, { contentType: 'image/png' }));
         const cfg = tConfig();
         const snapshot = { agreement_version: AGREEMENT_VERSION, agreement_ref: T.ag.ref, front_page: tFront(), config: cfg, answers: T.an, people: T.people.map(p => ({ legal_name: p.legal_name, email: p.email })), signer: { name: person.legal_name, email: person.email }, notices: noticeSnapshot(T.ag.address, tFront().client, T.an), signed_at_client: new Date().toISOString() };
-        Object.assign(snapshot, await signExtras(T.id, T.an));
+        Object.assign(snapshot, await signExtras(T.id, T.an), { id_check: idc.check });
         const res = await must(sb.rpc('agent_sign_in_person', { a: T.id, pid, p_image_path: path, p_snapshot: snapshot, p_user_agent: navigator.userAgent }));
         await sigSaved($('#pad_' + pid), `${person.legal_name} has signed`, 'Signature saved');
         T.people = await must(sb.from('agreement_people').select('*').eq('agreement_id', T.id).order('position'));
@@ -3064,6 +3082,9 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       const unsigned = T.people.filter(p => (p.legal_name || '').trim() && !p.signed_at);
       for (const p of [0, 1]) { const e = tValidate(p); if (e) return tErr(e + ` (page ${p + 1})`); }
       if (unsigned.some(p => !EMAIL_RE.test(p.email || ''))) return tErr('Add an email on page 1 for everyone still to sign, so they can sign in.');
+      // signing at a distance: each person needs their own email (Tim, 26 November 2026); the database refuses a shared one too (029)
+      { const named_ = T.people.filter(p => (p.legal_name || '').trim()), ems = named_.map(p => String(p.email || '').trim().toLowerCase()).filter(Boolean);
+        if (new Set(ems).size !== ems.length) { const m = 'Two people share an email. Each person needs their own email to sign on their own phone, or they can sign here with you.'; atBtn(sp, m, 'err'); return tErr(m); } }
       const guideDone = (T.an.guide || []).length >= GUIDE.length, acksDone = (T.an.acks || []).length >= acksList(T.c).length, legal = ['have', 'waive'].includes(T.legalPick || (T.ag.legal || {}).choice);
       T.an._step = !guideDone ? 6 : (!acksDone || !legal) ? 7 : 9;
       if (!(await tSave())) return;
@@ -3668,7 +3689,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       ${canSign && toSign.length && !unchecked ? `<h2>Sign in person</h2><p class="small">${isHH ? 'The landlord' : 'Each vendor'} can sign here on your phone, witnessed by you, or on their own phone from their agreement page.</p>
         ${toSign.map(p => `<div class="card tight" data-fsigner="${p.id}"><label class="choice cb" style="margin:0 0 8px"><input type="checkbox" data-fok="${p.id}"><span class="mark"></span><span><span class="ct">${nt(p.legal_name)} has checked it${isHH ? '' : ' and makes the Vendor Statement'}</span></span></label>
           <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:8px"><h3 style="margin:0">${nt(p.legal_name)}</h3><button class="btn link" type="button" data-fclr="${p.id}">Clear</button></div>
-          <div class="sig-wrap"><canvas id="fpad_${p.id}" aria-label="Signature pad for ${esc(p.legal_name)}"></canvas><div class="sig-line"></div><span class="hint">${esc(callName(p) || p.legal_name)} signs here</span></div>${saveNote(`Save ${callName(p) || p.legal_name}'s signature`)}
+          ${idCheckHTML('f' + p.id, p.legal_name)}<div class="sig-wrap"><canvas id="fpad_${p.id}" aria-label="Signature pad for ${esc(p.legal_name)}"></canvas><div class="sig-line"></div><span class="hint">${esc(callName(p) || p.legal_name)} signs here</span></div>${saveNote(`Save ${callName(p) || p.legal_name}'s signature`)}
           <div class="toolbar"><button class="btn primary" type="button" data-fsign="${p.id}">Save ${esc(callName(p) || p.legal_name)}'s signature</button></div></div>`).join('')}<div class="err" id="fErr"></div>` : ''}
       ${fs.length ? `<h2>Signatures</h2>${fs.map(s => `<div class="card tight"><div style="font-weight:600">${nt(s.signer_name)}${s.signer_role === 'agent' ? ' <span class="small">(licensee)</span>' : ''}</div><div class="small">${esc(fmtDT(s.signed_at))} · fingerprint ${esc(String(s.snapshot_sha256).slice(0, 16))}…${s.snapshot && s.snapshot.witnessed_by ? ' · witnessed by you' : ''}</div></div>`).join('')}` : ''}
     </div>`;
@@ -3714,11 +3735,12 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       const pid = b.dataset.fsign, p = signers.find(x => x.id === pid), er = $('#fErr');
       if (!$(`[data-fok="${pid}"]`).checked) { er.textContent = `Tick the box once ${callName(p) || p.legal_name} has checked it.`; return; }
       if (!pads[pid].drawn()) { er.textContent = 'Please sign in the box first.'; return; }
+      const idc = await idCheckRead('f' + pid, p.legal_name, pid); if (idc.err) { er.textContent = idc.err; atBtn(b, idc.err, 'err'); return; }
       b.disabled = true;
       try {
         const path = await uploadSig($('#fpad_' + pid), ag.id, 'form-' + fid + '-' + pid);
         const d = isHH ? hhDoc(fm.agent_data, ag.address, names) : vdDoc(fm.data || {}, ag.address, names, new Date());
-        const res = await must(sb.rpc('agent_form_sign_in_person', { f: fid, pid, p_image_path: path, p_snapshot: { document: d.title, doc: d, property: ag.address, agreement_ref: ag.ref, signer: { name: p.legal_name, email: p.email }, signed_at_client: new Date().toISOString() }, p_user_agent: navigator.userAgent }));
+        const res = await must(sb.rpc('agent_form_sign_in_person', { f: fid, pid, p_image_path: path, p_snapshot: { document: d.title, doc: d, property: ag.address, agreement_ref: ag.ref, signer: { name: p.legal_name, email: p.email }, id_check: idc.check, signed_at_client: new Date().toISOString() }, p_user_agent: navigator.userAgent }));
         await sigSaved($('#fpad_' + pid), `${p.legal_name} has signed`, 'Signature saved');
         if (res && res.remaining === 0 && isHH) { const { error: fe } = await sb.functions.invoke('notify', { body: { type: 'form_signed', agreement_id: ag.id, form_id: fid } }); toast(fe ? 'All signed. The PDF didn\'t file; try again below.' : 'All signed. Filed, and emailed to you.'); }
         else if (res && res.remaining === 0) toast('All the vendors have signed. Countersign it below.');
@@ -4635,7 +4657,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <div class="toolbar"><button class="btn ghost" type="button" id="vPdf2">Read the variation (PDF)</button></div>
       ${todo.map(p => `<div class="card tight" data-vp="${p.id}"><div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:8px"><h3 style="margin:0">${nt(p.legal_name)}</h3><button class="btn link" type="button" data-vclr="${p.id}">Clear</button></div>
         <label class="choice cb"><input type="checkbox" data-vok="${p.id}"><span class="mark"></span><span><span class="ct">I've read these changes and agree to them</span><span class="cd">I was told I can get legal advice before signing, and given time to do so</span></span></label>
-        <div class="sig-wrap"><canvas data-vcv="${p.id}" aria-label="Signature of ${esc(p.legal_name)}"></canvas><div class="sig-line"></div><span class="hint">Sign here</span></div>${saveNote('Save signatures')}</div>`).join('') || '<p class="small">Everyone has signed.</p>'}
+        ${idCheckHTML('v' + p.id, p.legal_name)}<div class="sig-wrap"><canvas data-vcv="${p.id}" aria-label="Signature of ${esc(p.legal_name)}"></canvas><div class="sig-line"></div><span class="hint">Sign here</span></div>${saveNote('Save signatures')}</div>`).join('') || '<p class="small">Everyone has signed.</p>'}
       <div class="err"></div></div>`;
     const pads = {};
     $$('[data-vcv]').forEach(cv => { pads[cv.dataset.vcv] = makePad(cv); });
@@ -4648,10 +4670,11 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       const ready = todo.filter(p => pads[p.id].drawn());
       if (!ready.length) return tErr('Each person ticks the box and signs.');
       for (const p of ready) if (!$(`[data-vok="${p.id}"]`).checked) return tErr(`${p.legal_name} needs to tick the box before signing.`);
+      const idcs = {}; for (const p of ready) { const r_ = await idCheckRead('v' + p.id, p.legal_name, p.id); if (r_.err) { atBtn($(`[data-idok="v${p.id}"]`).closest('label'), r_.err, 'err'); return tErr(r_.err); } idcs[p.id] = r_.check; }
       let res = null; const shown = [];
       for (const p of ready) {
         const path = await uploadSig($(`[data-vcv="${p.id}"]`), agId, vid + '-' + p.id);
-        res = await must(sb.rpc('agent_sign_variation_in_person', { v: vid, pid: p.id, p_image_path: path, p_snapshot: varSnapshot(ag, vr, { name: p.legal_name, email: p.email, role: 'client' }), p_user_agent: navigator.userAgent }));
+        res = await must(sb.rpc('agent_sign_variation_in_person', { v: vid, pid: p.id, p_image_path: path, p_snapshot: Object.assign(varSnapshot(ag, vr, { name: p.legal_name, email: p.email, role: 'client' }), { id_check: idcs[p.id] }), p_user_agent: navigator.userAgent }));
         shown.push(sigSaved($(`[data-vcv="${p.id}"]`), `${p.legal_name} has signed`, 'Signature saved'));
       }
       await Promise.all(shown);
@@ -7533,12 +7556,9 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         </section>
         ${ctx.api.undo ? sgUndoHTML(ctx, true) : ''}
         <section class="card" id="sgFinish"><h2>Finish</h2>${left ? `<p class="small" id="sgLeft">${left} place${left === 1 ? '' : 's'} still to do. You can finish once every place is done.</p>` : '<p class="small" id="sgAllDone">Every place is done.</p>'}
-          ${ctx.mode === 'person' ? `<label class="choice cb"><input type="checkbox" id="sgSaw"><span class="mark"></span><span><span class="ct">Tim: I saw ${esc(ctx.name)} sign</span></span></label>
-            <fieldset class="sg-idwho" id="sgIdWho"><legend class="f">Identity <span class="opt">(optional: choose one, or leave it)</span></legend>
-              <label class="choice"><input type="radio" name="sgIdWho" value="" checked><span class="mark"></span><span><span class="ct">Neither</span></span></label>
-              <label class="choice"><input type="radio" name="sgIdWho" value="known"><span class="mark"></span><span><span class="ct">Known to the agent</span></span></label>
-              <label class="choice"><input type="radio" name="sgIdWho" value="checked"><span class="mark"></span><span><span class="ct">ID checked</span></span></label>
-              <label class="f" for="sgIdType">What was seen <span class="opt">(the type only; no number is kept)</span></label><select id="sgIdType"><option value="">Choose</option>${SG_ID.filter(([k]) => k !== 'known_to_tim').map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select></fieldset>` : ''}
+          ${ctx.mode === 'person' ? `<div class="sg-idwho" id="sgIdWho"><label class="f" for="sgIdType">Photo ID you checked for ${esc(ctx.name)} <span class="opt">(the type only; no number is kept)</span></label>
+              <select id="sgIdType"><option value="">Choose</option>${SG_ID.filter(([k]) => k !== 'known_to_tim').map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select>
+              <label class="choice cb" style="margin-top:8px"><input type="checkbox" id="sgSaw"><span class="mark"></span><span><span class="ct">Tim: I checked ${esc(ctx.name)}'s ID and watched them sign</span></span></label></div>` : ''}
           <p class="small" id="sgToTimOnly"><strong>When you confirm, this goes straight to Tim McGuire, the agent. He will be in touch with the other party; they are not told until he does.</strong></p>
           <div class="toolbar"><button class="btn primary" type="button" id="sgFinishGo" ${left ? 'disabled' : ''}>Finish signing</button></div></section>`;
     }
@@ -7623,13 +7643,11 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       on('#sgAskGo', async () => { const t = $('#sgAskText').value.trim(); if (t.length < 3) return ($('#sgAskOut').textContent = 'Say what you would like changed.');
         try { await ctx.api.ask(t); $('#sgAskText').value = ''; $('#sgAskOut').textContent = 'Sent to Tim. He\'ll be in touch.'; } catch (e) { $('#sgAskOut').textContent = e.message; } });
       on('#sgFinishGo', () => act(async () => { let o = {};
-        // identity is Tim's free choice (Tim, 24 November 2026): known to the agent, an ID check with what was seen, or neither
-        if (ctx.mode === 'person') { if (!$('#sgSaw').checked) throw new Error('Tim: tick that you saw them sign.');
-          const who = ($('input[name="sgIdWho"]:checked') || {}).value || '', seen = $('#sgIdType').value;
-          let id = who === 'known' ? 'known_to_tim' : who === 'checked' ? seen : null;
-          if (who === 'checked' && !seen) throw new Error('Choose what ID you saw, or choose Neither.');
-          if (!who && seen) id = seen;   // a type chosen without the button: an ID check
-          o = { id }; }
+        // identity on Tim's device (Tim, 26 November 2026): the photo ID he checked for this person, and his tick that he watched them sign
+        if (ctx.mode === 'person') { const seen = $('#sgIdType').value;
+          if (!seen) throw new Error(`Choose the photo ID you checked for ${ctx.name}.`);
+          if (!$('#sgSaw').checked) throw new Error(`Tim: tick that you checked ${ctx.name}'s ID and watched them sign.`);
+          o = { id: seen, checked: true }; }
         const r = await ctx.api.finish(o); ctx.finished = r; }, () => ctx.done(ctx.finished)));
       F.rerender = paint;
     }
@@ -7795,7 +7813,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       last, ever_tapped: (tapsEver || []).length > 0,
       api: { change: c => sgRpc('agent_round_change', Object.assign({ p_id: c.id, p_kind: c.kind, p_page: c.page, p_geometry: c.geometry, p_target: c.target || null, p_places: c.places }, P_)), consent: () => sgRpc('agent_signing_consent', Object.assign({ p_ua: ua }, P_)), receipt: r => sgRpc('agent_signing_receipt', Object.assign({ p_guide: r.guide, p_version: r.version || null, p_file: r.file || null, p_sha256: r.sha256 || null, p_pages: r.pages || null }, P_)),
         marks: (a, b) => sgRpc('agent_signing_marks', Object.assign({ p_sig: a, p_init: b }, P_)), tap: pl => sgRpc('agent_signing_tap', Object.assign({ p_place: pl }, P_)),
-        mark: m => sgRpc('agent_signing_mark', Object.assign({ p_kind: m.kind, p_page: m.page, p_geometry: m.geometry, p_target: m.target || null }, P_)), finish: o2 => sgRpc('agent_signing_finish', Object.assign({ p_id_sighted: o2.id, p_ua: ua }, P_)),
+        mark: m => sgRpc('agent_signing_mark', Object.assign({ p_kind: m.kind, p_page: m.page, p_geometry: m.geometry, p_target: m.target || null }, P_)), finish: o2 => sgRpc('agent_signing_finish_checked', Object.assign({ p_id_type: o2.id, p_checked: o2.checked === true, p_ua: ua }, P_)),
         undo: (scope, clear) => sgRpc('agent_signing_undo', Object.assign({ p_scope: scope, p_clear: !!clear }, P_)) },
       reload: () => viewSignTurn(sid, signerId), back: () => { SG_HANDBACK = sid; viewSigning(sid); }, done: r => { toast(`${s.name} has finished`); SG_HANDBACK = sid; viewSigning(sid); } });
   }

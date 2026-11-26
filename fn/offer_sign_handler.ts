@@ -68,7 +68,8 @@ export function executionRecord(m: any) {
   return {
     address: m.address, offer_ref: m.offer_ref, round: 1, draft: { number: m.draft?.number, sha256: m.draft?.sha256 }, places_sha256: m.places_sha256, made_at: m.made_at,
     signers: (m.signers || []).map((s: any) => ({ name: s.name, method: m.method, verified_at: s.verified_at, witnessed_by: s.witnessed_by, id_sighted: s.id_sighted, consent_at: s.consent_at, receipts: s.receipts || [],
-      first_tap: s.first_tap, last_tap: s.last_tap, finished_at: s.finished_at, places: s.places, ua: s.ua, net: s.net, seen_sha256: s.seen_sha256 })),
+      first_tap: s.first_tap, last_tap: s.last_tap, finished_at: s.finished_at, places: s.places, ua: s.ua, net: s.net, seen_sha256: s.seen_sha256,
+      ...(s.id_checked_at ? { id_checked_at: s.id_checked_at } : {}) })),   // 029: Tim's ID check in person, with its time
     marks: (m.marks || []).map((k: any) => Object.assign({ kind: k.kind, page: k.page, by: k.by, at: k.at, reviewed_at: k.reviewed_at }, (k.kind === "strike" || k.kind === "insert") && k.geometry?.text ? { text: k.geometry.text } : {})),   // the struck words (Offers fixes 2), and added text (029); marks before it have none
     replaced: m.replaced || [],
   };
@@ -168,7 +169,10 @@ export function makeHandler(d: Deps) {
     if (!m.date_place) throw new Error("The agreement blank has no date place, so the date can't be added. Add it to the places on the blank first.");
     // drawn again from Round N's own layers; its fingerprint and the drawing version are recorded on the copy and with the agreement
     const record = { address: m.address, offer_ref: m.offer_ref, date_text: m.date_text, accepted_at: m.accepted_at, confirmed_by: "Tim McGuire", made_at: m.made_at, document: m.document, round: m.round, rounds: m.rounds || [],
-      base: { round: m.round, sha256: m.round_sha256 }, draw_version: N.DRAW_VERSION };
+      base: { round: m.round, sha256: m.round_sha256 }, draw_version: N.DRAW_VERSION } as any;
+    // 029: each in-person signer's photo ID check, from the layers (only when there are any)
+    const idc = layers.flatMap((L: any) => (L.signers || []).filter((s: any) => s.id_checked_at).map((s: any) => ({ round: L.doc_round, who: s.name, id_sighted: s.id_sighted, at: s.id_checked_at })));
+    if (idc.length) record.id_checks = idc;
     const { bytes } = await d.renderWorking(draft, { ink: st.ink, changes: st.changes, own: st.own, lines: N.agreementLines(record), date: { text: m.date_text, place: m.date_place || null }, title: `Agreement: ${m.address || ""}` });
     const sha = await sha256(bytes), path = `properties/${m.property_id}/docs/offer-agreement-${m.offer_id}-${sha.slice(0, 12)}.pdf`;
     const up = await d.upload(path, bytes); if (!up.ok && !up.exists) throw new Error("The agreement couldn't be stored. Try again.");
