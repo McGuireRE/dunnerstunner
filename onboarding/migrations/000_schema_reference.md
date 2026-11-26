@@ -426,5 +426,11 @@ agreements/<agreement id>/signatures/... (vendors may upload their own signature
 - `offer_mail_allowed` redefined: as 024 (checked against the live body 26 November 2026), except that the `agreed_purchasers` branch
   also allows the agreed draft's `pl_email` and `pl_service` (the purchasers' lawyer as the contract's contact page has them; only text
   holding an @). Every other kind is unchanged; execute still revoked from public, anon and authenticated. Nothing else changes.
+- Part 2 (Tim, 26 November 2026): `lawyer_links.phone` (text, optional; check `^[0-9+()\-. ]{6,40}$`, as the offer form's phones).
+  Five-argument `vendor_send_to_lawyer`, `vendor_forward_to_lawyer` and `agent_send_to_lawyer` (`l_phone`) beside the four-argument ones,
+  which are kept word for word; each is the old body with the phone checked (`offer_phone_ok`), stored and logged. A call without
+  `l_phone` runs the old function. Execute: authenticated and service_role, not anon (as the old ones). Tim's own forward from the
+  agreement page inserts the row with the phone itself (his `agent_all_lawyer` policy).
 - Rollback test: `tests/agreed-mail-rollback.sql` (built by `tests/agreed-mail-rollback.js`). Local run 26 November 2026 on the stand-in
-  (pg-standin, 010, 016 part A, 018, 019, 021 to 026): every line as expected, no CAPITALS.
+  (pg-standin, 010, 016 part A, 018, 019, 021 to 026): every line as expected, no CAPITALS. The stand-in lacks the agency-agreement
+  functions, so the block first adds them as they are live (only where missing), then checks them unchanged by fingerprint.

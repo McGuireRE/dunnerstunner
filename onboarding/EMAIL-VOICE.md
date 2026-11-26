@@ -29,6 +29,7 @@ The model is Tim's own post-agreement emails, which several lawyers have praised
 - The other side's lawyer too (Tim's standing preference): "The vendors' lawyer is:" name, firm, email, phone.
 - Each lawyer shows as a short block: name and firm, "Email:", "Phone:", and "Notices are served to:" when the email for service
   of notices on the agreement's contact page is a different address (Tim, 26 November 2026). The same address is shown once.
+  Each lawyer is cc'd at their email and, when it differs, the notices address too.
 - "The property marketing homepage with documents is here." (when a link exists; LIM linked where held).
 - Heading "Roadmap":
   - "Date of agreement: <date>. The first working day is <weekday, date>." Note any public holiday in the period.

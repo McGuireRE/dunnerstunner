@@ -409,7 +409,8 @@
     const ags = (agreements || []).filter(a => ['signed', 'countersigned'].includes(a.status) && (a.created_at || '') >= cyc).sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
     for (const a of ags) {
       const ls = (links || []).filter(l => l.agreement_id === a.id && !holdsOwn(l.email, O)).sort((x, y) => ((x.sent_at || '') < (y.sent_at || '') ? 1 : -1));
-      if (ls[0]) return { firm: ls[0].firm || '', person: ls[0].lawyer_name || '', email: ls[0].email || '', source: 'the lawyer the agency agreement was sent to' };
+      // the phone where it was recorded with the lawyer (030, lawyer_links.phone), never a vendor's own
+      if (ls[0]) return { firm: ls[0].firm || '', person: ls[0].lawyer_name || '', email: ls[0].email || '', phone: ls[0].phone && !holdsOwn(ls[0].phone, O) ? ls[0].phone : '', source: 'the lawyer the agency agreement was sent to' };
     }
     return null;
   }

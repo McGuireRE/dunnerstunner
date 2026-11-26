@@ -5,6 +5,10 @@
 -- Needs 024 to 026 (and what they build on) applied first. The fixture (one agreed offer with its draft, document, round and agreement,
 -- and a second offer) is written in replica mode, so the foreign keys and fixed-record guards don't ask for a whole signing history;
 -- the mode is switched back before the migration, and every check runs with all triggers live.
+-- Part 2 (the vendors' lawyer's phone): the local stand-in has only a skeleton of the agency-agreement tables, so the block first adds
+-- what the live project has (the lawyer_links and agreements columns, agreement_events, simple is_party, require_open and log_event)
+-- and the three four-argument lawyer functions exactly as they are live (read 26 November 2026). On the live project these steps change
+-- nothing that matters: the columns and functions are already there, and the stand-in helpers are only created if missing.
 do $t$
 declare out text := ''; pid uuid := gen_random_uuid(); oid uuid := gen_random_uuid(); oid2 uuid := gen_random_uuid(); drid uuid := gen_random_uuid(); dr2 uuid := gen_random_uuid();
   docid uuid := gen_random_uuid(); rid uuid := gen_random_uuid(); agid uuid := gen_random_uuid(); aid uuid := gen_random_uuid(); x text; e text;
@@ -13,7 +17,8 @@ declare out text := ''; pid uuid := gen_random_uuid(); oid uuid := gen_random_uu
     'lawyer', jsonb_build_object('firm', 'Law Ltd', 'person', 'Pat Lawyer', 'email', 'pat@law.example', 'phone', '03 477 0000'));
   placed jsonb := jsonb_build_array(jsonb_build_object('id', 'pl_email', 'text', 'Pat.Contract@law.example'), jsonb_build_object('id', 'pl_service', 'text', 'notices@law.example'),
     jsonb_build_object('id', 'vl_email', 'text', 'sam@counsel.example'), jsonb_build_object('id', 'price', 'text', '$650,000'));
-  allowed_ text[]; h text := repeat('a1', 32);
+  allowed_ text[]; h text := repeat('a1', 32); aid2 uuid := gen_random_uuid(); vuser uuid := gen_random_uuid(); lid uuid; old_ text[]; new_ text[];
+  vendor text; agentc text;
 begin
   set local session_replication_role = replica;
   insert into public.properties (id, address, stage) values (pid, 'RB 30 Mail Street, Dunedin', 'under_offer');
@@ -36,6 +41,77 @@ begin
   begin perform public.offer_mail_check(oid, 'agreed_purchasers', null, array['rb-ana@example.com'], array['pat.contract@law.example'], 'Congratulations!', 'Hello'); out := out || '024 CC ACCEPTED; ';
   exception when others then out := out || '024 cc refused: ' || sqlerrm || '; '; end;
   foreach k in array kinds loop before_ := before_ || coalesce(array_to_string(public.offer_mail_allowed(oid, k, null), ','), ''); end loop;
+
+  -- Part 2 stand-in (only what is missing; see the header)
+  alter table public.lawyer_links add column if not exists token text, add column if not exists sent_by text, add column if not exists expires_at timestamptz;
+  alter table public.agreements add column if not exists legal jsonb not null default '{}', add column if not exists sent_at timestamptz;
+  alter table public.agreement_people add column if not exists pref_name text;
+  create table if not exists public.agreement_events (id bigserial primary key, agreement_id uuid, actor text, kind text, detail jsonb, at timestamptz default now());
+  if to_regprocedure('public.log_event(uuid, text, text, jsonb)') is null then
+    execute $f$create function public.log_event(a uuid, actor text, kind text, detail jsonb) returns void language sql security definer set search_path = public as 'insert into public.agreement_events (agreement_id, actor, kind, detail) values (a, actor, kind, detail)'$f$; end if;
+  if to_regprocedure('public.is_party(uuid)') is null then
+    execute $f$create function public.is_party(a uuid) returns boolean language sql stable security definer set search_path = public as 'select exists (select 1 from public.agreement_people where agreement_id = a and user_id = auth.uid())'$f$; end if;
+  if to_regprocedure('public.require_open(uuid)') is null then
+    execute $f$create function public.require_open(a uuid) returns void language plpgsql security definer set search_path = public as 'begin if not public.is_party(a) then raise exception ''Not your agreement''; end if; end'$f$; end if;
+  if to_regprocedure('public.agent_send_to_lawyer(uuid, text, text, text)') is null then
+    execute $f$CREATE OR REPLACE FUNCTION public.agent_send_to_lawyer(a uuid, l_name text, l_firm text, l_email text)
+ RETURNS uuid
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+declare lid uuid; who text;
+begin
+  if not public.is_agent() then raise exception 'Not allowed'; end if;
+  select string_agg(coalesce(nullif(pref_name,''), split_part(legal_name,' ',1)), ' and ') into who from public.agreement_people where agreement_id = a and legal_name <> '';
+  insert into public.lawyer_links (agreement_id, lawyer_name, firm, email, sent_by) values (a, l_name, coalesce(l_firm,''), l_email, coalesce(who, 'Your client')) returning id into lid;
+  update public.agreements set status = 'parked', sent_at = coalesce(sent_at, now()), legal = legal || jsonb_build_object('status','sent','lawyer',l_name,'firm',l_firm,'sent_at',now()) where id = a and status in ('draft','sent','parked');
+  perform public.log_event(a, coalesce(auth.jwt()->>'email','agent'), 'sent_to_lawyer', jsonb_build_object('lawyer', l_name, 'firm', l_firm, 'email', l_email, 'recorded', 'at appointment'));
+  return lid;
+end $function$$f$;
+    execute $f$CREATE OR REPLACE FUNCTION public.vendor_forward_to_lawyer(a uuid, l_name text, l_firm text, l_email text)
+ RETURNS uuid
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+declare lid uuid; who text;
+begin
+  if not public.is_party(a) then raise exception 'Not your agreement'; end if;
+  if not exists (select 1 from public.agreements where id = a and status in ('signed','countersigned','ended')) then
+    raise exception 'The agreement has not been signed yet';
+  end if;
+  if coalesce(trim(l_name),'') = '' or l_email !~ '^[^@\s]+@[^@\s]+\.[^@\s]+$' then raise exception 'Add the lawyer''s name and a valid email'; end if;
+  select coalesce(nullif(legal_name,''), email) into who from public.agreement_people where agreement_id = a and user_id = auth.uid() limit 1;
+  insert into public.lawyer_links (agreement_id, lawyer_name, firm, email, sent_by, expires_at)
+  values (a, l_name, coalesce(l_firm,''), l_email, who, now() + interval '90 days') returning id into lid;
+  perform public.log_event(a, coalesce(auth.jwt()->>'email','vendor'), 'forwarded_to_lawyer', jsonb_build_object('lawyer', l_name, 'firm', l_firm, 'email', l_email, 'by', who));
+  return lid;
+end $function$$f$;
+    execute $f$CREATE OR REPLACE FUNCTION public.vendor_send_to_lawyer(a uuid, l_name text, l_firm text, l_email text)
+ RETURNS uuid
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+declare lid uuid; who text;
+begin
+  perform public.require_open(a);
+  select coalesce(nullif(legal_name,''), email) into who from public.agreement_people where agreement_id = a and user_id = auth.uid() limit 1;
+  insert into public.lawyer_links (agreement_id, lawyer_name, firm, email, sent_by) values (a, l_name, coalesce(l_firm,''), l_email, who) returning id into lid;
+  update public.agreements set status = 'parked', legal = legal || jsonb_build_object('status','sent','lawyer',l_name,'firm',l_firm,'sent_at',now()) where id = a;
+  perform public.log_event(a, coalesce(auth.jwt()->>'email','vendor'), 'sent_to_lawyer', jsonb_build_object('lawyer', l_name, 'firm', l_firm, 'email', l_email));
+  return lid;
+end $function$$f$;
+    revoke execute on function public.agent_send_to_lawyer(uuid, text, text, text), public.vendor_forward_to_lawyer(uuid, text, text, text), public.vendor_send_to_lawyer(uuid, text, text, text) from public, anon;
+    grant execute on function public.agent_send_to_lawyer(uuid, text, text, text), public.vendor_forward_to_lawyer(uuid, text, text, text), public.vendor_send_to_lawyer(uuid, text, text, text) to authenticated;
+  end if;
+  -- a vendor on two agency agreements (one signed, one not), and an agent
+  insert into public.agreements (id, property_id, status) values (aid2, pid, 'sent');
+  insert into public.agreement_people (agreement_id, user_id, legal_name, email, phone) values (aid, vuser, 'Vera Vendor', 'rb-vera@example.com', '022 987 6543'), (aid2, vuser, 'Vera Vendor', 'rb-vera@example.com', '022 987 6543');
+  insert into public.agents (email, name) values ('rb-agent@example.com', 'RB Agent') on conflict do nothing;
+  vendor := json_build_object('sub', vuser, 'email', 'rb-vera@example.com', 'role', 'authenticated')::text; agentc := json_build_object('sub', gen_random_uuid(), 'email', 'rb-agent@example.com', 'role', 'authenticated')::text;
+  select array_agg(md5(pg_get_functiondef(fn_::regprocedure)) order by fn_) into old_ from unnest(array['public.agent_send_to_lawyer(uuid,text,text,text)', 'public.vendor_forward_to_lawyer(uuid,text,text,text)', 'public.vendor_send_to_lawyer(uuid,text,text,text)']) fn_;
 
   execute $mig$__MIGRATION__$mig$;
 
@@ -61,5 +137,39 @@ begin
   -- 5. still not runnable by anyone but the database's own functions
   if has_function_privilege('authenticated', 'public.offer_mail_allowed(uuid, text, uuid)', 'execute') or has_function_privilege('anon', 'public.offer_mail_allowed(uuid, text, uuid)', 'execute') then out := out || 'OFFER_MAIL_ALLOWED RUNNABLE BY A SIGNED-IN USER; ';
   else out := out || 'not runnable by anon or signed-in users; '; end if;
+
+  -- ── Part 2: the vendors' lawyer's phone ──
+  -- 6. the four-argument functions are word for word as they were; the new column refuses words
+  select array_agg(md5(pg_get_functiondef(fn_::regprocedure)) order by fn_) into new_ from unnest(array['public.agent_send_to_lawyer(uuid,text,text,text)', 'public.vendor_forward_to_lawyer(uuid,text,text,text)', 'public.vendor_send_to_lawyer(uuid,text,text,text)']) fn_;
+  if new_ is distinct from old_ then out := out || 'A FOUR-ARGUMENT LAWYER FUNCTION CHANGED; '; else out := out || 'four-argument lawyer functions unchanged; '; end if;
+  begin insert into public.lawyer_links (agreement_id, lawyer_name, firm, email, phone) values (aid, 'X', '', 'x@law.example', 'call me'); out := out || 'A WORDY PHONE WAS STORED; ';
+  exception when check_violation then out := out || 'the column refuses a phone that isn''t a number; '; end;
+  -- 7. as the vendor: the page's calls, without a phone (four arguments, named, as the page sends them) and with one
+  execute 'set local role authenticated'; perform set_config('request.jwt.claims', vendor, true);
+  lid := public.vendor_forward_to_lawyer(a => aid, l_name => 'Sam Counsel', l_firm => 'Counsel and Co', l_email => 'sam@counsel.example');
+  out := out || 'no phone: ' || coalesce((select coalesce(phone, 'null') from public.lawyer_links where id = lid), 'NO ROW') || '; ';
+  lid := public.vendor_forward_to_lawyer(a => aid, l_name => 'Sam Counsel', l_firm => 'Counsel and Co', l_email => 'sam@counsel.example', l_phone => ' 03 455 0000 ');
+  out := out || 'forward with phone: ' || coalesce((select phone from public.lawyer_links where id = lid), 'MISSING') || ', logged ' || coalesce((select detail->>'phone' from public.agreement_events where agreement_id = aid and kind = 'forwarded_to_lawyer' order by id desc limit 1), 'NOT LOGGED') || '; ';
+  lid := public.vendor_forward_to_lawyer(a => aid, l_name => 'Sam Counsel', l_firm => '', l_email => 'sam@counsel.example', l_phone => '  ');
+  out := out || 'a blank phone: ' || coalesce((select coalesce(phone, 'null') from public.lawyer_links where id = lid), 'NO ROW') || '; ';
+  begin perform public.vendor_forward_to_lawyer(a => aid, l_name => 'Sam', l_firm => '', l_email => 'sam@counsel.example', l_phone => 'ring Sam'); out := out || 'A WORDY PHONE WAS ACCEPTED; ';
+  exception when others then out := out || 'refused (' || sqlerrm || '); '; end;
+  begin perform public.vendor_forward_to_lawyer(a => aid2, l_name => 'Sam', l_firm => '', l_email => 'sam@counsel.example', l_phone => '03 455 0000'); out := out || 'FORWARDED AN UNSIGNED AGREEMENT; ';
+  exception when others then out := out || 'unsigned: ' || sqlerrm || '; '; end;
+  lid := public.vendor_send_to_lawyer(a => aid2, l_name => 'Sam Counsel', l_firm => 'Counsel and Co', l_email => 'sam@counsel.example', l_phone => '+64 3 455 0000');
+  out := out || 'send before signing: ' || coalesce((select phone from public.lawyer_links where id = lid), 'MISSING') || ', ' || (select status from public.agreements where id = aid2) || '; ';
+  begin perform public.agent_send_to_lawyer(a => aid2, l_name => 'Sam', l_firm => '', l_email => 'sam@counsel.example', l_phone => '03 455 0000'); out := out || 'A VENDOR RAN THE AGENT''S FUNCTION; ';
+  exception when others then out := out || 'the agent''s function refuses a vendor (' || sqlerrm || '); '; end;
+  -- 8. as Tim: at the appointment, with the phone
+  perform set_config('request.jwt.claims', agentc, true);
+  lid := public.agent_send_to_lawyer(a => aid2, l_name => 'Sam Counsel', l_firm => 'Counsel and Co', l_email => 'sam@counsel.example', l_phone => '03 455 0001');
+  out := out || 'agent send: ' || coalesce((select phone from public.lawyer_links where id = lid), 'MISSING') || ', logged ' || coalesce((select detail->>'phone' from public.agreement_events where agreement_id = aid2 and kind = 'sent_to_lawyer' order by id desc limit 1), 'NOT LOGGED') || '; ';
+  execute 'reset role';
+  -- 9. who can run the new ones: signed-in users and the service role, never anon
+  foreach x in array array['public.vendor_send_to_lawyer(uuid,text,text,text,text)', 'public.vendor_forward_to_lawyer(uuid,text,text,text,text)', 'public.agent_send_to_lawyer(uuid,text,text,text,text)'] loop
+    if has_function_privilege('anon', x, 'execute') or not has_function_privilege('authenticated', x, 'execute') or not has_function_privilege('service_role', x, 'execute') then out := out || 'WRONG PRIVILEGES ON ' || upper(x) || '; '; end if; end loop;
+  out := out || 'new functions: signed-in users and the service role only; ';
+  -- 10. the vendors' email may still go to that lawyer (the agency agreement in force), and only as before
+  if not ('sam@counsel.example' = any(public.offer_mail_allowed(oid, 'agreed_vendors', null))) then out := out || 'THE AGENCY AGREEMENT''S LAWYER IS NOT ALLOWED ON THE VENDORS'' EMAIL; '; else out := out || 'the vendors'' email may go to the agency agreement''s lawyer; '; end if;
   raise exception 'ROLLBACK %', out;
 end $t$;

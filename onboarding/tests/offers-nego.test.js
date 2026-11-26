@@ -394,7 +394,7 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
     { const need0 = (await p.textContent('#mlNeed')).trim(); out.need0 = need0; expect(/^Still needed: .*the vendors' lawyer \(name, firm, email, phone\)/.test(need0) && !/the vendors' lawyer's/.test(need0),'Still needed, at the top of the review: ' + need0); }
     // the vendors' lawyer on the agency agreement, and a different email for notices on the agreement's contact page: the next build fills both
     const plSvc0 = await p.evaluate(oid => { const d = window.__mockDB, ag = d.offer_agreements.find(x => x.offer_id === oid), doc = d.offer_documents.find(x => x.id === ag.document_id), dr = d.offer_drafts.find(x => x.id === doc.draft_id);
-      d.lawyer_links.push({ id: 'LL-mail-1', agreement_id: 'A1', lawyer_name: 'Sam Counsel', firm: 'Counsel and Co', email: 'sam@counsel.example', sent_at: new Date().toISOString(), open_count: 0 });
+      d.lawyer_links.push({ id: 'LL-mail-1', agreement_id: 'A1', lawyer_name: 'Sam Counsel', firm: 'Counsel and Co', email: 'sam@counsel.example', phone: '03 455 0000', sent_at: new Date().toISOString(), open_count: 0 });   // the phone recorded with the lawyer (030)
       const sv = dr.placed.find(x => x.id === 'pl_service'), was = sv ? sv.text : null; if (sv) sv.text = 'conveyancing@synthlaw.example'; else dr.placed.push({ id: 'pl_service', text: 'conveyancing@synthlaw.example' });
       localStorage.setItem('mockdb', JSON.stringify(d)); return was; }, offA);
     await p.selectOption('#ngDepHolder', 'other'); expect(await p.isVisible('#ngDepOther'), 'Other: type it in'); await p.click('#ngDepSave'); expect(/Type who holds the deposit/.test(await p.textContent('#ngDepOut')), 'Other needs the holder typed');
@@ -403,11 +403,11 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
     { const d_ = await db(p), m_ = d_.offer_mail_drafts.filter(m => m.offer_id === offA && m.status === 'draft'), P_ = m_.find(m => m.kind === 'agreed_purchasers'), V_ = m_.find(m => m.kind === 'agreed_vendors');
       out.agreedBodies2 = { purchasers: P_.body.split('**Roadmap**')[0], vendors: V_.body.split('**Roadmap**')[0], pcc: P_.cc_addr, vcc: V_.cc_addr };
       expect(V_.cc_addr.join() === 'sam@counsel.example' && V_.body.includes("This email is cc'd to your lawyer, Sam Counsel of Counsel and Co.") && V_.body.includes('That way Sam and I'), "the vendors' email: their lawyer named, by first name, and cc'd, from the agency agreement's lawyer");
-      expect(P_.body.includes("The vendors' lawyer is:\nSam Counsel, Counsel and Co\nEmail: sam@counsel.example\nPhone: [Tim to fill: the vendors' lawyer's phone]"), "the purchasers' email: the vendors' lawyer filled, the phone not on record a clear blank");
+      expect(P_.body.includes("The vendors' lawyer is:\nSam Counsel, Counsel and Co\nEmail: sam@counsel.example\nPhone: 03 455 0000") && V_.body.includes("Your lawyer:\nSam Counsel, Counsel and Co\nEmail: sam@counsel.example\nPhone: 03 455 0000"), "both emails: the vendors' lawyer filled, with the phone recorded on the agency agreement");
       const svc = "Pat Solicitor, Synthetic Law\nEmail: pat@synthlaw.example\nPhone: 03 477 1234\nNotices are served to: conveyancing@synthlaw.example";
-      expect(P_.body.includes(svc) && V_.body.includes(svc) && P_.cc_addr.join() === 'pat@synthlaw.example', "a different email for notices on the agreement: both shown, labelled, in both emails; the cc is the lawyer's email");
+      expect(P_.body.includes(svc) && V_.body.includes(svc) && P_.cc_addr.join() === 'pat@synthlaw.example,conveyancing@synthlaw.example', "a different email for notices on the agreement: both shown, labelled, in both emails, and both cc'd: " + P_.cc_addr);
       const need1 = (await p.textContent('#mlNeed')).trim(); out.need1 = need1;
-      expect(/the vendors' lawyer's phone/.test(need1) && !/name, firm, email, phone/.test(need1), 'Still needed now lists only the vendors\' lawyer\'s phone among the lawyers: ' + need1);
+      expect(!/lawyer/.test(need1), 'Still needed lists no lawyer detail now: ' + need1);
       expect(/taken from the lawyer the agency agreement was sent to/.test(await p.textContent('#mlNotes')), "Tim is told where the vendors' lawyer came from"); }
     await p.evaluate(([oid, was]) => { const d = window.__mockDB, ag = d.offer_agreements.find(x => x.offer_id === oid), doc = d.offer_documents.find(x => x.id === ag.document_id), dr = d.offer_drafts.find(x => x.id === doc.draft_id);
       d.lawyer_links = d.lawyer_links.filter(x => x.id !== 'LL-mail-1'); const i = dr.placed.findIndex(x => x.id === 'pl_service'); if (was === null) dr.placed.splice(i, 1); else dr.placed[i].text = was;

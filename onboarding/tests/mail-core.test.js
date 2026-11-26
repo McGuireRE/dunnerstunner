@@ -94,7 +94,8 @@ const base = () => ({
     ok(x.purchasers.cc.join() === 'pat.contract@synthlaw.example', 'cc: the lawyer email on the agreement: ' + x.purchasers.cc);
     has(x.purchasers.body, "Pat Solicitor, Synthetic Law Limited\nEmail: pat.contract@synthlaw.example\nPhone: 03 477 9999", "the purchasers' email: as on the agreement");
     has(x.vendors.body, "The purchasers' lawyer is:\nPat Solicitor, Synthetic Law Limited\nEmail: pat.contract@synthlaw.example\nPhone: 03 477 9999", "the vendors' email: the same");
-    ok(!/Notices are served to/.test(x.purchasers.body + x.vendors.body), 'the same address for notices: shown once'); }
+    ok(!/Notices are served to/.test(x.purchasers.body + x.vendors.body), 'the same address for notices: shown once');
+    b.purchaserLawyer.service = 'PAT.CONTRACT@synthlaw.example'; ok(M.agreedDrafts(b).purchasers.cc.join() === 'pat.contract@synthlaw.example', 'the same address in other capitals: cc\'d once'); }
   { // Tim, 26 November 2026: a lawyer's email and the email for service of notices differ: both, labelled, in both emails
     const b = base(); b.vendorLawyer = { person: 'Sam Counsel', firm: 'Counsel and Co', email: 'sam@counsel.example', phone: '03 455 0000', service: 'notices@counsel.example' };
     b.purchaserLawyer = { person: 'Pat Solicitor', firm: 'Synthetic Law', email: 'pat@synthlaw.example', phone: '03 477 1234', service: 'conveyancing@synthlaw.example' };
@@ -102,7 +103,8 @@ const base = () => ({
     for (const t of [x.purchasers.body, x.vendors.body]) {
       has(t, 'Sam Counsel, Counsel and Co\nEmail: sam@counsel.example\nPhone: 03 455 0000\nNotices are served to: notices@counsel.example', "the vendors' lawyer: email and notices address both");
       has(t, 'Pat Solicitor, Synthetic Law\nEmail: pat@synthlaw.example\nPhone: 03 477 1234\nNotices are served to: conveyancing@synthlaw.example', "the purchasers' lawyer: email and notices address both"); }
-    ok(x.vendors.cc.join() === 'sam@counsel.example' && x.purchasers.cc.join() === 'pat@synthlaw.example', "cc: each lawyer's own email");
+    // Tim, 26 November 2026: cc both the lawyer's email and the notices address when they differ
+    ok(x.vendors.cc.join() === 'sam@counsel.example,notices@counsel.example' && x.purchasers.cc.join() === 'pat@synthlaw.example,conveyancing@synthlaw.example', "cc: each lawyer's email and their notices address: " + x.vendors.cc + ' / ' + x.purchasers.cc);
     // only the notices address on record: it is the address for both, shown once
     b.vendorLawyer = { person: 'Sam Counsel', firm: 'Counsel and Co', phone: '03 455 0000', service: 'notices@counsel.example' }; const y = M.agreedDrafts(b);
     has(y.purchasers.body, 'Sam Counsel, Counsel and Co\nEmail: notices@counsel.example\nPhone: 03 455 0000\n\n', 'only the notices address: used once, as the email');

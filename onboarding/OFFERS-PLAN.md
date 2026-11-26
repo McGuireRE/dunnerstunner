@@ -916,9 +916,17 @@ Tim: "none of the contact details were filled in" (offer on 188 Gladstone Road).
   in the vendors' email, or the other way round. In the live test offer the purchaser's email is also the vendor's, so it is left
   out of both emails; and the only lawyer link on that agency agreement carries the vendor's own email, so the vendors' lawyer
   stays a blank there (as it did on the drafted contract).
+Tim's answers (26 November 2026), built on top: (1) when a lawyer's email and notices address differ, the email is cc'd to both;
+(2) the vendors' email wording ("The contact details I have for you are:", "Your lawyer:") is approved; (3) a phone for the vendors'
+lawyer wherever the lawyer is recorded on the agency agreement: the vendor's "Send to my lawyer" (before signing) and "Send a copy to
+your lawyer" (after), Tim's "Send to lawyer and pause" at the appointment and his "Forward the signed agreement to a lawyer" (030 part
+2: `lawyer_links.phone` and five-argument lawyer functions). The phone shows in the agreement page's lawyer links, goes on a drafted
+contract's contact page (vendor's lawyers: contact details) when the vendors' lawyer comes from the agency agreement, and fills the
+agreed emails. Links recorded before have no phone, so it stays "Still needed" for them.
 Tests: `tests/mail-core.test.js` (extended: the live case, signers, the contract's lawyer, differing notices address, Still
 needed, privacy left-outs), `tests/offers-nego.test.js` (extended: built on the page, then rebuilt with an agency agreement
-lawyer and a different notices address), `tests/agreed-mail-rollback.sql` / `.js` (030, local stand-in: every line as expected).
+lawyer and a different notices address), `tests/agreed-mail-rollback.sql` / `.js` (030, local stand-in: every line as expected),
+`tests/lawyer-phone.test.js` (new: the phone on the vendor's and Tim's lawyer forms), `tests/draft-core.test.js` (the phone from the link).
 
 ## Offers fixes 1 (raised by Tim 25 November 2026, built ahead of everything else; branch `offers-fixes-1`)
 

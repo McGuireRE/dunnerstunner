@@ -328,7 +328,8 @@
     const close = 'It has been great working with you thus far, and I look forward to ensuring everything continues smoothly.\n\nFaithfully,\nTim';
     const pNames = names(purch.map(q => q.first || q.last));
     const purchasers = {
-      to: uniq(purch.map(q => q.to).concat(purch.some(q => q.to) ? [] : [D.email])), cc: uniq([pLawP.email]),
+      // cc: the lawyer's email and, when it is a different address, the email for notices too (Tim, 26 November 2026)
+      to: uniq(purch.map(q => q.to).concat(purch.some(q => q.to) ? [] : [D.email])), cc: uniq([pLawP.email, pLawP.service]),
       subject: `Congratulations! ${addr}`,
       body: [...top, `Dear ${pNames || blank('fill: their first names')},`,
         `Congratulations on your agreement to purchase ${addr}. It sure is a desirable property! The agreement is attached.`,
@@ -344,7 +345,7 @@
     };
     const vNames = names(vend.map(v => v.call));
     const vendors = {
-      to: uniq(vend.map(v => v.to)), cc: uniq([vLawV.email]),
+      to: uniq(vend.map(v => v.to)), cc: uniq([vLawV.email, vLawV.service]),
       subject: `Congratulations! ${addr}`,
       body: [...top, `Hello ${vNames || blank('fill: their first names')},`,
         `Congratulations on your agreement for the sale of ${addr}. This email is cc'd to your lawyer, ${vLawV.person || blank("fill: the vendors' lawyer's name")} of ${vLawV.firm || blank("fill: the vendors' lawyer's firm")}.`,

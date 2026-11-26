@@ -180,6 +180,12 @@ const ok = (c, msg) => { if (!c) errs.push(msg); };
   eq((D.pickVendorLawyer({ cycle_at: '2026-06-01T00:00:00Z' }, ags, lks, parties) || {}).firm, 'Now Law', 'vendor lawyer: only a signed agreement of this round of owners');
   eq(D.pickVendorLawyer({ cycle_at: '2026-06-01T00:00:00Z' }, ags.filter(a => a.id !== 'now'), lks, parties), null, 'none when only an earlier round or an unsigned agreement has one');
   eq(D.pickVendorLawyer({}, ags, lks.concat({ agreement_id: 'now', firm: 'Mine', email: 'testy@vendor.example', sent_at: '2026-12-01' }), parties).firm, 'Now Law', "a link to the vendor's own email is never taken");
+  // 030 (Tim, 26 November 2026): the lawyer's phone, where it was recorded with the lawyer on the agency agreement; never a vendor's own
+  eq(D.pickVendorLawyer({}, ags, lks.concat({ agreement_id: 'now', firm: 'Phone Law', lawyer_name: 'Pia', email: 'pia@phone.example', phone: '03 455 0000', sent_at: '2026-12-02' }), parties).phone, '03 455 0000', "the vendor's lawyer's phone from the agency agreement's lawyer link");
+  eq(D.pickVendorLawyer({}, ags, lks.concat({ agreement_id: 'now', firm: 'Phone Law', lawyer_name: 'Pia', email: 'pia@phone.example', phone: '+64 21 000 1111', sent_at: '2026-12-02' }), parties).phone, '', "a lawyer phone that is the vendor's own is never taken");
+  eq(D.pickVendorLawyer({}, ags, lks, parties).phone, '', 'no phone recorded: none');
+  { const pvp = D.planDraft({ details: base, map: vmap, terms, today: '2026-11-24', parties, vendorLawyer: { firm: 'Phone Law', person: 'Pia', email: 'pia@phone.example', phone: '03 455 0000', source: 'the lawyer the agency agreement was sent to' } });
+    ok((I(pvp, 'vl_phone') || {}).text === '03 455 0000', "the recorded phone goes on the contract's contact page for the vendor's lawyer"); }
   // 3. anything but the further terms that doesn't fit blocks approval
   const p30 = plan({ chattels_add: Array.from({ length: 30 }, (_, i) => 'Synthetic chattel number ' + (i + 1)) });
   const r30 = await D.renderDraft(PDFLib, blank, p30);
