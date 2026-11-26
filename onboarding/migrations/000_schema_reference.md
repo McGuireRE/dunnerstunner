@@ -450,6 +450,27 @@ agreements/<agreement id>/signatures/... (vendors may upload their own signature
   note). An empty choice is refused. A vendor with no email may sign on Tim's device; Tim's handing over of the copy is an
   `agreement_events` row of kind `copy_handed_over`.
 
+## 030 The agreed emails' lawyer cc (Agreed emails filled in, 26 November 2026; tested in a rollback block on a local PostgreSQL stand-in, NOT yet on the live project)
+- `offer_mail_allowed` redefined: as 024 (checked against the live body 26 November 2026), except that the `agreed_purchasers` branch
+  also allows the agreed draft's `pl_email` and `pl_service` (the purchasers' lawyer as the contract's contact page has them; only text
+  holding an @), unless it is a vendor's own address. After review: in `agreed_vendors`, a vendors' lawyer address (on the agreed draft,
+  or the agency agreement's lawyer link) that is a purchaser's own is no longer allowed. New internal `offer_vendor_own_emails(offer)`
+  and `offer_purchaser_own_emails(offer)` (each side's own addresses as `offer_mail_side_hit` reads them; Tim's own never a party's;
+  the offer's lawyer email not the purchasers'). Every other kind is unchanged; execute revoked from public, anon and authenticated.
+- Part 2 (Tim, 26 November 2026): `lawyer_links.phone` (text, optional; check `^[0-9+()\-. ]{6,40}$`, as the offer form's phones).
+  Five-argument `vendor_send_to_lawyer`, `vendor_forward_to_lawyer` and `agent_send_to_lawyer` (`l_phone`) beside the four-argument ones,
+  which are kept word for word; each is the old body with the phone checked (`offer_phone_ok`), stored and logged. A call without
+  `l_phone` runs the old function. Execute: authenticated and service_role, not anon (as the old ones). Tim's own forward from the
+  agreement page inserts the row with the phone itself (his `agent_all_lawyer` policy).
+- Rollback test: `tests/agreed-mail-rollback.sql` (built by `tests/agreed-mail-rollback.js`). Local run 26 November 2026 on the stand-in
+  (pg-standin, 010, 016 part A, 018, 019, 021 to 026, pg-standin-signatures, 029, then `tests/pg-standin-agency.sql`): every line as
+  expected, no CAPITALS. `pg-standin-agency.sql` brings the agency agreement's tables, auth.users and their triggers and functions to
+  the live definitions (read 27 November 2026; 28 functions checked identical to live by fingerprint); the block itself makes only
+  fixtures, including a made-up auth.users row for the vendor (live's agreement_people.user_id key), and has 029's guard: a fixture
+  error shows in CAPITALS. The first live run (before this) stopped at that key, nothing kept. The second (efb0d3c) read the vendor's log
+  as the vendor, which live's RLS on agreement_events doesn't allow; the stand-in now has live's RLS and policies on those four
+  tables, and the test reads the log after the role is reset.
+
 ## 028 The shared records (LW0, 26 November 2026; tested in a rollback block, NOT yet on the live project)
 One home for each fact. Every new table has RLS; nobody writes them directly; every trigger here catches its own errors and records them
 in `shared_record_log` (agent reads), so this layer can never stop a vendor's questionnaire, a signing or an offer. Signed records,
@@ -515,4 +536,5 @@ signatures and fingerprints are not touched.
 - Privileges: every new definer function is closed to PUBLIC and anon; `profile_vendor_key` and `qa_mine` (read inside the vendor
   policies) are open to signed-in users only; the internal helpers to nobody but the functions that call them.
 - Rollback test: `tests/shared-records-rollback.sql` (built by `tests/shared-records-rollback.js`); quick local stand-in
-  `tests/lw0-standin.sql` (simplified inspection functions; the live run uses the real ones).
+  `tests/lw0-standin-030.sql` (run on the stand-in built through 030: brings every table, policy and helper 028 builds on to its live
+  definition, including 012's own `agent_inspection_save` and the questionnaire's triggers). Applying 028 needs 030 first.

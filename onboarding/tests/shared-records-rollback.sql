@@ -1,10 +1,11 @@
 -- Rollback test for migration 028 (LW0, the shared records). Run with onboarding/tests/shared-records-rollback.js, which puts the whole
 -- migration inside the block, so one statement changes everything, runs the checks and then raises, which undoes it all. Nothing is kept.
 -- The output is the exception message: values and refusals in lower case; a line in CAPITALS means something that should have been
--- refused was allowed, or a value was wrong. Needs 026 (and everything before it) applied. The agent is simulated with
+-- refused was allowed, or a value was wrong. Needs 030 (and everything before it) applied: the live project, or the stand-in through 030 with tests/lw0-standin-030.sql. Its fixtures match the
+-- live schema (NOT NULLs, foreign keys, the agreement's and questionnaire's own triggers); one that doesn't shows in capitals at the end. The agent is simulated with
 -- request.jwt.claims; a vendor likewise. Test rows use example.com addresses only, and nothing sends email.
 do $t$
-declare out text := ''; da uuid; sa uuid; p3 uuid; i3 uuid; p4 uuid; i4 uuid; bp uuid; ba uuid; bron uuid; c3 uuid; pp3 uuid; r jsonb; pid uuid; iid uuid; aid uuid; plid uuid; pp1 uuid; pp2 uuid; c1 uuid; c2 uuid; lk uuid; n int; n2 int; x text; vid uuid; qid uuid;
+declare out text := ''; bdesc jsonb; da uuid; sa uuid; p3 uuid; i3 uuid; p4 uuid; i4 uuid; bp uuid; ba uuid; bron uuid; c3 uuid; pp3 uuid; r jsonb; pid uuid; iid uuid; aid uuid; plid uuid; pp1 uuid; pp2 uuid; c1 uuid; c2 uuid; lk uuid; n int; n2 int; x text; vid uuid; qid uuid;
   sig0 bigint; sigsha text; apc text; pre_signed text;
   agent text := json_build_object('email', (select email from public.agents order by created_at limit 1), 'sub', '22222222-2222-2222-2222-222222222222', 'role', 'authenticated')::text;
   vendor text := '{"email":"rb-lw0-vendor@example.com","sub":"11111111-1111-1111-1111-1111111110a1","role":"authenticated"}';
@@ -21,6 +22,9 @@ begin
   update public.properties set found = '{"land_area":{"key":"land_area","field":"pLand","written":true,"value":812,"display":"812 m²","as_of_label":"2026-2027 rating year","source_name":"Dunedin City Council rates","label":"Land area"}}' where id = bp;
   perform set_config('app.council_accept', 'off', true);
   insert into public.agreements (address, property_id, answers) values ('2 Lw0 Backfill Lane, Rollbackville', bp, '{"pBed":"3"}') returning id into ba;
+
+  -- what the file says just before 028 (live, the agreement's own trigger has already copied its page 1 onto the file)
+  select description into bdesc from public.properties where id = bp;
 
   execute $mig$__MIGRATION__$mig$;
 
@@ -47,8 +51,8 @@ begin
   r := public.profile_read(bp, false);
   out := out || 'backfilled file: ' || (select string_agg(px->>'key' || '=' || (px->'value' #>> '{}') || '/' || (px->>'source') || coalesce('/' || (px->>'source_name'), '') || '/' || (px->>'ticked')
       || coalesce(' others ' || (select string_agg((o->'value' #>> '{}') || '/' || (o->>'source'), ',') from jsonb_array_elements(px->'others') o), ''), ', ' order by px->>'key') from jsonb_array_elements(r) px)
-    || ' file unchanged=' || ((select description from public.properties where id = bp) = '{"pHeat":"Wood burner","pBed":"2","pLand":"800"}'::jsonb)::text || '; ';
-  if (select description from public.properties where id = bp) <> '{"pHeat":"Wood burner","pBed":"2","pLand":"800"}'::jsonb then out := out || 'THE BACKFILL CHANGED A PROPERTY FILE; '; end if;
+    || ' file unchanged=' || ((select description from public.properties where id = bp) = bdesc)::text || '; ';
+  if (select description from public.properties where id = bp) <> bdesc then out := out || 'THE BACKFILL CHANGED A PROPERTY FILE; '; end if;
   if n > 0 then out := out || 'THE PROFILE AND THE FILE DISAGREE AFTER THE BACKFILL; '; end if;
   if ((select px from jsonb_array_elements(r) px where px->>'key' = 'pLand')->>'source') <> 'tim' then out := out || 'A COUNCIL VALUE REPLACED THE FILE''S LAND AREA; '; end if;
   -- in the backfill, an earlier check answer differing from the file's own value: the file's stays, the answer beside it
@@ -111,7 +115,9 @@ begin
   r := (select f from jsonb_array_elements(public.agent_property_profile(pid)->'facts') f where f->>'key' = 'pBed');
   out := out || 'a different check answer: ticked ' || (r->>'value') || '/' || (r->>'source') || '/' || (r->>'ticked') || ' beside it ' || coalesce((select string_agg((o->>'value') || '/' || (o->>'source'), ',' order by o->>'source') from jsonb_array_elements(r->'others') o), 'none')
     || ' file=' || (select description->>'pBed' from public.properties where id = pid) || '; ';
-  if r->>'value' <> '5' or (r->>'ticked')::boolean is not true or not (r->'others') @> '[{"value":"4","source":"agreement"}]' or (select description->>'pBed' from public.properties where id = pid) <> '5' then out := out || 'THE CHECK ANSWER DID NOT TAKE, OR THE AGREEMENT''S VALUE IS NOT SHOWN; '; end if;
+  -- here the draft agreement in force says 4, so migration 012 holds the answer as a difference for Tim to choose on the check: Tim's 4
+  -- stays on the profile and the file, and the 5 is beside it (with no agreement in force, his answer takes: see 3 Lw0 Check Road below)
+  if r->>'value' <> '4' or not (r->'others') @> '[{"value":"5","source":"inspection"}]' or (select description->>'pBed' from public.properties where id = pid) <> '4' then out := out || 'A DIFFERENCE WITH THE AGREEMENT WAS NOT KEPT BESIDE; '; end if;
   -- untick all, then a record source can't take a person's place, and choosing something not on the property is refused
   perform public.agent_profile_tick(pid, null, false);
   out := out || 'ticked after untick all=' || (select count(*) from public.property_profile where property_id = pid and ticked) || '; ';
@@ -128,11 +134,11 @@ begin
   out := out || 'after the clear, a draft agreement says 700: cleared=' || (r->>'cleared') || ' chosen=' || coalesce(r->>'value_id', 'none') || ' beside it ' || (select string_agg((o->'value' #>> '{}') || '/' || (o->>'source'), ',' order by o->>'source') from jsonb_array_elements(r->'others') o)
     || ' file=' || coalesce((select description->>'pLand' from public.properties where id = pid), 'empty') || '; ';
   if r->>'value_id' is not null or (select description->>'pLand' from public.properties where id = pid) is not null then out := out || 'A CLEARED FACT WAS REFILLED; '; end if;
-  -- Tim then answers it on the check (600): his own choice, so it fills it
+  -- his check answer 600 differs from the draft agreement in force (700): migration 012 holds it for him to choose on the check
   perform public.agent_inspection_save(iid, '{"pLand":"600"}'::jsonb, null, null, null);
   r := (select f from jsonb_array_elements(public.agent_property_profile(pid)->'facts') f where f->>'key' = 'pLand');
-  out := out || 'then his check answer 600: chosen ' || coalesce(r->>'value', 'none') || '/' || coalesce(r->>'source', '-') || ' file=' || coalesce((select description->>'pLand' from public.properties where id = pid), 'empty') || '; ';
-  if coalesce(r->>'value', '') <> '600' or (select description->>'pLand' from public.properties where id = pid) is distinct from '600' then out := out || 'HIS CHECK ANSWER DID NOT FILL THE CLEARED FACT; '; end if;
+  out := out || 'then his check answer 600 (the agreement says 700): cleared=' || (r->>'cleared') || ' beside it ' || (select string_agg((o->'value' #>> '{}') || '/' || (o->>'source'), ',' order by o->>'source') from jsonb_array_elements(r->'others') o) || ' file=' || coalesce((select description->>'pLand' from public.properties where id = pid), 'empty') || '; ';
+  if r->>'value_id' is not null or (select description->>'pLand' from public.properties where id = pid) is not null or not (r->'others') @> '[{"value":"600","source":"inspection"}]' then out := out || 'A CLEARED FACT WAS REFILLED, OR HIS ANSWER IS NOT SHOWN; '; end if;
   -- Tim's decision (26 November 2026): his disclosures check answer is his own choice. The file said 800 (his entry), the check says 790:
   -- the profile, ticked, and the file say 790; the 800 is kept beside it
   r := public.agent_inspection_start(null, '3 Lw0 Check Road, Rollbackville'); p3 := (r->>'property_id')::uuid; i3 := (r->>'inspection_id')::uuid;
@@ -312,5 +318,7 @@ begin
   if (select count(*) from public.signatures) <> sig0 or (select md5(string_agg(snapshot_sha256, ',' order by id)) from public.signatures) is distinct from sigsha then out := out || 'SIGNATURES CHANGED; '; end if;
   if (select md5(string_agg(id::text || coalesce(contact_id::text, '-') || legal_name || email, ',' order by id)) from public.agreement_people where signed_at is not null and agreement_id <> aid) is distinct from pre_signed then out := out || 'A SIGNED PERSON CHANGED; '; end if;
   out := out || 'signed untouched; log=' || (select count(*) from public.shared_record_log) || coalesce(' ' || (select string_agg(what || ': ' || (detail->>'error'), ' | ') from public.shared_record_log), '') || '; ';
+  -- a fixture that doesn't match the live schema shows as a refusal above; say so in capitals (other builders' tests met this live)
+  if out ~* 'null value in column|violates foreign key|violates unique|does not exist' then out := out || 'A FIXTURE DID NOT MATCH THE SCHEMA; '; end if;
   raise exception 'ROLLBACK %', out;
 end $t$;

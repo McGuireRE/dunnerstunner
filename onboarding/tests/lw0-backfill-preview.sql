@@ -1,5 +1,5 @@
 -- LW0 backfill preview (for Tim, before 028 is applied). Run against a COPY of the live records with 028 applied (never the live project):
--- load the live rows into the local stand-in (tests/lw0-standin.sql), keep _before (properties: id, description, title_ref,
+-- load the live rows into the local stand-in built through 030 with tests/lw0-standin-030.sql, keep _before (properties: id, description, title_ref,
 -- legal_description) and _signed_before (signed agreement_people: id, contact_id, legal_name, email), apply 028, then run this with psql.
 -- Output: each name in each list and what it becomes; each property's facts with their source and any value shown beside them;
 -- and that no property file and no signed person changed. The result goes to tests/out/lw0-backfill-preview.txt (not committed).

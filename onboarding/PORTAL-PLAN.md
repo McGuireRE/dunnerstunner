@@ -137,7 +137,7 @@ Status: built, awaiting review (26 November 2026, branch `lw0-shared-records`) a
 is written and tested in a rollback block on a local stand-in (every check passed after the first review's fixes); it still has to be run
 in a rollback block on the live project before it is applied. It is NOT applied. Before it is applied Tim sees what the backfill would do:
 `tests/lw0-backfill-preview.sql`, run on a copy of the live records, writes `tests/out/lw0-backfill-preview.txt` (not committed). Tests: `lw0-shared-records.test.js`,
-`tests/shared-records-rollback.sql` (with `.js`), `tests/lw0-standin.sql`; `portal-routes.test.js`, `inspection.test.js` and
+`tests/shared-records-rollback.sql` (with `.js`), `tests/lw0-standin-030.sql` (the stand-in through 030 brought to the live schema); `portal-routes.test.js`, `inspection.test.js` and
 `council-lookup.test.js` updated for the new names and order.
 
 The rule (Tim): every fact has one home; pages read from it and save back; every value carries where it came from and when; if two

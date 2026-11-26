@@ -19,9 +19,14 @@ as `BUILD-PLAN.md`: builder, tests against the mock database, independent review
 - Live: Signing viewer, chattels initials, four more marks, Tim's own places and identity checks, 27 November 2026 about 5:15am NZT.
   Migration 029 applied (its live rollback test ran clean first: 75 checks, no capitals); main 1b730e7; offer-sign v7 pinned to 1b730e7,
   OPTIONS 200; live page byte-identical to the build.
+- Live: Agreed emails filled in (contact details, both lawyers, cc both addresses, Still needed, lawyer phone), 27 November 2026
+  about 7:10am NZT. Migration 030 applied (its live rollback test ran clean first: 27 checks, no capitals); main 4e00a47; page only,
+  no function change; live page byte-identical to the build.
 - Edge functions and the commit each is pinned to: offer-sign 1b730e7; offer-public, offer-draft, doc-prefill 06c2d22.
 - Still to do: the test offer with Tim's own addresses (OFFERS-PLAN "Going live" step 5), then Tim's solicitor confirms the
   signing and counteroffer method before the first real offer. Phases 5 and 6 not built.
+- Built, awaiting review: Agreed emails filled in (branch `agreed-mail-details`, live main 4d306b2 merged in; migration 030 not
+  applied; its rollback test passes on the stand-in with 029; see its section).
 - Older "Status:" lines in the phase sections below are kept as the build history; this section is the current state.
 
 Replaces: the Jotform "Prepare My Offer" form, retyping each offer into the REINZ eForms portal, and Adobe signing.
@@ -1016,6 +1021,57 @@ problem as item 5; to be fixed the same way.
 Decided by Tim, 25 November 2026: "Confirm the agreement" while an offer is frozen is held, not made (Offers fixes 3).
 Tests: `tests/offers-fixes2.test.js` (new), `tests/strike-snap.test.js` (new), `tests/mail-core.test.js`, `tests/offer-nego-fn.test.js`,
 `tests/offers-nego.test.js` (extended).
+
+## Agreed emails filled in (Tim, 26 November 2026; branch `agreed-mail-details` from main be6d6b8)
+
+Status: built, awaiting review. Migration 030 written and tested on the local stand-in only, NOT applied. Page change only besides
+that: no edge function changes, so nothing to redeploy. Drafts already made stay as they are; a new build (Build the emails, or a
+deposit holder change while the drafts are unsent) fills the details.
+Tim: "none of the contact details were filled in" (offer on 188 Gladstone Road). Every blank now comes from the record holding it:
+- Purchasers: names, emails and phones from the offer; the first purchaser also takes the offer's own email and phone (the form
+  keeps the buyer's own there, which is why the live drafts had "[Tim to fill: email]"); a signer's email by the same name.
+- The purchasers' lawyer: the agreed contract's contact page (pl_ places: name, firm, email, phone, email for notices), a field
+  missing there from the offer's lawyer (Tim is told which).
+- Vendors: the names as signed, their emails, phones from the property file. New in the vendors' email: "The contact details I
+  have for you are:" and "Your lawyer:" in full.
+- The vendors' lawyer: the contract's contact page (vl_ places); if it has none, the lawyer the newest signed agency agreement was
+  sent to (never one whose email is a vendor's own: the drafting rule). Tim is told where it came from. The first name from it.
+- Tim's preference kept: each email has the other side's lawyer in full. Tim's addition the same day: when a lawyer's email and the
+  email for service of notices differ, both are shown, labelled ("Email:" and "Notices are served to:"); the same address once.
+- Cc: each side's lawyer's email from the same record (the notices address if it is the only one). 030 lets the purchasers' email
+  be cc'd to the lawyer email (or notices address) on the agreed draft, as 024 already allowed for the vendors'.
+- What isn't on record stays a named blank ("[Tim to fill: the vendors' lawyer's phone]") and is listed once at the top of the
+  review: "Still needed: ...". A lawyer missing altogether is one item.
+- Privacy unchanged: the other side's own email or phone (the 024/025 guard) is left out of an email, never put in, and Tim is told
+  ("Left out of the email to the purchasers: ..."). Tim's own phone and email are always allowed. Purchasers' own details never go
+  in the vendors' email, or the other way round. In the live test offer the purchaser's email is also the vendor's, so it is left
+  out of both emails; and the only lawyer link on that agency agreement carries the vendor's own email, so the vendors' lawyer
+  stays a blank there (as it did on the drafted contract).
+Tim's answers (26 November 2026), built on top: (1) when a lawyer's email and notices address differ, the email is cc'd to both;
+(2) the vendors' email wording ("The contact details I have for you are:", "Your lawyer:") is approved; (3) a phone for the vendors'
+lawyer wherever the lawyer is recorded on the agency agreement: the vendor's "Send to my lawyer" (before signing) and "Send a copy to
+your lawyer" (after), Tim's "Send to lawyer and pause" at the appointment and his "Forward the signed agreement to a lawyer" (030 part
+2: `lawyer_links.phone` and five-argument lawyer functions). The phone shows in the agreement page's lawyer links, goes on a drafted
+contract's contact page (vendor's lawyers: contact details) when the vendors' lawyer comes from the agency agreement, and fills the
+agreed emails. Links recorded before have no phone, so it stays "Still needed" for them.
+After the review of 8bf2243 (four points, all fixed): an email whose cc ends up empty (no lawyer address on record, or the only
+one left out for privacy) never says it is cc'd: it says "Your lawyer:" / "Your lawyer is ..." with a line for Tim to add the lawyer
+to the cc, listed under Still needed. 030 refuses, as the purchasers' cc, a lawyer address on the contract that is a vendor's own,
+and the mirror (a vendors' lawyer address that is a purchaser's own); Tim's own address is never a party's. Anyone on the agreement
+whose address can't go on their side's email (a second purchaser's email known only from signing, a vendor who signed in person
+with no signing email) gets a note for Tim: they won't receive it. When the contact page has only part of the vendors' lawyer
+(a phone, say), the agency agreement's lawyer fills the rest and the page's phone is kept; Tim is told which part came from where.
+030's rollback test, first run on live (27 November 2026, by the lead, nothing kept): it stopped at a fixture (live's
+agreement_people.user_id references auth.users). Fixed: the stand-in now matches live for every table the fixtures write
+(`tests/pg-standin-agency.sql`), the vendor is a made-up auth.users row made and rolled back in the block, and 029's guard turns a
+fixture error into a line in CAPITALS. 030 itself is unchanged.
+Second live run (efb0d3c): one line, "logged NOT LOGGED" for the vendor's forward. Not 030: on live only the agent may read
+agreement_events (RLS), and the test read the log while still signed in as the vendor. The stand-in now has live's RLS on the agency
+agreement's tables and reproduced it; the test reads the log after the role is reset. 030 unchanged.
+Tests: `tests/mail-core.test.js` (extended: the live case, signers, the contract's lawyer, differing notices address, Still
+needed, privacy left-outs), `tests/offers-nego.test.js` (extended: built on the page, then rebuilt with an agency agreement
+lawyer and a different notices address), `tests/agreed-mail-rollback.sql` / `.js` (030, local stand-in: every line as expected),
+`tests/lawyer-phone.test.js` (new: the phone on the vendor's and Tim's lawyer forms), `tests/draft-core.test.js` (the phone from the link).
 
 ## Offers fixes 1 (raised by Tim 25 November 2026, built ahead of everything else; branch `offers-fixes-1`)
 

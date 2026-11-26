@@ -1139,6 +1139,7 @@
         <label class="f" for="lawN">Lawyer's name</label><input type="text" id="lawN">
         <label class="f" for="lawF">Firm</label><input type="text" id="lawF">
         <label class="f" for="lawE">Email</label><input type="email" id="lawE">
+        <label class="f" for="lawP">Phone <span class="opt">(optional)</span></label><input type="tel" id="lawP" autocomplete="off">
         <p class="small">They'll get a read-only link to your agreement and your answers so far. Everything pauses until you've heard back.</p>
         <button class="btn primary" type="button" id="sendLaw" style="width:100%">Send to my lawyer and pause</button>
       </div></div>
@@ -1154,10 +1155,11 @@
     const upd = () => { const c = $('input[name="legal"]:checked'); $('#lawWrap').hidden = !(c && c.value === 'send'); };
     $$('input[name="legal"]').forEach(r => r.addEventListener('change', upd)); upd();
     $('#sendLaw').addEventListener('click', async () => {
-      const n = $('#lawN').value.trim(), fm = $('#lawF').value.trim(), e = $('#lawE').value.trim();
+      const n = $('#lawN').value.trim(), fm = $('#lawF').value.trim(), e = $('#lawE').value.trim(), ph = $('#lawP').value.trim();
       if (!n || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)) return err('Add your lawyer\'s name and email.');
+      if (ph && !LAW_PHONE_RE.test(ph)) return err('Check your lawyer\'s phone number (digits, spaces and + only).');
       collect(); await saveAns({ acks: ANS.acks || [] });
-      await must(sb.rpc('vendor_send_to_lawyer', { a: A.id, l_name: n, l_firm: fm, l_email: e }));
+      await must(sb.rpc('vendor_send_to_lawyer', lawArgs({ a: A.id, l_name: n, l_firm: fm, l_email: e }, ph)));
       const { error: fe } = await sb.functions.invoke('notify', { body: { type: 'lawyer', agreement_id: A.id } });
       if (fe) console.warn('lawyer email', fe);
       A = await must(sb.from('agreements').select('*').eq('id', A.id).single());
@@ -1275,26 +1277,32 @@
     return true;
   };
 
+  // the lawyer's phone, where a lawyer is recorded on the agency agreement (030, lawyer_links.phone; Tim, 26 November 2026): optional,
+  // the same rule as the database's check. With a phone the five-argument functions are called; without one, the four-argument ones as before.
+  const LAW_PHONE_RE = /^[0-9+()\-. ]{6,40}$/;
+  const lawArgs = (base, ph) => ph ? Object.assign({}, base, { l_phone: ph }) : base;
 function lawyerForm(id, title, blurb) {
     return `<div class="card" id="${id}"><h3>${title}</h3><p class="small">${blurb}</p>
       <label class="f" for="${id}N">Lawyer's name</label><input type="text" id="${id}N">
       <label class="f" for="${id}F">Firm <span class="opt">(optional)</span></label><input type="text" id="${id}F">
       <label class="f" for="${id}E">Email</label><input type="email" id="${id}E">
+      <label class="f" for="${id}P">Phone <span class="opt">(optional)</span></label><input type="tel" id="${id}P" autocomplete="off">
       <div class="toolbar"><button class="btn primary" type="button" id="${id}Go">Send to lawyer</button></div>
       <div class="err" id="${id}Err"></div><div class="card okc tight" id="${id}Ok" hidden><p class="small" style="margin:0"></p></div></div>`;
   }
   function wireLawyerForm(id, send) {
     $('#' + id + 'Go').addEventListener('click', async () => {
-      const n = $('#' + id + 'N').value.trim(), fm = $('#' + id + 'F').value.trim(), e = $('#' + id + 'E').value.trim();
+      const n = $('#' + id + 'N').value.trim(), fm = $('#' + id + 'F').value.trim(), e = $('#' + id + 'E').value.trim(), ph = $('#' + id + 'P').value.trim();
       const er = $('#' + id + 'Err'); er.textContent = '';
       if (!n || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)) { er.textContent = 'Add the lawyer\'s name and email.'; return; }
+      if (ph && !LAW_PHONE_RE.test(ph)) { er.textContent = 'Check the lawyer\'s phone number (digits, spaces and + only).'; return; }
       const btn = $('#' + id + 'Go'); btn.disabled = true;
       try {
-        await send(n, fm, e);
+        await send(n, fm, e, ph);
         const { data, error } = await sb.functions.invoke('notify', { body: { type: 'lawyer', agreement_id: A ? A.id : send.agId } });
         const ok = $('#' + id + 'Ok'); ok.hidden = false;
         ok.querySelector('p').textContent = (error || (data && data.ok === false)) ? `Saved, but the email didn't go yet. Tim has been told and will make sure ${n} gets it.` : `Sent. ${n} has been emailed a read-only link to the signed agreement, and Tim has a copy.`;
-        ['N', 'F', 'E'].forEach(s => $('#' + id + s).value = '');
+        ['N', 'F', 'E', 'P'].forEach(s => $('#' + id + s).value = '');
       } catch (_) { /* toast shown */ } finally { btn.disabled = false; }
     });
   }
@@ -1377,7 +1385,7 @@ function lawyerForm(id, title, blurb) {
     };
     top();
   }
-  BIND[10] = () => { wirePdf(A.id); if ($('#fwd')) wireLawyerForm('fwd', async (n, fm, e) => { await must(sb.rpc('vendor_forward_to_lawyer', { a: A.id, l_name: n, l_firm: fm, l_email: e })); }); const cl = $('#cancelLink'); if (cl) cl.addEventListener('click', e => { e.preventDefault(); viewCancelRequest(); }); wireVarDone(); wirePaperwork(); wireShared(); };
+  BIND[10] = () => { wirePdf(A.id); if ($('#fwd')) wireLawyerForm('fwd', async (n, fm, e, ph) => { await must(sb.rpc('vendor_forward_to_lawyer', lawArgs({ a: A.id, l_name: n, l_firm: fm, l_email: e }, ph))); }); const cl = $('#cancelLink'); if (cl) cl.addEventListener('click', e => { e.preventDefault(); viewCancelRequest(); }); wireVarDone(); wirePaperwork(); wireShared(); };
 
   /* ═════════════════ AGENT ═════════════════ */
   /* ═════════ PROPERTY FILE: one record of the property and its owners, read and written by every page ═════════ */
@@ -3099,7 +3107,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <h2>Legal advice</h2><p class="small"><span class="clause">Clause 22.1.1</span></p>
       <div class="choices">${[['have', 'They\'ve had legal advice', ''], ['waive', 'They\'re happy to go ahead without it', 'They can still talk to a lawyer before cooling-off ends'], ['send', 'Send it to their lawyer first', 'Their lawyer gets a read-only link, and signing pauses']].map(([v, t, d]) => `<label class="choice"><input type="radio" name="tLegal" value="${v}" ${(T.legalPick || L.choice) === v ? 'checked' : ''}><span class="mark"></span><span><span class="ct">${t}</span>${d ? `<span class="cd">${d}</span>` : ''}</span></label>`).join('')}</div>
       <div id="tLawWrap" hidden><div class="row2 stack"><div><label class="f">Lawyer's name</label><input type="text" id="tLawN"></div><div><label class="f">Firm <span class="opt">(optional)</span></label><input type="text" id="tLawF"></div></div>
-        <label class="f">Lawyer's email</label><input type="email" id="tLawE"><div class="toolbar"><button class="btn primary" type="button" id="tLawGo">Send to lawyer and pause</button></div></div>
+        <label class="f">Lawyer's email</label><input type="email" id="tLawE"><label class="f">Lawyer's phone <span class="opt">(optional)</span></label><input type="tel" id="tLawP" autocomplete="off"><div class="toolbar"><button class="btn primary" type="button" id="tLawGo">Send to lawyer and pause</button></div></div>
       <h2>Identity</h2>
       <div class="card tight"><p class="small" style="margin:0">${manual ? 'You verify each seller yourself. Use the AML file for each person on the agreement page.' : `${esc(T.c.aml)} sends each seller a link to verify on their phone.`} They can sign now; you can't act until everyone is verified.</p></div>
       ${priorList(T.an).length ? `<h2>Cancelling the previous agency</h2><p class="small">Each seller also signs ${priorList(T.an).length > 1 ? 'these notices' : 'this notice'} with the same signature. You check and send ${priorList(T.an).length > 1 ? 'them' : 'it'} from the agreement page.</p>${docViewer(priorList(T.an).map(x => noticeHTML(T.ag.address, fp.client || '(names to come)', x)).join(''), { id: 'tNoticeDv' })}` : ''}
@@ -3148,10 +3156,11 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const lu = () => { const ch = $('input[name="tLegal"]:checked'); $('#tLawWrap').hidden = !(ch && ch.value === 'send'); };
     $$('input[name="tLegal"]').forEach(r => r.addEventListener('change', lu)); lu();
     $('#tLawGo').addEventListener('click', async () => {
-      const n = $('#tLawN').value.trim(), fm = $('#tLawF').value.trim(), e = $('#tLawE').value.trim();
+      const n = $('#tLawN').value.trim(), fm = $('#tLawF').value.trim(), e = $('#tLawE').value.trim(), ph = $('#tLawP').value.trim();
       if (!n || !EMAIL_RE.test(e)) return tErr('Add the lawyer\'s name and email.');
+      if (ph && !LAW_PHONE_RE.test(ph)) return tErr('Check the lawyer\'s phone number (digits, spaces and + only).');
       tCollect(); if (!(await tSave())) return;
-      await must(sb.rpc('agent_send_to_lawyer', { a: T.id, l_name: n, l_firm: fm, l_email: e }));
+      await must(sb.rpc('agent_send_to_lawyer', lawArgs({ a: T.id, l_name: n, l_firm: fm, l_email: e }, ph)));
       const { data, error } = await sb.functions.invoke('notify', { body: { type: 'lawyer', agreement_id: T.id } });
       toast(error || (data && data.ok === false) ? 'Saved, but the lawyer email didn\'t send. Try again from the agreement page.' : 'Sent to ' + n, error || (data && data.ok === false) ? 'err' : 'ok');
       viewAgentDetail(T.id);
@@ -3301,7 +3310,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
 
       ${sigs.length ? `<h2>Signatures</h2>${sigs.map(s => `<div class="card tight"><div style="font-weight:600">${nt(s.signer_name)} <span class="small">(${s.signer_role === 'agent' ? 'licensee' : 'client'})</span></div><div class="small">${esc(fmtDT(s.signed_at))} · fingerprint ${esc(s.snapshot_sha256.slice(0, 16))}…</div>${sigUrls[s.id] ? `<img class="sigimg" src="${sigUrls[s.id]}" alt="Signature of ${esc(s.signer_name)}">` : ''}</div>`).join('')}` : ''}
 
-      ${lawyers.length ? `<h2>Lawyer links</h2>${lawyers.map(l => `<div class="card tight"><div style="font-weight:600">${esc(l.lawyer_name)}${l.firm ? ', ' + esc(l.firm) : ''}</div><div class="small">${esc(l.email)} · sent ${esc(fmtDT(l.sent_at))} · ${l.first_opened_at ? 'opened ' + esc(fmtDT(l.first_opened_at)) + ` (${l.open_count}×)` : 'not opened yet'}</div>
+      ${lawyers.length ? `<h2>Lawyer links</h2>${lawyers.map(l => `<div class="card tight"><div style="font-weight:600">${esc(l.lawyer_name)}${l.firm ? ', ' + esc(l.firm) : ''}</div><div class="small">${esc(l.email)}${l.phone ? ' · ' + esc(l.phone) : ''} · sent ${esc(fmtDT(l.sent_at))} · ${l.first_opened_at ? 'opened ' + esc(fmtDT(l.first_opened_at)) + ` (${l.open_count}×)` : 'not opened yet'}</div>
         <div class="small">${l.emailed_at ? 'Emailed ' + esc(fmtDT(l.emailed_at)) : `<strong style="color:var(--accent)">Not emailed${l.email_error ? ': ' + esc(l.email_error) : ''}</strong>`}</div>
         ${l.emailed_at ? '' : `<button class="btn ghost no-print" type="button" data-sendlaw="1" style="margin-top:8px">Send lawyer email now</button>`}</div>`).join('')}` : ''}
       ${['signed', 'countersigned'].includes(ag.status) ? `<h2>Signed copy</h2><div class="card tight"><div class="small">${ag.copy_sent_at ? 'Emailed to everyone ' + esc(fmtDT(ag.copy_sent_at)) : `<strong style="color:var(--accent)">Not emailed yet${ag.copy_error ? ': ' + esc(ag.copy_error) : ''}</strong>`}</div>${ag.copy_sent_at ? '' : '<button class="btn ghost no-print" type="button" id="sendCopy" style="margin-top:8px">Email signed copy now</button>'}</div>` : ''}
@@ -3327,7 +3336,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     $('#printBtn').addEventListener('click', () => window.print());
     const pla = $('#plAns'); if (pla) pla.addEventListener('click', () => viewPrelistingAgent(cfg.prelisting_id));
     wirePdf(id); const cpb = $('#campPdf'); if (cpb) cpb.addEventListener('click', () => openPdf(id, 'campaign'));
-    if ($('#afwd')) { const sender = async (n, fm, e) => { await must(sb.from('lawyer_links').insert({ agreement_id: id, lawyer_name: n, firm: fm, email: e, sent_by: 'Tim McGuire', expires_at: new Date(Date.now() + 90 * 864e5).toISOString() })); await must(sb.from('agreement_events').insert({ agreement_id: id, actor: SESSION.user.email, kind: 'forwarded_to_lawyer', detail: { lawyer: n, email: e } })); }; sender.agId = id; wireLawyerForm('afwd', sender); }
+    if ($('#afwd')) { const sender = async (n, fm, e, ph) => { await must(sb.from('lawyer_links').insert(Object.assign({ agreement_id: id, lawyer_name: n, firm: fm, email: e }, ph ? { phone: ph } : {}, { sent_by:'Tim McGuire', expires_at: new Date(Date.now() + 90 * 864e5).toISOString() }))); await must(sb.from('agreement_events').insert({ agreement_id: id, actor: SESSION.user.email, kind: 'forwarded_to_lawyer', detail: Object.assign({ lawyer: n, email: e }, ph ? { phone: ph } : {}) })); }; sender.agId = id; wireLawyerForm('afwd', sender); }
     const callNotify = async (type) => { const { data, error } = await sb.functions.invoke('notify', { body: { type, agreement_id: id } }); if (error || (data && data.ok === false)) toast('Email failed. See the Emails list below.', 'err'); else toast('Email sent'); viewAgentDetail(id); };
     $$('[data-sendlaw]').forEach(b => b.addEventListener('click', () => { b.disabled = true; callNotify('lawyer'); }));
     const sc = $('#sendCopy'); if (sc) sc.addEventListener('click', () => { sc.disabled = true; callNotify('signed'); });
@@ -6906,7 +6915,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     } catch (_) { throw new Error('The owners\' details couldn\'t be loaded, so nothing was drafted. Check you have signal, then try again.'); }
     const parties = ppl.map(x => ({ who: 'a vendor', email: x.email, phone: x.phone })).concat(apl.map(x => ({ who: 'a vendor', email: x.email, phone: x.phone })));
     // the vendor's lawyer, if the file holds one: only from a signed agreement of the current owners
-    const links = ags.length ? ((await ofSafe(sb.from('lawyer_links').select('agreement_id,lawyer_name,firm,email,sent_at').in('agreement_id', ags.map(x => x.id)))) || []) : [];
+    const links = ags.length ? ((await ofSafe(sb.from('lawyer_links').select('*').in('agreement_id', ags.map(x => x.id)))) || []) : [];   // with the phone (030) once it is there
     const vendorLawyer = DR.pickVendorLawyer(prop, ags, links, parties);
     // read from the blank itself each time: the chattels, and the further terms numbering and continuation bands
     const fresh = DR.buildMap(DR_CACHE[b.id] && DR_CACHE[b.id].pages ? DR_CACHE[b.id].pages : await drBlankPages(b));
@@ -7534,13 +7543,51 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       ofSafe(sb.from('offer_signings').select('id,round_no').eq('offer_id', o.id).eq('side', 'vendor').order('round_no', { ascending: false })), ofSafe(sb.from('offer_links').select('province').eq('property_id', p.id)),
       sgRpc('agent_offer_layers', { p_offer: o.id, p_document: ag.document_id }).catch(() => null)]);
     const vs = vg && vg[0] ? ((await ofSafe(sb.from('offer_signers').select(SG_COLS).eq('signing_id', vg[0].id).order('position'))) || []).filter(x => !x.void_at) : [];
-    const vendorsOf = vs.map(x => { const pp = (owners || []).find(q => (q.email && x.email && q.email.toLowerCase() === x.email.toLowerCase()) || q.legal_name === x.name) || {}; return { legal_name: x.name, pref_name: pp.pref_name || '', email: x.email, phone: pp.phone || '' }; });
+    const vendorsOf = vs.map(x => { const pp = (owners || []).find(q => (q.email && x.email && q.email.toLowerCase() === x.email.toLowerCase()) || q.legal_name === x.name) || {}; return { legal_name: x.name, pref_name: pp.pref_name || '', email: x.email || pp.email || '', to: x.email || '', phone: pp.phone || '' }; });   // To: only a signer's own address (024 allows no other)
+    const ct = await mlAgreedContacts(o, pl);
     const labels = {}; (((ag.terms || {}).conditions) || []).forEach(c => { const i = OF.condInfo && OF.condInfo(c.key); labels[c.key] = (i && i.label) || c.key; });
     const dh = dhGiven || ((await ofSafe(sb.from('offer_deposit_holders').select('*').eq('offer_id', o.id).order('id', { ascending: false }).limit(1))) || [])[0] || { holder: MAIL.depositRecommended(ngKs(o, ag)) };
     const province = o.province || ((lk || [])[0] || {}).province || OF.DEFAULT_PROVINCE;
     const r = MAIL.agreedDrafts({ address: p.address, agreement: ag, terms: ag.terms || {}, details: o.details || {}, vendors: vendorsOf, layers: ly && Array.isArray(ly.layers) ? ly.layers : undefined, priceBoxes, province, offers: OF,
-      vendorLawyer: { person: pl('vl_person'), firm: pl('vl_firm'), email: pl('vl_email') || pl('vl_service'), phone: pl('vl_phone') }, holidays: hol || [], labels, depositHolder: { holder: dh.holder, other: dh.other_text || dh.other || '' } });
+      vendorLawyer: ct.vendorLawyer, purchaserLawyer: ct.purchaserLawyer, purchaserSigners: ct.purchaserSigners, hide: ct.hide, agent: ct.agent, sources: ct.sources,
+      holidays: hol || [], labels, depositHolder: { holder: dh.holder, other: dh.other_text || dh.other || '' } });
     return { r, ag, p };
+  }
+  /* Agreed emails filled in (Tim, 26 November 2026): the contact details for the agreed emails, from the records that hold them.
+     The lawyers: the agreed contract's contact page first (its placed fields, pl_ and vl_, so the emails match the agreement), each with
+     its email for service of notices. A field the page doesn't have comes from the offer (the purchasers' lawyer); when the page has no
+     vendors' lawyer at all, the lawyer the newest signed agency agreement was sent to (never one holding a vendor's own email; the same
+     record the database lets the vendors' email go to). The purchaser signers, by name, for an email missing on the offer. And the
+     privacy guard's lists (024/025 offer_mail_side_hit): the other side's own emails and phones, and the agent's own (offer_settings),
+     which are never hidden. Hiding more than the database would only leaves a value out; it never gets a draft refused. */
+  async function mlAgreedContacts(o, pl) {
+    const D = o.details || {}, L = D.lawyer || {}, sources = [], t_ = v => String(v == null ? '' : v).trim();
+    const pick = (id, fb) => t_(pl(id)) || t_(fb);
+    const purchaserLawyer = { person: pick('pl_person', L.person), firm: pick('pl_firm', L.firm), email: pick('pl_email', L.email), phone: pick('pl_phone', L.phone), service: pick('pl_service') };
+    const fromOffer = ['person', 'firm', 'email', 'phone'].filter(k => !t_(pl('pl_' + k)) && t_(L[k]));
+    if (fromOffer.length) sources.push(`The purchasers' lawyer's ${fromOffer.map(k => k === 'person' ? 'name' : k).join(', ')}: not on the agreement's contact page, so taken from the offer. Check them.`);
+    let vendorLawyer = { person: pick('vl_person'), firm: pick('vl_firm'), email: pick('vl_email'), phone: pick('vl_phone'), service: pick('vl_service') };
+    const [ags, ppl, sgs, st] = await Promise.all([ofSafe(sb.from('agreements').select('id,status,created_at').eq('property_id', o.property_id)), ofSafe(sb.from('property_people').select('email,phone').eq('property_id', o.property_id)),
+      ofSafe(sb.from('offer_signings').select('id,side').eq('offer_id', o.id)), ofSafe(sb.from('offer_settings').select('agent_phone,agent_email'))]);
+    const sideOf = id => ((sgs || []).find(g => g.id === id) || {}).side, sgIds = (sgs || []).map(g => g.id);
+    const signers = sgIds.length ? ((await ofSafe(sb.from('offer_signers').select('signing_id,name,email,void_at').in('signing_id', sgIds))) || []) : [];
+    const agIds = (ags || []).map(a => a.id), apl = agIds.length ? ((await ofSafe(sb.from('agreement_people').select('email,phone').in('agreement_id', agIds))) || []) : [];
+    if (!vendorLawyer.person && !vendorLawyer.firm && !vendorLawyer.email && !vendorLawyer.service) {
+      const prop = ((await ofSafe(sb.from('properties').select('id,cycle_at').eq('id', o.property_id))) || [])[0] || {};
+      const newest = (ags || []).filter(a => ['signed', 'countersigned'].includes(a.status)).sort((a, b) => (a.created_at < b.created_at ? 1 : -1))[0];
+      const links = newest ? ((await ofSafe(sb.from('lawyer_links').select('*').eq('agreement_id', newest.id))) || []) : [];   // with the phone (030) once it is there
+      const parties = (ppl || []).concat(apl).map(x => ({ who: 'a vendor', email: x.email, phone: x.phone }));
+      const V = newest ? DR.pickVendorLawyer(prop, [newest], links, parties) : null;
+      // field by field: what the page does have (a phone, say) is kept; the rest comes from the agency agreement's lawyer (review of 8bf2243)
+      if (V) { const pg = vendorLawyer; vendorLawyer = { person: t_(V.person), firm: t_(V.firm), email: t_(V.email), phone: pg.phone || t_(V.phone), service: pg.service };
+        sources.push(`The vendors' lawyer isn't named on the agreement's contact page: their ${['name', 'firm', 'email'].concat(pg.phone ? [] : V.phone ? ['phone'] : []).join(', ')} taken from ${V.source}${pg.phone ? ', the phone from the contact page' : ''}. Check they are acting on this sale.`); }
+    }
+    const purchaserSigners = signers.filter(x => sideOf(x.signing_id) === 'purchaser' && !x.void_at && x.email).map(x => ({ name: x.name, email: x.email }));
+    const law = t_(L.email).toLowerCase();
+    const purchaserOwn = { emails: [D.email].concat((D.purchasers || []).map(q => q.email)).filter(e => t_(e) && t_(e).toLowerCase() !== law), phones: [D.phone].concat((D.purchasers || []).map(q => q.phone)).filter(Boolean) };
+    const vendorOwn = { emails: (ppl || []).concat(apl).map(x => x.email).concat(signers.filter(x => sideOf(x.signing_id) === 'vendor').map(x => x.email)).filter(Boolean), phones: (ppl || []).concat(apl).map(x => x.phone).filter(Boolean) };
+    const s0 = (st || [])[0] || {};
+    return { purchaserLawyer, vendorLawyer, purchaserSigners, sources, hide: { purchasers: vendorOwn, vendors: purchaserOwn }, agent: { emails: [s0.agent_email].filter(Boolean), phones: [s0.agent_phone].filter(Boolean) } };
   }
   async function mlBuildAgreed(o, p) {
     await mlAgentLoad();
@@ -8244,7 +8291,10 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     // what the portal worked out for the emails (dates, the price after the negotiation, the deposit), shown once to Tim with how (Offers fixes 2)
     let agNotes = []; if (ag && agMail.some(m => m.status === 'draft')) { try { agNotes = (await mlAgreedResult(o, null)).r.notes || []; } catch (_) { agNotes = []; } }
     const notesHTML = agNotes.length ? `<div class="card note tight" id="mlNotes"><p class="small" style="margin:0 0 4px"><strong>Worked out for these emails (check each):</strong></p><ul class="dr-list">${agNotes.map(n => `<li class="small">${esc(n)}</li>`).join('')}</ul></div>` : '';
-    const agMailHTML = ag ? (agMail.some(m => m.status !== 'void') ? notesHTML + mlPanelHTML(agMail, 'Emails to the parties', 'mlAgreed', 'Built from the agreement. Nothing goes until you press Send. Fill in or delete each marked blank, read each one, then send it, or tick Reviewed on both and use Send all reviewed. The lawyers\' pack is separate.')
+    // what the open drafts still need from Tim, once each, at the top of his review (Agreed emails filled in, 26 November 2026)
+    const need = MAIL.stillNeeded(agMail.filter(m => m.status === 'draft').map(m => m.subject + '\n' + m.body).join('\n'));
+    const needHTML = need.length ? `<div class="card warnc tight" id="mlNeed"><p class="small" style="margin:0 0 4px"><strong>Still needed:</strong> ${esc(need.join('; '))}.</p><p class="small" style="margin:0">Each is a marked blank in the emails below. Fill it in or delete it before sending.</p></div>` : '';
+    const agMailHTML = ag ? (agMail.some(m => m.status !== 'void') ? needHTML + notesHTML + mlPanelHTML(agMail, 'Emails to the parties', 'mlAgreed', 'Built from the agreement. Nothing goes until you press Send. Fill in or delete each marked blank, read each one, then send it, or tick Reviewed on both and use Send all reviewed. The lawyers\' pack is separate.')
       : `<section class="card" id="mlAgreed"><h2>Emails to the parties</h2><p class="small">One to the purchasers (cc their lawyer) and one to the vendors (cc theirs), each with the agreed copy and the other side's lawyer. Nothing is sent until you press Send.</p><div class="toolbar"><button class="btn primary" type="button" id="mlBuildAgreed">Build the emails</button></div><p class="small" id="mlBuildOut" role="status" aria-live="polite"></p></section>`) : '';
     const last = open ? R_.filter(r => r.document_id === open.id).sort((a, z) => z.doc_round - a.doc_round)[0] : null;
     const live = open ? (gs || []).find(g => g.document_id === open.id && ['ready', 'signing', 'held', 'complete'].includes(g.status)) : null;

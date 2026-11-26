@@ -27,6 +27,9 @@ The model is Tim's own post-agreement emails, which several lawyers have praised
 - "This email is cc'd to your lawyer:" name, firm, email, phone. Then "He/She is the person who will guide you through the
   remaining stages of your property purchase. Keep me in the loop with any questions or progress."
 - The other side's lawyer too (Tim's standing preference): "The vendors' lawyer is:" name, firm, email, phone.
+- Each lawyer shows as a short block: name and firm, "Email:", "Phone:", and "Notices are served to:" when the email for service
+  of notices on the agreement's contact page is a different address (Tim, 26 November 2026). The same address is shown once.
+  Each lawyer is cc'd at their email and, when it differs, the notices address too.
 - "The property marketing homepage with documents is here." (when a link exists; LIM linked where held).
 - Heading "Roadmap":
   - "Date of agreement: <date>. The first working day is <weekday, date>." Note any public holiday in the period.
@@ -55,7 +58,9 @@ The model is Tim's own post-agreement emails, which several lawyers have praised
 - "The agreement can be viewed and downloaded here and is also attached."
 - While conditional: "Until the purchaser confirms the agreement, you have tasked me with marketing the property. The advertising
   will remain active and I will continue to discuss the property with potential purchasers."
-- "The purchaser's lawyer is:" name, firm, email, phone.
+- "The contact details I have for you are:" each vendor's name as signed, their email and phone.
+- "Your lawyer:" and "The purchaser's lawyer is:" (or "purchasers'"), each with name, firm, email, phone and any different
+  address for notices.
 - Heading "Roadmap": "From here, the purchasers will complete the agreed conditions. In the meantime, ensure any bookings and plans
   pertaining to your move are only tentative "pencil" bookings. The property is not sold yet, but "under offer"." Then date of
   agreement, price, "Conditions: purchaser's action steps" (from the vendors' side), deposit, any vendor action items from further

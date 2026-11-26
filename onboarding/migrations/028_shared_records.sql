@@ -486,6 +486,9 @@ begin
       if tg_op = 'UPDATE' and v is not distinct from (coalesce(old.answers, '{}'::jsonb) -> k) and new.property_id is not distinct from old.property_id then continue; end if;
       if public.jblank(v) and (tg_op = 'INSERT' or public.jblank(coalesce(old.answers, '{}'::jsonb) -> k)) then continue; end if;
       perform public.profile_record(new.property_id, k, v, 'agreement', new.id, to_char(coalesce(new.updated_at, now()) at time zone 'Pacific/Auckland', 'FMDD Mon YYYY'), 'Agency agreement ' || coalesce(new.ref, ''), null, null, coalesce(auth.jwt()->>'email', 'agent'), 'auto');
+      -- the agreement's own trigger (agreement_after, migration 002, which runs first) copies page 1 to the property file; where the
+      -- profile keeps another value (Tim's, a fact he cleared, an official figure), the file goes back to it and the agreement's is beside it
+      perform public.profile_sync_file(new.property_id, k);
     end loop;
   exception when others then perform public.shared_note('profile_from_agreement', jsonb_build_object('agreement', new.id, 'error', sqlerrm)); end;
   return null;
@@ -811,7 +814,7 @@ begin
         case when coalesce(g.side, 'purchaser') = 'purchaser' then 'purchaser' end, true, pc);
     elsif tg_table_name = 'lawyer_links' then
       select property_id into pid from public.agreements where id = new.agreement_id;
-      pc := public.person_link('lawyer_link', new.id, pid, new.lawyer_name, null, new.email, null, false, 'solicitor', true);
+      pc := public.person_link('lawyer_link', new.id, pid, new.lawyer_name, null, new.email, new.phone, false, 'solicitor', true);   -- phone: migration 030
       if pc is not null and coalesce(trim(new.firm), '') <> '' then update public.crm_contacts set organisation_name = coalesce(organisation_name, left(trim(new.firm), 200)) where id = pc; end if;
     elsif tg_table_name = 'ql_seller_leads' then
       select property_id into pid from public.ql_listings where id = new.listing_id;
@@ -822,7 +825,7 @@ begin
 end $$;
 create trigger person_link_after after insert or update of contact_name, contact_email, property_id, status on public.prelistings for each row execute function public.person_link_after();
 create trigger person_link_after after insert on public.offer_signers for each row execute function public.person_link_after();
-create trigger person_link_after after insert or update of lawyer_name, email, firm on public.lawyer_links for each row execute function public.person_link_after();
+create trigger person_link_after after insert or update of lawyer_name, email, firm, phone on public.lawyer_links for each row execute function public.person_link_after();
 create trigger person_link_after after insert or update of name, email, phone, listing_id, status on public.ql_seller_leads for each row execute function public.person_link_after();
 
 -- a new AML file is filed with its person's contact (crm_aml_sync then keeps the contact's AML summary); locked files are never touched
@@ -1189,7 +1192,7 @@ begin
       (select contact_id from public.property_people where id = r.person_id));
   end loop;
   for r in select l.*, a.property_id as pid from public.lawyer_links l join public.agreements a on a.id = l.agreement_id order by l.sent_at nulls last, l.id loop
-    cid := public.person_link('lawyer_link', r.id, r.pid, r.lawyer_name, null, r.email, null, false, 'solicitor', true);
+    cid := public.person_link('lawyer_link', r.id, r.pid, r.lawyer_name, null, r.email, r.phone, false, 'solicitor', true);
     if cid is not null and coalesce(trim(r.firm), '') <> '' then update public.crm_contacts set organisation_name = coalesce(organisation_name, left(trim(r.firm), 200)) where id = cid; end if;
   end loop;
   for r in select * from public.prelistings order by created_at loop
