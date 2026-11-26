@@ -432,14 +432,15 @@ signatures and fingerprints are not touched.
   `recorded_at`, `recorded_by`; never changed or removed, `guard_fact_value`), `property_profile` (per property and fact: the chosen value,
   `chosen_by` auto or tim, `ticked`). `profile_record` (internal) decides, with p_choose: `tim` (Tim chose it here: chosen and ticked);
   `offer` (a disclosures check answer, council values in the backfill: chosen and ticked unless Tim ticked a different value from another
-  source, which then stays, with this one shown beside it); `auto` (chosen only when nothing ticked stands, never over the property file's own
+  source, or the chosen value is the property file's own, including a fact Tim cleared there; that then stays, with this one beside it); `auto` (chosen only when nothing ticked stands, never over the property file's own
   value, never a record over a person's entry); `never` (kept as a value only). A source clearing its chosen value hands over to what the
   property file still says, else the newest other value. Whatever is chosen is written back to the file (`profile_sync_file`, internal;
   never to an agreement; skipped during the backfill, so applying 028 changes no property file). `profile_file_value` (internal). Values that
   are the same in another type (640 and "640") are not shown as different. Triggers: `profile_from_found` (council values Tim used are his;
   one that waited is a value only), `profile_from_inspection` (answers offered; his choice on the check applied), `profile_from_agreement`
   (page 1 as an automatic value). Read: `agent_property_profile(p)`, `my_property_profile(p)` (a party to the property, never Relab). Write:
-  `agent_profile_set(p, key, value)` (Tim's entry on the file; a cleared value clears the choice, nothing stays ticked),
+  `agent_profile_set(p, key, value)` (Tim's entry on the file; clearing records his empty entry as the chosen one, not ticked, so no
+  later source refills it by itself; `profile_read` gives it as `cleared`, with other values beside it),
   `agent_profile_choose(p, key, value_id)`, `agent_profile_tick(p, keys or null, on)`.
 - Person: `person_links` (source property_people, agreement_people, prelisting, offer_signer, lawyer_link, ql_listing or ql_seller_lead,
   and its row; contact; property; role; `matched_by` email, name, record, new or tim; `doubt` and `doubt_contact_id` for Tim). Matching

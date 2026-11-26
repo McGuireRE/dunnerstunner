@@ -150,11 +150,14 @@ create policy pp_vendor on public.property_profile for select to authenticated
 --   p_choose 'auto':  chosen when nothing is chosen yet, or when what is chosen is not ticked and is from the same source, or a person's
 --                     entry replacing another person's entry or a record; a record never replaces a person's entry by itself; nothing
 --                     automatic replaces what the property file says (Tim's own entries, source 'tim'); the same value changes nothing.
---   p_choose 'offer': a value Tim gave in another place (a disclosures check answer; council values in the backfill): chosen and
---                     ticked, unless Tim has ticked a different value from another source. Then his ticked value stays and this one
---                     is shown beside it for him to choose (Tim, 26 November 2026: a ticked value is never overwritten).
+--   p_choose 'offer': a value Tim gave in another place (a disclosures check answer; council values and check answers in the backfill):
+--                     chosen and ticked, unless Tim has ticked a different value from another source, or what is chosen is the property
+--                     file's own value (source 'tim', including a fact Tim cleared on the file). Then that stays and this one is shown
+--                     beside it for him to choose (Tim, 26 November 2026: a ticked value is never overwritten).
 --   p_choose 'tim':   Tim chose it himself, here and now: chosen and ticked.
 --   p_choose 'never': kept as a value only (for example an inspection answer that differs from the agreement in force).
+-- A fact Tim cleared on the property file stays cleared: its chosen value is his empty entry, which nothing automatic and no offered
+-- value replaces; other values are shown beside it.
 -- A source clearing its value: if that source's value was chosen (and not ticked by Tim, unless Tim cleared it), the newest value from
 -- another source is chosen instead, or the fact has no value.
 -- Whatever is chosen is written back to the property file (profile_sync_file), so the file and the profile always say the same.
@@ -196,8 +199,8 @@ begin
   end if;
   if ch = 'never' then return vid; end if;
   if ch = 'offer' then
-    if c.property_id is not null and cv.source <> p_source and c.ticked and (cv.value #>> '{}') is distinct from (v #>> '{}') then
-      perform public.profile_sync_file(p_property, p_key);   -- Tim's value stays, on the file too; this one is shown beside it
+    if c.property_id is not null and cv.source <> p_source and (c.ticked or cv.source = 'tim') and (cv.value #>> '{}') is distinct from (v #>> '{}') then
+      perform public.profile_sync_file(p_property, p_key);   -- Tim's value (or the file's own) stays, on the file too; this one is shown beside it
       return vid;
     end if;
     ch := 'tim';
@@ -237,15 +240,15 @@ language sql stable security definer set search_path = public as $$
   select coalesce(jsonb_agg(row_to_json(x)::jsonb order by x.position, x.key), '[]'::jsonb) from (
     select k.key, coalesce(pk.label, (select l.label from latest l where l.key = k.key and l.label is not null limit 1), k.key) as label,
            coalesce(pk.grp, 'council') as grp, coalesce(pk.position, 500) as position,
-           cv.id as value_id, cv.value, cv.display, cv.source, cv.source_name, cv.as_of, cv.recorded_at,
-           coalesce(c.ticked, false) as ticked, c.chosen_by,
+           case when cv.value is null then null else cv.id end as value_id, cv.value, cv.display, cv.source, cv.source_name, cv.as_of, cv.recorded_at,
+           coalesce(c.ticked, false) and cv.value is not null as ticked, c.chosen_by, (cv.id is not null and cv.value is null) as cleared,
            coalesce((select jsonb_agg(jsonb_build_object('value_id', l.id, 'value', l.value, 'display', l.display, 'source', l.source, 'source_name', l.source_name, 'as_of', l.as_of, 'recorded_at', l.recorded_at) order by l.recorded_at desc)
                        from latest l where l.key = k.key and l.value is not null and (cv.id is null or (l.id <> cv.id and (l.value #>> '{}') is distinct from (cv.value #>> '{}')))), '[]'::jsonb) as others
       from keys k
       left join public.profile_keys pk on pk.key = k.key
       left join public.property_profile c on c.property_id = p_property and c.key = k.key
       left join public.property_fact_values cv on cv.id = c.value_id and (not p_vendor or cv.source <> 'relab')
-  ) x where x.value_id is not null or jsonb_array_length(x.others) > 0;
+  ) x where x.value_id is not null or x.cleared or jsonb_array_length(x.others) > 0;
 $$;
 revoke execute on function public.profile_read(uuid, boolean) from public, anon, authenticated;
 
@@ -296,12 +299,12 @@ declare f public.property_fact_values; p public.properties; cur text;
 begin
   if coalesce(current_setting('app.profile_backfill', true), '') = 'on' then return; end if;
   select v.* into f from public.property_profile c join public.property_fact_values v on v.id = c.value_id where c.property_id = p_property and c.key = p_key;
-  if f.id is null or f.value is null then return; end if;
+  if f.id is null then return; end if;   -- (a value of null: Tim cleared it on the file, so the file stays empty)
   select * into p from public.properties where id = p_property;
   if p.id is null then return; end if;
   cur := case when p_key = any (public.desc_keys()) then p.description ->> p_key when p_key = 'title_ref' then p.title_ref when p_key = 'legal_description' then p.legal_description end;
   if not (p_key = any (public.desc_keys()) or p_key in ('title_ref', 'legal_description')) then return; end if;
-  if cur is not distinct from (f.value #>> '{}') then return; end if;
+  if cur is not distinct from (f.value #>> '{}') or (f.value is null and coalesce(cur, '') = '') then return; end if;
   begin
     perform public.profile_write_back(p_property, p_key, f.value);
   exception when others then perform public.shared_note('profile_sync_file', jsonb_build_object('property', p_property, 'key', p_key, 'error', sqlerrm)); end;
@@ -317,11 +320,18 @@ begin
   if not exists (select 1 from public.profile_keys where key = p_key) then raise exception 'Not a property fact'; end if;
   if p_value is not null and length(p_value::text) > 6000 then raise exception 'Too long'; end if;
   perform 1 from public.properties where id = p_property for update;
-  -- Tim cleared it on the property file: nothing is chosen for it now, and nothing stays ticked; other sources' values stay listed
-  if public.jblank(p_value) then perform public.profile_write_back(p_property, p_key, null); end if;
+  -- Tim cleared it on the property file: his empty entry is the chosen one, not ticked, so no later source fills it by itself; other
+  -- sources' values stay listed beside it for him to use
+  if public.jblank(p_value) then
+    perform public.profile_write_back(p_property, p_key, null);
+    insert into public.property_fact_values (property_id, key, value, source, source_name, as_of, recorded_by)
+    values (p_property, p_key, null, 'tim', 'Tim', to_char(now() at time zone 'Pacific/Auckland', 'FMDD Mon YYYY'), coalesce(auth.jwt()->>'email', 'agent')) returning id into vid;
+    insert into public.property_profile (property_id, key, value_id, chosen_by, ticked) values (p_property, p_key, vid, 'tim', false)
+    on conflict (property_id, key) do update set value_id = excluded.value_id, chosen_by = 'tim', chosen_at = now(), ticked = false, ticked_at = null, ticked_by = null;
+    return public.agent_property_profile(p_property);
+  end if;
   vid := public.profile_record(p_property, p_key, p_value, 'tim', null, to_char(now() at time zone 'Pacific/Auckland', 'FMDD Mon YYYY'), 'Tim', null, null, null, 'tim');
-  if public.jblank(p_value) then delete from public.property_profile where property_id = p_property and key = p_key; end if;
-  perform public.profile_write_back(p_property, p_key, case when public.jblank(p_value) then null else p_value end);
+  perform public.profile_write_back(p_property, p_key, p_value);
   return public.agent_property_profile(p_property);
 end $$;
 

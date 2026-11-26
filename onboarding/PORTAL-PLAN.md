@@ -147,8 +147,9 @@ The five records:
 1. Property profile: `property_fact_values` (every value from every source, dated, never changed) and `property_profile` (the chosen
    value per fact, and whether Tim ticked it), over `profile_keys`. Filled by the council lookup, the disclosures check, agreements, the
    Quiet List, the property file itself and Tim. Whatever is chosen is written back to the property file, never to an agreement, so the
-   file and the profile always agree; the file's own values are on the profile as Tim's ("Property file"); clearing a field on the file
-   clears it on the profile (nothing stays ticked). A ticked value is never overwritten (Tim, 26 November 2026): a later answer that differs,
+   file and the profile always agree; the file's own values are on the profile as Tim's ("Property file") and stay chosen against later
+   answers from elsewhere (shown beside them); clearing a field on the file keeps it cleared (no later source refills it by itself; other
+   values are shown beside it). A ticked value is never overwritten (Tim, 26 November 2026): a later answer that differs,
    for example on the disclosures check, is shown beside it for him to choose. On screen: a "Property profile" card on
    the property file (source and date per fact, the other source's value with "Use this", "Tick all"); the disclosures check offers the
    profile's value for a fact it hasn't noted ("On the property profile: ... Use this"); Tim's typing on the property file is saved to the
@@ -207,6 +208,8 @@ early hotfix 3 commits on this branch are superseded by it.
 First review (26 November 2026, not ready) fixed on the same branch: names on one email, the backfill preview, two-way links where safe,
 the profile and the file agreeing, ticked values kept, function privileges, button feedback for background work, the disclosures check
 opening offline without waiting, two signers at once, the flaky address check, and Desktop analysis apart from the listing steps.
+Re-review (26 November 2026): the property file's own values and facts Tim cleared now hold against answers from elsewhere, so the
+backfill preview shows no fact where the profile and the file disagree.
 
 Open for Tim: the backfill preview (what each of today's names becomes; the people flagged for him); whether "What I heard from you" may
 show answers to Tim's own questions; migration 028's rollback test to be run on the live project before it is applied.

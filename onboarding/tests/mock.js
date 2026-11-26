@@ -80,7 +80,7 @@ function profileRecord(pid,key,value,source,ref,asOf,sourceName,display,by,choos
       const alt=Object.values(FV().filter(f=>f.property_id===pid&&f.key===key&&f.source!==source).reduce((m,f)=>{ if(!m[f.source]||m[f.source].recorded_at<f.recorded_at) m[f.source]=f; return m; },{})).filter(f=>f.value!=null).sort((a,b)=>a.recorded_at<b.recorded_at?1:-1)[0];
       if(alt){ setC(alt.id,'auto',false); profileSyncFile(pid,key); } else DB.property_profile=PRF().filter(x=>x!==c); } return vid; }
   if(choose==='never') return vid;
-  if(choose==='offer'){ if(c&&cv&&cv.source!==source&&c.ticked&&!sameTxt(cv.value,v)){ profileSyncFile(pid,key); return vid; } choose='tim'; }
+  if(choose==='offer'){ if(c&&cv&&cv.source!==source&&(c.ticked||cv.source==='tim')&&!sameTxt(cv.value,v)){ profileSyncFile(pid,key); return vid; } choose='tim'; }
   if(choose==='tim'){ setC(vid,'tim',true); profileSyncFile(pid,key); return vid; }
   let move; if(!c) move=true; else if(sameTxt(cv&&cv.value,v)) move=false; else if(c.ticked) move=false; else if(cv&&cv.source===source) move=true; else if(cv&&cv.source==='tim') move=false; else if(recKind(source)==='record'&&recKind(cv&&cv.source)==='person') move=false; else move=true;
   if(move){ setC(vid,'auto',false); profileSyncFile(pid,key); } return vid; }
@@ -90,8 +90,8 @@ function profileRead(pid,vendor){
   const L=Object.values(latest), keys=[...new Set(L.map(f=>f.key))];
   return keys.map(k=>{ const c=PRF().find(x=>x.property_id===pid&&x.key===k), cv=c?FV().find(f=>f.id===c.value_id&&ok(f)):null;
     const others=L.filter(f=>f.key===k&&f.value!=null&&(!cv||(f.id!==cv.id&&!sameTxt(f.value,cv.value)))).sort((a,b)=>a.recorded_at<b.recorded_at?1:-1).map(f=>({value_id:f.id,value:f.value,display:f.display,source:f.source,source_name:f.source_name,as_of:f.as_of,recorded_at:f.recorded_at}));
-    return {key:k,label:PROFILE_LABEL[k]||k,position:PROFILE_KEYS.includes(k)?PROFILE_KEYS.indexOf(k):500,value_id:cv?cv.id:null,value:cv?cv.value:null,display:cv?cv.display:null,source:cv?cv.source:null,source_name:cv?cv.source_name:null,as_of:cv?cv.as_of:null,recorded_at:cv?cv.recorded_at:null,ticked:!!(c&&c.ticked&&cv),chosen_by:c?c.chosen_by:null,others}; })
-    .filter(x=>x.value_id||x.others.length).sort((a,b)=>a.position-b.position||(a.key<b.key?-1:1)); }
+    return {key:k,label:PROFILE_LABEL[k]||k,position:PROFILE_KEYS.includes(k)?PROFILE_KEYS.indexOf(k):500,value_id:cv&&cv.value!=null?cv.id:null,value:cv?cv.value:null,display:cv?cv.display:null,source:cv?cv.source:null,source_name:cv?cv.source_name:null,as_of:cv?cv.as_of:null,recorded_at:cv?cv.recorded_at:null,ticked:!!(c&&c.ticked&&cv&&cv.value!=null),chosen_by:c?c.chosen_by:null,cleared:!!(cv&&cv.value==null),others}; })
+    .filter(x=>x.value_id||x.cleared||x.others.length).sort((a,b)=>a.position-b.position||(a.key<b.key?-1:1)); }
 function profileWriteBack(pid,key,v){ const p=PT().find(x=>x.id===pid); if(!p) return; if(DESC.includes(key)){ if(v==null) delete p.description[key]; else p.description[key]=(key==='chattels'&&Array.isArray(v))?v:(typeof v==='string'?v:String(v)); } else if(key==='title_ref') p.title_ref=v; else if(key==='legal_description') p.legal_description=v; }
 // people: one contact per person (the same email with a name that fits; no email, the same legal name on the property)
 const first=s=>norm(s).split(' ')[0];
@@ -173,7 +173,11 @@ function sharedRpc(name,a,me){
     const c=PRF().find(x=>x.property_id===a.p_property&&x.key===a.p_key), n={property_id:a.p_property,key:a.p_key,value_id:f.id,chosen_by:'tim',chosen_at:now(),ticked:true,ticked_at:now(),ticked_by:me.email}; if(c) Object.assign(c,n); else PRF().push(n);
     profileWriteBack(a.p_property,a.p_key,f.value); save(); return ok({property_id:a.p_property,facts:profileRead(a.p_property,false)}); }
   if(name==='agent_profile_tick'){ PRF().filter(x=>x.property_id===a.p_property&&(!a.p_keys||a.p_keys.includes(x.key))).forEach(x=>{ x.ticked=!!a.p_on; x.ticked_at=a.p_on?now():null; x.ticked_by=a.p_on?me.email:null; }); save(); return ok({property_id:a.p_property,facts:profileRead(a.p_property,false)}); }
-  if(name==='agent_profile_set'){ if(!PROFILE_KEYS.includes(a.p_key)) return bad('Not a property fact'); if(jblank(a.p_value)) profileWriteBack(a.p_property,a.p_key,null); profileRecord(a.p_property,a.p_key,a.p_value,'tim',null,lwToday(),'Tim',null,me.email,'tim'); if(jblank(a.p_value)) DB.property_profile=PRF().filter(x=>!(x.property_id===a.p_property&&x.key===a.p_key)); profileWriteBack(a.p_property,a.p_key,jblank(a.p_value)?null:a.p_value); save(); return ok({property_id:a.p_property,facts:profileRead(a.p_property,false)}); }
+  if(name==='agent_profile_set'){ if(!PROFILE_KEYS.includes(a.p_key)) return bad('Not a property fact'); if(jblank(a.p_value)){ // Tim cleared it on the file: his empty entry is chosen (not ticked), so no later source fills it by itself
+      profileWriteBack(a.p_property,a.p_key,null); const row={id:uid(),property_id:a.p_property,key:a.p_key,value:null,display:null,source:'tim',source_name:'Tim',source_ref:null,as_of:lwToday(),recorded_at:stamp(),recorded_by:me.email}; FV().push(row);
+      const c=PRF().find(x=>x.property_id===a.p_property&&x.key===a.p_key), n={property_id:a.p_property,key:a.p_key,value_id:row.id,chosen_by:'tim',chosen_at:now(),ticked:false,ticked_at:null,ticked_by:null}; if(c) Object.assign(c,n); else PRF().push(n);
+      save(); return ok({property_id:a.p_property,facts:profileRead(a.p_property,false)}); }
+    profileRecord(a.p_property,a.p_key,a.p_value,'tim',null,lwToday(),'Tim',null,me.email,'tim'); profileWriteBack(a.p_property,a.p_key,jblank(a.p_value)?null:a.p_value); save(); return ok({property_id:a.p_property,facts:profileRead(a.p_property,false)}); }
   if(name==='agent_person_link_resolve'){ const l=PLK().find(x=>x.id===a.p_link); if(!l) return bad('Not found'); if(!l.doubt) return bad('Nothing to check here');
     if(a.p_same){ if(!l.doubt_contact_id) return bad('There is no other person to join this to'); const old=l.contact_id, to=l.doubt_contact_id; l.contact_id=to;
       // the working lists follow (never a signed row)

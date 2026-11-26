@@ -41,3 +41,6 @@ select 'Property files changed by the backfill: ' || count(*) from public.proper
 select 'Signed agreement people changed: ' || count(*) from public.agreement_people a join public._signed_before b on b.id = a.id
  where a.contact_id is distinct from b.contact_id or a.legal_name is distinct from b.legal_name or a.email is distinct from b.email;
 select 'Problems logged: ' || count(*) || coalesce(' (' || string_agg(what || ': ' || (detail->>'error'), '; ') || ')', '') from public.shared_record_log;
+select 'Facts where the profile and the property file disagree: ' || count(*) from public.property_profile c join public.property_fact_values f on f.id = c.value_id join public.properties p on p.id = c.property_id
+ where (c.key = any (public.desc_keys()) and (p.description ->> c.key) is distinct from (f.value #>> '{}'))
+    or (c.key = 'title_ref' and p.title_ref is distinct from (f.value #>> '{}')) or (c.key = 'legal_description' and p.legal_description is distinct from (f.value #>> '{}'));

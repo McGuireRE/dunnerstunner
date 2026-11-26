@@ -15,7 +15,11 @@ begin
   select md5(string_agg(id::text || coalesce(contact_id::text, '-') || legal_name || email, ',' order by id)) into pre_signed from public.agreement_people where signed_at is not null;
 
   -- before 028: a property file Tim filled in himself, and a draft agreement saying something else about the bedrooms
-  insert into public.properties (address, description, title_ref) values ('2 Lw0 Backfill Lane, Rollbackville', '{"pHeat":"Wood burner","pBed":"2"}', 'OT1/LW0') returning id into bp;
+  insert into public.properties (address, description, title_ref) values ('2 Lw0 Backfill Lane, Rollbackville', '{"pHeat":"Wood burner","pBed":"2","pLand":"800"}', 'OT1/LW0') returning id into bp;
+  -- and a council value Tim used once, which the file has since changed (800 on the file, 812 from the council)
+  perform set_config('app.council_accept', 'on', true);
+  update public.properties set found = '{"land_area":{"key":"land_area","field":"pLand","written":true,"value":812,"display":"812 m²","as_of_label":"2026-2027 rating year","source_name":"Dunedin City Council rates","label":"Land area"}}' where id = bp;
+  perform set_config('app.council_accept', 'off', true);
   insert into public.agreements (address, property_id, answers) values ('2 Lw0 Backfill Lane, Rollbackville', bp, '{"pBed":"3"}') returning id into ba;
 
   execute $mig$__MIGRATION__$mig$;
@@ -43,8 +47,16 @@ begin
   r := public.profile_read(bp, false);
   out := out || 'backfilled file: ' || (select string_agg(px->>'key' || '=' || (px->'value' #>> '{}') || '/' || (px->>'source') || coalesce('/' || (px->>'source_name'), '') || '/' || (px->>'ticked')
       || coalesce(' others ' || (select string_agg((o->'value' #>> '{}') || '/' || (o->>'source'), ',') from jsonb_array_elements(px->'others') o), ''), ', ' order by px->>'key') from jsonb_array_elements(r) px)
-    || ' file unchanged=' || ((select description from public.properties where id = bp) = '{"pHeat":"Wood burner","pBed":"2"}'::jsonb)::text || '; ';
-  if (select description from public.properties where id = bp) <> '{"pHeat":"Wood burner","pBed":"2"}'::jsonb then out := out || 'THE BACKFILL CHANGED A PROPERTY FILE; '; end if;
+    || ' file unchanged=' || ((select description from public.properties where id = bp) = '{"pHeat":"Wood burner","pBed":"2","pLand":"800"}'::jsonb)::text || '; ';
+  if (select description from public.properties where id = bp) <> '{"pHeat":"Wood burner","pBed":"2","pLand":"800"}'::jsonb then out := out || 'THE BACKFILL CHANGED A PROPERTY FILE; '; end if;
+  if n > 0 then out := out || 'THE PROFILE AND THE FILE DISAGREE AFTER THE BACKFILL; '; end if;
+  if ((select px from jsonb_array_elements(r) px where px->>'key' = 'pLand')->>'source') <> 'tim' then out := out || 'A COUNCIL VALUE REPLACED THE FILE''S LAND AREA; '; end if;
+  -- a later answer from another place (a disclosures check) differing from the file's own value: the file's stays, the answer beside it
+  perform public.profile_record(bp, 'pHeat', '"Heat pump"', 'inspection', null, '26 Nov 2026', 'Inspect a property', null, null, 'agent', 'offer');
+  r := (select px from jsonb_array_elements(public.profile_read(bp, false)) px where px->>'key' = 'pHeat');
+  out := out || 'check answer against the file''s heating: chosen ' || (r->>'value') || '/' || (r->>'source') || ' beside it ' || coalesce((select string_agg((o->>'value') || '/' || (o->>'source'), ',') from jsonb_array_elements(r->'others') o), 'none')
+    || ' file=' || (select description->>'pHeat' from public.properties where id = bp) || '; ';
+  if r->>'value' <> 'Wood burner' or (select description->>'pHeat' from public.properties where id = bp) <> 'Wood burner' then out := out || 'AN OFFERED VALUE REPLACED THE FILE''S OWN; '; end if;
 
   -- privileges: nothing new is open to anon or PUBLIC; the internal helpers are closed to signed-in users too
   select string_agg(p.proname, ',' order by p.proname) into x from pg_proc p
@@ -108,6 +120,13 @@ begin
   r := (select f from jsonb_array_elements(public.agent_property_profile(pid)->'facts') f where f->>'key' = 'pLand');
   out := out || 'Tim cleared land on the file: chosen=' || coalesce(r->>'value_id', 'none') || ' ticked=' || (r->>'ticked') || ' still listed=' || (select string_agg((o->'value' #>> '{}') || '/' || (o->>'source'), ',' order by o->>'source') from jsonb_array_elements(r->'others') o)
     || ' file=' || coalesce((select description->>'pLand' from public.properties where id = pid), 'empty') || '; ';
+  -- a fact Tim cleared stays cleared: a draft agreement and a check answer saying something later are shown beside it, never fill it
+  update public.agreements set answers = answers || '{"pLand":"700"}' where id = aid;
+  perform public.agent_inspection_save(iid, '{"pLand":"600"}'::jsonb, null, null, null);
+  r := (select f from jsonb_array_elements(public.agent_property_profile(pid)->'facts') f where f->>'key' = 'pLand');
+  out := out || 'after the clear, a draft agreement says 700 and the check 600: cleared=' || (r->>'cleared') || ' chosen=' || coalesce(r->>'value_id', 'none') || ' beside it ' || (select string_agg((o->'value' #>> '{}') || '/' || (o->>'source'), ',' order by o->>'source') from jsonb_array_elements(r->'others') o)
+    || ' file=' || coalesce((select description->>'pLand' from public.properties where id = pid), 'empty') || '; ';
+  if r->>'value_id' is not null or (select description->>'pLand' from public.properties where id = pid) is not null then out := out || 'A CLEARED FACT WAS REFILLED; '; end if;
   -- clearing on the inspection: the chosen value from the inspection goes, the newest other value takes its place
   perform public.agent_inspection_save(iid, '{"pType":""}'::jsonb, null, null, null);
   out := out || 'cleared pType: ' || coalesce(((select f from jsonb_array_elements(public.agent_property_profile(pid)->'facts') f where f->>'key' = 'pType')->>'value'), 'gone') || '; ';
