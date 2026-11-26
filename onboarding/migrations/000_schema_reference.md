@@ -421,3 +421,10 @@ agreements/<agreement id>/signatures/... (vendors may upload their own signature
   (pg-standin, 010, 016 part A, 018, 019, 021, 022, 023, 024, 025): every line as expected, no CAPITALS. Also run on the stand-in with
   026 applied straight after 024: 024's own rollback test (output identical apart from the new tables in its truncate notice), 025's
   rollback test (identical) and 024's race test (no errors).
+
+## 030 The agreed emails' lawyer cc (Agreed emails filled in, 26 November 2026; tested in a rollback block on a local PostgreSQL stand-in, NOT yet on the live project)
+- `offer_mail_allowed` redefined: as 024 (checked against the live body 26 November 2026), except that the `agreed_purchasers` branch
+  also allows the agreed draft's `pl_email` and `pl_service` (the purchasers' lawyer as the contract's contact page has them; only text
+  holding an @). Every other kind is unchanged; execute still revoked from public, anon and authenticated. Nothing else changes.
+- Rollback test: `tests/agreed-mail-rollback.sql` (built by `tests/agreed-mail-rollback.js`). Local run 26 November 2026 on the stand-in
+  (pg-standin, 010, 016 part A, 018, 019, 021 to 026): every line as expected, no CAPITALS.

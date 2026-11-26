@@ -19,6 +19,7 @@ as `BUILD-PLAN.md`: builder, tests against the mock database, independent review
 - Edge functions and the commit each is pinned to: offer-sign 11e46da; offer-public, offer-draft, doc-prefill 06c2d22.
 - Still to do: the test offer with Tim's own addresses (OFFERS-PLAN "Going live" step 5), then Tim's solicitor confirms the
   signing and counteroffer method before the first real offer. Phases 5 and 6 not built.
+- Built, awaiting review: Agreed emails filled in (branch `agreed-mail-details`; migration 030 not applied; see its section).
 - Older "Status:" lines in the phase sections below are kept as the build history; this section is the current state.
 
 Replaces: the Jotform "Prepare My Offer" form, retyping each offer into the REINZ eForms portal, and Adobe signing.
@@ -889,6 +890,35 @@ problem as item 5; to be fixed the same way.
 Decided by Tim, 25 November 2026: "Confirm the agreement" while an offer is frozen is held, not made (Offers fixes 3).
 Tests: `tests/offers-fixes2.test.js` (new), `tests/strike-snap.test.js` (new), `tests/mail-core.test.js`, `tests/offer-nego-fn.test.js`,
 `tests/offers-nego.test.js` (extended).
+
+## Agreed emails filled in (Tim, 26 November 2026; branch `agreed-mail-details` from main be6d6b8)
+
+Status: built, awaiting review. Migration 030 written and tested on the local stand-in only, NOT applied. Page change only besides
+that: no edge function changes, so nothing to redeploy. Drafts already made stay as they are; a new build (Build the emails, or a
+deposit holder change while the drafts are unsent) fills the details.
+Tim: "none of the contact details were filled in" (offer on 188 Gladstone Road). Every blank now comes from the record holding it:
+- Purchasers: names, emails and phones from the offer; the first purchaser also takes the offer's own email and phone (the form
+  keeps the buyer's own there, which is why the live drafts had "[Tim to fill: email]"); a signer's email by the same name.
+- The purchasers' lawyer: the agreed contract's contact page (pl_ places: name, firm, email, phone, email for notices), a field
+  missing there from the offer's lawyer (Tim is told which).
+- Vendors: the names as signed, their emails, phones from the property file. New in the vendors' email: "The contact details I
+  have for you are:" and "Your lawyer:" in full.
+- The vendors' lawyer: the contract's contact page (vl_ places); if it has none, the lawyer the newest signed agency agreement was
+  sent to (never one whose email is a vendor's own: the drafting rule). Tim is told where it came from. The first name from it.
+- Tim's preference kept: each email has the other side's lawyer in full. Tim's addition the same day: when a lawyer's email and the
+  email for service of notices differ, both are shown, labelled ("Email:" and "Notices are served to:"); the same address once.
+- Cc: each side's lawyer's email from the same record (the notices address if it is the only one). 030 lets the purchasers' email
+  be cc'd to the lawyer email (or notices address) on the agreed draft, as 024 already allowed for the vendors'.
+- What isn't on record stays a named blank ("[Tim to fill: the vendors' lawyer's phone]") and is listed once at the top of the
+  review: "Still needed: ...". A lawyer missing altogether is one item.
+- Privacy unchanged: the other side's own email or phone (the 024/025 guard) is left out of an email, never put in, and Tim is told
+  ("Left out of the email to the purchasers: ..."). Tim's own phone and email are always allowed. Purchasers' own details never go
+  in the vendors' email, or the other way round. In the live test offer the purchaser's email is also the vendor's, so it is left
+  out of both emails; and the only lawyer link on that agency agreement carries the vendor's own email, so the vendors' lawyer
+  stays a blank there (as it did on the drafted contract).
+Tests: `tests/mail-core.test.js` (extended: the live case, signers, the contract's lawyer, differing notices address, Still
+needed, privacy left-outs), `tests/offers-nego.test.js` (extended: built on the page, then rebuilt with an agency agreement
+lawyer and a different notices address), `tests/agreed-mail-rollback.sql` / `.js` (030, local stand-in: every line as expected).
 
 ## Offers fixes 1 (raised by Tim 25 November 2026, built ahead of everything else; branch `offers-fixes-1`)
 

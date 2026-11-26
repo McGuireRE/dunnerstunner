@@ -53,15 +53,17 @@ const base = () => ({
   has(P.body, '2. LIM: within 10 working days of the date of agreement, due **Thursday 14 January 2027**. Order the LIM from the council now and ask for it to be processed urgently.', 'LIM step');
   has(P.body, 'They all fall due on the same day, so please get started on each of them straight away.', 'all due together: urged to start now');
   ok(!/Builder|Electrical|Toxicology/.test(P.body), 'only this agreement\'s conditions');
-  has(P.body, "This email is cc'd to your lawyer: Pat Solicitor, Synthetic Law, pat@synthlaw.example, 03 477 1234.", "the purchasers' lawyer");
-  has(P.body, "The vendors' lawyer is: Sam Counsel, Counsel and Co, sam@counsel.example, 03 455 0000.", "the other side's lawyer too");
+  has(P.body, "This email is cc'd to your lawyer:\nPat Solicitor, Synthetic Law\nEmail: pat@synthlaw.example\nPhone: 03 477 1234", "the purchasers' lawyer");
+  has(P.body, "The vendors' lawyer is:\nSam Counsel, Counsel and Co\nEmail: sam@counsel.example\nPhone: 03 455 0000", "the other side's lawyer too");
   has(P.body, 'Ana Testbuyer: ana.p@buyer.example, 022 777 6666', 'their own contact details, as supplied');
   has(V.body, 'Hello Vee,', 'vendors greeted by preferred name');
   has(V.body, "This email is cc'd to your lawyer, Sam Counsel of Counsel and Co.", "the vendors' lawyer named");
   has(V.body, "That way Sam and I can be responsive", "the lawyer's first name");
   has(V.body, 'Until the purchaser confirms the agreement, you have tasked me with marketing the property.', 'while conditional, marketing carries on');
   has(V.body, 'only tentative "pencil" bookings', 'pencil bookings');
-  has(V.body, "The purchaser's lawyer is: Pat Solicitor, Synthetic Law, pat@synthlaw.example, 03 477 1234.", "the purchasers' lawyer");
+  has(V.body, "The purchasers' lawyer is:\nPat Solicitor, Synthetic Law\nEmail: pat@synthlaw.example\nPhone: 03 477 1234", "the purchasers' lawyer (the other side's, Tim's standing preference)");
+  has(V.body, "Your lawyer:\nSam Counsel, Counsel and Co\nEmail: sam@counsel.example\nPhone: 03 455 0000", "the vendors' own lawyer, in full");
+  has(V.body, 'The contact details I have for you are:\nVera Vendorperson: vera@vendor.example, 021 000 1111', "the vendors' own details, as signed");
   has(V.body, "Conditions: purchaser's action steps", "the conditions from the vendors' side");
   has(V.body, '1. Further term 23 (Fence): The vendor shall repair the broken boundary fence before settlement. Please book any work now.', "the vendors' action items from the further terms");
   // privacy: each party sees only their own details and both lawyers'
@@ -70,6 +72,73 @@ const base = () => ({
   // blanks: only where the data is silent, clearly marked
   ok(JSON.stringify(r.blanks) === JSON.stringify(['[Tim to add: the property page link, or delete this line]', '[Tim to fill: when the deposit is paid]', '[Tim to check: no vendor action items were found in the further terms]'].filter(b => (P.body + V.body).includes(b))), 'the marked blanks: ' + JSON.stringify(r.blanks));
   ok(r.blanks.includes('[Tim to fill: when the deposit is paid]') && r.blanks.includes('[Tim to add: the property page link, or delete this line]') && !r.blanks.some(b => /vendor action/.test(b)), 'when the deposit is paid and the property page link are left for Tim; the vendor action item was found');
+  // Agreed emails filled in (Tim, 26 November 2026): every detail on record is filled; what isn't is a blank listed once as "Still needed"
+  { // the live case: the purchaser's own email and phone are on the offer, not in the purchaser's row
+    const b = base(); b.details.purchasers = [{ first: 'Ana', last: 'Testbuyer', email: null, phone: null }];
+    const x = M.agreedDrafts(b);
+    has(x.purchasers.body, 'Ana Testbuyer: ana.own@buyer.example, 021 999 8888', "the purchaser's email and phone from the offer itself");
+    ok(x.purchasers.to.join() === 'ana.own@buyer.example', 'to the address on the offer');
+    ok(!/\[Tim to fill: (email|phone)\]/.test(x.purchasers.body), 'no bare email or phone blanks');
+    has(x.vendors.body, "The purchaser's lawyer is:\nPat Solicitor", 'one purchaser: "purchaser\'s"'); }
+  { // a second purchaser with nothing on record: a named blank for each, and Tim's list; a signer's email by the same name is used
+    const b = base(); b.details.purchasers[1] = { first: 'Bo', last: 'Testbuyer' }; b.purchaserSigners = [{ name: 'bo testbuyer', email: 'bo.signer@buyer.example' }];
+    let x = M.agreedDrafts(b);
+    has(x.purchasers.body, 'Bo Testbuyer: bo.signer@buyer.example, [Tim to fill: Bo Testbuyer\'s phone]', "the signer's email; the phone a named blank");
+    ok(x.stillNeeded.includes("Bo Testbuyer's phone") && !x.stillNeeded.some(t => /Bo Testbuyer's email/.test(t)), 'Still needed: just the phone: ' + JSON.stringify(x.stillNeeded));
+    ok(!x.purchasers.to.includes('bo.signer@buyer.example'), "a signer's address isn't added to the To line (only the offer's addresses may receive it)");
+    b.purchaserSigners = []; x = M.agreedDrafts(b);
+    has(x.purchasers.body, "Bo Testbuyer: [Tim to fill: Bo Testbuyer's email], [Tim to fill: Bo Testbuyer's phone]", 'nothing on record: both named blanks'); }
+  { // the purchasers' lawyer from the agreed contract's contact page (purchaserLawyer), not the offer's: the email and cc match the agreement
+    const b = base(); b.purchaserLawyer = { person: 'Pat Solicitor', firm: 'Synthetic Law Limited', email: 'pat.contract@synthlaw.example', phone: '03 477 9999', service: 'pat.contract@synthlaw.example' };
+    const x = M.agreedDrafts(b);
+    ok(x.purchasers.cc.join() === 'pat.contract@synthlaw.example', 'cc: the lawyer email on the agreement: ' + x.purchasers.cc);
+    has(x.purchasers.body, "Pat Solicitor, Synthetic Law Limited\nEmail: pat.contract@synthlaw.example\nPhone: 03 477 9999", "the purchasers' email: as on the agreement");
+    has(x.vendors.body, "The purchasers' lawyer is:\nPat Solicitor, Synthetic Law Limited\nEmail: pat.contract@synthlaw.example\nPhone: 03 477 9999", "the vendors' email: the same");
+    ok(!/Notices are served to/.test(x.purchasers.body + x.vendors.body), 'the same address for notices: shown once'); }
+  { // Tim, 26 November 2026: a lawyer's email and the email for service of notices differ: both, labelled, in both emails
+    const b = base(); b.vendorLawyer = { person: 'Sam Counsel', firm: 'Counsel and Co', email: 'sam@counsel.example', phone: '03 455 0000', service: 'notices@counsel.example' };
+    b.purchaserLawyer = { person: 'Pat Solicitor', firm: 'Synthetic Law', email: 'pat@synthlaw.example', phone: '03 477 1234', service: 'conveyancing@synthlaw.example' };
+    const x = M.agreedDrafts(b);
+    for (const t of [x.purchasers.body, x.vendors.body]) {
+      has(t, 'Sam Counsel, Counsel and Co\nEmail: sam@counsel.example\nPhone: 03 455 0000\nNotices are served to: notices@counsel.example', "the vendors' lawyer: email and notices address both");
+      has(t, 'Pat Solicitor, Synthetic Law\nEmail: pat@synthlaw.example\nPhone: 03 477 1234\nNotices are served to: conveyancing@synthlaw.example', "the purchasers' lawyer: email and notices address both"); }
+    ok(x.vendors.cc.join() === 'sam@counsel.example' && x.purchasers.cc.join() === 'pat@synthlaw.example', "cc: each lawyer's own email");
+    // only the notices address on record: it is the address for both, shown once
+    b.vendorLawyer = { person: 'Sam Counsel', firm: 'Counsel and Co', phone: '03 455 0000', service: 'notices@counsel.example' }; const y = M.agreedDrafts(b);
+    has(y.purchasers.body, 'Sam Counsel, Counsel and Co\nEmail: notices@counsel.example\nPhone: 03 455 0000\n\n', 'only the notices address: used once, as the email');
+    ok(y.vendors.cc.join() === 'notices@counsel.example', 'cc: the notices address when it is the only one'); }
+  { // part of the vendors' lawyer missing: a named blank, listed at the top of Tim's review; the cc still filled
+    const b = base(); b.vendorLawyer = { person: 'Sam Counsel', firm: 'Counsel and Co', email: 'sam@counsel.example' };
+    const x = M.agreedDrafts(b);
+    has(x.purchasers.body, "Email: sam@counsel.example\nPhone: [Tim to fill: the vendors' lawyer's phone]", 'the missing phone: a clear blank');
+    ok(x.stillNeeded.includes("the vendors' lawyer's phone"), 'Still needed: the vendors\' lawyer\'s phone: ' + JSON.stringify(x.stillNeeded));
+    ok(x.vendors.cc.join() === 'sam@counsel.example', 'cc filled from the same record');
+    ok(JSON.stringify(M.stillNeeded('a [Tim to fill: x] b [Tim to check: y] [Tim to add: z] [Tim to fill: x]')) === '["x","z"]', 'stillNeeded: fill and add, once each, not the checks');
+    // nobody on record for the vendors' lawyer's first name
+    b.vendorLawyer = {}; has(M.agreedDrafts(b).vendors.body, "That way [Tim to fill: the vendors' lawyer's first name] and I", "the first name blank says whose"); }
+  { // privacy (offer_mail_side_hit, 024 and 025): the other side's own email or phone is left out, never put in; Tim's own always allowed
+    const b = base(); b.details.purchasers = [{ first: 'Tim', last: 'Testagent', email: null, phone: null }]; b.details.email = 'same@home.example'; b.details.phone = '+64 27 562 7207';
+    b.vendors = [{ legal_name: 'Timothy Testagent', pref_name: 'Tim', email: 'same@home.example', phone: '0275627207' }];
+    b.hide = { purchasers: { emails: ['same@home.example'], phones: ['0275627207'] }, vendors: { emails: ['same@home.example'], phones: ['+64275627207'] } };
+    const x = M.agreedDrafts(b);
+    has(x.purchasers.body, 'Tim Testagent: +64 27 562 7207\n', "the purchaser's own email is also a vendor's: left out; the phone is Tim's own, so kept");
+    ok(!x.purchasers.body.includes('same@home.example') && !x.vendors.body.includes('same@home.example'), 'the shared address appears in neither email');
+    ok(x.notes.some(n => /^Left out of the email to the purchasers: Tim Testagent's email\. It is the same as a vendor's own/.test(n)) && x.notes.some(n => /^Left out of the email to the vendors: Timothy Testagent's email\./.test(n)), 'Tim is told what was left out: ' + JSON.stringify(x.notes.filter(n => /Left out/.test(n))));
+    ok(!x.stillNeeded.some(t => /Testagent's email/.test(t)), 'left out for privacy is not "still needed"');
+    // another phone (not Tim's) shared by both sides: left out too
+    b.details.phone = '021 123 4567'; b.vendors[0].phone = '021 123 4567'; b.hide.purchasers.phones = ['021 123 4567']; b.hide.vendors.phones = ['021 123 4567'];
+    const y = M.agreedDrafts(b); ok(!y.purchasers.body.includes('021 123 4567') && !y.vendors.body.includes('021 123 4567'), 'a real party phone shared across sides: left out of both');
+    // a lawyer's address equal to the other side's own: left out of that email only
+    const c = base(); c.hide = { purchasers: { emails: ['sam@counsel.example'] }, vendors: {} }; const z = M.agreedDrafts(c);
+    ok(!z.purchasers.body.includes('sam@counsel.example') && z.vendors.body.includes('sam@counsel.example') && z.vendors.cc.join() === 'sam@counsel.example', 'the vendors\' lawyer\'s address held by a vendor: not in the purchasers\' email, still the vendors\' cc'); }
+  { // a vendor who signed in person has no signer email: the property file's email is shown to them, but isn't put on the To line
+    const b = base(); b.vendors = [{ legal_name: 'Vera Vendorperson', pref_name: 'Vee', email: 'vera@vendor.example', to: '', phone: '021 000 1111' }, { legal_name: 'Val Vendorperson', email: 'val@vendor.example', to: 'val@vendor.example', phone: '' }];
+    const x = M.agreedDrafts(b);
+    ok(x.vendors.to.join() === 'val@vendor.example', "To: only the vendors' own signer addresses: " + x.vendors.to);
+    has(x.vendors.body, "Vera Vendorperson: vera@vendor.example, 021 000 1111\nVal Vendorperson: val@vendor.example, [Tim to fill: Val Vendorperson's phone]", 'both vendors\' details shown, as signed'); }
+  { // the lawyers' details come with where they came from, for Tim (sources)
+    const b = base(); b.sources = ["The vendors' lawyer isn't on the agreement's contact page: taken from the lawyer the agency agreement was sent to. Check they are acting on this sale."];
+    ok(M.agreedDrafts(b).notes.includes(b.sources[0]), 'the source note is passed to Tim'); }
   // never a guess: a missing due date, lawyer or settlement becomes a blank
   { const b = base(); delete b.terms.as_drafted.d_lim; b.vendorLawyer = {}; b.terms.as_drafted.settlement = '15 working days after confirmation'; b.terms.settlement = { kind: 'relative', days: 15 };
     const x = M.agreedDrafts(b);
@@ -77,7 +146,9 @@ const base = () => ({
     has(x.purchasers.body, '2. LIM: within 10 working days of the date of agreement, due **Tuesday 26 January 2027**.', 'a due date not on the agreement: worked out from the agreement date');
     ok(x.notes.some(n => /^LIM due Tuesday 26 January 2027 \(worked out from the agreement date, Friday 18 December 2026: within 10 working days of the date of the agreement, with Otago holidays; check\)$/.test(n)), 'the worked-out LIM date is shown to Tim once, with how: ' + JSON.stringify(x.notes));
     ok(!x.purchasers.body.includes('worked out') && !x.vendors.body.includes('worked out'), 'the "worked out" notes are for Tim\'s editor, not in the emails');
-    has(x.purchasers.body, "The vendors' lawyer is: [Tim to fill: the lawyer (name, firm, email, phone)].", 'no vendors\' lawyer on file');
+    has(x.purchasers.body, "The vendors' lawyer is:\n[Tim to fill: the vendors' lawyer (name, firm, email, phone)]", 'no vendors\' lawyer on file');
+    ok(x.stillNeeded.includes("the vendors' lawyer (name, firm, email, phone)"), 'no vendors\' lawyer: listed for Tim as still needed');
+    ok(!x.stillNeeded.some(t => /^the vendors' lawyer's /.test(t)), "a lawyer missing altogether is one item, not their name, firm and first name again: " + JSON.stringify(x.stillNeeded));
     has(x.purchasers.body, 'Possession and Settlement day: **Wednesday 17 February 2027**', 'settlement: 15 working days after the last condition (Waitangi Day observed skipped)');
     ok(x.notes.some(n => /^Settlement day Wednesday 17 February 2027 \(worked out from the agreement date, Friday 18 December 2026: 15 working days after the last condition, with Otago holidays; check\)$/.test(n)), 'the worked-out settlement day is shown to Tim once');
     ok(!x.blanks.some(b => /settlement day|due date/.test(b)), 'no blank for dates the portal can work out');

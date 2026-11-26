@@ -10,6 +10,7 @@
      roundNotice(i)          Tim's own notice, once per submitted round: who, what changed, which round, and its portal address
      requestNotice(i)        Tim's urgent email when a party asks from their link to stop, withdraw or go back to the last sealed round
      agreedDrafts(i)         the agreed copy's two emails: to the purchasers (cc their lawyer) and to the vendors (cc theirs)
+     stillNeeded(text)       what the marked blanks still ask Tim to fill or add, in plain words, once each (the top of his review)
      agreedPrice(i)          the agreed price after the negotiation (a typed figure that replaced the struck price), or a marked blank
      agreedDates(i)          each condition's due date and settlement day, from the agreement date with working days and the province's holidays
      agreedNotice(i)         Tim's own email once the agreed copy is locked (sent at once, with the copy attached; never to a party)
@@ -225,14 +226,51 @@
   }
 
   // input: { address, agreement: { agreement_date }, terms (offer_agreements.terms), details (the offer), vendors: [{ legal_name, pref_name, email, phone }],
-  //   vendorLawyer: { person, firm, email, phone }, holidays: [{ day, label }], labels: { key: 'Finance', ... } }
-  //   -> { purchasers: { to, cc, subject, body }, vendors: { ... }, blanks: [the marked blanks, once each] }
+  //   vendorLawyer: { person, firm, email, phone, service }, purchaserLawyer: { the same } (else details.lawyer), purchaserSigners: [{ name, email }],
+  //   hide, agent (see below), sources: [notes for Tim on where a lawyer came from], holidays: [{ day, label }], labels: { key: 'Finance', ... } }
+  //   -> { purchasers: { to, cc, subject, body }, vendors: { ... }, blanks: [the marked blanks, once each], stillNeeded: [plain words], notes, left }
   function agreedDrafts(input) {
     const T = input.terms || {}, D = input.details || {}, AD = T.as_drafted || {}, labels = Object.assign({}, input.labels || {}), addr = s_(input.address);
     const conds = Array.isArray(T.conditions) ? T.conditions : [];
-    const pl = D.lawyer || {}, vl = input.vendorLawyer || {};
-    const purch = (D.purchasers || []).map(q => ({ first: s_(q.first), last: s_(q.last), email: s_(q.email), phone: s_(q.phone) })).filter(q => q.first || q.last);
-    const vend = (input.vendors || []).map(v => ({ name: s_(v.legal_name), call: s_(v.pref_name) || s_(v.legal_name).split(/\s+/)[0], email: s_(v.email), phone: s_(v.phone) }));
+    /* Agreed emails filled in (Tim, 26 November 2026): every contact detail comes from the record that already holds it, so all Tim does
+       is read and send. What isn't on record stays a marked blank, and the blanks are listed for him once ("Still needed", stillNeeded).
+         the purchasers: their names, emails and phones on the offer (the first purchaser also has the offer's own email and phone; a
+           signer's email by the same name)
+         the purchasers' lawyer: input.purchaserLawyer (the agreed contract's contact page, as Tim's screen reads it), else the offer's
+         the vendors: input.vendors (the names as signed, their emails and phones); the vendors' lawyer: input.vendorLawyer
+         each lawyer's email for service of notices (service), shown as well when it isn't their email (Tim, 26 November 2026)
+       Privacy (024 and 025, offer_mail_side_hit): an email never holds the other side's own email or phone. input.hide gives them
+       ({ purchasers: { emails, phones }, vendors: { emails, phones } }: what each email must not hold), input.agent Tim's own (never
+       hidden). A value that would break the rule is left out of that email, and Tim is told in the notes. */
+    const nsn = v => { let x = String(v == null ? '' : v).replace(/\D/g, ''); if (x.startsWith('0064')) x = x.slice(4); else if (x.startsWith('64') && x.length >= 10) x = x.slice(2); else if (x.startsWith('0')) x = x.slice(1); return x; };
+    const AG = input.agent || {}, agentE = new Set((AG.emails || []).map(e => s_(e).toLowerCase()).filter(Boolean)), agentP = new Set([TIM_PHONE].concat(AG.phones || []).map(nsn).filter(Boolean));
+    const forbidOf = h => ({ emails: ((h || {}).emails || []).map(e => s_(e).toLowerCase()).filter(e => e.length >= 5 && e.includes('@') && !agentE.has(e)), phones: ((h || {}).phones || []).map(nsn).filter(x => x.length >= 7 && !agentP.has(x)) });
+    const HIDE = { purchasers: forbidOf((input.hide || {}).purchasers), vendors: forbidOf((input.hide || {}).vendors) }, LEFT = { purchasers: [], vendors: [] };
+    // a value for one of the two emails ('purchasers' | 'vendors'): '' when it holds the other side's own email or phone (Tim is told)
+    const keep = (to, v, what) => { const x = s_(v); if (!x) return ''; const t = x.toLowerCase(), n = nsn(x), F = HIDE[to];
+      if (F.emails.some(e => t.includes(e)) || (n.length >= 6 && F.phones.some(f => n.includes(f)))) { if (!LEFT[to].includes(what)) LEFT[to].push(what); return ''; } return x; };
+    const pSigners = input.purchaserSigners || [];
+    const purch = (D.purchasers || []).filter(q => s_(q.first) || s_(q.last)).map((q, k) => { const full = [s_(q.first), s_(q.last)].filter(Boolean).join(' '), sg = pSigners.find(x => s_(x.name).toLowerCase() === full.toLowerCase()) || {};
+      return { first: s_(q.first), last: s_(q.last), full, to: s_(q.email) || (k === 0 ? s_(D.email) : ''), email: s_(q.email) || s_(sg.email) || (k === 0 ? s_(D.email) : ''), phone: s_(q.phone) || (k === 0 ? s_(D.phone) : '') }; });
+    // a vendor's To address: their own as signer (v.to, when given), else the email shown; the email shown may come from the property file
+    const vend = (input.vendors || []).map(v => ({ name: s_(v.legal_name), full: s_(v.legal_name), call: s_(v.pref_name) || s_(v.legal_name).split(/\s+/)[0], email: s_(v.email), to: v.to !== undefined ? s_(v.to) : s_(v.email), phone: s_(v.phone) }));
+    const pl = input.purchaserLawyer || D.lawyer || {}, vl = input.vendorLawyer || {};
+    const pWho = purch.length > 1 ? "the purchasers' lawyer" : "the purchaser's lawyer", vWho = "the vendors' lawyer";
+    // a lawyer as one email may show them: the email for notices stands in for a missing email; hidden values are dropped, never blanked
+    const lawyerFor = (L, to, who) => { const email = keep(to, L.email, `${who}'s email`), service = keep(to, L.service, `${who}'s email for notices`), phone = keep(to, L.phone, `${who}'s phone`);
+      return { person: s_(L.person), firm: s_(L.firm), email: email || service, service, phone, hidEmail: !email && !service && !!(s_(L.email) || s_(L.service)), hidPhone: !phone && !!s_(L.phone) }; };
+    const lawyerBlock = (L, who) => {
+      if (!L.person && !L.firm && !L.email && !L.hidEmail) return blank(`fill: ${who} (name, firm, email, phone)`);
+      const lines = [[L.person || blank(`fill: ${who}'s name`), L.firm || blank(`fill: ${who}'s firm`)].join(', ')];
+      if (!L.hidEmail) lines.push(`Email: ${L.email || blank(`fill: ${who}'s email`)}`);
+      if (!L.hidPhone) lines.push(`Phone: ${L.phone || blank(`fill: ${who}'s phone`)}`);
+      if (L.service && L.email && L.service.toLowerCase() !== L.email.toLowerCase()) lines.push(`Notices are served to: ${L.service}`);
+      return lines.join('\n'); };
+    // a party's own contact line, in their own side's email: what is on record, a blank for what isn't
+    const contactLine = (q, to) => { const e = keep(to, q.email, `${q.full}'s email`), ph = keep(to, q.phone, `${q.full}'s phone`), hidE = !e && !!q.email, hidP = !ph && !!q.phone;
+      const parts = [hidE ? '' : (e || blank(`fill: ${q.full}'s email`)), hidP ? '' : (ph || blank(`fill: ${q.full}'s phone`))].filter(Boolean);
+      return parts.length ? `${q.full}: ${parts.join(', ')}` : q.full; };
+    const pLawP = lawyerFor(pl, 'purchasers', pWho), pLawV = lawyerFor(pl, 'vendors', pWho), vLawP = lawyerFor(vl, 'purchasers', vWho), vLawV = lawyerFor(vl, 'vendors', vWho);
     const agreed = fromIso((input.agreement || {}).agreement_date), fwd = agreed ? firstWorkingDay(iso(agreed), input.holidays) : null;
     // each condition's due date: the date written on the agreement for it (as drafted), else a blank
     // the price as agreed: after the negotiation, when a typed figure replaced it (shared with Tim's own email, agreedNotice)
@@ -272,7 +310,6 @@
     const excluded = (D.chattels_exclude || []).map(s_).filter(Boolean);
     const chattels = [...asIs.map(t => `As is, where is: further term ${t.number}${t.title ? ` (${t.title})` : ''}.`), ...(excluded.length ? [`Expressly excluded: ${excluded.join(', ')}.`] : [])];
     const vendorItems = ft.filter(t => /\bvendors?\b[^.]{0,60}\b(shall|will|must|is to|are to|to (complete|repair|remove|replace|provide|fix|finish))\b/i.test(s_(t.text)));
-    const lawyerLine = L => (L.person || L.firm) ? [s_(L.person) || blank("fill: the lawyer's name"), s_(L.firm) || blank("fill: the lawyer's firm"), s_(L.email) || blank("fill: the lawyer's email"), s_(L.phone) || blank("fill: the lawyer's phone")].join(', ') : blank('fill: the lawyer (name, firm, email, phone)');
     const changed = (T.changes || []).length;
     const top = [];
     if (changed) top.push(blank(`check: the negotiation made ${changed} change${changed === 1 ? '' : 's'} to the document; make sure this roadmap follows them`));
@@ -291,13 +328,14 @@
     const close = 'It has been great working with you thus far, and I look forward to ensuring everything continues smoothly.\n\nFaithfully,\nTim';
     const pNames = names(purch.map(q => q.first || q.last));
     const purchasers = {
-      to: uniq(purch.map(q => q.email).concat(purch.some(q => q.email) ? [] : [D.email])), cc: uniq([pl.email]),
+      to: uniq(purch.map(q => q.to).concat(purch.some(q => q.to) ? [] : [D.email])), cc: uniq([pLawP.email]),
       subject: `Congratulations! ${addr}`,
       body: [...top, `Dear ${pNames || blank('fill: their first names')},`,
         `Congratulations on your agreement to purchase ${addr}. It sure is a desirable property! The agreement is attached.`,
-        'The contact details you have supplied me are:\n' + (purch.length ? purch.map(q => `${[q.first, q.last].filter(Boolean).join(' ')}: ${q.email || blank('fill: email')}, ${q.phone || blank('fill: phone')}`).join('\n') : blank('fill: their contact details')),
-        `This email is cc'd to your lawyer: ${lawyerLine(pl)}. They are the person who will guide you through the remaining stages of your property purchase. Keep me in the loop with any questions or progress.`,
-        `The vendors' lawyer is: ${lawyerLine(vl)}.`,
+        'The contact details you have supplied me are:\n' + (purch.length ? purch.map(q => contactLine(q, 'purchasers')).join('\n') : blank("fill: the purchasers' names and contact details")),
+        `This email is cc'd to your lawyer:\n${lawyerBlock(pLawP, pWho)}`,
+        'They are the person who will guide you through the remaining stages of your property purchase. Keep me in the loop with any questions or progress.',
+        `The vendors' lawyer is:\n${lawyerBlock(vLawP, vWho)}`,
         `The property marketing homepage with documents is here: ${blank('add: the property page link, or delete this line')}`,
         '**Roadmap**', ...dateLines, `Price: ${price}`, condP, depositP, chatP, inspect,
         'Meeting with your lawyer: your lawyer will meet with you before settlement to go through the documents. Make sure you take evidence of ID and evidence of your current address.',
@@ -306,14 +344,16 @@
     };
     const vNames = names(vend.map(v => v.call));
     const vendors = {
-      to: uniq(vend.map(v => v.email)), cc: uniq([vl.email]),
+      to: uniq(vend.map(v => v.to)), cc: uniq([vLawV.email]),
       subject: `Congratulations! ${addr}`,
       body: [...top, `Hello ${vNames || blank('fill: their first names')},`,
-        `Congratulations on your agreement for the sale of ${addr}. This email is cc'd to your lawyer, ${s_(vl.person) || blank("fill: the vendors' lawyer's name")} of ${s_(vl.firm) || blank("fill: the vendors' lawyer's firm")}.`,
-        `They will handle all legal notices regarding the agreement and ensure everything proceeds correctly. Keep us in the loop with any developments as soon as possible. That way ${s_(vl.person).split(/\s+/)[0] || blank("fill: the lawyer's first name")} and I can be responsive and ensure you get the best possible outcome.`,
+        `Congratulations on your agreement for the sale of ${addr}. This email is cc'd to your lawyer, ${vLawV.person || blank("fill: the vendors' lawyer's name")} of ${vLawV.firm || blank("fill: the vendors' lawyer's firm")}.`,
+        `They will handle all legal notices regarding the agreement and ensure everything proceeds correctly. Keep us in the loop with any developments as soon as possible. That way ${vLawV.person.split(/\s+/)[0] || blank("fill: the vendors' lawyer's first name")} and I can be responsive and ensure you get the best possible outcome.`,
         'The agreement is attached.',
         ...(conds.length ? ['Until the purchaser confirms the agreement, you have tasked me with marketing the property. The advertising will remain active and I will continue to discuss the property with potential purchasers.'] : []),
-        `The purchaser's lawyer is: ${lawyerLine(pl)}.`,
+        'The contact details I have for you are:\n' + (vend.length ? vend.map(v => contactLine(v, 'vendors')).join('\n') : blank("fill: the vendors' names and contact details")),
+        `Your lawyer:\n${lawyerBlock(vLawV, vWho)}`,
+        `${pWho.replace(/^t/, 'T')} is:\n${lawyerBlock(pLawV, pWho)}`,
         '**Roadmap**',
         ...(conds.length ? ['From here, the purchasers will complete the agreed conditions. In the meantime, ensure any bookings and plans pertaining to your move are only tentative "pencil" bookings. The property is not sold yet, but "under offer".'] : []),
         ...dateLines, `Price: ${price}`, condV, depositLine("the purchasers'"),
@@ -326,7 +366,18 @@
         close].join('\n\n'),
     };
     const blanks = [...new Set((purchasers.body + '\n' + vendors.body).match(BLANK_RE) || [])];
-    return { purchasers, vendors, blanks, notes, price: PR };
+    [['purchasers', 'the purchasers'], ['vendors', 'the vendors']].forEach(([k, w]) => { if (LEFT[k].length) notes.push(`Left out of the email to ${w}: ${LEFT[k].join(', ')}. ${k === 'purchasers' ? 'It is the same as a vendor\'s own' : 'It is the same as a purchaser\'s own'}, and each side sees only their own details and the lawyers'.`); });
+    (input.sources || []).forEach(n => notes.push(n));
+    return { purchasers, vendors, blanks, notes, price: PR, stillNeeded: stillNeeded(purchasers.subject + '\n' + purchasers.body + '\n' + vendors.subject + '\n' + vendors.body), left: LEFT };
+  }
+
+  // what Tim still has to fill in or add, in plain words, once each ("the vendors' lawyer's phone"): from the marked blanks of one or more
+  // drafts, so his review lists them at the top ("Still needed: ..."); the checks ([Tim to check: ...]) are not in it
+  function stillNeeded(text) {
+    const all = [...new Set((String(text || '').match(BLANK_RE) || []).filter(b => /^\[Tim to (fill|add):/.test(b)).map(b => b.replace(/^\[Tim to (fill|add):\s*/, '').replace(/\]$/, '').trim()))];
+    // a lawyer missing altogether is one item: their name, firm, email, phone and first name are part of it
+    const whole = all.map(t => (/^(.+) \(name, firm, email, phone\)$/.exec(t) || [])[1]).filter(Boolean);
+    return all.filter(t => !whole.some(w => t.startsWith(w + "'s ")));
   }
 
   /* ───── Tim's own email when the agreement is confirmed (Offers fixes 2; Tim: "it is most important that I get an email once the
@@ -414,7 +465,7 @@
     return '<div style="font-family:Arial,sans-serif;font-size:15px;line-height:1.5;color:#1F1D1A;max-width:600px">' + String(text).split(/\n{2,}/).map(p => `<p>${para(p)}</p>`).join('') + '</div>';
   }
 
-  const MAIL = { LINK, BLANK_RE, get TIM_PHONE() { return TIM_PHONE; }, setAgent, allChanges, signLinkDraft, reopenedDraft, finishAgainDraft, roundNotice, agreedDrafts, agreedPrice, agreedDates, agreedNotice, PRICE_BLANK, DEPOSIT_HOLDERS, depositRecommended, withdrawDrafts, requestNotice, firstWorkingDay, parseDate, longDate, toHtml, P_ACTION };
+  const MAIL = { LINK, BLANK_RE, get TIM_PHONE() { return TIM_PHONE; }, setAgent, allChanges, stillNeeded, signLinkDraft, reopenedDraft, finishAgainDraft, roundNotice, agreedDrafts, agreedPrice, agreedDates, agreedNotice, PRICE_BLANK, DEPOSIT_HOLDERS, depositRecommended, withdrawDrafts, requestNotice, firstWorkingDay, parseDate, longDate, toHtml, P_ACTION };
   // also on the global object everywhere (a bundler may wrap this file as CommonJS: the offer-sign entry reads the globals; offers hotfix 2)
   if (typeof module !== 'undefined' && module.exports) module.exports = MAIL; root.MAIL = MAIL;
 })(typeof window !== 'undefined' ? window : globalThis);

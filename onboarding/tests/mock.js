@@ -909,7 +909,9 @@ const lowAll=a=>(a||[]).map(x=>String(x||'').trim().toLowerCase()).filter(Boolea
 function mailAllowed(offerId,kind,signerId){ const o=PO().find(x=>x.id===offerId); if(!o) return [];
   if(kind==='sign_link'||kind==='reopened'){ const sr=OSR().find(x=>x.id===signerId), g=sr&&OSG().find(x=>x.id===sr.signing_id); return sr&&g&&g.offer_id===offerId?lowAll([sr.email]):[]; }
   const d=o.details||{};
-  if(kind==='agreed_purchasers') return lowAll([d.email,...(d.purchasers||[]).map(q=>q.email),(d.lawyer||{}).email]);
+  // 030 (Agreed emails filled in): also the purchasers' lawyer's email and email for notices on the agreed draft's contact page
+  if(kind==='agreed_purchasers'){ const ag=OAG().find(x=>x.offer_id===offerId), doc=ag&&ODC().find(x=>x.id===ag.document_id), dr=doc&&DB.offer_drafts.find(x=>x.id===doc.draft_id);
+    return lowAll([d.email,...(d.purchasers||[]).map(q=>q.email),(d.lawyer||{}).email,...((dr&&dr.placed)||[]).filter(x=>['pl_email','pl_service'].includes(x.id)).map(x=>x.text)]).filter(x=>x.indexOf('@')>0); }
   if(kind==='agreed_vendors'){ const ag=OAG().find(x=>x.offer_id===offerId), doc=ag&&ODC().find(x=>x.id===ag.document_id), dr=doc&&DB.offer_drafts.find(x=>x.id===doc.draft_id), ags=(DB.agreements||[]).filter(x=>x.property_id===o.property_id).map(x=>x.id);
     const inForce=(DB.agreements||[]).filter(x=>x.property_id===o.property_id&&['signed','countersigned'].includes(x.status)).sort((x,y)=>String(y.created_at).localeCompare(String(x.created_at)))[0];   // 024: the vendor signers and the lawyer of the agreement in force
     return lowAll([...OSR().filter(x=>{ const g=OSG().find(y=>y.id===x.signing_id); return g&&g.offer_id===offerId&&g.side==='vendor'&&!x.void_at; }).map(x=>x.email),...(DB.lawyer_links||[]).filter(x=>inForce&&x.agreement_id===inForce.id).map(x=>x.email),
