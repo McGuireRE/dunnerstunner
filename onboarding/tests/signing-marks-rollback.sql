@@ -221,33 +221,36 @@ begin
 
   -- 6. identity for the agency agreement, its variations, notices and forms (one rule on each signature table, whoever writes it):
   -- in person, Tim's ID check is in the snapshot (the type, never a number); by a signer's own link, their own email
-  declare ag uuid := (select id from public.agreements where property_id = pid limit 1); pa uuid; pb uuid; okc jsonb := jsonb_build_object('type', 'passport', 'checked', true, 'by', 'Tim McGuire', 'at', now());
+  declare ag uuid := (select id from public.agreements where property_id = pid limit 1); pa uuid; pb uuid; okc jsonb := jsonb_build_object('type', 'passport', 'checked', true, 'by', 'Tim McGuire', 'at', now()); fm uuid; va uuid;
   begin
     insert into public.agreement_people (agreement_id, legal_name, email, phone) values (ag, 'Ali Shared', 'shared@example.com', '') returning id into pa;
     insert into public.agreement_people (agreement_id, legal_name, email, phone) values (ag, 'Bea Shared', 'Shared@example.com ', '') returning id into pb;
-    begin insert into public.signatures (agreement_id, person_id, signer_role, signer_name, snapshot) values (ag, pa, 'client', 'Ali Shared', '{"signing_method":"In person, on the licensee''s device"}'); out := out || 'SIGNED IN PERSON WITH NO ID CHECK; ';
+    -- the parent rows live requires: a form (healthy homes, so no vendor declaration checks) and a variation; snapshot_sha256 is required too
+    insert into public.property_forms (property_id, agreement_id, kind, form_version, data) values (pid, ag, 'healthy_homes', 'HH-2026-11', '{}') returning id into fm;
+    insert into public.agreement_variations (agreement_id, number) values (ag, coalesce((select max(number) from public.agreement_variations where agreement_id = ag), 0) + 1) returning id into va;
+    begin insert into public.signatures (agreement_id, person_id, signer_role, signer_name, snapshot_sha256, snapshot) values (ag, pa, 'client', 'Ali Shared', 'rollback-test', '{"signing_method":"In person, on the licensee''s device"}'); out := out || 'SIGNED IN PERSON WITH NO ID CHECK; ';
     exception when others then out := out || 'in person needs the check: ' || sqlerrm || '; '; end;
-    begin insert into public.signatures (agreement_id, person_id, signer_role, signer_name, snapshot) values (ag, pa, 'client', 'Ali Shared', jsonb_build_object('signing_method', 'In person, on the licensee''s device', 'id_check', okc || '{"number":"AB123456"}')); out := out || 'AN ID NUMBER WAS KEPT; ';
+    begin insert into public.signatures (agreement_id, person_id, signer_role, signer_name, snapshot_sha256, snapshot) values (ag, pa, 'client', 'Ali Shared', 'rollback-test', jsonb_build_object('signing_method', 'In person, on the licensee''s device', 'id_check', okc || '{"number":"AB123456"}')); out := out || 'AN ID NUMBER WAS KEPT; ';
     exception when others then out := out || 'no number: ' || sqlerrm || '; '; end;
-    begin insert into public.variation_signatures (agreement_id, person_id, signer_role, signer_name, snapshot) values (ag, pa, 'client', 'Ali Shared', jsonb_build_object('signing_method', 'In person, on the licensee''s device', 'id_check', okc || jsonb_build_object('at', now() - interval '2 hours'))); out := out || 'AN OLD ID CHECK WAS TAKEN; ';
+    begin insert into public.variation_signatures (variation_id, agreement_id, person_id, signer_role, signer_name, snapshot_sha256, snapshot) values (va, ag, pa, 'client', 'Ali Shared', 'rollback-test', jsonb_build_object('signing_method', 'In person, on the licensee''s device', 'id_check', okc || jsonb_build_object('at', now() - interval '2 hours'))); out := out || 'AN OLD ID CHECK WAS TAKEN; ';
     exception when others then out := out || 'checked now: ' || sqlerrm || '; '; end;
     -- a check with no time at all is refused too, for a photo ID and for "none"
-    begin insert into public.signatures (agreement_id, person_id, signer_role, signer_name, snapshot) values (ag, pa, 'client', 'Ali Shared', jsonb_build_object('signing_method', 'In person, on the licensee''s device', 'id_check', okc - 'at')); out := out || 'AN ID CHECK WITH NO TIME WAS TAKEN; ';
+    begin insert into public.signatures (agreement_id, person_id, signer_role, signer_name, snapshot_sha256, snapshot) values (ag, pa, 'client', 'Ali Shared', 'rollback-test', jsonb_build_object('signing_method', 'In person, on the licensee''s device', 'id_check', okc - 'at')); out := out || 'AN ID CHECK WITH NO TIME WAS TAKEN; ';
     exception when others then out := out || 'photo ID needs a time: ' || sqlerrm || '; '; end;
-    begin insert into public.signatures (agreement_id, person_id, signer_role, signer_name, snapshot) values (ag, pa, 'client', 'Ali Shared', jsonb_build_object('signing_method', 'In person, on the licensee''s device', 'id_check', jsonb_build_object('type', 'none', 'warned', true, 'by', 'Tim McGuire', 'note', 'Signed in person without an identity check'))); out := out || 'NO ID WITH NO TIME WAS TAKEN; ';
+    begin insert into public.signatures (agreement_id, person_id, signer_role, signer_name, snapshot_sha256, snapshot) values (ag, pa, 'client', 'Ali Shared', 'rollback-test', jsonb_build_object('signing_method', 'In person, on the licensee''s device', 'id_check', jsonb_build_object('type', 'none', 'warned', true, 'by', 'Tim McGuire', 'note', 'Signed in person without an identity check'))); out := out || 'NO ID WITH NO TIME WAS TAKEN; ';
     exception when others then out := out || 'none needs a time: ' || sqlerrm || '; '; end;
-    insert into public.form_signatures (agreement_id, person_id, signer_role, signer_name, snapshot) values (ag, pa, 'client', 'Ali Shared', jsonb_build_object('signing_method', 'In person, on the licensee''s device', 'id_check', okc));
+    insert into public.form_signatures (form_id, agreement_id, person_id, signer_role, signer_name, snapshot_sha256, snapshot) values (fm, ag, pa, 'client', 'Ali Shared', 'rollback-test', jsonb_build_object('signing_method', 'In person, on the licensee''s device', 'id_check', okc));
     -- Tim's explicit choice after a warning passes; "none" without the warning doesn't
-    begin insert into public.signatures (agreement_id, person_id, signer_role, signer_name, snapshot) values (ag, pa, 'client', 'Ali Shared', jsonb_build_object('signing_method', 'In person, on the licensee''s device', 'id_check', jsonb_build_object('type', 'none', 'by', 'Tim McGuire', 'at', now()))); out := out || 'NO ID WITHOUT THE WARNING; ';
+    begin insert into public.signatures (agreement_id, person_id, signer_role, signer_name, snapshot_sha256, snapshot) values (ag, pa, 'client', 'Ali Shared', 'rollback-test', jsonb_build_object('signing_method', 'In person, on the licensee''s device', 'id_check', jsonb_build_object('type', 'none', 'by', 'Tim McGuire', 'at', now()))); out := out || 'NO ID WITHOUT THE WARNING; ';
     exception when others then out := out || 'none needs the warning: ' || sqlerrm || '; '; end;
-    insert into public.variation_signatures (agreement_id, person_id, signer_role, signer_name, snapshot) values (ag, pa, 'client', 'Ali Shared', jsonb_build_object('signing_method', 'In person, on the licensee''s device', 'id_check', jsonb_build_object('type', 'none', 'warned', true, 'by', 'Tim McGuire', 'at', now(), 'note', 'Signed in person without an identity check')));
+    insert into public.variation_signatures (variation_id, agreement_id, person_id, signer_role, signer_name, snapshot_sha256, snapshot) values (va, ag, pa, 'client', 'Ali Shared', 'rollback-test', jsonb_build_object('signing_method', 'In person, on the licensee''s device', 'id_check', jsonb_build_object('type', 'none', 'warned', true, 'by', 'Tim McGuire', 'at', now(), 'note', 'Signed in person without an identity check')));
     out := out || 'no ID check, warned: kept=' || (select snapshot->'id_check'->>'note' from public.variation_signatures where person_id = pa limit 1) || '; ';
     out := out || 'in person with the check: shared email fine=' || (select count(*) from public.form_signatures where person_id = pa) || '; ';
-    begin insert into public.signatures (agreement_id, person_id, signer_role, signer_name, snapshot) values (ag, pb, 'client', 'Bea Shared', '{"signing_method":"On their own device"}'); out := out || 'SIGNED BY LINK WITH A SHARED EMAIL; ';
+    begin insert into public.signatures (agreement_id, person_id, signer_role, signer_name, snapshot_sha256, snapshot) values (ag, pb, 'client', 'Bea Shared', 'rollback-test', '{"signing_method":"On their own device"}'); out := out || 'SIGNED BY LINK WITH A SHARED EMAIL; ';
     exception when others then out := out || 'by link, own email: ' || sqlerrm || '; '; end;
     update public.agreement_people set email = 'bea@example.com' where id = pb;
-    insert into public.variation_signatures (agreement_id, person_id, signer_role, signer_name, snapshot) values (ag, pb, 'client', 'Bea Shared', '{"signing_method":"On their own device"}');
-    insert into public.signatures (agreement_id, person_id, signer_role, signer_name, snapshot) values (ag, pb, 'agent', 'Timothy McGuire', '{}');
+    insert into public.variation_signatures (variation_id, agreement_id, person_id, signer_role, signer_name, snapshot_sha256, snapshot) values (va, ag, pb, 'client', 'Bea Shared', 'rollback-test', '{"signing_method":"On their own device"}');
+    insert into public.signatures (agreement_id, person_id, signer_role, signer_name, snapshot_sha256, snapshot) values (ag, pb, 'agent', 'Timothy McGuire', 'rollback-test', '{}');
     out := out || 'own email by link and Tim''s own countersignature: ok; ';
   end;
 
@@ -257,5 +260,7 @@ begin
   begin perform public.agent_signing_release_edited(d3, 'in_person', sizes, '[]', '{}', '{}'); out := out || 'A VENDOR RELEASED; '; exception when others then out := out || 'agent only: ' || sqlerrm || '; '; end;
   begin perform public.offer_sign_do_mark(s1, 'own_initials', 1, '{"x":100,"y":100,"w":30,"h":14}', null, null, false); out := out || 'A SIGNED-IN USER RAN THE INNER MARK; '; exception when others then out := out || 'inner closed: ' || sqlerrm || '; '; end;
   execute 'reset role';
+  -- a refusal for the wrong reason (a fixture missing a column or parent row) must not pass as the rule working
+  if out ~* 'null value in column|violates foreign key|violates unique|does not exist' then out := out || 'A FIXTURE DID NOT MATCH THE SCHEMA; '; end if;
   raise exception 'ROLLBACK %', out;
 end $t$;
