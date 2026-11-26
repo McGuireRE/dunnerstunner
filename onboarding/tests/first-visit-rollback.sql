@@ -9,7 +9,7 @@ do $t$
 declare out text := ''; r jsonb; fv1 uuid := gen_random_uuid(); fv2 uuid := gen_random_uuid(); fv3 uuid := gen_random_uuid(); fv4 uuid := gen_random_uuid();
   p1 uuid := gen_random_uuid(); p2 uuid; p3 uuid; pid uuid; k1 uuid := gen_random_uuid(); k2 uuid := gen_random_uuid(); k3 uuid := gen_random_uuid(); k4 uuid := gen_random_uuid();
   r1 uuid := gen_random_uuid(); r2 uuid := gen_random_uuid(); r3 uuid := gen_random_uuid(); r4 uuid := gen_random_uuid(); r5 uuid := gen_random_uuid(); r6 uuid := gen_random_uuid();
-  n int; n2 int; x text; ag2 uuid; ag3 uuid; fv5 uuid := gen_random_uuid(); p5 uuid; a3 jsonb; sig0 bigint; sigsha text; pre_signed text; pp1 uuid; c1 uuid; ph uuid := gen_random_uuid();
+  n int; n2 int; x text; ag2 uuid; ag3 uuid; fv5 uuid := gen_random_uuid(); p5 uuid; a3 jsonb; k5 uuid := gen_random_uuid(); sig0 bigint; sigsha text; pre_signed text; pp1 uuid; c1 uuid; ph uuid := gen_random_uuid();
   agent text := json_build_object('email', (select email from public.agents order by created_at limit 1), 'sub', '22222222-2222-2222-2222-222222222222', 'role', 'authenticated')::text;
   vendor text := '{"email":"rb-lw1-vendor@example.com","sub":"11111111-1111-1111-1111-1111111110b1","role":"authenticated"}';
 begin
@@ -117,6 +117,31 @@ begin
   out := out || 'no bedrooms: pBed=' || coalesce((select f.value #>> '{}' from public.property_profile c join public.property_fact_values f on f.id = c.value_id where c.property_id = p1 and c.key = 'pBed'), 'none')
     || ' wording=' || coalesce((select f.value #>> '{}' from public.property_profile c join public.property_fact_values f on f.id = c.value_id where c.property_id = p1 and c.key = 'rooms_summary'), 'none') || '; ';
 
+  -- after the first review: a later choice of Tim's on the file is never undone by the visit (a later room save, or a new call, sits beside)
+  perform public.agent_profile_set(p2, 'pBed', '"4"');
+  perform public.agent_fv_room(fv2, jsonb_build_object('id', r5, 'base', 'kitchen', 'label', 'Kitchen', 'position', 5, 'notes', 'New benchtop'));
+  out := out || 'file 4 then a kitchen note: file=' || coalesce((select description->>'pBed' from public.properties where id = p2), 'none');
+  if (select description->>'pBed' from public.properties where id = p2) is distinct from '4' then out := out || 'A ROOM SAVE UNDID TIM''S LATER BEDROOM COUNT; '; end if;
+  perform public.agent_fv_room(fv2, jsonb_build_object('id', r2, 'base', 'bedroom', 'label', 'Bedroom 2', 'position', 2, 'tim_class', 'bedroom'));   -- back on the list: the visit now says 2
+  out := out || ' then a new call: file=' || coalesce((select description->>'pBed' from public.properties where id = p2), 'none')
+    || ' visit beside=' || coalesce((select value #>> '{}' from public.property_fact_values where property_id = p2 and key = 'pBed' and source_ref = fv2 order by recorded_at desc limit 1), 'none') || '; ';
+  if (select description->>'pBed' from public.properties where id = p2) is distinct from '4' then out := out || 'A NEW CALL ON THE VISIT OVERWROTE TIM''S LATER CHOICE; '; end if;
+  -- every room taken off: the visit's own count goes (p1 had "0 bedrooms plus flexible room" from the visit)
+  perform public.agent_fv_room(fv1, jsonb_build_object('id', r6, 'base', 'bedroom', 'label', 'Bedroom', 'tim_class', 'flexible', 'archived', true));
+  out := out || 'all rooms off: pBed=' || coalesce((select f.value #>> '{}' from public.property_profile c join public.property_fact_values f on f.id = c.value_id where c.property_id = p1 and c.key = 'pBed'), 'none')
+    || ' file=' || coalesce((select description->>'pBed' from public.properties where id = p1), 'none') || '; ';
+  if (select f.value from public.property_profile c join public.property_fact_values f on f.id = c.value_id where c.property_id = p1 and c.key = 'pBed') is not null
+     or (select description->>'pBed' from public.properties where id = p1) is not null then out := out || 'A STALE BEDROOM COUNT STAYED WITH EVERY ROOM OFF; '; end if;
+  -- an email added at the door that is already someone else's on the property: that person, never a second signer with one email
+  perform public.agent_fv_person(fv2, k5, 'Robbie', '', '', true, null, true);
+  perform public.agent_fv_person(fv2, k5, 'Robbie', 'rb-lw1-vendor@example.com', '', true, null, true);
+  out := out || 'email of someone on file: rows with it=' || (select count(*) from public.property_people where property_id = p2 and lower(email) = 'rb-lw1-vendor@example.com')
+    || ' points at them=' || ((select property_person_id from public.first_visit_people where id = k5) = pp1)::text
+    || ' typed row=' || coalesce((select role from public.property_people where property_id = p2 and legal_name = 'Robbie'), 'none') || '; ';
+  if (select count(*) from public.property_people where property_id = p2 and lower(email) = 'rb-lw1-vendor@example.com') <> 1 then out := out || 'TWO PEOPLE ON THE PROPERTY SHARE ONE EMAIL; '; end if;
+  if (select property_person_id from public.first_visit_people where id = k5) is distinct from pp1 then out := out || 'THE VISIT DOES NOT POINT AT THE PERSON ON FILE; '; end if;
+  if (select count(*) from public.property_people where property_id = p2 and role = 'owner' and legal_name = 'Robbie') > 0 then out := out || 'THE ROW TYPED AT THE DOOR IS STILL AN OWNER; '; end if;
+
   -- 5. tap lists: his own entry on the profile ("First visit"), the file following; bedrooms never from here; a blank clears only this
   -- visit's own value
   r := public.agent_fv_fact(fv2, 'pType', '"House"');
@@ -135,6 +160,10 @@ begin
   perform public.agent_profile_set(p2, 'pType', '"Townhouse"');   -- Tim types it on the property file afterwards
   r := public.agent_fv_fact(fv2, 'pType', '""');                   -- the first visit's own value is no longer the chosen one: nothing changes
   if (select description->>'pType' from public.properties where id = p2) is distinct from 'Townhouse' then out := out || 'A BLANK ON THE FIRST VISIT CLEARED TIM''S LATER ENTRY; '; end if;
+  r := public.agent_fv_fact(fv2, 'pType', '"House"');              -- a tap sent again after a lost signal
+  r := public.agent_fv_fact(fv2, 'pType', '"Unit"');               -- or a new tap on the visit
+  out := out || 'after Tim''s Townhouse, the visit''s House and Unit: file=' || coalesce((select description->>'pType' from public.properties where id = p2), 'none') || '; ';
+  if (select description->>'pType' from public.properties where id = p2) is distinct from 'Townhouse' then out := out || 'A RE-SENT OR LATER TAP UNDID TIM''S LATER CHOICE; '; end if;
 
   execute 'reset role';   -- (the checks below read internal helpers; the functions still run as Tim, by his claims)
   -- 5b. one chattels list: the first visit's chattels fill the unsigned draft (and the file), never a sent agreement; Tim's later edit

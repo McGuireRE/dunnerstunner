@@ -15572,14 +15572,16 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   function fvSyncSoon(v, ms) { clearTimeout(FVS.syncT); FVS.syncT = setTimeout(() => fvSync(v), ms == null ? 900 : ms); }
   const fvOffline = () => !navigator.onLine;
   // the visit's photos and documents waiting in the upload queue: moved to the property on file, then let go
-  async function fvRelease(v, from) {
+  async function fvRelease(v) {
+    if (!v.server || !v.pid) return;
     await rqLoad();
+    let n = 0;
     for (const it of RQ.items.values()) {
       if (it.hold !== v.id) continue;
       if (it.pid !== v.pid) { const p = REPO.paths(v.pid, it.key, it.kind, it.name, it.mime, !!it.thumb_path); it.pid = v.pid; it.path = p.path; it.thumb_path = p.thumb; }
-      it.hold = null; try { await rqPut(it); } catch (_) { }
+      it.hold = null; n++; try { await rqPut(it); } catch (_) { }
     }
-    rqPaint(); rqPump();
+    if (n) { rqPaint(); rqPump(); }
   }
   // send what has changed, one item at a time. A network failure stops it (it tries again when the signal returns); any other answer
   // is kept with that item, said on the page, and not tried again until Tim changes it or taps Try again.
@@ -15609,9 +15611,12 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
           const r = await call('agent_fv_start', { p_id: v.id, p_property: v.pid || null, p_address: v.address || null, p_from: v.from, p_prelisting: v.prelisting_id, p_started_at: v.started_at });
           if (r === 'err') break;
           const was = v.pid; v.pid = r.property_id; v.server = true; v.err = ''; v.matched = !!r.matched;
-          await fvPut(v); await fvRelease(v, was);
+          await fvPut(v);
           if (FVS.cur === v.id) fvAddress(v);   // under its property now
         }
+        // every time, once the visit is on file: anything still held for it (a photo still being prepared when the visit was filed, or the
+        // page closed in between) goes to the visit's property, with the property id corrected
+        await fvRelease(v);
         if (FVC.dirty(v.meta)) await call('agent_fv_set', { p_id: v.id, p_patch: { notes: v.meta.notes || '', decision: v.meta.decision || '', next_note: v.meta.next_note || '' } }, v.meta);
         let later = 0;
         for (const p of v.people) if (FVC.dirty(p)) {
@@ -16033,7 +16038,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
           if (!v.pid) { v.pid = fvUid(); await fvPut(v); }
           atBtn(lab, 'Getting them ready...', 'busy');
           const res = await rqAdd(files, { pid: v.pid, kind: 'Photo', room: r.label.slice(0, 60), caption: ($('[data-fvcap]', card).value || '').trim(), hold: v.server ? null : v.id });
-          r.photo_keys = (r.photo_keys || []).concat(res.keys || []); fvTouch(v, r, true); ph.value = '';
+          r.photo_keys = (r.photo_keys || []).concat(res.keys || []); fvTouch(v, r, true); ph.value = ''; if (v.server) fvRelease(v);
           setTimeout(() => { fvDraw(v); const l2 = $(`#${lab.id}`); atBtn(l2, res.refused.length ? `${res.added} added. ${res.refused[0]}` : `${res.added} photo${res.added === 1 ? '' : 's'} added. ${fvOffline() || !v.server ? 'Kept on this phone; uploads by itself.' : 'Uploading.'}`, res.refused.length ? 'err' : 'ok'); }, 50);
         });
         const ar = $('[data-fvarch]', card); ar.addEventListener('click', () => {
@@ -16056,7 +16061,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         const lab = inp.closest('label'), files = Array.from(inp.files || []); if (!files.length) return;
         if (!v.pid) { v.pid = fvUid(); await fvPut(v); $('[data-rq]', sec$).dataset.rq = v.pid; }
         atBtn(lab, 'Getting them ready...', 'busy');
-        const res = await rqAdd(files, { pid: v.pid, kind: inp.dataset.fvdoc, hold: v.server ? null : v.id }); inp.value = '';
+        const res = await rqAdd(files, { pid: v.pid, kind: inp.dataset.fvdoc, hold: v.server ? null : v.id }); inp.value = ''; if (v.server) fvRelease(v);
         atBtn(lab, res.refused.length ? `${res.added} added. ${res.refused[0]}` : `${res.added} added. ${fvOffline() || !v.server ? 'Kept on this phone; uploads by itself.' : 'Uploading.'}`, res.refused.length ? 'err' : 'ok');
       }));
     }

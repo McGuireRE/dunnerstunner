@@ -179,6 +179,14 @@ Shared code: the lists are `src/property-lists.js` (for the profile, appraisal, 
 `src/fv-core.js` (the same as the database's). The upload queue gained a caption, a hold for a visit not yet filed, and the keys it added.
 Later passes left as hooks (FV_HOOKS in app.js): GT2 recording with consent, GT3 AI field suggestions.
 
+First review (27 November 2026, not ready) fixed on the same branch: the visit's values on the profile (bedrooms, room wording, tap lists,
+chattels) are written only when they say something new, and once Tim chooses something else on the profile, the file or his draft agreement
+after the visit first noted a fact, the visit's later values sit beside it (a later room save or a re-sent tap never undoes his choice);
+an email added at the door that already belongs to someone on the property points the visit at that person (the row typed without an email
+is set aside), never two signers with one email; photos and documents held on the phone are let go on every sync once the visit is filed,
+under its property (not only straight after it is filed); taking every room off (or clearing every call) clears the visit's own bedroom
+count and wording, unless Tim has chosen since. Left as is (reviewer, minor): a phone number given at the door replaces the one on file for
+a matched person.
 Tim's answers (27 November 2026): ONE chattels list. The chattels tapped at the first visit (standard, featured, to be removed) fill the
 agency agreement's chattels: its own chips (`chattels`) and "Anything else staying or going?" (`chatOther`: what else stays, with counts, and
 what goes with the vendors), on the property profile as his own ("First visit chattels"), the property file (so an agreement started later

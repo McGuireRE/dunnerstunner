@@ -203,13 +203,22 @@ const FVQ=['goals','timing','timing_when','reason_selling','motivation','price_t
 const FV_FACTS=['pType','title_type','dwellings','living_dining','pBath','ensuites','toilets','garaging','parking_spaces','cladding','roofing','insulation','flooring','glazing','levels','extra_spaces','chattels_std','chattels_featured','chattels_removed','outdoor','outlook'];
 const FVT=()=>(DB.first_visits||=[]), FVP=()=>(DB.first_visit_people||=[]), PRM=()=>(DB.property_rooms||=[]), TLE=()=>(DB.tap_list_extras||=[]);
 const ROOM_CLASS=['bedroom','study','office','living','studio','sleepout','flexible'];
+// the visit's own entry: only when it says something new; once something else was chosen after the visit first noted the fact, beside it
+function fvRecord(pid,key,val,vid,name,by){ const mine=FV().filter(f=>f.property_id===pid&&f.key===key&&f.source==='tim'&&f.source_ref===vid).sort((a,b)=>a.recorded_at<b.recorded_at?-1:1), last=mine[mine.length-1];
+  if(last&&sameTxt(last.value,val)) return last.id; const c=PRF().find(x=>x.property_id===pid&&x.key===key), cv=c&&FV().find(f=>f.id===c.value_id);
+  const later=mine.length&&c&&!(cv&&cv.source==='tim'&&cv.source_ref===vid)&&c.chosen_at>mine[0].recorded_at;
+  return profileRecord(pid,key,val,'tim',vid,lwToday(),name,null,by,later?'never':'check'); }
+function fvClear(pid,key,vid,name,by){ const c=PRF().find(x=>x.property_id===pid&&x.key===key), cv=c&&FV().find(f=>f.id===c.value_id);
+  if(!cv||cv.source!=='tim'||cv.source_ref!==vid||cv.value==null) return false; profileWriteBack(pid,key,null);
+  const row={id:uid(),property_id:pid,key,value:null,source:'tim',source_name:name,source_ref:vid,as_of:lwToday(),recorded_at:stamp(),recorded_by:by}; FV().push(row); Object.assign(c,{value_id:row.id,chosen_by:'profile',chosen_at:stamp(),ticked:false,ticked_at:null,ticked_by:null});
+  if(DESC.includes(key)) (DB.agreements||[]).filter(a=>a.property_id===pid&&a.status==='draft'&&!a.signed_at&&same((a.answers||{})[key],cv.value)).forEach(a=>{ delete a.answers[key]; }); return true; }
 function fvRoomsProfile(pid,vid,by){ const L=PRM().filter(r=>r.property_id===pid&&!r.archived_at), nb=L.filter(r=>r.tim_class==='bedroom').length;
-  if(nb===0&&(L.some(r=>r.base==='bedroom'&&!r.tim_class)||!L.some(r=>r.base==='bedroom'||r.tim_class))) return;
+  if(nb===0&&(L.some(r=>r.base==='bedroom'&&!r.tim_class)||!L.some(r=>r.base==='bedroom'||r.tim_class))){ fvClear(pid,'pBed',vid,'First visit: your call on each room',by); fvClear(pid,'rooms_summary',vid,'First visit: your call on each room',by); return; }
   const ONE={study:'study',office:'office',studio:'studio',sleepout:'sleepout',flexible:'flexible room'}, MANY={study:'studies',office:'offices',studio:'studios',sleepout:'sleepouts',flexible:'flexible rooms'};
   const g={}; L.slice().sort((a,b)=>(a.position||0)-(b.position||0)).forEach(r=>{ if(ONE[r.tim_class]) g[r.tim_class]=(g[r.tim_class]||0)+1; });
   const parts=Object.keys(g).map(c=>g[c]>1?g[c]+' '+MANY[c]:ONE[c]), extra=!parts.length?'':parts.length===1?parts[0]:parts.slice(0,-1).join(', ')+' and '+parts[parts.length-1];
-  profileRecord(pid,'pBed',String(nb),'tim',vid,lwToday(),'First visit: your call on each room',null,by,'check');
-  profileRecord(pid,'rooms_summary',nb+' bedroom'+(nb===1?'':'s')+(extra?' plus '+extra:''),'tim',vid,lwToday(),'First visit: your call on each room',null,by,'check'); }
+  fvRecord(pid,'pBed',String(nb),vid,'First visit: your call on each room',by);
+  fvRecord(pid,'rooms_summary',nb+' bedroom'+(nb===1?'':'s')+(extra?' plus '+extra:''),vid,'First visit: your call on each room',by); }
 // one chattels list (031 section 4b): the first visit's lists fill an unsigned draft agreement's chattels and the file; Tim's later edit
 // on the draft wins and comes back to the lists; no loops
 const fvChosen=(pid,k)=>{ const c=PRF().find(x=>x.property_id===pid&&x.key===k); return c?FV().find(f=>f.id===c.value_id)||null:null; };
@@ -217,9 +226,8 @@ function fvChattelsProfile(pid,vid,by){ const ag=window.FVC.chattelsAgreement((f
   const first=FV().filter(f=>f.property_id===pid&&f.source_ref===vid&&/^chattels_/.test(f.key)).map(f=>f.recorded_at).sort()[0]||'';
   ['chattels','chatOther'].forEach(k=>{ const v=ag[k], cv=fvChosen(pid,k);
     if(cv&&cv.source==='agreement'&&cv.recorded_at>first){ if(!jblank(v)) profileRecord(pid,k,v,'tim',vid,lwToday(),'First visit chattels',null,by,'never'); return; }
-    if(jblank(v)||(Array.isArray(v)&&!v.length)){ if(cv&&cv.source==='tim'&&cv.source_ref===vid&&cv.value!=null){ profileWriteBack(pid,k,null); const row={id:uid(),property_id:pid,key:k,value:null,source:'tim',source_name:'First visit chattels',source_ref:vid,as_of:lwToday(),recorded_at:stamp(),recorded_by:by}; FV().push(row); Object.assign(PRF().find(x=>x.property_id===pid&&x.key===k),{value_id:row.id,chosen_by:'profile',chosen_at:stamp(),ticked:false});
-      (DB.agreements||[]).filter(a=>a.property_id===pid&&a.status==='draft'&&!a.signed_at&&same((a.answers||{})[k],cv.value)).forEach(a=>{ delete a.answers[k]; }); } return; }
-    profileRecord(pid,k,v,'tim',vid,lwToday(),'First visit chattels',null,by,'check'); profileSyncDraft(pid,k); }); }
+    if(jblank(v)||(Array.isArray(v)&&!v.length)){ fvClear(pid,k,vid,'First visit chattels',by); return; }
+    const id=fvRecord(pid,k,v,vid,'First visit chattels',by); if(PRF().some(x=>x.property_id===pid&&x.key===k&&x.value_id===id)) profileSyncDraft(pid,k); }); }
 function fvChattelsFromAgreement(ag){ const pid=ag.property_id, std=(fvChosen(pid,'chattels_std')||{}).value||[], feat=(fvChosen(pid,'chattels_featured')||{}).value||[], rem=(fvChosen(pid,'chattels_removed')||{}).value||[], ach=(ag.answers||{}).chattels;
   if(!Array.isArray(ach)||!(std.length+feat.length)) return; const F=window.FVC, sorted=x=>JSON.stringify(x.slice().sort());
   if(sorted(F.chattelsAgreement(std,feat,rem).chattels)===sorted(ach)) return;
@@ -253,7 +261,10 @@ function fvRpc(name,a,me){
     if(em&&!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em)) return bad('Check the email address');
     let x=FVP().find(f=>f.id===a.p_key); if(x&&x.first_visit_id!==v.id) return bad('That person is on another visit');
     const pp=x&&x.property_person_id?PP().find(r=>r.id===x.property_person_id):null; let ppid=null;
-    if(pp&&pp.role!=='former'){ const signed=(DB.agreement_people||[]).some(ap=>ap.signed_at&&(DB.agreements||[]).some(g=>g.id===ap.agreement_id&&g.property_id===pp.property_id)&&((pp.email&&(ap.email||'').toLowerCase()===pp.email.toLowerCase())||norm(ap.legal_name)===norm(pp.legal_name)));
+    const other=pp&&pp.role!=='former'&&em&&!pp.email?PP().find(r=>r.property_id===pp.property_id&&r.id!==pp.id&&(r.role||'owner')!=='former'&&(r.email||'').toLowerCase()===em):null;
+    if(other){ ppid=other.id; if(ph) other.phone=ph;   // the email is already someone else's on this property: that is who this is
+      if((pp.name_from||pp.source)==='appraisal'&&!pp.user_id&&!FVP().some(f=>f.property_person_id===pp.id&&f.id!==a.p_key)&&!(DB.agreement_people||[]).some(ap=>(DB.agreements||[]).some(g=>g.id===ap.agreement_id&&g.property_id===pp.property_id)&&norm(ap.legal_name)===norm(pp.legal_name))) pp.role='former'; }
+    else if(pp&&pp.role!=='former'){ const signed=(DB.agreement_people||[]).some(ap=>ap.signed_at&&(DB.agreements||[]).some(g=>g.id===ap.agreement_id&&g.property_id===pp.property_id)&&((pp.email&&(ap.email||'').toLowerCase()===pp.email.toLowerCase())||norm(ap.legal_name)===norm(pp.legal_name)));
       if(!signed){ if(nm&&(pp.name_from||pp.source)==='appraisal') pp.legal_name=nm; if(em&&!pp.email) pp.email=em; if(ph) pp.phone=ph; pp.updated_at=now(); } ppid=pp.id; }
     else if(nm||em){ const n0=PP().filter(r=>r.property_id===v.property_id).length; ppid=mergePerson(v.property_id,nm,'',em,ph,null,'appraisal');
       if(ppid&&a.p_owner===false&&PP().filter(r=>r.property_id===v.property_id).length>n0){ const r=PP().find(y=>y.id===ppid); if(r.role==='owner') r.role='contact'; } }
@@ -273,11 +284,9 @@ function fvRpc(name,a,me){
     x.archived_at=r.archived?(x.archived_at||now()):null; fvRoomsProfile(v.property_id,v.id,me.email); save(); return ok(Object.assign({},x)); }
   if(name==='agent_fv_fact'){ if(a.p_key==='pBed') return bad('Bedrooms come only from your call on each room'); if(!FV_FACTS.includes(a.p_key)) return bad('Not a fact the first visit records');
     let val=a.p_value; if(typeof val==='number') val=String(val);
-    if(jblank(val)||(Array.isArray(val)&&!val.length)||(typeof val==='string'&&!val.trim())){ const c=PRF().find(x=>x.property_id===v.property_id&&x.key===a.p_key), cv=c&&FV().find(f=>f.id===c.value_id);
-      const ours=!!(cv&&cv.source==='tim'&&cv.source_ref===v.id&&cv.value!=null);
-      if(ours){ profileWriteBack(v.property_id,a.p_key,null); const row={id:uid(),property_id:v.property_id,key:a.p_key,value:null,source:'tim',source_name:'First visit',source_ref:v.id,as_of:lwToday(),recorded_at:stamp(),recorded_by:me.email}; FV().push(row); Object.assign(c,{value_id:row.id,chosen_by:'profile',chosen_at:stamp(),ticked:false,ticked_at:null,ticked_by:null}); }
+    if(jblank(val)||(Array.isArray(val)&&!val.length)||(typeof val==='string'&&!val.trim())){ const ours=fvClear(v.property_id,a.p_key,v.id,'First visit',me.email);
       if(a.p_key.startsWith('chattels_')) fvChattelsProfile(v.property_id,v.id,me.email); save(); return ok({key:a.p_key,cleared:ours}); }
-    const vid=profileRecord(v.property_id,a.p_key,val,'tim',v.id,lwToday(),'First visit',null,me.email,'check');
+    const vid=fvRecord(v.property_id,a.p_key,val,v.id,'First visit',me.email);
     if(a.p_key.startsWith('chattels_')) fvChattelsProfile(v.property_id,v.id,me.email); save();
     return ok({key:a.p_key,value_id:vid,chosen:PRF().some(x=>x.property_id===v.property_id&&x.key===a.p_key&&x.value_id===vid)}); }
   return bad('unknown rpc '+name); }

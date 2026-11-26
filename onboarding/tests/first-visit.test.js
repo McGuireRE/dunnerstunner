@@ -285,6 +285,37 @@ const expect = (c, m) => { if (!c) errs.push(m); };
       await p.goto(PB + 'properties/P1/first-visit/new'); await wait(1200);
       expect(/^\/portal\/properties\/P1\/first-visit\/[0-9a-f-]{36}$/.test(await at()), tag + ': starting from a property files to it: ' + (await at()));
 
+      // ── 5b. After the first review: a photo held on the phone when the visit was filed but not let go (the page closed in between) is
+      // let go on the next sync, under the visit's property; and taking every room off clears the visit's own bedroom count ──
+      await p.goto(PB + 'processes/first-visit'); await wait(800);
+      await p.evaluate(() => localStorage.setItem('mockOffline', '1'));
+      await p.click('#fvStartNone'); await wait(700);
+      const v3 = await p.getAttribute('#fvPage', 'data-visit');
+      await step('rooms'); await p.click('#fvAddRooms [data-fvaddroom="bedroom"]'); await wait(250);
+      await p.click('.fv-room.open [data-fvchips^="class_"] input[value="bedroom"] + span'); await wait(150);
+      await p.setInputFiles('.fv-room.open [data-fvphoto]', [{ name: 'held.png', mimeType: 'image/png', buffer: PNG }]); await wait(900);
+      await step(''); await p.fill('#fvAddrEdit', '5 Roslyn Terrace, Dunedin'); await p.click('#fvAddrSave'); await wait(600);
+      // the start reaches the database, but the page closes before the photo is let go
+      await p.evaluate(async id => { localStorage.removeItem('mockOffline');
+        await window.supabase.createClient('x', 'y').rpc('agent_fv_start', { p_id: id, p_property: 'P2', p_address: '5 Roslyn Terrace, Dunedin', p_from: 'nothing', p_prelisting: null, p_started_at: new Date().toISOString() });
+        localStorage.setItem('mockOffline', '1');
+        await new Promise((res, rej) => { const q = indexedDB.open('mre-fv', 1); q.onsuccess = () => { const tx = q.result.transaction('visits', 'readwrite'), st = tx.objectStore('visits'), g = st.get(id);
+          g.onsuccess = () => { const v = g.result; v.server = true; v.pid = 'P2'; st.put(v); }; tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error); }; q.onerror = () => rej(q.error); }); }, v3);
+      out[tag].heldBefore = await p.evaluate(() => new Promise(res => { const q = indexedDB.open('mre-repo', 1); q.onsuccess = () => { const g = q.result.transaction('queue').objectStore('queue').getAll(); g.onsuccess = () => res(g.result.filter(x => x.hold).map(x => x.pid)); }; }));
+      expect(out[tag].heldBefore.length === 1 && out[tag].heldBefore[0] !== 'P2', tag + ': the photo is held under the phone\'s own property id: ' + JSON.stringify(out[tag].heldBefore));
+      await p.evaluate(() => localStorage.removeItem('mockOffline')); await p.reload(); await wait(2500);
+      d = await db();
+      const held = (d.property_documents || []).find(x => x.property_id === 'P2' && x.kind === 'Photo');
+      expect(held && String(held.path).startsWith('properties/P2/photos/'), tag + ': the held photo is let go on the next sync, under the visit\'s property: ' + JSON.stringify(held && held.path));
+      expect(((d.property_profile || []).find(x => x.property_id === 'P2' && x.key === 'pBed') || {}).value_id && d.properties.find(x => x.id === 'P2').description.pBed === '1', tag + ': the visit\'s count is on the profile and the file');
+      await p.goto(PB + `properties/P2/first-visit/${v3}/rooms`); await wait(1000);
+      await p.click('.fv-room .fv-roomhead'); await wait(300);
+      await p.click('.fv-room.open [data-fvarch]'); await p.click('.fv-room.open [data-fvarch]'); await wait(2500);
+      d = await db();
+      const pb = (d.property_profile || []).find(x => x.property_id === 'P2' && x.key === 'pBed'), pbv = pb && d.property_fact_values.find(f => f.id === pb.value_id);
+      expect((!pbv || pbv.value == null) && d.properties.find(x => x.id === 'P2').description.pBed == null, tag + ': every room off: the visit\'s own bedroom count goes: ' + JSON.stringify(pbv && pbv.value));
+      expect(/not called yet/.test(await p.textContent('#fvBeds')), tag + ': and the page says so');
+
       // ── 6. A vendor reads none of it and runs none of it ──
       await p.evaluate(() => localStorage.setItem('mocksession', JSON.stringify({ user: { id: 'v-1', email: 'robin@example.com' } }))); await p.goto(PK + '/onboarding/'); await wait(700);
       const vend = await p.evaluate(async () => {

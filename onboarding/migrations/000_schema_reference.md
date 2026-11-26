@@ -560,4 +560,6 @@ signatures and fingerprints are not touched.
   (`fv_chattels_agreement`, `fv_chattel_map`, `fv_agreement_chattels`) and an unsigned draft through `profile_sync_draft`; Tim's later draft
   edit wins. Trigger `profile_fv_chattels` (after update of answers on agreements, drafts only, `fv_chattels_from_agreement`) brings the
   agreement's chips back to `chattels_std` and `chattels_featured`. Helpers `fv_chosen`, `fv_chattel_name`, `fv_chattel_count` are internal.
+- The visit's own values go through `fv_record` (only when new; beside, not chosen, once something else was chosen after the visit first
+  noted the fact) and `fv_clear` (only the visit's own chosen value, with the file and an unsigned draft that still says it). Both internal.
 

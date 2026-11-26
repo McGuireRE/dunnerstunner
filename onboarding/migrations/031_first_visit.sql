@@ -223,7 +223,18 @@ begin
   select * into x from public.first_visit_people where id = p_key for update;
   if x.id is not null and x.first_visit_id <> p_visit then raise exception 'That person is on another visit'; end if;
   if x.property_person_id is not null then select * into pp from public.property_people where id = x.property_person_id; end if;
-  if pp.id is not null and pp.role <> 'former' then
+  if pp.id is not null and pp.role <> 'former' and em <> '' and pp.email = ''
+     and exists (select 1 from public.property_people o where o.property_id = pp.property_id and o.id <> pp.id and o.role <> 'former' and lower(o.email) = em) then
+    -- the email given is already someone else's on this property: that is who this is (never two signers with one email). This visit
+    -- points at them; the row typed at the door without an email, if nobody else uses it, is set aside (never deleted).
+    select id into ppid from public.property_people o where o.property_id = pp.property_id and o.id <> pp.id and o.role <> 'former' and lower(o.email) = em order by position limit 1;
+    if ph <> '' then update public.property_people set phone = ph where id = ppid and phone is distinct from ph; end if;
+    if coalesce(pp.name_from, pp.source, '') = 'appraisal' and pp.user_id is null
+       and not exists (select 1 from public.first_visit_people f where f.property_person_id = pp.id and f.id <> p_key)
+       and not exists (select 1 from public.agreement_people ap join public.agreements a on a.id = ap.agreement_id where a.property_id = pp.property_id and public.norm_name(ap.legal_name) = public.norm_name(pp.legal_name)) then
+      update public.property_people set role = 'former' where id = pp.id;
+    end if;
+  elsif pp.id is not null and pp.role <> 'former' then
     -- the same person, corrected: only what was typed informally, and never an email already known or anyone who has signed
     if not exists (select 1 from public.agreement_people ap join public.agreements a on a.id = ap.agreement_id
                     where a.property_id = pp.property_id and ap.signed_at is not null and ((pp.email <> '' and lower(ap.email) = lower(pp.email)) or public.norm_name(ap.legal_name) = public.norm_name(pp.legal_name))) then
@@ -245,7 +256,8 @@ begin
   end if;
   insert into public.first_visit_people as f (id, first_visit_id, property_person_id, contact_id, decision_maker, here)
   values (p_key, p_visit, ppid, (select contact_id from public.property_people where id = ppid), p_decision_maker, coalesce(p_here, true))
-  on conflict (id) do update set property_person_id = coalesce(excluded.property_person_id, f.property_person_id), contact_id = coalesce(excluded.contact_id, f.contact_id),
+  on conflict (id) do update set property_person_id = coalesce(excluded.property_person_id, f.property_person_id),
+    contact_id = case when excluded.property_person_id is not null then coalesce(excluded.contact_id, f.contact_id) else f.contact_id end,
     decision_maker = excluded.decision_maker, here = excluded.here, updated_at = now();
   select * into x from public.first_visit_people where id = p_key;
   return jsonb_build_object('key', x.id, 'property_person_id', x.property_person_id, 'contact_id', x.contact_id, 'filed', x.property_person_id is not null);
@@ -271,6 +283,43 @@ begin
   return jsonb_build_object('question', p_question, 'ref', ref);
 end $$;
 
+-- the visit's own entry on the profile (after the first review, 27 November 2026). Written only when it says something new; and once
+-- something else was chosen for the fact after the visit first noted it (Tim on the profile or the file, his draft agreement), the visit's
+-- new values only sit beside it. So a later save of an unrelated room, or a tap sent again after a lost signal, never undoes his later choice.
+create or replace function public.fv_record(p_property uuid, p_key text, p_value jsonb, p_visit uuid, p_name text) returns uuid
+language plpgsql security definer set search_path = public as $$
+declare last public.property_fact_values; first_at timestamptz; c public.property_profile; cv public.property_fact_values;
+begin
+  select * into last from public.property_fact_values where property_id = p_property and key = p_key and source = 'tim' and source_ref = p_visit order by recorded_at desc, id desc limit 1;
+  if last.id is not null and (last.value #>> '{}') is not distinct from (p_value #>> '{}') then return last.id; end if;   -- nothing new
+  select min(recorded_at) into first_at from public.property_fact_values where property_id = p_property and key = p_key and source = 'tim' and source_ref = p_visit;
+  select * into c from public.property_profile where property_id = p_property and key = p_key;
+  if c.property_id is not null then select * into cv from public.property_fact_values where id = c.value_id; end if;
+  -- something else was chosen after the visit first noted this fact: from then on the visit's values sit beside, until Tim chooses one
+  if first_at is not null and c.property_id is not null and not (cv.source = 'tim' and cv.source_ref is not distinct from p_visit) and c.chosen_at > first_at then
+    return public.profile_record(p_property, p_key, p_value, 'tim', p_visit, public.fv_today(), p_name, null, null, coalesce(auth.jwt()->>'email', 'agent'), 'never');
+  end if;
+  return public.profile_record(p_property, p_key, p_value, 'tim', p_visit, public.fv_today(), p_name, null, null, coalesce(auth.jwt()->>'email', 'agent'), 'check');
+end $$;
+-- the visit's own value cleared, where it is still the chosen one (as clearing it on the property file would): the file follows, and an
+-- unsigned draft agreement that still says it lets it go. Anything Tim chose since stays.
+create or replace function public.fv_clear(p_property uuid, p_key text, p_visit uuid, p_name text) returns boolean
+language plpgsql security definer set search_path = public as $$
+declare cv public.property_fact_values; vid uuid;
+begin
+  select f.* into cv from public.property_profile c join public.property_fact_values f on f.id = c.value_id where c.property_id = p_property and c.key = p_key;
+  if cv.id is null or cv.source <> 'tim' or cv.source_ref is distinct from p_visit or cv.value is null then return false; end if;
+  perform public.profile_write_back(p_property, p_key, null);
+  insert into public.property_fact_values (property_id, key, value, source, source_name, source_ref, as_of, recorded_by)
+  values (p_property, p_key, null, 'tim', p_name, p_visit, public.fv_today(), coalesce(auth.jwt()->>'email', 'agent')) returning id into vid;
+  update public.property_profile set value_id = vid, chosen_by = 'profile', chosen_at = clock_timestamp(), ticked = false, ticked_at = null, ticked_by = null where property_id = p_property and key = p_key;
+  if p_key = any (public.desc_keys()) then
+    update public.agreements a set answers = a.answers - p_key where a.property_id = p_property and a.status = 'draft' and a.signed_at is null
+       and (a.answers -> p_key) is not distinct from cv.value and not exists (select 1 from public.agreement_people x where x.agreement_id = a.id and x.signed_at is not null);
+  end if;
+  return true;
+end $$;
+
 -- the bedroom count and the room wording, from Tim's classifications only. Written when he has called at least one room a bedroom, or
 -- has made a call on every room tapped as a bedroom (so "no bedrooms" is only ever his own call); otherwise nothing is written.
 create or replace function public.fv_rooms_profile(p_property uuid, p_visit uuid) returns void
@@ -279,7 +328,12 @@ declare nb int; open_beds int; extras text; words text; parts text[];
 begin
   select count(*) filter (where tim_class = 'bedroom'), count(*) filter (where base = 'bedroom' and tim_class is null)
     into nb, open_beds from public.property_rooms where property_id = p_property and archived_at is null;
-  if nb = 0 and (open_beds > 0 or not exists (select 1 from public.property_rooms where property_id = p_property and archived_at is null and (base = 'bedroom' or tim_class is not null))) then return; end if;
+  if nb = 0 and (open_beds > 0 or not exists (select 1 from public.property_rooms where property_id = p_property and archived_at is null and (base = 'bedroom' or tim_class is not null))) then
+    -- no call stands any more (every room taken off, or his call cleared): the visit's own count and wording go, unless Tim chose since
+    perform public.fv_clear(p_property, 'pBed', p_visit, 'First visit: your call on each room');
+    perform public.fv_clear(p_property, 'rooms_summary', p_visit, 'First visit: your call on each room');
+    return;
+  end if;
   select array_agg(case when s.n > 1 then s.n || ' ' || s.pl else s.one end order by s.o) into parts
     from (select tim_class, count(*) n, min(position) o,
                  case tim_class when 'flexible' then 'flexible room' else tim_class end one,
@@ -289,8 +343,8 @@ begin
   extras := case when parts is null then null when array_length(parts, 1) = 1 then parts[1]
                  else array_to_string(parts[1:array_length(parts, 1) - 1], ', ') || ' and ' || parts[array_length(parts, 1)] end;
   words := nb || ' bedroom' || case when nb = 1 then '' else 's' end || coalesce(' plus ' || extras, '');
-  perform public.profile_record(p_property, 'pBed', to_jsonb(nb::text), 'tim', p_visit, public.fv_today(), 'First visit: your call on each room', null, null, coalesce(auth.jwt()->>'email', 'agent'), 'check');
-  perform public.profile_record(p_property, 'rooms_summary', to_jsonb(words), 'tim', p_visit, public.fv_today(), 'First visit: your call on each room', null, null, coalesce(auth.jwt()->>'email', 'agent'), 'check');
+  perform public.fv_record(p_property, 'pBed', to_jsonb(nb::text), p_visit, 'First visit: your call on each room');
+  perform public.fv_record(p_property, 'rooms_summary', to_jsonb(words), p_visit, 'First visit: your call on each room');
 end $$;
 
 -- one room, saved whole (sent again with the same id, it is updated). p_room: id, base, label, position, notes, measurements, features
@@ -337,7 +391,7 @@ create or replace function public.fv_fact_keys() returns text[] language sql imm
 $$;
 create or replace function public.agent_fv_fact(p_visit uuid, p_key text, p_value jsonb) returns jsonb
 language plpgsql security definer set search_path = public as $$
-declare v public.first_visits; cv public.property_fact_values; vid uuid; val jsonb := p_value;
+declare v public.first_visits; vid uuid; val jsonb := p_value; cl boolean;
 begin
   if not public.is_agent() then raise exception 'Agent only'; end if;
   if p_key = 'pBed' then raise exception 'Bedrooms come only from your call on each room'; end if;
@@ -349,18 +403,11 @@ begin
   if v.id is null then raise exception 'Visit not found'; end if;
   perform 1 from public.properties where id = v.property_id for update;
   if public.jblank(val) or (jsonb_typeof(val) = 'array' and jsonb_array_length(val) = 0) or (jsonb_typeof(val) = 'string' and trim(val #>> '{}') = '') then
-    select f.* into cv from public.property_profile c join public.property_fact_values f on f.id = c.value_id where c.property_id = v.property_id and c.key = p_key;
-    if cv.id is not null and cv.source = 'tim' and cv.source_ref = v.id and cv.value is not null then
-      perform public.profile_write_back(v.property_id, p_key, null);
-      insert into public.property_fact_values (property_id, key, value, source, source_name, source_ref, as_of, recorded_by)
-      values (v.property_id, p_key, null, 'tim', 'First visit', v.id, public.fv_today(), coalesce(auth.jwt()->>'email', 'agent')) returning id into vid;
-      update public.property_profile set value_id = vid, chosen_by = 'profile', chosen_at = clock_timestamp(), ticked = false, ticked_at = null, ticked_by = null
-       where property_id = v.property_id and key = p_key;
-    end if;
+    cl := public.fv_clear(v.property_id, p_key, v.id, 'First visit');
     if p_key in ('chattels_std', 'chattels_featured', 'chattels_removed') then perform public.fv_chattels_profile(v.property_id, v.id); end if;
-    return jsonb_build_object('key', p_key, 'cleared', cv.id is not null and cv.source = 'tim' and cv.source_ref = v.id);
+    return jsonb_build_object('key', p_key, 'cleared', cl);
   end if;
-  vid := public.profile_record(v.property_id, p_key, val, 'tim', v.id, public.fv_today(), 'First visit', null, null, coalesce(auth.jwt()->>'email', 'agent'), 'check');
+  vid := public.fv_record(v.property_id, p_key, val, v.id, 'First visit');
   if p_key in ('chattels_std', 'chattels_featured', 'chattels_removed') then perform public.fv_chattels_profile(v.property_id, v.id); end if;   -- one chattels list
   return jsonb_build_object('key', p_key, 'value_id', vid,
     'chosen', exists (select 1 from public.property_profile where property_id = v.property_id and key = p_key and value_id = vid));
@@ -438,18 +485,11 @@ begin
     end if;
     if public.jblank(v) or v = '[]'::jsonb then
       -- nothing left to say: what the first visit wrote is cleared (on the profile, the file, and an unsigned draft that still says it)
-      if cv.id is not null and cv.source = 'tim' and cv.source_ref = p_visit and cv.value is not null then
-        perform public.profile_write_back(p_property, k, null);
-        insert into public.property_fact_values (property_id, key, value, source, source_name, source_ref, as_of, recorded_by)
-        values (p_property, k, null, 'tim', 'First visit chattels', p_visit, public.fv_today(), by_) returning id into vid;
-        update public.property_profile set value_id = vid, chosen_by = 'profile', chosen_at = clock_timestamp(), ticked = false, ticked_at = null, ticked_by = null where property_id = p_property and key = k;
-        update public.agreements a2 set answers = a2.answers - k where a2.property_id = p_property and a2.status = 'draft' and a2.signed_at is null
-           and (a2.answers -> k) is not distinct from cv.value and not exists (select 1 from public.agreement_people x where x.agreement_id = a2.id and x.signed_at is not null);
-      end if;
+      perform public.fv_clear(p_property, k, p_visit, 'First visit chattels');
       continue;
     end if;
-    perform public.profile_record(p_property, k, v, 'tim', p_visit, public.fv_today(), 'First visit chattels', null, null, by_, 'check');
-    perform public.profile_sync_draft(p_property, k);   -- an unsigned draft agreement only; never one sent, parked or signed
+    vid := public.fv_record(p_property, k, v, p_visit, 'First visit chattels');
+    if exists (select 1 from public.property_profile where property_id = p_property and key = k and value_id = vid) then perform public.profile_sync_draft(p_property, k); end if;   -- an unsigned draft agreement only; never one sent, parked or signed
   end loop;
 end $$;
 -- the agreement's chips back to the first visit's lists: a draft's chattels that say something the lists don't (Tim's edit on the
@@ -492,5 +532,6 @@ grant execute on function public.agent_fv_start(uuid, uuid, text, text, uuid, ti
   public.agent_fv_person(uuid, uuid, text, text, text, boolean, boolean, boolean), public.agent_fv_answer(uuid, uuid, text, jsonb),
   public.agent_fv_room(uuid, jsonb), public.agent_fv_fact(uuid, text, jsonb), public.agent_tap_extra(text, text, boolean) to authenticated;
 revoke execute on function public.fv_rooms_profile(uuid, uuid), public.fv_fact_keys(), public.fv_today(), public.room_class_ok(text) from public, anon, authenticated;
+revoke execute on function public.fv_record(uuid, text, jsonb, uuid, text), public.fv_clear(uuid, text, uuid, text) from public, anon, authenticated;
 revoke execute on function public.fv_chattel_map(), public.fv_agreement_chattels(), public.fv_chattel_name(text), public.fv_chattel_count(text), public.fv_chattels_agreement(jsonb, jsonb, jsonb),
   public.fv_chosen(uuid, text), public.fv_chattels_profile(uuid, uuid), public.fv_chattels_from_agreement() from public, anon, authenticated;
