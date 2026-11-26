@@ -186,7 +186,7 @@ const TIM = ['agent-1', 'hello@timmcguire.co.nz'];
   await p.evaluate(() => { localStorage.setItem('mockSaveDelay', '1500'); const t = [...document.querySelectorAll('.insp-tab')].find(b => b.textContent.startsWith('Tenancy')); t.click(); });
   await p.waitForTimeout(200); await tap('d:tenanted', 'now'); await tap('d:tenanted', 'no');
   await p.click('#insGoFinish'); await p.waitForTimeout(3500); await p.evaluate(() => localStorage.removeItem('mockSaveDelay'));
-  out.finishH1 = await p.textContent('main h1'); expect(out.finishH1 === 'Inspection finished', 'finished: ' + out.finishH1);
+  out.finishH1 = await p.textContent('main h1'); expect(out.finishH1 === 'Disclosures check finished', 'finished: ' + out.finishH1);
   out.finishDecl = await p.textContent('#insDecl'); expect(/When the vendors start their Vendor Declaration/.test(out.finishDecl), 'before listing: the answers wait for the vendors');
   expect(!(await sideways()), 'the finish screen fits 390 px');
   await p.screenshot({ path: path.join(__dirname, 'out', 'insp_finish.png'), fullPage: false });
@@ -420,7 +420,7 @@ const TIM = ['agent-1', 'hello@timmcguire.co.nz'];
     'a single vendor: change is recorded as changed, changing back as a check, a tick after that changes nothing: ' + JSON.stringify(out.samChk));
 
   // 17. no em dashes on Tim's screens; dark mode at 390 px
-  await as(...TIM); expect(await p.textContent('main h1') === 'Inspection finished', 'Tim lands back where he left off'); await p.click('#navHome'); await p.waitForTimeout(300); await p.click('#homeInspect'); await p.waitForTimeout(400);
+  await as(...TIM); expect(await p.textContent('main h1') === 'Disclosures check finished', 'Tim lands back where he left off'); await p.click('#navHome'); await p.waitForTimeout(300); await p.click('#homeInspect'); await p.waitForTimeout(400);
   expect(await p.evaluate(() => !document.body.innerText.includes('—')), 'no em dashes');
   const dk = await page('dark'); const q = dk.p;
   await q.goto('https://packages.dunnerstunner.co.nz/onboarding/'); await q.waitForTimeout(300);

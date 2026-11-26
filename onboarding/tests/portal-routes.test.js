@@ -179,7 +179,7 @@ const out = {}; const errs = [];
   await menu('People'); out.m5 = await at(p);
   await menu('Processes'); out.m6 = await at(p);
   out.procOrder = await p.$$eval('#pProc .home-tile', els => els.map(e => e.id));
-  expect(JSON.stringify(out.procOrder) === JSON.stringify(['soonFirst', 'soonReport', 'homeBegin', 'homeInspect', 'homeAgree', 'homeForms', 'homeOffer', 'soonDesk', 'soonPrep']), 'Processes are in the order they are used for a property: ' + out.procOrder);
+  expect(JSON.stringify(out.procOrder) === JSON.stringify(['soonFirst', 'soonReport', 'soonDesk', 'homeBegin', 'homeInspect', 'homeAgree', 'homeForms', 'homeOffer', 'soonPrep']), 'Processes are in the order they are used for a property: ' + out.procOrder);
   await p.click('#soonPrep'); await wait(p, 400); await p.click('#soonDesk'); await wait(p, 400); await p.click('#soonFirst'); await wait(p, 400); await p.click('#soonReport'); await wait(p, 400);
   out.soonStays = await at(p); expect(out.soonStays === '/portal/processes', 'the Coming soon tiles do nothing when tapped: ' + out.soonStays);
   await p.click('#homeBegin'); await wait(p, 700); out.m7 = [await at(p), (await chrome(p)).up];

@@ -118,30 +118,49 @@ const TIM = ['agent-1', 'hello@timmcguire.co.nz'];
       d = await db(); out[tag].heat = pc('PA', 'pHeat');
       expect(out[tag].heat && out[tag].heat[0] === 'Heat pump and log burner' && out[tag].heat[1] === 'tim' && out[tag].heat[2] === true, 'typed on the property file: on the profile as Tim\'s: ' + JSON.stringify(out[tag].heat));
 
-      // 6a. Tim's standing rule (26 November 2026): a button's progress and result show just under it, never only in a toast
+      // 6a. Tim's standing rule (26 November 2026): what a button is doing or has done shows just under it, never only in a toast
       if (tag === 'light') {
-        const note = sel => p.evaluate(sel => { const b = document.querySelector(sel); if (!b) return null; const n = document.getElementById('bn-' + (b.id || 'x')); if (!n) return { none: true };
+        const note = sel => p.evaluate(sel => { const b = document.querySelector(sel); if (!b) return null; const n = document.getElementById('bn-' + b.id); if (!n) return { none: true };
           const row = b.closest('.toolbar') || b; return { next: row.nextElementSibling === n, gap: Math.round(n.getBoundingClientRect().top - row.getBoundingClientRect().bottom), text: n.textContent, kind: n.dataset.kind, shown: !n.hidden }; }, sel);
         const toastUp = () => p.evaluate(() => !document.getElementById('toast').hidden && document.getElementById('toast').textContent);
-        await p.evaluate(() => localStorage.setItem('mockRpcDelay', '900'));
-        await p.fill('#pfd_pHeat', 'Heat pump'); await p.click('#pfSave'); await p.waitForTimeout(450);
+        await p.evaluate(() => localStorage.setItem('mockRpcDelay', '1200'));
+        await p.fill('#pfd_pHeat', 'Heat pump'); await p.click('#pfSave'); await p.waitForTimeout(500);
         out[tag].busy = await note('#pfSave');
         expect(out[tag].busy && out[tag].busy.next && out[tag].busy.shown && out[tag].busy.kind === 'busy' && out[tag].busy.text === 'Saving...' && out[tag].busy.gap >= 0 && out[tag].busy.gap < 24, 'while it saves, "Saving..." shows just under the button: ' + JSON.stringify(out[tag].busy));
-        await p.evaluate(() => localStorage.removeItem('mockRpcDelay')); await p.waitForTimeout(2200);
+        await p.evaluate(() => localStorage.removeItem('mockRpcDelay')); await p.waitForTimeout(2400);
         out[tag].saved = await note('#pfSave');
-        expect(out[tag].saved && out[tag].saved.next && out[tag].saved.text === 'Saved' && out[tag].saved.kind === 'ok' && !(await toastUp()), 'the result shows under the button on the redrawn page, not in a toast: ' + JSON.stringify(out[tag].saved));
+        expect(out[tag].saved && out[tag].saved.next && out[tag].saved.shown && out[tag].saved.text === 'Saved' && out[tag].saved.kind === 'ok' && !(await toastUp()), 'the result shows under the button on the redrawn page, not in a toast: ' + JSON.stringify(out[tag].saved));
         await p.fill('#pfAddr', ''); await p.click('#pfSave'); await p.waitForTimeout(300);
         out[tag].check = await note('#pfSave');
-        expect(out[tag].check && out[tag].check.text === 'Add the address.' && out[tag].check.kind === 'err', 'a check that stops it shows under the button: ' + JSON.stringify(out[tag].check));
+        expect(out[tag].check && out[tag].check.shown && out[tag].check.text === 'Add the address.' && out[tag].check.kind === 'err', 'a check that stops it shows under the button: ' + JSON.stringify(out[tag].check));
         await p.fill('#pfAddr', '4 Profile Road, Roslyn');
-        await p.evaluate(() => localStorage.setItem('mockFailWrite', 'properties')); await p.click('#pfSave'); await p.waitForTimeout(700);
+        await p.evaluate(() => localStorage.setItem('mockFailWrite', 'properties')); await p.click('#pfSave'); await p.waitForTimeout(800);
         out[tag].fail = await note('#pfSave');
-        expect(out[tag].fail && out[tag].fail.kind === 'err' && out[tag].fail.shown && !(await toastUp()), 'a failed save shows under the button: ' + JSON.stringify(out[tag].fail));
+        expect(out[tag].fail && out[tag].fail.kind === 'err' && out[tag].fail.shown && /^Not saved yet\. Everything you typed is still here\./.test(out[tag].fail.text) && !(await toastUp()), 'a failed save shows under the button, in plain words: ' + JSON.stringify(out[tag].fail));
         await p.evaluate(() => localStorage.removeItem('mockFailWrite'));
-        // the property profile's own buttons too
-        await openProp('PA'); await p.click('#pfProfTbl tr[data-prof="pHeat"] [data-profuse]').catch(() => null); await p.waitForTimeout(1500);
-        out[tag].use = await p.evaluate(() => { const n = document.getElementById('bn-x'); return n && n.isConnected ? [n.textContent, n.dataset.kind, n.previousElementSibling && n.previousElementSibling.matches('button[data-profuse]')] : null; });
-        expect(!out[tag].use || out[tag].use[1] === 'ok', 'Use this: its result at the button (when one is still there): ' + JSON.stringify(out[tag].use));
+        // the property profile's own buttons: "Use this" reports in its fact's row, "Tick all" where it was
+        await rpc('agent_profile_set', { p_property: 'PA', p_key: 'pPark', p_value: 'Single garage' });
+        await p.evaluate(() => { const d = JSON.parse(localStorage.getItem('mockdb')); d.agreements.push({ id: 'AC', ref: 'MRE-2026-1011', address: '4 Profile Road, Roslyn', property_id: 'PA', status: 'draft', config: {}, answers: { pPark: 'Double garage' }, legal: {}, agreement_version: 'v3.15-26102026', created_at: '2026-11-22T00:00:00Z', updated_at: '2026-11-22T00:00:00Z' }); localStorage.setItem('mockdb', JSON.stringify(d)); });
+        await go(); await openProp('PA');
+        out[tag].parkRow = await profRow('pPark');
+        if (await p.$('#pfProfTbl tr[data-prof="pPark"] [data-profuse]')) {
+          await p.click('#pfProfTbl tr[data-prof="pPark"] [data-profuse]'); await p.waitForTimeout(1500);
+          out[tag].use = await p.evaluate(() => { const td = document.querySelector('#pfProfTbl tr[data-prof="pPark"] td:last-child'); const n = td && td.querySelector('.btn-note'); return n ? [n.textContent, n.dataset.kind, !n.hidden] : null; });
+          expect(out[tag].use && out[tag].use[0] === 'Used. The property file has it now.' && out[tag].use[1] === 'ok' && out[tag].use[2] && !(await toastUp()), 'Use this: its result in that fact\'s row, where the button was: ' + JSON.stringify(out[tag].use));
+        } else expect(false, 'a second value for parking, with Use this: ' + out[tag].parkRow);
+        if (await p.isVisible('#pfProfTick')) {
+          await p.click('#pfProfTick'); await p.waitForTimeout(900);
+          out[tag].tick = await p.evaluate(() => { const n = document.querySelector('#pfProfile > .btn-note'); return n ? [n.textContent, n.dataset.kind, !n.hidden, n.previousElementSibling && n.previousElementSibling.id] : null; });
+          expect(out[tag].tick && out[tag].tick[0] === 'All ticked as checked.' && out[tag].tick[2] && out[tag].tick[3] === 'pfProfTbl', 'Tick all: its result where the button was: ' + JSON.stringify(out[tag].tick));
+        }
+        // a press in the signing viewer is left alone: its messages are not moved (another builder is changing those screens)
+        out[tag].skip = await p.evaluate(() => { const w = document.createElement('div'); w.id = 'sgFlow'; w.innerHTML = '<button class="btn" type="button" id="lw0Probe">Probe</button>'; document.getElementById('main').appendChild(w); document.getElementById('lw0Probe').click(); return new Promise(r => setTimeout(() => r(!document.getElementById('bn-lw0Probe')), 300)); });
+        expect(out[tag].skip, 'the signing viewer keeps its own messages');
+        await p.evaluate(() => { const d = JSON.parse(localStorage.getItem('mockdb')); d.agreements = d.agreements.filter(a => a.id !== 'AC'); localStorage.setItem('mockdb', JSON.stringify(d)); });
+        // the message lines of the offer form, the clause library, Ready to sign and presenting a round sit just under their buttons
+        const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'app.js'), 'utf8');
+        out[tag].under = ['ofSend', 'drLibSave', 'sgRelease', 'ngGo'].map(id => { const m = new RegExp('id="' + id + '"[^\\n]*?</div>\\s*<div class="err" id="(\\w+)"').exec(src); return id + ':' + (m ? m[1] : 'NOT UNDER'); });
+        expect(out[tag].under.every(x => !/NOT UNDER/.test(x)), 'message lines under their buttons: ' + out[tag].under);
       }
 
       // 6. the vendor: answers to the questions before we meet go to the bank as they answer; their own profile only; no people records

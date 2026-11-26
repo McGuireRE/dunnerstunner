@@ -133,8 +133,9 @@ Ids in addresses are the database ids. Addresses never contain a name, email or 
 
 ### LW0. The shared records
 
-Status: built 26 November 2026 on branch `lw0-shared-records`, awaiting review and Tim's approval. Migration 028 (`migrations/028_shared_records.sql`)
-is written and tested in a rollback block on the live project and on a local stand-in; it is NOT applied. Tests: `lw0-shared-records.test.js`,
+Status: built, awaiting review (26 November 2026, branch `lw0-shared-records`) and Tim's approval. Migration 028 (`migrations/028_shared_records.sql`)
+is written and tested in a rollback block on a local stand-in (re-run after the merge with main: every check passed); the first builder
+reported a rollback run on the live project too, which the reviewer repeats before it is applied. It is NOT applied. Tests: `lw0-shared-records.test.js`,
 `tests/shared-records-rollback.sql` (with `.js`), `tests/lw0-standin.sql`; `portal-routes.test.js`, `inspection.test.js` and
 `council-lookup.test.js` updated for the new names and order.
 
@@ -173,7 +174,26 @@ campaign schedule's "Pre-listing period" (printed into agreements) stay as they 
 P1 follow-ups: a vendor signing a form on Tim's device stays in signing mode after a reload (no menu, Stop signing shown); a failed save
 says "Not saved yet. Everything you typed is still here. Check you have signal, then tap Save and close again."
 
-Open for Tim: see the build report (doubts on today's test people; whether "What I heard from you" may show answers to Tim's own questions).
+Feedback at the button (Tim's rule, 26 November 2026), swept in LW0 with the one shared `atBtn(btn, msg, kind)` from Offers hotfix 3:
+- Every `.btn` pressed on Tim's and vendors' screens is remembered. While the database or a function works for it, a note just under it says
+  what is happening ("Saving...", "Sending...", "Drafting...", "Getting it ready to sign...", "Uploading...", "Looking...", or the button's
+  own `data-busy` wording). A message the page would have shown in a toast goes under that button instead, and follows the button when the
+  page redraws; only if the button is gone for good does it fall back to the toast.
+- Left alone (another builder is changing them): the signing viewer (`#sgFlow`, `#sgHandback`), the signing places (`#sgPlacesSum`,
+  document holders) and the marking tools (`#sgHeld`). Also the top bar, footer menu and the Back and Continue bar, which already sit at
+  the bottom of each step.
+- Moved under their buttons: the message lines of the offer form (Send my offer), the clause library (Save the library), Ready to sign
+  (signing release) and Present to the vendors or purchasers. The property file's Save, "Use this" and "Tick all" on the property profile
+  report at the button, or in the fact's own row once the page has redrawn.
+- Processes order: First visit (coming soon), Appraisal report (coming soon), Desktop analysis (coming soon), Questions before we meet,
+  Disclosures check, Let's agree, Forms, Draft an offer, Improvements and preparation assessment (coming soon). The disclosures check's own
+  headings now say "Disclosures check finished" and "Disclosures check not found".
+
+Merged with main ad6548c (Offers hotfix 3 final) on 26 November 2026: main's drafting code and `offers-draft.test.js` taken whole; the two
+early hotfix 3 commits on this branch are superseded by it.
+
+Open for Tim: see the build report (doubts on today's test people; whether "What I heard from you" may show answers to Tim's own questions;
+the name "Questions before we meet"; migration 028's rollback test to be run on the live project by the reviewer before it is applied).
 
 ### P1. Shell and addresses
 
