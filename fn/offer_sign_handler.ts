@@ -319,15 +319,17 @@ export function makeHandler(d: Deps) {
         }
         return json({ ok: true, id: r.id, reopened: r.reopened });
       }
-      // 029: added text or the signer's own initials, name or signature, from their link. In Round 1 it holds signing for Tim, who is told
-      // at once (as for a request to change), and nobody else; from Round 2 on only their own mark, which is not a change and tells nobody
+      // 029: a mark from their link. In Round 1 every kind (a note, a line through text, a crossed-out box, a reinstatement, added text,
+      // their own initials, name or signature) holds signing for Tim, who is told at once and alone; from Round 2 on only their own
+      // initials, name or signature, which is not a change and tells nobody. The database checks each as on Tim's screen.
       if (action === "mark") {
-        const kind = ["insert", "own_initials", "own_name", "own_signature"].includes(String(body.kind)) ? String(body.kind) : "";
-        if (!kind || !Number.isInteger(body.page) || !body.geometry || typeof body.geometry !== "object" || Array.isArray(body.geometry) || JSON.stringify(body.geometry).length > 2000) return json({ ok: false, error: "That didn't save. Please try again." }, 400);
-        const r = await call("offer_sign_mark", { p_token: token, p_session: session, p_net: net, p_kind: kind, p_page: body.page, p_geometry: body.geometry });
+        const kind = ["note", "strike", "cross", "reinstate", "insert", "own_initials", "own_name", "own_signature"].includes(String(body.kind)) ? String(body.kind) : "";
+        const target = body.target == null ? null : String(body.target);
+        if (!kind || (target !== null && !UUID.test(target)) || !Number.isInteger(body.page) || !body.geometry || typeof body.geometry !== "object" || Array.isArray(body.geometry) || JSON.stringify(body.geometry).length > 60000) return json({ ok: false, error: "That didn't save. Please try again." }, 400);
+        const r = await call("offer_sign_mark", { p_token: token, p_session: session, p_net: net, p_kind: kind, p_page: body.page, p_geometry: body.geometry, p_target: target });
         let emailed = null;
-        if (r.held) { emailed = true; const what = ({ insert: "added text", own_initials: "added their own initials", own_name: "added their own name", own_signature: "added their own signature" } as Record<string, string>)[kind];
-          const words = kind === "insert" ? `<blockquote style="border-left:3px solid #C9C4BD;margin:0;padding:4px 12px">${esc(String(body.geometry.text || "").slice(0, 300))}</blockquote>` : "";
+        if (r.held) { emailed = true; const what = ({ note: "wrote a note", strike: "put a line through text", cross: "crossed out a box", reinstate: "reinstated a line or box", insert: "added text", own_initials: "added their own initials", own_name: "added their own name", own_signature: "added their own signature" } as Record<string, string>)[kind];
+          const words = kind === "insert" || kind === "strike" ? `<blockquote style="border-left:3px solid #C9C4BD;margin:0;padding:4px 12px">${esc(String(body.geometry.text || "").slice(0, 300))}</blockquote>` : "";
           try { await d.sendMail("offer_sign_marked", { to: d.timEmail, subject: `A purchaser marked the offer: ${r.address || "an offer"}`, html: wrap(`<p><strong>${esc(r.name)}</strong> ${esc(what)} on page ${esc(r.page)} of their offer for <strong>${esc(r.address || "")}</strong>, from their signing link.</p>${words}<p>Signing is held until you check it on the signing page and re-approve it. Nobody else has been told.</p>`) }); } catch (_) { emailed = false; } }
         return json({ ok: true, id: r.id, held: !!r.held, emailed });
       }

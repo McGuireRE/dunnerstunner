@@ -425,7 +425,8 @@ agreements/<agreement id>/signatures/... (vendors may upload their own signature
 ## 029 Signing places, chattels initials and four more marks (26 November 2026; tested in a rollback block on a local PostgreSQL stand-in, NOT yet on the live project)
 - `offer_sign_marks`: kinds widened (nothing removed) with `own_initials`, `own_name`, `own_signature`; new column `ink_png` (only on a
   signer's own initials or signature: the database copies in that signer's own ink as it stands, `offer_sign_ink`); `offer_sign_marks_live`
-  gains the column. Typed words (`insert`) may now be a Round 1 mark too.
+  gains the column. Typed words (`insert`) may now be a Round 1 mark too. By link in Round 1 every mark kind (note, strike, cross, reinstate
+  too) goes through `offer_sign_mark` (with a reinstatement's target) and holds the round as on Tim's screen.
 - Triggers, before insert: `guard_offer_mark_place` (typed words and a signer's own marks sit inside the page, off the date place and off
   other signers' places; a signer's own mark carries exactly their own ink or name), `guard_offer_signing_chattels` (a side signing the
   whole agreement has each signer's initials inside the map's chattels area; refused with a plain message when the map has none).

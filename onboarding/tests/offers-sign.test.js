@@ -270,8 +270,8 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   await draw(q, '#sgSig', 5); await draw(q, '#sgInit', 6); await q.click('#sgDrawGo'); await q.waitForSelector('#sgPlaces');
   // plain words for a signer: no "fingerprint"; the check code sits behind Details, with what it is for
   expect(!/fingerprint/i.test(await q.textContent('#main')) && await q.$('#sgDocCheck') && /Document check code/.test(await q.textContent('#sgDocCheck')) && !(await q.$eval('#sgDocCheck', e => e.open)), 'the signer sees "Document check code" behind Details, never "fingerprint"');
-  // 029 (Tim, 26 November 2026): by link in Round 1 a purchaser has the four ways to add to the page (they hold signing for Tim), not the line, cross or note
-  expect(JSON.stringify(await q.$$eval('#sgTools [data-tool]', b => b.map(x => x.dataset.tool))) === JSON.stringify(['insert', 'own_initials', 'own_name', 'own_signature']) && await q.$('#sgAskBox'), 'a link signer can add text, their initials, name or signature (not strike or cross), and can ask Tim for a change');
+  // 029 (Tim, 26 November 2026): by link in Round 1 a purchaser has every tool Tim's screen has (each holds signing for Tim)
+  expect(JSON.stringify(await q.$$eval('#sgTools [data-tool]', b => b.map(x => x.dataset.tool))) === JSON.stringify(['note', 'strike', 'cross', 'reinstate', 'insert', 'own_initials', 'own_name', 'own_signature']) && await q.$('#sgAskBox'), 'a link signer has every marking tool (note, line, cross, reinstate, added text, their own initials, name or signature), and can ask Tim for a change');
   const allMine = await q.$$eval('#sgPgPick option', o => o.length); expect(allMine >= 1, 'the pages are there to read');
   d = await db(q); const eve = d.offer_signers.find(s => s.signing_id === gB.id && s.position === 1), fin = d.offer_signers.find(s => s.signing_id === gB.id && s.position === 2);
   const finPlace = gB.places.find(x => x.signer === 2).id;

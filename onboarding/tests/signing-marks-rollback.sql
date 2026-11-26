@@ -145,6 +145,7 @@ begin
   out := out || 'presented: edits recorded=' || (select count(*) from public.offer_events where offer_id = o1 and kind = 'sign_places_edited' and detail->>'signing_id' = g2::text) || '; ';
   perform pg_temp.rb_prep(g2);
   select id into v1 from public.offer_signers where signing_id = g2 and position = 1; select id into v2 from public.offer_signers where signing_id = g2 and position = 2;
+  begin perform public.offer_sign_do_mark(v1, 'cross', 1, '{"x":100,"y":150,"w":60,"h":20}', null, null, true); out := out || 'A ROUND 2 CROSS WENT IN AS A MARK; '; exception when others then out := out || 'round 2 cross is a change: ' || sqlerrm || '; '; end;
   begin perform public.agent_signing_mark(v1, 'insert', 1, '{"x":100,"y":250,"text":"More words","size":9}', null); out := out || 'TYPED WORDS WENT IN AS A MARK IN ROUND 2; '; exception when others then out := out || 'round 2 text is a change: ' || sqlerrm || '; '; end;
   begin perform public.agent_signing_mark(v1, 'own_signature', 2, '{"x":75,"y":598,"w":40,"h":16}', null); out := out || 'UNA''S SIGNATURE COVERED ANA''S ROUND 1 CHATTELS INITIALS; '; exception when others then out := out || 'clear of earlier ink: ' || sqlerrm || '; '; end;
   r := public.agent_signing_mark(v1, 'own_signature', 1, '{"x":300,"y":600,"w":80,"h":20}', null);
@@ -169,7 +170,17 @@ begin
   out := out || 'link own initials: held=' || (r->>'held') || ' status=' || (select status from public.offer_signings where id = gl) || ' ink is hers=' || ((select ink_png from public.offer_sign_marks where id = (r->>'id')::uuid) = png2) || ' state marks=' || jsonb_array_length(public.offer_sign_state(tok, ses)->'signing'->'marks') || ' with ink=' || (select count(*) from jsonb_array_elements(public.offer_sign_state(tok, ses)->'signing'->'marks') e where e ? 'ink') || '; ';
   r := public.offer_sign_mark(tok, ses, 'n1', 'insert', 1, '{"x":100,"y":200,"text":"Please add the curtains","size":9}');
   out := out || 'link typed: held=' || (r->>'held') || ' event by link=' || (select detail->>'by_link' from public.offer_events where offer_id = o2 order by seq desc limit 1) || '; ';
-  begin perform public.offer_sign_mark(tok, ses, 'n1', 'note', 1, '{"strokes":[[[1,1],[5,5]]]}'); out := out || 'A NOTE BY LINK; '; exception when others then out := out || 'four kinds only: ' || sqlerrm || '; '; end;
+  -- and, by link in Round 1, the note, the line, the crossed-out box and the reinstatement too (Tim, 26 November 2026), held for Tim alike
+  r := public.offer_sign_mark(tok, ses, 'n1', 'cross', 1, '{"x":100,"y":150,"w":60,"h":20}'); mk := (r->>'id')::uuid;
+  out := out || 'link cross: held=' || (r->>'held') || '; ';
+  begin perform public.offer_sign_mark(tok, ses, 'n1', 'cross', 1, '{"x":590,"y":150,"w":60,"h":20}'); out := out || 'A CROSS OFF THE PAGE BY LINK; '; exception when others then out := out || 'cross checked: ' || sqlerrm || '; '; end;
+  begin perform public.offer_sign_mark(tok, ses, 'n1', 'note', 1, '{"x":1}', mk); out := out || 'A NOTE POINTED AT A MARK; '; exception when others then out := out || 'target only on a reinstatement: ' || sqlerrm || '; '; end;
+  r := public.offer_sign_mark(tok, ses, 'n1', 'reinstate', 1, '{"x":100,"y":172}', mk);
+  out := out || 'link reinstate: held=' || (r->>'held') || ' target=' || ((select target from public.offer_sign_marks where id = (r->>'id')::uuid) = mk) || '; ';
+  begin perform public.offer_sign_mark(tok, ses, 'n1', 'reinstate', 1, '{"x":100,"y":172}', mk); out := out || 'REINSTATED TWICE BY LINK; '; exception when others then out := out || 'once only: ' || sqlerrm || '; '; end;
+  perform public.offer_sign_mark(tok, ses, 'n1', 'note', 1, '{"strokes":[[[300,300],[320,310]]]}');
+  out := out || 'link marks on the timeline: ' || (select string_agg(detail->>'kind', ',' order by seq) from public.offer_events where offer_id = o2 and kind = 'sign_marked') || '; ';
+  begin perform public.offer_sign_mark(tok, ses, 'n1', 'smudge', 1, '{"x":1}'); out := out || 'AN UNKNOWN KIND BY LINK; '; exception when others then out := out || 'known kinds only: ' || sqlerrm || '; '; end;
   begin perform public.offer_sign_mark(tok, ses, 'n1', 'own_name', 1, '{"x":100,"y":400,"w":120,"h":12,"text":"Bo Markbuyer","size":9}'); out := out || 'ANA ADDED BO''S NAME BY LINK; '; exception when others then out := out || 'her own name only: ' || sqlerrm || '; '; end;
   -- Tim's in-person mark function can't act on a link signer's turn
   execute 'reset role'; perform set_config('request.jwt.claims', agent, true);
@@ -179,7 +190,7 @@ begin
   execute 'set local role authenticated'; perform set_config('request.jwt.claims', vendor, true);
   begin perform public.offer_sign_mark(tok, ses, 'n1', 'own_initials', 1, '{"x":100,"y":100,"w":30,"h":14}'); out := out || 'A SIGNED-IN USER RAN THE LINK MARK; '; exception when others then out := out || 'service only: ' || sqlerrm || '; '; end;
   begin perform public.agent_signing_release_edited(d3, 'in_person', sizes, '[]', '{}', '{}'); out := out || 'A VENDOR RELEASED; '; exception when others then out := out || 'agent only: ' || sqlerrm || '; '; end;
-  begin perform public.offer_sign_do_mark(s1, 'own_initials', 1, '{"x":100,"y":100,"w":30,"h":14}', null, false); out := out || 'A SIGNED-IN USER RAN THE INNER MARK; '; exception when others then out := out || 'inner closed: ' || sqlerrm || '; '; end;
+  begin perform public.offer_sign_do_mark(s1, 'own_initials', 1, '{"x":100,"y":100,"w":30,"h":14}', null, null, false); out := out || 'A SIGNED-IN USER RAN THE INNER MARK; '; exception when others then out := out || 'inner closed: ' || sqlerrm || '; '; end;
   execute 'reset role';
   raise exception 'ROLLBACK %', out;
 end $t$;

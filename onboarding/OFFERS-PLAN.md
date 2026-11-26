@@ -757,7 +757,8 @@ there is room (`SIGN.chattelsArea`, `chattelsBoxes`). A map with no chattels are
 signer's last initials there, nor move them out of the box. The database refuses a round without them, whoever writes it (029).
 
 C. Four more ways to mark the page, in every round, in person and by link: "Add text", "Add my initials", "Add my name", "Add my
-signature". Round 1 under "Mark the page:" (by link, these four; on Tim's screen beside the note, line, cross and reinstate); from
+signature". Round 1 under "Mark the page:", beside the note, line, cross and reinstate, in person and by link alike (Tim, 26 November
+2026: link signers in Round 1 get every tool, each holding the round for Tim exactly as on his device); from
 Round 2 in "To counter, change the document" (the old "Type words" is now "Add text"; it is the same change, with the further term
 numbering). With changes from a link switched off, the link offers only the signer's own initials, name or signature.
 - Added text is a change: in Round 1 it holds signing for Tim, who checks it and re-approves, then everyone on that side initials beside
@@ -767,7 +768,9 @@ numbering). With changes from a link switched off, the link offers only the sign
   is not a change: it holds nothing, lifts nothing, asks nobody to initial it, and doesn't count as the round changing the document.
 - Every new mark sits inside the page, clear of the date place and of other signers' places (from Round 2 a signer's own mark also
   keeps clear of earlier rounds' places). Undo (Offers fixes 3) works on them. 30 an hour per signer; by link 60 an hour per network.
-- By link in Round 1, a mark holds the round and Tim alone is emailed ("A purchaser marked the offer"). Nobody else is told.
+- By link in Round 1, any mark (the note, a line through text, a crossed-out box, a reinstatement, or one of the four) holds the round,
+  is checked by the database exactly as on Tim's screen (`offer_sign_do_mark`, the offer-sign `mark` action with a reinstatement's
+  target), and Tim alone is emailed ("A purchaser marked the offer"). Nobody else is told until Tim releases it.
 - Shown on screen in the marks layer, drawn on the locked Round 1 and on every later round's working copy and the agreed copy
   (`SIGN.drawAdded`; earlier rounds draw exactly as before), listed on the execution record and the round's record ("Added by a signer
   in this round"), and on the timeline (`sign_marked` in Round 1, `sign_own_mark` later).

@@ -980,8 +980,10 @@ function markPlaceGuard(g,s,m){ if(!['insert',...OWN_K].includes(m.kind)) return
   const pls=sgAllPlaces(g).filter(e=>e.signer!==s.position).concat(isOwnK(m.kind)?docSigns.flatMap(id=>sgAllPlaces(OSG().find(x=>x.id===id))):[]);
   if(pls.some(e=>e.page===m.page&&ovl(e,rc)>0.5)) throw new Error("That would sit on someone else's place to sign or initial. Put it in a clear space"); }
 // offer_sign_do_mark: added text (Round 1) or a signer's own initials, name or signature (any round), in person or by link
-function sgDoMark(s,kind,page,geo,net,link){ if(!['insert',...OWN_K].includes(kind)) throw new Error('Choose what to add'); let g=OSG().find(x=>x.id===s.signing_id);
-  if((g.round_no||1)>1&&kind==='insert') throw new Error('In a counteroffer, added text is a change: use the change tools');
+// by link in Round 1 the note, line, cross and reinstatement too, checked as on Tim's screen (Tim, 26 November 2026)
+function sgDoMark(s,kind,page,geo,net,link,target){ const old_=['note','strike','cross','reinstate'].includes(kind); if(!['insert',...OWN_K].includes(kind)&&!(old_&&link)) throw new Error('Choose what to add');
+  if(kind!=='reinstate'&&target) throw new Error('Only a reinstatement points at another mark'); let g=OSG().find(x=>x.id===s.signing_id);
+  if((g.round_no||1)>1&&(kind==='insert'||old_)) throw new Error('In a counteroffer, that is a change: use the change tools');
   if((g.round_no||1)>1) g=sgReady(s,false);
   else { if(holdActive(g.offer_id)) throw new Error(NEUTRAL_STOP); if(s.void_at) throw new Error('This version has been replaced. Tim will send you the new one.'); const w=sgCurrent(g); if(w) throw new Error(w);
     if(ORQ().some(r=>r.signer_id===s.id&&!r.handled_at)) throw new Error(ASKED_STOP); if(!['signing','held'].includes(g.status)) throw new Error("Signing isn't open"); if(s.finished_at) throw new Error('You have finished signing. Thank you.'); }
@@ -990,11 +992,13 @@ function sgDoMark(s,kind,page,geo,net,link){ if(!['insert',...OWN_K].includes(ki
   if(OSM().filter(m=>m.signer_id===s.id&&Date.parse(m.at)>Date.now()-36e5).length>=30) throw new Error('You have marked the page a lot in the last hour. Please call Tim on 027 562 7207');
   if(link){ if(hits('sign_change',net,null,36e5)>=60) throw new Error('A lot of changes have been made from here in the last hour. Please call Tim on 027 562 7207'); OH().push({at:now(),kind:'sign_change',net}); }
   if(!(page>=1&&page<=g.pages.length)) throw new Error("That page isn't in the document"); const [w,h]=g.pages[page-1];
-  if(kind==='insert'){ if(!insOk(geo,w,h)) throw new Error("That doesn't sit on the page"); const who=privateHit(PO().find(x=>x.id===g.offer_id),geo.text); if(who) throw new Error(`Those words hold ${who}'s own phone or email, so they can't go on the agreement. Only the lawyers' details go on it`); }
+  if(old_){ if(!window.SIGN.markOk({kind,geometry:geo,target:kind==='reinstate'?target||'x':null},{w,h})) throw new Error("That mark doesn't sit on the page");
+    if(kind==='reinstate'){ const t=liveMarks().find(x=>x.id===target&&x.signing_id===g.id); if(!t||!['strike','cross'].includes(t.kind)) throw new Error('Choose a line or crossed-out box to reinstate'); if(liveMarks().some(x=>x.target===t.id&&x.kind==='reinstate')) throw new Error('That has already been reinstated'); } }
+  else if(kind==='insert'){ if(!insOk(geo,w,h)) throw new Error("That doesn't sit on the page"); const who=privateHit(PO().find(x=>x.id===g.offer_id),geo.text); if(who) throw new Error(`Those words hold ${who}'s own phone or email, so they can't go on the agreement. Only the lawyers' details go on it`); }
   else if(!ownOk(kind,geo,w,h)) throw new Error("That doesn't sit on the page. Put it inside the page");
-  const m={id:uid(),signing_id:g.id,signer_id:s.id,by_name:s.name,kind,page,geometry:geo,target:null,at:now(),ink_png:kind==='own_initials'?ink.init_png:kind==='own_signature'?ink.sig_png:null};
+  const m={id:uid(),signing_id:g.id,signer_id:s.id,by_name:s.name,kind,page,geometry:geo,target:kind==='reinstate'?target:null,at:now(),ink_png:kind==='own_initials'?ink.init_png:kind==='own_signature'?ink.sig_png:null};
   markPlaceGuard(g,s,m); OSM().push(m);
-  if((g.round_no||1)===1){ g.status='held'; g.held_at=now(); sgEv(g,s.name,'sign_marked',{signing_id:g.id,mark_id:m.id,kind,page,signer:s.position,target:null,by_link:!!link,text:['insert','own_name'].includes(kind)?geo.text:null}); }
+  if((g.round_no||1)===1){ g.status='held'; g.held_at=now(); sgEv(g,s.name,'sign_marked',{signing_id:g.id,mark_id:m.id,kind,page,signer:s.position,target:m.target,by_link:!!link,text:['insert','own_name','strike'].includes(kind)?geo.text:null}); }
   else sgEv(g,s.name,'sign_own_mark',{signing_id:g.id,round:g.round_no,side:g.side,mark_id:m.id,kind,page,signer:s.position,by_link:!!link,text:kind==='own_name'?geo.text:null});
   return {id:m.id,held:(g.round_no||1)===1,name:s.name,round:g.round_no||1,side:g.side||'purchaser',kind,page,address:(PT().find(x=>x.id===g.property_id)||{}).address}; }
 // Tim's own changes to the places (offer_places_edits_ok), recorded on the round's timeline (sign_places_edited)
@@ -1383,8 +1387,8 @@ async function signInvoke(o){ const b=(o&&o.body)||{}, me=S&&S.user, net='h:'+mo
       if(r.reopened>0) (r.reopened_signers||[]).forEach(x=>{ if(!x.email||!x.id) return; try{ const w=window.MAIL.reopenedDraft({first:String(x.name||'').split(' ')[0],address:r.address,by:r.by,side:g.side}); mailInsert('system',{p_offer:g.offer_id,p_kind:'reopened',p_signer:x.id,p_to:[x.email],p_cc:[],p_subject:w.subject,p_body:w.body}); }catch(_){} }); save();
       return res({ok:true,id:r.id,reopened:r.reopened}); }
     // 029: added text or the signer's own initials, name or signature from their link; in Round 1 it holds the round and Tim alone is told
-    if(b.action==='mark'){ if(!['insert',...OWN_K].includes(String(b.kind))||!Number.isInteger(b.page)||!b.geometry||typeof b.geometry!=='object'||Array.isArray(b.geometry)) return res({ok:false,error:"That didn't save. Please try again."},400);
-      const r=sgDoMark(s,b.kind,b.page,b.geometry,net,true); save(); let emailed=null;
+    if(b.action==='mark'){ if(!['note','strike','cross','reinstate','insert',...OWN_K].includes(String(b.kind))||(b.target!=null&&!/^[0-9a-f-]{36}$/i.test(String(b.target)))||!Number.isInteger(b.page)||!b.geometry||typeof b.geometry!=='object'||Array.isArray(b.geometry)) return res({ok:false,error:"That didn't save. Please try again."},400);
+      const r=sgDoMark(s,b.kind,b.page,b.geometry,net,true,b.target||null); save(); let emailed=null;
       if(r.held){ emailed=true; try{ sgMail('offer_sign_marked','tim',{mark_kind:b.kind,page:b.page,subject:'A purchaser marked the offer: '+p.address,text:b.kind==='insert'?b.geometry.text:null}); }catch(_){ emailed=false; } }
       save(); return res({ok:true,id:r.id,held:r.held,emailed}); }
     if(b.action==='ask'){ if(s.void_at||['locked','replaced'].includes(g.status)) throw new Error('This version is no longer being signed'); if(holdActive(g.offer_id)) throw new Error(NEUTRAL_STOP); if(ORQ().some(r=>r.signer_id===s.id&&!r.handled_at)) throw new Error(ASKED_STOP); const t=String(b.text||'').trim(); if(t.length<3||t.length>1000) throw new Error('Please say what you would like changed (up to 1,000 characters)');

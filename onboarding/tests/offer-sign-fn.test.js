@@ -97,8 +97,12 @@ const MAILC = require(path.join(__dirname, '..', 'src', 'mail-core.js'));
   expect(x.j.ok && x.j.held === false && x.j.emailed === null && !mails.length, 'a signer\'s own mark in a later round: not held, nobody emailed');
   x = await J(await post({ action: 'mark', token: TOK, session: SES, kind: 'own_name', page: 1, geometry: { x: 1, y: 1, w: 90, h: 13, text: 'Someone Else', size: 9 } }));
   expect(x.j.ok === false && /your own name/.test(x.j.error), 'the database\'s refusal is shown plainly');
-  calls = []; x = await J(await post({ action: 'mark', token: TOK, session: SES, kind: 'note', page: 1, geometry: { strokes: [] } }));
-  expect(x.j.ok === false && !calls.some(c => c[0] === 'offer_sign_mark'), 'only the four kinds reach the database');
+  mails = []; calls = []; x = await J(await post({ action: 'mark', token: TOK, session: SES, kind: 'reinstate', page: 1, geometry: { x: 10, y: 10 }, target: SID }));
+  { const mc = calls.find(c => c[0] === 'offer_sign_mark'); expect(x.j.ok && x.j.held && mc && mc[1].p_kind === 'reinstate' && mc[1].p_target === SID && mails.length === 1 && /reinstated a line or box/.test(mails[0].html), 'a reinstatement from a link: its target passed on, held, Tim emailed'); }
+  calls = []; x = await J(await post({ action: 'mark', token: TOK, session: SES, kind: 'smudge', page: 1, geometry: { x: 1 } }));
+  expect(x.j.ok === false && !calls.some(c => c[0] === 'offer_sign_mark'), 'an unknown kind never reaches the database');
+  calls = []; x = await J(await post({ action: 'mark', token: TOK, session: SES, kind: 'reinstate', page: 1, geometry: { x: 1 }, target: 'not-a-uuid' }));
+  expect(x.j.ok === false && !calls.some(c => c[0] === 'offer_sign_mark'), 'a bad target never reaches the database');
   // ask Tim to stop or withdraw: recorded, then one urgent email to Tim alone, at once; the reason made safe; nobody else emailed
   mails = []; calls = []; x = await J(await post({ action: 'request', token: TOK, session: SES, kind: 'withdraw', reason_key: 'other', reason: 'We bought elsewhere <b>today</b>' }));
   const rqc = calls.find(c => c[0] === 'offer_sign_request');

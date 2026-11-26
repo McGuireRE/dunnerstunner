@@ -283,11 +283,17 @@ const GUIDES = { sale_purchase: { file: 'rea-sale-purchase-guide-2022-en.pdf', v
   out.markMails = ml.map(m => m.to); out.markR = r; out.allKinds = (await mails(p)).map(m => m.kind); expect(ml.length === 1 && ml[0].to === 'tim', 'C by link: Tim alone is emailed that she marked the page');
   const stL = await invoke(p, Object.assign({ action: 'state' }, A_));
   expect(stL.signing.marks.length === 1 && stL.signing.marks[0].ink === PNG1 && stL.signing.marks[0].mine, 'C by link: her screen shows the mark, with her ink');
-  r = await invoke(p, Object.assign({ action: 'mark', kind: 'note', page: 1, geometry: { strokes: [[[1, 1], [5, 5]]] } }, A_)); expect(r.ok === false, 'by link, only the four kinds');
+  // by link in Round 1, every tool Tim's screen has: a crossed-out box and its reinstatement hold the round for Tim too, Tim alone emailed
+  r = await invoke(p, Object.assign({ action: 'mark', kind: 'cross', page: 1, geometry: { x: spotL.x, y: spotL.y + 40, w: 60, h: 20 } }, A_)); const crossL = r.id;
+  expect(r.ok && r.held && (await mails(p)).filter(m => m.kind === 'offer_sign_marked').length === 2, 'C by link: a crossed-out box holds the round, and Tim alone is emailed');
+  r = await invoke(p, Object.assign({ action: 'mark', kind: 'reinstate', page: 1, geometry: { x: spotL.x, y: spotL.y + 62 }, target: crossL }, A_));
+  d = await db(p); expect(r.ok && r.held && d.offer_sign_marks.find(m => m.id === r.id).target === crossL, 'C by link: a reinstatement points at the box it reinstates');
+  r = await invoke(p, Object.assign({ action: 'mark', kind: 'smudge', page: 1, geometry: { x: 1 } }, A_)); expect(r.ok === false, 'by link, only the known kinds');
+  for (let i = 0; i < 2; i++) await invoke(p, Object.assign({ action: 'undo', scope: 'last' }, A_));
   // her link page shows the held message and lets her undo it
   { const q = await page(); await q.goto(link); await q.evaluate(([k, v]) => sessionStorage.setItem(k, v), ['sgSes:' + tok, ses]).catch(() => {}); await q.close(); }
   r = await invoke(p, Object.assign({ action: 'undo', scope: 'last' }, A_)); d = await db(p);
-  expect(r.ok && d.offer_signings.find(x => x.id === gL.id).status === 'signing', 'C by link: she undoes her mark, and signing carries on');
+  expect(r.ok && d.offer_signings.find(x => x.id === gL.id).status === 'signing', 'C by link: she undoes her marks, and signing carries on');
   // she signs every place and finishes: Round 1 is locked
   const stF = await invoke(p, Object.assign({ action: 'state' }, A_));
   for (const pl of stF.signing.places) await invoke(p, Object.assign({ action: 'tap', place: pl.id }, A_));

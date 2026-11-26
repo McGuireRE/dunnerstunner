@@ -11,7 +11,8 @@
 --     other signers don't initial them; from Round 2 on they are not changes (nothing is lifted, nothing more to initial, and they don't
 --     count as the round changing the document). They are always allowed by link. Every new mark sits inside the page, clear of the date
 --     place and of every other signer's place (guard_offer_mark_place, before insert, whoever writes). Undo (026) works on them as on
---     every change. 30 an hour per signer, and by link 60 an hour per network, as changes are.
+--     every change. 30 an hour per signer, and by link 60 an hour per network, as changes are. By link in Round 1 a signer also has the
+--     note, the line through text, the crossed-out box and the reinstatement, checked and held exactly as on Tim's screen.
 --   * Chattels initials: whenever a side signs the whole agreement (Round 1, the vendors' first round, and every round when Tim's
 --     setting resign_every_round is on), each signer has an initial place inside the chattels area of the blank's map. A signing without
 --     them is refused, whoever inserts it (guard_offer_signing_chattels, before insert), with a plain message when the map has no
@@ -128,15 +129,18 @@ create trigger offer_signings_chattels before insert on public.offer_signings fo
 -- hourly limit). Round 1: typed words or the signer's own initials, name or signature; it holds signing for Tim, as every Round 1 mark
 -- does. From Round 2 on: only a signer's own initials, name or signature (typed words are a change: offer_sign_do_change); it doesn't
 -- hold signing and asks nobody to initial it. Lock order: the offer, then the signing, then the signer.
-create or replace function public.offer_sign_do_mark(p_signer uuid, p_kind text, p_page int, p_geometry jsonb, p_net text, p_link boolean) returns jsonb language plpgsql security definer set search_path = public as $$
-declare s public.offer_signers; g public.offer_signings; why text; w numeric; h numeric; mid uuid; ink jsonb; who text; n text;
+-- By link in Round 1 the signer also has 020's marks (a note, a line through text, a crossed-out box, a reinstatement: Tim, 26 November
+-- 2026), checked exactly as on Tim's screen (agent_signing_mark) and holding the round for him in the same way.
+create or replace function public.offer_sign_do_mark(p_signer uuid, p_kind text, p_page int, p_geometry jsonb, p_target uuid, p_net text, p_link boolean) returns jsonb language plpgsql security definer set search_path = public as $$
+declare s public.offer_signers; g public.offer_signings; why text; w numeric; h numeric; mid uuid; ink jsonb; who text; n text; t public.offer_sign_marks; old_ boolean := coalesce(p_kind, '') in ('note', 'strike', 'cross', 'reinstate');
 begin
-  if coalesce(p_kind, '') not in ('insert', 'own_initials', 'own_name', 'own_signature') then raise exception 'Choose what to add'; end if;
+  if coalesce(p_kind, '') not in ('insert', 'own_initials', 'own_name', 'own_signature') and not (old_ and p_link is true) then raise exception 'Choose what to add'; end if;
+  if p_kind <> 'reinstate' and p_target is not null then raise exception 'Only a reinstatement points at another mark'; end if;
   perform public.offer_lock_by_signer(p_signer);
   perform 1 from public.offer_signings where id = (select signing_id from public.offer_signers where id = p_signer) for update;
   select * into s from public.offer_signers where id = p_signer for update; if s.id is null then raise exception 'No such signer'; end if;
   select * into g from public.offer_signings where id = s.signing_id;
-  if g.round_no > 1 and p_kind = 'insert' then raise exception 'In a counteroffer, added text is a change: use the change tools'; end if;
+  if g.round_no > 1 and (p_kind = 'insert' or old_) then raise exception 'In a counteroffer, that is a change: use the change tools'; end if;
   if g.round_no > 1 then g := public.offer_sign_ready(s, false);
   else
     if public.offer_hold_active(g.offer_id) then raise exception 'This version is no longer being signed. Tim will be in touch.'; end if;
@@ -156,19 +160,26 @@ begin
     insert into public.offer_hits (kind, net) values ('sign_change', n); end if;
   if p_page is null or p_page < 1 or p_page > jsonb_array_length(g.pages) then raise exception 'That page isn''t in the document'; end if;
   w := (g.pages->(p_page - 1)->>0)::numeric; h := (g.pages->(p_page - 1)->>1)::numeric;
-  if p_kind = 'insert' then
+  if old_ then
+    if not public.offer_mark_ok(p_kind, p_geometry, w, h) then raise exception 'That mark doesn''t sit on the page'; end if;
+    if p_kind = 'reinstate' then
+      select * into t from public.offer_sign_marks_live where id = p_target and signing_id = g.id;
+      if t.id is null or t.kind not in ('strike', 'cross') then raise exception 'Choose a line or crossed-out box to reinstate'; end if;
+      if exists (select 1 from public.offer_sign_marks_live where target = t.id and kind = 'reinstate') then raise exception 'That has already been reinstated'; end if;
+    end if;
+  elsif p_kind = 'insert' then
     if not public.offer_change_ok('insert', p_geometry, w, h) then raise exception 'That doesn''t sit on the page'; end if;
     who := public.offer_private_hit(g.offer_id, p_geometry->>'text');
     if who is not null then raise exception 'Those words hold %''s own phone or email, so they can''t go on the agreement. Only the lawyers'' details go on it', who; end if;
   elsif not public.offer_own_ok(p_kind, p_geometry, w, h) then raise exception 'That doesn''t sit on the page. Put it inside the page';
   end if;
   insert into public.offer_sign_marks (signing_id, signer_id, by_name, kind, page, geometry, target, ink_png)
-  values (g.id, s.id, s.name, p_kind, p_page, p_geometry, null, case p_kind when 'own_initials' then ink->>'init_png' when 'own_signature' then ink->>'sig_png' end) returning id into mid;
+  values (g.id, s.id, s.name, p_kind, p_page, p_geometry, case when p_kind = 'reinstate' then p_target end, case p_kind when 'own_initials' then ink->>'init_png' when 'own_signature' then ink->>'sig_png' end) returning id into mid;
   perform set_config('offers.fn', 'on', true);
   if g.round_no = 1 then
     update public.offer_signings set status = 'held', held_at = now() where id = g.id;
-    insert into public.offer_events (property_id, offer_id, actor, kind, detail) values (g.property_id, g.offer_id, s.name, 'sign_marked', jsonb_build_object('signing_id', g.id, 'mark_id', mid, 'kind', p_kind, 'page', p_page, 'signer', s.position, 'target', null,
-      'by_link', p_link is true, 'text', case when p_kind in ('insert', 'own_name') then p_geometry->>'text' end));
+    insert into public.offer_events (property_id, offer_id, actor, kind, detail) values (g.property_id, g.offer_id, s.name, 'sign_marked', jsonb_build_object('signing_id', g.id, 'mark_id', mid, 'kind', p_kind, 'page', p_page, 'signer', s.position, 'target', p_target,
+      'by_link', p_link is true, 'text', case when p_kind in ('insert', 'own_name', 'strike') then p_geometry->>'text' end));
   else
     insert into public.offer_events (property_id, offer_id, actor, kind, detail) values (g.property_id, g.offer_id, s.name, 'sign_own_mark', jsonb_build_object('signing_id', g.id, 'round', g.round_no, 'side', g.side, 'mark_id', mid, 'kind', p_kind, 'page', p_page, 'signer', s.position,
       'by_link', p_link is true, 'text', case when p_kind = 'own_name' then p_geometry->>'text' end));
@@ -177,11 +188,11 @@ begin
   return jsonb_build_object('id', mid, 'held', g.round_no = 1, 'name', s.name, 'round', g.round_no, 'side', g.side, 'kind', p_kind, 'page', p_page, 'address', (select address from public.properties where id = g.property_id));
 end $$;
 -- by link: the signer's own token and session (the offer-sign edge function, service role)
-create or replace function public.offer_sign_mark(p_token text, p_session text, p_net text, p_kind text, p_page int, p_geometry jsonb) returns jsonb language plpgsql security definer set search_path = public as $$
+create or replace function public.offer_sign_mark(p_token text, p_session text, p_net text, p_kind text, p_page int, p_geometry jsonb, p_target uuid default null) returns jsonb language plpgsql security definer set search_path = public as $$
 declare s public.offer_signers;
 begin
   s := public.offer_sign_me(p_token, p_session);
-  return public.offer_sign_do_mark(s.id, p_kind, p_page, p_geometry, p_net, true);
+  return public.offer_sign_do_mark(s.id, p_kind, p_page, p_geometry, p_target, p_net, true);
 end $$;
 
 -- ───── Tim's own changes to the places, before a round goes out ─────
@@ -449,7 +460,7 @@ begin
   -- 029: typed words and a signer's own initials, name or signature (any round for their own; Round 1 for typed words)
   if coalesce(p_kind, '') in ('insert', 'own_initials', 'own_name', 'own_signature') then
     if p_target is not null then raise exception 'Only a reinstatement points at another mark'; end if;
-    return public.offer_sign_do_mark(p_signer, p_kind, p_page, p_geometry, null, false); end if;
+    return public.offer_sign_do_mark(p_signer, p_kind, p_page, p_geometry, null, null, false); end if;
   select * into g from public.offer_signings where id = s.signing_id for update; select * into s from public.offer_signers where id = p_signer for update;
   if g.round_no > 1 then raise exception 'In a counteroffer, use the change tools'; end if;
   if s.void_at is not null then raise exception 'This version has been replaced'; end if;
@@ -500,8 +511,8 @@ end $$;
 
 -- ───── execute rights ─────
 revoke execute on function public.guard_offer_mark_place(), public.guard_offer_signing_chattels(), public.offer_hits_date(uuid, int, jsonb), public.offer_chattels_rect(uuid),
-  public.offer_sign_do_mark(uuid, text, int, jsonb, text, boolean), public.offer_places_edits_ok(jsonb, jsonb, uuid) from public, anon, authenticated;
-revoke execute on function public.offer_sign_mark(text, text, text, text, int, jsonb) from public, anon, authenticated;
-grant execute on function public.offer_sign_mark(text, text, text, text, int, jsonb) to service_role;
+  public.offer_sign_do_mark(uuid, text, int, jsonb, uuid, text, boolean), public.offer_places_edits_ok(jsonb, jsonb, uuid) from public, anon, authenticated;
+revoke execute on function public.offer_sign_mark(text, text, text, text, int, jsonb, uuid) from public, anon, authenticated;
+grant execute on function public.offer_sign_mark(text, text, text, text, int, jsonb, uuid) to service_role;
 revoke execute on function public.agent_signing_release_edited(uuid, text, jsonb, jsonb, int[], jsonb), public.agent_round_present_edited(uuid, text, jsonb, boolean, text, boolean, jsonb) from public, anon;
 grant execute on function public.agent_signing_release_edited(uuid, text, jsonb, jsonb, int[], jsonb), public.agent_round_present_edited(uuid, text, jsonb, boolean, text, boolean, jsonb) to authenticated;
