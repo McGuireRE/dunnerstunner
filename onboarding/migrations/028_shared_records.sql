@@ -91,7 +91,7 @@ revoke insert, update, delete, truncate on public.profile_keys from anon, authen
 
 -- where a value can come from; 'record' sources are public or bought records, 'person' sources are someone's own entry
 create or replace function public.profile_source_kind(s text) returns text language sql immutable as $$
-  select case when s in ('council', 'reinz', 'relab') then 'record' else 'person' end;
+  select case when s in ('council', 'reinz', 'relab', 'title') then 'record' else 'person' end;
 $$;
 
 create table public.property_fact_values (
@@ -101,7 +101,7 @@ create table public.property_fact_values (
   value jsonb,                                -- null: this source cleared it
   display text,                               -- the words the source gave, where it gave any (council records)
   label text,                                 -- the source's own name for the fact (council records that aren't in profile_keys)
-  source text not null check (source in ('council', 'reinz', 'relab', 'inspection', 'agreement', 'tim', 'first_visit', 'questionnaire', 'quiet_list')),
+  source text not null check (source in ('council', 'reinz', 'relab', 'title', 'inspection', 'agreement', 'tim', 'first_visit', 'questionnaire', 'quiet_list')),
   source_name text,                           -- for example "Dunedin City Council rates"
   source_ref uuid,                            -- the lookup, inspection, agreement or listing it came from
   as_of text,                                 -- the date the source gives for it (for example "2026-2027 rating year")
@@ -150,10 +150,16 @@ create policy pp_vendor on public.property_profile for select to authenticated
 --   p_choose 'auto':  chosen when nothing is chosen yet, or when what is chosen is not ticked and is from the same source, or a person's
 --                     entry replacing another person's entry or a record; a record never replaces a person's entry by itself; nothing
 --                     automatic replaces what the property file says (Tim's own entries, source 'tim'); the same value changes nothing.
---   p_choose 'offer': a value Tim gave in another place (a disclosures check answer; council values and check answers in the backfill):
---                     chosen and ticked, unless Tim has ticked a different value from another source, or what is chosen is the property
---                     file's own value (source 'tim', including a fact Tim cleared on the file). Then that stays and this one is shown
---                     beside it for him to choose (Tim, 26 November 2026: a ticked value is never overwritten).
+--   p_choose 'check': Tim's answer on the disclosures check. It is his own choice (Tim, 26 November 2026): chosen and ticked, and the
+--                     property file follows (as migration 012 already writes it). The one exception: where the property's documents hold
+--                     an official figure for the fact (a record of title or survey plan, source 'title') and it says something else, the
+--                     official figure stays chosen and his answer is shown beside it; the check page tells him so under his answer.
+--   p_choose 'official': a figure from a record of title or survey plan among the property's documents (read by the document reader).
+--                     It wins over an informal value: chosen (not ticked; Tim ticks it), and the file follows. A value Tim ticked, or a
+--                     fact he cleared on the file, is never silently overwritten: the official figure is shown beside it, marked.
+--   p_choose 'beside': the backfill's council values and check answers: chosen and ticked unless Tim has ticked a different value from
+--                     another source, or what is chosen is the property file's own value (source 'tim', including a fact Tim cleared on
+--                     the file). Then that stays and this one is shown beside it, so applying 028 leaves the file and the profile agreeing.
 --   p_choose 'tim':   Tim chose it himself, here and now: chosen and ticked.
 --   p_choose 'never': kept as a value only (for example an inspection answer that differs from the agreement in force).
 -- A fact Tim cleared on the property file stays cleared: its chosen value is his empty entry, which nothing automatic and no offered
@@ -165,10 +171,10 @@ create or replace function public.profile_record(p_property uuid, p_key text, p_
   p_source_name text, p_display text, p_label text, p_by text, p_choose text) returns uuid
 language plpgsql security definer set search_path = public as $$
 declare v jsonb := case when public.jblank(p_value) then null else p_value end; last public.property_fact_values; vid uuid;
-  c public.property_profile; cv public.property_fact_values; alt uuid; move boolean := false; ch text := p_choose; fv jsonb;
+  c public.property_profile; cv public.property_fact_values; alt uuid; move boolean := false; ch text := p_choose; fv jsonb; off public.property_fact_values;
 begin
   if p_property is null or p_key is null then return null; end if;
-  if ch not in ('auto', 'offer', 'tim', 'never') then raise exception 'profile_record: bad choice'; end if;
+  if ch not in ('auto', 'beside', 'check', 'official', 'tim', 'never') then raise exception 'profile_record: bad choice'; end if;
   if not exists (select 1 from public.profile_keys where key = p_key) and p_source <> 'council' then return null; end if;
   select * into last from public.property_fact_values where property_id = p_property and key = p_key and source = p_source order by recorded_at desc, id desc limit 1;
   if last.id is not null and last.value is not distinct from v and coalesce(last.display, '') = coalesce(p_display, '') and last.source_ref is not distinct from p_ref then
@@ -198,12 +204,38 @@ begin
     return vid;
   end if;
   if ch = 'never' then return vid; end if;
-  if ch = 'offer' then
+  if ch = 'beside' then
     if c.property_id is not null and cv.source <> p_source and (c.ticked or cv.source = 'tim') and (cv.value #>> '{}') is distinct from (v #>> '{}') then
       perform public.profile_sync_file(p_property, p_key);   -- Tim's value (or the file's own) stays, on the file too; this one is shown beside it
       return vid;
     end if;
     ch := 'tim';
+  end if;
+  if ch = 'check' then
+    -- the official figure from the property's documents, if there is one and it says something else
+    select * into off from public.property_fact_values where property_id = p_property and key = p_key and source = 'title' order by recorded_at desc, id desc limit 1;
+    if off.id is not null and off.value is not null and (off.value #>> '{}') is distinct from (v #>> '{}')
+       and (c.property_id is null or cv.source = 'title' or not c.ticked) then
+      insert into public.property_profile (property_id, key, value_id, chosen_by) values (p_property, p_key, off.id, 'auto')
+      on conflict (property_id, key) do update set value_id = excluded.value_id, chosen_by = case when property_profile.value_id = excluded.value_id then property_profile.chosen_by else 'auto' end,
+        ticked = case when property_profile.value_id = excluded.value_id then property_profile.ticked else false end;
+      perform public.profile_sync_file(p_property, p_key);   -- the official figure stays, on the file too; his answer is shown beside it
+      return vid;
+    end if;
+    ch := 'tim';
+  end if;
+  if ch = 'official' then
+    if c.property_id is not null and cv.source <> p_source and (cv.value #>> '{}') is distinct from (v #>> '{}')
+       and (c.ticked or (cv.source = 'tim' and cv.value is null)) then
+      return vid;   -- Tim ticked a different value, or cleared it: the official figure is shown beside it, marked, for him to choose
+    end if;
+    insert into public.property_profile (property_id, key, value_id, chosen_by) values (p_property, p_key, vid, 'auto')
+    on conflict (property_id, key) do update set value_id = excluded.value_id, chosen_by = 'auto', chosen_at = now(),
+      ticked = case when property_profile.value_id = excluded.value_id then property_profile.ticked else false end,
+      ticked_at = case when property_profile.value_id = excluded.value_id then property_profile.ticked_at end,
+      ticked_by = case when property_profile.value_id = excluded.value_id then property_profile.ticked_by end;
+    perform public.profile_sync_file(p_property, p_key);
+    return vid;
   end if;
   if ch = 'tim' then
     insert into public.property_profile as pp (property_id, key, value_id, chosen_by, ticked, ticked_at, ticked_by)
@@ -379,9 +411,10 @@ begin
 end $$;
 create trigger profile_from_found after update of found on public.properties for each row execute function public.profile_from_found();
 
--- Inspect a property (the disclosures check): Tim's own answers, chosen and ticked, unless the agreement in force holds a different
--- value (then kept as a value until he chooses on the check, as now) or Tim has ticked a different value from another source (then
--- his ticked value stays and the answer is shown beside it); his choice on the check is applied here too
+-- Inspect a property (the disclosures check): Tim's own answers are his choice, chosen and ticked, with the property file and the draft
+-- agreement as migration 012 writes them; kept as a value only while the agreement in force holds a different one (he chooses on the
+-- check, as now), and beside an official figure from the property's documents that says something else; his choice on the check is
+-- applied here too
 create or replace function public.profile_from_inspection() returns trigger language plpgsql security definer set search_path = public as $$
 declare k text; v jsonb; r jsonb; f public.property_fact_values; asof text := to_char(now() at time zone 'Pacific/Auckland', 'FMDD Mon YYYY');
 begin
@@ -391,7 +424,7 @@ begin
       v := new.facts -> k;
       if tg_op = 'UPDATE' and v is not distinct from (old.facts -> k) then continue; end if;
       perform public.profile_record(new.property_id, k, v, 'inspection', new.id, asof, 'Inspect a property', null, null, new.created_by,
-        case when coalesce(new.conflicts, '{}'::jsonb) ? k then 'never' else 'offer' end);
+        case when coalesce(new.conflicts, '{}'::jsonb) ? k then 'never' else 'check' end);
     end loop;
     if tg_op = 'UPDATE' then
       for k, r in select * from jsonb_each(coalesce(new.resolved, '{}'::jsonb)) loop
@@ -429,6 +462,51 @@ begin
   return null;
 end $$;
 create trigger profile_from_agreement after insert or update of answers, property_id, status on public.agreements for each row execute function public.profile_from_agreement();
+
+-- the property's documents: a record of title, a cross lease or unit title document, or a survey plan is the official source for the
+-- land area and the title reference (Tim, 26 November 2026). What the document reader found in it (read_result.fields, the same answer
+-- form as doc_prefill) goes on the profile as an official figure ('title'). A document archived or no longer one of these: its
+-- figures go, and what the file says (or the newest other value) takes their place.
+create or replace function public.profile_official_kinds() returns text[] language sql immutable as $$
+  select array['Record of title', 'Cross lease or unit title document', 'Survey plan'];
+$$;
+create or replace function public.profile_from_document_row(d public.property_documents, p_on boolean) returns void
+language plpgsql security definer set search_path = public as $$
+declare x jsonb; k text; v jsonb;
+begin
+  if d.property_id is null then return; end if;
+  for x in select e from jsonb_array_elements(case when jsonb_typeof(d.read_result -> 'fields') = 'array' then d.read_result -> 'fields' else '[]'::jsonb end) e loop
+    k := case x->>'key' when 'pLand' then 'pLand' when 'title' then 'title_ref' end;
+    if k is null then continue; end if;
+    -- a reading of several documents at once: only figures it says came from the title or plan
+    if coalesce(x->>'source', '') !~* '(title|survey|plan|cross lease|unit title|\mct\M|\mdp\M)' then continue; end if;
+    v := case when k = 'pLand' then to_jsonb(coalesce(public.ql_num(x->'value')::text, x->>'value')) else to_jsonb(trim(x->>'value')) end;
+    if not p_on then
+      if exists (select 1 from public.property_fact_values f where f.property_id = d.property_id and f.key = k and f.source = 'title' and f.source_ref = d.id) then
+        perform public.profile_record(d.property_id, k, null, 'title', d.id, null, d.kind, null, null, coalesce(d.created_by, 'agent'), 'auto');
+      end if;
+    elsif not public.jblank(v) then
+      perform public.profile_record(d.property_id, k, v, 'title', d.id, coalesce(to_char(d.issued_on, 'FMDD Mon YYYY'), to_char(d.created_at at time zone 'Pacific/Auckland', 'FMDD Mon YYYY')),
+        d.kind || coalesce(' (' || nullif(x->>'source', '') || ')', ''), null, null, coalesce(d.created_by, 'agent'),
+        case when coalesce(current_setting('app.profile_backfill', true), '') = 'on' then 'never' else 'official' end);   -- the backfill only lists it
+    end if;
+  end loop;
+end $$;
+create or replace function public.profile_from_document() returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  begin
+    if tg_op = 'UPDATE' and old.archived_at is null and old.kind = any (public.profile_official_kinds())
+       and (new.archived_at is not null or not (coalesce(new.kind, '') = any (public.profile_official_kinds()))) then
+      perform public.profile_from_document_row(old, false);
+    end if;
+    if new.archived_at is null and new.kind = any (public.profile_official_kinds())
+       and (tg_op = 'INSERT' or new.read_result is distinct from old.read_result or new.kind is distinct from old.kind or old.archived_at is not null) then
+      perform public.profile_from_document_row(new, true);
+    end if;
+  exception when others then perform public.shared_note('profile_from_document', jsonb_build_object('document', new.id, 'error', sqlerrm)); end;
+  return null;
+end $$;
+create trigger profile_from_document after insert or update of read_result, kind, archived_at on public.property_documents for each row execute function public.profile_from_document();
 
 -- ───── 2. person ─────
 alter table public.crm_property_links drop constraint crm_property_links_role_check;
@@ -1053,7 +1131,8 @@ revoke execute on function public.profile_vendor_key(text), public.qa_mine(text,
 grant execute on function public.profile_vendor_key(text), public.qa_mine(text, uuid, uuid) to authenticated;
 -- internal helpers: only the functions above call them
 revoke execute on function public.person_name_fits(uuid, text, boolean), public.person_unlink_pp(), public.profile_source_kind(text), public.person_first(text),
-  public.person_joint(text), public.person_nick_fits(text, text), public.person_short_same(text, text), public.profile_file_value(uuid, text), public.agreement_role(text), public.qa_prelisting_map(), public.ql_num(jsonb) from public, anon, authenticated;
+  public.person_joint(text), public.person_nick_fits(text, text), public.person_short_same(text, text), public.profile_file_value(uuid, text),
+  public.profile_official_kinds(), public.profile_from_document_row(public.property_documents, boolean), public.profile_from_document(), public.agreement_role(text), public.qa_prelisting_map(), public.ql_num(jsonb) from public, anon, authenticated;
 
 -- ───── backfill (today's records are test records; nothing signed is changed) ─────
 do $bf$
@@ -1108,7 +1187,7 @@ begin
     for k, v in select * from jsonb_each(coalesce(r.found, '{}'::jsonb)) loop
       perform public.profile_record(r.id, coalesce(case when v->>'field' in ('title_ref', 'legal_description') or v->>'field' = any (public.desc_keys()) then v->>'field' end, k), v->'value', 'council', null,
         coalesce(v->>'as_of_label', v->>'as_of', left(v->>'fetched_at', 10)), v->>'source_name', v->>'display', v->>'label', 'backfill',
-        case when coalesce(v->>'field', '') <> '' and coalesce((v->>'written')::boolean, false) = false then 'never' else 'offer' end);
+        case when coalesce(v->>'field', '') <> '' and coalesce((v->>'written')::boolean, false) = false then 'never' else 'beside' end);
     end loop;
   end loop;
   for r in select * from public.agreements where property_id is not null and status not in ('ended', 'cancelled') order by created_at loop
@@ -1122,9 +1201,13 @@ begin
     for k, v in select * from jsonb_each(coalesce(r.facts, '{}'::jsonb)) loop
       if k = any (public.desc_keys()) and not public.jblank(v) then
         perform public.profile_record(r.property_id, k, v, 'inspection', r.id, to_char(coalesce(public.stamp_ts(r.stamps->>('f:' || k)), r.updated_at) at time zone 'Pacific/Auckland', 'FMDD Mon YYYY'),
-          'Inspect a property', null, null, r.created_by, case when coalesce(r.conflicts, '{}'::jsonb) ? k then 'never' else 'offer' end);
+          'Inspect a property', null, null, r.created_by, case when coalesce(r.conflicts, '{}'::jsonb) ? k then 'never' else 'beside' end);
       end if;
     end loop;
+  end loop;
+  -- official figures from the property's documents (listed only: the backfill changes no property file)
+  for r in select * from public.property_documents where archived_at is null and kind = any (public.profile_official_kinds()) order by created_at loop
+    perform public.profile_from_document_row(r, true);
   end loop;
   -- the questions before we meet, into the bank
   for r in select * from public.prelistings loop

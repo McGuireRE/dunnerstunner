@@ -149,7 +149,13 @@ The five records:
    Quiet List, the property file itself and Tim. Whatever is chosen is written back to the property file, never to an agreement, so the
    file and the profile always agree; the file's own values are on the profile as Tim's ("Property file") and stay chosen against later
    answers from elsewhere (shown beside them); clearing a field on the file keeps it cleared (no later source refills it by itself; other
-   values are shown beside it). A ticked value is never overwritten (Tim, 26 November 2026): a later answer that differs,
+   values are shown beside it).
+   Tim's decision (26 November 2026): what he records on the disclosures check is his own choice, so it updates the property file, the
+   profile (chosen, ticked) and the draft agreement as before; answers from other places (council, agreements, the Quiet List, the
+   backfill) only sit beside his values. Except: where a record of title (or cross lease or unit title document) or survey plan is among
+   the property's documents, its land area and title reference are the official figures. They stay chosen; a different answer on the
+   check is kept beside them, and the check says so right under his answer ("The record of title says 812 m². That is the official
+   figure, ..."). Nothing silently overwrites either way. A ticked value is never overwritten (Tim, 26 November 2026): a later answer that differs,
    for example on the disclosures check, is shown beside it for him to choose. On screen: a "Property profile" card on
    the property file (source and date per fact, the other source's value with "Use this", "Tick all"); the disclosures check offers the
    profile's value for a fact it hasn't noted ("On the property profile: ... Use this"); Tim's typing on the property file is saved to the
@@ -210,6 +216,8 @@ the profile and the file agreeing, ticked values kept, function privileges, butt
 opening offline without waiting, two signers at once, the flaky address check, and Desktop analysis apart from the listing steps.
 Re-review (26 November 2026): the property file's own values and facts Tim cleared now hold against answers from elsewhere, so the
 backfill preview shows no fact where the profile and the file disagree.
+Second re-review (26 November 2026, Tim's decision): disclosures check answers are Tim's own choice; official figures from a record of
+title or survey plan hold against them, with a warning under the answer.
 
 Open for Tim: the backfill preview (what each of today's names becomes; the people flagged for him); whether "What I heard from you" may
 show answers to Tim's own questions; migration 028's rollback test to be run on the live project before it is applied.

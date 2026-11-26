@@ -43,6 +43,8 @@ const TIM = ['agent-1', 'hello@timmcguire.co.nz'];
             found: { land_area: { key: 'land_area', field: 'pLand', written: true, value: 640, display: '640 m²', as_of_label: '2026-2027 rating year', source_name: 'Dunedin City Council rates', label: 'Land area' },
                      capital_value: { key: 'capital_value', value: 780000, display: '$780,000', as_of: '2026-2027', source_name: 'Dunedin City Council rates', label: 'Capital value' } } },
           { id: 'PB', address: '9 Signed Street, Maori Hill', ownership: {}, description: {}, disclosures: {}, found: {}, provenance: {}, stage: 'signed', stage_at: now, created_at: now, updated_at: now },
+          { id: 'PD', address: '11 Check Crescent, Glenleith', ownership: {}, description: { pLand: '800' }, disclosures: {}, found: {}, provenance: {}, stage: 'appraisal', stage_at: now, created_at: now, updated_at: now },
+          { id: 'PE', address: '12 Title Track, Roslyn', ownership: {}, description: {}, disclosures: {}, found: {}, provenance: {}, stage: 'appraisal', stage_at: now, created_at: now, updated_at: now },
           { id: 'PC', address: '7 Typed Terrace, Opoho', ownership: {}, description: { pHeat: 'Wood burner' }, disclosures: {}, found: {}, provenance: {}, stage: 'appraisal', stage_at: now, created_at: now, updated_at: now }],
         property_people: [
           { id: 'PPA1', property_id: 'PA', position: 1, legal_name: 'Robin Rowe', pref_name: 'Rob', email: 'robin@example.com', phone: '021 555 0101', role: 'owner', source: 'agent', name_from: 'agent', created_at: now },
@@ -118,14 +120,37 @@ const TIM = ['agent-1', 'hello@timmcguire.co.nz'];
       await p.click('#pfProfTick'); await p.waitForTimeout(700); d = await db();
       expect((d.property_profile || []).filter(x => x.property_id === 'PA').every(x => x.ticked) && !(await p.isVisible('#pfProfTick')), 'Tick all ticks every fact');
 
-      // 4a. Tim's decision (26 November 2026): a ticked value is never overwritten. A later disclosures check answer that differs is shown beside it
+      // 4a. a check answer that differs from the draft agreement in force is kept beside it until Tim chooses on the check (migration 012's rule)
       await p.click('[data-inspopen]'); await p.waitForTimeout(900);
       await p.click('.insp-tab:has-text("Inside")').catch(() => null); await p.waitForTimeout(300);
       await p.click('[data-ik="f:pBed"] input[value="3"] + span'); await p.waitForTimeout(1400);
       d = await db(); out[tag].bed4 = pc('PA', 'pBed');
       out[tag].bedOthers = (await rpc('agent_property_profile', { p_property: 'PA' })).data.facts.find(x => x.key === 'pBed').others.map(o => o.value + '/' + o.source);
       expect(out[tag].bed4 && out[tag].bed4[0] === '5' && out[tag].bed4[1] === 'agreement' && out[tag].bed4[2] === true && out[tag].bedOthers.includes('3/inspection') && d.properties.find(x => x.id === 'PA').description.pBed === '5',
-        'the ticked 5 stays, on the file too; the check\'s 3 is shown beside it: ' + JSON.stringify([out[tag].bed4, out[tag].bedOthers]));
+        'differs from the agreement in force: the ticked 5 stays, on the file too; the check\'s 3 is shown beside it: ' + JSON.stringify([out[tag].bed4, out[tag].bedOthers]));
+
+      // 4b. Tim's decision (26 November 2026): his disclosures check answer is his own choice. The file said 800; the check says 790
+      const factOf = async (pid, k) => (await rpc('agent_property_profile', { p_property: pid })).data.facts.find(x => x.key === k) || {};
+      await openProp('PD'); await p.click('#inspNewP'); await p.waitForTimeout(900);
+      await p.fill('#if_pLand', '790'); await p.press('#if_pLand', 'Tab'); await p.waitForTimeout(1600);
+      d = await db(); out[tag].pd = await factOf('PD', 'pLand');
+      expect(out[tag].pd.value === '790' && out[tag].pd.source === 'inspection' && out[tag].pd.ticked && (out[tag].pd.others || []).some(o => o.value === '800') && d.properties.find(x => x.id === 'PD').description.pLand === '790',
+        'file 800, check 790: the check answer on the profile (ticked) and the file, 800 beside it: ' + JSON.stringify(out[tag].pd));
+      // 4c. ...except where a record of title among the property's documents gives the official figure: it stays, and Tim is told under his answer
+      await p.evaluate(now => { const d = JSON.parse(localStorage.getItem('mockdb')); (d.property_documents ||= []).push({ id: 'DE', property_id: 'PE', kind: 'Record of title', folder: 'title', name: 'title.pdf', path: 'PE/title.pdf', source: 'dropped',
+        read_result: { fields: [{ key: 'pLand', value: '812 m²', source: 'Record of title OT9/1' }] }, created_at: now, created_by: 'agent' }); localStorage.setItem('mockdb', JSON.stringify(d)); }, now);
+      await go(); d = await db(); out[tag].pe0 = [(await factOf('PE', 'pLand')).value, (await factOf('PE', 'pLand')).source, d.properties.find(x => x.id === 'PE').description.pLand];
+      expect(JSON.stringify(out[tag].pe0) === JSON.stringify(['812', 'title', '812']), 'the record of title\'s land area on the profile and the file: ' + JSON.stringify(out[tag].pe0));
+      await openProp('PE'); out[tag].peRow = await profRow('pLand');
+      expect(/Official: record of title/.test(out[tag].peRow || ''), 'marked as the official figure on the property page: ' + out[tag].peRow);
+      await p.click('#inspNewP'); await p.waitForTimeout(900);
+      await p.fill('#if_pLand', '790'); await p.press('#if_pLand', 'Tab'); await p.waitForTimeout(1600);
+      out[tag].peNote = await p.evaluate(() => { const n = document.querySelector('[data-iofficial="pLand"]'), inp = document.getElementById('if_pLand'); if (!n) return null;
+        return { text: n.textContent, under: !!(inp.compareDocumentPosition(n) & Node.DOCUMENT_POSITION_FOLLOWING) && inp.closest('[data-ik]') === n.closest('[data-ik]') }; });
+      expect(out[tag].peNote && /^The record of title says 812 m²\. That is the official figure/.test(out[tag].peNote.text) && out[tag].peNote.under, 'the warning right under his answer: ' + JSON.stringify(out[tag].peNote));
+      d = await db(); out[tag].pe = await factOf('PE', 'pLand');
+      expect(out[tag].pe.value === '812' && out[tag].pe.source === 'title' && (out[tag].pe.others || []).some(o => o.value === '790' && o.source === 'inspection') && d.properties.find(x => x.id === 'PE').description.pLand === '812',
+        'the official 812 stays on the profile and the file; his 790 is beside it to choose: ' + JSON.stringify(out[tag].pe));
 
       // 5. Tim's own entry on the property file goes to the profile (a property with no agreement, so the file can be edited)
       await p.evaluate(() => { const d = JSON.parse(localStorage.getItem('mockdb')); d.agreements = d.agreements.filter(a => a.id !== 'AA'); localStorage.setItem('mockdb', JSON.stringify(d)); });

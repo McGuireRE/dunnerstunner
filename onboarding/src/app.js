@@ -1203,7 +1203,8 @@ function lawyerForm(id, title, blurb) {
   async function saveReadDocs(pid, read) {
     if (!pid || !read || !(read.files || []).length) return;
     const kindOf = name => ((read.documents || []).find(d => d.file === name) || {}).kind || null;
-    const rr = { flags: read.flags || [], documents: read.documents || [], at: new Date().toISOString() };
+    // the reader's figures are kept too: from a record of title or survey plan they are the official ones on the property profile (LW0)
+    const rr = { flags: read.flags || [], documents: read.documents || [], fields: (read.fields || []).filter(f => f && ['pLand', 'title'].includes(f.key)), at: new Date().toISOString() };
     try { await must(sb.from('property_documents').insert(read.files.map(f => ({ property_id: pid, name: f.name, path: f.path, kind: kindOf(f.name), source: 'dropped', read_result: rr, created_by: SESSION.user.email })))); } catch (e) { toast("The documents couldn't be filed on the property. Try dropping them in again.", 'err'); console.warn('file docs', e); }
   }
   const propFlags = docs => { const seen = new Set(), out = []; docs.forEach(d => ((d.read_result || {}).flags || []).forEach(f => { if (!seen.has(f.text)) { seen.add(f.text); out.push(f); } })); return out; };
@@ -3945,7 +3946,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     (kind === 'facts' ? INS.facts : kind === 'decl' ? INS.decl : INS.notes)[k] = v;
     if (INS_STATE[INS.id]) delete INS_STATE[INS.id].refused;
     inspKeep(INS.id);
-    inspShow(INS.id); inspCounts(); inspCopyPaint();
+    inspShow(INS.id); inspCounts(); inspCopyPaint(); if (kind === 'facts') inspConflictsPaint();
     inspSyncOne(INS.id);
   }
   // one save of what is waiting, in a batch the server will take: at most INSP_BATCH characters, and at most INS_LIMIT[id] answers
@@ -4074,14 +4075,18 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   }
 
   /* ───────── LW0: the property profile (migration 028), one home for each fact ───────── */
-  const PROFILE_SRC = { council: 'Council records', inspection: 'Disclosures check', agreement: 'Agency agreement', tim: 'You', quiet_list: 'The Quiet List', relab: 'Relab', reinz: 'REINZ', first_visit: 'First visit', questionnaire: 'Their answers' };
+  const PROFILE_SRC = { title: 'Official record', council: 'Council records', inspection: 'Disclosures check', agreement: 'Agency agreement', tim: 'You', quiet_list: 'The Quiet List', relab: 'Relab', reinz: 'REINZ', first_visit: 'First visit', questionnaire: 'Their answers' };
   async function profileLoad(pid) {
     if (!okId(pid) && !(typeof pid === 'string' && pid)) return [];
     try { const { data, error } = await sb.rpc('agent_property_profile', { p_property: pid }); if (error || !data) return []; return Array.isArray(data.facts) ? data.facts : []; } catch (_) { return []; }
   }
   const profileFact = (facts, k) => (facts || []).find(x => x.key === k && x.value_id && !ijblank(x.value)) || null;
   const profileVal = x => x.display || (Array.isArray(x.value) ? x.value.join(', ') : typeof x.value === 'string' ? x.value : String(x.value));
-  const profileWhen = x => [PROFILE_SRC[x.source] || x.source, x.as_of].filter(Boolean).join(', ');
+  // a figure from a record of title or survey plan is marked as the official one, with the document it came from
+  const profileSrcName = x => x.source === 'title' ? 'Official: ' + String(x.source_name || 'record of title').replace(/ \(.*\)$/, '').toLowerCase() : (PROFILE_SRC[x.source] || x.source);
+  const profileWhen = x => [profileSrcName(x), x.as_of].filter(Boolean).join(', ');
+  // the official figure for a fact (chosen, or shown beside the chosen value), if the property's documents hold one
+  const profileOfficial = (facts, k) => { const x = (facts || []).find(f => f.key === k); if (!x) return null; if (x.source === 'title' && x.value_id) return x; return (x.others || []).find(o => o.source === 'title') || null; };
   // on the disclosures check: a fact not yet noted that the profile already holds is offered, with where it came from
   function inspProfileHint(k, v) {
     const x = !ijblank(v) || !INS || !INS.profile ? null : profileFact(INS.profile, k);
@@ -4093,7 +4098,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     if (!facts.length) return '<p class="small" style="margin:0">Nothing on the profile yet. Council records, the disclosures check and the agreement fill it as they are used.</p>';
     const unticked = facts.filter(x => x.value_id && !x.ticked).length;
     return `<table class="sum" id="pfProfTbl">${facts.map(x => `<tr data-prof="${esc(x.key)}"><td style="white-space:normal">${esc(x.label)}</td><td style="white-space:normal">${x.value_id ? `${esc(profileVal(x))} <span class="src-badge">${esc(profileWhen(x))}</span>${x.ticked ? ' <span class="small" title="Ticked by you">✓</span>' : ''}` : `<span class="small">${x.cleared ? 'Cleared by you on the property file' : 'No value chosen'}</span>`}
-        ${(x.others || []).map(o => `<div class="small pfother" style="margin-top:4px">${esc(PROFILE_SRC[o.source] || o.source)} says <strong>${esc(o.display || (Array.isArray(o.value) ? o.value.join(', ') : String(o.value)))}</strong>${o.as_of ? ` (${esc(o.as_of)})` : ''} <button class="btn link" type="button" data-profuse="${esc(x.key)}" data-vid="${esc(o.value_id)}">Use this</button></div>`).join('')}</td></tr>`).join('')}</table>
+        ${(x.others || []).map(o => `<div class="small pfother" style="margin-top:4px">${esc(profileSrcName(o))} says <strong>${esc(o.display || (Array.isArray(o.value) ? o.value.join(', ') : String(o.value)))}</strong>${o.as_of ? ` (${esc(o.as_of)})` : ''} <button class="btn link" type="button" data-profuse="${esc(x.key)}" data-vid="${esc(o.value_id)}">Use this</button></div>`).join('')}</td></tr>`).join('')}</table>
       ${unticked ? `<div class="toolbar"><button class="btn ghost" type="button" id="pfProfTick">Tick all ${unticked} as checked</button></div>` : ''}`;
   }
   async function profileCardDraw(pid) {
@@ -4210,7 +4215,17 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     !(['hazards', 'hazOther'].includes(k) && ijblank(c.inspection) && ((INS.decl.hazard || {}).a || '') !== 'no')));
   function inspConflictsPaint() {
     const now = inspConflictsNow();
-    $$('[data-iconf]').forEach(el => { const c = now[el.dataset.iconf]; el.innerHTML = c ? `<p class="small iconf">The agreement ${esc(c.ref || '')} says ${esc(inspVal(el.dataset.iconf, c.agreement))}. Your note is kept, and you choose which to use when you finish.</p>` : ''; });
+    $$('[data-iconf]').forEach(el => { const k = el.dataset.iconf, c = now[k];
+      el.innerHTML = (c ? `<p class="small iconf">The agreement ${esc(c.ref || '')} says ${esc(inspVal(k, c.agreement))}. Your note is kept, and you choose which to use when you finish.</p>` : '') + inspOfficialNote(k); });
+  }
+  // LW0 (Tim, 26 November 2026): where the property's documents hold the official figure (record of title, survey plan) and Tim's answer
+  // differs, it says so right under his answer; the official figure stays on the property file, his answer is kept beside it
+  function inspOfficialNote(k) {
+    const o = INS && profileOfficial(INS.profile, k), mine = INS && INS.facts[k];
+    if (!o || ijblank(mine) || String(mine).trim() === String(o.value).trim()) return '';
+    const unit = v => k === 'pLand' && /^[0-9.]+$/.test(String(v).trim()) ? String(v).trim() + ' m²' : String(v);
+    const doc = String(o.source_name || 'record of title').replace(/ \(.*\)$/, '').toLowerCase();
+    return `<p class="small iconf iofficial" data-iofficial="${esc(k)}">The ${esc(doc)} says ${esc(unit(o.value))}. That is the official figure, so the property file keeps it. Your ${esc(unit(mine))} is kept beside it: choose on the property file.</p>`;
   }
   const inspFlush = () => { Object.keys(INS_TIMERS).forEach(k => { clearTimeout(INS_TIMERS[k].t); INS_TIMERS[k].go(); delete INS_TIMERS[k]; }); };
 

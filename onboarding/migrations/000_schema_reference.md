@@ -431,8 +431,13 @@ signatures and fingerprints are not touched.
   council, reinz, relab, inspection, agreement, tim, first_visit, questionnaire, quiet_list; with display, source name, `as_of`,
   `recorded_at`, `recorded_by`; never changed or removed, `guard_fact_value`), `property_profile` (per property and fact: the chosen value,
   `chosen_by` auto or tim, `ticked`). `profile_record` (internal) decides, with p_choose: `tim` (Tim chose it here: chosen and ticked);
-  `offer` (a disclosures check answer, council values in the backfill: chosen and ticked unless Tim ticked a different value from another
-  source, or the chosen value is the property file's own, including a fact Tim cleared there; that then stays, with this one beside it); `auto` (chosen only when nothing ticked stands, never over the property file's own
+  `check` (a disclosures check answer: Tim's own choice, chosen and ticked, the file following as 012 writes it, unless an official figure
+  from the property's documents differs, which then stays chosen with his answer beside it); `official` (a record of title, cross lease or
+  unit title document, or survey plan among `property_documents`, source `title`, from the reader's `read_result.fields` for land area and
+  title reference, trigger `profile_from_document`: wins over an informal value, never over one Tim ticked or cleared, which it sits beside;
+  an archived document's figures go); `beside` (the backfill's council values and check answers: chosen and ticked unless Tim ticked a
+  different value from another source or the chosen value is the property file's own, including a fact Tim cleared there; that then
+  stays, with this one beside it; the backfill only lists official figures); `auto` (chosen only when nothing ticked stands, never over the property file's own
   value, never a record over a person's entry); `never` (kept as a value only). A source clearing its chosen value hands over to what the
   property file still says, else the newest other value. Whatever is chosen is written back to the file (`profile_sync_file`, internal;
   never to an agreement; skipped during the backfill, so applying 028 changes no property file). `profile_file_value` (internal). Values that

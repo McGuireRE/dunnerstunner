@@ -52,7 +52,8 @@ const PROFILE_LABEL={pType:'Type of property',pYear:'Year built',pBed:'Bedrooms'
 const SHARED_TABLES=['property_fact_values','property_profile','person_links','crm_contacts','crm_contact_methods','crm_property_links','property_person_roles','qa_answers','qa_questions','profile_keys','shared_record_log'];
 const QA_PL={spoke:'other_agents_spoken',spokeFeel:'other_agents_feel',choose:'agent_choice_same_fee',chooseWhy:'agent_choice_why',ideas:'plan_ideas',conf:'plan_confidence',likeMost:'plan_like_most',easyYes:'easy_yes',meet:'meeting_times'};
 const FV=()=>(DB.property_fact_values||=[]), PRF=()=>(DB.property_profile||=[]), CT=()=>(DB.crm_contacts||=[]), CM=()=>(DB.crm_contact_methods||=[]), PLK=()=>(DB.person_links||=[]), CPL=()=>(DB.crm_property_links||=[]), QA=()=>(DB.qa_answers||=[]);
-const recKind=s=>['council','reinz','relab'].includes(s)?'record':'person';
+const recKind=s=>['council','reinz','relab','title'].includes(s)?'record':'person';
+const OFFICIAL_KINDS=['Record of title','Cross lease or unit title document','Survey plan'];
 const lwToday=()=>new Date().toLocaleDateString('en-NZ',{day:'numeric',month:'short',year:'numeric',timeZone:'Pacific/Auckland'});
 let SEQ=0; const stamp=()=>new Date(Date.now()+(SEQ++)).toISOString();
 // After the first review (26 November 2026): 'offer' (a check answer) never replaces a ticked value; the file's values are on the
@@ -80,7 +81,13 @@ function profileRecord(pid,key,value,source,ref,asOf,sourceName,display,by,choos
       const alt=Object.values(FV().filter(f=>f.property_id===pid&&f.key===key&&f.source!==source).reduce((m,f)=>{ if(!m[f.source]||m[f.source].recorded_at<f.recorded_at) m[f.source]=f; return m; },{})).filter(f=>f.value!=null).sort((a,b)=>a.recorded_at<b.recorded_at?1:-1)[0];
       if(alt){ setC(alt.id,'auto',false); profileSyncFile(pid,key); } else DB.property_profile=PRF().filter(x=>x!==c); } return vid; }
   if(choose==='never') return vid;
-  if(choose==='offer'){ if(c&&cv&&cv.source!==source&&(c.ticked||cv.source==='tim')&&!sameTxt(cv.value,v)){ profileSyncFile(pid,key); return vid; } choose='tim'; }
+  if(choose==='beside'){ if(c&&cv&&cv.source!==source&&(c.ticked||cv.source==='tim')&&!sameTxt(cv.value,v)){ profileSyncFile(pid,key); return vid; } choose='tim'; }
+  // the disclosures check: Tim's own choice, unless an official figure from the property's documents says something else
+  if(choose==='check'){ const off=FV().filter(f=>f.property_id===pid&&f.key===key&&f.source==='title').sort((a,b)=>a.recorded_at<b.recorded_at?1:-1)[0];
+    if(off&&off.value!=null&&!sameTxt(off.value,v)&&(!c||(cv&&cv.source==='title')||!c.ticked)){ if(!c||c.value_id!==off.id) setC(off.id,'auto',false); profileSyncFile(pid,key); return vid; } choose='tim'; }
+  // an official figure (record of title, survey plan): wins over an informal value; never over one Tim ticked or cleared
+  if(choose==='official'){ if(c&&cv&&cv.source!==source&&!sameTxt(cv.value,v)&&(c.ticked||(cv.source==='tim'&&cv.value==null))) return vid;
+    if(!c||c.value_id!==vid) setC(vid,'auto',false); profileSyncFile(pid,key); return vid; }
   if(choose==='tim'){ setC(vid,'tim',true); profileSyncFile(pid,key); return vid; }
   let move; if(!c) move=true; else if(sameTxt(cv&&cv.value,v)) move=false; else if(c.ticked) move=false; else if(cv&&cv.source===source) move=true; else if(cv&&cv.source==='tim') move=false; else if(recKind(source)==='record'&&recKind(cv&&cv.source)==='person') move=false; else move=true;
   if(move){ setC(vid,'auto',false); profileSyncFile(pid,key); } return vid; }
@@ -156,12 +163,19 @@ function sharedSync(){
     const cid=(PLK().find(l=>l.source==='prelisting'&&l.source_id===pl.id)||{}).contact_id||null;
     Object.entries(QA_PL).forEach(([k,q])=>once('plq:'+pl.id+':'+k,JSON.stringify([(pl.answers||{})[k]??null,pl.property_id]),()=>qaPut(q,pl.property_id,cid,(pl.answers||{})[k],'questionnaire',pl.id,true,pl.contact_email))); });
   PT().forEach(p=>Object.keys(Object.assign({},p.found||{},JSON.parse(seen['found:'+p.id]||'{}'))).forEach(k=>{ const v=(p.found||{})[k]; once('found:'+p.id+':'+k,JSON.stringify(v??null),()=>{
-    const f=v||{}; const pk=['title_ref','legal_description'].concat(DESC).includes(f.field)?f.field:k; const ch=!v?'tim':(f.field&&!f.written?'never':LW0_BACKFILL?'offer':'tim');
+    const f=v||{}; const pk=['title_ref','legal_description'].concat(DESC).includes(f.field)?f.field:k; const ch=!v?'tim':(f.field&&!f.written?'never':LW0_BACKFILL?'beside':'tim');
     profileRecord(p.id,(v?pk:(JSON.parse(seen['foundkey:'+p.id+':'+k]||'null')||k)),v?f.value:null,'council',null,f.as_of_label||f.as_of||(f.fetched_at||'').slice(0,10),f.source_name,f.display,'agent',ch);
     if(v) seen['foundkey:'+p.id+':'+k]=JSON.stringify(pk); }); }));
   PT().forEach(p=>{ seen['found:'+p.id]=JSON.stringify(Object.fromEntries(Object.keys(Object.assign({},JSON.parse(seen['found:'+p.id]||'{}'),p.found||{})).map(k=>[k,1]))); });
   (DB.agreements||[]).forEach(ag=>{ if(!ag.property_id||['ended','cancelled'].includes(ag.status)) return; DESC.forEach(k=>once('aga:'+ag.id+':'+k,JSON.stringify([(ag.answers||{})[k]??null,ag.property_id]),prev=>{ const v=(ag.answers||{})[k]; if(jblank(v)&&(!prev||jblank(prev[0]))) return; profileRecord(ag.property_id,k,v,'agreement',ag.id,lwToday(),'Agency agreement '+(ag.ref||''),null,'agent','auto'); })); });
-  (DB.property_inspections||[]).forEach(i=>DESC.forEach(k=>once('insp:'+i.id+':'+k,JSON.stringify((i.facts||{})[k]??null),prev=>{ const v=(i.facts||{})[k]; if(jblank(v)&&prev===null) return; profileRecord(i.property_id,k,v,'inspection',i.id,lwToday(),'Inspect a property',null,i.created_by,(i.conflicts||{})[k]?'never':'offer'); })));
+  (DB.property_inspections||[]).forEach(i=>DESC.forEach(k=>once('insp:'+i.id+':'+k,JSON.stringify((i.facts||{})[k]??null),prev=>{ const v=(i.facts||{})[k]; if(jblank(v)&&prev===null) return; profileRecord(i.property_id,k,v,'inspection',i.id,lwToday(),'Inspect a property',null,i.created_by,(i.conflicts||{})[k]?'never':LW0_BACKFILL?'beside':'check'); })));
+  // official figures from a record of title or survey plan among the property's documents (read_result.fields from the reader)
+  (DB.property_documents||[]).forEach(dc=>{ const on=!dc.archived_at&&OFFICIAL_KINDS.includes(dc.kind); const fields=on&&dc.read_result&&Array.isArray(dc.read_result.fields)?dc.read_result.fields:[];
+    once('doc:'+dc.id,JSON.stringify([on,fields]),prev=>{
+      const keyOf=x=>x.key==='pLand'?'pLand':x.key==='title'?'title_ref':null, ok=x=>keyOf(x)&&/(title|survey|plan|cross lease|unit title|\bct\b|\bdp\b)/i.test(x.source||'');
+      if(!on){ if(prev&&prev[0]) (prev[1]||[]).filter(ok).forEach(x=>{ if(FV().some(f=>f.property_id===dc.property_id&&f.key===keyOf(x)&&f.source==='title'&&f.source_ref===dc.id)) profileRecord(dc.property_id,keyOf(x),null,'title',dc.id,null,dc.kind,null,'agent','auto'); }); return; }
+      fields.filter(ok).forEach(x=>{ const k=keyOf(x); const v=k==='pLand'?(String(x.value).match(/[0-9]+(\.[0-9]+)?/)||[String(x.value)])[0]:String(x.value).trim();
+        profileRecord(dc.property_id,k,v,'title',dc.id,lwToday(),dc.kind+(x.source?' ('+x.source+')':''),null,'agent',LW0_BACKFILL?'never':'official'); }); }); });
   seen._done=1; LW0_BACKFILL=false;
 }
 function sharedRpc(name,a,me){

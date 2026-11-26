@@ -4,7 +4,7 @@
 -- refused was allowed, or a value was wrong. Needs 026 (and everything before it) applied. The agent is simulated with
 -- request.jwt.claims; a vendor likewise. Test rows use example.com addresses only, and nothing sends email.
 do $t$
-declare out text := ''; bp uuid; ba uuid; bron uuid; c3 uuid; pp3 uuid; r jsonb; pid uuid; iid uuid; aid uuid; plid uuid; pp1 uuid; pp2 uuid; c1 uuid; c2 uuid; lk uuid; n int; n2 int; x text; vid uuid; qid uuid;
+declare out text := ''; p3 uuid; i3 uuid; p4 uuid; i4 uuid; bp uuid; ba uuid; bron uuid; c3 uuid; pp3 uuid; r jsonb; pid uuid; iid uuid; aid uuid; plid uuid; pp1 uuid; pp2 uuid; c1 uuid; c2 uuid; lk uuid; n int; n2 int; x text; vid uuid; qid uuid;
   sig0 bigint; sigsha text; apc text; pre_signed text;
   agent text := json_build_object('email', (select email from public.agents order by created_at limit 1), 'sub', '22222222-2222-2222-2222-222222222222', 'role', 'authenticated')::text;
   vendor text := '{"email":"rb-lw0-vendor@example.com","sub":"11111111-1111-1111-1111-1111111110a1","role":"authenticated"}';
@@ -51,12 +51,14 @@ begin
   if (select description from public.properties where id = bp) <> '{"pHeat":"Wood burner","pBed":"2","pLand":"800"}'::jsonb then out := out || 'THE BACKFILL CHANGED A PROPERTY FILE; '; end if;
   if n > 0 then out := out || 'THE PROFILE AND THE FILE DISAGREE AFTER THE BACKFILL; '; end if;
   if ((select px from jsonb_array_elements(r) px where px->>'key' = 'pLand')->>'source') <> 'tim' then out := out || 'A COUNCIL VALUE REPLACED THE FILE''S LAND AREA; '; end if;
-  -- a later answer from another place (a disclosures check) differing from the file's own value: the file's stays, the answer beside it
-  perform public.profile_record(bp, 'pHeat', '"Heat pump"', 'inspection', null, '26 Nov 2026', 'Inspect a property', null, null, 'agent', 'offer');
+  -- in the backfill, an earlier check answer differing from the file's own value: the file's stays, the answer beside it
+  perform set_config('app.profile_backfill', 'on', true);
+  perform public.profile_record(bp, 'pHeat', '"Heat pump"', 'inspection', null, '26 Nov 2026', 'Inspect a property', null, null, 'agent', 'beside');
+  perform set_config('app.profile_backfill', 'off', true);
   r := (select px from jsonb_array_elements(public.profile_read(bp, false)) px where px->>'key' = 'pHeat');
-  out := out || 'check answer against the file''s heating: chosen ' || (r->>'value') || '/' || (r->>'source') || ' beside it ' || coalesce((select string_agg((o->>'value') || '/' || (o->>'source'), ',') from jsonb_array_elements(r->'others') o), 'none')
+  out := out || 'backfill check answer against the file''s heating: chosen ' || (r->>'value') || '/' || (r->>'source') || ' beside it ' || coalesce((select string_agg((o->>'value') || '/' || (o->>'source'), ',') from jsonb_array_elements(r->'others') o), 'none')
     || ' file=' || (select description->>'pHeat' from public.properties where id = bp) || '; ';
-  if r->>'value' <> 'Wood burner' or (select description->>'pHeat' from public.properties where id = bp) <> 'Wood burner' then out := out || 'AN OFFERED VALUE REPLACED THE FILE''S OWN; '; end if;
+  if r->>'value' <> 'Wood burner' or (select description->>'pHeat' from public.properties where id = bp) <> 'Wood burner' then out := out || 'A BACKFILLED VALUE REPLACED THE FILE''S OWN; '; end if;
 
   -- privileges: nothing new is open to anon or PUBLIC; the internal helpers are closed to signed-in users too
   select string_agg(p.proname, ',' order by p.proname) into x from pg_proc p
@@ -64,7 +66,7 @@ begin
      'agent_property_profile','my_property_profile','agent_profile_set','agent_profile_choose','agent_profile_tick','profile_from_found','profile_from_inspection','profile_from_agreement',
      'person_name_fits','person_find','person_link','person_link_pp','person_unlink_pp','person_link_ap','person_link_after','aml_file_contact','agent_person_link_resolve','qa_mine','qa_put',
      'qa_from_prelisting','qa_from_seller_lead','qa_from_profile','agent_qa_answer','ql_listing_before','ql_listing_after','agent_ql_set_photos','ql_listing_photos','inspection_photos',
-     'guard_fact_value','person_joint','person_nick_fits','person_short_same','profile_file_value','person_first','profile_source_kind','agreement_role','qa_prelisting_map','ql_num'])
+     'guard_fact_value','person_joint','person_nick_fits','person_short_same','profile_file_value','profile_official_kinds','profile_from_document_row','profile_from_document','person_first','profile_source_kind','agreement_role','qa_prelisting_map','ql_num'])
      and (has_function_privilege('anon', p.oid, 'EXECUTE') or exists (select 1 from aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a where a.grantee = 0 and a.privilege_type = 'EXECUTE'));
   out := out || 'open to anon or PUBLIC: ' || coalesce(upper(x), 'none') || '; ';
   select string_agg(p.proname, ',' order by p.proname) into x from pg_proc p
@@ -104,12 +106,12 @@ begin
   vid := ((select o from jsonb_array_elements(r->'facts') f, jsonb_array_elements(f->'others') o where f->>'key' = 'pBed' limit 1)->>'value_id')::uuid;
   perform public.agent_profile_choose(pid, 'pBed', vid);
   out := out || 'chose agreement: file pBed=' || (select description->>'pBed' from public.properties where id = pid) || ' agreement answers kept=' || (select answers->>'pBed' from public.agreements where id = aid) || '; ';
-  -- the inspection saving the same fact again (Tim) chooses it once more: his newest entry
+  -- the check saying something else (Tim, 26 November 2026): his check answer is his own choice; the agreement's value stays beside it
   perform public.agent_inspection_save(iid, '{"pBed":"5"}'::jsonb, null, null, null);
   r := (select f from jsonb_array_elements(public.agent_property_profile(pid)->'facts') f where f->>'key' = 'pBed');
-  out := out || 'after a different check answer: ticked ' || (r->>'value') || '/' || (r->>'source') || '/' || (r->>'ticked') || ' beside it ' || coalesce((select string_agg((o->>'value') || '/' || (o->>'source'), ',' order by o->>'source') from jsonb_array_elements(r->'others') o), 'none')
+  out := out || 'a different check answer: ticked ' || (r->>'value') || '/' || (r->>'source') || '/' || (r->>'ticked') || ' beside it ' || coalesce((select string_agg((o->>'value') || '/' || (o->>'source'), ',' order by o->>'source') from jsonb_array_elements(r->'others') o), 'none')
     || ' file=' || (select description->>'pBed' from public.properties where id = pid) || '; ';
-  if r->>'value' <> '4' or not (r->'others') @> '[{"value":"5","source":"inspection"}]' then out := out || 'A TICKED VALUE WAS OVERWRITTEN OR THE NEW ONE IS NOT SHOWN; '; end if;
+  if r->>'value' <> '5' or (r->>'ticked')::boolean is not true or not (r->'others') @> '[{"value":"4","source":"agreement"}]' or (select description->>'pBed' from public.properties where id = pid) <> '5' then out := out || 'THE CHECK ANSWER DID NOT TAKE, OR THE AGREEMENT''S VALUE IS NOT SHOWN; '; end if;
   -- untick all, then a record source can't take a person's place, and choosing something not on the property is refused
   perform public.agent_profile_tick(pid, null, false);
   out := out || 'ticked after untick all=' || (select count(*) from public.property_profile where property_id = pid and ticked) || '; ';
@@ -120,13 +122,47 @@ begin
   r := (select f from jsonb_array_elements(public.agent_property_profile(pid)->'facts') f where f->>'key' = 'pLand');
   out := out || 'Tim cleared land on the file: chosen=' || coalesce(r->>'value_id', 'none') || ' ticked=' || (r->>'ticked') || ' still listed=' || (select string_agg((o->'value' #>> '{}') || '/' || (o->>'source'), ',' order by o->>'source') from jsonb_array_elements(r->'others') o)
     || ' file=' || coalesce((select description->>'pLand' from public.properties where id = pid), 'empty') || '; ';
-  -- a fact Tim cleared stays cleared: a draft agreement and a check answer saying something later are shown beside it, never fill it
+  -- a fact Tim cleared stays cleared: a draft agreement saying something later is shown beside it, never fills it
   update public.agreements set answers = answers || '{"pLand":"700"}' where id = aid;
-  perform public.agent_inspection_save(iid, '{"pLand":"600"}'::jsonb, null, null, null);
   r := (select f from jsonb_array_elements(public.agent_property_profile(pid)->'facts') f where f->>'key' = 'pLand');
-  out := out || 'after the clear, a draft agreement says 700 and the check 600: cleared=' || (r->>'cleared') || ' chosen=' || coalesce(r->>'value_id', 'none') || ' beside it ' || (select string_agg((o->'value' #>> '{}') || '/' || (o->>'source'), ',' order by o->>'source') from jsonb_array_elements(r->'others') o)
+  out := out || 'after the clear, a draft agreement says 700: cleared=' || (r->>'cleared') || ' chosen=' || coalesce(r->>'value_id', 'none') || ' beside it ' || (select string_agg((o->'value' #>> '{}') || '/' || (o->>'source'), ',' order by o->>'source') from jsonb_array_elements(r->'others') o)
     || ' file=' || coalesce((select description->>'pLand' from public.properties where id = pid), 'empty') || '; ';
   if r->>'value_id' is not null or (select description->>'pLand' from public.properties where id = pid) is not null then out := out || 'A CLEARED FACT WAS REFILLED; '; end if;
+  -- Tim then answers it on the check (600): his own choice, so it fills it
+  perform public.agent_inspection_save(iid, '{"pLand":"600"}'::jsonb, null, null, null);
+  r := (select f from jsonb_array_elements(public.agent_property_profile(pid)->'facts') f where f->>'key' = 'pLand');
+  out := out || 'then his check answer 600: chosen ' || coalesce(r->>'value', 'none') || '/' || coalesce(r->>'source', '-') || ' file=' || coalesce((select description->>'pLand' from public.properties where id = pid), 'empty') || '; ';
+  if coalesce(r->>'value', '') <> '600' or (select description->>'pLand' from public.properties where id = pid) is distinct from '600' then out := out || 'HIS CHECK ANSWER DID NOT FILL THE CLEARED FACT; '; end if;
+  -- Tim's decision (26 November 2026): his disclosures check answer is his own choice. The file said 800 (his entry), the check says 790:
+  -- the profile, ticked, and the file say 790; the 800 is kept beside it
+  r := public.agent_inspection_start(null, '3 Lw0 Check Road, Rollbackville'); p3 := (r->>'property_id')::uuid; i3 := (r->>'inspection_id')::uuid;
+  perform public.agent_profile_set(p3, 'pLand', '"800"');
+  perform public.agent_inspection_save(i3, '{"pLand":"790"}'::jsonb, null, null, null);
+  r := (select f from jsonb_array_elements(public.agent_property_profile(p3)->'facts') f where f->>'key' = 'pLand');
+  out := out || 'file 800, then the check 790: chosen ' || (r->>'value') || '/' || (r->>'source') || '/' || (r->>'ticked') || ' beside it ' || coalesce((select string_agg((o->>'value') || '/' || (o->>'source'), ',') from jsonb_array_elements(r->'others') o), 'none')
+    || ' file=' || (select description->>'pLand' from public.properties where id = p3) || '; ';
+  if r->>'value' <> '790' or (r->>'ticked')::boolean is not true or (select description->>'pLand' from public.properties where id = p3) <> '790' then out := out || 'THE CHECK ANSWER DID NOT TAKE; '; end if;
+  -- a record of title arriving afterwards with 812: Tim's ticked 790 stays; the official figure is shown beside it, marked
+  insert into public.property_documents (property_id, kind, name, path, read_result, created_by) values (p3, 'Record of title', 'title.pdf', 'lw0/title.pdf',
+    '{"fields":[{"key":"pLand","value":"812 m²","source":"Record of title OT1/LW0"},{"key":"pBed","value":"9","source":"Record of title"}]}', 'agent');
+  r := (select f from jsonb_array_elements(public.agent_property_profile(p3)->'facts') f where f->>'key' = 'pLand');
+  out := out || 'title 812 after Tim ticked 790: chosen ' || (r->>'value') || ' beside it ' || coalesce((select string_agg((o->>'value') || '/' || (o->>'source'), ',' order by o->>'source') from jsonb_array_elements(r->'others') o), 'none')
+    || ' file=' || (select description->>'pLand' from public.properties where id = p3) || ' other facts from it=' || (select count(*) from public.property_fact_values where property_id = p3 and source = 'title' and key <> 'pLand') || '; ';
+  if r->>'value' <> '790' then out := out || 'THE OFFICIAL FIGURE OVERWROTE A TICKED VALUE; '; end if;
+  -- the title already there (812), then the check says 790: the official figure stays chosen and on the file; 790 beside it
+  r := public.agent_inspection_start(null, '4 Lw0 Title Road, Rollbackville'); p4 := (r->>'property_id')::uuid; i4 := (r->>'inspection_id')::uuid;
+  insert into public.property_documents (property_id, kind, name, path, read_result, created_by) values (p4, 'Survey plan', 'plan.pdf', 'lw0/plan.pdf',
+    '{"fields":[{"key":"pLand","value":"812","source":"Survey plan DP 608"}]}', 'agent') returning id into lk;
+  out := out || 'survey plan 812: file=' || coalesce((select description->>'pLand' from public.properties where id = p4), 'empty') || '; ';
+  perform public.agent_inspection_save(i4, '{"pLand":"790"}'::jsonb, null, null, null);
+  r := (select f from jsonb_array_elements(public.agent_property_profile(p4)->'facts') f where f->>'key' = 'pLand');
+  out := out || 'then the check 790: chosen ' || (r->>'value') || '/' || (r->>'source') || ' beside it ' || coalesce((select string_agg((o->>'value') || '/' || (o->>'source'), ',') from jsonb_array_elements(r->'others') o), 'none')
+    || ' file=' || (select description->>'pLand' from public.properties where id = p4) || '; ';
+  if r->>'value' <> '812' or r->>'source' <> 'title' or (select description->>'pLand' from public.properties where id = p4) <> '812' or not (r->'others') @> '[{"value":"790","source":"inspection"}]' then out := out || 'THE OFFICIAL FIGURE DID NOT HOLD; '; end if;
+  -- the plan archived: its figure goes, and the file's value takes its place
+  update public.property_documents set archived_at = now() where id = lk;
+  r := (select f from jsonb_array_elements(public.agent_property_profile(p4)->'facts') f where f->>'key' = 'pLand');
+  out := out || 'plan archived: chosen ' || coalesce(r->>'value', 'none') || '/' || coalesce(r->>'source', '-') || '; ';
   -- clearing on the inspection: the chosen value from the inspection goes, the newest other value takes its place
   perform public.agent_inspection_save(iid, '{"pType":""}'::jsonb, null, null, null);
   out := out || 'cleared pType: ' || coalesce(((select f from jsonb_array_elements(public.agent_property_profile(pid)->'facts') f where f->>'key' = 'pType')->>'value'), 'gone') || '; ';
