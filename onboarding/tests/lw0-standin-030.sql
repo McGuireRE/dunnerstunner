@@ -11,8 +11,120 @@
 -- Left out: aml_on_lock and aml_lock_guard on aml_files (the test never updates an AML file).
 -- Run once on that stand-in, before 028. NEVER on the live project.
 
+-- for the stand-in only: pgcrypto (gen_random_bytes, gen_random_uuid) in the extensions schema, as on Supabase, and Tim's agents list
+set check_function_bodies = off;   -- the stand-in only: function bodies are checked when they run, so the order of creation doesn't matter
+create schema if not exists extensions;
+create extension if not exists pgcrypto schema extensions;
+create schema if not exists auth;
+create table if not exists public.agents (email text not null, name text not null default '', created_at timestamptz default now() not null);
+
 set search_path = public, extensions;
 create sequence if not exists public.ql_listing_seq;
+-- the helpers 028 and these tables call, as live (is_agent, is_party, jblank, desc_keys, disc_keys, norm_name, same_person_name,
+-- touch_updated, bump_stage, merge_property_person)
+CREATE OR REPLACE FUNCTION public.bump_stage(pid uuid, s text)
+ RETURNS void
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+begin
+  update public.properties set stage = s, stage_at = now()
+   where id = pid and stage <> 'withdrawn' and coalesce(public.stage_rank(stage), 0) < public.stage_rank(s);
+end $function$
+;
+CREATE OR REPLACE FUNCTION public.desc_keys()
+ RETURNS text[]
+ LANGUAGE sql
+ IMMUTABLE
+AS $function$ select array['pType','pYear','pBed','pBath','pFloor','pLand','pBuild','pPark','pHeat','pLove','chattels','chatOther'] $function$
+;
+CREATE OR REPLACE FUNCTION public.disc_keys()
+ RETURNS text[]
+ LANGUAGE sql
+ IMMUTABLE
+AS $function$ select array['work','workDetail','wt','wtDetail','meth','methDetail','def','defDetail','hazards','hazOther'] $function$
+;
+CREATE OR REPLACE FUNCTION public.is_agent()
+ RETURNS boolean
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+  select exists (select 1 from public.agents a where lower(a.email) = lower(coalesce(auth.jwt()->>'email','')));
+$function$
+;
+CREATE OR REPLACE FUNCTION public.is_party(a uuid)
+ RETURNS boolean
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+  select exists (select 1 from public.agreement_people p where p.agreement_id = a and p.user_id = auth.uid());
+$function$
+;
+CREATE OR REPLACE FUNCTION public.jblank(v jsonb)
+ RETURNS boolean
+ LANGUAGE sql
+ IMMUTABLE
+AS $function$
+  select v is null or v = 'null'::jsonb or v = '""'::jsonb or v = '[]'::jsonb or v = '{}'::jsonb;
+$function$
+;
+CREATE OR REPLACE FUNCTION public.merge_property_person(pid uuid, p_name text, p_pref text, p_email text, p_phone text, p_user uuid, p_source text)
+ RETURNS uuid
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+declare r public.property_people; em text := lower(trim(coalesce(p_email,''))); nm text := trim(regexp_replace(coalesce(p_name,''), '\s+', ' ', 'g'));
+begin
+  if nm = '' and em = '' then return null; end if;
+  select * into r from public.property_people where property_id = pid and role <> 'former' and em <> '' and lower(email) = em order by position limit 1;
+  if r.id is null and nm <> '' then select * into r from public.property_people where property_id = pid and role <> 'former' and (em = '' or email = '') and public.same_person_name(legal_name, nm) order by position limit 1; end if;   -- never merge two people with different emails
+  if r.id is null then
+    insert into public.property_people (property_id, position, legal_name, pref_name, email, phone, user_id, source, name_from, role)
+    values (pid, coalesce((select max(position) from public.property_people where property_id = pid and role <> 'former'), 0) + 1, nm, coalesce(trim(p_pref),''), em, coalesce(trim(p_phone),''), p_user, p_source, p_source, 'owner')
+    returning id into r.id;
+  else
+    update public.property_people set
+      legal_name = case when nm <> '' and (legal_name = '' or public.name_rank(p_source) >= public.name_rank(coalesce(name_from, source))) then nm else legal_name end,
+      name_from = case when nm <> '' and (legal_name = '' or public.name_rank(p_source) >= public.name_rank(coalesce(name_from, source))) then p_source else name_from end,
+      pref_name = case when coalesce(trim(p_pref),'') <> '' then trim(p_pref) else pref_name end,
+      email = case when em <> '' and email = '' then em else email end,   -- an email once known is never replaced by a merge
+      phone = case when coalesce(trim(p_phone),'') <> '' then trim(p_phone) else phone end,
+      user_id = coalesce(user_id, p_user),
+      role = case when role = 'contact' and p_source <> 'appraisal' then 'owner' else role end
+     where id = r.id;
+  end if;
+  return r.id;
+end $function$
+;
+CREATE OR REPLACE FUNCTION public.norm_name(s text)
+ RETURNS text
+ LANGUAGE sql
+ IMMUTABLE
+AS $function$
+  select lower(trim(regexp_replace(coalesce(s,''), '\s+', ' ', 'g')));
+$function$
+;
+CREATE OR REPLACE FUNCTION public.same_person_name(a text, b text)
+ RETURNS boolean
+ LANGUAGE sql
+ IMMUTABLE
+AS $function$
+  select public.norm_name(a) <> '' and public.norm_name(b) <> '' and (public.norm_name(a) = public.norm_name(b) or (
+    split_part(public.norm_name(a), ' ', 1) = split_part(public.norm_name(b), ' ', 1)
+    and regexp_replace(public.norm_name(a), '^.* ', '') = regexp_replace(public.norm_name(b), '^.* ', '')
+    and position(' ' in public.norm_name(a)) > 0 and position(' ' in public.norm_name(b)) > 0));
+$function$
+;
+CREATE OR REPLACE FUNCTION public.touch_updated()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SET search_path TO 'public'
+AS $function$ begin new.updated_at := now(); return new; end $function$
+;
 -- crm_contacts
 create table if not exists public.crm_contacts (id uuid primary key default gen_random_uuid());
 alter table public.crm_contacts add column if not exists id uuid default gen_random_uuid() not null;

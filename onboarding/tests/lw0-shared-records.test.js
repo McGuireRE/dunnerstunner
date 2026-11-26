@@ -41,6 +41,7 @@ const TIM = ['agent-1', 'hello@timmcguire.co.nz'];
         properties: [
           { id: 'PA', address: '4 Profile Road, Roslyn', ownership: {}, description: {}, disclosures: {}, provenance: {}, stage: 'appraisal', stage_at: now, created_at: now, updated_at: now,
             found: { land_area: { key: 'land_area', field: 'pLand', written: true, value: 640, display: '640 m²', as_of_label: '2026-2027 rating year', source_name: 'Dunedin City Council rates', label: 'Land area' },
+                     bedrooms: { key: 'bedrooms', field: 'pBed', written: true, value: '2', display: '2', as_of_label: '2026-2027 rating year', source_name: 'Dunedin City Council rates', label: 'Bedrooms' },
                      capital_value: { key: 'capital_value', value: 780000, display: '$780,000', as_of: '2026-2027', source_name: 'Dunedin City Council rates', label: 'Capital value' } } },
           { id: 'PB', address: '9 Signed Street, Maori Hill', ownership: {}, description: {}, disclosures: {}, found: {}, provenance: {}, stage: 'signed', stage_at: now, created_at: now, updated_at: now },
           { id: 'PD', address: '11 Check Crescent, Glenleith', ownership: {}, description: { pLand: '800' }, disclosures: {}, found: {}, provenance: {}, stage: 'appraisal', stage_at: now, created_at: now, updated_at: now },
@@ -71,6 +72,9 @@ const TIM = ['agent-1', 'hello@timmcguire.co.nz'];
       let d = await db();
       out[tag].profile0 = (d.property_profile || []).filter(x => x.property_id === 'PA').map(x => x.key).sort();
       expect(JSON.stringify(out[tag].profile0) === JSON.stringify(['capital_value', 'pLand']), 'council values on the profile: ' + out[tag].profile0);
+      // bedrooms are Tim's judgement (27 November 2026): the council's count is kept beside only, never chosen or written to the file
+      expect((d.property_fact_values || []).some(f => f.property_id === 'PA' && f.key === 'pBed' && f.source === 'council') && !(d.property_profile || []).some(x => x.property_id === 'PA' && x.key === 'pBed') && !d.properties.find(x => x.id === 'PA').description.pBed,
+        'a council bedroom count sits beside only');
       const linkOf = (src, id) => (d.person_links || []).find(l => l.source === src && l.source_id === id) || {};
       expect(linkOf('property_people', 'PPA1').contact_id && linkOf('property_people', 'PPA1').contact_id === linkOf('prelisting', 'LA').contact_id, 'the questions before we meet and the owner are one person (the informal "Rob" with the same email)');
       expect(linkOf('property_people', 'PPA2').contact_id && linkOf('property_people', 'PPA2').contact_id !== linkOf('property_people', 'PPA1').contact_id && /different name/.test(linkOf('property_people', 'PPA2').doubt || ''), 'the same email with a different name: kept apart and flagged for Tim');
@@ -79,11 +83,19 @@ const TIM = ['agent-1', 'hello@timmcguire.co.nz'];
       expect((d.crm_property_links || []).some(x => x.property_id === 'PA' && x.role === 'owner' && x.contact_id === linkOf('property_people', 'PPA1').contact_id), 'the owner role on the property, in the one home');
       expect(d.property_people.find(x => x.id === 'PPA1').contact_id === linkOf('property_people', 'PPA1').contact_id, 'property_people carries its contact');
 
+      const setAg2 = (id, ans) => p.evaluate(([id, ans]) => { const d = JSON.parse(localStorage.getItem('mockdb')); const x = d.agreements.find(y => y.id === id); x.answers = Object.assign({}, x.answers, ans); localStorage.setItem('mockdb', JSON.stringify(d)); }, [id, ans]);
       // 2a. the backfill takes each property file's own values as Tim's: chosen; a different value elsewhere is shown beside; the file is unchanged
       out[tag].pcHeat = (() => { const c = (d.property_profile || []).find(x => x.property_id === 'PC' && x.key === 'pHeat'); const v = c && (d.property_fact_values || []).find(f => f.id === c.value_id); return c && v ? [v.value, v.source, c.ticked] : null; })();
       out[tag].pcRow = (await rpc('agent_property_profile', { p_property: 'PC' })).data.facts.find(x => x.key === 'pHeat');
       expect(out[tag].pcHeat && out[tag].pcHeat[0] === 'Wood burner' && out[tag].pcHeat[1] === 'tim' && out[tag].pcRow.others.some(o => o.value === 'Heat pump' && o.source === 'agreement') && d.properties.find(x => x.id === 'PC').description.pHeat === 'Wood burner',
         'the file\'s own value on the profile, the agreement\'s beside it, the file unchanged: ' + JSON.stringify(out[tag].pcRow));
+
+      // 2b. a fact Tim cleared on the file holds against a later draft edit (shown beside it)
+      await rpc('agent_profile_set', { p_property: 'PC', p_key: 'pHeat', p_value: '' });
+      await setAg2('AC2', { pHeat: 'Gas fire' }); await go(); d = await db();
+      out[tag].pcClear = (await rpc('agent_property_profile', { p_property: 'PC' })).data.facts.find(x => x.key === 'pHeat') || {};
+      expect(out[tag].pcClear.cleared && (out[tag].pcClear.others || []).some(o => o.value === 'Gas fire' && o.source === 'agreement') && !d.properties.find(x => x.id === 'PC').description.pHeat,
+        'a cleared fact stays cleared against a draft edit, the draft\'s value beside it: ' + JSON.stringify(out[tag].pcClear));
 
       // 3. the property page shows the profile; the disclosures check reads it first and offers its value
       await openProp('PA');
@@ -104,21 +116,28 @@ const TIM = ['agent-1', 'hello@timmcguire.co.nz'];
       const pc = (pid, k) => { const c = (d.property_profile || []).find(x => x.property_id === pid && x.key === k); const v = c && (d.property_fact_values || []).find(f => f.id === c.value_id); return c && v ? [v.value, v.source, c.ticked, !!v.as_of] : null; };
       out[tag].bed = pc('PA', 'pBed'); expect(JSON.stringify(out[tag].bed) === JSON.stringify(['4', 'inspection', true, true]), 'disclosures check answer on the profile: ' + JSON.stringify(out[tag].bed));
 
-      // 4. an agreement saying something else: kept as another value, shown beside the ticked one, and Tim chooses
+      // 4. Tim's decision (27 November 2026): his edit to page 1 of a draft agreement is his choice: the file said 4 (from the check), the
+      //    draft says 5, so the profile and the file say 5, and the check's 4 is beside it
+      const setAg = (id, ans) => p.evaluate(([id, ans]) => { const d = JSON.parse(localStorage.getItem('mockdb')); const x = d.agreements.find(y => y.id === id); x.answers = Object.assign({}, x.answers, ans); localStorage.setItem('mockdb', JSON.stringify(d)); }, [id, ans]);
       await p.evaluate(() => { const d = JSON.parse(localStorage.getItem('mockdb')); d.agreements.push({ id: 'AA', ref: 'MRE-2026-1010', address: '4 Profile Road, Roslyn', property_id: 'PA', status: 'draft', config: {}, answers: { pBed: '5', pBath: '2' }, legal: {}, agreement_version: 'v3.15-26102026', created_at: '2026-11-21T00:00:00Z', updated_at: '2026-11-21T00:00:00Z' }); localStorage.setItem('mockdb', JSON.stringify(d)); });
       await go(); await openProp('PA');
       d = await db(); out[tag].bed2 = pc('PA', 'pBed'); out[tag].bath = pc('PA', 'pBath');
-      expect(out[tag].bed2 && out[tag].bed2[0] === '4' && out[tag].bed2[2] === true, 'the ticked value stays: ' + JSON.stringify(out[tag].bed2));
-      expect(out[tag].bath && out[tag].bath[0] === '2' && out[tag].bath[1] === 'agreement' && out[tag].bath[2] === false, 'a fact nobody else holds: the agreement\'s, not ticked: ' + JSON.stringify(out[tag].bath));
+      expect(out[tag].bed2 && out[tag].bed2[0] === '5' && out[tag].bed2[1] === 'agreement' && out[tag].bed2[2] === true && d.properties.find(x => x.id === 'PA').description.pBed === '5', 'his draft edit is chosen, on the file too: ' + JSON.stringify(out[tag].bed2));
+      expect(out[tag].bath && out[tag].bath[0] === '2' && out[tag].bath[1] === 'agreement', 'a fact nobody else holds: the agreement\'s: ' + JSON.stringify(out[tag].bath));
       out[tag].bedRow = await profRow('pBed');
-      expect(/Agency agreement says 5/.test(out[tag].bedRow || '') && /Use this/.test(out[tag].bedRow), 'both shown: ' + out[tag].bedRow);
+      expect(/Disclosures check says 4/.test(out[tag].bedRow || '') && /Use this/.test(out[tag].bedRow), 'both shown: ' + out[tag].bedRow);
+      // Tim chooses the check's 4 on the profile: the file and the unsigned draft follow
       await p.click('#pfProfTbl tr[data-prof="pBed"] [data-profuse]'); await p.waitForTimeout(1000);
       d = await db(); out[tag].bed3 = pc('PA', 'pBed');
-      expect(out[tag].bed3 && out[tag].bed3[0] === '5' && out[tag].bed3[1] === 'agreement' && out[tag].bed3[2] === true && d.properties.find(x => x.id === 'PA').description.pBed === '5' && d.agreements.find(x => x.id === 'AA').answers.pBed === '5', 'Tim chose the agreement\'s: chosen, ticked, on the file: ' + JSON.stringify(out[tag].bed3));
-      // tick all
-      expect(await p.isVisible('#pfProfTick'), 'Tick all offered while something is not ticked');
-      await p.click('#pfProfTick'); await p.waitForTimeout(700); d = await db();
-      expect((d.property_profile || []).filter(x => x.property_id === 'PA').every(x => x.ticked) && !(await p.isVisible('#pfProfTick')), 'Tick all ticks every fact');
+      expect(out[tag].bed3 && out[tag].bed3[0] === '4' && out[tag].bed3[1] === 'inspection' && out[tag].bed3[2] === true && d.properties.find(x => x.id === 'PA').description.pBed === '4' && d.agreements.find(x => x.id === 'AA').answers.pBed === '4', 'Tim chose 4: chosen, ticked, on the file and the draft: ' + JSON.stringify(out[tag].bed3));
+      // the draft then edited to 6: his later choice on the profile holds, 6 beside it
+      await setAg('AA', { pBed: '6' }); await go(); d = await db(); out[tag].bedHold = pc('PA', 'pBed');
+      out[tag].bedHoldOthers = (await rpc('agent_property_profile', { p_property: 'PA' })).data.facts.find(x => x.key === 'pBed').others.map(o => o.value + '/' + o.source);
+      expect(out[tag].bedHold && out[tag].bedHold[0] === '4' && out[tag].bedHoldOthers.includes('6/agreement') && d.properties.find(x => x.id === 'PA').description.pBed === '4', 'his profile choice holds against a later draft edit: ' + JSON.stringify([out[tag].bedHold, out[tag].bedHoldOthers]));
+      await openProp('PA');
+      // tick all (when something is not ticked)
+      if (await p.isVisible('#pfProfTick')) { await p.click('#pfProfTick'); await p.waitForTimeout(700); d = await db();
+        expect((d.property_profile || []).filter(x => x.property_id === 'PA').every(x => x.ticked) && !(await p.isVisible('#pfProfTick')), 'Tick all ticks every fact'); }
 
       // 4a. a check answer that differs from the draft agreement in force is kept beside it until Tim chooses on the check (migration 012's rule)
       await p.click('[data-inspopen]'); await p.waitForTimeout(900);
@@ -126,8 +145,8 @@ const TIM = ['agent-1', 'hello@timmcguire.co.nz'];
       await p.click('[data-ik="f:pBed"] input[value="3"] + span'); await p.waitForTimeout(1400);
       d = await db(); out[tag].bed4 = pc('PA', 'pBed');
       out[tag].bedOthers = (await rpc('agent_property_profile', { p_property: 'PA' })).data.facts.find(x => x.key === 'pBed').others.map(o => o.value + '/' + o.source);
-      expect(out[tag].bed4 && out[tag].bed4[0] === '5' && out[tag].bed4[1] === 'agreement' && out[tag].bed4[2] === true && out[tag].bedOthers.includes('3/inspection') && d.properties.find(x => x.id === 'PA').description.pBed === '5',
-        'differs from the agreement in force: the ticked 5 stays, on the file too; the check\'s 3 is shown beside it: ' + JSON.stringify([out[tag].bed4, out[tag].bedOthers]));
+      expect(out[tag].bed4 && out[tag].bed4[0] === '4' && out[tag].bed4[2] === true && out[tag].bedOthers.includes('3/inspection') && d.properties.find(x => x.id === 'PA').description.pBed === '4',
+        'differs from the agreement in force: his 4 stays, on the file too; the check\'s 3 is shown beside it: ' + JSON.stringify([out[tag].bed4, out[tag].bedOthers]));
 
       // 4b. Tim's decision (26 November 2026): his disclosures check answer is his own choice. The file said 800; the check says 790
       const factOf = async (pid, k) => (await rpc('agent_property_profile', { p_property: pid })).data.facts.find(x => x.key === k) || {};
@@ -168,8 +187,12 @@ const TIM = ['agent-1', 'hello@timmcguire.co.nz'];
       expect(out[tag].pe.value === '812' && out[tag].pe.source === 'title' && (out[tag].pe.others || []).some(o => o.value === '790' && o.source === 'inspection') && d.properties.find(x => x.id === 'PE').description.pLand === '812',
         'the official 812 stays on the profile and the file; his 790 is beside it to choose: ' + JSON.stringify(out[tag].pe));
       expect(d.agreements.find(x => x.id === 'AE').answers.pLand === '812', 'the unsigned draft agreement shows the official 812 until Tim chooses: ' + d.agreements.find(x => x.id === 'AE').answers.pLand);
+      // the draft edited to 850 while the official 812 stands: 812 holds on the profile and the file, 850 beside it
+      await setAg2('AE', { pLand: '850' }); await go(); d = await db(); out[tag].peDraft = await factOf('PE', 'pLand');
+      expect(out[tag].peDraft.value === '812' && out[tag].peDraft.source === 'title' && (out[tag].peDraft.others || []).some(o => o.value === '850' && o.source === 'agreement') && d.properties.find(x => x.id === 'PE').description.pLand === '812',
+        'the official figure holds against a draft edit, 850 beside it: ' + JSON.stringify(out[tag].peDraft));
       // Tim chooses his 790 on the property page: the file and the unsigned draft follow
-      await openProp('PE'); await p.click('#pfProfTbl tr[data-prof="pLand"] [data-profuse]'); await p.waitForTimeout(1500);
+      await openProp('PE'); await p.evaluate(() => { const b = [...document.querySelectorAll('#pfProfTbl tr[data-prof="pLand"] [data-profuse]')].find(x => /\b790\b/.test(x.closest('.pfother').textContent)); b.click(); }); await p.waitForTimeout(1500);
       d = await db(); out[tag].peChose = [(await factOf('PE', 'pLand')).value, d.properties.find(x => x.id === 'PE').description.pLand, d.agreements.find(x => x.id === 'AE').answers.pLand];
       expect(JSON.stringify(out[tag].peChose) === JSON.stringify(['790', '790', '790']), 'Tim chose 790: the profile, the file and the unsigned draft follow: ' + JSON.stringify(out[tag].peChose));
       // the title read again (ticked 812) after that: his explicit later choice holds

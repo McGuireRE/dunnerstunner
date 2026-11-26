@@ -160,7 +160,10 @@ The five records:
    value on the profile, the file and the unsigned draft follow (Tim, 26 November 2026). The AI suggests and Tim ticks: only figures he
    ticked in the import review count as official; the rest are shown beside as "from the record of title, not checked" and used nowhere
    until he chooses them. A ticked official figure takes precedence over a check answer whichever came first, but never over a value he
-   chose on the profile after it was there, and never refills a fact he cleared. A ticked value is never overwritten (Tim, 26 November 2026): a later answer that differs,
+   chose on the profile after it was there, and never refills a fact he cleared. Tim's edit to page 1 of a draft agency agreement is his choice too
+   (27 November 2026): the profile and the file follow it, as before; only a fact he cleared, a ticked official figure, or a value he chose
+   on the profile after the agreement had one hold against it. Whether a room is a bedroom is his judgement: only his own bedroom counts
+   are ever used; council, Quiet List, reader and backfilled agreement counts sit beside. A room-by-room record is planned for LW1/LW2. A ticked value is never overwritten (Tim, 26 November 2026): a later answer that differs,
    for example on the disclosures check, is shown beside it for him to choose. On screen: a "Property profile" card on
    the property file (source and date per fact, the other source's value with "Use this", "Tick all"); the disclosures check offers the
    profile's value for a fact it hasn't noted ("On the property profile: ... Use this"); Tim's typing on the property file is saved to the

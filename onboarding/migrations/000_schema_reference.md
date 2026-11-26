@@ -482,7 +482,11 @@ signatures and fingerprints are not touched.
   `chosen_by` auto or tim, `ticked`). `profile_record` (internal) decides, with p_choose: `tim` (Tim chose it here: chosen and ticked);
   `check` (a disclosures check answer: Tim's own choice, chosen and ticked, the file following as 012 writes it, unless an official figure
   from the property's documents differs, which then stays chosen, on the file and on an unsigned draft agreement, with his answer
-  beside it); `profile_sync_draft` (internal) writes the chosen value to an agreement still a draft with nobody signed (never sent,
+  beside it); `agreement` (Tim's edit to page 1 of a draft agreement: his choice, chosen and ticked,
+  the file following as 002 copies it; only a fact he cleared, a ticked official figure, or a value he chose on the profile after the
+  agreement had one hold, with the agreement's value beside; after any agreement edit the file is put back to the profile wherever the
+  profile keeps another value); bedrooms (`pBed`) are Tim's judgement: only his own entries (file, check, draft edit, profile choice) are
+  ever chosen, all other counts sit beside; `profile_sync_draft` (internal) writes the chosen value to an agreement still a draft with nobody signed (never sent,
   parked or signed) when an official figure is chosen or holds, and when Tim chooses with `agent_profile_choose`; `official` (a record of title, cross lease or
   unit title document, or survey plan among `property_documents`, source `title`, from the reader's `read_result.fields` for land area and
   title reference that Tim ticked in the import review (`ticked`, with the value he `used`), trigger `profile_from_document`: chosen and

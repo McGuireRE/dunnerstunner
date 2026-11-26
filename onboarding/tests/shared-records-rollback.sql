@@ -5,7 +5,7 @@
 -- live schema (NOT NULLs, foreign keys, the agreement's and questionnaire's own triggers); one that doesn't shows in capitals at the end. The agent is simulated with
 -- request.jwt.claims; a vendor likewise. Test rows use example.com addresses only, and nothing sends email.
 do $t$
-declare out text := ''; bdesc jsonb; da uuid; sa uuid; p3 uuid; i3 uuid; p4 uuid; i4 uuid; bp uuid; ba uuid; bron uuid; c3 uuid; pp3 uuid; r jsonb; pid uuid; iid uuid; aid uuid; plid uuid; pp1 uuid; pp2 uuid; c1 uuid; c2 uuid; lk uuid; n int; n2 int; x text; vid uuid; qid uuid;
+declare out text := ''; bq uuid; bqa uuid; bdesc jsonb; da uuid; sa uuid; p3 uuid; i3 uuid; p4 uuid; i4 uuid; bp uuid; ba uuid; bron uuid; c3 uuid; pp3 uuid; r jsonb; pid uuid; iid uuid; aid uuid; plid uuid; pp1 uuid; pp2 uuid; c1 uuid; c2 uuid; lk uuid; n int; n2 int; x text; vid uuid; qid uuid;
   sig0 bigint; sigsha text; apc text; pre_signed text;
   agent text := json_build_object('email', (select email from public.agents order by created_at limit 1), 'sub', '22222222-2222-2222-2222-222222222222', 'role', 'authenticated')::text;
   vendor text := '{"email":"rb-lw0-vendor@example.com","sub":"11111111-1111-1111-1111-1111111110a1","role":"authenticated"}';
@@ -15,6 +15,9 @@ begin
   select count(*), md5(string_agg(snapshot_sha256, ',' order by id)) into sig0, sigsha from public.signatures;
   select md5(string_agg(id::text || coalesce(contact_id::text, '-') || legal_name || email, ',' order by id)) into pre_signed from public.agreement_people where signed_at is not null;
 
+  -- before 028: a property whose file says 4 bedrooms, with a draft agreement saying the same (the file's value is backfilled)
+  insert into public.properties (address, description) values ('5 Lw0 Draft Drive, Rollbackville', '{"pBed":"4"}') returning id into bq;
+  insert into public.agreements (address, property_id, answers) values ('5 Lw0 Draft Drive, Rollbackville', bq, '{"pBed":"4"}') returning id into bqa;
   -- before 028: a property file Tim filled in himself, and a draft agreement saying something else about the bedrooms
   insert into public.properties (address, description, title_ref) values ('2 Lw0 Backfill Lane, Rollbackville', '{"pHeat":"Wood burner","pBed":"2","pLand":"800"}', 'OT1/LW0') returning id into bp;
   -- and a council value Tim used once, which the file has since changed (800 on the file, 812 from the council)
@@ -102,22 +105,36 @@ begin
   out := out || 'pLand: chosen=' || (r->>'value') || ' ticked=' || (r->>'ticked') || ' others=' || (select string_agg((o->>'value') || '/' || (o->>'source') || '/' || coalesce(o->>'as_of', 'NO DATE'), ',') from jsonb_array_elements(r->'others') o) || '; ';
   out := out || 'capital value: ' || ((select f from jsonb_array_elements(public.agent_property_profile(pid)->'facts') f where f->>'key' = 'capital_value')->>'display') || '; ';
 
-  -- 3. an agreement saying something else: a value from the agreement, the ticked one stays; Tim chooses, and the file follows
+  -- 3. Tim's decision (27 November 2026): his edit to page 1 of a draft agreement is his choice. A backfilled file value gives way:
+  --    the file said 4 and the draft is edited to 5, so the profile and the file say 5, with 4 beside
+  update public.agreements set answers = answers || '{"pBed":"5"}' where id = bqa;
+  r := (select f from jsonb_array_elements(public.agent_property_profile(bq)->'facts') f where f->>'key' = 'pBed');
+  out := out || 'file 4, draft edited to 5: chosen ' || (r->>'value') || '/' || (r->>'source') || '/' || (r->>'ticked') || ' beside it ' || coalesce((select string_agg((o->>'value') || '/' || (o->>'source'), ',') from jsonb_array_elements(r->'others') o), 'none')
+    || ' file=' || (select description->>'pBed' from public.properties where id = bq) || '; ';
+  if r->>'value' <> '5' or (select description->>'pBed' from public.properties where id = bq) <> '5' then out := out || 'HIS DRAFT EDIT DID NOT REACH THE PROFILE AND THE FILE; '; end if;
+  --    a new draft agreement saying 4 over the check's 3: his edit, so 4 is chosen, the check's 3 beside it
   insert into public.agreements (address, property_id, answers) values ('1 Lw0 Test Street, Rollbackville', pid, '{"pBed":"4","pBath":"2"}') returning id into aid;
   r := public.agent_property_profile(pid);
   out := out || 'agreement: pBed=' || ((select f from jsonb_array_elements(r->'facts') f where f->>'key' = 'pBed')->>'value') || ' others=' || coalesce((select string_agg(o->>'value' || '/' || (o->>'source'), ',') from jsonb_array_elements(r->'facts') f, jsonb_array_elements(f->'others') o where f->>'key' = 'pBed'), 'none')
-    || ' pBath=' || ((select f from jsonb_array_elements(r->'facts') f where f->>'key' = 'pBath')->>'value') || '/' || ((select f from jsonb_array_elements(r->'facts') f where f->>'key' = 'pBath')->>'ticked') || '; ';
-  vid := ((select o from jsonb_array_elements(r->'facts') f, jsonb_array_elements(f->'others') o where f->>'key' = 'pBed' limit 1)->>'value_id')::uuid;
+    || ' pBath=' || ((select f from jsonb_array_elements(r->'facts') f where f->>'key' = 'pBath')->>'value') || ' file pBed=' || (select description->>'pBed' from public.properties where id = pid) || '; ';
+  if ((select f from jsonb_array_elements(r->'facts') f where f->>'key' = 'pBed')->>'value') <> '4' then out := out || 'A NEW DRAFT''S PAGE 1 WAS NOT TAKEN; '; end if;
+  --    Tim then chooses the check's 3 on the profile: the file and the unsigned draft follow; a later edit of the draft to 4 doesn't move it
+  vid := ((select o from jsonb_array_elements(r->'facts') f, jsonb_array_elements(f->'others') o where f->>'key' = 'pBed' and o->>'source' = 'inspection' limit 1)->>'value_id')::uuid;
   perform public.agent_profile_choose(pid, 'pBed', vid);
-  out := out || 'chose agreement: file pBed=' || (select description->>'pBed' from public.properties where id = pid) || ' agreement answers kept=' || (select answers->>'pBed' from public.agreements where id = aid) || '; ';
+  out := out || 'Tim chose 3: file pBed=' || (select description->>'pBed' from public.properties where id = pid) || ' draft=' || (select answers->>'pBed' from public.agreements where id = aid) || '; ';
+  update public.agreements set answers = answers || '{"pBed":"4"}' where id = aid;
+  r := (select f from jsonb_array_elements(public.agent_property_profile(pid)->'facts') f where f->>'key' = 'pBed');
+  out := out || 'draft edited to 4 after his choice: chosen ' || (r->>'value') || '/' || (r->>'source') || ' beside it ' || coalesce((select string_agg((o->>'value') || '/' || (o->>'source'), ',' order by o->>'source') from jsonb_array_elements(r->'others') o), 'none')
+    || ' file=' || (select description->>'pBed' from public.properties where id = pid) || '; ';
+  if r->>'value' <> '3' or (select description->>'pBed' from public.properties where id = pid) <> '3' or not (r->'others') @> '[{"value":"4","source":"agreement"}]' then out := out || 'HIS LATER PROFILE CHOICE DID NOT HOLD AGAINST THE DRAFT; '; end if;
   -- the check saying something else (Tim, 26 November 2026): his check answer is his own choice; the agreement's value stays beside it
   perform public.agent_inspection_save(iid, '{"pBed":"5"}'::jsonb, null, null, null);
   r := (select f from jsonb_array_elements(public.agent_property_profile(pid)->'facts') f where f->>'key' = 'pBed');
   out := out || 'a different check answer: ticked ' || (r->>'value') || '/' || (r->>'source') || '/' || (r->>'ticked') || ' beside it ' || coalesce((select string_agg((o->>'value') || '/' || (o->>'source'), ',' order by o->>'source') from jsonb_array_elements(r->'others') o), 'none')
     || ' file=' || (select description->>'pBed' from public.properties where id = pid) || '; ';
-  -- here the draft agreement in force says 4, so migration 012 holds the answer as a difference for Tim to choose on the check: Tim's 4
+  -- here the draft agreement in force says 4, so migration 012 holds the answer as a difference for Tim to choose on the check: his 3
   -- stays on the profile and the file, and the 5 is beside it (with no agreement in force, his answer takes: see 3 Lw0 Check Road below)
-  if r->>'value' <> '4' or not (r->'others') @> '[{"value":"5","source":"inspection"}]' or (select description->>'pBed' from public.properties where id = pid) <> '4' then out := out || 'A DIFFERENCE WITH THE AGREEMENT WAS NOT KEPT BESIDE; '; end if;
+  if r->>'value' <> '3' or not (r->'others') @> '[{"value":"5","source":"inspection"}]' or (select description->>'pBed' from public.properties where id = pid) <> '3' then out := out || 'A DIFFERENCE WITH THE AGREEMENT WAS NOT KEPT BESIDE; '; end if;
   -- untick all, then a record source can't take a person's place, and choosing something not on the property is refused
   perform public.agent_profile_tick(pid, null, false);
   out := out || 'ticked after untick all=' || (select count(*) from public.property_profile where property_id = pid and ticked) || '; ';
@@ -181,6 +198,12 @@ begin
   out := out || 'draft agreement=' || (select answers->>'pLand' from public.agreements where id = da) || ' signed agreement=' || (select answers->>'pLand' from public.agreements where id = sa) || '; ';
   if (select answers->>'pLand' from public.agreements where id = da) <> '812' then out := out || 'THE DRAFT DID NOT FOLLOW THE OFFICIAL FIGURE; '; end if;
   if (select answers->>'pLand' from public.agreements where id = sa) <> '700' then out := out || 'A SIGNED AGREEMENT WAS CHANGED; '; end if;
+  -- the draft edited to 850 while the ticked official 812 stands: the official figure holds on the profile and the file, 850 beside
+  update public.agreements set answers = answers || '{"pLand":"850"}' where id = da;
+  r := (select f from jsonb_array_elements(public.agent_property_profile(p4)->'facts') f where f->>'key' = 'pLand');
+  out := out || 'draft edited to 850 against the official 812: chosen ' || (r->>'value') || '/' || (r->>'source') || ' file=' || (select description->>'pLand' from public.properties where id = p4) || '; ';
+  if r->>'value' <> '812' or (select description->>'pLand' from public.properties where id = p4) <> '812' or not (r->'others') @> '[{"value":"850","source":"agreement"}]' then out := out || 'THE OFFICIAL FIGURE DID NOT HOLD AGAINST A DRAFT EDIT; '; end if;
+  r := (select f from jsonb_array_elements(public.agent_property_profile(p4)->'facts') f where f->>'key' = 'pLand');
   -- Tim then chooses his 790 on the profile: the file and the unsigned draft follow; the signed agreement stays as it is
   perform public.agent_profile_choose(p4, 'pLand', ((select o from jsonb_array_elements(r->'others') o where o->>'source' = 'inspection' limit 1)->>'value_id')::uuid);
   out := out || 'Tim chose 790: file=' || (select description->>'pLand' from public.properties where id = p4) || ' draft=' || (select answers->>'pLand' from public.agreements where id = da) || ' signed=' || (select answers->>'pLand' from public.agreements where id = sa) || '; ';
@@ -301,8 +324,13 @@ begin
   out := out || 'quiet list: ' || (select concat_ws(',', 'beds=' || beds, 'land=' || land_m2, 'rv=' || rv, 'type=' || coalesce(property_type, 'none'), 'vendor=' || case when vendor_contact_id = c1 then 'Robin' else 'WRONG' end) from public.ql_listings where id = lk)
     || ' note in bank=' || (select count(*) from public.qa_answers where source_ref = lk and question_key = 'tim_notes' and not by_vendor) || '; ';
   update public.ql_listings set beds = 6 where id = lk;
-  out := out || 'listing beds 6: file pBed=' || (select description->>'pBed' from public.properties where id = pid) || '; ';
-  out := out || 'listing beds 6: profile ' || ((select f from jsonb_array_elements(public.profile_read(pid, false)) f where f->>'key' = 'pBed')->>'value') || ' with others ' || (select string_agg(o->>'value' || '/' || (o->>'source'), ',' order by o->>'source') from jsonb_array_elements(public.profile_read(pid, false)) f, jsonb_array_elements(f->'others') o where f->>'key' = 'pBed') || '; ';
+  -- bedrooms are Tim's judgement (27 November 2026): the Quiet List's 6, a council count and a reader's count are only ever beside
+  perform public.profile_record(pid, 'pBed', '"7"', 'council', null, '27 Nov 2026', 'Council', null, null, 'agent', 'tim');
+  perform public.profile_record(pid, 'pBed', '"8"', 'reader', null, '27 Nov 2026', 'From the record of title, not checked', null, null, 'agent', 'official');
+  r := (select f from jsonb_array_elements(public.profile_read(pid, false)) f where f->>'key' = 'pBed');
+  out := out || 'bedrooms after the Quiet List 6, council 7, reader 8: chosen ' || (r->>'value') || '/' || (r->>'source') || ' beside it ' || (select string_agg(o->>'value' || '/' || (o->>'source'), ',' order by o->>'source') from jsonb_array_elements(r->'others') o)
+    || ' file=' || (select description->>'pBed' from public.properties where id = pid) || '; ';
+  if r->>'source' not in ('tim', 'inspection', 'agreement') or (select description->>'pBed' from public.properties where id = pid) in ('6', '7', '8') then out := out || 'A BEDROOM COUNT THAT ISN''T TIM''S WAS USED; '; end if;
   execute 'set local role authenticated'; perform set_config('request.jwt.claims', agent, true);
   begin perform public.agent_ql_set_photos(lk, array[gen_random_uuid()]); out := out || 'A PHOTO FROM NOWHERE WAS USED; '; exception when others then out := out || 'photos: ' || sqlerrm || '; '; end;
   out := out || 'ql photos=' || (select count(*) from public.ql_listing_photos(lk)) || ' inspection photos=' || (select count(*) from public.inspection_photos(iid)) || '; ';

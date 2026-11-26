@@ -158,6 +158,9 @@ create policy pp_vendor on public.property_profile for select to authenticated
 --   p_choose 'official': a figure from a record of title or survey plan among the property's documents (read by the document reader).
 --                     It wins over an informal value: chosen (not ticked; Tim ticks it), and the file follows. A value Tim ticked, or a
 --                     fact he cleared on the file, is never silently overwritten: the official figure is shown beside it, marked.
+--   p_choose 'agreement': Tim's own edit to page 1 of a draft agency agreement (Tim, 27 November 2026): chosen and ticked, the file following
+--                     as migration 002 copies it; except over a fact he cleared, a ticked official figure, or a value he chose on the
+--                     profile after the agreement had one, which stay, with the agreement's value beside.
 --   p_choose 'beside': the backfill's council values and check answers: chosen and ticked unless Tim has ticked a different value from
 --                     another source, or what is chosen is the property file's own value (source 'tim', including a fact Tim cleared on
 --                     the file). Then that stays and this one is shown beside it, so applying 028 leaves the file and the profile agreeing.
@@ -175,7 +178,7 @@ declare v jsonb := case when public.jblank(p_value) then null else p_value end; 
   c public.property_profile; cv public.property_fact_values; alt uuid; move boolean := false; ch text := p_choose; fv jsonb; off public.property_fact_values;
 begin
   if p_property is null or p_key is null then return null; end if;
-  if ch not in ('auto', 'beside', 'check', 'official', 'tim', 'never') then raise exception 'profile_record: bad choice'; end if;
+  if ch not in ('auto', 'beside', 'check', 'agreement', 'official', 'tim', 'never') then raise exception 'profile_record: bad choice'; end if;
   if not exists (select 1 from public.profile_keys where key = p_key) and p_source <> 'council' then return null; end if;
   select * into last from public.property_fact_values where property_id = p_property and key = p_key and source = p_source order by recorded_at desc, id desc limit 1;
   if last.id is not null and last.value is not distinct from v and coalesce(last.display, '') = coalesce(p_display, '') and last.source_ref is not distinct from p_ref then
@@ -188,6 +191,9 @@ begin
   end if;
   select * into c from public.property_profile where property_id = p_property and key = p_key for update;
   if c.property_id is not null then select * into cv from public.property_fact_values where id = c.value_id; end if;
+  -- whether a room is a bedroom is Tim's judgement (Tim, 27 November 2026): for bedrooms only his own entries are ever chosen (his typing
+  -- on the file, his disclosures check answer, his edit to a draft agreement, his choice on the profile); every other count sits beside
+  if p_key = 'pBed' and v is not null and not (p_source in ('tim', 'inspection') or (p_source = 'agreement' and ch = 'agreement')) then ch := 'never'; end if;
   if v is null then
     if c.property_id is not null and cv.source = p_source and (not c.ticked or ch = 'tim') then
       -- what the property file still says takes its place (the file is never changed by a source going), else the newest other value
@@ -196,7 +202,9 @@ begin
         alt := public.profile_record(p_property, p_key, fv, 'tim', null, to_char(now() at time zone 'Pacific/Auckland', 'FMDD Mon YYYY'), 'Property file', null, null, coalesce(p_by, 'agent'), 'never');
       else
         select x.id into alt from (select distinct on (f.source) f.id, f.value, f.recorded_at from public.property_fact_values f
-                                    where f.property_id = p_property and f.key = p_key and f.source <> p_source order by f.source, f.recorded_at desc, f.id desc) x
+                                    where f.property_id = p_property and f.key = p_key and f.source <> p_source
+                                      and (p_key <> 'pBed' or f.source in ('tim', 'inspection'))   -- bedrooms: only Tim's own count takes over
+                                    order by f.source, f.recorded_at desc, f.id desc) x
          where x.value is not null order by x.recorded_at desc limit 1;
       end if;
       if alt is null then delete from public.property_profile where property_id = p_property and key = p_key;
@@ -205,9 +213,28 @@ begin
     return vid;
   end if;
   if ch = 'never' then return vid; end if;
+  -- the same value as the one chosen, from a draft or the check: the choice stays as it is (who chose it, and whether it is official)
+  if ch in ('agreement', 'check') and c.property_id is not null and (cv.value #>> '{}') is not distinct from (v #>> '{}') then
+    perform public.profile_sync_file(p_property, p_key);
+    return vid;
+  end if;
   if ch = 'beside' then
     if c.property_id is not null and cv.source <> p_source and (c.ticked or cv.source = 'tim') and (cv.value #>> '{}') is distinct from (v #>> '{}') then
       perform public.profile_sync_file(p_property, p_key);   -- Tim's value (or the file's own) stays, on the file too; this one is shown beside it
+      return vid;
+    end if;
+    ch := 'tim';
+  end if;
+  if ch = 'agreement' then
+    -- Tim editing page 1 of a draft agency agreement: his choice, so the profile (and the file, as migration 002 copies it) follow
+    -- (Tim, 27 November 2026). Only these hold, with the agreement's value shown beside: a fact he cleared, a ticked official figure, or
+    -- a value he chose on the profile himself after the agreement had a value for it.
+    if c.property_id is not null and cv.source <> p_source and (cv.value #>> '{}') is distinct from (v #>> '{}')
+       and ((cv.source = 'tim' and cv.value is null)
+            or (cv.source = 'title' and c.ticked)
+            or (c.chosen_by = 'profile' and exists (select 1 from public.property_fact_values a where a.property_id = p_property and a.key = p_key
+                                                     and a.source = 'agreement' and a.recorded_at < c.chosen_at))) then
+      perform public.profile_sync_file(p_property, p_key);
       return vid;
     end if;
     ch := 'tim';
@@ -485,9 +512,14 @@ begin
       v := coalesce(new.answers, '{}'::jsonb) -> k;
       if tg_op = 'UPDATE' and v is not distinct from (coalesce(old.answers, '{}'::jsonb) -> k) and new.property_id is not distinct from old.property_id then continue; end if;
       if public.jblank(v) and (tg_op = 'INSERT' or public.jblank(coalesce(old.answers, '{}'::jsonb) -> k)) then continue; end if;
-      perform public.profile_record(new.property_id, k, v, 'agreement', new.id, to_char(coalesce(new.updated_at, now()) at time zone 'Pacific/Auckland', 'FMDD Mon YYYY'), 'Agency agreement ' || coalesce(new.ref, ''), null, null, coalesce(auth.jwt()->>'email', 'agent'), 'auto');
-      -- the agreement's own trigger (agreement_after, migration 002, which runs first) copies page 1 to the property file; where the
-      -- profile keeps another value (Tim's, a fact he cleared, an official figure), the file goes back to it and the agreement's is beside it
+      -- a draft is Tim's own edit (his choice); any other agreement's page 1 is an automatic value
+      perform public.profile_record(new.property_id, k, v, 'agreement', new.id, to_char(coalesce(new.updated_at, now()) at time zone 'Pacific/Auckland', 'FMDD Mon YYYY'), 'Agency agreement ' || coalesce(new.ref, ''), null, null, coalesce(auth.jwt()->>'email', 'agent'),
+        case when new.status = 'draft' then 'agreement' else 'auto' end);
+    end loop;
+    -- the agreement's own trigger (agreement_after, migration 002, which runs first) copies all of page 1 to the property file, changed
+    -- or not; wherever the profile keeps another value (a fact Tim cleared, a ticked official figure, his own later choice, a bedroom
+    -- count that isn't his), the file goes back to it
+    foreach k in array public.desc_keys() loop
       perform public.profile_sync_file(new.property_id, k);
     end loop;
   exception when others then perform public.shared_note('profile_from_agreement', jsonb_build_object('agreement', new.id, 'error', sqlerrm)); end;

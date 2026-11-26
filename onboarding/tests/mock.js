@@ -77,13 +77,20 @@ function profileRecord(pid,key,value,source,ref,asOf,sourceName,display,by,choos
   else { if(!last&&v==null) return null; const row={id:uid(),property_id:pid,key,value:v,display:display||null,source,source_name:sourceName||null,source_ref:ref||null,as_of:asOf||null,recorded_at:stamp(),recorded_by:by||'agent'}; FV().push(row); vid=row.id; }
   const c=PRF().find(x=>x.property_id===pid&&x.key===key), cv=c?FV().find(f=>f.id===c.value_id):null;
   const setC=(id,by_,tick)=>{ const n={property_id:pid,key,value_id:id,chosen_by:by_,chosen_at:now(),ticked:!!tick,ticked_at:tick?now():null,ticked_by:tick?(by||'agent'):null}; if(c) Object.assign(c,n); else PRF().push(n); };
+  // bedrooms are Tim's judgement (27 November 2026): only his own counts are ever chosen; every other sits beside
+  if(key==='pBed'&&v!=null&&!(['tim','inspection'].includes(source)||(source==='agreement'&&choose==='agreement'))) choose='never';
   if(v==null){ if(c&&cv&&cv.source===source&&(!c.ticked||choose==='tim')){
       // what the property file still says takes its place (a source going never changes the file), else the newest other value
       const pf=PT().find(x=>x.id===pid)||{}, fv=DESC.includes(key)?(pf.description||{})[key]:key==='title_ref'?pf.title_ref:key==='legal_description'?pf.legal_description:null;
       if(!jblank(fv)&&source!=='tim'){ const fid=profileRecord(pid,key,fv,'tim',null,lwToday(),'Property file',null,by,'never'); setC(fid,'auto',false); return vid; }
-      const alt=Object.values(FV().filter(f=>f.property_id===pid&&f.key===key&&f.source!==source).reduce((m,f)=>{ if(!m[f.source]||m[f.source].recorded_at<f.recorded_at) m[f.source]=f; return m; },{})).filter(f=>f.value!=null).sort((a,b)=>a.recorded_at<b.recorded_at?1:-1)[0];
+      const alt=Object.values(FV().filter(f=>f.property_id===pid&&f.key===key&&f.source!==source&&(key!=='pBed'||['tim','inspection'].includes(f.source))).reduce((m,f)=>{ if(!m[f.source]||m[f.source].recorded_at<f.recorded_at) m[f.source]=f; return m; },{})).filter(f=>f.value!=null).sort((a,b)=>a.recorded_at<b.recorded_at?1:-1)[0];
       if(alt){ setC(alt.id,'auto',false); profileSyncFile(pid,key); } else DB.property_profile=PRF().filter(x=>x!==c); } return vid; }
   if(choose==='never') return vid;
+  // the same value as the one chosen, from a draft or the check: the choice stays as it is
+  if((choose==='agreement'||choose==='check')&&c&&cv&&sameTxt(cv.value,v)){ profileSyncFile(pid,key); return vid; }
+  // Tim's edit to a draft agreement is his choice (Tim, 27 November 2026), except over a fact he cleared, a ticked official figure, or
+  // a value he chose on the profile after the agreement had one
+  if(choose==='agreement'){ if(c&&cv&&cv.source!==source&&!sameTxt(cv.value,v)&&((cv.source==='tim'&&cv.value==null)||(cv.source==='title'&&c.ticked)||(c.chosen_by==='profile'&&FV().some(a=>a.property_id===pid&&a.key===key&&a.source==='agreement'&&a.recorded_at<c.chosen_at)))){ profileSyncFile(pid,key); return vid; } choose='tim'; }
   if(choose==='beside'){ if(c&&cv&&cv.source!==source&&(c.ticked||cv.source==='tim')&&!sameTxt(cv.value,v)){ profileSyncFile(pid,key); return vid; } choose='tim'; }
   // the disclosures check: Tim's own choice, unless an official figure from the property's documents says something else
   if(choose==='check'){ const off=FV().filter(f=>f.property_id===pid&&f.key===key&&f.source==='title').sort((a,b)=>a.recorded_at<b.recorded_at?1:-1)[0];
@@ -171,7 +178,7 @@ function sharedSync(){
     profileRecord(p.id,(v?pk:(JSON.parse(seen['foundkey:'+p.id+':'+k]||'null')||k)),v?f.value:null,'council',null,f.as_of_label||f.as_of||(f.fetched_at||'').slice(0,10),f.source_name,f.display,'agent',ch);
     if(v) seen['foundkey:'+p.id+':'+k]=JSON.stringify(pk); }); }));
   PT().forEach(p=>{ seen['found:'+p.id]=JSON.stringify(Object.fromEntries(Object.keys(Object.assign({},JSON.parse(seen['found:'+p.id]||'{}'),p.found||{})).map(k=>[k,1]))); });
-  (DB.agreements||[]).forEach(ag=>{ if(!ag.property_id||['ended','cancelled'].includes(ag.status)) return; DESC.forEach(k=>once('aga:'+ag.id+':'+k,JSON.stringify([(ag.answers||{})[k]??null,ag.property_id]),prev=>{ const v=(ag.answers||{})[k]; if(jblank(v)&&(!prev||jblank(prev[0]))) return; profileRecord(ag.property_id,k,v,'agreement',ag.id,lwToday(),'Agency agreement '+(ag.ref||''),null,'agent','auto'); })); });
+  (DB.agreements||[]).forEach(ag=>{ if(!ag.property_id||['ended','cancelled'].includes(ag.status)) return; DESC.forEach(k=>once('aga:'+ag.id+':'+k,JSON.stringify([(ag.answers||{})[k]??null,ag.property_id]),prev=>{ const v=(ag.answers||{})[k]; if(jblank(v)&&(!prev||jblank(prev[0]))) return; profileRecord(ag.property_id,k,v,'agreement',ag.id,lwToday(),'Agency agreement '+(ag.ref||''),null,'agent',LW0_BACKFILL||ag.status!=='draft'?'auto':'agreement'); })); });
   (DB.property_inspections||[]).forEach(i=>DESC.forEach(k=>once('insp:'+i.id+':'+k,JSON.stringify((i.facts||{})[k]??null),prev=>{ const v=(i.facts||{})[k]; if(jblank(v)&&prev===null) return; profileRecord(i.property_id,k,v,'inspection',i.id,lwToday(),'Inspect a property',null,i.created_by,(i.conflicts||{})[k]?'never':LW0_BACKFILL?'beside':'check'); })));
   // official figures from a record of title or survey plan among the property's documents (read_result.fields from the reader)
   (DB.property_documents||[]).forEach(dc=>{ const on=!dc.archived_at&&OFFICIAL_KINDS.includes(dc.kind); const fields=on&&dc.read_result&&Array.isArray(dc.read_result.fields)?dc.read_result.fields:[];
