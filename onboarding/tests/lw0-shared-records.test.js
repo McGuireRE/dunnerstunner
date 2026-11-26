@@ -50,7 +50,7 @@ const TIM = ['agent-1', 'hello@timmcguire.co.nz'];
           { id: 'PPA1', property_id: 'PA', position: 1, legal_name: 'Robin Rowe', pref_name: 'Rob', email: 'robin@example.com', phone: '021 555 0101', role: 'owner', source: 'agent', name_from: 'agent', created_at: now },
           { id: 'PPA2', property_id: 'PA', position: 2, legal_name: 'Jordan Rowe', pref_name: '', email: 'robin@example.com', phone: '', role: 'owner', source: 'agent', name_from: 'agent', created_at: now },
           { id: 'PPB1', property_id: 'PB', position: 1, legal_name: 'Sam Signer', pref_name: '', email: 'sam@example.com', phone: '', user_id: 'v-sam', role: 'owner', source: 'agreement', name_from: 'agreement', created_at: now }],
-        agreements: [{ id: 'AC2', ref: 'MRE-2026-1012', address: '7 Typed Terrace, Opoho', property_id: 'PC', status: 'draft', config: {}, answers: { pHeat: 'Heat pump' }, legal: {}, agreement_version: 'v3.15-26102026', created_at: now, updated_at: now }, { id: 'AB', ref: 'MRE-2026-1009', address: '9 Signed Street, Maori Hill', property_id: 'PB', status: 'signed', config: {}, answers: { pBed: '3' }, legal: {}, agreement_version: 'v3.15-26102026', created_at: now, updated_at: now }],
+        agreements: [{ id: 'AE', ref: 'MRE-2026-1013', address: '12 Title Track, Roslyn', property_id: 'PE', status: 'draft', config: {}, answers: { pLand: '800' }, legal: {}, agreement_version: 'v3.15-26102026', created_at: now, updated_at: now }, { id: 'AC2', ref: 'MRE-2026-1012', address: '7 Typed Terrace, Opoho', property_id: 'PC', status: 'draft', config: {}, answers: { pHeat: 'Heat pump' }, legal: {}, agreement_version: 'v3.15-26102026', created_at: now, updated_at: now }, { id: 'AB', ref: 'MRE-2026-1009', address: '9 Signed Street, Maori Hill', property_id: 'PB', status: 'signed', config: {}, answers: { pBed: '3' }, legal: {}, agreement_version: 'v3.15-26102026', created_at: now, updated_at: now }],
         agreement_people: [{ id: 'APB1', agreement_id: 'AB', position: 1, legal_name: 'Sam Signer', pref_name: '', email: 'sam@example.com', phone: '', user_id: 'v-sam', signed_at: now, contact_id: null }],
         prelistings: [{ id: 'LA', address: '4 Profile Road, Roslyn', property_id: 'PA', contact_name: 'Rob', contact_email: 'robin@example.com', status: 'appraisal', appraisal: { method: 'Auction' }, answers: {}, plan: {}, created_at: now, updated_at: now }],
         agreement_events: [], signatures: [], lawyer_links: [], aml_files: [], aml_events: [], email_log: [], cancellation_requests: [] })); }, now);
@@ -140,7 +140,8 @@ const TIM = ['agent-1', 'hello@timmcguire.co.nz'];
       await p.evaluate(now => { const d = JSON.parse(localStorage.getItem('mockdb')); (d.property_documents ||= []).push({ id: 'DE', property_id: 'PE', kind: 'Record of title', folder: 'title', name: 'title.pdf', path: 'PE/title.pdf', source: 'dropped',
         read_result: { fields: [{ key: 'pLand', value: '812 m²', source: 'Record of title OT9/1' }] }, created_at: now, created_by: 'agent' }); localStorage.setItem('mockdb', JSON.stringify(d)); }, now);
       await go(); d = await db(); out[tag].pe0 = [(await factOf('PE', 'pLand')).value, (await factOf('PE', 'pLand')).source, d.properties.find(x => x.id === 'PE').description.pLand];
-      expect(JSON.stringify(out[tag].pe0) === JSON.stringify(['812', 'title', '812']), 'the record of title\'s land area on the profile and the file: ' + JSON.stringify(out[tag].pe0));
+      out[tag].pe0.push(d.agreements.find(x => x.id === 'AE').answers.pLand);
+      expect(JSON.stringify(out[tag].pe0) === JSON.stringify(['812', 'title', '812', '812']), 'the record of title\'s land area on the profile, the file and the unsigned draft agreement: ' + JSON.stringify(out[tag].pe0));
       await openProp('PE'); out[tag].peRow = await profRow('pLand');
       expect(/Official: record of title/.test(out[tag].peRow || ''), 'marked as the official figure on the property page: ' + out[tag].peRow);
       await p.click('#inspNewP'); await p.waitForTimeout(900);
@@ -151,6 +152,11 @@ const TIM = ['agent-1', 'hello@timmcguire.co.nz'];
       d = await db(); out[tag].pe = await factOf('PE', 'pLand');
       expect(out[tag].pe.value === '812' && out[tag].pe.source === 'title' && (out[tag].pe.others || []).some(o => o.value === '790' && o.source === 'inspection') && d.properties.find(x => x.id === 'PE').description.pLand === '812',
         'the official 812 stays on the profile and the file; his 790 is beside it to choose: ' + JSON.stringify(out[tag].pe));
+      expect(d.agreements.find(x => x.id === 'AE').answers.pLand === '812', 'the unsigned draft agreement shows the official 812 until Tim chooses: ' + d.agreements.find(x => x.id === 'AE').answers.pLand);
+      // Tim chooses his 790 on the property page: the file and the unsigned draft follow
+      await openProp('PE'); await p.click('#pfProfTbl tr[data-prof="pLand"] [data-profuse]'); await p.waitForTimeout(1500);
+      d = await db(); out[tag].peChose = [(await factOf('PE', 'pLand')).value, d.properties.find(x => x.id === 'PE').description.pLand, d.agreements.find(x => x.id === 'AE').answers.pLand];
+      expect(JSON.stringify(out[tag].peChose) === JSON.stringify(['790', '790', '790']), 'Tim chose 790: the profile, the file and the unsigned draft follow: ' + JSON.stringify(out[tag].peChose));
 
       // 5. Tim's own entry on the property file goes to the profile (a property with no agreement, so the file can be edited)
       await p.evaluate(() => { const d = JSON.parse(localStorage.getItem('mockdb')); d.agreements = d.agreements.filter(a => a.id !== 'AA'); localStorage.setItem('mockdb', JSON.stringify(d)); });

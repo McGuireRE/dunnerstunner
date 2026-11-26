@@ -153,7 +153,8 @@ create policy pp_vendor on public.property_profile for select to authenticated
 --   p_choose 'check': Tim's answer on the disclosures check. It is his own choice (Tim, 26 November 2026): chosen and ticked, and the
 --                     property file follows (as migration 012 already writes it). The one exception: where the property's documents hold
 --                     an official figure for the fact (a record of title or survey plan, source 'title') and it says something else, the
---                     official figure stays chosen and his answer is shown beside it; the check page tells him so under his answer.
+--                     official figure stays chosen, on the property file and on an unsigned draft agreement (Tim, 26 November 2026),
+--                     and his answer is shown beside it; the check page tells him so under his answer.
 --   p_choose 'official': a figure from a record of title or survey plan among the property's documents (read by the document reader).
 --                     It wins over an informal value: chosen (not ticked; Tim ticks it), and the file follows. A value Tim ticked, or a
 --                     fact he cleared on the file, is never silently overwritten: the official figure is shown beside it, marked.
@@ -219,7 +220,8 @@ begin
       insert into public.property_profile (property_id, key, value_id, chosen_by) values (p_property, p_key, off.id, 'auto')
       on conflict (property_id, key) do update set value_id = excluded.value_id, chosen_by = case when property_profile.value_id = excluded.value_id then property_profile.chosen_by else 'auto' end,
         ticked = case when property_profile.value_id = excluded.value_id then property_profile.ticked else false end;
-      perform public.profile_sync_file(p_property, p_key);   -- the official figure stays, on the file too; his answer is shown beside it
+      perform public.profile_sync_file(p_property, p_key);   -- the official figure stays, on the file and the unsigned draft; his answer beside it
+      perform public.profile_sync_draft(p_property, p_key);
       return vid;
     end if;
     ch := 'tim';
@@ -235,6 +237,7 @@ begin
       ticked_at = case when property_profile.value_id = excluded.value_id then property_profile.ticked_at end,
       ticked_by = case when property_profile.value_id = excluded.value_id then property_profile.ticked_by end;
     perform public.profile_sync_file(p_property, p_key);
+    perform public.profile_sync_draft(p_property, p_key);   -- the official figure goes on an unsigned draft agreement too
     return vid;
   end if;
   if ch = 'tim' then
@@ -343,6 +346,27 @@ begin
 end $$;
 revoke execute on function public.profile_sync_file(uuid, text) from public, anon, authenticated;
 
+-- the unsigned draft agency agreement follows too, but only where Tim decided it (26 November 2026): an official figure holding against
+-- his check answer, and his own choice on the profile. Only an agreement still a draft (not sent, parked or signed) with nobody signed;
+-- never a signed record. Not during the backfill.
+create or replace function public.profile_sync_draft(p_property uuid, p_key text) returns void
+language plpgsql security definer set search_path = public as $$
+declare f public.property_fact_values; ag public.agreements;
+begin
+  if coalesce(current_setting('app.profile_backfill', true), '') = 'on' or not (p_key = any (public.desc_keys())) then return; end if;
+  select v.* into f from public.property_profile c join public.property_fact_values v on v.id = c.value_id where c.property_id = p_property and c.key = p_key;
+  if f.id is null or f.value is null then return; end if;
+  for ag in select * from public.agreements a where a.property_id = p_property and a.status = 'draft' and a.signed_at is null
+              and not exists (select 1 from public.agreement_people x where x.agreement_id = a.id and x.signed_at is not null) loop
+    if (ag.answers ->> p_key) is not distinct from (f.value #>> '{}') then continue; end if;
+    begin
+      update public.agreements set answers = coalesce(answers, '{}'::jsonb) || jsonb_build_object(p_key, case when jsonb_typeof(f.value) in ('string', 'array') then f.value else to_jsonb(f.value #>> '{}') end)
+       where id = ag.id and status = 'draft';
+    exception when others then perform public.shared_note('profile_sync_draft', jsonb_build_object('agreement', ag.id, 'key', p_key, 'error', sqlerrm)); end;
+  end loop;
+end $$;
+revoke execute on function public.profile_sync_draft(uuid, text) from public, anon, authenticated;
+
 create or replace function public.agent_profile_set(p_property uuid, p_key text, p_value jsonb) returns jsonb
 language plpgsql security definer set search_path = public as $$
 declare vid uuid;
@@ -379,6 +403,7 @@ begin
   values (p_property, p_key, f.id, 'tim', true, now(), coalesce(auth.jwt()->>'email', 'agent'))
   on conflict (property_id, key) do update set value_id = excluded.value_id, chosen_by = 'tim', chosen_at = now(), ticked = true, ticked_at = now(), ticked_by = excluded.ticked_by;
   perform public.profile_write_back(p_property, p_key, f.value);
+  perform public.profile_sync_draft(p_property, p_key);   -- and an unsigned draft agreement (Tim, 26 November 2026)
   return public.agent_property_profile(p_property);
 end $$;
 
@@ -1132,7 +1157,7 @@ grant execute on function public.profile_vendor_key(text), public.qa_mine(text, 
 -- internal helpers: only the functions above call them
 revoke execute on function public.person_name_fits(uuid, text, boolean), public.person_unlink_pp(), public.profile_source_kind(text), public.person_first(text),
   public.person_joint(text), public.person_nick_fits(text, text), public.person_short_same(text, text), public.profile_file_value(uuid, text),
-  public.profile_official_kinds(), public.profile_from_document_row(public.property_documents, boolean), public.profile_from_document(), public.agreement_role(text), public.qa_prelisting_map(), public.ql_num(jsonb) from public, anon, authenticated;
+  public.profile_official_kinds(), public.profile_from_document_row(public.property_documents, boolean), public.profile_from_document(), public.profile_sync_draft(uuid, text), public.agreement_role(text), public.qa_prelisting_map(), public.ql_num(jsonb) from public, anon, authenticated;
 
 -- ───── backfill (today's records are test records; nothing signed is changed) ─────
 do $bf$

@@ -4,7 +4,7 @@
 -- refused was allowed, or a value was wrong. Needs 026 (and everything before it) applied. The agent is simulated with
 -- request.jwt.claims; a vendor likewise. Test rows use example.com addresses only, and nothing sends email.
 do $t$
-declare out text := ''; p3 uuid; i3 uuid; p4 uuid; i4 uuid; bp uuid; ba uuid; bron uuid; c3 uuid; pp3 uuid; r jsonb; pid uuid; iid uuid; aid uuid; plid uuid; pp1 uuid; pp2 uuid; c1 uuid; c2 uuid; lk uuid; n int; n2 int; x text; vid uuid; qid uuid;
+declare out text := ''; da uuid; sa uuid; p3 uuid; i3 uuid; p4 uuid; i4 uuid; bp uuid; ba uuid; bron uuid; c3 uuid; pp3 uuid; r jsonb; pid uuid; iid uuid; aid uuid; plid uuid; pp1 uuid; pp2 uuid; c1 uuid; c2 uuid; lk uuid; n int; n2 int; x text; vid uuid; qid uuid;
   sig0 bigint; sigsha text; apc text; pre_signed text;
   agent text := json_build_object('email', (select email from public.agents order by created_at limit 1), 'sub', '22222222-2222-2222-2222-222222222222', 'role', 'authenticated')::text;
   vendor text := '{"email":"rb-lw0-vendor@example.com","sub":"11111111-1111-1111-1111-1111111110a1","role":"authenticated"}';
@@ -66,7 +66,7 @@ begin
      'agent_property_profile','my_property_profile','agent_profile_set','agent_profile_choose','agent_profile_tick','profile_from_found','profile_from_inspection','profile_from_agreement',
      'person_name_fits','person_find','person_link','person_link_pp','person_unlink_pp','person_link_ap','person_link_after','aml_file_contact','agent_person_link_resolve','qa_mine','qa_put',
      'qa_from_prelisting','qa_from_seller_lead','qa_from_profile','agent_qa_answer','ql_listing_before','ql_listing_after','agent_ql_set_photos','ql_listing_photos','inspection_photos',
-     'guard_fact_value','person_joint','person_nick_fits','person_short_same','profile_file_value','profile_official_kinds','profile_from_document_row','profile_from_document','person_first','profile_source_kind','agreement_role','qa_prelisting_map','ql_num'])
+     'guard_fact_value','person_joint','person_nick_fits','person_short_same','profile_file_value','profile_official_kinds','profile_from_document_row','profile_from_document','profile_sync_draft','person_first','profile_source_kind','agreement_role','qa_prelisting_map','ql_num'])
      and (has_function_privilege('anon', p.oid, 'EXECUTE') or exists (select 1 from aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a where a.grantee = 0 and a.privilege_type = 'EXECUTE'));
   out := out || 'open to anon or PUBLIC: ' || coalesce(upper(x), 'none') || '; ';
   select string_agg(p.proname, ',' order by p.proname) into x from pg_proc p
@@ -151,14 +151,27 @@ begin
   if r->>'value' <> '790' then out := out || 'THE OFFICIAL FIGURE OVERWROTE A TICKED VALUE; '; end if;
   -- the title already there (812), then the check says 790: the official figure stays chosen and on the file; 790 beside it
   r := public.agent_inspection_start(null, '4 Lw0 Title Road, Rollbackville'); p4 := (r->>'property_id')::uuid; i4 := (r->>'inspection_id')::uuid;
+  -- an unsigned draft agreement saying 800, and a signed one saying 700 (never touched)
+  execute 'reset role';
+  insert into public.agreements (address, property_id, status, answers) values ('4 Lw0 Title Road, Rollbackville', p4, 'draft', '{"pLand":"800"}') returning id into da;
+  insert into public.agreements (address, property_id, status, answers, signed_at) values ('4 Lw0 Title Road, Rollbackville', p4, 'signed', '{"pLand":"700"}', now()) returning id into sa;
+  execute 'set local role authenticated'; perform set_config('request.jwt.claims', agent, true);
   insert into public.property_documents (property_id, kind, name, path, read_result, created_by) values (p4, 'Survey plan', 'plan.pdf', 'lw0/plan.pdf',
     '{"fields":[{"key":"pLand","value":"812","source":"Survey plan DP 608"}]}', 'agent') returning id into lk;
-  out := out || 'survey plan 812: file=' || coalesce((select description->>'pLand' from public.properties where id = p4), 'empty') || '; ';
+  out := out || 'survey plan 812: file=' || coalesce((select description->>'pLand' from public.properties where id = p4), 'empty') || ' draft=' || (select answers->>'pLand' from public.agreements where id = da) || ' signed=' || (select answers->>'pLand' from public.agreements where id = sa) || '; ';
   perform public.agent_inspection_save(i4, '{"pLand":"790"}'::jsonb, null, null, null);
   r := (select f from jsonb_array_elements(public.agent_property_profile(p4)->'facts') f where f->>'key' = 'pLand');
   out := out || 'then the check 790: chosen ' || (r->>'value') || '/' || (r->>'source') || ' beside it ' || coalesce((select string_agg((o->>'value') || '/' || (o->>'source'), ',') from jsonb_array_elements(r->'others') o), 'none')
     || ' file=' || (select description->>'pLand' from public.properties where id = p4) || '; ';
   if r->>'value' <> '812' or r->>'source' <> 'title' or (select description->>'pLand' from public.properties where id = p4) <> '812' or not (r->'others') @> '[{"value":"790","source":"inspection"}]' then out := out || 'THE OFFICIAL FIGURE DID NOT HOLD; '; end if;
+  -- Tim's decision (26 November 2026): the official figure goes on the unsigned draft too; a signed agreement is never touched
+  out := out || 'draft agreement=' || (select answers->>'pLand' from public.agreements where id = da) || ' signed agreement=' || (select answers->>'pLand' from public.agreements where id = sa) || '; ';
+  if (select answers->>'pLand' from public.agreements where id = da) <> '812' then out := out || 'THE DRAFT DID NOT FOLLOW THE OFFICIAL FIGURE; '; end if;
+  if (select answers->>'pLand' from public.agreements where id = sa) <> '700' then out := out || 'A SIGNED AGREEMENT WAS CHANGED; '; end if;
+  -- Tim then chooses his 790 on the profile: the file and the unsigned draft follow; the signed agreement stays as it is
+  perform public.agent_profile_choose(p4, 'pLand', ((select o from jsonb_array_elements(r->'others') o where o->>'source' = 'inspection' limit 1)->>'value_id')::uuid);
+  out := out || 'Tim chose 790: file=' || (select description->>'pLand' from public.properties where id = p4) || ' draft=' || (select answers->>'pLand' from public.agreements where id = da) || ' signed=' || (select answers->>'pLand' from public.agreements where id = sa) || '; ';
+  if (select description->>'pLand' from public.properties where id = p4) <> '790' or (select answers->>'pLand' from public.agreements where id = da) <> '790' or (select answers->>'pLand' from public.agreements where id = sa) <> '700' then out := out || 'HIS CHOICE DID NOT REACH THE FILE AND THE DRAFT, OR TOUCHED THE SIGNED ONE; '; end if;
   -- the plan archived: its figure goes, and the file's value takes its place
   update public.property_documents set archived_at = now() where id = lk;
   r := (select f from jsonb_array_elements(public.agent_property_profile(p4)->'facts') f where f->>'key' = 'pLand');

@@ -60,6 +60,9 @@ let SEQ=0; const stamp=()=>new Date(Date.now()+(SEQ++)).toISOString();
 // profile as Tim's ('Property file'); whatever is chosen is written back to the file (not on the first pass, the backfill); names that
 // don't fit are kept apart and flagged; a name holding two people is flagged to be split.
 let LW0_BACKFILL=false;   // the first pass: no property file is changed
+// an unsigned draft agency agreement follows an official figure and Tim's choice on the profile; never one sent, parked or signed
+function profileSyncDraft(pid,key){ if(LW0_BACKFILL||!DESC.includes(key)) return; const c=PRF().find(x=>x.property_id===pid&&x.key===key), f=c&&FV().find(x=>x.id===c.value_id); if(!f||f.value==null) return;
+  (DB.agreements||[]).filter(a=>a.property_id===pid&&a.status==='draft'&&!a.signed_at&&!(DB.agreement_people||[]).some(x=>x.agreement_id===a.id&&x.signed_at)).forEach(a=>{ a.answers||={}; if(!sameTxt(a.answers[key],f.value)) a.answers[key]=typeof f.value==='string'||Array.isArray(f.value)?f.value:String(f.value); }); }
 const txt=v=>v==null?null:(typeof v==='string'?v:JSON.stringify(v)), sameTxt=(a,b)=>txt(a)===txt(b)||(typeof a!=='object'&&typeof b!=='object'&&String(a)===String(b));
 function profileSyncFile(pid,key){ if(LW0_BACKFILL) return; const c=PRF().find(x=>x.property_id===pid&&x.key===key), f=c&&FV().find(x=>x.id===c.value_id); if(!f||f.value==null) return;
   const p=PT().find(x=>x.id===pid); if(!p) return; if(!(DESC.includes(key)||key==='title_ref'||key==='legal_description')) return;
@@ -84,10 +87,10 @@ function profileRecord(pid,key,value,source,ref,asOf,sourceName,display,by,choos
   if(choose==='beside'){ if(c&&cv&&cv.source!==source&&(c.ticked||cv.source==='tim')&&!sameTxt(cv.value,v)){ profileSyncFile(pid,key); return vid; } choose='tim'; }
   // the disclosures check: Tim's own choice, unless an official figure from the property's documents says something else
   if(choose==='check'){ const off=FV().filter(f=>f.property_id===pid&&f.key===key&&f.source==='title').sort((a,b)=>a.recorded_at<b.recorded_at?1:-1)[0];
-    if(off&&off.value!=null&&!sameTxt(off.value,v)&&(!c||(cv&&cv.source==='title')||!c.ticked)){ if(!c||c.value_id!==off.id) setC(off.id,'auto',false); profileSyncFile(pid,key); return vid; } choose='tim'; }
+    if(off&&off.value!=null&&!sameTxt(off.value,v)&&(!c||(cv&&cv.source==='title')||!c.ticked)){ if(!c||c.value_id!==off.id) setC(off.id,'auto',false); profileSyncFile(pid,key); profileSyncDraft(pid,key); return vid; } choose='tim'; }
   // an official figure (record of title, survey plan): wins over an informal value; never over one Tim ticked or cleared
   if(choose==='official'){ if(c&&cv&&cv.source!==source&&!sameTxt(cv.value,v)&&(c.ticked||(cv.source==='tim'&&cv.value==null))) return vid;
-    if(!c||c.value_id!==vid) setC(vid,'auto',false); profileSyncFile(pid,key); return vid; }
+    if(!c||c.value_id!==vid) setC(vid,'auto',false); profileSyncFile(pid,key); profileSyncDraft(pid,key); return vid; }
   if(choose==='tim'){ setC(vid,'tim',true); profileSyncFile(pid,key); return vid; }
   let move; if(!c) move=true; else if(sameTxt(cv&&cv.value,v)) move=false; else if(c.ticked) move=false; else if(cv&&cv.source===source) move=true; else if(cv&&cv.source==='tim') move=false; else if(recKind(source)==='record'&&recKind(cv&&cv.source)==='person') move=false; else move=true;
   if(move){ setC(vid,'auto',false); profileSyncFile(pid,key); } return vid; }
@@ -185,7 +188,7 @@ function sharedRpc(name,a,me){
   if(name==='agent_property_profile') return ok({property_id:a.p_property,facts:profileRead(a.p_property,false)});
   if(name==='agent_profile_choose'){ const f=FV().find(x=>x.id===a.p_value_id&&x.property_id===a.p_property&&x.key===a.p_key); if(!f||f.value==null) return bad('That value is not on this property');
     const c=PRF().find(x=>x.property_id===a.p_property&&x.key===a.p_key), n={property_id:a.p_property,key:a.p_key,value_id:f.id,chosen_by:'tim',chosen_at:now(),ticked:true,ticked_at:now(),ticked_by:me.email}; if(c) Object.assign(c,n); else PRF().push(n);
-    profileWriteBack(a.p_property,a.p_key,f.value); save(); return ok({property_id:a.p_property,facts:profileRead(a.p_property,false)}); }
+    profileWriteBack(a.p_property,a.p_key,f.value); profileSyncDraft(a.p_property,a.p_key); save(); return ok({property_id:a.p_property,facts:profileRead(a.p_property,false)}); }
   if(name==='agent_profile_tick'){ PRF().filter(x=>x.property_id===a.p_property&&(!a.p_keys||a.p_keys.includes(x.key))).forEach(x=>{ x.ticked=!!a.p_on; x.ticked_at=a.p_on?now():null; x.ticked_by=a.p_on?me.email:null; }); save(); return ok({property_id:a.p_property,facts:profileRead(a.p_property,false)}); }
   if(name==='agent_profile_set'){ if(!PROFILE_KEYS.includes(a.p_key)) return bad('Not a property fact'); if(jblank(a.p_value)){ // Tim cleared it on the file: his empty entry is chosen (not ticked), so no later source fills it by itself
       profileWriteBack(a.p_property,a.p_key,null); const row={id:uid(),property_id:a.p_property,key:a.p_key,value:null,display:null,source:'tim',source_name:'Tim',source_ref:null,as_of:lwToday(),recorded_at:stamp(),recorded_by:me.email}; FV().push(row);
