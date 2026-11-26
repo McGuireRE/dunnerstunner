@@ -14,6 +14,8 @@ as `BUILD-PLAN.md`: builder, tests against the mock database, independent review
 - Live: Offers fixes 3 (undo and start again in every turn, Tim's "Start this round again", "Unfreeze and go back", Confirm held
   while frozen), 26 November about 10:55 NZT. Migration 026 applied (its live rollback test ran clean first); main 11e46da, pages
   published from 4df62e2 (an empty commit: the first push didn't start a Pages build); offer-sign v6 pinned to 11e46da, OPTIONS 200.
+- Live: Offers hotfix 3 (re-draft with nothing changed stays on the same draft; drafting messages under the button pressed),
+  26 November about 12:35 NZT, main ad6548c; page only, no database or function change.
 - Edge functions and the commit each is pinned to: offer-sign 11e46da; offer-public, offer-draft, doc-prefill 06c2d22.
 - Still to do: the test offer with Tim's own addresses (OFFERS-PLAN "Going live" step 5), then Tim's solicitor confirms the
   signing and counteroffer method before the first real offer. Phases 5 and 6 not built.
