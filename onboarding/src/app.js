@@ -9851,10 +9851,52 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   // phase B: a header video starts where Tim set it, and stays still for anyone with reduced motion turned on
   function abWireVideos(root) {
     const still = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    $$('video.apv-hero-m', root).forEach(v => { const s = +v.dataset.start || 0;
-      const go = () => { try { if (s > 0 && isFinite(v.duration) && s < v.duration) v.currentTime = s; } catch (_) { } };
-      if (v.readyState >= 1) go(); else v.addEventListener('loadedmetadata', go, { once: true });
+    $$('video.apv-hero-m', root).forEach(v => { const sp = APPR.clipSpeed(v.dataset.speed);
+      // a slow loop: the speed Tim set (0.5 to 1.0), applied again whenever the browser loads the clip afresh
+      const go = () => { try { v.defaultPlaybackRate = sp; v.playbackRate = sp; } catch (_) { } };
+      go(); v.addEventListener('loadedmetadata', go); v.addEventListener('play', go);
       if (still) { v.removeAttribute('autoplay'); try { v.pause(); } catch (_) { } } });
+  }
+  // the header clip (Tim, 28 November 2026, 9:22am): the segment Tim picked, re-encoded small in his browser (at most 1,280 px wide,
+  // a modest bitrate, no sound), WebM where the browser makes it, MP4 where that is what it makes (iOS Safari). Resolves
+  // { blob, mime, w, h, d, still } or null when this browser can't do it (the caller then falls back). Only this clip is uploaded.
+  function abClip(file, start, len) {
+    const types = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm', 'video/mp4;codecs=avc1', 'video/mp4'];
+    const MR = window.MediaRecorder, type = MR && typeof MR.isTypeSupported === 'function' ? types.find(t => { try { return MR.isTypeSupported(t); } catch (_) { return false; } }) : null;
+    if (!type || !HTMLCanvasElement.prototype.captureStream) return Promise.resolve(null);
+    return new Promise(res => {
+      const v = document.createElement('video'), u = URL.createObjectURL(file); let done = false, rec = null, still = null, raf = 0;
+      const fin = x => { if (done) return; done = true; clearTimeout(t); cancelAnimationFrame(raf); try { v.pause(); } catch (_) { } try { URL.revokeObjectURL(u); } catch (_) { } res(x); };
+      const t = setTimeout(() => { if (rec && rec.state === 'recording') rec.stop(); else fin(null); }, (len + 20) * 1000);
+      v.muted = true; v.playsInline = true; v.preload = 'auto';
+      v.onerror = () => fin(null);
+      v.onloadedmetadata = () => {
+        const w0 = v.videoWidth, h0 = v.videoHeight; if (!w0 || !h0) return fin(null);
+        const k = Math.min(1, AB_CLIP_W / w0), c = document.createElement('canvas'); c.width = Math.round(w0 * k / 2) * 2; c.height = Math.round(h0 * k / 2) * 2;
+        const g = c.getContext('2d'), s0 = isFinite(v.duration) ? Math.min(Math.max(0, start), Math.max(0, v.duration - 0.5)) : Math.max(0, start), end = s0 + len;
+        v.onseeked = async () => {
+          v.onseeked = null; g.drawImage(v, 0, 0, c.width, c.height);
+          still = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.85));
+          let stream; try { stream = c.captureStream(24); rec = new MR(stream, { mimeType: type, videoBitsPerSecond: 1200000 }); } catch (_) { return fin(null); }
+          const parts = []; rec.ondataavailable = e => { if (e.data && e.data.size) parts.push(e.data); };
+          rec.onstop = () => { const mime = type.split(';')[0], blob = new Blob(parts, { type: mime }); fin(blob.size ? { blob, mime, w: c.width, h: c.height, d: Math.min(len, Math.max(0, (v.currentTime || end) - s0)), still } : null); };
+          rec.onerror = () => fin(null);
+          const draw = () => { g.drawImage(v, 0, 0, c.width, c.height); if (v.currentTime >= end || v.ended) { if (rec.state === 'recording') rec.stop(); return; } raf = requestAnimationFrame(draw); };
+          v.onended = () => { if (rec && rec.state === 'recording') rec.stop(); };
+          rec.start(250); try { await v.play(); } catch (_) { return fin(null); } draw();
+        };
+        try { v.currentTime = s0 || 0.001; } catch (_) { fin(null); }
+      };
+      v.src = u;
+    });
+  }
+  // how long a video file runs, read in the browser (null if this browser can't read it)
+  function abDuration(file) {
+    return new Promise(res => { const v = document.createElement('video'), u = URL.createObjectURL(file); let done = false;
+      const fin = x => { if (done) return; done = true; clearTimeout(t); try { URL.revokeObjectURL(u); } catch (_) { } res(x); };
+      const t = setTimeout(() => fin(null), 8000); v.preload = 'metadata'; v.muted = true;
+      v.onloadedmetadata = () => { if (isFinite(v.duration)) return fin(v.duration); v.currentTime = 1e7; v.ontimeupdate = () => { v.ontimeupdate = null; fin(isFinite(v.duration) ? v.duration : null); }; };
+      v.onerror = () => fin(null); v.src = u; });
   }
   // photos by comparable: { compId: [{ id, url, path, cover }] }, the print photo (cover) first, then in Tim's order
   async function cmpPhotoUrls(aid, compIds) {
@@ -10223,7 +10265,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   // The header, a video introduction, What I heard from you, their home as a mockup listing, the ideal buyers and the reviews, on one
   // screen (Tim only). The AI drafts (doc-prefill, Sonnet); Tim edits and ticks every line, and only ticked lines are written into the
   // sections a vendor reads. Anything negative the AI notices goes to his private notes, never the page. A sent appraisal is read only.
-  const AVB = 'appraisal-video', AB_VIDEO_MAX = 150 * 1024 * 1024, AB_PHOTO_MAX = 15 * 1024 * 1024;
+  const AVB = 'appraisal-video', AB_VIDEO_MAX = APPR.CLIP.maxBytes, AB_PHOTO_MAX = 15 * 1024 * 1024, AB_CLIP_W = APPR.CLIP.width;
+  const AB_CLIP_NO = 'Choose a short clip of up to 12 seconds, or use a photo.';
   const AB_PHOTO_TYPES = ['image/jpeg', 'image/png', 'image/webp'], AB_VIDEO_TYPES = ['video/mp4', 'video/webm', 'video/quicktime'];
   const AB_PART_WORDS = { heard: 'What I heard from you', ad: 'the advertisement', buyers: 'the ideal buyers' };
   // a photo made ready for the web: longest side about 1,920 px, compressed, with a warning if the original is small
@@ -10275,7 +10318,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     if (keep && !$('#absPage')) return;
     const S = JSON.parse(JSON.stringify(rec.setup));
     S.header = S.header === 'own' ? 'own' : 'claude';
-    S.headerOpt = Object.assign({ url: '', asset: '', kind: 'image', credit: '', focus: { x: 50, y: 50 }, zoom: 1, bright: 1, start: 0 }, S.headerOpt || {});
+    S.headerOpt = Object.assign({ url: '', asset: '', kind: 'image', credit: '', focus: { x: 50, y: 50 }, zoom: 1, bright: 1, speed: APPR.CLIP.speed }, S.headerOpt || {});
+    const seg = { start: 0, len: APPR.CLIP.len };   // the segment for the next clip (not saved: only the clip is kept)
     S.heard = Object.assign({ lines: [] }, S.heard || {}); S.intro = Object.assign({}, S.intro || {});
     S.home = Object.assign({ on: false, photos: [], facts: {}, ad: {} }, S.home || {}); S.home.ad = Object.assign({ title: '', body: '', ticked: false }, S.home.ad || {});
     S.buyers = Object.assign({ text: '', tags: [], ticked: false }, S.buyers || {}); S.reviews = Object.assign({ on: false }, S.reviews || {});
@@ -10297,7 +10341,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const previewHTML = hp => `${hp ? `<p class="small" style="margin:10px 0 4px">Drag on the picture to choose what stays in view.</p><div class="abs-frame" id="absFrame">${hp}</div>
           <div class="row2"><div><label class="f" for="absZoom">Zoom</label><input type="range" id="absZoom" min="1" max="3" step="0.05" value="${esc(S.headerOpt.zoom)}"${dis}></div><div><label class="f" for="absBright">Brightness</label><input type="range" id="absBright" min="0.5" max="1.5" step="0.05" value="${esc(S.headerOpt.bright)}"${dis}></div></div>
           ${S.header === 'own' ? `<label class="f" for="absCredit">Credit line <span class="opt">(optional)</span></label><input type="text" id="absCredit" maxlength="120" value="${esc(S.headerOpt.credit || '')}"${dis}>` : ''}
-          ${S.headerOpt.kind === 'video' && S.header === 'own' ? `<label class="f" for="absStart">Start the video at (seconds)</label><input type="number" id="absStart" min="0" max="3600" step="1" inputmode="numeric" value="${esc(S.headerOpt.start || 0)}"${dis}><p class="small" style="margin:4px 0 0">It plays muted and on a loop. Paper copies, and anyone who has reduced motion turned on, see the still frame.</p>` : ''}` : ''}`;
+          ${(S.header === 'own' ? S.headerOpt.kind === 'video' : APPR.VIDEO_URL.test(S.headerOpt.url || '')) ? `<label class="f" for="absSpeed">Playback speed <span class="opt">(<span id="absSpeedV">${esc(APPR.clipSpeed(S.headerOpt.speed))}</span> times: a slow loop)</span></label><input type="range" id="absSpeed" min="${APPR.CLIP.speedMin}" max="${APPR.CLIP.speedMax}" step="0.05" value="${esc(APPR.clipSpeed(S.headerOpt.speed))}"${dis}><p class="small" style="margin:4px 0 0">It plays muted, slowly and on a loop. Paper copies, and anyone who has reduced motion turned on, see the still frame.</p>` : ''}` : ''}`;
     const draw = () => {
       const hA = assetOf('header'), iA = assetOf('intro'), hp = header_();
       main().innerHTML = `<div class="view-pad abs" id="absPage"><span class="agent-flag">Only you see this</span><h1>Sections</h1>
@@ -10308,12 +10352,14 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <div class="card tight" id="absHeader"><div class="choices">${['claude', 'own'].map(k => `<label class="choice"><input type="radio" name="absHeader" value="${k}"${S.header === k ? ' checked' : ''}${dis}><span class="mark"></span><span><span class="ct">${k === 'claude' ? 'Leave it to Claude' : 'Use my own'}</span><span class="cd">${k === 'claude' ? 'A photo or footage from the Dunedin NZ Visual Library, credited DunedinNZ' : 'A photo or video you upload'}</span></span></label>`).join('')}</div>
         ${S.header === 'claude' ? `<label class="f" for="absLibUrl">Link to the photo or video from the Dunedin NZ Visual Library <span class="opt">(the file itself, starting https://)</span></label><input type="url" id="absLibUrl" value="${esc(S.headerOpt.url || '')}" placeholder="https://"${dis}>
           <p class="small" style="margin:6px 0 0">Credited DunedinNZ on the page. Leave it blank and no header is shown.</p>`
-        : `<label class="f" for="absHeaderFile">Your photo or video <span class="opt">(JPEG, PNG or WebP photo; MP4, WebM or MOV video up to 150 MB)</span></label><input type="file" id="absHeaderFile" accept="${AB_PHOTO_TYPES.concat(AB_VIDEO_TYPES).join(',')}"${dis}>
+        : `<p class="small" style="margin:8px 0 6px">For a video, choose the part to use first: a short clip of ${APPR.CLIP.min} to ${APPR.CLIP.max} seconds is made from it on this device and played as a slow loop. Only the clip is uploaded.</p>
+          <div class="row2"><div><label class="f" for="absSegStart" style="margin-top:0">Clip starts at (seconds)</label><input type="number" id="absSegStart" min="0" step="1" inputmode="numeric" value="${esc(seg.start)}"${dis}></div><div><label class="f" for="absSegLen" style="margin-top:0">Clip length (${APPR.CLIP.min} to ${APPR.CLIP.max} seconds)</label><input type="number" id="absSegLen" min="${APPR.CLIP.min}" max="${APPR.CLIP.max}" step="1" inputmode="numeric" value="${esc(seg.len)}"${dis}></div></div>
+          <label class="f" for="absHeaderFile">Your photo or video <span class="opt">(JPEG, PNG or WebP photo; MP4, WebM or MOV video)</span></label><input type="file" id="absHeaderFile" accept="${AB_PHOTO_TYPES.concat(AB_VIDEO_TYPES).join(',')}"${dis}>
           ${hA ? `<p class="small" style="margin:6px 0 0">Using ${esc(hA.file_name || (hA.kind === 'video' ? 'your video' : 'your photo'))}${hA.kind === 'video' && !hA.still_path ? '. No still frame could be taken from it, so paper copies show no header' : ''}.</p><button class="btn link" type="button" id="absHeaderRm"${dis}>Remove it</button>` : '<p class="small" style="margin:6px 0 0">Nothing uploaded yet, so no header is shown.</p>'}`}
         <div id="absPrev">${previewHTML(hp)}</div></div>
       <h2>Video introduction</h2>
       <div class="card tight" id="absIntro"><p class="small" style="margin:0 0 6px">Optional: a short hello from you, which they play themselves. Without one, nothing shows.</p>
-        <label class="f" for="absIntroFile" style="margin-top:0">Your video <span class="opt">(MP4, WebM or MOV, up to 150 MB)</span></label><input type="file" id="absIntroFile" accept="${AB_VIDEO_TYPES.join(',')}"${dis}>
+        <label class="f" for="absIntroFile" style="margin-top:0">Your video <span class="opt">(MP4, WebM or MOV, up to 50 MB: about a minute, or recorded at 720p on your phone)</span></label><input type="file" id="absIntroFile" accept="${AB_VIDEO_TYPES.join(',')}"${dis}>
         ${iA ? `<p class="small" style="margin:6px 0 0">Using ${esc(iA.file_name || 'your video')}.</p>${urls[iA.id] ? `<div class="apv-intro-box" style="margin-top:6px"><video controls playsinline preload="metadata"${urls[iA.id].still ? ` poster="${esc(urls[iA.id].still)}"` : ''}><source src="${esc(urls[iA.id].url)}"></video></div>` : ''}<button class="btn link" type="button" id="absIntroRm"${dis}>Remove it</button>` : ''}</div>
       <h2>What I heard from you</h2>
       <div class="card tight" id="absHeard"><p class="small" style="margin:0 0 6px">The AI rewrites their answers (Questions before we meet and the first visit), why they wanted to talk and your notes, in your voice. It never reads the client heart. Tick each line you want them to see.</p>
@@ -10356,7 +10402,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       const r = $('input[name="absHeader"]:checked'); if (r) S.header = r.value;
       if (v('#absLibUrl') != null) S.headerOpt.url = v('#absLibUrl').trim();
       if (v('#absZoom') != null) S.headerOpt.zoom = +v('#absZoom'); if (v('#absBright') != null) S.headerOpt.bright = +v('#absBright');
-      if (v('#absCredit') != null) S.headerOpt.credit = v('#absCredit').replace(/\s+/g, ' ').trim(); if (v('#absStart') != null) S.headerOpt.start = Math.max(0, Math.round(+v('#absStart') || 0));
+      if (v('#absCredit') != null) S.headerOpt.credit = v('#absCredit').replace(/\s+/g, ' ').trim(); if (v('#absSpeed') != null) S.headerOpt.speed = APPR.clipSpeed(v('#absSpeed'));
+      if (v('#absSegStart') != null) seg.start = Math.max(0, Math.round(+v('#absSegStart') || 0)); if (v('#absSegLen') != null) seg.len = v('#absSegLen');
       $$('[data-abl]').forEach(t => { const l = S.heard.lines[+t.dataset.abl]; if (l) l.text = t.value; });
       $$('[data-abt]').forEach(t => { const l = S.heard.lines[+t.dataset.abt]; if (l) l.ticked = t.checked; });
       S.home.on = !!($('#absHomeOn') || {}).checked;
@@ -10390,19 +10437,34 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       const isVid = AB_VIDEO_TYPES.includes(file.type) || (role === 'intro'), isPh = AB_PHOTO_TYPES.includes(file.type);
       if (role === 'intro' && !AB_VIDEO_TYPES.includes(file.type)) return atBtn(btn, 'Choose an MP4, WebM or MOV video.', 'err');
       if (!isVid && !isPh) return atBtn(btn, 'Choose a JPEG, PNG or WebP photo, or an MP4, WebM or MOV video.', 'err');
-      if (isVid && file.size > AB_VIDEO_MAX) return atBtn(btn, 'This video is over 150 MB, so it can\'t be used. Trim it, or save it smaller, then try again.', 'err');
-      read(); atBtn(btn, isVid ? 'Taking a still frame...' : 'Getting the photo ready...', 'busy');
+      if (role === 'intro' && file.size > AB_VIDEO_MAX) return atBtn(btn, 'This video is over 50 MB, so it can\'t be used. Keep it under about a minute, or record it at 720p on your phone, then try again.', 'err');
+      read();
+      const lenOk = APPR.clipLen(seg.len);
+      if (role === 'header' && isVid && lenOk === '') return atBtn(btn, 'Choose a clip length from ' + APPR.CLIP.min + ' to ' + APPR.CLIP.max + ' seconds, then choose the video again.', 'err');
       const key = crypto.randomUUID(), base = `appraisals/${rec.id}/${role}/${key}`;
-      let path, still = null, row;
+      let path, still = null, row, clipped = false;
       if (isVid) {
-        const s = await abStill(file, role === 'header' ? S.headerOpt.start : 1);
-        const ext = file.type === 'video/webm' ? 'webm' : file.type === 'video/quicktime' ? 'mov' : 'mp4'; path = base + '.' + ext;
+        // the header: the segment Tim picked, made into a short, small clip on this device; only the clip is uploaded. A browser that
+        // can't make one may upload the file itself, but only a short one (12 seconds, 50 MB). The introduction is uploaded as it is.
+        let body = file, mime = file.type, meta = {}, stillBlob = null;
+        if (role === 'header') {
+          atBtn(btn, 'Making a ' + lenOk + ' second clip...', 'busy');
+          const c = await abClip(file, seg.start, lenOk);
+          if (c && c.blob && c.blob.size <= AB_VIDEO_MAX) { body = c.blob; mime = c.mime; meta = { w: c.w, h: c.h, d: c.d }; stillBlob = c.still; clipped = true; }
+          else {
+            const d = file.size <= AB_VIDEO_MAX ? await abDuration(file) : null;
+            if (!(d != null && d <= APPR.CLIP.max + 0.25)) return atBtn(btn, AB_CLIP_NO, 'err');
+          }
+        }
+        if (!clipped) { atBtn(btn, 'Taking a still frame...', 'busy'); const s = await abStill(file, role === 'header' ? 0 : 1); if (s) { meta = s.meta || {}; stillBlob = s.blob || null; } }
+        const ext = mime === 'video/webm' ? 'webm' : mime === 'video/quicktime' ? 'mov' : 'mp4'; path = base + '.' + ext;
         atBtn(btn, 'Uploading the video...', 'busy');
-        const up = await sb.storage.from(AVB).upload(path, file, { contentType: file.type, upsert: false });
-        if (up.error) return atBtn(btn, abSizeErr(up.error) ? 'This video is bigger than your storage plan lets one file be. On the Free plan the limit is 50 MB; on Pro you can raise it in Supabase Storage settings.' : netErr(up.error) ? 'Not uploaded. Check you have signal, then try again.' : 'Not uploaded: ' + up.error.message, 'err');
-        if (s && s.blob) { const sp = base + '-still.jpg'; const u2 = await sb.storage.from(AMB).upload(sp, s.blob, { contentType: 'image/jpeg', upsert: false }); if (!u2.error) still = sp; }
-        row = { appraisal_id: rec.id, role, kind: 'video', bucket: AVB, path, still_path: still, file_name: String(file.name || '').slice(0, 200), width: (s && s.meta && s.meta.w) || null, height: (s && s.meta && s.meta.h) || null, duration_s: s && s.meta && s.meta.d != null ? Math.round(s.meta.d * 10) / 10 : null };
+        const up = await sb.storage.from(AVB).upload(path, body, { contentType: mime, upsert: false });
+        if (up.error) return atBtn(btn, abSizeErr(up.error) ? (role === 'header' ? AB_CLIP_NO : 'This video is bigger than your storage plan lets one file be. Keep it under about a minute, or record it at 720p on your phone.') : netErr(up.error) ? 'Not uploaded. Check you have signal, then try again.' : 'Not uploaded: ' + up.error.message, 'err');
+        if (stillBlob) { const sp = base + '-still.jpg'; const u2 = await sb.storage.from(AMB).upload(sp, stillBlob, { contentType: 'image/jpeg', upsert: false }); if (!u2.error) still = sp; }
+        row = { appraisal_id: rec.id, role, kind: 'video', bucket: AVB, path, still_path: still, file_name: String(file.name || '').slice(0, 200), width: meta.w || null, height: meta.h || null, duration_s: meta.d != null ? Math.round(meta.d * 10) / 10 : null };
       } else {
+        atBtn(btn, 'Getting the photo ready...', 'busy');
         const r = await abPhotoReady(file); if (!r) return atBtn(btn, 'That photo couldn\'t be read. Try another, or save it as a JPEG first.', 'err');
         if (r.blob.size > AB_PHOTO_MAX) return atBtn(btn, 'That photo is still over 15 MB once made smaller. Try another.', 'err');
         path = base + '.jpg'; atBtn(btn, 'Uploading the photo...', 'busy');
@@ -10411,14 +10473,20 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         row = { appraisal_id: rec.id, role, kind: 'image', bucket: AMB, path, file_name: String(file.name || '').slice(0, 200), width: r.w, height: r.h };
         if (r.small) pending.small = true;
       }
-      let made = null; try { const d = await must(sb.from('appraisal_assets').insert(row).select()); made = Array.isArray(d) ? d[0] : d; } catch (e) { return atBtn(btn, 'Not filed: ' + ((e && e.message) || 'try again.'), 'err'); }
-      const old = assets.filter(a => a.role === role);
-      if (role === 'header') { S.headerOpt.asset = made.id; S.headerOpt.kind = made.kind; if (made.kind !== 'video') S.headerOpt.start = 0; } else S.intro.asset = made.id;
+      // nothing is left behind if a later step fails: the files just uploaded, and the row once filed (best effort)
+      const unstore = async () => { try { await sb.storage.from(row.bucket).remove([row.path]); if (row.still_path) await sb.storage.from(AMB).remove([row.still_path]); } catch (_) { } };
+      let made = null; try { const d = await must(sb.from('appraisal_assets').insert(row).select()); made = Array.isArray(d) ? d[0] : d; } catch (e) { await unstore(); return atBtn(btn, 'Not filed: ' + ((e && e.message) || 'try again.'), 'err'); }
+      const old = assets.filter(a => a.role === role), prevH = Object.assign({}, S.headerOpt), prevI = Object.assign({}, S.intro);
+      if (role === 'header') { S.headerOpt.asset = made.id; S.headerOpt.kind = made.kind; } else S.intro.asset = made.id;
       const sv = $('#absSave') || btn;
-      if (!(await save(sv, 'Uploaded and saved.'))) return;
+      if (!(await save(sv, 'Uploaded and saved.'))) {
+        S.headerOpt = prevH; S.intro = prevI;
+        try { await must(sb.from('appraisal_assets').delete().eq('id', made.id)); } catch (_) { } await unstore();
+        return atBtn(btn, 'Not saved, so the upload was taken off again. Check the note by Save, then try again.', 'err');
+      }
       for (const a of old) { try { await must(sb.from('appraisal_assets').delete().eq('id', a.id)); await sb.storage.from(a.bucket).remove([a.path]); if (a.still_path) await sb.storage.from(AMB).remove([a.still_path]); } catch (_) { } }
       await viewAppraisalSections(rec.id, true);
-      atBtn($(role === 'header' ? '#absHeaderFile' : '#absIntroFile'), (made.kind === 'video' ? (still ? 'Uploaded, with a still frame for paper.' : 'Uploaded. No still frame could be taken from this video in this browser, so paper copies leave it out.') : pending.small ? 'Uploaded. This photo is small, so it may look soft on a wide screen.' : 'Uploaded.'), made.kind === 'video' && !still ? 'err' : 'ok');
+      atBtn($(role === 'header' ? '#absHeaderFile' : '#absIntroFile'), (made.kind === 'video' ? (still ? (clipped ? 'Your ' + lenOk + ' second clip is uploaded, with a still frame for paper. The original stays on your device.' : 'Uploaded, with a still frame for paper.') : 'Uploaded. No still frame could be taken from this video in this browser, so paper copies leave it out.') : pending.small ? 'Uploaded. This photo is small, so it may look soft on a wide screen.' : 'Uploaded.'), made.kind === 'video' && !still ? 'err' : 'ok');
     };
     const remove = async (role, btn) => {
       const a = assetOf(role); if (!a) return; read();
@@ -10459,6 +10527,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         fr.addEventListener('pointerdown', e => { drag = true; try { fr.setPointerCapture(e.pointerId); } catch (_) { } at(e); });
         fr.addEventListener('pointermove', e => { if (drag) at(e); }); fr.addEventListener('pointerup', () => { drag = false; }); fr.addEventListener('pointercancel', () => { drag = false; });
         ['#absZoom', '#absBright'].forEach(q => { const i = $(q); if (i) i.addEventListener('input', () => { S.headerOpt.zoom = +$('#absZoom').value; S.headerOpt.bright = +$('#absBright').value; JDIRTY = true; restyle(); }); });
+        // the slow loop's speed, shown on the preview as Tim moves it
+        const sp = $('#absSpeed'); if (sp) sp.addEventListener('input', () => { S.headerOpt.speed = APPR.clipSpeed(sp.value); JDIRTY = true; $('#absSpeedV').textContent = S.headerOpt.speed; $$('video.apv-hero-m', fr).forEach(v => { v.dataset.speed = S.headerOpt.speed; try { v.playbackRate = S.headerOpt.speed; } catch (_) { } }); });
         abWireVideos(fr);
       }
     };

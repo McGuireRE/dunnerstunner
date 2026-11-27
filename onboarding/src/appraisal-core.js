@@ -253,6 +253,12 @@
   const VIDEO_URL = /\.(mp4|webm|mov)(?:[?#]|$)/i;
   const httpsUrl = u => /^https:\/\/[^\s"'<>]+$/.test(String(u || '').trim()) && String(u).length <= 1000;
   const num0 = (v, lo, hi, d) => { const n = +v; return isFinite(n) && v !== '' && v != null ? Math.max(lo, Math.min(hi, n)) : d; };
+  // the header clip (Tim, 28 November 2026, 9:22am): a segment of 4 to 12 seconds (8 unless Tim sets it), played slowly (0.5 to 1.0,
+  // 0.6 unless Tim sets it). A file the browser can't shorten is accepted only up to 12 seconds and 50 MB.
+  const CLIP = { min: 4, max: 12, len: 8, speedMin: 0.5, speedMax: 1, speed: 0.6, maxBytes: 50 * 1024 * 1024, width: 1280 };
+  const clipSpeed = v => Math.round(num0(v, CLIP.speedMin, CLIP.speedMax, CLIP.speed) * 100) / 100;
+  // a segment length Tim typed: the number, or '' when it is outside 4 to 12 seconds
+  const clipLen = v => { const n = +v; return v !== '' && v != null && isFinite(n) && n >= CLIP.min && n <= CLIP.max ? n : ''; };
   const paras = t => String(t || '').split(/\n\s*\n/).map(x => x.replace(/\s+/g, ' ').trim()).filter(Boolean);
   // the facts a mockup listing may show, in the order a listing shows them. Never the owners (Relab), rates, valuations, the title or
   // legal description, and never the bedroom count on its own: the room wording comes only from Tim's call on each room (FVC.wording).
@@ -270,7 +276,8 @@
       v = String(v == null ? '' : v).replace(/\s+/g, ' ').trim(); if (!v || /^(unknown|n\/?a|none|-)$/i.test(v)) return;
       if ((k === 'pFloor' || k === 'pLand') && /^\d+(\.\d+)?$/.test(v)) v = Number(v).toLocaleString('en-NZ') + ' m²';
       out.push({ key: k, label, value: v }); });
-    return out;
+    // parking once: the count when there is one, otherwise the description
+    return out.some(x => x.key === 'parking_spaces') ? out.filter(x => x.key !== 'pPark') : out;
   }
   const tickedLines = h => ((h && h.lines) || []).filter(l => l && l.ticked && String(l.text || '').trim()).map(l => String(l.text).replace(/\s+/g, ' ').trim());
   // the phase B sections from the set-up: { header, before: [the sections that go before the opinion of price], reviews }
@@ -279,8 +286,10 @@
     const frame = { focus: { x: num0((ho.focus || {}).x, 0, 100, 50), y: num0((ho.focus || {}).y, 0, 100, 50) }, zoom: num0(ho.zoom, 1, 3, 1), bright: num0(ho.bright, 0.5, 1.5, 1) };
     if (s.header === 'own' ? !!ho.asset : httpsUrl(ho.url)) {
       o.header = s.header === 'own'
-        ? Object.assign({ type: 'header', stage: STAGES.header, src: 'asset', asset: String(ho.asset), kind: ho.kind === 'video' ? 'video' : 'image', credit: String(ho.credit || '').replace(/\s+/g, ' ').trim().slice(0, 120), start: num0(ho.start, 0, 3600, 0) }, frame)
-        : Object.assign({ type: 'header', stage: STAGES.header, src: 'library', url: String(ho.url).trim(), kind: VIDEO_URL.test(ho.url) ? 'video' : 'image', credit: LIBRARY_CREDIT, start: 0 }, frame);
+        ? Object.assign({ type: 'header', stage: STAGES.header, src: 'asset', asset: String(ho.asset), kind: ho.kind === 'video' ? 'video' : 'image', credit: String(ho.credit || '').replace(/\s+/g, ' ').trim().slice(0, 120) }, frame)
+        : Object.assign({ type: 'header', stage: STAGES.header, src: 'library', url: String(ho.url).trim(), kind: VIDEO_URL.test(ho.url) ? 'video' : 'image', credit: LIBRARY_CREDIT }, frame);
+      // a video header is a short slow loop (Tim, 28 November 2026, 9:22am): its playback speed, 0.5 to 1.0, 0.6 unless Tim sets it
+      if (o.header.kind === 'video') o.header.speed = clipSpeed(ho.speed);
     }
     if (s.intro && s.intro.asset) o.before.push({ type: 'intro', stage: STAGES.intro, asset: String(s.intro.asset) });
     const lines = tickedLines(s.heard);
@@ -303,9 +312,12 @@
     const named = [].concat(((s.heard && s.heard.lines) || []).map((l, i) => ['Line ' + (i + 1) + ' of What I heard', l && l.text]),
       [['The advertisement', ad.title], ['The advertisement', ad.body], ['The ideal buyers', by.text]], (by.tags || []).map(t => ['The ideal buyers', t]),
       [['The credit line', ho.credit]], (hm.details || []).map(d => ['A key detail', (d || []).join(' ')]));
-    for (const [where, t] of named) { const w = wordingProblem(t); if (w) return where + ': ' + w.charAt(0).toLowerCase() + w.slice(1) + ' Change it or take it out, then save.'; }
+    for (const [where, t] of named) { const w = wordingProblem(t) || contactProblem(t); if (w) return where + ': ' + w.charAt(0).toLowerCase() + w.slice(1) + ' Change it or take it out, then save.'; }
     return '';
   }
+  // a link, phone number or email in a line a vendor reads: never allowed (the same test as the drafting function's, fn/prefill_shared.ts)
+  const CONTACT_RE = [/\b(?:https?:\/\/|www\.)\S+/i, /\]\([^)]*\)/, /(?:\+\s?64|\b0)[\s().-]*\d(?:[\s().-]*\d){5,10}\b/, /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+\.[A-Za-z]/];
+  const contactProblem = t => CONTACT_RE.some(re => re.test(String(t || ''))) ? 'Take out the link, phone number or email: they don\'t belong in this wording.' : '';
   const styleOf = sec => 'object-position:' + num0((sec.focus || {}).x, 0, 100, 50) + '% ' + num0((sec.focus || {}).y, 0, 100, 50) + '%;transform-origin:' + num0((sec.focus || {}).x, 0, 100, 50) + '% ' + num0((sec.focus || {}).y, 0, 100, 50) + '%;transform:scale(' + num0(sec.zoom, 1, 3, 1) + ');filter:brightness(' + num0(sec.bright, 0.5, 1.5, 1) + ')';
   // the header: a photo, or a video that plays muted and looped, with its still frame for paper and for reduced motion. A library
   // photo is credited "DunedinNZ"; Tim's own carries his credit line if he wrote one. Nothing to show: no header at all.
@@ -315,7 +327,7 @@
     else { const a = ((ev && ev.assets) || {})[sec.asset]; if (!a || !a.url) return ''; url = a.url; still = a.still || ''; mime = a.mime || ''; }
     const st = styleOf(sec), credit = String(sec.credit || '').trim();
     const media = sec.kind === 'video'
-      ? '<video class="apv-hero-m" autoplay muted loop playsinline preload="metadata" data-start="' + esc(num0(sec.start, 0, 3600, 0)) + '"' + (still ? ' poster="' + esc(still) + '"' : '') + ' style="' + st + '" aria-hidden="true"><source src="' + esc(url) + '"' + (mime ? ' type="' + esc(mime) + '"' : '') + '></video>'
+      ? '<video class="apv-hero-m" autoplay muted loop playsinline preload="metadata" data-speed="' + esc(clipSpeed(sec.speed)) + '"' + (still ? ' poster="' + esc(still) + '"' : '') + ' style="' + st + '" aria-hidden="true"><source src="' + esc(url) + '"' + (mime ? ' type="' + esc(mime) + '"' : '') + '></video>'
         + (still ? '<img class="apv-hero-still" src="' + esc(still) + '" alt="" style="' + st + '">' : '')
       : '<img class="apv-hero-m" src="' + esc(url) + '" alt="" style="' + st + '">';
     return '<figure class="apv-hero' + (sec.kind === 'video' ? ' vid' : '') + (sec.kind === 'video' && !still ? ' nostill' : '') + '" data-stage="' + esc(sec.stage) + '">' + media
@@ -325,11 +337,12 @@
   function intro(sec, ev) {
     const a = ((ev && ev.assets) || {})[sec.asset]; if (!a || !a.url) return '';
     return '<section class="apv-intro' + (a.still ? '' : ' nostill') + '" data-stage="' + esc(sec.stage) + '"><h2>A short video from me</h2><div class="apv-intro-box"><video controls playsinline preload="metadata"' + (a.still ? ' poster="' + esc(a.still) + '"' : '') + '><source src="' + esc(a.url) + '"' + (a.mime ? ' type="' + esc(a.mime) + '"' : '') + '></video>'
-      + (a.still ? '<img class="apv-intro-still" src="' + esc(a.still) + '" alt="A still from Tim\'s video introduction">' : '') + '</div><p class="apv-note apv-intro-print">The video plays on the web version of this appraisal.</p></section>';
+      + (a.still ? '<img class="apv-intro-still" src="' + esc(a.still) + '" alt="A still from my video introduction">' : '') + '</div><p class="apv-note apv-intro-print">The video plays on the web version of this appraisal.</p></section>';
   }
   function heard(sec, f) {
     const items = (sec.items || []).filter(x => String(x || '').trim()); if (!items.length) return '';
-    return '<section class="apv-heard" data-stage="' + esc(sec.stage) + '"><h2>What I heard from you</h2><ul class="apv-list">' + items.map(x => '<li>' + inline(x, f) + '</li>').join('') + '</ul></section>';
+    // plain text only: escaped, never a link or markup (the review of 5b248b9)
+    return '<section class="apv-heard" data-stage="' + esc(sec.stage) + '"><h2>What I heard from you</h2><ul class="apv-list">' + items.map(x => '<li>' + quote(x) + '</li>').join('') + '</ul></section>';
   }
   // their home as a listing could show it, clearly a mockup: Tim's photos in his order, the key details he ticked, his advertisement.
   // With no photo to show and no advertisement ticked, nothing is drawn.
@@ -346,7 +359,7 @@
   function buyers(sec, f) {
     const tags = (sec.tags || []).filter(t => String(t || '').trim());
     if (!String(sec.text || '').trim() && !tags.length) return '';
-    return '<section class="apv-buyers" data-stage="' + esc(sec.stage) + '"><h2>The buyers I have in mind</h2>' + paras(sec.text).map(p => '<p>' + inline(p, f) + '</p>').join('')
+    return '<section class="apv-buyers" data-stage="' + esc(sec.stage) + '"><h2>The buyers I have in mind</h2>' + paras(sec.text).map(p => '<p>' + quote(p) + '</p>').join('')
       + (tags.length ? '<p class="apv-tags">' + tags.map(t => '<span class="apv-tag">' + esc(t) + '</span>').join(' ') + '</p>' : '') + '</section>';
   }
   // which of Tim's reviews a vendor reads: ticked, still on Google, and words a vendor may read; newest first
@@ -574,5 +587,5 @@
     vendorComp, VENDOR_COMP, STATUS_WORDS, RINGS, ringWords, compsRule, reportPacks, reportLine, matchPhoto, addrParts, addrSame, addrMatch, adShown, cmpShown, evidence,
     METHODS, CAMPAIGNS, MAX_WEEKS, campaignOf, waveFor, stepsFor, methodSentence, isHill, suburbOf, plansFor, checkSetup, writeStandard, sectionsProblem,
     DEFAULT_NOTE, DALMORE_LINE, HEAD_AND_SHOULDERS, VALUATION_LABEL,
-    phaseB, checkSections, homeFacts, HOME_FACTS, HOME_FACT_KEYS, MOCKUP_LABEL, LIBRARY_CREDIT, STAGES, reviewsShown, httpsUrl, VIDEO_URL };
+    phaseB, checkSections, homeFacts, CLIP, clipSpeed, clipLen, HOME_FACTS, HOME_FACT_KEYS, MOCKUP_LABEL, LIBRARY_CREDIT, STAGES, reviewsShown, httpsUrl, VIDEO_URL };
 })();

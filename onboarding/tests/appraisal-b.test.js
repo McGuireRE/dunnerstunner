@@ -3,8 +3,10 @@
 //   Nothing uploaded or ticked: no phase B section on the appraisal (no heading, no placeholder), and each appears once it has content
 //   (Tim, 28 November 2026). The header: "Leave it to Claude" with no link shows none, a library link is credited DunedinNZ; "Use my
 //   own": a photo made ready for the web and filed in appraisal-media with Tim's framing (drag), zoom, brightness and credit; a video
-//   filed in appraisal-video with a still frame, muted and looped on the page, the still in print, the old header removed; over 150 MB
-//   refused plainly; the storage plan's own limit said plainly. A video introduction, played by the vendor. What I heard from you: the AI
+//   made into a short slow loop on the device (a 4 to 12 second segment, 8 by default, others refused; only the clip uploaded, its
+//   still frame from the clip), muted and looped at the speed Tim sets (0.6 by default, stored and applied), the still in print and for
+//   reduced motion, the old header removed; with no re-encoding, a short file used as it is and anything else refused with "Choose a
+//   short clip of up to 12 seconds, or use a photo." A video introduction, played by the vendor, capped at 50 MB. What I heard from you: the AI
 //   (mocked) drafts unticked lines, never from the client heart, logged with the appraisal; only ticked lines show; a ticked line about
 //   the fee is refused; the AI's private note goes to Tim's private notes, never the page. The mockup listing: photos from the one store
 //   by room, in Tim's order, the key details he ticked (never the Relab owners), the room wording from his calls, the advertisement
@@ -90,7 +92,7 @@ const PACK = o => Object.assign({ format: 'mre.reviews/1', profile: 'Tim McGuire
     const c = document.createElement('canvas'); c.width = 900; c.height = 600; const g = c.getContext('2d'); g.fillStyle = '#2a6'; g.fillRect(0, 0, 900, 600); g.fillStyle = '#fff'; g.fillRect(100, 100, 200, 200);
     const png = await new Promise(r => c.toBlob(r, 'image/png')); const b2 = async bl => { const u = new Uint8Array(await bl.arrayBuffer()); let s = ''; for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode(...u.subarray(i, i + 0x8000)); return btoa(s); };
     let webm = null; try { const st = c.captureStream(10), rec = new MediaRecorder(st, { mimeType: 'video/webm' }), parts = []; rec.ondataavailable = e => parts.push(e.data); rec.start(100);
-      for (let i = 0; i < 12; i++) { g.fillStyle = i % 2 ? '#a26' : '#26a'; g.fillRect(0, 0, 900, 600); await new Promise(r => setTimeout(r, 80)); } rec.stop(); await new Promise(r => { rec.onstop = r; }); webm = await b2(new Blob(parts, { type: 'video/webm' })); } catch (e) { webm = null; }
+      for (let i = 0; i < 60; i++) { g.fillStyle = i % 2 ? '#a26' : '#26a'; g.fillRect(0, 0, 900, 600); g.fillStyle = '#fff'; g.fillRect(i * 12, 250, 60, 60); await new Promise(r => setTimeout(r, 100)); }   /* about six seconds */ rec.stop(); await new Promise(r => { rec.onstop = r; }); webm = await b2(new Blob(parts, { type: 'video/webm' })); } catch (e) { webm = null; }
     return { png: await b2(png), webm };
   });
   expect(!!media.webm, 'the test could record a short video in the browser');
@@ -143,31 +145,60 @@ const PACK = o => Object.assign({ format: 'mre.reviews/1', profile: 'Tim McGuire
   await p.goto(PB + 'appraisals/AVB/present'); await wait(p, 900); h = await doc(p);
   expect(/object-position:25% 80%/.test(h) && /scale\(1\.5\)/.test(h) && /brightness\(1\.2\)/.test(h) && /Photo by Tim/.test(h) && !/DunedinNZ/.test(h), 'presenting: Tim\'s own photo with his framing and credit');
 
-  // ── 4. Use my own: a video, with a still frame; the photo it replaces removed ──
+  // ── 4. Use my own: a short slow loop (Tim, 28 Nov 9:22am): a 4 to 12 second clip made on the device, only the clip uploaded ──
   await p.goto(sections()); await wait(p, 900);
-  const big = path.join(__dirname, 'out', 'rb-big-video.webm'); fs.writeFileSync(big, ''); fs.truncateSync(big, 151 * 1024 * 1024);
-  await p.setInputFiles('#absHeaderFile', big); await wait(p, 800);
-  expect(/over 150 MB, so it can't be used/.test(await note(p, 'absHeaderFile') || '') && (await db(p)).appraisal_assets.length === 1, 'a video over 150 MB is refused plainly; nothing filed'); fs.unlinkSync(big);
-  await setLS(p, { mockVideoLimit: '100' }); await p.setInputFiles('#absHeaderFile', [WEBM]); await wait(p, 2500);
-  expect(/Free plan the limit is 50 MB/.test(await note(p, 'absHeaderFile') || ''), 'a video over the storage plan\'s limit: said plainly, with what the plans allow'); await setLS(p, { mockVideoLimit: null });
-  await p.setInputFiles('#absHeaderFile', [WEBM]); await wait(p, 3500);
+  // a save that fails after the file is filed: the new file and its row are taken off again, the old header stays
+  const before4 = await db(p); await setLS(p, { mockFailRpc: 'agent_appraisal_save' });
+  await p.setInputFiles('#absHeaderFile', [PNGF]); await wait(p, 1800); await setLS(p, { mockFailRpc: null });
+  d = await db(p); out.strays = { note: await note(p, 'absHeaderFile'), assets: d.appraisal_assets.length, objs: Object.keys(d.storage_objects).filter(k => k.startsWith('appraisals/AVB/')).length, before: Object.keys(before4.storage_objects).filter(k => k.startsWith('appraisals/AVB/')).length };
+  expect(/taken off again/.test(out.strays.note || '') && out.strays.assets === 1 && out.strays.objs === out.strays.before && d.appraisal_assets[0].id === before4.appraisal_assets[0].id, 'a failed save leaves no stray file or row: ' + JSON.stringify(out.strays));
+  await p.goto(sections()); await wait(p, 900);
+  expect(await p.inputValue('#absSegLen') === '8' && await p.getAttribute('#absSegLen', 'min') === '4' && await p.getAttribute('#absSegLen', 'max') === '12', 'the clip length: 8 seconds unless Tim sets it, 4 to 12');
+  for (const bad of ['3', '13']) { await p.fill('#absSegLen', bad); await p.setInputFiles('#absHeaderFile', [WEBM]); await wait(p, 500);
+    expect(/clip length from 4 to 12 seconds/.test(await note(p, 'absHeaderFile') || '') && (await db(p)).appraisal_assets.length === 1, 'a clip of ' + bad + ' seconds is refused, nothing filed'); }
+  await p.fill('#absSegStart', '1'); await p.fill('#absSegLen', '4');
+  await p.setInputFiles('#absHeaderFile', [WEBM]); await p.waitForFunction(() => { const n = document.getElementById('bn-absHeaderFile'); return n && /clip is uploaded|Not |Choose/.test(n.textContent); }, null, { timeout: 30000 }).catch(() => {}); await wait(p, 600);
   d = await db(p); ha = d.appraisal_assets.filter(a => a.role === 'header'); out.headerVideo = ha;
-  expect(ha.length === 1 && ha[0].kind === 'video' && ha[0].bucket === 'appraisal-video' && ha[0].mime_type === 'video/webm' && /header\/.*\.webm$/.test(ha[0].path), 'the video filed in appraisal-video, the photo it replaced taken off');
-  expect(!!ha[0].still_path && d.storage_objects[ha[0].still_path] && d.storage_objects[ha[0].still_path].bucket === 'appraisal-media' && /still frame/.test(await note(p, 'absHeaderFile') || ''), 'a still frame was taken and kept in appraisal-media');
+  out.clipNote = await note(p, 'absHeaderFile');
+  expect(ha.length === 1 && ha[0].kind === 'video' && ha[0].bucket === 'appraisal-video' && ha[0].mime_type === 'video/webm' && /header\/.*\.webm$/.test(ha[0].path), 'the clip filed in appraisal-video as WebM, the photo it replaced taken off: ' + out.clipNote);
+  const so = ha[0] && d.storage_objects[ha[0].path];
+  expect(so && so.size !== WEBM.buffer.length && so.size < 50 * 1024 * 1024 && ha[0].width <= 1280 && ha[0].duration_s != null && ha[0].duration_s <= 4.5, 'only the re-encoded clip is uploaded, never the original: ' + JSON.stringify({ size: so && so.size, original: WEBM.buffer.length, w: ha[0] && ha[0].width, d: ha[0] && ha[0].duration_s }));
+  expect(/4 second clip is uploaded/.test(out.clipNote || ''), 'the button says the clip is uploaded and the original stays on the device');
+  expect(!!ha[0].still_path && d.storage_objects[ha[0].still_path] && d.storage_objects[ha[0].still_path].bucket === 'appraisal-media', 'a still frame taken from the clip, kept in appraisal-media');
   expect(!Object.keys(d.storage_objects).some(k => /header\/.*\.jpg$/.test(k) && !/-still\.jpg$/.test(k)), 'the replaced photo is removed from storage too');
-  expect(!!(await p.$('#absStart')), 'a video can be set to start part way');
-  await p.fill('#absStart', '2'); expect(/Saved/.test(await saveSections(p) || ''), 'start saved');
+  expect(await p.inputValue('#absSpeed') === '0.6', 'the playback speed: 0.6 unless Tim sets it');
+  await p.fill('#absSpeed', '0.8'); await p.dispatchEvent('#absSpeed', 'input'); expect(/Saved/.test(await saveSections(p) || ''), 'speed saved');
+  expect((await av(p)).setup.headerOpt.speed === 0.8 && (await av(p)).sections.find(s => s.type === 'header').speed === 0.8, 'the speed is stored in the section');
+  await setLS(p, { mockVideoLimit: '100' }); await p.setInputFiles('#absHeaderFile', [WEBM]); await p.waitForFunction(() => { const n = document.getElementById('bn-absHeaderFile'); return n && n.dataset.kind === 'err'; }, null, { timeout: 30000 }).catch(() => {});
+  expect((await note(p, 'absHeaderFile') || '').startsWith('Choose a short clip of up to 12 seconds, or use a photo.'), 'a clip the storage refuses: the plain message'); await setLS(p, { mockVideoLimit: null });
   await p.goto(PB + 'appraisals/AVB/present'); await wait(p, 1200); h = await doc(p);
-  expect(/<video class="apv-hero-m" autoplay="" muted="" loop="" playsinline=""/.test(h) && /data-start="2"/.test(h) && /apv-hero-still/.test(h), 'presenting: the video plays muted and looped, from where Tim set it, with its still frame');
-  out.muted = await p.evaluate(() => { const v = document.querySelector('video.apv-hero-m'); return v ? v.muted : null; }); expect(out.muted === true, 'the header video is muted');
+  expect(/<video class="apv-hero-m" autoplay="" muted="" loop="" playsinline=""/.test(h) && /data-speed="0.8"/.test(h) && /apv-hero-still/.test(h), 'presenting: the clip plays muted and looped, at Tim\'s speed, with its still frame');
+  out.rate = await p.evaluate(() => { const v = document.querySelector('video.apv-hero-m'); return v ? { muted: v.muted, rate: v.playbackRate, loop: v.loop } : null; });
+  expect(out.rate && out.rate.muted && out.rate.loop && Math.abs(out.rate.rate - 0.8) < 0.001, 'the speed is applied to the playing clip: ' + JSON.stringify(out.rate));
   await p.emulateMedia({ media: 'print' });
   out.print = await p.evaluate(() => ({ video: getComputedStyle(document.querySelector('.apv-hero video')).display, still: getComputedStyle(document.querySelector('.apv-hero-still')).display }));
-  expect(out.print.video === 'none' && out.print.still === 'block', 'in print: the still frame, not the video: ' + JSON.stringify(out.print));
-  await p.emulateMedia({ media: 'screen' });
+  expect(out.print.video === 'none' && out.print.still === 'block', 'in print: the still frame, not the clip: ' + JSON.stringify(out.print));
+  await p.emulateMedia({ media: 'screen', reducedMotion: 'reduce' }); await p.reload(); await wait(p, 1200);
+  out.reducedOwn = await p.evaluate(() => { const v = document.querySelector('.apv-hero video'), s = document.querySelector('.apv-hero-still'); return { still: getComputedStyle(s).display, video: getComputedStyle(v).visibility, paused: v.paused }; });
+  expect(out.reducedOwn.still === 'block' && out.reducedOwn.video === 'hidden' && out.reducedOwn.paused, 'reduced motion: the still frame shows and the clip stays still: ' + JSON.stringify(out.reducedOwn));
+  await p.emulateMedia({ reducedMotion: 'no-preference' });
+  // a browser that can't make a clip: a file up to 12 seconds and 50 MB is used as it is; anything else, the plain message
+  await p.goto(sections()); await wait(p, 900);
+  await p.evaluate(() => { window.MediaRecorder = undefined; });
+  const big = path.join(__dirname, 'out', 'rb-big-video.webm'); fs.writeFileSync(big, ''); fs.truncateSync(big, 51 * 1024 * 1024);
+  await p.setInputFiles('#absHeaderFile', big); await wait(p, 1500);
+  expect((await note(p, 'absHeaderFile') || '').startsWith('Choose a short clip of up to 12 seconds, or use a photo.'), 'no clip possible and over 50 MB: the plain message');
+  await p.setInputFiles('#absHeaderFile', [{ name: 'rb-not-a-video.webm', mimeType: 'video/webm', buffer: Buffer.from('not a video') }]); await wait(p, 1500);
+  expect((await note(p, 'absHeaderFile') || '').startsWith('Choose a short clip of up to 12 seconds, or use a photo.'), 'no clip possible and its length can\'t be read: the plain message');
+  await p.setInputFiles('#absHeaderFile', [WEBM]); await p.waitForFunction(() => { const n = document.getElementById('bn-absHeaderFile'); return n && /Uploaded|Not |Choose/.test(n.textContent); }, null, { timeout: 30000 }).catch(() => {}); await wait(p, 600);
+  d = await db(p); ha = d.appraisal_assets.filter(a => a.role === 'header'); out.fallback = { note: await note(p, 'absHeaderFile'), size: ha[0] && d.storage_objects[ha[0].path] && d.storage_objects[ha[0].path].size };
+  expect(ha.length === 1 && out.fallback.size === WEBM.buffer.length, 'no clip possible, a six-second file: used as it is: ' + JSON.stringify(out.fallback));
 
   // ── 5. the video introduction ──
   await p.goto(sections()); await wait(p, 900);
   await p.setInputFiles('#absIntroFile', [PNGF]); await wait(p, 400); expect(/MP4, WebM or MOV/.test(await note(p, 'absIntroFile') || ''), 'the introduction must be a video');
+  await p.setInputFiles('#absIntroFile', big); await wait(p, 600);
+  expect(/over 50 MB.*about a minute.*720p on your phone/.test(await note(p, 'absIntroFile') || '') && !(await db(p)).appraisal_assets.some(a => a.role === 'intro'), 'an introduction over 50 MB: refused plainly, with how to make it smaller'); fs.unlinkSync(big);
   await p.setInputFiles('#absIntroFile', [WEBM]); await wait(p, 3500);
   d = await db(p); expect(d.appraisal_assets.filter(a => a.role === 'intro').length === 1 && (await av(p)).setup.intro.asset, 'the introduction filed and used');
   await p.goto(PB + 'appraisals/AVB/present'); await wait(p, 900); h = await doc(p);
@@ -186,6 +217,9 @@ const PACK = o => Object.assign({ format: 'mre.reviews/1', profile: 'Tim McGuire
   await p.click('[data-abnote="heard"]'); expect(/RB-AI-PRIVATE/.test(await p.inputValue('#absPrivate')), 'the private note goes into Tim\'s private notes');
   await tick(p, '[data-abt="1"]'); expect(/Line 2 of What I heard: fees and commission/.test(await saveSections(p) || ''), 'a ticked line about the fee is refused at the button, naming the line');
   await tick(p, '[data-abt="1"]', false); expect(/Line 2 of What I heard/.test(await saveSections(p) || ''), 'unticked, it still can\'t be kept: change it or take it out');
+  // a link, phone number or email can't be kept in a line, ticked or not (the review of 5b248b9)
+  for (const t of ['Call me on 021 555 1234.', 'Write to rb@example.test.', 'See [my page](https://x.example.test).']) {
+    await p.fill('#absL1', t); expect(/^Line 2 of What I heard: take out the link, phone number or email/.test(await saveSections(p) || ''), 'a line holding "' + t + '" is refused at the button, naming the line'); }
   await p.click('[data-abr="1"]'); await wait(p, 300); await p.fill('#absL0', 'You are moving north for a new job, and want to be settled by March.'); await tick(p, '[data-abt="0"]');
   expect(/Saved/.test(await saveSections(p) || ''), 'saved with one line ticked');
   await p.goto(PB + 'appraisals/AVB/present'); await wait(p, 900); h = await doc(p);
@@ -235,7 +269,7 @@ const PACK = o => Object.assign({ format: 'mre.reviews/1', profile: 'Tim McGuire
   const id1 = d.tim_reviews.find(r => r.ref === 'g1').id, id2 = d.tim_reviews.find(r => r.ref === 'g2').id;
   await tick(p, `[data-rvt="${id2}"]`); await wait(p, 400);
   out.feeTick = await p.evaluate(i => { const n = document.querySelector(`[data-rvw="${i}"] .btn-note`); return n ? n.textContent + '|' + n.dataset.kind : null; }, id2);
-  expect(/can't go on an appraisal: Fees/.test(out.feeTick || '') && !(await p.isChecked(`[data-rvt="${id2}"]`)) && !(await db(p)).tim_reviews.find(r => r.id === id2).ticked, 'a review mentioning a fee can\'t be ticked, said under its tick box: ' + out.feeTick);
+  expect(out.feeTick === "This review mentions a fee or 'as is', so it can't be shown on an appraisal|err" && !(await p.isChecked(`[data-rvt="${id2}"]`)) && !(await db(p)).tim_reviews.find(r => r.id === id2).ticked, 'a review mentioning a fee can\'t be ticked, said under its tick box: ' + out.feeTick);
   await tick(p, `[data-rvt="${id1}"]`); await wait(p, 400); expect((await db(p)).tim_reviews.find(r => r.id === id1).ticked, 'a review ticked');
   await p.goto(PB + 'appraisals/AVB/present'); await wait(p, 900); h = await doc(p);
   expect(/What my clients say/.test(h) && /Sam/.test(h) && /&lt;b&gt;brilliant/.test(h) && !/Ari/.test(h) && !/No fees/.test(h), 'presenting: only the ticked review, escaped');

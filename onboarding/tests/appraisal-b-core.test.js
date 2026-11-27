@@ -95,14 +95,19 @@ expect(!/Your home as a listing/.test(draw(homeOff, ev).h), 'the mockup switched
 // the intro's asset missing (removed): nothing
 expect(!/A short video from me/.test(draw(FULL, Object.assign({}, ev, { assets: {} })).h), 'the video introduction missing from storage: not shown');
 // Tim's own header: a video, muted and looped, with its still; and a photo with his credit
-const OWNV = Object.assign(JSON.parse(JSON.stringify(EMPTY)), { header: 'own', headerOpt: { asset: 'h1', kind: 'video', credit: 'Filmed by Tim', focus: { x: 10, y: 90 }, zoom: 2, bright: 0.8, start: 3 } });
+const OWNV = Object.assign(JSON.parse(JSON.stringify(EMPTY)), { header: 'own', headerOpt: { asset: 'h1', kind: 'video', credit: 'Filmed by Tim', focus: { x: 10, y: 90 }, zoom: 2, bright: 0.8, speed: 0.75 } });
 let hv = draw(OWNV, { assets: { h1: { url: 'https://img.example.test/h.webm', still: 'https://img.example.test/h.jpg', mime: 'video/webm' } } }).h;
-expect(/<video class="apv-hero-m" autoplay muted loop playsinline/.test(hv) && /data-start="3"/.test(hv) && /apv-hero-still/.test(hv) && /Filmed by Tim/.test(hv) && !/DunedinNZ/.test(hv), 'Tim\'s own video: muted, looped, its start, its still frame, his credit');
+expect(/<video class="apv-hero-m" autoplay muted loop playsinline/.test(hv) && /data-speed="0.75"/.test(hv) && /apv-hero-still/.test(hv) && /Filmed by Tim/.test(hv) && !/DunedinNZ/.test(hv), 'Tim\'s own clip: muted, looped, slowed to his speed, its still frame, his credit');
+expect(NEW.writeStandard(OWNV, ranges, ctx).sections[0].speed === 0.75, 'the speed is stored in the section');
+[[undefined, 0.6], [0.2, 0.5], [3, 1], ['0.55', 0.55], ['', 0.6]].forEach(([v, w]) => expect(NEW.clipSpeed(v) === w, 'speed ' + v + ' reads as ' + w + ', not ' + NEW.clipSpeed(v)));
+[[3.9, ''], [4, 4], [8, 8], [12, 12], [12.5, ''], ['', ''], ['x', '']].forEach(([v, w]) => expect(NEW.clipLen(v) === w, 'a segment of ' + v + ' seconds: ' + JSON.stringify(NEW.clipLen(v))));
+expect(NEW.CLIP.len === 8 && NEW.CLIP.min === 4 && NEW.CLIP.max === 12 && NEW.CLIP.maxBytes === 52428800, 'the clip rules: 4 to 12 seconds, 8 by default, 50 MB');
+expect(!('speed' in NEW.writeStandard(Object.assign(JSON.parse(JSON.stringify(EMPTY)), { headerOpt: { url: 'https://library.example.test/x.jpg', speed: 0.7 } }), ranges, ctx).sections[0]), 'a photo header has no speed');
 expect(!/apv-hero/.test(draw(OWNV, {}).h), '"Use my own" with the file not to hand: no header');
 const noStill = draw(OWNV, { assets: { h1: { url: 'https://img.example.test/h.webm', mime: 'video/webm' } } }).h;
 expect(/apv-hero vid nostill/.test(noStill), 'a video without a still frame is marked, so print leaves it out');
 const libVid = Object.assign(JSON.parse(JSON.stringify(EMPTY)), { headerOpt: { url: 'https://library.example.test/rb-hill.mp4' } });
-expect(/<video class="apv-hero-m" autoplay muted loop/.test(draw(libVid).h), 'library footage plays muted and looped');
+expect(/<video class="apv-hero-m" autoplay muted loop[^>]*data-speed="0.6"/.test(draw(libVid).h), 'library footage plays muted and looped, slowly by default');
 const badUrl = Object.assign(JSON.parse(JSON.stringify(EMPTY)), { headerOpt: { url: 'javascript:alert(1)' } });
 expect(!/apv-hero/.test(draw(badUrl).h) && /https:\/\//.test(NEW.checkSections(badUrl)), 'a header link that isn\'t https is never drawn, and Tim is told');
 
@@ -122,5 +127,22 @@ expect(/current condition/.test(NEW.checkSections(asIs)), 'a ticked advertisemen
 const feeLine = JSON.parse(JSON.stringify(EMPTY)); feeLine.heard.lines = [{ text: 'You asked about my fee.', ticked: false }];
 expect(/^Line 1 of What I heard: fees and commission/.test(NEW.checkSections(feeLine)), 'an unticked line about the fee is refused too (the database keeps no such draft), naming the line: ' + NEW.checkSections(feeLine));
 feeLine.heard.lines[0].text = 'You asked how I work.'; expect(NEW.checkSections(feeLine) === '', 'changed: fine');
+
+// ── links, phone numbers and emails never reach a vendor (the review of 5b248b9) ──
+['Call me on 021 555 1234.', 'Email rb@example.test any time.', 'See [my page](https://x.example.test).', 'Go to www.example.test now.'].forEach(t => {
+  const a = JSON.parse(JSON.stringify(EMPTY)); a.heard.lines = [{ text: 'Fine.', ticked: true }, { text: t, ticked: false }];
+  expect(/^Line 2 of What I heard: take out the link, phone number or email/.test(NEW.checkSections(a)), 'a line holding "' + t + '" can\'t be kept, ticked or not, naming the line: ' + NEW.checkSections(a));
+  const b2 = JSON.parse(JSON.stringify(EMPTY)); b2.buyers.text = t; expect(/^The ideal buyers: take out the link/.test(NEW.checkSections(b2)), 'the ideal buyers holding "' + t + '" are refused');
+  const c2 = JSON.parse(JSON.stringify(EMPTY)); c2.home.ad.body = t; expect(/^The advertisement: take out the link/.test(NEW.checkSections(c2)), 'the advertisement holding "' + t + '" is refused'); });
+['650 m² of land, built 1978, 3 bedrooms.', '$520,000 to $575,000', 'Moving by 1 March 2027.'].forEach(t => { const a = JSON.parse(JSON.stringify(EMPTY)); a.heard.lines = [{ text: t, ticked: true }]; expect(NEW.checkSections(a) === '', 'ordinary figures are fine: ' + t); });
+// even if one got through, heard and buyers draw as plain text: never a live link or markup
+const sneak = JSON.parse(JSON.stringify(EMPTY)); sneak.heard.lines = [{ text: 'See [my page](https://x.example.test) and https://y.example.test **now** <b>x</b>', ticked: true }]; sneak.buyers = { text: '[my page](https://x.example.test)', tags: [], ticked: true };
+const hs = draw(sneak, {}).h;
+expect(!/<a /.test(hs.slice(hs.indexOf('apv-heard'), hs.indexOf('My opinion of price'))) && /\[my page\]\(https:\/\/x\.example\.test\)/.test(hs) && /&lt;b&gt;/.test(hs) && !/<strong>now/.test(hs), 'heard and buyers are escaped plain text: no anchor, no bold, no markup');
+// parking once, preferring the count
+const pk = NEW.homeFacts([{ key: 'pPark', value: 'Off-street', value_id: 'p1', source: 'tim' }, { key: 'parking_spaces', value: '2', value_id: 'p2', source: 'tim' }], null).map(x => x.key);
+expect(pk.includes('parking_spaces') && !pk.includes('pPark'), 'parking shows once, the count preferred: ' + pk);
+expect(NEW.homeFacts([{ key: 'pPark', value: 'Off-street', value_id: 'p1', source: 'tim' }], null).some(x => x.key === 'pPark'), 'with no count, the parking description shows');
+expect(/alt="A still from my video introduction"/.test(r.h), 'the introduction\'s still is described in Tim\'s voice');
 
 console.log(JSON.stringify({ out, errs }, null, 1));

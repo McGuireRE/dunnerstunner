@@ -141,6 +141,9 @@ appeal to investors, case by case.
   leaves out advertisement wording with "as is", a fee or commission, but the column itself holds the quote as given.
 - The send function sets `app.appraisal_send` with `set_config('app.appraisal_send', 'on', true)` (the `true` keeps it to that
   transaction), sets the status to 'sent', and nothing else in that transaction may change the appraisal afterwards.
+- From the phase B review: the frozen snapshot must freeze the ticked Google reviews (words, stars, reviewer, date) and the header (the
+  library link or Tim's file, and its still), since today both are read live when the page draws: a review ticked or unticked later, or
+  a header replaced, must not change a copy already sent. The mockup's photos and the video introduction likewise.
 
 ## Phase B in detail (built 28 November 2026, migration 036, not applied; builds on 035)
 
@@ -153,16 +156,23 @@ as phase A wrote them (the core test compares against a frozen copy of the d0128
 
 - **The header.** "Leave it to Claude" (default): Tim pastes the link to a photo or video file from the Dunedin NZ Visual Library; it
   is credited "DunedinNZ". With no link, no header. "Use my own": a photo (made ready for the web in his browser: longest side about
-  1,920 px, JPEG, a warning if the original is small) into `appraisal-media` under `appraisals/<id>/header/`, or a video (MP4, WebM or
-  MOV, up to 150 MB, refused over that with a plain message) into the new private bucket `appraisal-video`, with a still frame taken in
-  his browser from where it starts (into `appraisal-media`). Drag on the preview to choose what stays in view; zoom, brightness and a
-  credit line; a video's start time. Videos play muted and looped; the still frame shows in print and for reduced motion (a video with
-  no still frame is left out of print). Filed in `appraisal_assets` (type and size read from storage). Uploading or removing saves at once
-  and removes the file it replaces.
-  - **The size limit.** `appraisal-media` stays at 15 MB, photos only. Videos go to the separate `appraisal-video` bucket at 150 MB.
-    Supabase's global upload limit caps every bucket: on the Free plan it can't be over 50 MB; on Pro and up it can be raised to 500 GB
-    in Storage settings. A video over the project's limit is refused with that said plainly.
-- **Video introduction** (optional): a video, filed the same way (`intro/`), played by the vendor (not on its own), its still in print.
+  1,920 px, JPEG, a warning if the original is small) into `appraisal-media` under `appraisals/<id>/header/`, or a **short slow loop**
+  from a video (Tim, 28 November 2026, 9:22am: "It might be best to have a short slow loop instead"):
+  - Tim picks the segment: where it starts and a length of 4 to 12 seconds (8 unless he sets it; outside that is refused plainly).
+  - His browser re-encodes just that segment small (canvas and MediaRecorder: at most 1,280 px wide, about 1.2 Mbit/s, no sound; WebM
+    where the browser makes it, MP4 where that is what it makes, as on iOS Safari), typically a few MB. Only the clip is uploaded, into
+    the private bucket `appraisal-video`; the original never leaves his device. The still frame is taken from the clip's first frame.
+  - It plays muted and looped at a playback speed Tim sets from 0.5 to 1.0 (0.6 unless he sets it), stored in the section
+    (`speed`). The still frame shows in print and for reduced motion (a video with no still frame is left out of print).
+  - If the browser can't re-encode, a file is accepted as it is only when it runs at most 12 seconds and is at most 50 MB; otherwise
+    "Choose a short clip of up to 12 seconds, or use a photo."
+  - Drag on the preview to choose what stays in view; zoom, brightness and a credit line. Filed in `appraisal_assets` (type and size read
+    from storage). Uploading or removing saves at once and removes the file it replaces.
+  - **The size limit.** `appraisal-media` stays at 15 MB, photos only. The separate `appraisal-video` bucket is capped at 50 MB, matching
+    Supabase's global upload limit (the Free plan's ceiling), so nothing depends on the plan.
+- **Video introduction** (optional, Tim talking): uploaded as it is, up to 50 MB ("This video is over 50 MB, so it can't be used. Keep it
+  under about a minute, or record it at 720p on your phone, then try again."), filed the same way (`intro/`), played by the vendor (not on
+  its own), its still in print.
 - **What I heard from you.** "Draft with AI" (doc-prefill, mode `appraisal_draft`, part `heard`, Sonnet, `record_heard`, auto tool choice
   and the answer-only line, logged in `ai_calls` with `appraisal_id`). It reads the vendor's answers in the question bank (Questions before
   we meet, the first visit and the questionnaire), "why they wanted to talk", Tim's notes (`tim_notes` and the first visit's notes) and
@@ -178,13 +188,16 @@ as phase A wrote them (the core test compares against a frozen copy of the d0128
   the "ideal for" tags; Tim edits and ticks.
 - **Google reviews.** Tim's reviews from the "Tim McGuire" Google Business profile (never "McGuire"), from the monthly pack below,
   pasted at `/appraisals/reviews`. New and changed reviews arrive unticked; a review naming a fee or commission, or saying "as is", can't
-  be ticked; one gone from Google is kept, unticked, marked removed. On the Sections screen, "Show my ticked Google reviews": the newest
+  be ticked ("This review mentions a fee or 'as is', so it can't be shown on an appraisal."); one gone from Google is kept, unticked, marked removed. On the Sections screen, "Show my ticked Google reviews": the newest
   six ticked show, reviewer by first name or initial, stars, month and year, the words as a quote, and a link.
 - **The wording guard and drafts.** The database's wording guard reads the whole set-up, so every line on the screen, ticked or not, must
-  pass it before saving; the screen names the line ("Line 2 of What I heard: ...").
+  pass it before saving; the screen names the line ("Line 2 of What I heard: ..."). The screen also refuses any line holding a link, a
+  phone number or an email (review of 5b248b9), and What I heard and the ideal buyers are drawn as escaped plain text, never a link.
+- **Storage.** The header and introduction add policies need the folder to name an appraisal that exists and isn't sent. An upload whose
+  save then fails is taken off again (its row and files, best effort).
 - Private notes, Relab ownership, the client heart and buyers' locations never reach the present or print views.
 - Not in this phase: the vendor's own view of these sections and their files (phase E, from the frozen snapshot, with short-lived links);
-  retaking a video's still frame from a new start time (the still is taken at upload); re-reading a library page to pick its photo for
+  re-reading a library page to pick its photo for
   Tim (he pastes the file link); the scheduled task that fills the reviews pack (written below; Tim sets it up).
 
 ### Reviews pack: `mre.reviews/1` (pasted at `/appraisals/reviews`, once a month)

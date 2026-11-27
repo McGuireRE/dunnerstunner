@@ -645,15 +645,16 @@ tests/appraisal-c2.test.js; function tests tests/appraisal-fetch-fn.test.js and 
 Builds on 035 (live). Additive only: no existing column, row, policy, function, trigger or signed-record protection changes. The new
 sections (header, intro, heard, home, buyers, reviews) are JSON in `appraisal_views.sections`, written by the portal from `setup`
 (`headerOpt`, `intro`, `heard`, `home`, `buyers`, `reviews`); no column is added there.
-- Storage: bucket `appraisal-video` (private, 150 MB, MP4, WebM, MOV). Policies on storage.objects: `appraisal_video_agent_read`,
-  `appraisal_video_agent_add` (under appraisals/<id>/header/ or /intro/, not once sent), `appraisal_video_agent_remove` (not once sent),
-  `appraisal_media_agent_add_header` (header photos and still frames in appraisal-media under header/ or intro/, not once sent). The
-  project's global upload limit caps the bucket (Free plan 50 MB at most; Pro and up up to 500 GB, set in Storage settings).
+- Storage: bucket `appraisal-video` (private, 50 MB to match the global upload limit, MP4, WebM, MOV; the header video is a 4 to 12
+  second clip re-encoded in Tim's browser, so only the clip is stored). Policies on storage.objects: `appraisal_video_agent_read`,
+  `appraisal_video_agent_add` (under appraisals/<id>/header/ or /intro/ of an appraisal that exists and isn't sent), `appraisal_video_agent_remove` (not once sent),
+  `appraisal_media_agent_add_header` (header photos and still frames in appraisal-media under header/ or intro/, of an appraisal that
+  exists and isn't sent).
 - `appraisal_assets`: appraisal_id (cascade), role header|intro, kind image|video (intro is always video), bucket appraisal-media (photos)
   | appraisal-video (videos), path (unique), still_path (a video's still frame, in appraisal-media), file_name, mime_type, size_bytes and
   still_mime (read from storage by the guard), width, height, duration_s, created_by, created_at. RLS: select, insert and delete for
   is_agent(); update revoked. `guard_appraisal_asset`: its own appraisal's folder for its role, in storage in the right bucket, a JPEG, PNG
-  or WebP photo or an MP4, WebM or MOV video up to 150 MB, a still only on a video; never updated; nothing added or removed once sent.
+  or WebP photo or an MP4, WebM or MOV video up to 50 MB, a still only on a video; never updated; nothing added or removed once sent.
 - `appraisal_drafts`: appraisal_id (cascade), part ad|heard|buyers, result (jsonb, up to 50,000), inputs (the question and fact keys sent,
   never values), model, made_by, made_at. RLS: select for is_agent() only; no direct writes. `guard_appraisal_draft`: never changes, kept
   with its appraisal, none added once sent. `appraisal_draft_save(p_appraisal, p_part, p_result, p_inputs, p_model, p_actor)`: service role

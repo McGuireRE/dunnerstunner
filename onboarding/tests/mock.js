@@ -524,7 +524,7 @@ function lw3cTable(table,op,payload,rows,single){
       if((n.kind==='image')!==(n.bucket===AMB)) throw new Error('A photo goes in appraisal-media and a video in appraisal-video');
       if((DB.appraisal_assets||[]).some(m=>m.path===n.path)) throw new Error('duplicate key value violates unique constraint "appraisal_assets_path_key"');
       const o=SO()[n.path]; if(!o||o.bucket!==n.bucket) throw new Error("The file isn't in storage yet. Try again"); n.mime_type=o.mime; n.size_bytes=o.size;
-      if(n.kind==='image'&&!AM_MIME.includes(n.mime_type)) throw new Error('Photos must be JPEG, PNG or WebP'); if(n.kind==='video'&&!AV_MIME.includes(n.mime_type)) throw new Error('Videos must be MP4, WebM or MOV'); if(n.kind==='video'&&n.size_bytes>157286400) throw new Error('Videos over 150 MB are refused');
+      if(n.kind==='image'&&!AM_MIME.includes(n.mime_type)) throw new Error('Photos must be JPEG, PNG or WebP'); if(n.kind==='video'&&!AV_MIME.includes(n.mime_type)) throw new Error('Videos must be MP4, WebM or MOV'); if(n.kind==='video'&&n.size_bytes>52428800) throw new Error('Videos over 50 MB are refused');
       n.still_mime=null; if(n.still_path){ if(n.kind!=='video') throw new Error('Only a video has a still frame'); const so=SO()[n.still_path]; if(!so||so.bucket!==AMB) throw new Error("The still frame isn't in storage yet. Try again"); if(!AM_MIME.includes(so.mime)) throw new Error('A still frame must be JPEG, PNG or WebP'); n.still_mime=so.mime; } else n.still_path=null;
       n.file_name=n.file_name||''; n.created_by=meEmail(); });
   }
@@ -556,7 +556,7 @@ function compCheck(n){ const ck=c=>{ throw new Error('new row for relation "appr
   const w=apprWording([n.compare_text||'',n.method||'']); if(w) throw new Error(w); }
 function apprBucket(){ return {
   upload:(p,blob,o)=>{ logCall('up:'+AMB+':'+p); if(offline()) return netFail(); if(!isAgentMe()) return bad('new row violates row-level security policy');
-    const f=String(p).split('/'); if(f[0]!=='appraisals'||!((f[2]==='comps'&&f.length>=5)||(['header','intro'].includes(f[2])&&f.length>=4&&!avSent(f[1])))) return bad('new row violates row-level security policy');   // 036: header/ and intro/ too, not once sent
+    const f=String(p).split('/'); if(f[0]!=='appraisals'||!((f[2]==='comps'&&f.length>=5)||(['header','intro'].includes(f[2])&&f.length>=4&&(DB.appraisal_views||[]).some(v=>v.id===f[1]&&v.status!=='sent')))) return bad('new row violates row-level security policy');   // 036: header/ and intro/ too, of an appraisal that exists and isn't sent
     if(SO()[p]) return Promise.resolve({data:null,error:{message:'The resource already exists',statusCode:'409'}});
     const mime=(o&&o.contentType)||blob.type; if(!AM_MIME.includes(mime)) return bad('mime type '+mime+' is not supported'); if(blob.size>15728640) return bad('The object exceeded the maximum allowed size');
     SO()[p]={size:blob.size,mime,bucket:AMB}; (window.__repoBlobs||={})[p]=blob; save(); return ok({path:p}); },
@@ -601,7 +601,7 @@ function lw3cRpc(name,a,me){ if(offline()) return bad('Failed to fetch');
     if(String(pk.complete)==='true'&&!skipped.length) RV().forEach(x=>{ if(!x.removed_at&&!seen.includes(x.ref)){ Object.assign(x,{removed_at:now(),ticked:false,ticked_at:null,ticked_by:null,updated_at:now()}); removed++; } });
     save(); return ok({added,updated,unchanged:same_,removed,skipped}); }
   if(name==='agent_review_tick'){ const r=RV().find(x=>x.id===a.p_id); if(!r) return bad('Review not found');
-    if(a.p_on){ if(r.removed_at) return bad("This review is no longer on your Google profile, so it can't be shown"); const w=apprWording([r.body]); if(w) return bad("This review can't go on an appraisal: "+w); }
+    if(a.p_on){ if(r.removed_at) return bad("This review is no longer on your Google profile, so it can't be shown"); const w=apprWording([r.body]); if(w) return bad("This review mentions a fee or 'as is', so it can't be shown on an appraisal"); }
     Object.assign(r,{ticked:!!a.p_on,ticked_at:a.p_on?now():null,ticked_by:a.p_on?me.email:null,updated_at:now()}); save(); return ok({id:r.id,ticked:r.ticked}); }
   if(name==='agent_comps_order'){ const ids=a.p_ids||[], mine=CP().filter(c=>c.appraisal_id===a.p_appraisal);
     if(new Set(ids).size!==ids.length||ids.length!==mine.length||ids.some(i=>!mine.some(c=>c.id===i))) return bad('The list must hold each comparable of this appraisal once');
@@ -1929,14 +1929,14 @@ async function signInvoke(o){ const b=(o&&o.body)||{}, me=S&&S.user, net='h:'+mo
     if(b.action==='finish'){ const r=sgFinish(s,ua,net,null,null); save(); if(!r.complete) return res({ok:true,complete:false}); try{ const rd=await sgLock(r.signing_id,'system (last signer finished)'); return res({ok:true,complete:true,locked:true,round:rd.round}); }catch(_){ return res({ok:true,complete:true,locked:false}); } }
   }catch(e){ return fail(e); }
   return res({error:'Bad request'},400); }
-// 036: the private video bucket (MP4, WebM, MOV, 150 MB), Tim only, under appraisals/<id>/header/ or /intro/, nothing added or
+// 036: the private video bucket (MP4, WebM, MOV, 50 MB), Tim only, under appraisals/<id>/header/ or /intro/, nothing added or
 // removed once the appraisal is sent. localStorage mockVideoLimit = bytes: the project's global upload limit (the Free plan's 50 MB).
 function videoBucket(){ return {
   upload:(p,blob,o)=>{ logCall('up:'+AVB+':'+p); if(offline()) return netFail(); if(!isAgentMe()) return bad('new row violates row-level security policy');
-    const f=String(p).split('/'); if(f[0]!=='appraisals'||!['header','intro'].includes(f[2])||f.length<4||avSent(f[1])) return bad('new row violates row-level security policy');
+    const f=String(p).split('/'); if(f[0]!=='appraisals'||!['header','intro'].includes(f[2])||f.length<4||!(DB.appraisal_views||[]).some(v=>v.id===f[1]&&v.status!=='sent')) return bad('new row violates row-level security policy');
     if(SO()[p]) return Promise.resolve({data:null,error:{message:'The resource already exists',statusCode:'409'}});
     const mime=(o&&o.contentType)||blob.type; if(!AV_MIME.includes(mime)) return bad('mime type '+mime+' is not supported');
-    const lim=Math.min(157286400,+localStorage.getItem('mockVideoLimit')||157286400); if(blob.size>lim) return bad('The object exceeded the maximum allowed size');
+    const lim=Math.min(52428800,+localStorage.getItem('mockVideoLimit')||52428800); if(blob.size>lim) return bad('The object exceeded the maximum allowed size');
     SO()[p]={size:blob.size,mime,bucket:AVB}; (window.__repoBlobs||={})[p]=blob; save(); return ok({path:p}); },
   createSignedUrl:p=>{ if(offline()) return netFail(); if(!isAgentMe()||!SO()[p]||SO()[p].bucket!==AVB) return bad('Object not found'); const bl=(window.__repoBlobs||{})[p]; return ok({signedUrl:bl?URL.createObjectURL(bl):'data:video/webm;base64,'}); },
   remove:(ps)=>{ if(offline()) return netFail(); if(!isAgentMe()) return ok([]); const gone=(ps||[]).filter(p=>{ const f=String(p).split('/'); return SO()[p]&&SO()[p].bucket===AVB&&!avSent(f[1]); }); gone.forEach(p=>{ delete SO()[p]; }); save(); return ok(gone.map(name=>({name}))); } }; }

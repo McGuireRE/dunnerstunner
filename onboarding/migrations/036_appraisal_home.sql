@@ -5,9 +5,10 @@
 -- appraisal_views.setup, so every row already there (phase A, C and C2, and the one loaded by hand) is untouched.
 --
 --   appraisal-video    a new private bucket for Tim's own header video and his video introduction (MP4, WebM or MOV, up to
---                      150 MB). The project's global upload limit caps every bucket: on the Free plan it can't pass 50 MB; on Pro
---                      and up it can be raised to 500 GB in Storage settings. appraisal-media stays photos only, at 15 MB; a header
---                      photo and every video's still frame go there, under appraisals/<appraisal>/header/ or /intro/.
+--                      50 MB, matching the project's global upload limit). The header video is a short slow loop: a 4 to 12 second
+--                      clip Tim picks, re-encoded small in his browser (Tim, 28 November 2026, 9:22am), so only that clip is stored.
+--                      appraisal-media stays photos only, at 15 MB; a header photo and every video's still frame go there, under
+--                      appraisals/<appraisal>/header/ or /intro/.
 --   appraisal_assets   one header photo, header video or video introduction on one appraisal: where it is kept, its type and size
 --                      (read from storage, never from the page), and a video's still frame (for paper and for reduced motion).
 --                      Never changed once filed: Tim adds a new one and removes the old. Nothing changes once the appraisal is sent.
@@ -25,18 +26,19 @@
 
 -- ═══════════════ the video bucket and the header and introduction folders ═══════════════
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
-values ('appraisal-video', 'appraisal-video', false, 157286400, array['video/mp4', 'video/webm', 'video/quicktime'])
+values ('appraisal-video', 'appraisal-video', false, 52428800, array['video/mp4', 'video/webm', 'video/quicktime'])
 on conflict (id) do nothing;
 create policy appraisal_video_agent_read on storage.objects for select to authenticated using (bucket_id = 'appraisal-video' and public.is_agent());
 create policy appraisal_video_agent_add on storage.objects for insert to authenticated with check (bucket_id = 'appraisal-video' and public.is_agent()
   and (storage.foldername(name))[1] = 'appraisals' and (storage.foldername(name))[3] = any (array['header', 'intro'])
-  and not exists (select 1 from public.appraisal_views v where v.id::text = (storage.foldername(name))[2] and v.status = 'sent'));
+  and exists (select 1 from public.appraisal_views v where v.id::text = (storage.foldername(name))[2] and v.status <> 'sent'));
 create policy appraisal_video_agent_remove on storage.objects for delete to authenticated using (bucket_id = 'appraisal-video' and public.is_agent()
   and not exists (select 1 from public.appraisal_views v where v.id::text = (storage.foldername(objects.name))[2] and v.status = 'sent'));
--- a header photo and the still frames, beside the comparables' photos (the 034 policy for comps/ is unchanged)
+-- a header photo and the still frames, beside the comparables' photos (the 034 policy for comps/ is unchanged). Both add policies need
+-- the folder to name an appraisal that exists and isn't sent.
 create policy appraisal_media_agent_add_header on storage.objects for insert to authenticated with check (bucket_id = 'appraisal-media' and public.is_agent()
   and (storage.foldername(name))[1] = 'appraisals' and (storage.foldername(name))[3] = any (array['header', 'intro'])
-  and not exists (select 1 from public.appraisal_views v where v.id::text = (storage.foldername(name))[2] and v.status = 'sent'));
+  and exists (select 1 from public.appraisal_views v where v.id::text = (storage.foldername(name))[2] and v.status <> 'sent'));
 
 -- ═══════════════ the header and the video introduction ═══════════════
 create table public.appraisal_assets (
@@ -67,7 +69,7 @@ revoke all on public.appraisal_assets from anon;
 revoke update, truncate, trigger, references on public.appraisal_assets from authenticated;
 
 -- a file sits in its own appraisal's folder for its role, is in storage already in the right bucket (its type and size are read from
--- storage), is a photo (JPEG, PNG, WebP) or a video (MP4, WebM, MOV, up to 150 MB); a video's still frame is a photo in the same
+-- storage), is a photo (JPEG, PNG, WebP) or a video (MP4, WebM, MOV, up to 50 MB); a video's still frame is a photo in the same
 -- folder. Once filed it never changes; nothing is added or removed once the appraisal is sent.
 create function public.guard_appraisal_asset() returns trigger
 language plpgsql security definer set search_path = public as $$
@@ -92,7 +94,7 @@ begin
   new.size_bytes := nullif(m->>'size', '')::bigint;
   if new.kind = 'image' and (new.mime_type is null or new.mime_type not in ('image/jpeg', 'image/png', 'image/webp')) then raise exception 'Photos must be JPEG, PNG or WebP'; end if;
   if new.kind = 'video' and (new.mime_type is null or new.mime_type not in ('video/mp4', 'video/webm', 'video/quicktime')) then raise exception 'Videos must be MP4, WebM or MOV'; end if;
-  if new.kind = 'video' and coalesce(new.size_bytes, 0) > 157286400 then raise exception 'Videos over 150 MB are refused'; end if;
+  if new.kind = 'video' and coalesce(new.size_bytes, 0) > 52428800 then raise exception 'Videos over 50 MB are refused'; end if;
   new.still_mime := null;
   if new.still_path is not null then
     if new.kind <> 'video' then raise exception 'Only a video has a still frame'; end if;
@@ -269,7 +271,7 @@ begin
   if coalesce(p_on, false) then
     if r.removed_at is not null then raise exception 'This review is no longer on your Google profile, so it can''t be shown'; end if;
     prob := public.appraisal_wording_problem(to_jsonb(r.body));
-    if prob <> '' then raise exception 'This review can''t go on an appraisal: %', prob; end if;
+    if prob <> '' then raise exception 'This review mentions a fee or ''as is'', so it can''t be shown on an appraisal'; end if;
   end if;
   update public.tim_reviews set ticked = coalesce(p_on, false), ticked_at = case when coalesce(p_on, false) then now() end,
     ticked_by = case when coalesce(p_on, false) then coalesce(auth.jwt()->>'email', 'agent') end, updated_at = now()

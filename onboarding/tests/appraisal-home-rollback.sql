@@ -39,7 +39,7 @@ begin
 
   -- the new bucket
   select public::text || '|' || file_size_limit || '|' || array_to_string(allowed_mime_types, ',') into x from storage.buckets where id = 'appraisal-video';
-  if x is distinct from 'false|157286400|video/mp4,video/webm,video/quicktime' then out := out || 'THE VIDEO BUCKET IS NOT AS WRITTEN: ' || coalesce(x, 'none') || '; '; else out := out || 'video bucket: private, 150 MB, MP4, WebM, MOV; '; end if;
+  if x is distinct from 'false|52428800|video/mp4,video/webm,video/quicktime' then out := out || 'THE VIDEO BUCKET IS NOT AS WRITTEN: ' || coalesce(x, 'none') || '; '; else out := out || 'video bucket: private, 50 MB, MP4, WebM, MOV; '; end if;
 
   -- shape: Row Level Security, policies, privileges, functions
   for r in select t from unnest(array['appraisal_assets', 'appraisal_drafts', 'tim_reviews']) t loop
@@ -68,12 +68,14 @@ begin
   insert into storage.objects (bucket_id, name, metadata) values ('appraisal-video', 'appraisals/' || aid || '/header/rb.webm', '{"mimetype":"video/webm","size":2000000}');
   insert into storage.objects (bucket_id, name, metadata) values ('appraisal-media', 'appraisals/' || aid || '/header/rb-still.jpg', '{"mimetype":"image/jpeg","size":40000}');
   insert into storage.objects (bucket_id, name, metadata) values ('appraisal-media', 'appraisals/' || aid || '/header/rb-photo.jpg', '{"mimetype":"image/jpeg","size":50000}');
-  insert into storage.objects (bucket_id, name, metadata) values ('appraisal-video', 'appraisals/' || aid || '/intro/rb-hello.mp4', '{"mimetype":"video/mp4","size":160000000}');
+  insert into storage.objects (bucket_id, name, metadata) values ('appraisal-video', 'appraisals/' || aid || '/intro/rb-hello.mp4', '{"mimetype":"video/mp4","size":52428801}');
   insert into storage.objects (bucket_id, name, metadata) values ('appraisal-video', 'appraisals/' || aid || '/intro/rb-ok.mp4', '{"mimetype":"video/mp4","size":30000000}');
   out := out || 'Tim adds a video, a still and a photo under header/ and intro/; ';
   begin insert into storage.objects (bucket_id, name, metadata) values ('appraisal-video', 'appraisals/' || aid || '/comps/rb.webm', '{}'); out := out || 'A VIDEO WENT INTO COMPS; '; exception when others then out := out || 'video outside header and intro: refused; '; end;
   begin insert into storage.objects (bucket_id, name, metadata) values ('appraisal-video', 'appraisals/' || sid || '/header/rb.webm', '{}'); out := out || 'A VIDEO WAS ADDED TO A SENT APPRAISAL; '; exception when others then out := out || 'sent, video: refused; '; end;
   begin insert into storage.objects (bucket_id, name, metadata) values ('appraisal-media', 'appraisals/' || sid || '/header/rb.jpg', '{}'); out := out || 'A PHOTO WAS ADDED TO A SENT APPRAISAL''S HEADER; '; exception when others then out := out || 'sent, header photo: refused; '; end;
+  begin insert into storage.objects (bucket_id, name, metadata) values ('appraisal-video', 'appraisals/' || gen_random_uuid() || '/header/rb.webm', '{}'); out := out || 'A VIDEO WENT INTO A FOLDER WITH NO APPRAISAL; '; exception when others then out := out || 'video, no such appraisal: refused; '; end;
+  begin insert into storage.objects (bucket_id, name, metadata) values ('appraisal-media', 'appraisals/not-an-id/intro/rb.jpg', '{}'); out := out || 'A PHOTO WENT INTO A FOLDER WITH NO APPRAISAL; '; exception when others then out := out || 'photo, no such appraisal: refused; '; end;
   execute 'reset role';
   execute 'set local role authenticated'; perform set_config('request.jwt.claims', vendor, true);
   begin insert into storage.objects (bucket_id, name, metadata) values ('appraisal-video', 'appraisals/' || aid || '/header/rb-v.webm', '{}'); out := out || 'A VENDOR UPLOADED A VIDEO; '; exception when others then out := out || 'vendor upload: refused; '; end;
@@ -88,7 +90,7 @@ begin
   if x is distinct from 'video/webm|2000000|image/jpeg' then out := out || 'THE TYPE AND SIZE WERE NOT READ FROM STORAGE: ' || coalesce(x, 'none') || '; '; else out := out || 'a header video filed, its type and size read from storage, not the page; '; end if;
   insert into public.appraisal_assets (appraisal_id, role, kind, bucket, path) values (aid, 'header', 'image', 'appraisal-media', 'appraisals/' || aid || '/header/rb-photo.jpg') returning id into a2;
   out := out || 'a header photo filed; ';
-  begin insert into public.appraisal_assets (appraisal_id, role, kind, bucket, path) values (aid, 'intro', 'video', 'appraisal-video', 'appraisals/' || aid || '/intro/rb-hello.mp4'); out := out || 'A VIDEO OVER 150 MB WAS FILED; '; exception when others then out := out || 'over 150 MB: ' || sqlerrm || '; '; end;
+  begin insert into public.appraisal_assets (appraisal_id, role, kind, bucket, path) values (aid, 'intro', 'video', 'appraisal-video', 'appraisals/' || aid || '/intro/rb-hello.mp4'); out := out || 'A VIDEO OVER 50 MB WAS FILED; '; exception when others then out := out || 'one byte over 50 MB: ' || sqlerrm || '; '; end;
   insert into public.appraisal_assets (appraisal_id, role, kind, bucket, path) values (aid, 'intro', 'video', 'appraisal-video', 'appraisals/' || aid || '/intro/rb-ok.mp4');
   out := out || 'an introduction filed with no still frame; ';
   begin insert into public.appraisal_assets (appraisal_id, role, kind, bucket, path) values (aid, 'intro', 'image', 'appraisal-media', 'appraisals/' || aid || '/header/rb-photo.jpg'); out := out || 'A PHOTO BECAME AN INTRODUCTION; '; exception when others then out := out || 'a photo as the introduction: refused; '; end;
@@ -136,7 +138,8 @@ begin
   if (select count(*) from public.tim_reviews where ticked) <> 0 then out := out || 'A NEW REVIEW ARRIVED TICKED; '; end if;
   select id into rv1 from public.tim_reviews where ref = 'rb-g1'; select id into rv2 from public.tim_reviews where ref = 'rb-g2'; select id into rv4 from public.tim_reviews where ref = 'rb-g4';
   select reviewed_on::text into x from public.tim_reviews where id = rv4; if x is distinct from to_char(today - 60, 'YYYY-MM') || '-01' then out := out || 'A MONTH-ONLY DATE WAS NOT THE FIRST OF THE MONTH; '; end if;
-  begin perform public.agent_review_tick(rv2, true); out := out || 'A REVIEW NAMING A FEE WAS TICKED; '; exception when others then out := out || 'fee review: ' || sqlerrm || '; '; end;
+  begin perform public.agent_review_tick(rv2, true); out := out || 'A REVIEW NAMING A FEE WAS TICKED; '; exception when others then
+    if sqlerrm = 'This review mentions a fee or ''as is'', so it can''t be shown on an appraisal' then out := out || 'fee review: refused, in the agreed words; '; else out := out || 'THE FEE REVIEW MESSAGE IS: ' || sqlerrm || '; '; end if; end;
   j := public.agent_review_tick(rv1, true); out := out || 'Tim ticks one: ' || (j->>'ticked') || '; ';
   j := public.agent_reviews_import(pack); out := out || 'same pack again: ' || (j->>'added') || ' added, ' || (j->>'unchanged') || ' unchanged; ';
   if not (select ticked from public.tim_reviews where id = rv1) then out := out || 'AN UNCHANGED REVIEW WAS UNTICKED; '; end if;
