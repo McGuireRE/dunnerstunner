@@ -144,5 +144,6 @@ const pk = NEW.homeFacts([{ key: 'pPark', value: 'Off-street', value_id: 'p1', s
 expect(pk.includes('parking_spaces') && !pk.includes('pPark'), 'parking shows once, the count preferred: ' + pk);
 expect(NEW.homeFacts([{ key: 'pPark', value: 'Off-street', value_id: 'p1', source: 'tim' }], null).some(x => x.key === 'pPark'), 'with no count, the parking description shows');
 expect(/alt="A still from my video introduction"/.test(r.h), 'the introduction\'s still is described in Tim\'s voice');
+expect(!/web version|plays on the web/i.test(r.h), 'no "plays on the web version" note under the video (Tim, 28 Nov)');
 
 console.log(JSON.stringify({ out, errs }, null, 1));

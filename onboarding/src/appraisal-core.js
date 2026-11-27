@@ -337,7 +337,7 @@
   function intro(sec, ev) {
     const a = ((ev && ev.assets) || {})[sec.asset]; if (!a || !a.url) return '';
     return '<section class="apv-intro' + (a.still ? '' : ' nostill') + '" data-stage="' + esc(sec.stage) + '"><h2>A short video from me</h2><div class="apv-intro-box"><video controls playsinline preload="metadata"' + (a.still ? ' poster="' + esc(a.still) + '"' : '') + '><source src="' + esc(a.url) + '"' + (a.mime ? ' type="' + esc(a.mime) + '"' : '') + '></video>'
-      + (a.still ? '<img class="apv-intro-still" src="' + esc(a.still) + '" alt="A still from my video introduction">' : '') + '</div><p class="apv-note apv-intro-print">The video plays on the web version of this appraisal.</p></section>';
+      + (a.still ? '<img class="apv-intro-still" src="' + esc(a.still) + '" alt="A still from my video introduction">' : '') + '</div></section>';
   }
   function heard(sec, f) {
     const items = (sec.items || []).filter(x => String(x || '').trim()); if (!items.length) return '';

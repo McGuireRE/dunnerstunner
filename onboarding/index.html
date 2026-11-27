@@ -1118,7 +1118,7 @@ body.apv-present main { max-width: 760px; padding-bottom: 48px; }
 @media (prefers-reduced-motion: reduce) { .apv-hero.vid .apv-hero-still { display: block; } .apv-hero.vid:not(.nostill) video { visibility: hidden; } }
 .apv-intro-box { position: relative; border-radius: 12px; overflow: hidden; background: #000; max-width: 640px; }
 .apv-intro-box video { display: block; width: 100%; max-height: 70vh; }
-.apv-intro-still, .apv-intro-print { display: none; }
+.apv-intro-still { display: none; }
 .apv-heard .apv-list li { margin-bottom: 6px; }
 .apv-mock { font-size: 14.5px; color: var(--muted); }
 .apv-tag.mock { color: var(--ink); border-color: var(--warn); }
@@ -1142,7 +1142,6 @@ body.apv-present main { max-width: 760px; padding-bottom: 48px; }
   .apv-intro-box { background: none; }
   .apv-intro-box video { display: none !important; }
   .apv-intro-still { display: block; width: 100%; max-height: 8cm; object-fit: cover; }
-  .apv-intro-print { display: block; }
   .apv-home-card, .apv-rev { break-inside: avoid; }
 }
 /* the sections screen (Tim only) */
@@ -7426,7 +7425,7 @@ window.JOURNEY_MEDIA_HINTS = {
   function intro(sec, ev) {
     const a = ((ev && ev.assets) || {})[sec.asset]; if (!a || !a.url) return '';
     return '<section class="apv-intro' + (a.still ? '' : ' nostill') + '" data-stage="' + esc(sec.stage) + '"><h2>A short video from me</h2><div class="apv-intro-box"><video controls playsinline preload="metadata"' + (a.still ? ' poster="' + esc(a.still) + '"' : '') + '><source src="' + esc(a.url) + '"' + (a.mime ? ' type="' + esc(a.mime) + '"' : '') + '></video>'
-      + (a.still ? '<img class="apv-intro-still" src="' + esc(a.still) + '" alt="A still from my video introduction">' : '') + '</div><p class="apv-note apv-intro-print">The video plays on the web version of this appraisal.</p></section>';
+      + (a.still ? '<img class="apv-intro-still" src="' + esc(a.still) + '" alt="A still from my video introduction">' : '') + '</div></section>';
   }
   function heard(sec, f) {
     const items = (sec.items || []).filter(x => String(x || '').trim()); if (!items.length) return '';
