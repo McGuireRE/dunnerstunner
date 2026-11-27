@@ -77,7 +77,9 @@ begin
   out := out || 'report filed in the one store, folder ' || coalesce(x, 'NONE') || '; ';
   -- it stays a report and is never shared; nothing else becomes one
   begin perform public.agent_repo_share(d1, true); out := out || 'A REPORT WAS SHARED; '; exception when undefined_function then
-    begin update public.property_documents set shared_at = now() where id = d1; out := out || 'A REPORT WAS SHARED; '; exception when others then out := out || 'sharing a report: ' || sqlerrm || '; '; end; end;
+    begin update public.property_documents set shared_at = now() where id = d1; out := out || 'A REPORT WAS SHARED; '; exception when others then out := out || 'sharing a report: ' || sqlerrm || '; '; end;
+    -- live has agent_repo_share, which refuses through the same guard
+    when others then out := out || 'sharing a report: ' || sqlerrm || '; '; end;
   begin update public.property_documents set kind = 'Other' where id = d1; out := out || 'A REPORT BECAME ANOTHER KIND; '; exception when others then out := out || 'kind away: refused; '; end;
   begin update public.property_documents set kind = 'Comparables or market report' where id = d2; out := out || 'A LIM BECAME A REPORT; '; exception when others then out := out || 'kind to report: ' || sqlerrm || '; '; end;
   update public.property_documents set title = 'RB report, retitled' where id = d1; get diagnostics n = row_count; out := out || 'title change allowed: ' || n || '; ';
