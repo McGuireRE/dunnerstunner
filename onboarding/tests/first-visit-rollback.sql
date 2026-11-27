@@ -10,6 +10,7 @@ declare out text := ''; r jsonb; fv1 uuid := gen_random_uuid(); fv2 uuid := gen_
   p1 uuid := gen_random_uuid(); p2 uuid; p3 uuid; pid uuid; k1 uuid := gen_random_uuid(); k2 uuid := gen_random_uuid(); k3 uuid := gen_random_uuid(); k4 uuid := gen_random_uuid();
   r1 uuid := gen_random_uuid(); r2 uuid := gen_random_uuid(); r3 uuid := gen_random_uuid(); r4 uuid := gen_random_uuid(); r5 uuid := gen_random_uuid(); r6 uuid := gen_random_uuid();
   n int; n2 int; x text; ag2 uuid; ag3 uuid; fv5 uuid := gen_random_uuid(); p5 uuid; a3 jsonb; k5 uuid := gen_random_uuid(); sig0 bigint; sigsha text; pre_signed text; pp1 uuid; c1 uuid; ph uuid := gen_random_uuid();
+  k6 uuid := gen_random_uuid(); pp6 uuid; o6 uuid; d6 uuid; bl6 uuid; bm6 uuid; dr6 uuid; g6 uuid;
   agent text := json_build_object('email', (select email from public.agents order by created_at limit 1), 'sub', '22222222-2222-2222-2222-222222222222', 'role', 'authenticated')::text;
   vendor text := '{"email":"rb-lw1-vendor@example.com","sub":"11111111-1111-1111-1111-1111111110b1","role":"authenticated"}';
 begin
@@ -141,6 +142,27 @@ begin
   if (select count(*) from public.property_people where property_id = p2 and lower(email) = 'rb-lw1-vendor@example.com') <> 1 then out := out || 'TWO PEOPLE ON THE PROPERTY SHARE ONE EMAIL; '; end if;
   if (select property_person_id from public.first_visit_people where id = k5) is distinct from pp1 then out := out || 'THE VISIT DOES NOT POINT AT THE PERSON ON FILE; '; end if;
   if (select count(*) from public.property_people where property_id = p2 and role = 'owner' and legal_name = 'Robbie') > 0 then out := out || 'THE ROW TYPED AT THE DOOR IS STILL AN OWNER; '; end if;
+  -- the same, but the row typed at the door has since signed an offer (an offer signer): it stays as it is, nothing is set aside
+  perform public.agent_fv_person(fv2, k6, 'Robbo Lw1', '', '', true, null, true);
+  select property_person_id into pp6 from public.first_visit_people where id = k6;
+  execute 'reset role';
+  insert into public.property_offers (property_id) values (p2) returning id into o6;
+  insert into public.property_documents (property_id, name, path) values (p2, 'Blank.pdf', 'rb-lw1/' || o6 || '/blank.pdf') returning id into d6;
+  insert into public.offer_blanks (property_id, document_id, sha256, size_bytes, file_name, pages, sizes, edition_checked, created_by)
+    values (p2, d6, repeat('ab', 32), 10, 'Blank.pdf', 1, '[[595,842]]', true, 'test') returning id into bl6;
+  insert into public.offer_blank_maps (blank_id, version, places, created_by) values (bl6, 1, '[{"id":"chattels","kind":"area","page":1,"x":40,"y":400,"w":300,"h":60}]', 'test') returning id into bm6;
+  insert into public.offer_drafts (offer_id, property_id, number, blank_id, blank_sha256, map_id, details, placed, needs, path, sha256, size_bytes, created_by)
+    values (o6, p2, 1, bl6, repeat('ab', 32), bm6, '{}', '[]', '[]', 'rb-lw1/' || o6 || '/draft1.pdf', repeat('ef', 32), 10, 'test') returning id into dr6;
+  insert into public.offer_signings (offer_id, property_id, draft_id, draft_sha256, method, pages, places, places_sha256, released_by)
+    values (o6, p2, dr6, repeat('ef', 32), 'in_person', '[[595,842]]', '[]', repeat('12', 32), 'test') returning id into g6;
+  insert into public.offer_signers (signing_id, position, name, email, person_id) values (g6, 1, 'Robbo Lw1', 'rb-lw1-robbo@example.com', pp6);
+  execute 'set local role authenticated';
+  select count(*) into n from public.property_people where property_id = p2 and role = 'former';
+  perform public.agent_fv_person(fv2, k6, 'Robbo Lw1', 'rb-lw1-vendor@example.com', '', true, null, true);
+  out := out || 'offer signer typed at the door: role=' || (select role from public.property_people where id = pp6) || ' email=' || coalesce(nullif((select email from public.property_people where id = pp6), ''), 'none')
+    || ' set aside=' || ((select count(*) from public.property_people where property_id = p2 and role = 'former') - n) || '; ';
+  if (select role from public.property_people where id = pp6) is distinct from 'owner' or (select email from public.property_people where id = pp6) <> '' then out := out || 'AN OFFER SIGNER WAS CHANGED; '; end if;
+  if (select count(*) from public.property_people where property_id = p2 and role = 'former') <> n then out := out || 'SOMEONE WAS SET ASIDE; '; end if;
 
   -- 5. tap lists: his own entry on the profile ("First visit"), the file following; bedrooms never from here; a blank clears only this
   -- visit's own value

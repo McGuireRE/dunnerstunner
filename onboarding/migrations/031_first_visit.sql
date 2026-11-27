@@ -231,6 +231,7 @@ begin
     if ph <> '' then update public.property_people set phone = ph where id = ppid and phone is distinct from ph; end if;
     if coalesce(pp.name_from, pp.source, '') = 'appraisal' and pp.user_id is null
        and not exists (select 1 from public.first_visit_people f where f.property_person_id = pp.id and f.id <> p_key)
+       and not exists (select 1 from public.offer_signers os where os.person_id = pp.id)
        and not exists (select 1 from public.agreement_people ap join public.agreements a on a.id = ap.agreement_id where a.property_id = pp.property_id and public.norm_name(ap.legal_name) = public.norm_name(pp.legal_name)) then
       update public.property_people set role = 'former' where id = pp.id;
     end if;

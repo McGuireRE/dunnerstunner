@@ -263,7 +263,7 @@ function fvRpc(name,a,me){
     const pp=x&&x.property_person_id?PP().find(r=>r.id===x.property_person_id):null; let ppid=null;
     const other=pp&&pp.role!=='former'&&em&&!pp.email?PP().find(r=>r.property_id===pp.property_id&&r.id!==pp.id&&(r.role||'owner')!=='former'&&(r.email||'').toLowerCase()===em):null;
     if(other){ ppid=other.id; if(ph) other.phone=ph;   // the email is already someone else's on this property: that is who this is
-      if((pp.name_from||pp.source)==='appraisal'&&!pp.user_id&&!FVP().some(f=>f.property_person_id===pp.id&&f.id!==a.p_key)&&!(DB.agreement_people||[]).some(ap=>(DB.agreements||[]).some(g=>g.id===ap.agreement_id&&g.property_id===pp.property_id)&&norm(ap.legal_name)===norm(pp.legal_name))) pp.role='former'; }
+      if((pp.name_from||pp.source)==='appraisal'&&!pp.user_id&&!FVP().some(f=>f.property_person_id===pp.id&&f.id!==a.p_key)&&!(DB.offer_signers||[]).some(s=>s.person_id===pp.id)&&!(DB.agreement_people||[]).some(ap=>(DB.agreements||[]).some(g=>g.id===ap.agreement_id&&g.property_id===pp.property_id)&&norm(ap.legal_name)===norm(pp.legal_name))) pp.role='former'; }
     else if(pp&&pp.role!=='former'){ const signed=(DB.agreement_people||[]).some(ap=>ap.signed_at&&(DB.agreements||[]).some(g=>g.id===ap.agreement_id&&g.property_id===pp.property_id)&&((pp.email&&(ap.email||'').toLowerCase()===pp.email.toLowerCase())||norm(ap.legal_name)===norm(pp.legal_name)));
       if(!signed){ if(nm&&(pp.name_from||pp.source)==='appraisal') pp.legal_name=nm; if(em&&!pp.email) pp.email=em; if(ph) pp.phone=ph; pp.updated_at=now(); } ppid=pp.id; }
     else if(nm||em){ const n0=PP().filter(r=>r.property_id===v.property_id).length; ppid=mergePerson(v.property_id,nm,'',em,ph,null,'appraisal');

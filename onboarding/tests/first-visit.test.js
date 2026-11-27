@@ -316,6 +316,22 @@ const expect = (c, m) => { if (!c) errs.push(m); };
       expect((!pbv || pbv.value == null) && d.properties.find(x => x.id === 'P2').description.pBed == null, tag + ': every room off: the visit\'s own bedroom count goes: ' + JSON.stringify(pbv && pbv.value));
       expect(/not called yet/.test(await p.textContent('#fvBeds')), tag + ': and the page says so');
 
+      // ── 5c. An email added at the door that is someone else's on the property: the row typed at the door is set aside, unless that row
+      // has signed an offer (an offer signer), when it stays as it is ──
+      const ks = await p.evaluate(async vid => { const c = window.supabase.createClient('x', 'y'), k = { a: crypto.randomUUID(), b: crypto.randomUUID(), c: crypto.randomUUID() }, r = {};
+        const put = (key, name, email) => c.rpc('agent_fv_person', { p_visit: vid, p_key: key, p_name: name, p_email: email, p_phone: '', p_owner: true, p_decision_maker: null, p_here: true });
+        r.a = (await put(k.a, 'Sam Door', '')).data.property_person_id; r.b = (await put(k.b, 'Pat Door', '')).data.property_person_id; await put(k.c, 'Lee Owner', 'lee-fv@example.com');
+        const d = JSON.parse(localStorage.getItem('mockdb')); (d.offer_signers ||= []).push({ id: crypto.randomUUID(), signing_id: 'SG-fv', position: 1, name: 'Sam Door', email: 'sam-fv@example.com', person_id: r.a });
+        localStorage.setItem('mockdb', JSON.stringify(d)); return { k, r }; }, v3);
+      await p.reload(); await wait(1500);
+      await p.evaluate(async ({ vid, k }) => { const c = window.supabase.createClient('x', 'y');
+        for (const key of [k.a, k.b]) await c.rpc('agent_fv_person', { p_visit: vid, p_key: key, p_name: '', p_email: 'lee-fv@example.com', p_phone: '', p_owner: true, p_decision_maker: null, p_here: true }); }, { vid: v3, k: ks.k });
+      d = await db();
+      const rowA = d.property_people.find(x => x.id === ks.r.a), rowB = d.property_people.find(x => x.id === ks.r.b);
+      out[tag].setAside = { signer: rowA && [rowA.role, rowA.email], other: rowB && [rowB.role, rowB.email] };
+      expect(rowA && (rowA.role || 'owner') === 'owner' && !rowA.email, tag + ': the offer signer typed at the door stays as it is: ' + JSON.stringify(out[tag].setAside));
+      expect(rowB && rowB.role === 'former', tag + ': a row typed at the door with nobody signed is set aside: ' + JSON.stringify(out[tag].setAside));
+
       // ── 6. A vendor reads none of it and runs none of it ──
       await p.evaluate(() => localStorage.setItem('mocksession', JSON.stringify({ user: { id: 'v-1', email: 'robin@example.com' } }))); await p.goto(PK + '/onboarding/'); await wait(700);
       const vend = await p.evaluate(async () => {
