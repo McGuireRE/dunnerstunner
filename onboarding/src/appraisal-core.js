@@ -232,9 +232,149 @@
   }
   // anything in what was written that a vendor would read and must never see
   function sectionsProblem(sections) { const out = []; const walk = v => { if (typeof v === 'string') out.push(v); else if (v && typeof v === 'object') Object.values(v).forEach(walk); }; walk(sections); return wordingProblem(out.join(' ')); }
-  function render(rec) {
+  // ev (LW3 phase C, 034): the evidence drawn live from the database, for an appraisal written from its set-up:
+  // { comps: the shown comparables in order (vendor fields only), photos: { compId: [{ url, alt }] }, months: market_months rows,
+  //   market: show the Dunedin market report }. It goes in before the opinion of price. With no ev, or nothing in it, the page is
+  //   exactly as phase A (and 032) drew it.
+  function render(rec, ev) {
     const f = (rec && rec.fields) || {};
-    return '<article class="apv-doc"><h1>' + esc((rec && rec.title) || 'Market appraisal') + '</h1>' + ((rec && rec.sections) || []).map(s => section(s, f)).join('') + '</article>';
+    const parts = ((rec && rec.sections) || []).map(s => section(s, f));
+    const extra = rec && rec.setup && rec.setup.v && ev ? evidence(ev, f) : '';
+    if (extra) { let at = ((rec && rec.sections) || []).findIndex(s => s && s.type === 'heading' && /^my opinion of price$/i.test(String(s.text || '').trim()));
+      if (at < 0) at = ((rec && rec.sections) || []).findIndex(s => s && s.type === 'opinion'); if (at < 0) at = parts.length; parts.splice(at, 0, extra); }
+    return '<article class="apv-doc"><h1>' + esc((rec && rec.title) || 'Market appraisal') + '</h1>' + parts.join('') + '</article>';
+  }
+
+  /* ───────── LW3 phase C (034): comparables, the price dots and the Dunedin market report ───────── */
+  // the fields of a comparable a vendor may see. Tim's private note, the source link and anything not listed here never reach the page.
+  const VENDOR_COMP = ['id', 'position', 'status', 'address', 'suburb', 'price', 'sold_on', 'listed_on', 'method', 'days_to_sell', 'bedrooms', 'bathrooms', 'floor_m2', 'land_m2', 'cv', 'agency', 'sold_by_tim', 'ad_text', 'compare_text', 'compare_ticked', 'ring', 'distance_m'];
+  const vendorComp = c => { const o = {}; VENDOR_COMP.forEach(k => { if (c && c[k] !== undefined) o[k] = c[k]; }); return o; };
+  const STATUS_WORDS = { sold: 'Sold', listed: 'On the market', context: 'For context only, not comparable' };
+  const RINGS = [['suburb', 'Same suburb'], ['750m', 'Within 750 m'], ['1500m', 'Within 1.5 km'], ['further', 'Further afield']];
+  const ringWords = k => (RINGS.find(r => r[0] === k) || [])[1] || '';
+  const km = m => m >= 1000 ? (Math.round(m / 100) / 10).toString() + ' km' : Math.round(m) + ' m';
+  const num1 = v => (Math.round(+v * 10) / 10).toLocaleString('en-NZ');
+  // a quote from a listing: plain text, drawn escaped, with its line breaks. Never markup, never an instruction.
+  const quote = t => esc(t).replace(/\n{2,}/g, '</p><p>').replace(/\n/g, '<br>');
+  // what a vendor reads of the advertisement wording: only if it passes the wording rules (another agency's "as is" is never shown)
+  const adShown = c => !!String((c && c.ad_text) || '').trim() && !wordingProblem(c.ad_text);
+  const cmpShown = c => !!(c && c.compare_ticked && String(c.compare_text || '').trim());
+  function compCard(c, i, photos) {
+    const st = STATUS_WORDS[c.status] ? c.status : 'sold';
+    const price = c.price > 0 ? (st === 'listed' ? 'Asking ' : st === 'sold' ? 'Sold for ' : '') + dollars(c.price) : (st === 'listed' ? (c.method || 'Price on request') : '');
+    const when = st === 'listed' ? (c.listed_on ? 'Listed ' + longDate(c.listed_on) : '') : (c.sold_on ? 'Sold ' + longDate(c.sold_on) : '');
+    const figs = [['Price', price], ['Date', when], ['Method', st === 'listed' && !(c.price > 0) ? '' : c.method], ['Days to sell', c.days_to_sell != null && st !== 'listed' ? c.days_to_sell + ' days' : ''],
+      ['Bedrooms', c.bedrooms != null ? String(c.bedrooms) : ''], ['Bathrooms', c.bathrooms != null ? num1(c.bathrooms) : ''], ['Floor area', c.floor_m2 ? num1(c.floor_m2) + ' m²' : ''],
+      ['Land', c.land_m2 ? num1(c.land_m2) + ' m²' : ''], ['Capital value', c.cv ? dollars(c.cv) : ''], ['Agency', c.agency],
+      ['How near', [ringWords(c.ring), c.distance_m != null ? km(c.distance_m) + ' away' : ''].filter(Boolean).join(', ')]].filter(x => String(x[1] || '').trim());
+    const ph = (photos || []).filter(p => p && p.url);
+    const car = ph.length ? '<div class="apv-car" data-n="' + ph.length + '"><div class="apv-car-strip" tabindex="0" aria-label="Photos of ' + esc(c.address) + '">' + ph.map((p, k) => '<img src="' + esc(p.url) + '" alt="' + esc('Photo ' + (k + 1) + ' of ' + ph.length + ', ' + c.address) + '"' + (k ? ' loading="lazy"' : '') + ' decoding="async">').join('') + '</div>'
+      + (ph.length > 1 ? '<div class="apv-car-ctl no-print"><button type="button" class="apv-car-btn" data-car="-1" aria-label="Previous photo">‹</button><span class="apv-car-at" aria-live="polite">1 of ' + ph.length + '</span><button type="button" class="apv-car-btn" data-car="1" aria-label="Next photo">›</button></div>' : '') + '</div>' : '';
+    return '<article class="apv-comp' + (st === 'context' ? ' ctx' : '') + '" data-comp="' + esc(c.id) + '"><header class="apv-comp-h"><span class="apv-comp-n" aria-hidden="true">' + (i + 1) + '</span><div><h3>' + esc(c.address) + '</h3>'
+      + '<p class="apv-comp-tags"><span class="apv-tag st-' + st + '">' + esc(STATUS_WORDS[st]) + '</span>' + (c.sold_by_tim ? '<span class="apv-tag tim">Sold by Tim</span>' : '') + '</p></div></header>' + car
+      + (figs.length ? '<dl class="apv-figs">' + figs.map(([k, v]) => '<div><dt>' + esc(k) + '</dt><dd>' + esc(v) + '</dd></div>').join('') + '</dl>' : '')
+      + (adShown(c) ? '<div class="apv-ad"><h4>How it was advertised</h4><blockquote><p>' + quote(c.ad_text) + '</p></blockquote></div>' : '')
+      + (cmpShown(c) ? '<div class="apv-cmp"><h4>How it compares with your home</h4><p>' + quote(c.compare_text) + '</p></div>' : '') + '</article>';
+  }
+  function evidence(ev, f) {
+    const comps = (ev.comps || []).filter(c => c && c.shown !== false).map(vendorComp);
+    const dots = window.MKT && comps.length ? window.MKT.dots(comps.map((c, i) => ({ n: i + 1, price: c.price, status: c.status, label: c.address, when: c.status === 'listed' ? (c.listed_on ? 'listed ' + longDate(c.listed_on) : '') : (c.sold_on ? longDate(c.sold_on) : '') })), (f && f.ranges) || []) : '';
+    const sold = comps.filter(c => c.status !== 'listed'), listed = comps.filter(c => c.status === 'listed');
+    const nPrice = comps.filter(c => !(c.price > 0)).length;
+    const num = c => comps.indexOf(c);
+    const market = ev.market && window.MKT ? window.MKT.report(ev.months || [], (f && f.ranges) || [], { area: ev.area }) : '';
+    let h = '';
+    if (comps.length) {
+      h += '<h2>Price evidence at a glance</h2>' + (dots || '') + (nPrice ? '<p class="apv-note">' + (nPrice === 1 ? 'One comparable has' : nPrice + ' comparables have') + ' no price to show, so ' + (nPrice === 1 ? 'it isn\'t' : 'they aren\'t') + ' on the chart.</p>' : '');
+      if (sold.length) h += '<h2>Recent sales nearby</h2><div class="apv-comps">' + sold.map(c => compCard(c, num(c), (ev.photos || {})[c.id])).join('') + '</div>';
+      if (listed.length) h += '<h2>On the market now</h2><div class="apv-comps">' + listed.map(c => compCard(c, num(c), (ev.photos || {})[c.id])).join('') + '</div>';
+    }
+    if (market) h += '<h2>The Dunedin market</h2>' + market;
+    return h ? '<section class="apv-evidence">' + h + '</section>' : '';
+  }
+
+  // the comparables rule (Tim, 25 November 2026): at least five nearby sales, ideally from the last three months, going back as far as
+  // it takes to find three true comparables. Sold and "for context only" sales both count as nearby sales; only sold ones not for context
+  // are true comparables. Sales in a never-mix group are never counted for a home outside it (or the other way round).
+  // comps: every comparable (hidden ones are left out here); o: { today: 'YYYY-MM-DD', suburb, groups: [{ name, suburbs }] }
+  // Returns { ok, items: [{ kind: ok|warn|err|info, text }] }, in plain words for Tim.
+  function compsRule(comps, o) {
+    o = o || {}; const today = o.today || new Date().toLocaleDateString('en-CA', { timeZone: 'Pacific/Auckland' });
+    const low = s => String(s || '').trim().toLowerCase();
+    const groupOf = s => (o.groups || []).find(g => (g.suburbs || []).some(x => low(x) === low(s)) && low(s));
+    const back = new Date(today + 'T12:00:00'); back.setMonth(back.getMonth() - 3); const cut = back.toISOString().slice(0, 10);
+    const items = [], add = (kind, text) => items.push({ kind, text });
+    const shown = (comps || []).filter(c => c && c.shown !== false), sg = groupOf(o.suburb);
+    const mixed = c => { const g = groupOf(c.suburb); return (g || sg) && g !== sg; };
+    shown.filter(c => mixed(c) && c.status !== 'context').forEach(c => { const g = groupOf(c.suburb) || sg;
+      add('warn', c.address + ' is ' + (groupOf(c.suburb) ? 'in ' + c.suburb + ', on' : 'outside') + ' your never-mix list (' + g.name + '), so it isn\'t counted. Hide it, or mark it for context only.'); });
+    const ok = shown.filter(c => !mixed(c));
+    const near = ok.filter(c => c.status !== 'listed' && c.sold_on && c.ring !== 'further');
+    const recentNear = near.filter(c => c.sold_on >= cut);
+    const truth = ok.filter(c => c.status === 'sold' && c.sold_on).sort((a, b) => (a.sold_on < b.sold_on ? 1 : -1));
+    const recentTrue = truth.filter(c => c.sold_on >= cut);
+    if (near.length >= 5) add('ok', near.length + ' nearby sales: at least five are needed.');
+    else add('err', (near.length ? 'Only ' + near.length + ' nearby sale' + (near.length === 1 ? '' : 's') : 'No nearby sales yet') + ': at least five are needed. Add ' + (5 - near.length) + ' more, from the same suburb first, then within 750 m, then 1.5 km.');
+    if (near.length) { if (recentNear.length >= 5) add('ok', recentNear.length + ' of them sold in the last three months.');
+      else add('info', recentNear.length + ' of them sold in the last three months, so older sales make up the rest. That is fine: go back as far as it takes.'); }
+    if (recentTrue.length >= 3) add('ok', recentTrue.length + ' true comparables from the last three months: at least three are needed.');
+    else if (truth.length >= 3) add('ok', '3 true comparables, going back to ' + monthYear(truth[2].sold_on) + '.');
+    else add('err', (truth.length ? 'Only ' + truth.length + ' true comparable' + (truth.length === 1 ? '' : 's') : 'No true comparables yet') + ': three are needed. Go further back in time until you find ' + (3 - truth.length === 1 ? 'one more' : (3 - truth.length) + ' more') + '.');
+    if (!shown.some(c => c.status === 'listed')) add('info', 'Nothing on the market is shown. Add any homes that compete with this one: buyers will compare them.');
+    shown.filter(c => c.status !== 'listed' && !c.sold_on).forEach(c => add('warn', 'Add the sale date for ' + c.address + '.'));
+    shown.filter(c => !c.ring).forEach(c => add('warn', 'Set how near ' + c.address + ' is: same suburb, within 750 m, within 1.5 km, or further.'));
+    shown.filter(c => !cmpShown(c)).forEach(c => add('warn', 'How ' + c.address + ' compares ' + (String(c.compare_text || '').trim() ? 'isn\'t ticked yet' : 'isn\'t written yet') + ', so the vendor won\'t see a comparison.'));
+    shown.filter(c => String(c.ad_text || '').trim() && !adShown(c)).forEach(c => add('warn', 'The advertisement wording for ' + c.address + ' isn\'t shown to the vendor: ' + wordingProblem(c.ad_text).replace(/\.$/, '') + '.'));
+    return { ok: !items.some(x => x.kind === 'err'), items };
+  }
+  const monthYear = d => { const x = /^(\d{4})-(\d{2})/.exec(String(d || '')); return x ? ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'][+x[2] - 1] + ' ' + x[1] : ''; };
+
+  // a photo dropped from Tim's download folder: which comparable it belongs to. By its file name in the pack's photo list, else by a
+  // name that starts with the comparable's reference (RB-R1_1.jpg for reference RB-R1). Returns the comparable's id, or ''.
+  function matchPhoto(fileName, comps) {
+    const base = String(fileName || '').split(/[\\/]/).pop().trim().toLowerCase(); if (!base) return '';
+    const byHint = (comps || []).find(c => (c.photo_hints || []).some(h => h && String(h.file || '').toLowerCase() === base)); if (byHint) return byHint.id;
+    const byRef = (comps || []).filter(c => c.source_ref).sort((a, b) => String(b.source_ref).length - String(a.source_ref).length)
+      .find(c => { const r = String(c.source_ref).toLowerCase(); return base.startsWith(r) && /^[_\-. ]/.test(base.slice(r.length)); });
+    return byRef ? byRef.id : '';
+  }
+
+  // near-duplicate addresses: the same rules as appraisal_addr_parts() and appraisal_addr_same() in migration 034, case for case
+  const CANON = { street: 'st', str: 'st', saint: 'st', road: 'rd', avenue: 'ave', av: 'ave', crescent: 'cres', cr: 'cres', place: 'pl', terrace: 'tce', ter: 'tce', drive: 'dr', lane: 'ln', highway: 'hwy', court: 'ct', crt: 'ct', grove: 'gr', parade: 'pde', square: 'sq', close: 'cl', esplanade: 'esp', boulevard: 'blvd', mount: 'mt', heights: 'hts', track: 'trk' };
+  const TYPES = ['st', 'rd', 'ave', 'cres', 'pl', 'tce', 'dr', 'ln', 'hwy', 'ct', 'gr', 'pde', 'sq', 'cl', 'esp', 'blvd', 'way', 'rise', 'hts', 'trk', 'mews', 'row', 'view', 'walk', 'quay', 'loop', 'glade', 'glen'];
+  const DIRS = ['north', 'south', 'east', 'west', 'upper', 'lower', 'extension', 'ext', 'n', 's', 'e', 'w'];
+  function addrParts(p) {
+    const segs = [];
+    String(p == null ? '' : p).toLowerCase().replace(/[āēīōū]/g, ch => ({ ā: 'a', ē: 'e', ī: 'i', ō: 'o', ū: 'u' }[ch])).split(',').forEach(seg => {
+      const t = seg.replace(/[^a-z0-9/-]+/g, ' ').trim(); if (!t) return;
+      let toks = t.split(' ');
+      for (;;) { const n = toks.length; if (!n) break; const z = toks[n - 1];
+        if (/^[0-9]{4}$/.test(z) && (n > 1 || segs.length > 0)) toks = toks.slice(0, n - 1);
+        else if (['nz', 'otago', 'aotearoa'].includes(z)) toks = toks.slice(0, n - 1);
+        else if (n > 1 && z === 'zealand' && toks[n - 2] === 'new') toks = toks.slice(0, n - 2);
+        else if (n > 1 && z === 'city' && toks[n - 2] === 'dunedin') toks = toks.slice(0, n - 2);
+        else if (z === 'dunedin' && !(n > 1 && ['north', 'south', 'east', 'west', 'central'].includes(toks[n - 2]))) toks = toks.slice(0, n - 1);
+        else break; }
+      if (!toks.length) return;
+      segs.push(toks.map(x => CANON[x] || x).join(' '));
+    });
+    if (!segs.length) return { num: '', street: '', suburb: '', known: false, toks: '' };
+    let first = segs[0].split(' '), num = '', rest = segs;
+    if (/^[0-9]+[a-z]?([/-][0-9]+[a-z]?)?$/.test(first[0])) { num = first[0]; first = first.slice(1); if (!first.length && segs.length >= 2) { first = segs[1].split(' '); rest = segs.slice(1); } }
+    const street = first.join(' '), known = rest.length >= 2 && street !== '', suburb = known ? rest[1] : '';
+    return { num, street, suburb, known, toks: (street + ' ' + suburb).trim() };
+  }
+  function addrSame(a, b) {
+    const x = addrParts(a), y = addrParts(b);
+    if (!x.num || x.num !== y.num || !x.street || !y.street) return false;
+    if (x.known && y.known) return x.street === y.street && x.suburb === y.suburb;
+    if (x.known) return y.toks === x.street || y.toks === x.toks;
+    if (y.known) return x.toks === y.street || x.toks === y.toks;
+    if (x.toks === y.toks) return true;
+    const [st, lt] = x.toks.length <= y.toks.length ? [x.toks, y.toks] : [y.toks, x.toks];
+    if (lt.slice(0, st.length + 1) !== st + ' ') return false;
+    const w = st.split(' '), next = lt.slice(st.length + 1).split(' ')[0];
+    return TYPES.includes(w[w.length - 1]) && !DIRS.includes(next) && !TYPES.includes(next);
   }
   // the method names for the editor: the first cell of each row of the ways-to-sell table, up to its first comma
   function methodNames(rec) {
@@ -251,6 +391,7 @@
     return wordingProblem(f.bedrooms) || wordingProblem((f.method || {}).name) || wordingProblem((f.method || {}).text);
   }
   window.APPR = { render, fmtRange, dollars, inline, methodNames, checkFields, wordingProblem,
+    vendorComp, VENDOR_COMP, STATUS_WORDS, RINGS, ringWords, compsRule, matchPhoto, addrParts, addrSame, adShown, cmpShown, evidence,
     METHODS, CAMPAIGNS, MAX_WEEKS, campaignOf, waveFor, stepsFor, methodSentence, isHill, suburbOf, plansFor, checkSetup, writeStandard, sectionsProblem,
     DEFAULT_NOTE, DALMORE_LINE, HEAD_AND_SHOULDERS, VALUATION_LABEL };
 })();

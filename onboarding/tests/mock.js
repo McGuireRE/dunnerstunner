@@ -349,6 +349,10 @@ function q(table){ logCall('from:'+table);
     // 026: the views of what stands (read only; security invoker, so the same rules as the tables they read)
     // migration 032: appraisal views are Tim's alone (is_agent() select, insert and update); nobody deletes a row
     if(table==='appraisal_views'&&(!isAgentMe()||op==='delete')) throw new Error('permission denied for table appraisal_views');
+    // migration 034: guard_appraisal_view (a sent row never changes; 'sent' only by sending; the wording guard on every insert and
+    // on any update of title, sections, fields or setup) and the five new agent-only tables with their guards
+    if(table==='appraisal_views'&&(op==='insert'||op==='update')) avGuard(op,payload,op==='update'?(DB.appraisal_views||[]).filter(r=>filters.every(f=>f(r))):[]);
+    if(LW3C_TABLES.includes(table)){ const r0=lw3cTable(table,op,payload,(DB[table]||=[]).filter(r=>filters.every(f=>f(r))),single); if(r0) return r0; }
     const T=LIVE_VIEWS[table]?LIVE_VIEWS[table]():(DB[table]||=[]);
     // photos and documents (migration 016): vendors see none of it; guard_property_document() on every write
     if(['property_documents','property_document_events','repo_kinds'].includes(table)){ const r0=repoTable(table,op,payload,op==='update'?T.filter(r=>filters.every(f=>f(r))):[],single); if(r0) return r0; }
@@ -472,7 +476,8 @@ function appraisalRpc(name,a,me){ if(offline()) return bad('Failed to fetch');
   const AV=()=>(DB.appraisal_views||=[]), norm=s=>String(s||'').replace(/\s+/g,' ').trim();
   if(name==='agent_appraisal_create'){ let pid=a.p_property||null, addr=norm(a.p_address), made=false; const k=norm(a.p_kind)||'standard';
     if(!['standard','bespoke'].includes(k)) return bad('Unknown kind of appraisal');
-    if(!pid){ if(addr.length<3) return bad('Add the address'); if(addr.length>300) return bad('That address is too long'); if(PT().some(p=>norm(p.address).toLowerCase()===addr.toLowerCase())) return bad('That address is already on file. Choose it from the list'); }
+    if(!pid){ if(addr.length<3) return bad('Add the address'); if(addr.length>300) return bad('That address is too long'); if(PT().some(p=>norm(p.address).toLowerCase()===addr.toLowerCase())) return bad('That address is already on file. Choose it from the list');
+      /* 034: a near-duplicate (Rd for Road, extra commas, no suburb or postcode) is refused, naming the property on file */ const dup=PT().slice().sort((x,y)=>(x.created_at<y.created_at?-1:1)).find(p=>window.APPR.addrSame(p.address,addr)); if(dup) return bad('That address is already on file as "'+dup.address+'". Choose it from the list'); }
     else { const p=PT().find(x=>x.id===pid); if(!p) return bad('Property not found'); addr=norm(p.address); }
     const w=apprWording(addr); if(w) return bad(w);
     if(!pid){ pid=newProp(addr).id; made=true; }
@@ -489,6 +494,122 @@ function appraisalRpc(name,a,me){ if(offline()) return bad('Failed to fetch');
   if(a.p_setup!=null) r.setup=c(a.p_setup); if(a.p_fields!=null) r.fields=c(a.p_fields); if(a.p_sections!=null) r.sections=c(a.p_sections);
   if(a.p_title!=null) r.title=a.p_title; if(a.p_prepared_for!=null) r.prepared_for=a.p_prepared_for; if(a.p_private_notes!=null) r.private_notes=a.p_private_notes; if(a.p_status!=null) r.status=a.p_status;
   r.prepared_on=r.prepared_on||new Date().toLocaleDateString('en-CA',{timeZone:'Pacific/Auckland'}); r.updated_at=now(); save(); return ok(c(r)); }
+// ── migration 034 (LW3 phase C): comparables, photos, the never-mix list and the market store, mirroring the database ──
+// localStorage mockLw3cCalls: every 034 function call, for the tests. mockSendFlag = '1' stands for phase E's send function (it
+// alone may set 'sent'). Photos: bucket 'appraisal-media', kept in DB.storage_objects with the bucket named, as storage.objects.
+const LW3C_TABLES=['appraisal_comps','appraisal_media','suburb_groups','market_months','market_sales'];
+const AMB='appraisal-media', AM_MIME=['image/jpeg','image/png','image/webp'];
+const SENT_MSG='This appraisal has been sent, and a sent copy never changes';
+const avSent=id=>(DB.appraisal_views||[]).some(v=>v.id===id&&v.status==='sent');
+function avGuard(op,payload,rows){ const list=Array.isArray(payload)?payload:[payload];
+  if(op==='update'){ rows.forEach(r=>{ if(r.status==='sent') throw new Error(SENT_MSG); const n=Object.assign({},r,payload);
+    if(n.status==='sent'&&localStorage.getItem('mockSendFlag')!=='1') throw new Error('An appraisal is marked sent only by sending it');
+    if(['title','sections','fields','setup'].some(k=>k in payload&&!same(payload[k],r[k]))){ const w=apprWording([n.title,n.sections,n.fields,n.setup]); if(w) throw new Error(w); } }); return; }
+  list.forEach(n=>{ if(n.status==='sent'&&localStorage.getItem('mockSendFlag')!=='1') throw new Error('An appraisal is marked sent only by sending it'); const w=apprWording([n.title||'',n.sections||[],n.fields||{},n.setup||{}]); if(w) throw new Error(w); }); }
+function lw3cTable(table,op,payload,rows,single){
+  if(offline()) throw new Error('Failed to fetch');
+  if(!isAgentMe()){ if(op==='select') return {data:single?undefined:[],error:single?{message:'not found'}:null}; if(!(S&&S.user)) throw new Error('permission denied for table '+table); if(op==='insert') throw new Error('new row violates row-level security policy for table "'+table+'"'); return {data:[],error:null}; }
+  const list=Array.isArray(payload)?payload:[payload];
+  if(table==='appraisal_comps'){
+    if(op==='delete'){ rows.forEach(r=>{ if(avSent(r.appraisal_id)) throw new Error(SENT_MSG); }); DB.appraisal_media=(DB.appraisal_media||[]).filter(m=>!rows.some(r=>r.id===m.comp_id)); return null; }
+    if(op==='insert') list.forEach(n=>{ if(avSent(n.appraisal_id)) throw new Error(SENT_MSG); compCheck(n); Object.assign(n,Object.assign(compDefaults(),n)); });
+    if(op==='update') rows.forEach(r=>{ if(avSent(r.appraisal_id)) throw new Error(SENT_MSG); if('appraisal_id' in payload&&payload.appraisal_id!==r.appraisal_id) throw new Error('A comparable stays on its own appraisal'); compCheck(Object.assign({},r,payload)); });
+  }
+  if(table==='appraisal_media'){
+    if(op==='delete') rows.forEach(r=>{ if(avSent(r.appraisal_id)) throw new Error(SENT_MSG); });
+    if(op==='insert') list.forEach(n=>{ if(avSent(n.appraisal_id)) throw new Error(SENT_MSG); if(n.comp_id&&!(DB.appraisal_comps||[]).some(c=>c.id===n.comp_id&&c.appraisal_id===n.appraisal_id)) throw new Error("That comparable isn't on this appraisal");
+      if(!String(n.path||'').startsWith('appraisals/'+n.appraisal_id+'/comps/')||String(n.path).includes('..')) throw new Error("A photo must sit in its own appraisal's folder");
+      if((DB.appraisal_media||[]).some(m=>m.path===n.path)) throw new Error('duplicate key value violates unique constraint "appraisal_media_path_key"');
+      const o=SO()[n.path]; if(!o||o.bucket!==AMB) throw new Error("The photo isn't in storage yet. Try again"); n.mime_type=o.mime; n.size_bytes=o.size; if(!AM_MIME.includes(n.mime_type)) throw new Error('Photos must be JPEG, PNG or WebP');
+      n.position=n.position||0; n.cover=!!n.cover; n.source=n.source||'upload'; n.file_name=n.file_name||''; n.created_by=meEmail(); });
+    if(op==='update') rows.forEach(r=>{ if(avSent(r.appraisal_id)) throw new Error(SENT_MSG); if(['appraisal_id','path','mime_type','size_bytes','source','created_at'].some(k=>k in payload&&!same(payload[k],r[k]))) throw new Error("Where a photo is kept, and what it is, can't change");
+      if(payload.comp_id&&!(DB.appraisal_comps||[]).some(c=>c.id===payload.comp_id&&c.appraisal_id===r.appraisal_id)) throw new Error("That comparable isn't on this appraisal"); });
+  }
+  if(table==='suburb_groups'&&(op==='insert'||op==='update')) (op==='insert'?list:rows.map(r=>Object.assign({},r,payload))).forEach(n=>{ if(!String(n.name||'').trim()) throw new Error('new row for relation "suburb_groups" violates check constraint "suburb_groups_name_check"'); if(!Array.isArray(n.suburbs)||!n.suburbs.length||n.suburbs.length>40) throw new Error('new row for relation "suburb_groups" violates check constraint "suburb_groups_suburbs_check"'); if(op==='insert'){ n.kind=n.kind||'never_mix'; n.note=n.note||''; } });
+  if(op==='delete'){ DB[table]=(DB[table]||[]).filter(r=>!rows.includes(r)); save(); return {data:null,error:null}; }
+  return null; }
+function compDefaults(){ return {position:0,shown:true,status:'sold',suburb:'',price:null,sold_on:null,listed_on:null,method:'',days_to_sell:null,bedrooms:null,bathrooms:null,floor_m2:null,land_m2:null,cv:null,agency:'',sold_by_tim:false,ad_text:'',compare_text:'',compare_ticked:false,private_note:'',ring:null,distance_m:null,source:'tim',source_ref:null,source_url:null,gathered_at:null,photo_hints:[],created_by:meEmail()}; }
+// the checks on appraisal_comps (the table's own checks and guard_appraisal_comp's wording guard)
+function compCheck(n){ const ck=c=>{ throw new Error('new row for relation "appraisal_comps" violates check constraint "appraisal_comps_'+c+'_check"'); };
+  if(String(n.address||'').trim().length<3||String(n.address).length>300) ck('address'); if(n.status!=null&&!['sold','listed','context'].includes(n.status)) ck('status');
+  if(n.price!=null&&!(Number.isInteger(n.price)&&n.price>0)) ck('price'); if(n.ring!=null&&!['suburb','750m','1500m','further'].includes(n.ring)) ck('ring');
+  if(n.source_url!=null&&!/^https:\/\//.test(n.source_url)) ck('source_url'); if(n.source!=null&&!['reinz','relab','listing','tim','other'].includes(n.source)) ck('source');
+  if(String(n.compare_text||'').length>4000) ck('compare_text'); if(String(n.ad_text||'').length>8000) ck('ad_text'); if(String(n.private_note||'').length>4000) ck('private_note');
+  const w=apprWording([n.compare_text||'',n.method||'']); if(w) throw new Error(w); }
+function apprBucket(){ return {
+  upload:(p,blob,o)=>{ logCall('up:'+AMB+':'+p); if(offline()) return netFail(); if(!isAgentMe()) return bad('new row violates row-level security policy');
+    const f=String(p).split('/'); if(f[0]!=='appraisals'||f[2]!=='comps'||f.length<5) return bad('new row violates row-level security policy');
+    if(SO()[p]) return Promise.resolve({data:null,error:{message:'The resource already exists',statusCode:'409'}});
+    const mime=(o&&o.contentType)||blob.type; if(!AM_MIME.includes(mime)) return bad('mime type '+mime+' is not supported'); if(blob.size>15728640) return bad('The object exceeded the maximum allowed size');
+    SO()[p]={size:blob.size,mime,bucket:AMB}; (window.__repoBlobs||={})[p]=blob; save(); return ok({path:p}); },
+  createSignedUrl:p=>{ if(offline()) return netFail(); if(!isAgentMe()||!SO()[p]) return bad('Object not found'); const bl=(window.__repoBlobs||{})[p]; return ok({signedUrl:bl?URL.createObjectURL(bl):PNG1}); },
+  createSignedUrls:(ps)=>{ if(offline()) return netFail(); if(!isAgentMe()) return ok((ps||[]).map(p=>({path:p,signedUrl:null,error:'Object not found'}))); return ok((ps||[]).map(p=>{ const bl=(window.__repoBlobs||{})[p]; return SO()[p]?{path:p,signedUrl:bl?URL.createObjectURL(bl):PNG1,error:null}:{path:p,signedUrl:null,error:'Object not found'}; })); },
+  remove:(ps)=>{ if(offline()) return netFail(); if(!isAgentMe()) return ok([]); const gone=(ps||[]).filter(p=>{ const f=String(p).split('/'); return SO()[p]&&SO()[p].bucket===AMB&&!avSent(f[1]); }); gone.forEach(p=>{ delete SO()[p]; }); save(); return ok(gone.map(name=>({name}))); } }; }
+// the pack readers (appraisal_pack_text, _num, _date, _url, _ts)
+const pkText=(v,max)=>{ if(v==null) return null; if(!['string','number','boolean'].includes(typeof v)) return null; const s=String(v).replace(/\r\n/g,'\n').replace(/[\x01-\x08\x0b\x0c\x0e-\x1f\x7f]/g,'').trim().slice(0,max); return s||null; };
+const pkNum=(v,lo,hi,what)=>{ if(v==null) return null; let x; if(typeof v==='number') x=v; else if(typeof v==='string'){ const s=v.replace(/[$,\s]/g,''); if(!s) return null; if(!/^-?[0-9]+(\.[0-9]+)?$/.test(s)) throw new Error(what+' must be a number'); x=+s; } else throw new Error(what+' must be a number'); if(x<lo||x>hi) throw new Error(what+' is out of range'); return x; };
+const pkInt=(v,lo,hi,what)=>{ const x=pkNum(v,lo,hi,what); return x==null?null:Math.round(x); };
+const pkDec=(v,lo,hi,what)=>{ const x=pkNum(v,lo,hi,what); return x==null?null:Math.round(x*10)/10; };
+const pkDate=(v,what)=>{ let s=pkText(v,40); if(s==null) return null; if(/^\d{4}-\d{2}$/.test(s)) s+='-01'; if(!/^\d{4}-\d{2}-\d{2}$/.test(s)) throw new Error(what+' must be a date written YYYY-MM-DD'); const d=new Date(s+'T00:00:00Z'); if(isNaN(d)||d.toISOString().slice(0,10)!==s) throw new Error(what+' must be a real date'); return s; };
+const pkUrl=v=>{ const u=pkText(v,2000); return u&&/^https:\/\/\S+$/.test(u)&&u.length<=1000?u:null; };
+const pkTs=v=>{ const s=pkText(v,60); if(s==null) return null; const d=new Date(s); if(isNaN(d)) throw new Error('gathered_at must be a date and time'); return d.toISOString(); };
+const SRCS=['reinz','relab','listing','tim','other'];
+function lw3cRpc(name,a,me){ if(offline()) return bad('Failed to fetch');
+  try{ const l=JSON.parse(localStorage.getItem('mockLw3cCalls')||'[]'); l.push({name,a}); localStorage.setItem('mockLw3cCalls',JSON.stringify(l)); }catch(_){}
+  if(!isAgentMe()) return bad('Agent only');
+  const CP=()=>(DB.appraisal_comps||=[]), ws=s=>String(s||'').replace(/\s+/g,' ');
+  if(name==='agent_comps_order'){ const ids=a.p_ids||[], mine=CP().filter(c=>c.appraisal_id===a.p_appraisal);
+    if(new Set(ids).size!==ids.length||ids.length!==mine.length||ids.some(i=>!mine.some(c=>c.id===i))) return bad('The list must hold each comparable of this appraisal once');
+    if(avSent(a.p_appraisal)) return bad(SENT_MSG); let n=0; ids.forEach((i,k)=>{ const c=mine.find(x=>x.id===i); if(c.position!==k+1){ c.position=k+1; c.updated_at=now(); n++; } }); save(); return ok(n); }
+  if(name==='agent_comps_import'){ const av=(DB.appraisal_views||[]).find(v=>v.id===a.p_appraisal); if(!av) return bad('Appraisal not found'); if(av.status==='sent') return bad(SENT_MSG);
+    const pk=a.p_pack; if(!pk||typeof pk!=='object'||Array.isArray(pk)||pk.format!=='mre.comps/1') return bad("That isn't a comparables pack (format mre.comps/1)");
+    if(JSON.stringify(pk).length>1000000) return bad('That pack is too big to import at once'); if(!Array.isArray(pk.comps)) return bad('The pack has no list of comparables'); if(pk.comps.length>60) return bad('At most 60 comparables in one pack');
+    let dSrc, dAt; try{ dSrc=(pkText(pk.source,20)||'reinz').toLowerCase(); dAt=pkTs(pk.gathered_at)||now(); }catch(e){ return bad(e.message); } if(!SRCS.includes(dSrc)) return bad('Unknown source '+dSrc);
+    let added=0, updated=0, kept=0, nextpos=Math.max(0,...CP().filter(c=>c.appraisal_id===av.id).map(c=>c.position||0)); const skipped=[], notes=[];
+    pk.comps.forEach((c,ix)=>{ const i=ix+1; try{
+      if(!c||typeof c!=='object'||Array.isArray(c)) throw new Error('not a comparable');
+      const addr=ws(pkText(c.address,400)||''); if(addr.length<3) throw new Error('no address'); if(addr.length>300) throw new Error('the address is too long');
+      const st=(pkText(c.status,20)||'sold').toLowerCase(); if(!['sold','listed','context'].includes(st)) throw new Error('status must be sold, listed or context');
+      const src=(pkText(c.source,20)||dSrc).toLowerCase(); if(!SRCS.includes(src)) throw new Error('unknown source '+src);
+      const ref=pkText(c.ref,200), ring=pkText(c.ring,20); if(ring!=null&&!['suburb','750m','1500m','further'].includes(ring)) throw new Error('ring must be suburb, 750m, 1500m or further');
+      const x={suburb:pkText(c.suburb,100),price:pkInt(c.price,1,999999999,'price'),sold_on:pkDate(c.sold_on,'sold_on'),listed_on:pkDate(c.listed_on,'listed_on'),method:pkText(c.method,100),days_to_sell:pkInt(c.days_to_sell,0,3650,'days_to_sell'),
+        bedrooms:pkInt(c.bedrooms,0,50,'bedrooms'),bathrooms:pkDec(c.bathrooms,0,50,'bathrooms'),floor_m2:pkDec(c.floor_m2,0.1,99999,'floor_m2'),land_m2:pkDec(c.land_m2,0.1,99999999,'land_m2'),cv:pkInt(c.cv,1,999999999,'cv'),
+        agency:pkText(c.agency,150),sold_by_tim:String(c.sold_by_tim).toLowerCase()==='true',ad_text:pkText(c.ad_text,8000),ring,distance_m:pkInt(c.distance_m,0,1000000,'distance_m'),url:pkUrl(c.url),gathered_at:pkTs(c.gathered_at)||dAt};
+      let ctext=pkText(c.compare_text,4000); if(ctext!=null){ const w=apprWording(ctext); if(w){ notes.push({n:i,note:'How it compares was left out: '+w}); ctext=null; } }
+      if(x.method!=null){ const w=apprWording(x.method); if(w){ notes.push({n:i,note:'The method was left out: '+w}); x.method=null; } }
+      const hints=Array.isArray(c.photos)?c.photos.slice(0,30).filter(h=>h&&typeof h==='object'&&!Array.isArray(h)&&(pkText(h.file,200)!=null||pkUrl(h.url)!=null)).map(h=>{ const o={}; const f=(pkText(h.file,200)||'').replace(/^.*[/\\]/,''); if(f) o.file=f; const u=pkUrl(h.url); if(u) o.url=u; return o; }):[];
+      let ex=ref?CP().find(r=>r.appraisal_id===av.id&&r.source===src&&r.source_ref===ref):null;
+      if(!ex) ex=CP().filter(r=>r.appraisal_id===av.id&&(r.source_ref==null||ref==null)&&(ws(r.address).toLowerCase()===addr.toLowerCase()||window.APPR.addrSame(r.address,addr))).sort((p,q)=>p.position-q.position)[0]||null;
+      if(ex){ if(ex.compare_ticked&&ctext!=null&&ctext!==ex.compare_text) kept++;
+        const n=Object.assign({},ex,{status:ex.status==='context'?'context':st}); ['suburb','price','sold_on','listed_on','method','days_to_sell','bedrooms','bathrooms','floor_m2','land_m2','cv','agency','ad_text','ring','distance_m'].forEach(k=>{ if(x[k]!=null) n[k]=x[k]; });
+        n.sold_by_tim=ex.sold_by_tim||x.sold_by_tim; if(!ex.compare_ticked&&ctext!=null) n.compare_text=ctext; n.source=src; if(ref) n.source_ref=ref; if(x.url) n.source_url=x.url; n.gathered_at=x.gathered_at;
+        const hs=(ex.photo_hints||[]).slice(); hints.forEach(h=>{ if(!hs.some(e=>same(e,h))) hs.push(h); }); n.photo_hints=hs;
+        compCheck(n); Object.assign(ex,n,{updated_at:now()}); updated++; }
+      else { const n=Object.assign(compDefaults(),{id:uid(),appraisal_id:av.id,position:++nextpos,status:st,address:addr,suburb:x.suburb||'',price:x.price,sold_on:x.sold_on,listed_on:x.listed_on,method:x.method||'',days_to_sell:x.days_to_sell,bedrooms:x.bedrooms,bathrooms:x.bathrooms,floor_m2:x.floor_m2,land_m2:x.land_m2,cv:x.cv,agency:x.agency||'',sold_by_tim:x.sold_by_tim,ad_text:x.ad_text||'',compare_text:ctext||'',compare_ticked:false,ring:x.ring,distance_m:x.distance_m,source:src,source_ref:ref,source_url:x.url,gathered_at:x.gathered_at,photo_hints:hints,created_at:now(),updated_at:now()});
+        compCheck(n); CP().push(n); added++; }
+    }catch(e){ skipped.push({n:i,why:e.message}); } });
+    save(); return ok({added,updated,kept_ticked:kept,skipped,notes}); }
+  if(name==='agent_market_import'){ const pk=a.p_pack; if(!pk||typeof pk!=='object'||Array.isArray(pk)||pk.format!=='mre.market/1') return bad("That isn't a market pack (format mre.market/1)");
+    const MS=(pk.months==null?[]:pk.months), SS=(pk.sales==null?[]:pk.sales); if(!Array.isArray(MS)||!Array.isArray(SS)) return bad('months and sales must be lists'); if(MS.length>400||SS.length>5000) return bad('At most 400 months and 5,000 sales in one pack');
+    let dAt; try{ dAt=pkTs(pk.gathered_at)||now(); }catch(e){ return bad(e.message); } const dUrl=pkUrl(pk.url); const MM=()=>(DB.market_months||=[]), MSL=()=>(DB.market_sales||=[]); let ma=0, mu=0, sa=0, su=0; const skipped=[];
+    MS.forEach((m,ix)=>{ try{ if(!m||typeof m!=='object'||Array.isArray(m)) throw new Error('not a month'); const area=ws(pkText(m.area,100)||'').trim(); if(!area) throw new Error('no area');
+      const d=pkDate(m.month,'month'); if(!d) throw new Error('no month'); const mon=d.slice(0,8)+'01';
+      const x={median:pkInt(m.median,1,999999999,'median'),lq:pkInt(m.lower_quartile,1,999999999,'lower_quartile'),uq:pkInt(m.upper_quartile,1,999999999,'upper_quartile'),sales:pkInt(m.sales,0,1000000,'sales'),days:pkInt(m.days_to_sell,0,3650,'days_to_sell')};
+      if(x.lq!=null&&x.median!=null&&x.lq>x.median) throw new Error('the lower quartile is above the median'); if(x.uq!=null&&x.median!=null&&x.uq<x.median) throw new Error('the upper quartile is below the median');
+      const bands=Array.isArray(m.bands)?m.bands.slice(0,40).map(b=>{ if(!b||typeof b!=='object'||Array.isArray(b)) throw new Error('a price band must have from, to and count'); const o={}; const f=pkInt(b.from,0,999999999,"a band's from"), t=pkInt(b.to,0,999999999,"a band's to"); if(f!=null) o.from=f; if(t!=null) o.to=t; o.count=pkInt(b.count,0,1000000,"a band's count")||0; return o; }):[];
+      const at=pkTs(m.gathered_at)||dAt, ex=MM().find(r=>r.area===area&&r.month===mon);
+      if(ex){ if(at>=ex.gathered_at){ if(x.median!=null) ex.median=x.median; if(x.lq!=null) ex.lower_quartile=x.lq; if(x.uq!=null) ex.upper_quartile=x.uq; if(x.sales!=null) ex.sales=x.sales; if(x.days!=null) ex.days_to_sell=x.days; if(bands.length) ex.bands=bands; ex.source_url=pkUrl(m.url)||dUrl||ex.source_url; ex.gathered_at=at; ex.updated_at=now(); mu++; } }
+      else { MM().push({id:uid(),area,month:mon,median:x.median,lower_quartile:x.lq,upper_quartile:x.uq,sales:x.sales,days_to_sell:x.days,bands,source:'reinz',source_url:pkUrl(m.url)||dUrl,gathered_at:at,updated_at:now()}); ma++; }
+    }catch(e){ skipped.push({n:ix+1,what:'month',why:e.message}); } });
+    SS.forEach((s,ix)=>{ try{ if(!s||typeof s!=='object'||Array.isArray(s)) throw new Error('not a sale'); const sub=ws(pkText(s.suburb,100)||'').trim(), dt=pkDate(s.sold_on,'sold_on'), pr=pkInt(s.price,1,999999999,'price');
+      if(!sub||!dt||pr==null) throw new Error('a sale needs its suburb, sold_on and price'); const addr=ws(pkText(s.address,300)||''), ref=pkText(s.ref,200);
+      const x={bedrooms:pkInt(s.bedrooms,0,50,'bedrooms'),bathrooms:pkDec(s.bathrooms,0,50,'bathrooms'),floor_m2:pkDec(s.floor_m2,0.1,99999,'floor_m2'),land_m2:pkDec(s.land_m2,0.1,99999999,'land_m2'),ptype:pkText(s.property_type,60)||'',days:pkInt(s.days_to_sell,0,3650,'days_to_sell')};
+      const ex=ref?MSL().find(r=>r.source==='reinz'&&r.source_ref===ref):MSL().find(r=>r.source_ref==null&&r.suburb===sub&&r.sold_on===dt&&r.price===pr&&r.address===addr); const at=pkTs(s.gathered_at)||dAt;
+      if(ex){ Object.assign(ex,{suburb:sub,sold_on:dt,price:pr,address:addr||ex.address,bedrooms:x.bedrooms??ex.bedrooms,bathrooms:x.bathrooms??ex.bathrooms,floor_m2:x.floor_m2??ex.floor_m2,land_m2:x.land_m2??ex.land_m2,property_type:x.ptype||ex.property_type,days_to_sell:x.days??ex.days_to_sell,gathered_at:at}); su++; }
+      else { MSL().push({id:uid(),suburb:sub,sold_on:dt,price:pr,address:addr,bedrooms:x.bedrooms,bathrooms:x.bathrooms,floor_m2:x.floor_m2,land_m2:x.land_m2,property_type:x.ptype,days_to_sell:x.days,source:'reinz',source_ref:ref,gathered_at:at}); sa++; }
+    }catch(e){ skipped.push({n:ix+1,what:'sale',why:e.message}); } });
+    save(); return ok({months_added:ma,months_updated:mu,sales_added:sa,sales_updated:su,skipped}); }
+  return bad('unknown rpc '+name); }
 function rpcInner(name,a){
   const me=S&&S.user; const ag=a&&a.a?DB.agreements.find(x=>x.id===a.a):null;
   const mine=()=>DB.agreement_people.find(p=>p.agreement_id===a.a&&p.user_id===me.id);
@@ -496,6 +617,7 @@ function rpcInner(name,a){
   if(name.startsWith('agent_fv_')||name==='agent_tap_extra') return fvRpc(name,a,me);
   if(name.startsWith('agent_council_')) return councilRpc(name,a,me);
   if(name==='agent_appraisal_create'||name==='agent_appraisal_save') return appraisalRpc(name,a,me);
+  if(['agent_comps_import','agent_comps_order','agent_market_import'].includes(name)) return lw3cRpc(name,a,me);
   if(SIGN_RPCS.includes(name)) return signRpc(name,a,me);
   if(DRAFT_RPCS.includes(name)) return draftRpc(name,a,me);
   if(name.startsWith('offer_sign_')||name.startsWith('offer_round_')) return bad('permission denied for function '+name);
@@ -1762,7 +1884,7 @@ window.supabase={createClient(){ return {
     if(n==='doc-prefill'){ const mode=localStorage.getItem('prefillMode'); if(mode==='off') return Promise.resolve({data:null,error:{message:'503',context:{json:async()=>({error:'not_set_up'})}}}); return ok({ok:true,skipped:[],result:JSON.parse(localStorage.getItem('prefillResult'))}); }const a=JSON.parse(localStorage.getItem('inv')||'[]');a.push(n+':'+o.body.type);localStorage.setItem('inv',JSON.stringify(a));
     if(n==='notify'&&o.body.type==='form_signed'){ const fm=(DB.property_forms||[]).find(x=>x.id===o.body.form_id); if(fm&&fm.status==='signed'&&(fm.kind==='healthy_homes'||fm.countersigned_at)&&!fm.document_id&&fm.agreement_id===o.body.agreement_id){ const d={id:uid(),property_id:fm.property_id,kind:fm.kind==='healthy_homes'?'Healthy Homes checklist and statement':'Vendor Declaration',name:(fm.kind==='healthy_homes'?'Healthy-Homes-Checklist-and-Statement':'Vendor-Declaration')+'.pdf',path:'properties/'+fm.property_id+'/generated/'+fm.id+'.pdf',source:'generated',created_by:'system',created_at:now(),bucket:'private',folder:'agency'}; (DB.property_documents||=[]).push(d); fm.document_id=d.id; save(); } }
     return ok({ok:true});}},
-  storage:{from(b){ if(b===RB) return repoBucket(); return{upload:(p)=>ok({path:p}),createSignedUrl:()=>ok({signedUrl:PNG1})}}},
+  storage:{from(b){ if(b===RB) return repoBucket(); if(b===AMB) return apprBucket(); return{upload:(p)=>ok({path:p}),createSignedUrl:()=>ok({signedUrl:PNG1})}}},
   auth:{getSession:()=>ok({session:S}),onAuthStateChange(){},signInWithOtp:o=>{ try{ const l=JSON.parse(localStorage.getItem('otpLog')||'[]'); l.push(o||null); localStorage.setItem('otpLog',JSON.stringify(l)); }catch(_){} return ok({}); },   // otpLog: each sign-in link asked for, with where it brings the person back to
  signOut:async()=>{localStorage.removeItem('mocksession');}}
 };}};

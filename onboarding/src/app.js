@@ -9323,7 +9323,9 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     R('appraisals', 'appraisals', () => viewPortalAppraisals()),
     R('appraisals/new', 'appraisalNew', () => viewAppraisalNew(null)),
     R('appraisals/new/:id', 'appraisalNew', p => viewAppraisalNew(p)),
+    R('appraisals/market', 'appraisalMarket', () => viewMarketFigures()),   // before appraisals/:id, which would take "market" as an id
     R('appraisals/:id/setup', 'appraisal', a => viewAppraisalSetup(a)),
+    R('appraisals/:id/comps', 'appraisal', a => viewAppraisalComps(a)),
     R('appraisals/:id', 'appraisal', a => viewAppraisalView(a, false)),
     R('appraisals/:id/present', 'appraisal', a => viewAppraisalView(a, true)),
     R('translations', 'viewTranslations', () => APP_TRANSLATION ? RAW.viewTranslations() : viewPortalMissing()),
@@ -9367,7 +9369,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     if (new RegExp(`^properties/${id}$`).test(path)) return ['properties', 'Properties'];
     if ((m = new RegExp(`^appraisals/new/${id}$`).exec(path))) return [`properties/${m[1]}`, 'Property file'];
     if (path === 'appraisals/new') return ['appraisals', 'Appraisals'];
-    if ((m = new RegExp(`^appraisals/${id}/(present|setup)$`).exec(path))) return [`appraisals/${m[1]}`, 'Appraisal'];
+    if (path === 'appraisals/market') return ['appraisals', 'Appraisals'];
+    if ((m = new RegExp(`^appraisals/${id}/(present|setup|comps)$`).exec(path))) return [`appraisals/${m[1]}`, 'Appraisal'];
     if (new RegExp(`^appraisals/${id}$`).test(path)) return ['appraisals', 'Appraisals'];
     if (/^processes\/.+/.test(path)) return ['processes', 'Processes'];
     if (/^people\/.+/.test(path)) return ['people', 'People'];
@@ -9545,7 +9548,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     if (!$('#main .loading')) return;   // Tim has moved on
     rows = rows.filter(r => okId(r.id));
     main().innerHTML = `<div class="view-pad" id="apvList"><span class="agent-flag">Only you see this</span><h1>Appraisals</h1>
-      <div class="toolbar" id="apvNewRow">${plink('appraisals/new', 'New appraisal', 'btn primary')}</div>
+      <div class="toolbar" id="apvNewRow">${plink('appraisals/new', 'New appraisal', 'btn primary')}${plink('appraisals/market', 'Market figures', 'btn ghost')}</div>
       ${rows.length ? `<div class="card tight"><ul class="needs">${rows.map(r => `<li><div class="what"><strong translate="no">${esc(r.title || r.address || 'Appraisal')}</strong><span class="small">Updated ${esc(fmtDT(r.updated_at))}</span></div><span class="needbtns">${plink(`appraisals/${r.id}`, 'Open', 'btn ghost')}${plink(`appraisals/${r.id}/present`, 'Present', 'btn primary')}</span></li>`).join('')}</ul></div>`
         : '<div class="card note tight"><p class="small" style="margin:0">No appraisals here yet.</p></div>'}
     </div>`;
@@ -9632,10 +9635,13 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <div class="toolbar"><button class="btn primary" type="button" id="apsNewAddr">Start from this address</button></div>
       <div id="crAps"></div></div>`;
     const draw = () => {
-      const q = norm($('#apsAddr').value); let m = [];
-      if (q.length >= 3) m = props.filter(p => { const a = norm(p.address); return a && (a.includes(q) || q.includes(a) || (q.split(' ').length > 1 && q.split(' ').slice(0, 2).join(' ') === a.split(' ').slice(0, 2).join(' '))); }).slice(0, 6);
-      const exact = m.some(p => norm(p.address) === q);
-      $('#apsMatches').innerHTML = m.length ? `<p class="small" style="margin:12px 0 6px">Already on file. Choose it to keep one record of the property:</p>${m.map(p => `<div class="card tight insp-match"><div><strong translate="no">${esc(p.address)}</strong><br>${stagePill(p.stage)}</div><button class="btn ${exact && norm(p.address) === q ? 'primary' : 'ghost'}" type="button" data-aps-prop="${esc(p.id)}">Appraise this one</button></div>`).join('')}` : '';
+      const raw = $('#apsAddr').value, q = norm(raw); let m = [];
+      // 034: the same property written another way ("Rd" for "Road", extra commas, no suburb or postcode) counts as on file
+      const same = p => norm(p.address) === q || APPR.addrSame(p.address, raw);
+      if (q.length >= 3) m = props.filter(p => { const a = norm(p.address); return a && (same(p) || a.includes(q) || q.includes(a) || (q.split(' ').length > 1 && q.split(' ').slice(0, 2).join(' ') === a.split(' ').slice(0, 2).join(' '))); })
+        .sort((x, y) => +same(y) - +same(x)).slice(0, 6);
+      const exact = m.some(same);
+      $('#apsMatches').innerHTML = m.length ? `<p class="small" style="margin:12px 0 6px">Already on file. Choose it to keep one record of the property:</p>${m.map(p => `<div class="card tight insp-match"><div><strong translate="no">${esc(p.address)}</strong><br>${stagePill(p.stage)}</div><button class="btn ${same(p) ? 'primary' : 'ghost'}" type="button" data-aps-prop="${esc(p.id)}">Appraise this one</button></div>`).join('')}` : '';
       const nb = $('#apsNewAddr'); nb.disabled = exact; atBtn(nb, exact ? 'This address is already on file. Choose it above.' : '', 'err');
       $$('[data-aps-prop]').forEach(b => b.addEventListener('click', async () => { const d = await apsStart(b.dataset.apsProp, null, b); if (d) apsOpenSetup(d.appraisal_id); }));
     };
@@ -9770,18 +9776,295 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     top();
   }
   // an appraisal written from its set-up: the page itself (the same drawing as the presentation), Tim's tools and his private notes
-  function apsShow(rec, present) {
-    const tools = present ? '' : `<div class="toolbar no-print" id="apvTools">${plink(`appraisals/${rec.id}/setup`, 'Change the set-up', 'btn primary')}${plink(`appraisals/${rec.id}/present`, 'Present on screen', 'btn ghost')}<button class="btn ghost" type="button" id="apvPrint">Print</button></div>
+  async function apsShow(rec, present) {
+    const ev = await apvEvidence(rec);   // LW3 phase C: the comparables, their photos and the market report (none: drawn as phase A)
+    if (!$('#main .loading')) return;   // Tim has moved on
+    const tools = present ? '' : `<div class="toolbar no-print" id="apvTools">${plink(`appraisals/${rec.id}/setup`, 'Change the set-up', 'btn primary')}${plink(`appraisals/${rec.id}/comps`, 'Comparables', 'btn ghost')}${plink(`appraisals/${rec.id}/present`, 'Present on screen', 'btn ghost')}<button class="btn ghost" type="button" id="apvPrint">Print</button></div>
       ${String(rec.private_notes || '').trim() ? `<details class="acc no-print" id="apsNotes"><summary>Your private notes</summary><div class="in"><p class="small" style="white-space:pre-wrap;margin:0">${esc(rec.private_notes)}</p></div></details>` : ''}`;
     main().innerHTML = `<div class="view-pad apv${present ? ' apv-show' : ''}" id="apvPage">${present ? '' : '<span class="agent-flag no-print">Only you see this</span>'}${tools}<div id="apvDoc"></div>
       ${present ? `<p class="apv-exit no-print">${plink(`appraisals/${rec.id}`, 'Finish presenting')}</p>` : ''}</div>`;
-    $('#apvDoc').innerHTML = APPR.render(rec);
+    $('#apvDoc').innerHTML = APPR.render(rec, ev);
     const pb = $('#apvPrint'); if (pb) pb.addEventListener('click', () => { apsOpenAll(); window.print(); });
     top();
   }
   // in print every sale method is open (a vendor must see them all, whatever Tim recommends)
   function apsOpenAll() { $$('#apvDoc details.apv-mc').forEach(d => { d.open = true; }); }
   window.addEventListener('beforeprint', apsOpenAll);
+
+  /* ───────── LW3 phase C (migration 034, APPRAISAL-PLAN.md): comparables, photos, the comparables rule, the market report ───────── */
+  const AMB = 'appraisal-media';
+  const todayNZ = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Pacific/Auckland' });
+  // what an appraisal written from its set-up draws beyond its sections: the shown comparables (vendor fields only: never Tim's notes),
+  // their photos (signed links, the print photo first), and the market months when Tim has switched the report on. Anything that
+  // fails to load is left out, so the page is then exactly as phase A drew it.
+  async function apvEvidence(rec) {
+    const ev = { comps: [], photos: {}, months: [], market: !!(rec.setup && rec.setup.market), area: String((rec.setup || {}).marketArea || '') };
+    if (!(rec.setup && rec.setup.v)) return ev;
+    try { const { data, error } = await sb.from('appraisal_comps').select('*').eq('appraisal_id', rec.id).order('position'); if (!error) ev.comps = (data || []).filter(c => c && c.shown !== false && okId(c.id)).map(APPR.vendorComp); } catch (_) { ev.comps = []; }
+    if (ev.comps.length) ev.photos = await cmpPhotoUrls(rec.id, ev.comps.map(c => c.id));
+    if (ev.market) { try { const { data, error } = await sb.from('market_months').select('*').order('month'); if (!error) ev.months = data || []; } catch (_) { ev.months = []; } }
+    return ev;
+  }
+  // photos by comparable: { compId: [{ id, url, path, cover }] }, the print photo (cover) first, then in Tim's order
+  async function cmpPhotoUrls(aid, compIds) {
+    const out = {};
+    try {
+      const { data, error } = await sb.from('appraisal_media').select('*').eq('appraisal_id', aid);
+      if (error) return out;
+      const ms = (data || []).filter(m => compIds.includes(m.comp_id)).sort((a, b) => (+!!b.cover - +!!a.cover) || ((a.position || 0) - (b.position || 0)) || (a.created_at < b.created_at ? -1 : 1));
+      if (!ms.length) return out;
+      const { data: urls } = await sb.storage.from(AMB).createSignedUrls(ms.map(m => m.path), 3600);
+      ms.forEach(m => { const u = (urls || []).find(x => x.path === m.path); if (u && u.signedUrl) (out[m.comp_id] ||= []).push({ id: m.id, url: u.signedUrl, path: m.path, cover: !!m.cover }); });
+    } catch (_) { }
+    return out;
+  }
+  // the photo carousels: the buttons move one photo at a time; the count follows a swipe
+  document.addEventListener('click', e => {
+    const b = e.target && e.target.closest ? e.target.closest('.apv-car-btn') : null; if (!b) return;
+    const car = b.closest('.apv-car'), s = car.querySelector('.apv-car-strip'), n = +car.dataset.n || 1, w = Math.max(1, s.clientWidth);
+    const at = Math.max(0, Math.min(n - 1, Math.round(s.scrollLeft / w) + (+b.dataset.car)));
+    s.scrollTo({ left: at * w, behavior: 'smooth' }); const t = car.querySelector('.apv-car-at'); if (t) t.textContent = (at + 1) + ' of ' + n;
+  });
+  document.addEventListener('scroll', e => {
+    const s = e.target; if (!s || !s.classList || !s.classList.contains('apv-car-strip')) return;
+    const car = s.closest('.apv-car'), t = car && car.querySelector('.apv-car-at'); if (t) t.textContent = (Math.round(s.scrollLeft / Math.max(1, s.clientWidth)) + 1) + ' of ' + car.dataset.n;
+  }, true);
+
+  // the comparables screen: Tim adds, edits, hides, reorders and removes comparables; imports a gathered pack; adds photos (his own
+  // uploads, or a drop from his bulk-download folder matched by file name); checks the comparables rule; switches the market report on;
+  // and keeps his never-mix list. Agent only. A sent appraisal is shown read only.
+  const CMP_ST = [['sold', 'Sold'], ['listed', 'On the market'], ['context', 'For context only']];
+  const CMP_SRC = [['tim', 'Typed by you'], ['reinz', 'REINZ'], ['relab', 'Relab'], ['listing', 'A live listing'], ['other', 'Somewhere else']];
+  const CMP_PHOTO_MAX = 15 * 1024 * 1024, CMP_PHOTO_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+  let CMP_EDIT = null;   // the comparable open for editing ('new' for a new one), kept while the page redraws
+  async function viewAppraisalComps(id, keep) {
+    header('Comparables', '', 0); actions(false); document.body.classList.remove('apv-present');
+    if (!keep) { CMP_EDIT = null; main().innerHTML = '<div class="loading">Loading...</div>'; }
+    let rec = null; try { const d = await must(sb.from('appraisal_views').select('*').eq('id', id)); rec = Array.isArray(d) ? d[0] : d; } catch (_) { rec = null; }
+    if (!keep && !$('#main .loading')) return;
+    if (!rec) return viewPortalMissing();
+    if (!(rec.setup && rec.setup.v)) {
+      main().innerHTML = `<div class="view-pad" id="cmpHand"><span class="agent-flag">Only you see this</span><h1>Comparables</h1><div class="card note tight"><p class="small" style="margin:0">This appraisal was loaded by hand, so its comparables are part of its own wording. Change its figures on its own page.</p></div><div class="toolbar">${plink(`appraisals/${rec.id}`, 'Open the appraisal', 'btn primary')}</div></div>`;
+      top(); return;
+    }
+    let comps = [], groups = [], photos = {}, failed = false;
+    try { comps = ((await must(sb.from('appraisal_comps').select('*').eq('appraisal_id', id).order('position'))) || []).filter(c => okId(c.id)); groups = (await must(sb.from('suburb_groups').select('*').order('name'))) || []; } catch (_) { failed = true; }
+    if (!failed) photos = await cmpPhotoUrls(id, comps.map(c => c.id));
+    if (!keep && !$('#main .loading')) return;
+    if (keep && !$('#cmpPage')) return;
+    const sent = rec.status === 'sent', ro = sent || failed;
+    const suburb = String((rec.setup || {}).suburb || APPR.suburbOf(rec.address) || '');
+    const rule = APPR.compsRule(comps, { today: todayNZ(), suburb, groups });
+    const ruleHTML = `<ul class="cmp-rule" id="cmpRuleList">${rule.items.map(x => `<li data-kind="${x.kind}">${esc(x.text)}</li>`).join('')}</ul>`;
+    const stName = k => (CMP_ST.find(s => s[0] === k) || CMP_ST[0])[1];
+    const line = c => [c.price ? APPR.dollars(c.price) : '', c.status === 'listed' ? (c.listed_on ? 'listed ' + fmtDate(c.listed_on) : '') : (c.sold_on ? 'sold ' + fmtDate(c.sold_on) : ''), APPR.ringWords(c.ring)].filter(Boolean).join(', ');
+    const srcName = k => (CMP_SRC.find(s => s[0] === k) || CMP_SRC[0])[1];
+    const editor = c => { const v = c || {}, isNew = !c, sel = (idn, opts, cur) => `<select id="${idn}">${opts.map(([k, t]) => `<option value="${esc(k)}"${k === cur ? ' selected' : ''}>${esc(t)}</option>`).join('')}</select>`;
+      const inp = (idn, label, val, o) => `<div><label class="f" for="${idn}">${label}</label><input type="${(o && o.type) || 'text'}" id="${idn}" value="${esc(val == null ? '' : val)}"${o && o.num ? ' inputmode="decimal"' : ''}${o && o.ph ? ` placeholder="${esc(o.ph)}"` : ''}></div>`;
+      return `<div class="card tight cmp-editor" id="cmpEditor"><h3 style="margin-top:0">${isNew ? 'A new comparable' : 'Edit this comparable'}</h3>
+        ${inp('cfAddr', 'Address', v.address)}<div class="row2">${inp('cfSuburb', 'Suburb', v.suburb)}<div><label class="f" for="cfStatus">Status</label>${sel('cfStatus', CMP_ST, v.status || 'sold')}</div></div>
+        <div class="row2">${inp('cfPrice', 'Price (sold, or asking)', v.price, { num: 1, ph: '$' })}${inp('cfMethod', 'Method', v.method, { ph: 'Deadline sale' })}</div>
+        <div class="row2">${inp('cfSold', 'Date sold', v.sold_on, { type: 'date' })}${inp('cfListed', 'Date listed', v.listed_on, { type: 'date' })}</div>
+        <div class="row2">${inp('cfDays', 'Days to sell', v.days_to_sell, { num: 1 })}${inp('cfAgency', 'Agency', v.agency)}</div>
+        <div class="row2">${inp('cfBeds', 'Bedrooms', v.bedrooms, { num: 1 })}${inp('cfBaths', 'Bathrooms', v.bathrooms, { num: 1 })}</div>
+        <div class="row2">${inp('cfFloor', 'Floor area (m²)', v.floor_m2, { num: 1 })}${inp('cfLand', 'Land (m²)', v.land_m2, { num: 1 })}</div>
+        <div class="row2">${inp('cfCv', 'Capital value', v.cv, { num: 1, ph: '$' })}<div><label class="f" for="cfRing">How near</label>${sel('cfRing', [['', 'Not set yet']].concat(APPR.RINGS), v.ring || '')}</div></div>
+        <div class="row2">${inp('cfDist', 'Distance (metres)', v.distance_m, { num: 1 })}<div></div></div>
+        <label class="choice cb"><input type="checkbox" id="cfTim"${v.sold_by_tim ? ' checked' : ''}><span class="mark"></span><span><span class="ct">Sold by Tim</span></span></label>
+        <label class="f" for="cfAd">How it was advertised <span class="opt">(the listing's own words, quoted)</span></label><textarea id="cfAd" rows="4">${esc(v.ad_text || '')}</textarea>
+        <label class="f" for="cfCmp">How it compares with their home <span class="opt">(the vendor sees this once ticked)</span></label><textarea id="cfCmp" rows="3">${esc(v.compare_text || '')}</textarea>
+        <label class="choice cb"><input type="checkbox" id="cfTick"${isNew || v.compare_ticked ? ' checked' : ''}><span class="mark"></span><span><span class="ct">Ticked: show how it compares to the vendor</span></span></label>
+        <label class="f" for="cfPriv">Your private note <span class="opt">(only you see this: never on their page or in print)</span></label><textarea id="cfPriv" rows="2">${esc(v.private_note || '')}</textarea>
+        <div class="row2"><div><label class="f" for="cfSrc">Source</label>${sel('cfSrc', CMP_SRC, v.source || 'tim')}</div>${inp('cfGot', 'Gathered on', v.gathered_at ? new Date(v.gathered_at).toLocaleDateString('en-CA', { timeZone: 'Pacific/Auckland' }) : '', { type: 'date' })}</div>
+        ${inp('cfUrl', 'Link to it <span class="opt">(optional)</span>', v.source_url, { ph: 'https://' })}
+        <div class="toolbar"><button class="btn primary" type="button" id="cfSave">${isNew ? 'Add this comparable' : 'Save changes'}</button><button class="btn ghost" type="button" id="cfCancel">Cancel</button></div></div>`; };
+    const row = (c, i) => { const ph = photos[c.id] || [];
+      return `<li class="card tight cmp-row${c.shown === false ? ' off' : ''}" data-cmp="${esc(c.id)}"><div class="cmp-top"><span class="apv-comp-n" aria-hidden="true">${i + 1}</span><div class="cmp-what"><strong translate="no">${esc(c.address)}</strong>
+        <span class="small">${esc(line(c) || 'No price or date yet')}</span>
+        <span class="cmp-pills"><span class="pill">${esc(stName(c.status))}</span>${c.sold_by_tim ? '<span class="pill">Sold by Tim</span>' : ''}${c.shown === false ? '<span class="pill warnp">Hidden</span>' : ''}${APPR.cmpShown(c) ? '<span class="pill okp">Comparison ticked</span>' : ''}</span></div></div>
+        ${String(c.private_note || '').trim() ? `<p class="small cmp-priv"><strong>Your note:</strong> ${esc(c.private_note)}</p>` : ''}
+        <p class="small cmp-src">Source: ${esc(srcName(c.source))}${c.gathered_at ? ', gathered ' + esc(fmtDate(new Date(c.gathered_at).toLocaleDateString('en-CA', { timeZone: 'Pacific/Auckland' }))) : ''}${c.source_url ? ` · <a href="${esc(c.source_url)}" target="_blank" rel="noopener">open the link</a>` : ''}</p>
+        ${ph.length ? `<div class="cmp-photos">${ph.map((m, k) => `<figure data-media="${esc(m.id)}"><img src="${esc(m.url)}" alt="Photo ${k + 1}"><figcaption>${m.cover || (!ph.some(x => x.cover) && k === 0) ? '<span class="pill okp">In print</span>' : (ro ? '' : `<button class="btn link" type="button" data-med-cover="${esc(m.id)}" id="medCover-${esc(m.id)}">Use in print</button>`)}${ro ? '' : `<button class="btn link" type="button" data-med-rm="${esc(m.id)}" id="medRm-${esc(m.id)}">Remove</button>`}</figcaption></figure>`).join('')}</div>` : ''}
+        ${ro ? '' : `<div class="toolbar cmp-tools"><button class="btn ghost" type="button" data-cmp-edit="${esc(c.id)}" id="cmpEdit-${esc(c.id)}">Edit</button><button class="btn ghost" type="button" data-cmp-hide="${esc(c.id)}" id="cmpHide-${esc(c.id)}">${c.shown === false ? 'Show' : 'Hide'}</button>
+          <button class="btn ghost" type="button" data-cmp-move="-1" data-id="${esc(c.id)}" id="cmpUp-${esc(c.id)}"${i === 0 ? ' disabled' : ''} aria-label="Move up">Up</button><button class="btn ghost" type="button" data-cmp-move="1" data-id="${esc(c.id)}" id="cmpDown-${esc(c.id)}"${i === comps.length - 1 ? ' disabled' : ''} aria-label="Move down">Down</button>
+          <label class="btn ghost cmp-addph" id="cmpPh-${esc(c.id)}">Add photos<input type="file" accept="image/jpeg,image/png,image/webp" multiple data-cmp-photos="${esc(c.id)}" hidden></label><button class="btn link" type="button" data-cmp-rm="${esc(c.id)}" id="cmpRm-${esc(c.id)}">Remove</button></div>`}
+        ${CMP_EDIT === c.id && !ro ? editor(c) : ''}</li>`; };
+    main().innerHTML = `<div class="view-pad cmp" id="cmpPage"><span class="agent-flag">Only you see this</span><h1>Comparables</h1>
+      <p class="lede" translate="no">${esc(rec.address || rec.title || '')}</p>
+      <div class="toolbar no-print">${plink(`appraisals/${rec.id}`, 'Open the appraisal', 'btn ghost')}${plink(`appraisals/${rec.id}/present`, 'Present on screen', 'btn ghost')}${plink('appraisals/market', 'Market figures', 'btn ghost')}</div>
+      ${sent ? '<div class="card warnc tight"><p class="small" style="margin:0">This appraisal has been sent, so its comparables can\'t be changed. A sent copy never changes.</p></div>' : ''}
+      ${failed ? '<div class="card warnc tight"><p class="small" style="margin:0">The comparables didn\'t load. Check you have signal, then open this page again.</p></div>' : ''}
+      <h2>The comparables rule</h2>
+      <div class="card tight" id="cmpRule"><p class="small" style="margin:0 0 6px">At least five nearby sales, ideally from the last three months, going back as far as it takes to find three true comparables.</p>${ruleHTML}
+        <div class="toolbar"><button class="btn ghost" type="button" id="cmpCheck">Check against the comparables rule</button></div></div>
+      <h2>Your comparables</h2>
+      ${comps.length ? `<ol class="cmp-list" id="cmpList">${comps.map(row).join('')}</ol>` : '<div class="card note tight"><p class="small" style="margin:0">No comparables yet. Add one, or import a pack gathered from REINZ.</p></div>'}
+      ${ro ? '' : `<div class="toolbar"><button class="btn primary" type="button" id="cmpAdd">Add a comparable</button></div>${CMP_EDIT === 'new' ? editor(null) : ''}`}
+      ${ro ? '' : `<h2>Import a pack</h2>
+      <div class="card tight"><p class="small" style="margin:0 0 6px">Paste the comparables pack gathered from REINZ or Relab (format mre.comps/1). Its source and date are kept; your ticked wording is never replaced; the listing's words are only ever quoted.</p>
+        <label class="f" for="cmpPack" style="margin-top:0">Pack</label><textarea id="cmpPack" rows="5" data-nodirty spellcheck="false" placeholder='{"format":"mre.comps/1","comps":[...]}'></textarea>
+        <div class="toolbar"><button class="btn primary" type="button" id="cmpImport">Import the pack</button></div></div>
+      <h2>Photos from your download folder</h2>
+      <div class="card tight"><p class="small" style="margin:0 0 6px">Choose or drop the photos you downloaded. Each is matched to its comparable by its file name; choose one for any that don't match.</p>
+        <div class="cmp-drop" id="cmpDrop"><label class="btn ghost" id="cmpFolderPick">Choose photos<input type="file" id="cmpFolder" accept="image/jpeg,image/png,image/webp" multiple hidden></label><span class="small">or drop them here</span></div>
+        <div id="cmpFolderList"></div></div>`}
+      <h2>On the appraisal</h2>
+      <div class="card tight"><label class="choice cb"><input type="checkbox" id="cmpMarket"${rec.setup.market ? ' checked' : ''}${ro ? ' disabled' : ''}><span class="mark"></span><span><span class="ct">Show the Dunedin market report</span><span class="cd">From the shared market figures, loaded once a month.</span></span></label></div>
+      <h2>Your never-mix list</h2>
+      <div class="card tight" id="grpCard"><p class="small" style="margin:0 0 6px">Suburbs whose sales are never mixed with others (for example North East Valley's investor and student sales). A sale in a group is not counted for a home outside it.</p>
+        ${groups.map(g => `<div class="cmp-grp" data-grp="${esc(g.id)}"><div class="row2"><div><label class="f" for="grpN-${esc(g.id)}">Name</label><input type="text" id="grpN-${esc(g.id)}" value="${esc(g.name)}"></div><div><label class="f" for="grpS-${esc(g.id)}">Suburbs <span class="opt">(commas between)</span></label><input type="text" id="grpS-${esc(g.id)}" value="${esc((g.suburbs || []).join(', '))}"></div></div>
+          <div class="toolbar"><button class="btn ghost" type="button" data-grp-save="${esc(g.id)}" id="grpSave-${esc(g.id)}">Save</button><button class="btn link" type="button" data-grp-rm="${esc(g.id)}" id="grpRm-${esc(g.id)}">Remove</button></div></div>`).join('')}
+        <div class="row2"><div><label class="f" for="grpName">New group</label><input type="text" id="grpName" data-nodirty placeholder="Student and investor sales"></div><div><label class="f" for="grpSuburbs">Suburbs <span class="opt">(commas between)</span></label><input type="text" id="grpSuburbs" data-nodirty></div></div>
+        <div class="toolbar"><button class="btn ghost" type="button" id="grpAdd">Add to the list</button></div></div>
+    </div>`;
+    if (!keep) top();
+    const again = async (btnId, msg, kind) => { const y = window.scrollY; JDIRTY = false; await viewAppraisalComps(id, true); window.scrollTo(0, y); if (btnId && msg) atBtn(document.getElementById(btnId), msg, kind || 'ok'); };
+    const fail = (b, e, what) => atBtn(b, netErr(e) ? 'Not saved. Check you have signal, then try again.' : (what || 'Not saved') + ': ' + ((e && e.message) || 'try again.'), 'err');
+    $('#cmpCheck').addEventListener('click', e => { const r = APPR.compsRule(comps, { today: todayNZ(), suburb, groups }); $('#cmpRuleList').outerHTML = `<ul class="cmp-rule" id="cmpRuleList">${r.items.map(x => `<li data-kind="${x.kind}">${esc(x.text)}</li>`).join('')}</ul>`;
+      atBtn(e.currentTarget, r.ok ? 'Meets the comparables rule. Check the points below before you present.' : 'Not yet: see what is still needed above.', r.ok ? 'ok' : 'err'); });
+    const mk = $('#cmpMarket');
+    if (mk && !ro) mk.addEventListener('change', async () => {
+      const next = Object.assign({}, rec.setup, { market: mk.checked }); atBtn(mk, 'Saving...', 'busy');
+      const { data, error } = await sb.rpc('agent_appraisal_save', { p_id: rec.id, p_setup: next, p_fields: null, p_sections: null, p_title: null, p_prepared_for: null, p_private_notes: null, p_status: null });
+      if (error || !data) { mk.checked = !mk.checked; fail(mk, error); return; }
+      rec.setup = next; atBtn(mk, mk.checked ? 'Saved. The market report shows on this appraisal.' : 'Saved. The market report is off for this appraisal.', 'ok'); });
+    if (ro) return;
+    // add, edit, hide, reorder and remove
+    $('#cmpAdd').addEventListener('click', () => { CMP_EDIT = 'new'; again(); });
+    $$('[data-cmp-edit]').forEach(b => b.addEventListener('click', () => { CMP_EDIT = b.dataset.cmpEdit; again(); }));
+    const ce = $('#cfCancel'); if (ce) ce.addEventListener('click', () => { CMP_EDIT = null; again(); });
+    const cs = $('#cfSave'); if (cs) cs.addEventListener('click', async () => {
+      const v = s => $('#' + s).value.trim(), n = (s, int) => { const t = v(s).replace(/[$,\s]/g, ''); if (!t) return null; if (!/^[0-9]+(\.[0-9]+)?$/.test(t)) return NaN; return int ? Math.round(+t) : Math.round(+t * 10) / 10; };
+      const row_ = { address: v('cfAddr').replace(/\s+/g, ' '), suburb: v('cfSuburb'), status: v('cfStatus'), price: n('cfPrice', 1), method: v('cfMethod'), sold_on: v('cfSold') || null, listed_on: v('cfListed') || null,
+        days_to_sell: n('cfDays', 1), agency: v('cfAgency'), bedrooms: n('cfBeds', 1), bathrooms: n('cfBaths'), floor_m2: n('cfFloor'), land_m2: n('cfLand'), cv: n('cfCv', 1), ring: v('cfRing') || null, distance_m: n('cfDist', 1),
+        sold_by_tim: $('#cfTim').checked, ad_text: $('#cfAd').value.trim(), compare_text: $('#cfCmp').value.trim(), compare_ticked: $('#cfTick').checked, private_note: $('#cfPriv').value.trim(),
+        source: v('cfSrc') || 'tim', source_url: v('cfUrl') || null, gathered_at: v('cfGot') ? new Date(v('cfGot') + 'T12:00:00').toISOString() : null };
+      if (row_.address.length < 3) return atBtn(cs, 'Add the address.', 'err');
+      const bad = ['price', 'days_to_sell', 'bedrooms', 'bathrooms', 'floor_m2', 'land_m2', 'cv', 'distance_m'].find(k => Number.isNaN(row_[k]));
+      if (bad) return atBtn(cs, 'Use numbers only for the figures (' + { price: 'price', days_to_sell: 'days to sell', bedrooms: 'bedrooms', bathrooms: 'bathrooms', floor_m2: 'floor area', land_m2: 'land', cv: 'capital value', distance_m: 'distance' }[bad] + ').', 'err');
+      if (row_.price === 0) row_.price = null;
+      if (row_.source_url && !/^https:\/\/\S+$/.test(row_.source_url)) return atBtn(cs, 'The link needs to start with https://', 'err');
+      const w = APPR.wordingProblem(row_.compare_text) || APPR.wordingProblem(row_.method); if (w) return atBtn(cs, w, 'err');
+      cs.disabled = true; atBtn(cs, 'Saving...', 'busy');
+      const isNew = CMP_EDIT === 'new';
+      try {
+        if (isNew) await must(sb.from('appraisal_comps').insert(Object.assign({ appraisal_id: rec.id, position: comps.length ? Math.max(...comps.map(c => c.position || 0)) + 1 : 1 }, row_)).select());
+        else await must(sb.from('appraisal_comps').update(row_).eq('id', CMP_EDIT).select());
+      } catch (e) { cs.disabled = false; return fail(cs, e); }
+      const at = isNew ? 'cmpAdd' : 'cmpEdit-' + CMP_EDIT; CMP_EDIT = null;
+      again(at, isNew ? 'Added. It shows on the appraisal' + (row_.compare_ticked && row_.compare_text ? ', with how it compares.' : '.') : 'Saved.', 'ok');
+    });
+    $$('[data-cmp-hide]').forEach(b => b.addEventListener('click', async () => { const c = comps.find(x => x.id === b.dataset.cmpHide); atBtn(b, 'Saving...', 'busy');
+      try { await must(sb.from('appraisal_comps').update({ shown: c.shown === false }).eq('id', c.id).select()); } catch (e) { return fail(b, e); }
+      again('cmpHide-' + c.id, c.shown === false ? 'Shown on the appraisal again.' : 'Hidden. It stays here, but not on the appraisal.', 'ok'); }));
+    $$('[data-cmp-move]').forEach(b => b.addEventListener('click', async () => {
+      const ids = comps.map(c => c.id), i = ids.indexOf(b.dataset.id), j = i + (+b.dataset.cmpMove); if (j < 0 || j >= ids.length) return;
+      [ids[i], ids[j]] = [ids[j], ids[i]]; atBtn(b, 'Saving...', 'busy');
+      const { error } = await sb.rpc('agent_comps_order', { p_appraisal: rec.id, p_ids: ids }); if (error) return fail(b, error);
+      again((+b.dataset.cmpMove < 0 ? 'cmpUp-' : 'cmpDown-') + b.dataset.id, 'Moved. It is number ' + (j + 1) + ' now.', 'ok'); }));
+    $$('[data-cmp-rm]').forEach(b => b.addEventListener('click', async () => { const c = comps.find(x => x.id === b.dataset.cmpRm);
+      if (!confirm('Remove ' + c.address + ' and its photos from this appraisal? To keep it but leave it off the appraisal, choose Hide instead.')) return;
+      atBtn(b, 'Removing...', 'busy'); const paths = (photos[c.id] || []).map(m => m.path);
+      try { await must(sb.from('appraisal_comps').delete().eq('id', c.id)); } catch (e) { return fail(b, e, 'Not removed'); }
+      if (paths.length) { try { await sb.storage.from(AMB).remove(paths); } catch (_) { } }
+      again('cmpAdd', 'Removed ' + c.address + '.', 'ok'); }));
+    // photos: Tim's own, per comparable
+    const upload = async (cid, files, source) => { let n = 0; const why = [];
+      const have = (photos[cid] || []).length;
+      for (const f of files) {
+        if (!CMP_PHOTO_TYPES.includes(f.type)) { why.push(f.name + ' is not a JPEG, PNG or WebP photo'); continue; }
+        if (f.size > CMP_PHOTO_MAX) { why.push(f.name + ' is over 15 MB'); continue; }
+        const ext = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' }[f.type], path = `appraisals/${rec.id}/comps/${cid}/${ngUuid()}.${ext}`;
+        const { error } = await sb.storage.from(AMB).upload(path, f, { contentType: f.type, upsert: false, cacheControl: '3600' });
+        if (error) { why.push(f.name + (netErr(error) ? ': no signal' : ': ' + error.message)); continue; }
+        const { error: e2 } = await sb.from('appraisal_media').insert({ appraisal_id: rec.id, comp_id: cid, path, file_name: String(f.name || '').slice(0, 200), position: have + n + 1, source });
+        if (e2) { why.push(f.name + ': ' + e2.message); try { await sb.storage.from(AMB).remove([path]); } catch (_) { } continue; }
+        n++; }
+      return { n, why }; };
+    $$('[data-cmp-photos]').forEach(inp => inp.addEventListener('change', async () => { const cid = inp.dataset.cmpPhotos, lab = $('#cmpPh-' + cid), files = Array.from(inp.files || []); if (!files.length) return;
+      atBtn(lab, 'Adding ' + files.length + ' photo' + (files.length === 1 ? '' : 's') + '...', 'busy'); const r = await upload(cid, files, 'upload');
+      again('cmpPh-' + cid, (r.n ? 'Added ' + r.n + ' photo' + (r.n === 1 ? '' : 's') + '.' : 'No photos added.') + (r.why.length ? ' Not added: ' + r.why.join('; ') + '.' : ''), r.why.length ? 'err' : 'ok'); }));
+    $$('[data-med-cover]').forEach(b => b.addEventListener('click', async () => { const mid = b.dataset.medCover, cid = b.closest('[data-cmp]').dataset.cmp; atBtn(b, 'Saving...', 'busy');
+      try { for (const m of photos[cid] || []) if (m.cover && m.id !== mid) await must(sb.from('appraisal_media').update({ cover: false }).eq('id', m.id)); await must(sb.from('appraisal_media').update({ cover: true }).eq('id', mid)); } catch (e) { return fail(b, e); }
+      again('cmpPh-' + cid, 'That photo leads the carousel and is the one in print.', 'ok'); }));
+    $$('[data-med-rm]').forEach(b => b.addEventListener('click', async () => { const mid = b.dataset.medRm, cid = b.closest('[data-cmp]').dataset.cmp, m = (photos[cid] || []).find(x => x.id === mid); atBtn(b, 'Removing...', 'busy');
+      try { await must(sb.from('appraisal_media').delete().eq('id', mid)); } catch (e) { return fail(b, e, 'Not removed'); }
+      try { if (m) await sb.storage.from(AMB).remove([m.path]); } catch (_) { }
+      again('cmpPh-' + cid, 'Photo removed.', 'ok'); }));
+    // photos from the download folder, matched by file name
+    let dropped = [];
+    const drawDrop = () => { const box = $('#cmpFolderList'); if (!dropped.length) { box.innerHTML = ''; return; }
+      box.innerHTML = `<ul class="cmp-files">${dropped.map((d, i) => `<li><span class="small" translate="no">${esc(d.f.name)}</span><select data-drop="${i}" aria-label="Comparable for ${esc(d.f.name)}"><option value="">Choose a comparable</option>${comps.map((c, k) => `<option value="${esc(c.id)}"${c.id === d.cid ? ' selected' : ''}>${k + 1}. ${esc(c.address)}</option>`).join('')}</select>${d.auto ? '<span class="pill okp">Matched</span>' : ''}</li>`).join('')}</ul>
+        <div class="toolbar"><button class="btn primary" type="button" id="cmpFolderFile">File these photos</button></div>`;
+      $$('[data-drop]').forEach(s => s.addEventListener('change', () => { dropped[+s.dataset.drop].cid = s.value; dropped[+s.dataset.drop].auto = false; }));
+      $('#cmpFolderFile').addEventListener('click', async e => { const b = e.currentTarget, todo = dropped.filter(d => d.cid), skip = dropped.length - todo.length; if (!todo.length) return atBtn(b, 'Choose a comparable for each photo first.', 'err');
+        b.disabled = true; atBtn(b, 'Filing ' + todo.length + ' photo' + (todo.length === 1 ? '' : 's') + '...', 'busy'); let n = 0; const why = [];
+        for (const cid of Array.from(new Set(todo.map(d => d.cid)))) { const r = await upload(cid, todo.filter(d => d.cid === cid).map(d => d.f), 'folder'); n += r.n; why.push(...r.why); }
+        dropped = []; again('cmpFolderPick', 'Filed ' + n + ' photo' + (n === 1 ? '' : 's') + '.' + (skip ? ' ' + skip + ' left out: no comparable chosen.' : '') + (why.length ? ' Not filed: ' + why.join('; ') + '.' : ''), why.length ? 'err' : 'ok'); }); };
+    const take = files => { Array.from(files || []).forEach(f => { const cid = APPR.matchPhoto(f.name, comps); dropped.push({ f, cid, auto: !!cid }); }); drawDrop(); };
+    $('#cmpFolder').addEventListener('change', e => take(e.target.files));
+    const dz = $('#cmpDrop'); dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('on'); }); dz.addEventListener('dragleave', () => dz.classList.remove('on'));
+    dz.addEventListener('drop', e => { e.preventDefault(); dz.classList.remove('on'); take(e.dataTransfer && e.dataTransfer.files); });
+    // the pack
+    $('#cmpImport').addEventListener('click', async e => { const b = e.currentTarget; let pk = null;
+      try { pk = JSON.parse($('#cmpPack').value); } catch (_) { return atBtn(b, 'That isn\'t a pack: paste the whole of it, from the first { to the last }.', 'err'); }
+      if (!pk || pk.format !== 'mre.comps/1') return atBtn(b, 'That isn\'t a comparables pack (format mre.comps/1).', 'err');
+      b.disabled = true; atBtn(b, 'Importing...', 'busy');
+      const { data, error } = await sb.rpc('agent_comps_import', { p_appraisal: rec.id, p_pack: pk }); b.disabled = false;
+      if (error || !data) return fail(b, error, 'Not imported');
+      const parts = ['Added ' + data.added, 'updated ' + data.updated].concat(data.kept_ticked ? ['kept your ticked wording on ' + data.kept_ticked] : []);
+      const extra = (data.skipped || []).map(s => 'number ' + s.n + ' skipped: ' + s.why).concat((data.notes || []).map(s => 'number ' + s.n + ': ' + s.note));
+      again('cmpImport', parts.join(', ') + '.' + (extra.length ? ' ' + extra.join('; ') + '.' : ''), (data.skipped || []).length ? 'err' : 'ok'); });
+    // the never-mix list
+    const subs = s => String(s || '').split(',').map(x => x.replace(/\s+/g, ' ').trim()).filter(Boolean);
+    $('#grpAdd').addEventListener('click', async e => { const b = e.currentTarget, name = $('#grpName').value.replace(/\s+/g, ' ').trim(), s = subs($('#grpSuburbs').value);
+      if (!name || !s.length) return atBtn(b, 'Give the group a name and at least one suburb.', 'err');
+      try { await must(sb.from('suburb_groups').insert({ name, suburbs: s }).select()); } catch (er) { return fail(b, er); }
+      again('grpAdd', 'Added "' + name + '" to your never-mix list.', 'ok'); });
+    $$('[data-grp-save]').forEach(b => b.addEventListener('click', async () => { const g = b.dataset.grpSave, name = $('#grpN-' + g).value.replace(/\s+/g, ' ').trim(), s = subs($('#grpS-' + g).value);
+      if (!name || !s.length) return atBtn(b, 'Give the group a name and at least one suburb.', 'err');
+      try { await must(sb.from('suburb_groups').update({ name, suburbs: s }).eq('id', g).select()); } catch (er) { return fail(b, er); }
+      again('grpSave-' + g, 'Saved.', 'ok'); }));
+    $$('[data-grp-rm]').forEach(b => b.addEventListener('click', async () => { const g = b.dataset.grpRm;
+      try { await must(sb.from('suburb_groups').delete().eq('id', g)); } catch (er) { return fail(b, er, 'Not removed'); }
+      again('grpAdd', 'Removed from your never-mix list.', 'ok'); }));
+    if (CMP_EDIT && $('#cmpEditor')) { const f = $('#cfAddr'); if (f) f.focus({ preventScroll: true }); $('#cmpEditor').scrollIntoView({ block: 'nearest' }); }
+  }
+
+  // the shared market figures (market_months and market_sales): what is loaded, a preview of the report, and the import box.
+  // The same store feeds every appraisal's market report and, later, the Quarterly market update.
+  async function viewMarketFigures(keep) {
+    header('Market figures', '', 0); actions(false); document.body.classList.remove('apv-present');
+    if (!keep) main().innerHTML = '<div class="loading">Loading...</div>';
+    let months = [], nSales = 0, failed = false;
+    try { months = (await must(sb.from('market_months').select('*').order('month'))) || []; nSales = ((await must(sb.from('market_sales').select('id'))) || []).length; } catch (_) { failed = true; }
+    if (!keep && !$('#main .loading')) return;
+    if (keep && !$('#mktPage')) return;
+    const areas = {}; months.forEach(m => { (areas[m.area] ||= []).push(m); });
+    main().innerHTML = `<div class="view-pad" id="mktPage"><span class="agent-flag">Only you see this</span><h1>Market figures</h1>
+      <p class="lede">The Dunedin market report on each appraisal, from REINZ, loaded once a month. One store, shared by every appraisal that month.</p>
+      ${failed ? '<div class="card warnc tight"><p class="small" style="margin:0">The figures didn\'t load. Check you have signal, then open this page again.</p></div>' : ''}
+      <h2>What is loaded</h2>
+      <div class="card tight" id="mktHave">${Object.keys(areas).length ? `<ul class="needs">${Object.keys(areas).sort().map(a => { const L = areas[a].slice().sort((x, y) => (x.month < y.month ? -1 : 1)), last = L[L.length - 1];
+        return `<li><div class="what"><strong translate="no">${esc(a)}</strong><span class="small">${L.length} month${L.length === 1 ? '' : 's'}, to ${esc(MKT.monthName(last.month))}; gathered ${esc(MKT.longDate(last.gathered_at))}</span></div></li>`; }).join('')}</ul>` : '<p class="small" style="margin:0">No market figures yet.</p>'}
+        <p class="small" style="margin:8px 0 0">${nSales} individual sale${nSales === 1 ? '' : 's'} stored. Their addresses are for you only.</p></div>
+      <h2>Import figures</h2>
+      <div class="card tight"><p class="small" style="margin:0 0 6px">Paste the market pack gathered from REINZ (format mre.market/1). A newer gathering replaces an older one for the same month; the same sale twice is stored once.</p>
+        <label class="f" for="mktPack" style="margin-top:0">Pack</label><textarea id="mktPack" rows="5" data-nodirty spellcheck="false" placeholder='{"format":"mre.market/1","months":[...]}'></textarea>
+        <div class="toolbar"><button class="btn primary" type="button" id="mktImport">Import the figures</button></div></div>
+      ${months.length ? `<h2>How it reads on an appraisal</h2><div class="apv-doc" id="mktPreview">${MKT.report(months, [], {})}</div>` : ''}
+    </div>`;
+    if (!keep) top();
+    $('#mktImport').addEventListener('click', async e => { const b = e.currentTarget; let pk = null;
+      try { pk = JSON.parse($('#mktPack').value); } catch (_) { return atBtn(b, 'That isn\'t a pack: paste the whole of it, from the first { to the last }.', 'err'); }
+      if (!pk || pk.format !== 'mre.market/1') return atBtn(b, 'That isn\'t a market pack (format mre.market/1).', 'err');
+      b.disabled = true; atBtn(b, 'Importing...', 'busy');
+      const { data, error } = await sb.rpc('agent_market_import', { p_pack: pk }); b.disabled = false;
+      if (error || !data) return atBtn(b, netErr(error) ? 'Not imported. Check you have signal, then try again.' : 'Not imported: ' + ((error && error.message) || 'try again.'), 'err');
+      const sk = (data.skipped || []).map(s => s.what + ' ' + s.n + ' skipped: ' + s.why);
+      const y = window.scrollY; await viewMarketFigures(true); window.scrollTo(0, y);
+      atBtn($('#mktImport'), 'Months: ' + data.months_added + ' added, ' + data.months_updated + ' updated. Sales: ' + data.sales_added + ' added, ' + data.sales_updated + ' updated.' + (sk.length ? ' ' + sk.join('; ') + '.' : ''), sk.length ? 'err' : 'ok'); });
+  }
   function viewPortalMissing(msg) {
     header('', '', 0); actions(false);
     main().innerHTML = `<div class="view-pad" id="pMissing"><h1>This page isn't here</h1><p class="lede">${esc(msg || 'There is no page at this address. It may have been typed wrongly, or what it showed has gone.')}</p><div class="toolbar">${plink('', 'Home', 'btn primary')}</div></div>`;

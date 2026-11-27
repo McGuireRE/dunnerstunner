@@ -983,6 +983,124 @@ body.apv-present main { max-width: 760px; padding-bottom: 48px; }
   .apv-mc, .apv-panel, .apv-opinion { break-inside: avoid; }
   #apsNotes { display: none !important; }
 }
+/* LW3 phase C (034): the comparables on the appraisal, their photo carousels, the price dots and the market charts. Phone first:
+   every chart is an SVG that scales to its box, the carousels swipe inside their own strip, nothing scrolls sideways at 390 px. */
+.apv-evidence { margin: 8px 0 0; }
+.apv-comps { display: grid; gap: 14px; margin: 10px 0 18px; }
+.apv-comp { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; min-width: 0; break-inside: avoid; }
+.apv-comp.ctx { border-style: dashed; }
+.apv-comp-h { display: flex; gap: 10px; align-items: flex-start; }
+.apv-comp-h h3 { margin: 0; font-size: 18px; line-height: 1.3; }
+.apv-comp-n { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 50%; background: var(--accent-fill); color: var(--on-accent); font-weight: 600; font-size: 14px; }
+.apv-comp.ctx .apv-comp-n { background: var(--line); color: var(--ink); }
+.apv-comp-tags { margin: 4px 0 0; }
+.apv-tag.st-listed { color: var(--ink); border-color: var(--muted); }
+.apv-tag.st-context { color: var(--muted); border-color: var(--line); }
+.apv-tag.tim { color: var(--accent); border-color: var(--accent); }
+.apv-figs { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px 14px; margin: 12px 0 0; }
+.apv-figs div { min-width: 0; }
+.apv-figs dt { font-size: 12.5px; font-weight: 600; color: var(--muted); }
+.apv-figs dd { margin: 1px 0 0; font-variant-numeric: tabular-nums; }
+.apv-ad h4, .apv-cmp h4 { margin: 14px 0 4px; font-size: 14px; font-weight: 600; color: var(--muted); }
+.apv-ad blockquote { margin: 0; padding: 2px 0 2px 12px; border-left: 3px solid var(--line); font-style: italic; color: var(--ink); }
+.apv-ad blockquote p { margin: 0 0 6px; }
+.apv-cmp p { margin: 0; }
+.apv-car { margin: 12px 0 0; }
+.apv-car-strip { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; border-radius: 10px; background: var(--bg); -webkit-overflow-scrolling: touch; }
+.apv-car-strip img { flex: 0 0 100%; width: 100%; aspect-ratio: 3 / 2; object-fit: cover; scroll-snap-align: start; display: block; }
+.apv-car-ctl { display: flex; align-items: center; justify-content: center; gap: 14px; margin-top: 6px; }
+.apv-car-btn { font: inherit; font-size: 20px; line-height: 1; width: 40px; height: 36px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 999px; cursor: pointer; }
+.apv-car-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.apv-car-at { font-size: 14px; color: var(--muted); min-width: 52px; text-align: center; }
+/* the charts (market-core.js): marks wear the page's colours, text wears text colours */
+.mk-fig { margin: 12px 0 18px; padding: 14px 14px 10px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; min-width: 0; break-inside: avoid; }
+.mk-fig figcaption strong { display: block; font-size: 16.5px; }
+.mk-fig figcaption span { display: block; font-size: 14px; color: var(--muted); margin-bottom: 6px; }
+.mk-fig svg { display: block; width: 100%; height: auto; overflow: visible; }
+.mk-tick { font-size: 12px; fill: var(--muted); font-family: var(--body); }
+.mk-val { font-size: 12.5px; font-weight: 600; fill: var(--ink); font-family: var(--body); }
+.mk-axis { stroke: var(--muted); stroke-width: 1; }
+.mk-grid { stroke: var(--line); stroke-width: 1; }
+.mk-line { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.mk-spread { fill: var(--accent); opacity: .16; }
+.mk-pt { fill: var(--accent); stroke: var(--surface); stroke-width: 2; }
+.mk-bar { fill: var(--muted); opacity: .55; }
+.mk-bar.last { fill: var(--accent); opacity: 1; }
+.mk-range rect { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1; stroke-dasharray: 4 3; }
+.mk-range-lab { font-size: 11px; font-weight: 600; fill: var(--accent); font-family: var(--body); }
+.mk-dot circle { stroke: var(--surface); stroke-width: 2; }
+.mk-dot.sold circle { fill: var(--accent-fill); }
+.mk-dot.listed circle { fill: var(--surface); stroke: var(--accent); stroke-width: 2.5; }
+.mk-dot.context circle { fill: var(--line); }
+.mk-dot text { font-size: 10.5px; font-weight: 700; font-family: var(--body); pointer-events: none; fill: var(--on-accent); }
+.mk-dot.listed text, .mk-dot.context text { fill: var(--ink); }
+.mk-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13px; color: var(--muted); margin: 6px 0 0; }
+.mk-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.mk-key { display: inline-block; width: 12px; height: 12px; border-radius: 50%; }
+.mk-key.sold { background: var(--accent-fill); }
+.mk-key.listed { border: 2.5px solid var(--accent); box-sizing: border-box; }
+.mk-key.context { background: var(--line); }
+.mk-key.range { border-radius: 3px; background: var(--accent-soft); border: 1px dashed var(--accent); }
+.mk-table { margin-top: 6px; font-size: 14px; }
+.mk-table summary { cursor: pointer; color: var(--muted); }
+.mk-table .apv-tbl { font-size: 14px; margin: 8px 0 4px; }
+.mk-lede { font-size: 17px; }
+.mk-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 0 14px; }
+.mk-bands { display: grid; gap: 6px; margin-top: 4px; }
+.mk-band { display: grid; grid-template-columns: minmax(0, 7.5em) minmax(0, 1fr) auto; gap: 8px; align-items: center; font-size: 13.5px; }
+.mk-band-lab { color: var(--muted); font-variant-numeric: tabular-nums; }
+.mk-band-bar { display: block; height: 14px; }
+.mk-band-bar i { display: block; height: 100%; background: var(--muted); opacity: .5; border-radius: 0 4px 4px 0; }
+.mk-band.on .mk-band-bar i { background: var(--accent); opacity: 1; }
+.mk-band-n { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.mk-band-n em { font-style: normal; font-size: 12px; font-weight: 600; color: var(--accent); margin-left: 4px; }
+.mk-src { margin-top: 0; }
+/* the comparables screen (Tim only) */
+.cmp-list { list-style: none; padding: 0; margin: 8px 0; display: grid; gap: 10px; }
+.cmp-row { margin: 0; }
+.cmp-row.off { opacity: .72; border-style: dashed; }
+.cmp-top { display: flex; gap: 10px; align-items: flex-start; }
+.cmp-what { display: flex; flex-direction: column; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
+.cmp-pills { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.cmp-pills .pill { white-space: normal; }
+.pill.warnp { background: var(--warn-soft); color: var(--warn); }
+.cmp-priv { margin: 8px 0 0; padding: 6px 10px; background: var(--warn-soft); border-radius: 6px; overflow-wrap: anywhere; }
+.cmp-src { margin: 6px 0 0; color: var(--muted); overflow-wrap: anywhere; }
+.cmp-tools { flex-wrap: wrap; }
+.cmp-tools .btn { padding-left: 12px; padding-right: 12px; }
+.cmp-addph { cursor: pointer; }
+.cmp-photos { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; margin: 10px 0 0; }
+.cmp-photos figure { margin: 0; min-width: 0; }
+.cmp-photos img { width: 100%; aspect-ratio: 3 / 2; object-fit: cover; border-radius: 6px; display: block; background: var(--bg); }
+.cmp-photos figcaption { display: flex; flex-wrap: wrap; gap: 2px 8px; font-size: 13px; margin-top: 2px; }
+.cmp-photos .btn.link { font-size: 13px; padding: 0; }
+.cmp-rule { list-style: none; padding: 0; margin: 4px 0 0; display: grid; gap: 4px; }
+.cmp-rule li { padding: 6px 10px 6px 30px; border-radius: 6px; position: relative; font-size: 15px; overflow-wrap: anywhere; }
+.cmp-rule li::before { position: absolute; left: 10px; top: 6px; font-weight: 700; }
+.cmp-rule li[data-kind="ok"] { background: var(--ok-soft); }
+.cmp-rule li[data-kind="ok"]::before { content: "\2713"; color: var(--ok-text, var(--ok)); }
+.cmp-rule li[data-kind="err"] { background: var(--accent-soft); }
+.cmp-rule li[data-kind="err"]::before { content: "!"; color: var(--accent); }
+.cmp-rule li[data-kind="warn"] { background: var(--warn-soft); }
+.cmp-rule li[data-kind="warn"]::before { content: "!"; color: var(--warn); }
+.cmp-rule li[data-kind="info"] { background: var(--bg); }
+.cmp-rule li[data-kind="info"]::before { content: "i"; color: var(--muted); }
+.cmp-editor { margin-top: 10px; }
+.cmp-editor textarea { width: 100%; }
+.cmp-drop { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; border: 2px dashed var(--line); border-radius: 10px; padding: 12px; }
+.cmp-drop.on { border-color: var(--accent); background: var(--accent-soft); }
+.cmp-files { list-style: none; padding: 0; margin: 10px 0 0; display: grid; gap: 8px; }
+.cmp-files li { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; }
+.cmp-files li > span.small { overflow-wrap: anywhere; min-width: 0; }
+.cmp-files select { max-width: 100%; }
+.cmp-grp { border-bottom: 1px solid var(--line); padding-bottom: 8px; margin-bottom: 8px; }
+@media print {
+  .apv-car-strip { overflow: visible; display: block; background: none; }
+  .apv-car-strip img { display: none; }
+  .apv-car-strip img:first-child { display: block; width: 100%; max-height: 9cm; object-fit: cover; }
+  .apv-car-ctl, .mk-table { display: none !important; }
+  .apv-comp, .mk-fig { break-inside: avoid; }
+}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script src="../catalogue.js"></script>
@@ -6759,6 +6877,136 @@ window.JOURNEY_MEDIA_HINTS = {
 
 </script>
 <script>
+// Market and price charts (LW3 phase C, migration 034): one shared file for every chart the appraisal report draws, and for the
+// Quarterly market update to reuse. Pure: no database, no page state. Each function takes plain rows and returns HTML (inline SVG
+// that scales to its box, so nothing scrolls sideways at 390 px). Colours come from the page's own colour variables, so light and
+// dark both work. Every mark has a hover title, and each chart has its figures as a table under "See the figures".
+//
+//   MKT.dots(points, ranges)        price evidence at a glance: each comparable a numbered dot, Tim's range(s) shaded
+//   MKT.report(months, ranges, o)   the Dunedin market report: median with its spread, days to sell, sales per month, price bands
+//   MKT.pickArea(months, prefer)    the area to chart (Tim's choice, else Dunedin, else the area with most months)
+//   MKT.lastYear(months, area)      that area's months, oldest first, the latest twelve
+(function () {
+  'use strict';
+  const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const dollars = n => '$' + Math.round(Number(n) || 0).toLocaleString('en-NZ');
+  // "$540K", "$1.25M": short figures for axes and labels
+  const short = n => { n = +n || 0; if (n >= 1e6) return '$' + (Math.round(n / 1e4) / 100).toString().replace(/\.?0+$/, '') + 'M'; if (n >= 1e3) return '$' + Math.round(n / 1e3) + 'K'; return '$' + Math.round(n); };
+  const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  const ym = d => { const m = /^(\d{4})-(\d{2})/.exec(String(d || '')); return m ? { y: +m[1], m: +m[2] } : null; };
+  const monthName = d => { const x = ym(d); return x ? MONTHS[x.m - 1] + ' ' + x.y : ''; };
+  const monthShort = d => { const x = ym(d); return x ? MONTHS[x.m - 1].slice(0, 3) : ''; };
+  const longDate = d => { if (!d) return ''; const x = new Date(String(d).length === 10 ? d + 'T12:00:00' : d); return isNaN(x) ? '' : x.toLocaleDateString('en-NZ', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Pacific/Auckland' }); };
+  // tidy axis steps: 1, 2, 2.5 or 5 times a power of ten, about n ticks across the span
+  function ticks(lo, hi, n) {
+    const span = Math.max(1, hi - lo), raw = span / Math.max(1, n || 4), p = Math.pow(10, Math.floor(Math.log10(raw)));
+    const step = [1, 2, 2.5, 5, 10].map(k => k * p).find(s => s >= raw) || 10 * p;
+    const out = []; for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-9; v += step) out.push(Math.round(v));
+    return out;
+  }
+  // a bar with rounded top corners (4 px), standing on the baseline
+  const bar = (x, y, w, h, cls, title) => { h = Math.max(0, h); const r = Math.min(4, w / 2, h);
+    return '<path class="' + cls + '" d="M' + x + ',' + (y + h) + 'V' + (y + r) + 'Q' + x + ',' + y + ' ' + (x + r) + ',' + y + 'H' + (x + w - r) + 'Q' + (x + w) + ',' + y + ' ' + (x + w) + ',' + (y + r) + 'V' + (y + h) + 'Z"><title>' + esc(title) + '</title></path>'; };
+  const table = (head, rows) => '<details class="mk-table"><summary>See the figures</summary><table class="apv-tbl"><thead><tr>' + head.map(h => '<th scope="col">' + esc(h) + '</th>').join('') + '</tr></thead><tbody>'
+    + rows.map(r => '<tr>' + r.map((c, j) => '<td data-h="' + esc(head[j]) + '">' + esc(c) + '</td>').join('') + '</tr>').join('') + '</tbody></table></details>';
+  const W = 340;   // the drawing's own width; it scales to its box
+
+  /* ───────── price evidence at a glance ───────── */
+  // points: [{ n, price, status: sold|listed|context, label, when }]; ranges: [{ option, low, high }]
+  const STATUS = { sold: 'Sold', listed: 'On the market', context: 'For context only' };
+  function dots(points, ranges) {
+    const pts = (points || []).filter(p => p && +p.price > 0), rs = (ranges || []).filter(r => r && +r.low > 0 && +r.high > +r.low);
+    if (!pts.length) return '';
+    const vals = pts.map(p => +p.price).concat(...rs.map(r => [+r.low, +r.high]));
+    let lo = Math.min(...vals), hi = Math.max(...vals); const pad = Math.max((hi - lo) * 0.08, hi * 0.02); lo = Math.max(0, lo - pad); hi += pad;
+    const L = 14, R = W - 14, x = v => L + (v - lo) / (hi - lo) * (R - L), rad = 10;
+    // stack dots that would overlap: each goes on the lowest level where it clears the dots already there
+    const levels = [], placed = pts.slice().sort((a, b) => a.price - b.price).map(p => { const cx = x(p.price); let k = 0;
+      while ((levels[k] || []).some(o => Math.abs(o - cx) < rad * 2 + 2)) k++; (levels[k] = levels[k] || []).push(cx); return { p, cx, k }; });
+    const nl = Math.max(1, levels.length), top = rs.length ? 30 : 12, base = top + nl * (rad * 2 + 4), H = base + 30;
+    const bands = rs.map((r, i) => '<g class="mk-range" data-range="' + esc(r.key || i) + '"><rect x="' + x(r.low).toFixed(1) + '" y="' + (top - 4) + '" width="' + Math.max(2, x(r.high) - x(r.low)).toFixed(1) + '" height="' + (base - top + 8) + '" rx="4"><title>' + esc((r.option || 'My range') + ': ' + dollars(r.low) + ' to ' + dollars(r.high)) + '</title></rect>'
+      + '<text class="mk-range-lab" x="' + ((x(r.low) + x(r.high)) / 2).toFixed(1) + '" y="' + (top - 10) + '" text-anchor="middle">' + esc(rs.length > 1 ? (r.option || 'Range ' + (i + 1)) : 'My range') + '</text></g>').join('');
+    const tk = ticks(lo, hi, 4).filter(v => v >= lo && v <= hi);
+    const axis = '<line class="mk-axis" x1="' + L + '" x2="' + R + '" y1="' + (base + 4) + '" y2="' + (base + 4) + '"/>' + tk.map(v => '<text class="mk-tick" x="' + x(v).toFixed(1) + '" y="' + (base + 20) + '" text-anchor="middle">' + esc(short(v)) + '</text>').join('');
+    const marks = placed.map(({ p, cx, k }) => { const cy = base - rad - 2 - k * (rad * 2 + 4), st = STATUS[p.status] ? p.status : 'sold';
+      return '<g class="mk-dot ' + st + '" data-n="' + esc(p.n) + '" data-price="' + esc(p.price) + '"><circle cx="' + cx.toFixed(1) + '" cy="' + cy + '" r="' + rad + '"/><text x="' + cx.toFixed(1) + '" y="' + (cy + 3.5) + '" text-anchor="middle">' + esc(p.n) + '</text>'
+        + '<title>' + esc(p.n + '. ' + (p.label || '') + ': ' + dollars(p.price) + ', ' + STATUS[st].toLowerCase() + (p.when ? ' (' + p.when + ')' : '')) + '</title></g>'; }).join('');
+    const used = ['sold', 'listed', 'context'].filter(s => pts.some(p => (STATUS[p.status] ? p.status : 'sold') === s));
+    const legend = '<p class="mk-legend">' + used.map(s => '<span><i class="mk-key ' + s + '"></i>' + esc(STATUS[s]) + '</span>').join('') + (rs.length ? '<span><i class="mk-key range"></i>' + (rs.length > 1 ? 'My ranges, shaded' : 'My range, shaded') + '</span>' : '') + '</p>';
+    return '<figure class="mk-fig mk-dots" role="img" aria-label="Each comparable\'s price as a numbered dot' + (rs.length ? ', with my range shaded' : '') + '">'
+      + '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" preserveAspectRatio="xMidYMid meet">' + bands + axis + marks + '</svg>' + legend
+      + table(['No.', 'Comparable', 'Price', 'Status'], pts.map(p => [String(p.n), p.label || '', dollars(p.price), STATUS[STATUS[p.status] ? p.status : 'sold']])) + '</figure>';
+  }
+
+  /* ───────── the market report ───────── */
+  function pickArea(months, prefer) {
+    const areas = {}; (months || []).forEach(m => { if (m && m.area) areas[m.area] = (areas[m.area] || 0) + 1; });
+    const names = Object.keys(areas), low = s => String(s || '').trim().toLowerCase();
+    return names.find(a => prefer && low(a) === low(prefer)) || names.find(a => low(a) === 'dunedin') || names.find(a => low(a) === 'dunedin city')
+      || names.sort((a, b) => areas[b] - areas[a] || (a < b ? -1 : 1))[0] || '';
+  }
+  const lastYear = (months, area) => (months || []).filter(m => m && m.area === area && ym(m.month)).sort((a, b) => (a.month < b.month ? -1 : 1)).slice(-12);
+  // the x positions for n months, and which months get a label (every one, or every second or third so they never collide)
+  const xs = n => { const L = 56, R = W - 16, step = n > 1 ? (R - L) / (n - 1) : 0; return i => n > 1 ? L + i * step : (L + R) / 2; };
+  const every = n => n > 8 ? 3 : n > 5 ? 2 : 1;
+  function yAxis(lo, hi, y, fmt) { return ticks(lo, hi, 3).filter(v => v >= lo && v <= hi).map(v => '<line class="mk-grid" x1="44" x2="' + (W - 8) + '" y1="' + y(v).toFixed(1) + '" y2="' + y(v).toFixed(1) + '"/><text class="mk-tick" x="40" y="' + (y(v) + 4).toFixed(1) + '" text-anchor="end">' + esc(fmt(v)) + '</text>').join(''); }
+  function xLabels(ms, X, yb) { const k = every(ms.length); return ms.map((m, i) => (i % k === (ms.length - 1) % k) ? '<text class="mk-tick" x="' + X(i).toFixed(1) + '" y="' + yb + '" text-anchor="middle">' + esc(monthShort(m.month)) + '</text>' : '').join(''); }
+  function medianChart(ms) {
+    const pts = ms.map((m, i) => ({ i, m })).filter(o => +o.m.median > 0); if (pts.length < 2) return '';
+    const H = 190, T = 14, B = H - 30, X = xs(ms.length);
+    const vals = pts.flatMap(o => [+o.m.median, +o.m.lower_quartile || +o.m.median, +o.m.upper_quartile || +o.m.median]);
+    let lo = Math.min(...vals), hi = Math.max(...vals); const pad = (hi - lo) * 0.12 || hi * 0.05; lo = Math.max(0, lo - pad); hi += pad;
+    const y = v => B - (v - lo) / (hi - lo) * (B - T);
+    const spread = pts.filter(o => +o.m.lower_quartile > 0 && +o.m.upper_quartile > 0);
+    const band = spread.length >= 2 ? '<path class="mk-spread" d="M' + spread.map(o => X(o.i).toFixed(1) + ',' + y(+o.m.upper_quartile).toFixed(1)).join('L') + 'L' + spread.slice().reverse().map(o => X(o.i).toFixed(1) + ',' + y(+o.m.lower_quartile).toFixed(1)).join('L') + 'Z"><title>The middle half of sales each month (lower to upper quartile)</title></path>' : '';
+    const line = '<path class="mk-line" d="M' + pts.map(o => X(o.i).toFixed(1) + ',' + y(+o.m.median).toFixed(1)).join('L') + '"/>';
+    const marks = pts.map(o => '<circle class="mk-pt" cx="' + X(o.i).toFixed(1) + '" cy="' + y(+o.m.median).toFixed(1) + '" r="4"><title>' + esc(monthName(o.m.month) + ': median ' + dollars(o.m.median) + (spread.includes(o) ? ', middle half ' + dollars(o.m.lower_quartile) + ' to ' + dollars(o.m.upper_quartile) : '')) + '</title></circle>').join('');
+    const last = pts[pts.length - 1];
+    const lab = '<text class="mk-val" x="' + Math.min(W - 12, X(last.i)).toFixed(1) + '" y="' + (y(+last.m.median) - 10).toFixed(1) + '" text-anchor="end">' + esc(short(last.m.median)) + '</text>';
+    return '<figure class="mk-fig" data-chart="median"><figcaption><strong>Median sale price</strong><span>The line is the median each month; the shading is the middle half of sales (the spread).</span></figcaption>'
+      + '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" role="img" aria-label="Median sale price by month, with the spread shaded">' + yAxis(lo, hi, y, short) + band + line + marks + lab + xLabels(ms, X, H - 10) + '</svg>'
+      + table(['Month', 'Median', 'Lower quartile', 'Upper quartile'], ms.map(m => [monthName(m.month), m.median ? dollars(m.median) : '', m.lower_quartile ? dollars(m.lower_quartile) : '', m.upper_quartile ? dollars(m.upper_quartile) : ''])) + '</figure>';
+  }
+  function barChart(ms, key, o) {
+    const pts = ms.map((m, i) => ({ i, m, v: m[key] })).filter(p => p.v != null && isFinite(+p.v)); if (pts.length < 2) return '';
+    const H = 170, T = 16, B = H - 30, X = xs(ms.length), hi = Math.max(1, ...pts.map(p => +p.v)) * 1.12, y = v => B - v / hi * (B - T);
+    const bw = Math.max(6, Math.min(22, (W - 60) / ms.length - 4));
+    const bars = pts.map((p, j) => bar(+(X(p.i) - bw / 2).toFixed(1), +y(+p.v).toFixed(1), bw, +(B - y(+p.v)).toFixed(1), 'mk-bar' + (j === pts.length - 1 ? ' last' : ''), monthName(p.m.month) + ': ' + o.fmt(p.v))).join('');
+    const last = pts[pts.length - 1];
+    const lab = '<text class="mk-val" x="' + X(last.i).toFixed(1) + '" y="' + (y(+last.v) - 5).toFixed(1) + '" text-anchor="middle">' + esc(o.fmt(last.v)) + '</text>';
+    return '<figure class="mk-fig" data-chart="' + esc(key) + '"><figcaption><strong>' + esc(o.title) + '</strong><span>' + esc(o.sub) + '</span></figcaption>'
+      + '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" role="img" aria-label="' + esc(o.title) + ' by month">' + yAxis(0, hi, y, v => String(Math.round(v))) + '<line class="mk-axis" x1="44" x2="' + (W - 8) + '" y1="' + B + '" y2="' + B + '"/>' + bars + lab + xLabels(ms, X, H - 10) + '</svg>'
+      + table(['Month', o.title], ms.map(m => [monthName(m.month), m[key] != null ? o.fmt(m[key]) : ''])) + '</figure>';
+  }
+  // price bands: how many homes sold in each band, latest month with bands; the bands the vendor's range touches are marked
+  function bandsChart(m, ranges) {
+    const bs = ((m && m.bands) || []).filter(b => b && isFinite(+b.count)); if (!bs.length) return '';
+    const rs = (ranges || []).filter(r => r && +r.low > 0 && +r.high > +r.low), peak = Math.max(1, ...bs.map(b => +b.count));
+    const label = b => b.from == null || +b.from === 0 ? 'Under ' + short(b.to) : b.to == null ? short(b.from) + ' and over' : short(b.from) + ' to ' + short(b.to);
+    const touches = b => rs.some(r => (b.to == null || +r.low < +b.to) && (b.from == null || +r.high > +b.from));
+    return '<figure class="mk-fig" data-chart="bands"><figcaption><strong>Where sales landed</strong><span>Homes sold in each price band, ' + esc(monthName(m.month)) + '.' + (rs.length ? ' Your range is marked.' : '') + '</span></figcaption>'
+      + '<div class="mk-bands">' + bs.map(b => { const on = touches(b); return '<div class="mk-band' + (on ? ' on' : '') + '" title="' + esc(label(b) + ': ' + b.count + ' sold') + '"><span class="mk-band-lab">' + esc(label(b)) + '</span><span class="mk-band-bar"><i style="width:' + Math.max(2, Math.round(+b.count / peak * 100)) + '%"></i></span><span class="mk-band-n">' + esc(b.count) + (on ? ' <em>Your range</em>' : '') + '</span></div>'; }).join('') + '</div>'
+      + table(['Price band', 'Homes sold', 'Your range'], bs.map(b => [label(b), String(b.count), touches(b) ? 'Yes' : ''])) + '</figure>';
+  }
+  // months: rows of market_months; ranges: the appraisal's fields.ranges; o: { area, title }
+  function report(months, ranges, o) {
+    o = o || {}; const area = pickArea(months, o.area), ms = lastYear(months, area); if (!ms.length) return '';
+    const latest = ms[ms.length - 1], withBands = ms.slice().reverse().find(m => (m.bands || []).length);
+    const got = ms.map(m => m.gathered_at).filter(Boolean).sort().pop();
+    const lede = latest.median ? 'In ' + monthName(latest.month) + ' the median sale price in ' + area + ' was ' + dollars(latest.median)
+      + (latest.sales != null ? ', from ' + latest.sales + ' sales' : '') + (latest.days_to_sell != null ? ', and homes took ' + latest.days_to_sell + ' days to sell at the median' : '') + '.' : '';
+    return '<div class="mk-report" data-area="' + esc(area) + '">' + (lede ? '<p class="mk-lede">' + esc(lede) + '</p>' : '')
+      + '<div class="mk-grid">' + medianChart(ms)
+      + barChart(ms, 'days_to_sell', { title: 'Days to sell', sub: 'The median number of days from listing to sale.', fmt: v => Math.round(v) + ' days' })
+      + barChart(ms, 'sales', { title: 'Homes sold each month', sub: 'How many homes sold in ' + area + '.', fmt: v => Math.round(v) + ' sold' })
+      + (withBands ? bandsChart(withBands, ranges) : '') + '</div>'
+      + '<p class="apv-note mk-src">Source: REINZ, figures to ' + esc(monthName(latest.month)) + (got ? ', gathered ' + esc(longDate(got)) : '') + '.</p></div>';
+  }
+  window.MKT = { dots, report, pickArea, lastYear, ticks, short, monthName, longDate, STATUS };
+})();
+
+</script>
+<script>
 // Appraisal views (migration 032): draws one appraisal record (sections in JSON, plus the fields Tim edits) as plain HTML.
 // No database, no page state: the portal page in app.js loads the record, draws it with APPR.render and saves the fields.
 // This is the seed of the full Appraisal page, so nothing here knows about any one property.
@@ -6993,9 +7241,149 @@ window.JOURNEY_MEDIA_HINTS = {
   }
   // anything in what was written that a vendor would read and must never see
   function sectionsProblem(sections) { const out = []; const walk = v => { if (typeof v === 'string') out.push(v); else if (v && typeof v === 'object') Object.values(v).forEach(walk); }; walk(sections); return wordingProblem(out.join(' ')); }
-  function render(rec) {
+  // ev (LW3 phase C, 034): the evidence drawn live from the database, for an appraisal written from its set-up:
+  // { comps: the shown comparables in order (vendor fields only), photos: { compId: [{ url, alt }] }, months: market_months rows,
+  //   market: show the Dunedin market report }. It goes in before the opinion of price. With no ev, or nothing in it, the page is
+  //   exactly as phase A (and 032) drew it.
+  function render(rec, ev) {
     const f = (rec && rec.fields) || {};
-    return '<article class="apv-doc"><h1>' + esc((rec && rec.title) || 'Market appraisal') + '</h1>' + ((rec && rec.sections) || []).map(s => section(s, f)).join('') + '</article>';
+    const parts = ((rec && rec.sections) || []).map(s => section(s, f));
+    const extra = rec && rec.setup && rec.setup.v && ev ? evidence(ev, f) : '';
+    if (extra) { let at = ((rec && rec.sections) || []).findIndex(s => s && s.type === 'heading' && /^my opinion of price$/i.test(String(s.text || '').trim()));
+      if (at < 0) at = ((rec && rec.sections) || []).findIndex(s => s && s.type === 'opinion'); if (at < 0) at = parts.length; parts.splice(at, 0, extra); }
+    return '<article class="apv-doc"><h1>' + esc((rec && rec.title) || 'Market appraisal') + '</h1>' + parts.join('') + '</article>';
+  }
+
+  /* ───────── LW3 phase C (034): comparables, the price dots and the Dunedin market report ───────── */
+  // the fields of a comparable a vendor may see. Tim's private note, the source link and anything not listed here never reach the page.
+  const VENDOR_COMP = ['id', 'position', 'status', 'address', 'suburb', 'price', 'sold_on', 'listed_on', 'method', 'days_to_sell', 'bedrooms', 'bathrooms', 'floor_m2', 'land_m2', 'cv', 'agency', 'sold_by_tim', 'ad_text', 'compare_text', 'compare_ticked', 'ring', 'distance_m'];
+  const vendorComp = c => { const o = {}; VENDOR_COMP.forEach(k => { if (c && c[k] !== undefined) o[k] = c[k]; }); return o; };
+  const STATUS_WORDS = { sold: 'Sold', listed: 'On the market', context: 'For context only, not comparable' };
+  const RINGS = [['suburb', 'Same suburb'], ['750m', 'Within 750 m'], ['1500m', 'Within 1.5 km'], ['further', 'Further afield']];
+  const ringWords = k => (RINGS.find(r => r[0] === k) || [])[1] || '';
+  const km = m => m >= 1000 ? (Math.round(m / 100) / 10).toString() + ' km' : Math.round(m) + ' m';
+  const num1 = v => (Math.round(+v * 10) / 10).toLocaleString('en-NZ');
+  // a quote from a listing: plain text, drawn escaped, with its line breaks. Never markup, never an instruction.
+  const quote = t => esc(t).replace(/\n{2,}/g, '</p><p>').replace(/\n/g, '<br>');
+  // what a vendor reads of the advertisement wording: only if it passes the wording rules (another agency's "as is" is never shown)
+  const adShown = c => !!String((c && c.ad_text) || '').trim() && !wordingProblem(c.ad_text);
+  const cmpShown = c => !!(c && c.compare_ticked && String(c.compare_text || '').trim());
+  function compCard(c, i, photos) {
+    const st = STATUS_WORDS[c.status] ? c.status : 'sold';
+    const price = c.price > 0 ? (st === 'listed' ? 'Asking ' : st === 'sold' ? 'Sold for ' : '') + dollars(c.price) : (st === 'listed' ? (c.method || 'Price on request') : '');
+    const when = st === 'listed' ? (c.listed_on ? 'Listed ' + longDate(c.listed_on) : '') : (c.sold_on ? 'Sold ' + longDate(c.sold_on) : '');
+    const figs = [['Price', price], ['Date', when], ['Method', st === 'listed' && !(c.price > 0) ? '' : c.method], ['Days to sell', c.days_to_sell != null && st !== 'listed' ? c.days_to_sell + ' days' : ''],
+      ['Bedrooms', c.bedrooms != null ? String(c.bedrooms) : ''], ['Bathrooms', c.bathrooms != null ? num1(c.bathrooms) : ''], ['Floor area', c.floor_m2 ? num1(c.floor_m2) + ' m²' : ''],
+      ['Land', c.land_m2 ? num1(c.land_m2) + ' m²' : ''], ['Capital value', c.cv ? dollars(c.cv) : ''], ['Agency', c.agency],
+      ['How near', [ringWords(c.ring), c.distance_m != null ? km(c.distance_m) + ' away' : ''].filter(Boolean).join(', ')]].filter(x => String(x[1] || '').trim());
+    const ph = (photos || []).filter(p => p && p.url);
+    const car = ph.length ? '<div class="apv-car" data-n="' + ph.length + '"><div class="apv-car-strip" tabindex="0" aria-label="Photos of ' + esc(c.address) + '">' + ph.map((p, k) => '<img src="' + esc(p.url) + '" alt="' + esc('Photo ' + (k + 1) + ' of ' + ph.length + ', ' + c.address) + '"' + (k ? ' loading="lazy"' : '') + ' decoding="async">').join('') + '</div>'
+      + (ph.length > 1 ? '<div class="apv-car-ctl no-print"><button type="button" class="apv-car-btn" data-car="-1" aria-label="Previous photo">‹</button><span class="apv-car-at" aria-live="polite">1 of ' + ph.length + '</span><button type="button" class="apv-car-btn" data-car="1" aria-label="Next photo">›</button></div>' : '') + '</div>' : '';
+    return '<article class="apv-comp' + (st === 'context' ? ' ctx' : '') + '" data-comp="' + esc(c.id) + '"><header class="apv-comp-h"><span class="apv-comp-n" aria-hidden="true">' + (i + 1) + '</span><div><h3>' + esc(c.address) + '</h3>'
+      + '<p class="apv-comp-tags"><span class="apv-tag st-' + st + '">' + esc(STATUS_WORDS[st]) + '</span>' + (c.sold_by_tim ? '<span class="apv-tag tim">Sold by Tim</span>' : '') + '</p></div></header>' + car
+      + (figs.length ? '<dl class="apv-figs">' + figs.map(([k, v]) => '<div><dt>' + esc(k) + '</dt><dd>' + esc(v) + '</dd></div>').join('') + '</dl>' : '')
+      + (adShown(c) ? '<div class="apv-ad"><h4>How it was advertised</h4><blockquote><p>' + quote(c.ad_text) + '</p></blockquote></div>' : '')
+      + (cmpShown(c) ? '<div class="apv-cmp"><h4>How it compares with your home</h4><p>' + quote(c.compare_text) + '</p></div>' : '') + '</article>';
+  }
+  function evidence(ev, f) {
+    const comps = (ev.comps || []).filter(c => c && c.shown !== false).map(vendorComp);
+    const dots = window.MKT && comps.length ? window.MKT.dots(comps.map((c, i) => ({ n: i + 1, price: c.price, status: c.status, label: c.address, when: c.status === 'listed' ? (c.listed_on ? 'listed ' + longDate(c.listed_on) : '') : (c.sold_on ? longDate(c.sold_on) : '') })), (f && f.ranges) || []) : '';
+    const sold = comps.filter(c => c.status !== 'listed'), listed = comps.filter(c => c.status === 'listed');
+    const nPrice = comps.filter(c => !(c.price > 0)).length;
+    const num = c => comps.indexOf(c);
+    const market = ev.market && window.MKT ? window.MKT.report(ev.months || [], (f && f.ranges) || [], { area: ev.area }) : '';
+    let h = '';
+    if (comps.length) {
+      h += '<h2>Price evidence at a glance</h2>' + (dots || '') + (nPrice ? '<p class="apv-note">' + (nPrice === 1 ? 'One comparable has' : nPrice + ' comparables have') + ' no price to show, so ' + (nPrice === 1 ? 'it isn\'t' : 'they aren\'t') + ' on the chart.</p>' : '');
+      if (sold.length) h += '<h2>Recent sales nearby</h2><div class="apv-comps">' + sold.map(c => compCard(c, num(c), (ev.photos || {})[c.id])).join('') + '</div>';
+      if (listed.length) h += '<h2>On the market now</h2><div class="apv-comps">' + listed.map(c => compCard(c, num(c), (ev.photos || {})[c.id])).join('') + '</div>';
+    }
+    if (market) h += '<h2>The Dunedin market</h2>' + market;
+    return h ? '<section class="apv-evidence">' + h + '</section>' : '';
+  }
+
+  // the comparables rule (Tim, 25 November 2026): at least five nearby sales, ideally from the last three months, going back as far as
+  // it takes to find three true comparables. Sold and "for context only" sales both count as nearby sales; only sold ones not for context
+  // are true comparables. Sales in a never-mix group are never counted for a home outside it (or the other way round).
+  // comps: every comparable (hidden ones are left out here); o: { today: 'YYYY-MM-DD', suburb, groups: [{ name, suburbs }] }
+  // Returns { ok, items: [{ kind: ok|warn|err|info, text }] }, in plain words for Tim.
+  function compsRule(comps, o) {
+    o = o || {}; const today = o.today || new Date().toLocaleDateString('en-CA', { timeZone: 'Pacific/Auckland' });
+    const low = s => String(s || '').trim().toLowerCase();
+    const groupOf = s => (o.groups || []).find(g => (g.suburbs || []).some(x => low(x) === low(s)) && low(s));
+    const back = new Date(today + 'T12:00:00'); back.setMonth(back.getMonth() - 3); const cut = back.toISOString().slice(0, 10);
+    const items = [], add = (kind, text) => items.push({ kind, text });
+    const shown = (comps || []).filter(c => c && c.shown !== false), sg = groupOf(o.suburb);
+    const mixed = c => { const g = groupOf(c.suburb); return (g || sg) && g !== sg; };
+    shown.filter(c => mixed(c) && c.status !== 'context').forEach(c => { const g = groupOf(c.suburb) || sg;
+      add('warn', c.address + ' is ' + (groupOf(c.suburb) ? 'in ' + c.suburb + ', on' : 'outside') + ' your never-mix list (' + g.name + '), so it isn\'t counted. Hide it, or mark it for context only.'); });
+    const ok = shown.filter(c => !mixed(c));
+    const near = ok.filter(c => c.status !== 'listed' && c.sold_on && c.ring !== 'further');
+    const recentNear = near.filter(c => c.sold_on >= cut);
+    const truth = ok.filter(c => c.status === 'sold' && c.sold_on).sort((a, b) => (a.sold_on < b.sold_on ? 1 : -1));
+    const recentTrue = truth.filter(c => c.sold_on >= cut);
+    if (near.length >= 5) add('ok', near.length + ' nearby sales: at least five are needed.');
+    else add('err', (near.length ? 'Only ' + near.length + ' nearby sale' + (near.length === 1 ? '' : 's') : 'No nearby sales yet') + ': at least five are needed. Add ' + (5 - near.length) + ' more, from the same suburb first, then within 750 m, then 1.5 km.');
+    if (near.length) { if (recentNear.length >= 5) add('ok', recentNear.length + ' of them sold in the last three months.');
+      else add('info', recentNear.length + ' of them sold in the last three months, so older sales make up the rest. That is fine: go back as far as it takes.'); }
+    if (recentTrue.length >= 3) add('ok', recentTrue.length + ' true comparables from the last three months: at least three are needed.');
+    else if (truth.length >= 3) add('ok', '3 true comparables, going back to ' + monthYear(truth[2].sold_on) + '.');
+    else add('err', (truth.length ? 'Only ' + truth.length + ' true comparable' + (truth.length === 1 ? '' : 's') : 'No true comparables yet') + ': three are needed. Go further back in time until you find ' + (3 - truth.length === 1 ? 'one more' : (3 - truth.length) + ' more') + '.');
+    if (!shown.some(c => c.status === 'listed')) add('info', 'Nothing on the market is shown. Add any homes that compete with this one: buyers will compare them.');
+    shown.filter(c => c.status !== 'listed' && !c.sold_on).forEach(c => add('warn', 'Add the sale date for ' + c.address + '.'));
+    shown.filter(c => !c.ring).forEach(c => add('warn', 'Set how near ' + c.address + ' is: same suburb, within 750 m, within 1.5 km, or further.'));
+    shown.filter(c => !cmpShown(c)).forEach(c => add('warn', 'How ' + c.address + ' compares ' + (String(c.compare_text || '').trim() ? 'isn\'t ticked yet' : 'isn\'t written yet') + ', so the vendor won\'t see a comparison.'));
+    shown.filter(c => String(c.ad_text || '').trim() && !adShown(c)).forEach(c => add('warn', 'The advertisement wording for ' + c.address + ' isn\'t shown to the vendor: ' + wordingProblem(c.ad_text).replace(/\.$/, '') + '.'));
+    return { ok: !items.some(x => x.kind === 'err'), items };
+  }
+  const monthYear = d => { const x = /^(\d{4})-(\d{2})/.exec(String(d || '')); return x ? ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'][+x[2] - 1] + ' ' + x[1] : ''; };
+
+  // a photo dropped from Tim's download folder: which comparable it belongs to. By its file name in the pack's photo list, else by a
+  // name that starts with the comparable's reference (RB-R1_1.jpg for reference RB-R1). Returns the comparable's id, or ''.
+  function matchPhoto(fileName, comps) {
+    const base = String(fileName || '').split(/[\\/]/).pop().trim().toLowerCase(); if (!base) return '';
+    const byHint = (comps || []).find(c => (c.photo_hints || []).some(h => h && String(h.file || '').toLowerCase() === base)); if (byHint) return byHint.id;
+    const byRef = (comps || []).filter(c => c.source_ref).sort((a, b) => String(b.source_ref).length - String(a.source_ref).length)
+      .find(c => { const r = String(c.source_ref).toLowerCase(); return base.startsWith(r) && /^[_\-. ]/.test(base.slice(r.length)); });
+    return byRef ? byRef.id : '';
+  }
+
+  // near-duplicate addresses: the same rules as appraisal_addr_parts() and appraisal_addr_same() in migration 034, case for case
+  const CANON = { street: 'st', str: 'st', saint: 'st', road: 'rd', avenue: 'ave', av: 'ave', crescent: 'cres', cr: 'cres', place: 'pl', terrace: 'tce', ter: 'tce', drive: 'dr', lane: 'ln', highway: 'hwy', court: 'ct', crt: 'ct', grove: 'gr', parade: 'pde', square: 'sq', close: 'cl', esplanade: 'esp', boulevard: 'blvd', mount: 'mt', heights: 'hts', track: 'trk' };
+  const TYPES = ['st', 'rd', 'ave', 'cres', 'pl', 'tce', 'dr', 'ln', 'hwy', 'ct', 'gr', 'pde', 'sq', 'cl', 'esp', 'blvd', 'way', 'rise', 'hts', 'trk', 'mews', 'row', 'view', 'walk', 'quay', 'loop', 'glade', 'glen'];
+  const DIRS = ['north', 'south', 'east', 'west', 'upper', 'lower', 'extension', 'ext', 'n', 's', 'e', 'w'];
+  function addrParts(p) {
+    const segs = [];
+    String(p == null ? '' : p).toLowerCase().replace(/[āēīōū]/g, ch => ({ ā: 'a', ē: 'e', ī: 'i', ō: 'o', ū: 'u' }[ch])).split(',').forEach(seg => {
+      const t = seg.replace(/[^a-z0-9/-]+/g, ' ').trim(); if (!t) return;
+      let toks = t.split(' ');
+      for (;;) { const n = toks.length; if (!n) break; const z = toks[n - 1];
+        if (/^[0-9]{4}$/.test(z) && (n > 1 || segs.length > 0)) toks = toks.slice(0, n - 1);
+        else if (['nz', 'otago', 'aotearoa'].includes(z)) toks = toks.slice(0, n - 1);
+        else if (n > 1 && z === 'zealand' && toks[n - 2] === 'new') toks = toks.slice(0, n - 2);
+        else if (n > 1 && z === 'city' && toks[n - 2] === 'dunedin') toks = toks.slice(0, n - 2);
+        else if (z === 'dunedin' && !(n > 1 && ['north', 'south', 'east', 'west', 'central'].includes(toks[n - 2]))) toks = toks.slice(0, n - 1);
+        else break; }
+      if (!toks.length) return;
+      segs.push(toks.map(x => CANON[x] || x).join(' '));
+    });
+    if (!segs.length) return { num: '', street: '', suburb: '', known: false, toks: '' };
+    let first = segs[0].split(' '), num = '', rest = segs;
+    if (/^[0-9]+[a-z]?([/-][0-9]+[a-z]?)?$/.test(first[0])) { num = first[0]; first = first.slice(1); if (!first.length && segs.length >= 2) { first = segs[1].split(' '); rest = segs.slice(1); } }
+    const street = first.join(' '), known = rest.length >= 2 && street !== '', suburb = known ? rest[1] : '';
+    return { num, street, suburb, known, toks: (street + ' ' + suburb).trim() };
+  }
+  function addrSame(a, b) {
+    const x = addrParts(a), y = addrParts(b);
+    if (!x.num || x.num !== y.num || !x.street || !y.street) return false;
+    if (x.known && y.known) return x.street === y.street && x.suburb === y.suburb;
+    if (x.known) return y.toks === x.street || y.toks === x.toks;
+    if (y.known) return x.toks === y.street || x.toks === y.toks;
+    if (x.toks === y.toks) return true;
+    const [st, lt] = x.toks.length <= y.toks.length ? [x.toks, y.toks] : [y.toks, x.toks];
+    if (lt.slice(0, st.length + 1) !== st + ' ') return false;
+    const w = st.split(' '), next = lt.slice(st.length + 1).split(' ')[0];
+    return TYPES.includes(w[w.length - 1]) && !DIRS.includes(next) && !TYPES.includes(next);
   }
   // the method names for the editor: the first cell of each row of the ways-to-sell table, up to its first comma
   function methodNames(rec) {
@@ -7012,6 +7400,7 @@ window.JOURNEY_MEDIA_HINTS = {
     return wordingProblem(f.bedrooms) || wordingProblem((f.method || {}).name) || wordingProblem((f.method || {}).text);
   }
   window.APPR = { render, fmtRange, dollars, inline, methodNames, checkFields, wordingProblem,
+    vendorComp, VENDOR_COMP, STATUS_WORDS, RINGS, ringWords, compsRule, matchPhoto, addrParts, addrSame, adShown, cmpShown, evidence,
     METHODS, CAMPAIGNS, MAX_WEEKS, campaignOf, waveFor, stepsFor, methodSentence, isHill, suburbOf, plansFor, checkSetup, writeStandard, sectionsProblem,
     DEFAULT_NOTE, DALMORE_LINE, HEAD_AND_SHOULDERS, VALUATION_LABEL };
 })();
@@ -16495,7 +16884,9 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     R('appraisals', 'appraisals', () => viewPortalAppraisals()),
     R('appraisals/new', 'appraisalNew', () => viewAppraisalNew(null)),
     R('appraisals/new/:id', 'appraisalNew', p => viewAppraisalNew(p)),
+    R('appraisals/market', 'appraisalMarket', () => viewMarketFigures()),   // before appraisals/:id, which would take "market" as an id
     R('appraisals/:id/setup', 'appraisal', a => viewAppraisalSetup(a)),
+    R('appraisals/:id/comps', 'appraisal', a => viewAppraisalComps(a)),
     R('appraisals/:id', 'appraisal', a => viewAppraisalView(a, false)),
     R('appraisals/:id/present', 'appraisal', a => viewAppraisalView(a, true)),
     R('translations', 'viewTranslations', () => APP_TRANSLATION ? RAW.viewTranslations() : viewPortalMissing()),
@@ -16539,7 +16930,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     if (new RegExp(`^properties/${id}$`).test(path)) return ['properties', 'Properties'];
     if ((m = new RegExp(`^appraisals/new/${id}$`).exec(path))) return [`properties/${m[1]}`, 'Property file'];
     if (path === 'appraisals/new') return ['appraisals', 'Appraisals'];
-    if ((m = new RegExp(`^appraisals/${id}/(present|setup)$`).exec(path))) return [`appraisals/${m[1]}`, 'Appraisal'];
+    if (path === 'appraisals/market') return ['appraisals', 'Appraisals'];
+    if ((m = new RegExp(`^appraisals/${id}/(present|setup|comps)$`).exec(path))) return [`appraisals/${m[1]}`, 'Appraisal'];
     if (new RegExp(`^appraisals/${id}$`).test(path)) return ['appraisals', 'Appraisals'];
     if (/^processes\/.+/.test(path)) return ['processes', 'Processes'];
     if (/^people\/.+/.test(path)) return ['people', 'People'];
@@ -16717,7 +17109,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     if (!$('#main .loading')) return;   // Tim has moved on
     rows = rows.filter(r => okId(r.id));
     main().innerHTML = `<div class="view-pad" id="apvList"><span class="agent-flag">Only you see this</span><h1>Appraisals</h1>
-      <div class="toolbar" id="apvNewRow">${plink('appraisals/new', 'New appraisal', 'btn primary')}</div>
+      <div class="toolbar" id="apvNewRow">${plink('appraisals/new', 'New appraisal', 'btn primary')}${plink('appraisals/market', 'Market figures', 'btn ghost')}</div>
       ${rows.length ? `<div class="card tight"><ul class="needs">${rows.map(r => `<li><div class="what"><strong translate="no">${esc(r.title || r.address || 'Appraisal')}</strong><span class="small">Updated ${esc(fmtDT(r.updated_at))}</span></div><span class="needbtns">${plink(`appraisals/${r.id}`, 'Open', 'btn ghost')}${plink(`appraisals/${r.id}/present`, 'Present', 'btn primary')}</span></li>`).join('')}</ul></div>`
         : '<div class="card note tight"><p class="small" style="margin:0">No appraisals here yet.</p></div>'}
     </div>`;
@@ -16804,10 +17196,13 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <div class="toolbar"><button class="btn primary" type="button" id="apsNewAddr">Start from this address</button></div>
       <div id="crAps"></div></div>`;
     const draw = () => {
-      const q = norm($('#apsAddr').value); let m = [];
-      if (q.length >= 3) m = props.filter(p => { const a = norm(p.address); return a && (a.includes(q) || q.includes(a) || (q.split(' ').length > 1 && q.split(' ').slice(0, 2).join(' ') === a.split(' ').slice(0, 2).join(' '))); }).slice(0, 6);
-      const exact = m.some(p => norm(p.address) === q);
-      $('#apsMatches').innerHTML = m.length ? `<p class="small" style="margin:12px 0 6px">Already on file. Choose it to keep one record of the property:</p>${m.map(p => `<div class="card tight insp-match"><div><strong translate="no">${esc(p.address)}</strong><br>${stagePill(p.stage)}</div><button class="btn ${exact && norm(p.address) === q ? 'primary' : 'ghost'}" type="button" data-aps-prop="${esc(p.id)}">Appraise this one</button></div>`).join('')}` : '';
+      const raw = $('#apsAddr').value, q = norm(raw); let m = [];
+      // 034: the same property written another way ("Rd" for "Road", extra commas, no suburb or postcode) counts as on file
+      const same = p => norm(p.address) === q || APPR.addrSame(p.address, raw);
+      if (q.length >= 3) m = props.filter(p => { const a = norm(p.address); return a && (same(p) || a.includes(q) || q.includes(a) || (q.split(' ').length > 1 && q.split(' ').slice(0, 2).join(' ') === a.split(' ').slice(0, 2).join(' '))); })
+        .sort((x, y) => +same(y) - +same(x)).slice(0, 6);
+      const exact = m.some(same);
+      $('#apsMatches').innerHTML = m.length ? `<p class="small" style="margin:12px 0 6px">Already on file. Choose it to keep one record of the property:</p>${m.map(p => `<div class="card tight insp-match"><div><strong translate="no">${esc(p.address)}</strong><br>${stagePill(p.stage)}</div><button class="btn ${same(p) ? 'primary' : 'ghost'}" type="button" data-aps-prop="${esc(p.id)}">Appraise this one</button></div>`).join('')}` : '';
       const nb = $('#apsNewAddr'); nb.disabled = exact; atBtn(nb, exact ? 'This address is already on file. Choose it above.' : '', 'err');
       $$('[data-aps-prop]').forEach(b => b.addEventListener('click', async () => { const d = await apsStart(b.dataset.apsProp, null, b); if (d) apsOpenSetup(d.appraisal_id); }));
     };
@@ -16942,18 +17337,295 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     top();
   }
   // an appraisal written from its set-up: the page itself (the same drawing as the presentation), Tim's tools and his private notes
-  function apsShow(rec, present) {
-    const tools = present ? '' : `<div class="toolbar no-print" id="apvTools">${plink(`appraisals/${rec.id}/setup`, 'Change the set-up', 'btn primary')}${plink(`appraisals/${rec.id}/present`, 'Present on screen', 'btn ghost')}<button class="btn ghost" type="button" id="apvPrint">Print</button></div>
+  async function apsShow(rec, present) {
+    const ev = await apvEvidence(rec);   // LW3 phase C: the comparables, their photos and the market report (none: drawn as phase A)
+    if (!$('#main .loading')) return;   // Tim has moved on
+    const tools = present ? '' : `<div class="toolbar no-print" id="apvTools">${plink(`appraisals/${rec.id}/setup`, 'Change the set-up', 'btn primary')}${plink(`appraisals/${rec.id}/comps`, 'Comparables', 'btn ghost')}${plink(`appraisals/${rec.id}/present`, 'Present on screen', 'btn ghost')}<button class="btn ghost" type="button" id="apvPrint">Print</button></div>
       ${String(rec.private_notes || '').trim() ? `<details class="acc no-print" id="apsNotes"><summary>Your private notes</summary><div class="in"><p class="small" style="white-space:pre-wrap;margin:0">${esc(rec.private_notes)}</p></div></details>` : ''}`;
     main().innerHTML = `<div class="view-pad apv${present ? ' apv-show' : ''}" id="apvPage">${present ? '' : '<span class="agent-flag no-print">Only you see this</span>'}${tools}<div id="apvDoc"></div>
       ${present ? `<p class="apv-exit no-print">${plink(`appraisals/${rec.id}`, 'Finish presenting')}</p>` : ''}</div>`;
-    $('#apvDoc').innerHTML = APPR.render(rec);
+    $('#apvDoc').innerHTML = APPR.render(rec, ev);
     const pb = $('#apvPrint'); if (pb) pb.addEventListener('click', () => { apsOpenAll(); window.print(); });
     top();
   }
   // in print every sale method is open (a vendor must see them all, whatever Tim recommends)
   function apsOpenAll() { $$('#apvDoc details.apv-mc').forEach(d => { d.open = true; }); }
   window.addEventListener('beforeprint', apsOpenAll);
+
+  /* ───────── LW3 phase C (migration 034, APPRAISAL-PLAN.md): comparables, photos, the comparables rule, the market report ───────── */
+  const AMB = 'appraisal-media';
+  const todayNZ = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Pacific/Auckland' });
+  // what an appraisal written from its set-up draws beyond its sections: the shown comparables (vendor fields only: never Tim's notes),
+  // their photos (signed links, the print photo first), and the market months when Tim has switched the report on. Anything that
+  // fails to load is left out, so the page is then exactly as phase A drew it.
+  async function apvEvidence(rec) {
+    const ev = { comps: [], photos: {}, months: [], market: !!(rec.setup && rec.setup.market), area: String((rec.setup || {}).marketArea || '') };
+    if (!(rec.setup && rec.setup.v)) return ev;
+    try { const { data, error } = await sb.from('appraisal_comps').select('*').eq('appraisal_id', rec.id).order('position'); if (!error) ev.comps = (data || []).filter(c => c && c.shown !== false && okId(c.id)).map(APPR.vendorComp); } catch (_) { ev.comps = []; }
+    if (ev.comps.length) ev.photos = await cmpPhotoUrls(rec.id, ev.comps.map(c => c.id));
+    if (ev.market) { try { const { data, error } = await sb.from('market_months').select('*').order('month'); if (!error) ev.months = data || []; } catch (_) { ev.months = []; } }
+    return ev;
+  }
+  // photos by comparable: { compId: [{ id, url, path, cover }] }, the print photo (cover) first, then in Tim's order
+  async function cmpPhotoUrls(aid, compIds) {
+    const out = {};
+    try {
+      const { data, error } = await sb.from('appraisal_media').select('*').eq('appraisal_id', aid);
+      if (error) return out;
+      const ms = (data || []).filter(m => compIds.includes(m.comp_id)).sort((a, b) => (+!!b.cover - +!!a.cover) || ((a.position || 0) - (b.position || 0)) || (a.created_at < b.created_at ? -1 : 1));
+      if (!ms.length) return out;
+      const { data: urls } = await sb.storage.from(AMB).createSignedUrls(ms.map(m => m.path), 3600);
+      ms.forEach(m => { const u = (urls || []).find(x => x.path === m.path); if (u && u.signedUrl) (out[m.comp_id] ||= []).push({ id: m.id, url: u.signedUrl, path: m.path, cover: !!m.cover }); });
+    } catch (_) { }
+    return out;
+  }
+  // the photo carousels: the buttons move one photo at a time; the count follows a swipe
+  document.addEventListener('click', e => {
+    const b = e.target && e.target.closest ? e.target.closest('.apv-car-btn') : null; if (!b) return;
+    const car = b.closest('.apv-car'), s = car.querySelector('.apv-car-strip'), n = +car.dataset.n || 1, w = Math.max(1, s.clientWidth);
+    const at = Math.max(0, Math.min(n - 1, Math.round(s.scrollLeft / w) + (+b.dataset.car)));
+    s.scrollTo({ left: at * w, behavior: 'smooth' }); const t = car.querySelector('.apv-car-at'); if (t) t.textContent = (at + 1) + ' of ' + n;
+  });
+  document.addEventListener('scroll', e => {
+    const s = e.target; if (!s || !s.classList || !s.classList.contains('apv-car-strip')) return;
+    const car = s.closest('.apv-car'), t = car && car.querySelector('.apv-car-at'); if (t) t.textContent = (Math.round(s.scrollLeft / Math.max(1, s.clientWidth)) + 1) + ' of ' + car.dataset.n;
+  }, true);
+
+  // the comparables screen: Tim adds, edits, hides, reorders and removes comparables; imports a gathered pack; adds photos (his own
+  // uploads, or a drop from his bulk-download folder matched by file name); checks the comparables rule; switches the market report on;
+  // and keeps his never-mix list. Agent only. A sent appraisal is shown read only.
+  const CMP_ST = [['sold', 'Sold'], ['listed', 'On the market'], ['context', 'For context only']];
+  const CMP_SRC = [['tim', 'Typed by you'], ['reinz', 'REINZ'], ['relab', 'Relab'], ['listing', 'A live listing'], ['other', 'Somewhere else']];
+  const CMP_PHOTO_MAX = 15 * 1024 * 1024, CMP_PHOTO_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+  let CMP_EDIT = null;   // the comparable open for editing ('new' for a new one), kept while the page redraws
+  async function viewAppraisalComps(id, keep) {
+    header('Comparables', '', 0); actions(false); document.body.classList.remove('apv-present');
+    if (!keep) { CMP_EDIT = null; main().innerHTML = '<div class="loading">Loading...</div>'; }
+    let rec = null; try { const d = await must(sb.from('appraisal_views').select('*').eq('id', id)); rec = Array.isArray(d) ? d[0] : d; } catch (_) { rec = null; }
+    if (!keep && !$('#main .loading')) return;
+    if (!rec) return viewPortalMissing();
+    if (!(rec.setup && rec.setup.v)) {
+      main().innerHTML = `<div class="view-pad" id="cmpHand"><span class="agent-flag">Only you see this</span><h1>Comparables</h1><div class="card note tight"><p class="small" style="margin:0">This appraisal was loaded by hand, so its comparables are part of its own wording. Change its figures on its own page.</p></div><div class="toolbar">${plink(`appraisals/${rec.id}`, 'Open the appraisal', 'btn primary')}</div></div>`;
+      top(); return;
+    }
+    let comps = [], groups = [], photos = {}, failed = false;
+    try { comps = ((await must(sb.from('appraisal_comps').select('*').eq('appraisal_id', id).order('position'))) || []).filter(c => okId(c.id)); groups = (await must(sb.from('suburb_groups').select('*').order('name'))) || []; } catch (_) { failed = true; }
+    if (!failed) photos = await cmpPhotoUrls(id, comps.map(c => c.id));
+    if (!keep && !$('#main .loading')) return;
+    if (keep && !$('#cmpPage')) return;
+    const sent = rec.status === 'sent', ro = sent || failed;
+    const suburb = String((rec.setup || {}).suburb || APPR.suburbOf(rec.address) || '');
+    const rule = APPR.compsRule(comps, { today: todayNZ(), suburb, groups });
+    const ruleHTML = `<ul class="cmp-rule" id="cmpRuleList">${rule.items.map(x => `<li data-kind="${x.kind}">${esc(x.text)}</li>`).join('')}</ul>`;
+    const stName = k => (CMP_ST.find(s => s[0] === k) || CMP_ST[0])[1];
+    const line = c => [c.price ? APPR.dollars(c.price) : '', c.status === 'listed' ? (c.listed_on ? 'listed ' + fmtDate(c.listed_on) : '') : (c.sold_on ? 'sold ' + fmtDate(c.sold_on) : ''), APPR.ringWords(c.ring)].filter(Boolean).join(', ');
+    const srcName = k => (CMP_SRC.find(s => s[0] === k) || CMP_SRC[0])[1];
+    const editor = c => { const v = c || {}, isNew = !c, sel = (idn, opts, cur) => `<select id="${idn}">${opts.map(([k, t]) => `<option value="${esc(k)}"${k === cur ? ' selected' : ''}>${esc(t)}</option>`).join('')}</select>`;
+      const inp = (idn, label, val, o) => `<div><label class="f" for="${idn}">${label}</label><input type="${(o && o.type) || 'text'}" id="${idn}" value="${esc(val == null ? '' : val)}"${o && o.num ? ' inputmode="decimal"' : ''}${o && o.ph ? ` placeholder="${esc(o.ph)}"` : ''}></div>`;
+      return `<div class="card tight cmp-editor" id="cmpEditor"><h3 style="margin-top:0">${isNew ? 'A new comparable' : 'Edit this comparable'}</h3>
+        ${inp('cfAddr', 'Address', v.address)}<div class="row2">${inp('cfSuburb', 'Suburb', v.suburb)}<div><label class="f" for="cfStatus">Status</label>${sel('cfStatus', CMP_ST, v.status || 'sold')}</div></div>
+        <div class="row2">${inp('cfPrice', 'Price (sold, or asking)', v.price, { num: 1, ph: '$' })}${inp('cfMethod', 'Method', v.method, { ph: 'Deadline sale' })}</div>
+        <div class="row2">${inp('cfSold', 'Date sold', v.sold_on, { type: 'date' })}${inp('cfListed', 'Date listed', v.listed_on, { type: 'date' })}</div>
+        <div class="row2">${inp('cfDays', 'Days to sell', v.days_to_sell, { num: 1 })}${inp('cfAgency', 'Agency', v.agency)}</div>
+        <div class="row2">${inp('cfBeds', 'Bedrooms', v.bedrooms, { num: 1 })}${inp('cfBaths', 'Bathrooms', v.bathrooms, { num: 1 })}</div>
+        <div class="row2">${inp('cfFloor', 'Floor area (m²)', v.floor_m2, { num: 1 })}${inp('cfLand', 'Land (m²)', v.land_m2, { num: 1 })}</div>
+        <div class="row2">${inp('cfCv', 'Capital value', v.cv, { num: 1, ph: '$' })}<div><label class="f" for="cfRing">How near</label>${sel('cfRing', [['', 'Not set yet']].concat(APPR.RINGS), v.ring || '')}</div></div>
+        <div class="row2">${inp('cfDist', 'Distance (metres)', v.distance_m, { num: 1 })}<div></div></div>
+        <label class="choice cb"><input type="checkbox" id="cfTim"${v.sold_by_tim ? ' checked' : ''}><span class="mark"></span><span><span class="ct">Sold by Tim</span></span></label>
+        <label class="f" for="cfAd">How it was advertised <span class="opt">(the listing's own words, quoted)</span></label><textarea id="cfAd" rows="4">${esc(v.ad_text || '')}</textarea>
+        <label class="f" for="cfCmp">How it compares with their home <span class="opt">(the vendor sees this once ticked)</span></label><textarea id="cfCmp" rows="3">${esc(v.compare_text || '')}</textarea>
+        <label class="choice cb"><input type="checkbox" id="cfTick"${isNew || v.compare_ticked ? ' checked' : ''}><span class="mark"></span><span><span class="ct">Ticked: show how it compares to the vendor</span></span></label>
+        <label class="f" for="cfPriv">Your private note <span class="opt">(only you see this: never on their page or in print)</span></label><textarea id="cfPriv" rows="2">${esc(v.private_note || '')}</textarea>
+        <div class="row2"><div><label class="f" for="cfSrc">Source</label>${sel('cfSrc', CMP_SRC, v.source || 'tim')}</div>${inp('cfGot', 'Gathered on', v.gathered_at ? new Date(v.gathered_at).toLocaleDateString('en-CA', { timeZone: 'Pacific/Auckland' }) : '', { type: 'date' })}</div>
+        ${inp('cfUrl', 'Link to it <span class="opt">(optional)</span>', v.source_url, { ph: 'https://' })}
+        <div class="toolbar"><button class="btn primary" type="button" id="cfSave">${isNew ? 'Add this comparable' : 'Save changes'}</button><button class="btn ghost" type="button" id="cfCancel">Cancel</button></div></div>`; };
+    const row = (c, i) => { const ph = photos[c.id] || [];
+      return `<li class="card tight cmp-row${c.shown === false ? ' off' : ''}" data-cmp="${esc(c.id)}"><div class="cmp-top"><span class="apv-comp-n" aria-hidden="true">${i + 1}</span><div class="cmp-what"><strong translate="no">${esc(c.address)}</strong>
+        <span class="small">${esc(line(c) || 'No price or date yet')}</span>
+        <span class="cmp-pills"><span class="pill">${esc(stName(c.status))}</span>${c.sold_by_tim ? '<span class="pill">Sold by Tim</span>' : ''}${c.shown === false ? '<span class="pill warnp">Hidden</span>' : ''}${APPR.cmpShown(c) ? '<span class="pill okp">Comparison ticked</span>' : ''}</span></div></div>
+        ${String(c.private_note || '').trim() ? `<p class="small cmp-priv"><strong>Your note:</strong> ${esc(c.private_note)}</p>` : ''}
+        <p class="small cmp-src">Source: ${esc(srcName(c.source))}${c.gathered_at ? ', gathered ' + esc(fmtDate(new Date(c.gathered_at).toLocaleDateString('en-CA', { timeZone: 'Pacific/Auckland' }))) : ''}${c.source_url ? ` · <a href="${esc(c.source_url)}" target="_blank" rel="noopener">open the link</a>` : ''}</p>
+        ${ph.length ? `<div class="cmp-photos">${ph.map((m, k) => `<figure data-media="${esc(m.id)}"><img src="${esc(m.url)}" alt="Photo ${k + 1}"><figcaption>${m.cover || (!ph.some(x => x.cover) && k === 0) ? '<span class="pill okp">In print</span>' : (ro ? '' : `<button class="btn link" type="button" data-med-cover="${esc(m.id)}" id="medCover-${esc(m.id)}">Use in print</button>`)}${ro ? '' : `<button class="btn link" type="button" data-med-rm="${esc(m.id)}" id="medRm-${esc(m.id)}">Remove</button>`}</figcaption></figure>`).join('')}</div>` : ''}
+        ${ro ? '' : `<div class="toolbar cmp-tools"><button class="btn ghost" type="button" data-cmp-edit="${esc(c.id)}" id="cmpEdit-${esc(c.id)}">Edit</button><button class="btn ghost" type="button" data-cmp-hide="${esc(c.id)}" id="cmpHide-${esc(c.id)}">${c.shown === false ? 'Show' : 'Hide'}</button>
+          <button class="btn ghost" type="button" data-cmp-move="-1" data-id="${esc(c.id)}" id="cmpUp-${esc(c.id)}"${i === 0 ? ' disabled' : ''} aria-label="Move up">Up</button><button class="btn ghost" type="button" data-cmp-move="1" data-id="${esc(c.id)}" id="cmpDown-${esc(c.id)}"${i === comps.length - 1 ? ' disabled' : ''} aria-label="Move down">Down</button>
+          <label class="btn ghost cmp-addph" id="cmpPh-${esc(c.id)}">Add photos<input type="file" accept="image/jpeg,image/png,image/webp" multiple data-cmp-photos="${esc(c.id)}" hidden></label><button class="btn link" type="button" data-cmp-rm="${esc(c.id)}" id="cmpRm-${esc(c.id)}">Remove</button></div>`}
+        ${CMP_EDIT === c.id && !ro ? editor(c) : ''}</li>`; };
+    main().innerHTML = `<div class="view-pad cmp" id="cmpPage"><span class="agent-flag">Only you see this</span><h1>Comparables</h1>
+      <p class="lede" translate="no">${esc(rec.address || rec.title || '')}</p>
+      <div class="toolbar no-print">${plink(`appraisals/${rec.id}`, 'Open the appraisal', 'btn ghost')}${plink(`appraisals/${rec.id}/present`, 'Present on screen', 'btn ghost')}${plink('appraisals/market', 'Market figures', 'btn ghost')}</div>
+      ${sent ? '<div class="card warnc tight"><p class="small" style="margin:0">This appraisal has been sent, so its comparables can\'t be changed. A sent copy never changes.</p></div>' : ''}
+      ${failed ? '<div class="card warnc tight"><p class="small" style="margin:0">The comparables didn\'t load. Check you have signal, then open this page again.</p></div>' : ''}
+      <h2>The comparables rule</h2>
+      <div class="card tight" id="cmpRule"><p class="small" style="margin:0 0 6px">At least five nearby sales, ideally from the last three months, going back as far as it takes to find three true comparables.</p>${ruleHTML}
+        <div class="toolbar"><button class="btn ghost" type="button" id="cmpCheck">Check against the comparables rule</button></div></div>
+      <h2>Your comparables</h2>
+      ${comps.length ? `<ol class="cmp-list" id="cmpList">${comps.map(row).join('')}</ol>` : '<div class="card note tight"><p class="small" style="margin:0">No comparables yet. Add one, or import a pack gathered from REINZ.</p></div>'}
+      ${ro ? '' : `<div class="toolbar"><button class="btn primary" type="button" id="cmpAdd">Add a comparable</button></div>${CMP_EDIT === 'new' ? editor(null) : ''}`}
+      ${ro ? '' : `<h2>Import a pack</h2>
+      <div class="card tight"><p class="small" style="margin:0 0 6px">Paste the comparables pack gathered from REINZ or Relab (format mre.comps/1). Its source and date are kept; your ticked wording is never replaced; the listing's words are only ever quoted.</p>
+        <label class="f" for="cmpPack" style="margin-top:0">Pack</label><textarea id="cmpPack" rows="5" data-nodirty spellcheck="false" placeholder='{"format":"mre.comps/1","comps":[...]}'></textarea>
+        <div class="toolbar"><button class="btn primary" type="button" id="cmpImport">Import the pack</button></div></div>
+      <h2>Photos from your download folder</h2>
+      <div class="card tight"><p class="small" style="margin:0 0 6px">Choose or drop the photos you downloaded. Each is matched to its comparable by its file name; choose one for any that don't match.</p>
+        <div class="cmp-drop" id="cmpDrop"><label class="btn ghost" id="cmpFolderPick">Choose photos<input type="file" id="cmpFolder" accept="image/jpeg,image/png,image/webp" multiple hidden></label><span class="small">or drop them here</span></div>
+        <div id="cmpFolderList"></div></div>`}
+      <h2>On the appraisal</h2>
+      <div class="card tight"><label class="choice cb"><input type="checkbox" id="cmpMarket"${rec.setup.market ? ' checked' : ''}${ro ? ' disabled' : ''}><span class="mark"></span><span><span class="ct">Show the Dunedin market report</span><span class="cd">From the shared market figures, loaded once a month.</span></span></label></div>
+      <h2>Your never-mix list</h2>
+      <div class="card tight" id="grpCard"><p class="small" style="margin:0 0 6px">Suburbs whose sales are never mixed with others (for example North East Valley's investor and student sales). A sale in a group is not counted for a home outside it.</p>
+        ${groups.map(g => `<div class="cmp-grp" data-grp="${esc(g.id)}"><div class="row2"><div><label class="f" for="grpN-${esc(g.id)}">Name</label><input type="text" id="grpN-${esc(g.id)}" value="${esc(g.name)}"></div><div><label class="f" for="grpS-${esc(g.id)}">Suburbs <span class="opt">(commas between)</span></label><input type="text" id="grpS-${esc(g.id)}" value="${esc((g.suburbs || []).join(', '))}"></div></div>
+          <div class="toolbar"><button class="btn ghost" type="button" data-grp-save="${esc(g.id)}" id="grpSave-${esc(g.id)}">Save</button><button class="btn link" type="button" data-grp-rm="${esc(g.id)}" id="grpRm-${esc(g.id)}">Remove</button></div></div>`).join('')}
+        <div class="row2"><div><label class="f" for="grpName">New group</label><input type="text" id="grpName" data-nodirty placeholder="Student and investor sales"></div><div><label class="f" for="grpSuburbs">Suburbs <span class="opt">(commas between)</span></label><input type="text" id="grpSuburbs" data-nodirty></div></div>
+        <div class="toolbar"><button class="btn ghost" type="button" id="grpAdd">Add to the list</button></div></div>
+    </div>`;
+    if (!keep) top();
+    const again = async (btnId, msg, kind) => { const y = window.scrollY; JDIRTY = false; await viewAppraisalComps(id, true); window.scrollTo(0, y); if (btnId && msg) atBtn(document.getElementById(btnId), msg, kind || 'ok'); };
+    const fail = (b, e, what) => atBtn(b, netErr(e) ? 'Not saved. Check you have signal, then try again.' : (what || 'Not saved') + ': ' + ((e && e.message) || 'try again.'), 'err');
+    $('#cmpCheck').addEventListener('click', e => { const r = APPR.compsRule(comps, { today: todayNZ(), suburb, groups }); $('#cmpRuleList').outerHTML = `<ul class="cmp-rule" id="cmpRuleList">${r.items.map(x => `<li data-kind="${x.kind}">${esc(x.text)}</li>`).join('')}</ul>`;
+      atBtn(e.currentTarget, r.ok ? 'Meets the comparables rule. Check the points below before you present.' : 'Not yet: see what is still needed above.', r.ok ? 'ok' : 'err'); });
+    const mk = $('#cmpMarket');
+    if (mk && !ro) mk.addEventListener('change', async () => {
+      const next = Object.assign({}, rec.setup, { market: mk.checked }); atBtn(mk, 'Saving...', 'busy');
+      const { data, error } = await sb.rpc('agent_appraisal_save', { p_id: rec.id, p_setup: next, p_fields: null, p_sections: null, p_title: null, p_prepared_for: null, p_private_notes: null, p_status: null });
+      if (error || !data) { mk.checked = !mk.checked; fail(mk, error); return; }
+      rec.setup = next; atBtn(mk, mk.checked ? 'Saved. The market report shows on this appraisal.' : 'Saved. The market report is off for this appraisal.', 'ok'); });
+    if (ro) return;
+    // add, edit, hide, reorder and remove
+    $('#cmpAdd').addEventListener('click', () => { CMP_EDIT = 'new'; again(); });
+    $$('[data-cmp-edit]').forEach(b => b.addEventListener('click', () => { CMP_EDIT = b.dataset.cmpEdit; again(); }));
+    const ce = $('#cfCancel'); if (ce) ce.addEventListener('click', () => { CMP_EDIT = null; again(); });
+    const cs = $('#cfSave'); if (cs) cs.addEventListener('click', async () => {
+      const v = s => $('#' + s).value.trim(), n = (s, int) => { const t = v(s).replace(/[$,\s]/g, ''); if (!t) return null; if (!/^[0-9]+(\.[0-9]+)?$/.test(t)) return NaN; return int ? Math.round(+t) : Math.round(+t * 10) / 10; };
+      const row_ = { address: v('cfAddr').replace(/\s+/g, ' '), suburb: v('cfSuburb'), status: v('cfStatus'), price: n('cfPrice', 1), method: v('cfMethod'), sold_on: v('cfSold') || null, listed_on: v('cfListed') || null,
+        days_to_sell: n('cfDays', 1), agency: v('cfAgency'), bedrooms: n('cfBeds', 1), bathrooms: n('cfBaths'), floor_m2: n('cfFloor'), land_m2: n('cfLand'), cv: n('cfCv', 1), ring: v('cfRing') || null, distance_m: n('cfDist', 1),
+        sold_by_tim: $('#cfTim').checked, ad_text: $('#cfAd').value.trim(), compare_text: $('#cfCmp').value.trim(), compare_ticked: $('#cfTick').checked, private_note: $('#cfPriv').value.trim(),
+        source: v('cfSrc') || 'tim', source_url: v('cfUrl') || null, gathered_at: v('cfGot') ? new Date(v('cfGot') + 'T12:00:00').toISOString() : null };
+      if (row_.address.length < 3) return atBtn(cs, 'Add the address.', 'err');
+      const bad = ['price', 'days_to_sell', 'bedrooms', 'bathrooms', 'floor_m2', 'land_m2', 'cv', 'distance_m'].find(k => Number.isNaN(row_[k]));
+      if (bad) return atBtn(cs, 'Use numbers only for the figures (' + { price: 'price', days_to_sell: 'days to sell', bedrooms: 'bedrooms', bathrooms: 'bathrooms', floor_m2: 'floor area', land_m2: 'land', cv: 'capital value', distance_m: 'distance' }[bad] + ').', 'err');
+      if (row_.price === 0) row_.price = null;
+      if (row_.source_url && !/^https:\/\/\S+$/.test(row_.source_url)) return atBtn(cs, 'The link needs to start with https://', 'err');
+      const w = APPR.wordingProblem(row_.compare_text) || APPR.wordingProblem(row_.method); if (w) return atBtn(cs, w, 'err');
+      cs.disabled = true; atBtn(cs, 'Saving...', 'busy');
+      const isNew = CMP_EDIT === 'new';
+      try {
+        if (isNew) await must(sb.from('appraisal_comps').insert(Object.assign({ appraisal_id: rec.id, position: comps.length ? Math.max(...comps.map(c => c.position || 0)) + 1 : 1 }, row_)).select());
+        else await must(sb.from('appraisal_comps').update(row_).eq('id', CMP_EDIT).select());
+      } catch (e) { cs.disabled = false; return fail(cs, e); }
+      const at = isNew ? 'cmpAdd' : 'cmpEdit-' + CMP_EDIT; CMP_EDIT = null;
+      again(at, isNew ? 'Added. It shows on the appraisal' + (row_.compare_ticked && row_.compare_text ? ', with how it compares.' : '.') : 'Saved.', 'ok');
+    });
+    $$('[data-cmp-hide]').forEach(b => b.addEventListener('click', async () => { const c = comps.find(x => x.id === b.dataset.cmpHide); atBtn(b, 'Saving...', 'busy');
+      try { await must(sb.from('appraisal_comps').update({ shown: c.shown === false }).eq('id', c.id).select()); } catch (e) { return fail(b, e); }
+      again('cmpHide-' + c.id, c.shown === false ? 'Shown on the appraisal again.' : 'Hidden. It stays here, but not on the appraisal.', 'ok'); }));
+    $$('[data-cmp-move]').forEach(b => b.addEventListener('click', async () => {
+      const ids = comps.map(c => c.id), i = ids.indexOf(b.dataset.id), j = i + (+b.dataset.cmpMove); if (j < 0 || j >= ids.length) return;
+      [ids[i], ids[j]] = [ids[j], ids[i]]; atBtn(b, 'Saving...', 'busy');
+      const { error } = await sb.rpc('agent_comps_order', { p_appraisal: rec.id, p_ids: ids }); if (error) return fail(b, error);
+      again((+b.dataset.cmpMove < 0 ? 'cmpUp-' : 'cmpDown-') + b.dataset.id, 'Moved. It is number ' + (j + 1) + ' now.', 'ok'); }));
+    $$('[data-cmp-rm]').forEach(b => b.addEventListener('click', async () => { const c = comps.find(x => x.id === b.dataset.cmpRm);
+      if (!confirm('Remove ' + c.address + ' and its photos from this appraisal? To keep it but leave it off the appraisal, choose Hide instead.')) return;
+      atBtn(b, 'Removing...', 'busy'); const paths = (photos[c.id] || []).map(m => m.path);
+      try { await must(sb.from('appraisal_comps').delete().eq('id', c.id)); } catch (e) { return fail(b, e, 'Not removed'); }
+      if (paths.length) { try { await sb.storage.from(AMB).remove(paths); } catch (_) { } }
+      again('cmpAdd', 'Removed ' + c.address + '.', 'ok'); }));
+    // photos: Tim's own, per comparable
+    const upload = async (cid, files, source) => { let n = 0; const why = [];
+      const have = (photos[cid] || []).length;
+      for (const f of files) {
+        if (!CMP_PHOTO_TYPES.includes(f.type)) { why.push(f.name + ' is not a JPEG, PNG or WebP photo'); continue; }
+        if (f.size > CMP_PHOTO_MAX) { why.push(f.name + ' is over 15 MB'); continue; }
+        const ext = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' }[f.type], path = `appraisals/${rec.id}/comps/${cid}/${ngUuid()}.${ext}`;
+        const { error } = await sb.storage.from(AMB).upload(path, f, { contentType: f.type, upsert: false, cacheControl: '3600' });
+        if (error) { why.push(f.name + (netErr(error) ? ': no signal' : ': ' + error.message)); continue; }
+        const { error: e2 } = await sb.from('appraisal_media').insert({ appraisal_id: rec.id, comp_id: cid, path, file_name: String(f.name || '').slice(0, 200), position: have + n + 1, source });
+        if (e2) { why.push(f.name + ': ' + e2.message); try { await sb.storage.from(AMB).remove([path]); } catch (_) { } continue; }
+        n++; }
+      return { n, why }; };
+    $$('[data-cmp-photos]').forEach(inp => inp.addEventListener('change', async () => { const cid = inp.dataset.cmpPhotos, lab = $('#cmpPh-' + cid), files = Array.from(inp.files || []); if (!files.length) return;
+      atBtn(lab, 'Adding ' + files.length + ' photo' + (files.length === 1 ? '' : 's') + '...', 'busy'); const r = await upload(cid, files, 'upload');
+      again('cmpPh-' + cid, (r.n ? 'Added ' + r.n + ' photo' + (r.n === 1 ? '' : 's') + '.' : 'No photos added.') + (r.why.length ? ' Not added: ' + r.why.join('; ') + '.' : ''), r.why.length ? 'err' : 'ok'); }));
+    $$('[data-med-cover]').forEach(b => b.addEventListener('click', async () => { const mid = b.dataset.medCover, cid = b.closest('[data-cmp]').dataset.cmp; atBtn(b, 'Saving...', 'busy');
+      try { for (const m of photos[cid] || []) if (m.cover && m.id !== mid) await must(sb.from('appraisal_media').update({ cover: false }).eq('id', m.id)); await must(sb.from('appraisal_media').update({ cover: true }).eq('id', mid)); } catch (e) { return fail(b, e); }
+      again('cmpPh-' + cid, 'That photo leads the carousel and is the one in print.', 'ok'); }));
+    $$('[data-med-rm]').forEach(b => b.addEventListener('click', async () => { const mid = b.dataset.medRm, cid = b.closest('[data-cmp]').dataset.cmp, m = (photos[cid] || []).find(x => x.id === mid); atBtn(b, 'Removing...', 'busy');
+      try { await must(sb.from('appraisal_media').delete().eq('id', mid)); } catch (e) { return fail(b, e, 'Not removed'); }
+      try { if (m) await sb.storage.from(AMB).remove([m.path]); } catch (_) { }
+      again('cmpPh-' + cid, 'Photo removed.', 'ok'); }));
+    // photos from the download folder, matched by file name
+    let dropped = [];
+    const drawDrop = () => { const box = $('#cmpFolderList'); if (!dropped.length) { box.innerHTML = ''; return; }
+      box.innerHTML = `<ul class="cmp-files">${dropped.map((d, i) => `<li><span class="small" translate="no">${esc(d.f.name)}</span><select data-drop="${i}" aria-label="Comparable for ${esc(d.f.name)}"><option value="">Choose a comparable</option>${comps.map((c, k) => `<option value="${esc(c.id)}"${c.id === d.cid ? ' selected' : ''}>${k + 1}. ${esc(c.address)}</option>`).join('')}</select>${d.auto ? '<span class="pill okp">Matched</span>' : ''}</li>`).join('')}</ul>
+        <div class="toolbar"><button class="btn primary" type="button" id="cmpFolderFile">File these photos</button></div>`;
+      $$('[data-drop]').forEach(s => s.addEventListener('change', () => { dropped[+s.dataset.drop].cid = s.value; dropped[+s.dataset.drop].auto = false; }));
+      $('#cmpFolderFile').addEventListener('click', async e => { const b = e.currentTarget, todo = dropped.filter(d => d.cid), skip = dropped.length - todo.length; if (!todo.length) return atBtn(b, 'Choose a comparable for each photo first.', 'err');
+        b.disabled = true; atBtn(b, 'Filing ' + todo.length + ' photo' + (todo.length === 1 ? '' : 's') + '...', 'busy'); let n = 0; const why = [];
+        for (const cid of Array.from(new Set(todo.map(d => d.cid)))) { const r = await upload(cid, todo.filter(d => d.cid === cid).map(d => d.f), 'folder'); n += r.n; why.push(...r.why); }
+        dropped = []; again('cmpFolderPick', 'Filed ' + n + ' photo' + (n === 1 ? '' : 's') + '.' + (skip ? ' ' + skip + ' left out: no comparable chosen.' : '') + (why.length ? ' Not filed: ' + why.join('; ') + '.' : ''), why.length ? 'err' : 'ok'); }); };
+    const take = files => { Array.from(files || []).forEach(f => { const cid = APPR.matchPhoto(f.name, comps); dropped.push({ f, cid, auto: !!cid }); }); drawDrop(); };
+    $('#cmpFolder').addEventListener('change', e => take(e.target.files));
+    const dz = $('#cmpDrop'); dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('on'); }); dz.addEventListener('dragleave', () => dz.classList.remove('on'));
+    dz.addEventListener('drop', e => { e.preventDefault(); dz.classList.remove('on'); take(e.dataTransfer && e.dataTransfer.files); });
+    // the pack
+    $('#cmpImport').addEventListener('click', async e => { const b = e.currentTarget; let pk = null;
+      try { pk = JSON.parse($('#cmpPack').value); } catch (_) { return atBtn(b, 'That isn\'t a pack: paste the whole of it, from the first { to the last }.', 'err'); }
+      if (!pk || pk.format !== 'mre.comps/1') return atBtn(b, 'That isn\'t a comparables pack (format mre.comps/1).', 'err');
+      b.disabled = true; atBtn(b, 'Importing...', 'busy');
+      const { data, error } = await sb.rpc('agent_comps_import', { p_appraisal: rec.id, p_pack: pk }); b.disabled = false;
+      if (error || !data) return fail(b, error, 'Not imported');
+      const parts = ['Added ' + data.added, 'updated ' + data.updated].concat(data.kept_ticked ? ['kept your ticked wording on ' + data.kept_ticked] : []);
+      const extra = (data.skipped || []).map(s => 'number ' + s.n + ' skipped: ' + s.why).concat((data.notes || []).map(s => 'number ' + s.n + ': ' + s.note));
+      again('cmpImport', parts.join(', ') + '.' + (extra.length ? ' ' + extra.join('; ') + '.' : ''), (data.skipped || []).length ? 'err' : 'ok'); });
+    // the never-mix list
+    const subs = s => String(s || '').split(',').map(x => x.replace(/\s+/g, ' ').trim()).filter(Boolean);
+    $('#grpAdd').addEventListener('click', async e => { const b = e.currentTarget, name = $('#grpName').value.replace(/\s+/g, ' ').trim(), s = subs($('#grpSuburbs').value);
+      if (!name || !s.length) return atBtn(b, 'Give the group a name and at least one suburb.', 'err');
+      try { await must(sb.from('suburb_groups').insert({ name, suburbs: s }).select()); } catch (er) { return fail(b, er); }
+      again('grpAdd', 'Added "' + name + '" to your never-mix list.', 'ok'); });
+    $$('[data-grp-save]').forEach(b => b.addEventListener('click', async () => { const g = b.dataset.grpSave, name = $('#grpN-' + g).value.replace(/\s+/g, ' ').trim(), s = subs($('#grpS-' + g).value);
+      if (!name || !s.length) return atBtn(b, 'Give the group a name and at least one suburb.', 'err');
+      try { await must(sb.from('suburb_groups').update({ name, suburbs: s }).eq('id', g).select()); } catch (er) { return fail(b, er); }
+      again('grpSave-' + g, 'Saved.', 'ok'); }));
+    $$('[data-grp-rm]').forEach(b => b.addEventListener('click', async () => { const g = b.dataset.grpRm;
+      try { await must(sb.from('suburb_groups').delete().eq('id', g)); } catch (er) { return fail(b, er, 'Not removed'); }
+      again('grpAdd', 'Removed from your never-mix list.', 'ok'); }));
+    if (CMP_EDIT && $('#cmpEditor')) { const f = $('#cfAddr'); if (f) f.focus({ preventScroll: true }); $('#cmpEditor').scrollIntoView({ block: 'nearest' }); }
+  }
+
+  // the shared market figures (market_months and market_sales): what is loaded, a preview of the report, and the import box.
+  // The same store feeds every appraisal's market report and, later, the Quarterly market update.
+  async function viewMarketFigures(keep) {
+    header('Market figures', '', 0); actions(false); document.body.classList.remove('apv-present');
+    if (!keep) main().innerHTML = '<div class="loading">Loading...</div>';
+    let months = [], nSales = 0, failed = false;
+    try { months = (await must(sb.from('market_months').select('*').order('month'))) || []; nSales = ((await must(sb.from('market_sales').select('id'))) || []).length; } catch (_) { failed = true; }
+    if (!keep && !$('#main .loading')) return;
+    if (keep && !$('#mktPage')) return;
+    const areas = {}; months.forEach(m => { (areas[m.area] ||= []).push(m); });
+    main().innerHTML = `<div class="view-pad" id="mktPage"><span class="agent-flag">Only you see this</span><h1>Market figures</h1>
+      <p class="lede">The Dunedin market report on each appraisal, from REINZ, loaded once a month. One store, shared by every appraisal that month.</p>
+      ${failed ? '<div class="card warnc tight"><p class="small" style="margin:0">The figures didn\'t load. Check you have signal, then open this page again.</p></div>' : ''}
+      <h2>What is loaded</h2>
+      <div class="card tight" id="mktHave">${Object.keys(areas).length ? `<ul class="needs">${Object.keys(areas).sort().map(a => { const L = areas[a].slice().sort((x, y) => (x.month < y.month ? -1 : 1)), last = L[L.length - 1];
+        return `<li><div class="what"><strong translate="no">${esc(a)}</strong><span class="small">${L.length} month${L.length === 1 ? '' : 's'}, to ${esc(MKT.monthName(last.month))}; gathered ${esc(MKT.longDate(last.gathered_at))}</span></div></li>`; }).join('')}</ul>` : '<p class="small" style="margin:0">No market figures yet.</p>'}
+        <p class="small" style="margin:8px 0 0">${nSales} individual sale${nSales === 1 ? '' : 's'} stored. Their addresses are for you only.</p></div>
+      <h2>Import figures</h2>
+      <div class="card tight"><p class="small" style="margin:0 0 6px">Paste the market pack gathered from REINZ (format mre.market/1). A newer gathering replaces an older one for the same month; the same sale twice is stored once.</p>
+        <label class="f" for="mktPack" style="margin-top:0">Pack</label><textarea id="mktPack" rows="5" data-nodirty spellcheck="false" placeholder='{"format":"mre.market/1","months":[...]}'></textarea>
+        <div class="toolbar"><button class="btn primary" type="button" id="mktImport">Import the figures</button></div></div>
+      ${months.length ? `<h2>How it reads on an appraisal</h2><div class="apv-doc" id="mktPreview">${MKT.report(months, [], {})}</div>` : ''}
+    </div>`;
+    if (!keep) top();
+    $('#mktImport').addEventListener('click', async e => { const b = e.currentTarget; let pk = null;
+      try { pk = JSON.parse($('#mktPack').value); } catch (_) { return atBtn(b, 'That isn\'t a pack: paste the whole of it, from the first { to the last }.', 'err'); }
+      if (!pk || pk.format !== 'mre.market/1') return atBtn(b, 'That isn\'t a market pack (format mre.market/1).', 'err');
+      b.disabled = true; atBtn(b, 'Importing...', 'busy');
+      const { data, error } = await sb.rpc('agent_market_import', { p_pack: pk }); b.disabled = false;
+      if (error || !data) return atBtn(b, netErr(error) ? 'Not imported. Check you have signal, then try again.' : 'Not imported: ' + ((error && error.message) || 'try again.'), 'err');
+      const sk = (data.skipped || []).map(s => s.what + ' ' + s.n + ' skipped: ' + s.why);
+      const y = window.scrollY; await viewMarketFigures(true); window.scrollTo(0, y);
+      atBtn($('#mktImport'), 'Months: ' + data.months_added + ' added, ' + data.months_updated + ' updated. Sales: ' + data.sales_added + ' added, ' + data.sales_updated + ' updated.' + (sk.length ? ' ' + sk.join('; ') + '.' : ''), sk.length ? 'err' : 'ok'); });
+  }
   function viewPortalMissing(msg) {
     header('', '', 0); actions(false);
     main().innerHTML = `<div class="view-pad" id="pMissing"><h1>This page isn't here</h1><p class="lede">${esc(msg || 'There is no page at this address. It may have been typed wrongly, or what it showed has gone.')}</p><div class="toolbar">${plink('', 'Home', 'btn primary')}</div></div>`;

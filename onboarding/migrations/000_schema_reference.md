@@ -580,3 +580,39 @@ Builds on 032 (`appraisal_views`, live: one presentable appraisal per row, secti
   figures or with its low not below its high; sets prepared_on the first time.
 Both agent functions: security definer, search_path public, revoked from public and anon, granted to authenticated.
 Tests: tests/appraisal-setup-rollback.js/.sql on tests/appraisal-setup-standin.sql; browser test tests/appraisal-setup.test.js.
+
+## 034 Appraisal comparables, photos, the never-mix list and the market store (LW3 phase C, 27 November 2026; tested in a rollback block on a local PostgreSQL stand-in built to live 033, NOT yet on the live project)
+Builds on 033 (live). Additive, plus `agent_appraisal_create` replaced with the same signature. Row Level Security on every new table:
+one `for all` policy each, `to authenticated`, `is_agent()` both ways; nothing for anon (revoked) or vendors; truncate, trigger and
+references revoked from authenticated.
+- `appraisal_comps`: appraisal_id (cascade), position, shown, status sold|listed|context, address (3 to 300), suburb, price, sold_on,
+  listed_on, method, days_to_sell, bedrooms, bathrooms (one decimal), floor_m2, land_m2, cv, agency, sold_by_tim, ad_text (quoted listing
+  words, up to 8,000), compare_text and compare_ticked (only ticked wording reaches a vendor), private_note (Tim only, never drawn),
+  ring suburb|750m|1500m|further, distance_m, source reinz|relab|listing|tim|other, source_ref (unique per appraisal and source),
+  source_url (https only), gathered_at, photo_hints (jsonb list of {file, url} from a pack), created_by, created_at, updated_at.
+  `guard_appraisal_comp`: nothing changes on a sent appraisal; a comparable stays on its appraisal; the wording guard on compare_text
+  and method (ad_text is a quote: stored as given, shown only if it passes the guard).
+- `appraisal_media`: appraisal_id (cascade), comp_id (cascade), path (unique, under appraisals/<appraisal>/comps/), file_name, mime_type
+  and size_bytes (read from storage by the guard, never from the page), width, height, position, cover (the print photo), source
+  upload|folder|url, source_url. `guard_appraisal_media`: not on a sent appraisal; the comparable belongs to the appraisal; the file is in
+  storage already and is a JPEG, PNG or WebP; path, type, size and source never change.
+- `suburb_groups` (Tim's never-mix list): name, kind never_mix, suburbs text[] (1 to 40), note.
+- `market_months` (shared store): area, month (first of the month), median, lower_quartile, upper_quartile, sales, days_to_sell, bands
+  (jsonb list of {from, to, count}), source, source_url, gathered_at; unique (area, month).
+- `market_sales`: suburb, sold_on, price (public); address (Tim only); bedrooms, bathrooms, floor_m2, land_m2, property_type,
+  days_to_sell, source, source_ref (unique with source), gathered_at.
+- `guard_appraisal_view` on appraisal_views (before insert, update, delete): a 'sent' row never changes and is never removed; 'sent' is
+  set only when `app.appraisal_send` is 'on' (phase E's send function, for its own transaction); the wording guard on every insert and
+  on any update of title, sections, fields or setup. The 032 policies are unchanged.
+- Functions (security definer, search_path public, revoked from public and anon, granted to authenticated; each checks is_agent):
+  `agent_comps_import(p_appraisal, p_pack)` (pack mre.comps/1, APPRAISAL-PLAN.md; returns added, updated, kept_ticked, skipped, notes),
+  `agent_comps_order(p_appraisal, p_ids)`, `agent_market_import(p_pack)` (pack mre.market/1; returns months_added, months_updated,
+  sales_added, sales_updated, skipped). Internal (not callable by users): `appraisal_addr_parts`, `appraisal_addr_same`,
+  `appraisal_pack_text`, `_num`, `_date`, `_url`, `_ts`, and the three guards.
+- `agent_appraisal_create` (replaced, same signature): the 033 body, plus a near-duplicate of an address on file ("Rd" for "Road",
+  extra commas, no suburb or postcode, same number and street, same suburb or none) is refused naming that property.
+- Storage: bucket `appraisal-media` (private, 15 MB, JPEG, PNG, WebP). Policies on storage.objects: `appraisal_media_agent_read`
+  (select), `appraisal_media_agent_add` (insert under appraisals/<id>/comps/), `appraisal_media_agent_remove` (delete, not when the
+  appraisal is sent). No vendor policy (phase E gives vendors short-lived links).
+Tests: tests/appraisal-comps-rollback.js/.sql on tests/appraisal-comps-standin.sql (after appraisal-setup-standin.sql and 033); browser
+test tests/appraisal-comps.test.js; address cases tests/files/addr-cases.json (both the SQL and the page run them).
