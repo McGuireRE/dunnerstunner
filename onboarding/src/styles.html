@@ -786,8 +786,9 @@ table.sum.of-sum td:first-child, table.sum.of-dates td:first-child { width: 40%;
 /* the portal (PORTAL-PLAN.md P1): the footer menu and the up link. These elements exist only in the portal. */
 .pnav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 7; background: var(--surface); border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom, 0px); }
 .pnav[hidden] { display: none; }
-.pnav-in { max-width: 640px; margin: 0 auto; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); padding-left: max(4px, env(safe-area-inset-left, 0px)); padding-right: max(4px, env(safe-area-inset-right, 0px)); }
+.pnav-in { max-width: 640px; margin: 0 auto; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); padding-left: max(4px, env(safe-area-inset-left, 0px)); padding-right: max(4px, env(safe-area-inset-right, 0px)); }
 .pnav a { display: flex; align-items: center; justify-content: center; min-height: 54px; padding: 0 4px; font-size: 15px; font-weight: 600; color: var(--muted); text-decoration: none; border-top: 3px solid transparent; text-align: center; }
+@media (max-width: 440px) { .pnav a { font-size: 13px; padding: 0 1px; letter-spacing: -0.1px; } }
 .pnav a[aria-current="page"] { color: var(--ink); border-top-color: var(--accent); }
 .pnav a:focus-visible { outline: 2px solid var(--accent); outline-offset: -4px; }
 body.pnav-on .actions { bottom: calc(58px + env(safe-area-inset-bottom, 0px)); padding-bottom: 0; }
@@ -875,7 +876,9 @@ body.dv-lock { overflow: hidden; }
 .apv-wcap { font-size: 14.5px; color: var(--muted); margin: 12px 0 0; }
 .apv-exit { margin-top: 28px; font-size: 14px; }
 /* presentation mode: no menu, no up link, no top-bar buttons, larger type */
-body.apv-present #pNav, body.apv-present #pUpRow, body.apv-present .agent-nav, body.apv-present .step-count, body.apv-present .bar { display: none !important; }
+body.apv-present #pNav, body.apv-present #pUpRow, body.apv-present .agent-nav, body.apv-present .step-count, body.apv-present .bar, body.apv-present #signOut { display: none !important; }
+/* presenting: the logo goes nowhere, so a tap can't open Home with other clients on it */
+body.apv-present .brand img { pointer-events: none; cursor: default; }
 body.apv-present main { max-width: 760px; padding-bottom: 48px; }
 .apv-show .apv-doc { font-size: 19.5px; line-height: 1.6; }
 .apv-show .apv-doc h1 { font-size: clamp(36px, 8vw, 52px); }

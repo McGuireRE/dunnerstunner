@@ -68,6 +68,15 @@ const SAMPLE = {
   await signIn(p, 'agent-test@example.com'); await p.goto(PB); await wait(p);
   out.homeLink = await p.$$eval('#pHome a[data-plink="appraisals"]', a => a.length);
   expect(out.homeLink === 1, 'Home has an Appraisals shortcut');
+  // the Appraisals tile in the portal menu, beside Home, Properties, People and Processes, all fitting at 390 px
+  out.tile = await p.evaluate(() => { const n = document.getElementById('pNav'), as = Array.from(n.querySelectorAll('a'));
+    return { names: as.map(a => a.textContent).join('|'), fit: as.every(a => a.scrollWidth <= a.clientWidth + 1 && a.getBoundingClientRect().right <= innerWidth + 0.5), shown: !n.hidden }; });
+  expect(out.tile.shown && out.tile.names === 'Home|Properties|People|Processes|Appraisals' && out.tile.fit, 'Appraisals tile in the menu, all five fit: ' + JSON.stringify(out.tile));
+  expect(!(await side(p)), 'Home with five menu tiles: no sideways scroll at 390');
+  await p.click('#pNav a[data-plink="appraisals"]'); await wait(p);
+  out.tileHere = await p.evaluate(() => [location.pathname, document.querySelector('#pNav a[data-plink="appraisals"]').getAttribute('aria-current')]);
+  expect(out.tileHere[0] === '/portal/appraisals' && out.tileHere[1] === 'page', 'the tile opens the list and shows as current: ' + out.tileHere);
+  await p.goto(PB); await wait(p);
   await p.click('#pHome a[data-plink="appraisals"]'); await wait(p);
   out.listPath = await p.evaluate(() => location.pathname); out.listH1 = await p.textContent('h1');
   expect(out.listPath === '/portal/appraisals' && out.listH1 === 'Appraisals', 'the list opens: ' + out.listPath + ' ' + out.listH1);
@@ -127,6 +136,11 @@ const SAMPLE = {
   out.present = pr;
   expect(pr.path === '/portal/appraisals/AV1/present' && !pr.edit && pr.controls === 0 && !pr.flag && !pr.nav && !pr.up, 'presentation has no editing chrome: ' + JSON.stringify(pr));
   expect(pr.body >= 19 && pr.lede.includes('$410,000 to $465,000') && pr.exit, 'large type, the saved figures, and a way out');
+  // presenting: no Sign out, and the logo goes nowhere (Home lists other clients)
+  out.presChrome = await p.evaluate(() => ({ so: getComputedStyle(document.getElementById('signOut')).display, logo: Array.from(document.querySelectorAll('.brand img')).every(i => getComputedStyle(i).pointerEvents === 'none') }));
+  expect(out.presChrome.so === 'none' && out.presChrome.logo, 'presentation hides Sign out and the logo link: ' + JSON.stringify(out.presChrome));
+  await p.evaluate(() => { const i = Array.from(document.querySelectorAll('.brand img')).find(x => x.offsetParent); if (i) i.click(); }); await wait(p, 300);
+  expect(await p.evaluate(() => location.pathname) === '/portal/appraisals/AV1/present', 'a tap on the logo stays on the presentation');
   expect(!banned(await docText(p)), 'presentation: no "as is", fee or commission');
   expect(!(await side(p)), 'presentation: no sideways scroll at 390 light'); await shot(p, 'present_390_light');
   await p.emulateMedia({ media: 'print' });

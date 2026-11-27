@@ -375,7 +375,7 @@ const out = {}; const errs = [];
   await p.goto(PR + 'properties/P1'); await wait(p, 800);
   out.rootLinks = await p.$$eval('#pNav a', l => l.map(a => a.getAttribute('href')));
   c = await chrome(p);
-  expect(JSON.stringify(out.rootLinks) === JSON.stringify(['/', '/properties', '/people', '/processes']) && c.up === '/properties', 'at the root the menu and up link have no /portal/: ' + JSON.stringify(out.rootLinks) + ' ' + c.up);
+  expect(JSON.stringify(out.rootLinks) === JSON.stringify(['/', '/properties', '/people', '/processes', '/appraisals']) && c.up === '/properties', 'at the root the menu and up link have no /portal/: ' + JSON.stringify(out.rootLinks) + ' ' + c.up);
   await p.click('#pNav a:has-text("Processes")'); await wait(p, 600); expect((await at(p)) === '/processes', 'root: the menu moves to /processes');
   await shot(p, 'root_processes_390_dark');
   out.soonContrast = await p.evaluate(() => {

@@ -2480,7 +2480,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   $('#navHome').addEventListener('click', () => navGo(viewAgentHome));
   $('#navDash').addEventListener('click', () => navGo(viewAgentDashboard));
   $('#navTr').addEventListener('click', () => { if (APP_TRANSLATION) navGo(viewTranslations); });
-  $$('.brand img').forEach(i => i.addEventListener('click', () => { if (IS_AGENT) { if (PORTAL) { if (!portalInPerson()) portalNav(''); } else navGo(viewAgentHome); } }));   // in person the logo does nothing: a vendor may be holding the tablet
+  $$('.brand img').forEach(i => i.addEventListener('click', () => { if (IS_AGENT) { if (PORTAL) { if (!portalInPerson() && !document.body.classList.contains('apv-present')) portalNav(''); } else navGo(viewAgentHome); } }));   // in person the logo does nothing: a vendor may be holding the tablet
 
   const TILE_BEGIN = `<button class="home-tile" type="button" id="homeBegin"><span class="kick">Before the presentation</span><span class="ttl">Questions before we meet</span><span class="txt">Send them a few questions with your summary, so you hear what matters to them before you meet. Their answers file to the person and the property.</span><span class="go">Set up their questions →</span></button>`;
   const TILE_INSPECT = `<button class="home-tile" type="button" id="homeInspect"><span class="kick">For the listing</span><span class="ttl">Disclosures check</span><span class="txt">Walk round with your phone and note the property facts and the Vendor Declaration answers. Only the address is needed.</span><span class="go">Start a disclosures check →</span></button>`;
@@ -8743,7 +8743,6 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     if (new RegExp(`^properties/${id}$`).test(path)) return ['properties', 'Properties'];
     if ((m = new RegExp(`^appraisals/${id}/present$`).exec(path))) return [`appraisals/${m[1]}`, 'Appraisal'];
     if (new RegExp(`^appraisals/${id}$`).test(path)) return ['appraisals', 'Appraisals'];
-    if (path === 'appraisals') return ['', 'Home'];
     if (/^processes\/.+/.test(path)) return ['processes', 'Processes'];
     if (/^people\/.+/.test(path)) return ['people', 'People'];
     if (path === 'translations') return ['', 'Home'];
@@ -8791,7 +8790,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     // a vendor starts signing on a pad: from now on this page is in person (Back, Forward, the logo and the menu stay away)
     document.addEventListener('pointerdown', e => { const w = e.target.closest && e.target.closest('.sig-wrap'), cv = w && w.querySelector('canvas'); if (cv) portalPadStarted(cv); }, true);
     const nav = document.createElement('nav'); nav.className = 'pnav no-print'; nav.id = 'pNav'; nav.setAttribute('aria-label', 'Portal menu'); nav.hidden = true;
-    nav.innerHTML = `<div class="pnav-in">${[['', 'Home'], ['properties', 'Properties'], ['people', 'People'], ['processes', 'Processes']].map(([p, t]) => plink(p, t)).join('')}</div>`;
+    nav.innerHTML = `<div class="pnav-in">${[['', 'Home'], ['properties', 'Properties'], ['people', 'People'], ['processes', 'Processes'], ['appraisals', 'Appraisals']].map(([p, t]) => plink(p, t)).join('')}</div>`;
     document.body.appendChild(nav);
     // any portal link: a plain click moves within the portal (with the unsaved-work check); a new tab or window opens the address itself
     document.addEventListener('click', e => {
