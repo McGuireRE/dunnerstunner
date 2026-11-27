@@ -88,6 +88,7 @@ begin
   execute 'set local role service_role';
   j := public.appraisal_report_source(hid, d1);
   if j->>'path' is distinct from 'properties/' || pid || '/docs/11111111-1111-4111-8111-111111111111-rb-report.pdf' then out := out || 'THE SOURCE PATH IS WRONG: ' || j::text || '; '; else out := out || 'source: the report''s path; '; end if;
+  if j->>'subject' is distinct from (select address from public.appraisal_views where id = hid) then out := out || 'THE SOURCE DOES NOT NAME THE SUBJECT: ' || j::text || '; '; else out := out || 'source: names the subject property; '; end if;
   begin perform public.appraisal_report_source(hid, d2); out := out || 'A LIM WAS READ AS A REPORT; '; exception when others then out := out || 'a LIM: ' || sqlerrm || '; '; end;
   begin perform public.appraisal_report_source(hid, dother); out := out || 'ANOTHER PROPERTY''S REPORT WAS READ; '; exception when others then out := out || 'another property: ' || sqlerrm || '; '; end;
   begin perform public.appraisal_report_source(hid, dimg); out := out || 'A PHOTO WAS READ AS A REPORT; '; exception when others then out := out || 'not a PDF: refused; '; end;

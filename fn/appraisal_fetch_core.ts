@@ -65,16 +65,19 @@ export const ipBlocked = (s: string) => (isV4(s) ? ipv4Blocked(s) : isV6(s) ? ip
 
 // ───────── links ─────────
 const BAD_HOST = /(^|\.)(localhost|local|internal|intranet|lan|home|corp|localdomain|home\.arpa)$/i;
-// Is this a link that may be fetched? http or https only; no user name or password; the normal ports; a public host name (with a
+// Is this a link that may be fetched? https only (see below); no user name or password; the normal port; a public host name (with a
 // dot) or a public address. Returns the parsed link, or why not in plain words. The host's addresses are checked separately, after
-// they are looked up (and again after every redirect).
+// they are looked up (and again after every redirect). Why https only: the address is looked up twice (once to check it, once by the
+// fetch itself), so a hostile site could answer the second lookup with a private address (DNS rebinding). Over https the connection then
+// fails, because nothing on a private address holds a certificate for the site's name; over plain http it would go through.
 export function checkUrl(raw: unknown): { ok: true; url: URL } | { ok: false; why: string } {
   const s = String(raw ?? "").trim();
   if (!s || s.length > 2000) return { ok: false, why: "That isn't a web link." };
   let u: URL; try { u = new URL(s); } catch (_) { return { ok: false, why: "That isn't a web link." }; }
-  if (u.protocol !== "http:" && u.protocol !== "https:") return { ok: false, why: "Only web links (http or https) can be fetched." };
+  if (u.protocol === "http:") return { ok: false, why: "Only secure links (starting with https) can be fetched. Open the listing in your browser and copy the link from the address bar." };
+  if (u.protocol !== "https:") return { ok: false, why: "Only web links starting with https can be fetched." };
   if (u.username || u.password) return { ok: false, why: "Links with a user name or password can't be fetched." };
-  if (u.port && !((u.protocol === "https:" && u.port === "443") || (u.protocol === "http:" && u.port === "80"))) return { ok: false, why: "Only links on the normal web ports can be fetched." };
+  if (u.port && u.port !== "443") return { ok: false, why: "Only links on the normal web port can be fetched." };
   const host = u.hostname.replace(/\.$/, "");
   if (!host) return { ok: false, why: "That isn't a web link." };
   if (isV4(host) || host.startsWith("[")) { if (ipBlocked(host)) return { ok: false, why: "That link points at a private address, so it can't be fetched." }; return { ok: true, url: u }; }

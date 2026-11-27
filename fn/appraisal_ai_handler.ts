@@ -38,7 +38,7 @@ export async function readReport(d: AiDeps, body: any, agent: string): Promise<O
   if (bytes.length > REPORT_MAX_BYTES) return { status: 413, body: { ok: false, error: "That report is over 20 MB, too big to read in one go. Save the comparables pages as their own PDF and upload that." } };
   const pages = pdfPageCount(bytes);
   if (pages > REPORT_MAX_PAGES) return { status: 413, body: { ok: false, error: "That report has more than 100 pages. Save the comparables pages as their own PDF and upload that." } };
-  const request = buildReportReadRequest(b64(bytes), String(src.data.name || "report.pdf"));
+  const request = buildReportReadRequest(b64(bytes), String(src.data.name || "report.pdf"), String(src.data.subject || ""));
   let r: { ok: boolean; status: number; body: any };
   try { r = await d.callModel(request, 120000); } catch (e: any) { r = { ok: false, status: 0, body: { error: { message: String(e?.message || e) } } }; }
   const usage = r.body?.usage || {};

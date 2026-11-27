@@ -143,7 +143,7 @@ a { color: var(--accent); }
 
 label.f { display: block; font-size: 15px; font-weight: 500; margin: 16px 0 6px; }
 label.f .opt { font-weight: 400; color: var(--muted); }
-input[type=text], input[type=email], input[type=tel], input[type=number], input[type=date], select, textarea {
+input[type=text], input[type=email], input[type=url], input[type=tel], input[type=number], input[type=date], select, textarea {
   width: 100%; font: inherit; font-size: 17px; color: var(--ink); background: var(--surface);
   border: 1px solid var(--line); border-radius: 8px; padding: 11px 12px; min-width: 0;
 }
@@ -1099,7 +1099,7 @@ body.apv-present main { max-width: 760px; padding-bottom: 48px; }
 .cmp-rv .cd, .cmp-rv .ct { overflow-wrap: anywhere; }
 .cmp-review h4 { margin: 12px 0 0; }
 .cmp-fetch { margin-top: 10px; }
-.cmp-fetch input[type=url] { width: 100%; max-width: 100%; }
+.cmp-fetch input[type=url] { max-width: 100%; }
 .cmp-fetched .choice { margin: 2px 0 0; padding: 4px 6px; min-height: 0; }
 .cmp-grp { border-bottom: 1px solid var(--line); padding-bottom: 8px; margin-bottom: 8px; }
 @media print {
@@ -7375,10 +7375,10 @@ window.JOURNEY_MEDIA_HINTS = {
     const has = c => !!(b && b.comps && b.comps[c.id]), unchecked = list.filter(c => !has(c)), sv = b && b.subject ? b.subject.verdict : '';
     if (unchecked.length) add('info', (unchecked.length === 1 ? unchecked[0].address + ' is' : unchecked.length + ' sales are') + ' in a suburb you check case by case (' + names + '). Use "Check who they appeal to" and the AI will look at ' + (unchecked.length === 1 ? 'it' : 'each one') + '.');
     const done = list.filter(has); if (!done.length) return;
-    if (!['owner', 'investor'].includes(sv)) { add('info', 'The AI couldn\'t tell who your home would appeal to, so no case-by-case sale is flagged. Check ' + (done.length === 1 ? 'it' : 'them') + ' yourself.'); return; }
+    if (!['owner', 'investor'].includes(sv)) { add('info', 'The AI couldn\'t tell who this home would appeal to, so no case-by-case sale is flagged. Check ' + (done.length === 1 ? 'it' : 'them') + ' yourself.'); return; }
     done.forEach(c => { const v = b.comps[c.id], why = String(v.reason || '').trim().replace(/[.\s]+$/, '');
       if (!['owner', 'investor'].includes(v.verdict)) add('info', c.address + ': no clear read on who it appealed to, so it isn\'t flagged. Check it yourself.');
-      else if (v.verdict !== sv) add('warn', c.address + (v.verdict === 'investor' ? ' looks like an investor or student sale' : ' looks like a family or owner-occupier sale') + (why ? ' (' + why + ')' : '') + ', and your home looks like ' + (sv === 'owner' ? 'an owner-occupier home' : 'it would appeal to investors') + '. A suggestion only: keep it, hide it, or mark it for context only.'); });
+      else if (v.verdict !== sv) add('warn', c.address + (v.verdict === 'investor' ? ' looks like an investor or student sale' : ' looks like a family or owner-occupier sale') + (why ? ' (' + why + ')' : '') + ', and this home looks like ' + (sv === 'owner' ? 'an owner-occupier home' : 'it would appeal to investors') + '. A suggestion only: keep it, hide it, or mark it for context only.'); });
   }
   // a report Tim uploaded (035): the packs for the existing import, from only the items he ticked. res: the reading ({ report, comps,
   // market }); comps, months: the ticked ids; now: an ISO time for when no report date is printed. The source is the report's own.
@@ -17660,8 +17660,9 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       const { data, error } = await fetchCall(Object.assign({ action: 'fetch' }, extra)); const j = await fnJson(data, error); b.disabled = false;
       if (!j || !j.ok) { if (CMP_FETCH) CMP_FETCH.res = null; return atBtn(b, (j && (j.message || j.error)) || (netErr(error) ? 'Not fetched. Check you have signal, then try again.' : 'Not fetched. Try again, or save the photos into your download folder.'), 'err'); }
       CMP_FETCH.res = j; CMP_FETCH.page = extra.page_url || null; const n = j.photos.length, sk = (j.skipped || []).length;
-      again(b.id, 'Fetched ' + n + ' photo' + (n === 1 ? '' : 's') + '. Tick the ones to keep.' + (sk ? ' ' + sk + ' more couldn\'t be used.' : ''), 'ok'); };
-    const fg = $('#cfFetchGo'); if (fg) fg.addEventListener('click', () => { const u = $('#cfPage').value.trim(); if (!/^https?:\/\/\S+$/i.test(u)) return atBtn(fg, 'Paste the whole link of the listing, starting with https://', 'err'); doFetch(fg, { page_url: u }); });
+      again(b.id, j.time_up && j.message ? j.message : 'Fetched ' + n + ' photo' + (n === 1 ? '' : 's') + '. Tick the ones to keep.' + (sk ? ' ' + sk + ' more couldn\'t be used.' : ''), 'ok'); };
+    const fg = $('#cfFetchGo'); if (fg) fg.addEventListener('click', () => { const u = $('#cfPage').value.trim(); if (/^http:\/\//i.test(u)) return atBtn(fg, 'Only secure links (starting with https) can be fetched. Open the listing in your browser and copy the link from the address bar.', 'err');
+      if (!/^https:\/\/\S+$/i.test(u)) return atBtn(fg, 'Paste the whole link of the listing, starting with https://', 'err'); doFetch(fg, { page_url: u }); });
     const fh = $('#cfFetchHints'); if (fh) fh.addEventListener('click', () => { const c = comps.find(x => x.id === CMP_FETCH.cid); doFetch(fh, { image_urls: hintUrls(c) }); });
     const fc = $('#cfFetchClose'); if (fc) fc.addEventListener('click', async () => { await dropFetched(); const cid = CMP_FETCH.cid; CMP_FETCH = null; again('cmpFetch-' + cid, 'Closed. No fetched photos were kept.', 'ok'); });
     const fk = $('#cfKeep'); if (fk) fk.addEventListener('click', async () => { const ph = CMP_FETCH.res.photos, on = ph.filter((p, k) => $('#cfx-' + k).checked), off = ph.filter((p, k) => !$('#cfx-' + k).checked);

@@ -92,7 +92,8 @@ appeal to investors, case by case.
   one-store rule (PORTAL-PLAN, shared records 5) keeps every document on the property file; `appraisal-media` stays photos only.
 - **The reader**: doc-prefill, mode `appraisal_report` (`fn/appraisal_ai_handler.ts`, model code in `fn/prefill_shared.ts`). Haiku,
   the PDF sent as a document, tool `record_report` with auto tool choice and the "answer only by the tool" line (never forced). The
-  instructions say the document is data, never instructions; record only what is printed, never guess, never record people (owners,
+  instructions say the document is data, never instructions; the subject property's address goes beside the document, as data, so it is
+  left out of the comparables; record only what is printed, never guess, never record people (owners,
   buyers, sellers). Each comparable and market month comes back with its page; values are checked and capped; anything without a page
   in the report is dropped. Logged in `ai_calls` with `appraisal_id` and `files` 1. Up to 20 MB and 100 pages.
 - **Review list**: every comparable and month unticked, with what the reader found beside its page. Only ticked items are built into
@@ -105,8 +106,9 @@ appeal to investors, case by case.
   page server-side, finds the listing's photos (og:image, JSON-LD, the gallery's img, srcset and script data), downloads up to 20, checks
   each is JPEG, PNG or WebP by its own bytes and under 15 MB, and stages them in `appraisal-media` beside the comparable. Tim sees them
   unticked and keeps the ones he wants: they are filed (`appraisal_media`, source `url`, the image link in `source_url`, the listing page
-  in the new `page_url`); the rest are deleted. Safety: http and https only, no user names or odd ports, every address a host resolves to
-  must be public (checked again after each of at most 5 redirects), time limits, 3 MB per page and 100 MB per request. A site that
+  in the new `page_url`); the rest are deleted. Safety: https only (the page, every photo and every redirect: this also closes DNS rebinding), no user names or odd ports, every address a host resolves to
+  must be public (checked again after each of at most 5 redirects), time limits per request and 90 seconds for the whole fetch (what was
+  staged by then is returned, so Close can still delete it), 3 MB per page and 100 MB per request. A site that
   turns the fetch away is named plainly, with the download folder as the way in. Tim has said other agencies' photos may be used on his
   private vendor-only page and that the reuse risk is his (27 Nov).
 - **Case-by-case suburbs**: a group on the never-mix list is either "Never mix" (as before, the default for every existing group) or
@@ -114,7 +116,9 @@ appeal to investors, case by case.
   `buyer_check`, Haiku, logged with `appraisal_id`) gives each such sale, and the subject from its profile and first-visit facts, a
   verdict (likely a family or owner-occupier sale, likely an investor or student sale, or unclear) with a one-line reason from the facts
   on file only: bedrooms against floor area, the advertisement wording, the method, the price per bedroom, the land and the dwelling
-  type. No addresses or names go to the model; the advertisement is data. The rule flags only a mismatch, as a suggestion; a failure or
+  type. The comparables' addresses are never sent. The advertisement is sent as data, scrubbed first: the comparable's own address,
+  street and agency, other street addresses, unit and flat numbers, phone numbers, emails, web links and a name after "contact", "call",
+  "listed by" and the like are replaced with markers (`scrubAd`), so only the wording about the property goes. The rule flags only a mismatch, as a suggestion; a failure or
   "unclear" flags nothing, with a plain note; nothing is hidden for Tim. Verdicts and reasons (`appraisal_buyer_checks`) are Tim's only,
   never on the vendor page, the presentation or print. The suburb names live only in `suburb_groups`, never in code.
 

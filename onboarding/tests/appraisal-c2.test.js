@@ -126,6 +126,9 @@ const READING = { report: { source: 'relab', title: 'RB Invented Comparables Rep
   expect(await p.$eval('#cfPage', e => e.value) === 'https://listings.example.com/rb/7', 'the comparable\'s own link is offered first');
   await p.fill('#cfPage', 'ftp://listings.example.com/rb/7'); await p.click('#cfFetchGo'); await wait(p, 300);
   expect(/starting with https/.test((await note(p, 'cfFetchGo')) || ''), 'not a web link: refused on the page');
+  await p.fill('#cfPage', 'http://listings.example.com/rb/7'); await p.click('#cfFetchGo'); await wait(p, 300);
+  expect(/Only secure links \(starting with https\)/.test((await note(p, 'cfFetchGo')) || ''), 'an http link: refused on the page, said plainly');
+  out.urlFont = await p.$eval('#cfPage', e => parseFloat(getComputedStyle(e).fontSize)); expect(out.urlFont >= 16, 'the link box is 16 px or more: ' + out.urlFont);
   await p.fill('#cfPage', 'https://listings.example.com/rb/7'); await p.click('#cfFetchGo'); await wait(p, 900);
   out.fetched = await note(p, 'cfFetchGo'); d = await db(p);
   const staged = Object.keys(d.storage_objects).filter(k => /\/comps\/CM1\/fetch-/.test(k));
@@ -158,17 +161,17 @@ const READING = { report: { source: 'relab', title: 'RB Invented Comparables Rep
   await p.click('#cmpBuyers'); await wait(p, 900);
   out.buyers = await note(p, 'cmpBuyers'); items = await ruleItems(p); d = await db(p);
   expect(/^Checked 2 sales\./.test(out.buyers || '') && d.ai_calls.some(x => x.purpose === 'appraisal buyer check' && x.ok && x.appraisal_id === 'AVA'), 'checked and logged: ' + out.buyers);
-  expect(items.includes('warn:RB 7 Mix Road, Rbmix looks like an investor or student sale (Six bedrooms in 130 m2, advertised as tenanted), and your home looks like an owner-occupier home. A suggestion only: keep it, hide it, or mark it for context only.') && !items.some(x => /RB 9 Mix Road, Rbmix looks like/.test(x)), 'only the mismatch is flagged, as a suggestion: ' + JSON.stringify(items));
+  expect(items.includes('warn:RB 7 Mix Road, Rbmix looks like an investor or student sale (Six bedrooms in 130 m2, advertised as tenanted), and this home looks like an owner-occupier home. A suggestion only: keep it, hide it, or mark it for context only.') && !items.some(x => /RB 9 Mix Road, Rbmix looks like/.test(x)), 'only the mismatch is flagged, as a suggestion: ' + JSON.stringify(items));
   expect((await comps(p)).every(c => c.shown !== false), 'nothing is hidden for Tim');
   out.verdictRow = await p.$eval('[data-cmp="CM1"] .cmp-buyer', e => e.textContent);
   expect(/^Who it likely appealed to \(AI, only you see this\): Likely an investor or student sale\. Six bedrooms/.test(out.verdictRow), 'the verdict and reason on Tim\'s screen: ' + out.verdictRow);
   // an investor subject: the owner-occupier sale is the mismatch; an unclear subject flags nothing
   await setLS(p, { buyerResult: { subject: { verdict: 'investor', reason: 'Five bedrooms near campus.' }, byAddress: { 'RB 7 Mix Road, Rbmix': { verdict: 'investor', reason: 'Tenanted.' }, 'RB 9 Mix Road, Rbmix': { verdict: 'owner', reason: 'Family home.' } } } });
   await p.click('#cmpBuyers'); await wait(p, 900); items = await ruleItems(p);
-  expect(items.some(x => /^warn:RB 9 Mix Road, Rbmix looks like a family or owner-occupier sale \(Family home\), and your home looks like it would appeal to investors\./.test(x)) && !items.some(x => /RB 7 Mix Road.*looks like/.test(x)), 'an investor subject: a matching investor sale is fine: ' + JSON.stringify(items));
+  expect(items.some(x => /^warn:RB 9 Mix Road, Rbmix looks like a family or owner-occupier sale \(Family home\), and this home looks like it would appeal to investors\./.test(x)) && !items.some(x => /RB 7 Mix Road.*looks like/.test(x)), 'an investor subject: a matching investor sale is fine: ' + JSON.stringify(items));
   await setLS(p, { buyerResult: { subject: { verdict: 'unclear', reason: '' }, byAddress: { 'RB 7 Mix Road, Rbmix': { verdict: 'investor', reason: 'Tenanted.' } } } });
   await p.click('#cmpBuyers'); await wait(p, 900); items = await ruleItems(p);
-  expect(items.some(x => x === 'info:The AI couldn\'t tell who your home would appeal to, so no case-by-case sale is flagged. Check them yourself.') && !items.some(x => /looks like/.test(x)), 'unclear: no flag, a plain note: ' + JSON.stringify(items));
+  expect(items.some(x => x === 'info:The AI couldn\'t tell who this home would appeal to, so no case-by-case sale is flagged. Check them yourself.') && !items.some(x => /looks like/.test(x)), 'unclear: no flag, a plain note: ' + JSON.stringify(items));
   await setLS(p, { buyerResult: { subject: { verdict: 'owner', reason: 'Family home.' }, byAddress: { 'RB 7 Mix Road, Rbmix': { verdict: 'investor', reason: 'Tenanted, strong yield.' } } } });
   await p.click('#cmpBuyers'); await wait(p, 900);
   // the never-mix list: its mode, and a new case-by-case group

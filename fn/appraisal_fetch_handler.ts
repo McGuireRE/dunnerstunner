@@ -6,8 +6,8 @@
 //          fingerprint of the image link. Nothing is filed yet: Tim sees them (short signed links) and picks which to keep.
 //   keep:  files the photos Tim picked (appraisal_media rows: source 'url', the image link, the listing page's link) and removes the
 //          ones he left out. A photo is filed only if its stored name matches the fingerprint of the link sent back with it.
-// Safety: http and https only; no user names, odd ports or private host names; every address a host resolves to must be public, and
-// that is checked again after every redirect (at most 5); time limits on every request; a page over 3 MB, a photo over 15 MB or
+// Safety: https only (for the page, every photo and every redirect; this also closes DNS rebinding, see appraisal_fetch_core.ts); no user names, odd ports or private host names; every address a host resolves to must be public, and
+// that is checked again after every redirect (at most 5); time limits on every request and 90 seconds for the whole fetch (what was staged by then is returned); a page over 3 MB, a photo over 15 MB or
 // 100 MB in all is refused; a photo must be JPEG, PNG or WebP by its own bytes, not only by what the site says. The page's text is
 // data: it is only searched for image links. Where a site turns the fetch away, Tim is told plainly and pointed at his download folder.
 // Tested by onboarding/tests/appraisal-fetch-fn.test.js with fakes (no network, database or storage).
@@ -29,14 +29,21 @@ type Deps = {
   insertMedia: (rows: Record<string, unknown>[]) => Promise<{ error: string | null }>;
   remove: (paths: string[]) => Promise<void>;
   sha?: (s: string) => Promise<string>;
+  timeBudgetMs?: number;                                                            // the whole fetch's time limit (TIME_BUDGET_MS); smaller in tests
 };
-type Got = { ok: true; url: string; status: number; type: string; bytes: Uint8Array } | { ok: false; why: string; blocked?: boolean; status?: number };
+type Got = { ok: true; url: string; status: number; type: string; bytes: Uint8Array } | { ok: false; why: string; blocked?: boolean; status?: number; timeUp?: boolean };
+// the bytes left to download and the moment the whole request must stop, well inside the edge function's wall-clock limit (150 s)
+export type Budget = { left: number; until: number };
+export const TIME_BUDGET_MS = 90000;
 
-// one request, made safely: the link checked; the host's addresses looked up and every one public; no redirect followed blindly (each
-// hop checked the same way); a time limit; the body read up to its cap and no further.
-export async function safeGet(d: Deps, raw: string, kind: "page" | "image", budget: { left: number }): Promise<Got> {
+// one request, made safely: the link checked (https only); the host's addresses looked up and every one public; no redirect followed
+// blindly (each hop checked the same way); a time limit, never past the request's own budget; the body read up to its cap and no
+// further, and a body that stalls or breaks is a plain failure, never an error.
+export async function safeGet(d: Deps, raw: string, kind: "page" | "image", budget: Budget): Promise<Got> {
   let url = raw;
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    const msLeft = budget.until - Date.now();
+    if (msLeft <= 0) return { ok: false, timeUp: true, why: "Time ran out." };
     const c = checkUrl(url); if (!c.ok) return { ok: false, why: c.why };
     const host = c.url.hostname.replace(/^\[|\]$/g, "").replace(/\.$/, "");
     if (!(isV4(host) || host.includes(":"))) {
@@ -45,7 +52,7 @@ export async function safeGet(d: Deps, raw: string, kind: "page" | "image", budg
       if (!ips.length) return { ok: false, why: "That site couldn't be found." };
       if (!addressesOk(ips)) return { ok: false, why: "That link points at a private address, so it can't be fetched." };
     } else if (ipBlocked(host)) return { ok: false, why: "That link points at a private address, so it can't be fetched." };
-    const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), kind === "page" ? PAGE_MS : IMAGE_MS);
+    const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), Math.min(kind === "page" ? PAGE_MS : IMAGE_MS, msLeft));
     try {
       let r: Response;
       try {
@@ -64,9 +71,15 @@ export async function safeGet(d: Deps, raw: string, kind: "page" | "image", budg
       const chunks: Uint8Array[] = []; let n = 0;
       if (r.body) {
         const rd = r.body.getReader();
-        for (;;) { const { done, value } = await rd.read(); if (done) break; n += value.length;
-          if (n > cap) { try { await rd.cancel(); } catch (_) { /* */ } return { ok: false, why: kind === "page" ? "That page is too big to read." : "That photo is over 15 MB." }; }
-          chunks.push(value); }
+        try {
+          for (;;) { const { done, value } = await rd.read(); if (done) break; n += value.length;
+            if (n > cap) { try { await rd.cancel(); } catch (_) { /* */ } return { ok: false, why: kind === "page" ? "That page is too big to read." : "That photo is over 15 MB." }; }
+            chunks.push(value); }
+        } catch (e: any) {
+          // the time limit fired, or the connection dropped, part way through the download
+          try { await rd.cancel(); } catch (_) { /* */ }
+          return { ok: false, timeUp: Date.now() >= budget.until, why: ctl.signal.aborted ? "The site took too long to send it." : "The download broke off part way." };
+        }
       }
       const bytes = new Uint8Array(n); let at = 0; for (const ch of chunks) { bytes.set(ch, at); at += ch.length; }
       budget.left -= n;
@@ -84,7 +97,7 @@ export async function safeGet(d: Deps, raw: string, kind: "page" | "image", budg
 export function makeHandler(d: Deps) {
   const sha = d.sha || sha256Hex;
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: Object.assign({ "Content-Type": "application/json", "Cache-Control": "no-store" }, d.cors) });
-  return async (req: Request): Promise<Response> => {
+  const handle = async (req: Request): Promise<Response> => {
     if (req.method === "OPTIONS") return new Response("ok", { headers: d.cors });
     if (req.method !== "POST") return json({ error: "Not allowed" }, 405);
     const auth = req.headers.get("Authorization") || "";
@@ -105,7 +118,7 @@ export function makeHandler(d: Deps) {
     const pageIn = typeof body.page_url === "string" ? body.page_url.trim() : "";
 
     if (action === "fetch") {
-      const budget = { left: MAX_TOTAL_BYTES };
+      const budget: Budget = { left: MAX_TOTAL_BYTES, until: Date.now() + (d.timeBudgetMs || TIME_BUDGET_MS) };
       let candidates: string[] = [], page: string | null = null;
       if (pageIn) {
         const g = await safeGet(d, pageIn, "page", budget);
@@ -124,11 +137,12 @@ export function makeHandler(d: Deps) {
       }
       if (!candidates.length) return json({ ok: false, reason: "no_photos", message: pageIn ? "No listing photos were found on that page. If the site loads them as you scroll, save them into your download folder instead." : "Give the link of the listing, or of its photos." });
       const photos: { path: string; image_url: string; mime: string; size: number }[] = [], skipped: { image_url: string; why: string }[] = [];
-      let blocked = 0;
+      let blocked = 0, timeUp = false;
       for (const u of candidates) {
         if (photos.length >= MAX_IMAGES || budget.left <= 0) break;
+        if (Date.now() >= budget.until) { timeUp = true; break; }   // stop in good time, and return what is staged so far
         const g = await safeGet(d, u, "image", budget);
-        if (!g.ok) { if (g.blocked) blocked++; skipped.push({ image_url: u, why: g.why }); continue; }
+        if (!g.ok) { if (g.timeUp) { timeUp = true; break; } if (g.blocked) blocked++; skipped.push({ image_url: u, why: g.why }); continue; }
         const mime = sniffImage(g.bytes);
         if (!typeOk(g.type, mime)) { skipped.push({ image_url: u, why: "Not a JPEG, PNG or WebP photo." }); continue; }
         if (g.bytes.length < 2000) { skipped.push({ image_url: u, why: "Too small to be a listing photo." }); continue; }
@@ -138,9 +152,10 @@ export function makeHandler(d: Deps) {
         if (!up.ok && !up.exists) { skipped.push({ image_url: u, why: "It couldn't be saved: " + (up.error || "try again") + "." }); continue; }
         photos.push({ path, image_url: u, mime: mime!, size: g.bytes.length });
       }
-      if (!photos.length) return json({ ok: false, reason: blocked ? "blocked" : "no_photos", message: blocked ? BLOCKED_MESSAGE : "None of the photos could be fetched. Save them from the listing into your download folder instead.", skipped: skipped.slice(0, 10) });
+      if (!photos.length) return json({ ok: false, reason: timeUp ? "time" : blocked ? "blocked" : "no_photos", message: timeUp ? "The site was too slow, so no photos were fetched in the time allowed. Save them from the listing into your download folder instead." : blocked ? BLOCKED_MESSAGE : "None of the photos could be fetched. Save them from the listing into your download folder instead.", skipped: skipped.slice(0, 10) });
       let links: Record<string, string> = {}; try { links = await d.sign(photos.map((p) => p.path)); } catch (_) { links = {}; }
-      return json({ ok: true, page_url: page, photos: photos.map((p) => ({ ...p, url: links[p.path] || null })), skipped: skipped.slice(0, 20) });
+      return json({ ok: true, page_url: page, photos: photos.map((p) => ({ ...p, url: links[p.path] || null })), skipped: skipped.slice(0, 20), time_up: timeUp,
+        message: timeUp ? "The site was slow, so only " + photos.length + " photo" + (photos.length === 1 ? " was" : "s were") + " fetched in the time allowed. Keep the ones you want, or save the rest into your download folder." : null });
     }
 
     // keep
@@ -162,5 +177,9 @@ export function makeHandler(d: Deps) {
     const gone = discard.filter((p: unknown) => mine(p) && !have.paths.includes(String(p)) && !rows.some((r) => r.path === p)) as string[];
     if (gone.length) { try { await d.remove(gone); } catch (_) { /* left for a later clean-up; never shown, as nothing files them */ } }
     return json({ ok: true, kept: rows.length, removed: gone.length });
+  };
+  // anything unexpected still answers in JSON, with the CORS headers, in plain words
+  return async (req: Request): Promise<Response> => {
+    try { return await handle(req); } catch (_) { return json({ ok: false, reason: "failed", error: "Something went wrong fetching the photos. Try again, or save them into your download folder." }, 500); }
   };
 }

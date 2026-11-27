@@ -42,7 +42,7 @@ Deno.serve(async (req) => {
         buyerInputs: async (aid) => {
           const { data: a } = await dbA.from("appraisal_views").select("id, property_id, status, setup, fields").eq("id", aid).maybeSingle();
           if (!a) return null;
-          const { data: comps } = await dbA.from("appraisal_comps").select("id, shown, status, suburb, price, bedrooms, bathrooms, floor_m2, land_m2, cv, days_to_sell, method, ad_text").eq("appraisal_id", aid).order("position");
+          const { data: comps } = await dbA.from("appraisal_comps").select("id, shown, status, address, suburb, price, bedrooms, bathrooms, floor_m2, land_m2, cv, days_to_sell, method, agency, ad_text").eq("appraisal_id", aid).order("position");
           const { data: groups } = await dbA.from("suburb_groups").select("suburbs, mode");
           // the subject's facts from its profile (the first visit's facts are on it), read as Tim with his own token
           const prof = a.property_id ? await userClient.rpc("agent_property_profile", { p_property: a.property_id }) : { data: null };

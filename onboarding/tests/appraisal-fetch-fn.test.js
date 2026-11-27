@@ -27,9 +27,11 @@ const path = require('path');
   // ── links ──
   const bad = ['ftp://listings.example.com/x', 'file:///etc/passwd', 'javascript:alert(1)', 'data:text/html,hi', 'gopher://x.example.com/', 'http://user:pw@listings.example.com/', 'https://listings.example.com:8443/x',
     'http://127.0.0.1/', 'http://2130706433/', 'http://0x7f000001/', 'http://0177.0.0.1/', 'http://[::1]/', 'http://[::ffff:169.254.169.254]/', 'http://localhost/', 'http://printer.local/', 'http://intranet/', 'http://metadata.internal/', 'http://169.254.169.254/latest/meta-data', 'not a link', ''];
-  const okL = ['https://listings.example.com/rb/1', 'http://listings.example.com/x?y=1', 'https://listings.example.com:443/x', 'http://8.8.8.8/x'];
+  bad.push('http://listings.example.com/x?y=1', 'http://8.8.8.8/x', 'http://listings.example.com:80/x');
+  const okL = ['https://listings.example.com/rb/1', 'https://listings.example.com/x?y=1', 'https://listings.example.com:443/x', 'https://8.8.8.8/x'];
   out.badLinks = bad.map(u => [u, C.checkUrl(u).ok]).filter(x => x[1]);
   expect(!out.badLinks.length && okL.every(u => C.checkUrl(u).ok), 'link rules: ' + JSON.stringify([out.badLinks, okL.filter(u => !C.checkUrl(u).ok)]));
+  expect(/Only secure links \(starting with https\)/.test(C.checkUrl('http://listings.example.com/x').why), 'an http link: a plain message (https only, which also closes DNS rebinding)');
 
   // ── finding the photos in sample HTML (invented) ──
   const page = `<!doctype html><html><head><meta property="og:image" content="https://cdn.example.com/rb/hero.jpg?w=1200&amp;h=800">
@@ -110,14 +112,18 @@ const path = require('path');
   r = await F({ page_url: 'https://evil.example.com/x' }); j = await r.json(); expect(!j.ok && /private address/.test(j.message) && !fetched.length, 'a host that resolves privately is never fetched: ' + j.message);
   r = await F({ page_url: 'https://mixed.example.com/x' }); j = await r.json(); expect(!j.ok && /private address/.test(j.message) && !fetched.length, 'one private address among public ones is enough to refuse');
   r = await F({ page_url: 'https://down.example.com/x' }); j = await r.json(); expect(!j.ok && /couldn't be checked/.test(j.message) && !fetched.length, 'a lookup that fails refuses (never fetched unchecked)');
-  r = await F({ page_url: 'http://169.254.169.254/latest/meta-data/' }); j = await r.json(); expect(!j.ok && /private address/.test(j.message) && !fetched.length, 'the metadata address is refused');
-  web['https://listings.example.com/rb/hop'] = () => resp(302, null, { location: 'http://evil.example.com/admin' });
-  web['https://listings.example.com/rb/hop2'] = () => resp(301, null, { location: 'http://[::1]/' });
+  r = await F({ page_url: 'https://169.254.169.254/latest/meta-data/' }); j = await r.json(); expect(!j.ok && /private address/.test(j.message) && !fetched.length, 'the metadata address is refused');
+  r = await F({ page_url: 'http://listings.example.com/rb/listing/1' }); j = await r.json(); expect(!j.ok && /Only secure links/.test(j.message) && !fetched.length, 'an http listing page is refused, said plainly: ' + j.message);
+  web['https://listings.example.com/rb/hop'] = () => resp(302, null, { location: 'https://evil.example.com/admin' });
+  web['https://listings.example.com/rb/hop2'] = () => resp(301, null, { location: 'https://[::1]/' });
   web['https://listings.example.com/rb/hop3'] = () => resp(302, null, { location: 'file:///etc/passwd' });
   fetched = []; r = await F({ page_url: 'https://listings.example.com/rb/hop' }); j = await r.json();
   expect(!j.ok && /private address/.test(j.message) && JSON.stringify(fetched) === '["https://listings.example.com/rb/hop"]', 'a redirect into a private address is checked and refused: ' + JSON.stringify(fetched));
   r = await F({ page_url: 'https://listings.example.com/rb/hop2' }); j = await r.json(); expect(!j.ok && /private address/.test(j.message), 'a redirect to loopback IPv6 refused');
-  r = await F({ page_url: 'https://listings.example.com/rb/hop3' }); j = await r.json(); expect(!j.ok && /Only web links/.test(j.message), 'a redirect to a file link refused');
+  r = await F({ page_url: 'https://listings.example.com/rb/hop3' }); j = await r.json(); expect(!j.ok && /Only web links starting with https/.test(j.message), 'a redirect to a file link refused');
+  web['https://listings.example.com/rb/hop4'] = () => resp(302, null, { location: 'http://listings.example.com/rb/listing/1' });
+  fetched = []; r = await F({ page_url: 'https://listings.example.com/rb/hop4' }); j = await r.json();
+  expect(!j.ok && /Only secure links/.test(j.message) && fetched.length === 1, 'a redirect down to plain http is refused (https only on every hop)');
   let hops = 0; web['https://listings.example.com/rb/loop'] = () => { hops++; return resp(302, null, { location: '/rb/loop' }); };
   r = await F({ page_url: 'https://listings.example.com/rb/loop' }); j = await r.json(); expect(!j.ok && /redirected too many times/.test(j.message) && hops === C.MAX_REDIRECTS + 1, 'at most 5 redirects: ' + hops);
   web['https://listings.example.com/rb/moved'] = () => resp(301, null, { location: 'https://listings.example.com/rb/listing/1' });
@@ -162,9 +168,33 @@ const path = require('path');
     && media[0].source_url === k[0].image_url && media.map(m => m.position).join() === '1,2' && removed.length === d.length && !removed.includes('appraisals/other/comps/x/y.jpg'), 'kept photos filed with their links; the rest removed; nothing outside the comparable touched: ' + JSON.stringify(out.keep));
   r = await post({ action: 'keep', appraisal_id: AID, comp_id: CID, keep: k.map(p => ({ path: p.path, image_url: p.image_url })), discard: [k[0].path] }); j = await r.json();
   expect(j.ok && j.kept === 0 && j.removed === 0 && media.length === 2, 'keeping twice files nothing twice, and a filed photo is never removed by a discard');
-  const httpImg = 'http://cdn.example.com/rb/plain.jpg'; web[httpImg] = jpgResp; dns['cdn.example.com'] = pub;
-  r = await F({ image_urls: [httpImg] }); const hp = (await r.json()).photos[0];
-  r = await post({ action: 'keep', appraisal_id: AID, comp_id: CID, keep: [{ path: hp.path, image_url: httpImg }] }); j = await r.json();
-  expect(j.ok && media[2].source_url === null && media[2].page_url === null, 'a photo from a plain http link: filed, its source_url left empty (https only), as the table requires');
+  const httpImg = 'http://cdn.example.com/rb/plain.jpg'; web[httpImg] = jpgResp; fetched = [];
+  r = await F({ image_urls: [httpImg] }); j = await r.json();
+  expect(!j.ok && !fetched.length, 'a photo link over plain http is never fetched');
+  r = await post({ action: 'keep', appraisal_id: AID, comp_id: CID, keep: [{ path: `appraisals/${AID}/comps/${CID}/fetch-${require('crypto').createHash('sha256').update(httpImg).digest('hex').slice(0, 32)}.jpg`, image_url: httpImg }] });
+  expect(r.status === 400 && media.length === 2, 'nor filed with an http link');
+
+  // a body that stalls or breaks, the whole fetch's time budget, and nothing escaping as a bare error
+  const mkH = (o) => H.makeHandler(Object.assign({ cors: { 'Access-Control-Allow-Origin': '*' }, whoIsAgent: async () => agent, comp: async () => ({ id: CID, appraisal_id: AID, sent: false }), resolve: async () => pub,
+    fetch: async (url, init) => { fetched.push(url); const w = web[url]; return w ? w(init) : resp(404, 'x'); }, upload: async (p, b, m) => { stored[p] = { size: b.length, mime: m }; return { ok: true }; },
+    sign: async (ps) => Object.fromEntries(ps.map(p => [p, 'https://storage.example.com/signed/' + p])), filed: async () => ({ paths: [], maxPosition: 0 }), insertMedia: async () => ({ error: null }), remove: async () => { } }, o));
+  const postTo = (hh, b) => hh(new Request('https://x/f', { method: 'POST', headers: { Authorization: 'Bearer good', 'Content-Type': 'application/json' }, body: JSON.stringify(Object.assign({ action: 'fetch', appraisal_id: AID, comp_id: CID }, b)) }));
+  const stall = (first) => (init) => resp(200, new ReadableStream({ start(c) { c.enqueue(first); init.signal.addEventListener('abort', () => { const e = new Error('aborted'); e.name = 'AbortError'; c.error(e); }); } }), { 'content-type': first[0] === 0xff ? 'image/jpeg' : 'text/html' });
+  const broken = () => resp(200, new ReadableStream({ start(c) { c.enqueue(JPG.subarray(0, 100)); c.error(new Error('connection reset')); } }), { 'content-type': 'image/jpeg' });
+  web['https://listings.example.com/rb/stall-page'] = stall(new TextEncoder().encode('<html><head>'));
+  let hh = mkH({ timeBudgetMs: 1500 }); let t1 = Date.now();
+  r = await postTo(hh, { page_url: 'https://listings.example.com/rb/stall-page' }); j = await r.json();
+  out.stallPage = [r.status, j, Date.now() - t1];
+  expect(r.status === 200 && j.ok === false && /too long/.test(j.message) && r.headers.get('Access-Control-Allow-Origin') === '*' && Date.now() - t1 < 4000, 'a page whose body stalls: a plain answer within the budget, never a bare 500: ' + JSON.stringify(out.stallPage));
+  web['https://cdn.example.com/rb/broken.jpg'] = broken; web['https://cdn.example.com/rb/ok1.jpg'] = jpgResp; web['https://cdn.example.com/rb/ok2.jpg'] = jpgResp;
+  web['https://cdn.example.com/rb/stall.jpg'] = stall(JPG.subarray(0, 100)); web['https://cdn.example.com/rb/never.jpg'] = jpgResp;
+  hh = mkH({ timeBudgetMs: 2500 }); fetched = []; t1 = Date.now();
+  r = await postTo(hh, { image_urls: ['https://cdn.example.com/rb/broken.jpg', 'https://cdn.example.com/rb/ok1.jpg', 'https://cdn.example.com/rb/ok2.jpg', 'https://cdn.example.com/rb/stall.jpg', 'https://cdn.example.com/rb/never.jpg'] }); j = await r.json();
+  out.budget = { status: r.status, ok: j.ok, n: (j.photos || []).length, time_up: j.time_up, message: j.message, skipped: j.skipped, ms: Date.now() - t1, fetched };
+  expect(j.ok && j.photos.length === 2 && j.time_up === true && /only 2 photos were fetched in the time allowed/.test(j.message) && j.skipped.some(x => /broke off/.test(x.why)) && !fetched.includes('https://cdn.example.com/rb/never.jpg') && Date.now() - t1 < 5000 && r.headers.get('Access-Control-Allow-Origin') === '*',
+    'the budget: a broken download skipped, a stalled one ends the loop, and what was staged is returned for Tim to keep or discard: ' + JSON.stringify(out.budget));
+  hh = mkH({ upload: async () => { throw new Error('storage down'); } });
+  r = await postTo(hh, { image_urls: ['https://cdn.example.com/rb/ok1.jpg'] }); j = await r.json();
+  expect(r.status === 500 && j.ok === false && /Something went wrong/.test(j.error) && r.headers.get('Access-Control-Allow-Origin') === '*', 'anything unexpected still answers in JSON with the CORS headers');
   console.log(JSON.stringify(Object.assign(out, { errs }), null, 1));
 })().catch(e => console.log(JSON.stringify({ errs: ['crashed: ' + (e && e.stack || e)] }, null, 1)));

@@ -341,10 +341,10 @@
     const has = c => !!(b && b.comps && b.comps[c.id]), unchecked = list.filter(c => !has(c)), sv = b && b.subject ? b.subject.verdict : '';
     if (unchecked.length) add('info', (unchecked.length === 1 ? unchecked[0].address + ' is' : unchecked.length + ' sales are') + ' in a suburb you check case by case (' + names + '). Use "Check who they appeal to" and the AI will look at ' + (unchecked.length === 1 ? 'it' : 'each one') + '.');
     const done = list.filter(has); if (!done.length) return;
-    if (!['owner', 'investor'].includes(sv)) { add('info', 'The AI couldn\'t tell who your home would appeal to, so no case-by-case sale is flagged. Check ' + (done.length === 1 ? 'it' : 'them') + ' yourself.'); return; }
+    if (!['owner', 'investor'].includes(sv)) { add('info', 'The AI couldn\'t tell who this home would appeal to, so no case-by-case sale is flagged. Check ' + (done.length === 1 ? 'it' : 'them') + ' yourself.'); return; }
     done.forEach(c => { const v = b.comps[c.id], why = String(v.reason || '').trim().replace(/[.\s]+$/, '');
       if (!['owner', 'investor'].includes(v.verdict)) add('info', c.address + ': no clear read on who it appealed to, so it isn\'t flagged. Check it yourself.');
-      else if (v.verdict !== sv) add('warn', c.address + (v.verdict === 'investor' ? ' looks like an investor or student sale' : ' looks like a family or owner-occupier sale') + (why ? ' (' + why + ')' : '') + ', and your home looks like ' + (sv === 'owner' ? 'an owner-occupier home' : 'it would appeal to investors') + '. A suggestion only: keep it, hide it, or mark it for context only.'); });
+      else if (v.verdict !== sv) add('warn', c.address + (v.verdict === 'investor' ? ' looks like an investor or student sale' : ' looks like a family or owner-occupier sale') + (why ? ' (' + why + ')' : '') + ', and this home looks like ' + (sv === 'owner' ? 'an owner-occupier home' : 'it would appeal to investors') + '. A suggestion only: keep it, hide it, or mark it for context only.'); });
   }
   // a report Tim uploaded (035): the packs for the existing import, from only the items he ticked. res: the reading ({ report, comps,
   // market }); comps, months: the ticked ids; now: an ISO time for when no report date is printed. The source is the report's own.

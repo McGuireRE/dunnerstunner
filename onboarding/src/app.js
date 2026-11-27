@@ -10026,8 +10026,9 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       const { data, error } = await fetchCall(Object.assign({ action: 'fetch' }, extra)); const j = await fnJson(data, error); b.disabled = false;
       if (!j || !j.ok) { if (CMP_FETCH) CMP_FETCH.res = null; return atBtn(b, (j && (j.message || j.error)) || (netErr(error) ? 'Not fetched. Check you have signal, then try again.' : 'Not fetched. Try again, or save the photos into your download folder.'), 'err'); }
       CMP_FETCH.res = j; CMP_FETCH.page = extra.page_url || null; const n = j.photos.length, sk = (j.skipped || []).length;
-      again(b.id, 'Fetched ' + n + ' photo' + (n === 1 ? '' : 's') + '. Tick the ones to keep.' + (sk ? ' ' + sk + ' more couldn\'t be used.' : ''), 'ok'); };
-    const fg = $('#cfFetchGo'); if (fg) fg.addEventListener('click', () => { const u = $('#cfPage').value.trim(); if (!/^https?:\/\/\S+$/i.test(u)) return atBtn(fg, 'Paste the whole link of the listing, starting with https://', 'err'); doFetch(fg, { page_url: u }); });
+      again(b.id, j.time_up && j.message ? j.message : 'Fetched ' + n + ' photo' + (n === 1 ? '' : 's') + '. Tick the ones to keep.' + (sk ? ' ' + sk + ' more couldn\'t be used.' : ''), 'ok'); };
+    const fg = $('#cfFetchGo'); if (fg) fg.addEventListener('click', () => { const u = $('#cfPage').value.trim(); if (/^http:\/\//i.test(u)) return atBtn(fg, 'Only secure links (starting with https) can be fetched. Open the listing in your browser and copy the link from the address bar.', 'err');
+      if (!/^https:\/\/\S+$/i.test(u)) return atBtn(fg, 'Paste the whole link of the listing, starting with https://', 'err'); doFetch(fg, { page_url: u }); });
     const fh = $('#cfFetchHints'); if (fh) fh.addEventListener('click', () => { const c = comps.find(x => x.id === CMP_FETCH.cid); doFetch(fh, { image_urls: hintUrls(c) }); });
     const fc = $('#cfFetchClose'); if (fc) fc.addEventListener('click', async () => { await dropFetched(); const cid = CMP_FETCH.cid; CMP_FETCH = null; again('cmpFetch-' + cid, 'Closed. No fetched photos were kept.', 'ok'); });
     const fk = $('#cfKeep'); if (fk) fk.addEventListener('click', async () => { const ph = CMP_FETCH.res.photos, on = ph.filter((p, k) => $('#cfx-' + k).checked), off = ph.filter((p, k) => !$('#cfx-' + k).checked);

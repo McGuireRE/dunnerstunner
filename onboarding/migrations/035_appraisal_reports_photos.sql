@@ -77,7 +77,8 @@ revoke all on function public.guard_appraisal_report() from public, anon, authen
 create trigger appraisal_reports_guard before insert or update or delete on public.appraisal_reports for each row execute function public.guard_appraisal_report();
 
 -- the report to read: the appraisal is written from its set-up and not sent; the document is a comparables or market report, a PDF in
--- the property-files bucket, on the appraisal's own property, not removed. Returns where it is (for the service role only).
+-- the property-files bucket, on the appraisal's own property, not removed. Returns where it is, and the subject property's address so
+-- the reader can leave it out (for the service role only).
 create function public.appraisal_report_source(p_appraisal uuid, p_document uuid) returns jsonb
 language plpgsql stable security definer set search_path = public as $$
 declare a public.appraisal_views; d public.property_documents;
@@ -93,7 +94,7 @@ begin
     raise exception 'Only a PDF added as a comparables or market report can be read here';
   end if;
   if d.archived_at is not null then raise exception 'That report has been removed from the property file'; end if;
-  return jsonb_build_object('path', d.path, 'name', d.name, 'size', d.size_bytes, 'property_id', d.property_id);
+  return jsonb_build_object('path', d.path, 'name', d.name, 'size', d.size_bytes, 'property_id', d.property_id, 'subject', a.address);
 end $$;
 revoke all on function public.appraisal_report_source(uuid, uuid) from public, anon, authenticated;
 
