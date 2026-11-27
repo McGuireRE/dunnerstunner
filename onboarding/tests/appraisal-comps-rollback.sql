@@ -2,28 +2,41 @@
 -- freeze and wording guard on appraisal_views, and near-duplicate addresses). Run with onboarding/tests/appraisal-comps-rollback.js,
 -- which puts the whole migration inside the block, so one statement applies it, runs the checks and then raises, which undoes it all.
 -- Nothing is kept. The output is the exception message: lower case reads as expected; a line in CAPITALS means something was wrong.
--- Needs 033 and what it builds on, as live (tests/appraisal-comps-standin.sql says how the local stand-in is built).
+-- Needs 033 and what it builds on, as live (tests/appraisal-comps-standin.sql says how the local stand-in is built). Self-contained:
+-- every write goes to rows the test makes itself; appraisals already there (on live, the row loaded by hand) are only read, and the
+-- test runs the same with none at all.
 -- Test rows use invented example data only. The agent is the first row of public.agents, as in 032's and 033's tests.
 do $t$
 declare out text := ''; x text; n int; j jsonb; r record;
-  hid uuid; pa uuid; hand_before text; hand_after text; pa_before text; pa_after text;
+  hid uuid; pa uuid; hand_before text; hand_after text;
   aid uuid; aid2 uuid; aid3 uuid; c1 uuid; c2 uuid; c9 uuid; r1 uuid; r2 uuid; m1 uuid; gid uuid; ppath text;
   agent text := json_build_object('email', (select email from public.agents order by created_at limit 1), 'sub', '22222222-2222-2222-2222-222222222222', 'role', 'authenticated')::text;
   vendor text := json_build_object('email', 'rb-vendor@example.com', 'sub', '33333333-3333-3333-3333-333333333333', 'role', 'authenticated')::text;
   pack1 jsonb; pack2 jsonb; mpack jsonb;
 begin
-  -- the row loaded by hand (oldest, no set-up) and the phase A appraisal: every value, as text, to compare afterwards
-  select id, to_jsonb(v)::text into hid, hand_before from public.appraisal_views v where v.setup = '{}'::jsonb order by created_at limit 1;
-  select id, to_jsonb(v)::text into pa, pa_before from public.appraisal_views v where v.setup ? 'v' order by created_at limit 1;
+  -- every appraisal already there (on live: the one row loaded by hand; on the stand-in: whatever it holds, or none), every value as
+  -- text, to show 034 changes none of them. They are only read: the checks below write to the test's own rows.
+  select coalesce(string_agg(to_jsonb(v)::text, '|' order by id), '') into hand_before from public.appraisal_views v;
 
   $mig$__MIGRATION__$mig$;
 
-  -- both rows are unchanged, and the guard passes them
-  select to_jsonb(v)::text into hand_after from public.appraisal_views v where id = hid;
-  select to_jsonb(v)::text into pa_after from public.appraisal_views v where id = pa;
-  if hid is null or pa is null then out := out || 'THE STAND-IN LACKS THE HAND-LOADED OR PHASE A ROW; ';
-  elsif hand_after is distinct from hand_before or pa_after is distinct from pa_before then out := out || 'AN EXISTING APPRAISAL CHANGED; ';
-  else out := out || 'hand-loaded and phase A rows unchanged; '; end if;
+  select coalesce(string_agg(to_jsonb(v)::text, '|' order by id), '') into hand_after from public.appraisal_views v;
+  if hand_after is distinct from hand_before then out := out || 'AN EXISTING APPRAISAL CHANGED; '; else out := out || 'existing appraisals unchanged (' || (select count(*) from public.appraisal_views) || '); '; end if;
+  -- the test's own rows, invented: one like the row loaded by hand (no set-up) and one written from a phase A set-up. They go in
+  -- through the new guard, so their clean wording passes it.
+  insert into public.appraisal_views (title, address, prepared_for, sections, fields)
+    values ('RB 3 Hand Street, Testville: Market Appraisal', 'RB 3 Hand Street, Testville', 'Hand Person',
+      '[{"type":"heading","text":"My appraisal"},{"type":"ranges"},{"type":"method"}]'::jsonb,
+      '{"ranges":[{"key":"A","option":"A. Option one","involves":"Sample","low":400000,"high":450000}],"bedrooms":"3 bedrooms","method":{"name":"Deadline sale","text":"Sample"}}'::jsonb)
+    returning id into hid;
+  insert into public.appraisal_views (title, address, prepared_for, status, setup, kind, sections, fields)
+    values ('RB 4 Phase Street, Testville: Market Appraisal', 'RB 4 Phase Street, Testville', 'Phase Person', 'ready',
+      '{"v":1,"campaign":{"kind":"standard"},"method":"deadline","plan":"premium","basis":"comparables"}'::jsonb, 'standard',
+      '[{"type":"heading","text":"My opinion of price"},{"type":"opinion"}]'::jsonb,
+      '{"ranges":[{"key":"A","option":"Your home","involves":"","low":500000,"high":550000}],"method":{"name":"Deadline sale","key":"deadline","text":"I would recommend a deadline sale."}}'::jsonb)
+    returning id into pa;
+  select setup::text || '|' || (select setup->>'v' from public.appraisal_views where id = pa) into x from public.appraisal_views where id = hid;
+  if x is distinct from '{}|1' then out := out || 'THE TEST''S OWN ROWS ARE NOT AS WRITTEN: ' || coalesce(x, 'none') || '; '; else out := out || 'test rows: one hand-style, one phase A; '; end if;
   select string_agg(public.appraisal_wording_problem(jsonb_build_array(title, sections, fields, setup)), '') into x from public.appraisal_views;
   if x <> '' then out := out || 'AN EXISTING ROW FAILS THE GUARD: ' || x || '; '; else out := out || 'existing rows pass the guard; '; end if;
 
@@ -77,18 +90,23 @@ begin
   -- (a) the wording guard on a direct update, as Tim (the path the 032 update policy leaves open)
   insert into public.properties (address) values ('33 Rbsample Road, Testville');
   execute 'set local role authenticated'; perform set_config('request.jwt.claims', agent, true);
+  -- each update is to one of the test's own rows, visible to Tim: a refused one must raise; one that touched no row counts as a failure
+  select count(*) into n from public.appraisal_views where id in (hid, pa);
+  if n <> 2 then out := out || 'TIM CANNOT SEE THE TEST ROWS (' || n || '); '; end if;
   update public.appraisal_views set fields = jsonb_set(fields, '{bedrooms}', '"4 bedrooms"') where id = hid;
-  get diagnostics n = row_count; out := out || 'hand-loaded editor''s direct update: ' || n || ' row; ';
-  begin update public.appraisal_views set sections = sections || '[{"type":"para","text":"Sold as is."}]'::jsonb where id = hid; out := out || '"AS IS" SAVED BY A DIRECT UPDATE; '; exception when others then out := out || 'direct update, as is: ' || sqlerrm || '; '; end;
-  begin update public.appraisal_views set title = 'Our fee schedule' where id = hid; out := out || 'A FEE IN THE TITLE SAVED BY A DIRECT UPDATE; '; exception when others then out := out || 'direct update, fee in the title: refused; '; end;
-  begin update public.appraisal_views set setup = '{"v":1,"note":"Commission included"}'::jsonb where id = pa; out := out || 'COMMISSION IN THE SET-UP SAVED; '; exception when others then out := out || 'direct update, commission in the set-up: refused; '; end;
-  begin update public.appraisal_views set fields = jsonb_set(fields, '{method,text}', '"Fees apply"') where id = pa; out := out || 'A FEE IN THE FIELDS SAVED; '; exception when others then out := out || 'direct update, fee in the fields: refused; '; end;
+  get diagnostics n = row_count; if n <> 1 then out := out || 'THE HAND-STYLE EDITOR''S UPDATE TOUCHED ' || n || ' ROWS; '; else out := out || 'hand-style editor''s direct update: 1 row; '; end if;
+  begin update public.appraisal_views set sections = sections || '[{"type":"para","text":"Sold as is."}]'::jsonb where id = hid; get diagnostics n = row_count; out := out || '"AS IS" SAVED BY A DIRECT UPDATE (' || n || ' ROWS); '; exception when others then out := out || 'direct update, as is: ' || sqlerrm || '; '; end;
+  begin update public.appraisal_views set title = 'Our fee schedule' where id = hid; get diagnostics n = row_count; out := out || 'A FEE IN THE TITLE SAVED BY A DIRECT UPDATE (' || n || ' ROWS); '; exception when others then out := out || 'direct update, fee in the title: refused; '; end;
+  begin update public.appraisal_views set setup = '{"v":1,"note":"Commission included"}'::jsonb where id = pa; get diagnostics n = row_count; out := out || 'COMMISSION IN THE SET-UP SAVED (' || n || ' ROWS); '; exception when others then out := out || 'direct update, commission in the set-up: refused; '; end;
+  begin update public.appraisal_views set fields = jsonb_set(fields, '{method,text}', '"Fees apply"') where id = pa; get diagnostics n = row_count; out := out || 'A FEE IN THE FIELDS SAVED (' || n || ' ROWS); '; exception when others then out := out || 'direct update, fee in the fields: refused; '; end;
   begin insert into public.appraisal_views (title, address) values ('Sold As-Is Appraisal', 'RB 40 Insert Street'); out := out || '"AS IS" SAVED BY A DIRECT INSERT; '; exception when others then out := out || 'direct insert, as is: refused; '; end;
-  begin update public.appraisal_views set prepared_for = 'The fee payer' where id = pa; out := out || 'A FEE IN PREPARED FOR SAVED; '; exception when others then out := out || 'direct update, fee in prepared for: refused; '; end;
-  begin update public.appraisal_views set address = '1 Sold As Is Lane' where id = pa; out := out || '"AS IS" IN THE ADDRESS SAVED; '; exception when others then out := out || 'direct update, as is in the address: refused; '; end;
+  begin update public.appraisal_views set prepared_for = 'The fee payer' where id = pa; get diagnostics n = row_count; out := out || 'A FEE IN PREPARED FOR SAVED (' || n || ' ROWS); '; exception when others then out := out || 'direct update, fee in prepared for: refused; '; end;
+  begin update public.appraisal_views set address = '1 Sold As Is Lane' where id = pa; get diagnostics n = row_count; out := out || '"AS IS" IN THE ADDRESS SAVED (' || n || ' ROWS); '; exception when others then out := out || 'direct update, as is in the address: refused; '; end;
   update public.appraisal_views set private_notes = 'They may want to sell as is; my fee came up.' where id = pa;
-  get diagnostics n = row_count; if n <> 1 then out := out || 'PRIVATE NOTES WERE REFUSED; '; else out := out || 'private notes: not checked (Tim''s own); '; end if;
-  begin update public.appraisal_views set status = 'sent' where id = pa; out := out || 'TIM MARKED AN APPRAISAL SENT DIRECTLY; '; exception when others then out := out || 'direct sent: ' || sqlerrm || '; '; end;
+  get diagnostics n = row_count; if n <> 1 then out := out || 'PRIVATE NOTES TOUCHED ' || n || ' ROWS; '; else out := out || 'private notes: not checked (Tim''s own), 1 row; '; end if;
+  begin update public.appraisal_views set status = 'sent' where id = pa; get diagnostics n = row_count; out := out || 'TIM MARKED AN APPRAISAL SENT DIRECTLY (' || n || ' ROWS); '; exception when others then out := out || 'direct sent: ' || sqlerrm || '; '; end;
+  select title || '|' || setup::text || '|' || status into x from public.appraisal_views where id = pa;
+  if x is distinct from 'RB 4 Phase Street, Testville: Market Appraisal|{"v": 1, "plan": "premium", "basis": "comparables", "method": "deadline", "campaign": {"kind": "standard"}}|ready' then out := out || 'A REFUSED UPDATE CHANGED THE ROW: ' || coalesce(x, 'none') || '; '; end if;
   -- a new appraisal from an address, for the comparables below
   j := public.agent_appraisal_create(null, '34 Rbsample Road, Testville', null); aid := (j->>'appraisal_id')::uuid;
   j := public.agent_appraisal_create(null, '35 Rbsample Road, Testville', null); aid2 := (j->>'appraisal_id')::uuid;
