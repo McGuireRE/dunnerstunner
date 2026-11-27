@@ -12,8 +12,10 @@ declare out text := ''; x text; n int; j jsonb; r record;
   sha text := repeat('ab', 32); res jsonb;
 begin
   -- what is there before 035: a phase A appraisal with a comparable and a photo, a never-mix group (all invented)
-  select id into hid from public.appraisal_views where setup ? 'v' order by created_at limit 1;
-  select property_id into pid from public.appraisal_views where id = hid;
+  -- self-contained: the test makes its own invented property and phase A appraisal, so it runs the same on a stand-in or on live
+  insert into public.properties (address) values ('RB 3 Subject Road, Testville') returning id into pid;
+  insert into public.appraisal_views (property_id, title, address, status, setup, sections, fields)
+    values (pid, 'RB appraisal', 'RB 3 Subject Road, Testville', 'draft', '{"v":1}', '[]', '{}') returning id into hid;
   insert into public.appraisal_comps (appraisal_id, position, status, address, suburb, price, sold_on, ring) values (hid, 1, 'sold', 'RB 1 Before Road, Testville', 'Testville', 500000, date '2026-10-01', 'suburb') returning id into c1;
   insert into storage.objects (bucket_id, name, metadata) values ('appraisal-media', 'appraisals/' || hid || '/comps/' || c1 || '/before.jpg', '{"mimetype":"image/jpeg","size":1234}');
   insert into public.appraisal_media (appraisal_id, comp_id, path) values (hid, c1, 'appraisals/' || hid || '/comps/' || c1 || '/before.jpg') returning id into m1;
