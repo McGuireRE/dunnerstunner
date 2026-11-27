@@ -289,7 +289,8 @@
       if (sold.length) h += '<h2>Recent sales nearby</h2><div class="apv-comps">' + sold.map(c => compCard(c, num(c), (ev.photos || {})[c.id])).join('') + '</div>';
       if (listed.length) h += '<h2>On the market now</h2><div class="apv-comps">' + listed.map(c => compCard(c, num(c), (ev.photos || {})[c.id])).join('') + '</div>';
     }
-    if (market) h += '<h2>The Dunedin market</h2>' + market;
+    // the heading follows the area charted: "The Dunedin market" by default, or the area Tim chose (setup.marketArea)
+    if (market) h += '<h2>' + esc('The ' + (window.MKT.pickArea(ev.months || [], ev.area) || 'Dunedin') + ' market') + '</h2>' + market;
     return h ? '<section class="apv-evidence">' + h + '</section>' : '';
   }
 
@@ -344,12 +345,12 @@
   const TYPES = ['st', 'rd', 'ave', 'cres', 'pl', 'tce', 'dr', 'ln', 'hwy', 'ct', 'gr', 'pde', 'sq', 'cl', 'esp', 'blvd', 'way', 'rise', 'hts', 'trk', 'mews', 'row', 'view', 'walk', 'quay', 'loop', 'glade', 'glen'];
   const DIRS = ['north', 'south', 'east', 'west', 'upper', 'lower', 'extension', 'ext', 'n', 's', 'e', 'w'];
   function addrParts(p) {
-    const segs = [];
+    const segs = []; let pc = '';
     String(p == null ? '' : p).toLowerCase().replace(/[āēīōū]/g, ch => ({ ā: 'a', ē: 'e', ī: 'i', ō: 'o', ū: 'u' }[ch])).split(',').forEach(seg => {
       const t = seg.replace(/[^a-z0-9/-]+/g, ' ').trim(); if (!t) return;
       let toks = t.split(' ');
       for (;;) { const n = toks.length; if (!n) break; const z = toks[n - 1];
-        if (/^[0-9]{4}$/.test(z) && (n > 1 || segs.length > 0)) toks = toks.slice(0, n - 1);
+        if (/^[0-9]{4}$/.test(z) && (n > 1 || segs.length > 0)) { pc = z; toks = toks.slice(0, n - 1); }
         else if (['nz', 'otago', 'aotearoa'].includes(z)) toks = toks.slice(0, n - 1);
         else if (n > 1 && z === 'zealand' && toks[n - 2] === 'new') toks = toks.slice(0, n - 2);
         else if (n > 1 && z === 'city' && toks[n - 2] === 'dunedin') toks = toks.slice(0, n - 2);
@@ -358,24 +359,37 @@
       if (!toks.length) return;
       segs.push(toks.map(x => CANON[x] || x).join(' '));
     });
-    if (!segs.length) return { num: '', street: '', suburb: '', known: false, toks: '' };
-    let first = segs[0].split(' '), num = '', rest = segs;
-    if (/^[0-9]+[a-z]?([/-][0-9]+[a-z]?)?$/.test(first[0])) { num = first[0]; first = first.slice(1); if (!first.length && segs.length >= 2) { first = segs[1].split(' '); rest = segs.slice(1); } }
+    if (!segs.length) return { num: '', street: '', suburb: '', known: false, toks: '', pc };
+    let rest = segs, first = rest[0].split(' '), num = '';
+    const UNIT = /^[0-9]+[a-z]?$/;
+    if (['flat', 'unit', 'apartment', 'apt'].includes(first[0]) && UNIT.test(first[1] || '')) {
+      if (UNIT.test(first[2] || '')) first = [first[1] + '/' + first[2]].concat(first.slice(3));
+      else if (first.length === 2 && rest.length >= 2 && UNIT.test(rest[1].split(' ')[0])) { const nx = rest[1].split(' '); first = [first[1] + '/' + nx[0]].concat(nx.slice(1)); rest = rest.slice(1); }
+    }
+    if (first[0] === 'lot' && UNIT.test(first[1] || '')) { num = 'lot' + first[1]; first = first.slice(2); }
+    else if (/^[0-9]+[a-z]?([/-][0-9]+[a-z]?)?$/.test(first[0])) {
+      num = first[0]; first = first.slice(1);
+      if (/^[0-9]+$/.test(num) && /^[a-z]$/.test(first[0] || '') && first.length >= 3) { num += first[0]; first = first.slice(1); }
+    }
+    if (num && !first.length && rest.length >= 2) { first = rest[1].split(' '); rest = rest.slice(1); }
     const street = first.join(' '), known = rest.length >= 2 && street !== '', suburb = known ? rest[1] : '';
-    return { num, street, suburb, known, toks: (street + ' ' + suburb).trim() };
+    return { num, street, suburb, known, toks: (street + ' ' + suburb).trim(), pc };
   }
-  function addrSame(a, b) {
+  // 'same', 'maybe' (offer it, never a block) or '': appraisal_addr_match() in migration 034, case for case
+  function addrMatch(a, b) {
     const x = addrParts(a), y = addrParts(b);
-    if (!x.num || x.num !== y.num || !x.street || !y.street) return false;
-    if (x.known && y.known) return x.street === y.street && x.suburb === y.suburb;
-    if (x.known) return y.toks === x.street || y.toks === x.toks;
-    if (y.known) return x.toks === y.street || x.toks === y.toks;
-    if (x.toks === y.toks) return true;
+    if (!x.num || x.num !== y.num || !x.street || !y.street) return '';
+    if (x.pc && y.pc && x.pc !== y.pc) return '';
+    if (x.known && y.known) return x.street === y.street && x.suburb === y.suburb ? 'same' : '';
+    if (x.known || y.known) { const [k, s] = x.known ? [x, y] : [y, x]; return s.toks === k.toks ? 'same' : s.toks === k.street ? 'maybe' : ''; }
+    if (x.toks === y.toks) return 'same';
     const [st, lt] = x.toks.length <= y.toks.length ? [x.toks, y.toks] : [y.toks, x.toks];
-    if (lt.slice(0, st.length + 1) !== st + ' ') return false;
+    if (lt.slice(0, st.length + 1) !== st + ' ') return '';
     const w = st.split(' '), next = lt.slice(st.length + 1).split(' ')[0];
-    return TYPES.includes(w[w.length - 1]) && !DIRS.includes(next) && !TYPES.includes(next);
+    return TYPES.includes(w[w.length - 1]) && !DIRS.includes(next) ? 'maybe' : '';
   }
+  const addrSame = (a, b) => addrMatch(a, b) === 'same';
+
   // the method names for the editor: the first cell of each row of the ways-to-sell table, up to its first comma
   function methodNames(rec) {
     const s = ((rec && rec.sections) || []).find(x => x && x.type === 'methods');
@@ -391,7 +405,7 @@
     return wordingProblem(f.bedrooms) || wordingProblem((f.method || {}).name) || wordingProblem((f.method || {}).text);
   }
   window.APPR = { render, fmtRange, dollars, inline, methodNames, checkFields, wordingProblem,
-    vendorComp, VENDOR_COMP, STATUS_WORDS, RINGS, ringWords, compsRule, matchPhoto, addrParts, addrSame, adShown, cmpShown, evidence,
+    vendorComp, VENDOR_COMP, STATUS_WORDS, RINGS, ringWords, compsRule, matchPhoto, addrParts, addrSame, addrMatch, adShown, cmpShown, evidence,
     METHODS, CAMPAIGNS, MAX_WEEKS, campaignOf, waveFor, stepsFor, methodSentence, isHill, suburbOf, plansFor, checkSetup, writeStandard, sectionsProblem,
     DEFAULT_NOTE, DALMORE_LINE, HEAD_AND_SHOULDERS, VALUATION_LABEL };
 })();

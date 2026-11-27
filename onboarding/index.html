@@ -6913,7 +6913,7 @@ window.JOURNEY_MEDIA_HINTS = {
 
   /* ───────── price evidence at a glance ───────── */
   // points: [{ n, price, status: sold|listed|context, label, when }]; ranges: [{ option, low, high }]
-  const STATUS = { sold: 'Sold', listed: 'On the market', context: 'For context only' };
+  const STATUS = { sold: 'Sold', listed: 'On the market', context: 'For context only, not comparable' };   // the same words as the cards
   function dots(points, ranges) {
     const pts = (points || []).filter(p => p && +p.price > 0), rs = (ranges || []).filter(r => r && +r.low > 0 && +r.high > +r.low);
     if (!pts.length) return '';
@@ -6945,7 +6945,19 @@ window.JOURNEY_MEDIA_HINTS = {
     return names.find(a => prefer && low(a) === low(prefer)) || names.find(a => low(a) === 'dunedin') || names.find(a => low(a) === 'dunedin city')
       || names.sort((a, b) => areas[b] - areas[a] || (a < b ? -1 : 1))[0] || '';
   }
-  const lastYear = (months, area) => (months || []).filter(m => m && m.area === area && ym(m.month)).sort((a, b) => (a.month < b.month ? -1 : 1)).slice(-12);
+  // the latest twelve calendar months of an area (or fewer, from its first month), oldest first. A month with no figures stays in
+  // its place as { month, missing: true }, so the charts draw it as a gap rather than squeezing the months either side together.
+  const mIndex = d => { const x = ym(d); return x ? x.y * 12 + x.m - 1 : null; };
+  const mOf = i => Math.floor(i / 12) + '-' + String(i % 12 + 1).padStart(2, '0') + '-01';
+  function lastYear(months, area) {
+    const rows = (months || []).filter(m => m && m.area === area && ym(m.month)); if (!rows.length) return [];
+    const by = {}; rows.forEach(m => { by[mIndex(m.month)] = m; });
+    const idx = Object.keys(by).map(Number), hi = Math.max(...idx), lo = Math.max(Math.min(...idx), hi - 11), out = [];
+    for (let i = lo; i <= hi; i++) out.push(by[i] || { area, month: mOf(i), missing: true });
+    return out;
+  }
+  // consecutive runs of points (a gap ends a run), for lines and bands that break where a month is missing
+  const runs = pts => pts.reduce((a, p) => { const r = a[a.length - 1]; if (r && p.i === r[r.length - 1].i + 1) r.push(p); else a.push([p]); return a; }, []);
   // the x positions for n months, and which months get a label (every one, or every second or third so they never collide)
   const xs = n => { const L = 56, R = W - 16, step = n > 1 ? (R - L) / (n - 1) : 0; return i => n > 1 ? L + i * step : (L + R) / 2; };
   const every = n => n > 8 ? 3 : n > 5 ? 2 : 1;
@@ -6958,17 +6970,17 @@ window.JOURNEY_MEDIA_HINTS = {
     let lo = Math.min(...vals), hi = Math.max(...vals); const pad = (hi - lo) * 0.12 || hi * 0.05; lo = Math.max(0, lo - pad); hi += pad;
     const y = v => B - (v - lo) / (hi - lo) * (B - T);
     const spread = pts.filter(o => +o.m.lower_quartile > 0 && +o.m.upper_quartile > 0);
-    const band = spread.length >= 2 ? '<path class="mk-spread" d="M' + spread.map(o => X(o.i).toFixed(1) + ',' + y(+o.m.upper_quartile).toFixed(1)).join('L') + 'L' + spread.slice().reverse().map(o => X(o.i).toFixed(1) + ',' + y(+o.m.lower_quartile).toFixed(1)).join('L') + 'Z"><title>The middle half of sales each month (lower to upper quartile)</title></path>' : '';
-    const line = '<path class="mk-line" d="M' + pts.map(o => X(o.i).toFixed(1) + ',' + y(+o.m.median).toFixed(1)).join('L') + '"/>';
+    const band = runs(spread).filter(r => r.length >= 2).map(r => '<path class="mk-spread" d="M' + r.map(o => X(o.i).toFixed(1) + ',' + y(+o.m.upper_quartile).toFixed(1)).join('L') + 'L' + r.slice().reverse().map(o => X(o.i).toFixed(1) + ',' + y(+o.m.lower_quartile).toFixed(1)).join('L') + 'Z"><title>The middle half of sales each month (the lower to the upper end)</title></path>').join('');
+    const line = runs(pts).filter(r => r.length >= 2).map(r => '<path class="mk-line" d="M' + r.map(o => X(o.i).toFixed(1) + ',' + y(+o.m.median).toFixed(1)).join('L') + '"/>').join('');
     const marks = pts.map(o => '<circle class="mk-pt" cx="' + X(o.i).toFixed(1) + '" cy="' + y(+o.m.median).toFixed(1) + '" r="4"><title>' + esc(monthName(o.m.month) + ': median ' + dollars(o.m.median) + (spread.includes(o) ? ', middle half ' + dollars(o.m.lower_quartile) + ' to ' + dollars(o.m.upper_quartile) : '')) + '</title></circle>').join('');
     const last = pts[pts.length - 1];
     const lab = '<text class="mk-val" x="' + Math.min(W - 12, X(last.i)).toFixed(1) + '" y="' + (y(+last.m.median) - 10).toFixed(1) + '" text-anchor="end">' + esc(short(last.m.median)) + '</text>';
     return '<figure class="mk-fig" data-chart="median"><figcaption><strong>Median sale price</strong><span>The line is the median each month; the shading is the middle half of sales (the spread).</span></figcaption>'
       + '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" role="img" aria-label="Median sale price by month, with the spread shaded">' + yAxis(lo, hi, y, short) + band + line + marks + lab + xLabels(ms, X, H - 10) + '</svg>'
-      + table(['Month', 'Median', 'Lower quartile', 'Upper quartile'], ms.map(m => [monthName(m.month), m.median ? dollars(m.median) : '', m.lower_quartile ? dollars(m.lower_quartile) : '', m.upper_quartile ? dollars(m.upper_quartile) : ''])) + '</figure>';
+      + table(['Month', 'Median', 'Lower end', 'Upper end'], ms.map(m => m.missing ? [monthName(m.month), 'No figures', '', ''] : [monthName(m.month), m.median ? dollars(m.median) : '', m.lower_quartile ? dollars(m.lower_quartile) : '', m.upper_quartile ? dollars(m.upper_quartile) : ''])) + '</figure>';
   }
   function barChart(ms, key, o) {
-    const pts = ms.map((m, i) => ({ i, m, v: m[key] })).filter(p => p.v != null && isFinite(+p.v)); if (pts.length < 2) return '';
+    const pts = ms.map((m, i) => ({ i, m, v: m[key] })).filter(p => !p.m.missing && p.v != null && isFinite(+p.v)); if (pts.length < 2) return '';
     const H = 170, T = 16, B = H - 30, X = xs(ms.length), hi = Math.max(1, ...pts.map(p => +p.v)) * 1.12, y = v => B - v / hi * (B - T);
     const bw = Math.max(6, Math.min(22, (W - 60) / ms.length - 4));
     const bars = pts.map((p, j) => bar(+(X(p.i) - bw / 2).toFixed(1), +y(+p.v).toFixed(1), bw, +(B - y(+p.v)).toFixed(1), 'mk-bar' + (j === pts.length - 1 ? ' last' : ''), monthName(p.m.month) + ': ' + o.fmt(p.v))).join('');
@@ -6976,23 +6988,27 @@ window.JOURNEY_MEDIA_HINTS = {
     const lab = '<text class="mk-val" x="' + X(last.i).toFixed(1) + '" y="' + (y(+last.v) - 5).toFixed(1) + '" text-anchor="middle">' + esc(o.fmt(last.v)) + '</text>';
     return '<figure class="mk-fig" data-chart="' + esc(key) + '"><figcaption><strong>' + esc(o.title) + '</strong><span>' + esc(o.sub) + '</span></figcaption>'
       + '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" role="img" aria-label="' + esc(o.title) + ' by month">' + yAxis(0, hi, y, v => String(Math.round(v))) + '<line class="mk-axis" x1="44" x2="' + (W - 8) + '" y1="' + B + '" y2="' + B + '"/>' + bars + lab + xLabels(ms, X, H - 10) + '</svg>'
-      + table(['Month', o.title], ms.map(m => [monthName(m.month), m[key] != null ? o.fmt(m[key]) : ''])) + '</figure>';
+      + table(['Month', o.title], ms.map(m => [monthName(m.month), m.missing ? 'No figures' : m[key] != null ? o.fmt(m[key]) : ''])) + '</figure>';
   }
   // price bands: how many homes sold in each band, latest month with bands; the bands the vendor's range touches are marked
   function bandsChart(m, ranges) {
     const bs = ((m && m.bands) || []).filter(b => b && isFinite(+b.count)); if (!bs.length) return '';
     const rs = (ranges || []).filter(r => r && +r.low > 0 && +r.high > +r.low), peak = Math.max(1, ...bs.map(b => +b.count));
-    const label = b => b.from == null || +b.from === 0 ? 'Under ' + short(b.to) : b.to == null ? short(b.from) + ' and over' : short(b.from) + ' to ' + short(b.to);
-    const touches = b => rs.some(r => (b.to == null || +r.low < +b.to) && (b.from == null || +r.high > +b.from));
+    const lo = b => +b.from > 0, hi = b => b.to != null && +b.to > 0;
+    const label = b => lo(b) && hi(b) ? short(b.from) + ' to ' + short(b.to) : hi(b) ? 'Under ' + short(b.to) : lo(b) ? short(b.from) + ' and over' : 'All prices';
+    const touches = b => rs.some(r => (!hi(b) || +r.low < +b.to) && (!lo(b) || +r.high > +b.from));
     return '<figure class="mk-fig" data-chart="bands"><figcaption><strong>Where sales landed</strong><span>Homes sold in each price band, ' + esc(monthName(m.month)) + '.' + (rs.length ? ' Your range is marked.' : '') + '</span></figcaption>'
       + '<div class="mk-bands">' + bs.map(b => { const on = touches(b); return '<div class="mk-band' + (on ? ' on' : '') + '" title="' + esc(label(b) + ': ' + b.count + ' sold') + '"><span class="mk-band-lab">' + esc(label(b)) + '</span><span class="mk-band-bar"><i style="width:' + Math.max(2, Math.round(+b.count / peak * 100)) + '%"></i></span><span class="mk-band-n">' + esc(b.count) + (on ? ' <em>Your range</em>' : '') + '</span></div>'; }).join('') + '</div>'
       + table(['Price band', 'Homes sold', 'Your range'], bs.map(b => [label(b), String(b.count), touches(b) ? 'Yes' : ''])) + '</figure>';
   }
   // months: rows of market_months; ranges: the appraisal's fields.ranges; o: { area, title }
+  const SOURCES = { reinz: 'REINZ', other: 'other published figures' };
   function report(months, ranges, o) {
     o = o || {}; const area = pickArea(months, o.area), ms = lastYear(months, area); if (!ms.length) return '';
     const latest = ms[ms.length - 1], withBands = ms.slice().reverse().find(m => (m.bands || []).length);
     const got = ms.map(m => m.gathered_at).filter(Boolean).sort().pop();
+    // the source line follows the figures' own source (market_months.source)
+    const srcs = Array.from(new Set(ms.filter(m => !m.missing).map(m => SOURCES[m.source] || SOURCES.other)));
     const lede = latest.median ? 'In ' + monthName(latest.month) + ' the median sale price in ' + area + ' was ' + dollars(latest.median)
       + (latest.sales != null ? ', from ' + latest.sales + ' sales' : '') + (latest.days_to_sell != null ? ', and homes took ' + latest.days_to_sell + ' days to sell at the median' : '') + '.' : '';
     return '<div class="mk-report" data-area="' + esc(area) + '">' + (lede ? '<p class="mk-lede">' + esc(lede) + '</p>' : '')
@@ -7000,9 +7016,9 @@ window.JOURNEY_MEDIA_HINTS = {
       + barChart(ms, 'days_to_sell', { title: 'Days to sell', sub: 'The median number of days from listing to sale.', fmt: v => Math.round(v) + ' days' })
       + barChart(ms, 'sales', { title: 'Homes sold each month', sub: 'How many homes sold in ' + area + '.', fmt: v => Math.round(v) + ' sold' })
       + (withBands ? bandsChart(withBands, ranges) : '') + '</div>'
-      + '<p class="apv-note mk-src">Source: REINZ, figures to ' + esc(monthName(latest.month)) + (got ? ', gathered ' + esc(longDate(got)) : '') + '.</p></div>';
+      + '<p class="apv-note mk-src">Source: ' + esc(srcs.join(' and ')) + ', figures to ' + esc(monthName(latest.month)) + (got ? ', gathered ' + esc(longDate(got)) : '') + '.</p></div>';
   }
-  window.MKT = { dots, report, pickArea, lastYear, ticks, short, monthName, longDate, STATUS };
+  window.MKT = { dots, report, pickArea, lastYear, ticks, short, monthName, longDate, STATUS, SOURCES };
 })();
 
 </script>
@@ -7298,7 +7314,8 @@ window.JOURNEY_MEDIA_HINTS = {
       if (sold.length) h += '<h2>Recent sales nearby</h2><div class="apv-comps">' + sold.map(c => compCard(c, num(c), (ev.photos || {})[c.id])).join('') + '</div>';
       if (listed.length) h += '<h2>On the market now</h2><div class="apv-comps">' + listed.map(c => compCard(c, num(c), (ev.photos || {})[c.id])).join('') + '</div>';
     }
-    if (market) h += '<h2>The Dunedin market</h2>' + market;
+    // the heading follows the area charted: "The Dunedin market" by default, or the area Tim chose (setup.marketArea)
+    if (market) h += '<h2>' + esc('The ' + (window.MKT.pickArea(ev.months || [], ev.area) || 'Dunedin') + ' market') + '</h2>' + market;
     return h ? '<section class="apv-evidence">' + h + '</section>' : '';
   }
 
@@ -7353,12 +7370,12 @@ window.JOURNEY_MEDIA_HINTS = {
   const TYPES = ['st', 'rd', 'ave', 'cres', 'pl', 'tce', 'dr', 'ln', 'hwy', 'ct', 'gr', 'pde', 'sq', 'cl', 'esp', 'blvd', 'way', 'rise', 'hts', 'trk', 'mews', 'row', 'view', 'walk', 'quay', 'loop', 'glade', 'glen'];
   const DIRS = ['north', 'south', 'east', 'west', 'upper', 'lower', 'extension', 'ext', 'n', 's', 'e', 'w'];
   function addrParts(p) {
-    const segs = [];
+    const segs = []; let pc = '';
     String(p == null ? '' : p).toLowerCase().replace(/[āēīōū]/g, ch => ({ ā: 'a', ē: 'e', ī: 'i', ō: 'o', ū: 'u' }[ch])).split(',').forEach(seg => {
       const t = seg.replace(/[^a-z0-9/-]+/g, ' ').trim(); if (!t) return;
       let toks = t.split(' ');
       for (;;) { const n = toks.length; if (!n) break; const z = toks[n - 1];
-        if (/^[0-9]{4}$/.test(z) && (n > 1 || segs.length > 0)) toks = toks.slice(0, n - 1);
+        if (/^[0-9]{4}$/.test(z) && (n > 1 || segs.length > 0)) { pc = z; toks = toks.slice(0, n - 1); }
         else if (['nz', 'otago', 'aotearoa'].includes(z)) toks = toks.slice(0, n - 1);
         else if (n > 1 && z === 'zealand' && toks[n - 2] === 'new') toks = toks.slice(0, n - 2);
         else if (n > 1 && z === 'city' && toks[n - 2] === 'dunedin') toks = toks.slice(0, n - 2);
@@ -7367,24 +7384,37 @@ window.JOURNEY_MEDIA_HINTS = {
       if (!toks.length) return;
       segs.push(toks.map(x => CANON[x] || x).join(' '));
     });
-    if (!segs.length) return { num: '', street: '', suburb: '', known: false, toks: '' };
-    let first = segs[0].split(' '), num = '', rest = segs;
-    if (/^[0-9]+[a-z]?([/-][0-9]+[a-z]?)?$/.test(first[0])) { num = first[0]; first = first.slice(1); if (!first.length && segs.length >= 2) { first = segs[1].split(' '); rest = segs.slice(1); } }
+    if (!segs.length) return { num: '', street: '', suburb: '', known: false, toks: '', pc };
+    let rest = segs, first = rest[0].split(' '), num = '';
+    const UNIT = /^[0-9]+[a-z]?$/;
+    if (['flat', 'unit', 'apartment', 'apt'].includes(first[0]) && UNIT.test(first[1] || '')) {
+      if (UNIT.test(first[2] || '')) first = [first[1] + '/' + first[2]].concat(first.slice(3));
+      else if (first.length === 2 && rest.length >= 2 && UNIT.test(rest[1].split(' ')[0])) { const nx = rest[1].split(' '); first = [first[1] + '/' + nx[0]].concat(nx.slice(1)); rest = rest.slice(1); }
+    }
+    if (first[0] === 'lot' && UNIT.test(first[1] || '')) { num = 'lot' + first[1]; first = first.slice(2); }
+    else if (/^[0-9]+[a-z]?([/-][0-9]+[a-z]?)?$/.test(first[0])) {
+      num = first[0]; first = first.slice(1);
+      if (/^[0-9]+$/.test(num) && /^[a-z]$/.test(first[0] || '') && first.length >= 3) { num += first[0]; first = first.slice(1); }
+    }
+    if (num && !first.length && rest.length >= 2) { first = rest[1].split(' '); rest = rest.slice(1); }
     const street = first.join(' '), known = rest.length >= 2 && street !== '', suburb = known ? rest[1] : '';
-    return { num, street, suburb, known, toks: (street + ' ' + suburb).trim() };
+    return { num, street, suburb, known, toks: (street + ' ' + suburb).trim(), pc };
   }
-  function addrSame(a, b) {
+  // 'same', 'maybe' (offer it, never a block) or '': appraisal_addr_match() in migration 034, case for case
+  function addrMatch(a, b) {
     const x = addrParts(a), y = addrParts(b);
-    if (!x.num || x.num !== y.num || !x.street || !y.street) return false;
-    if (x.known && y.known) return x.street === y.street && x.suburb === y.suburb;
-    if (x.known) return y.toks === x.street || y.toks === x.toks;
-    if (y.known) return x.toks === y.street || x.toks === y.toks;
-    if (x.toks === y.toks) return true;
+    if (!x.num || x.num !== y.num || !x.street || !y.street) return '';
+    if (x.pc && y.pc && x.pc !== y.pc) return '';
+    if (x.known && y.known) return x.street === y.street && x.suburb === y.suburb ? 'same' : '';
+    if (x.known || y.known) { const [k, s] = x.known ? [x, y] : [y, x]; return s.toks === k.toks ? 'same' : s.toks === k.street ? 'maybe' : ''; }
+    if (x.toks === y.toks) return 'same';
     const [st, lt] = x.toks.length <= y.toks.length ? [x.toks, y.toks] : [y.toks, x.toks];
-    if (lt.slice(0, st.length + 1) !== st + ' ') return false;
+    if (lt.slice(0, st.length + 1) !== st + ' ') return '';
     const w = st.split(' '), next = lt.slice(st.length + 1).split(' ')[0];
-    return TYPES.includes(w[w.length - 1]) && !DIRS.includes(next) && !TYPES.includes(next);
+    return TYPES.includes(w[w.length - 1]) && !DIRS.includes(next) ? 'maybe' : '';
   }
+  const addrSame = (a, b) => addrMatch(a, b) === 'same';
+
   // the method names for the editor: the first cell of each row of the ways-to-sell table, up to its first comma
   function methodNames(rec) {
     const s = ((rec && rec.sections) || []).find(x => x && x.type === 'methods');
@@ -7400,7 +7430,7 @@ window.JOURNEY_MEDIA_HINTS = {
     return wordingProblem(f.bedrooms) || wordingProblem((f.method || {}).name) || wordingProblem((f.method || {}).text);
   }
   window.APPR = { render, fmtRange, dollars, inline, methodNames, checkFields, wordingProblem,
-    vendorComp, VENDOR_COMP, STATUS_WORDS, RINGS, ringWords, compsRule, matchPhoto, addrParts, addrSame, adShown, cmpShown, evidence,
+    vendorComp, VENDOR_COMP, STATUS_WORDS, RINGS, ringWords, compsRule, matchPhoto, addrParts, addrSame, addrMatch, adShown, cmpShown, evidence,
     METHODS, CAMPAIGNS, MAX_WEEKS, campaignOf, waveFor, stepsFor, methodSentence, isHill, suburbOf, plansFor, checkSetup, writeStandard, sectionsProblem,
     DEFAULT_NOTE, DALMORE_LINE, HEAD_AND_SHOULDERS, VALUATION_LABEL };
 })();
@@ -17159,9 +17189,10 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   // New appraisal: from a property on file (the property file's button opens appraisals/new/<property>) or from an address, with the
   // council lookup offered as on the disclosures check. Starting makes the appraisal (and a property file for a new address) and
   // opens its set-up page in place of this one.
-  async function apsStart(pid, addr, btn) {
+  async function apsStart(pid, addr, btn, different) {
     if (btn) { btn.disabled = true; atBtn(btn, 'Starting...', 'busy'); }
-    const { data, error } = await sb.rpc('agent_appraisal_create', { p_property: pid || null, p_address: addr || null, p_kind: 'standard' });
+    // 034: "It's a different property" starts a new file even though the address looks like one on file (the database records it)
+    const { data, error } = await sb.rpc('agent_appraisal_create', Object.assign({ p_property: pid || null, p_address: addr || null, p_kind: 'standard' }, different ? { p_different: true } : {}));
     if (error || !data) { if (btn) { btn.disabled = false; atBtn(btn, netErr(error) ? 'No signal. Try again when you have signal; nothing was made.' : (error && error.message) || 'Not started. Try again.', 'err'); } return null; }
     return data;
   }
@@ -17197,14 +17228,20 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <div id="crAps"></div></div>`;
     const draw = () => {
       const raw = $('#apsAddr').value, q = norm(raw); let m = [];
-      // 034: the same property written another way ("Rd" for "Road", extra commas, no suburb or postcode) counts as on file
-      const same = p => norm(p.address) === q || APPR.addrSame(p.address, raw);
-      if (q.length >= 3) m = props.filter(p => { const a = norm(p.address); return a && (same(p) || a.includes(q) || q.includes(a) || (q.split(' ').length > 1 && q.split(' ').slice(0, 2).join(' ') === a.split(' ').slice(0, 2).join(' '))); })
-        .sort((x, y) => +same(y) - +same(x)).slice(0, 6);
-      const exact = m.some(same);
-      $('#apsMatches').innerHTML = m.length ? `<p class="small" style="margin:12px 0 6px">Already on file. Choose it to keep one record of the property:</p>${m.map(p => `<div class="card tight insp-match"><div><strong translate="no">${esc(p.address)}</strong><br>${stagePill(p.stage)}</div><button class="btn ${same(p) ? 'primary' : 'ghost'}" type="button" data-aps-prop="${esc(p.id)}">Appraise this one</button></div>`).join('')}` : '';
-      const nb = $('#apsNewAddr'); nb.disabled = exact; atBtn(nb, exact ? 'This address is already on file. Choose it above.' : '', 'err');
+      // 034: the same property written another way ("Rd" for "Road", extra commas, "Flat 2, 14" for "2/14") counts as on file; one that
+      // leaves out or adds the suburb is a possible match, offered but never a block. A typed address the same as one on file can't be filed
+      // twice; a near-duplicate can, once Tim says it's a different property.
+      const exactOf = p => norm(p.address) === q, kind = p => exactOf(p) ? 'same' : APPR.addrMatch(p.address, raw);
+      if (q.length >= 3) m = props.filter(p => { const a = norm(p.address); return a && (kind(p) || a.includes(q) || q.includes(a) || (q.split(' ').length > 1 && q.split(' ').slice(0, 2).join(' ') === a.split(' ').slice(0, 2).join(' '))); })
+        .sort((x, y) => ({ same: 2, maybe: 1 }[kind(y)] || 0) - ({ same: 2, maybe: 1 }[kind(x)] || 0)).slice(0, 6);
+      const exact = m.some(exactOf), same = !exact && m.some(p => kind(p) === 'same');
+      $('#apsMatches').innerHTML = m.length ? `<p class="small" style="margin:12px 0 6px">${exact || same ? 'Already on file. Choose it to keep one record of the property:' : 'Possibly on file. If it is the same property, choose it to keep one record:'}</p>${m.map(p => `<div class="card tight insp-match"><div><strong translate="no">${esc(p.address)}</strong><br>${stagePill(p.stage)}${kind(p) === 'maybe' ? ' <span class="small">possible match</span>' : ''}</div><button class="btn ${kind(p) === 'same' ? 'primary' : 'ghost'}" type="button" data-aps-prop="${esc(p.id)}">Appraise this one</button></div>`).join('')}`
+        + (same ? `<div class="toolbar"><button class="btn ghost" type="button" id="apsDiffer">It's a different property</button></div>` : '') : '';
+      const nb = $('#apsNewAddr'); nb.disabled = exact || same; atBtn(nb, exact ? 'This address is already on file. Choose it above.' : same ? 'This address looks like one on file. Choose it above, or say it\'s a different property.' : '', 'err');
       $$('[data-aps-prop]').forEach(b => b.addEventListener('click', async () => { const d = await apsStart(b.dataset.apsProp, null, b); if (d) apsOpenSetup(d.appraisal_id); }));
+      const df = $('#apsDiffer'); if (df) df.addEventListener('click', async () => { const a = $('#apsAddr').value.replace(/\s+/g, ' ').trim();
+        if (!confirm('Start a new property file for ' + a + '? It will be kept apart from the one that looks the same, and your choice is recorded.')) return;
+        const d = await apsStart(null, a, df, true); if (d) apsOpenSetup(d.appraisal_id); });
     };
     $('#apsAddr').addEventListener('input', draw);
     $('#apsNewAddr').addEventListener('click', async e => {

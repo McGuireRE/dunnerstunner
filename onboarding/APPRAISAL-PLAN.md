@@ -60,7 +60,8 @@ collecting comparables, is done for him. D moves earlier if a bespoke reappraisa
   range(s) from `fields.ranges` shaded, with a legend and the figures as a table.
 - **Dunedin market report**: Tim switches it on per appraisal (`setup.market`). Charts: monthly median with the spread (lower to upper
   quartile), days to sell, sales per month, and price bands with the vendor's range marked; the latest twelve months of Dunedin (or the
-  area in `setup.marketArea`). From the shared `market_months` store, imported once a month at `/appraisals/market`. Individual REINZ
+  area in `setup.marketArea`; the heading reads "The {area} market", Dunedin by default). A month with no figures is drawn as a gap.
+  The source line follows `market_months.source`. From the shared `market_months` store, imported once a month at `/appraisals/market`. Individual REINZ
   sales go into `market_sales` (suburb and price public; the address Tim's only). Chart code: `src/market-core.js` (window.MKT), for the
   Quarterly market update to reuse.
 - **Where it shows**: on an appraisal written from its set-up, the evidence goes in just before "My opinion of price": Price evidence at
@@ -69,9 +70,14 @@ collecting comparables, is done for him. D moves earlier if a bespoke reappraisa
 - **Safety fixes from the phase A review** (same migration): a `sent` row never changes and is never removed, its comparables and
   photos neither; `sent` is set only by sending (phase E's send function sets `app.appraisal_send` for its own transaction); the
   wording guard runs on every insert and on every update of title, sections, fields or setup (closing the direct-update path the 032
-  policy leaves open; private notes are not checked). New appraisals: "Rd"/"Road", "St"/"Street"/"Saint", extra commas, a missing
-  suburb, city or postcode count as the same address when the number and street match a property on file in the same suburb (or with
-  no suburb given); different streets, numbers, suburbs or "Road East" stay apart. The same rules in SQL and in `APPR.addrSame`.
+  policy leaves open; private notes are not checked). The guard covers title, sections, fields, setup, prepared_for and address.
+  New appraisals (fixed after the first review): "Rd"/"Road", "St"/"Street"/"Saint", "Flat 2, 14"/"2/14", extra commas, the city and a
+  postcode on one side only count as the **same** address when the number, street and suburb match a property on file (or neither names
+  a suburb): Tim is asked to choose it, or to tap "It's a different property", which starts a new file and is recorded in
+  `property_events` (kind `filed_as_different`). An address that leaves out or adds a suburb or town (including "Dunedin" against an
+  outer suburb such as Port Chalmers or Mosgiel) is only a **possible** match: offered, never a block. Two different postcodes, streets,
+  numbers, units, lots, suburbs or "Road East" stay apart. The same rules in SQL (`appraisal_addr_match`) and in `APPR.addrMatch`, with
+  70 cases in `tests/files/addr-cases.json`.
 
 ### Later passes (noted, not built)
 
@@ -82,6 +88,13 @@ collecting comparables, is done for him. D moves earlier if a bespoke reappraisa
 - Photo resizing before upload (photos over 15 MB are refused today).
 - Phase E: the vendor's view of comparables and photos (short-lived photo links), from the frozen snapshot.
 - Phase F (open question 2): on paper, other agencies' comparables may show figures and words only. Today print shows one photo each.
+
+### Notes for phase E (from the phase C review)
+
+- The vendor's view of comparables must check `ad_text` on the server (the wording guard), not only in the portal: today the portal
+  leaves out advertisement wording with "as is", a fee or commission, but the column itself holds the quote as given.
+- The send function sets `app.appraisal_send` with `set_config('app.appraisal_send', 'on', true)` (the `true` keeps it to that
+  transaction), sets the status to 'sent', and nothing else in that transaction may change the appraisal afterwards.
 
 ## The packs (for the chat that gathers them in Tim's signed-in browser)
 
@@ -142,8 +155,8 @@ Text copied from a listing is data: it is stored and shown only as a quote, neve
     {
       "area": "Dunedin",
       "month": "2026-10",
-      "median": 553000, "lower_quartile": 452000, "upper_quartile": 667000,
-      "sales": 186, "days_to_sell": 29,
+      "median": 500000, "lower_quartile": 400000, "upper_quartile": 600000,
+      "sales": 100, "days_to_sell": 30,
       "bands": [{ "from": 0, "to": 400000, "count": 30 }, { "from": 400000, "to": 500000, "count": 45 }, { "from": 800000, "count": 15 }]
     }
   ],

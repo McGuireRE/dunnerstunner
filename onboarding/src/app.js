@@ -9598,9 +9598,10 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   // New appraisal: from a property on file (the property file's button opens appraisals/new/<property>) or from an address, with the
   // council lookup offered as on the disclosures check. Starting makes the appraisal (and a property file for a new address) and
   // opens its set-up page in place of this one.
-  async function apsStart(pid, addr, btn) {
+  async function apsStart(pid, addr, btn, different) {
     if (btn) { btn.disabled = true; atBtn(btn, 'Starting...', 'busy'); }
-    const { data, error } = await sb.rpc('agent_appraisal_create', { p_property: pid || null, p_address: addr || null, p_kind: 'standard' });
+    // 034: "It's a different property" starts a new file even though the address looks like one on file (the database records it)
+    const { data, error } = await sb.rpc('agent_appraisal_create', Object.assign({ p_property: pid || null, p_address: addr || null, p_kind: 'standard' }, different ? { p_different: true } : {}));
     if (error || !data) { if (btn) { btn.disabled = false; atBtn(btn, netErr(error) ? 'No signal. Try again when you have signal; nothing was made.' : (error && error.message) || 'Not started. Try again.', 'err'); } return null; }
     return data;
   }
@@ -9636,14 +9637,20 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <div id="crAps"></div></div>`;
     const draw = () => {
       const raw = $('#apsAddr').value, q = norm(raw); let m = [];
-      // 034: the same property written another way ("Rd" for "Road", extra commas, no suburb or postcode) counts as on file
-      const same = p => norm(p.address) === q || APPR.addrSame(p.address, raw);
-      if (q.length >= 3) m = props.filter(p => { const a = norm(p.address); return a && (same(p) || a.includes(q) || q.includes(a) || (q.split(' ').length > 1 && q.split(' ').slice(0, 2).join(' ') === a.split(' ').slice(0, 2).join(' '))); })
-        .sort((x, y) => +same(y) - +same(x)).slice(0, 6);
-      const exact = m.some(same);
-      $('#apsMatches').innerHTML = m.length ? `<p class="small" style="margin:12px 0 6px">Already on file. Choose it to keep one record of the property:</p>${m.map(p => `<div class="card tight insp-match"><div><strong translate="no">${esc(p.address)}</strong><br>${stagePill(p.stage)}</div><button class="btn ${same(p) ? 'primary' : 'ghost'}" type="button" data-aps-prop="${esc(p.id)}">Appraise this one</button></div>`).join('')}` : '';
-      const nb = $('#apsNewAddr'); nb.disabled = exact; atBtn(nb, exact ? 'This address is already on file. Choose it above.' : '', 'err');
+      // 034: the same property written another way ("Rd" for "Road", extra commas, "Flat 2, 14" for "2/14") counts as on file; one that
+      // leaves out or adds the suburb is a possible match, offered but never a block. A typed address the same as one on file can't be filed
+      // twice; a near-duplicate can, once Tim says it's a different property.
+      const exactOf = p => norm(p.address) === q, kind = p => exactOf(p) ? 'same' : APPR.addrMatch(p.address, raw);
+      if (q.length >= 3) m = props.filter(p => { const a = norm(p.address); return a && (kind(p) || a.includes(q) || q.includes(a) || (q.split(' ').length > 1 && q.split(' ').slice(0, 2).join(' ') === a.split(' ').slice(0, 2).join(' '))); })
+        .sort((x, y) => ({ same: 2, maybe: 1 }[kind(y)] || 0) - ({ same: 2, maybe: 1 }[kind(x)] || 0)).slice(0, 6);
+      const exact = m.some(exactOf), same = !exact && m.some(p => kind(p) === 'same');
+      $('#apsMatches').innerHTML = m.length ? `<p class="small" style="margin:12px 0 6px">${exact || same ? 'Already on file. Choose it to keep one record of the property:' : 'Possibly on file. If it is the same property, choose it to keep one record:'}</p>${m.map(p => `<div class="card tight insp-match"><div><strong translate="no">${esc(p.address)}</strong><br>${stagePill(p.stage)}${kind(p) === 'maybe' ? ' <span class="small">possible match</span>' : ''}</div><button class="btn ${kind(p) === 'same' ? 'primary' : 'ghost'}" type="button" data-aps-prop="${esc(p.id)}">Appraise this one</button></div>`).join('')}`
+        + (same ? `<div class="toolbar"><button class="btn ghost" type="button" id="apsDiffer">It's a different property</button></div>` : '') : '';
+      const nb = $('#apsNewAddr'); nb.disabled = exact || same; atBtn(nb, exact ? 'This address is already on file. Choose it above.' : same ? 'This address looks like one on file. Choose it above, or say it\'s a different property.' : '', 'err');
       $$('[data-aps-prop]').forEach(b => b.addEventListener('click', async () => { const d = await apsStart(b.dataset.apsProp, null, b); if (d) apsOpenSetup(d.appraisal_id); }));
+      const df = $('#apsDiffer'); if (df) df.addEventListener('click', async () => { const a = $('#apsAddr').value.replace(/\s+/g, ' ').trim();
+        if (!confirm('Start a new property file for ' + a + '? It will be kept apart from the one that looks the same, and your choice is recorded.')) return;
+        const d = await apsStart(null, a, df, true); if (d) apsOpenSetup(d.appraisal_id); });
     };
     $('#apsAddr').addEventListener('input', draw);
     $('#apsNewAddr').addEventListener('click', async e => {

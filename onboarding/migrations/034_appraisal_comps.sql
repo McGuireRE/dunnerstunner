@@ -1,7 +1,8 @@
 -- 034: appraisal comparables, photos, the comparables rule's never-mix list and the shared Dunedin market store (LW3 phase C,
 -- APPRAISAL-PLAN.md), with two safety fixes from the phase A review. Additive only: five new tables, one new private storage bucket
--- with agent-only policies, new functions and triggers. One function is replaced with the same signature (agent_appraisal_create:
--- the same rules, plus near-duplicate addresses). No existing column, row, policy or signed-record protection is changed or weakened.
+-- with agent-only policies, new functions and triggers. One function is replaced (agent_appraisal_create: the same rules, plus
+-- near-duplicate addresses and one new argument with a default, so existing calls work unchanged). No existing column, row, policy
+-- or signed-record protection is changed or weakened.
 --
 --   appraisal_comps    one comparable on one appraisal: sold, on the market (listed) or for context only; price, dates, method, days
 --                      to sell, figures, agency, sold by Tim, the advertisement wording (quoted data), how it compares (with a ticked
@@ -20,11 +21,12 @@
 -- Safety fixes from the phase A review:
 --   (a) guard_appraisal_view, on appraisal_views: a row whose status is 'sent' never changes and is never removed; 'sent' is set only
 --       by phase E's send function (it sets app.appraisal_send for its own transaction); and the wording guard (no "as is", fee or
---       commission) runs on every insert, and on every update of title, sections, fields or setup, so the direct update the 032
---       policy allows is guarded too. Private notes are Tim's own and are not checked.
---   (b) agent_appraisal_create treats "Rd"/"Road", "St"/"Street", extra commas and a missing suburb or postcode as the same address
---       when the number and street match a property on file in the same suburb (or when no suburb is given), and asks Tim to choose
---       that property. Different streets, numbers or suburbs stay apart.
+--       commission) runs on every insert, and on every update of title, sections, fields, setup, prepared_for or address, so the
+--       direct update the 032 policy allows is guarded too. Private notes are Tim's own and are not checked.
+--   (b) agent_appraisal_create treats "Rd"/"Road", "St"/"Street", "Flat 2, 14"/"2/14", extra commas, the city and a missing postcode
+--       as the same address when the number, street and suburb match a property on file (or neither names a suburb), and asks Tim to
+--       choose that property, or to say it is a different property (recorded in property_events). Two different postcodes, streets,
+--       numbers or suburbs stay apart; an address with no suburb is only offered as a possible match for one that names a suburb.
 --
 -- Row Level Security on every new table, agent only (is_agent()). Vendors and anon get nothing (vendor views come in phase E).
 -- Every function checks is_agent() where it is called by a person, sets its search_path, and is revoked from public and anon.
@@ -169,8 +171,9 @@ begin
     raise exception 'An appraisal is marked sent only by sending it';
   end if;
   if tg_op = 'INSERT' or new.title is distinct from old.title or new.sections is distinct from old.sections
-     or new.fields is distinct from old.fields or new.setup is distinct from old.setup then
-    prob := public.appraisal_wording_problem(jsonb_build_array(new.title, new.sections, new.fields, new.setup));
+     or new.fields is distinct from old.fields or new.setup is distinct from old.setup
+     or new.prepared_for is distinct from old.prepared_for or new.address is distinct from old.address then
+    prob := public.appraisal_wording_problem(jsonb_build_array(new.title, new.sections, new.fields, new.setup, new.prepared_for, new.address));
     if prob <> '' then raise exception '%', prob; end if;
   end if;
   return new;
@@ -237,14 +240,15 @@ revoke all on function public.guard_appraisal_media() from public, anon, authent
 create trigger appraisal_media_guard before insert or update or delete on public.appraisal_media for each row execute function public.guard_appraisal_media();
 
 -- ═══════════════ (b) near-duplicate addresses ═══════════════
--- an address in parts: the number, the street and the suburb, with "Rd"/"Road", "St"/"Street"/"Saint" and the like written one way,
--- extra commas, the city, "New Zealand" and the postcode left out. known: the address had a separate suburb part (after a comma).
+-- an address in parts: the number (with a unit or lot written before it: "Flat 2, 14" is 2/14, "14 A" is 14a, "Lot 2" is lot2), the
+-- street and the suburb, with "Rd"/"Road", "St"/"Street"/"Saint" and the like written one way, extra commas, the city and "New Zealand"
+-- left out, and the postcode kept apart (pc). known: the address had a separate suburb part (after a comma).
 -- The same rules are APPR.addrParts in src/appraisal-core.js (the tests run one list of cases through both).
 create function public.appraisal_addr_parts(p text) returns jsonb
 language plpgsql immutable set search_path = public as $$
 declare
   canon constant jsonb := '{"street":"st","str":"st","saint":"st","road":"rd","avenue":"ave","av":"ave","crescent":"cres","cr":"cres","place":"pl","terrace":"tce","ter":"tce","drive":"dr","lane":"ln","highway":"hwy","court":"ct","crt":"ct","grove":"gr","parade":"pde","square":"sq","close":"cl","esplanade":"esp","boulevard":"blvd","mount":"mt","heights":"hts","track":"trk"}';
-  seg text; t text; toks text[]; n int; segs text[] := '{}'; first text[]; num text := ''; street text := ''; suburb text := ''; known boolean := false;
+  seg text; t text; toks text[]; n int; segs text[] := '{}'; first text[]; num text := ''; street text := ''; suburb text := ''; known boolean := false; pc text := '';
 begin
   foreach seg in array regexp_split_to_array(translate(lower(coalesce(p, '')), 'āēīōū', 'aeiou'), ',') loop
     t := btrim(regexp_replace(seg, '[^a-z0-9/-]+', ' ', 'g'));
@@ -253,7 +257,7 @@ begin
     loop
       n := coalesce(array_length(toks, 1), 0);
       exit when n = 0;
-      if toks[n] ~ '^[0-9]{4}$' and (n > 1 or coalesce(array_length(segs, 1), 0) > 0) then toks := toks[1:n-1];
+      if toks[n] ~ '^[0-9]{4}$' and (n > 1 or coalesce(array_length(segs, 1), 0) > 0) then pc := toks[n]; toks := toks[1:n-1];
       elsif toks[n] in ('nz', 'otago', 'aotearoa') then toks := toks[1:n-1];
       elsif n > 1 and toks[n] = 'zealand' and toks[n-1] = 'new' then toks := toks[1:n-2];
       elsif n > 1 and toks[n] = 'city' and toks[n-1] = 'dunedin' then toks := toks[1:n-2];
@@ -266,47 +270,66 @@ begin
     segs := segs || array_to_string(toks, ' ');
   end loop;
   if coalesce(array_length(segs, 1), 0) = 0 then
-    return jsonb_build_object('num', '', 'street', '', 'suburb', '', 'known', false, 'toks', '');
+    return jsonb_build_object('num', '', 'street', '', 'suburb', '', 'known', false, 'toks', '', 'pc', pc);
   end if;
   first := string_to_array(segs[1], ' ');
-  if first[1] ~ '^[0-9]+[a-z]?([/-][0-9]+[a-z]?)?$' then
-    num := first[1]; first := first[2:];
-    if coalesce(array_length(first, 1), 0) = 0 and array_length(segs, 1) >= 2 then first := string_to_array(segs[2], ' '); segs := segs[2:]; end if;
+  if first[1] in ('flat', 'unit', 'apartment', 'apt') and first[2] ~ '^[0-9]+[a-z]?$' then
+    if first[3] ~ '^[0-9]+[a-z]?$' then first := array[first[2] || '/' || first[3]] || first[4:];
+    elsif array_length(first, 1) = 2 and array_length(segs, 1) >= 2 and split_part(segs[2], ' ', 1) ~ '^[0-9]+[a-z]?$' then
+      first := array[first[2] || '/' || split_part(segs[2], ' ', 1)] || (string_to_array(segs[2], ' '))[2:]; segs := segs[2:];
+    end if;
   end if;
+  if first[1] = 'lot' and first[2] ~ '^[0-9]+[a-z]?$' then num := 'lot' || first[2]; first := first[3:];
+  elsif first[1] ~ '^[0-9]+[a-z]?([/-][0-9]+[a-z]?)?$' then
+    num := first[1]; first := first[2:];
+    if num ~ '^[0-9]+$' and first[1] ~ '^[a-z]$' and coalesce(array_length(first, 1), 0) >= 3 then num := num || first[1]; first := first[2:]; end if;
+  end if;
+  if num <> '' and coalesce(array_length(first, 1), 0) = 0 and array_length(segs, 1) >= 2 then first := string_to_array(segs[2], ' '); segs := segs[2:]; end if;
   street := coalesce(array_to_string(first, ' '), '');
   if array_length(segs, 1) >= 2 and street <> '' then known := true; suburb := segs[2]; end if;
-  return jsonb_build_object('num', num, 'street', street, 'suburb', suburb, 'known', known, 'toks', btrim(street || ' ' || suburb));
+  return jsonb_build_object('num', num, 'street', street, 'suburb', suburb, 'known', known, 'toks', btrim(street || ' ' || suburb), 'pc', pc);
 end $$;
 revoke all on function public.appraisal_addr_parts(text) from public, anon, authenticated;
 
--- two addresses are the same property: the same number and street, and the same suburb, or no suburb on one of them. Without commas
--- the suburb can't be told from the street, so the shorter must be the longer's street (ending in a street type such as Road) and
--- what follows must not be a direction or another street type (Sample Road East is not Sample Road, and Lantern View Road is not
--- Lantern View). Unsure means not the same.
-create function public.appraisal_addr_same(a text, b text) returns boolean
+-- how two addresses compare: 'same' (the same number and street, and the same suburb, or no suburb on either; no two different
+-- postcodes), 'maybe' (the same number and street, but one names a suburb or town the other leaves out: offered to Tim, never a block),
+-- or '' (different, or unsure). Without commas the suburb can't be told from the street, so a longer address is only a 'maybe' of a
+-- shorter one ending in a street type (Road, Street ...), and never when what follows is a direction (Sample Road East, Road Upper).
+create function public.appraisal_addr_match(a text, b text) returns text
 language plpgsql immutable set search_path = public as $$
-declare x jsonb := public.appraisal_addr_parts(a); y jsonb := public.appraisal_addr_parts(b); st text; lt text; w text[];
+declare x jsonb := public.appraisal_addr_parts(a); y jsonb := public.appraisal_addr_parts(b); k jsonb; s jsonb; st text; lt text; w text[];
   types constant text[] := array['st', 'rd', 'ave', 'cres', 'pl', 'tce', 'dr', 'ln', 'hwy', 'ct', 'gr', 'pde', 'sq', 'cl', 'esp', 'blvd', 'way', 'rise', 'hts', 'trk', 'mews', 'row', 'view', 'walk', 'quay', 'loop', 'glade', 'glen'];
   dirs constant text[] := array['north', 'south', 'east', 'west', 'upper', 'lower', 'extension', 'ext', 'n', 's', 'e', 'w'];
 begin
-  if x->>'num' = '' or x->>'num' is distinct from y->>'num' or x->>'street' = '' or y->>'street' = '' then return false; end if;
-  if (x->>'known')::boolean and (y->>'known')::boolean then return x->>'street' = y->>'street' and x->>'suburb' = y->>'suburb'; end if;
-  if (x->>'known')::boolean then return y->>'toks' in (x->>'street', x->>'toks'); end if;
-  if (y->>'known')::boolean then return x->>'toks' in (y->>'street', y->>'toks'); end if;
-  if x->>'toks' = y->>'toks' then return true; end if;
+  if x->>'num' = '' or x->>'num' is distinct from y->>'num' or x->>'street' = '' or y->>'street' = '' then return ''; end if;
+  if x->>'pc' <> '' and y->>'pc' <> '' and x->>'pc' <> y->>'pc' then return ''; end if;
+  if (x->>'known')::boolean and (y->>'known')::boolean then
+    return case when x->>'street' = y->>'street' and x->>'suburb' = y->>'suburb' then 'same' else '' end;
+  end if;
+  if (x->>'known')::boolean or (y->>'known')::boolean then
+    if (x->>'known')::boolean then k := x; s := y; else k := y; s := x; end if;
+    return case when s->>'toks' = k->>'toks' then 'same' when s->>'toks' = k->>'street' then 'maybe' else '' end;
+  end if;
+  if x->>'toks' = y->>'toks' then return 'same'; end if;
   if length(x->>'toks') <= length(y->>'toks') then st := x->>'toks'; lt := y->>'toks'; else st := y->>'toks'; lt := x->>'toks'; end if;
-  if left(lt, length(st) + 1) <> st || ' ' then return false; end if;
+  if left(lt, length(st) + 1) <> st || ' ' then return ''; end if;
   w := string_to_array(st, ' ');
-  return w[array_length(w, 1)] = any (types) and split_part(substr(lt, length(st) + 2), ' ', 1) <> all (dirs || types);
+  return case when w[array_length(w, 1)] = any (types) and split_part(substr(lt, length(st) + 2), ' ', 1) <> all (dirs) then 'maybe' else '' end;
 end $$;
+revoke all on function public.appraisal_addr_match(text, text) from public, anon, authenticated;
+create function public.appraisal_addr_same(a text, b text) returns boolean
+language sql immutable set search_path = public as $$ select public.appraisal_addr_match(a, b) = 'same' $$;
 revoke all on function public.appraisal_addr_same(text, text) from public, anon, authenticated;
 
--- agent_appraisal_create, replaced with the same signature: the 033 body, plus a near-duplicate of an address on file is refused with
--- that property named, so Tim chooses it rather than filing the property twice.
-create or replace function public.agent_appraisal_create(p_property uuid, p_address text, p_kind text default 'standard') returns jsonb
+-- agent_appraisal_create, replaced with one more argument (p_different, default false, so existing calls work unchanged): the 033 body,
+-- plus a near-duplicate ('same') of an address on file is refused naming that property, unless Tim says it is a different property,
+-- when a new file is started anyway and that choice is recorded in property_events (kind filed_as_different) with the addresses it
+-- was like. A 'maybe' is never refused here: the page offers it.
+drop function public.agent_appraisal_create(uuid, text, text);
+create function public.agent_appraisal_create(p_property uuid, p_address text, p_kind text default 'standard', p_different boolean default false) returns jsonb
 language plpgsql security definer set search_path = public as $$
 declare pid uuid := p_property; addr text := trim(regexp_replace(coalesce(p_address, ''), '\s+', ' ', 'g'));
-  k text := coalesce(nullif(trim(p_kind), ''), 'standard'); made boolean := false; aid uuid; prob text; dup text;
+  k text := coalesce(nullif(trim(p_kind), ''), 'standard'); made boolean := false; aid uuid; prob text; dup text; likes jsonb;
 begin
   if not public.is_agent() then raise exception 'Agent only'; end if;
   if k not in ('standard', 'bespoke') then raise exception 'Unknown kind of appraisal'; end if;
@@ -316,8 +339,10 @@ begin
     if exists (select 1 from public.properties where lower(trim(regexp_replace(address, '\s+', ' ', 'g'))) = lower(addr)) then
       raise exception 'That address is already on file. Choose it from the list';
     end if;
-    select address into dup from public.properties where public.appraisal_addr_same(address, addr) order by created_at limit 1;
-    if found then raise exception 'That address is already on file as "%". Choose it from the list', dup; end if;
+    select jsonb_agg(jsonb_build_object('id', id, 'address', address) order by created_at) into likes from public.properties where public.appraisal_addr_same(address, addr);
+    if likes is not null and not coalesce(p_different, false) then
+      raise exception 'That address is already on file as "%". Choose it from the list, or choose "It''s a different property"', likes->0->>'address';
+    end if;
   else
     select address into addr from public.properties where id = pid;
     if not found then raise exception 'Property not found'; end if;
@@ -332,10 +357,14 @@ begin
   insert into public.appraisal_views (property_id, address, title, kind, setup, status)
     values (pid, addr, case when addr = '' then 'Market appraisal' else addr || ': Market Appraisal' end, k, jsonb_build_object('v', 1), 'draft')
     returning id into aid;
+  if made and likes is not null then
+    insert into public.property_events (property_id, actor, kind, detail)
+      values (pid, coalesce(auth.jwt()->>'email', ''), 'filed_as_different', jsonb_build_object('address', addr, 'like', likes, 'appraisal_id', aid));
+  end if;
   return jsonb_build_object('appraisal_id', aid, 'property_id', pid, 'created_property', made);
 end $$;
-revoke all on function public.agent_appraisal_create(uuid, text, text) from public, anon;
-grant execute on function public.agent_appraisal_create(uuid, text, text) to authenticated;
+revoke all on function public.agent_appraisal_create(uuid, text, text, boolean) from public, anon;
+grant execute on function public.agent_appraisal_create(uuid, text, text, boolean) to authenticated;
 
 -- ═══════════════ reading a pack: plain values only ═══════════════
 -- text: control characters taken out, trimmed, cut to its length. Text is data: nothing in it is ever followed.

@@ -43,20 +43,20 @@ begin
   if x is distinct from 'appraisal_views_agent_insert,appraisal_views_agent_select,appraisal_views_agent_update' then out := out || 'THE 032 POLICIES CHANGED: ' || coalesce(x, 'none') || '; '; else out := out || '032 policies unchanged; '; end if;
   select string_agg(p.proname || ':' || p.prosecdef::text || ':' || coalesce(array_to_string(p.proconfig, ' '), '-'), ',' order by p.proname) into x
     from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname in ('agent_comps_import', 'agent_comps_order', 'agent_market_import', 'agent_appraisal_create',
-      'guard_appraisal_view', 'guard_appraisal_comp', 'guard_appraisal_media', 'appraisal_addr_parts', 'appraisal_addr_same');
-  if x is distinct from 'agent_appraisal_create:true:search_path=public,agent_comps_import:true:search_path=public,agent_comps_order:true:search_path=public,agent_market_import:true:search_path=public,appraisal_addr_parts:false:search_path=public,appraisal_addr_same:false:search_path=public,guard_appraisal_comp:true:search_path=public,guard_appraisal_media:true:search_path=public,guard_appraisal_view:true:search_path=public'
+      'guard_appraisal_view', 'guard_appraisal_comp', 'guard_appraisal_media', 'appraisal_addr_parts', 'appraisal_addr_match', 'appraisal_addr_same');
+  if x is distinct from 'agent_appraisal_create:true:search_path=public,agent_comps_import:true:search_path=public,agent_comps_order:true:search_path=public,agent_market_import:true:search_path=public,appraisal_addr_match:false:search_path=public,appraisal_addr_parts:false:search_path=public,appraisal_addr_same:false:search_path=public,guard_appraisal_comp:true:search_path=public,guard_appraisal_media:true:search_path=public,guard_appraisal_view:true:search_path=public'
     then out := out || 'THE FUNCTIONS ARE NOT AS WRITTEN: ' || coalesce(x, 'none') || '; '; else out := out || 'functions: definer where needed, search_path set; '; end if;
   select string_agg(p.oid::regprocedure::text, ',') into x from pg_proc p where p.pronamespace = 'public'::regnamespace
     and p.proname in ('agent_comps_import', 'agent_comps_order', 'agent_market_import', 'agent_appraisal_create', 'guard_appraisal_view', 'guard_appraisal_comp', 'guard_appraisal_media',
-      'appraisal_addr_parts', 'appraisal_addr_same', 'appraisal_pack_text', 'appraisal_pack_num', 'appraisal_pack_date', 'appraisal_pack_url', 'appraisal_pack_ts')
+      'appraisal_addr_parts', 'appraisal_addr_match', 'appraisal_addr_same', 'appraisal_pack_text', 'appraisal_pack_num', 'appraisal_pack_date', 'appraisal_pack_url', 'appraisal_pack_ts')
     and has_function_privilege('anon', p.oid, 'execute');
   if x is not null then out := out || 'ANON MAY CALL: ' || x || '; '; else out := out || 'anon: no functions; '; end if;
   select string_agg(p.oid::regprocedure::text, ',') into x from pg_proc p where p.pronamespace = 'public'::regnamespace
-    and p.proname in ('guard_appraisal_view', 'guard_appraisal_comp', 'guard_appraisal_media', 'appraisal_addr_parts', 'appraisal_addr_same', 'appraisal_pack_text', 'appraisal_pack_num', 'appraisal_pack_date', 'appraisal_pack_url', 'appraisal_pack_ts')
+    and p.proname in ('guard_appraisal_view', 'guard_appraisal_comp', 'guard_appraisal_media', 'appraisal_addr_parts', 'appraisal_addr_match', 'appraisal_addr_same', 'appraisal_pack_text', 'appraisal_pack_num', 'appraisal_pack_date', 'appraisal_pack_url', 'appraisal_pack_ts')
     and has_function_privilege('authenticated', p.oid, 'execute');
   if x is not null then out := out || 'A HELPER IS CALLABLE DIRECTLY: ' || x || '; '; end if;
   if not (has_function_privilege('authenticated', 'public.agent_comps_import(uuid,jsonb)', 'execute') and has_function_privilege('authenticated', 'public.agent_comps_order(uuid,uuid[])', 'execute')
-     and has_function_privilege('authenticated', 'public.agent_market_import(jsonb)', 'execute') and has_function_privilege('authenticated', 'public.agent_appraisal_create(uuid,text,text)', 'execute')) then out := out || 'SIGNED-IN USERS CANNOT CALL THE AGENT FUNCTIONS; '; end if;
+     and has_function_privilege('authenticated', 'public.agent_market_import(jsonb)', 'execute') and has_function_privilege('authenticated', 'public.agent_appraisal_create(uuid,text,text,boolean)', 'execute')) then out := out || 'SIGNED-IN USERS CANNOT CALL THE AGENT FUNCTIONS; '; end if;
   -- the bucket and its policies; the storage policies already there are kept
   select public::text || '|' || file_size_limit || '|' || array_to_string(allowed_mime_types, ' ') into x from storage.buckets where id = 'appraisal-media';
   if x is distinct from 'false|15728640|image/jpeg image/png image/webp' then out := out || 'THE BUCKET IS NOT AS WRITTEN: ' || coalesce(x, 'none') || '; '; else out := out || 'bucket appraisal-media: private, 15 MB, photos only; '; end if;
@@ -68,7 +68,8 @@ begin
   for r in select * from (values
     __ADDR_CASES__
   ) v(k, a, b, want) loop
-    if public.appraisal_addr_same(r.a, r.b) is distinct from r.want or public.appraisal_addr_same(r.b, r.a) is distinct from r.want then out := out || 'ADDRESS CASE ' || r.k || ' WRONG: ' || r.a || ' / ' || r.b || '; '; end if;
+    if public.appraisal_addr_match(r.a, r.b) is distinct from r.want or public.appraisal_addr_match(r.b, r.a) is distinct from r.want
+       or public.appraisal_addr_same(r.a, r.b) is distinct from (r.want = 'same') then out := out || 'ADDRESS CASE ' || r.k || ' WRONG: ' || r.a || ' / ' || r.b || ' gave ' || public.appraisal_addr_match(r.a, r.b) || '; '; end if;
     n := n + 1;
   end loop;
   out := out || 'address cases run: ' || n || '; ';
@@ -83,6 +84,8 @@ begin
   begin update public.appraisal_views set setup = '{"v":1,"note":"Commission included"}'::jsonb where id = pa; out := out || 'COMMISSION IN THE SET-UP SAVED; '; exception when others then out := out || 'direct update, commission in the set-up: refused; '; end;
   begin update public.appraisal_views set fields = jsonb_set(fields, '{method,text}', '"Fees apply"') where id = pa; out := out || 'A FEE IN THE FIELDS SAVED; '; exception when others then out := out || 'direct update, fee in the fields: refused; '; end;
   begin insert into public.appraisal_views (title, address) values ('Sold As-Is Appraisal', 'RB 40 Insert Street'); out := out || '"AS IS" SAVED BY A DIRECT INSERT; '; exception when others then out := out || 'direct insert, as is: refused; '; end;
+  begin update public.appraisal_views set prepared_for = 'The fee payer' where id = pa; out := out || 'A FEE IN PREPARED FOR SAVED; '; exception when others then out := out || 'direct update, fee in prepared for: refused; '; end;
+  begin update public.appraisal_views set address = '1 Sold As Is Lane' where id = pa; out := out || '"AS IS" IN THE ADDRESS SAVED; '; exception when others then out := out || 'direct update, as is in the address: refused; '; end;
   update public.appraisal_views set private_notes = 'They may want to sell as is; my fee came up.' where id = pa;
   get diagnostics n = row_count; if n <> 1 then out := out || 'PRIVATE NOTES WERE REFUSED; '; else out := out || 'private notes: not checked (Tim''s own); '; end if;
   begin update public.appraisal_views set status = 'sent' where id = pa; out := out || 'TIM MARKED AN APPRAISAL SENT DIRECTLY; '; exception when others then out := out || 'direct sent: ' || sqlerrm || '; '; end;
@@ -92,7 +95,16 @@ begin
   j := public.agent_appraisal_create(null, '36 Rbsample Road, Testville', null); aid3 := (j->>'appraisal_id')::uuid;
   -- (b) near-duplicates of an address on file are refused, naming it; a different street is not
   begin perform public.agent_appraisal_create(null, '33 rbsample rd,, Testville 9010', null); out := out || 'A NEAR-DUPLICATE ADDRESS WAS FILED; '; exception when others then out := out || 'near-duplicate: ' || sqlerrm || '; '; end;
-  begin perform public.agent_appraisal_create(null, '33 Rbsample Rd', null); out := out || 'AN ADDRESS WITHOUT ITS SUBURB WAS FILED TWICE; '; exception when others then out := out || 'no suburb: refused; '; end;
+  -- no suburb given: only a possible match (the page offers it), so not refused here
+  j := public.agent_appraisal_create(null, '33 Rbsample Rd', null);
+  if (j->>'created_property') <> 'true' then out := out || 'A POSSIBLE MATCH WAS REFUSED; '; else out := out || 'no suburb: only a possible match, not refused; '; end if;
+  -- Tim says it is a different property: a new file, recorded with the addresses it was like
+  begin perform public.agent_appraisal_create(null, '33 Rbsample Road, Testville 9010', null, false); out := out || 'A SAME ADDRESS WITH ITS POSTCODE WAS FILED; '; exception when others then out := out || 'with a postcode: refused; '; end;
+  j := public.agent_appraisal_create(null, '33 Rbsample Road, Testville 9010', null, true);
+  select count(*) into n from public.property_events where property_id = (j->>'property_id')::uuid and kind = 'filed_as_different' and detail->'like'->0->>'address' = '33 Rbsample Road, Testville' and actor <> '';
+  if (j->>'created_property') <> 'true' or n <> 1 then out := out || 'A DIFFERENT PROPERTY WAS NOT FILED OR NOT RECORDED; '; else out := out || 'it''s a different property: filed and recorded; '; end if;
+  begin perform public.agent_appraisal_create(null, '33 Rbsample Road, Testville', null, true); out := out || 'AN EXACT ADDRESS WAS FILED TWICE; '; exception when others then out := out || 'the exact same address: still refused; '; end;
+  begin perform public.agent_appraisal_create(null, '34 Rbsample Road, Testville 9099', null); out := out || 'A NEAR-DUPLICATE WITH ANOTHER POSTCODE WAS NOT REFUSED; '; exception when others then out := out || 'postcode on one side only: refused; '; end;
   j := public.agent_appraisal_create(null, '33 Rbsample Street, Testville', null);
   select count(*) into n from public.properties where address = '33 Rbsample Street, Testville';
   if n <> 1 or (j->>'created_property') <> 'true' then out := out || 'A DIFFERENT STREET WAS MERGED; '; else out := out || 'a different street: its own file; '; end if;

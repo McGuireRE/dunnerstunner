@@ -602,15 +602,19 @@ references revoked from authenticated.
 - `market_sales`: suburb, sold_on, price (public); address (Tim only); bedrooms, bathrooms, floor_m2, land_m2, property_type,
   days_to_sell, source, source_ref (unique with source), gathered_at.
 - `guard_appraisal_view` on appraisal_views (before insert, update, delete): a 'sent' row never changes and is never removed; 'sent' is
-  set only when `app.appraisal_send` is 'on' (phase E's send function, for its own transaction); the wording guard on every insert and
-  on any update of title, sections, fields or setup. The 032 policies are unchanged.
+  set only when `app.appraisal_send` is 'on' (phase E's send function, set_config(..., true) for its own transaction); the wording guard
+  on every insert and on any update of title, sections, fields, setup, prepared_for or address. The 032 policies are unchanged.
 - Functions (security definer, search_path public, revoked from public and anon, granted to authenticated; each checks is_agent):
   `agent_comps_import(p_appraisal, p_pack)` (pack mre.comps/1, APPRAISAL-PLAN.md; returns added, updated, kept_ticked, skipped, notes),
   `agent_comps_order(p_appraisal, p_ids)`, `agent_market_import(p_pack)` (pack mre.market/1; returns months_added, months_updated,
-  sales_added, sales_updated, skipped). Internal (not callable by users): `appraisal_addr_parts`, `appraisal_addr_same`,
+  sales_added, sales_updated, skipped). Internal (not callable by users): `appraisal_addr_parts`, `appraisal_addr_match` ('same', 'maybe'
+  or ''), `appraisal_addr_same`,
   `appraisal_pack_text`, `_num`, `_date`, `_url`, `_ts`, and the three guards.
-- `agent_appraisal_create` (replaced, same signature): the 033 body, plus a near-duplicate of an address on file ("Rd" for "Road",
-  extra commas, no suburb or postcode, same number and street, same suburb or none) is refused naming that property.
+- `agent_appraisal_create(p_property, p_address, p_kind default 'standard', p_different default false)` (replaces the 033 three-argument
+  function; existing calls work unchanged): the 033 body, plus a 'same' near-duplicate of an address on file (same number, street and
+  suburb, or no suburb on either; no two different postcodes) is refused naming that property, unless p_different, when a new file is
+  started and recorded in `property_events` (kind filed_as_different, detail {address, like: [{id, address}], appraisal_id}). A 'maybe'
+  (one side names a suburb the other leaves out) is never refused: the page offers it.
 - Storage: bucket `appraisal-media` (private, 15 MB, JPEG, PNG, WebP). Policies on storage.objects: `appraisal_media_agent_read`
   (select), `appraisal_media_agent_add` (insert under appraisals/<id>/comps/), `appraisal_media_agent_remove` (delete, not when the
   appraisal is sent). No vendor policy (phase E gives vendors short-lived links).

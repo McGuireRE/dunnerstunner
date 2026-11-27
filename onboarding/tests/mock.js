@@ -474,15 +474,16 @@ function appraisalRpc(name,a,me){ if(offline()) return bad('Failed to fetch');
   try{ const l=JSON.parse(localStorage.getItem('mockApprCalls')||'[]'); l.push({name,a}); localStorage.setItem('mockApprCalls',JSON.stringify(l)); }catch(_){}
   if(!isAgentMe()) return bad('Agent only');
   const AV=()=>(DB.appraisal_views||=[]), norm=s=>String(s||'').replace(/\s+/g,' ').trim();
-  if(name==='agent_appraisal_create'){ let pid=a.p_property||null, addr=norm(a.p_address), made=false; const k=norm(a.p_kind)||'standard';
+  if(name==='agent_appraisal_create'){ let pid=a.p_property||null, addr=norm(a.p_address), made=false, likes=[]; const k=norm(a.p_kind)||'standard';
     if(!['standard','bespoke'].includes(k)) return bad('Unknown kind of appraisal');
     if(!pid){ if(addr.length<3) return bad('Add the address'); if(addr.length>300) return bad('That address is too long'); if(PT().some(p=>norm(p.address).toLowerCase()===addr.toLowerCase())) return bad('That address is already on file. Choose it from the list');
-      /* 034: a near-duplicate (Rd for Road, extra commas, no suburb or postcode) is refused, naming the property on file */ const dup=PT().slice().sort((x,y)=>(x.created_at<y.created_at?-1:1)).find(p=>window.APPR.addrSame(p.address,addr)); if(dup) return bad('That address is already on file as "'+dup.address+'". Choose it from the list'); }
+      /* 034: a near-duplicate ('same') is refused, naming the property on file, unless Tim says it's a different property (p_different), which is recorded */ likes=PT().slice().sort((x,y)=>(x.created_at<y.created_at?-1:1)).filter(p=>window.APPR.addrSame(p.address,addr)).map(p=>({id:p.id,address:p.address})); if(likes.length&&!a.p_different) return bad('That address is already on file as "'+likes[0].address+'". Choose it from the list, or choose "It\'s a different property"'); }
     else { const p=PT().find(x=>x.id===pid); if(!p) return bad('Property not found'); addr=norm(p.address); }
     const w=apprWording(addr); if(w) return bad(w);
     if(!pid){ pid=newProp(addr).id; made=true; }
     const r={id:uid(),property_id:pid,title:addr?addr+': Market Appraisal':'Market appraisal',address:addr,prepared_for:'',prepared_on:null,status:'draft',sections:[],fields:{},setup:{v:1},kind:k,private_notes:'',created_by:me.email,created_at:now(),updated_at:now()};
-    AV().push(r); save(); return ok({appraisal_id:r.id,property_id:pid,created_property:made}); }
+    AV().push(r); if(made&&likes.length) (DB.property_events||=[]).push({id:(DB.property_events||[]).length+1,property_id:pid,agreement_id:null,at:now(),actor:me.email,kind:'filed_as_different',detail:{address:addr,like:likes,appraisal_id:r.id}});
+    save(); return ok({appraisal_id:r.id,property_id:pid,created_property:made}); }
   const r=AV().find(x=>x.id===a.p_id); if(!r) return bad('Appraisal not found');
   if(r.status==='sent') return bad('This appraisal has been sent, and a sent copy never changes');
   const isObj_=x=>x&&typeof x==='object'&&!Array.isArray(x);
@@ -504,8 +505,8 @@ const avSent=id=>(DB.appraisal_views||[]).some(v=>v.id===id&&v.status==='sent');
 function avGuard(op,payload,rows){ const list=Array.isArray(payload)?payload:[payload];
   if(op==='update'){ rows.forEach(r=>{ if(r.status==='sent') throw new Error(SENT_MSG); const n=Object.assign({},r,payload);
     if(n.status==='sent'&&localStorage.getItem('mockSendFlag')!=='1') throw new Error('An appraisal is marked sent only by sending it');
-    if(['title','sections','fields','setup'].some(k=>k in payload&&!same(payload[k],r[k]))){ const w=apprWording([n.title,n.sections,n.fields,n.setup]); if(w) throw new Error(w); } }); return; }
-  list.forEach(n=>{ if(n.status==='sent'&&localStorage.getItem('mockSendFlag')!=='1') throw new Error('An appraisal is marked sent only by sending it'); const w=apprWording([n.title||'',n.sections||[],n.fields||{},n.setup||{}]); if(w) throw new Error(w); }); }
+    if(['title','sections','fields','setup','prepared_for','address'].some(k=>k in payload&&!same(payload[k],r[k]))){ const w=apprWording([n.title,n.sections,n.fields,n.setup,n.prepared_for||'',n.address||'']); if(w) throw new Error(w); } }); return; }
+  list.forEach(n=>{ if(n.status==='sent'&&localStorage.getItem('mockSendFlag')!=='1') throw new Error('An appraisal is marked sent only by sending it'); const w=apprWording([n.title||'',n.sections||[],n.fields||{},n.setup||{},n.prepared_for||'',n.address||'']); if(w) throw new Error(w); }); }
 function lw3cTable(table,op,payload,rows,single){
   if(offline()) throw new Error('Failed to fetch');
   if(!isAgentMe()){ if(op==='select') return {data:single?undefined:[],error:single?{message:'not found'}:null}; if(!(S&&S.user)) throw new Error('permission denied for table '+table); if(op==='insert') throw new Error('new row violates row-level security policy for table "'+table+'"'); return {data:[],error:null}; }

@@ -39,6 +39,23 @@ insert into storage.buckets (id, name, public) values ('private', 'private', fal
 create policy agent_all_files on storage.objects using (bucket_id = 'private' and public.is_agent()) with check (bucket_id = 'private' and public.is_agent());
 create policy repo_agent_read on storage.objects for select to authenticated using (bucket_id = 'property-files' and public.is_agent());
 
+-- property_events (009) as live: the permanent record agent_appraisal_create writes "it's a different property" to; no_change word
+-- for word; the live foreign keys, trigger, policy and grants (authenticated may only select)
+CREATE OR REPLACE FUNCTION public.no_change()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SET search_path TO 'public'
+AS $function$
+begin raise exception 'Records in % cannot be changed or deleted', tg_table_name; end $function$;
+create table public.property_events (id bigint generated always as identity primary key, property_id uuid not null references public.properties(id),
+  agreement_id uuid references public.agreements(id), at timestamptz not null default now(), actor text not null, kind text not null, detail jsonb not null default '{}'::jsonb);
+create index property_events_property_idx on public.property_events (property_id, at desc);
+alter table public.property_events enable row level security;
+create policy pe_agent_read on public.property_events for select using (public.is_agent());
+create trigger property_events_immutable before update or delete on public.property_events for each row execute function public.no_change();
+revoke all on public.property_events from anon;
+revoke insert, update, delete, truncate on public.property_events from authenticated;
+
 -- an invented appraisal written from its phase A set-up (the test checks 034 leaves every value of it, and of the hand-loaded row, as it was)
 insert into public.properties (address) values ('RB 2 Phase Street, Testville');
 insert into public.appraisal_views (property_id, title, address, prepared_for, prepared_on, status, setup, kind, sections, fields)
