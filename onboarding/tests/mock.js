@@ -461,12 +461,41 @@ if(['agent_repo_add','agent_repo_set','agent_repo_share','agent_repo_archive','v
   let rd=0; try{ rd=+localStorage.getItem('mockRpcDelay')||0; }catch(_){} if(rd) return new Promise(r=>setTimeout(()=>{ const out=rpcInner(name,a); save(); Promise.resolve(out).then(r); },rd));
   let dl=0; try{ dl=+localStorage.getItem('mockSaveDelay')||0; }catch(_){} if(dl&&name==='agent_inspection_save') return new Promise(r=>setTimeout(()=>{ const out=rpcInner(name,a); save(); r(out); },dl));
   const res=rpcInner(name,a); (DB.agreements||[]).forEach(x=>{ const o=before.get(x.id); if(o&&JSON.stringify(o)!==JSON.stringify(x)) syncAgreement(x,o); }); save(); return res; }
+// migration 033: a new appraisal report and saving its set-up, with the same rules as the database functions (agent only; an
+// address already on file is chosen, not filed twice; the wording guard over every string a vendor can read; each range's low below
+// its high; a sent appraisal never changes; 'sent' is never set here). localStorage mockApprCalls: every call, for the tests.
+function apprWording(v){ const out=[]; const walk=x=>{ if(typeof x==='string') out.push(x); else if(x&&typeof x==='object') Object.values(x).forEach(walk); }; walk(v); const t=out.join(' ');
+  if(/\bas[\s-]+is\b/i.test(t)) return 'Please write "current condition" rather than "as is".'; if(/\b(fees?|commissions?)\b/i.test(t)) return 'Fees and commission are never shown on an appraisal.'; return ''; }
+function appraisalRpc(name,a,me){ if(offline()) return bad('Failed to fetch');
+  try{ const l=JSON.parse(localStorage.getItem('mockApprCalls')||'[]'); l.push({name,a}); localStorage.setItem('mockApprCalls',JSON.stringify(l)); }catch(_){}
+  if(!isAgentMe()) return bad('Agent only');
+  const AV=()=>(DB.appraisal_views||=[]), norm=s=>String(s||'').replace(/\s+/g,' ').trim();
+  if(name==='agent_appraisal_create'){ let pid=a.p_property||null, addr=norm(a.p_address), made=false; const k=norm(a.p_kind)||'standard';
+    if(!['standard','bespoke'].includes(k)) return bad('Unknown kind of appraisal');
+    if(!pid){ if(addr.length<3) return bad('Add the address'); if(addr.length>300) return bad('That address is too long'); if(PT().some(p=>norm(p.address).toLowerCase()===addr.toLowerCase())) return bad('That address is already on file. Choose it from the list'); }
+    else { const p=PT().find(x=>x.id===pid); if(!p) return bad('Property not found'); addr=norm(p.address); }
+    const w=apprWording(addr); if(w) return bad(w);
+    if(!pid){ pid=newProp(addr).id; made=true; }
+    const r={id:uid(),property_id:pid,title:addr?addr+': Market Appraisal':'Market appraisal',address:addr,prepared_for:'',prepared_on:null,status:'draft',sections:[],fields:{},setup:{v:1},kind:k,private_notes:'',created_by:me.email,created_at:now(),updated_at:now()};
+    AV().push(r); save(); return ok({appraisal_id:r.id,property_id:pid,created_property:made}); }
+  const r=AV().find(x=>x.id===a.p_id); if(!r) return bad('Appraisal not found');
+  if(r.status==='sent') return bad('This appraisal has been sent, and a sent copy never changes');
+  const isObj_=x=>x&&typeof x==='object'&&!Array.isArray(x);
+  if(a.p_setup!=null&&!isObj_(a.p_setup)) return bad('The set-up must be a set of choices'); if(a.p_fields!=null&&!isObj_(a.p_fields)) return bad('The figures must be a set of fields'); if(a.p_sections!=null&&!Array.isArray(a.p_sections)) return bad('The sections must be a list');
+  if(a.p_status!=null&&!['draft','ready','presented','archived'].includes(a.p_status)) return bad("That status can't be set here");
+  const w=apprWording([a.p_sections,a.p_fields,a.p_setup,a.p_title,a.p_prepared_for]); if(w) return bad(w);
+  if(a.p_fields&&'ranges' in a.p_fields){ if(!Array.isArray(a.p_fields.ranges)) return bad('Each range needs a low and a high figure'); for(const x of a.p_fields.ranges){ if(!isObj_(x)||typeof x.low!=='number'||typeof x.high!=='number'||!(x.low>0)||!(x.high>0)) return bad('Each range needs a low and a high figure'); if(x.low>=x.high) return bad('The low figure must be below the high figure ('+(x.option||x.key||'a range')+')'); } }
+  const c=v=>JSON.parse(JSON.stringify(v));
+  if(a.p_setup!=null) r.setup=c(a.p_setup); if(a.p_fields!=null) r.fields=c(a.p_fields); if(a.p_sections!=null) r.sections=c(a.p_sections);
+  if(a.p_title!=null) r.title=a.p_title; if(a.p_prepared_for!=null) r.prepared_for=a.p_prepared_for; if(a.p_private_notes!=null) r.private_notes=a.p_private_notes; if(a.p_status!=null) r.status=a.p_status;
+  r.prepared_on=r.prepared_on||new Date().toLocaleDateString('en-CA',{timeZone:'Pacific/Auckland'}); r.updated_at=now(); save(); return ok(c(r)); }
 function rpcInner(name,a){
   const me=S&&S.user; const ag=a&&a.a?DB.agreements.find(x=>x.id===a.a):null;
   const mine=()=>DB.agreement_people.find(p=>p.agreement_id===a.a&&p.user_id===me.id);
   if(['agent_property_profile','agent_profile_choose','agent_profile_tick','agent_profile_set','agent_person_link_resolve','my_property_profile'].includes(name)) return sharedRpc(name,a,me);
   if(name.startsWith('agent_fv_')||name==='agent_tap_extra') return fvRpc(name,a,me);
   if(name.startsWith('agent_council_')) return councilRpc(name,a,me);
+  if(name==='agent_appraisal_create'||name==='agent_appraisal_save') return appraisalRpc(name,a,me);
   if(SIGN_RPCS.includes(name)) return signRpc(name,a,me);
   if(DRAFT_RPCS.includes(name)) return draftRpc(name,a,me);
   if(name.startsWith('offer_sign_')||name.startsWith('offer_round_')) return bad('permission denied for function '+name);

@@ -563,3 +563,20 @@ signatures and fingerprints are not touched.
 - The visit's own values go through `fv_record` (only when new; beside, not chosen, once something else was chosen after the visit first
   noted the fact) and `fv_clear` (only the visit's own chosen value, with the file and an unsigned draft that still says it). Both internal.
 
+## 033 Appraisal set-up (LW3 phase A, 27 November 2026; tested in a rollback block on a local PostgreSQL stand-in, NOT yet on the live project)
+Builds on 032 (`appraisal_views`, live: one presentable appraisal per row, sections and fields in JSON, Tim only). Additive:
+- `appraisal_views.setup` jsonb object, default `{}`: Tim's choices on the set-up page (`v` 1, `tabs`, `preparedFor`, `suburb`, `suburbLink`,
+  `note`, `campaign` {kind standard|larger|land|weeks, weeks}, `method` deadline|tender|auction|eoi|negotiation, `methodText`, `basis`,
+  `plan` digital|premium|elite|custom, `header` claude|own). A row with no `setup.v` (the one loaded by hand) is drawn and edited as in 032.
+- `appraisal_views.kind` text, default 'standard', check standard|bespoke (bespoke comes in phase D).
+- `appraisal_views.private_notes` text, default '': Tim's own notes, weak points included; never drawn on the vendor's page.
+- `appraisal_views.status` check now draft|presented|archived|ready|sent (values added only).
+- `ai_calls.appraisal_id` uuid, nullable, references appraisal_views on delete set null.
+- `appraisal_wording_problem(jsonb)` (not callable by users): every string in the value, checked for "as is", fee and commission.
+- `agent_appraisal_create(p_property, p_address, p_kind)`: is_agent; from a property on file, or from an address (a new property file,
+  refused if the address is already on file); returns appraisal_id, property_id, created_property.
+- `agent_appraisal_save(p_id, p_setup, p_fields, p_sections, p_title, p_prepared_for, p_private_notes, p_status)`: is_agent; a null leaves that
+  part alone; refuses a sent appraisal, setting 'sent', the wording guard's finds (not on private notes), and a range without both
+  figures or with its low not below its high; sets prepared_on the first time.
+Both agent functions: security definer, search_path public, revoked from public and anon, granted to authenticated.
+Tests: tests/appraisal-setup-rollback.js/.sql on tests/appraisal-setup-standin.sql; browser test tests/appraisal-setup.test.js.

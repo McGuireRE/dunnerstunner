@@ -933,4 +933,45 @@ body.apv-present main { max-width: 760px; padding-bottom: 48px; }
 .fv-decide .btn .small { font-weight: 400; color: inherit; }
 @media (min-width: 640px) { .fv-decide { grid-template-columns: 1fr 1fr; } }
 .fv-beds { margin: 8px 0; }
+/* LW3 phase A (033): the set-up page and the sections it writes */
+.choice.off { opacity: .6; cursor: default; }
+.aps-missing { margin: 6px 0 0; font-weight: 600; }
+.aps-missing[data-kind="err"] { color: var(--warn); }
+.aps-missing[data-kind="ok"] { color: var(--ok-text, var(--ok)); }
+.aps-part { margin: 8px 0; }
+.apv-opinion { margin: 10px 0 18px; }
+.apv-opin { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; margin: 0 0 8px; padding: 14px 16px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
+.apv-opin-part { color: var(--muted); font-size: 15px; }
+.apv-opin-fig { font-size: clamp(22px, 6vw, 30px); font-weight: 600; color: var(--accent); white-space: normal; }
+.apv-valn { font-size: 14.5px; color: var(--muted); margin: 6px 0 0; }
+.apv-camp { overflow: hidden; }
+.apv-camp .apv-wave figcaption span span { display: inline; }   /* a figure kept from translation stays in its line */
+.apv-camp.dense .apv-wpct { font-size: 10px; }
+.apv-camp.dense .apv-wlab { font-size: 9px; overflow: hidden; text-overflow: clip; white-space: nowrap; }
+.apv-camp.dense .apv-wgrid { gap: 2px; }
+.apv-mcs { display: grid; gap: 8px; margin: 10px 0 18px; }
+.apv-mc { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; }
+.apv-mc.apv-rec { border-color: var(--ok); background: var(--ok-soft); }
+.apv-mc summary { cursor: pointer; }
+.apv-mc dl { margin: 8px 0 2px; }
+.apv-mc dt { font-size: 13px; font-weight: 600; color: var(--muted); margin-top: 6px; }
+.apv-mc dd { margin: 2px 0 0; }
+.apv-plans { display: flex; gap: 12px; overflow-x: auto; scroll-snap-type: x mandatory; padding: 4px 2px 10px; margin: 10px 0 8px; -webkit-overflow-scrolling: touch; }
+.apv-plan { flex: 0 0 min(82%, 320px); scroll-snap-align: start; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; min-width: 0; }
+.apv-plan.apv-rec { border-color: var(--ok); box-shadow: 0 0 0 1px var(--ok) inset; }
+.apv-plan h3 { margin: 4px 0 2px; }
+.apv-plan-price { font-weight: 600; font-size: 18px; margin: 0 0 6px; }
+.apv-plan-price span { font-weight: 400; font-size: 13px; color: var(--muted); }
+.apv-plan ul { padding-left: 18px; margin: 8px 0 0; font-size: 14.5px; }
+.apv-plan li { margin: 3px 0; }
+.apv-panel { margin: 28px 0 10px; padding: 16px 18px; background: var(--accent-soft); border-radius: 10px; }
+.apv-panel h2 { margin-top: 0; }
+.apv-show .apv-plan ul, .apv-show .apv-mc dd { font-size: 17px; }
+@media print {
+  .apv-mc::details-content { content-visibility: visible; display: block; }
+  .apv-plans { flex-wrap: wrap; overflow: visible; }
+  .apv-plan { flex: 1 1 45%; break-inside: avoid; }
+  .apv-mc, .apv-panel, .apv-opinion { break-inside: avoid; }
+  #apsNotes { display: none !important; }
+}
 </style>

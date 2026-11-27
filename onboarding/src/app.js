@@ -1514,6 +1514,8 @@ function lawyerForm(id, title, blurb) {
     let pfv = []; try { const { data, error } = await sb.from('first_visits').select('id,started_at,decision').eq('property_id', id).order('started_at', { ascending: false }); if (!error) pfv = data || []; } catch (_) { }
     let pevents = []; try { const { data, error } = await sb.from('property_events').select('at,actor,kind,detail').eq('property_id', id).order('at', { ascending: false }); if (!error) pevents = data || []; } catch (_) { }
     const OFX = await offersLoad(id);   // the Offers tile (offers phase 1): agent only
+    // LW3 phase A: the property's appraisal reports (portal only, Tim only)
+    let papr = []; if (PORTAL) { try { const { data, error } = await sb.from('appraisal_views').select('id,title,status,updated_at,setup').eq('property_id', id).order('updated_at', { ascending: false }); if (!error) papr = (data || []).filter(r => okId(r.id)); } catch (_) { } }
     const pl = pls.find(x => x.status !== 'closed' && (!p.cycle_at || x.created_at >= p.cycle_at)) || null;   // only this round's pre-listing
     const byRole = r => people.filter(x => (x.role || 'owner') === r).map(x => Object.assign({ _orig_name: x.legal_name }, x));
     PF = { p, people: byRole('owner'), contacts: byRole('contact'), formers: byRole('former'), docs, pls, ags, liveAgreement: live, removed: [], was: { description: Object.assign({}, p.description), title_ref: p.title_ref || '' } };
@@ -1549,6 +1551,9 @@ function lawyerForm(id, title, blurb) {
           ${!pls.length && !ags.length ? '<p class="small" style="margin:0">No appraisal page or agreement yet.</p>' : ''}
         </div>
         ${fvTileHTML(id, pfv)}
+        ${PORTAL ? `<div class="card ptile no-print" id="apsTile"><h3>Appraisal report</h3>
+          ${papr.map(r => `<div class="fact"><div class="v" style="font-weight:400;display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><span>${esc(r.title || 'Appraisal')}<br><span class="small">Updated ${esc(fmtDT(r.updated_at))}</span></span>${plink(`appraisals/${r.id}`, 'Open', 'btn link')}</div></div>`).join('') || '<p class="small" style="margin:0 0 8px">Your written opinion of price for this property, started from its file.</p>'}
+          <div class="toolbar">${plink(`appraisals/new/${id}`, papr.length ? 'New appraisal report' : 'Start an appraisal report', 'btn ghost')}</div></div>` : ''}
         ${inspTileHTML(pinsp)}
         ${formsTileHTML(pforms, live)}
         ${stageTileHTML(p, govAg, pevents)}
@@ -9201,7 +9206,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   // a page sets its own address: the first time after it opens it goes into the history as that opening said; after that it replaces
   function portalAt(path) { if (!PORTAL || path == null) return; const mode = NAV_FRESH || 'replace'; NAV_FRESH = null; setAddr(path, mode); }
   // set-up screens a page moves on from (an offer's signing set-up, presenting a round, a signer's turn): the next page takes their place
-  const isCreation = p => /\/new$/.test(p || '') || p === 'processes/agreement' || p === 'processes/appraisal' || /\/offers\/[^/]+\/(draft\/[^/]+\/sign|present|signing\/[^/]+\/turn\/[^/]+)$/.test(p || '');
+  const isCreation = p => /\/new$/.test(p || '') || /^appraisals\/new\/[A-Za-z0-9_-]+$/.test(p || '') || p === 'processes/agreement' || p === 'processes/appraisal' || /\/offers\/[^/]+\/(draft\/[^/]+\/sign|present|signing\/[^/]+\/turn\/[^/]+)$/.test(p || '');
   function portalView(name) { INPERSON_VIEW = IN_PERSON_VIEWS.includes(name); }
   // the property (and other ids) a page belongs to, looked up once and remembered
   const ROWS = {};
@@ -9316,6 +9321,9 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     R('processes/offer', 'viewOfferPick', () => RAW.viewOfferPick()),
     R('processes/forms', 'forms', () => viewPortalForms()),
     R('appraisals', 'appraisals', () => viewPortalAppraisals()),
+    R('appraisals/new', 'appraisalNew', () => viewAppraisalNew(null)),
+    R('appraisals/new/:id', 'appraisalNew', p => viewAppraisalNew(p)),
+    R('appraisals/:id/setup', 'appraisal', a => viewAppraisalSetup(a)),
     R('appraisals/:id', 'appraisal', a => viewAppraisalView(a, false)),
     R('appraisals/:id/present', 'appraisal', a => viewAppraisalView(a, true)),
     R('translations', 'viewTranslations', () => APP_TRANSLATION ? RAW.viewTranslations() : viewPortalMissing()),
@@ -9357,7 +9365,9 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     if ((m = new RegExp(`^properties/${id}/offers/(clauses|blank/${id})$`).exec(path))) return [`properties/${m[1]}/offers`, 'Property file'];
     if ((m = new RegExp(`^properties/${id}/.+$`).exec(path))) return [`properties/${m[1]}`, 'Property file'];
     if (new RegExp(`^properties/${id}$`).test(path)) return ['properties', 'Properties'];
-    if ((m = new RegExp(`^appraisals/${id}/present$`).exec(path))) return [`appraisals/${m[1]}`, 'Appraisal'];
+    if ((m = new RegExp(`^appraisals/new/${id}$`).exec(path))) return [`properties/${m[1]}`, 'Property file'];
+    if (path === 'appraisals/new') return ['appraisals', 'Appraisals'];
+    if ((m = new RegExp(`^appraisals/${id}/(present|setup)$`).exec(path))) return [`appraisals/${m[1]}`, 'Appraisal'];
     if (new RegExp(`^appraisals/${id}$`).test(path)) return ['appraisals', 'Appraisals'];
     if (/^processes\/.+/.test(path)) return ['processes', 'Processes'];
     if (/^people\/.+/.test(path)) return ['people', 'People'];
@@ -9470,7 +9480,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <h2 id="pProcList">Listing, in order</h2>
       <div class="home-tiles">
         <button class="home-tile" type="button" id="homeFirst"><span class="kick">At the property</span><span class="ttl">First visit</span><span class="txt">Loose notes, rooms, photos and client details from the walk-through and the conversation. Nothing compulsory, and it works without signal.</span><span class="go">Start or carry on →</span></button>
-        <div class="home-tile soon" id="soonReport" aria-disabled="true"><span class="kick">Coming soon</span><span class="ttl">Appraisal report</span><span class="txt">Your written opinion of price with its evidence, from the property profile. Not built yet.</span></div>
+        <button class="home-tile" type="button" id="homeReport"><span class="kick">After the first visit</span><span class="ttl">Appraisal report</span><span class="txt">Your written opinion of price, from a property on file or an address: your range, the campaign, the method and the marketing, written in the agreed order.</span><span class="go">Start an appraisal →</span></button>
         ${TILE_BEGIN}
         ${TILE_INSPECT}
         ${TILE_AGREE}
@@ -9483,7 +9493,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         <div class="home-tile soon" id="soonDesk" aria-disabled="true"><span class="kick">Coming soon</span><span class="ttl">Desktop analysis</span><span class="txt">For someone weighing up the market who hasn't decided to sell: a lighter look from the information they supply, less in depth than a market value opinion. Not built yet.</span></div>
       </div>
     </div>`;
-    [['homeFirst', 'processes/first-visit'], ['homeBegin', 'processes/appraisal'], ['homeInspect', 'processes/inspection'], ['homeAgree', 'processes/agreement'], ['homeOffer', 'processes/offer'], ['homeForms', 'processes/forms']]
+    [['homeFirst', 'processes/first-visit'], ['homeReport', 'appraisals/new'], ['homeBegin', 'processes/appraisal'], ['homeInspect', 'processes/inspection'], ['homeAgree', 'processes/agreement'], ['homeOffer', 'processes/offer'], ['homeForms', 'processes/forms']]
       .forEach(([id, p]) => $('#' + id).addEventListener('click', () => portalNav(p)));
     top();
   }
@@ -9535,6 +9545,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     if (!$('#main .loading')) return;   // Tim has moved on
     rows = rows.filter(r => okId(r.id));
     main().innerHTML = `<div class="view-pad" id="apvList"><span class="agent-flag">Only you see this</span><h1>Appraisals</h1>
+      <div class="toolbar" id="apvNewRow">${plink('appraisals/new', 'New appraisal', 'btn primary')}</div>
       ${rows.length ? `<div class="card tight"><ul class="needs">${rows.map(r => `<li><div class="what"><strong translate="no">${esc(r.title || r.address || 'Appraisal')}</strong><span class="small">Updated ${esc(fmtDT(r.updated_at))}</span></div><span class="needbtns">${plink(`appraisals/${r.id}`, 'Open', 'btn ghost')}${plink(`appraisals/${r.id}/present`, 'Present', 'btn primary')}</span></li>`).join('')}</ul></div>`
         : '<div class="card note tight"><p class="small" style="margin:0">No appraisals here yet.</p></div>'}
     </div>`;
@@ -9547,6 +9558,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     if (!$('#main .loading')) return;
     if (!rec) return viewPortalMissing();
     document.body.classList.toggle('apv-present', !!present);
+    if (rec.setup && rec.setup.v) return apsShow(rec, present);   // LW3 phase A: an appraisal written from its set-up page
     const f = rec.fields || {};
     const draw = () => { const d = $('#apvDoc'); if (d) d.innerHTML = APPR.render(rec); };
     const names = APPR.methodNames(rec);
@@ -9579,6 +9591,197 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     });
     top();
   }
+  /* ───────── LW3 phase A (migration 033, APPRAISAL-PLAN.md): a new appraisal report and its set-up page ───────── */
+  // New appraisal: from a property on file (the property file's button opens appraisals/new/<property>) or from an address, with the
+  // council lookup offered as on the disclosures check. Starting makes the appraisal (and a property file for a new address) and
+  // opens its set-up page in place of this one.
+  async function apsStart(pid, addr, btn) {
+    if (btn) { btn.disabled = true; atBtn(btn, 'Starting...', 'busy'); }
+    const { data, error } = await sb.rpc('agent_appraisal_create', { p_property: pid || null, p_address: addr || null, p_kind: 'standard' });
+    if (error || !data) { if (btn) { btn.disabled = false; atBtn(btn, netErr(error) ? 'No signal. Try again when you have signal; nothing was made.' : (error && error.message) || 'Not started. Try again.', 'err'); } return null; }
+    return data;
+  }
+  async function apsOpenSetup(aid) {
+    const to = `appraisals/${aid}/setup`; JDIRTY = false;
+    if (!PORTAL) return viewAppraisalSetup(aid);
+    try { history.replaceState({ portal: to }, '', PORTAL_BASE + to); } catch (_) { }
+    return portalOpen(to);
+  }
+  async function viewAppraisalNew(pid) {
+    header('New appraisal', '', 0); actions(false);
+    main().innerHTML = '<div class="loading">Loading...</div>';
+    let props = []; try { props = (await must(sb.from('properties').select('id,address,stage,updated_at').order('updated_at', { ascending: false }))) || []; } catch (_) { props = []; }
+    if (!$('#main .loading')) return;
+    const chosen = pid ? props.find(p => p.id === pid) : null;
+    if (pid && !chosen) return viewPortalMissing();
+    if (chosen) {
+      let mine = []; try { mine = ((await must(sb.from('appraisal_views').select('id,title,status,updated_at,setup').eq('property_id', pid).order('updated_at', { ascending: false }))) || []).filter(r => okId(r.id)); } catch (_) { mine = []; }
+      if (!$('#main .loading')) return;
+      main().innerHTML = `<div class="view-pad" id="apsNew"><span class="agent-flag">Only you see this</span><h1>New appraisal report</h1>
+        <p class="lede">For <strong translate="no">${esc(chosen.address || 'this property')}</strong>, from its property file. What is on the file is used; nothing is sent to anyone.</p>
+        ${mine.length ? `<p class="small" style="margin:12px 0 6px">Already started for this property:</p><div class="card tight"><ul class="needs" id="apsMine">${mine.map(r => `<li><div class="what"><strong translate="no">${esc(r.title || 'Appraisal')}</strong><span class="small">Updated ${esc(fmtDT(r.updated_at))}</span></div><span class="needbtns">${plink(r.setup && r.setup.v ? `appraisals/${r.id}/setup` : `appraisals/${r.id}`, 'Carry on', 'btn ghost')}</span></li>`).join('')}</ul></div>` : ''}
+        <div class="toolbar"><button class="btn primary" type="button" id="apsStartProp">${mine.length ? 'Start another appraisal report' : 'Start the appraisal report'}</button></div></div>`;
+      $('#apsStartProp').addEventListener('click', async e => { const d = await apsStart(pid, null, e.currentTarget); if (d) apsOpenSetup(d.appraisal_id); });
+      top(); return;
+    }
+    const norm = s => String(s || '').toLowerCase().replace(/[,.]/g, ' ').replace(/\s+/g, ' ').trim();
+    main().innerHTML = `<div class="view-pad" id="apsNew"><span class="agent-flag">Only you see this</span><h1>New appraisal report</h1>
+      <p class="lede">Choose a property on file, or start one from its address. Nothing is sent to anyone.</p>
+      <label class="f" for="apsAddr" style="margin-top:0">Address</label><input type="text" id="apsAddr" data-nodirty autocomplete="off" placeholder="Street, suburb, Dunedin">
+      <div id="apsMatches"></div>
+      <div class="toolbar"><button class="btn primary" type="button" id="apsNewAddr">Start from this address</button></div>
+      <div id="crAps"></div></div>`;
+    const draw = () => {
+      const q = norm($('#apsAddr').value); let m = [];
+      if (q.length >= 3) m = props.filter(p => { const a = norm(p.address); return a && (a.includes(q) || q.includes(a) || (q.split(' ').length > 1 && q.split(' ').slice(0, 2).join(' ') === a.split(' ').slice(0, 2).join(' '))); }).slice(0, 6);
+      const exact = m.some(p => norm(p.address) === q);
+      $('#apsMatches').innerHTML = m.length ? `<p class="small" style="margin:12px 0 6px">Already on file. Choose it to keep one record of the property:</p>${m.map(p => `<div class="card tight insp-match"><div><strong translate="no">${esc(p.address)}</strong><br>${stagePill(p.stage)}</div><button class="btn ${exact && norm(p.address) === q ? 'primary' : 'ghost'}" type="button" data-aps-prop="${esc(p.id)}">Appraise this one</button></div>`).join('')}` : '';
+      const nb = $('#apsNewAddr'); nb.disabled = exact; atBtn(nb, exact ? 'This address is already on file. Choose it above.' : '', 'err');
+      $$('[data-aps-prop]').forEach(b => b.addEventListener('click', async () => { const d = await apsStart(b.dataset.apsProp, null, b); if (d) apsOpenSetup(d.appraisal_id); }));
+    };
+    $('#apsAddr').addEventListener('input', draw);
+    $('#apsNewAddr').addEventListener('click', async e => {
+      const b = e.currentTarget, a = $('#apsAddr').value.replace(/\s+/g, ' ').trim();
+      if (a.length < 3) { atBtn(b, 'Add the address.', 'err'); return; }
+      const d = await apsStart(null, a, b); if (d) apsOpenSetup(d.appraisal_id);
+    });
+    // the council lookup, once an address is entered: "Start the appraisal and use these" makes the appraisal and its property file,
+    // uses the ticked values on the file, then opens the set-up. A retry uses the same appraisal, never a second.
+    let made = null, madeFor = '';
+    crAddressHook($('#apsAddr'), $('#crAps'), () => ({ pid: null, useLabel: 'Start the appraisal and use these',
+      before: async () => { const a = $('#apsAddr').value.replace(/\s+/g, ' ').trim(); if (made && madeFor === a) return made.property_id;
+        const d = await apsStart(null, a, $('#apsNewAddr')); if (!d) return null; made = d; madeFor = a; return d.property_id; },
+      onUsed: () => { if (made) apsOpenSetup(made.appraisal_id); } }));
+    top(); $('#apsAddr').focus();
+  }
+
+  // the set-up page: the tabs checklist, who it's for, Tim's note, a range per part, campaign length (asked every time), the method,
+  // the pricing basis, the marketing plan, the header and Tim's private notes. Saving writes the standard sections in the agreed order.
+  const APS_TABS = [
+    ['reinz', 'REINZ Statistics Portal, signed in', 'Sales, days to sell, photos, advertisement wording and the market report.', true],
+    ['listing', 'The live listing of any comparable still on the market', 'REINZ holds sold homes only.', false],
+    ['library', 'Dunedin NZ Visual Library', 'Only for a different header video or photo.', false],
+    ['relab', 'Relab, signed in', 'Only for an ownership check or a valuation REINZ lacks.', false],
+  ];
+  const APS_CAMPAIGN = [['standard', 'Standard home', '3 to 4 weeks'], ['larger', 'Larger or high-end home', '6 to 8 weeks, a longer curve'], ['land', 'Section or bare land', 'About 6 months, charted by month'], ['weeks', 'A number of weeks', 'Any number from 1 to ' + APPR.MAX_WEEKS]];
+  async function viewAppraisalSetup(id) {
+    header('Appraisal set-up', '', 0); actions(false);
+    document.body.classList.remove('apv-present');
+    main().innerHTML = '<div class="loading">Loading...</div>';
+    let rec = null; try { const d = await must(sb.from('appraisal_views').select('*').eq('id', id)); rec = Array.isArray(d) ? d[0] : d; } catch (_) { rec = null; }
+    if (!$('#main .loading')) return;
+    if (!rec) return viewPortalMissing();
+    if (!(rec.setup && rec.setup.v)) {
+      main().innerHTML = `<div class="view-pad" id="apsHand"><span class="agent-flag">Only you see this</span><h1>Appraisal set-up</h1><div class="card note tight"><p class="small" style="margin:0">This appraisal was loaded by hand, so it has no set-up. Change its figures on its own page.</p></div><div class="toolbar">${plink(`appraisals/${rec.id}`, 'Open the appraisal', 'btn primary')}</div></div>`;
+      top(); return;
+    }
+    let owners = [];
+    if (okId(rec.property_id)) { try { owners = ((await must(sb.from('property_people').select('legal_name,pref_name,role,position').eq('property_id', rec.property_id).order('position'))) || []).filter(x => (x.role || 'owner') === 'owner'); } catch (_) { owners = []; } }
+    if (!$('#main .loading')) return;
+    const firstName = x => String((x.pref_name || '').trim() || (x.legal_name || '').trim().split(/\s+/)[0] || '').trim();
+    const ownerNames = owners.map(firstName).filter(Boolean);
+    const S = Object.assign({ method: 'deadline', basis: 'comparables', header: 'claude', tabs: {} }, JSON.parse(JSON.stringify(rec.setup)));
+    if (S.suburb == null) S.suburb = APPR.suburbOf(rec.address);
+    if (S.note == null) S.note = APPR.DEFAULT_NOTE;
+    if (S.preparedFor == null) S.preparedFor = rec.prepared_for || (ownerNames.length > 1 ? ownerNames.slice(0, -1).join(', ') + ' and ' + ownerNames.slice(-1) : ownerNames[0] || '');
+    let parts = ((rec.fields || {}).ranges || []).map(r => ({ key: r.key, option: r.option || '', low: r.low, high: r.high }));
+    if (!parts.length) parts = [{ key: 'A', option: 'Your home', low: '', high: '' }];
+    const sent = rec.status === 'sent';
+    const radio = (name, val, title, desc, on, off) => `<label class="choice${off ? ' off' : ''}"><input type="radio" name="${name}" value="${esc(val)}"${on ? ' checked' : ''}${off ? ' disabled' : ''}><span class="mark"></span><span><span class="ct">${title}</span>${desc ? `<span class="cd">${desc}</span>` : ''}</span></label>`;
+    const PK = typeof PACKAGES !== 'undefined' ? PACKAGES : {};
+    const partsHTML = () => parts.map((r, i) => `<div class="card tight aps-part" data-part="${i}"><label class="f" for="apsPart${i}" style="margin-top:0">Part</label><input type="text" id="apsPart${i}" value="${esc(r.option)}" placeholder="Your home">
+        <div class="row2"><div><label class="f" for="apsLo${i}">Low</label><input type="text" inputmode="numeric" id="apsLo${i}" value="${esc(r.low)}" placeholder="$"></div><div><label class="f" for="apsHi${i}">High</label><input type="text" inputmode="numeric" id="apsHi${i}" value="${esc(r.high)}" placeholder="$"></div></div>
+        ${parts.length > 1 ? `<button class="btn link" type="button" data-aps-rm="${i}">Remove this part</button>` : ''}</div>`).join('');
+    main().innerHTML = `<div class="view-pad aps" id="apsPage"><span class="agent-flag">Only you see this</span><h1>Appraisal set-up</h1>
+      <p class="lede" translate="no">${esc(rec.address || rec.title || '')}</p>
+      ${sent ? '<div class="card warnc tight"><p class="small" style="margin:0">This appraisal has been sent, so it can\'t be changed. A sent copy never changes.</p></div>' : ''}
+      <h2 id="apsTabsH">Browser tabs to have open</h2>
+      <div class="card tight" id="apsTabs"><p class="small" style="margin:0 0 8px">Before anything is gathered for you, have these open in this browser. Tick each one that is open.</p>
+        <div class="choices">${APS_TABS.map(([k, t, d]) => `<label class="choice cb"><input type="checkbox" data-aps-tab="${k}"${S.tabs[k] ? ' checked' : ''}><span class="mark"></span><span><span class="ct">${esc(t)}</span><span class="cd">${esc(d)}</span></span></label>`).join('')}</div>
+        <p class="small" style="margin:8px 0 0">Council records need nothing open.</p>
+        <p class="small aps-missing" id="apsTabsMissing" role="status"></p></div>
+      <h2>Who it's for</h2>
+      <div class="card tight">
+        <label class="f" for="apsFor" style="margin-top:0">Prepared for</label><input type="text" id="apsFor" value="${esc(S.preparedFor)}" placeholder="Their first names">
+        <label class="f" for="apsSuburb">Suburb</label><input type="text" id="apsSuburb" value="${esc(S.suburb)}">
+        <p class="small" id="apsHill" style="margin:6px 0 0"></p>
+        <div id="apsLinkWrap"><label class="f" for="apsLink">Your link to this suburb <span class="opt">(optional: shown only if you write it)</span></label><input type="text" id="apsLink" value="${esc(S.suburbLink || '')}"></div>
+      </div>
+      <h2>Your note to them</h2>
+      <div class="card tight"><label class="f" for="apsNote" style="margin-top:0">Your note <span class="opt">(a blank line starts a new paragraph)</span></label><textarea id="apsNote" rows="6">${esc(S.note)}</textarea></div>
+      <h2>Your range</h2>
+      <div class="card tight"><p class="small" style="margin:0 0 6px">One range for each part that sells. These are your figures: nothing is priced for you.</p>
+        <div id="apsParts">${partsHTML()}</div>
+        <button class="btn link" type="button" id="apsAddPart">Add a part</button></div>
+      <h2>How long the campaign should be</h2>
+      <div class="card tight"><div class="choices" id="apsCamp">${APS_CAMPAIGN.map(([k, t, d]) => radio('apsCamp', k, esc(t), esc(d), (S.campaign || {}).kind === k)).join('')}</div>
+        <div id="apsWeeksWrap"><label class="f" for="apsWeeks">Number of weeks</label><input type="number" id="apsWeeks" min="1" max="${APPR.MAX_WEEKS}" inputmode="numeric" value="${esc((S.campaign || {}).weeks || '')}"></div></div>
+      <h2>Sale method</h2>
+      <div class="card tight"><div class="choices" id="apsMethod">${APPR.METHODS.map(m => radio('apsMethod', m.key, esc(m.name), '', S.method === m.key)).join('')}</div>
+        <label class="f" for="apsMethodText">How you'd sell it, in your words <span class="opt">(optional)</span></label><textarea id="apsMethodText" rows="3">${esc(S.methodText || '')}</textarea></div>
+      <h2>Pricing basis</h2>
+      <div class="card tight"><div class="choices" id="apsBasis">${radio('apsBasis', 'comparables', 'Comparable sales', 'The standard appraisal', true)}${radio('apsBasis', 'nocomps', 'No comparables', 'Coming later', false, true)}${radio('apsBasis', 'yield', 'Net yield', 'Coming later', false, true)}</div></div>
+      <h2>Marketing plan</h2>
+      <div class="card tight"><p class="small" style="margin:0 0 6px">The one you pick shows first, marked as recommended.</p><div class="choices" id="apsPlan">${Object.keys(PK).map(k => radio('apsPlan', k, esc(PK[k].name), esc(APPR.dollars(PK[k].price)) + ' incl. GST', S.plan === k)).join('')}${radio('apsPlan', 'custom', 'Build your own', 'Chosen item by item', S.plan === 'custom')}</div></div>
+      <h2>Header image or video</h2>
+      <div class="card tight"><div class="choices" id="apsHeader">${radio('apsHeader', 'claude', 'Leave it to Claude', 'A photo or footage that suits the suburb', S.header !== 'own')}${radio('apsHeader', 'own', 'Use my own', 'Uploading your own comes in the next part. Until then no header is shown.', S.header === 'own')}</div></div>
+      <h2>Private notes</h2>
+      <div class="card tight"><label class="f" for="apsPrivate" style="margin-top:0">Only you see these <span class="opt">(weak points of the home go here, never on their page)</span></label><textarea id="apsPrivate" rows="4">${esc(rec.private_notes || '')}</textarea></div>
+      ${sent ? '' : '<div class="toolbar"><button class="btn primary" type="button" id="apsSave">Save and write the appraisal</button></div>'}
+      <div class="toolbar no-print" id="apsAfter">${plink(`appraisals/${rec.id}`, 'Open the appraisal', 'btn ghost')}${plink(`appraisals/${rec.id}/present`, 'Present on screen', 'btn ghost')}</div>
+    </div>`;
+    const val = n => { const x = $(`input[name="${n}"]:checked`); return x ? x.value : ''; };
+    const readParts = () => { parts = parts.map((r, i) => ({ key: r.key, option: ($('#apsPart' + i) || {}).value || '', low: ($('#apsLo' + i) || {}).value || '', high: ($('#apsHi' + i) || {}).value || '' })); };
+    const redrawParts = () => { $('#apsParts').innerHTML = partsHTML(); wireParts(); };
+    const wireParts = () => $$('[data-aps-rm]').forEach(b => b.addEventListener('click', () => { readParts(); parts.splice(+b.dataset.apsRm, 1); JDIRTY = true; redrawParts(); }));
+    wireParts();
+    $('#apsAddPart').addEventListener('click', () => { readParts(); const used = parts.map(r => r.key); let k = 65; while (used.includes(String.fromCharCode(k))) k++; parts.push({ key: String.fromCharCode(k), option: '', low: '', high: '' }); JDIRTY = true; redrawParts(); const n = $('#apsPart' + (parts.length - 1)); if (n) n.focus(); });
+    // what follows the choices on screen: the tabs still to open, the Dalmore line or the suburb link, the weeks box, the sentence's default
+    const follow = () => {
+      const miss = APS_TABS.filter(([k, , , need]) => need && !$(`[data-aps-tab="${k}"]`).checked).map(x => x[1].replace(/, signed in$/, ''));
+      const ms = $('#apsTabsMissing'); ms.textContent = miss.length ? 'Still to open: ' + miss.join(', ') + '.' : 'REINZ is open. Open the others only if you need them.'; ms.dataset.kind = miss.length ? 'err' : 'ok';
+      const hill = APPR.isHill($('#apsSuburb').value);
+      $('#apsHill').textContent = hill ? 'The line about where you live shows on this appraisal: ' + APPR.DALMORE_LINE : 'Where you live is not mentioned outside Pine Hill, Liberton and Dalmore. You can add your own link to this suburb below.';
+      $('#apsLinkWrap').hidden = hill;
+      $('#apsWeeksWrap').hidden = val('apsCamp') !== 'weeks';
+      const camp = { kind: val('apsCamp') || 'standard', weeks: +$('#apsWeeks').value || 0 };
+      $('#apsMethodText').placeholder = APPR.methodSentence(camp, val('apsMethod') || 'deadline');
+    };
+    $('#apsPage').addEventListener('input', follow); $('#apsPage').addEventListener('change', follow); follow();
+    const sv = $('#apsSave');
+    if (sv) sv.addEventListener('click', async () => {
+      readParts();
+      const ranges = parts.map(r => ({ key: r.key, option: String(r.option).replace(/\s+/g, ' ').trim(), low: Math.round(num(r.low)), high: Math.round(num(r.high)) }));
+      const tabs = {}; APS_TABS.forEach(([k]) => { tabs[k] = !!$(`[data-aps-tab="${k}"]`).checked; });
+      const camp = val('apsCamp'), next = Object.assign({}, S, { v: 1, tabs, preparedFor: $('#apsFor').value.replace(/\s+/g, ' ').trim(), suburb: $('#apsSuburb').value.replace(/\s+/g, ' ').trim(),
+        suburbLink: APPR.isHill($('#apsSuburb').value) ? '' : $('#apsLink').value.replace(/\s+/g, ' ').trim(), note: $('#apsNote').value.trim(),
+        campaign: camp === 'weeks' ? { kind: camp, weeks: Math.round(+$('#apsWeeks').value) || 0 } : { kind: camp }, method: val('apsMethod'), methodText: $('#apsMethodText').value.trim(),
+        basis: val('apsBasis') || 'comparables', plan: val('apsPlan'), header: val('apsHeader') || 'claude' });
+      const bad = APPR.checkSetup(next, ranges); if (bad) { atBtn(sv, bad, 'err'); return; }
+      const w = APPR.writeStandard(next, ranges, { address: rec.address, preparedOn: rec.prepared_on, cat: { PACKAGES: typeof PACKAGES !== 'undefined' ? PACKAGES : {}, ITEMS: typeof ITEMS !== 'undefined' ? ITEMS : {}, CATALOGUE: typeof CATALOGUE !== 'undefined' ? CATALOGUE : [] } });
+      const bad2 = APPR.sectionsProblem([w.sections, w.title, next.preparedFor]); if (bad2) { atBtn(sv, bad2, 'err'); return; }
+      sv.disabled = true; atBtn(sv, 'Saving...', 'busy');
+      const { data, error } = await sb.rpc('agent_appraisal_save', { p_id: rec.id, p_setup: next, p_fields: w.fields, p_sections: w.sections, p_title: w.title, p_prepared_for: next.preparedFor, p_private_notes: $('#apsPrivate').value.trim(), p_status: null });
+      sv.disabled = false;
+      if (error || !data) { atBtn(sv, netErr(error) ? 'Not saved. Check you have signal, then try again.' : 'Not saved: ' + ((error && error.message) || 'try again.'), 'err'); return; }
+      Object.assign(rec, data); Object.assign(S, next); JDIRTY = false;
+      atBtn(sv, 'Saved. The appraisal is written in the agreed order: open it or present it below.', 'ok');
+    });
+    top();
+  }
+  // an appraisal written from its set-up: the page itself (the same drawing as the presentation), Tim's tools and his private notes
+  function apsShow(rec, present) {
+    const tools = present ? '' : `<div class="toolbar no-print" id="apvTools">${plink(`appraisals/${rec.id}/setup`, 'Change the set-up', 'btn primary')}${plink(`appraisals/${rec.id}/present`, 'Present on screen', 'btn ghost')}<button class="btn ghost" type="button" id="apvPrint">Print</button></div>
+      ${String(rec.private_notes || '').trim() ? `<details class="acc no-print" id="apsNotes"><summary>Your private notes</summary><div class="in"><p class="small" style="white-space:pre-wrap;margin:0">${esc(rec.private_notes)}</p></div></details>` : ''}`;
+    main().innerHTML = `<div class="view-pad apv${present ? ' apv-show' : ''}" id="apvPage">${present ? '' : '<span class="agent-flag no-print">Only you see this</span>'}${tools}<div id="apvDoc"></div>
+      ${present ? `<p class="apv-exit no-print">${plink(`appraisals/${rec.id}`, 'Finish presenting')}</p>` : ''}</div>`;
+    $('#apvDoc').innerHTML = APPR.render(rec);
+    const pb = $('#apvPrint'); if (pb) pb.addEventListener('click', () => { apsOpenAll(); window.print(); });
+    top();
+  }
+  // in print every sale method is open (a vendor must see them all, whatever Tim recommends)
+  function apsOpenAll() { $$('#apvDoc details.apv-mc').forEach(d => { d.open = true; }); }
+  window.addEventListener('beforeprint', apsOpenAll);
   function viewPortalMissing(msg) {
     header('', '', 0); actions(false);
     main().innerHTML = `<div class="view-pad" id="pMissing"><h1>This page isn't here</h1><p class="lede">${esc(msg || 'There is no page at this address. It may have been typed wrongly, or what it showed has gone.')}</p><div class="toolbar">${plink('', 'Home', 'btn primary')}</div></div>`;

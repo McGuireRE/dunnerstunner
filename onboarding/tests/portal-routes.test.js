@@ -120,7 +120,7 @@ const out = {}; const errs = [];
     'properties/P1/offers/blank/B1': async () => (await p.textContent('#stepName')) === 'Places on the blank',
     'properties/P1/offers/O1/draft/D1': async () => (await p.textContent('#stepName')) === 'Draft agreement' && !!(await p.$('#drReview')),
     'people': async () => !!(await p.$('#pPeople')),
-    'processes': async () => (await p.$$('#pProc button.home-tile')).length === 6 && JSON.stringify(await p.$$eval('#pProc .home-tile.soon', l => l.map(x => [x.tagName, x.querySelector('.kick').textContent, x.querySelector('.ttl').textContent]))) === JSON.stringify([['DIV', 'Coming soon', 'Appraisal report'], ['DIV', 'Coming soon', 'Improvements and preparation assessment'], ['DIV', 'Coming soon', 'Desktop analysis']]) && !/appraisal/i.test(await p.$$eval('#pProc #soonDesk, #pProc #soonPrep', l => l.map(x => x.textContent).join(' '))),
+    'processes': async () => (await p.$$('#pProc button.home-tile')).length === 7 && JSON.stringify(await p.$$eval('#pProc .home-tile.soon', l => l.map(x => [x.tagName, x.querySelector('.kick').textContent, x.querySelector('.ttl').textContent]))) === JSON.stringify([['DIV', 'Coming soon', 'Improvements and preparation assessment'], ['DIV', 'Coming soon', 'Desktop analysis']]) && (await p.textContent('#pProc #homeReport .ttl')) === 'Appraisal report' && !/appraisal/i.test(await p.$$eval('#pProc #soonDesk, #pProc #soonPrep', l => l.map(x => x.textContent).join(' '))),
     'processes/appraisal': async () => (await p.inputValue('#plAddr')) === '',
     'processes/agreement': async () => !!(await p.$('.ttabs')) && (await p.inputValue('#tAddr')) === '',
     'processes/inspection': async () => !!(await p.$('#insAddr')),
@@ -182,8 +182,8 @@ const out = {}; const errs = [];
   out.procOrder = await p.$$eval('#pProc .home-tile', els => els.map(e => e.id));
   out.deskApart = await p.$eval('#soonDesk', e => { const g = e.closest('.home-tiles'); return !!g && g.previousElementSibling && g.previousElementSibling.id === 'pProcApart' && !g.querySelector('#homeBegin'); });
   expect(out.deskApart, 'Desktop analysis is listed apart from the listing steps (Tim, 26 November 2026)');
-  expect(JSON.stringify(out.procOrder) === JSON.stringify(['homeFirst', 'soonReport', 'homeBegin', 'homeInspect', 'homeAgree', 'homeForms', 'homeOffer', 'soonPrep', 'soonDesk']), 'Processes are in the order they are used for a property: ' + out.procOrder);
-  await p.click('#soonPrep'); await wait(p, 400); await p.click('#soonDesk'); await wait(p, 400); await p.click('#soonReport'); await wait(p, 400);
+  expect(JSON.stringify(out.procOrder) === JSON.stringify(['homeFirst', 'homeReport', 'homeBegin', 'homeInspect', 'homeAgree', 'homeForms', 'homeOffer', 'soonPrep', 'soonDesk']), 'Processes are in the order they are used for a property: ' + out.procOrder);
+  await p.click('#soonPrep'); await wait(p, 400); await p.click('#soonDesk'); await wait(p, 400);
   out.soonStays = await at(p); expect(out.soonStays === '/portal/processes', 'the Coming soon tiles do nothing when tapped: ' + out.soonStays);
   await p.click('#homeBegin'); await wait(p, 700); out.m7 = [await at(p), (await chrome(p)).up];
   await menu('Home'); out.m8 = await at(p);
@@ -385,7 +385,7 @@ const out = {}; const errs = [];
     return Array.from(document.querySelectorAll('.home-tile.soon')).flatMap(t => { const bg = rgb(getComputedStyle(t).backgroundColor), op = getComputedStyle(t).opacity;
       return ['.kick', '.ttl', '.txt'].map(k => [k, op, Math.round(ratio(rgb(getComputedStyle(t.querySelector(k)).color), bg) * 100) / 100]); });
   });
-  expect(out.soonContrast.length === 9 && out.soonContrast.every(([, op, r]) => op === '1' && r >= 4.5), 'Coming soon text: at least 4.5:1 in dark mode: ' + JSON.stringify(out.soonContrast));
+  expect(out.soonContrast.length === 6 && out.soonContrast.every(([, op, r]) => op === '1' && r >= 4.5), 'Coming soon text: at least 4.5:1 in dark mode: ' + JSON.stringify(out.soonContrast));
   await p.evaluate(() => localStorage.removeItem('mocksession')); await p.goto(PR + 'people'); await wait(p, 600);
   await p.fill('#loginEmail', 'agent-test@example.com'); await p.click('#loginBtn'); await wait(p, 300);
   out.rootOtp = await p.evaluate(() => JSON.parse(localStorage.getItem('otpLog') || '[]').pop());
