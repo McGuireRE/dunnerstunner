@@ -16,7 +16,7 @@ mock database, a rollback test for any migration, an independent review and Tim'
 | D | Bespoke: several titles and units, options that add up, no comparables, net yield | 3 to 4 |
 
 A and C give Tim the most value first: an appraisal starts from the property file in minutes, and the slowest part,
-collecting comparables, is done for him. D moves earlier if the Sheerness reappraisal is booked.
+collecting comparables, is done for him. D moves earlier if a bespoke reappraisal is booked.
 
 ## Phase A in detail
 

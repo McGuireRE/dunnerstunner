@@ -195,6 +195,9 @@ function renderWith(src, rec) { const vm = require('vm'); const ctx = { window: 
   [n, s] = await viaSetup({ camp: 'standard', method: 'negotiation', plan: 'custom' }); out.nego = [s.mark, s.on, s.steps, s.sub, s.plans[0]];
   expect(s.mark === '' && s.on === 0 && s.steps.some(x => /^Offers any time/.test(x)) && /About 80% of interested buyers visit in the first 4 weeks/.test(s.sub), 'negotiation: no closing marker, offers any time: ' + JSON.stringify(out.nego));
   expect(s.plans[0][0] === 'custom' && s.plans[0][1], 'Build your own picked: it shows first, marked');
+  // one week by negotiation reads "the first week", never "the first 1 weeks"
+  [n, s] = await viaSetup({ camp: 'weeks', weeks: 1, method: 'negotiation' }); out.oneWeek = s.sub;
+  expect(/visit in the first week\b/.test(s.sub) && !/first 1 weeks/.test(await docText(p)), 'one week: plain wording: ' + s.sub);
   // a long run of weeks stays on the page at 390 px
   [n, s] = await viaSetup({ camp: 'weeks', weeks: 26, method: 'deadline' });
   expect(s.bars.length === 27 && !(await side(p)), '26 weeks: no sideways scroll at 390: ' + s.bars.length);

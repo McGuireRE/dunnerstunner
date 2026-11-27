@@ -134,7 +134,7 @@
   // the buyer-visit chart for a campaign and method: the marker and its label follow the method (negotiation has no closing day)
   function waveFor(c, methodKey) {
     const cp = campaignOf(c), m = methodOf(methodKey), mk = m.mark ? cp.mark : 0;
-    return { type: 'campaign', title: 'Most buyers come early', subtitle: mk ? '{{early}}% of interested buyers visit by ' + cp.unit.toLowerCase() + ' ' + mk : 'About 80% of interested buyers visit in the first ' + cp.bars.length + ' ' + cp.unit.toLowerCase() + 's',
+    return { type: 'campaign', title: 'Most buyers come early', subtitle: mk ? '{{early}}% of interested buyers visit by ' + cp.unit.toLowerCase() + ' ' + mk : 'About 80% of interested buyers visit in the first ' + (cp.bars.length === 1 ? cp.unit.toLowerCase() : cp.bars.length + ' ' + cp.unit.toLowerCase() + 's'),
       bars: cp.bars.map((p, i) => ({ label: cp.unit + ' ' + (i + 1), pct: p })), marker: mk, markerLabel: mk ? m.mark + ' ' + closeWords(cp) : '',
       trickle: 'then a trickle', tail: cp.unit + ' ' + (cp.bars.length + 1) + ' on', caption: cp.caption };
   }
