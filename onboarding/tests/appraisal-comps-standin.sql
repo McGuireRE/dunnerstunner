@@ -15,6 +15,15 @@ create table storage.buckets (id text not null primary key, name text not null, 
   public boolean default false, avif_autodetection boolean default false, file_size_limit bigint, allowed_mime_types text[], owner_id text);
 create table storage.objects (id uuid primary key default gen_random_uuid(), bucket_id text references storage.buckets(id), name text, owner uuid,
   created_at timestamptz default now(), updated_at timestamptz default now(), last_accessed_at timestamptz default now(), metadata jsonb, path_tokens text[], version text, owner_id text, user_metadata jsonb);
+-- live: direct deletes from storage.objects are refused unless storage.allow_delete_query is 'true' (the Storage API sets it)
+create function storage.protect_delete() returns trigger language plpgsql as $pd$
+begin
+  if coalesce(current_setting('storage.allow_delete_query', true), 'false') != 'true' then
+    raise exception 'Direct deletion from storage tables is not allowed. Use the Storage API instead.' using errcode = '42501';
+  end if;
+  return null;
+end $pd$;
+create trigger protect_objects_delete before delete on storage.objects for each statement execute function storage.protect_delete();
 CREATE OR REPLACE FUNCTION storage.foldername(name text)
  RETURNS text[]
  LANGUAGE plpgsql

@@ -240,6 +240,8 @@ begin
   begin insert into public.appraisal_comps (appraisal_id, address) values (aid3, '32 Rbcomp Road'); out := out || 'A COMPARABLE WAS ADDED TO A SENT APPRAISAL; '; exception when others then out := out || 'sent, new comparable: refused; '; end;
   begin perform public.agent_comps_import(aid3, pack1); out := out || 'A PACK WENT INTO A SENT APPRAISAL; '; exception when others then out := out || 'sent, import: refused; '; end;
   begin delete from public.appraisal_media where appraisal_id = aid3; out := out || 'A SENT PHOTO WAS REMOVED; '; exception when others then out := out || 'sent photo, remove: refused; '; end;
+  -- the Storage API sets storage.allow_delete_query for its own deletes (live's protect_objects_delete trigger); do the same
+  perform set_config('storage.allow_delete_query', 'true', true);
   delete from storage.objects where bucket_id = 'appraisal-media' and name like 'appraisals/' || aid3 || '/%';
   execute 'reset role';
   select count(*) into n from storage.objects where name like 'appraisals/' || aid3 || '/%';
