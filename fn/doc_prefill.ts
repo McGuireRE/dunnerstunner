@@ -6,7 +6,8 @@ import { createClient } from "npm:@supabase/supabase-js@2.45.4";
 import { unzipSync, strFromU8 } from "npm:fflate@0.8.2";
 import * as XLSX from "npm:xlsx@0.18.5";
 
-import { FIELD_KEYS, MAX_TOTAL, MODEL, NO_TOOL_ERROR, NO_TOOL_MESSAGE, SYSTEM, TOOL, TRANSLATE_KINDS, answerByTool, buildTranslateRequest, readTranslateResult, toolUseOf } from "./prefill_shared.ts";
+import { FIELD_KEYS, MAX_TOTAL, MODEL, NO_TOOL_ERROR, NO_TOOL_MESSAGE, SYSTEM, TOOL, TRANSLATE_KINDS, answerByTool, buildTranslateRequest, callAnthropic, logAiCall, readTranslateResult, toolUseOf } from "./prefill_shared.ts";
+import { type AiDeps, buyerCheck, readReport } from "./appraisal_ai_handler.ts";
 
 function b64(bytes: Uint8Array) { let s = ""; for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000)); return btoa(s); }
 export function docxText(bytes: Uint8Array) {
@@ -28,6 +29,32 @@ Deno.serve(async (req) => {
     if (!key) return json({ error: "not_set_up", message: "Document reading isn't switched on yet." }, 503);
 
     const body = await req.json();
+
+    // LW3 phase C2 (appraisal_ai_handler.ts): reading a comparables or market report, and who a sale appealed to in suburbs Tim checks
+    // case by case. Same agent-only check above, same key, every call logged in ai_calls with the appraisal's id.
+    if (body.mode === "appraisal_report" || body.mode === "buyer_check") {
+      const { data: who } = await userClient.auth.getUser();
+      const agent = String(who?.user?.email || "agent");
+      const dbA = admin();
+      const deps: AiDeps = {
+        rpc: async (fn, args) => { const { data, error } = await dbA.rpc(fn, args); return { data, error: error ? { message: error.message } : null }; },
+        download: async (path) => { const { data, error } = await dbA.storage.from("property-files").download(path); return error || !data ? null : new Uint8Array(await data.arrayBuffer()); },
+        buyerInputs: async (aid) => {
+          const { data: a } = await dbA.from("appraisal_views").select("id, property_id, status, setup, fields").eq("id", aid).maybeSingle();
+          if (!a) return null;
+          const { data: comps } = await dbA.from("appraisal_comps").select("id, shown, status, suburb, price, bedrooms, bathrooms, floor_m2, land_m2, cv, days_to_sell, method, ad_text").eq("appraisal_id", aid).order("position");
+          const { data: groups } = await dbA.from("suburb_groups").select("suburbs, mode");
+          // the subject's facts from its profile (the first visit's facts are on it), read as Tim with his own token
+          const prof = a.property_id ? await userClient.rpc("agent_property_profile", { p_property: a.property_id }) : { data: null };
+          return { appraisal: a, comps: comps || [], groups: groups || [], facts: ((prof.data && prof.data.facts) || []).map((f: any) => ({ key: f.key, value: f.value })) };
+        },
+        aiKey: () => key,
+        callModel: (request, ms) => callAnthropic(key, request, ms),
+        logAi: (row, who_) => logAiCall(dbA, row, who_),
+      };
+      const out = body.mode === "appraisal_report" ? await readReport(deps, body, agent) : await buyerCheck(deps, body, agent);
+      return json(out.body, out.status);
+    }
 
     // Translation mode (phase 4): same agent-only check, same key, same ai_calls log. The strings are data.
     if (body.mode === "translate") {

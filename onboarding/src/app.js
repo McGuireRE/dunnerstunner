@@ -9844,6 +9844,15 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   const CMP_SRC = [['tim', 'Typed by you'], ['reinz', 'REINZ'], ['relab', 'Relab'], ['listing', 'A live listing'], ['other', 'Somewhere else']];
   const CMP_PHOTO_MAX = 15 * 1024 * 1024, CMP_PHOTO_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
   let CMP_EDIT = null;   // the comparable open for editing ('new' for a new one), kept while the page redraws
+  // C2: photos from a listing page for one comparable ({ cid, res: the fetch's answer, page }), kept while the page redraws; and the
+  // report last saved but not read (so Tim can try the reading again)
+  let CMP_FETCH = null, CMP_REPORT_RETRY = null;
+  const CMP_REPORT_KIND = 'Comparables or market report';
+  const RPT_SRC = { relab: 'Relab', reinz: 'REINZ', other: 'another source' };
+  const BUYER_WORDS = { owner: 'Likely a family or owner-occupier sale', investor: 'Likely an investor or student sale', unclear: 'Unclear' };
+  const GRP_MODES = [['never_mix', 'Never mix'], ['case_by_case', 'Case by case']];
+  // a function's answer, also when it came back with an error status (its JSON body says why)
+  const fnJson = async (data, error) => { if (data) return data; try { return error && error.context && typeof error.context.json === 'function' ? await error.context.json() : null; } catch (_) { return null; } };
   async function viewAppraisalComps(id, keep) {
     header('Comparables', '', 0); actions(false); document.body.classList.remove('apv-present');
     if (!keep) { CMP_EDIT = null; main().innerHTML = '<div class="loading">Loading...</div>'; }
@@ -9857,11 +9866,19 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     let comps = [], groups = [], photos = {}, failed = false;
     try { comps = ((await must(sb.from('appraisal_comps').select('*').eq('appraisal_id', id).order('position'))) || []).filter(c => okId(c.id)); groups = (await must(sb.from('suburb_groups').select('*').order('name'))) || []; } catch (_) { failed = true; }
     if (!failed) photos = await cmpPhotoUrls(id, comps.map(c => c.id));
+    // C2 (035): readings of uploaded reports still to be ticked, and the latest case-by-case check (Tim's alone)
+    let reports = [], buyers = null;
+    if (!failed) {
+      try { reports = ((await must(sb.from('appraisal_reports').select('*').eq('appraisal_id', id).order('read_at'))) || []).filter(r => !r.imported_at && r.result); } catch (_) { reports = []; }
+      try { const bc = (await must(sb.from('appraisal_buyer_checks').select('*').eq('appraisal_id', id).order('checked_at'))) || []; buyers = bc.length ? bc[bc.length - 1] : null; } catch (_) { buyers = null; }
+    }
     if (!keep && !$('#main .loading')) return;
     if (keep && !$('#cmpPage')) return;
     const sent = rec.status === 'sent', ro = sent || failed;
     const suburb = String((rec.setup || {}).suburb || APPR.suburbOf(rec.address) || '');
-    const rule = APPR.compsRule(comps, { today: todayNZ(), suburb, groups });
+    const rule = APPR.compsRule(comps, { today: todayNZ(), suburb, groups, buyers });
+    const anyCbc = groups.some(g => g.mode === 'case_by_case');
+    if (CMP_FETCH && !comps.some(c => c.id === CMP_FETCH.cid)) CMP_FETCH = null;
     const ruleHTML = `<ul class="cmp-rule" id="cmpRuleList">${rule.items.map(x => `<li data-kind="${x.kind}">${esc(x.text)}</li>`).join('')}</ul>`;
     const stName = k => (CMP_ST.find(s => s[0] === k) || CMP_ST[0])[1];
     const line = c => [c.price ? APPR.dollars(c.price) : '', c.status === 'listed' ? (c.listed_on ? 'listed ' + fmtDate(c.listed_on) : '') : (c.sold_on ? 'sold ' + fmtDate(c.sold_on) : ''), APPR.ringWords(c.ring)].filter(Boolean).join(', ');
@@ -9890,12 +9907,32 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         <span class="small">${esc(line(c) || 'No price or date yet')}</span>
         <span class="cmp-pills"><span class="pill">${esc(stName(c.status))}</span>${c.sold_by_tim ? '<span class="pill">Sold by Tim</span>' : ''}${c.shown === false ? '<span class="pill warnp">Hidden</span>' : ''}${APPR.cmpShown(c) ? '<span class="pill okp">Comparison ticked</span>' : ''}</span></div></div>
         ${String(c.private_note || '').trim() ? `<p class="small cmp-priv"><strong>Your note:</strong> ${esc(c.private_note)}</p>` : ''}
+        ${buyers && buyers.comps && buyers.comps[c.id] ? `<p class="small cmp-priv cmp-buyer" data-verdict="${esc(buyers.comps[c.id].verdict)}"><strong>Who it likely appealed to (AI, only you see this):</strong> ${esc(BUYER_WORDS[buyers.comps[c.id].verdict] || BUYER_WORDS.unclear)}${buyers.comps[c.id].reason ? '. ' + esc(buyers.comps[c.id].reason) : ''}</p>` : ''}
         <p class="small cmp-src">Source: ${esc(srcName(c.source))}${c.gathered_at ? ', gathered ' + esc(fmtDate(new Date(c.gathered_at).toLocaleDateString('en-CA', { timeZone: 'Pacific/Auckland' }))) : ''}${c.source_url ? ` · <a href="${esc(c.source_url)}" target="_blank" rel="noopener">open the link</a>` : ''}</p>
         ${ph.length ? `<div class="cmp-photos">${ph.map((m, k) => `<figure data-media="${esc(m.id)}"><img src="${esc(m.url)}" alt="Photo ${k + 1}"><figcaption>${m.cover || (!ph.some(x => x.cover) && k === 0) ? '<span class="pill okp">In print</span>' : (ro ? '' : `<button class="btn link" type="button" data-med-cover="${esc(m.id)}" id="medCover-${esc(m.id)}">Use in print</button>`)}${ro ? '' : `<button class="btn link" type="button" data-med-rm="${esc(m.id)}" id="medRm-${esc(m.id)}">Remove</button>`}</figcaption></figure>`).join('')}</div>` : ''}
         ${ro ? '' : `<div class="toolbar cmp-tools"><button class="btn ghost" type="button" data-cmp-edit="${esc(c.id)}" id="cmpEdit-${esc(c.id)}">Edit</button><button class="btn ghost" type="button" data-cmp-hide="${esc(c.id)}" id="cmpHide-${esc(c.id)}">${c.shown === false ? 'Show' : 'Hide'}</button>
           <button class="btn ghost" type="button" data-cmp-move="-1" data-id="${esc(c.id)}" id="cmpUp-${esc(c.id)}"${i === 0 ? ' disabled' : ''} aria-label="Move up">Up</button><button class="btn ghost" type="button" data-cmp-move="1" data-id="${esc(c.id)}" id="cmpDown-${esc(c.id)}"${i === comps.length - 1 ? ' disabled' : ''} aria-label="Move down">Down</button>
-          <label class="btn ghost cmp-addph" id="cmpPh-${esc(c.id)}">Add photos<input type="file" accept="image/jpeg,image/png,image/webp" multiple data-cmp-photos="${esc(c.id)}" hidden></label><button class="btn link" type="button" data-cmp-rm="${esc(c.id)}" id="cmpRm-${esc(c.id)}">Remove</button></div>`}
+          <label class="btn ghost cmp-addph" id="cmpPh-${esc(c.id)}">Add photos<input type="file" accept="image/jpeg,image/png,image/webp" multiple data-cmp-photos="${esc(c.id)}" hidden></label><button class="btn ghost" type="button" data-cmp-fetch="${esc(c.id)}" id="cmpFetch-${esc(c.id)}">Photos from a listing</button><button class="btn link" type="button" data-cmp-rm="${esc(c.id)}" id="cmpRm-${esc(c.id)}">Remove</button></div>`}
+        ${CMP_FETCH && CMP_FETCH.cid === c.id && !ro ? fetchBox(c) : ''}
         ${CMP_EDIT === c.id && !ro ? editor(c) : ''}</li>`; };
+    // photos from a listing page (or the pack's photo links): fetched by the appraisal-fetch function, then Tim ticks the ones to keep
+    const hintUrls = c => (c.photo_hints || []).map(h => h && h.url).filter(u => /^https:\/\/\S+$/.test(String(u || '')));
+    const fetchBox = c => { const r = CMP_FETCH.res, hints = hintUrls(c);
+      return `<div class="card tight cmp-fetch" id="cmpFetchBox"><h3 style="margin-top:0">Photos from a listing</h3>
+        <p class="small" style="margin:0 0 6px">Paste the link of a recent listing of this home on a portal or an agency's site. Its photos are fetched and kept privately; you tick the ones to keep.</p>
+        <label class="f" for="cfPage" style="margin-top:0">Link to the listing</label><input type="url" id="cfPage" data-nodirty value="${esc(CMP_FETCH.page || c.source_url || '')}" placeholder="https://" inputmode="url">
+        <div class="toolbar"><button class="btn primary" type="button" id="cfFetchGo">Fetch the photos</button>${hints.length ? `<button class="btn ghost" type="button" id="cfFetchHints">Use the pack's photo links (${hints.length})</button>` : ''}<button class="btn link" type="button" id="cfFetchClose">Close</button></div>
+        ${r && (r.photos || []).length ? `<p class="small" style="margin:10px 0 6px">Tick the photos to keep. Nothing is filed until you tap Keep; the ones you leave unticked are deleted.</p>
+          <div class="cmp-photos cmp-fetched">${r.photos.map((p, k) => `<figure><img src="${esc(p.url || '')}" alt="Fetched photo ${k + 1}"><figcaption><label class="choice cb"><input type="checkbox" id="cfx-${k}" data-cfx="${k}"><span class="mark"></span><span><span class="ct">Keep</span></span></label></figcaption></figure>`).join('')}</div>
+          <div class="toolbar"><button class="btn primary" type="button" id="cfKeep">Keep the ticked photos</button></div>` : ''}</div>`; };
+    // a report's reading, for Tim to tick: every item unticked, with what the reader found and the page it came from
+    const reviewCard = rp => { const res = rp.result || {}, cs = res.comps || [], ms = res.market || [], rep = res.report || {};
+      const mline = m => [m.median ? 'median ' + APPR.dollars(m.median) : '', m.lower_quartile && m.upper_quartile ? 'middle half ' + APPR.dollars(m.lower_quartile) + ' to ' + APPR.dollars(m.upper_quartile) : '', m.sales != null ? m.sales + ' sold' : '', m.days_to_sell != null ? m.days_to_sell + ' days to sell' : ''].filter(Boolean).join(', ');
+      return `<div class="card tight cmp-review" data-report="${esc(rp.id)}" id="rv-${esc(rp.id)}"><h3 style="margin-top:0">What the reader found${rep.title ? ': <span translate="no">' + esc(rep.title) + '</span>' : ''}</h3>
+        <p class="small" style="margin:0 0 6px">From ${esc(RPT_SRC[rep.source] || RPT_SRC.other)}${rep.date ? ', dated ' + esc(fmtDate(rep.date)) : ''}. Nothing is ticked: tick each item to bring in, after checking it against the page it came from.</p>
+        ${cs.length ? `<h4>Comparables</h4><ul class="cmp-files cmp-rv">${cs.map(c => `<li><label class="choice cb"><input type="checkbox" data-rv-c="${esc(c.id)}"><span class="mark"></span><span><span class="ct" translate="no">${esc(c.address)}</span><span class="cd">Page ${esc(c.page)}: ${esc(APPR.reportLine(c) || 'no figures printed')}</span></span></label></li>`).join('')}</ul>` : '<p class="small">No comparables found in it.</p>'}
+        ${ms.length ? `<h4>Market figures</h4><ul class="cmp-files cmp-rv">${ms.map(m => `<li><label class="choice cb"><input type="checkbox" data-rv-m="${esc(m.id)}"><span class="mark"></span><span><span class="ct" translate="no">${esc(m.area)}, ${esc(MKT.monthName(m.month + '-01'))}</span><span class="cd">Page ${esc(m.page)}: ${esc(mline(m) || 'no figures printed')}</span></span></label></li>`).join('')}</ul>` : ''}
+        <div class="toolbar"><button class="btn primary" type="button" data-rv-imp="${esc(rp.id)}" id="rvImp-${esc(rp.id)}">Bring in the ticked items</button><button class="btn link" type="button" data-rv-skip="${esc(rp.id)}" id="rvSkip-${esc(rp.id)}">Set this report aside</button></div></div>`; };
     main().innerHTML = `<div class="view-pad cmp" id="cmpPage"><span class="agent-flag">Only you see this</span><h1>Comparables</h1>
       <p class="lede" translate="no">${esc(rec.address || rec.title || '')}</p>
       <div class="toolbar no-print">${plink(`appraisals/${rec.id}`, 'Open the appraisal', 'btn ghost')}${plink(`appraisals/${rec.id}/present`, 'Present on screen', 'btn ghost')}${plink('appraisals/market', 'Market figures', 'btn ghost')}</div>
@@ -9903,7 +9940,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       ${failed ? '<div class="card warnc tight"><p class="small" style="margin:0">The comparables didn\'t load. Check you have signal, then open this page again.</p></div>' : ''}
       <h2>The comparables rule</h2>
       <div class="card tight" id="cmpRule"><p class="small" style="margin:0 0 6px">At least five nearby sales, ideally from the last three months, going back as far as it takes to find three true comparables.</p>${ruleHTML}
-        <div class="toolbar"><button class="btn ghost" type="button" id="cmpCheck">Check against the comparables rule</button></div></div>
+        <div class="toolbar"><button class="btn ghost" type="button" id="cmpCheck">Check against the comparables rule</button>${anyCbc && !ro ? '<button class="btn ghost" type="button" id="cmpBuyers">Check who they appeal to</button>' : ''}</div>
+        ${anyCbc ? `<p class="small" style="margin:6px 0 0">${buyers ? 'Case-by-case sales last checked ' + esc(fmtDate(new Date(buyers.checked_at).toLocaleDateString('en-CA', { timeZone: 'Pacific/Auckland' }))) + '. ' : ''}In suburbs you check case by case, the AI suggests who each sale appealed to, and only a mismatch with this home is flagged. Nothing is hidden for you.</p>` : ''}</div>
       <h2>Your comparables</h2>
       ${comps.length ? `<ol class="cmp-list" id="cmpList">${comps.map(row).join('')}</ol>` : '<div class="card note tight"><p class="small" style="margin:0">No comparables yet. Add one, or import a pack gathered from REINZ.</p></div>'}
       ${ro ? '' : `<div class="toolbar"><button class="btn primary" type="button" id="cmpAdd">Add a comparable</button></div>${CMP_EDIT === 'new' ? editor(null) : ''}`}
@@ -9911,6 +9949,9 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <div class="card tight"><p class="small" style="margin:0 0 6px">Paste the comparables pack gathered from REINZ or Relab (format mre.comps/1). Its source and date are kept; your ticked wording is never replaced; the listing's words are only ever quoted.</p>
         <label class="f" for="cmpPack" style="margin-top:0">Pack</label><textarea id="cmpPack" rows="5" data-nodirty spellcheck="false" placeholder='{"format":"mre.comps/1","comps":[...]}'></textarea>
         <div class="toolbar"><button class="btn primary" type="button" id="cmpImport">Import the pack</button></div></div>
+      <div class="card tight" id="cmpReportCard"><h3 style="margin-top:0">Upload a report (PDF)</h3><p class="small" style="margin:0 0 6px">A Relab, REINZ or similar comparables or market report. It is kept on the property file with your agency papers (never shared), and the AI reads it. You tick what to bring in: nothing comes in without your tick.</p>
+        <div class="toolbar"><label class="btn ghost" id="cmpReportPick">Choose the report<input type="file" id="cmpReport" accept="application/pdf,.pdf" hidden></label>${CMP_REPORT_RETRY ? '<button class="btn ghost" type="button" id="cmpReportRetry">Read the saved report again</button>' : ''}</div></div>
+      ${reports.map(reviewCard).join('')}
       <h2>Photos from your download folder</h2>
       <div class="card tight"><p class="small" style="margin:0 0 6px">Choose or drop the photos you downloaded. Each is matched to its comparable by its file name; choose one for any that don't match.</p>
         <div class="cmp-drop" id="cmpDrop"><label class="btn ghost" id="cmpFolderPick">Choose photos<input type="file" id="cmpFolder" accept="image/jpeg,image/png,image/webp" multiple hidden></label><span class="small">or drop them here</span></div>
@@ -9918,16 +9959,18 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <h2>On the appraisal</h2>
       <div class="card tight"><label class="choice cb"><input type="checkbox" id="cmpMarket"${rec.setup.market ? ' checked' : ''}${ro ? ' disabled' : ''}><span class="mark"></span><span><span class="ct">Show the Dunedin market report</span><span class="cd">From the shared market figures, loaded once a month.</span></span></label></div>
       <h2>Your never-mix list</h2>
-      <div class="card tight" id="grpCard"><p class="small" style="margin:0 0 6px">Suburbs whose sales are never mixed with others (for example North East Valley's investor and student sales). A sale in a group is not counted for a home outside it.</p>
+      <div class="card tight" id="grpCard"><p class="small" style="margin:0 0 6px">Never mix: a sale in the group is not counted for a home outside it. Case by case: the sales are counted, the AI suggests whether each looks like an investor or student sale or a family home, and only a mismatch with this home is flagged.</p>
         ${groups.map(g => `<div class="cmp-grp" data-grp="${esc(g.id)}"><div class="row2"><div><label class="f" for="grpN-${esc(g.id)}">Name</label><input type="text" id="grpN-${esc(g.id)}" value="${esc(g.name)}"></div><div><label class="f" for="grpS-${esc(g.id)}">Suburbs <span class="opt">(commas between)</span></label><input type="text" id="grpS-${esc(g.id)}" value="${esc((g.suburbs || []).join(', '))}"></div></div>
+          <label class="f" for="grpM-${esc(g.id)}">How their sales are used</label><select id="grpM-${esc(g.id)}">${GRP_MODES.map(([k, t]) => `<option value="${k}"${(g.mode || 'never_mix') === k ? ' selected' : ''}>${t}</option>`).join('')}</select>
           <div class="toolbar"><button class="btn ghost" type="button" data-grp-save="${esc(g.id)}" id="grpSave-${esc(g.id)}">Save</button><button class="btn link" type="button" data-grp-rm="${esc(g.id)}" id="grpRm-${esc(g.id)}">Remove</button></div></div>`).join('')}
         <div class="row2"><div><label class="f" for="grpName">New group</label><input type="text" id="grpName" data-nodirty placeholder="Student and investor sales"></div><div><label class="f" for="grpSuburbs">Suburbs <span class="opt">(commas between)</span></label><input type="text" id="grpSuburbs" data-nodirty></div></div>
+        <label class="f" for="grpMode">How their sales are used</label><select id="grpMode" data-nodirty>${GRP_MODES.map(([k, t]) => `<option value="${k}">${t}</option>`).join('')}</select>
         <div class="toolbar"><button class="btn ghost" type="button" id="grpAdd">Add to the list</button></div></div>
     </div>`;
     if (!keep) top();
     const again = async (btnId, msg, kind) => { const y = window.scrollY; JDIRTY = false; await viewAppraisalComps(id, true); window.scrollTo(0, y); if (btnId && msg) atBtn(document.getElementById(btnId), msg, kind || 'ok'); };
     const fail = (b, e, what) => atBtn(b, netErr(e) ? 'Not saved. Check you have signal, then try again.' : (what || 'Not saved') + ': ' + ((e && e.message) || 'try again.'), 'err');
-    $('#cmpCheck').addEventListener('click', e => { const r = APPR.compsRule(comps, { today: todayNZ(), suburb, groups }); $('#cmpRuleList').outerHTML = `<ul class="cmp-rule" id="cmpRuleList">${r.items.map(x => `<li data-kind="${x.kind}">${esc(x.text)}</li>`).join('')}</ul>`;
+    $('#cmpCheck').addEventListener('click', e => { const r = APPR.compsRule(comps, { today: todayNZ(), suburb, groups, buyers }); $('#cmpRuleList').outerHTML = `<ul class="cmp-rule" id="cmpRuleList">${r.items.map(x => `<li data-kind="${x.kind}">${esc(x.text)}</li>`).join('')}</ul>`;
       atBtn(e.currentTarget, r.ok ? 'Meets the comparables rule. Check the points below before you present.' : 'Not yet: see what is still needed above.', r.ok ? 'ok' : 'err'); });
     const mk = $('#cmpMarket');
     if (mk && !ro) mk.addEventListener('change', async () => {
@@ -9936,6 +9979,63 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       if (error || !data) { mk.checked = !mk.checked; fail(mk, error); return; }
       rec.setup = next; atBtn(mk, mk.checked ? 'Saved. The market report shows on this appraisal.' : 'Saved. The market report is off for this appraisal.', 'ok'); });
     if (ro) return;
+    // C2: who the sales in case-by-case suburbs likely appealed to (the AI suggests; only a mismatch is flagged; nothing is hidden)
+    const cb = $('#cmpBuyers'); if (cb) cb.addEventListener('click', async () => { cb.disabled = true; atBtn(cb, 'Checking... this takes a few seconds.', 'busy');
+      const { data, error } = await sb.functions.invoke('doc-prefill', { body: { mode: 'buyer_check', appraisal_id: rec.id } }); const j = await fnJson(data, error); cb.disabled = false;
+      if (!j || !j.ok) return atBtn(cb, (j && (j.message || j.error)) || (netErr(error) ? 'Not checked. Check you have signal, then try again.' : 'The AI check didn\'t work this time, so nothing is flagged. Try again.'), 'err');
+      again('cmpBuyers', j.checked ? 'Checked ' + j.checked + ' sale' + (j.checked === 1 ? '' : 's') + '. Any mismatch with this home is in the list above, as a suggestion.' : (j.message || 'Nothing to check.'), 'ok'); });
+    // C2: a report (PDF) filed on the property file as agency papers, then read by the AI; Tim ticks what comes in
+    const readReport = async (docId, el) => { atBtn(el, 'Reading the report... this can take a minute or two.', 'busy');
+      const { data, error } = await sb.functions.invoke('doc-prefill', { body: { mode: 'appraisal_report', appraisal_id: rec.id, document_id: docId } }); const j = await fnJson(data, error);
+      if (!j || !j.ok) { CMP_REPORT_RETRY = docId; return again(el.id === 'cmpReportRetry' ? 'cmpReportRetry' : 'cmpReportPick', (j && (j.message || j.error)) || (netErr(error) ? 'Not read. Check you have signal, then try again. The report is saved.' : 'Not read this time. The report is saved, so you can read it again.'), 'err'); }
+      CMP_REPORT_RETRY = null; const n = (j.result.comps || []).length, m = (j.result.market || []).length;
+      again('cmpReportPick', n + m ? 'Read. It found ' + n + ' comparable' + (n === 1 ? '' : 's') + (m ? ' and ' + m + ' month' + (m === 1 ? '' : 's') + ' of market figures' : '') + '. Tick what to bring in below.' : 'Read, but it found no comparables or market figures. Check it is the right report.', n + m ? 'ok' : 'err'); };
+    $('#cmpReport').addEventListener('change', async e => { const f = (e.target.files || [])[0], lab = $('#cmpReportPick'); e.target.value = ''; if (!f) return;
+      if (!rec.property_id) return atBtn(lab, 'This appraisal has no property file, so the report can\'t be kept.', 'err');
+      if (f.size > 20 * 1024 * 1024) return atBtn(lab, 'That report is over 20 MB. Save the comparables pages as their own PDF and upload that.', 'err');
+      const bytes = new Uint8Array(await f.arrayBuffer()), kind = REPO.sniff(bytes.subarray(0, 65536), bytes.subarray(Math.max(0, bytes.length - 65536)), f.name);
+      if (kind.mime !== 'application/pdf') return atBtn(lab, 'That isn\'t a PDF. Save the report as a PDF and choose it again.', 'err');
+      atBtn(lab, 'Saving the report on the property file...', 'busy');
+      const sha = await REPO.sha256(bytes), key = crypto.randomUUID(), pth = REPO.paths(rec.property_id, key, CMP_REPORT_KIND, f.name, 'application/pdf').path;
+      const up = await sb.storage.from('property-files').upload(pth, new Blob([bytes], { type: 'application/pdf' }), { contentType: 'application/pdf', upsert: false });
+      if (up.error) return atBtn(lab, netErr(up.error) ? 'Not saved. Check you have signal, then try again.' : 'Not saved: ' + up.error.message, 'err');
+      let doc; try { doc = await must(sb.rpc('agent_repo_add', { p_property: rec.property_id, p_item: { key, kind: CMP_REPORT_KIND, name: f.name, title: ('Comparables report: ' + f.name).slice(0, 200), path: pth, mime_type: 'application/pdf', size_bytes: bytes.length, sha256: sha } })); } catch (er) { return fail(lab, er); }
+      await readReport(doc.id, lab); });
+    const rr = $('#cmpReportRetry'); if (rr) rr.addEventListener('click', () => { rr.disabled = true; readReport(CMP_REPORT_RETRY, rr); });
+    $$('[data-rv-imp]').forEach(b => b.addEventListener('click', async () => { const rp = reports.find(r => r.id === b.dataset.rvImp), box = $('#rv-' + rp.id);
+      const tc = Array.from(box.querySelectorAll('[data-rv-c]')).filter(i => i.checked).map(i => i.dataset.rvC), tm = Array.from(box.querySelectorAll('[data-rv-m]')).filter(i => i.checked).map(i => i.dataset.rvM);
+      if (!tc.length && !tm.length) return atBtn(b, 'Tick at least one item first, or set the report aside.', 'err');
+      const pk = APPR.reportPacks(rp.result, tc, tm, new Date().toISOString()); b.disabled = true; atBtn(b, 'Bringing them in...', 'busy');
+      const said = [], extra = []; let bad = false;
+      if (pk.comps) { const { data, error } = await sb.rpc('agent_comps_import', { p_appraisal: rec.id, p_pack: pk.comps }); if (error || !data) { b.disabled = false; return fail(b, error, 'Not brought in'); }
+        said.push('Comparables: added ' + data.added + ', updated ' + data.updated + (data.kept_ticked ? ', kept your ticked wording on ' + data.kept_ticked : ''));
+        (data.skipped || []).forEach(x => { bad = true; extra.push(((pk.comps.comps[x.n - 1] || {}).address || 'number ' + x.n) + ' skipped: ' + x.why); });
+        (data.notes || []).forEach(x => extra.push(((pk.comps.comps[x.n - 1] || {}).address || 'number ' + x.n) + ': ' + x.note)); }
+      if (pk.market) { const { data, error } = await sb.rpc('agent_market_import', { p_pack: pk.market }); if (error || !data) { b.disabled = false; return fail(b, error, 'Market figures not brought in'); }
+        said.push('Market months: ' + data.months_added + ' added, ' + data.months_updated + ' updated'); (data.skipped || []).forEach(x => { bad = true; extra.push('month ' + x.n + ' skipped: ' + x.why); }); }
+      const { error: e3 } = await sb.rpc('agent_report_imported', { p_report: rp.id, p_comps: tc, p_months: tm });
+      again('cmpReportPick', said.join('. ') + '.' + (extra.length ? ' ' + extra.join('; ') + '.' : '') + (e3 ? ' Your ticks weren\'t recorded on the report, so it stays in the list.' : ''), bad || e3 ? 'err' : 'ok'); }));
+    $$('[data-rv-skip]').forEach(b => b.addEventListener('click', async () => { atBtn(b, 'Saving...', 'busy');
+      const { error } = await sb.rpc('agent_report_imported', { p_report: b.dataset.rvSkip, p_comps: [], p_months: [] }); if (error) return fail(b, error);
+      again('cmpReportPick', 'Set aside. Nothing was brought in from that report. It stays on the property file.', 'ok'); }));
+    // C2: photos from a listing page
+    const fetchCall = body => sb.functions.invoke('appraisal-fetch', { body: Object.assign({ appraisal_id: rec.id, comp_id: CMP_FETCH.cid }, body) });
+    const dropFetched = async () => { const r = CMP_FETCH && CMP_FETCH.res; if (r && (r.photos || []).length) { try { await fetchCall({ action: 'keep', keep: [], discard: r.photos.map(p => p.path) }); } catch (_) { } } };
+    $$('[data-cmp-fetch]').forEach(b => b.addEventListener('click', async () => { if (CMP_FETCH && CMP_FETCH.cid !== b.dataset.cmpFetch) await dropFetched(); CMP_FETCH = { cid: b.dataset.cmpFetch, res: null, page: null }; again(); }));
+    const doFetch = async (b, extra) => { b.disabled = true; atBtn(b, 'Fetching the photos... this can take a minute.', 'busy'); await dropFetched();
+      const { data, error } = await fetchCall(Object.assign({ action: 'fetch' }, extra)); const j = await fnJson(data, error); b.disabled = false;
+      if (!j || !j.ok) { if (CMP_FETCH) CMP_FETCH.res = null; return atBtn(b, (j && (j.message || j.error)) || (netErr(error) ? 'Not fetched. Check you have signal, then try again.' : 'Not fetched. Try again, or save the photos into your download folder.'), 'err'); }
+      CMP_FETCH.res = j; CMP_FETCH.page = extra.page_url || null; const n = j.photos.length, sk = (j.skipped || []).length;
+      again(b.id, 'Fetched ' + n + ' photo' + (n === 1 ? '' : 's') + '. Tick the ones to keep.' + (sk ? ' ' + sk + ' more couldn\'t be used.' : ''), 'ok'); };
+    const fg = $('#cfFetchGo'); if (fg) fg.addEventListener('click', () => { const u = $('#cfPage').value.trim(); if (!/^https?:\/\/\S+$/i.test(u)) return atBtn(fg, 'Paste the whole link of the listing, starting with https://', 'err'); doFetch(fg, { page_url: u }); });
+    const fh = $('#cfFetchHints'); if (fh) fh.addEventListener('click', () => { const c = comps.find(x => x.id === CMP_FETCH.cid); doFetch(fh, { image_urls: hintUrls(c) }); });
+    const fc = $('#cfFetchClose'); if (fc) fc.addEventListener('click', async () => { await dropFetched(); const cid = CMP_FETCH.cid; CMP_FETCH = null; again('cmpFetch-' + cid, 'Closed. No fetched photos were kept.', 'ok'); });
+    const fk = $('#cfKeep'); if (fk) fk.addEventListener('click', async () => { const ph = CMP_FETCH.res.photos, on = ph.filter((p, k) => $('#cfx-' + k).checked), off = ph.filter((p, k) => !$('#cfx-' + k).checked);
+      if (!on.length) return atBtn(fk, 'Tick the photos to keep first, or close to keep none.', 'err');
+      fk.disabled = true; atBtn(fk, 'Keeping ' + on.length + ' photo' + (on.length === 1 ? '' : 's') + '...', 'busy');
+      const { data, error } = await fetchCall({ action: 'keep', page_url: CMP_FETCH.page || undefined, keep: on.map(p => ({ path: p.path, image_url: p.image_url })), discard: off.map(p => p.path) }); const j = await fnJson(data, error); fk.disabled = false;
+      if (!j || !j.ok) return atBtn(fk, (j && (j.message || j.error)) || (netErr(error) ? 'Not kept. Check you have signal, then try again.' : 'Not kept. Try again.'), 'err');
+      const cid = CMP_FETCH.cid; CMP_FETCH = null; again('cmpPh-' + cid, 'Kept ' + j.kept + ' photo' + (j.kept === 1 ? '' : 's') + ' from the listing.' + (j.removed ? ' ' + j.removed + ' left out and deleted.' : ''), 'ok'); });
     // add, edit, hide, reorder and remove
     $('#cmpAdd').addEventListener('click', () => { CMP_EDIT = 'new'; again(); });
     $$('[data-cmp-edit]').forEach(b => b.addEventListener('click', () => { CMP_EDIT = b.dataset.cmpEdit; again(); }));
@@ -10026,11 +10126,13 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const subs = s => String(s || '').split(',').map(x => x.replace(/\s+/g, ' ').trim()).filter(Boolean);
     $('#grpAdd').addEventListener('click', async e => { const b = e.currentTarget, name = $('#grpName').value.replace(/\s+/g, ' ').trim(), s = subs($('#grpSuburbs').value);
       if (!name || !s.length) return atBtn(b, 'Give the group a name and at least one suburb.', 'err');
-      try { await must(sb.from('suburb_groups').insert({ name, suburbs: s }).select()); } catch (er) { return fail(b, er); }
-      again('grpAdd', 'Added "' + name + '" to your never-mix list.', 'ok'); });
+      const mode = $('#grpMode').value === 'case_by_case' ? 'case_by_case' : 'never_mix';
+      try { await must(sb.from('suburb_groups').insert({ name, suburbs: s, mode }).select()); } catch (er) { return fail(b, er); }
+      again('grpAdd', 'Added "' + name + '" to your list' + (mode === 'case_by_case' ? ', checked case by case.' : ', never mixed.'), 'ok'); });
     $$('[data-grp-save]').forEach(b => b.addEventListener('click', async () => { const g = b.dataset.grpSave, name = $('#grpN-' + g).value.replace(/\s+/g, ' ').trim(), s = subs($('#grpS-' + g).value);
       if (!name || !s.length) return atBtn(b, 'Give the group a name and at least one suburb.', 'err');
-      try { await must(sb.from('suburb_groups').update({ name, suburbs: s }).eq('id', g).select()); } catch (er) { return fail(b, er); }
+      const mode = $('#grpM-' + g).value === 'case_by_case' ? 'case_by_case' : 'never_mix';
+      try { await must(sb.from('suburb_groups').update({ name, suburbs: s, mode }).eq('id', g).select()); } catch (er) { return fail(b, er); }
       again('grpSave-' + g, 'Saved.', 'ok'); }));
     $$('[data-grp-rm]').forEach(b => b.addEventListener('click', async () => { const g = b.dataset.grpRm;
       try { await must(sb.from('suburb_groups').delete().eq('id', g)); } catch (er) { return fail(b, er, 'Not removed'); }

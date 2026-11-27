@@ -302,7 +302,10 @@
   function compsRule(comps, o) {
     o = o || {}; const today = o.today || new Date().toLocaleDateString('en-CA', { timeZone: 'Pacific/Auckland' });
     const low = s => String(s || '').trim().toLowerCase();
-    const groupOf = s => (o.groups || []).find(g => (g.suburbs || []).some(x => low(x) === low(s)) && low(s));
+    // never-mix groups keep their sales apart; case-by-case groups (035) are counted, and only a mismatch the AI suggests is flagged
+    const inG = (g, s) => (g.suburbs || []).some(x => low(x) === low(s)) && low(s);
+    const groupOf = s => (o.groups || []).find(g => (g.mode || 'never_mix') !== 'case_by_case' && inG(g, s));
+    const cbcOf = s => (o.groups || []).find(g => g.mode === 'case_by_case' && inG(g, s));
     const back = new Date(today + 'T12:00:00'); back.setMonth(back.getMonth() - 3); const cut = back.toISOString().slice(0, 10);
     const items = [], add = (kind, text) => items.push({ kind, text });
     const shown = (comps || []).filter(c => c && c.shown !== false), sg = groupOf(o.suburb);
@@ -310,6 +313,7 @@
     shown.filter(c => mixed(c) && c.status !== 'context').forEach(c => { const g = groupOf(c.suburb) || sg;
       add('warn', c.address + ' is ' + (groupOf(c.suburb) ? 'in ' + c.suburb + ', on' : 'outside') + ' your never-mix list (' + g.name + '), so it isn\'t counted. Hide it, or mark it for context only.'); });
     const ok = shown.filter(c => !mixed(c));
+    caseByCase(ok.filter(c => c.status !== 'listed' && cbcOf(c.suburb)), o.buyers, add, cbcOf);
     const near = ok.filter(c => c.status !== 'listed' && c.sold_on && c.ring !== 'further');
     const recentNear = near.filter(c => c.sold_on >= cut);
     const truth = ok.filter(c => c.status === 'sold' && c.sold_on).sort((a, b) => (a.sold_on < b.sold_on ? 1 : -1));
@@ -327,6 +331,36 @@
     shown.filter(c => !cmpShown(c)).forEach(c => add('warn', 'How ' + c.address + ' compares ' + (String(c.compare_text || '').trim() ? 'isn\'t ticked yet' : 'isn\'t written yet') + ', so the vendor won\'t see a comparison.'));
     shown.filter(c => String(c.ad_text || '').trim() && !adShown(c)).forEach(c => add('warn', 'The advertisement wording for ' + c.address + ' isn\'t shown to the vendor: ' + wordingProblem(c.ad_text).replace(/\.$/, '') + '.'));
     return { ok: !items.some(x => x.kind === 'err'), items };
+  }
+  // case-by-case suburbs (Tim, 27 November 2026): the AI's verdict on each sale there and on the subject (b: the latest check,
+  // { subject: { verdict, reason }, comps: { id: { verdict, reason } } }). Only a mismatch is flagged, as a suggestion; "unclear" or no
+  // check flags nothing, with a plain note. The verdicts and reasons are Tim's alone: this list is only ever on his screen.
+  function caseByCase(list, b, add, cbcOf) {
+    if (!list.length) return;
+    const names = Array.from(new Set(list.map(c => cbcOf(c.suburb).name))).join(', ');
+    const has = c => !!(b && b.comps && b.comps[c.id]), unchecked = list.filter(c => !has(c)), sv = b && b.subject ? b.subject.verdict : '';
+    if (unchecked.length) add('info', (unchecked.length === 1 ? unchecked[0].address + ' is' : unchecked.length + ' sales are') + ' in a suburb you check case by case (' + names + '). Use "Check who they appeal to" and the AI will look at ' + (unchecked.length === 1 ? 'it' : 'each one') + '.');
+    const done = list.filter(has); if (!done.length) return;
+    if (!['owner', 'investor'].includes(sv)) { add('info', 'The AI couldn\'t tell who your home would appeal to, so no case-by-case sale is flagged. Check ' + (done.length === 1 ? 'it' : 'them') + ' yourself.'); return; }
+    done.forEach(c => { const v = b.comps[c.id], why = String(v.reason || '').trim().replace(/[.\s]+$/, '');
+      if (!['owner', 'investor'].includes(v.verdict)) add('info', c.address + ': no clear read on who it appealed to, so it isn\'t flagged. Check it yourself.');
+      else if (v.verdict !== sv) add('warn', c.address + (v.verdict === 'investor' ? ' looks like an investor or student sale' : ' looks like a family or owner-occupier sale') + (why ? ' (' + why + ')' : '') + ', and your home looks like ' + (sv === 'owner' ? 'an owner-occupier home' : 'it would appeal to investors') + '. A suggestion only: keep it, hide it, or mark it for context only.'); });
+  }
+  // a report Tim uploaded (035): the packs for the existing import, from only the items he ticked. res: the reading ({ report, comps,
+  // market }); comps, months: the ticked ids; now: an ISO time for when no report date is printed. The source is the report's own.
+  const PACK_KEYS = ['ref', 'status', 'address', 'suburb', 'price', 'sold_on', 'listed_on', 'method', 'days_to_sell', 'bedrooms', 'bathrooms', 'floor_m2', 'land_m2', 'cv', 'agency', 'distance_m'];
+  function reportPacks(res, comps, months, now) {
+    const rep = (res && res.report) || {}, source = ['relab', 'reinz'].includes(rep.source) ? rep.source : 'other';
+    const at = /^\d{4}-\d{2}-\d{2}$/.test(rep.date || '') ? rep.date + 'T12:00:00+13:00' : now;
+    const cp = ((res && res.comps) || []).filter(c => (comps || []).includes(c.id)).map(c => { const x = {}; PACK_KEYS.forEach(k => { if (c[k] != null && c[k] !== '') x[k] = c[k]; }); x.source = source; return x; });
+    const mp = ((res && res.market) || []).filter(m => (months || []).includes(m.id)).map(m => { const x = {}; ['area', 'month', 'median', 'lower_quartile', 'upper_quartile', 'sales', 'days_to_sell'].forEach(k => { if (m[k] != null && m[k] !== '') x[k] = m[k]; }); return x; });
+    return { comps: cp.length ? { format: 'mre.comps/1', source, gathered_at: at, comps: cp } : null, market: mp.length ? { format: 'mre.market/1', gathered_at: at, months: mp } : null };
+  }
+  // what the reader found, in one line, for Tim's review list
+  function reportLine(c) {
+    return [c.suburb, c.status === 'listed' ? (c.price ? 'asking ' + dollars(c.price) : 'on the market') : (c.price ? dollars(c.price) : ''), c.status === 'listed' ? (c.listed_on ? 'listed ' + longDate(c.listed_on) : '') : (c.sold_on ? 'sold ' + longDate(c.sold_on) : ''),
+      c.method, c.bedrooms != null ? c.bedrooms + ' bed' : '', c.bathrooms != null ? num1(c.bathrooms) + ' bath' : '', c.floor_m2 ? num1(c.floor_m2) + ' m² floor' : '', c.land_m2 ? num1(c.land_m2) + ' m² land' : '',
+      c.cv ? 'CV ' + dollars(c.cv) : '', c.agency, c.distance_m != null ? km(c.distance_m) + ' away' : '', c.ref ? 'ref ' + c.ref : ''].filter(x => String(x || '').trim()).join(', ');
   }
   const monthYear = d => { const x = /^(\d{4})-(\d{2})/.exec(String(d || '')); return x ? ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'][+x[2] - 1] + ' ' + x[1] : ''; };
 
@@ -405,7 +439,7 @@
     return wordingProblem(f.bedrooms) || wordingProblem((f.method || {}).name) || wordingProblem((f.method || {}).text);
   }
   window.APPR = { render, fmtRange, dollars, inline, methodNames, checkFields, wordingProblem,
-    vendorComp, VENDOR_COMP, STATUS_WORDS, RINGS, ringWords, compsRule, matchPhoto, addrParts, addrSame, addrMatch, adShown, cmpShown, evidence,
+    vendorComp, VENDOR_COMP, STATUS_WORDS, RINGS, ringWords, compsRule, reportPacks, reportLine, matchPhoto, addrParts, addrSame, addrMatch, adShown, cmpShown, evidence,
     METHODS, CAMPAIGNS, MAX_WEEKS, campaignOf, waveFor, stepsFor, methodSentence, isHill, suburbOf, plansFor, checkSetup, writeStandard, sectionsProblem,
     DEFAULT_NOTE, DALMORE_LINE, HEAD_AND_SHOULDERS, VALUATION_LABEL };
 })();

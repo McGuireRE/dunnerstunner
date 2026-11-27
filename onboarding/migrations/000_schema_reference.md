@@ -620,3 +620,23 @@ references revoked from authenticated.
   appraisal is sent). No vendor policy (phase E gives vendors short-lived links).
 Tests: tests/appraisal-comps-rollback.js/.sql on tests/appraisal-comps-standin.sql (after appraisal-setup-standin.sql and 033); browser
 test tests/appraisal-comps.test.js; address cases tests/files/addr-cases.json (both the SQL and the page run them).
+
+## 035 Comparables from an uploaded report, photos from a listing page, case-by-case suburbs (LW3 phase C2, 27 November 2026; tested in a rollback block on a local PostgreSQL stand-in built to live 033 plus 034 and the live document store, NOT yet on the live project)
+Builds on 034 (apply 034 first). Additive only: no existing column, row, policy, function or signed-record protection changes.
+- `repo_kinds`: 'Comparables or market report' (agency, position 216, never shared, never exported). `guard_report_document` (before
+  update on property_documents): such a report keeps its kind and is never shared; no other item becomes one.
+- `appraisal_reports`: appraisal_id (cascade), document_id (property_documents), result (jsonb: report, comps and market, each item with
+  its id and page), model, pages, read_by, read_at, imported (the ticked ids), imported_by, imported_at. Row Level Security: select for
+  is_agent() only; insert, update, delete, truncate revoked from authenticated, everything from anon. `guard_appraisal_report`: a
+  reading never changes, Tim's ticks are recorded once, nothing on a sent appraisal, kept unless its appraisal goes.
+- `appraisal_buyer_checks`: appraisal_id (cascade), subject ({verdict owner|investor|unclear, reason}), comps ({comp id: {verdict,
+  reason}}), model, checked_by, checked_at. Same access as appraisal_reports. `guard_buyer_check`: never changes, kept, none added once
+  sent. Tim's only: never on a vendor page.
+- `appraisal_media.page_url` (http or https, up to 1,000): the listing page a fetched photo came from; `guard_media_page_url` keeps it.
+- `suburb_groups.mode` never_mix (default; every existing group) | case_by_case.
+- Functions: `agent_report_imported(p_report, p_comps text[], p_months text[])` (security definer, is_agent, granted to authenticated).
+  Service role only (revoked from public, anon and authenticated; granted to service_role), used by doc-prefill:
+  `appraisal_report_source(p_appraisal, p_document)` (the appraisal from its set-up and not sent; the document a comparables report, a PDF
+  in property-files, on the appraisal's property, not removed; returns its path), `appraisal_report_save(...)`, `appraisal_buyer_save(...)`.
+Tests: tests/appraisal-reports-rollback.js/.sql on tests/appraisal-reports-standin.sql (after the 034 chain); browser test
+tests/appraisal-c2.test.js; function tests tests/appraisal-fetch-fn.test.js and tests/appraisal-ai-fn.test.js.

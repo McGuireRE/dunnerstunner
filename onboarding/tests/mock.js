@@ -498,7 +498,7 @@ function appraisalRpc(name,a,me){ if(offline()) return bad('Failed to fetch');
 // ── migration 034 (LW3 phase C): comparables, photos, the never-mix list and the market store, mirroring the database ──
 // localStorage mockLw3cCalls: every 034 function call, for the tests. mockSendFlag = '1' stands for phase E's send function (it
 // alone may set 'sent'). Photos: bucket 'appraisal-media', kept in DB.storage_objects with the bucket named, as storage.objects.
-const LW3C_TABLES=['appraisal_comps','appraisal_media','suburb_groups','market_months','market_sales'];
+const LW3C_TABLES=['appraisal_comps','appraisal_media','suburb_groups','market_months','market_sales','appraisal_reports','appraisal_buyer_checks'];   // the last two: migration 035 (Tim reads; only the functions write)
 const AMB='appraisal-media', AM_MIME=['image/jpeg','image/png','image/webp'];
 const SENT_MSG='This appraisal has been sent, and a sent copy never changes';
 const avSent=id=>(DB.appraisal_views||[]).some(v=>v.id===id&&v.status==='sent');
@@ -511,6 +511,7 @@ function lw3cTable(table,op,payload,rows,single){
   if(offline()) throw new Error('Failed to fetch');
   if(!isAgentMe()){ if(op==='select') return {data:single?undefined:[],error:single?{message:'not found'}:null}; if(!(S&&S.user)) throw new Error('permission denied for table '+table); if(op==='insert') throw new Error('new row violates row-level security policy for table "'+table+'"'); return {data:[],error:null}; }
   const list=Array.isArray(payload)?payload:[payload];
+  if(['appraisal_reports','appraisal_buyer_checks'].includes(table)&&op!=='select') throw new Error('permission denied for table '+table);   // 035: written only by doc-prefill
   if(table==='appraisal_comps'){
     if(op==='delete'){ rows.forEach(r=>{ if(avSent(r.appraisal_id)) throw new Error(SENT_MSG); }); DB.appraisal_media=(DB.appraisal_media||[]).filter(m=>!rows.some(r=>r.id===m.comp_id)); return null; }
     if(op==='insert') list.forEach(n=>{ if(avSent(n.appraisal_id)) throw new Error(SENT_MSG); compCheck(n); Object.assign(n,Object.assign(compDefaults(),n)); });
@@ -523,10 +524,10 @@ function lw3cTable(table,op,payload,rows,single){
       if((DB.appraisal_media||[]).some(m=>m.path===n.path)) throw new Error('duplicate key value violates unique constraint "appraisal_media_path_key"');
       const o=SO()[n.path]; if(!o||o.bucket!==AMB) throw new Error("The photo isn't in storage yet. Try again"); n.mime_type=o.mime; n.size_bytes=o.size; if(!AM_MIME.includes(n.mime_type)) throw new Error('Photos must be JPEG, PNG or WebP');
       n.position=n.position||0; n.cover=!!n.cover; n.source=n.source||'upload'; n.file_name=n.file_name||''; n.created_by=meEmail(); });
-    if(op==='update') rows.forEach(r=>{ if(avSent(r.appraisal_id)) throw new Error(SENT_MSG); if(['appraisal_id','path','mime_type','size_bytes','source','created_at'].some(k=>k in payload&&!same(payload[k],r[k]))) throw new Error("Where a photo is kept, and what it is, can't change");
+    if(op==='update') rows.forEach(r=>{ if(avSent(r.appraisal_id)) throw new Error(SENT_MSG); if(['appraisal_id','path','mime_type','size_bytes','source','created_at','page_url'].some(k=>k in payload&&!same(payload[k]??null,r[k]??null))) throw new Error("Where a photo is kept, and what it is, can't change");
       if(payload.comp_id&&!(DB.appraisal_comps||[]).some(c=>c.id===payload.comp_id&&c.appraisal_id===r.appraisal_id)) throw new Error("That comparable isn't on this appraisal"); });
   }
-  if(table==='suburb_groups'&&(op==='insert'||op==='update')) (op==='insert'?list:rows.map(r=>Object.assign({},r,payload))).forEach(n=>{ if(!String(n.name||'').trim()) throw new Error('new row for relation "suburb_groups" violates check constraint "suburb_groups_name_check"'); if(!Array.isArray(n.suburbs)||!n.suburbs.length||n.suburbs.length>40) throw new Error('new row for relation "suburb_groups" violates check constraint "suburb_groups_suburbs_check"'); if(op==='insert'){ n.kind=n.kind||'never_mix'; n.note=n.note||''; } });
+  if(table==='suburb_groups'&&(op==='insert'||op==='update')) (op==='insert'?list:rows.map(r=>Object.assign({},r,payload))).forEach(n=>{ if(!String(n.name||'').trim()) throw new Error('new row for relation "suburb_groups" violates check constraint "suburb_groups_name_check"'); if(!Array.isArray(n.suburbs)||!n.suburbs.length||n.suburbs.length>40) throw new Error('new row for relation "suburb_groups" violates check constraint "suburb_groups_suburbs_check"'); if(n.mode!=null&&!['never_mix','case_by_case'].includes(n.mode)) throw new Error('new row for relation "suburb_groups" violates check constraint "suburb_groups_mode_check"'); if(op==='insert'){ n.kind=n.kind||'never_mix'; n.note=n.note||''; n.mode=n.mode||'never_mix'; } });
   if(op==='delete'){ DB[table]=(DB[table]||[]).filter(r=>!rows.includes(r)); save(); return {data:null,error:null}; }
   return null; }
 function compDefaults(){ return {position:0,shown:true,status:'sold',suburb:'',price:null,sold_on:null,listed_on:null,method:'',days_to_sell:null,bedrooms:null,bathrooms:null,floor_m2:null,land_m2:null,cv:null,agency:'',sold_by_tim:false,ad_text:'',compare_text:'',compare_ticked:false,private_note:'',ring:null,distance_m:null,source:'tim',source_ref:null,source_url:null,gathered_at:null,photo_hints:[],created_by:meEmail()}; }
@@ -559,6 +560,10 @@ function lw3cRpc(name,a,me){ if(offline()) return bad('Failed to fetch');
   try{ const l=JSON.parse(localStorage.getItem('mockLw3cCalls')||'[]'); l.push({name,a}); localStorage.setItem('mockLw3cCalls',JSON.stringify(l)); }catch(_){}
   if(!isAgentMe()) return bad('Agent only');
   const CP=()=>(DB.appraisal_comps||=[]), ws=s=>String(s||'').replace(/\s+/g,' ');
+  // 035: Tim's ticks on a report's reading, recorded once, only of items the reading holds
+  if(name==='agent_report_imported'){ const r=(DB.appraisal_reports||[]).find(x=>x.id===a.p_report); if(!r) return bad('Report not found'); if(avSent(r.appraisal_id)) return bad(SENT_MSG); if(r.imported_at) return bad('What you ticked from this report is already recorded');
+    const cs=a.p_comps||[], ms=a.p_months||[]; if(cs.some(x=>!(r.result.comps||[]).some(e=>e.id===x))) return bad("That comparable isn't in this report's reading"); if(ms.some(x=>!(r.result.market||[]).some(e=>e.id===x))) return bad("That month isn't in this report's reading");
+    Object.assign(r,{imported:{comps:cs.slice(),months:ms.slice()},imported_by:me.email,imported_at:now()}); save(); return ok({id:r.id,comps:cs.length,months:ms.length}); }
   if(name==='agent_comps_order'){ const ids=a.p_ids||[], mine=CP().filter(c=>c.appraisal_id===a.p_appraisal);
     if(new Set(ids).size!==ids.length||ids.length!==mine.length||ids.some(i=>!mine.some(c=>c.id===i))) return bad('The list must hold each comparable of this appraisal once');
     if(avSent(a.p_appraisal)) return bad(SENT_MSG); let n=0; ids.forEach((i,k)=>{ const c=mine.find(x=>x.id===i); if(c.position!==k+1){ c.position=k+1; c.updated_at=now(); n++; } }); save(); return ok(n); }
@@ -618,7 +623,7 @@ function rpcInner(name,a){
   if(name.startsWith('agent_fv_')||name==='agent_tap_extra') return fvRpc(name,a,me);
   if(name.startsWith('agent_council_')) return councilRpc(name,a,me);
   if(name==='agent_appraisal_create'||name==='agent_appraisal_save') return appraisalRpc(name,a,me);
-  if(['agent_comps_import','agent_comps_order','agent_market_import'].includes(name)) return lw3cRpc(name,a,me);
+  if(['agent_comps_import','agent_comps_order','agent_market_import','agent_report_imported'].includes(name)) return lw3cRpc(name,a,me);
   if(SIGN_RPCS.includes(name)) return signRpc(name,a,me);
   if(DRAFT_RPCS.includes(name)) return draftRpc(name,a,me);
   if(name.startsWith('offer_sign_')||name.startsWith('offer_round_')) return bad('permission denied for function '+name);
@@ -996,6 +1001,8 @@ function pdUpdate(o,patch){ const n=Object.assign({},o,patch), who=meEmail();
   if(n.bucket===RB&&!rk(n.kind)) throw new Error('Choose a kind from the list');
   if(o.kind==='REINZ agreement blank'&&(n.kind!==o.kind||n.shared_at)) throw new Error('An agreement blank stays an agreement blank, and is never shared');   // guard_blank_document (019)
   if(n.kind==='REINZ agreement blank'&&o.kind!==n.kind) throw new Error("Load an agreement blank from the property's Offers tile");
+  if(o.kind==='Comparables or market report'&&(n.kind!==o.kind||n.shared_at)) throw new Error('A comparables or market report stays one, and is never shared');   // guard_report_document (035)
+  if(n.kind==='Comparables or market report'&&o.kind!==n.kind) throw new Error("Add a comparables or market report from an appraisal's Comparables screen");
   if(n.archived_at&&!o.archived_at){ n.shared_at=null; n.shared_by=null; n.archived_by=who; }
   if(!n.archived_at) n.archived_by=null;
   if(n.shared_at){ if(n.archived_at) throw new Error("A removed item can't be shared"); if(n.bucket!==RB) throw new Error('Only a file added under Photos and documents can be shared'); if(!repoShareable(n.kind,n.source)) throw new Error('This kind of item is never shared with the vendors');
@@ -1880,8 +1887,59 @@ async function signInvoke(o){ const b=(o&&o.body)||{}, me=S&&S.user, net='h:'+mo
     if(b.action==='finish'){ const r=sgFinish(s,ua,net,null,null); save(); if(!r.complete) return res({ok:true,complete:false}); try{ const rd=await sgLock(r.signing_id,'system (last signer finished)'); return res({ok:true,complete:true,locked:true,round:rd.round}); }catch(_){ return res({ok:true,complete:true,locked:false}); } }
   }catch(e){ return fail(e); }
   return res({error:'Bad request'},400); }
+// ── migration 035 and phase C2's functions (mirrors fn/appraisal_fetch_handler.ts and fn/appraisal_ai_handler.ts; no network, no model) ──
+// appraisal-fetch: localStorage fetchMode = 'blocked' | 'none' | 'offline' changes the answer; fetchCount = how many photos a page gives
+// (default 4). Staged photos go into storage under fetch-<SHA-256 of the image link>, as the function names them; keep files them.
+// doc-prefill appraisal_report: reportMode = 'off' | 'fail'; reportResult = the reading (as fn/prefill_shared.ts readReportResult
+// gives it). buyer_check: buyerMode = 'off' | 'fail'; buyerResult = { subject: {verdict, reason}, byAddress: { address: {verdict, reason} } }.
+// Every call is in localStorage c2Calls; every model call is an ai_calls row with the appraisal's id.
+const c2Log=b=>{ try{ const l=JSON.parse(localStorage.getItem('c2Calls')||'[]'); l.push(b); localStorage.setItem('c2Calls',JSON.stringify(l)); }catch(_){} };
+const fnErr=(status,body)=>Promise.resolve({data:null,error:{message:String(status),context:{json:async()=>body}}});
+const FETCHED=/^appraisals\/([0-9a-zA-Z-]+)\/comps\/([0-9a-zA-Z-]+)\/fetch-([0-9a-f]{32})\.(jpg|png|webp)$/;
+function fetchInvoke(o){ const b=(o&&o.body)||{}, m=localStorage.getItem('fetchMode'); c2Log(Object.assign({fn:'appraisal-fetch'},b));
+  if(offline()||m==='offline') return Promise.resolve({data:null,error:{message:'Failed to fetch'}});
+  if(!isAgentMe()) return fnErr(403,{error:'Only Tim can do this'});
+  const c=(DB.appraisal_comps||[]).find(x=>x.id===b.comp_id&&x.appraisal_id===b.appraisal_id); if(!c) return fnErr(404,{ok:false,error:"That comparable isn't on this appraisal."}); if(avSent(c.appraisal_id)) return fnErr(409,{ok:false,error:SENT_MSG});
+  const h=u=>window.SIGN.sha256Hex(u).slice(0,32);
+  if(b.action==='fetch'){
+    if(m==='blocked') return ok({ok:false,reason:'blocked',message:"That site wouldn't let the photos be fetched (it turns away automatic downloads). Save them from the listing into your download folder, then drop them in under Photos from your download folder."});
+    if(m==='none') return ok({ok:false,reason:'no_photos',message:'No listing photos were found on that page. If the site loads them as you scroll, save them into your download folder instead.'});
+    const urls=b.page_url?Array.from({length:+localStorage.getItem('fetchCount')||4},(_,i)=>'https://photos.example.com/rb/'+h(b.page_url).slice(0,6)+'-'+(i+1)+'.jpg'):(b.image_urls||[]).slice(0,20);
+    const photos=urls.map(u=>{ const path='appraisals/'+b.appraisal_id+'/comps/'+b.comp_id+'/fetch-'+h(u)+'.jpg'; SO()[path]={size:5000,mime:'image/jpeg',bucket:AMB}; return {path,image_url:u,mime:'image/jpeg',size:5000,url:PNG1}; });
+    save(); return ok({ok:true,page_url:b.page_url||null,photos,skipped:b.page_url?[{image_url:'https://photos.example.com/rb/logo.svg',why:'Not a JPEG, PNG or WebP photo.'}]:[]}); }
+  if(b.action==='keep'){ const have=(DB.appraisal_media||[]).filter(x=>x.comp_id===c.id); let pos=have.reduce((n,x)=>Math.max(n,x.position||0),0); const rows=[];
+    for(const k of (b.keep||[])){ const mm=FETCHED.exec(String(k.path||'')); if(!mm||mm[1]!==b.appraisal_id||mm[2]!==b.comp_id||h(String(k.image_url||''))!==mm[3]) return fnErr(400,{ok:false,error:"A photo didn't match the link it came from, so nothing was filed. Fetch the photos again."});
+      if(have.some(x=>x.path===k.path)) continue; const so=SO()[k.path]; if(!so) return fnErr(409,{ok:false,error:"The photos weren't filed: The photo isn't in storage yet. Try again"});
+      rows.push({id:uid(),appraisal_id:b.appraisal_id,comp_id:b.comp_id,path:k.path,file_name:String(k.image_url).split('/').pop(),mime_type:so.mime,size_bytes:so.size,position:++pos,cover:false,source:'url',source_url:/^https:\/\//.test(k.image_url)?k.image_url:null,page_url:b.page_url||null,created_by:S.user.email,created_at:now()}); }
+    (DB.appraisal_media||=[]).push(...rows); const gone=(b.discard||[]).filter(p=>{ const mm=FETCHED.exec(String(p)); return mm&&mm[1]===b.appraisal_id&&mm[2]===b.comp_id&&!have.some(x=>x.path===p)&&!rows.some(r=>r.path===p)&&SO()[p]; }); gone.forEach(p=>{ delete SO()[p]; });
+    save(); return ok({ok:true,kept:rows.length,removed:gone.length}); }
+  return fnErr(400,{error:'Bad request'}); }
+function apprAiInvoke(o){ const b=(o&&o.body)||{}; c2Log(Object.assign({fn:'doc-prefill'},b));
+  if(offline()) return Promise.resolve({data:null,error:{message:'Failed to fetch'}});
+  if(!isAgentMe()) return fnErr(403,{error:'Not allowed'});
+  const av=(DB.appraisal_views||[]).find(v=>v.id===b.appraisal_id); if(!av) return fnErr(404,{ok:false,error:'Appraisal not found'}); if(av.status==='sent') return fnErr(409,{ok:false,error:SENT_MSG});
+  const log=(purpose,ok_,files)=>(DB.ai_calls||=[]).push({id:(DB.ai_calls.length+1),at:now(),purpose,model:'claude-haiku-5-5',ok:ok_,files,appraisal_id:av.id,agent:S.user.email});
+  if(b.mode==='appraisal_report'){ const m=localStorage.getItem('reportMode'), d=(DB.property_documents||[]).find(x=>x.id===b.document_id);
+    if(!d) return fnErr(409,{ok:false,error:"That report isn't on the property file"}); if(d.property_id!==av.property_id) return fnErr(409,{ok:false,error:'That report is on another property'});
+    if(d.kind!=='Comparables or market report'||d.mime_type!=='application/pdf') return fnErr(409,{ok:false,error:'Only a PDF added as a comparables or market report can be read here'});
+    if(m==='off') return ok({ok:false,reason:'off',message:"Reading reports isn't switched on yet. Your report is saved on the property file."});
+    if(m==='fail'){ log('appraisal report read',false,1); save(); return ok({ok:false,reason:'failed',message:"The AI didn't give a usable answer. Try again. Your report is saved, so you can read it again."}); }
+    const result=JSON.parse(localStorage.getItem('reportResult')||'{"report":{"source":"other"},"comps":[],"market":[]}'); log('appraisal report read',true,1);
+    const r={id:uid(),appraisal_id:av.id,document_id:d.id,result,model:'claude-haiku-5-5',pages:6,read_by:S.user.email,read_at:now(),imported:null,imported_by:null,imported_at:null}; (DB.appraisal_reports||=[]).push(r); save();
+    return ok({ok:true,report_id:r.id,result,pages:6}); }
+  if(b.mode==='buyer_check'){ const m=localStorage.getItem('buyerMode'), low=s=>String(s||'').trim().toLowerCase();
+    const cbc=new Set(); (DB.suburb_groups||[]).filter(g=>g.mode==='case_by_case').forEach(g=>(g.suburbs||[]).forEach(s=>cbc.add(low(s))));
+    const sales=(DB.appraisal_comps||[]).filter(c=>c.appraisal_id===av.id&&c.shown!==false&&cbc.has(low(c.suburb)));
+    if(!sales.length) return ok({ok:true,checked:0,message:'None of the comparables on show are in a suburb you check case by case.'});
+    if(m==='off') return ok({ok:false,reason:'off',message:"The AI check isn't switched on yet, so nothing is flagged."});
+    if(m==='fail'){ log('appraisal buyer check',false,0); save(); return ok({ok:false,reason:'failed',message:"The AI check didn't work this time, so nothing is flagged. Check those sales yourself, or try again."}); }
+    const R=JSON.parse(localStorage.getItem('buyerResult')||'{}'), comps={}; sales.forEach(c=>{ comps[c.id]=(R.byAddress||{})[c.address]||{verdict:'unclear',reason:''}; });
+    const subject=R.subject||{verdict:'unclear',reason:''}; log('appraisal buyer check',true,0);
+    const row={id:uid(),appraisal_id:av.id,subject,comps,model:'claude-haiku-5-5',checked_by:S.user.email,checked_at:now()}; (DB.appraisal_buyer_checks||=[]).push(row); save();
+    return ok({ok:true,check_id:row.id,checked:sales.length,subject,comps}); }
+  return fnErr(400,{error:'Bad request'}); }
 window.supabase={createClient(){ return {
-  from:q, rpc, functions:{invoke:(n,o)=>{ logCall('fn:'+n+(o&&o.body&&o.body.mode?':'+o.body.mode:'')); if(n==='property-lookup') return councilInvoke(o); if(n==='offer-public') return offerInvoke(o); if(n==='offer-draft') return draftInvoke(o); if(n==='offer-sign') return signInvoke(o); if(n==='repo-link') return repoLinkInvoke(o); if(n==='doc-prefill'&&o.body&&o.body.mode==='translate'){ const reqs=JSON.parse(localStorage.getItem('trReqs')||'[]'); reqs.push(o.body); localStorage.setItem('trReqs',JSON.stringify(reqs)); const m=localStorage.getItem('translateMode'); if(m==='off') return Promise.resolve({data:null,error:{message:'503',context:{json:async()=>({error:'not_set_up'})}}}); if(m==='noTool') return ok({ok:false,reason:'no_tool',message:"The AI didn't give a usable answer. Try again."}); const src=o.body.sources; const rej=m==='rejectFirst'?[src[0]]:[]; let cutL=[]; let use=src.filter(x=>!rej.includes(x)); if(m==='cutOff'){ const h=src.length>1?Math.floor(src.length/2):0; cutL=src.slice(h); use=src.slice(0,h); } const resp={ok:true,model:o.body.kind==='screens'||o.body.kind==='guide'?'claude-sonnet-5-5':'claude-haiku-5-5',cut_off:m==='cutOff',translations:use.map(x=>({source:x,text:'<'+o.body.lang+'> '+x})),rejected:rej.map(x=>({source:x,reason:'number changed'})).concat(cutL.map(x=>({source:x,reason:'cut off'}))),usage:{input:10,output:10}}; const D=+localStorage.getItem('translateDelay')||0; return D?new Promise(r=>setTimeout(()=>r({data:resp,error:null}),D)):ok(resp); }
+  from:q, rpc, functions:{invoke:(n,o)=>{ logCall('fn:'+n+(o&&o.body&&o.body.mode?':'+o.body.mode:'')); if(n==='property-lookup') return councilInvoke(o); if(n==='appraisal-fetch') return fetchInvoke(o); if(n==='doc-prefill'&&o&&o.body&&['appraisal_report','buyer_check'].includes(o.body.mode)) return apprAiInvoke(o); if(n==='offer-public') return offerInvoke(o); if(n==='offer-draft') return draftInvoke(o); if(n==='offer-sign') return signInvoke(o); if(n==='repo-link') return repoLinkInvoke(o); if(n==='doc-prefill'&&o.body&&o.body.mode==='translate'){ const reqs=JSON.parse(localStorage.getItem('trReqs')||'[]'); reqs.push(o.body); localStorage.setItem('trReqs',JSON.stringify(reqs)); const m=localStorage.getItem('translateMode'); if(m==='off') return Promise.resolve({data:null,error:{message:'503',context:{json:async()=>({error:'not_set_up'})}}}); if(m==='noTool') return ok({ok:false,reason:'no_tool',message:"The AI didn't give a usable answer. Try again."}); const src=o.body.sources; const rej=m==='rejectFirst'?[src[0]]:[]; let cutL=[]; let use=src.filter(x=>!rej.includes(x)); if(m==='cutOff'){ const h=src.length>1?Math.floor(src.length/2):0; cutL=src.slice(h); use=src.slice(0,h); } const resp={ok:true,model:o.body.kind==='screens'||o.body.kind==='guide'?'claude-sonnet-5-5':'claude-haiku-5-5',cut_off:m==='cutOff',translations:use.map(x=>({source:x,text:'<'+o.body.lang+'> '+x})),rejected:rej.map(x=>({source:x,reason:'number changed'})).concat(cutL.map(x=>({source:x,reason:'cut off'}))),usage:{input:10,output:10}}; const D=+localStorage.getItem('translateDelay')||0; return D?new Promise(r=>setTimeout(()=>r({data:resp,error:null}),D)):ok(resp); }
     if(n==='doc-prefill'){ const mode=localStorage.getItem('prefillMode'); if(mode==='off') return Promise.resolve({data:null,error:{message:'503',context:{json:async()=>({error:'not_set_up'})}}}); return ok({ok:true,skipped:[],result:JSON.parse(localStorage.getItem('prefillResult'))}); }const a=JSON.parse(localStorage.getItem('inv')||'[]');a.push(n+':'+o.body.type);localStorage.setItem('inv',JSON.stringify(a));
     if(n==='notify'&&o.body.type==='form_signed'){ const fm=(DB.property_forms||[]).find(x=>x.id===o.body.form_id); if(fm&&fm.status==='signed'&&(fm.kind==='healthy_homes'||fm.countersigned_at)&&!fm.document_id&&fm.agreement_id===o.body.agreement_id){ const d={id:uid(),property_id:fm.property_id,kind:fm.kind==='healthy_homes'?'Healthy Homes checklist and statement':'Vendor Declaration',name:(fm.kind==='healthy_homes'?'Healthy-Homes-Checklist-and-Statement':'Vendor-Declaration')+'.pdf',path:'properties/'+fm.property_id+'/generated/'+fm.id+'.pdf',source:'generated',created_by:'system',created_at:now(),bucket:'private',folder:'agency'}; (DB.property_documents||=[]).push(d); fm.document_id=d.id; save(); } }
     return ok({ok:true});}},

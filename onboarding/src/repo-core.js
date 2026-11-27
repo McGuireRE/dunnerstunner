@@ -21,8 +21,9 @@
     ['Healthy Homes checklist and statement', 'agency', 1, 0], ['Marketing proof', 'agency', 1, 0],
     ['Appraisal', 'agency', 0, 0], ['Offer', 'agency', 0, 0], ['Identity document', 'agency', 0, 0], ['AML record', 'agency', 0, 0], ['CRM export', 'agency', 0, 0],
   ];
-  // kinds filed only from their own screen, never from the general uploader: the REINZ agreement blank (Offers tile, migration 019)
-  const SPECIAL_KINDS = [['REINZ agreement blank', 'agency', 0, 0]];
+  // kinds filed only from their own screen, never from the general uploader: the REINZ agreement blank (Offers tile, migration 019) and
+  // a comparables or market report (an appraisal's Comparables screen, migration 035)
+  const SPECIAL_KINDS = [['REINZ agreement blank', 'agency', 0, 0], ['Comparables or market report', 'agency', 0, 0]];
   const FOLDERS = [['photos', 'Photos'], ['title', 'Title and legal'], ['council', 'Council'], ['plans', 'Plans'], ['reports', 'Reports and checks'],
     ['work', 'Work done'], ['systems', 'Appliances and systems'], ['insurance', 'Insurance'], ['rental', 'Rental'], ['valuation', 'Rates and valuation'],
     ['other', 'Other'], ['agency', 'Agency papers']];
