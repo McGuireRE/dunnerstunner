@@ -9324,7 +9324,9 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     R('appraisals/new', 'appraisalNew', () => viewAppraisalNew(null)),
     R('appraisals/new/:id', 'appraisalNew', p => viewAppraisalNew(p)),
     R('appraisals/market', 'appraisalMarket', () => viewMarketFigures()),   // before appraisals/:id, which would take "market" as an id
+    R('appraisals/reviews', 'appraisalReviews', () => viewReviews()),     // LW3 phase B (036): Tim's Google reviews (before appraisals/:id too)
     R('appraisals/:id/setup', 'appraisal', a => viewAppraisalSetup(a)),
+    R('appraisals/:id/sections', 'appraisal', a => viewAppraisalSections(a)),
     R('appraisals/:id/comps', 'appraisal', a => viewAppraisalComps(a)),
     R('appraisals/:id', 'appraisal', a => viewAppraisalView(a, false)),
     R('appraisals/:id/present', 'appraisal', a => viewAppraisalView(a, true)),
@@ -9369,8 +9371,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     if (new RegExp(`^properties/${id}$`).test(path)) return ['properties', 'Properties'];
     if ((m = new RegExp(`^appraisals/new/${id}$`).exec(path))) return [`properties/${m[1]}`, 'Property file'];
     if (path === 'appraisals/new') return ['appraisals', 'Appraisals'];
-    if (path === 'appraisals/market') return ['appraisals', 'Appraisals'];
-    if ((m = new RegExp(`^appraisals/${id}/(present|setup|comps)$`).exec(path))) return [`appraisals/${m[1]}`, 'Appraisal'];
+    if (path === 'appraisals/market' || path === 'appraisals/reviews') return ['appraisals', 'Appraisals'];
+    if ((m = new RegExp(`^appraisals/${id}/(present|setup|comps|sections)$`).exec(path))) return [`appraisals/${m[1]}`, 'Appraisal'];
     if (new RegExp(`^appraisals/${id}$`).test(path)) return ['appraisals', 'Appraisals'];
     if (/^processes\/.+/.test(path)) return ['processes', 'Processes'];
     if (/^people\/.+/.test(path)) return ['people', 'People'];
@@ -9548,7 +9550,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     if (!$('#main .loading')) return;   // Tim has moved on
     rows = rows.filter(r => okId(r.id));
     main().innerHTML = `<div class="view-pad" id="apvList"><span class="agent-flag">Only you see this</span><h1>Appraisals</h1>
-      <div class="toolbar" id="apvNewRow">${plink('appraisals/new', 'New appraisal', 'btn primary')}${plink('appraisals/market', 'Market figures', 'btn ghost')}</div>
+      <div class="toolbar" id="apvNewRow">${plink('appraisals/new', 'New appraisal', 'btn primary')}${plink('appraisals/market', 'Market figures', 'btn ghost')}${plink('appraisals/reviews', 'Google reviews', 'btn ghost')}</div>
       ${rows.length ? `<div class="card tight"><ul class="needs">${rows.map(r => `<li><div class="what"><strong translate="no">${esc(r.title || r.address || 'Appraisal')}</strong><span class="small">Updated ${esc(fmtDT(r.updated_at))}</span></div><span class="needbtns">${plink(`appraisals/${r.id}`, 'Open', 'btn ghost')}${plink(`appraisals/${r.id}/present`, 'Present', 'btn primary')}</span></li>`).join('')}</ul></div>`
         : '<div class="card note tight"><p class="small" style="margin:0">No appraisals here yet.</p></div>'}
     </div>`;
@@ -9737,11 +9739,12 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <h2>Marketing plan</h2>
       <div class="card tight"><p class="small" style="margin:0 0 6px">The one you pick shows first, marked as recommended.</p><div class="choices" id="apsPlan">${Object.keys(PK).map(k => radio('apsPlan', k, esc(PK[k].name), esc(APPR.dollars(PK[k].price)) + ' incl. GST', S.plan === k)).join('')}${radio('apsPlan', 'custom', 'Build your own', 'Chosen item by item', S.plan === 'custom')}</div></div>
       <h2>Header image or video</h2>
-      <div class="card tight"><div class="choices" id="apsHeader">${radio('apsHeader', 'claude', 'Leave it to Claude', 'A photo or footage that suits the suburb', S.header !== 'own')}${radio('apsHeader', 'own', 'Use my own', 'Uploading your own comes in the next part. Until then no header is shown.', S.header === 'own')}</div></div>
+      <div class="card tight"><div class="choices" id="apsHeader">${radio('apsHeader', 'claude', 'Leave it to Claude', 'A photo or footage from the Dunedin NZ Visual Library, credited DunedinNZ', S.header !== 'own')}${radio('apsHeader', 'own', 'Use my own', 'A photo or video you upload', S.header === 'own')}</div>
+        <p class="small" style="margin:8px 0 0">Choose the photo or video, and frame it, on the ${plink(`appraisals/${rec.id}/sections`, 'Sections', 'btn link')} screen. Until one is chosen, no header is shown.</p></div>
       <h2>Private notes</h2>
       <div class="card tight"><label class="f" for="apsPrivate" style="margin-top:0">Only you see these <span class="opt">(weak points of the home go here, never on their page)</span></label><textarea id="apsPrivate" rows="4">${esc(rec.private_notes || '')}</textarea></div>
       ${sent ? '' : '<div class="toolbar"><button class="btn primary" type="button" id="apsSave">Save and write the appraisal</button></div>'}
-      <div class="toolbar no-print" id="apsAfter">${plink(`appraisals/${rec.id}`, 'Open the appraisal', 'btn ghost')}${plink(`appraisals/${rec.id}/present`, 'Present on screen', 'btn ghost')}</div>
+      <div class="toolbar no-print" id="apsAfter">${plink(`appraisals/${rec.id}`, 'Open the appraisal', 'btn ghost')}${plink(`appraisals/${rec.id}/sections`, 'Sections', 'btn ghost')}${plink(`appraisals/${rec.id}/present`, 'Present on screen', 'btn ghost')}</div>
     </div>`;
     const val = n => { const x = $(`input[name="${n}"]:checked`); return x ? x.value : ''; };
     const readParts = () => { parts = parts.map((r, i) => ({ key: r.key, option: ($('#apsPart' + i) || {}).value || '', low: ($('#apsLo' + i) || {}).value || '', high: ($('#apsHi' + i) || {}).value || '' })); };
@@ -9786,11 +9789,11 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   async function apsShow(rec, present) {
     const ev = await apvEvidence(rec);   // LW3 phase C: the comparables, their photos and the market report (none: drawn as phase A)
     if (!$('#main .loading')) return;   // Tim has moved on
-    const tools = present ? '' : `<div class="toolbar no-print" id="apvTools">${plink(`appraisals/${rec.id}/setup`, 'Change the set-up', 'btn primary')}${plink(`appraisals/${rec.id}/comps`, 'Comparables', 'btn ghost')}${plink(`appraisals/${rec.id}/present`, 'Present on screen', 'btn ghost')}<button class="btn ghost" type="button" id="apvPrint">Print</button></div>
+    const tools = present ? '' : `<div class="toolbar no-print" id="apvTools">${plink(`appraisals/${rec.id}/setup`, 'Change the set-up', 'btn primary')}${plink(`appraisals/${rec.id}/sections`, 'Sections', 'btn ghost')}${plink(`appraisals/${rec.id}/comps`, 'Comparables', 'btn ghost')}${plink(`appraisals/${rec.id}/present`, 'Present on screen', 'btn ghost')}<button class="btn ghost" type="button" id="apvPrint">Print</button></div>
       ${String(rec.private_notes || '').trim() ? `<details class="acc no-print" id="apsNotes"><summary>Your private notes</summary><div class="in"><p class="small" style="white-space:pre-wrap;margin:0">${esc(rec.private_notes)}</p></div></details>` : ''}`;
     main().innerHTML = `<div class="view-pad apv${present ? ' apv-show' : ''}" id="apvPage">${present ? '' : '<span class="agent-flag no-print">Only you see this</span>'}${tools}<div id="apvDoc"></div>
       ${present ? `<p class="apv-exit no-print">${plink(`appraisals/${rec.id}`, 'Finish presenting')}</p>` : ''}</div>`;
-    $('#apvDoc').innerHTML = APPR.render(rec, ev);
+    $('#apvDoc').innerHTML = APPR.render(rec, ev); abWireVideos($('#apvDoc'));
     const pb = $('#apvPrint'); if (pb) pb.addEventListener('click', () => { apsOpenAll(); window.print(); });
     top();
   }
@@ -9810,7 +9813,48 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     try { const { data, error } = await sb.from('appraisal_comps').select('*').eq('appraisal_id', rec.id).order('position'); if (!error) ev.comps = (data || []).filter(c => c && c.shown !== false && okId(c.id)).map(APPR.vendorComp); } catch (_) { ev.comps = []; }
     if (ev.comps.length) ev.photos = await cmpPhotoUrls(rec.id, ev.comps.map(c => c.id));
     if (ev.market) { try { const { data, error } = await sb.from('market_months').select('*').order('month'); if (!error) ev.months = data || []; } catch (_) { ev.months = []; } }
+    // LW3 phase B (036): only what the sections name: the header and video files, the mockup's photos, and Tim's ticked reviews.
+    // Anything that fails to load is left out, and a section with nothing left to show isn't drawn.
+    const secs = (rec.sections || []).filter(s => s && typeof s === 'object');
+    const assetIds = secs.filter(s => ((s.type === 'header' && s.src === 'asset') || s.type === 'intro') && okId(s.asset)).map(s => s.asset);
+    if (assetIds.length) ev.assets = await abAssetUrls(rec.id, assetIds);
+    const docIds = [].concat(...secs.filter(s => s.type === 'home').map(s => (s.photos || []).filter(okId)));
+    if (docIds.length) ev.homePhotos = await abHomePhotoUrls(rec.property_id, docIds);
+    if (secs.some(s => s.type === 'reviews')) { try { const { data, error } = await sb.from('tim_reviews').select('id,reviewer,rating,reviewed_on,body,url,ticked,removed_at').eq('ticked', true); if (!error) ev.reviews = data || []; } catch (_) { ev.reviews = []; } }
     return ev;
+  }
+  // phase B: signed links for an appraisal's header and video files ({ id: { url, still, mime, kind } }); none for a file not to hand
+  async function abAssetUrls(aid, ids) {
+    const out = {};
+    try {
+      const { data, error } = await sb.from('appraisal_assets').select('*').eq('appraisal_id', aid); if (error) return out;
+      for (const a of (data || []).filter(x => ids.includes(x.id))) {
+        const u = await sb.storage.from(a.bucket).createSignedUrl(a.path, 3600); if (!u || u.error || !u.data) continue;
+        let still = ''; if (a.still_path) { const s = await sb.storage.from(AMB).createSignedUrl(a.still_path, 3600); if (s && !s.error && s.data) still = s.data.signedUrl; }
+        out[a.id] = { url: u.data.signedUrl, still, mime: a.mime_type || '', kind: a.kind, role: a.role, file_name: a.file_name || '' };
+      }
+    } catch (_) { }
+    return out;
+  }
+  // phase B: the mockup's photos, from the one store (property_documents on this property, photos only, not removed): { id: { url, room } }
+  async function abHomePhotoUrls(pid, ids) {
+    const out = {}; if (!okId(pid)) return out;
+    try {
+      const { data, error } = await sb.from('property_documents').select('id,property_id,kind,path,bucket,room,mime_type,archived_at').eq('property_id', pid); if (error) return out;
+      const ps = (data || []).filter(d => ids.includes(d.id) && d.kind === 'Photo' && !d.archived_at && /^image\//.test(d.mime_type || '') && d.path);
+      if (!ps.length) return out;
+      const { data: urls } = await sb.storage.from(RBUCKET).createSignedUrls(ps.map(d => d.path), 3600);
+      ps.forEach(d => { const u = (urls || []).find(x => x.path === d.path); if (u && u.signedUrl) out[d.id] = { url: u.signedUrl, room: d.room || '' }; });
+    } catch (_) { }
+    return out;
+  }
+  // phase B: a header video starts where Tim set it, and stays still for anyone with reduced motion turned on
+  function abWireVideos(root) {
+    const still = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    $$('video.apv-hero-m', root).forEach(v => { const s = +v.dataset.start || 0;
+      const go = () => { try { if (s > 0 && isFinite(v.duration) && s < v.duration) v.currentTime = s; } catch (_) { } };
+      if (v.readyState >= 1) go(); else v.addEventListener('loadedmetadata', go, { once: true });
+      if (still) { v.removeAttribute('autoplay'); try { v.pause(); } catch (_) { } } });
   }
   // photos by comparable: { compId: [{ id, url, path, cover }] }, the print photo (cover) first, then in Tim's order
   async function cmpPhotoUrls(aid, compIds) {
@@ -10174,6 +10218,306 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       const sk = (data.skipped || []).map(s => s.what + ' ' + s.n + ' skipped: ' + s.why);
       const y = window.scrollY; await viewMarketFigures(true); window.scrollTo(0, y);
       atBtn($('#mktImport'), 'Months: ' + data.months_added + ' added, ' + data.months_updated + ' updated. Sales: ' + data.sales_added + ' added, ' + data.sales_updated + ' updated.' + (sk.length ? ' ' + sk.join('; ') + '.' : ''), sk.length ? 'err' : 'ok'); });
+  }
+  /* ───────── LW3 phase B (migration 036, APPRAISAL-PLAN.md): the sections screen and Tim's Google reviews ───────── */
+  // The header, a video introduction, What I heard from you, their home as a mockup listing, the ideal buyers and the reviews, on one
+  // screen (Tim only). The AI drafts (doc-prefill, Sonnet); Tim edits and ticks every line, and only ticked lines are written into the
+  // sections a vendor reads. Anything negative the AI notices goes to his private notes, never the page. A sent appraisal is read only.
+  const AVB = 'appraisal-video', AB_VIDEO_MAX = 150 * 1024 * 1024, AB_PHOTO_MAX = 15 * 1024 * 1024;
+  const AB_PHOTO_TYPES = ['image/jpeg', 'image/png', 'image/webp'], AB_VIDEO_TYPES = ['video/mp4', 'video/webm', 'video/quicktime'];
+  const AB_PART_WORDS = { heard: 'What I heard from you', ad: 'the advertisement', buyers: 'the ideal buyers' };
+  // a photo made ready for the web: longest side about 1,920 px, compressed, with a warning if the original is small
+  async function abPhotoReady(file) {
+    try {
+      const bmp = await createImageBitmap(file), long = Math.max(bmp.width, bmp.height), k = Math.min(1, 1920 / long);
+      const c = document.createElement('canvas'); c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k); c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+      const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.85));
+      return blob ? { blob, w: c.width, h: c.height, small: long < 1200 } : null;
+    } catch (_) { return null; }
+  }
+  // a video's still frame (for paper and for reduced motion), from where it starts; null if this browser can't read the video
+  function abStill(file, at) {
+    return new Promise(res => {
+      const v = document.createElement('video'), u = URL.createObjectURL(file); let done = false, meta = {};
+      const fin = x => { if (done) return; done = true; clearTimeout(t); try { URL.revokeObjectURL(u); } catch (_) { } res(x); };
+      const t = setTimeout(() => fin(null), 10000);
+      v.muted = true; v.playsInline = true; v.preload = 'auto';
+      v.onloadedmetadata = () => { meta = { w: v.videoWidth, h: v.videoHeight, d: isFinite(v.duration) ? v.duration : null };
+        const s = Math.max(0, +at || 0), end = isFinite(v.duration) ? Math.max(0, v.duration - 0.05) : s; try { v.currentTime = Math.min(s, end) || 0.01; } catch (_) { fin({ meta }); } };
+      v.onseeked = () => { try { const w = v.videoWidth, h = v.videoHeight; if (!w || !h) return fin({ meta }); const k = Math.min(1, 1920 / Math.max(w, h)), c = document.createElement('canvas');
+        c.width = Math.round(w * k); c.height = Math.round(h * k); c.getContext('2d').drawImage(v, 0, 0, c.width, c.height); c.toBlob(b => fin({ meta, blob: b || null }), 'image/jpeg', 0.85); } catch (_) { fin({ meta }); } };
+      v.onerror = () => fin(null); v.src = u;
+    });
+  }
+  const abSizeErr = e => /maximum allowed size|exceeded|too large|payload/i.test(String((e && e.message) || ''));
+  async function viewAppraisalSections(id, keep) {
+    header('Sections', '', 0); actions(false); document.body.classList.remove('apv-present');
+    if (!keep) main().innerHTML = '<div class="loading">Loading...</div>';
+    let rec = null; try { const d = await must(sb.from('appraisal_views').select('*').eq('id', id)); rec = Array.isArray(d) ? d[0] : d; } catch (_) { rec = null; }
+    if (!keep && !$('#main .loading')) return;
+    if (!rec) return viewPortalMissing();
+    if (!(rec.setup && rec.setup.v)) {
+      main().innerHTML = `<div class="view-pad" id="absHand"><span class="agent-flag">Only you see this</span><h1>Sections</h1><div class="card note tight"><p class="small" style="margin:0">This appraisal was loaded by hand, so its wording is its own. Change its figures on its own page.</p></div><div class="toolbar">${plink(`appraisals/${rec.id}`, 'Open the appraisal', 'btn primary')}</div></div>`;
+      top(); return;
+    }
+    const pid = okId(rec.property_id) ? rec.property_id : null, sent = rec.status === 'sent';
+    let photos = [], facts = [], rooms = [], assets = [], nTicked = 0;
+    if (pid) {
+      try { photos = ((await must(sb.from('property_documents').select('id,kind,path,bucket,room,caption,mime_type,archived_at,created_at').eq('property_id', pid))) || []).filter(d => d.kind === 'Photo' && !d.archived_at && /^image\//.test(d.mime_type || '') && okId(d.id)); } catch (_) { photos = []; }
+      facts = await profileLoad(pid);
+      try { rooms = ((await must(sb.from('property_rooms').select('id,base,label,position,tim_class,archived_at').eq('property_id', pid))) || []).map(r => ({ base: r.base, tim_class: r.tim_class || '', position: r.position, archived: !!r.archived_at })); } catch (_) { rooms = []; }
+    }
+    try { assets = ((await must(sb.from('appraisal_assets').select('*').eq('appraisal_id', rec.id))) || []).filter(a => okId(a.id)); } catch (_) { assets = []; }
+    try { nTicked = ((await must(sb.from('tim_reviews').select('id').eq('ticked', true))) || []).length; } catch (_) { nTicked = 0; }
+    const urls = assets.length ? await abAssetUrls(rec.id, assets.map(a => a.id)) : {};
+    const phUrls = photos.length ? await abHomePhotoUrls(pid, photos.map(d => d.id)) : {};
+    if (!keep && !$('#main .loading')) return;
+    if (keep && !$('#absPage')) return;
+    const S = JSON.parse(JSON.stringify(rec.setup));
+    S.header = S.header === 'own' ? 'own' : 'claude';
+    S.headerOpt = Object.assign({ url: '', asset: '', kind: 'image', credit: '', focus: { x: 50, y: 50 }, zoom: 1, bright: 1, start: 0 }, S.headerOpt || {});
+    S.heard = Object.assign({ lines: [] }, S.heard || {}); S.intro = Object.assign({}, S.intro || {});
+    S.home = Object.assign({ on: false, photos: [], facts: {}, ad: {} }, S.home || {}); S.home.ad = Object.assign({ title: '', body: '', ticked: false }, S.home.ad || {});
+    S.buyers = Object.assign({ text: '', tags: [], ticked: false }, S.buyers || {}); S.reviews = Object.assign({ on: false }, S.reviews || {});
+    const wording = FVC.wording(rooms);
+    const offer = APPR.homeFacts(facts, wording);
+    // a key detail is ticked as Tim left it; the first time, as the profile has it ticked (the room wording always on)
+    const factOn = k => k in S.home.facts ? !!S.home.facts[k] : (k === 'rooms' || !!((facts || []).find(x => x.key === k) || {}).ticked);
+    const pending = {};   // what the AI flagged on its last draft for each part (problems and a private note), until the page is left
+    const dis = sent ? ' disabled' : '';
+    const header_ = asset => { const s = APPR.phaseB(Object.assign({}, S, { home: {}, heard: {}, buyers: {}, intro: {}, reviews: {} })).header; if (!s) return '';
+      const t = document.createElement('div'); t.innerHTML = APPR.render({ title: '', sections: [s] }, { assets: urls }); const h = t.querySelector('.apv-hero'); return h ? h.outerHTML : ''; };
+    const assetOf = role => assets.find(a => a.role === role && a.id === (role === 'header' ? S.headerOpt.asset : S.intro.asset)) || null;
+    const privBox = part => { const p = pending[part]; return p && p.private_note ? `<div class="abs-private" data-abpriv="${part}"><p class="small" style="margin:6px 0 0"><strong>For your private notes only</strong> (never on their page): ${esc(p.private_note)}</p><button class="btn link" type="button" data-abnote="${part}"${dis}>Add to my private notes</button></div>` : ''; };
+    const probs = part => { const p = pending[part]; return p && (p.problems || []).length ? `<p class="small" data-abprob="${part}" style="margin:6px 0 0">${(p.problems || []).map(esc).join(' ')}</p>` : ''; };
+    const drafted = (part, label) => `<button class="btn ghost" type="button" id="abs${part}Draft"${dis}>${label}</button>`;
+    const byRoom = {}; photos.slice().sort((a, b) => (a.created_at < b.created_at ? -1 : 1)).forEach(d => { (byRoom[d.room || 'Other photos'] ||= []).push(d); });
+    const chosen = () => S.home.photos.filter(x => photos.some(d => d.id === x));
+    // the header's preview and its controls (redrawn on their own when the library link changes, so nothing else is redrawn mid-click)
+    const previewHTML = hp => `${hp ? `<p class="small" style="margin:10px 0 4px">Drag on the picture to choose what stays in view.</p><div class="abs-frame" id="absFrame">${hp}</div>
+          <div class="row2"><div><label class="f" for="absZoom">Zoom</label><input type="range" id="absZoom" min="1" max="3" step="0.05" value="${esc(S.headerOpt.zoom)}"${dis}></div><div><label class="f" for="absBright">Brightness</label><input type="range" id="absBright" min="0.5" max="1.5" step="0.05" value="${esc(S.headerOpt.bright)}"${dis}></div></div>
+          ${S.header === 'own' ? `<label class="f" for="absCredit">Credit line <span class="opt">(optional)</span></label><input type="text" id="absCredit" maxlength="120" value="${esc(S.headerOpt.credit || '')}"${dis}>` : ''}
+          ${S.headerOpt.kind === 'video' && S.header === 'own' ? `<label class="f" for="absStart">Start the video at (seconds)</label><input type="number" id="absStart" min="0" max="3600" step="1" inputmode="numeric" value="${esc(S.headerOpt.start || 0)}"${dis}><p class="small" style="margin:4px 0 0">It plays muted and on a loop. Paper copies, and anyone who has reduced motion turned on, see the still frame.</p>` : ''}` : ''}`;
+    const draw = () => {
+      const hA = assetOf('header'), iA = assetOf('intro'), hp = header_();
+      main().innerHTML = `<div class="view-pad abs" id="absPage"><span class="agent-flag">Only you see this</span><h1>Sections</h1>
+      <p class="lede" translate="no">${esc(rec.address || rec.title || '')}</p>
+      <p class="small">Each section shows on their appraisal only once it has something in it: a photo or video chosen, or a line you have ticked. Nothing here is sent to anyone.</p>
+      ${sent ? '<div class="card warnc tight"><p class="small" style="margin:0">This appraisal has been sent, so it can\'t be changed. A sent copy never changes.</p></div>' : ''}
+      <h2>Header photo or video</h2>
+      <div class="card tight" id="absHeader"><div class="choices">${['claude', 'own'].map(k => `<label class="choice"><input type="radio" name="absHeader" value="${k}"${S.header === k ? ' checked' : ''}${dis}><span class="mark"></span><span><span class="ct">${k === 'claude' ? 'Leave it to Claude' : 'Use my own'}</span><span class="cd">${k === 'claude' ? 'A photo or footage from the Dunedin NZ Visual Library, credited DunedinNZ' : 'A photo or video you upload'}</span></span></label>`).join('')}</div>
+        ${S.header === 'claude' ? `<label class="f" for="absLibUrl">Link to the photo or video from the Dunedin NZ Visual Library <span class="opt">(the file itself, starting https://)</span></label><input type="url" id="absLibUrl" value="${esc(S.headerOpt.url || '')}" placeholder="https://"${dis}>
+          <p class="small" style="margin:6px 0 0">Credited DunedinNZ on the page. Leave it blank and no header is shown.</p>`
+        : `<label class="f" for="absHeaderFile">Your photo or video <span class="opt">(JPEG, PNG or WebP photo; MP4, WebM or MOV video up to 150 MB)</span></label><input type="file" id="absHeaderFile" accept="${AB_PHOTO_TYPES.concat(AB_VIDEO_TYPES).join(',')}"${dis}>
+          ${hA ? `<p class="small" style="margin:6px 0 0">Using ${esc(hA.file_name || (hA.kind === 'video' ? 'your video' : 'your photo'))}${hA.kind === 'video' && !hA.still_path ? '. No still frame could be taken from it, so paper copies show no header' : ''}.</p><button class="btn link" type="button" id="absHeaderRm"${dis}>Remove it</button>` : '<p class="small" style="margin:6px 0 0">Nothing uploaded yet, so no header is shown.</p>'}`}
+        <div id="absPrev">${previewHTML(hp)}</div></div>
+      <h2>Video introduction</h2>
+      <div class="card tight" id="absIntro"><p class="small" style="margin:0 0 6px">Optional: a short hello from you, which they play themselves. Without one, nothing shows.</p>
+        <label class="f" for="absIntroFile" style="margin-top:0">Your video <span class="opt">(MP4, WebM or MOV, up to 150 MB)</span></label><input type="file" id="absIntroFile" accept="${AB_VIDEO_TYPES.join(',')}"${dis}>
+        ${iA ? `<p class="small" style="margin:6px 0 0">Using ${esc(iA.file_name || 'your video')}.</p>${urls[iA.id] ? `<div class="apv-intro-box" style="margin-top:6px"><video controls playsinline preload="metadata"${urls[iA.id].still ? ` poster="${esc(urls[iA.id].still)}"` : ''}><source src="${esc(urls[iA.id].url)}"></video></div>` : ''}<button class="btn link" type="button" id="absIntroRm"${dis}>Remove it</button>` : ''}</div>
+      <h2>What I heard from you</h2>
+      <div class="card tight" id="absHeard"><p class="small" style="margin:0 0 6px">The AI rewrites their answers (Questions before we meet and the first visit), why they wanted to talk and your notes, in your voice. It never reads the client heart. Tick each line you want them to see.</p>
+        ${drafted('heard', S.heard.lines.length ? 'Draft again with AI' : 'Draft with AI')}${probs('heard')}
+        <div id="absLines">${S.heard.lines.map((l, i) => `<div class="abs-line" data-abline="${i}"><label class="f" for="absL${i}" style="margin-top:0">Line ${i + 1}</label><textarea id="absL${i}" data-abl="${i}" rows="2"${dis}>${esc(l.text || '')}</textarea>
+          <div class="choices"><label class="choice cb"><input type="checkbox" data-abt="${i}"${l.ticked ? ' checked' : ''}${dis}><span class="mark"></span><span><span class="ct">Show this line</span></span></label></div><button class="btn link" type="button" data-abr="${i}"${dis}>Remove this line</button></div>`).join('') || '<p class="small" style="margin:8px 0 0">No lines yet.</p>'}</div>
+        <button class="btn link" type="button" id="absHeardAdd"${dis}>Add a line</button>${privBox('heard')}</div>
+      <h2>Their home as a mockup listing</h2>
+      <div class="card tight" id="absHome"><div class="choices"><label class="choice cb"><input type="checkbox" id="absHomeOn"${S.home.on ? ' checked' : ''}${dis}><span class="mark"></span><span><span class="ct">Show the mockup listing</span><span class="cd">Labelled on their page as a mockup, not live. It shows once it has a photo or a ticked advertisement.</span></span></label></div>
+        <h3>Photos</h3>${photos.length ? Object.keys(byRoom).map(rm => `<p class="small" style="margin:10px 0 4px"><strong>${esc(rm)}</strong></p><div class="abs-ph">${byRoom[rm].map(d => `<figure class="${S.home.photos.includes(d.id) ? 'on' : ''}">${phUrls[d.id] ? `<img src="${esc(phUrls[d.id].url)}" alt="${esc(rm)}">` : ''}<figcaption>${esc(d.caption || '')}</figcaption><label class="choice cb"><input type="checkbox" data-abp="${esc(d.id)}"${S.home.photos.includes(d.id) ? ' checked' : ''}${dis}><span class="mark"></span><span><span class="ct">Use</span></span></label></figure>`).join('')}</div>`).join('')
+          : '<p class="small" style="margin:0">No photos on the property file yet. Photos taken at the first visit, filed by room, appear here.</p>'}
+        ${chosen().length ? `<p class="small" style="margin:12px 0 4px">In this order:</p><ol class="apv-list" id="absOrder">${chosen().map((x, i) => { const d = photos.find(p => p.id === x); return `<li>${esc((d && d.room) || 'Photo')}${d && d.caption ? ', ' + esc(d.caption) : ''} <button class="btn link" type="button" data-abup="${i}"${i ? '' : ' disabled'}${dis}>Up</button> <button class="btn link" type="button" data-abdn="${i}"${i < chosen().length - 1 ? '' : ' disabled'}${dis}>Down</button></li>`; }).join('')}</ol>` : ''}
+        <h3>Key details</h3><p class="small" style="margin:0 0 6px">From the property profile. The rooms read as you called each room at the first visit. Never the owners or anything from Relab.</p>
+        ${offer.length ? `<div class="choices">${offer.map(x => `<label class="choice cb"><input type="checkbox" data-abf="${esc(x.key)}"${factOn(x.key) ? ' checked' : ''}${dis}><span class="mark"></span><span><span class="ct">${esc(x.label)}</span><span class="cd">${esc(x.value)}</span></span></label>`).join('')}</div>` : '<p class="small" style="margin:0">No facts on the profile yet.</p>'}
+        ${wording ? '' : '<p class="small" style="margin:6px 0 0">No room wording yet: make your call on each room on the first visit.</p>'}
+        <h3>The advertisement</h3><p class="small" style="margin:0 0 6px">Drafted in your "To..." style from the key details ticked above and the ideal buyers. Edit it, then tick it when it is ready for them.</p>
+        ${drafted('ad', S.home.ad.title || S.home.ad.body ? 'Draft again with AI' : 'Draft with AI')}${probs('ad')}
+        <label class="f" for="absAdTitle">Title</label><input type="text" id="absAdTitle" maxlength="120" value="${esc(S.home.ad.title || '')}" placeholder="To ..."${dis}>
+        <label class="f" for="absAdBody">Wording <span class="opt">(a blank line starts a new paragraph)</span></label><textarea id="absAdBody" rows="7"${dis}>${esc(S.home.ad.body || '')}</textarea>
+        <div class="choices"><label class="choice cb"><input type="checkbox" id="absAdTick"${S.home.ad.ticked ? ' checked' : ''}${dis}><span class="mark"></span><span><span class="ct">Ready for them to see</span></span></label></div>${privBox('ad')}</div>
+      <h2>The ideal buyers</h2>
+      <div class="card tight" id="absBuyers"><p class="small" style="margin:0 0 6px">A short summary, in your voice, of their story and the ideal buyers you brainstormed at the first visit.</p>
+        ${drafted('buyers', S.buyers.text ? 'Draft again with AI' : 'Draft with AI')}${probs('buyers')}
+        <label class="f" for="absBuyText">Summary</label><textarea id="absBuyText" rows="4"${dis}>${esc(S.buyers.text || '')}</textarea>
+        <label class="f" for="absBuyTags">Ideal for <span class="opt">(separate with commas)</span></label><input type="text" id="absBuyTags" value="${esc((S.buyers.tags || []).join(', '))}"${dis}>
+        <div class="choices"><label class="choice cb"><input type="checkbox" id="absBuyTick"${S.buyers.ticked ? ' checked' : ''}${dis}><span class="mark"></span><span><span class="ct">Ready for them to see</span></span></label></div>${privBox('buyers')}</div>
+      <h2>Google reviews</h2>
+      <div class="card tight" id="absReviews"><div class="choices"><label class="choice cb"><input type="checkbox" id="absRevOn"${S.reviews.on ? ' checked' : ''}${dis}><span class="mark"></span><span><span class="ct">Show my ticked Google reviews</span><span class="cd">${nTicked ? nTicked + ' ticked to show, the newest six on the page' : 'None ticked yet, so none would show'}</span></span></label></div>
+        <div class="toolbar">${plink('appraisals/reviews', 'Choose which reviews show', 'btn link')}</div></div>
+      <h2>Private notes</h2>
+      <div class="card tight"><label class="f" for="absPrivate" style="margin-top:0">Only you see these <span class="opt">(weak points of the home go here, never on their page)</span></label><textarea id="absPrivate" rows="4"${dis}>${esc(rec.private_notes || '')}</textarea></div>
+      ${sent ? '' : '<div class="toolbar"><button class="btn primary" type="button" id="absSave">Save and write the appraisal</button></div>'}
+      <div class="toolbar no-print">${plink(`appraisals/${rec.id}`, 'Open the appraisal', 'btn ghost')}${plink(`appraisals/${rec.id}/setup`, 'Set-up', 'btn ghost')}${plink(`appraisals/${rec.id}/present`, 'Present on screen', 'btn ghost')}</div></div>`;
+      wire();
+    };
+    // what is on screen, into S (before any redraw and before saving)
+    const read = () => {
+      if (!$('#absPage') || sent) return;
+      const v = q => { const e = $(q); return e ? e.value : null; };
+      const r = $('input[name="absHeader"]:checked'); if (r) S.header = r.value;
+      if (v('#absLibUrl') != null) S.headerOpt.url = v('#absLibUrl').trim();
+      if (v('#absZoom') != null) S.headerOpt.zoom = +v('#absZoom'); if (v('#absBright') != null) S.headerOpt.bright = +v('#absBright');
+      if (v('#absCredit') != null) S.headerOpt.credit = v('#absCredit').replace(/\s+/g, ' ').trim(); if (v('#absStart') != null) S.headerOpt.start = Math.max(0, Math.round(+v('#absStart') || 0));
+      $$('[data-abl]').forEach(t => { const l = S.heard.lines[+t.dataset.abl]; if (l) l.text = t.value; });
+      $$('[data-abt]').forEach(t => { const l = S.heard.lines[+t.dataset.abt]; if (l) l.ticked = t.checked; });
+      S.home.on = !!($('#absHomeOn') || {}).checked;
+      $$('[data-abf]').forEach(t => { S.home.facts[t.dataset.abf] = t.checked; });
+      S.home.ad.title = v('#absAdTitle') || ''; S.home.ad.body = v('#absAdBody') || ''; S.home.ad.ticked = !!($('#absAdTick') || {}).checked;
+      S.buyers.text = v('#absBuyText') || ''; S.buyers.tags = (v('#absBuyTags') || '').split(',').map(x => x.replace(/\s+/g, ' ').trim()).filter(Boolean).slice(0, 20); S.buyers.ticked = !!($('#absBuyTick') || {}).checked;
+      S.reviews.on = !!($('#absRevOn') || {}).checked;
+    };
+    const redraw = () => { read(); const y = window.scrollY; draw(); window.scrollTo(0, y); };
+    // saves the set-up and, once the set-up is complete, writes the sections (only ticked and uploaded things reach them)
+    const save = async (btn, okMsg) => {
+      read();
+      const bad = APPR.checkSections(S); if (bad) { atBtn(btn, bad, 'err'); return false; }
+      S.home.details = offer.filter(x => factOn(x.key)).map(x => [x.label, x.value]);
+      const ranges = ((rec.fields || {}).ranges || []).map(r => ({ key: r.key, option: r.option, low: r.low, high: r.high }));
+      const ready = !APPR.checkSetup(S, ranges);
+      const w = ready ? APPR.writeStandard(S, ranges, { address: rec.address, preparedOn: rec.prepared_on, cat: { PACKAGES: typeof PACKAGES !== 'undefined' ? PACKAGES : {}, ITEMS: typeof ITEMS !== 'undefined' ? ITEMS : {}, CATALOGUE: typeof CATALOGUE !== 'undefined' ? CATALOGUE : [] } }) : null;
+      if (w) { const b2 = APPR.sectionsProblem([w.sections, w.title]); if (b2) { atBtn(btn, b2, 'err'); return false; } }
+      btn.disabled = true; atBtn(btn, 'Saving...', 'busy');
+      const { data, error } = await sb.rpc('agent_appraisal_save', { p_id: rec.id, p_setup: S, p_fields: w ? w.fields : null, p_sections: w ? w.sections : null, p_title: w ? w.title : null, p_prepared_for: null, p_private_notes: ($('#absPrivate') || {}).value != null ? $('#absPrivate').value.trim() : null, p_status: null });
+      btn.disabled = false;
+      if (error || !data) { atBtn(btn, netErr(error) ? 'Not saved. Check you have signal, then try again.' : 'Not saved: ' + ((error && error.message) || 'try again.'), 'err'); return false; }
+      Object.assign(rec, data); JDIRTY = false;
+      atBtn(btn, okMsg || (ready ? 'Saved. Only what you ticked or uploaded is on the appraisal: open it or present it below.' : 'Saved. Finish the set-up (your range, the campaign, the method and the plan) and the appraisal is written.'), 'ok');
+      return true;
+    };
+    // an upload: the file to storage (a photo made ready for the web first; a video with its still frame), filed in appraisal_assets,
+    // the set-up saved to use it, then the one it replaces removed
+    const upload = async (role, file, btn) => {
+      if (!file) return;
+      const isVid = AB_VIDEO_TYPES.includes(file.type) || (role === 'intro'), isPh = AB_PHOTO_TYPES.includes(file.type);
+      if (role === 'intro' && !AB_VIDEO_TYPES.includes(file.type)) return atBtn(btn, 'Choose an MP4, WebM or MOV video.', 'err');
+      if (!isVid && !isPh) return atBtn(btn, 'Choose a JPEG, PNG or WebP photo, or an MP4, WebM or MOV video.', 'err');
+      if (isVid && file.size > AB_VIDEO_MAX) return atBtn(btn, 'This video is over 150 MB, so it can\'t be used. Trim it, or save it smaller, then try again.', 'err');
+      read(); atBtn(btn, isVid ? 'Taking a still frame...' : 'Getting the photo ready...', 'busy');
+      const key = crypto.randomUUID(), base = `appraisals/${rec.id}/${role}/${key}`;
+      let path, still = null, row;
+      if (isVid) {
+        const s = await abStill(file, role === 'header' ? S.headerOpt.start : 1);
+        const ext = file.type === 'video/webm' ? 'webm' : file.type === 'video/quicktime' ? 'mov' : 'mp4'; path = base + '.' + ext;
+        atBtn(btn, 'Uploading the video...', 'busy');
+        const up = await sb.storage.from(AVB).upload(path, file, { contentType: file.type, upsert: false });
+        if (up.error) return atBtn(btn, abSizeErr(up.error) ? 'This video is bigger than your storage plan lets one file be. On the Free plan the limit is 50 MB; on Pro you can raise it in Supabase Storage settings.' : netErr(up.error) ? 'Not uploaded. Check you have signal, then try again.' : 'Not uploaded: ' + up.error.message, 'err');
+        if (s && s.blob) { const sp = base + '-still.jpg'; const u2 = await sb.storage.from(AMB).upload(sp, s.blob, { contentType: 'image/jpeg', upsert: false }); if (!u2.error) still = sp; }
+        row = { appraisal_id: rec.id, role, kind: 'video', bucket: AVB, path, still_path: still, file_name: String(file.name || '').slice(0, 200), width: (s && s.meta && s.meta.w) || null, height: (s && s.meta && s.meta.h) || null, duration_s: s && s.meta && s.meta.d != null ? Math.round(s.meta.d * 10) / 10 : null };
+      } else {
+        const r = await abPhotoReady(file); if (!r) return atBtn(btn, 'That photo couldn\'t be read. Try another, or save it as a JPEG first.', 'err');
+        if (r.blob.size > AB_PHOTO_MAX) return atBtn(btn, 'That photo is still over 15 MB once made smaller. Try another.', 'err');
+        path = base + '.jpg'; atBtn(btn, 'Uploading the photo...', 'busy');
+        const up = await sb.storage.from(AMB).upload(path, r.blob, { contentType: 'image/jpeg', upsert: false });
+        if (up.error) return atBtn(btn, netErr(up.error) ? 'Not uploaded. Check you have signal, then try again.' : 'Not uploaded: ' + up.error.message, 'err');
+        row = { appraisal_id: rec.id, role, kind: 'image', bucket: AMB, path, file_name: String(file.name || '').slice(0, 200), width: r.w, height: r.h };
+        if (r.small) pending.small = true;
+      }
+      let made = null; try { const d = await must(sb.from('appraisal_assets').insert(row).select()); made = Array.isArray(d) ? d[0] : d; } catch (e) { return atBtn(btn, 'Not filed: ' + ((e && e.message) || 'try again.'), 'err'); }
+      const old = assets.filter(a => a.role === role);
+      if (role === 'header') { S.headerOpt.asset = made.id; S.headerOpt.kind = made.kind; if (made.kind !== 'video') S.headerOpt.start = 0; } else S.intro.asset = made.id;
+      const sv = $('#absSave') || btn;
+      if (!(await save(sv, 'Uploaded and saved.'))) return;
+      for (const a of old) { try { await must(sb.from('appraisal_assets').delete().eq('id', a.id)); await sb.storage.from(a.bucket).remove([a.path]); if (a.still_path) await sb.storage.from(AMB).remove([a.still_path]); } catch (_) { } }
+      await viewAppraisalSections(rec.id, true);
+      atBtn($(role === 'header' ? '#absHeaderFile' : '#absIntroFile'), (made.kind === 'video' ? (still ? 'Uploaded, with a still frame for paper.' : 'Uploaded. No still frame could be taken from this video in this browser, so paper copies leave it out.') : pending.small ? 'Uploaded. This photo is small, so it may look soft on a wide screen.' : 'Uploaded.'), made.kind === 'video' && !still ? 'err' : 'ok');
+    };
+    const remove = async (role, btn) => {
+      const a = assetOf(role); if (!a) return; read();
+      if (role === 'header') S.headerOpt.asset = ''; else S.intro.asset = '';
+      if (!(await save($('#absSave') || btn, 'Removed.'))) return;
+      try { await must(sb.from('appraisal_assets').delete().eq('id', a.id)); await sb.storage.from(a.bucket).remove([a.path]); if (a.still_path) await sb.storage.from(AMB).remove([a.still_path]); } catch (_) { }
+      await viewAppraisalSections(rec.id, true); atBtn($(role === 'header' ? '#absHeaderFile' : '#absIntroFile'), 'Removed. Nothing shows in its place.', 'ok');
+    };
+    // the AI drafts one part (doc-prefill, Sonnet). Lines arrive unticked; a ticked line already there is kept.
+    const draft = async (part, btn) => {
+      read(); btn.disabled = true; atBtn(btn, 'Drafting...', 'busy');
+      const tickedFacts = offer.filter(x => factOn(x.key) && x.key !== 'rooms').map(x => x.key);
+      const { data, error } = await sb.functions.invoke('doc-prefill', { body: { mode: 'appraisal_draft', part, appraisal_id: rec.id, facts: part === 'ad' ? tickedFacts : [] } });
+      const d = await fnJson(data, error); btn.disabled = false;
+      if (!d || !d.ok) return atBtn(btn, (d && (d.message || d.error)) || (netErr(error) ? 'No signal. Try again when you have signal.' : 'The AI didn\'t answer. Try again in a minute.'), 'err');
+      const r = d.result || {};
+      if (part === 'heard') { S.heard.lines = S.heard.lines.filter(l => l.ticked).concat((r.lines || []).map(l => ({ id: crypto.randomUUID(), text: l.text, ticked: false }))); pending.heard = { private_note: r.private_note || '', problems: (r.lines || []).filter(l => l.problem).map(l => l.problem) }; }
+      if (part === 'ad') { S.home.ad = { title: r.title || '', body: (r.paras || []).join('\n\n'), ticked: false }; pending.ad = { private_note: r.private_note || '', problems: r.problems || [] }; }
+      if (part === 'buyers') { S.buyers = { text: r.summary || '', tags: r.tags || [], ticked: false }; pending.buyers = { private_note: r.private_note || '', problems: r.problems || [] }; }
+      JDIRTY = true; const y = window.scrollY; draw(); window.scrollTo(0, y);
+      atBtn($('#abs' + part + 'Draft'), 'Drafted. Read it, change anything you like, and tick ' + (part === 'heard' ? 'each line' : 'it') + ' you want them to see. Then save.', 'ok');
+    };
+    const wire = () => {
+      if (sent) return;
+      $$('input[name="absHeader"]').forEach(i => i.addEventListener('change', () => { JDIRTY = true; setTimeout(redraw, 0); }));
+      const lib = $('#absLibUrl'); if (lib) lib.addEventListener('change', () => { JDIRTY = true; read(); $('#absPrev').innerHTML = previewHTML(header_()); wireFrame(); });
+      wireFrame();
+      const hf = $('#absHeaderFile'); if (hf) hf.addEventListener('change', () => upload('header', hf.files && hf.files[0], hf));
+      const inf = $('#absIntroFile'); if (inf) inf.addEventListener('change', () => upload('intro', inf.files && inf.files[0], inf));
+      wireRest();
+    };
+    // the drag to frame, zoom and brightness on the header's preview
+    const wireFrame = () => {
+      const fr = $('#absFrame'); if (!fr || sent) return;
+      {
+        const restyle = () => { const st = 'object-position:' + S.headerOpt.focus.x + '% ' + S.headerOpt.focus.y + '%;transform-origin:' + S.headerOpt.focus.x + '% ' + S.headerOpt.focus.y + '%;transform:scale(' + S.headerOpt.zoom + ');filter:brightness(' + S.headerOpt.bright + ')'; $$('.apv-hero-m, .apv-hero-still', fr).forEach(m => m.setAttribute('style', st)); };
+        let drag = false; const at = e => { const b = fr.getBoundingClientRect(); S.headerOpt.focus = { x: Math.round(Math.max(0, Math.min(100, (e.clientX - b.left) / b.width * 100))), y: Math.round(Math.max(0, Math.min(100, (e.clientY - b.top) / b.height * 100))) }; JDIRTY = true; restyle(); };
+        fr.addEventListener('pointerdown', e => { drag = true; try { fr.setPointerCapture(e.pointerId); } catch (_) { } at(e); });
+        fr.addEventListener('pointermove', e => { if (drag) at(e); }); fr.addEventListener('pointerup', () => { drag = false; }); fr.addEventListener('pointercancel', () => { drag = false; });
+        ['#absZoom', '#absBright'].forEach(q => { const i = $(q); if (i) i.addEventListener('input', () => { S.headerOpt.zoom = +$('#absZoom').value; S.headerOpt.bright = +$('#absBright').value; JDIRTY = true; restyle(); }); });
+        abWireVideos(fr);
+      }
+    };
+    const wireRest = () => {
+      const hr = $('#absHeaderRm'); if (hr) hr.addEventListener('click', () => remove('header', hr));
+      const ir = $('#absIntroRm'); if (ir) ir.addEventListener('click', () => remove('intro', ir));
+      ['heard', 'ad', 'buyers'].forEach(p => { const b = $('#abs' + p + 'Draft'); if (b) b.addEventListener('click', () => draft(p, b)); });
+      $('#absHeardAdd').addEventListener('click', () => { read(); S.heard.lines.push({ id: crypto.randomUUID(), text: '', ticked: false }); JDIRTY = true; const y = window.scrollY; draw(); window.scrollTo(0, y); const t = $('#absL' + (S.heard.lines.length - 1)); if (t) t.focus(); });
+      $$('[data-abr]').forEach(b => b.addEventListener('click', () => { read(); S.heard.lines.splice(+b.dataset.abr, 1); JDIRTY = true; const y = window.scrollY; draw(); window.scrollTo(0, y); }));
+      $$('[data-abp]').forEach(c => c.addEventListener('change', () => { read(); const x = c.dataset.abp; S.home.photos = c.checked ? S.home.photos.filter(p => p !== x).concat([x]) : S.home.photos.filter(p => p !== x); JDIRTY = true; redraw(); }));
+      const mv = (i, d) => { read(); const L = chosen(), j = i + d; if (j < 0 || j >= L.length) return; [L[i], L[j]] = [L[j], L[i]]; S.home.photos = L; JDIRTY = true; const y = window.scrollY; draw(); window.scrollTo(0, y); };
+      $$('[data-abup]').forEach(b => b.addEventListener('click', () => mv(+b.dataset.abup, -1))); $$('[data-abdn]').forEach(b => b.addEventListener('click', () => mv(+b.dataset.abdn, 1)));
+      $$('[data-abnote]').forEach(b => b.addEventListener('click', () => { const p = pending[b.dataset.abnote]; const ta = $('#absPrivate'); if (!p || !ta) return; ta.value = (ta.value.trim() ? ta.value.trim() + '\n\n' : '') + p.private_note; p.private_note = ''; JDIRTY = true; atBtn(b, 'Added to your private notes. Save to keep it.', 'ok'); }));
+      $('#absSave').addEventListener('click', e => save(e.currentTarget));
+    };
+    draw(); if (!keep) top();
+  }
+
+  // Tim's Google reviews from his "Tim McGuire" profile: the monthly pack (mre.reviews/1) pasted in, and the ones he ticks show on his
+  // appraisals. New and changed reviews arrive unticked; a review gone from Google is kept, unticked, and can't be ticked.
+  async function viewReviews(keep) {
+    header('Google reviews', '', 0); actions(false); document.body.classList.remove('apv-present');
+    if (!keep) main().innerHTML = '<div class="loading">Loading...</div>';
+    let rows = [], failed = false;
+    try { rows = ((await must(sb.from('tim_reviews').select('*').order('reviewed_on', { ascending: false }))) || []).filter(r => okId(r.id)); } catch (_) { failed = true; }
+    if (!keep && !$('#main .loading')) return;
+    if (keep && !$('#rvwPage')) return;
+    const nT = rows.filter(r => r.ticked).length;
+    const stars = n => `<span class="apv-stars" aria-label="${n} out of 5 stars">${'★'.repeat(n)}<span class="off">${'★'.repeat(5 - n)}</span></span>`;
+    main().innerHTML = `<div class="view-pad" id="rvwPage"><span class="agent-flag">Only you see this</span><h1>Google reviews</h1>
+      <p class="lede">From your "Tim McGuire" Google Business profile, copied once a month in your signed-in browser. Tick the ones to show on your appraisals; the newest six ticked show.</p>
+      ${failed ? '<div class="card warnc tight"><p class="small" style="margin:0">The reviews didn\'t load. Check you have signal, then open this page again.</p></div>' : ''}
+      <h2>Import reviews</h2>
+      <div class="card tight"><p class="small" style="margin:0 0 6px">Paste the reviews pack (format mre.reviews/1). New and changed reviews arrive unticked, so you check each one.</p>
+        <label class="f" for="rvwPack" style="margin-top:0">Pack</label><textarea id="rvwPack" rows="5" data-nodirty spellcheck="false" placeholder='{"format":"mre.reviews/1","profile":"Tim McGuire","reviews":[...]}'></textarea>
+        <div class="toolbar"><button class="btn primary" type="button" id="rvwImport">Import the reviews</button></div></div>
+      <h2>Your reviews</h2>
+      <p class="small" id="rvwCount">${rows.length ? `${rows.length} review${rows.length === 1 ? '' : 's'}, ${nT} ticked to show.` : 'No reviews yet. Import the first pack above.'}</p>
+      ${rows.length ? `<div class="card tight" id="rvwList">${rows.map(r => `<div class="rvw-item${r.removed_at ? ' gone' : ''}" data-rvw="${esc(r.id)}"><div>${stars(r.rating)}<strong>${esc(r.reviewer)}</strong> <span class="small">${esc(fmtDate(r.reviewed_on))}${r.removed_at ? ', no longer on Google' : ''}</span></div>
+        ${String(r.body || '').trim() ? `<blockquote>${esc(r.body)}</blockquote>` : '<p class="small" style="margin:4px 0">Stars only, no words.</p>'}
+        <div class="choices"><label class="choice cb${r.removed_at ? ' off' : ''}"><input type="checkbox" data-rvt="${esc(r.id)}"${r.ticked ? ' checked' : ''}${r.removed_at ? ' disabled' : ''}><span class="mark"></span><span><span class="ct">Show on appraisals</span></span></label></div>
+        ${APPR.httpsUrl(r.url) ? `<a class="small" href="${esc(r.url)}" target="_blank" rel="noopener">Open it on Google</a>` : ''}</div>`).join('')}</div>` : ''}
+    </div>`;
+    if (!keep) top();
+    $('#rvwImport').addEventListener('click', async e => { const b = e.currentTarget; let pk = null;
+      try { pk = JSON.parse($('#rvwPack').value); } catch (_) { return atBtn(b, 'That isn\'t a pack: paste the whole of it, from the first { to the last }.', 'err'); }
+      if (!pk || pk.format !== 'mre.reviews/1') return atBtn(b, 'That isn\'t a reviews pack (format mre.reviews/1).', 'err');
+      b.disabled = true; atBtn(b, 'Importing...', 'busy');
+      const { data, error } = await sb.rpc('agent_reviews_import', { p_pack: pk }); b.disabled = false;
+      if (error || !data) return atBtn(b, netErr(error) ? 'Not imported. Check you have signal, then try again.' : 'Not imported: ' + ((error && error.message) || 'try again.'), 'err');
+      const sk = (data.skipped || []).map(s => 'review ' + s.n + ' skipped: ' + s.why);
+      const y = window.scrollY; await viewReviews(true); window.scrollTo(0, y);
+      atBtn($('#rvwImport'), data.added + ' new, ' + data.updated + ' changed (unticked for you to check), ' + data.unchanged + ' the same' + (data.removed ? ', ' + data.removed + ' gone from Google' : '') + '.' + (sk.length ? ' ' + sk.join('; ') + '.' : ''), sk.length ? 'err' : 'ok'); });
+    $$('[data-rvt]').forEach(c => c.addEventListener('change', async () => { const on = c.checked; c.disabled = true;
+      const { data, error } = await sb.rpc('agent_review_tick', { p_id: c.dataset.rvt, p_on: on }); c.disabled = false;
+      const lab = c.closest('label');
+      if (error || !data) { c.checked = !on; return atBtn(lab, netErr(error) ? 'Not saved. Check you have signal, then try again.' : (error && error.message) || 'Not saved. Try again.', 'err'); }
+      const n = $$('[data-rvt]').filter(x => x.checked).length; const ct = $('#rvwCount'); if (ct) ct.textContent = rows.length + ' review' + (rows.length === 1 ? '' : 's') + ', ' + n + ' ticked to show.';
+      atBtn(lab, on ? 'Shows on your appraisals.' : 'No longer shown.', 'ok'); }));
   }
   function viewPortalMissing(msg) {
     header('', '', 0); actions(false);

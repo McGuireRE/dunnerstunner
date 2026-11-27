@@ -132,11 +132,13 @@
     const srcs = Array.from(new Set(ms.filter(m => !m.missing).map(m => SOURCES[m.source] || SOURCES.other)));
     const lede = latest.median ? 'In ' + monthName(latest.month) + ' the median sale price in ' + area + ' was ' + dollars(latest.median)
       + (latest.sales != null ? ', from ' + latest.sales + ' sales' : '') + (latest.days_to_sell != null ? ', and homes took ' + latest.days_to_sell + ' days to sell at the median' : '') + '.' : '';
-    return '<div class="mk-report" data-area="' + esc(area) + '">' + (lede ? '<p class="mk-lede">' + esc(lede) + '</p>' : '')
-      + '<div class="mk-grid">' + medianChart(ms)
+    const charts = medianChart(ms)
       + barChart(ms, 'days_to_sell', { title: 'Days to sell', sub: 'The median number of days from listing to sale.', fmt: v => Math.round(v) + ' days' })
       + barChart(ms, 'sales', { title: 'Homes sold each month', sub: 'How many homes sold in ' + area + '.', fmt: v => Math.round(v) + ' sold' })
-      + (withBands ? bandsChart(withBands, ranges) : '') + '</div>'
+      + (withBands ? bandsChart(withBands, ranges) : '');
+    if (!lede && !charts) return '';   // no figure to show: no report at all, not an empty one (Tim, 28 November 2026)
+    return '<div class="mk-report" data-area="' + esc(area) + '">' + (lede ? '<p class="mk-lede">' + esc(lede) + '</p>' : '')
+      + '<div class="mk-grid">' + charts + '</div>'
       + '<p class="apv-note mk-src">Source: ' + esc(srcs.join(' and ')) + ', figures to ' + esc(monthName(latest.month)) + (got ? ', gathered ' + esc(longDate(got)) : '') + '.</p></div>';
   }
   window.MKT = { dots, report, pickArea, lastYear, ticks, short, monthName, longDate, STATUS, SOURCES };

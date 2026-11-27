@@ -640,3 +640,29 @@ Builds on 034 (apply 034 first). Additive only: no existing column, row, policy,
   in property-files, on the appraisal's property, not removed; returns its path), `appraisal_report_save(...)`, `appraisal_buyer_save(...)`.
 Tests: tests/appraisal-reports-rollback.js/.sql on tests/appraisal-reports-standin.sql (after the 034 chain); browser test
 tests/appraisal-c2.test.js; function tests tests/appraisal-fetch-fn.test.js and tests/appraisal-ai-fn.test.js.
+
+## 036 The header, a video introduction, AI drafts and Google reviews (LW3 phase B, 28 November 2026; tested in a rollback block on a local PostgreSQL stand-in built to live 035, NOT yet on the live project)
+Builds on 035 (live). Additive only: no existing column, row, policy, function, trigger or signed-record protection changes. The new
+sections (header, intro, heard, home, buyers, reviews) are JSON in `appraisal_views.sections`, written by the portal from `setup`
+(`headerOpt`, `intro`, `heard`, `home`, `buyers`, `reviews`); no column is added there.
+- Storage: bucket `appraisal-video` (private, 150 MB, MP4, WebM, MOV). Policies on storage.objects: `appraisal_video_agent_read`,
+  `appraisal_video_agent_add` (under appraisals/<id>/header/ or /intro/, not once sent), `appraisal_video_agent_remove` (not once sent),
+  `appraisal_media_agent_add_header` (header photos and still frames in appraisal-media under header/ or intro/, not once sent). The
+  project's global upload limit caps the bucket (Free plan 50 MB at most; Pro and up up to 500 GB, set in Storage settings).
+- `appraisal_assets`: appraisal_id (cascade), role header|intro, kind image|video (intro is always video), bucket appraisal-media (photos)
+  | appraisal-video (videos), path (unique), still_path (a video's still frame, in appraisal-media), file_name, mime_type, size_bytes and
+  still_mime (read from storage by the guard), width, height, duration_s, created_by, created_at. RLS: select, insert and delete for
+  is_agent(); update revoked. `guard_appraisal_asset`: its own appraisal's folder for its role, in storage in the right bucket, a JPEG, PNG
+  or WebP photo or an MP4, WebM or MOV video up to 150 MB, a still only on a video; never updated; nothing added or removed once sent.
+- `appraisal_drafts`: appraisal_id (cascade), part ad|heard|buyers, result (jsonb, up to 50,000), inputs (the question and fact keys sent,
+  never values), model, made_by, made_at. RLS: select for is_agent() only; no direct writes. `guard_appraisal_draft`: never changes, kept
+  with its appraisal, none added once sent. `appraisal_draft_save(p_appraisal, p_part, p_result, p_inputs, p_model, p_actor)`: service role
+  only (doc-prefill); refuses a hand-loaded or sent appraisal, an unknown part, and inputs that list the client heart.
+- `tim_reviews`: source google, profile (must be 'Tim McGuire'), ref (unique with source), reviewer (first name or initial only, checked),
+  rating 1 to 5, reviewed_on, body (up to 4,000), url (https), ticked, ticked_at, ticked_by, removed_at, gathered_at, imported_at,
+  updated_at. RLS: select for is_agent() only; no direct writes. `agent_reviews_import(p_pack)` (pack mre.reviews/1, APPRAISAL-PLAN.md;
+  returns added, updated, unchanged, removed, skipped) and `agent_review_tick(p_id, p_on)` (refuses a removed review and one the wording
+  guard refuses): security definer, is_agent, granted to authenticated only.
+Tests: tests/appraisal-home-rollback.js/.sql on tests/appraisal-home-standin.sql (after the 035 chain; it checks the stand-in against
+live's function definitions); browser test tests/appraisal-b.test.js; core test tests/appraisal-b-core.test.js (against a frozen copy of
+the d012895 core); function test tests/appraisal-draft-fn.test.js.

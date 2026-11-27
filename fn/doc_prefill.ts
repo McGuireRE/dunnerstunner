@@ -7,7 +7,7 @@ import { unzipSync, strFromU8 } from "npm:fflate@0.8.2";
 import * as XLSX from "npm:xlsx@0.18.5";
 
 import { FIELD_KEYS, MAX_TOTAL, MODEL, NO_TOOL_ERROR, NO_TOOL_MESSAGE, SYSTEM, TOOL, TRANSLATE_KINDS, answerByTool, buildTranslateRequest, callAnthropic, logAiCall, readTranslateResult, toolUseOf } from "./prefill_shared.ts";
-import { type AiDeps, buyerCheck, readReport } from "./appraisal_ai_handler.ts";
+import { type AiDeps, buyerCheck, draftPart, readReport } from "./appraisal_ai_handler.ts";
 
 function b64(bytes: Uint8Array) { let s = ""; for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000)); return btoa(s); }
 export function docxText(bytes: Uint8Array) {
@@ -32,7 +32,7 @@ Deno.serve(async (req) => {
 
     // LW3 phase C2 (appraisal_ai_handler.ts): reading a comparables or market report, and who a sale appealed to in suburbs Tim checks
     // case by case. Same agent-only check above, same key, every call logged in ai_calls with the appraisal's id.
-    if (body.mode === "appraisal_report" || body.mode === "buyer_check") {
+    if (body.mode === "appraisal_report" || body.mode === "buyer_check" || body.mode === "appraisal_draft") {
       const { data: who } = await userClient.auth.getUser();
       const agent = String(who?.user?.email || "agent");
       const dbA = admin();
@@ -48,11 +48,25 @@ Deno.serve(async (req) => {
           const prof = a.property_id ? await userClient.rpc("agent_property_profile", { p_property: a.property_id }) : { data: null };
           return { appraisal: a, comps: comps || [], groups: groups || [], facts: ((prof.data && prof.data.facts) || []).map((f: any) => ({ key: f.key, value: f.value })) };
         },
+        // LW3 phase B (036): what is on file for drafting, read as Tim with his own token (Row Level Security applies). The client
+        // heart is left out of the query, and draftInputs leaves it out again.
+        draftInputs: async (aid) => {
+          const { data: a } = await dbA.from("appraisal_views").select("id, property_id, status, setup").eq("id", aid).maybeSingle();
+          if (!a) return null;
+          if (!a.property_id) return { appraisal: a, answers: [], questions: [], visitNotes: [], facts: [], rooms: [] };
+          const { data: answers } = await userClient.from("qa_answers").select("question_key, value, by_vendor, source").eq("property_id", a.property_id).neq("question_key", "client_heart");
+          const { data: questions } = await userClient.from("qa_questions").select("key, text");
+          const { data: visits } = await userClient.from("first_visits").select("notes").eq("property_id", a.property_id);
+          const { data: rooms } = await userClient.from("property_rooms").select("base, tim_class, position, archived_at").eq("property_id", a.property_id);
+          const prof = await userClient.rpc("agent_property_profile", { p_property: a.property_id });
+          return { appraisal: a, answers: answers || [], questions: questions || [], visitNotes: (visits || []).map((v: any) => v.notes).filter(Boolean),
+            facts: (prof.data && prof.data.facts) || [], rooms: (rooms || []).map((r: any) => ({ base: r.base, tim_class: r.tim_class, position: r.position, archived: !!r.archived_at })) };
+        },
         aiKey: () => key,
         callModel: (request, ms) => callAnthropic(key, request, ms),
         logAi: (row, who_) => logAiCall(dbA, row, who_),
       };
-      const out = body.mode === "appraisal_report" ? await readReport(deps, body, agent) : await buyerCheck(deps, body, agent);
+      const out = body.mode === "appraisal_report" ? await readReport(deps, body, agent) : body.mode === "appraisal_draft" ? await draftPart(deps, body, agent) : await buyerCheck(deps, body, agent);
       return json(out.body, out.status);
     }
 

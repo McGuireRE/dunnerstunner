@@ -1100,4 +1100,57 @@ body.apv-present main { max-width: 760px; padding-bottom: 48px; }
   .apv-car-ctl, .mk-table { display: none !important; }
   .apv-comp, .mk-fig { break-inside: avoid; }
 }
+/* LW3 phase B (036): the header, the video introduction, What I heard, the mockup listing, the ideal buyers and reviews */
+.apv-hero { position: relative; margin: 0 0 18px; border-radius: 14px; overflow: hidden; aspect-ratio: 16 / 7; background: var(--bg); }
+.apv-hero-m, .apv-hero-still { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+.apv-hero-still { display: none; }
+.apv-credit { position: absolute; right: 8px; bottom: 6px; font-size: 12px; color: #fff; background: rgba(0,0,0,.45); padding: 1px 8px; border-radius: 999px; }
+@media (max-width: 560px) { .apv-hero { aspect-ratio: 4 / 3; } }
+@media (prefers-reduced-motion: reduce) { .apv-hero.vid .apv-hero-still { display: block; } .apv-hero.vid:not(.nostill) video { visibility: hidden; } }
+.apv-intro-box { position: relative; border-radius: 12px; overflow: hidden; background: #000; max-width: 640px; }
+.apv-intro-box video { display: block; width: 100%; max-height: 70vh; }
+.apv-intro-still, .apv-intro-print { display: none; }
+.apv-heard .apv-list li { margin-bottom: 6px; }
+.apv-mock { font-size: 14.5px; color: var(--muted); }
+.apv-tag.mock { color: var(--ink); border-color: var(--warn); }
+.apv-home-card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; min-width: 0; }
+.apv-home-card .apv-car { margin-top: 0; }
+.apv-adraft h3 { margin: 16px 0 6px; font-size: 20px; }
+.apv-adraft p { margin: 0 0 10px; }
+.apv-tags .apv-tag { text-transform: none; letter-spacing: 0; font-size: 13px; color: var(--ink); border-color: var(--line); }
+.apv-revs { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); gap: 12px; }
+.apv-rev { margin: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; min-width: 0; break-inside: avoid; }
+.apv-rev blockquote { margin: 6px 0; font-style: italic; }
+.apv-rev blockquote p { margin: 0; }
+.apv-rev figcaption { font-size: 14px; color: var(--muted); }
+.apv-stars { margin: 0; color: #c58a00; letter-spacing: 2px; }
+.apv-stars .off { color: var(--line); }
+@media print {
+  .apv-hero.vid video { display: none !important; }
+  .apv-hero.vid .apv-hero-still { display: block; }
+  .apv-hero.nostill, .apv-intro.nostill { display: none !important; }
+  .apv-hero { aspect-ratio: auto; height: 7cm; }
+  .apv-intro-box { background: none; }
+  .apv-intro-box video { display: none !important; }
+  .apv-intro-still { display: block; width: 100%; max-height: 8cm; object-fit: cover; }
+  .apv-intro-print { display: block; }
+  .apv-home-card, .apv-rev { break-inside: avoid; }
+}
+/* the sections screen (Tim only) */
+.abs .abs-ph { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 140px), 1fr)); gap: 10px; }
+.abs .abs-ph figure { margin: 0; border: 1px solid var(--line); border-radius: 10px; padding: 6px; min-width: 0; }
+.abs .abs-ph figure.on { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent) inset; }
+.abs .abs-ph img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 6px; display: block; }
+.abs .abs-ph figcaption { font-size: 13px; overflow-wrap: anywhere; }
+.abs .abs-ph .choice { margin: 4px 0 0; padding: 2px 4px; min-height: 0; }
+.abs .abs-line { border-bottom: 1px solid var(--line); padding: 8px 0; }
+.abs .abs-line textarea { min-height: 64px; }
+.abs .abs-frame { position: relative; touch-action: none; cursor: grab; user-select: none; }
+.abs .abs-frame .apv-hero { margin: 0; }
+.abs input[type=range] { width: 100%; }
+.abs .abs-private { border-left: 3px solid var(--line); padding-left: 10px; }
+.rvw-item { border-bottom: 1px solid var(--line); padding: 10px 0; }
+.rvw-item .apv-stars { display: inline-block; margin-right: 6px; }
+.rvw-item blockquote { margin: 4px 0; font-style: italic; overflow-wrap: anywhere; }
+.rvw-item.gone { opacity: .6; }
 </style>

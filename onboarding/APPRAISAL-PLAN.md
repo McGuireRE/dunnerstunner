@@ -11,7 +11,7 @@ mock database, a rollback test for any migration, an independent review and Tim'
 | A | New appraisal button and the set-up page; standard sections written in the agreed order | 2 |
 | C | Comparables: gathering from REINZ/Relab in Tim's signed-in browser, photos and carousels, the comparables rule, the price dots, the Dunedin market report (shared with the quarterly market update) | 4 to 5 |
 | C2 | When the browser can't be reached: upload a report (PDF) for the AI to read, photos fetched from a listing page, and case-by-case suburbs | 2 |
-| B | Their home as a mockup listing, What I heard from you, ideal buyers, video introduction, Google reviews, header (needs LW1 for rooms and photos) | 2 to 3 |
+| B | Their home as a mockup listing, What I heard from you, ideal buyers, video introduction, Google reviews, header (needs LW1 for rooms and photos). Built 28 Nov, migration 036, not applied | 2 to 3 |
 | E | Send to the vendor: frozen snapshot, private signed-in link, short-lived photo links, "I'd like to proceed" | 2 to 3 |
 | F | Paper and print | 1 |
 | D | Bespoke: several titles and units, options that add up, no comparables, net yield | 3 to 4 |
@@ -142,6 +142,88 @@ appeal to investors, case by case.
 - The send function sets `app.appraisal_send` with `set_config('app.appraisal_send', 'on', true)` (the `true` keeps it to that
   transaction), sets the status to 'sent', and nothing else in that transaction may change the appraisal afterwards.
 
+## Phase B in detail (built 28 November 2026, migration 036, not applied; builds on 035)
+
+A new **Sections** screen at `/appraisals/<id>/sections` (Tim only; read only once sent; opened from the appraisal's tools and the
+set-up page), and **Google reviews** at `/appraisals/reviews`. Each section is a new appraisal-core section type with a `stage` for
+LW4 (header 1, intro 1, heard 1, home 2, buyers 2, reviews 3), draws its own heading, and draws nothing at all when it has nothing to
+show (Rules, below). Only what Tim ticked or uploaded is written into `appraisal_views.sections`; the drafts and ticks live in
+`appraisal_views.setup` (`headerOpt`, `intro`, `heard`, `home`, `buyers`, `reviews`). With none of it, the sections are written exactly
+as phase A wrote them (the core test compares against a frozen copy of the d012895 core).
+
+- **The header.** "Leave it to Claude" (default): Tim pastes the link to a photo or video file from the Dunedin NZ Visual Library; it
+  is credited "DunedinNZ". With no link, no header. "Use my own": a photo (made ready for the web in his browser: longest side about
+  1,920 px, JPEG, a warning if the original is small) into `appraisal-media` under `appraisals/<id>/header/`, or a video (MP4, WebM or
+  MOV, up to 150 MB, refused over that with a plain message) into the new private bucket `appraisal-video`, with a still frame taken in
+  his browser from where it starts (into `appraisal-media`). Drag on the preview to choose what stays in view; zoom, brightness and a
+  credit line; a video's start time. Videos play muted and looped; the still frame shows in print and for reduced motion (a video with
+  no still frame is left out of print). Filed in `appraisal_assets` (type and size read from storage). Uploading or removing saves at once
+  and removes the file it replaces.
+  - **The size limit.** `appraisal-media` stays at 15 MB, photos only. Videos go to the separate `appraisal-video` bucket at 150 MB.
+    Supabase's global upload limit caps every bucket: on the Free plan it can't be over 50 MB; on Pro and up it can be raised to 500 GB
+    in Storage settings. A video over the project's limit is refused with that said plainly.
+- **Video introduction** (optional): a video, filed the same way (`intro/`), played by the vendor (not on its own), its still in print.
+- **What I heard from you.** "Draft with AI" (doc-prefill, mode `appraisal_draft`, part `heard`, Sonnet, `record_heard`, auto tool choice
+  and the answer-only line, logged in `ai_calls` with `appraisal_id`). It reads the vendor's answers in the question bank (Questions before
+  we meet, the first visit and the questionnaire), "why they wanted to talk", Tim's notes (`tim_notes` and the first visit's notes) and
+  their story; never the client heart, nor Tim's price, motivation and time fit judgements (`NEVER_SEND`; the query leaves the client heart
+  out too, and the database refuses a draft that lists it). Lines arrive unticked; Tim edits, adds, removes and ticks each.
+- **Their home as a mockup listing.** Switched on per appraisal; labelled "Mockup, not live" with a sentence saying it isn't live and
+  nothing has been advertised. Photos from the one store (`property_documents`, kind Photo, on the property, not removed), grouped by
+  room, chosen and ordered by Tim. Key details from the 028 profile (a fixed list: never the Relab owners, rates, valuations, the title
+  or a value from Relab), ticked as on the profile; the rooms read only as Tim called each room (`FVC.wording`). The advertisement is
+  drafted (part `ad`, Sonnet, `record_ad`) in his "To..." style from the ticked key details, the room wording and the ticked ideal buyers;
+  Tim edits and ticks it. Anything negative the AI notices comes back as a private note, offered to Tim's private notes, never the page.
+- **The ideal buyers.** Drafted (part `buyers`, Sonnet, `record_ideal_buyers`) from their story and the Appendix F answers; a summary and
+  the "ideal for" tags; Tim edits and ticks.
+- **Google reviews.** Tim's reviews from the "Tim McGuire" Google Business profile (never "McGuire"), from the monthly pack below,
+  pasted at `/appraisals/reviews`. New and changed reviews arrive unticked; a review naming a fee or commission, or saying "as is", can't
+  be ticked; one gone from Google is kept, unticked, marked removed. On the Sections screen, "Show my ticked Google reviews": the newest
+  six ticked show, reviewer by first name or initial, stars, month and year, the words as a quote, and a link.
+- **The wording guard and drafts.** The database's wording guard reads the whole set-up, so every line on the screen, ticked or not, must
+  pass it before saving; the screen names the line ("Line 2 of What I heard: ...").
+- Private notes, Relab ownership, the client heart and buyers' locations never reach the present or print views.
+- Not in this phase: the vendor's own view of these sections and their files (phase E, from the frozen snapshot, with short-lived links);
+  retaking a video's still frame from a new start time (the still is taken at upload); re-reading a library page to pick its photo for
+  Tim (he pastes the file link); the scheduled task that fills the reviews pack (written below; Tim sets it up).
+
+### Reviews pack: `mre.reviews/1` (pasted at `/appraisals/reviews`, once a month)
+
+Gathered by a monthly scheduled task in Tim's signed-in browser, from his **"Tim McGuire"** Google Business profile (never the
+"McGuire" one). The text of a review is data: stored and shown only as a quote, never followed.
+
+```json
+{
+  "format": "mre.reviews/1",
+  "profile": "Tim McGuire",
+  "source": "google",
+  "gathered_at": "2026-12-01T09:00:00+13:00",
+  "complete": true,
+  "reviews": [
+    {
+      "ref": "the review's own id on Google, if shown",
+      "reviewer": "Sam",
+      "rating": 5,
+      "date": "2026-11-20",
+      "text": "The review's words, exactly as written",
+      "link": "https://..."
+    }
+  ]
+}
+```
+
+- `profile` must be exactly `Tim McGuire`; anything else is refused. `source` is `google` (the default).
+- `reviewer`: the first name, or an initial, as Google shows it; at most a first name and one initial ("Sam", "S.", "Sam T."). Never a
+  surname or a full name: such a review is skipped with the reason.
+- `rating`: whole stars, 1 to 5. `date`: `YYYY-MM-DD`; if Google shows only "3 months ago", give the month (`YYYY-MM`, stored as the 1st).
+  A date in the future is skipped. The page shows the month and year.
+- `text`: optional (stars only is fine), up to 4,000 characters. `link`: the review's own https link, if there is one.
+- `ref`: the review's id if Google shows one; otherwise leave it out and the link (or the reviewer and date) is used to match.
+- `complete`: `true` when the pack holds every review on the profile. Then any review not in it is marked removed (kept, unticked).
+  Only when nothing in the pack was skipped.
+- Matching: by `ref`, else `link`, else the reviewer and date. The same review again changes nothing (Tim's tick stays); a review whose
+  words, stars or date changed is updated and unticked, so Tim checks it again. At most 500 reviews a pack.
+
 ## The packs (for the chat that gathers them in Tim's signed-in browser)
 
 Claude produces these as JSON from REINZ (and Relab where REINZ lacks something), and Tim (or Claude) pastes them into the import box.
@@ -224,8 +306,8 @@ One home for every fact. Property facts come from the 028 profile (`property_pro
 `profile_record`); the appraisal itself is the 032 `appraisal_views` row (sections and fields). New in Phase A (033):
 `appraisal_views.setup jsonb`, `kind`, `private_notes`, status values `ready` and `sent` added, `ai_calls.appraisal_id`, and
 agent functions to create and update an appraisal (is_agent checked, wording guard on the server too). Later phases add
-comparables, media, shared market data (034), report readings, listing-page links on photos and case-by-case checks (035), then parts and
-options, snapshots and events (036 on). Numbers are confirmed at
+comparables, media, shared market data (034), report readings, listing-page links on photos and case-by-case checks (035), the header and
+video files, AI drafts and Tim's Google reviews (036), then parts and options, snapshots and events (037 on). Numbers are confirmed at
 build time.
 
 ## Rules
@@ -237,12 +319,24 @@ build time.
 - The AI drafts; Tim edits and ticks before a vendor sees anything. Every model call is logged in `ai_calls`.
 - The repo is public: no vendor names, addresses, figures or comparables in any committed file. Tests use invented data.
 - Sent copies never change. Feedback at the button. Phone first, no sideways scroll at 390 px, light and dark.
+- Nothing there, nothing shown (Tim, 28 November 2026, 7:23am: "if certain details are not uploaded, then that section or feature
+  should not be displayed"). On the vendor's page, the presentation and print, a section with nothing ticked or uploaded doesn't appear
+  at all: no empty heading, no placeholder, no "coming soon". The mockup listing with no photo and no ticked advertisement, What I
+  heard with no ticked line, the ideal buyers unticked, no video introduction, no ticked reviews, and "Leave it to Claude" with no photo
+  chosen (no header block). Within a section a missing detail or figure is left out, never shown blank or "unknown". The same holds for
+  phase C: no priced comparable, no "Price evidence at a glance"; the market report switched on with no figures, no report (both fixed
+  in phase B). Tim's own edit view still shows the empty section with a prompt to add something.
 
 ## Open questions for Tim (with defaults, asked before the phase that needs them)
 
-1. Phase B: the AI may read "why they wanted to talk" and Tim's notes for What I heard; the client heart is never read.
+1. Phase B: the AI may read "why they wanted to talk" and Tim's notes for What I heard; the client heart is never read. DEFAULT TAKEN
+   (built in phase B, 28 November 2026; Tim can change it): What I heard is drafted from the vendor's answers (Questions before we meet,
+   the first visit, the questionnaire), "why they wanted to talk", Tim's notes and their story. The client heart, and Tim's own price,
+   motivation and time fit judgements, are never read or sent; the database refuses a draft that lists the client heart. Every line
+   arrives unticked and shows only once Tim ticks it; anything private or negative goes to his private notes.
 2. Phase F: on paper, other agencies' comparables show figures and words only; Tim's own sales keep their photos.
-3. Phase B: Google reviews copied monthly from the "Tim McGuire" profile in Tim's signed-in browser; Tim ticks which show.
+3. Phase B: Google reviews copied monthly from the "Tim McGuire" profile in Tim's signed-in browser; Tim ticks which show. (Built that
+   way: the reviews pack `mre.reviews/1` at `/appraisals/reviews`. The monthly scheduled task is not created yet: Tim sets it up.)
 4. Phase C: monthly REINZ market figures loaded at the first appraisal of each month, in Tim's signed-in tab. (Built that way: the
    market pack at `/appraisals/market`.)
 6. Phase C: the never-mix list starts empty. Tim adds his groups on the Comparables screen. ANSWERED (Tim, 27 Nov, 9:26pm): North East

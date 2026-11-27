@@ -4,7 +4,8 @@
 //
 // Section types: heading, para (cls 'lede' for the opening), list (ordered), table (head, rows), note (small print),
 // ranges (the options table from fields.ranges), method (the recommended method's sentence), wave (the buyer-wave graph),
-// methods (the ways-to-sell table, with the recommended one marked).
+// methods (the ways-to-sell table, with the recommended one marked). Phase A (033): byline, opinion, campaign, methodcards, plans,
+// panel. Phase B (036): header, intro, heard, home, buyers, reviews (each with a stage, and nothing drawn when empty).
 // Text may hold **bold**, [words](https://link), a bare https:// link, and the tokens {{range:<key>}}, {{bedrooms}} and {{method}}.
 (function () {
   'use strict';
@@ -46,7 +47,7 @@
       + (sec.caption ? '<p class="apv-wcap">' + inline(sec.caption) + '</p>' : '') + '</figure>';
   }
   const methodMatch = (name, rowName) => !!name && String(rowName || '').toLowerCase().indexOf(String(name).toLowerCase()) === 0;
-  function section(sec, f) {
+  function section(sec, f, ev) {
     if (!sec || typeof sec !== 'object') return '';
     switch (sec.type) {
       case 'heading': return '<h2>' + inline(sec.text, f) + '</h2>';
@@ -67,6 +68,13 @@
       case 'methodcards': return methodCards(sec);
       case 'plans': return plans(sec);
       case 'panel': return '<aside class="apv-panel"><h2>' + inline(sec.title, f) + '</h2>' + (sec.items || []).map(x => '<p>' + inline(x, f) + '</p>').join('') + '</aside>';
+      // LW3 phase B (036): each draws its own heading, and nothing at all when it has nothing to show (Tim, 28 November 2026)
+      case 'header': return hero(sec, ev);
+      case 'intro': return intro(sec, ev);
+      case 'heard': return heard(sec, f);
+      case 'home': return home(sec, ev);
+      case 'buyers': return buyers(sec, f);
+      case 'reviews': return reviews(sec, ev);
       default: return '';
     }
   }
@@ -228,7 +236,128 @@
       { type: 'plans', items: plansFor(s.plan, c.cat), included: inc },
       { type: 'panel', title: 'Tim is not like other agents', items: panel },
     ]);
+    // LW3 phase B (036): only what Tim has ticked or uploaded is written; with none of it, the sections are exactly as phase A wrote them
+    const b = phaseB(s), at = sections.findIndex(x => x.type === 'heading' && x.text === 'My opinion of price');
+    if (b.header) sections.unshift(b.header);
+    sections.splice(at + (b.header ? 1 : 0), 0, ...b.before);
+    if (b.reviews) sections.push(b.reviews);
     return { title: (c.address ? c.address + ': ' : '') + 'Market Appraisal', sections, fields };
+  }
+
+  /* ───────── LW3 phase B (036): the header, a video introduction, What I heard from you, their home as a mockup listing, the
+     ideal buyers and Google reviews. Each section carries the stage of the presentation it belongs to (LW4), draws its own heading,
+     and draws nothing at all when it has nothing to show (Tim, 28 November 2026). ───────── */
+  const STAGES = { header: 1, intro: 1, heard: 1, home: 2, buyers: 2, reviews: 3 };
+  const MOCKUP_LABEL = 'A mockup of how your listing could look, to show you how I would present your home. It is not live, and nothing has been advertised.';
+  const LIBRARY_CREDIT = 'DunedinNZ';
+  const VIDEO_URL = /\.(mp4|webm|mov)(?:[?#]|$)/i;
+  const httpsUrl = u => /^https:\/\/[^\s"'<>]+$/.test(String(u || '').trim()) && String(u).length <= 1000;
+  const num0 = (v, lo, hi, d) => { const n = +v; return isFinite(n) && v !== '' && v != null ? Math.max(lo, Math.min(hi, n)) : d; };
+  const paras = t => String(t || '').split(/\n\s*\n/).map(x => x.replace(/\s+/g, ' ').trim()).filter(Boolean);
+  // the facts a mockup listing may show, in the order a listing shows them. Never the owners (Relab), rates, valuations, the title or
+  // legal description, and never the bedroom count on its own: the room wording comes only from Tim's call on each room (FVC.wording).
+  const HOME_FACTS = [['pType', 'Type'], ['living_dining', 'Living and dining'], ['pBath', 'Bathrooms'], ['ensuites', 'Ensuites'], ['toilets', 'Toilets'],
+    ['pFloor', 'Floor area'], ['pLand', 'Land area'], ['levels', 'Levels'], ['pYear', 'Year built'], ['pBuild', 'Construction'], ['pHeat', 'Heating'],
+    ['garaging', 'Garaging'], ['parking_spaces', 'Parking spaces'], ['pPark', 'Parking'], ['extra_spaces', 'Extra spaces'], ['outdoor', 'Outdoors'], ['outlook', 'Outlook'], ['title_type', 'Title']];
+  const HOME_FACT_KEYS = HOME_FACTS.map(x => x[0]);
+  // the facts on offer for the mockup, from the property profile (028): only the keys above, only a chosen value, never one from Relab.
+  // wording: FVC.wording(rooms), Tim's call on each room, shown first as "Rooms". Returns [{ key, label, value }].
+  function homeFacts(facts, wording) {
+    const out = [];
+    if (String(wording || '').trim()) out.push({ key: 'rooms', label: 'Rooms', value: String(wording).trim() });
+    HOME_FACTS.forEach(([k, label]) => { const x = (facts || []).find(y => y && y.key === k && y.value_id && y.source !== 'relab');
+      if (!x) return; let v = x.display || (Array.isArray(x.value) ? x.value.join(', ') : x.value);
+      v = String(v == null ? '' : v).replace(/\s+/g, ' ').trim(); if (!v || /^(unknown|n\/?a|none|-)$/i.test(v)) return;
+      if ((k === 'pFloor' || k === 'pLand') && /^\d+(\.\d+)?$/.test(v)) v = Number(v).toLocaleString('en-NZ') + ' m²';
+      out.push({ key: k, label, value: v }); });
+    return out;
+  }
+  const tickedLines = h => ((h && h.lines) || []).filter(l => l && l.ticked && String(l.text || '').trim()).map(l => String(l.text).replace(/\s+/g, ' ').trim());
+  // the phase B sections from the set-up: { header, before: [the sections that go before the opinion of price], reviews }
+  function phaseB(s) {
+    const o = { header: null, before: [], reviews: null }, ho = s.headerOpt || {};
+    const frame = { focus: { x: num0((ho.focus || {}).x, 0, 100, 50), y: num0((ho.focus || {}).y, 0, 100, 50) }, zoom: num0(ho.zoom, 1, 3, 1), bright: num0(ho.bright, 0.5, 1.5, 1) };
+    if (s.header === 'own' ? !!ho.asset : httpsUrl(ho.url)) {
+      o.header = s.header === 'own'
+        ? Object.assign({ type: 'header', stage: STAGES.header, src: 'asset', asset: String(ho.asset), kind: ho.kind === 'video' ? 'video' : 'image', credit: String(ho.credit || '').replace(/\s+/g, ' ').trim().slice(0, 120), start: num0(ho.start, 0, 3600, 0) }, frame)
+        : Object.assign({ type: 'header', stage: STAGES.header, src: 'library', url: String(ho.url).trim(), kind: VIDEO_URL.test(ho.url) ? 'video' : 'image', credit: LIBRARY_CREDIT, start: 0 }, frame);
+    }
+    if (s.intro && s.intro.asset) o.before.push({ type: 'intro', stage: STAGES.intro, asset: String(s.intro.asset) });
+    const lines = tickedLines(s.heard);
+    if (lines.length) o.before.push({ type: 'heard', stage: STAGES.heard, items: lines });
+    const hm = s.home || {}, ad = hm.ad && hm.ad.ticked && (String(hm.ad.title || '').trim() || String(hm.ad.body || '').trim()) ? { title: String(hm.ad.title || '').replace(/\s+/g, ' ').trim(), paras: paras(hm.ad.body) } : null;
+    const photos = (hm.photos || []).filter(Boolean).map(String);
+    if (hm.on && (photos.length || ad)) o.before.push({ type: 'home', stage: STAGES.home, label: MOCKUP_LABEL, photos,
+      details: (hm.details || []).filter(d => Array.isArray(d) && String(d[0] || '').trim() && String(d[1] || '').trim()).map(d => [String(d[0]), String(d[1])]), ad });
+    const by = s.buyers || {};
+    if (by.ticked && (String(by.text || '').trim() || (by.tags || []).length)) o.before.push({ type: 'buyers', stage: STAGES.buyers, text: String(by.text || '').trim(), tags: (by.tags || []).map(t => String(t).trim()).filter(Boolean) });
+    if (s.reviews && s.reviews.on) o.reviews = { type: 'reviews', stage: STAGES.reviews, max: 6 };
+    return o;
+  }
+  // checks the sections screen before saving; returns a problem in plain words, or ''. Every line is checked, ticked or not: the
+  // database's wording guard reads the whole set-up, so a line saying "as is" or naming a fee can't even be kept as a draft.
+  function checkSections(s) {
+    const ho = s.headerOpt || {};
+    if (s.header !== 'own' && String(ho.url || '').trim() && !httpsUrl(ho.url)) return 'The header link must start with https:// and be the link to the photo or video itself.';
+    const hm = s.home || {}, by = s.buyers || {}, ad = hm.ad || {};
+    const named = [].concat(((s.heard && s.heard.lines) || []).map((l, i) => ['Line ' + (i + 1) + ' of What I heard', l && l.text]),
+      [['The advertisement', ad.title], ['The advertisement', ad.body], ['The ideal buyers', by.text]], (by.tags || []).map(t => ['The ideal buyers', t]),
+      [['The credit line', ho.credit]], (hm.details || []).map(d => ['A key detail', (d || []).join(' ')]));
+    for (const [where, t] of named) { const w = wordingProblem(t); if (w) return where + ': ' + w.charAt(0).toLowerCase() + w.slice(1) + ' Change it or take it out, then save.'; }
+    return '';
+  }
+  const styleOf = sec => 'object-position:' + num0((sec.focus || {}).x, 0, 100, 50) + '% ' + num0((sec.focus || {}).y, 0, 100, 50) + '%;transform-origin:' + num0((sec.focus || {}).x, 0, 100, 50) + '% ' + num0((sec.focus || {}).y, 0, 100, 50) + '%;transform:scale(' + num0(sec.zoom, 1, 3, 1) + ');filter:brightness(' + num0(sec.bright, 0.5, 1.5, 1) + ')';
+  // the header: a photo, or a video that plays muted and looped, with its still frame for paper and for reduced motion. A library
+  // photo is credited "DunedinNZ"; Tim's own carries his credit line if he wrote one. Nothing to show: no header at all.
+  function hero(sec, ev) {
+    let url = '', still = '', mime = '';
+    if (sec.src === 'library') { if (!httpsUrl(sec.url)) return ''; url = sec.url; }
+    else { const a = ((ev && ev.assets) || {})[sec.asset]; if (!a || !a.url) return ''; url = a.url; still = a.still || ''; mime = a.mime || ''; }
+    const st = styleOf(sec), credit = String(sec.credit || '').trim();
+    const media = sec.kind === 'video'
+      ? '<video class="apv-hero-m" autoplay muted loop playsinline preload="metadata" data-start="' + esc(num0(sec.start, 0, 3600, 0)) + '"' + (still ? ' poster="' + esc(still) + '"' : '') + ' style="' + st + '" aria-hidden="true"><source src="' + esc(url) + '"' + (mime ? ' type="' + esc(mime) + '"' : '') + '></video>'
+        + (still ? '<img class="apv-hero-still" src="' + esc(still) + '" alt="" style="' + st + '">' : '')
+      : '<img class="apv-hero-m" src="' + esc(url) + '" alt="" style="' + st + '">';
+    return '<figure class="apv-hero' + (sec.kind === 'video' ? ' vid' : '') + (sec.kind === 'video' && !still ? ' nostill' : '') + '" data-stage="' + esc(sec.stage) + '">' + media
+      + (credit ? '<figcaption class="apv-credit">' + esc((sec.src === 'library' ? 'Photo: ' : '') + credit) + '</figcaption>' : '') + '</figure>';
+  }
+  // Tim's video introduction: played by the vendor (not on its own), with its still frame in print
+  function intro(sec, ev) {
+    const a = ((ev && ev.assets) || {})[sec.asset]; if (!a || !a.url) return '';
+    return '<section class="apv-intro' + (a.still ? '' : ' nostill') + '" data-stage="' + esc(sec.stage) + '"><h2>A short video from me</h2><div class="apv-intro-box"><video controls playsinline preload="metadata"' + (a.still ? ' poster="' + esc(a.still) + '"' : '') + '><source src="' + esc(a.url) + '"' + (a.mime ? ' type="' + esc(a.mime) + '"' : '') + '></video>'
+      + (a.still ? '<img class="apv-intro-still" src="' + esc(a.still) + '" alt="A still from Tim\'s video introduction">' : '') + '</div><p class="apv-note apv-intro-print">The video plays on the web version of this appraisal.</p></section>';
+  }
+  function heard(sec, f) {
+    const items = (sec.items || []).filter(x => String(x || '').trim()); if (!items.length) return '';
+    return '<section class="apv-heard" data-stage="' + esc(sec.stage) + '"><h2>What I heard from you</h2><ul class="apv-list">' + items.map(x => '<li>' + inline(x, f) + '</li>').join('') + '</ul></section>';
+  }
+  // their home as a listing could show it, clearly a mockup: Tim's photos in his order, the key details he ticked, his advertisement.
+  // With no photo to show and no advertisement ticked, nothing is drawn.
+  function home(sec, ev) {
+    const ph = (sec.photos || []).map(id => ((ev && ev.homePhotos) || {})[id]).filter(p => p && p.url), ad = sec.ad && (sec.ad.title || (sec.ad.paras || []).length) ? sec.ad : null;
+    if (!ph.length && !ad) return '';
+    const figs = (sec.details || []).filter(d => d && String(d[0] || '').trim() && String(d[1] || '').trim());
+    const car = ph.length ? '<div class="apv-car" data-n="' + ph.length + '"><div class="apv-car-strip" tabindex="0" aria-label="Photos of your home">' + ph.map((p, k) => '<img src="' + esc(p.url) + '" alt="' + esc('Photo ' + (k + 1) + ' of ' + ph.length + (p.room ? ', ' + p.room : '')) + '"' + (k ? ' loading="lazy"' : '') + ' decoding="async">').join('') + '</div>'
+      + (ph.length > 1 ? '<div class="apv-car-ctl no-print"><button type="button" class="apv-car-btn" data-car="-1" aria-label="Previous photo">‹</button><span class="apv-car-at" aria-live="polite">1 of ' + ph.length + '</span><button type="button" class="apv-car-btn" data-car="1" aria-label="Next photo">›</button></div>' : '') + '</div>' : '';
+    return '<section class="apv-home" data-stage="' + esc(sec.stage) + '"><h2>Your home as a listing</h2><p class="apv-mock"><span class="apv-tag mock">Mockup, not live</span> ' + esc(sec.label || MOCKUP_LABEL) + '</p>'
+      + '<div class="apv-home-card">' + car + (figs.length ? '<dl class="apv-figs">' + figs.map(([k, v]) => '<div><dt>' + esc(k) + '</dt><dd>' + esc(v) + '</dd></div>').join('') + '</dl>' : '')
+      + (ad ? '<div class="apv-adraft">' + (ad.title ? '<h3>' + esc(ad.title) + '</h3>' : '') + (ad.paras || []).map(p => '<p>' + quote(p) + '</p>').join('') + '</div>' : '') + '</div></section>';
+  }
+  function buyers(sec, f) {
+    const tags = (sec.tags || []).filter(t => String(t || '').trim());
+    if (!String(sec.text || '').trim() && !tags.length) return '';
+    return '<section class="apv-buyers" data-stage="' + esc(sec.stage) + '"><h2>The buyers I have in mind</h2>' + paras(sec.text).map(p => '<p>' + inline(p, f) + '</p>').join('')
+      + (tags.length ? '<p class="apv-tags">' + tags.map(t => '<span class="apv-tag">' + esc(t) + '</span>').join(' ') + '</p>' : '') + '</section>';
+  }
+  // which of Tim's reviews a vendor reads: ticked, still on Google, and words a vendor may read; newest first
+  const reviewsShown = (list, max) => (list || []).filter(r => r && r.ticked && !r.removed_at && !wordingProblem(r.body) && r.rating >= 1 && r.rating <= 5)
+    .sort((a, b) => (a.reviewed_on < b.reviewed_on ? 1 : a.reviewed_on > b.reviewed_on ? -1 : 0)).slice(0, max || 6);
+  function reviews(sec, ev) {
+    const rs = reviewsShown(ev && ev.reviews, sec.max); if (!rs.length) return '';
+    return '<section class="apv-reviews" data-stage="' + esc(sec.stage) + '"><h2>What my clients say</h2><div class="apv-revs">' + rs.map(r => '<figure class="apv-rev"><p class="apv-stars" aria-label="' + esc(r.rating + ' out of 5 stars') + '">' + '★'.repeat(r.rating) + '<span class="off">' + '★'.repeat(5 - r.rating) + '</span></p>'
+      + (String(r.body || '').trim() ? '<blockquote><p>' + quote(r.body) + '</p></blockquote>' : '') + '<figcaption>' + esc(r.reviewer) + (monthYear(r.reviewed_on) ? ', ' + esc(monthYear(r.reviewed_on)) : '')
+      + (httpsUrl(r.url) ? ' <a class="no-print" href="' + esc(r.url) + '" target="_blank" rel="noopener">Read it on Google</a>' : '') + '</figcaption></figure>').join('') + '</div>'
+      + '<p class="apv-note">From my Google reviews. Reviewers are named by first name or initial only.</p></section>';
   }
   // anything in what was written that a vendor would read and must never see
   function sectionsProblem(sections) { const out = []; const walk = v => { if (typeof v === 'string') out.push(v); else if (v && typeof v === 'object') Object.values(v).forEach(walk); }; walk(sections); return wordingProblem(out.join(' ')); }
@@ -238,11 +367,13 @@
   //   exactly as phase A (and 032) drew it.
   function render(rec, ev) {
     const f = (rec && rec.fields) || {};
-    const parts = ((rec && rec.sections) || []).map(s => section(s, f));
+    // phase B: the header (a photo or video across the top) goes above the title; every other section in its place
+    const secs = (rec && rec.sections) || [], top = secs.filter(s => s && s.type === 'header').map(s => section(s, f, ev)).join('');
+    const parts = secs.map(s => s && s.type === 'header' ? '' : section(s, f, ev));
     const extra = rec && rec.setup && rec.setup.v && ev ? evidence(ev, f) : '';
-    if (extra) { let at = ((rec && rec.sections) || []).findIndex(s => s && s.type === 'heading' && /^my opinion of price$/i.test(String(s.text || '').trim()));
-      if (at < 0) at = ((rec && rec.sections) || []).findIndex(s => s && s.type === 'opinion'); if (at < 0) at = parts.length; parts.splice(at, 0, extra); }
-    return '<article class="apv-doc"><h1>' + esc((rec && rec.title) || 'Market appraisal') + '</h1>' + parts.join('') + '</article>';
+    if (extra) { let at = secs.findIndex(s => s && s.type === 'heading' && /^my opinion of price$/i.test(String(s.text || '').trim()));
+      if (at < 0) at = secs.findIndex(s => s && s.type === 'opinion'); if (at < 0) at = parts.length; parts.splice(at, 0, extra); }
+    return '<article class="apv-doc">' + top + '<h1>' + esc((rec && rec.title) || 'Market appraisal') + '</h1>' + parts.join('') + '</article>';
   }
 
   /* ───────── LW3 phase C (034): comparables, the price dots and the Dunedin market report ───────── */
@@ -285,7 +416,8 @@
     const market = ev.market && window.MKT ? window.MKT.report(ev.months || [], (f && f.ranges) || [], { area: ev.area }) : '';
     let h = '';
     if (comps.length) {
-      h += '<h2>Price evidence at a glance</h2>' + (dots || '') + (nPrice ? '<p class="apv-note">' + (nPrice === 1 ? 'One comparable has' : nPrice + ' comparables have') + ' no price to show, so ' + (nPrice === 1 ? 'it isn\'t' : 'they aren\'t') + ' on the chart.</p>' : '');
+      // the price dots only when at least one comparable has a price to plot (Tim, 28 November 2026: nothing to show, no section)
+      if (dots) h += '<h2>Price evidence at a glance</h2>' + dots + (nPrice ?'<p class="apv-note">' + (nPrice === 1 ? 'One comparable has' : nPrice + ' comparables have') + ' no price to show, so ' + (nPrice === 1 ? 'it isn\'t' : 'they aren\'t') + ' on the chart.</p>' : '');
       if (sold.length) h += '<h2>Recent sales nearby</h2><div class="apv-comps">' + sold.map(c => compCard(c, num(c), (ev.photos || {})[c.id])).join('') + '</div>';
       if (listed.length) h += '<h2>On the market now</h2><div class="apv-comps">' + listed.map(c => compCard(c, num(c), (ev.photos || {})[c.id])).join('') + '</div>';
     }
@@ -441,5 +573,6 @@
   window.APPR = { render, fmtRange, dollars, inline, methodNames, checkFields, wordingProblem,
     vendorComp, VENDOR_COMP, STATUS_WORDS, RINGS, ringWords, compsRule, reportPacks, reportLine, matchPhoto, addrParts, addrSame, addrMatch, adShown, cmpShown, evidence,
     METHODS, CAMPAIGNS, MAX_WEEKS, campaignOf, waveFor, stepsFor, methodSentence, isHill, suburbOf, plansFor, checkSetup, writeStandard, sectionsProblem,
-    DEFAULT_NOTE, DALMORE_LINE, HEAD_AND_SHOULDERS, VALUATION_LABEL };
+    DEFAULT_NOTE, DALMORE_LINE, HEAD_AND_SHOULDERS, VALUATION_LABEL,
+    phaseB, checkSections, homeFacts, HOME_FACTS, HOME_FACT_KEYS, MOCKUP_LABEL, LIBRARY_CREDIT, STAGES, reviewsShown, httpsUrl, VIDEO_URL };
 })();

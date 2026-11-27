@@ -6,8 +6,11 @@
 //   buyer_check:      for the comparables in suburbs Tim checks case by case, and for the subject property, who each most likely appealed
 //                     to (owner-occupier, investor or student, or unclear), with a one-line reason. Saved (appraisal_buyer_checks) for
 //                     the comparables rule to flag mismatches on Tim's screen only.
-import { BUYER_CHECK_PURPOSE, buildBuyerRequest, buildReportReadRequest, buyerFacts, MODEL_READ, NO_TOOL_MESSAGE, noToolError, pdfPageCount, readBuyerResult, readReportResult,
-  REPORT_MAX_BYTES, REPORT_MAX_PAGES, REPORT_READ_PURPOSE } from "./prefill_shared.ts";
+//   appraisal_draft:  LW3 phase B (036). Sonnet drafts one part of the appraisal's own words (What I heard from you, the mockup's
+//                     advertisement, the ideal buyers) from what is on file, never the client heart. Saved (appraisal_drafts) and
+//                     returned for Tim to edit and tick; nothing reaches the vendor's page until he does.
+import { BUYER_CHECK_PURPOSE, buildBuyerRequest, buildDraftRequest, buildReportReadRequest, buyerFacts, DRAFT_PARTS, DRAFT_PURPOSE, draftInputs, MODEL_DRAFT, MODEL_READ, NO_TOOL_MESSAGE,
+  noToolError, pdfPageCount, readBuyerResult, readDraftResult, readReportResult, REPORT_MAX_BYTES, REPORT_MAX_PAGES, REPORT_READ_PURPOSE } from "./prefill_shared.ts";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 type Rpc = (fn: string, args: Record<string, unknown>) => Promise<{ data: any; error: { message: string } | null }>;
@@ -16,6 +19,8 @@ export type AiDeps = {
   rpc: Rpc;                                                               // with the service role
   download: (path: string) => Promise<Uint8Array | null>;                 // a file in the property-files bucket, with the service role
   buyerInputs: (aid: string) => Promise<{ appraisal: any; comps: any[]; groups: any[]; facts: { key: string; value: unknown }[] } | null>;
+  // 036: what is on file for drafting, read as Tim. The client heart is left out of the query itself, and again by draftInputs.
+  draftInputs?: (aid: string) => Promise<Parameters<typeof draftInputs>[1] | null>;
   aiKey: () => string;
   callModel: (request: any, ms?: number) => Promise<{ ok: boolean; status: number; body: any }>;
   logAi: (row: Row, agent: string) => Promise<void>;
@@ -92,4 +97,35 @@ export async function buyerCheck(d: AiDeps, body: any, agent: string): Promise<O
   const saved = await d.rpc("appraisal_buyer_save", { p_appraisal: aid, p_subject: res.subject, p_comps: comps, p_model: MODEL_READ, p_actor: agent });
   if (saved.error || !saved.data) return { status: 409, body: { ok: false, error: "The check couldn't be saved: " + ((saved.error && saved.error.message) || "try again.") } };
   return { status: 200, body: { ok: true, check_id: saved.data, checked: sales.length, subject: res.subject, comps } };
+}
+
+const NOTHING: Record<string, string> = {
+  heard: "There's nothing to draft from yet: no answers from Questions before we meet or the first visit.",
+  buyers: "There's nothing to draft from yet: their story and the ideal buyers are noted on the first visit.",
+  ad: "Tick some key details first, so the advertisement has facts to work from.",
+};
+export async function draftPart(d: AiDeps, body: any, agent: string): Promise<Out> {
+  const aid = body.appraisal_id, part = String(body.part || "");
+  if (!UUID.test(String(aid || "")) || !DRAFT_PARTS.includes(part) || !d.draftInputs) return { status: 400, body: { error: "Bad request" } };
+  let raw: Awaited<ReturnType<NonNullable<AiDeps["draftInputs"]>>> = null; try { raw = await d.draftInputs(aid); } catch (_) { raw = null; }
+  if (!raw || !raw.appraisal) return { status: 404, body: { ok: false, error: "Appraisal not found" } };
+  if (raw.appraisal.status === "sent") return { status: 409, body: { ok: false, error: "This appraisal has been sent, and a sent copy never changes." } };
+  if (!(raw.appraisal.setup && raw.appraisal.setup.v)) return { status: 409, body: { ok: false, error: "This appraisal was loaded by hand, so it has no sections to draft." } };
+  const inp = draftInputs(part, raw, body.facts);
+  if (inp.empty) return { status: 200, body: { ok: false, reason: "nothing", message: NOTHING[part] } };
+  const key = d.aiKey();
+  if (!key) return { status: 200, body: { ok: false, reason: "off", message: "Drafting isn't switched on yet. Write it yourself for now." } };
+  const request = buildDraftRequest(part, inp.data);
+  let r: { ok: boolean; status: number; body: any };
+  try { r = await d.callModel(request, 60000); } catch (e: any) { r = { ok: false, status: 0, body: { error: { message: String(e?.message || e) } } }; }
+  const usage = r.body?.usage || {};
+  const base = { purpose: DRAFT_PURPOSE[part], model: MODEL_DRAFT, input_tokens: usage.input_tokens || 0, output_tokens: usage.output_tokens || 0, appraisal_id: aid, files: 0 };
+  const soft = "The AI didn't give a usable draft this time. Try again, or write it yourself.";
+  if (!r.ok) { const msg = String(r.body?.error?.message || r.status).slice(0, 300); await d.logAi({ ...base, ok: false, error: msg }, agent); return { status: 200, body: { ok: false, reason: "failed", message: r.status === 401 || /credit|billing/i.test(msg) ? friendly(r.status, msg) : soft } }; }
+  let res: ReturnType<typeof readDraftResult> | null = null; try { res = readDraftResult(part, r.body, inp.inputs.questions); } catch (_) { res = null; }
+  if (!res || res.noTool) { await d.logAi({ ...base, ok: false, error: noToolError(r.body) }, agent); return { status: 200, body: { ok: false, reason: "failed", message: soft } }; }
+  await d.logAi({ ...base, ok: true, error: null }, agent);
+  const saved = await d.rpc("appraisal_draft_save", { p_appraisal: aid, p_part: part, p_result: res.result, p_inputs: inp.inputs, p_model: MODEL_DRAFT, p_actor: agent });
+  if (saved.error || !saved.data) return { status: 409, body: { ok: false, error: "The draft couldn't be saved: " + ((saved.error && saved.error.message) || "try again.") } };
+  return { status: 200, body: { ok: true, draft_id: saved.data, part, result: res.result, usage: { input: usage.input_tokens || 0, output: usage.output_tokens || 0 } } };
 }

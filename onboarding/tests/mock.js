@@ -498,7 +498,8 @@ function appraisalRpc(name,a,me){ if(offline()) return bad('Failed to fetch');
 // ── migration 034 (LW3 phase C): comparables, photos, the never-mix list and the market store, mirroring the database ──
 // localStorage mockLw3cCalls: every 034 function call, for the tests. mockSendFlag = '1' stands for phase E's send function (it
 // alone may set 'sent'). Photos: bucket 'appraisal-media', kept in DB.storage_objects with the bucket named, as storage.objects.
-const LW3C_TABLES=['appraisal_comps','appraisal_media','suburb_groups','market_months','market_sales','appraisal_reports','appraisal_buyer_checks'];   // the last two: migration 035 (Tim reads; only the functions write)
+const LW3C_TABLES=['appraisal_comps','appraisal_media','suburb_groups','market_months','market_sales','appraisal_reports','appraisal_buyer_checks','appraisal_assets','appraisal_drafts','tim_reviews'];   // 035: reports and buyer checks (Tim reads; only the functions write); 036: assets (Tim adds, reads, removes; never updates), drafts and reviews (Tim reads; only the functions write)
+const AVB='appraisal-video', AV_MIME=['video/mp4','video/webm','video/quicktime'];
 const AMB='appraisal-media', AM_MIME=['image/jpeg','image/png','image/webp'];
 const SENT_MSG='This appraisal has been sent, and a sent copy never changes';
 const avSent=id=>(DB.appraisal_views||[]).some(v=>v.id===id&&v.status==='sent');
@@ -511,7 +512,22 @@ function lw3cTable(table,op,payload,rows,single){
   if(offline()) throw new Error('Failed to fetch');
   if(!isAgentMe()){ if(op==='select') return {data:single?undefined:[],error:single?{message:'not found'}:null}; if(!(S&&S.user)) throw new Error('permission denied for table '+table); if(op==='insert') throw new Error('new row violates row-level security policy for table "'+table+'"'); return {data:[],error:null}; }
   const list=Array.isArray(payload)?payload:[payload];
-  if(['appraisal_reports','appraisal_buyer_checks'].includes(table)&&op!=='select') throw new Error('permission denied for table '+table);   // 035: written only by doc-prefill
+  if(['appraisal_reports','appraisal_buyer_checks','appraisal_drafts','tim_reviews'].includes(table)&&op!=='select') throw new Error('permission denied for table '+table);   // 035, 036: written only by doc-prefill or the agent functions
+  // 036 guard_appraisal_asset: in its own appraisal's folder for its role, in storage in the right bucket (type and size from storage),
+  // a photo or a video up to 150 MB, a video's still frame a photo in the same folder; never updated; nothing once sent
+  if(table==='appraisal_assets'){
+    if(op==='update') throw new Error('permission denied for table appraisal_assets');
+    if(op==='delete') rows.forEach(r=>{ if(avSent(r.appraisal_id)) throw new Error(SENT_MSG); });
+    if(op==='insert') list.forEach(n=>{ if(avSent(n.appraisal_id)) throw new Error(SENT_MSG);
+      if(!['header','intro'].includes(n.role)||!['image','video'].includes(n.kind)||(n.role==='intro'&&n.kind!=='video')) throw new Error('new row for relation "appraisal_assets" violates check constraint');
+      const pre='appraisals/'+n.appraisal_id+'/'+n.role+'/'; if(!String(n.path||'').startsWith(pre)||String(n.path).includes('..')||(n.still_path&&(!String(n.still_path).startsWith(pre)||String(n.still_path).includes('..')))) throw new Error("A file must sit in its own appraisal's folder");
+      if((n.kind==='image')!==(n.bucket===AMB)) throw new Error('A photo goes in appraisal-media and a video in appraisal-video');
+      if((DB.appraisal_assets||[]).some(m=>m.path===n.path)) throw new Error('duplicate key value violates unique constraint "appraisal_assets_path_key"');
+      const o=SO()[n.path]; if(!o||o.bucket!==n.bucket) throw new Error("The file isn't in storage yet. Try again"); n.mime_type=o.mime; n.size_bytes=o.size;
+      if(n.kind==='image'&&!AM_MIME.includes(n.mime_type)) throw new Error('Photos must be JPEG, PNG or WebP'); if(n.kind==='video'&&!AV_MIME.includes(n.mime_type)) throw new Error('Videos must be MP4, WebM or MOV'); if(n.kind==='video'&&n.size_bytes>157286400) throw new Error('Videos over 150 MB are refused');
+      n.still_mime=null; if(n.still_path){ if(n.kind!=='video') throw new Error('Only a video has a still frame'); const so=SO()[n.still_path]; if(!so||so.bucket!==AMB) throw new Error("The still frame isn't in storage yet. Try again"); if(!AM_MIME.includes(so.mime)) throw new Error('A still frame must be JPEG, PNG or WebP'); n.still_mime=so.mime; } else n.still_path=null;
+      n.file_name=n.file_name||''; n.created_by=meEmail(); });
+  }
   if(table==='appraisal_comps'){
     if(op==='delete'){ rows.forEach(r=>{ if(avSent(r.appraisal_id)) throw new Error(SENT_MSG); }); DB.appraisal_media=(DB.appraisal_media||[]).filter(m=>!rows.some(r=>r.id===m.comp_id)); return null; }
     if(op==='insert') list.forEach(n=>{ if(avSent(n.appraisal_id)) throw new Error(SENT_MSG); compCheck(n); Object.assign(n,Object.assign(compDefaults(),n)); });
@@ -540,7 +556,7 @@ function compCheck(n){ const ck=c=>{ throw new Error('new row for relation "appr
   const w=apprWording([n.compare_text||'',n.method||'']); if(w) throw new Error(w); }
 function apprBucket(){ return {
   upload:(p,blob,o)=>{ logCall('up:'+AMB+':'+p); if(offline()) return netFail(); if(!isAgentMe()) return bad('new row violates row-level security policy');
-    const f=String(p).split('/'); if(f[0]!=='appraisals'||f[2]!=='comps'||f.length<5) return bad('new row violates row-level security policy');
+    const f=String(p).split('/'); if(f[0]!=='appraisals'||!((f[2]==='comps'&&f.length>=5)||(['header','intro'].includes(f[2])&&f.length>=4&&!avSent(f[1])))) return bad('new row violates row-level security policy');   // 036: header/ and intro/ too, not once sent
     if(SO()[p]) return Promise.resolve({data:null,error:{message:'The resource already exists',statusCode:'409'}});
     const mime=(o&&o.contentType)||blob.type; if(!AM_MIME.includes(mime)) return bad('mime type '+mime+' is not supported'); if(blob.size>15728640) return bad('The object exceeded the maximum allowed size');
     SO()[p]={size:blob.size,mime,bucket:AMB}; (window.__repoBlobs||={})[p]=blob; save(); return ok({path:p}); },
@@ -564,6 +580,29 @@ function lw3cRpc(name,a,me){ if(offline()) return bad('Failed to fetch');
   if(name==='agent_report_imported'){ const r=(DB.appraisal_reports||[]).find(x=>x.id===a.p_report); if(!r) return bad('Report not found'); if(avSent(r.appraisal_id)) return bad(SENT_MSG); if(r.imported_at) return bad('What you ticked from this report is already recorded');
     const cs=a.p_comps||[], ms=a.p_months||[]; if(cs.some(x=>!(r.result.comps||[]).some(e=>e.id===x))) return bad("That comparable isn't in this report's reading"); if(ms.some(x=>!(r.result.market||[]).some(e=>e.id===x))) return bad("That month isn't in this report's reading");
     Object.assign(r,{imported:{comps:cs.slice(),months:ms.slice()},imported_by:me.email,imported_at:now()}); save(); return ok({id:r.id,comps:cs.length,months:ms.length}); }
+  // 036: Tim's Google reviews (agent_reviews_import and agent_review_tick), the same rules as the database
+  const RV=()=>(DB.tim_reviews||=[]), NAME_OK=/^\p{L}[\p{L}'-]{0,29}\.?( \p{L}\.?)?$/u;
+  if(name==='agent_reviews_import'){ const pk=a.p_pack; if(!pk||typeof pk!=='object'||pk.format!=='mre.reviews/1') return bad("That isn't a reviews pack (format mre.reviews/1)");
+    if(pkText(pk.profile,100)!=='Tim McGuire') return bad('Only reviews from the "Tim McGuire" Google profile are imported, never the "McGuire" one');
+    if((pkText(pk.source,20)||'google').toLowerCase()!=='google') return bad('Only Google reviews are imported');
+    if(!Array.isArray(pk.reviews)) return bad('The pack has no list of reviews'); if(pk.reviews.length>500) return bad('At most 500 reviews in one pack');
+    let dAt; try{ dAt=pkTs(pk.gathered_at)||now(); }catch(e){ return bad(e.message); }
+    let added=0, updated=0, same_=0, removed=0; const skipped=[], seen=[]; const today=new Date(Date.now()+864e5).toLocaleDateString('en-CA',{timeZone:'Pacific/Auckland'});
+    pk.reviews.forEach((rv,i)=>{ try{ if(!rv||typeof rv!=='object'||Array.isArray(rv)) throw new Error('not a review');
+      const nm=String(pkText(rv.reviewer,60)||'').replace(/\s+/g,' '); if(!nm) throw new Error('no reviewer'); if(!NAME_OK.test(nm)) throw new Error('the reviewer must be a first name or an initial only');
+      const rt=pkNum(rv.rating,1,5,'rating'); if(rt==null||rt!==Math.round(rt)) throw new Error('rating must be a whole number of stars, 1 to 5');
+      const dt=pkDate(rv.date,'date'); if(!dt) throw new Error('no date'); if(dt>today) throw new Error('the date is in the future');
+      const body=pkText(rv.text,4000)||'', url=pkUrl(rv.link); if(rv.link!=null&&pkText(rv.link,2000)&&!url) throw new Error('the link must start with https://');
+      const ref=pkText(rv.ref,400)||url||(nm.toLowerCase()+'|'+dt); if(seen.includes(ref)) throw new Error('the same review is in the pack twice'); seen.push(ref);
+      const at=pkTs(rv.gathered_at)||dAt; let ex=RV().find(x=>x.ref===ref)||(url?RV().find(x=>x.url===url):null);
+      if(ex){ seen.push(ex.ref); if(ex.body!==body||ex.rating!==rt||ex.reviewed_on!==dt||ex.removed_at){ Object.assign(ex,{body,rating:rt,reviewed_on:dt,reviewer:nm,url:url||ex.url,removed_at:null,ticked:false,ticked_at:null,ticked_by:null,gathered_at:at,updated_at:now()}); updated++; } else { ex.gathered_at=at; if(url) ex.url=url; same_++; } }
+      else { RV().push({id:uid(),source:'google',profile:'Tim McGuire',ref,reviewer:nm,rating:rt,reviewed_on:dt,body,url,ticked:false,ticked_at:null,ticked_by:null,removed_at:null,gathered_at:at,imported_at:now(),updated_at:now()}); added++; }
+    }catch(e){ skipped.push({n:i+1,why:e.message}); } });
+    if(String(pk.complete)==='true'&&!skipped.length) RV().forEach(x=>{ if(!x.removed_at&&!seen.includes(x.ref)){ Object.assign(x,{removed_at:now(),ticked:false,ticked_at:null,ticked_by:null,updated_at:now()}); removed++; } });
+    save(); return ok({added,updated,unchanged:same_,removed,skipped}); }
+  if(name==='agent_review_tick'){ const r=RV().find(x=>x.id===a.p_id); if(!r) return bad('Review not found');
+    if(a.p_on){ if(r.removed_at) return bad("This review is no longer on your Google profile, so it can't be shown"); const w=apprWording([r.body]); if(w) return bad("This review can't go on an appraisal: "+w); }
+    Object.assign(r,{ticked:!!a.p_on,ticked_at:a.p_on?now():null,ticked_by:a.p_on?me.email:null,updated_at:now()}); save(); return ok({id:r.id,ticked:r.ticked}); }
   if(name==='agent_comps_order'){ const ids=a.p_ids||[], mine=CP().filter(c=>c.appraisal_id===a.p_appraisal);
     if(new Set(ids).size!==ids.length||ids.length!==mine.length||ids.some(i=>!mine.some(c=>c.id===i))) return bad('The list must hold each comparable of this appraisal once');
     if(avSent(a.p_appraisal)) return bad(SENT_MSG); let n=0; ids.forEach((i,k)=>{ const c=mine.find(x=>x.id===i); if(c.position!==k+1){ c.position=k+1; c.updated_at=now(); n++; } }); save(); return ok(n); }
@@ -623,7 +662,7 @@ function rpcInner(name,a){
   if(name.startsWith('agent_fv_')||name==='agent_tap_extra') return fvRpc(name,a,me);
   if(name.startsWith('agent_council_')) return councilRpc(name,a,me);
   if(name==='agent_appraisal_create'||name==='agent_appraisal_save') return appraisalRpc(name,a,me);
-  if(['agent_comps_import','agent_comps_order','agent_market_import','agent_report_imported'].includes(name)) return lw3cRpc(name,a,me);
+  if(['agent_comps_import','agent_comps_order','agent_market_import','agent_report_imported','agent_reviews_import','agent_review_tick'].includes(name)) return lw3cRpc(name,a,me);
   if(SIGN_RPCS.includes(name)) return signRpc(name,a,me);
   if(DRAFT_RPCS.includes(name)) return draftRpc(name,a,me);
   if(name.startsWith('offer_sign_')||name.startsWith('offer_round_')) return bad('permission denied for function '+name);
@@ -1044,7 +1083,10 @@ function repoBucket(){ return {
     if(blob.size>26214400) return bad('The object exceeded the maximum allowed size');
     SO()[p]={size:blob.size,mime}; (window.__repoBlobs||={})[p]=blob; save(); return (mime==='application/pdf'?blobKeep(p,blob):Promise.resolve()).then(()=>({data:{path:p},error:null})); },
   createSignedUrl:(p)=>{ if(offline()) return netFail(); if(!isAgentMe()) return bad('Object not found');   // vendors have no storage policy: they use repo-link if(!SO()[p]) return bad('Object not found');
-    const bl=(window.__repoBlobs||{})[p]; return ok({signedUrl:bl?URL.createObjectURL(bl):PNG1}); } }; }
+    const bl=(window.__repoBlobs||{})[p]; return ok({signedUrl:bl?URL.createObjectURL(bl):PNG1}); },
+  // 036: several at once, as the mockup listing's photos are read (Tim only; a missing one comes back with its error)
+  createSignedUrls:(ps)=>{ if(offline()) return netFail(); if(!isAgentMe()) return ok((ps||[]).map(p=>({path:p,signedUrl:null,error:'Object not found'})));
+    return ok((ps||[]).map(p=>{ const bl=(window.__repoBlobs||{})[p]; return SO()[p]||(DB.property_documents||[]).some(d=>d.path===p)?{path:p,signedUrl:bl?URL.createObjectURL(bl):PNG1,error:null}:{path:p,signedUrl:null,error:'Object not found'}; })); } }; }
 function repoRpc(name,a){
   if(offline()) return netFail();
   const me=S&&S.user;
@@ -1887,6 +1929,17 @@ async function signInvoke(o){ const b=(o&&o.body)||{}, me=S&&S.user, net='h:'+mo
     if(b.action==='finish'){ const r=sgFinish(s,ua,net,null,null); save(); if(!r.complete) return res({ok:true,complete:false}); try{ const rd=await sgLock(r.signing_id,'system (last signer finished)'); return res({ok:true,complete:true,locked:true,round:rd.round}); }catch(_){ return res({ok:true,complete:true,locked:false}); } }
   }catch(e){ return fail(e); }
   return res({error:'Bad request'},400); }
+// 036: the private video bucket (MP4, WebM, MOV, 150 MB), Tim only, under appraisals/<id>/header/ or /intro/, nothing added or
+// removed once the appraisal is sent. localStorage mockVideoLimit = bytes: the project's global upload limit (the Free plan's 50 MB).
+function videoBucket(){ return {
+  upload:(p,blob,o)=>{ logCall('up:'+AVB+':'+p); if(offline()) return netFail(); if(!isAgentMe()) return bad('new row violates row-level security policy');
+    const f=String(p).split('/'); if(f[0]!=='appraisals'||!['header','intro'].includes(f[2])||f.length<4||avSent(f[1])) return bad('new row violates row-level security policy');
+    if(SO()[p]) return Promise.resolve({data:null,error:{message:'The resource already exists',statusCode:'409'}});
+    const mime=(o&&o.contentType)||blob.type; if(!AV_MIME.includes(mime)) return bad('mime type '+mime+' is not supported');
+    const lim=Math.min(157286400,+localStorage.getItem('mockVideoLimit')||157286400); if(blob.size>lim) return bad('The object exceeded the maximum allowed size');
+    SO()[p]={size:blob.size,mime,bucket:AVB}; (window.__repoBlobs||={})[p]=blob; save(); return ok({path:p}); },
+  createSignedUrl:p=>{ if(offline()) return netFail(); if(!isAgentMe()||!SO()[p]||SO()[p].bucket!==AVB) return bad('Object not found'); const bl=(window.__repoBlobs||{})[p]; return ok({signedUrl:bl?URL.createObjectURL(bl):'data:video/webm;base64,'}); },
+  remove:(ps)=>{ if(offline()) return netFail(); if(!isAgentMe()) return ok([]); const gone=(ps||[]).filter(p=>{ const f=String(p).split('/'); return SO()[p]&&SO()[p].bucket===AVB&&!avSent(f[1]); }); gone.forEach(p=>{ delete SO()[p]; }); save(); return ok(gone.map(name=>({name}))); } }; }
 // ── migration 035 and phase C2's functions (mirrors fn/appraisal_fetch_handler.ts and fn/appraisal_ai_handler.ts; no network, no model) ──
 // appraisal-fetch: localStorage fetchMode = 'blocked' | 'none' | 'offline' changes the answer; fetchCount = how many photos a page gives
 // (default 4). Staged photos go into storage under fetch-<SHA-256 of the image link>, as the function names them; keep files them.
@@ -1937,13 +1990,31 @@ function apprAiInvoke(o){ const b=(o&&o.body)||{}; c2Log(Object.assign({fn:'doc-
     const subject=R.subject||{verdict:'unclear',reason:''}; log('appraisal buyer check',true,0);
     const row={id:uid(),appraisal_id:av.id,subject,comps,model:'claude-haiku-5-5',checked_by:S.user.email,checked_at:now()}; (DB.appraisal_buyer_checks||=[]).push(row); save();
     return ok({ok:true,check_id:row.id,checked:sales.length,subject,comps}); }
+  // 036 appraisal_draft (mirrors fn/appraisal_ai_handler.ts draftPart): Sonnet drafts one part from what is on file, never the client
+  // heart. draftMode = 'off' | 'fail'; draftResult_<part> = the cleaned result (as fn/prefill_shared.ts readDraftResult gives it).
+  // What would have been sent (question and fact keys) is kept in the appraisal_drafts row's inputs, as the function saves it.
+  if(b.mode==='appraisal_draft'){ const m=localStorage.getItem('draftMode'), part=b.part;
+    if(!['ad','heard','buyers'].includes(part)) return fnErr(400,{error:'Bad request'});
+    if(!(av.setup&&av.setup.v)) return fnErr(409,{ok:false,error:'This appraisal was loaded by hand, so it has no sections to draft'});
+    const IB=k=>/^ib_/.test(k)||k==='ideal_for'||/^story_/.test(k), NEVER=['client_heart','tim_price_fit','tim_motivation_fit','tim_time_fit'];
+    const ans=(DB.qa_answers||[]).filter(x=>x.property_id===av.property_id&&!NEVER.includes(x.question_key));
+    const qs=Array.from(new Set(ans.filter(x=>part==='heard'?!IB(x.question_key)||/^story_/.test(x.question_key):IB(x.question_key)).map(x=>x.question_key)));
+    const notes=part==='heard'&&(DB.first_visits||[]).some(v=>v.property_id===av.property_id&&String(v.notes||'').trim());
+    const facts=part==='ad'?(b.facts||[]).filter(k=>window.APPR.HOME_FACT_KEYS.includes(k)):[];
+    if(!qs.length&&!notes&&!facts.length) return ok({ok:false,reason:'nothing',message:part==='heard'?"There's nothing to draft from yet: no answers from Questions before we meet or the first visit.":part==='buyers'?"There's nothing to draft from yet: their story and the ideal buyers are noted on the first visit.":"Tick some key details first, so the advertisement has facts to work from."});
+    if(m==='off') return ok({ok:false,reason:'off',message:"Drafting isn't switched on yet. Write it yourself for now."});
+    const purpose='appraisal '+part+' draft'; const logS=(ok_)=>(DB.ai_calls||=[]).push({id:(DB.ai_calls.length+1),at:now(),purpose,model:'claude-sonnet-5-5',ok:ok_,files:0,appraisal_id:av.id,agent:S.user.email});
+    if(m==='fail'){ logS(false); save(); return ok({ok:false,reason:'failed',message:"The AI didn't give a usable draft this time. Try again, or write it yourself."}); }
+    const result=JSON.parse(localStorage.getItem('draftResult_'+part)||'{}'); logS(true);
+    const row={id:uid(),appraisal_id:av.id,part,result,inputs:{questions:qs,facts,visit_notes:!!notes},model:'claude-sonnet-5-5',made_by:S.user.email,made_at:now()}; (DB.appraisal_drafts||=[]).push(row); save();
+    return ok({ok:true,draft_id:row.id,part,result}); }
   return fnErr(400,{error:'Bad request'}); }
 window.supabase={createClient(){ return {
-  from:q, rpc, functions:{invoke:(n,o)=>{ logCall('fn:'+n+(o&&o.body&&o.body.mode?':'+o.body.mode:'')); if(n==='property-lookup') return councilInvoke(o); if(n==='appraisal-fetch') return fetchInvoke(o); if(n==='doc-prefill'&&o&&o.body&&['appraisal_report','buyer_check'].includes(o.body.mode)) return apprAiInvoke(o); if(n==='offer-public') return offerInvoke(o); if(n==='offer-draft') return draftInvoke(o); if(n==='offer-sign') return signInvoke(o); if(n==='repo-link') return repoLinkInvoke(o); if(n==='doc-prefill'&&o.body&&o.body.mode==='translate'){ const reqs=JSON.parse(localStorage.getItem('trReqs')||'[]'); reqs.push(o.body); localStorage.setItem('trReqs',JSON.stringify(reqs)); const m=localStorage.getItem('translateMode'); if(m==='off') return Promise.resolve({data:null,error:{message:'503',context:{json:async()=>({error:'not_set_up'})}}}); if(m==='noTool') return ok({ok:false,reason:'no_tool',message:"The AI didn't give a usable answer. Try again."}); const src=o.body.sources; const rej=m==='rejectFirst'?[src[0]]:[]; let cutL=[]; let use=src.filter(x=>!rej.includes(x)); if(m==='cutOff'){ const h=src.length>1?Math.floor(src.length/2):0; cutL=src.slice(h); use=src.slice(0,h); } const resp={ok:true,model:o.body.kind==='screens'||o.body.kind==='guide'?'claude-sonnet-5-5':'claude-haiku-5-5',cut_off:m==='cutOff',translations:use.map(x=>({source:x,text:'<'+o.body.lang+'> '+x})),rejected:rej.map(x=>({source:x,reason:'number changed'})).concat(cutL.map(x=>({source:x,reason:'cut off'}))),usage:{input:10,output:10}}; const D=+localStorage.getItem('translateDelay')||0; return D?new Promise(r=>setTimeout(()=>r({data:resp,error:null}),D)):ok(resp); }
+  from:q, rpc, functions:{invoke:(n,o)=>{ logCall('fn:'+n+(o&&o.body&&o.body.mode?':'+o.body.mode:'')); if(n==='property-lookup') return councilInvoke(o); if(n==='appraisal-fetch') return fetchInvoke(o); if(n==='doc-prefill'&&o&&o.body&&['appraisal_report','buyer_check','appraisal_draft'].includes(o.body.mode)) return apprAiInvoke(o); if(n==='offer-public') return offerInvoke(o); if(n==='offer-draft') return draftInvoke(o); if(n==='offer-sign') return signInvoke(o); if(n==='repo-link') return repoLinkInvoke(o); if(n==='doc-prefill'&&o.body&&o.body.mode==='translate'){ const reqs=JSON.parse(localStorage.getItem('trReqs')||'[]'); reqs.push(o.body); localStorage.setItem('trReqs',JSON.stringify(reqs)); const m=localStorage.getItem('translateMode'); if(m==='off') return Promise.resolve({data:null,error:{message:'503',context:{json:async()=>({error:'not_set_up'})}}}); if(m==='noTool') return ok({ok:false,reason:'no_tool',message:"The AI didn't give a usable answer. Try again."}); const src=o.body.sources; const rej=m==='rejectFirst'?[src[0]]:[]; let cutL=[]; let use=src.filter(x=>!rej.includes(x)); if(m==='cutOff'){ const h=src.length>1?Math.floor(src.length/2):0; cutL=src.slice(h); use=src.slice(0,h); } const resp={ok:true,model:o.body.kind==='screens'||o.body.kind==='guide'?'claude-sonnet-5-5':'claude-haiku-5-5',cut_off:m==='cutOff',translations:use.map(x=>({source:x,text:'<'+o.body.lang+'> '+x})),rejected:rej.map(x=>({source:x,reason:'number changed'})).concat(cutL.map(x=>({source:x,reason:'cut off'}))),usage:{input:10,output:10}}; const D=+localStorage.getItem('translateDelay')||0; return D?new Promise(r=>setTimeout(()=>r({data:resp,error:null}),D)):ok(resp); }
     if(n==='doc-prefill'){ const mode=localStorage.getItem('prefillMode'); if(mode==='off') return Promise.resolve({data:null,error:{message:'503',context:{json:async()=>({error:'not_set_up'})}}}); return ok({ok:true,skipped:[],result:JSON.parse(localStorage.getItem('prefillResult'))}); }const a=JSON.parse(localStorage.getItem('inv')||'[]');a.push(n+':'+o.body.type);localStorage.setItem('inv',JSON.stringify(a));
     if(n==='notify'&&o.body.type==='form_signed'){ const fm=(DB.property_forms||[]).find(x=>x.id===o.body.form_id); if(fm&&fm.status==='signed'&&(fm.kind==='healthy_homes'||fm.countersigned_at)&&!fm.document_id&&fm.agreement_id===o.body.agreement_id){ const d={id:uid(),property_id:fm.property_id,kind:fm.kind==='healthy_homes'?'Healthy Homes checklist and statement':'Vendor Declaration',name:(fm.kind==='healthy_homes'?'Healthy-Homes-Checklist-and-Statement':'Vendor-Declaration')+'.pdf',path:'properties/'+fm.property_id+'/generated/'+fm.id+'.pdf',source:'generated',created_by:'system',created_at:now(),bucket:'private',folder:'agency'}; (DB.property_documents||=[]).push(d); fm.document_id=d.id; save(); } }
     return ok({ok:true});}},
-  storage:{from(b){ if(b===RB) return repoBucket(); if(b===AMB) return apprBucket(); return{upload:(p)=>ok({path:p}),createSignedUrl:()=>ok({signedUrl:PNG1})}}},
+  storage:{from(b){ if(b===RB) return repoBucket(); if(b===AMB) return apprBucket(); if(b===AVB) return videoBucket(); return{upload:(p)=>ok({path:p}),createSignedUrl:()=>ok({signedUrl:PNG1})}}},
   auth:{getSession:()=>ok({session:S}),onAuthStateChange(){},signInWithOtp:o=>{ try{ const l=JSON.parse(localStorage.getItem('otpLog')||'[]'); l.push(o||null); localStorage.setItem('otpLog',JSON.stringify(l)); }catch(_){} return ok({}); },   // otpLog: each sign-in link asked for, with where it brings the person back to
  signOut:async()=>{localStorage.removeItem('mocksession');}}
 };}};
