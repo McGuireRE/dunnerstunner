@@ -44,7 +44,8 @@ export async function safeGet(d: Deps, raw: string, kind: "page" | "image", budg
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
     const msLeft = budget.until - Date.now();
     if (msLeft <= 0) return { ok: false, timeUp: true, why: "Time ran out." };
-    const c = checkUrl(url); if (!c.ok) return { ok: false, why: c.why };
+    const c = checkUrl(url);
+    if (!c.ok) return { ok: false, why: hop > 0 && /^\s*http:/i.test(url) ? "The site redirected to an insecure (http) page, so nothing was fetched from it." : c.why };
     const host = c.url.hostname.replace(/^\[|\]$/g, "").replace(/\.$/, "");
     if (!(isV4(host) || host.includes(":"))) {
       let ips: string[] = [];

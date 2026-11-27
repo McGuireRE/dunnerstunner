@@ -624,11 +624,24 @@ export const BUYER_TOOL = {
 };
 const SUBJECT_KEYS = ["pType", "title_type", "dwellings", "pBed", "rooms_summary", "pBath", "ensuites", "pFloor", "pLand", "pYear", "pBuild", "living_dining", "extra_spaces", "garaging", "parking_spaces", "outdoor", "outlook", "land_use", "zone", "capital_value"];
 // An advertisement's wording, scrubbed before it goes to the model: the comparable's own address (and its street) and agency name,
-// email addresses, web links, New Zealand phone numbers, unit and flat numbers, a street number with a street name and type ("14 Rbmix
-// Road", "2/14 Rbmix Rd"), and a name after "contact", "call", "listed by" and the like are each replaced with a short marker. What is
-// left is the wording about the property (tenanted, rental, student, yield, bedrooms), which is all the check needs.
+// email addresses, web links, New Zealand phone numbers, unit and flat numbers ("Flat 2/16"), a street number with the street's name and
+// type as capitalised words ("14 Rbmix Road", "2/14 RBMIX RD"; "2 minute walk" and "3 bedroom close to the university" are kept), a
+// name after "contact", "call", "listed by" and the like (in any case), and a capitalised name after "with" or "phone", "agent" (unless
+// it starts wording about the property) are each replaced with a short marker. What is left is the wording about the property
+// (tenanted, rental, student, yield, bedrooms, close to campus), which is all the check needs.
 const STREET_TYPES = "street|st|road|rd|avenue|ave|crescent|cres|place|pl|terrace|tce|drive|dr|lane|ln|way|highway|hwy|court|ct|grove|gr|parade|pde|close|cl|esplanade|esp|rise|heights|hts|track|trk|mews|row|view|walk|quay|loop|glade|glen|boulevard|blvd|square|sq";
 const escRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+// the street types, written as an address writes them: capitalised ("Road", "Rd") or all capitals ("ROAD")
+const TYPE_ALT = STREET_TYPES.split("|").flatMap((x) => [x[0].toUpperCase() + x.slice(1), x.toUpperCase()]).join("|");
+const STREET_RE = new RegExp("\\b\\d+[a-zA-Z]?(?:\\s*[/-]\\s*\\d+[a-zA-Z]?)?\\s+(?:[A-Z][A-Za-z'-]*\\s+){1,4}(?:" + TYPE_ALT + ")\\b\\.?", "g");
+// words after a cue word that are not a name ("call us", "contact the office", "phone now")
+const NOT_A_NAME = "us|me|now|today|the|a|an|our|your|for|on|to|at|or|and|agent|agents|office|team|us|anytime|direct|soon|first|early";
+const NAME_WORD = "(?!(?:" + NOT_A_NAME + ")\\b)[A-Za-z][A-Za-z'-]*";
+const NAME_AFTER_CUE = new RegExp("\\b(contact|call|ring|listed by|marketed by|presented by|enquiries to|talk to|speak to|viewing with)(\\s*:?\\s+)(" + NAME_WORD + "(?:\\s+" + NAME_WORD + "){0,2})", "gi");
+// after these cue words only a capitalised name counts ("phone line", "text messages" and "agent is" are left alone)
+const CAP_NAME_AFTER_CUE = /\b([Pp]hone|[Tt]ext|[Ee]mail|[Aa]gent|[Ll]isting agent)(\s*:?\s+)([A-Z][A-Za-z'-]*(?:\s+[A-Z][A-Za-z'-]*){0,2})/g;
+// capitalised words that start wording about a property, not a name ("with Harbour Views", "with North facing decks")
+const PROPERTY_CAPS = /^(?:Harbour|Sea|Ocean|City|Hill|Garden|Gardens|Views?|Double|Single|Separate|Large|Huge|Big|Small|North|South|East|West|Sun|Sunny|Heat|Heating|Off|Private|Plenty|Easy|Great|New|Open|Modern|Original|Two|Three|Four|Five|Six|Internal|Internet|Fibre|Wood|Log|Gas|Solar|Double-glazing|Ensuite|Ample|Its|Their|Native|Bush|Beach|Walking|Good|Lots)$/;
 export function scrubAd(text: unknown, own?: { address?: string | null; agency?: string | null }): string {
   let t = String(text ?? "").replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "");
   const addr = String(own?.address || "").trim(), agency = String(own?.agency || "").trim();
@@ -641,9 +654,15 @@ export function scrubAd(text: unknown, own?: { address?: string | null; agency?:
   t = t.replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+/g, "[email]")
     .replace(/\b(?:https?:\/\/|www\.)\S+/gi, "[link]")
     .replace(/(?:\+\s?64|\b0)[\s().-]*\d(?:[\s().-]*\d){5,10}\b/g, "[phone]")
-    .replace(/\b(?:unit|flat|apartment|apt|villa)\s*#?\s*\d+[a-z]?\b/gi, "[unit]")
-    .replace(new RegExp("\\b\\d+[a-z]?(?:\\s*[/-]\\s*\\d+[a-z]?)?\\s+(?:[A-Za-z][A-Za-z'-]*\\s+){1,4}(?:" + STREET_TYPES + ")\\b\\.?", "gi"), "[address]")
-    .replace(/\b([Cc]ontact|[Cc]all|[Rr]ing|[Pp]hone|[Tt]ext|[Ee]mail|[Aa]gent|[Ll]isting agent|[Ll]isted by|[Mm]arketed by|[Pp]resented by|[Ee]nquiries to|[Tt]alk to)(\s*:?\s+)((?:[A-Z][a-z'-]+)(?:\s+[A-Z][a-z'-]+){0,2})/g, "$1$2[name]");
+    // a street address: a number, then the street's name and type as capitalised words (so "2 minute walk" and "3 bedroom close to
+    // the university" are left alone: they are about the property)
+    .replace(STREET_RE, "[address]")
+    .replace(/\b(?:unit|flat|apartment|apt|villa)\s*#?\s*\d+[a-z]?(?:\s*[/-]\s*\d+[a-z]?)?\b/gi, "[unit]")
+    // a name after a cue word, in any case ("Call Tim McGuire", "contact pat example", "RING PAT"); the cue word's own case is kept
+    .replace(NAME_AFTER_CUE, (m: string, cue: string, gap: string, name: string) => (name.trim() ? cue + gap + "[name]" : m))
+    .replace(CAP_NAME_AFTER_CUE, (m: string, cue: string, gap: string, name: string) => (PROPERTY_CAPS.test(name.split(/\s+/)[0]) ? m : cue + gap + "[name]"))
+    // "with Mary": a capitalised name after "with", unless it is a word about the property ("with Harbour Views")
+    .replace(/\b([Ww]ith\s+)([A-Z][a-zA-Z'-]+(?:\s+[A-Z][a-zA-Z'-]+)?)\b/g, (m: string, w: string, name: string) => (PROPERTY_CAPS.test(name.split(/\s+/)[0]) ? m : w + "[name]"));
   return t;
 }
 // the facts sent: the subject's from its profile (the first visit's facts are on it) and Tim's range; each sale's figures, method and

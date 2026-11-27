@@ -110,6 +110,13 @@ const path = require('path'), fs = require('fs');
     const sc = S.scrubAd(ad, { address: '14 Rbmix Road, Rbmix', agency: 'Invented Realty' }); out.scrubbed = sc;
     expect(!/14 Rbmix|2\/16 Sample|Sample Street|unit 4B|Flat 3|Pat Example|Robin Sample|021 555|477 1234|0800 123|@|https?:|www\.|Invented Realty|Rbmix Road/i.test(sc), 'personal details scrubbed: ' + sc);
     expect(/Fully tenanted/.test(sc) && /\$1,100 a week/.test(sc) && /5 bedrooms, close to campus, 3 bathrooms, built 1970/.test(sc) && /\[address\]/.test(sc) && /\[phone\]/.test(sc) && /Call \[name\]/.test(sc) && /Listed by \[agency\]/.test(sc), 'the property wording stays, with markers: ' + sc);
+    // property wording kept, personal details removed (the C2 re-review's cases)
+    const keep = ['2 minute walk to campus', '3 bedroom close to the university', '4 bedroom place with a view', 'with Harbour Views', 'phone line connected', 'text messages welcome', 'Call us today', 'Contact the agent for details'];
+    keep.forEach(k => { const o = S.scrubAd(k + '.'); expect(o === k + '.', 'property wording kept: ' + JSON.stringify([k, o])); });
+    const gone = [['Call Tim McGuire on the day.', 'Call [name] on the day.'], ['contact pat example now', 'contact [name] now'], ['CALL PAT EXAMPLE', 'CALL [name]'], ['ring robin', 'ring [name]'],
+      ['Viewings with Mary.', 'Viewings with [name].'], ['Flat 2/16 is next door', '[unit] is next door'], ['also 22 RBMIX ROAD', 'also [address]'], ['near 5 Rbmix Close', 'near [address]'], ['Agent Robin Sample says hi', 'Agent [name] says hi']];
+    gone.forEach(([k, w]) => { const o = S.scrubAd(k); expect(o === w, 'personal detail removed: ' + JSON.stringify([k, o, w])); });
+    expect(!/Guire|\/16|Mary|pat|PAT|robin/i.test(gone.map(([k]) => S.scrubAd(k)).join(' ')), 'no part of a name or unit number is left behind');
     const f2 = S.buyerFacts([], [], 'Rbmix', [{ status: 'sold', suburb: 'Rbmix', address: '14 Rbmix Road, Rbmix', agency: 'Invented Realty', ad_text: ad }]);
     expect(f2.sales[0].advertisement === sc && !JSON.stringify(f2).includes('Invented Realty') && !JSON.stringify(f2).includes('14 Rbmix'), 'buyerFacts sends only the scrubbed advertisement, never the address or agency'); }
   // the shared logger keeps files 0 by default and takes appraisal_id when given

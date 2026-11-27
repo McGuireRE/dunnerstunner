@@ -123,7 +123,7 @@ const path = require('path');
   r = await F({ page_url: 'https://listings.example.com/rb/hop3' }); j = await r.json(); expect(!j.ok && /Only web links starting with https/.test(j.message), 'a redirect to a file link refused');
   web['https://listings.example.com/rb/hop4'] = () => resp(302, null, { location: 'http://listings.example.com/rb/listing/1' });
   fetched = []; r = await F({ page_url: 'https://listings.example.com/rb/hop4' }); j = await r.json();
-  expect(!j.ok && /Only secure links/.test(j.message) && fetched.length === 1, 'a redirect down to plain http is refused (https only on every hop)');
+  expect(!j.ok && /redirected to an insecure \(http\) page/.test(j.message) && !/address bar/.test(j.message) && fetched.length === 1, 'a redirect down to plain http is refused (https only on every hop), said as a redirect: ' + j.message);
   let hops = 0; web['https://listings.example.com/rb/loop'] = () => { hops++; return resp(302, null, { location: '/rb/loop' }); };
   r = await F({ page_url: 'https://listings.example.com/rb/loop' }); j = await r.json(); expect(!j.ok && /redirected too many times/.test(j.message) && hops === C.MAX_REDIRECTS + 1, 'at most 5 redirects: ' + hops);
   web['https://listings.example.com/rb/moved'] = () => resp(301, null, { location: 'https://listings.example.com/rb/listing/1' });
