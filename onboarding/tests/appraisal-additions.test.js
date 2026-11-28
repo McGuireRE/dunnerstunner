@@ -28,6 +28,7 @@ const expect = (c, m) => { if (!c) errs.push(m); };
 const now = new Date().toISOString();
 const day = n => new Date(Date.now() - n * 864e5).toLocaleDateString('en-CA', { timeZone: 'Pacific/Auckland' });
 const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Pacific/Auckland' });
+const TIM_PRICE_WORDING = 'How buyers set the price. Buyers stack up like a pyramid: many at the base, fewer at each level, and at the top the one buyer who wants your home more than anyone else. That buyer only reaches their best price while the buyers beneath them are still in the running. My job is to keep every genuine buyer in contention, so competition does the lifting. The range above is where I expect the market to land today. It is a guide, not a ceiling, and nothing pleases me more than proving it wrong.';
 const LM = (() => { const y = +today.slice(0, 4), m = +today.slice(5, 7); return m === 1 ? (y - 1) + '-12' : y + '-' + String(m - 1).padStart(2, '0'); })();
 const OLD = (() => { const [y, m] = LM.split('-').map(Number); return m === 1 ? (y - 1) + '-12' : y + '-' + String(m - 1).padStart(2, '0'); })();
 const svg = (c, w, h) => `<svg xmlns="http://www.w3.org/2000/svg" width="${w || 900}" height="${h || 600}"><rect width="100%" height="100%" fill="${c}"/><circle cx="50%" cy="45%" r="22%" fill="#fff" opacity=".7"/></svg>`;
@@ -194,8 +195,14 @@ const SEED = () => ({ properties: [{ id: 'P1', address: 'RB 4 Add Road, Rbvale',
   await p.evaluate(() => { window.__mockDB.appraisal_comps.find(c => c.id === 'C2').compare_ticked = true; });   // ticked in another tab; this page still shows it unticked
   await p.click('#cmpDraft-C2'); await wait(p, 900); d = await db(p);
   out.dLate = { note: await note(p, 'cmpDraft-C2'), same: d.appraisal_comps.find(c => c.id === 'C2').compare_text === c2t, ticked: d.appraisal_comps.find(c => c.id === 'C2').compare_ticked };
-  expect(/ticked meanwhile/.test(out.dLate.note || '') && out.dLate.same && out.dLate.ticked === true, 'A: wording ticked meanwhile is kept: the save only touches an unticked row: ' + JSON.stringify(out.dLate));
+  expect(/ticked or changed meanwhile/.test(out.dLate.note || '') && out.dLate.same && out.dLate.ticked === true, 'A: wording ticked meanwhile is kept: the save only touches an unticked row: ' + JSON.stringify(out.dLate));
   await edit(p, "d.appraisal_comps.find(c=>c.id==='C2').compare_ticked=false;");
+  // and the other race: the page shows no wording, another tab writes some (unticked) meanwhile; Draft all doesn't replace it
+  await edit(p, "d.appraisal_comps.find(c=>c.id==='C2').compare_text='';"); await p.reload(); await wait(p, 1000);
+  await p.evaluate(() => { window.__mockDB.appraisal_comps.find(c => c.id === 'C2').compare_text = 'Written in another tab.'; });
+  ai0 = await aiN(); DLGS.length = 0; await p.click('#cmpDraftAll'); await wait(p, 1200); d = await db(p);
+  out.dLateText = { note: await note(p, 'cmpDraftAll'), text: d.appraisal_comps.find(c => c.id === 'C2').compare_text, asked: DLGS.length };
+  expect(out.dLateText.text === 'Written in another tab.' && out.dLateText.asked === 0 && /Drafted 0 of 1\. Skipped 2: 1 ticked, so kept, 1 ticked or changed in another tab meanwhile, so kept\./.test(out.dLateText.note || ''), 'A: unticked wording written in another tab meanwhile is kept by Draft all, and said so: ' + JSON.stringify(out.dLateText));
   // the range is never on the early charts (Tim, 28 November 2026): the price evidence and the market charts show the sales alone, and
   // the range first appears in the opinion of price, as the pyramid
   out.rgSwitch = await p.evaluate(() => !!document.querySelector('#cmpRangeCharts'));
@@ -367,7 +374,7 @@ const SEED = () => ({ properties: [{ id: 'P1', address: 'RB 4 Add Road, Rbvale',
   // ── the price pyramid in the opinion of price (Tim, 28 November 2026): one range, two ranges, phone, wide, dark and print ──
   const pyr = () => p.evaluate(() => { const op = document.querySelector('#apvDoc .apv-opinion'); if (!op) return null;
     return Array.from(op.querySelectorAll('.apv-pyr')).map(f => { const svg = f.querySelector('svg'), poly = k => { const ys = svg.querySelector('.apv-pyr-' + k).getAttribute('points').split(' ').map(pt => +pt.split(',')[1]); return [Math.min(...ys), Math.max(...ys)]; };
-      const br = svg.querySelector('.apv-pyr-br').getAttribute('d'), m = /^M[\d.]+,([\d.]+) h8 V([\d.]+)/.exec(br), texts = Array.from(svg.querySelectorAll('text')).map(t => ({ t: t.textContent, y: +t.getAttribute('y'), h: t.getBoundingClientRect().height }));
+      const br = svg.querySelector('.apv-pyr-br').getAttribute('d'), m = /^M[\d.]+,([\d.]+) h8 V([\d.]+)/.exec(br), texts = Array.from(svg.querySelectorAll('text')).map(t => ({ t: t.textContent, y: +t.getAttribute('y'), h: Math.round(parseFloat(getComputedStyle(t).fontSize) * svg.getBoundingClientRect().width / svg.viewBox.baseVal.width * 10) / 10 }));
       const r = f.getBoundingClientRect(), bands = ['red', 'orange', 'yellow', 'green'].map(k => [k, poly(k)]), red = bands[0][1], green = bands[3][1];
       return { cap: (f.querySelector('.apv-pyr-cap') || {}).textContent || '', alt: svg.getAttribute('aria-label'), role: svg.getAttribute('role'), top: m ? +m[1] : null, bottom: m ? +m[2] : null, red, green,
         fills: ['red', 'orange', 'yellow', 'green'].map(k => getComputedStyle(svg.querySelector('.apv-pyr-' + k)).fill), texts, left: Math.round(r.left), w: Math.round(r.width), smallest: Math.min(...texts.map(x => x.h)) }; }); });
@@ -381,12 +388,13 @@ const SEED = () => ({ properties: [{ id: 'P1', address: 'RB 4 Add Road, Rbvale',
   expect(p1 && p1.fills.join('|') === 'rgb(226, 75, 74)|rgb(239, 159, 39)|rgb(250, 199, 117)|rgb(151, 196, 89)', 'pyramid: Tim\'s colours, red, orange, yellow and green: ' + JSON.stringify(p1 && p1.fills));
   expect(p1 && p1.bottom === p1.green[0] && Math.abs(p1.top - (p1.red[0] + p1.red[1]) / 2) < 1 && (p1.red[1] - p1.red[0]) >= 70, 'pyramid: the range runs from the top of the green to halfway up the (enlarged) red peak: ' + JSON.stringify(p1 && { top: p1.top, bottom: p1.bottom, red: p1.red, green: p1.green }));
   const T = t => p1 && p1.texts.find(x => x.t === t);
-  expect(p1 && T('$555,000') && T('$595,000') && T('Got to be better than') && T('Top of range') && T('Appraisal range') && T('Cherry on top:') && T('set by competition, not printed') && T('Widest base: the most buyers') && Math.abs(T('$595,000').y - p1.top) < 20 && Math.abs(T('$555,000').y - p1.bottom) < 20,
+  expect(p1 && T('$555,000') && T('$595,000') && T('Got to be better than') && T('Top of range') && T('Appraisal range') && T('Cherry on top:') && T('set by competition between buyers') && T('Widest base: the most buyers') && Math.abs(T('$595,000').y - p1.top) < 20 && Math.abs(T('$555,000').y - p1.bottom) < 20,
     'pyramid: the bracket carries Tim\'s figures at "Got to be better than" and "Top of range"; the labels name every part: ' + JSON.stringify(p1 && p1.texts.map(x => x.t)));
   expect(p1 && !p1.texts.some(x => /\$/.test(x.t) && x.y < p1.top - 1), 'pyramid: nothing above the top of the range carries a number: ' + JSON.stringify(p1 && p1.texts.filter(x => /\$/.test(x.t))));
-  expect(p1 && p1.smallest >= 10 && p1.w <= 390, 'pyramid: readable at 390 (smallest label ' + (p1 && p1.smallest) + ' px), within the screen');
+  expect(p1 && p1.smallest >= 12 && p1.w <= 390 && p1.w >= 330, 'pyramid: the full width of the card and readable at 390 (smallest label drawn at ' + (p1 && p1.smallest) + ' px, width ' + (p1 && p1.w) + '), within the screen');
   out.pw1 = await words();
-  expect(/^How I think about price\. Picture buyers as cherries/.test(out.pw1) && /Competition decides the rest\.$/.test(out.pw1.trim()), 'pyramid: Tim\'s price wording beside it: ' + out.pw1.slice(0, 80));
+  out.pwOrder = await p.evaluate(() => { const o = document.querySelector('#apvDoc .apv-opinion'), w = o.querySelector('.apv-pw'), y = o.querySelector('.apv-pyrs'), c = o.querySelector('.apv-opin-card'); return !!(w && y && c && (y.compareDocumentPosition(w) & 4) && (c.compareDocumentPosition(w) & 4) && w.querySelector('strong').textContent === 'How buyers set the price.'); });
+  expect(out.pw1.trim() === TIM_PRICE_WORDING && out.pwOrder && !/cherr|How I think about price/i.test(out.pw1), 'pyramid: Tim\'s price wording beside it: ' + out.pw1.slice(0, 80));
   expect(/\$555,000 to \$595,000/.test(await p.evaluate(() => document.querySelector('#apvDoc .apv-opin-fig').textContent)), 'the large range figures stay in the opinion card');
   expect(!(await side(p)), 'pyramid: no sideways scroll at 390'); await p.locator('#apvDoc .apv-opinion').screenshot({ path: path.join(__dirname, 'out', 'appraisal_add_pyramid_390.png') });
   // print: drawn, in colour, inside the page
@@ -408,11 +416,33 @@ const SEED = () => ({ properties: [{ id: 'P1', address: 'RB 4 Add Road, Rbvale',
   X = await mk(1280, 'dark'); p = X.p;
   await signIn(p, 'agent-test@example.com', twoRanges);
   await p.goto(PB + 'appraisals/AVX'); await wait(p, 1400);
-  P = await pyr(); out.pyr2Wide = P && P.map(x => ({ left: x.left, w: x.w }));
-  expect(P && P.length === 2 && P[1].left > P[0].left + 100, 'pyramid: side by side on a wide screen: ' + JSON.stringify(out.pyr2Wide));
+  P = await pyr(); out.pyr2Wide = P && P.map(x => ({ left: x.left, w: x.w, smallest: x.smallest }));
+  expect(P && P.length === 2 && P[1].left > P[0].left + 100 && P.every(x => x.smallest >= 12), 'pyramid: side by side on a wide screen: ' + JSON.stringify(out.pyr2Wide));
   out.pyrDark = await p.evaluate(() => { const t = document.querySelector('#apvDoc .apv-pyr-svg text'); return getComputedStyle(t).fill; });
   expect(out.pyrDark !== 'rgb(30, 29, 27)', 'pyramid: its labels follow the dark theme: ' + out.pyrDark);
   await p.locator('#apvDoc .apv-opinion').screenshot({ path: path.join(__dirname, 'out', 'appraisal_add_pyramid2_1280_dark.png') });
+  await edit(p, "d.appraisal_views[0].fields.ranges=[{key:'A',option:'Your home',involves:'',low:555000,high:595000}];"); await p.goto(PB + 'appraisals/AVX'); await wait(p, 1400);
+  P = await pyr(); out.pyr1Wide = P && P.map(x => ({ w: x.w, smallest: x.smallest }));
+  expect(P && P.length === 1 && P[0].w >= 440 && P[0].smallest >= 12, 'pyramid: one alone at 1280 draws at its full width, labels at least 12 px: ' + JSON.stringify(out.pyr1Wide));
+  await p.locator('#apvDoc .apv-opinion').screenshot({ path: path.join(__dirname, 'out', 'appraisal_add_pyramid_1280_dark.png') });
+  await X.ctx.close();
+
+  // ── off means off in the letter too: the default note's "Any questions at all" sentence follows the switches ──
+  const seedNote = (ch) => { const sd = SEED(), st = Object.assign({}, SETUP); delete st.note; sd.appraisal_views[0].setup = st;
+    sd.site_profile = [{ id: true, name: 'Tim McGuire', licence: '', phone: '027 562 7207', email: 'tim@mcguire.co.nz', photo_path: null, about: {}, channels: ['call', 'text', 'email', 'form'].map(k => ({ key: k, on: ch.includes(k), value: '' })), updated_at: now }]; return sd; };
+  const noteLook = async () => { await p.goto(PB + 'appraisals/AVX'); await wait(p, 1400);
+    const scr = await p.evaluate(() => ({ html: document.querySelector('#apvDoc').innerHTML, text: document.querySelector('#apvDoc').innerText }));
+    await p.emulateMedia({ media: 'print' }); const prt = await p.evaluate(() => document.querySelector('#apvDoc').innerText); await p.emulateMedia({ media: 'screen' });
+    return { scr, prt }; };
+  const PH = /027 ?562 ?7207|\+?64 ?27 ?562 ?7207/;
+  X = await mk(390); p = X.p;
+  for (const [ch, want] of [[['form'], null], [['call', 'text', 'email', 'form'], 'Any questions at all, call or text me on 027 562 7207.'], [['text'], 'Any questions at all, text me on 027 562 7207.'], [['email', 'form'], 'Any questions at all, email me at tim@mcguire.co.nz.']]) {
+    await signIn(p, 'agent-test@example.com', seedNote(ch)); await write(p);
+    const r = await noteLook(), line = (/Any questions at all[^\n]*/.exec(r.scr.text) || [null])[0];
+    out['note_' + ch.join('_')] = { line, phoneScreen: PH.test(r.scr.html), phonePrint: PH.test(r.prt) };
+    if (want === null) expect(!line && !PH.test(r.scr.html) && !PH.test(r.prt), 'off means off: with only the form on, the default note has no phone, and no phone shows anywhere on screen or in print: ' + JSON.stringify(out['note_form']));
+    else expect(line === want, 'the default note follows the switches (' + ch.join(', ') + '): ' + JSON.stringify(line));
+  }
   await X.ctx.close();
 
   await b.close();

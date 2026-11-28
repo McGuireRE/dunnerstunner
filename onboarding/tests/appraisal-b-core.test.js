@@ -30,6 +30,7 @@ const wNew = NEW.writeStandard(SETUP_A, ranges, ctx), wOld = OLD.writeStandard(S
 const noWords = w => JSON.stringify(Object.assign({}, w, { sections: w.sections.map(x => x.type === 'opinion' ? { type: 'opinion' } : x) }));
 const opN = wNew.sections.find(x => x.type === 'opinion');
 expect(noWords(wNew) === JSON.stringify(wOld) && opN.wording === NEW.PRICE_WORDING, 'a phase A set-up is written exactly as before, plus the price wording');
+expect(/^How buyers set the price\. /.test(NEW.PRICE_WORDING) && /It is a guide, not a ceiling, and nothing pleases me more than proving it wrong\.$/.test(NEW.PRICE_WORDING) && !/cherr|How I think about price/i.test(NEW.PRICE_WORDING), 'the default price wording is the one Tim approved on 28 November 2026 (8:00pm), with no cherry wording');
 const own = Object.assign({}, SETUP_A, { header: 'own' });
 expect(noWords(NEW.writeStandard(own, ranges, ctx)) === JSON.stringify(OLD.writeStandard(own, ranges, ctx)), '"Use my own" with nothing uploaded is written exactly as before, plus the price wording');
 out.pw = { edited: NEW.writeStandard(Object.assign({}, SETUP_A, { priceWording: 'My own words.' }), ranges, ctx).sections.find(x => x.type === 'opinion').wording, cleared: 'wording' in NEW.writeStandard(Object.assign({}, SETUP_A, { priceWording: '' }), ranges, ctx).sections.find(x => x.type === 'opinion'),

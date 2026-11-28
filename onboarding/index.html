@@ -1351,7 +1351,7 @@ body:has(#apvPage .apv-doc) { overflow-x: clip; }
 .apv-doc .apv-pyrs { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; margin: 14px 0 6px; }
 @media (min-width: 760px) { .apv-doc .apv-pyrs.many { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .apv-doc .apv-pyr { margin: 0; max-width: 460px; break-inside: avoid; }
-.apv-doc .apv-pyrs:not(.many) .apv-pyr { margin: 0 auto; }
+.apv-doc .apv-pyrs:not(.many) .apv-pyr { margin: 0 auto; width: 100%; }
 .apv-doc .apv-pyr-cap { font-weight: 600; font-size: 15px; margin: 0 0 4px; }
 .apv-doc .apv-pyr-svg { display: block; width: 100%; height: auto; overflow: visible; font-family: var(--body); -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 .apv-doc .apv-pyr-svg polygon { stroke: var(--ink); stroke-width: 1; stroke-opacity: .55; stroke-linejoin: round; }
@@ -7454,7 +7454,8 @@ window.JOURNEY_MEDIA_HINTS = {
 // ranges (the options table from fields.ranges), method (the recommended method's sentence), wave (the buyer-wave graph),
 // methods (the ways-to-sell table, with the recommended one marked). Phase A (033): byline, opinion, campaign, methodcards, plans,
 // panel. Phase B (036): header, intro, heard, home, buyers, reviews (each with a stage, and nothing drawn when empty).
-// Text may hold **bold**, [words](https://link), a bare https:// link, and the tokens {{range:<key>}}, {{bedrooms}} and {{method}}.
+// Text may hold **bold**, [words](https://link), a bare https:// link, and the tokens {{range:<key>}}, {{bedrooms}}, {{method}} and
+// {{reach}} (how to reach Tim, as his Call, Text and Email switches allow: see reachText).
 (function () {
   'use strict';
   const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -7470,6 +7471,7 @@ window.JOURNEY_MEDIA_HINTS = {
     let s = esc(text);
     s = s.replace(/\{\{range:([A-Za-z0-9_-]{1,20})\}\}/g, (m, k) => { const r = rangeOf(f, k); return r ? '<span class="apv-fig" data-range="' + esc(k) + '">' + esc(fmtRange(r)) + '</span>' : ''; });
     s = s.replace(/\{\{bedrooms\}\}/g, () => '<span data-f="bedrooms">' + esc((f && f.bedrooms) || '') + '</span>');
+    s = s.replace(/\{\{reach\}\}/g, () => esc(reachText()));
     s = s.replace(/\{\{method\}\}/g, () => '<span data-f="method">' + esc(((f && f.method) || {}).name || '') + '</span>');
     s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
     s = s.replace(/\[([^\]]+)\]\((https:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
@@ -7502,7 +7504,9 @@ window.JOURNEY_MEDIA_HINTS = {
     if (!sec || typeof sec !== 'object') return '';
     switch (sec.type) {
       case 'heading': return '<h2>' + inline(sec.text, f) + '</h2>';
-      case 'para': return '<p' + (sec.cls === 'lede' ? ' class="apv-lede"' : '') + '>' + inline(sec.text, f) + '</p>';
+      // a paragraph built round how to reach Tim ({{reach}}) is left out when every way to reach him is off (off means off)
+      case 'para': if (/\{\{reach\}\}/.test(String(sec.text || '')) && !reachText()) return '';
+        return '<p' + (sec.cls === 'lede' ? ' class="apv-lede"' : '') + '>' + inline(sec.text, f) + '</p>';
       case 'note': return '<p class="apv-note">' + inline(sec.text, f) + '</p>';
       case 'byline': return '<p class="apv-by">' + inline(sec.text, f) + '</p>';
       // an ordered list reads as the sample's steps: numbered cards in a row (two to a row on a phone)
@@ -7539,7 +7543,9 @@ window.JOURNEY_MEDIA_HINTS = {
   // that it doesn't suggest that I am underselling their property"). The tip of the peak carries no number: the cherry on top is set
   // by competition. The red peak is drawn large enough that its lower half sits visibly inside the bracket. Every band is named by
   // position and label as well as colour; one text alternative for screen readers.
-  const PRICE_WORDING = 'How I think about price. Picture buyers as cherries stacked in a pyramid: many at the base, fewer at each level, one on top. The cherry on top is only there because of the ones beneath it. Turn buyers away early, or publish the top figure, and the support disappears. My range runs from the "got to be better than" price to just under the cherry on top. Competition decides the rest.';
+  // Tim's price wording (approved 8:00pm, 28 November 2026; it replaced the cherry wording): how the market behaves, not about him.
+  // It follows the pyramid and the range figures, so "the range above" is true.
+  const PRICE_WORDING = 'How buyers set the price. Buyers stack up like a pyramid: many at the base, fewer at each level, and at the top the one buyer who wants your home more than anyone else. That buyer only reaches their best price while the buyers beneath them are still in the running. My job is to keep every genuine buyer in contention, so competition does the lifting. The range above is where I expect the market to land today. It is a guide, not a ceiling, and nothing pleases me more than proving it wrong.';
   function pyramid(r, label) {
     const AX = 110, TOP = 46, H = 236, HALF = 104;   // apex x, apex y, height, half the base
     const at = d => [AX - HALF * d / H, AX + HALF * d / H];   // the pyramid's edges, d below the apex
@@ -7554,7 +7560,7 @@ window.JOURNEY_MEDIA_HINTS = {
     return '<figure class="apv-pyr"' + (label ? ' data-pyr="' + esc(r.key) + '"' : '') + '>' + (label ? '<figcaption class="apv-pyr-cap">' + esc(label) + '</figcaption>' : '')
       + '<svg viewBox="0 0 400 320" role="img" aria-label="' + esc(alt) + '" class="apv-pyr-svg"><title>' + esc(alt) + '</title>'
       + B.map(poly).join('')
-      + t(AX + 14, 20, 'Cherry on top:', 'apv-pyr-k') + t(AX + 14, 36, 'set by competition, not printed', 'apv-pyr-s')
+      + t(AX + 14, 20, 'Cherry on top:', 'apv-pyr-k') + t(AX + 14, 36, 'set by competition between buyers', 'apv-pyr-s')
       + '<line class="apv-pyr-lead" x1="' + (AX + 10) + '" y1="40" x2="' + (AX + 4) + '" y2="' + (TOP + 14) + '"/>'
       + lead(yTop) + lead(yLow)
       + '<path class="apv-pyr-br" d="M' + BX + ',' + yTop + ' h8 V' + yLow + ' h-8"/>'
@@ -7574,7 +7580,7 @@ window.JOURNEY_MEDIA_HINTS = {
     // the pyramid: one for each part Tim appraised, each with its own label when there is more than one; then his price wording
     const pyr = rs.length ? '<div class="apv-pyrs' + (rs.length > 1 ? ' many' : '') + '">' + rs.map(r => pyramid(r, rs.length > 1 ? String(r.option || '') : '')).join('') + '</div>' : '';
     const words = paras(String(sec.wording || '')).map(x => x.replace(/\s+/g, ' '));
-    const pw = words.length ? '<div class="apv-pw">' + words.map((x, i) => { const m = i === 0 && /^(How I think about price\.)\s*(.*)$/.exec(x); return '<p>' + (m ? '<strong>' + esc(m[1]) + '</strong> ' + esc(m[2]) : esc(x)) + '</p>'; }).join('') + '</div>' : '';
+    const pw = words.length ? '<div class="apv-pw">' + words.map((x, i) => { const m = i === 0 && /^(How buyers set the price\.)\s*(.*)$/.exec(x); return '<p>' + (m ? '<strong>' + esc(m[1]) + '</strong> ' + esc(m[2]) : esc(x)) + '</p>'; }).join('') + '</div>' : '';
     return '<div class="apv-opinion"><div class="apv-opin-card">' + body + '</div>' + pyr + pw + '<p class="apv-valn">' + esc(VALUATION_LABEL) + '</p></div>';
   }
   // every sale method explained, as points that open; the recommended one marked and open (in print, every one is open)
@@ -7677,7 +7683,7 @@ window.JOURNEY_MEDIA_HINTS = {
     const rest = parts.slice(1).filter(s => !/^(dunedin|new zealand|nz|otago)$/i.test(s));
     return rest[0] || '';
   }
-  const DEFAULT_NOTE = 'Thank you for having me through your home, and for telling me what matters to you. This is my appraisal: where I think buyers will land, how I would sell it, and the marketing I would suggest.\n\nAny questions at all, call or text me on 027 562 7207.';
+  const DEFAULT_NOTE = 'Thank you for having me through your home, and for telling me what matters to you. This is my appraisal: where I think buyers will land, how I would sell it, and the marketing I would suggest.\n\nAny questions at all, {{reach}}.';
   // the marketing plans from the shared catalogue (catalogue.js: PACKAGES and ITEMS), Tim's pick first and marked
   function plansFor(pick, cat) {
     const P = (cat && cat.PACKAGES) || {}, I = (cat && cat.ITEMS) || {};
@@ -7951,6 +7957,13 @@ window.JOURNEY_MEDIA_HINTS = {
     S = S || {}; const on = k => ((S.channels || []).some(c => c && c.key === k && c.on !== false));
     const phone = String(S.phone || '').trim(), email = String(S.email || '').trim(), call = !!phone && on('call'), text = !!phone && on('text');
     return { phone: call || text ? phone : '', email: email && on('email') ? email : '', call, text };
+  }
+  // how to reach Tim, in the letter's words, as the switches allow: "call or text me on ...", "call me on ...", "text me on ...", else
+  // "email me at ..." when only Email is on, else nothing (and the sentence holding it is left out)
+  function reachText() {
+    const cf = contactFor(site());
+    if (cf.phone) return (cf.call && cf.text ? 'call or text me on ' : cf.call ? 'call me on ' : 'text me on ') + cf.phone;
+    return cf.email ? 'email me at ' + cf.email : '';
   }
   // the closing line's verb: "Call or text", "Call" or "Text", as the switches allow
   const reachVerb = cf => cf.call && cf.text ? 'Call or text' : cf.call ? 'Call' : cf.text ? 'Text' : '';
@@ -8308,7 +8321,7 @@ window.JOURNEY_MEDIA_HINTS = {
     if (!String(f.bedrooms || '').trim()) return 'Bedrooms can\'t be empty.';
     return wordingProblem(f.bedrooms) || wordingProblem((f.method || {}).name) || wordingProblem((f.method || {}).text);
   }
-  window.APPR = { render, brand, pyramid, PRICE_WORDING, pvOf, videoUrl, contactFor, reachVerb, subjectOf, diffTags, suburbSales, videoEmbed, embedSrc, aboutTabs, YOURS_KEYS, heroPreview: (sec, ev) => hero(sec, ev, '', true), MOCK_LINE, navLabel, fmtRange, dollars, inline, methodNames, checkFields, wordingProblem,
+  window.APPR = { render, brand, pyramid, PRICE_WORDING, reachText, pvOf, videoUrl, contactFor, reachVerb, subjectOf, diffTags, suburbSales, videoEmbed, embedSrc, aboutTabs, YOURS_KEYS, heroPreview: (sec, ev) => hero(sec, ev, '', true), MOCK_LINE, navLabel, fmtRange, dollars, inline, methodNames, checkFields, wordingProblem,
     vendorComp, VENDOR_COMP, STATUS_WORDS, RINGS, ringWords, compsRule, reportPacks, reportLine, matchPhoto, addrParts, addrSame, addrMatch, adShown, cmpShown, evidence,
     METHODS, CAMPAIGNS, MAX_WEEKS, campaignOf, waveFor, stepsFor, methodSentence, isHill, suburbOf, plansFor, checkSetup, writeStandard, sectionsProblem,
     DEFAULT_NOTE, DALMORE_LINE, HEAD_AND_SHOULDERS, VALUATION_LABEL,
@@ -18204,7 +18217,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         <div id="apsLinkWrap"><label class="f" for="apsLink">Your link to this suburb <span class="opt">(optional: shown only if you write it)</span></label><input type="text" id="apsLink" value="${esc(S.suburbLink || '')}"></div>
       </div>
       <h2>Your note to them</h2>
-      <div class="card tight"><label class="f" for="apsNote" style="margin-top:0">Your note <span class="opt">(a blank line starts a new paragraph)</span></label><textarea id="apsNote" rows="6">${esc(S.note)}</textarea></div>
+      <div class="card tight"><label class="f" for="apsNote" style="margin-top:0">Your note <span class="opt">(a blank line starts a new paragraph)</span></label><textarea id="apsNote" rows="6">${esc(S.note)}</textarea>
+        <p class="small" style="margin:6px 0 0">{{reach}} becomes how to reach you, as your Call, Text and Email switches on ${plink('settings/about', 'About and contact', 'btn link')} allow. With them all off, the sentence holding it is left out.</p></div>
       <h2>Your range</h2>
       <div class="card tight"><p class="small" style="margin:0 0 6px">One range for each part that sells. These are your figures: nothing is priced for you.</p>
         <div id="apsParts">${partsHTML()}</div>
@@ -18821,8 +18835,9 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       rec.setup = next; atBtn(scv, scv.checked ? 'Saved. Their rating valuation shows in the Yours column.' : 'Saved. Their rating valuation stays off the page.', 'ok'); });    if (ro) return;
     // 038: the AI drafts how a comparable compares with their home (Sonnet, through doc-prefill). The draft goes in unticked, so the
     // vendor sees nothing until Tim reads, changes and ticks it; a weak point of their home goes to his private note on the comparable.
-    // Ticked wording is Tim's: a draft never replaces it. The save itself only touches a row that is still unticked, so wording ticked
-    // in another tab meanwhile is kept too (the update then finds no row, and he is told).
+    // Ticked wording is Tim's: a draft never replaces it. The save itself only touches a row that is still unticked and still holds the
+    // wording this page showed (empty when nothing was there, or the very text he agreed to replace), so wording ticked or written in
+    // another tab meanwhile is kept (the update then finds no row, and he is told).
     const hasText = c => !!String(c.compare_text || '').trim();
     const draftCmp = async c => {
       const { data, error } = await sb.functions.invoke('doc-prefill', { body: { mode: 'appraisal_draft', part: 'compare', appraisal_id: rec.id, comp_id: c.id } }); const j = await fnJson(data, error);
@@ -18830,8 +18845,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       const r = j.result || {}, note = String(r.private_note || '').trim();
       const upd = { compare_text: String(r.text || '').trim(), compare_ticked: false };
       if (note) upd.private_note = (String(c.private_note || '').trim() ? c.private_note.trim() + '\n' : '') + 'AI: ' + note;
-      let rows; try { rows = await must(sb.from('appraisal_comps').update(upd).eq('id', c.id).eq('compare_ticked', false).select()); } catch (e) { return { ok: false, msg: 'Drafted, but not saved: ' + ((e && e.message) || 'try again.') }; }
-      if (!rows || !rows.length) return { ok: false, ticked: true, msg: 'Not changed: its wording was ticked meanwhile, so it is kept.' };
+      let rows; try { rows = await must(sb.from('appraisal_comps').update(upd).eq('id', c.id).eq('compare_ticked', false).eq('compare_text', String(c.compare_text || '')).select()); } catch (e) { return { ok: false, msg: 'Drafted, but not saved: ' + ((e && e.message) || 'try again.') }; }
+      if (!rows || !rows.length) return { ok: false, ticked: true, msg: 'Not changed: its wording was ticked or changed meanwhile, so it is kept.' };
       return { ok: true, problems: r.problems || [] };
     };
     $$('[data-cmp-draft]').forEach(b => b.addEventListener('click', async () => { const c = comps.find(x => x.id === b.dataset.cmpDraft);
@@ -18851,7 +18866,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       dall.disabled = true; let done = 0, bad = 0, late = 0, firstErr = '';
       for (const c of todo) { atBtn(dall, 'Drafting ' + (done + bad + late + 1) + ' of ' + todo.length + '...', 'busy'); const r = await draftCmp(c); if (r.ok) done++; else if (r.ticked) late++; else { bad++; firstErr = firstErr || r.msg; } }
       dall.disabled = false;
-      const why = [ticked.length + late ? (ticked.length + late) + ' ticked, so kept' : '', hidden.length ? hidden.length + ' hidden from the page' : '', kept ? kept + ' with your own wording kept' : ''].filter(Boolean);
+      const why = [ticked.length ? ticked.length + ' ticked, so kept' : '', late ? late + ' ticked or changed in another tab meanwhile, so kept' : '', hidden.length ? hidden.length + ' hidden from the page' : '', kept ? kept + ' with your own wording kept' : ''].filter(Boolean);
       const skipped = ticked.length + late + hidden.length + kept;
       const msg = (todo.length ? 'Drafted ' + done + ' of ' + todo.length + '.' + (done ? ' Each is unticked until you read and tick it.' : '') : 'Nothing to draft.') + (skipped ? ' Skipped ' + skipped + ': ' + why.join(', ') + '.' : '') + (bad ? ' ' + bad + ' not drafted: ' + firstErr : '');
       again('cmpDraftAll', msg, bad ? 'err' : 'ok'); });

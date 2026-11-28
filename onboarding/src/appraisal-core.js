@@ -6,7 +6,8 @@
 // ranges (the options table from fields.ranges), method (the recommended method's sentence), wave (the buyer-wave graph),
 // methods (the ways-to-sell table, with the recommended one marked). Phase A (033): byline, opinion, campaign, methodcards, plans,
 // panel. Phase B (036): header, intro, heard, home, buyers, reviews (each with a stage, and nothing drawn when empty).
-// Text may hold **bold**, [words](https://link), a bare https:// link, and the tokens {{range:<key>}}, {{bedrooms}} and {{method}}.
+// Text may hold **bold**, [words](https://link), a bare https:// link, and the tokens {{range:<key>}}, {{bedrooms}}, {{method}} and
+// {{reach}} (how to reach Tim, as his Call, Text and Email switches allow: see reachText).
 (function () {
   'use strict';
   const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -22,6 +23,7 @@
     let s = esc(text);
     s = s.replace(/\{\{range:([A-Za-z0-9_-]{1,20})\}\}/g, (m, k) => { const r = rangeOf(f, k); return r ? '<span class="apv-fig" data-range="' + esc(k) + '">' + esc(fmtRange(r)) + '</span>' : ''; });
     s = s.replace(/\{\{bedrooms\}\}/g, () => '<span data-f="bedrooms">' + esc((f && f.bedrooms) || '') + '</span>');
+    s = s.replace(/\{\{reach\}\}/g, () => esc(reachText()));
     s = s.replace(/\{\{method\}\}/g, () => '<span data-f="method">' + esc(((f && f.method) || {}).name || '') + '</span>');
     s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
     s = s.replace(/\[([^\]]+)\]\((https:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
@@ -54,7 +56,9 @@
     if (!sec || typeof sec !== 'object') return '';
     switch (sec.type) {
       case 'heading': return '<h2>' + inline(sec.text, f) + '</h2>';
-      case 'para': return '<p' + (sec.cls === 'lede' ? ' class="apv-lede"' : '') + '>' + inline(sec.text, f) + '</p>';
+      // a paragraph built round how to reach Tim ({{reach}}) is left out when every way to reach him is off (off means off)
+      case 'para': if (/\{\{reach\}\}/.test(String(sec.text || '')) && !reachText()) return '';
+        return '<p' + (sec.cls === 'lede' ? ' class="apv-lede"' : '') + '>' + inline(sec.text, f) + '</p>';
       case 'note': return '<p class="apv-note">' + inline(sec.text, f) + '</p>';
       case 'byline': return '<p class="apv-by">' + inline(sec.text, f) + '</p>';
       // an ordered list reads as the sample's steps: numbered cards in a row (two to a row on a phone)
@@ -91,7 +95,9 @@
   // that it doesn't suggest that I am underselling their property"). The tip of the peak carries no number: the cherry on top is set
   // by competition. The red peak is drawn large enough that its lower half sits visibly inside the bracket. Every band is named by
   // position and label as well as colour; one text alternative for screen readers.
-  const PRICE_WORDING = 'How I think about price. Picture buyers as cherries stacked in a pyramid: many at the base, fewer at each level, one on top. The cherry on top is only there because of the ones beneath it. Turn buyers away early, or publish the top figure, and the support disappears. My range runs from the "got to be better than" price to just under the cherry on top. Competition decides the rest.';
+  // Tim's price wording (approved 8:00pm, 28 November 2026; it replaced the cherry wording): how the market behaves, not about him.
+  // It follows the pyramid and the range figures, so "the range above" is true.
+  const PRICE_WORDING = 'How buyers set the price. Buyers stack up like a pyramid: many at the base, fewer at each level, and at the top the one buyer who wants your home more than anyone else. That buyer only reaches their best price while the buyers beneath them are still in the running. My job is to keep every genuine buyer in contention, so competition does the lifting. The range above is where I expect the market to land today. It is a guide, not a ceiling, and nothing pleases me more than proving it wrong.';
   function pyramid(r, label) {
     const AX = 110, TOP = 46, H = 236, HALF = 104;   // apex x, apex y, height, half the base
     const at = d => [AX - HALF * d / H, AX + HALF * d / H];   // the pyramid's edges, d below the apex
@@ -106,7 +112,7 @@
     return '<figure class="apv-pyr"' + (label ? ' data-pyr="' + esc(r.key) + '"' : '') + '>' + (label ? '<figcaption class="apv-pyr-cap">' + esc(label) + '</figcaption>' : '')
       + '<svg viewBox="0 0 400 320" role="img" aria-label="' + esc(alt) + '" class="apv-pyr-svg"><title>' + esc(alt) + '</title>'
       + B.map(poly).join('')
-      + t(AX + 14, 20, 'Cherry on top:', 'apv-pyr-k') + t(AX + 14, 36, 'set by competition, not printed', 'apv-pyr-s')
+      + t(AX + 14, 20, 'Cherry on top:', 'apv-pyr-k') + t(AX + 14, 36, 'set by competition between buyers', 'apv-pyr-s')
       + '<line class="apv-pyr-lead" x1="' + (AX + 10) + '" y1="40" x2="' + (AX + 4) + '" y2="' + (TOP + 14) + '"/>'
       + lead(yTop) + lead(yLow)
       + '<path class="apv-pyr-br" d="M' + BX + ',' + yTop + ' h8 V' + yLow + ' h-8"/>'
@@ -126,7 +132,7 @@
     // the pyramid: one for each part Tim appraised, each with its own label when there is more than one; then his price wording
     const pyr = rs.length ? '<div class="apv-pyrs' + (rs.length > 1 ? ' many' : '') + '">' + rs.map(r => pyramid(r, rs.length > 1 ? String(r.option || '') : '')).join('') + '</div>' : '';
     const words = paras(String(sec.wording || '')).map(x => x.replace(/\s+/g, ' '));
-    const pw = words.length ? '<div class="apv-pw">' + words.map((x, i) => { const m = i === 0 && /^(How I think about price\.)\s*(.*)$/.exec(x); return '<p>' + (m ? '<strong>' + esc(m[1]) + '</strong> ' + esc(m[2]) : esc(x)) + '</p>'; }).join('') + '</div>' : '';
+    const pw = words.length ? '<div class="apv-pw">' + words.map((x, i) => { const m = i === 0 && /^(How buyers set the price\.)\s*(.*)$/.exec(x); return '<p>' + (m ? '<strong>' + esc(m[1]) + '</strong> ' + esc(m[2]) : esc(x)) + '</p>'; }).join('') + '</div>' : '';
     return '<div class="apv-opinion"><div class="apv-opin-card">' + body + '</div>' + pyr + pw + '<p class="apv-valn">' + esc(VALUATION_LABEL) + '</p></div>';
   }
   // every sale method explained, as points that open; the recommended one marked and open (in print, every one is open)
@@ -229,7 +235,7 @@
     const rest = parts.slice(1).filter(s => !/^(dunedin|new zealand|nz|otago)$/i.test(s));
     return rest[0] || '';
   }
-  const DEFAULT_NOTE = 'Thank you for having me through your home, and for telling me what matters to you. This is my appraisal: where I think buyers will land, how I would sell it, and the marketing I would suggest.\n\nAny questions at all, call or text me on 027 562 7207.';
+  const DEFAULT_NOTE = 'Thank you for having me through your home, and for telling me what matters to you. This is my appraisal: where I think buyers will land, how I would sell it, and the marketing I would suggest.\n\nAny questions at all, {{reach}}.';
   // the marketing plans from the shared catalogue (catalogue.js: PACKAGES and ITEMS), Tim's pick first and marked
   function plansFor(pick, cat) {
     const P = (cat && cat.PACKAGES) || {}, I = (cat && cat.ITEMS) || {};
@@ -503,6 +509,13 @@
     S = S || {}; const on = k => ((S.channels || []).some(c => c && c.key === k && c.on !== false));
     const phone = String(S.phone || '').trim(), email = String(S.email || '').trim(), call = !!phone && on('call'), text = !!phone && on('text');
     return { phone: call || text ? phone : '', email: email && on('email') ? email : '', call, text };
+  }
+  // how to reach Tim, in the letter's words, as the switches allow: "call or text me on ...", "call me on ...", "text me on ...", else
+  // "email me at ..." when only Email is on, else nothing (and the sentence holding it is left out)
+  function reachText() {
+    const cf = contactFor(site());
+    if (cf.phone) return (cf.call && cf.text ? 'call or text me on ' : cf.call ? 'call me on ' : 'text me on ') + cf.phone;
+    return cf.email ? 'email me at ' + cf.email : '';
   }
   // the closing line's verb: "Call or text", "Call" or "Text", as the switches allow
   const reachVerb = cf => cf.call && cf.text ? 'Call or text' : cf.call ? 'Call' : cf.text ? 'Text' : '';
@@ -860,7 +873,7 @@
     if (!String(f.bedrooms || '').trim()) return 'Bedrooms can\'t be empty.';
     return wordingProblem(f.bedrooms) || wordingProblem((f.method || {}).name) || wordingProblem((f.method || {}).text);
   }
-  window.APPR = { render, brand, pyramid, PRICE_WORDING, pvOf, videoUrl, contactFor, reachVerb, subjectOf, diffTags, suburbSales, videoEmbed, embedSrc, aboutTabs, YOURS_KEYS, heroPreview: (sec, ev) => hero(sec, ev, '', true), MOCK_LINE, navLabel, fmtRange, dollars, inline, methodNames, checkFields, wordingProblem,
+  window.APPR = { render, brand, pyramid, PRICE_WORDING, reachText, pvOf, videoUrl, contactFor, reachVerb, subjectOf, diffTags, suburbSales, videoEmbed, embedSrc, aboutTabs, YOURS_KEYS, heroPreview: (sec, ev) => hero(sec, ev, '', true), MOCK_LINE, navLabel, fmtRange, dollars, inline, methodNames, checkFields, wordingProblem,
     vendorComp, VENDOR_COMP, STATUS_WORDS, RINGS, ringWords, compsRule, reportPacks, reportLine, matchPhoto, addrParts, addrSame, addrMatch, adShown, cmpShown, evidence,
     METHODS, CAMPAIGNS, MAX_WEEKS, campaignOf, waveFor, stepsFor, methodSentence, isHill, suburbOf, plansFor, checkSetup, writeStandard, sectionsProblem,
     DEFAULT_NOTE, DALMORE_LINE, HEAD_AND_SHOULDERS, VALUATION_LABEL,

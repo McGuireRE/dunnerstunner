@@ -344,7 +344,8 @@ build time.
 
 The appraisal now draws like the approved sample of 24 November 2026 (top bar with the logo and jump chips, the title over the header,
 cards, carousels, the opinion card, the plans strip, the panel, the closing line, the sample's paper look in print). Fonts are hosted on
-the site (`onboarding/assets/fonts`, SIL Open Font License) for every page, under their plain names; no page calls Google for a font.
+the site (`onboarding/assets/fonts`, SIL Open Font License), under their plain names: the portal and vendor onboarding pages load fonts
+only from the site.
 Tim's range is never on the early charts (Tim, 28 November 2026): the price evidence and the market charts show the sales alone, with
 no range band, "My range" line, label or note. The range first appears in the opinion of price, after the comparables and the suburb
 table, as **the price pyramid** (Tim, 28 November 2026, from his "price range presentation illustration" chat; it replaces the
@@ -354,11 +355,18 @@ figure) to halfway up the red peak ("Top of range", with his upper figure). At 6
 it doesn't suggest that I am underselling their property"; the bottom stays at the top of the green ("let's leave it there, as I will
 then be able to chat about the tyre kickers"). So the bracket spans yellow, orange and the lower half of the red, and the red peak is
 drawn large enough for that to read at 390 px and in print. The tip of the peak never carries a number: "Cherry on top: set by
-competition, not printed". Under the base: "Widest base: the most buyers". Screen readers hear "Appraisal range $X to $Y. Above it, the
+competition between buyers" (Tim's choice, 28 November 2026, replacing "set by competition, not printed"). Under the base: "Widest base: the most buyers". Screen readers hear "Appraisal range $X to $Y. Above it, the
 top price is set by competition between buyers." With two or more options, one pyramid each, with its own label, side by side on wide
-screens and stacked on a phone; the options table keeps its headings. Beside it, Tim's price wording (`setup.priceWording`, written into
-the opinion section as `wording`; set-up screen, "Your price wording"; defaults to the agreed text, cleared means none, checked like the
-other vendor text). The large range figures in the opinion card stay.
+screens and stacked on a phone; the options table keeps its headings. After it, Tim's price wording (`setup.priceWording`, written into
+the opinion section as `wording`; set-up screen, "Your price wording"; cleared means none, checked like the other vendor text). The
+large range figures in the opinion card stay. The default (Tim approved it at 8:00pm, 28 November 2026, replacing the cherry wording:
+"I don't want it to be about me and price. I am describing how the market is behaving, and how I take advantage of the market's
+appetite... The range is not prescriptive, and I love proving my estimate wrong (by exceeding expectations)."), with its heading in
+bold, word for word: **How buyers set the price.** Buyers stack up like a pyramid: many at the base, fewer at each level, and at the top
+the one buyer who wants your home more than anyone else. That buyer only reaches their best price while the buyers beneath them are
+still in the running. My job is to keep every genuine buyer in contention, so competition does the lifting. The range above is where I
+expect the market to land today. It is a guide, not a ceiling, and nothing pleases me more than proving it wrong. (It sits after the
+range figures and the pyramid, so "above" is true.) The pyramid keeps its "Cherry on top" label.
 
 - **A. The "Yours" column.** Each comparable shows This home and Yours side by side, a row only when both homes have the figure, and
   tags for the differences ("Yours has 1 more bedroom", "This one has 38 m² more land"). Their figures come from the property profile:
@@ -389,9 +397,13 @@ other vendor text). The large range figures in the opinion card stay.
   reach him (Call, Text, Email, Send a message, WhatsApp, Messenger, Discord, Telegram, Signal), each on or off, in his order, each
   detail checked as its service writes links. Seeded with the phone and email the vendor pages already use. The appraisal's signature
   line, closing line and print contact line read these settings through one function (`APPR.contactFor`). Off means off (Tim, 28
-  November 2026): with Call and Text both off the phone appears nowhere a vendor sees it (signature, closing line, print, the dialog),
+  November 2026): with Call and Text both off the phone appears nowhere on the appraisal pages a vendor sees (signature, closing line, the letter's
+  "Any questions at all" sentence, print, the dialog),
   and with Email off the email is hidden the same way; `site_profile_public()` doesn't return them. The closing line reads "Call or
-  text", "Call" or "Text" as the switches allow, and isn't shown when neither is on. Replacing or removing a picture deletes the old file; if the delete fails, Tim is
+  text", "Call" or "Text" as the switches allow, and isn't shown when neither is on. The default letter ends "Any questions at all,
+  {{reach}}.": the token becomes "call or text me on ...", "call me on ...", "text me on ..." or "email me at ...", and with every way
+  off the sentence is left out (a phone number Tim types into his note himself stays his words). Other portal pages that mention the
+  phone aren't covered yet. Replacing or removing a picture deletes the old file; if the delete fails, Tim is
   told under the button.
 - **E. The picture in a circle on every page's header** (the portal, the vendor's pages, the appraisal's own top bar), opposite the
   logo; the bar is a little taller and the logo larger. Tapping it, or "About Tim and McGuire Real Estate" on the point of difference

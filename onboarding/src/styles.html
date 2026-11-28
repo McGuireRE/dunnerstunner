@@ -1344,7 +1344,7 @@ body:has(#apvPage .apv-doc) { overflow-x: clip; }
 .apv-doc .apv-pyrs { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; margin: 14px 0 6px; }
 @media (min-width: 760px) { .apv-doc .apv-pyrs.many { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .apv-doc .apv-pyr { margin: 0; max-width: 460px; break-inside: avoid; }
-.apv-doc .apv-pyrs:not(.many) .apv-pyr { margin: 0 auto; }
+.apv-doc .apv-pyrs:not(.many) .apv-pyr { margin: 0 auto; width: 100%; }
 .apv-doc .apv-pyr-cap { font-weight: 600; font-size: 15px; margin: 0 0 4px; }
 .apv-doc .apv-pyr-svg { display: block; width: 100%; height: auto; overflow: visible; font-family: var(--body); -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 .apv-doc .apv-pyr-svg polygon { stroke: var(--ink); stroke-width: 1; stroke-opacity: .55; stroke-linejoin: round; }

@@ -9733,7 +9733,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         <div id="apsLinkWrap"><label class="f" for="apsLink">Your link to this suburb <span class="opt">(optional: shown only if you write it)</span></label><input type="text" id="apsLink" value="${esc(S.suburbLink || '')}"></div>
       </div>
       <h2>Your note to them</h2>
-      <div class="card tight"><label class="f" for="apsNote" style="margin-top:0">Your note <span class="opt">(a blank line starts a new paragraph)</span></label><textarea id="apsNote" rows="6">${esc(S.note)}</textarea></div>
+      <div class="card tight"><label class="f" for="apsNote" style="margin-top:0">Your note <span class="opt">(a blank line starts a new paragraph)</span></label><textarea id="apsNote" rows="6">${esc(S.note)}</textarea>
+        <p class="small" style="margin:6px 0 0">{{reach}} becomes how to reach you, as your Call, Text and Email switches on ${plink('settings/about', 'About and contact', 'btn link')} allow. With them all off, the sentence holding it is left out.</p></div>
       <h2>Your range</h2>
       <div class="card tight"><p class="small" style="margin:0 0 6px">One range for each part that sells. These are your figures: nothing is priced for you.</p>
         <div id="apsParts">${partsHTML()}</div>
@@ -10350,8 +10351,9 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       rec.setup = next; atBtn(scv, scv.checked ? 'Saved. Their rating valuation shows in the Yours column.' : 'Saved. Their rating valuation stays off the page.', 'ok'); });    if (ro) return;
     // 038: the AI drafts how a comparable compares with their home (Sonnet, through doc-prefill). The draft goes in unticked, so the
     // vendor sees nothing until Tim reads, changes and ticks it; a weak point of their home goes to his private note on the comparable.
-    // Ticked wording is Tim's: a draft never replaces it. The save itself only touches a row that is still unticked, so wording ticked
-    // in another tab meanwhile is kept too (the update then finds no row, and he is told).
+    // Ticked wording is Tim's: a draft never replaces it. The save itself only touches a row that is still unticked and still holds the
+    // wording this page showed (empty when nothing was there, or the very text he agreed to replace), so wording ticked or written in
+    // another tab meanwhile is kept (the update then finds no row, and he is told).
     const hasText = c => !!String(c.compare_text || '').trim();
     const draftCmp = async c => {
       const { data, error } = await sb.functions.invoke('doc-prefill', { body: { mode: 'appraisal_draft', part: 'compare', appraisal_id: rec.id, comp_id: c.id } }); const j = await fnJson(data, error);
@@ -10359,8 +10361,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       const r = j.result || {}, note = String(r.private_note || '').trim();
       const upd = { compare_text: String(r.text || '').trim(), compare_ticked: false };
       if (note) upd.private_note = (String(c.private_note || '').trim() ? c.private_note.trim() + '\n' : '') + 'AI: ' + note;
-      let rows; try { rows = await must(sb.from('appraisal_comps').update(upd).eq('id', c.id).eq('compare_ticked', false).select()); } catch (e) { return { ok: false, msg: 'Drafted, but not saved: ' + ((e && e.message) || 'try again.') }; }
-      if (!rows || !rows.length) return { ok: false, ticked: true, msg: 'Not changed: its wording was ticked meanwhile, so it is kept.' };
+      let rows; try { rows = await must(sb.from('appraisal_comps').update(upd).eq('id', c.id).eq('compare_ticked', false).eq('compare_text', String(c.compare_text || '')).select()); } catch (e) { return { ok: false, msg: 'Drafted, but not saved: ' + ((e && e.message) || 'try again.') }; }
+      if (!rows || !rows.length) return { ok: false, ticked: true, msg: 'Not changed: its wording was ticked or changed meanwhile, so it is kept.' };
       return { ok: true, problems: r.problems || [] };
     };
     $$('[data-cmp-draft]').forEach(b => b.addEventListener('click', async () => { const c = comps.find(x => x.id === b.dataset.cmpDraft);
@@ -10380,7 +10382,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       dall.disabled = true; let done = 0, bad = 0, late = 0, firstErr = '';
       for (const c of todo) { atBtn(dall, 'Drafting ' + (done + bad + late + 1) + ' of ' + todo.length + '...', 'busy'); const r = await draftCmp(c); if (r.ok) done++; else if (r.ticked) late++; else { bad++; firstErr = firstErr || r.msg; } }
       dall.disabled = false;
-      const why = [ticked.length + late ? (ticked.length + late) + ' ticked, so kept' : '', hidden.length ? hidden.length + ' hidden from the page' : '', kept ? kept + ' with your own wording kept' : ''].filter(Boolean);
+      const why = [ticked.length ? ticked.length + ' ticked, so kept' : '', late ? late + ' ticked or changed in another tab meanwhile, so kept' : '', hidden.length ? hidden.length + ' hidden from the page' : '', kept ? kept + ' with your own wording kept' : ''].filter(Boolean);
       const skipped = ticked.length + late + hidden.length + kept;
       const msg = (todo.length ? 'Drafted ' + done + ' of ' + todo.length + '.' + (done ? ' Each is unticked until you read and tick it.' : '') : 'Nothing to draft.') + (skipped ? ' Skipped ' + skipped + ': ' + why.join(', ') + '.' : '') + (bad ? ' ' + bad + ' not drafted: ' + firstErr : '');
       again('cmpDraftAll', msg, bad ? 'err' : 'ok'); });
