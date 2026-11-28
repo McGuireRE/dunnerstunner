@@ -1,9 +1,15 @@
 // 038: the email Tim gets for each message sent through "Send a message" on the About overlay. Pure: no network, no database, so
 // onboarding/tests/contact-mail-fn.test.js runs it as it is. notify.ts (type "contact") sends it, once per message, to Tim alone: the
-// address comes from the caller (notify passes TIM_EMAIL), never from the message. Everything the sender wrote is escaped.
+// address comes from timTo: Tim's own email from his settings (site_profile.email, handed over by contact_mark_emailed as tim_email)
+// when it is a real address, else notify's TIM_EMAIL; never anything the sender wrote. Everything the sender wrote is escaped.
 const esc = (s: unknown) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c] as string));
 const PREF: Record<string, string> = { call: "a call", text: "a text", email: "an email" };
 export type ContactRow = { id: string; name: string; from_email: string; phone?: string | null; preferred?: string | null; message: string; page?: string | null; sent_at?: string | null };
+const EMAIL_RE = /^[^@\s,;<>]+@[^@\s,;<>]+\.[^@\s,;<>]+$/;
+export function timTo(row: { tim_email?: string | null } | null, fallback: string) {
+  const e = String((row && row.tim_email) || "").trim();
+  return EMAIL_RE.test(e) && e.length <= 200 ? e : fallback;
+}
 export function contactMail(row: ContactRow, timEmail: string, appUrl: string) {
   const name = String(row.name || "").replace(/[\r\n]+/g, " ").trim().slice(0, 80) || "Someone";
   const pref = PREF[String(row.preferred || "")] || PREF.email;

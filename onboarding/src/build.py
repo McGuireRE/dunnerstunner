@@ -23,8 +23,6 @@ html = f'''<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex, nofollow">
 <title>Your agency agreement · McGuire Real Estate</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;1,400&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
 {css}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script src="../catalogue.js"></script>
@@ -108,12 +106,11 @@ shell = '''<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex, nofollow">
 <title>Page not found</title>
-<script>
-/* Google's fonts for every page except an appraisal, which uses the same fonts hosted on this site (onboarding/assets/fonts), so a
-   vendor reading an appraisal never calls Google. Every other page loads them exactly as before. */
-if (!/\\/appraisals?(\\/|$)/.test(location.pathname)) document.write('<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;1,400&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">');
-</script>
 <style>
+  /* the fonts are the site's own (onboarding/assets/fonts), on every page, never Google's; these two cover this holding message, and
+     the page's own styles bring the rest */
+  @font-face { font-family: 'Barlow'; font-style: normal; font-weight: 400; font-display: swap; src: url('https://packages.dunnerstunner.co.nz/onboarding/assets/fonts/barlow-latin-400-normal.woff2') format('woff2'); }
+  @font-face { font-family: 'Cormorant Garamond'; font-style: normal; font-weight: 500; font-display: swap; src: url('https://packages.dunnerstunner.co.nz/onboarding/assets/fonts/cormorant-garamond-latin-500-normal.woff2') format('woff2'); }
   html { color-scheme: light dark; }
   body { margin: 0; font-family: Barlow, system-ui, sans-serif; background: #FAF8F5; color: #1A1A18; }
   @media (prefers-color-scheme: dark) { body { background: #181716; color: #F2EEE9; } }

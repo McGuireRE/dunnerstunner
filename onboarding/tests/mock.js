@@ -1984,7 +1984,8 @@ function siteTable(table,op,single){ if(offline()) throw new Error('Failed to fe
 function siteRpc(name,a,me){ if(offline()) return netFail();
   const r=siteRow(), c=v=>JSON.parse(JSON.stringify(v));
   if(name==='site_profile_public'){ const chans=(r.channels||[]).filter(c=>c.on&&(c.key==='call'||c.key==='text'?!!r.phone:c.key==='email'?!!r.email:c.key==='form'?true:!!c.value&&SITE_VAL[c.key]&&SITE_VAL[c.key].test(c.value))).map(c=>({key:c.key,value:c.value||''}));
-    return ok({name:r.name,licence:r.licence,phone:r.phone,email:r.email,photo_path:r.photo_path,about:r.about||{},channels:chans}); }
+    const onK=k=>(r.channels||[]).some(c=>c.key===k&&c.on);   // off means off: no phone unless Call or Text is on, no email unless Email is on
+    return ok({name:r.name,licence:r.licence,phone:onK('call')||onK('text')?r.phone:'',email:onK('email')?r.email:'',photo_path:r.photo_path,about:r.about||{},channels:chans}); }
   if(name==='agent_site_profile_save'){ if(!isAgentMe()) return bad('Agent only'); const p=a.p||{};
     if(p.email&&!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(p.email)) return bad('That email address does not look right'); if(p.phone&&!/^\+?[0-9 ()-]{6,30}$/.test(p.phone)) return bad('That phone number does not look right');
     const seen=[]; for(const c of (p.channels||[])){ if(!SITE_CH.includes(c.key)) return bad('Not a way to reach you: '+c.key); if(seen.includes(c.key)) return bad('Each way to reach you once'); seen.push(c.key); if(SITE_VAL[c.key]&&c.value&&!SITE_VAL[c.key].test(String(c.value).trim())) return bad('That '+c.key+' detail does not look right'); }
@@ -2004,7 +2005,8 @@ function siteRpc(name,a,me){ if(offline()) return netFail();
 // notify type 'contact' (fn/notify.ts): signed in, the message's own sender, once per message, to Tim only
 function contactNotify(b){ const me=S&&S.user; if(!(me&&me.email)) return fnErr(403,{error:'Not allowed'});
   const m=(DB.contact_messages||[]).find(x=>x.id===b.message_id&&!x.emailed_at&&x.from_email===me.email.toLowerCase()); if(!m) return ok({ok:true,note:'nothing to send'});
-  m.emailed_at=now(); const l=JSON.parse(localStorage.getItem('contactMails')||'[]'); l.push({to:'tim@mcguire.co.nz',message_id:m.id,subject:'Message from '+m.name}); localStorage.setItem('contactMails',JSON.stringify(l)); save(); return ok({ok:true}); }
+  m.emailed_at=now(); const sp=(DB.site_profile||[])[0], se=sp&&sp.email&&/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(sp.email)?sp.email:'';
+  const l=JSON.parse(localStorage.getItem('contactMails')||'[]'); l.push({to:se||'tim@mcguire.co.nz',message_id:m.id,subject:'Message from '+m.name}); localStorage.setItem('contactMails',JSON.stringify(l)); save(); return ok({ok:true}); }
 const SPB='site-public', SP_MIME=['image/jpeg','image/png','image/webp'];
 function sitePublicBucket(){ return {
   upload:(p,blob,o)=>{ logCall('up:'+SPB+':'+p); if(offline()) return netFail(); if(!isAgentMe()) return bad('new row violates row-level security policy');
@@ -2013,7 +2015,10 @@ function sitePublicBucket(){ return {
     SO()[p]={size:blob.size,mime,bucket:SPB}; (window.__repoBlobs||={})[p]=blob; save(); return ok({path:p}); },
   // a public bucket: anyone gets the link (here, the file itself when it is to hand in this page, else a small stand-in picture)
   getPublicUrl:p=>{ const bl=(window.__repoBlobs||{})[p]; return {data:{publicUrl:bl?URL.createObjectURL(bl):PNG1}}; },
-  remove:(ps)=>{ if(offline()) return netFail(); if(!isAgentMe()) return ok([]); (ps||[]).forEach(p=>{ if(SO()[p]&&SO()[p].bucket===SPB) delete SO()[p]; }); save(); return ok(ps||[]); } }; }
+  // like storage: a remove gives back only the files it really removed. Without Tim's read rule (038) it finds no row and gives back
+  // nothing, with no error; mockSiteRemoveFail plays that, so the page must check what came back
+  remove:(ps)=>{ logCall('rm:'+SPB+':'+(ps||[]).join(',')); if(offline()) return netFail(); if(!isAgentMe()||localStorage.getItem('mockSiteRemoveFail')) return ok([]);
+    const gone=[]; (ps||[]).forEach(p=>{ if(SO()[p]&&SO()[p].bucket===SPB){ delete SO()[p]; gone.push({name:p}); } }); save(); return ok(gone); } }; }
 function apprAiInvoke(o){ const b=(o&&o.body)||{}; c2Log(Object.assign({fn:'doc-prefill'},b));
   if(offline()) return Promise.resolve({data:null,error:{message:'Failed to fetch'}});
   if(!isAgentMe()) return fnErr(403,{error:'Not allowed'});

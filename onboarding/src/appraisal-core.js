@@ -85,6 +85,37 @@
   }
   // the opinion of price: one row per part Tim appraised, always labelled as an appraisal, not a registered valuation
   const VALUATION_LABEL = 'This is an appraisal, not a registered valuation: my opinion of the range buyers are likely to pay, from recent sales and the market today.';
+  // The price pyramid (Tim, 28 November 2026, from his "price range presentation illustration" chat): buyers stacked in four bands,
+  // widest at the base, green, yellow, orange and a red peak. His range runs from the top of the green band ("Got to be better than",
+  // his lower figure) to halfway up the red peak ("Top of range", his upper figure: at 6:29pm he moved it there from the orange, "so
+  // that it doesn't suggest that I am underselling their property"). The tip of the peak carries no number: the cherry on top is set
+  // by competition. The red peak is drawn large enough that its lower half sits visibly inside the bracket. Every band is named by
+  // position and label as well as colour; one text alternative for screen readers.
+  const PRICE_WORDING = 'How I think about price. Picture buyers as cherries stacked in a pyramid: many at the base, fewer at each level, one on top. The cherry on top is only there because of the ones beneath it. Turn buyers away early, or publish the top figure, and the support disappears. My range runs from the "got to be better than" price to just under the cherry on top. Competition decides the rest.';
+  function pyramid(r, label) {
+    const AX = 110, TOP = 46, H = 236, HALF = 104;   // apex x, apex y, height, half the base
+    const at = d => [AX - HALF * d / H, AX + HALF * d / H];   // the pyramid's edges, d below the apex
+    // bands from the apex down: red (large, so its lower half sits clearly inside the bracket), orange, yellow, green (widest)
+    const B = [['red', 0, 84], ['orange', 84, 136], ['yellow', 136, 184], ['green', 184, 236]];
+    const poly = ([k, a, b]) => { const [l1, r1] = at(a), [l2, r2] = at(b); return '<polygon class="apv-pyr-' + k + '" points="' + [[l1, TOP + a], [r1, TOP + a], [r2, TOP + b], [l2, TOP + b]].map(p => p.map(n => Math.round(n * 10) / 10).join(',')).join(' ') + '"/>'; };
+    const yTop = TOP + 42, yLow = TOP + 184, BX = 232, TX = 244;   // top of range: halfway up the red; bottom: the top of the green
+    const lo = dollars(r.low), hi = dollars(r.high);
+    const alt = 'Appraisal range ' + lo + ' to ' + hi + '. Above it, the top price is set by competition between buyers.';
+    const t = (x, y, txt, cls, anchor) => '<text x="' + x + '" y="' + y + '"' + (cls ? ' class="' + cls + '"' : '') + (anchor ? ' text-anchor="' + anchor + '"' : '') + '>' + esc(txt) + '</text>';
+    const lead = y => { const [, re] = at(y - TOP); return '<line class="apv-pyr-lead" x1="' + Math.round(re + 3) + '" y1="' + y + '" x2="' + BX + '" y2="' + y + '"/>'; };
+    return '<figure class="apv-pyr"' + (label ? ' data-pyr="' + esc(r.key) + '"' : '') + '>' + (label ? '<figcaption class="apv-pyr-cap">' + esc(label) + '</figcaption>' : '')
+      + '<svg viewBox="0 0 400 320" role="img" aria-label="' + esc(alt) + '" class="apv-pyr-svg"><title>' + esc(alt) + '</title>'
+      + B.map(poly).join('')
+      + t(AX + 14, 20, 'Cherry on top:', 'apv-pyr-k') + t(AX + 14, 36, 'set by competition, not printed', 'apv-pyr-s')
+      + '<line class="apv-pyr-lead" x1="' + (AX + 10) + '" y1="40" x2="' + (AX + 4) + '" y2="' + (TOP + 14) + '"/>'
+      + lead(yTop) + lead(yLow)
+      + '<path class="apv-pyr-br" d="M' + BX + ',' + yTop + ' h8 V' + yLow + ' h-8"/>'
+      + t(TX + 6, yTop - 4, 'Top of range', 'apv-pyr-s') + t(TX + 6, yTop + 15, hi, 'apv-pyr-v')
+      + t(TX + 6, Math.round((yTop + yLow) / 2) + 5, 'Appraisal range', 'apv-pyr-k')
+      + t(TX + 6, yLow - 4, 'Got to be better than', 'apv-pyr-s') + t(TX + 6, yLow + 15, lo, 'apv-pyr-v')
+      + t(AX, TOP + H + 24, 'Widest base: the most buyers', 'apv-pyr-s', 'middle')
+      + '</svg></figure>';
+  }
   function opinion(sec, f) {
     const rs = ((f && f.ranges) || []).filter(r => r && r.low > 0 && r.high > 0);
     // the sample's note card: a line in small capitals, then the range in large display type; a part not named "Your home" keeps its name
@@ -92,7 +123,11 @@
     const body = rs.length === 1 && !sec.table
       ? '<p class="apv-kick">' + esc('In today\'s market I would expect ' + (yours ? 'your home' : 'it') + ' to sell between') + '</p><p class="apv-opin">' + (yours ? '' : '<span class="apv-opin-part">' + inline(rs[0].option || '', f) + '</span>') + '<span class="apv-fig apv-opin-fig" data-range="' + esc(rs[0].key) + '">' + esc(fmtRange(rs[0])) + '</span></p>'
       : (rs.length ? '<p class="apv-kick">In today\'s market I would expect buyers to land between</p>' : '') + table(sec.head || ['Part', 'Where I would expect buyers to land'], rs.map(r => [r.option || '', fmtRange(r)]), { f, cls: 'apv-ranges', rowAttr: (r, i) => ' data-range-row="' + esc((rs[i] || {}).key || '') + '"' });
-    return '<div class="apv-opinion"><div class="apv-opin-card">' + body + '</div><p class="apv-valn">' + esc(VALUATION_LABEL) + '</p></div>';
+    // the pyramid: one for each part Tim appraised, each with its own label when there is more than one; then his price wording
+    const pyr = rs.length ? '<div class="apv-pyrs' + (rs.length > 1 ? ' many' : '') + '">' + rs.map(r => pyramid(r, rs.length > 1 ? String(r.option || '') : '')).join('') + '</div>' : '';
+    const words = paras(String(sec.wording || '')).map(x => x.replace(/\s+/g, ' '));
+    const pw = words.length ? '<div class="apv-pw">' + words.map((x, i) => { const m = i === 0 && /^(How I think about price\.)\s*(.*)$/.exec(x); return '<p>' + (m ? '<strong>' + esc(m[1]) + '</strong> ' + esc(m[2]) : esc(x)) + '</p>'; }).join('') + '</div>' : '';
+    return '<div class="apv-opinion"><div class="apv-opin-card">' + body + '</div>' + pyr + pw + '<p class="apv-valn">' + esc(VALUATION_LABEL) + '</p></div>';
   }
   // every sale method explained, as points that open; the recommended one marked and open (in print, every one is open)
   function methodCards(sec) {
@@ -220,7 +255,7 @@
     if (!METHODS.some(m => m.key === s.method)) return 'Choose the sale method you recommend.';
     if (s.basis && s.basis !== 'comparables') return 'Only comparables can be used for now.';
     if (!s.plan) return 'Choose the marketing plan you recommend.';
-    for (const t of [s.note, s.methodText, s.suburbLink, s.preparedFor].concat(rs.map(r => r.option))) { const w = wordingProblem(t); if (w) return w; }
+    for (const t of [s.note, s.methodText, s.suburbLink, s.preparedFor, s.priceWording].concat(rs.map(r => r.option))) { const w = wordingProblem(t); if (w) return w; }
     return '';
   }
   // writes the standard sections, in the agreed order, from the set-up. ctx: { address, preparedOn, cat: { PACKAGES, ITEMS, CATALOGUE } }
@@ -229,6 +264,7 @@
     const c = ctx || {}, m = methodOf(s.method), who = String(s.preparedFor || '').trim();
     const fields = { ranges: (ranges || []).map((r, i) => ({ key: r.key || String.fromCharCode(65 + i), option: String(r.option || '').trim(), involves: '', low: Math.round(+r.low), high: Math.round(+r.high) })),
       method: { name: m.short || m.name, key: m.key, text: String(s.methodText || '').trim() || methodSentence(s.campaign, m.key) } };
+    const priceWording = String(s.priceWording == null ? PRICE_WORDING : s.priceWording).trim().slice(0, 1500);
     const note = String(s.note == null ? DEFAULT_NOTE : s.note).split(/\n\s*\n/).map(x => x.replace(/\s+/g, ' ').trim()).filter(Boolean);
     const panel = [HEAD_AND_SHOULDERS];
     if (isHill(s.suburb)) panel.push(DALMORE_LINE);
@@ -238,7 +274,7 @@
       { type: 'byline', text: (who ? 'Prepared for ' + who + ' by Tim McGuire' : 'Prepared by Tim McGuire') + ', McGuire Real Estate, ' + longDate(c.preparedOn) },
     ].concat(note.length ? [{ type: 'heading', text: 'A note from Tim' }] : [], note.map((t, i) => i === 0 ? { type: 'para', cls: 'lede', text: t } : { type: 'para', text: t }), [
       { type: 'heading', text: 'My opinion of price' },
-      { type: 'opinion' },
+      Object.assign({ type: 'opinion' }, priceWording ? { wording: priceWording } : {}),
       { type: 'heading', text: 'How I would sell it' },
       { type: 'method' },
       waveFor(s.campaign, m.key),
@@ -308,7 +344,7 @@
     }
     // a personal address on YouTube or Vimeo (Tim, 28 November 2026) goes above the letter; when there is one, it wins over an uploaded
     // introduction, which is then left out
-    const pv = videoEmbed(s.pvideo && s.pvideo.url);
+    const pv = pvOf(s.pvideo);
     if (pv) o.pvideo = { type: 'pvideo', stage: STAGES.intro, provider: pv.provider, id: pv.id, hash: pv.hash || '' };
     else if (s.intro && s.intro.asset) o.before.push({ type: 'intro', stage: STAGES.intro, asset: String(s.intro.asset) });
     const lines = tickedLines(s.heard);
@@ -376,6 +412,15 @@
     }
     return null;
   }
+  // what the set-up keeps for the personal video: the provider, the id and Vimeo's privacy hash, never the link as typed.
+  // pvOf reads it back (or an older set-up that kept the link, read through videoEmbed); videoUrl rebuilds a plain link for the field.
+  function pvOf(pv) {
+    if (!pv || typeof pv !== 'object') return null;
+    if (pv.provider === 'youtube' && /^[A-Za-z0-9_-]{11}$/.test(String(pv.id || ''))) return { provider: 'youtube', id: String(pv.id) };
+    if (pv.provider === 'vimeo' && /^[0-9]{6,12}$/.test(String(pv.id || ''))) return { provider: 'vimeo', id: String(pv.id), hash: /^[0-9a-f]{6,20}$/.test(String(pv.hash || '')) ? String(pv.hash) : '' };
+    return pv.url ? videoEmbed(pv.url) : null;
+  }
+  const videoUrl = v => !v ? '' : v.provider === 'youtube' ? 'https://youtu.be/' + v.id : 'https://vimeo.com/' + v.id + (v.hash ? '/' + v.hash : '');
   const embedSrc = v => v.provider === 'youtube' ? 'https://www.youtube-nocookie.com/embed/' + encodeURIComponent(v.id) + '?rel=0&autoplay=1'
     : 'https://player.vimeo.com/video/' + encodeURIComponent(v.id) + '?autoplay=1&dnt=1' + (v.hash ? '&h=' + encodeURIComponent(v.hash) : '');
   // the personal address: a poster with a play button; the player loads only when the vendor presses it, so nothing calls YouTube or
@@ -451,10 +496,20 @@
   const site = () => brand.site || {};
   const aboutTabs = () => [['tim', 'Tim'], ['agency', 'McGuire Real Estate']].map(([k, label]) => { const a = (site().about || {})[k] || {}; return { key: k, label, heading: cleanV(a.heading, 120), body: String(a.body || '').trim(), image: httpsUrl(a.image_url) || /^blob:|^data:image\//.test(String(a.image_url || '')) ? String(a.image_url) : '' }; })
     .filter(t => t.heading || t.body || t.image);
+  // The phone and email the appraisal shows (the signature line, the closing line, the print contact line) all come from here. Off
+  // means off (Tim, 28 November 2026): the phone only while Call or Text is on, the email only while Email is on. site_profile_public()
+  // already leaves them out when their switches are off; this checks again, so nothing a vendor sees can show them.
+  function contactFor(S) {
+    S = S || {}; const on = k => ((S.channels || []).some(c => c && c.key === k && c.on !== false));
+    const phone = String(S.phone || '').trim(), email = String(S.email || '').trim(), call = !!phone && on('call'), text = !!phone && on('text');
+    return { phone: call || text ? phone : '', email: email && on('email') ? email : '', call, text };
+  }
+  // the closing line's verb: "Call or text", "Call" or "Text", as the switches allow
+  const reachVerb = cf => cf.call && cf.text ? 'Call or text' : cf.call ? 'Call' : cf.text ? 'Text' : '';
   // the About button on the point of difference panel (it opens the overlay the page owns), and, on paper, the contact line and both
   // About sections in full. Nothing there: no button, nothing printed.
   function aboutBits() {
-    const S = site(), tabs = aboutTabs(), contact = [S.phone, S.email].filter(x => String(x || '').trim());
+    const S = site(), tabs = aboutTabs(), cf = contactFor(S), contact = [cf.phone, cf.email].filter(Boolean);
     if (!tabs.length && !contact.length && !S.photo_url) return '';
     return '<p class="apv-about-row no-print"><button type="button" class="apv-about-btn" data-apv-nav data-about-open>About Tim and McGuire Real Estate</button></p>'
       + '<div class="apv-print-only apv-about-print">' + (contact.length ? '<p class="apv-about-contact">' + esc([S.name].concat(contact).filter(Boolean).join(' · ')) + '</p>' : '')
@@ -481,7 +536,7 @@
     const heroSec = secs.find(s => s.type === 'header'), heroHtml = heroSec ? hero(heroSec, ev, head) : '';
     const parts = []; let letter = false;
     // the letter's signature, as in the sample: name, phone and email (the email when the page has given it)
-    const S = site(), sigLine = [S.name, S.phone, S.email].filter(x => String(x || '').trim());
+    const S = site(), CF = contactFor(S), sigLine = [S.name, CF.phone, CF.email].filter(x => String(x || '').trim());
     const sig = sigLine.length ? '<p class="apv-sig">' + esc(sigLine.join(' · ')) + '</p>' : '';
     for (let i = 0; i < secs.length; i++) {
       const s = secs[i], nx = secs[i + 1] || {}, nx2 = secs[i + 2] || {};
@@ -509,7 +564,7 @@
       if (at < 0) at = parts.findIndex(p => p.indexOf('class="apv-opinion"') >= 0); if (at < 0) at = parts.length; parts.splice(at, 0, extra);
     }
     // the closing line, on an appraisal written from its set-up (the sample's "When you're ready, I'm ready")
-    if (written && String(S.phone || '').trim()) parts.push('<section class="apv-close"><h2 class="apv-close-h">When you\'re ready, I\'m ready</h2><p>Questions at any stage? Call or text ' + esc(String(S.name || '').split(' ')[0] || 'me') + ' on <strong>' + esc(S.phone) + '</strong>.</p></section>');
+    if (written && CF.phone) parts.push('<section class="apv-close"><h2 class="apv-close-h">When you\'re ready, I\'m ready</h2><p>Questions at any stage? ' + esc(reachVerb(CF)) + ' ' + esc(String(S.name || '').split(' ')[0] || 'me') + ' on <strong>' + esc(CF.phone) + '</strong>.</p></section>');
     // a heading with nothing under it is not drawn, so it gets no chip either (Tim, 28 November 2026: no empty headings)
     const bare = p => /^<h2>[\s\S]*<\/h2>$/.test(p) || /^<section class="apv-close">/.test(p);
     const kept = parts.filter(p => p).filter((p, j, a) => !(/^<h2>[\s\S]*<\/h2>$/.test(p) && (j === a.length - 1 || bare(a[j + 1]))));
@@ -618,13 +673,16 @@
         r.floor_m2 ? num1(r.floor_m2) + ' m²' : '', r.land_m2 ? num1(r.land_m2) + ' m²' : '', r.days_to_sell != null ? String(r.days_to_sell) : ''].map((v, j) => '<td data-h="' + esc(head[j]) + '">' + (j === 1 && ci >= 0 ? '<span class="apv-tag near">Comparable ' + (ci + 1) + '</span> ' : '') + esc(v) + '</td>').join('') + '</tr>'; }).join('')
       + '</tbody></table><p class="apv-note">' + esc('Source: ' + (rows.some(r => r.source === 'other') ? 'published sales figures' : 'REINZ') + ', sales recorded for ' + s.suburb + ' in ' + month + '.') + '</p></section>';
   }
+  // Tim's range is never on the early charts (Tim, 28 November 2026): the price evidence and the market charts show the sales alone, and
+  // the range first appears in the opinion of price, as the pyramid
   function evidence(ev, f) {
+    const chartRanges = [];
     const comps = (ev.comps || []).filter(c => c && c.shown !== false).map(vendorComp);
-    const dots = window.MKT && comps.length ? window.MKT.dots(comps.map((c, i) => ({ n: i + 1, price: c.price, status: c.status, label: c.address, when: c.status === 'listed' ? (c.listed_on ? 'listed ' + longDate(c.listed_on) : '') : (c.sold_on ? longDate(c.sold_on) : '') })), (f && f.ranges) || []) : '';
+    const dots = window.MKT && comps.length ? window.MKT.dots(comps.map((c, i) => ({ n: i + 1, price: c.price, status: c.status, label: c.address, when: c.status === 'listed' ? (c.listed_on ? 'listed ' + longDate(c.listed_on) : '') : (c.sold_on ? longDate(c.sold_on) : '') })), chartRanges) : '';
     const sold = comps.filter(c => c.status !== 'listed'), listed = comps.filter(c => c.status === 'listed');
     const nPrice = comps.filter(c => !(c.price > 0)).length;
     const num = c => comps.indexOf(c);
-    const market = ev.market && window.MKT ? window.MKT.report(ev.months || [], (f && f.ranges) || [], { area: ev.area }) : '';
+    const market = ev.market && window.MKT ? window.MKT.report(ev.months || [], chartRanges, { area: ev.area }) : '';
     let h = '';
     if (comps.length) {
       // the price dots only when at least one comparable has a price to plot (Tim, 28 November 2026: nothing to show, no section)
@@ -802,7 +860,7 @@
     if (!String(f.bedrooms || '').trim()) return 'Bedrooms can\'t be empty.';
     return wordingProblem(f.bedrooms) || wordingProblem((f.method || {}).name) || wordingProblem((f.method || {}).text);
   }
-  window.APPR = { render, brand, subjectOf, diffTags, suburbSales, videoEmbed, embedSrc, aboutTabs, YOURS_KEYS, heroPreview: (sec, ev) => hero(sec, ev, '', true), MOCK_LINE, navLabel, fmtRange, dollars, inline, methodNames, checkFields, wordingProblem,
+  window.APPR = { render, brand, pyramid, PRICE_WORDING, pvOf, videoUrl, contactFor, reachVerb, subjectOf, diffTags, suburbSales, videoEmbed, embedSrc, aboutTabs, YOURS_KEYS, heroPreview: (sec, ev) => hero(sec, ev, '', true), MOCK_LINE, navLabel, fmtRange, dollars, inline, methodNames, checkFields, wordingProblem,
     vendorComp, VENDOR_COMP, STATUS_WORDS, RINGS, ringWords, compsRule, reportPacks, reportLine, matchPhoto, addrParts, addrSame, addrMatch, adShown, cmpShown, evidence,
     METHODS, CAMPAIGNS, MAX_WEEKS, campaignOf, waveFor, stepsFor, methodSentence, isHill, suburbOf, plansFor, checkSetup, writeStandard, sectionsProblem,
     DEFAULT_NOTE, DALMORE_LINE, HEAD_AND_SHOULDERS, VALUATION_LABEL,

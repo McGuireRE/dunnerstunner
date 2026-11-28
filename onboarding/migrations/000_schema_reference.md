@@ -599,7 +599,7 @@ references revoked from authenticated.
 - `suburb_groups` (Tim's never-mix list): name, kind never_mix, suburbs text[] (1 to 40), note.
 - `market_months` (shared store): area, month (first of the month), median, lower_quartile, upper_quartile, sales, days_to_sell, bands
   (jsonb list of {from, to, count}), source, source_url, gathered_at; unique (area, month).
-- `market_sales`: suburb, sold_on, price (public); address (Tim only); bedrooms, bathrooms, floor_m2, land_m2, property_type,
+- `market_sales`: suburb, sold_on, price (public); address (Tim's screens, and the appraisal's suburb table on the vendor, present and print views; off every other screen); bedrooms, bathrooms, floor_m2, land_m2, property_type,
   days_to_sell, source, source_ref (unique with source), gathered_at.
 - `guard_appraisal_view` on appraisal_views (before insert, update, delete): a 'sent' row never changes and is never removed; 'sent' is
   set only when `app.appraisal_send` is 'on' (phase E's send function, set_config(..., true) for its own transaction); the wording guard

@@ -12,6 +12,7 @@ const { chromium } = require('playwright'); const fs = require('fs'), path = req
 const ROOT = path.join(__dirname, '..', '..');
 const bundle = fs.readFileSync(path.join(__dirname, '..', 'portal.js'), 'utf8');
 const shell = fs.readFileSync(path.join(ROOT, 'portal', 'index.html'), 'utf8');
+const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
 const cat = fs.readFileSync(path.join(ROOT, 'catalogue.js'), 'utf8');
 const mock = fs.readFileSync(path.join(__dirname, 'mock.js'), 'utf8');
 const PK = 'https://packages.dunnerstunner.co.nz', PB = PK + '/portal/';
@@ -115,7 +116,7 @@ const GREQ = [], FREQ = [];   // requests to Google's fonts, and to the site's o
       close: (d.querySelector('.apv-close h2') || {}).textContent || '', reviews: d.querySelectorAll('.apv-rev').length, buyers: d.querySelectorAll('.apv-buyers .apv-tag').length,
       homeImgs: Array.from(d.querySelectorAll('.apv-home .apv-car img')).map(i => ({ blob: /^blob:/.test(i.src), ok: i.complete && i.naturalWidth > 100, w: Math.round(i.getBoundingClientRect().width) })),
       swipe: (d.querySelector('.apv-evidence .apv-lede.no-print') || {}).innerText || '', planNote: (d.querySelector('.apv-plans-h + .apv-note') || {}).innerText || '',
-      rangeLab: Array.from(d.querySelectorAll('.mk-dots .mk-range-lab')).map(x => x.textContent), sig: (d.querySelector('.apv-sig') || {}).textContent || '',
+      rangeLab: Array.from(d.querySelectorAll('.mk-dots .mk-range-lab')).map(x => x.textContent), pyr: (d.querySelector('.apv-opinion .apv-pyr-svg') || { getAttribute: () => null }).getAttribute('aria-label'), sig: (d.querySelector('.apv-sig') || {}).textContent || '',
       by: (() => { const e = d.querySelector('.apv-by'); return e ? getComputedStyle(e).display : 'none'; })(), noteK: /note from Tim/i.test(d.innerText),
       jump: (() => { const j = d.querySelector('.apv-jump'); return { wrap: getComputedStyle(j).flexWrap, ox: getComputedStyle(j).overflowX, allIn: Array.from(j.children).every(c => { const r = c.getBoundingClientRect(); return r.width > 0 && r.left >= 0 && r.right <= innerWidth; }) }; })(),
       fontH1: cs(d.querySelector('h1')).fontFamily || '', fontBody: cs(d).fontFamily || '', mainW: cs(document.querySelector('main')).maxWidth, text: d.innerText };
@@ -126,10 +127,16 @@ const GREQ = [], FREQ = [];   // requests to Google's fonts, and to the site's o
   await signIn(p);
   // the rest of the portal keeps its own width: the Appraisals list is not the appraisal page
   out.listW = await p.evaluate(() => getComputedStyle(document.querySelector('main')).maxWidth);
+  // the fonts are the site's own on every page: no Google link in either page head, and Tim's other pages load the same files
+  expect(!/fonts\.googleapis|fonts\.gstatic/.test(html) && !/fonts\.googleapis|fonts\.gstatic/.test(shell), 'no Google font link in the onboarding page or the portal shell');
+  GREQ.length = 0; FREQ.length = 0;
+  await p.goto(PB); await wait(p, 1200); await p.evaluate(() => document.fonts.ready);
+  out.homeFonts = { google: GREQ.slice(), own: FREQ.length, ok: await p.evaluate(() => document.fonts.check('16px "Barlow"') && document.fonts.check('30px "Cormorant Garamond"')) };
+  expect(!out.homeFonts.google.length && out.homeFonts.own >= 2 && out.homeFonts.ok, 'site-wide: Tim\'s home page loads the site\'s own fonts, never Google\'s: ' + JSON.stringify(out.homeFonts));
   GREQ.length = 0; FREQ.length = 0;
   await p.goto(PB + 'appraisals/AVL'); await wait(p, 1400);
   await p.evaluate(() => document.fonts.ready);
-  out.fonts = await p.evaluate(() => ({ barlow: document.fonts.check('16px "MRE Barlow"'), cormorant: document.fonts.check('30px "MRE Cormorant Garamond"') }));
+  out.fonts = await p.evaluate(() => ({ barlow: document.fonts.check('16px "Barlow"'), cormorant: document.fonts.check('30px "Cormorant Garamond"') }));
   out.fontReq = { google: GREQ.slice(), own: FREQ.length };
   expect(!out.fontReq.google.length && out.fontReq.own >= 2 && out.fonts.barlow && out.fonts.cormorant, 'the appraisal\'s fonts come from the site itself, never from Google: ' + JSON.stringify([out.fontReq, out.fonts]));
   let s = await info(p); out.phone = Object.assign({}, s, { text: undefined });
@@ -147,10 +154,10 @@ const GREQ = [], FREQ = [];   // requests to Google's fonts, and to the site's o
   expect(s.reviews === 3 && s.buyers === 3, 'reviews and the ideal buyers drawn: ' + JSON.stringify([s.reviews, s.buyers]));
   expect(s.homeImgs.length === 3 && s.homeImgs.every(x => x.blob) && s.homeImgs[0].ok && s.homeImgs[0].w > 200, 'phone: the mockup\'s own photos have loaded, with real size: ' + JSON.stringify(s.homeImgs));
   expect(/^Swipe through each home's photos/.test(s.swipe) && /^Swipe to compare the plans/.test(s.planNote), 'phone: the sample\'s swipe wording: ' + JSON.stringify([s.swipe, s.planNote]));
-  expect(s.rangeLab.every(x => x === 'My range: $555,000 to $595,000') && s.rangeLab.length === 2, 'the range over the dots in full dollars, in Tim\'s voice: ' + JSON.stringify(s.rangeLab));
+  expect(s.rangeLab.length === 0 && s.pyr === 'Appraisal range $555,000 to $595,000. Above it, the top price is set by competition between buyers.', 'no range over the dots; the range first shows in the opinion, as the pyramid: ' + JSON.stringify([s.rangeLab, s.pyr]));
   expect(s.sig === 'Tim McGuire · 027 562 7207 · tim@mcguire.co.nz' && s.by === 'none' && !s.noteK, 'the letter ends with the signature line; no heading over it; "Prepared for" on paper only: ' + JSON.stringify([s.sig, s.by, s.noteK]));
   expect(s.jump.ox === 'auto' && s.jump.wrap === 'nowrap', 'phone: the chips stay one sideways strip: ' + JSON.stringify(s.jump));
-  expect(/MRE Cormorant Garamond/.test(s.fontH1) && /MRE Barlow/.test(s.fontBody), 'the sample\'s fonts (with fallbacks): ' + JSON.stringify([s.fontH1, s.fontBody]));
+  expect(/^"?Cormorant Garamond"?,/.test(s.fontH1) && /^"?Barlow"?,/.test(s.fontBody) && !/MRE/.test(s.fontH1 + s.fontBody), 'the sample\'s fonts, under the site\'s plain names (with fallbacks): ' + JSON.stringify([s.fontH1, s.fontBody]));
   expect(!/TIM-ONLY-LOOK/.test(s.text) && !banned(s.text.replace(/Fees/g, '')), 'no private note, no "as is", fee or commission');
   expect(!(await side(p)), 'phone, light: no sideways scroll'); await shot(p, '390_light');
   // the controls: a jump chip, the filters, a price dot, the plans' arrows and dots

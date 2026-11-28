@@ -133,7 +133,7 @@
     const touches = b => rs.some(r => (!hi(b) || +r.low < +b.to) && (!lo(b) || +r.high > +b.from));
     return '<figure class="mk-fig" data-chart="bands"><figcaption><strong>Where sales landed</strong><span>Homes sold in each price band, ' + esc(monthName(m.month)) + '.' + (rs.length ? ' My range is marked.' : '') + '</span></figcaption>'
       + '<div class="mk-bands">' + bs.map(b => { const on = touches(b); return '<div class="mk-band' + (on ? ' on' : '') + '" title="' + esc(label(b) + ': ' + b.count + ' sold') + '"><span class="mk-band-lab">' + esc(label(b)) + '</span><span class="mk-band-bar"><i style="width:' + Math.max(2, Math.round(+b.count / peak * 100)) + '%"></i></span><span class="mk-band-n">' + esc(b.count) + (on ? ' <em>My range</em>' : '') + '</span></div>'; }).join('') + '</div>'
-      + table(['Price band', 'Homes sold', 'My range'], bs.map(b => [label(b), String(b.count), touches(b) ? 'Yes' : ''])) + '</figure>';
+      + table(rs.length ? ['Price band', 'Homes sold', 'My range'] : ['Price band', 'Homes sold'], bs.map(b => rs.length ? [label(b), String(b.count), touches(b) ? 'Yes' : ''] : [label(b), String(b.count)])) + '</figure>';
   }
   // months: rows of market_months; ranges: the appraisal's fields.ranges; o: { area, title }
   const SOURCES = { reinz: 'REINZ', other: 'other published figures' };

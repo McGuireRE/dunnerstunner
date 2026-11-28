@@ -28,7 +28,7 @@ begin
   select string_agg(to_jsonb(d)::text, '|' order by id) into x from public.appraisal_drafts d;
   if x is distinct from drafts_before then out := out || 'AN EXISTING DRAFT CHANGED; '; else out := out || 'drafts unchanged; '; end if;
   select string_agg(policyname || cmd || coalesce(qual, '') || coalesce(with_check, ''), '|' order by policyname) into x from pg_policies where schemaname = 'storage' and tablename = 'objects'
-    and policyname not in ('site_public_agent_add', 'site_public_agent_update', 'site_public_agent_remove');
+    and policyname not in ('site_public_agent_add', 'site_public_agent_update', 'site_public_agent_remove', 'site_public_agent_read');
   if x is distinct from pols_before then out := out || 'AN EXISTING STORAGE POLICY CHANGED; '; else out := out || 'storage policies: only added; '; end if;
   select string_agg(to_jsonb(b)::text, '|' order by id) into x from storage.buckets b where id <> 'site-public';
   if x is distinct from buckets_before then out := out || 'AN EXISTING BUCKET CHANGED; '; else out := out || 'buckets unchanged; '; end if;
@@ -57,6 +57,36 @@ begin
   begin perform public.appraisal_draft_save(aid, 'poem', '{}', '{}', 'm', 'agent'); out := out || 'ANY PART WAS SAVED; '; exception when others then out := out || 'unknown part: refused; '; end;
   begin insert into public.appraisal_drafts (appraisal_id, part, result, model, made_by) values (aid, 'other', '{}', 'm', 'a'); out := out || 'THE PART CHECK IS OFF; '; exception when others then out := out || 'part check: on; '; end;
 
+  if (select prosrc from pg_proc where oid = 'public.contact_send(text,text,text,text,uuid,text)'::regprocedure) ~ 'pg_advisory_xact_lock\(hashtext\(''contact_send:'' \|\| me\)\)' then out := out || 'five a day: one sender at a time (lock); '; else out := out || 'CONTACT_SEND TAKES NO LOCK; '; end if;
+
+  -- Tim's picture files: as Tim (through the Storage API, which turns storage.allow_delete_query on), a delete and a replace really
+  -- remove the row. Without his read rule a delete finds no row and says nothing, which is how old pictures were being left behind.
+  execute 'set local role authenticated'; perform set_config('request.jwt.claims', agent, true); perform set_config('storage.allow_delete_query', 'true', true);
+  insert into storage.objects (bucket_id, name) values ('site-public', 'profile/rb-old.jpg'), ('site-public', 'about/rb-old.jpg'), ('site-public', 'profile/rb-keep.jpg');
+  select count(*) into n from storage.objects where bucket_id = 'site-public'; out := out || 'agent sees ' || n || ' picture rows; ';
+  begin
+    execute 'reset role'; execute 'drop policy site_public_agent_read on storage.objects';
+    execute 'set local role authenticated'; perform set_config('request.jwt.claims', agent, true);
+    delete from storage.objects where bucket_id = 'site-public' and name = 'profile/rb-old.jpg'; get diagnostics n = row_count;
+    raise exception 'undo %', n;
+  exception when others then out := out || 'without the read rule a delete removes ' || coalesce(substring(sqlerrm from 'undo (\d+)'), sqlerrm) || '; '; end;
+  delete from storage.objects where bucket_id = 'site-public' and name = 'profile/rb-old.jpg'; get diagnostics n = row_count; out := out || 'remove picture: ' || n || ' row; ';
+  insert into storage.objects (bucket_id, name) values ('site-public', 'about/rb-new.jpg');
+  delete from storage.objects where bucket_id = 'site-public' and name = 'about/rb-old.jpg'; get diagnostics n = row_count; out := out || 'replace About image: old ' || n || ' row removed; ';
+  update storage.objects set metadata = '{"v":2}' where bucket_id = 'site-public' and name = 'profile/rb-keep.jpg'; get diagnostics n = row_count; out := out || 'overwrite in place: ' || n || ' row; ';
+  execute 'reset role';
+  select string_agg(name, ',' order by name) into x from storage.objects where bucket_id = 'site-public';
+  if x is distinct from 'about/rb-new.jpg,profile/rb-keep.jpg' then out := out || 'THE OLD FILES ARE STILL THERE: ' || coalesce(x, 'none') || '; '; else out := out || 'left: only the new files; '; end if;
+  execute 'set local role authenticated'; perform set_config('request.jwt.claims', vendor, true);
+  select count(*) into n from storage.objects where bucket_id = 'site-public'; if n <> 0 then out := out || 'A VENDOR LISTS TIM''S FILES; '; else out := out || 'vendor lists none; '; end if;
+  delete from storage.objects where bucket_id = 'site-public'; get diagnostics n = row_count; if n <> 0 then out := out || 'A VENDOR DELETED TIM''S FILES; '; else out := out || 'vendor delete: none; '; end if;
+  begin insert into storage.objects (bucket_id, name) values ('site-public', 'profile/rb-vendor.jpg'); out := out || 'A VENDOR UPLOADED A PICTURE; '; exception when others then out := out || 'vendor upload: refused; '; end;
+  execute 'reset role';
+  execute 'set local role anon'; perform set_config('request.jwt.claims', '{"role":"anon"}', true);
+  select count(*) into n from storage.objects where bucket_id = 'site-public'; if n <> 0 then out := out || 'ANON LISTS TIM''S FILES; '; else out := out || 'anon lists none; '; end if;
+  execute 'reset role';
+  perform set_config('storage.allow_delete_query', 'false', true);
+
   -- Tim saves his profile; a vendor and anon can't
   execute 'set local role authenticated'; perform set_config('request.jwt.claims', agent, true);
   begin
@@ -67,6 +97,12 @@ begin
   exception when others then out := out || 'THE AGENT COULD NOT SAVE: ' || sqlerrm || '; '; end;
   select string_agg(e->>'key', ',') into x from jsonb_array_elements(public.site_profile_public()->'channels') e;
   if x is distinct from 'call,form,whatsapp' then out := out || 'THE PUBLIC CHANNELS ARE WRONG: ' || coalesce(x, 'none') || '; '; else out := out || 'public channels: only those on and complete, in order; '; end if;
+  -- off means off: Email isn't on, so no email; Call is on, so the phone shows; with Call and Text off, no phone either
+  j := public.site_profile_public();
+  if j->>'email' = '' and j->>'phone' = '027 562 7207' then out := out || 'public: phone with Call on, no email with Email off; '; else out := out || 'THE PUBLIC PHONE OR EMAIL IGNORES THE SWITCHES: ' || (j->>'phone') || ' ' || (j->>'email') || '; '; end if;
+  perform public.agent_site_profile_save('{"name":"Tim McGuire","phone":"027 562 7207","email":"tim@example.test","channels":[{"key":"call","on":false},{"key":"text","on":false},{"key":"email","on":true},{"key":"form","on":true}]}');
+  j := public.site_profile_public();
+  if j->>'phone' = '' and j->>'email' = 'tim@example.test' then out := out || 'public: no phone with Call and Text off, email with Email on; '; else out := out || 'THE PUBLIC PHONE SHOWS WITH CALL AND TEXT OFF: ' || (j->>'phone') || ' ' || (j->>'email') || '; '; end if;
   begin perform public.agent_site_profile_save('{"channels":[{"key":"whatsapp","on":true,"value":"https://evil.example"}]}'); out := out || 'A BAD WHATSAPP NUMBER WAS KEPT; '; exception when others then out := out || 'bad channel value: refused; '; end;
   begin perform public.agent_site_profile_save('{"channels":[{"key":"myspace","on":true}]}'); out := out || 'AN UNKNOWN CHANNEL WAS KEPT; '; exception when others then out := out || 'unknown channel: refused; '; end;
   begin perform public.agent_site_profile_save('{"photo_path":"appraisals/x.jpg"}'); out := out || 'A PICTURE OUTSIDE ITS FOLDER WAS KEPT; '; exception when others then out := out || 'picture folder: checked; '; end;
@@ -99,7 +135,7 @@ begin
 
   -- notify takes each message once, and only for its own sender
   j := public.contact_mark_emailed(m1, 'someone-else@example.com'); if j is not null then out := out || 'MARKED FOR ANOTHER SENDER; '; end if;
-  j := public.contact_mark_emailed(m1, 'rb-vendor@example.com'); if j is null then out := out || 'NOT MARKED FOR ITS SENDER; '; else out := out || 'emailed once: ' || (j->>'name') || '; '; end if;
+  j := public.contact_mark_emailed(m1, 'rb-vendor@example.com'); if j is null then out := out || 'NOT MARKED FOR ITS SENDER; '; else out := out || 'emailed once: ' || (j->>'name') || ', to ' || coalesce(j->>'tim_email', 'TIM_EMAIL') || '; '; end if;
   j := public.contact_mark_emailed(m1, 'rb-vendor@example.com'); if j is not null then out := out || 'EMAILED TWICE; '; else out := out || 'second time: nothing; '; end if;
 
   -- Tim reads and marks done

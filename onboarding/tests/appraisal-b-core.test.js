@@ -26,9 +26,15 @@ const ctx = { address: 'RB 3 Core Road, Rbvale', preparedOn: '2026-11-28', cat }
 
 // ── 1. nothing earlier changes ──
 const wNew = NEW.writeStandard(SETUP_A, ranges, ctx), wOld = OLD.writeStandard(SETUP_A, ranges, ctx);
-expect(JSON.stringify(wNew) === JSON.stringify(wOld), 'a phase A set-up is written exactly as before');
+// the one addition: the opinion of price carries Tim's price wording (setup.priceWording, the agreed default when not set)
+const noWords = w => JSON.stringify(Object.assign({}, w, { sections: w.sections.map(x => x.type === 'opinion' ? { type: 'opinion' } : x) }));
+const opN = wNew.sections.find(x => x.type === 'opinion');
+expect(noWords(wNew) === JSON.stringify(wOld) && opN.wording === NEW.PRICE_WORDING, 'a phase A set-up is written exactly as before, plus the price wording');
 const own = Object.assign({}, SETUP_A, { header: 'own' });
-expect(JSON.stringify(NEW.writeStandard(own, ranges, ctx)) === JSON.stringify(OLD.writeStandard(own, ranges, ctx)), '"Use my own" with nothing uploaded is written exactly as before');
+expect(noWords(NEW.writeStandard(own, ranges, ctx)) === JSON.stringify(OLD.writeStandard(own, ranges, ctx)), '"Use my own" with nothing uploaded is written exactly as before, plus the price wording');
+out.pw = { edited: NEW.writeStandard(Object.assign({}, SETUP_A, { priceWording: 'My own words.' }), ranges, ctx).sections.find(x => x.type === 'opinion').wording, cleared: 'wording' in NEW.writeStandard(Object.assign({}, SETUP_A, { priceWording: '' }), ranges, ctx).sections.find(x => x.type === 'opinion'),
+  guarded: NEW.checkSetup(Object.assign({}, SETUP_A, { priceWording: 'Sold as is, no fees.' }), ranges) };
+expect(out.pw.edited === 'My own words.' && out.pw.cleared === false && !!out.pw.guarded, 'the price wording: editable per appraisal, cleared means none, and guarded like the other vendor text: ' + JSON.stringify(out.pw));
 const HAND = { title: 'RB 1 Hand Road: Market Appraisal', address: 'RB 1 Hand Road, Rbvale', setup: {}, fields: { ranges: [{ key: 'A', option: 'Current condition', involves: 'As it stands', low: 400000, high: 450000 }], bedrooms: '3', method: { name: 'Deadline sale', text: 'A deadline sale.' } },
   sections: [{ type: 'heading', text: 'What I heard' }, { type: 'para', cls: 'lede', text: 'You told me **lots**. {{range:A}} with {{bedrooms}} bedrooms by {{method}}.' }, { type: 'list', items: ['One', 'Two'] }, { type: 'table', head: ['A', 'B'], rows: [['1', '2']] },
     { type: 'ranges' }, { type: 'method' }, { type: 'wave', title: 'Wave', bars: [{ label: 'Week 1', pct: 35 }, { label: 'Week 2', pct: 25 }], marker: 1, markerLabel: 'Offers due' }, { type: 'methods', head: ['Method'], rows: [['Deadline sale, by a date']] }, { type: 'note', text: 'Small print.' }] };
@@ -57,6 +63,17 @@ out.selfCheck = { header: lost(T1, T1.replace('<th>Option</th>', '<th></th>')), 
   scoped: lost('<p>Price</p>', '<p>$1</p>'), inComp: lost('<article class="apv-comp" data-comp="c1"><dt>Price</dt><dd>Sold for $1</dd></article>', '<article class="apv-comp" data-comp="c1"><p>$1</p></article>') };
 expect(out.selfCheck.header.length === 1 && out.selfCheck.short.length === 1 && out.selfCheck.dup.length === 1 && out.selfCheck.alt.length === 1 && out.selfCheck.scoped.length === 1 && !out.selfCheck.inComp.length,
   'the nothing-lost check catches a dropped heading, a dropped short value, a dropped repeat and changed alt text; a reworded label is excused only inside a comparable: ' + JSON.stringify(out.selfCheck));
+// and the two more the review asked for: a section heading made smaller, and on-screen text moved to paper only
+out.selfCheck2 = { demoted: lost('<h2>Sales and current listings</h2><p>x</p>', '<h3>Sales and current listings</h3><p>x</p>'), designed: lost('<h2>Marketing plans</h2>', '<h3 class="apv-h3">Marketing plans</h3>'),
+  printOnly: lost('<p>Call me any time.</p>', '<div class="apv-print-only"><p>Call me any time.</p></div>'), byline: lost('<p class="apv-by">Prepared for Robin</p>', '<p class="apv-by apv-print-only">Prepared for Robin</p>'),
+  paperBefore: lost('<div class="apv-print-only"><p>On paper.</p></div>', '<div class="apv-print-only"><p>On paper.</p></div>'), stillH2: lost('<h2>Reviews</h2>', '<section><h2>Reviews</h2></section>') };
+expect(out.selfCheck2.demoted.length === 1 && /^heading demoted/.test(out.selfCheck2.demoted[0]) && !out.selfCheck2.designed.length && out.selfCheck2.printOnly.length === 1 && /^moved to print only/.test(out.selfCheck2.printOnly[0]) && !out.selfCheck2.byline.length && !out.selfCheck2.paperBefore.length && !out.selfCheck2.stillH2.length,
+  'the nothing-lost check catches a section heading made smaller and on-screen text moved to print only, and lets through only the listed, designed ones: ' + JSON.stringify(out.selfCheck2));
+// a chart's range label is excused only when the opinion's pyramid names the same figures
+{ const CH = '<figure class="mk-fig" data-chart="dots"><p>My range: $1,000 to $2,000</p><p>Sold</p></figure>', CH2 = '<figure class="mk-fig" data-chart="dots"><p>Sold</p></figure>';
+  const PY = f => '<div class="apv-opinion"><figure class="apv-pyr"><svg viewBox="0 0 400 320" role="img" aria-label="x" class="apv-pyr-svg"><title>Appraisal range ' + f + '. Above it, the top price is set by competition between buyers.</title></svg></figure></div>';
+  out.pyrCheck = { none: lost(CH, CH2), same: lost(CH, CH2 + PY('$1,000 to $2,000')), other: lost(CH, CH2 + PY('$1,000 to $3,000')) };
+  expect(out.pyrCheck.none.length === 1 && !out.pyrCheck.same.length && out.pyrCheck.other.length === 1, 'a range label leaving a chart is excused only by a pyramid with the same figures: ' + JSON.stringify(out.pyrCheck)); }
 // nothing there, nothing shown (Tim, 28 November 2026): no plan, no method, or a heading with nothing under it draws nothing, and gets no chip
 const EMPTY_SECS = [{ type: 'heading', text: 'Lonely heading' }, { type: 'heading', text: 'My opinion of price' }, { type: 'opinion' }, { type: 'heading', text: 'How I would sell it' }, { type: 'method' },
   { type: 'heading', text: 'Every way to sell, explained' }, { type: 'para', text: 'Whichever way you choose.' }, { type: 'methodcards', rec: 'deadline', items: [] }, { type: 'heading', text: 'Marketing plans' }, { type: 'plans', items: [], included: 'Every plan includes: photos.' }, { type: 'heading', text: 'Last and empty' }];

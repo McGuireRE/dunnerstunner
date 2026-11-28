@@ -109,7 +109,11 @@ grant execute on function public.agent_site_profile_save(jsonb) to authenticated
 -- what every page may show: only what is public, and only ways to reach him that are on and complete
 create function public.site_profile_public() returns jsonb
 language sql stable security definer set search_path = public as $$
-  select jsonb_build_object('name', s.name, 'licence', s.licence, 'phone', s.phone, 'email', s.email, 'photo_path', s.photo_path, 'about', s.about,
+  -- off means off (Tim, 28 November 2026): the phone only while Call or Text is on, the email only while Email is on
+  select jsonb_build_object('name', s.name, 'licence', s.licence,
+    'phone', case when exists (select 1 from jsonb_array_elements(s.channels) c where c->>'key' in ('call', 'text') and coalesce((c->>'on')::boolean, false)) then s.phone else '' end,
+    'email', case when exists (select 1 from jsonb_array_elements(s.channels) c where c->>'key' = 'email' and coalesce((c->>'on')::boolean, false)) then s.email else '' end,
+    'photo_path', s.photo_path, 'about', s.about,
     'channels', coalesce((select jsonb_agg(jsonb_build_object('key', e->>'key', 'value', coalesce(e->>'value', '')) order by o) from jsonb_array_elements(s.channels) with ordinality as x(e, o)
       where coalesce((e->>'on')::boolean, false)
         and case e->>'key' when 'call' then s.phone <> '' when 'text' then s.phone <> '' when 'email' then s.email <> '' when 'form' then true
@@ -128,6 +132,9 @@ create policy site_public_agent_add on storage.objects for insert to authenticat
 create policy site_public_agent_update on storage.objects for update to authenticated using (bucket_id = 'site-public' and public.is_agent())
   with check (bucket_id = 'site-public' and public.is_agent() and (storage.foldername(name))[1] = any (array['profile', 'about']));
 create policy site_public_agent_remove on storage.objects for delete to authenticated using (bucket_id = 'site-public' and public.is_agent());
+-- Tim reads his own files' rows (public read of the files themselves is the bucket's); without this a delete or a replace finds no row
+create policy site_public_agent_read on storage.objects for select to authenticated using (bucket_id = 'site-public' and public.is_agent()
+  and (storage.foldername(name))[1] = any (array['profile', 'about']));
 
 -- ═══════════════ 4. "Send a message" ═══════════════
 create table public.contact_messages (
@@ -160,6 +167,8 @@ begin
   if length(btrim(coalesce(p_message, ''))) not between 1 and 1000 then raise exception 'Write your message (up to 1,000 letters)'; end if;
   if coalesce(p_phone, '') <> '' and p_phone !~ '^\+?[0-9 ()-]{6,30}$' then raise exception 'That phone number does not look right'; end if;
   if coalesce(p_preferred, 'email') not in ('call', 'text', 'email') then raise exception 'Choose how Tim should reply'; end if;
+  -- one sender at a time, so two messages sent at once can't both slip under the limit
+  perform pg_advisory_xact_lock(hashtext('contact_send:' || me));
   if (select count(*) from public.contact_messages m where lower(m.from_email) = me and m.sent_at > now() - interval '24 hours') >= 5 then
     raise exception 'You have sent five messages today. Please call or text Tim instead';
   end if;
@@ -182,14 +191,15 @@ end $$;
 revoke all on function public.agent_contact_done(uuid) from public, anon;
 grant execute on function public.agent_contact_done(uuid) to authenticated;
 
--- notify (service role) takes the message to email Tim, once: the first call gets the row, any later call gets nothing
+-- notify (service role) takes the message to email Tim, once: the first call gets the row, any later call gets nothing. It also gives
+-- the address to send to: Tim's own email from his settings when one is set (notify falls back to its own TIM_EMAIL), never the sender's
 create function public.contact_mark_emailed(p_id uuid, p_from text) returns jsonb
 language plpgsql security definer set search_path = public as $$
 declare r public.contact_messages;
 begin
   update public.contact_messages set emailed_at = now() where id = p_id and emailed_at is null and lower(from_email) = lower(coalesce(p_from, '')) returning * into r;
   if not found then return null; end if;
-  return to_jsonb(r);
+  return to_jsonb(r) || jsonb_build_object('tim_email', (select nullif(s.email, '') from public.site_profile s where s.id));
 end $$;
 revoke all on function public.contact_mark_emailed(uuid, text) from public, anon, authenticated;
 grant execute on function public.contact_mark_emailed(uuid, text) to service_role;

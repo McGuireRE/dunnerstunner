@@ -344,7 +344,21 @@ build time.
 
 The appraisal now draws like the approved sample of 24 November 2026 (top bar with the logo and jump chips, the title over the header,
 cards, carousels, the opinion card, the plans strip, the panel, the closing line, the sample's paper look in print). Fonts are hosted on
-the site (`onboarding/assets/fonts`, SIL Open Font License); the portal shell skips Google's font link on appraisal addresses.
+the site (`onboarding/assets/fonts`, SIL Open Font License) for every page, under their plain names; no page calls Google for a font.
+Tim's range is never on the early charts (Tim, 28 November 2026): the price evidence and the market charts show the sales alone, with
+no range band, "My range" line, label or note. The range first appears in the opinion of price, after the comparables and the suburb
+table, as **the price pyramid** (Tim, 28 November 2026, from his "price range presentation illustration" chat; it replaces the
+cherries): an inline picture of buyers in four bands, widest at the base, green (#97C459), yellow (#FAC775), orange (#EF9F27) and a red
+peak (#E24B4A). A bracket on the right, "Appraisal range", runs from the top of the green band ("Got to be better than", with his lower
+figure) to halfway up the red peak ("Top of range", with his upper figure). At 6:29pm Tim moved the top there from the orange "so that
+it doesn't suggest that I am underselling their property"; the bottom stays at the top of the green ("let's leave it there, as I will
+then be able to chat about the tyre kickers"). So the bracket spans yellow, orange and the lower half of the red, and the red peak is
+drawn large enough for that to read at 390 px and in print. The tip of the peak never carries a number: "Cherry on top: set by
+competition, not printed". Under the base: "Widest base: the most buyers". Screen readers hear "Appraisal range $X to $Y. Above it, the
+top price is set by competition between buyers." With two or more options, one pyramid each, with its own label, side by side on wide
+screens and stacked on a phone; the options table keeps its headings. Beside it, Tim's price wording (`setup.priceWording`, written into
+the opinion section as `wording`; set-up screen, "Your price wording"; defaults to the agreed text, cleared means none, checked like the
+other vendor text). The large range figures in the opinion card stay.
 
 - **A. The "Yours" column.** Each comparable shows This home and Yours side by side, a row only when both homes have the figure, and
   tags for the differences ("Yours has 1 more bedroom", "This one has 38 m² more land"). Their figures come from the property profile:
@@ -354,6 +368,9 @@ the site (`onboarding/assets/fonts`, SIL Open Font License); the portal shell sk
   homes: "Draft the comparison" and "Draft all" (doc-prefill `appraisal_draft`, part `compare`, Sonnet, `record_compare`) send both
   homes' figures, the comparable's advertisement (scrubbed of its address, agency, phone, email, links and names) and Tim's first-visit
   notes, never the client heart. The draft arrives unticked; a weak point of their home goes to Tim's private note on the comparable.
+  A draft never replaces ticked wording (the save touches only a row still unticked). A single draft asks before replacing unticked
+  wording; "Draft all" skips ticked and hidden comparables, asks once before replacing unticked wording, and says how many it drafted
+  and skipped, and why.
   When Tim types his own, the screen reminds him to mention both homes.
 - **B. The order.** Price evidence, the comparables, the market report, then **Everything that sold in {suburb} last month**, then the
   opinion of price. The table lists every sale held in `market_sales` for the appraisal's suburb in the latest full month (not only the
@@ -362,30 +379,38 @@ the site (`onboarding/assets/fonts`, SIL Open Font License); the portal shell sk
   address. REINZ figures are provided to us as members for this very purpose."). `market_sales` addresses show in this table on the
   appraisal, on the vendor's private page and in print; they stay off every other screen. No sales held: no section, and Tim's copy
   prompts him to load the month's figures. (`market_sales` holds no sale method, so the method column is left out.)
-- **C. A personal message on YouTube or Vimeo** (Sections screen): only youtube.com, youtu.be and vimeo.com links; the video's id is
-  kept in the section (`pvideo`), and the page builds the player's address itself (youtube-nocookie.com/embed/ID,
+- **C. A personal message on YouTube or Vimeo** (Sections screen): only youtube.com, youtu.be and vimeo.com links; the set-up keeps the
+  provider, id and Vimeo's privacy hash (`setup.pvideo`), never the link as typed (the field shows a plain link rebuilt from the id); the
+  section (`pvideo`) keeps the same, and the page builds the player's address itself (youtube-nocookie.com/embed/ID,
   player.vimeo.com/video/ID). It sits above the letter as a poster; the player loads only when pressed (sandboxed, strict referrer
   policy), so nothing calls YouTube or Vimeo before then. Print shows nothing for it. With a link, an uploaded introduction is left out.
 - **D. About and contact, one settings page** (`/portal/settings/about`): Tim's picture (made square from the middle, about 512 px),
   name, licence line, phone, email, About Tim and About McGuire Real Estate (heading, text, an optional image each), and the ways to
   reach him (Call, Text, Email, Send a message, WhatsApp, Messenger, Discord, Telegram, Signal), each on or off, in his order, each
   detail checked as its service writes links. Seeded with the phone and email the vendor pages already use. The appraisal's signature
-  line and closing line read these settings.
+  line, closing line and print contact line read these settings through one function (`APPR.contactFor`). Off means off (Tim, 28
+  November 2026): with Call and Text both off the phone appears nowhere a vendor sees it (signature, closing line, print, the dialog),
+  and with Email off the email is hidden the same way; `site_profile_public()` doesn't return them. The closing line reads "Call or
+  text", "Call" or "Text" as the switches allow, and isn't shown when neither is on. Replacing or removing a picture deletes the old file; if the delete fails, Tim is
+  told under the button.
 - **E. The picture in a circle on every page's header** (the portal, the vendor's pages, the appraisal's own top bar), opposite the
   logo; the bar is a little taller and the logo larger. Tapping it, or "About Tim and McGuire Real Estate" on the point of difference
   panel, opens one dialog: picture, name and licence line, the ways to reach him as big buttons, then the two About tabs. "Send a
   message" is for signed-in people: `contact_send` (their own email from their sign-in, bounded, five a day each) puts it on Tim's
   Needs you, and notify emails Tim once per message (`contact_mark_emailed`, service role; never to anyone but Tim). People who aren't
-  signed in see Call, Text and Email, not the form. On Tim's own view the form is a preview. Room is kept in the header (`#hdrMe`) for a
+  signed in see Call, Text and Email, not the form. On Tim's own pages the form is a preview, with a line when his About is empty;
+  while presenting, on his copy of an appraisal and on any page done in person, the dialog holds only what a vendor sees (no preview,
+  no line for Tim, no settings link). The email to Tim goes to his settings email when set, otherwise notify's own address. Room is kept in the header (`#hdrMe`) for a
   signed-in person's own picture later (not built). Print: the contact line and both About sections in full under the panel.
 - **Migration 038** (`038_site_profile_contact.sql`): `appraisal_drafts` takes part `compare`; `site_profile` (one row, agent-only, read
   by anyone through `site_profile_public()`); the `site-public` bucket (public read, 2 MB, photos only, agent-only writes under
-  `profile/` and `about/`); `contact_messages` with `contact_send`, `agent_contact_done` and `contact_mark_emailed`. Rollback test:
+  `profile/` and `about/`, which Tim can also list there, so a delete or replace finds the old file); `contact_messages` with `contact_send` (one sender at a time, so the five a day holds), `agent_contact_done` and `contact_mark_emailed`. Rollback test:
   `tests/site-profile-rollback.sql` (via `site-profile-rollback.js`), run on the local stand-in.
 - **For phase E's frozen copy** (the send branch builds it as a whitelist): the Yours figures (`ev.subject`), the suburb table rows
   (`ev.suburbSales`: suburb, month, and each sale's date, address, price, bedrooms, bathrooms, floor, land, days to sell), the
   personal video (the `pvideo` section: provider, id, hash), and the About and contact (`site_profile_public` with the picture's and
-  About images' public links) as they stood when sent.
+  About images' public links, whose phone and email already follow the switches) as they stood when sent. The price pyramid needs
+  nothing more: it is drawn from `fields.ranges` and the opinion section's `wording`, both already in the sections.
 
 ## Open questions for Tim (with defaults, asked before the phase that needs them)
 

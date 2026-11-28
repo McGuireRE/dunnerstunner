@@ -9707,6 +9707,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const S = Object.assign({ method: 'deadline', basis: 'comparables', header: 'claude', tabs: {} }, JSON.parse(JSON.stringify(rec.setup)));
     if (S.suburb == null) S.suburb = APPR.suburbOf(rec.address);
     if (S.note == null) S.note = APPR.DEFAULT_NOTE;
+    if (S.priceWording == null) S.priceWording = APPR.PRICE_WORDING;
     if (S.preparedFor == null) S.preparedFor = rec.prepared_for || (ownerNames.length > 1 ? ownerNames.slice(0, -1).join(', ') + ' and ' + ownerNames.slice(-1) : ownerNames[0] || '');
     let parts = ((rec.fields || {}).ranges || []).map(r => ({ key: r.key, option: r.option || '', low: r.low, high: r.high }));
     if (!parts.length) parts = [{ key: 'A', option: 'Your home', low: '', high: '' }];
@@ -9737,6 +9738,9 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <div class="card tight"><p class="small" style="margin:0 0 6px">One range for each part that sells. These are your figures: nothing is priced for you.</p>
         <div id="apsParts">${partsHTML()}</div>
         <button class="btn link" type="button" id="apsAddPart">Add a part</button></div>
+      <h2>Your price wording</h2>
+      <div class="card tight"><label class="f" for="apsPriceWords" style="margin-top:0">Beside the price pyramid in your opinion of price <span class="opt">(a blank line starts a new paragraph; clear it and none shows)</span></label><textarea id="apsPriceWords" rows="6">${esc(S.priceWording)}</textarea>
+        <p class="small" style="margin:6px 0 0">The pyramid shows your range from "got to be better than" to the top of your range, halfway up the red peak. The tip of the peak never carries a number.</p></div>
       <h2>How long the campaign should be</h2>
       <div class="card tight"><div class="choices" id="apsCamp">${APS_CAMPAIGN.map(([k, t, d]) => radio('apsCamp', k, esc(t), esc(d), (S.campaign || {}).kind === k)).join('')}</div>
         <div id="apsWeeksWrap"><label class="f" for="apsWeeks">Number of weeks</label><input type="number" id="apsWeeks" min="1" max="${APPR.MAX_WEEKS}" inputmode="numeric" value="${esc((S.campaign || {}).weeks || '')}"></div></div>
@@ -9779,7 +9783,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       const ranges = parts.map(r => ({ key: r.key, option: String(r.option).replace(/\s+/g, ' ').trim(), low: Math.round(num(r.low)), high: Math.round(num(r.high)) }));
       const tabs = {}; APS_TABS.forEach(([k]) => { tabs[k] = !!$(`[data-aps-tab="${k}"]`).checked; });
       const camp = val('apsCamp'), next = Object.assign({}, S, { v: 1, tabs, preparedFor: $('#apsFor').value.replace(/\s+/g, ' ').trim(), suburb: $('#apsSuburb').value.replace(/\s+/g, ' ').trim(),
-        suburbLink: APPR.isHill($('#apsSuburb').value) ? '' : $('#apsLink').value.replace(/\s+/g, ' ').trim(), note: $('#apsNote').value.trim(),
+        suburbLink: APPR.isHill($('#apsSuburb').value) ? '' : $('#apsLink').value.replace(/\s+/g, ' ').trim(), note: $('#apsNote').value.trim(), priceWording: $('#apsPriceWords').value.trim().slice(0, 1500),
         campaign: camp === 'weeks' ? { kind: camp, weeks: Math.round(+$('#apsWeeks').value) || 0 } : { kind: camp }, method: val('apsMethod'), methodText: $('#apsMethodText').value.trim(),
         basis: val('apsBasis') || 'comparables', plan: val('apsPlan'), header: val('apsHeader') || 'claude' });
       const bad = APPR.checkSetup(next, ranges); if (bad) { atBtn(sv, bad, 'err'); return; }
@@ -10007,8 +10011,12 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   let ABOUT_FROM = null;
   async function openAbout(from) {
     await siteReady(); const S = SITE || {}, dlg = $('#aboutDlg'); if (!dlg) return;
-    const tabs = APPR.aboutTabs(), chans = channelList(S), signedIn = !!(SESSION && SESSION.user), agent = IS_AGENT;
-    const form = chans.some(c => c.key === 'form') && (signedIn || agent);
+    // vendor-facing only: while presenting, on Tim's copy of an appraisal, and on any page done in person, the overlay holds only what a
+    // vendor sees: no preview form, no "your About is empty" line, no link to settings. Tim's own lines show only on his other pages.
+    // (Tim is signed in there, so the working form isn't offered either: a message would go from him to himself.)
+    const vendorView = !IS_AGENT || document.body.classList.contains('apv-present') || !!$('#apvPage') || portalInPerson();
+    const tabs = APPR.aboutTabs(), chans = channelList(S), signedIn = !!(SESSION && SESSION.user), agent = IS_AGENT && !vendorView;
+    const form = chans.some(c => c.key === 'form') && (agent || (signedIn && !IS_AGENT));
     const btns = chans.filter(c => c.key !== 'form' || form).map(c => c.key === 'form' ? `<button type="button" class="ab-act" id="abFormBtn" aria-expanded="false" aria-controls="abForm">${esc(c.label)}</button>`
       : `<a class="ab-act" href="${esc(c.href)}"${/^https:/.test(c.href) ? ' target="_blank" rel="noopener"' : ''} data-ch="${esc(c.key)}">${esc(c.label)}</a>`).join('');
     const me = SESSION && SESSION.user ? SESSION.user : null, pre = agent ? '' : String((me && me.user_metadata && (me.user_metadata.name || me.user_metadata.full_name)) || '').slice(0, 80);
@@ -10122,15 +10130,19 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       if (up.error) { atBtn(btn, netErr(up.error) ? 'Not uploaded. Check you have signal, then try again.' : 'Not uploaded: ' + up.error.message, 'err'); return null; }
       return { path, small: r.small };
     };
+    // a remove gives back the files it really removed; anything short of that (no answer, an error, or fewer files) means the old
+    // file is still in the public bucket, so say so plainly under the button rather than claim it is gone
+    const unstore = async p => { if (!p) return true; try { const r = await sb.storage.from(SITE_BUCKET).remove([p]); return !r.error && Array.isArray(r.data) && r.data.length === 1; } catch (_) { return false; } };
+    const LEFT = ' The old picture file could not be deleted, so it may still open from an old link. Try again later, or ask for help.';
     const wire = () => {
       $('#spPage').addEventListener('input', () => { JDIRTY = true; });
       $('#spSave').addEventListener('click', e => save(e.currentTarget));
       $('#spPhoto').addEventListener('change', async e => { const old = st.photo_path, r = await upload(e.target.files[0], 'profile', $('#spPhotoPick')); if (!r) return; read(); st.photo_path = r.path;
-        if (await save($('#spSave'), 'Picture saved.')) { if (old) { try { await sb.storage.from(SITE_BUCKET).remove([old]); } catch (_) { } } draw(); atBtn($('#spPhotoPick'), 'Saved. It shows in the header of every page.' + (r.small ? ' It is small, so it may look soft.' : ''), 'ok'); } else { st.photo_path = old; try { await sb.storage.from(SITE_BUCKET).remove([r.path]); } catch (_) { } } });
-      const rm = $('#spPhotoRm'); if (rm) rm.addEventListener('click', async () => { const old = st.photo_path; read(); st.photo_path = null; if (await save(rm, 'Removed.')) { try { await sb.storage.from(SITE_BUCKET).remove([old]); } catch (_) { } draw(); atBtn($('#spPhotoPick'), 'Removed. No circle shows until you add one.', 'ok'); } else st.photo_path = old; });
+        if (await save($('#spSave'), 'Picture saved.')) { const gone = await unstore(old); draw(); const soft = r.small ? ' It is small, so it may look soft.' : ''; if (gone) atBtn($('#spPhotoPick'), 'Saved. It shows in the header of every page.' + soft, 'ok'); else atBtn($('#spPhotoPick'), 'Saved, and it shows in the header of every page.' + soft + LEFT, 'err'); } else { st.photo_path = old; await unstore(r.path); } });
+      const rm = $('#spPhotoRm'); if (rm) rm.addEventListener('click', async () => { const old = st.photo_path; read(); st.photo_path = null; if (await save(rm, 'Removed.')) { const gone = await unstore(old); draw(); atBtn($('#spPhotoPick'), gone ? 'Removed. No circle shows until you add one.' : 'Taken off every page.' + LEFT, gone ? 'ok' : 'err'); } else st.photo_path = old; });
       $$('[data-sp-img]').forEach(inp => inp.addEventListener('change', async e => { const k = inp.dataset.spImg, old = st.about[k].image_path, lb = $('#spImgPick-' + k), r = await upload(e.target.files[0], 'about', lb); if (!r) return; read(); st.about[k].image_path = r.path;
-        if (await save($('#spSave'), 'Image saved.')) { if (old) { try { await sb.storage.from(SITE_BUCKET).remove([old]); } catch (_) { } } draw(); atBtn($('#spImgPick-' + k), 'Saved.', 'ok'); } else st.about[k].image_path = old; }));
-      $$('[data-sp-img-rm]').forEach(b => b.addEventListener('click', async () => { const k = b.dataset.spImgRm, old = st.about[k].image_path; read(); st.about[k].image_path = null; if (await save(b, 'Removed.')) { try { await sb.storage.from(SITE_BUCKET).remove([old]); } catch (_) { } draw(); } else st.about[k].image_path = old; }));
+        if (await save($('#spSave'), 'Image saved.')) { const gone = await unstore(old); draw(); atBtn($('#spImgPick-' + k), gone ? 'Saved.' : 'Saved.' + LEFT, gone ? 'ok' : 'err'); } else { st.about[k].image_path = old; await unstore(r.path); } }));
+      $$('[data-sp-img-rm]').forEach(b => b.addEventListener('click', async () => { const k = b.dataset.spImgRm, old = st.about[k].image_path; read(); st.about[k].image_path = null; if (await save(b, 'Removed.')) { const gone = await unstore(old); draw(); atBtn($('#spImgPick-' + k), gone ? 'Removed.' : 'Taken off the About.' + LEFT, gone ? 'ok' : 'err'); } else st.about[k].image_path = old; }));
       const mv = (i, d) => { read(); const j = i + d; if (j < 0 || j >= st.channels.length) return; [st.channels[i], st.channels[j]] = [st.channels[j], st.channels[i]]; JDIRTY = true; draw(); };
       $$('[data-ch-up]').forEach(b => b.addEventListener('click', () => mv(+b.dataset.chUp, -1))); $$('[data-ch-dn]').forEach(b => b.addEventListener('click', () => mv(+b.dataset.chDn, 1)));
     };
@@ -10335,28 +10347,43 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       const next = Object.assign({}, rec.setup, { showCv: scv.checked }); atBtn(scv, 'Saving...', 'busy');
       const { data, error } = await sb.rpc('agent_appraisal_save', { p_id: rec.id, p_setup: next, p_fields: null, p_sections: null, p_title: null, p_prepared_for: null, p_private_notes: null, p_status: null });
       if (error || !data) { scv.checked = !scv.checked; fail(scv, error); return; }
-      rec.setup = next; atBtn(scv, scv.checked ? 'Saved. Their rating valuation shows in the Yours column.' : 'Saved. Their rating valuation stays off the page.', 'ok'); });
-    if (ro) return;
+      rec.setup = next; atBtn(scv, scv.checked ? 'Saved. Their rating valuation shows in the Yours column.' : 'Saved. Their rating valuation stays off the page.', 'ok'); });    if (ro) return;
     // 038: the AI drafts how a comparable compares with their home (Sonnet, through doc-prefill). The draft goes in unticked, so the
     // vendor sees nothing until Tim reads, changes and ticks it; a weak point of their home goes to his private note on the comparable.
+    // Ticked wording is Tim's: a draft never replaces it. The save itself only touches a row that is still unticked, so wording ticked
+    // in another tab meanwhile is kept too (the update then finds no row, and he is told).
+    const hasText = c => !!String(c.compare_text || '').trim();
     const draftCmp = async c => {
       const { data, error } = await sb.functions.invoke('doc-prefill', { body: { mode: 'appraisal_draft', part: 'compare', appraisal_id: rec.id, comp_id: c.id } }); const j = await fnJson(data, error);
       if (!j || !j.ok) return { ok: false, msg: (j && (j.message || j.error)) || (netErr(error) ? 'Not drafted. Check you have signal, then try again.' : 'Not drafted. Try again.') };
       const r = j.result || {}, note = String(r.private_note || '').trim();
       const upd = { compare_text: String(r.text || '').trim(), compare_ticked: false };
       if (note) upd.private_note = (String(c.private_note || '').trim() ? c.private_note.trim() + '\n' : '') + 'AI: ' + note;
-      try { await must(sb.from('appraisal_comps').update(upd).eq('id', c.id).select()); } catch (e) { return { ok: false, msg: 'Drafted, but not saved: ' + ((e && e.message) || 'try again.') }; }
+      let rows; try { rows = await must(sb.from('appraisal_comps').update(upd).eq('id', c.id).eq('compare_ticked', false).select()); } catch (e) { return { ok: false, msg: 'Drafted, but not saved: ' + ((e && e.message) || 'try again.') }; }
+      if (!rows || !rows.length) return { ok: false, ticked: true, msg: 'Not changed: its wording was ticked meanwhile, so it is kept.' };
       return { ok: true, problems: r.problems || [] };
     };
-    $$('[data-cmp-draft]').forEach(b => b.addEventListener('click', async () => { const c = comps.find(x => x.id === b.dataset.cmpDraft); b.disabled = true; atBtn(b, 'Drafting...', 'busy');
+    $$('[data-cmp-draft]').forEach(b => b.addEventListener('click', async () => { const c = comps.find(x => x.id === b.dataset.cmpDraft);
+      if (c.compare_ticked && hasText(c)) return atBtn(b, 'Its wording is ticked, so it is kept. To draft again, untick it in Edit first.', 'err');
+      if (hasText(c) && !window.confirm('This comparable already has wording you haven\'t ticked. Replace it with a new draft?')) return atBtn(b, 'Kept your wording.', 'ok');
+      b.disabled = true; atBtn(b, 'Drafting...', 'busy');
       const r = await draftCmp(c); b.disabled = false;
       if (!r.ok) return atBtn(b, r.msg, 'err');
       again('cmpDraft-' + c.id, 'Drafted. It is unticked: read it, change it if you like, then tick it in Edit.' + (r.problems.length ? ' Check: ' + r.problems.join(' ') : ''), r.problems.length ? 'err' : 'ok'); }));
+    // "Draft all" skips ticked wording and hidden comparables, asks once before replacing unticked wording, and says what it did and why
     const dall = $('#cmpDraftAll');
-    if (dall) dall.addEventListener('click', async () => { dall.disabled = true; let done = 0, bad = 0, firstErr = '';
-      for (const c of comps) { atBtn(dall, 'Drafting ' + (done + bad + 1) + ' of ' + comps.length + '...', 'busy'); const r = await draftCmp(c); if (r.ok) done++; else { bad++; firstErr = firstErr || r.msg; } }
+    if (dall) dall.addEventListener('click', async () => {
+      const ticked = comps.filter(c => c.compare_ticked && hasText(c)), hidden = comps.filter(c => c.shown === false && !ticked.includes(c));
+      const rest = comps.filter(c => !ticked.includes(c) && !hidden.includes(c)), mine = rest.filter(hasText);
+      const replace = mine.length ? window.confirm(mine.length + (mine.length === 1 ? ' comparable already has wording' : ' comparables already have wording') + ' you haven\'t ticked. Replace ' + (mine.length === 1 ? 'it' : 'them') + ' with new drafts? Cancel keeps ' + (mine.length === 1 ? 'it' : 'them') + ' and drafts only the empty ones.') : false;
+      const todo = rest.filter(c => replace || !hasText(c)), kept = replace ? 0 : mine.length;
+      dall.disabled = true; let done = 0, bad = 0, late = 0, firstErr = '';
+      for (const c of todo) { atBtn(dall, 'Drafting ' + (done + bad + late + 1) + ' of ' + todo.length + '...', 'busy'); const r = await draftCmp(c); if (r.ok) done++; else if (r.ticked) late++; else { bad++; firstErr = firstErr || r.msg; } }
       dall.disabled = false;
-      again('cmpDraftAll', 'Drafted ' + done + ' of ' + comps.length + '. Each is unticked until you read and tick it.' + (bad ? ' ' + bad + ' not drafted: ' + firstErr : ''), bad ? 'err' : 'ok'); });
+      const why = [ticked.length + late ? (ticked.length + late) + ' ticked, so kept' : '', hidden.length ? hidden.length + ' hidden from the page' : '', kept ? kept + ' with your own wording kept' : ''].filter(Boolean);
+      const skipped = ticked.length + late + hidden.length + kept;
+      const msg = (todo.length ? 'Drafted ' + done + ' of ' + todo.length + '.' + (done ? ' Each is unticked until you read and tick it.' : '') : 'Nothing to draft.') + (skipped ? ' Skipped ' + skipped + ': ' + why.join(', ') + '.' : '') + (bad ? ' ' + bad + ' not drafted: ' + firstErr : '');
+      again('cmpDraftAll', msg, bad ? 'err' : 'ok'); });
     const cmpTa = $('#cfCmp'), cmpHint = $('#cfCmpHint');
     if (cmpTa && cmpHint) { const chk = () => { const t = cmpTa.value.trim(), both = /\byours?\b/i.test(t) && /\b(this|that) (home|house|property|one)\b/i.test(t);
       cmpHint.dataset.kind = !t || both ? '' : 'err'; cmpHint.textContent = !t || both ? 'Compare and contrast: say something about this home and something about theirs ("this home" and "yours"), where they are alike and where they differ.' : 'It should mention both homes: this one and theirs ("yours").'; };
@@ -10613,6 +10640,9 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     if (!keep && !$('#main .loading')) return;
     if (keep && !$('#absPage')) return;
     const S = JSON.parse(JSON.stringify(rec.setup));
+    // the personal video kept as provider, id and hash (an older set-up's typed link is read once and not kept)
+    { const pv0 = APPR.pvOf(S.pvideo); S.pvideo = pv0 ? Object.assign({ provider: pv0.provider, id: pv0.id }, pv0.hash ? { hash: pv0.hash } : {}) : null; }
+    let pvTyped = null; const pvShown = () => pvTyped != null ? pvTyped : APPR.videoUrl(APPR.pvOf(S.pvideo));
     S.header = S.header === 'own' ? 'own' : 'claude';
     S.headerOpt = Object.assign({ url: '', asset: '', kind: 'image', credit: '', focus: { x: 50, y: 50 }, zoom: 1, bright: 1, speed: APPR.CLIP.speed }, S.headerOpt || {});
     const seg = { start: 0, len: APPR.CLIP.len };   // the segment for the next clip (not saved: only the clip is kept)
@@ -10655,8 +10685,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         <div id="absPrev">${previewHTML(hp)}</div></div>
       <h2>Video introduction</h2>
       <div class="card tight" id="absPv"><p class="small" style="margin:0 0 6px">A personal message on YouTube or Vimeo: paste its link and it sits above your letter. They press play to watch it; nothing loads from YouTube or Vimeo until they do. Without a link, nothing shows.${S.intro.asset ? ' With a link here, it shows in place of the video you uploaded below.' : ''}</p>
-        <label class="f" for="absPvUrl" style="margin-top:0">YouTube or Vimeo link <span class="opt">(youtube.com, youtu.be or vimeo.com)</span></label><input type="url" id="absPvUrl" inputmode="url" value="${esc((S.pvideo || {}).url || '')}" placeholder="https://youtu.be/..."${dis}>
-        <p class="small" id="absPvNote" style="margin:6px 0 0">${(S.pvideo || {}).url ? (APPR.videoEmbed(S.pvideo.url) ? 'This link works. Save to use it.' : 'That isn\'t a YouTube or Vimeo video link, so nothing will show.') : ''}</p></div>
+        <label class="f" for="absPvUrl" style="margin-top:0">YouTube or Vimeo link <span class="opt">(youtube.com, youtu.be or vimeo.com)</span></label><input type="url" id="absPvUrl" inputmode="url" value="${esc(pvShown())}" placeholder="https://youtu.be/..."${dis}>
+        <p class="small" id="absPvNote" style="margin:6px 0 0">${pvShown() ? (APPR.videoEmbed(pvShown()) ? 'This link works. Save to use it.' : 'That isn\'t a YouTube or Vimeo video link, so nothing will show.') : ''}</p></div>
       <div class="card tight" id="absIntro"><p class="small" style="margin:0 0 6px">Or upload a short hello from you, which they play themselves. Without one, nothing shows.</p>
         <label class="f" for="absIntroFile" style="margin-top:0">Your video <span class="opt">(MP4, WebM or MOV, up to 50 MB: about a minute, or recorded at 720p on your phone)</span></label><input type="file" id="absIntroFile" accept="${AB_VIDEO_TYPES.join(',')}"${dis}>
         ${iA ? `<p class="small" style="margin:6px 0 0">Using ${esc(iA.file_name || 'your video')}.</p>${urls[iA.id] ? `<div class="apv-intro-box" style="margin-top:6px"><video controls playsinline preload="metadata"${urls[iA.id].still ? ` poster="${esc(urls[iA.id].still)}"` : ''}><source src="${esc(urls[iA.id].url)}"></video></div>` : ''}<button class="btn link" type="button" id="absIntroRm"${dis}>Remove it</button>` : ''}</div>
@@ -10710,15 +10740,16 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       S.home.ad.title = v('#absAdTitle') || ''; S.home.ad.body = v('#absAdBody') || ''; S.home.ad.ticked = !!($('#absAdTick') || {}).checked;
       S.buyers.text = v('#absBuyText') || ''; S.buyers.tags = (v('#absBuyTags') || '').split(',').map(x => x.replace(/\s+/g, ' ').trim()).filter(Boolean).slice(0, 20); S.buyers.ticked = !!($('#absBuyTick') || {}).checked;
       S.reviews.on = !!($('#absRevOn') || {}).checked;
-      // the personal video's link: kept as typed; only a YouTube or Vimeo video's id is ever used (APPR.videoEmbed)
-      if (v('#absPvUrl') != null) S.pvideo = { url: v('#absPvUrl').trim().slice(0, 500) };
+      // the personal video: the typed link stays on this screen only; the set-up keeps the provider, the id and Vimeo's hash
+      // (APPR.videoEmbed), never the link itself. A link that isn't a video is refused on save, and nothing is kept.
+      if (v('#absPvUrl') != null) { pvTyped = v('#absPvUrl').trim().slice(0, 500); const e = APPR.videoEmbed(pvTyped); if (e || !pvTyped) S.pvideo = e ? Object.assign({ provider: e.provider, id: e.id }, e.hash ? { hash: e.hash } : {}) : null; }
     };
     const redraw = () => { read(); const y = window.scrollY; draw(); window.scrollTo(0, y); };
     // saves the set-up and, once the set-up is complete, writes the sections (only ticked and uploaded things reach them)
     const save = async (btn, okMsg) => {
       read();
       const bad = APPR.checkSections(S); if (bad) { atBtn(btn, bad, 'err'); return false; }
-      if (S.pvideo && S.pvideo.url && !APPR.videoEmbed(S.pvideo.url)) { atBtn(btn, 'The video link must be a YouTube or Vimeo video (youtube.com, youtu.be or vimeo.com), starting https://. Fix it or clear it, then save.', 'err'); return false; }
+      if (pvTyped && !APPR.videoEmbed(pvTyped)) { atBtn(btn, 'The video link must be a YouTube or Vimeo video (youtube.com, youtu.be or vimeo.com), starting https://. Fix it or clear it, then save.', 'err'); return false; }
       S.home.details =offer.filter(x => factOn(x.key)).map(x => [x.label, x.value]);
       const ranges = ((rec.fields || {}).ranges || []).map(r => ({ key: r.key, option: r.option, low: r.low, high: r.high }));
       const ready = !APPR.checkSetup(S, ranges);

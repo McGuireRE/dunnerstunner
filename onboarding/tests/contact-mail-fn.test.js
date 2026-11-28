@@ -13,5 +13,12 @@ const path = require('path');
   expect(m.replyTo === 'robin@example.com' && M.contactMail(Object.assign({}, row, { from_email: 'nope' }), 't@x.nz', 'https://a.example/').replyTo === undefined, 'reply-to only for a real-looking email');
   expect(/href="https:\/\/packages\.dunnerstunner\.co\.nz\/portal\/messages\/5b0f7d1e-2c3a-4d5e-8f90-123456789abc"/.test(m.html), 'the link opens the message on Needs you');
   expect(/would like a text back/.test(m.html), 'how they would like a reply');
+  // who it goes to: Tim's settings email when set and real, else notify's TIM_EMAIL; never the sender's
+  expect(M.timTo({ tim_email: 'tim.settings@example.test' }, 'fallback@example.test') === 'tim.settings@example.test', 'settings email used when set');
+  expect(M.timTo({ tim_email: '' }, 'fallback@example.test') === 'fallback@example.test' && M.timTo({}, 'fallback@example.test') === 'fallback@example.test' && M.timTo(null, 'fallback@example.test') === 'fallback@example.test', 'falls back to TIM_EMAIL when none set');
+  expect(M.timTo({ tim_email: 'a@b.nz, x@evil.example' }, 'fallback@example.test') === 'fallback@example.test' && M.timTo({ tim_email: 'nope' }, 'fallback@example.test') === 'fallback@example.test', 'a bad or doubled address falls back');
+  expect(M.timTo(Object.assign({}, row, { tim_email: null }), 'fallback@example.test') === 'fallback@example.test', 'never the sender\'s address');
+  const src = require('fs').readFileSync(path.join(__dirname, '..', '..', 'fn', 'notify.ts'), 'utf8');
+  expect(/contactMail\(row, timTo\(row, TIM_EMAIL\), APP_URL\)/.test(src), 'notify sends to timTo(row, TIM_EMAIL)');
   console.log(JSON.stringify({ out, errs }, null, 1));
 })();

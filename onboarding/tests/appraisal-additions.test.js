@@ -56,7 +56,7 @@ const SEED = () => ({ properties: [{ id: 'P1', address: 'RB 4 Add Road, Rbvale',
 
 (async () => {
   const b = await chromium.launch();
-  const REQ = [];
+  const REQ = [], DLG = { no: false }, DLGS = [];
   const mk = async (w, scheme, o) => {
     const ctx = await b.newContext({ viewport: { width: w, height: 900 }, colorScheme: scheme || 'light', hasTouch: w < 500, isMobile: w < 500 }); ctx.setDefaultTimeout(10000);
     ctx.on('request', r => REQ.push(r.url()));
@@ -72,7 +72,7 @@ const SEED = () => ({ properties: [{ id: 'P1', address: 'RB 4 Add Road, Rbvale',
     await ctx.addInitScript(bl => { window.__repoBlobs = window.__repoBlobs || {}; Object.entries(bl).forEach(([k, v]) => { window.__repoBlobs[k] = new Blob([v], { type: 'image/svg+xml' }); }); }, BLOBS);
     const p = await ctx.newPage(); p.on('pageerror', e => errs.push('page: ' + e.message));
     p.on('console', m => { if (m.type() === 'error' && !/Failed to load resource|permission denied|Failed to fetch|net::ERR|row-level security|Agent only/.test(m.text())) errs.push('console: ' + m.text()); });
-    p.on('dialog', d => d.accept());
+    p.on('dialog', d => { DLGS.push(d.message()); return DLG.no ? d.dismiss() : d.accept(); });
     return { ctx, p };
   };
   const wait = (p, ms) => p.waitForTimeout(ms || 600);
@@ -115,6 +115,26 @@ const SEED = () => ({ properties: [{ id: 'P1', address: 'RB 4 Add Road, Rbvale',
   await p.click('#spSave'); await wait(p, 900);
   out.spSaved = await note(p, 'spSave'); d = await db(p);
   expect(/^Saved/.test(out.spSaved || '') && d.site_profile[0].licence === 'Licensed salesperson, REAA 2008' && d.site_profile[0].about.tim.heading === 'About Tim' && d.site_profile[0].channels.map(c => c.key).slice(0, 5).join() === 'call,text,email,whatsapp,form', 'settings saved, in Tim\'s order: ' + JSON.stringify([out.spSaved, d.site_profile[0].channels.map(c => c.key)]));
+  // replacing the picture deletes the old file; when the delete comes back short (as it did without Tim's read rule), he is told
+  const pic2 = Buffer.from(big, 'base64');
+  await p.setInputFiles('#spPhoto', { name: 'tim2.png', mimeType: 'image/png', buffer: pic2 }); await wait(p, 1500);
+  d = await db(p); const ph2 = d.site_profile[0].photo_path;
+  out.replace = { old: !!d.storage_objects[ph], now: !!d.storage_objects[ph2], note: await note(p, 'spPhotoPick') };
+  expect(ph2 !== ph && !out.replace.old && out.replace.now && /\|ok$/.test(out.replace.note || ''), 'replace: the old picture file is gone, the new one kept: ' + JSON.stringify(out.replace));
+  await p.evaluate(() => localStorage.setItem('mockSiteRemoveFail', '1'));
+  await p.setInputFiles('#spPhoto', { name: 'tim3.png', mimeType: 'image/png', buffer: pic2 }); await wait(p, 1500);
+  d = await db(p); const ph3 = d.site_profile[0].photo_path;
+  out.replaceFail = { old: !!d.storage_objects[ph2], note: await note(p, 'spPhotoPick') };
+  expect(ph3 !== ph2 && out.replaceFail.old && /could not be deleted/.test(out.replaceFail.note || '') && /\|err$/.test(out.replaceFail.note || ''), 'a delete that removes nothing is reported plainly under the button: ' + JSON.stringify(out.replaceFail));
+  await p.click('#spPhotoRm'); await wait(p, 900); d = await db(p);
+  out.removeFail = { path: d.site_profile[0].photo_path, file: !!d.storage_objects[ph3], note: await note(p, 'spPhotoPick') };
+  expect(out.removeFail.path === null && out.removeFail.file && /could not be deleted/.test(out.removeFail.note || ''), 'remove: taken off, and the file left behind is reported: ' + JSON.stringify(out.removeFail));
+  await p.evaluate(() => localStorage.removeItem('mockSiteRemoveFail'));
+  await p.setInputFiles('#spPhoto', { name: 'tim4.png', mimeType: 'image/png', buffer: pic2 }); await wait(p, 1500);
+  d = await db(p); const ph4 = d.site_profile[0].photo_path; await p.click('#spPhotoRm'); await wait(p, 900); d = await db(p);
+  out.remove = { path: d.site_profile[0].photo_path, file: !!d.storage_objects[ph4], note: await note(p, 'spPhotoPick') };
+  expect(out.remove.path === null && !out.remove.file && /^Removed/.test(out.remove.note || ''), 'remove: the file is deleted too: ' + JSON.stringify(out.remove));
+  await p.setInputFiles('#spPhoto', { name: 'tim5.png', mimeType: 'image/png', buffer: pic2 }); await wait(p, 1500);
   // the agency tab's image (an About image, public read)
   await edit(p, "d.site_profile[0].about.agency={heading:'',body:'',image_path:'about/rb-agency.svg'};");
 
@@ -152,16 +172,52 @@ const SEED = () => ({ properties: [{ id: 'P1', address: 'RB 4 Add Road, Rbvale',
   expect(/should mention both homes/.test(out.hint[0]) && out.hint[1] === 'err' && out.hint2 === '', 'A: typing his own words, Tim is reminded to mention both homes: ' + JSON.stringify([out.hint, out.hint2]));
   await tick(p, '#cfTick'); await p.click('#cfSave'); await wait(p, 700);
   await tick(p, '#cmpShowCv'); await wait(p, 700);
+  // A: drafting never replaces ticked wording; Draft all skips ticked and hidden, asks before replacing unticked wording, says why
+  const aiN = async () => (await db(p)).ai_calls.filter(a => a.purpose === 'appraisal compare draft').length;
+  let ai0 = await aiN(); DLGS.length = 0;
+  await p.click('#cmpDraft-C1'); await wait(p, 600); d = await db(p);
+  out.dTicked = { note: await note(p, 'cmpDraft-C1'), text: d.appraisal_comps.find(c => c.id === 'C1').compare_text, ai: (await aiN()) - ai0, asked: DLGS.length };
+  expect(/ticked, so it is kept/.test(out.dTicked.note || '') && /close to yours in size/.test(out.dTicked.text) && out.dTicked.ai === 0 && out.dTicked.asked === 0, 'A: a single draft never replaces ticked wording, and costs nothing: ' + JSON.stringify(out.dTicked));
+  await edit(p, "d.appraisal_comps.find(c=>c.id==='C2').shown=false;"); await p.reload(); await wait(p, 1000);
+  await p.click('#cmpDraftAll'); await wait(p, 1000); d = await db(p);
+  out.dAllSkip = { note: await note(p, 'cmpDraftAll'), c1: d.appraisal_comps.find(c => c.id === 'C1').compare_text, ai: (await aiN()) - ai0 };
+  expect(/^Nothing to draft\. Skipped 2: 1 ticked, so kept, 1 hidden from the page\./.test(out.dAllSkip.note || '') && /close to yours in size/.test(out.dAllSkip.c1) && out.dAllSkip.ai === 0, 'A: Draft all skips ticked and hidden comparables and says why: ' + JSON.stringify(out.dAllSkip));
+  await edit(p, "d.appraisal_comps.find(c=>c.id==='C2').shown=true;"); await p.reload(); await wait(p, 1000);
+  const c2t = (await db(p)).appraisal_comps.find(c => c.id === 'C2').compare_text; DLG.no = true; DLGS.length = 0;
+  await p.click('#cmpDraftAll'); await wait(p, 1000); d = await db(p);
+  out.dAllKeep = { note: await note(p, 'cmpDraftAll'), same: d.appraisal_comps.find(c => c.id === 'C2').compare_text === c2t, ai: (await aiN()) - ai0, asked: DLGS.slice() };
+  expect(/^Nothing to draft\. Skipped 2: 1 ticked, so kept, 1 with your own wording kept\./.test(out.dAllKeep.note || '') && out.dAllKeep.same && out.dAllKeep.ai === 0 && out.dAllKeep.asked.length === 1 && /haven't ticked/.test(out.dAllKeep.asked[0]), 'A: Draft all asks before replacing unticked wording; Cancel keeps it: ' + JSON.stringify(out.dAllKeep));
+  DLGS.length = 0; await p.click('#cmpDraft-C2'); await wait(p, 600);
+  out.dOneKeep = { note: await note(p, 'cmpDraft-C2'), asked: DLGS.length, ai: (await aiN()) - ai0 };
+  expect(/^Kept your wording/.test(out.dOneKeep.note || '') && out.dOneKeep.asked === 1 && out.dOneKeep.ai === 0, 'A: a single draft asks first when there is unticked wording: ' + JSON.stringify(out.dOneKeep));
+  DLG.no = false;
+  await p.evaluate(() => { window.__mockDB.appraisal_comps.find(c => c.id === 'C2').compare_ticked = true; });   // ticked in another tab; this page still shows it unticked
+  await p.click('#cmpDraft-C2'); await wait(p, 900); d = await db(p);
+  out.dLate = { note: await note(p, 'cmpDraft-C2'), same: d.appraisal_comps.find(c => c.id === 'C2').compare_text === c2t, ticked: d.appraisal_comps.find(c => c.id === 'C2').compare_ticked };
+  expect(/ticked meanwhile/.test(out.dLate.note || '') && out.dLate.same && out.dLate.ticked === true, 'A: wording ticked meanwhile is kept: the save only touches an unticked row: ' + JSON.stringify(out.dLate));
+  await edit(p, "d.appraisal_comps.find(c=>c.id==='C2').compare_ticked=false;");
+  // the range is never on the early charts (Tim, 28 November 2026): the price evidence and the market charts show the sales alone, and
+  // the range first appears in the opinion of price, as the pyramid
+  out.rgSwitch = await p.evaluate(() => !!document.querySelector('#cmpRangeCharts'));
+  expect(!out.rgSwitch, 'no switch for the range on the charts: it is the rule');
+  await p.goto(PB + 'appraisals/AVX'); await wait(p, 1400);
+  out.rgEarly = await p.evaluate(() => { const D = document.querySelector('#apvDoc'), figs = Array.from(D.querySelectorAll('.mk-fig')).filter(f => !f.closest('.apv-opinion')), op = D.querySelector('.apv-opinion');
+    return { figs: figs.length, range: figs.some(f => f.querySelector('.mk-range, .mk-ref') || /My range|range is marked/i.test(f.textContent)), pyr: op ? op.querySelectorAll('.apv-pyr svg').length : 0, opinion: /\$555,000/.test(op ? op.innerText : '') }; });
+  expect(out.rgEarly.figs > 0 && !out.rgEarly.range && out.rgEarly.pyr === 1 && out.rgEarly.opinion, 'the price evidence shows the sales alone; the range first appears in the opinion, with the pyramid: ' + JSON.stringify(out.rgEarly));
+  out.rgMarket = await p.evaluate(() => { const months = []; for (let i = 0; i < 6; i++) months.push({ area: 'Dunedin', month: '2026-0' + (i + 1) + '-01', median: 500000 + i * 5000, lower_quartile: 420000, upper_quartile: 600000, sales: 100 + i, days_to_sell: 30, bands: [{ from: 0, to: 500000, count: 40 }, { from: 500000, to: 700000, count: 50 }, { from: 700000, to: null, count: 20 }], source: 'reinz' });
+    const rec = JSON.parse(localStorage.getItem('mockdb')).appraisal_views[0], x = document.createElement('div'); x.innerHTML = window.APPR.render(rec, { comps: [], months, market: true, area: 'Dunedin' });
+    const figs = Array.from(x.querySelectorAll('.mk-fig')); return { figs: figs.length, mine: figs.filter(f => /My range|range is marked/i.test(f.textContent) || f.querySelector('.mk-band.on, .mk-ref, .mk-range')).length, bandCols: Array.from(x.querySelectorAll('[data-chart="bands"] th')).map(t => t.textContent) }; });
+  expect(out.rgMarket.figs >= 4 && out.rgMarket.mine === 0 && !out.rgMarket.bandCols.includes('My range'), 'the market charts show no range, no "My range" line, label or note: ' + JSON.stringify(out.rgMarket));
   await p.goto(PB + 'appraisals/AVX'); await wait(p, 1400); s = await info();
   expect(s.cards[0].rows.includes('Rating valuation|$520,000|$610,000') && /close to yours in size/.test(s.text) && !/smaller section than yours/.test(s.text), 'A: the rating valuation once ticked; only the ticked comparison shows: ' + JSON.stringify(s.cards[0].rows));
 
   // E: the overlay from the circle on Tim's own view: preview form, tabs, contact actions; Esc closes and focus returns
   await p.click('#apvDoc .apv-avatar'); await wait(p, 400);
   out.dlgTim = await p.evaluate(() => { const g = document.querySelector('#aboutDlg'); return { open: !g.hidden, inside: g.contains(document.activeElement), acts: Array.from(g.querySelectorAll('.ab-act')).map(a => (a.getAttribute('href') || a.id) + '|' + a.textContent),
-    tabs: Array.from(g.querySelectorAll('[role="tab"]')).map(t => t.textContent + ':' + t.getAttribute('aria-selected')), formDisabled: !!g.querySelector('#abFSend[disabled]'), preview: /Preview/.test(g.textContent), photo: !!g.querySelector('.ab-photo') }; });
+    tabs: Array.from(g.querySelectorAll('[role="tab"]')).map(t => t.textContent + ':' + t.getAttribute('aria-selected')), form: !!g.querySelector('#abForm, #abFormBtn'), preview: /Preview|Only you see/.test(g.textContent), settings: !!g.querySelector('[data-plink="settings/about"]'), photo: !!g.querySelector('.ab-photo') }; });
   expect(out.dlgTim.open && out.dlgTim.inside && out.dlgTim.photo, 'E: the circle opens the overlay with focus inside it: ' + JSON.stringify(out.dlgTim));
-  expect(out.dlgTim.acts.join(',') === 'tel:+64275627207|Call,sms:+64275627207|Text,mailto:tim@mcguire.co.nz|Email,https://wa.me/64270000000|WhatsApp,abFormBtn|Send a message,https://t.me/rbtester|Telegram', 'E: the ways to reach Tim, in his order, as each service writes its links: ' + JSON.stringify(out.dlgTim.acts));
-  expect(out.dlgTim.tabs.join() === 'Tim:true,McGuire Real Estate:false' && out.dlgTim.formDisabled && out.dlgTim.preview, 'E: both tabs (the agency one has only its image), and on Tim\'s own view the form is a preview: ' + JSON.stringify(out.dlgTim));
+  expect(out.dlgTim.acts.join(',') === 'tel:+64275627207|Call,sms:+64275627207|Text,mailto:tim@mcguire.co.nz|Email,https://wa.me/64270000000|WhatsApp,https://t.me/rbtester|Telegram', 'E: the ways to reach Tim, in his order, as each service writes its links (no form on his copy of an appraisal): ' + JSON.stringify(out.dlgTim.acts));
+  expect(out.dlgTim.tabs.join() === 'Tim:true,McGuire Real Estate:false' && !out.dlgTim.form && !out.dlgTim.preview && !out.dlgTim.settings, 'E: both tabs (the agency one has only its image); on Tim\'s copy only what a vendor sees: no preview form, no settings link: ' + JSON.stringify(out.dlgTim));
   await p.focus('#abTab-tim'); await p.keyboard.press('ArrowRight'); await wait(p, 100);
   out.tabKey = await p.evaluate(() => [document.activeElement.id, document.querySelector('#abPanel-tim').hidden, document.querySelector('#abPanel-agency').hidden]);
   expect(out.tabKey.join() === 'abTab-agency,true,false', 'E: the arrow keys move between the tabs: ' + out.tabKey);
@@ -180,6 +236,51 @@ const SEED = () => ({ properties: [{ id: 'P1', address: 'RB 4 Add Road, Rbvale',
   expect(out.print.about && !out.print.btn && !out.print.avatar && !out.print.dlg, 'E: print shows the contact line and both About sections, no buttons: ' + JSON.stringify(out.print));
   await p.emulateMedia({ media: 'screen' });
 
+  // E: Tim's own lines (the preview form, "your About is empty", the settings link) only on his other pages: never while presenting,
+  // on his copy of an appraisal, or on a page done in person with the vendor
+  const dlgOn = () => p.evaluate(() => { const g = document.querySelector('#aboutDlg'); return { open: !g.hidden, form: !!g.querySelector('#abForm, #abFormBtn'), disabled: !!g.querySelector('#abFSend[disabled]'), preview: /Preview/.test(g.textContent), empty: /Your About is empty|Only you see/.test(g.textContent), settings: !!g.querySelector('[data-plink="settings/about"]') }; });
+  const saveAbout = await p.evaluate(() => JSON.stringify(window.__mockDB.site_profile[0].about));
+  await p.evaluate(() => { window.__mockDB.site_profile[0].about = {}; localStorage.setItem('mockdb', JSON.stringify(window.__mockDB)); });
+  const modes = {};
+  for (const [k, u, sel] of [['home', PB, '#hdrAvatar'], ['copy', PB + 'appraisals/AVX', '#apvDoc .apv-avatar'], ['present', PB + 'appraisals/AVX/present', '#apvDoc .apv-avatar'], ['inPerson', PB + 'properties/P1/agreement/new', '#hdrAvatar']]) {
+    await p.goto(u); await wait(p, 1300);
+    const has = await p.evaluate(q => { const e = document.querySelector(q); return !!e && e.getClientRects().length > 0; }, sel);
+    if (!has) { modes[k] = 'no circle'; continue; }
+    await p.click(sel); await wait(p, 400); modes[k] = await dlgOn(); await p.keyboard.press('Escape'); await wait(p, 150);
+  }
+  out.modes = modes;
+  const vend = m => m && m.open && !m.form && !m.preview && !m.empty && !m.settings;
+  expect(modes.home && modes.home.open && modes.home.form && modes.home.disabled && modes.home.preview && modes.home.empty && modes.home.settings, 'E: on Tim\'s own pages, the preview form and the "About is empty" line with its settings link: ' + JSON.stringify(modes.home));
+  expect(vend(modes.copy) && vend(modes.present), 'E: on his copy and while presenting, only what a vendor sees: ' + JSON.stringify([modes.copy, modes.present]));
+  expect(vend(modes.inPerson), 'E: on a page done in person, only what a vendor sees: ' + JSON.stringify(modes.inPerson));
+  await p.evaluate(a => { window.__mockDB.site_profile[0].about = JSON.parse(a); localStorage.setItem('mockdb', JSON.stringify(window.__mockDB)); }, saveAbout);
+
+  // off means off (Tim, 28 November 2026): one function decides the phone and email on the appraisal (signature, closing, print), and
+  // site_profile_public() leaves out a phone or email whose switches are all off
+  out.contactFor = await p.evaluate(() => { const A = window.APPR, S = (call, text, email) => ({ name: 'Tim', phone: '021 000 000', email: 'tim@example.test', channels: [{ key: 'call', on: call }, { key: 'text', on: text }, { key: 'email', on: email }] });
+    const v = (c, t) => A.reachVerb(A.contactFor(S(c, t, true)));
+    return { off: A.contactFor(S(false, false, false)), on: A.contactFor(S(true, true, true)), verbs: [v(true, true), v(true, false), v(false, true), v(false, false)], none: A.contactFor({}) }; });
+  expect(out.contactFor.off.phone === '' && out.contactFor.off.email === '' && out.contactFor.on.phone === '021 000 000' && out.contactFor.on.email === 'tim@example.test' && out.contactFor.verbs.join('|') === 'Call or text|Call|Text|' && out.contactFor.none.phone === '',
+    'contact: off means off; the closing line reads Call or text, Call, or Text: ' + JSON.stringify(out.contactFor));
+  const look = async () => { await p.goto(PB + 'appraisals/AVX'); await wait(p, 1400);
+    const r = await p.evaluate(() => { const D = document.querySelector('#apvDoc'), c = D.querySelector('.apv-close'), pr = D.querySelector('.apv-about-contact');
+      return { sig: (D.querySelector('.apv-sig') || {}).textContent || '', close: c ? c.textContent : null, print: pr ? pr.textContent : null, all: D.innerHTML }; });
+    await p.click('#apvDoc .apv-avatar'); await wait(p, 300);
+    r.dlg = await p.evaluate(() => { const g = document.querySelector('#aboutDlg'); return { acts: Array.from(g.querySelectorAll('.ab-act')).map(a => a.textContent), html: g.innerHTML }; }); await p.keyboard.press('Escape');
+    r.pub = await p.evaluate(async () => (await window.supabase.createClient('x', 'y').rpc('site_profile_public')).data); return r; };
+  const setCh = on => p.evaluate(o => { const r = window.__mockDB.site_profile[0]; r.channels.forEach(c => { if (c.key in o) c.on = o[c.key]; }); localStorage.setItem('mockdb', JSON.stringify(window.__mockDB)); }, on);
+  await setCh({ call: false, text: true }); let cv = await look();
+  out.textOnly = { sig: cv.sig, close: cv.close, acts: cv.dlg.acts };
+  expect(/Questions at any stage\? Text Tim on 027 562 7207\./.test(cv.close || '') && /027 562 7207/.test(cv.sig) && !cv.dlg.acts.includes('Call') && cv.dlg.acts.includes('Text'), 'switches: Text alone reads "Text Tim on ..."; no Call button: ' + JSON.stringify(out.textOnly));
+  await setCh({ call: false, text: false, email: false }); cv = await look();
+  out.allOff = { sig: cv.sig, close: cv.close, print: cv.print, acts: cv.dlg.acts, pub: { phone: cv.pub && cv.pub.phone, email: cv.pub && cv.pub.email } };
+  expect(cv.close === null && !/027 562 7207|562 7207|tim@mcguire\.co\.nz/.test(cv.all + cv.dlg.html) && !cv.dlg.acts.some(a => /Call|Text|Email/.test(a)) && cv.pub && cv.pub.phone === '' && cv.pub.email === '',
+    'switches: Call, Text and Email off: the phone and email appear nowhere a vendor sees (signature, closing, print, overlay), and site_profile_public leaves them out: ' + JSON.stringify(out.allOff));
+  await setCh({ call: true, text: true, email: true }); cv = await look();
+  expect(/Call or text Tim on/.test(cv.close || '') && /tim@mcguire\.co\.nz/.test(cv.sig), 'switches back on: Call or text, and the email in the signature');
+  { const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'appraisal-core.js'), 'utf8'), cfBody = (/function contactFor\(S\) \{[\s\S]*?\n  \}/.exec(src) || [''])[0], uses = (src.replace(cfBody, '').match(/\bS\.(phone|email)\b/g) || []).length;
+    expect(cfBody && uses === 0 && /CF\.phone, CF\.email/.test(src) && /if \(written && CF\.phone\)/.test(src) && /cf = contactFor\(S\)/.test(src), 'contact: the signature, closing and print lines all go through contactFor (' + uses + ' direct uses)'); }
+
   // C: the personal video: sections screen, then the appraisal; nothing from YouTube until pressed
   await p.goto(PB + 'appraisals/AVX/sections'); await wait(p, 1000);
   await p.fill('#absPvUrl', 'https://evil.example/watch?v=dQw4w9WgXcQ'); await p.click('#absSave'); await wait(p, 500);
@@ -188,6 +289,13 @@ const SEED = () => ({ properties: [{ id: 'P1', address: 'RB 4 Add Road, Rbvale',
   d = await db(p); const av = d.appraisal_views[0];
   out.pvSec = av.sections.filter(x => x.type === 'pvideo');
   expect(out.pvSec.length === 1 && out.pvSec[0].id === 'dQw4w9WgXcQ' && out.pvSec[0].provider === 'youtube' && !JSON.stringify(out.pvSec).includes('watch?v') && av.sections.findIndex(x => x.type === 'pvideo') < av.sections.findIndex(x => x.type === 'heading'), 'C: only the video\'s id is kept, above the letter: ' + JSON.stringify(out.pvSec));
+  out.pvSetup = av.setup.pvideo;
+  expect(JSON.stringify(out.pvSetup) === '{"provider":"youtube","id":"dQw4w9WgXcQ"}', 'C: the set-up keeps the provider and id only, not the link as typed: ' + JSON.stringify(out.pvSetup));
+  await p.goto(PB + 'appraisals/AVX/sections'); await wait(p, 1000);
+  out.pvField = await p.inputValue('#absPvUrl');
+  expect(out.pvField === 'https://youtu.be/dQw4w9WgXcQ', 'C: the field shows a plain link rebuilt from the id: ' + out.pvField);
+  out.pvVimeo = await p.evaluate(() => { const A = window.APPR, e = A.videoEmbed('https://vimeo.com/123456789/abcdef1234?share=copy'); return { e, back: A.videoUrl(A.pvOf({ provider: 'vimeo', id: e.id, hash: e.hash })), old: A.pvOf({ url: 'https://youtu.be/dQw4w9WgXcQ' }), bad: A.pvOf({ provider: 'youtube', id: 'x"><script>' }) }; });
+  expect(out.pvVimeo.back === 'https://vimeo.com/123456789/abcdef1234' && out.pvVimeo.old && out.pvVimeo.old.id === 'dQw4w9WgXcQ' && out.pvVimeo.bad === null, 'C: Vimeo keeps its privacy hash; an older set-up\'s link still reads; a bad id reads as nothing: ' + JSON.stringify(out.pvVimeo));
   REQ.length = 0; await p.goto(PB + 'appraisals/AVX'); await wait(p, 1400);
   out.pv = await p.evaluate(() => ({ poster: !!document.querySelector('.apv-pvideo .apv-pv-play'), iframe: !!document.querySelector('.apv-pvideo iframe'), before: (() => { const a = document.querySelector('.apv-pvideo'), l = document.querySelector('.apv-sig'); return !!(a && l && (a.compareDocumentPosition(l) & Node.DOCUMENT_POSITION_FOLLOWING)); })() }));
   out.pvCalls0 = REQ.filter(u => /youtube|vimeo|ytimg/.test(u)).length;
@@ -254,6 +362,57 @@ const SEED = () => ({ properties: [{ id: 'P1', address: 'RB 4 Add Road, Rbvale',
   out.none = await p.evaluate(() => ({ av: !!document.querySelector('#apvDoc .apv-avatar'), hdr: !document.querySelector('#hdrAvatar').hidden, btn: !!document.querySelector('#apvDoc [data-about-open]'), sub: !!document.querySelector('.apv-suburb'), close: !!document.querySelector('.apv-close'), prompt: (document.querySelector('#apvPrompts') || {}).innerText || '' }));
   expect(!out.none.av && !out.none.hdr && !out.none.btn && !out.none.sub && !out.none.close && /No sales are loaded for Rbvale/.test(out.none.prompt) && /Your About is empty/.test(out.none.prompt), 'G: nothing there, nothing shown, and Tim is prompted: ' + JSON.stringify(out.none));
   expect(!(await side(p)), 'wide dark: no sideways scroll'); await shot(p, 'tim_1280_dark');
+  await X.ctx.close();
+
+  // ── the price pyramid in the opinion of price (Tim, 28 November 2026): one range, two ranges, phone, wide, dark and print ──
+  const pyr = () => p.evaluate(() => { const op = document.querySelector('#apvDoc .apv-opinion'); if (!op) return null;
+    return Array.from(op.querySelectorAll('.apv-pyr')).map(f => { const svg = f.querySelector('svg'), poly = k => { const ys = svg.querySelector('.apv-pyr-' + k).getAttribute('points').split(' ').map(pt => +pt.split(',')[1]); return [Math.min(...ys), Math.max(...ys)]; };
+      const br = svg.querySelector('.apv-pyr-br').getAttribute('d'), m = /^M[\d.]+,([\d.]+) h8 V([\d.]+)/.exec(br), texts = Array.from(svg.querySelectorAll('text')).map(t => ({ t: t.textContent, y: +t.getAttribute('y'), h: t.getBoundingClientRect().height }));
+      const r = f.getBoundingClientRect(), bands = ['red', 'orange', 'yellow', 'green'].map(k => [k, poly(k)]), red = bands[0][1], green = bands[3][1];
+      return { cap: (f.querySelector('.apv-pyr-cap') || {}).textContent || '', alt: svg.getAttribute('aria-label'), role: svg.getAttribute('role'), top: m ? +m[1] : null, bottom: m ? +m[2] : null, red, green,
+        fills: ['red', 'orange', 'yellow', 'green'].map(k => getComputedStyle(svg.querySelector('.apv-pyr-' + k)).fill), texts, left: Math.round(r.left), w: Math.round(r.width), smallest: Math.min(...texts.map(x => x.h)) }; }); });
+  const words = () => p.evaluate(() => { const w = document.querySelector('#apvDoc .apv-opinion .apv-pw'); return w ? w.innerText : ''; });
+  X = await mk(390); p = X.p;
+  await signIn(p, 'agent-test@example.com'); await write(p);
+  await p.goto(PB + 'appraisals/AVX'); await wait(p, 1400);
+  let P = await pyr(); out.pyr1 = P;
+  const p1 = P && P[0];
+  expect(P && P.length === 1 && p1.role === 'img' && p1.alt === 'Appraisal range $555,000 to $595,000. Above it, the top price is set by competition between buyers.', 'pyramid: one, with the text alternative: ' + JSON.stringify(P && P.map(x => x.alt)));
+  expect(p1 && p1.fills.join('|') === 'rgb(226, 75, 74)|rgb(239, 159, 39)|rgb(250, 199, 117)|rgb(151, 196, 89)', 'pyramid: Tim\'s colours, red, orange, yellow and green: ' + JSON.stringify(p1 && p1.fills));
+  expect(p1 && p1.bottom === p1.green[0] && Math.abs(p1.top - (p1.red[0] + p1.red[1]) / 2) < 1 && (p1.red[1] - p1.red[0]) >= 70, 'pyramid: the range runs from the top of the green to halfway up the (enlarged) red peak: ' + JSON.stringify(p1 && { top: p1.top, bottom: p1.bottom, red: p1.red, green: p1.green }));
+  const T = t => p1 && p1.texts.find(x => x.t === t);
+  expect(p1 && T('$555,000') && T('$595,000') && T('Got to be better than') && T('Top of range') && T('Appraisal range') && T('Cherry on top:') && T('set by competition, not printed') && T('Widest base: the most buyers') && Math.abs(T('$595,000').y - p1.top) < 20 && Math.abs(T('$555,000').y - p1.bottom) < 20,
+    'pyramid: the bracket carries Tim\'s figures at "Got to be better than" and "Top of range"; the labels name every part: ' + JSON.stringify(p1 && p1.texts.map(x => x.t)));
+  expect(p1 && !p1.texts.some(x => /\$/.test(x.t) && x.y < p1.top - 1), 'pyramid: nothing above the top of the range carries a number: ' + JSON.stringify(p1 && p1.texts.filter(x => /\$/.test(x.t))));
+  expect(p1 && p1.smallest >= 10 && p1.w <= 390, 'pyramid: readable at 390 (smallest label ' + (p1 && p1.smallest) + ' px), within the screen');
+  out.pw1 = await words();
+  expect(/^How I think about price\. Picture buyers as cherries/.test(out.pw1) && /Competition decides the rest\.$/.test(out.pw1.trim()), 'pyramid: Tim\'s price wording beside it: ' + out.pw1.slice(0, 80));
+  expect(/\$555,000 to \$595,000/.test(await p.evaluate(() => document.querySelector('#apvDoc .apv-opin-fig').textContent)), 'the large range figures stay in the opinion card');
+  expect(!(await side(p)), 'pyramid: no sideways scroll at 390'); await p.locator('#apvDoc .apv-opinion').screenshot({ path: path.join(__dirname, 'out', 'appraisal_add_pyramid_390.png') });
+  // print: drawn, in colour, inside the page
+  await p.emulateMedia({ media: 'print' });
+  out.pyrPrint = await p.evaluate(() => { const f = document.querySelector('#apvDoc .apv-pyr'), r = f.getBoundingClientRect(); return { shown: getComputedStyle(f).display !== 'none' && r.height > 100, adjust: getComputedStyle(f.querySelector('svg')).printColorAdjust || getComputedStyle(f.querySelector('svg')).webkitPrintColorAdjust }; });
+  expect(out.pyrPrint.shown && out.pyrPrint.adjust === 'exact', 'pyramid: printed, in its colours: ' + JSON.stringify(out.pyrPrint));
+  await p.pdf({ path: path.join(__dirname, 'out', 'appraisal_add_pyramid_print.pdf') }).catch(() => {});
+  await p.emulateMedia({ media: 'screen' });
+  // two options: a pyramid each with its own label; the price table keeps its column headings; stacked on a phone
+  await edit(p, "const r=d.appraisal_views[0]; r.fields.ranges=[{key:'A',option:'Current condition',involves:'',low:540000,high:580000},{key:'B',option:'With light preparation',involves:'',low:575000,high:620000}];");
+  await p.goto(PB + 'appraisals/AVX'); await wait(p, 1400);
+  P = await pyr(); out.pyr2 = P && P.map(x => ({ cap: x.cap, alt: x.alt, left: x.left, w: x.w }));
+  out.pyr2Head = await p.evaluate(() => Array.from(document.querySelectorAll('#apvDoc .apv-opinion .apv-ranges th')).map(t => t.textContent));
+  expect(P && P.length === 2 && P[0].cap === 'Current condition' && P[1].cap === 'With light preparation' && /\$540,000 to \$580,000/.test(P[0].alt) && /\$575,000 to \$620,000/.test(P[1].alt) && P[0].left === P[1].left, 'pyramid: two options, one each with its own label, stacked on a phone: ' + JSON.stringify(out.pyr2));
+  expect(out.pyr2Head.length === 2 && out.pyr2Head.every(Boolean), 'pyramid: the multi-option price table keeps its column headings: ' + JSON.stringify(out.pyr2Head));
+  expect(!(await side(p)), 'two pyramids: no sideways scroll at 390'); await p.locator('#apvDoc .apv-opinion').screenshot({ path: path.join(__dirname, 'out', 'appraisal_add_pyramid2_390.png') });
+  const twoRanges = await db(p);
+  await X.ctx.close();
+  X = await mk(1280, 'dark'); p = X.p;
+  await signIn(p, 'agent-test@example.com', twoRanges);
+  await p.goto(PB + 'appraisals/AVX'); await wait(p, 1400);
+  P = await pyr(); out.pyr2Wide = P && P.map(x => ({ left: x.left, w: x.w }));
+  expect(P && P.length === 2 && P[1].left > P[0].left + 100, 'pyramid: side by side on a wide screen: ' + JSON.stringify(out.pyr2Wide));
+  out.pyrDark = await p.evaluate(() => { const t = document.querySelector('#apvDoc .apv-pyr-svg text'); return getComputedStyle(t).fill; });
+  expect(out.pyrDark !== 'rgb(30, 29, 27)', 'pyramid: its labels follow the dark theme: ' + out.pyrDark);
+  await p.locator('#apvDoc .apv-opinion').screenshot({ path: path.join(__dirname, 'out', 'appraisal_add_pyramid2_1280_dark.png') });
   await X.ctx.close();
 
   await b.close();
