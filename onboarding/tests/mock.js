@@ -337,7 +337,7 @@ function q(table){ logCall('from:'+table);
   const b={
     select(c){ if(op==='select'){sel=c||'*';} else wantSel=true; return b;},
     insert(p){op='insert';payload=p;return b;}, update(p){op='update';payload=p;return b;}, delete(){op='delete';return b;},
-    eq(k,v){filters.push(r=>r[k]===v);return b;}, neq(k,v){filters.push(r=>r[k]!==v);return b;}, gt(k,v){filters.push(r=>r[k]>v);return b;}, gte(k,v){filters.push(r=>r[k]>=v);return b;}, is(k,v){filters.push(r=>(v===null?r[k]==null:r[k]===v));return b;}, in(k,vs){filters.push(r=>vs.includes(r[k]));return b;},
+    eq(k,v){filters.push(r=>r[k]===v);return b;}, neq(k,v){filters.push(r=>r[k]!==v);return b;}, gt(k,v){filters.push(r=>r[k]>v);return b;}, gte(k,v){filters.push(r=>r[k]>=v);return b;}, lt(k,v){filters.push(r=>r[k]<v);return b;}, is(k,v){filters.push(r=>(v===null?r[k]==null:r[k]===v));return b;}, in(k,vs){filters.push(r=>vs.includes(r[k]));return b;},
     order(k,o){order=[k,o&&o.ascending===false?-1:1];return b;}, limit(){return b;}, single(){single=true;return b;},
     then(res,rej){ if(localStorage.getItem('trHang')==='1'&&table==='user_language') return; try{ res(run()); }catch(e){ res({data:null,error:{message:e.message}}); } }
   };
@@ -352,6 +352,7 @@ function q(table){ logCall('from:'+table);
     // migration 034: guard_appraisal_view (a sent row never changes; 'sent' only by sending; the wording guard on every insert and
     // on any update of title, sections, fields or setup) and the five new agent-only tables with their guards
     if(table==='appraisal_views'&&(op==='insert'||op==='update')) avGuard(op,payload,op==='update'?(DB.appraisal_views||[]).filter(r=>filters.every(f=>f(r))):[]);
+    if(['site_profile','contact_messages'].includes(table)){ const r0=siteTable(table,op,single); if(r0) return r0; }
     if(LW3C_TABLES.includes(table)){ const r0=lw3cTable(table,op,payload,(DB[table]||=[]).filter(r=>filters.every(f=>f(r))),single); if(r0) return r0; }
     const T=LIVE_VIEWS[table]?LIVE_VIEWS[table]():(DB[table]||=[]);
     // photos and documents (migration 016): vendors see none of it; guard_property_document() on every write
@@ -662,6 +663,7 @@ function rpcInner(name,a){
   if(name.startsWith('agent_fv_')||name==='agent_tap_extra') return fvRpc(name,a,me);
   if(name.startsWith('agent_council_')) return councilRpc(name,a,me);
   if(name==='agent_appraisal_create'||name==='agent_appraisal_save') return appraisalRpc(name,a,me);
+  if(['site_profile_public','agent_site_profile_save','contact_send','agent_contact_done'].includes(name)) return siteRpc(name,a,me);
   if(['agent_comps_import','agent_comps_order','agent_market_import','agent_report_imported','agent_reviews_import','agent_review_tick'].includes(name)) return lw3cRpc(name,a,me);
   if(SIGN_RPCS.includes(name)) return signRpc(name,a,me);
   if(DRAFT_RPCS.includes(name)) return draftRpc(name,a,me);
@@ -1967,6 +1969,51 @@ function fetchInvoke(o){ const b=(o&&o.body)||{}, m=localStorage.getItem('fetchM
     (DB.appraisal_media||=[]).push(...rows); const gone=(b.discard||[]).filter(p=>{ const mm=FETCHED.exec(String(p)); return mm&&mm[1]===b.appraisal_id&&mm[2]===b.comp_id&&!have.some(x=>x.path===p)&&!rows.some(r=>r.path===p)&&SO()[p]; }); gone.forEach(p=>{ delete SO()[p]; });
     save(); return ok({ok:true,kept:rows.length,removed:gone.length}); }
   return fnErr(400,{error:'Bad request'}); }
+// ── migration 038: Tim's About and contact (site_profile, one row, read by anyone through site_profile_public), the public images
+// bucket (site-public: anyone reads, Tim writes under profile/ or about/), and "Send a message" (contact_send: signed in, bounded,
+// five a day each; Tim reads contact_messages and marks them done). Mirrors migrations/038_site_profile_contact.sql. localStorage
+// contactMails: every email notify would send for a message (always to Tim, once each).
+const SITE_CH=['call','text','email','form','whatsapp','messenger','discord','telegram','signal'];
+const SITE_VAL={whatsapp:/^\+?[0-9 ]{8,20}$/,signal:/^\+?[0-9 ]{8,20}$/,messenger:/^[A-Za-z0-9.]{3,50}$/,telegram:/^[A-Za-z][A-Za-z0-9_]{4,31}$/,discord:/^[A-Za-z0-9-]{2,32}$/};
+function siteRow(){ DB.site_profile||=[]; if(!DB.site_profile.length) DB.site_profile.push({id:true,name:'Tim McGuire',licence:'',phone:'027 562 7207',email:'tim@mcguire.co.nz',photo_path:null,about:{},
+  channels:[{key:'call',on:true},{key:'text',on:true},{key:'email',on:true},{key:'form',on:true}].concat(['whatsapp','messenger','discord','telegram','signal'].map(k=>({key:k,on:false,value:''}))),updated_at:now()}); return DB.site_profile[0]; }
+function siteTable(table,op,single){ if(offline()) throw new Error('Failed to fetch');
+  if(op!=='select') throw new Error('permission denied for table '+table);
+  if(!isAgentMe()) return {data:single?null:[],error:null};
+  if(table==='site_profile') siteRow(); return null; }
+function siteRpc(name,a,me){ if(offline()) return netFail();
+  const r=siteRow(), c=v=>JSON.parse(JSON.stringify(v));
+  if(name==='site_profile_public'){ const chans=(r.channels||[]).filter(c=>c.on&&(c.key==='call'||c.key==='text'?!!r.phone:c.key==='email'?!!r.email:c.key==='form'?true:!!c.value&&SITE_VAL[c.key]&&SITE_VAL[c.key].test(c.value))).map(c=>({key:c.key,value:c.value||''}));
+    return ok({name:r.name,licence:r.licence,phone:r.phone,email:r.email,photo_path:r.photo_path,about:r.about||{},channels:chans}); }
+  if(name==='agent_site_profile_save'){ if(!isAgentMe()) return bad('Agent only'); const p=a.p||{};
+    if(p.email&&!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(p.email)) return bad('That email address does not look right'); if(p.phone&&!/^\+?[0-9 ()-]{6,30}$/.test(p.phone)) return bad('That phone number does not look right');
+    const seen=[]; for(const c of (p.channels||[])){ if(!SITE_CH.includes(c.key)) return bad('Not a way to reach you: '+c.key); if(seen.includes(c.key)) return bad('Each way to reach you once'); seen.push(c.key); if(SITE_VAL[c.key]&&c.value&&!SITE_VAL[c.key].test(String(c.value).trim())) return bad('That '+c.key+' detail does not look right'); }
+    if(p.photo_path&&!/^profile\/[A-Za-z0-9._-]{1,80}$/.test(p.photo_path)) return bad('That picture is not in its folder');
+    const about={}; for(const k of ['tim','agency']){ const t=(p.about||{})[k]||{}; if(t.image_path&&!/^about\/[A-Za-z0-9._-]{1,80}$/.test(t.image_path)) return bad('That About image is not in its folder'); about[k]={heading:String(t.heading||'').trim().slice(0,120),body:String(t.body||'').trim().slice(0,6000),image_path:t.image_path||null}; }
+    Object.assign(r,{name:String(p.name||'').trim().slice(0,80),licence:String(p.licence||'').trim().slice(0,160),phone:String(p.phone||'').trim(),email:String(p.email||'').trim(),photo_path:p.photo_path||null,about,channels:(p.channels||[]).map(c=>({key:c.key,on:!!c.on,value:String(c.value||'').trim()})),updated_at:now()});
+    try{ const l=JSON.parse(localStorage.getItem('mockSiteCalls')||'[]'); l.push(c(p)); localStorage.setItem('mockSiteCalls',JSON.stringify(l)); }catch(_){}
+    save(); return ok(c(r)); }
+  if(name==='contact_send'){ if(!(me&&me.email)) return bad('Sign in to send a message'); const em=me.email.toLowerCase();
+    const nm=String(a.p_name||'').trim(), msg=String(a.p_message||'').trim(); if(!nm||nm.length>80) return bad('Add your name (up to 80 letters)'); if(!msg||msg.length>1000) return bad('Write your message (up to 1,000 letters)');
+    if(a.p_phone&&!/^\+?[0-9 ()-]{6,30}$/.test(a.p_phone)) return bad('That phone number does not look right'); if(!['call','text','email'].includes(a.p_preferred||'email')) return bad('Choose how Tim should reply');
+    const day=Date.now()-864e5; if((DB.contact_messages||[]).filter(m=>m.from_email===em&&Date.parse(m.sent_at)>day).length>=5) return bad('You have sent five messages today. Please call or text Tim instead');
+    const row={id:uid(),from_email:em,name:nm,phone:String(a.p_phone||'').trim(),preferred:a.p_preferred||'email',message:msg,appraisal_id:(DB.appraisal_views||[]).some(v=>v.id===a.p_appraisal)?a.p_appraisal:null,page:String(a.p_page||'').slice(0,200),sent_at:now(),emailed_at:null,done_at:null,done_by:null};
+    (DB.contact_messages||=[]).push(row); save(); return ok(row.id); }
+  if(name==='agent_contact_done'){ if(!isAgentMe()) return bad('Agent only'); const m=(DB.contact_messages||[]).find(x=>x.id===a.p_id); if(m&&!m.done_at){ m.done_at=now(); m.done_by=meEmail(); } save(); return ok(null); }
+  return bad('Bad request'); }
+// notify type 'contact' (fn/notify.ts): signed in, the message's own sender, once per message, to Tim only
+function contactNotify(b){ const me=S&&S.user; if(!(me&&me.email)) return fnErr(403,{error:'Not allowed'});
+  const m=(DB.contact_messages||[]).find(x=>x.id===b.message_id&&!x.emailed_at&&x.from_email===me.email.toLowerCase()); if(!m) return ok({ok:true,note:'nothing to send'});
+  m.emailed_at=now(); const l=JSON.parse(localStorage.getItem('contactMails')||'[]'); l.push({to:'tim@mcguire.co.nz',message_id:m.id,subject:'Message from '+m.name}); localStorage.setItem('contactMails',JSON.stringify(l)); save(); return ok({ok:true}); }
+const SPB='site-public', SP_MIME=['image/jpeg','image/png','image/webp'];
+function sitePublicBucket(){ return {
+  upload:(p,blob,o)=>{ logCall('up:'+SPB+':'+p); if(offline()) return netFail(); if(!isAgentMe()) return bad('new row violates row-level security policy');
+    const f=String(p).split('/'); if(!['profile','about'].includes(f[0])||f.length!==2) return bad('new row violates row-level security policy');
+    const mime=(o&&o.contentType)||blob.type; if(!SP_MIME.includes(mime)) return bad('mime type '+mime+' is not supported'); if(blob.size>2097152) return bad('The object exceeded the maximum allowed size');
+    SO()[p]={size:blob.size,mime,bucket:SPB}; (window.__repoBlobs||={})[p]=blob; save(); return ok({path:p}); },
+  // a public bucket: anyone gets the link (here, the file itself when it is to hand in this page, else a small stand-in picture)
+  getPublicUrl:p=>{ const bl=(window.__repoBlobs||{})[p]; return {data:{publicUrl:bl?URL.createObjectURL(bl):PNG1}}; },
+  remove:(ps)=>{ if(offline()) return netFail(); if(!isAgentMe()) return ok([]); (ps||[]).forEach(p=>{ if(SO()[p]&&SO()[p].bucket===SPB) delete SO()[p]; }); save(); return ok(ps||[]); } }; }
 function apprAiInvoke(o){ const b=(o&&o.body)||{}; c2Log(Object.assign({fn:'doc-prefill'},b));
   if(offline()) return Promise.resolve({data:null,error:{message:'Failed to fetch'}});
   if(!isAgentMe()) return fnErr(403,{error:'Not allowed'});
@@ -1994,8 +2041,16 @@ function apprAiInvoke(o){ const b=(o&&o.body)||{}; c2Log(Object.assign({fn:'doc-
   // heart. draftMode = 'off' | 'fail'; draftResult_<part> = the cleaned result (as fn/prefill_shared.ts readDraftResult gives it).
   // What would have been sent (question and fact keys) is kept in the appraisal_drafts row's inputs, as the function saves it.
   if(b.mode==='appraisal_draft'){ const m=localStorage.getItem('draftMode'), part=b.part;
-    if(!['ad','heard','buyers'].includes(part)) return fnErr(400,{error:'Bad request'});
+    if(!['ad','heard','buyers','compare'].includes(part)) return fnErr(400,{error:'Bad request'});
     if(!(av.setup&&av.setup.v)) return fnErr(409,{ok:false,error:'This appraisal was loaded by hand, so it has no sections to draft'});
+    // 038 compare: one comparable on this appraisal against their home (draftResult_compare = { text, private_note, problems })
+    if(part==='compare'){ const cp=(DB.appraisal_comps||[]).find(x=>x.id===b.comp_id&&x.appraisal_id===av.id); if(!cp) return fnErr(404,{ok:false,error:"That comparable isn't on this appraisal."});
+      if(m==='off') return ok({ok:false,reason:'off',message:"Drafting isn't switched on yet. Write it yourself for now."});
+      const logS=(ok_)=>(DB.ai_calls||=[]).push({id:(DB.ai_calls.length+1),at:now(),purpose:'appraisal compare draft',model:'claude-sonnet-5-5',ok:ok_,files:0,appraisal_id:av.id,agent:S.user.email});
+      if(m==='fail'){ logS(false); save(); return ok({ok:false,reason:'failed',message:"The AI didn't give a usable draft this time. Try again, or write it yourself."}); }
+      const R=JSON.parse(localStorage.getItem('draftResult_compare')||'null')||{text:'This home ('+cp.address+') has '+(cp.bedrooms||'some')+' bedrooms; yours has the bigger section.',private_note:'',problems:[]}; logS(true);
+      const row={id:uid(),appraisal_id:av.id,part,result:R,inputs:{comp:cp.id,questions:[],facts:[],visit_notes:false},model:'claude-sonnet-5-5',made_by:S.user.email,made_at:now()}; (DB.appraisal_drafts||=[]).push(row); save();
+      return ok({ok:true,draft_id:row.id,part,result:R}); }
     const IB=k=>/^ib_/.test(k)||k==='ideal_for'||/^story_/.test(k), NEVER=['client_heart','tim_price_fit','tim_motivation_fit','tim_time_fit'];
     const ans=(DB.qa_answers||[]).filter(x=>x.property_id===av.property_id&&!NEVER.includes(x.question_key));
     const qs=Array.from(new Set(ans.filter(x=>part==='heard'?!IB(x.question_key)||/^story_/.test(x.question_key):IB(x.question_key)).map(x=>x.question_key)));
@@ -2013,8 +2068,9 @@ window.supabase={createClient(){ return {
   from:q, rpc, functions:{invoke:(n,o)=>{ logCall('fn:'+n+(o&&o.body&&o.body.mode?':'+o.body.mode:'')); if(n==='property-lookup') return councilInvoke(o); if(n==='appraisal-fetch') return fetchInvoke(o); if(n==='doc-prefill'&&o&&o.body&&['appraisal_report','buyer_check','appraisal_draft'].includes(o.body.mode)) return apprAiInvoke(o); if(n==='offer-public') return offerInvoke(o); if(n==='offer-draft') return draftInvoke(o); if(n==='offer-sign') return signInvoke(o); if(n==='repo-link') return repoLinkInvoke(o); if(n==='doc-prefill'&&o.body&&o.body.mode==='translate'){ const reqs=JSON.parse(localStorage.getItem('trReqs')||'[]'); reqs.push(o.body); localStorage.setItem('trReqs',JSON.stringify(reqs)); const m=localStorage.getItem('translateMode'); if(m==='off') return Promise.resolve({data:null,error:{message:'503',context:{json:async()=>({error:'not_set_up'})}}}); if(m==='noTool') return ok({ok:false,reason:'no_tool',message:"The AI didn't give a usable answer. Try again."}); const src=o.body.sources; const rej=m==='rejectFirst'?[src[0]]:[]; let cutL=[]; let use=src.filter(x=>!rej.includes(x)); if(m==='cutOff'){ const h=src.length>1?Math.floor(src.length/2):0; cutL=src.slice(h); use=src.slice(0,h); } const resp={ok:true,model:o.body.kind==='screens'||o.body.kind==='guide'?'claude-sonnet-5-5':'claude-haiku-5-5',cut_off:m==='cutOff',translations:use.map(x=>({source:x,text:'<'+o.body.lang+'> '+x})),rejected:rej.map(x=>({source:x,reason:'number changed'})).concat(cutL.map(x=>({source:x,reason:'cut off'}))),usage:{input:10,output:10}}; const D=+localStorage.getItem('translateDelay')||0; return D?new Promise(r=>setTimeout(()=>r({data:resp,error:null}),D)):ok(resp); }
     if(n==='doc-prefill'){ const mode=localStorage.getItem('prefillMode'); if(mode==='off') return Promise.resolve({data:null,error:{message:'503',context:{json:async()=>({error:'not_set_up'})}}}); return ok({ok:true,skipped:[],result:JSON.parse(localStorage.getItem('prefillResult'))}); }const a=JSON.parse(localStorage.getItem('inv')||'[]');a.push(n+':'+o.body.type);localStorage.setItem('inv',JSON.stringify(a));
     if(n==='notify'&&o.body.type==='form_signed'){ const fm=(DB.property_forms||[]).find(x=>x.id===o.body.form_id); if(fm&&fm.status==='signed'&&(fm.kind==='healthy_homes'||fm.countersigned_at)&&!fm.document_id&&fm.agreement_id===o.body.agreement_id){ const d={id:uid(),property_id:fm.property_id,kind:fm.kind==='healthy_homes'?'Healthy Homes checklist and statement':'Vendor Declaration',name:(fm.kind==='healthy_homes'?'Healthy-Homes-Checklist-and-Statement':'Vendor-Declaration')+'.pdf',path:'properties/'+fm.property_id+'/generated/'+fm.id+'.pdf',source:'generated',created_by:'system',created_at:now(),bucket:'private',folder:'agency'}; (DB.property_documents||=[]).push(d); fm.document_id=d.id; save(); } }
+    if(n==='notify'&&o.body.type==='contact') return contactNotify(o.body);
     return ok({ok:true});}},
-  storage:{from(b){ if(b===RB) return repoBucket(); if(b===AMB) return apprBucket(); if(b===AVB) return videoBucket(); return{upload:(p)=>ok({path:p}),createSignedUrl:()=>ok({signedUrl:PNG1})}}},
+  storage:{from(b){ if(b===RB) return repoBucket(); if(b===AMB) return apprBucket(); if(b===AVB) return videoBucket(); if(b===SPB) return sitePublicBucket(); return{upload:(p)=>ok({path:p}),createSignedUrl:()=>ok({signedUrl:PNG1})}}},
   auth:{getSession:()=>ok({session:S}),onAuthStateChange(){},signInWithOtp:o=>{ try{ const l=JSON.parse(localStorage.getItem('otpLog')||'[]'); l.push(o||null); localStorage.setItem('otpLog',JSON.stringify(l)); }catch(_){} return ok({}); },   // otpLog: each sign-in link asked for, with where it brings the person back to
  signOut:async()=>{localStorage.removeItem('mocksession');}}
 };}};

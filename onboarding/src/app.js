@@ -774,6 +774,7 @@
     const { data } = await sb.auth.getSession();
     SESSION = data.session;
     $('#signOut').hidden = !SESSION;
+    siteReady();   // 038: Tim's picture in the header and his About, public (no property data is read), never waited on
     closeJourney(); JCTX.pid = null; JREADY = false;
     IS_AGENT = false; setAgentNav();
     if (!SESSION) { JREADY = true; setAgentNav(); if (PORTAL) return viewLogin(); return pitchRoute() ? viewPitch() : viewLogin(); }   // the journey pages are public: no sign-in, and no data read (the portal has no public pages)
@@ -2531,6 +2532,10 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const seen = await safe(sb.from('agreement_events').select('agreement_id,kind,detail,at').in('kind', ['review_checked', 'appraisal_given']));
     const addr = id => (rows.find(r => r.id === id) || {}).address || 'Agreement';
     const needs = [];
+    // 038: messages sent through "Send a message", until Tim marks them done (shown escaped, as written)
+    try { const ms = (await must(sb.from('contact_messages').select('id,name,preferred,sent_at,done_at').is('done_at', null).order('sent_at', { ascending: false }))) || [];
+      ms.filter(m => okId(m.id)).forEach(m => needs.push({ what: 'Message from ' + m.name, where: 'Send a message', sub: 'Reply by ' + ({ call: 'call', text: 'text', email: 'email' }[m.preferred] || 'email') + ', ' + fmtDT(m.sent_at), hot: true,
+        go: () => PORTAL ? portalNav('messages/' + m.id) : viewContactMessage(m.id), done: async () => { const { error } = await sb.rpc('agent_contact_done', { p_id: m.id }); if (error) throw error; } })); } catch (_) { }
     // a party asked Tim to stop or withdraw: urgent, at the top
     (await hdUrgent()).forEach(u => needs.push({ what: `URGENT: ${u.side === 'vendor' ? 'a vendor' : 'a purchaser'} asks to ${u.kind === 'withdraw' ? 'withdraw' : 'stop signing'}`, where: u.address, sub: u.reason, go: () => viewOfferAgent(u.offer_id), hot: true, urgent: true }));
     const insps = await safe(sb.from('property_inspections').select('id,property_id,status,started_at').eq('status', 'in_progress'));
@@ -9331,6 +9336,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     R('appraisals/:id', 'appraisal', a => viewAppraisalView(a, false)),
     R('appraisals/:id/present', 'appraisal', a => viewAppraisalView(a, true)),
     R('translations', 'viewTranslations', () => APP_TRANSLATION ? RAW.viewTranslations() : viewPortalMissing()),
+    R('settings/about', 'siteSettings', () => viewSiteSettings()),   // 038: Tim's About and contact, for every page
+    R('messages/:id', 'contactMessage', m => viewContactMessage(m)),   // 038: a message sent through "Send a message"
   ];
   // open the page for an address (after sign-in, a typed or saved address, back and forward, the menu and links)
   async function portalOpen(path) {
@@ -9376,7 +9383,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     if (new RegExp(`^appraisals/${id}$`).test(path)) return ['appraisals', 'Appraisals'];
     if (/^processes\/.+/.test(path)) return ['processes', 'Processes'];
     if (/^people\/.+/.test(path)) return ['people', 'People'];
-    if (path === 'translations') return ['', 'Home'];
+    if (path === 'translations' || path === 'settings/about' || /^messages\//.test(path)) return ['', 'Home'];
     return null;
   }
   // in person: a signing pad, or a page done together with the vendors, is on screen. A vendor may be holding the tablet, so
@@ -9550,7 +9557,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     if (!$('#main .loading')) return;   // Tim has moved on
     rows = rows.filter(r => okId(r.id));
     main().innerHTML = `<div class="view-pad" id="apvList"><span class="agent-flag">Only you see this</span><h1>Appraisals</h1>
-      <div class="toolbar" id="apvNewRow">${plink('appraisals/new', 'New appraisal', 'btn primary')}${plink('appraisals/market', 'Market figures', 'btn ghost')}${plink('appraisals/reviews', 'Google reviews', 'btn ghost')}</div>
+      <div class="toolbar" id="apvNewRow">${plink('appraisals/new', 'New appraisal', 'btn primary')}${plink('appraisals/market', 'Market figures', 'btn ghost')}${plink('appraisals/reviews', 'Google reviews', 'btn ghost')}${plink('settings/about', 'About and contact', 'btn ghost')}</div>
       ${rows.length ? `<div class="card tight"><ul class="needs">${rows.map(r => `<li><div class="what"><strong translate="no">${esc(r.title || r.address || 'Appraisal')}</strong><span class="small">Updated ${esc(fmtDT(r.updated_at))}</span></div><span class="needbtns">${plink(`appraisals/${r.id}`, 'Open', 'btn ghost')}${plink(`appraisals/${r.id}/present`, 'Present', 'btn primary')}</span></li>`).join('')}</ul></div>`
         : '<div class="card note tight"><p class="small" style="margin:0">No appraisals here yet.</p></div>'}
     </div>`;
@@ -9565,6 +9572,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     document.body.classList.toggle('apv-present', !!present);
     apvBrand();   // the logo in the appraisal's own top bar
     if (rec.setup && rec.setup.v) return apsShow(rec, present);   // LW3 phase A: an appraisal written from its set-up page
+    await siteReady();   // 038: the profile picture in the top bar
     const f = rec.fields || {};
     const draw = () => { const d = $('#apvDoc'); if (d) d.innerHTML = APPR.render(rec); };
     const names = APPR.methodNames(rec);
@@ -9789,8 +9797,15 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   // an appraisal written from its set-up: the page itself (the same drawing as the presentation), Tim's tools and his private notes
   async function apsShow(rec, present) {
     const ev = await apvEvidence(rec);   // LW3 phase C: the comparables, their photos and the market report (none: drawn as phase A)
+    await siteReady();   // 038: Tim's About and contact, for the top bar's picture, the letter's signature and the About button
     if (!$('#main .loading')) return;   // Tim has moved on
+    // Tim's own prompts (never on the vendor's page): what would add a section that has nothing to show yet
+    const sub = ev.suburbSales, S0 = SITE || {}, aboutEmpty = !APPR.aboutTabs().length;
+    const prompts = [sub && !sub.rows.length && ev.comps.length ? `No sales are loaded for ${esc(sub.suburb)} in ${esc(MKT.monthName(sub.month + '-01'))}, so "Everything that sold in ${esc(sub.suburb)} last month" isn't shown. Load last month's figures on ${plink('appraisals/market', 'Market figures', 'btn link')}.` : '',
+      aboutEmpty ? `Your About is empty, so the About button and overlay show only your contact details. Write about yourself and McGuire Real Estate on ${plink('settings/about', 'About and contact', 'btn link')}.` : '',
+      !S0.photo_url ? `No profile picture yet, so no circle shows in the top bar. Add one on ${plink('settings/about', 'About and contact', 'btn link')}.` : ''].filter(Boolean);
     const tools = present ? '' : `<div class="toolbar no-print" id="apvTools">${plink(`appraisals/${rec.id}/setup`, 'Change the set-up', 'btn primary')}${plink(`appraisals/${rec.id}/sections`, 'Sections', 'btn ghost')}${plink(`appraisals/${rec.id}/comps`, 'Comparables', 'btn ghost')}${plink(`appraisals/${rec.id}/present`, 'Present on screen', 'btn ghost')}<button class="btn ghost" type="button" id="apvPrint">Print</button></div>
+      ${prompts.length ? `<div class="card note tight no-print" id="apvPrompts">${prompts.map(p => `<p class="small" style="margin:0 0 6px">${p}</p>`).join('')}</div>` : ''}
       ${String(rec.private_notes || '').trim() ? `<details class="acc no-print" id="apsNotes"><summary>Your private notes</summary><div class="in"><p class="small" style="white-space:pre-wrap;margin:0">${esc(rec.private_notes)}</p></div></details>` : ''}`;
     main().innerHTML = `<div class="view-pad apv${present ? ' apv-show' : ''}" id="apvPage">${present ? '' : '<span class="agent-flag no-print">Only you see this</span>'}${tools}<div id="apvDoc"></div>
       ${present ? `<p class="apv-exit no-print">${plink(`appraisals/${rec.id}`, 'Finish presenting')}</p>` : ''}</div>`;
@@ -9822,7 +9837,28 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const docIds = [].concat(...secs.filter(s => s.type === 'home').map(s => (s.photos || []).filter(okId)));
     if (docIds.length) ev.homePhotos = await abHomePhotoUrls(rec.property_id, docIds);
     if (secs.some(s => s.type === 'reviews')) { try { const { data, error } = await sb.from('tim_reviews').select('id,reviewer,rating,reviewed_on,body,url,ticked,removed_at').eq('ticked', true); if (!error) ev.reviews = data || []; } catch (_) { ev.reviews = []; } }
+    // 038 (Tim, 28 November 2026): their own figures for the "Yours" column (bedrooms from Tim's room calls, never Relab; the rating
+    // valuation only when he has ticked it), and everything that sold in their suburb last month (full street addresses)
+    if (ev.comps.length && okId(rec.property_id)) {
+      const facts = await profileLoad(rec.property_id); let rooms = [];
+      try { rooms = ((await must(sb.from('property_rooms').select('base,tim_class,position,archived_at').eq('property_id', rec.property_id))) || []).map(r => ({ base: r.base, tim_class: r.tim_class || '', position: r.position, archived: !!r.archived_at })); } catch (_) { rooms = []; }
+      ev.subject = APPR.subjectOf(facts, rooms, !!rec.setup.showCv);
+    }
+    ev.suburbSales = await apvSuburbSales(rec);
     return ev;
+  }
+  // the latest full calendar month, in New Zealand: "2026-10" on any day in November 2026
+  const lastFullMonth = () => { const t = todayNZ(), y = +t.slice(0, 4), m = +t.slice(5, 7); return m === 1 ? (y - 1) + '-12' : y + '-' + String(m - 1).padStart(2, '0'); };
+  // every sale held for the appraisal's suburb in the latest full month (market_sales; nothing held: null, and no section is drawn)
+  async function apvSuburbSales(rec) {
+    const suburb = String((rec.setup || {}).suburb || '').trim(); if (!suburb) return null;
+    const month = lastFullMonth(), [y, m] = month.split('-').map(Number), next = m === 12 ? (y + 1) + '-01' : y + '-' + String(m + 1).padStart(2, '0');
+    try {
+      const { data, error } = await sb.from('market_sales').select('suburb,sold_on,price,address,bedrooms,bathrooms,floor_m2,land_m2,days_to_sell,source').gte('sold_on', month + '-01').lt('sold_on', next + '-01');
+      if (error) return null;
+      const rows = (data || []).filter(r => String(r.suburb || '').trim().toLowerCase() === suburb.toLowerCase());
+      return rows.length ? { suburb, month, rows } : { suburb, month, rows: [] };
+    } catch (_) { return null; }
   }
   // phase B: signed links for an appraisal's header and video files ({ id: { url, still, mime, kind } }); none for a file not to hand
   async function abAssetUrls(aid, ids) {
@@ -9927,7 +9963,194 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const car = s.closest('.apv-car'), t = car && car.querySelector('.apv-car-at'); if (t) t.textContent = (Math.round(s.scrollLeft / Math.max(1, s.clientWidth)) + 1) + ' of ' + car.dataset.n;
   }, true);
   // the appraisal's look (the approved sample of 24 November 2026): the logo files for its top bar, set once from the page's own logos
-  function apvBrand() { if (!APPR.brand.light) { APPR.brand.light = ($('.logo-light') || {}).src || ''; APPR.brand.dark = ($('.logo-dark') || {}).src || ''; } APPR.brand.email = T_EMAIL; }
+  function apvBrand() { if (!APPR.brand.light) { APPR.brand.light = ($('.logo-light') || {}).src || ''; APPR.brand.dark = ($('.logo-dark') || {}).src || ''; } }
+
+  /* ───────── 038: Tim's About and contact, on every page (Tim, 28 November 2026) ─────────
+     One site-wide settings row (site_profile, read by anyone through site_profile_public). His picture sits in a circle in the header
+     bar of every page, opposite the logo (and in the appraisal's own top bar); tapping it, or "About Tim and McGuire Real Estate" on an
+     appraisal, opens one overlay: the picture, his name and licence line and the ways to reach him at the top, the two About tabs below.
+     Nothing there, nothing shown: no picture, no circle; an empty tab, no tab; a way to reach him with no detail, no button. */
+  const SITE_BUCKET = 'site-public';
+  let SITE = null, SITE_P = null;
+  const sitePublicUrl = p => { if (!p) return ''; try { const r = sb.storage.from(SITE_BUCKET).getPublicUrl(p); return (r && r.data && r.data.publicUrl) || ''; } catch (_) { return ''; } };
+  async function siteLoad() {
+    try {
+      const { data, error } = await sb.rpc('site_profile_public'); if (error || !data) { SITE = SITE || {}; return SITE; }
+      const about = {}; Object.entries(data.about || {}).forEach(([k, a]) => { about[k] = Object.assign({}, a, { image_url: sitePublicUrl(a && a.image_path) }); });
+      SITE = Object.assign({}, data, { photo_url: sitePublicUrl(data.photo_path), about });
+    } catch (_) { SITE = SITE || {}; }
+    APPR.brand.site = SITE; siteHeader(); return SITE;
+  }
+  const siteReady = () => SITE ? Promise.resolve(SITE) : (SITE_P = SITE_P || siteLoad());
+  // the header circle: on every page (vendor onboarding and the portal), opposite the logo. No picture: nothing.
+  function siteHeader() {
+    const b = $('#hdrAvatar'); if (!b) return;
+    const u = SITE && SITE.photo_url; b.hidden = !u;
+    if (u) { b.querySelector('img').src = u; b.setAttribute('aria-label', 'About and contact' + (SITE.name ? ': ' + SITE.name : '')); }
+  }
+  // each way to reach Tim as its service writes links; the page builds each one, nothing pasted is used as a link
+  const nzIntl = p => { const d = String(p || '').replace(/[^0-9+]/g, ''); return d.startsWith('+') ? d : d.startsWith('0') ? '+64' + d.slice(1) : d ? '+' + d : ''; };
+  const CHANNELS = {
+    call: { label: 'Call', href: S => S.phone ? 'tel:' + nzIntl(S.phone) : '' },
+    text: { label: 'Text', href: S => S.phone ? 'sms:' + nzIntl(S.phone) : '' },
+    email: { label: 'Email', href: S => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(S.email || '') ? 'mailto:' + S.email : '' },
+    form: { label: 'Send a message', href: () => '' },
+    whatsapp: { label: 'WhatsApp', re: /^\+?[0-9 ]{8,20}$/, href: (S, v) => 'https://wa.me/' + nzIntl(v).replace('+', ''), ph: '+64 27 000 0000' },
+    messenger: { label: 'Messenger', re: /^[A-Za-z0-9.]{3,50}$/, href: (S, v) => 'https://m.me/' + encodeURIComponent(v), ph: 'your.page.name' },
+    discord: { label: 'Discord', re: /^[A-Za-z0-9-]{2,32}$/, href: (S, v) => 'https://discord.gg/' + encodeURIComponent(v), ph: 'invite code' },
+    telegram: { label: 'Telegram', re: /^[A-Za-z][A-Za-z0-9_]{4,31}$/, href: (S, v) => 'https://t.me/' + encodeURIComponent(v), ph: 'username' },
+    signal: { label: 'Signal', re: /^\+?[0-9 ]{8,20}$/, href: (S, v) => 'https://signal.me/#p/' + nzIntl(v), ph: '+64 27 000 0000' },
+  };
+  const channelList = S => ((S && S.channels) || []).map(c => { const d = CHANNELS[c.key]; if (!d) return null; if (d.re && !d.re.test(String(c.value || ''))) return null;
+    const href = d.href(S, String(c.value || '').trim()); return c.key === 'form' || href ? { key: c.key, label: d.label, href } : null; }).filter(Boolean);
+  // the overlay: an accessible dialog (focus kept inside, Esc closes, the tabs as ARIA tabs), phone first
+  let ABOUT_FROM = null;
+  async function openAbout(from) {
+    await siteReady(); const S = SITE || {}, dlg = $('#aboutDlg'); if (!dlg) return;
+    const tabs = APPR.aboutTabs(), chans = channelList(S), signedIn = !!(SESSION && SESSION.user), agent = IS_AGENT;
+    const form = chans.some(c => c.key === 'form') && (signedIn || agent);
+    const btns = chans.filter(c => c.key !== 'form' || form).map(c => c.key === 'form' ? `<button type="button" class="ab-act" id="abFormBtn" aria-expanded="false" aria-controls="abForm">${esc(c.label)}</button>`
+      : `<a class="ab-act" href="${esc(c.href)}"${/^https:/.test(c.href) ? ' target="_blank" rel="noopener"' : ''} data-ch="${esc(c.key)}">${esc(c.label)}</a>`).join('');
+    const me = SESSION && SESSION.user ? SESSION.user : null, pre = agent ? '' : String((me && me.user_metadata && (me.user_metadata.name || me.user_metadata.full_name)) || '').slice(0, 80);
+    const aid = (/appraisals\/([0-9a-f-]{36})/.exec(location.pathname) || [])[1] || '';
+    dlg.innerHTML = `<div class="ab-panel" role="document"><button type="button" class="ab-close" id="abClose" aria-label="Close">×</button>
+      <div class="ab-head">${S.photo_url ? `<img class="ab-photo" src="${esc(S.photo_url)}" alt="">` : ''}<div><h2 id="abName">${esc(S.name || 'Contact')}</h2>${S.licence ? `<p class="small ab-lic">${esc(S.licence)}</p>` : ''}</div></div>
+      ${btns ? `<div class="ab-acts">${btns}</div>` : ''}
+      ${form ? `<form class="ab-form" id="abForm" hidden novalidate>${agent ? '<p class="small ab-prev"><strong>Preview.</strong> This is the form your clients see. It is switched off for you.</p>' : ''}
+        <label class="f" for="abFName">Your name</label><input type="text" id="abFName" maxlength="80" autocomplete="name" value="${esc(pre)}"${agent ? ' disabled' : ''}>
+        <label class="f" for="abFPhone">Phone <span class="opt">(optional)</span></label><input type="tel" id="abFPhone" maxlength="30" autocomplete="tel"${agent ? ' disabled' : ''}>
+        <fieldset class="ab-pref"><legend class="f">How should ${esc((S.name || 'Tim').split(' ')[0])} reply?</legend>${[['email', 'Email'], ['call', 'Call'], ['text', 'Text']].map(([k, t], i) => `<label class="choice"><input type="radio" name="abPref" value="${k}"${i ? '' : ' checked'}${agent ? ' disabled' : ''}><span class="mark"></span><span class="ct">${t}</span></label>`).join('')}</fieldset>
+        <label class="f" for="abFMsg">Your message</label><textarea id="abFMsg" rows="4" maxlength="1000"${agent ? ' disabled' : ''}></textarea>
+        <div class="toolbar"><button class="btn primary" type="submit" id="abFSend"${agent ? ' disabled' : ''}>Send</button></div></form>` : ''}
+      ${tabs.length ? `<div class="ab-about">${tabs.length > 1 ? `<div class="ab-tabs" role="tablist" aria-label="About">${tabs.map((t, i) => `<button type="button" role="tab" id="abTab-${t.key}" aria-controls="abPanel-${t.key}" aria-selected="${i ? 'false' : 'true'}" tabindex="${i ? '-1' : '0'}">${esc(t.label)}</button>`).join('')}</div>` : ''}
+        ${tabs.map((t, i) => `<section class="ab-tabp" id="abPanel-${t.key}"${tabs.length > 1 ? ` role="tabpanel" aria-labelledby="abTab-${t.key}"` : ''}${i ? ' hidden' : ''}><h3>${esc(t.heading || ('About ' + t.label))}</h3>${t.image ? `<img class="ab-img" src="${esc(t.image)}" alt="">` : ''}${String(t.body).split(/\n\s*\n/).map(p => p.trim()).filter(Boolean).map(p => `<p>${esc(p)}</p>`).join('')}</section>`).join('')}</div>`
+        : (agent ? `<p class="small ab-empty">Your About is empty: write about yourself and McGuire Real Estate on ${plink('settings/about', 'About and contact', 'btn link')}. Only you see this line.</p>` : '')}</div>`;
+    ABOUT_FROM = from || document.activeElement; dlg.hidden = false; document.body.classList.add('about-open');
+    const focusables = () => $$('a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), [tabindex="0"]', dlg).filter(e => !e.closest('[hidden]') && e.getClientRects().length);
+    (focusables()[0] || dlg).focus();
+    $('#abClose').addEventListener('click', closeAbout);
+    const fb = $('#abFormBtn'); if (fb) fb.addEventListener('click', () => { const f = $('#abForm'); f.hidden = !f.hidden; fb.setAttribute('aria-expanded', String(!f.hidden)); if (!f.hidden) { const n = $('#abFName'); if (n && !n.disabled) n.focus(); } });
+    $$('[role="tab"]', dlg).forEach((t, i, all) => { const pick = j => { all.forEach((x, k) => { x.setAttribute('aria-selected', String(k === j)); x.tabIndex = k === j ? 0 : -1; $('#' + x.getAttribute('aria-controls')).hidden = k !== j; }); all[j].focus(); };
+      t.addEventListener('click', () => pick(i)); t.addEventListener('keydown', e => { if (e.key === 'ArrowRight') { e.preventDefault(); pick((i + 1) % all.length); } if (e.key === 'ArrowLeft') { e.preventDefault(); pick((i - 1 + all.length) % all.length); } }); });
+    dlg.onkeydown = e => { if (e.key === 'Escape') { e.preventDefault(); closeAbout(); return; }
+      if (e.key === 'Tab') { const f = focusables(); if (!f.length) return; const first = f[0], last = f[f.length - 1]; if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); } else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); } } };
+    dlg.onclick = e => { if (e.target === dlg) closeAbout(); };
+    const fm = $('#abForm'); if (fm && !agent) fm.addEventListener('submit', async e => { e.preventDefault(); const b = $('#abFSend');
+      const name = $('#abFName').value.replace(/\s+/g, ' ').trim(), phone = $('#abFPhone').value.trim(), msg = $('#abFMsg').value.trim(), pref = ($('input[name="abPref"]:checked') || {}).value || 'email';
+      if (!name) return atBtn(b, 'Add your name.', 'err'); if (!msg) return atBtn(b, 'Write your message.', 'err');
+      if (phone && !/^\+?[0-9 ()-]{6,30}$/.test(phone)) return atBtn(b, 'That phone number doesn\'t look right.', 'err');
+      if (pref !== 'email' && !phone) return atBtn(b, 'Add your phone number, so ' + (S.name || 'Tim').split(' ')[0] + ' can ' + pref + ' you.', 'err');
+      b.disabled = true; atBtn(b, 'Sending...', 'busy');
+      const { data, error } = await sb.rpc('contact_send', { p_name: name, p_phone: phone, p_message: msg, p_preferred: pref, p_appraisal: aid || null, p_page: location.pathname.slice(0, 200) });
+      if (error || !data) { b.disabled = false; return atBtn(b, netErr(error) ? 'Not sent. Check you have signal, then try again.' : String((error && error.message) || 'Not sent. Try again.').replace(/^.*?: /, ''), 'err'); }
+      try { await sb.functions.invoke('notify', { body: { type: 'contact', message_id: data } }); } catch (_) { }
+      fm.reset(); $('#abFName').value = name; b.disabled = false; atBtn(b, 'Sent. ' + ((S.name || 'Tim').split(' ')[0]) + ' will ' + (pref === 'email' ? 'email' : pref) + ' you back.', 'ok'); });
+  }
+  function closeAbout() { const d = $('#aboutDlg'); if (!d || d.hidden) return; d.hidden = true; d.innerHTML = ''; document.body.classList.remove('about-open'); const f = ABOUT_FROM; ABOUT_FROM = null; if (f && f.focus && document.contains(f)) f.focus(); }
+  document.addEventListener('click', e => { const t = e.target && e.target.closest ? e.target.closest('[data-about-open],#hdrAvatar') : null; if (!t) return; e.preventDefault(); openAbout(t); });
+  // the personal video: the player loads only when pressed, and only from the two addresses the page builds itself
+  document.addEventListener('click', e => {
+    const b = e.target && e.target.closest ? e.target.closest('[data-apv-embed]') : null; if (!b) return;
+    const src = b.dataset.apvEmbed; if (!/^https:\/\/(www\.youtube-nocookie\.com\/embed\/[A-Za-z0-9_-]{11}\?|player\.vimeo\.com\/video\/[0-9]{6,12}\?)/.test(src)) return;
+    const f = document.createElement('iframe'); f.src = src; f.title = b.dataset.apvEmbedTitle || 'Video'; f.className = 'apv-pv-frame';
+    f.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-presentation allow-popups'); f.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
+    f.setAttribute('allow', 'autoplay; encrypted-media; fullscreen; picture-in-picture'); f.setAttribute('allowfullscreen', '');
+    b.replaceWith(f); f.focus();
+  });
+
+  // Tim's settings for all of it, at settings/about (Tim only)
+  const SP_PHOTO_PX = 512;
+  // a picture made square (the middle of it) and about 512 px, as a JPEG, in the browser
+  function spSquare(file, px) { return new Promise(res => { const u = URL.createObjectURL(file), im = new Image();
+    im.onload = () => { const s = Math.min(im.naturalWidth, im.naturalHeight), out = Math.min(px, s), c = document.createElement('canvas'); c.width = out; c.height = out;
+      c.getContext('2d').drawImage(im, (im.naturalWidth - s) / 2, (im.naturalHeight - s) / 2, s, s, 0, 0, out, out); URL.revokeObjectURL(u); c.toBlob(b => res(b ? { blob: b, small: s < px } : null), 'image/jpeg', 0.86); };
+    im.onerror = () => { URL.revokeObjectURL(u); res(null); }; im.src = u; }); }
+  async function viewSiteSettings() {
+    header('About and contact', '', 0); actions(false); document.body.classList.remove('apv-present');
+    if (!IS_AGENT) return viewPortalMissing();
+    main().innerHTML = '<div class="loading">Loading...</div>';
+    let row = null; try { const d = await must(sb.from('site_profile').select('*')); row = Array.isArray(d) ? d[0] : d; } catch (_) { row = null; }
+    if (!$('#main .loading')) return;
+    row = row || { name: '', licence: '', phone: '', email: '', photo_path: null, about: {}, channels: [] };
+    const st = { photo_path: row.photo_path || null, about: { tim: Object.assign({ heading: '', body: '', image_path: null }, (row.about || {}).tim || {}), agency: Object.assign({ heading: '', body: '', image_path: null }, (row.about || {}).agency || {}) },
+      channels: Object.keys(CHANNELS).map(k => Object.assign({ key: k, on: false, value: '' }, (row.channels || []).find(c => c.key === k) || {})).sort((a, b) => { const ia = (row.channels || []).findIndex(c => c.key === a.key), ib = (row.channels || []).findIndex(c => c.key === b.key); return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib); }) };
+    const draw = () => {
+      main().innerHTML = `<div class="view-pad sp" id="spPage"><span class="agent-flag">Only you see this</span><h1>About and contact</h1>
+        <p class="lede">One place for your picture, your contact details and your About. Every page uses them: the circle in the header, the overlay it opens, and your appraisals.</p>
+        <h2>Your picture</h2><div class="card tight"><div class="sp-photo">${st.photo_path ? `<img class="sp-circle" src="${esc(sitePublicUrl(st.photo_path))}" alt="Your picture">` : '<span class="sp-circle sp-none" aria-hidden="true"></span>'}
+          <div><label class="btn ghost" id="spPhotoPick">${st.photo_path ? 'Change your picture' : 'Choose a picture'}<input type="file" id="spPhoto" accept="image/jpeg,image/png,image/webp" hidden></label>${st.photo_path ? '<button class="btn link" type="button" id="spPhotoRm">Remove it</button>' : ''}
+          <p class="small" style="margin:6px 0 0">Made square from the middle, and about ${SP_PHOTO_PX} px. With no picture, no circle shows.</p></div></div></div>
+        <h2>Your details</h2><div class="card tight">
+          <label class="f" for="spName" style="margin-top:0">Name</label><input type="text" id="spName" maxlength="80" value="${esc(row.name)}">
+          <label class="f" for="spLic">Licence line <span class="opt">(optional)</span></label><input type="text" id="spLic" maxlength="160" value="${esc(row.licence)}" placeholder="Licensed salesperson, REAA 2008">
+          <div class="row2"><div><label class="f" for="spPhone">Phone</label><input type="tel" id="spPhone" maxlength="30" value="${esc(row.phone)}"></div><div><label class="f" for="spEmail">Email</label><input type="email" id="spEmail" maxlength="254" value="${esc(row.email)}"></div></div></div>
+        <h2>Ways to reach you</h2><div class="card tight"><p class="small" style="margin:0 0 6px">Each one you switch on shows as a button, in this order. One with no detail doesn't show. "Send a message" is a short form for people signed in to your pages; you read the messages on Needs you, and you get an email for each.</p>
+          <ol class="sp-ch">${st.channels.map((c, i) => { const d = CHANNELS[c.key]; return `<li data-ch="${c.key}"><label class="choice cb"><input type="checkbox" data-ch-on="${c.key}"${c.on ? ' checked' : ''}><span class="mark"></span><span class="ct">${esc(d.label)}</span></label>
+            ${d.re ? `<input type="text" data-ch-val="${c.key}" aria-label="${esc(d.label)} detail" value="${esc(c.value || '')}" placeholder="${esc(d.ph)}">` : `<span class="small">${c.key === 'form' ? 'The form' : 'Uses your ' + (c.key === 'email' ? 'email' : 'phone')}</span>`}
+            <span class="sp-mv"><button class="btn link" type="button" data-ch-up="${i}"${i ? '' : ' disabled'} aria-label="Move ${esc(d.label)} up">Up</button><button class="btn link" type="button" data-ch-dn="${i}"${i < st.channels.length - 1 ? '' : ' disabled'} aria-label="Move ${esc(d.label)} down">Down</button></span></li>`; }).join('')}</ol></div>
+        ${[['tim', 'About you'], ['agency', 'About McGuire Real Estate']].map(([k, t]) => `<h2>${t}</h2><div class="card tight">
+          <label class="f" for="spH-${k}" style="margin-top:0">Heading</label><input type="text" id="spH-${k}" maxlength="120" value="${esc(st.about[k].heading)}" placeholder="${k === 'tim' ? 'About Tim' : 'About McGuire Real Estate'}">
+          <label class="f" for="spB-${k}">Text <span class="opt">(a blank line starts a new paragraph)</span></label><textarea id="spB-${k}" rows="6" maxlength="6000" placeholder="${k === 'tim' ? 'Who you are, how you work, and why people choose you.' : 'The agency: who it is for and what it stands for.'}">${esc(st.about[k].body)}</textarea>
+          <div class="sp-img">${st.about[k].image_path ? `<img src="${esc(sitePublicUrl(st.about[k].image_path))}" alt="">` : ''}<label class="btn ghost" id="spImgPick-${k}">${st.about[k].image_path ? 'Change the image' : 'Add a photo or logo'}<input type="file" data-sp-img="${k}" accept="image/jpeg,image/png,image/webp" hidden></label>${st.about[k].image_path ? `<button class="btn link" type="button" data-sp-img-rm="${k}">Remove it</button>` : ''}</div>
+          <p class="small" style="margin:6px 0 0">Nothing written here: this tab doesn't show.</p></div>`).join('')}
+        <div class="toolbar"><button class="btn primary" type="button" id="spSave">Save</button></div></div>`;
+      wire(); top();
+    };
+    const read = () => { $$('[data-ch-on]').forEach(x => { const c = st.channels.find(y => y.key === x.dataset.chOn); c.on = x.checked; }); $$('[data-ch-val]').forEach(x => { st.channels.find(y => y.key === x.dataset.chVal).value = x.value.trim(); });
+      ['tim', 'agency'].forEach(k => { st.about[k].heading = $('#spH-' + k).value.trim(); st.about[k].body = $('#spB-' + k).value.trim(); });
+      row.name = $('#spName').value.trim(); row.licence = $('#spLic').value.trim(); row.phone = $('#spPhone').value.trim(); row.email = $('#spEmail').value.trim(); };
+    const save = async (btn, okMsg) => {
+      read();
+      const badCh = st.channels.find(c => c.on && CHANNELS[c.key].re && c.value && !CHANNELS[c.key].re.test(c.value));
+      if (badCh) { atBtn(btn, 'That ' + CHANNELS[badCh.key].label + ' detail doesn\'t look right. ' + (badCh.key === 'whatsapp' || badCh.key === 'signal' ? 'Use the phone number, such as +64 27 000 0000.' : badCh.key === 'discord' ? 'Use the invite code only, not the whole link.' : 'Use the username only, not the whole link.'), 'err'); return false; }
+      if (row.email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(row.email)) { atBtn(btn, 'That email address doesn\'t look right.', 'err'); return false; }
+      if (row.phone && !/^\+?[0-9 ()-]{6,30}$/.test(row.phone)) { atBtn(btn, 'That phone number doesn\'t look right.', 'err'); return false; }
+      btn.disabled = true; atBtn(btn, 'Saving...', 'busy');
+      const { data, error } = await sb.rpc('agent_site_profile_save', { p: { name: row.name, licence: row.licence, phone: row.phone, email: row.email, photo_path: st.photo_path, about: st.about, channels: st.channels } });
+      btn.disabled = false;
+      if (error || !data) { atBtn(btn, netErr(error) ? 'Not saved. Check you have signal, then try again.' : 'Not saved: ' + ((error && error.message) || 'try again.'), 'err'); return false; }
+      JDIRTY = false; SITE = null; SITE_P = null; await siteReady(); atBtn(btn, okMsg || 'Saved. Every page uses it now.', 'ok'); return true;
+    };
+    const upload = async (file, folder, btn) => {
+      if (!file) return null; if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) { atBtn(btn, 'Choose a JPEG, PNG or WebP picture.', 'err'); return null; }
+      atBtn(btn, 'Getting it ready...', 'busy');
+      const r = folder === 'profile' ? await spSquare(file, SP_PHOTO_PX) : await abPhotoReady(file);
+      if (!r || !r.blob) { atBtn(btn, 'That picture couldn\'t be read. Try another.', 'err'); return null; }
+      if (r.blob.size > 2097152) { atBtn(btn, 'That picture is still over 2 MB once made smaller. Try another.', 'err'); return null; }
+      const path = folder + '/' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8) + '.jpg';
+      const up = await sb.storage.from(SITE_BUCKET).upload(path, r.blob, { contentType: 'image/jpeg', upsert: false });
+      if (up.error) { atBtn(btn, netErr(up.error) ? 'Not uploaded. Check you have signal, then try again.' : 'Not uploaded: ' + up.error.message, 'err'); return null; }
+      return { path, small: r.small };
+    };
+    const wire = () => {
+      $('#spPage').addEventListener('input', () => { JDIRTY = true; });
+      $('#spSave').addEventListener('click', e => save(e.currentTarget));
+      $('#spPhoto').addEventListener('change', async e => { const old = st.photo_path, r = await upload(e.target.files[0], 'profile', $('#spPhotoPick')); if (!r) return; read(); st.photo_path = r.path;
+        if (await save($('#spSave'), 'Picture saved.')) { if (old) { try { await sb.storage.from(SITE_BUCKET).remove([old]); } catch (_) { } } draw(); atBtn($('#spPhotoPick'), 'Saved. It shows in the header of every page.' + (r.small ? ' It is small, so it may look soft.' : ''), 'ok'); } else { st.photo_path = old; try { await sb.storage.from(SITE_BUCKET).remove([r.path]); } catch (_) { } } });
+      const rm = $('#spPhotoRm'); if (rm) rm.addEventListener('click', async () => { const old = st.photo_path; read(); st.photo_path = null; if (await save(rm, 'Removed.')) { try { await sb.storage.from(SITE_BUCKET).remove([old]); } catch (_) { } draw(); atBtn($('#spPhotoPick'), 'Removed. No circle shows until you add one.', 'ok'); } else st.photo_path = old; });
+      $$('[data-sp-img]').forEach(inp => inp.addEventListener('change', async e => { const k = inp.dataset.spImg, old = st.about[k].image_path, lb = $('#spImgPick-' + k), r = await upload(e.target.files[0], 'about', lb); if (!r) return; read(); st.about[k].image_path = r.path;
+        if (await save($('#spSave'), 'Image saved.')) { if (old) { try { await sb.storage.from(SITE_BUCKET).remove([old]); } catch (_) { } } draw(); atBtn($('#spImgPick-' + k), 'Saved.', 'ok'); } else st.about[k].image_path = old; }));
+      $$('[data-sp-img-rm]').forEach(b => b.addEventListener('click', async () => { const k = b.dataset.spImgRm, old = st.about[k].image_path; read(); st.about[k].image_path = null; if (await save(b, 'Removed.')) { try { await sb.storage.from(SITE_BUCKET).remove([old]); } catch (_) { } draw(); } else st.about[k].image_path = old; }));
+      const mv = (i, d) => { read(); const j = i + d; if (j < 0 || j >= st.channels.length) return; [st.channels[i], st.channels[j]] = [st.channels[j], st.channels[i]]; JDIRTY = true; draw(); };
+      $$('[data-ch-up]').forEach(b => b.addEventListener('click', () => mv(+b.dataset.chUp, -1))); $$('[data-ch-dn]').forEach(b => b.addEventListener('click', () => mv(+b.dataset.chDn, 1)));
+    };
+    draw();
+  }
+  // one message sent through "Send a message", for Tim: shown escaped, as written
+  async function viewContactMessage(id) {
+    header('Message', '', 0); actions(false);
+    main().innerHTML = '<div class="loading">Loading...</div>';
+    let m = null; try { const d = await must(sb.from('contact_messages').select('*').eq('id', id)); m = Array.isArray(d) ? d[0] : d; } catch (_) { m = null; }
+    if (!$('#main .loading')) return; if (!m) return PORTAL ? viewPortalMissing() : navGo(viewAgentHome);
+    const how = { call: 'Call', text: 'Text', email: 'Email' }[m.preferred] || 'Email';
+    main().innerHTML = `<div class="view-pad" id="cmPage"><span class="agent-flag">Only you see this</span><h1>Message from ${esc(m.name)}</h1>
+      <div class="card tight"><p class="small" style="margin:0 0 6px">${esc(fmtDT(m.sent_at))} · reply by ${esc(how.toLowerCase())}${m.emailed_at ? ' · emailed to you' : ''}</p>
+        <p class="cm-msg" style="white-space:pre-wrap">${esc(m.message)}</p>
+        <p class="small" style="margin:0">${esc(m.from_email)}${m.phone ? ' · ' + esc(m.phone) : ''}</p></div>
+      <div class="toolbar">${m.phone ? `<a class="btn ghost" href="tel:${esc(nzIntl(m.phone))}">Call</a><a class="btn ghost" href="sms:${esc(nzIntl(m.phone))}">Text</a>` : ''}<a class="btn ghost" href="mailto:${esc(m.from_email)}">Email</a>${m.done_at ? '<span class="pill">Done</span>' : '<button class="btn primary" type="button" id="cmDone">Done</button>'}</div></div>`;
+    const d = $('#cmDone'); if (d) d.addEventListener('click', async () => { d.disabled = true; const { error } = await sb.rpc('agent_contact_done', { p_id: m.id }); d.disabled = false; if (error) return atBtn(d, 'Not saved. Try again.', 'err'); atBtn(d, 'Done. It has left Needs you.', 'ok'); });
+    top();
+  }
   // which plan card is in view in its strip
   function apvPlanAt(s) { const cards = $$('.apv-plan', s); let b = 0, d = 1e9; cards.forEach((c, i) => { const x = Math.abs(c.offsetLeft - s.offsetLeft - s.scrollLeft); if (x < d) { d = x; b = i; } }); return b; }
   // the appraisal's own controls: the jump chips, All / Sold / On the market, the plans' arrows and dots, a tap on a price dot, and the
@@ -10022,6 +10245,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         <label class="choice cb"><input type="checkbox" id="cfTim"${v.sold_by_tim ? ' checked' : ''}><span class="mark"></span><span><span class="ct">Sold by Tim</span></span></label>
         <label class="f" for="cfAd">How it was advertised <span class="opt">(the listing's own words, quoted)</span></label><textarea id="cfAd" rows="4">${esc(v.ad_text || '')}</textarea>
         <label class="f" for="cfCmp">How it compares with their home <span class="opt">(the vendor sees this once ticked)</span></label><textarea id="cfCmp" rows="3">${esc(v.compare_text || '')}</textarea>
+        <p class="small" id="cfCmpHint" style="margin:4px 0 0">Compare and contrast: say something about this home and something about theirs ("this home" and "yours"), where they are alike and where they differ.</p>
         <label class="choice cb"><input type="checkbox" id="cfTick"${isNew || v.compare_ticked ? ' checked' : ''}><span class="mark"></span><span><span class="ct">Ticked: show how it compares to the vendor</span></span></label>
         <label class="f" for="cfPriv">Your private note <span class="opt">(only you see this: never on their page or in print)</span></label><textarea id="cfPriv" rows="2">${esc(v.private_note || '')}</textarea>
         <div class="row2"><div><label class="f" for="cfSrc">Source</label>${sel('cfSrc', CMP_SRC, v.source || 'tim')}</div>${inp('cfGot', 'Gathered on', v.gathered_at ? new Date(v.gathered_at).toLocaleDateString('en-CA', { timeZone: 'Pacific/Auckland' }) : '', { type: 'date' })}</div>
@@ -10031,13 +10255,14 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       return `<li class="card tight cmp-row${c.shown === false ? ' off' : ''}" data-cmp="${esc(c.id)}"><div class="cmp-top"><span class="apv-comp-n" aria-hidden="true">${i + 1}</span><div class="cmp-what"><strong translate="no">${esc(c.address)}</strong>
         <span class="small">${esc(line(c) || 'No price or date yet')}</span>
         <span class="cmp-pills"><span class="pill">${esc(stName(c.status))}</span>${c.sold_by_tim ? '<span class="pill">Sold by Tim</span>' : ''}${c.shown === false ? '<span class="pill warnp">Hidden</span>' : ''}${APPR.cmpShown(c) ? '<span class="pill okp">Comparison ticked</span>' : ''}</span></div></div>
+        ${String(c.compare_text || '').trim() ? `<p class="small cmp-cmpline"><strong>How it compares${c.compare_ticked ? '' : ' (not ticked yet)'}:</strong> ${esc(c.compare_text)}</p>` : ''}
         ${String(c.private_note || '').trim() ? `<p class="small cmp-priv"><strong>Your note:</strong> ${esc(c.private_note)}</p>` : ''}
         ${buyers && buyers.comps && buyers.comps[c.id] ? `<p class="small cmp-priv cmp-buyer" data-verdict="${esc(buyers.comps[c.id].verdict)}"><strong>Who it likely appealed to (AI, only you see this):</strong> ${esc(BUYER_WORDS[buyers.comps[c.id].verdict] || BUYER_WORDS.unclear)}${buyers.comps[c.id].reason ? '. ' + esc(buyers.comps[c.id].reason) : ''}</p>` : ''}
         <p class="small cmp-src">Source: ${esc(srcName(c.source))}${c.gathered_at ? ', gathered ' + esc(fmtDate(new Date(c.gathered_at).toLocaleDateString('en-CA', { timeZone: 'Pacific/Auckland' }))) : ''}${c.source_url ? ` · <a href="${esc(c.source_url)}" target="_blank" rel="noopener">open the link</a>` : ''}</p>
         ${ph.length ? `<div class="cmp-photos">${ph.map((m, k) => `<figure data-media="${esc(m.id)}"><img src="${esc(m.url)}" alt="Photo ${k + 1}"><figcaption>${m.cover || (!ph.some(x => x.cover) && k === 0) ? '<span class="pill okp">In print</span>' : (ro ? '' : `<button class="btn link" type="button" data-med-cover="${esc(m.id)}" id="medCover-${esc(m.id)}">Use in print</button>`)}${ro ? '' : `<button class="btn link" type="button" data-med-rm="${esc(m.id)}" id="medRm-${esc(m.id)}">Remove</button>`}</figcaption></figure>`).join('')}</div>` : ''}
         ${ro ? '' : `<div class="toolbar cmp-tools"><button class="btn ghost" type="button" data-cmp-edit="${esc(c.id)}" id="cmpEdit-${esc(c.id)}">Edit</button><button class="btn ghost" type="button" data-cmp-hide="${esc(c.id)}" id="cmpHide-${esc(c.id)}">${c.shown === false ? 'Show' : 'Hide'}</button>
           <button class="btn ghost" type="button" data-cmp-move="-1" data-id="${esc(c.id)}" id="cmpUp-${esc(c.id)}"${i === 0 ? ' disabled' : ''} aria-label="Move up">Up</button><button class="btn ghost" type="button" data-cmp-move="1" data-id="${esc(c.id)}" id="cmpDown-${esc(c.id)}"${i === comps.length - 1 ? ' disabled' : ''} aria-label="Move down">Down</button>
-          <label class="btn ghost cmp-addph" id="cmpPh-${esc(c.id)}">Add photos<input type="file" accept="image/jpeg,image/png,image/webp" multiple data-cmp-photos="${esc(c.id)}" hidden></label><button class="btn ghost" type="button" data-cmp-fetch="${esc(c.id)}" id="cmpFetch-${esc(c.id)}">Photos from a listing</button><button class="btn link" type="button" data-cmp-rm="${esc(c.id)}" id="cmpRm-${esc(c.id)}">Remove</button></div>`}
+          <label class="btn ghost cmp-addph" id="cmpPh-${esc(c.id)}">Add photos<input type="file" accept="image/jpeg,image/png,image/webp" multiple data-cmp-photos="${esc(c.id)}" hidden></label><button class="btn ghost" type="button" data-cmp-fetch="${esc(c.id)}" id="cmpFetch-${esc(c.id)}">Photos from a listing</button><button class="btn ghost" type="button" data-cmp-draft="${esc(c.id)}" id="cmpDraft-${esc(c.id)}">Draft the comparison</button><button class="btn link" type="button" data-cmp-rm="${esc(c.id)}" id="cmpRm-${esc(c.id)}">Remove</button></div>`}
         ${CMP_FETCH && CMP_FETCH.cid === c.id && !ro ? fetchBox(c) : ''}
         ${CMP_EDIT === c.id && !ro ? editor(c) : ''}</li>`; };
     // photos from a listing page (or the pack's photo links): fetched by the appraisal-fetch function, then Tim ticks the ones to keep
@@ -10069,7 +10294,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         ${anyCbc ? `<p class="small" style="margin:6px 0 0">${buyers ? 'Case-by-case sales last checked ' + esc(fmtDate(new Date(buyers.checked_at).toLocaleDateString('en-CA', { timeZone: 'Pacific/Auckland' }))) + '. ' : ''}In suburbs you check case by case, the AI suggests who each sale appealed to, and only a mismatch with this home is flagged. Nothing is hidden for you.</p>` : ''}</div>
       <h2>Your comparables</h2>
       ${comps.length ? `<ol class="cmp-list" id="cmpList">${comps.map(row).join('')}</ol>` : '<div class="card note tight"><p class="small" style="margin:0">No comparables yet. Add one, or import a pack gathered from REINZ.</p></div>'}
-      ${ro ? '' : `<div class="toolbar"><button class="btn primary" type="button" id="cmpAdd">Add a comparable</button></div>${CMP_EDIT === 'new' ? editor(null) : ''}`}
+      ${ro ? '' : `<div class="toolbar"><button class="btn primary" type="button" id="cmpAdd">Add a comparable</button>${comps.length ? '<button class="btn ghost" type="button" id="cmpDraftAll">Draft all the comparisons</button>' : ''}</div>
+        ${comps.length ? '<p class="small" style="margin:0 0 8px">The AI drafts how each home compares with theirs, from both homes\' figures, the advertisement and your first-visit notes. Each draft arrives unticked: read it, change it, then tick it. Weak points of their home go to your private note, never the page.</p>' : ''}${CMP_EDIT === 'new' ? editor(null) : ''}`}
       ${ro ? '' : `<h2>Import a pack</h2>
       <div class="card tight"><p class="small" style="margin:0 0 6px">Paste the comparables pack gathered from REINZ or Relab (format mre.comps/1). Its source and date are kept; your ticked wording is never replaced; the listing's words are only ever quoted.</p>
         <label class="f" for="cmpPack" style="margin-top:0">Pack</label><textarea id="cmpPack" rows="5" data-nodirty spellcheck="false" placeholder='{"format":"mre.comps/1","comps":[...]}'></textarea>
@@ -10082,7 +10308,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         <div class="cmp-drop" id="cmpDrop"><label class="btn ghost" id="cmpFolderPick">Choose photos<input type="file" id="cmpFolder" accept="image/jpeg,image/png,image/webp" multiple hidden></label><span class="small">or drop them here</span></div>
         <div id="cmpFolderList"></div></div>`}
       <h2>On the appraisal</h2>
-      <div class="card tight"><label class="choice cb"><input type="checkbox" id="cmpMarket"${rec.setup.market ? ' checked' : ''}${ro ? ' disabled' : ''}><span class="mark"></span><span><span class="ct">Show the Dunedin market report</span><span class="cd">From the shared market figures, loaded once a month.</span></span></label></div>
+      <div class="card tight"><label class="choice cb"><input type="checkbox" id="cmpMarket"${rec.setup.market ? ' checked' : ''}${ro ? ' disabled' : ''}><span class="mark"></span><span><span class="ct">Show the Dunedin market report</span><span class="cd">From the shared market figures, loaded once a month.</span></span></label>
+        <label class="choice cb"><input type="checkbox" id="cmpShowCv"${rec.setup.showCv ? ' checked' : ''}${ro ? ' disabled' : ''}><span class="mark"></span><span><span class="ct">Show their rating valuation in the Yours column</span><span class="cd">Off unless you tick it. Bedrooms always come from your room calls on the first visit, never from Relab.</span></span></label></div>
       <h2>Your never-mix list</h2>
       <div class="card tight" id="grpCard"><p class="small" style="margin:0 0 6px">Never mix: a sale in the group is not counted for a home outside it. Case by case: the sales are counted, the AI suggests whether each looks like an investor or student sale or a family home, and only a mismatch with this home is flagged.</p>
         ${groups.map(g => `<div class="cmp-grp" data-grp="${esc(g.id)}"><div class="row2"><div><label class="f" for="grpN-${esc(g.id)}">Name</label><input type="text" id="grpN-${esc(g.id)}" value="${esc(g.name)}"></div><div><label class="f" for="grpS-${esc(g.id)}">Suburbs <span class="opt">(commas between)</span></label><input type="text" id="grpS-${esc(g.id)}" value="${esc((g.suburbs || []).join(', '))}"></div></div>
@@ -10103,7 +10330,37 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       const { data, error } = await sb.rpc('agent_appraisal_save', { p_id: rec.id, p_setup: next, p_fields: null, p_sections: null, p_title: null, p_prepared_for: null, p_private_notes: null, p_status: null });
       if (error || !data) { mk.checked = !mk.checked; fail(mk, error); return; }
       rec.setup = next; atBtn(mk, mk.checked ? 'Saved. The market report shows on this appraisal.' : 'Saved. The market report is off for this appraisal.', 'ok'); });
+    const scv = $('#cmpShowCv');
+    if (scv && !ro) scv.addEventListener('change', async () => {
+      const next = Object.assign({}, rec.setup, { showCv: scv.checked }); atBtn(scv, 'Saving...', 'busy');
+      const { data, error } = await sb.rpc('agent_appraisal_save', { p_id: rec.id, p_setup: next, p_fields: null, p_sections: null, p_title: null, p_prepared_for: null, p_private_notes: null, p_status: null });
+      if (error || !data) { scv.checked = !scv.checked; fail(scv, error); return; }
+      rec.setup = next; atBtn(scv, scv.checked ? 'Saved. Their rating valuation shows in the Yours column.' : 'Saved. Their rating valuation stays off the page.', 'ok'); });
     if (ro) return;
+    // 038: the AI drafts how a comparable compares with their home (Sonnet, through doc-prefill). The draft goes in unticked, so the
+    // vendor sees nothing until Tim reads, changes and ticks it; a weak point of their home goes to his private note on the comparable.
+    const draftCmp = async c => {
+      const { data, error } = await sb.functions.invoke('doc-prefill', { body: { mode: 'appraisal_draft', part: 'compare', appraisal_id: rec.id, comp_id: c.id } }); const j = await fnJson(data, error);
+      if (!j || !j.ok) return { ok: false, msg: (j && (j.message || j.error)) || (netErr(error) ? 'Not drafted. Check you have signal, then try again.' : 'Not drafted. Try again.') };
+      const r = j.result || {}, note = String(r.private_note || '').trim();
+      const upd = { compare_text: String(r.text || '').trim(), compare_ticked: false };
+      if (note) upd.private_note = (String(c.private_note || '').trim() ? c.private_note.trim() + '\n' : '') + 'AI: ' + note;
+      try { await must(sb.from('appraisal_comps').update(upd).eq('id', c.id).select()); } catch (e) { return { ok: false, msg: 'Drafted, but not saved: ' + ((e && e.message) || 'try again.') }; }
+      return { ok: true, problems: r.problems || [] };
+    };
+    $$('[data-cmp-draft]').forEach(b => b.addEventListener('click', async () => { const c = comps.find(x => x.id === b.dataset.cmpDraft); b.disabled = true; atBtn(b, 'Drafting...', 'busy');
+      const r = await draftCmp(c); b.disabled = false;
+      if (!r.ok) return atBtn(b, r.msg, 'err');
+      again('cmpDraft-' + c.id, 'Drafted. It is unticked: read it, change it if you like, then tick it in Edit.' + (r.problems.length ? ' Check: ' + r.problems.join(' ') : ''), r.problems.length ? 'err' : 'ok'); }));
+    const dall = $('#cmpDraftAll');
+    if (dall) dall.addEventListener('click', async () => { dall.disabled = true; let done = 0, bad = 0, firstErr = '';
+      for (const c of comps) { atBtn(dall, 'Drafting ' + (done + bad + 1) + ' of ' + comps.length + '...', 'busy'); const r = await draftCmp(c); if (r.ok) done++; else { bad++; firstErr = firstErr || r.msg; } }
+      dall.disabled = false;
+      again('cmpDraftAll', 'Drafted ' + done + ' of ' + comps.length + '. Each is unticked until you read and tick it.' + (bad ? ' ' + bad + ' not drafted: ' + firstErr : ''), bad ? 'err' : 'ok'); });
+    const cmpTa = $('#cfCmp'), cmpHint = $('#cfCmpHint');
+    if (cmpTa && cmpHint) { const chk = () => { const t = cmpTa.value.trim(), both = /\byours?\b/i.test(t) && /\b(this|that) (home|house|property|one)\b/i.test(t);
+      cmpHint.dataset.kind = !t || both ? '' : 'err'; cmpHint.textContent = !t || both ? 'Compare and contrast: say something about this home and something about theirs ("this home" and "yours"), where they are alike and where they differ.' : 'It should mention both homes: this one and theirs ("yours").'; };
+      cmpTa.addEventListener('input', chk); chk(); }
     // C2: who the sales in case-by-case suburbs likely appealed to (the AI suggests; only a mismatch is flagged; nothing is hidden)
     const cb = $('#cmpBuyers'); if (cb) cb.addEventListener('click', async () => { cb.disabled = true; atBtn(cb, 'Checking... this takes a few seconds.', 'busy');
       const { data, error } = await sb.functions.invoke('doc-prefill', { body: { mode: 'buyer_check', appraisal_id: rec.id } }); const j = await fnJson(data, error); cb.disabled = false;
@@ -10397,7 +10654,10 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
           ${hA ? `<p class="small" style="margin:6px 0 0">Using ${esc(hA.file_name || (hA.kind === 'video' ? 'your video' : 'your photo'))}${hA.kind === 'video' && !hA.still_path ? '. No still frame could be taken from it, so paper copies show no header' : ''}.</p><button class="btn link" type="button" id="absHeaderRm"${dis}>Remove it</button>` : '<p class="small" style="margin:6px 0 0">Nothing uploaded yet, so no header is shown.</p>'}`}
         <div id="absPrev">${previewHTML(hp)}</div></div>
       <h2>Video introduction</h2>
-      <div class="card tight" id="absIntro"><p class="small" style="margin:0 0 6px">Optional: a short hello from you, which they play themselves. Without one, nothing shows.</p>
+      <div class="card tight" id="absPv"><p class="small" style="margin:0 0 6px">A personal message on YouTube or Vimeo: paste its link and it sits above your letter. They press play to watch it; nothing loads from YouTube or Vimeo until they do. Without a link, nothing shows.${S.intro.asset ? ' With a link here, it shows in place of the video you uploaded below.' : ''}</p>
+        <label class="f" for="absPvUrl" style="margin-top:0">YouTube or Vimeo link <span class="opt">(youtube.com, youtu.be or vimeo.com)</span></label><input type="url" id="absPvUrl" inputmode="url" value="${esc((S.pvideo || {}).url || '')}" placeholder="https://youtu.be/..."${dis}>
+        <p class="small" id="absPvNote" style="margin:6px 0 0">${(S.pvideo || {}).url ? (APPR.videoEmbed(S.pvideo.url) ? 'This link works. Save to use it.' : 'That isn\'t a YouTube or Vimeo video link, so nothing will show.') : ''}</p></div>
+      <div class="card tight" id="absIntro"><p class="small" style="margin:0 0 6px">Or upload a short hello from you, which they play themselves. Without one, nothing shows.</p>
         <label class="f" for="absIntroFile" style="margin-top:0">Your video <span class="opt">(MP4, WebM or MOV, up to 50 MB: about a minute, or recorded at 720p on your phone)</span></label><input type="file" id="absIntroFile" accept="${AB_VIDEO_TYPES.join(',')}"${dis}>
         ${iA ? `<p class="small" style="margin:6px 0 0">Using ${esc(iA.file_name || 'your video')}.</p>${urls[iA.id] ? `<div class="apv-intro-box" style="margin-top:6px"><video controls playsinline preload="metadata"${urls[iA.id].still ? ` poster="${esc(urls[iA.id].still)}"` : ''}><source src="${esc(urls[iA.id].url)}"></video></div>` : ''}<button class="btn link" type="button" id="absIntroRm"${dis}>Remove it</button>` : ''}</div>
       <h2>What I heard from you</h2>
@@ -10450,13 +10710,16 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       S.home.ad.title = v('#absAdTitle') || ''; S.home.ad.body = v('#absAdBody') || ''; S.home.ad.ticked = !!($('#absAdTick') || {}).checked;
       S.buyers.text = v('#absBuyText') || ''; S.buyers.tags = (v('#absBuyTags') || '').split(',').map(x => x.replace(/\s+/g, ' ').trim()).filter(Boolean).slice(0, 20); S.buyers.ticked = !!($('#absBuyTick') || {}).checked;
       S.reviews.on = !!($('#absRevOn') || {}).checked;
+      // the personal video's link: kept as typed; only a YouTube or Vimeo video's id is ever used (APPR.videoEmbed)
+      if (v('#absPvUrl') != null) S.pvideo = { url: v('#absPvUrl').trim().slice(0, 500) };
     };
     const redraw = () => { read(); const y = window.scrollY; draw(); window.scrollTo(0, y); };
     // saves the set-up and, once the set-up is complete, writes the sections (only ticked and uploaded things reach them)
     const save = async (btn, okMsg) => {
       read();
       const bad = APPR.checkSections(S); if (bad) { atBtn(btn, bad, 'err'); return false; }
-      S.home.details = offer.filter(x => factOn(x.key)).map(x => [x.label, x.value]);
+      if (S.pvideo && S.pvideo.url && !APPR.videoEmbed(S.pvideo.url)) { atBtn(btn, 'The video link must be a YouTube or Vimeo video (youtube.com, youtu.be or vimeo.com), starting https://. Fix it or clear it, then save.', 'err'); return false; }
+      S.home.details =offer.filter(x => factOn(x.key)).map(x => [x.label, x.value]);
       const ranges = ((rec.fields || {}).ranges || []).map(r => ({ key: r.key, option: r.option, low: r.low, high: r.high }));
       const ready = !APPR.checkSetup(S, ranges);
       const w = ready ? APPR.writeStandard(S, ranges, { address: rec.address, preparedOn: rec.prepared_on, cat: { PACKAGES: typeof PACKAGES !== 'undefined' ? PACKAGES : {}, ITEMS: typeof ITEMS !== 'undefined' ? ITEMS : {}, CATALOGUE: typeof CATALOGUE !== 'undefined' ? CATALOGUE : [] } }) : null;

@@ -92,8 +92,9 @@ const OTHERS=/\b(Ray White|Harcourts|Barfoot|Bayleys|Century 21|Mike Pero|Quinov
 { const {ctx,p,reqs}=await setup({guides:true});
   await p.goto(URL); await seed(p,{});
   await openAt(p,'#journey');
-  let c=await calls(p); out.bCalls=c;
-  expect(c.length===0,'B: signed out, the page makes no database, function or sign-in requests: '+JSON.stringify(c));
+  // 038 (Tim, 28 November 2026): every page reads Tim's public profile (his picture and contact, site_profile_public), and nothing else
+  let c=(await calls(p)).filter(x=>x!=='rpc:site_profile_public'); out.bCalls=c;
+  expect(c.length===0,'B: signed out, the page makes no database, function or sign-in requests beyond Tim\'s public profile: '+JSON.stringify(c));
   expect(!reqs.some(u=>/supabase\.co/.test(u)),'B: no request to the database host: '+reqs.filter(u=>/supabase\.co/.test(u)).slice(0,2));
   expect(await p.textContent('#pTitle')==='Your selling journey','B: the page is Your selling journey');
   expect(await p.title()==='Your selling journey · McGuire Real Estate','B: a proper document title for sharing: '+await p.title());
@@ -132,7 +133,7 @@ const OTHERS=/\b(Ray White|Harcourts|Barfoot|Bayleys|Century 21|Mike Pero|Quinov
   expect(more.length===9&&more.every((h,k)=>h==='#journey/'+SLUGS[k]),'B: the panel has Read more on every stop: '+more);
   await p.click('#journey .jcard a[data-jmore="6"]'); await p.waitForTimeout(400);
   expect(await p.evaluate(()=>document.querySelector('#journey').hidden)&&await p.textContent('#pTitle')==='Getting ready'&&await p.evaluate(()=>location.hash)==='#journey/getting-ready','B: Read more closes the panel and opens the stop page');
-  c=await calls(p); expect(!c.some(x=>/^(from|rpc|fn):/.test(x)),'B: still no data calls after all that: '+JSON.stringify(c));
+  c=(await calls(p)).filter(x=>x!=='rpc:site_profile_public'); expect(!c.some(x=>/^(from|rpc|fn):/.test(x)),'B: still no data calls after all that (beyond Tim\'s public profile): '+JSON.stringify(c));
   await ctx.close(); }
 
 // ---------- C. the nine stop pages: complete, linked on, call to action, nothing forbidden, fits a phone in light and dark ----------

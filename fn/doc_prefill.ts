@@ -53,14 +53,16 @@ Deno.serve(async (req) => {
         draftInputs: async (aid) => {
           const { data: a } = await dbA.from("appraisal_views").select("id, property_id, status, setup").eq("id", aid).maybeSingle();
           if (!a) return null;
-          if (!a.property_id) return { appraisal: a, answers: [], questions: [], visitNotes: [], facts: [], rooms: [] };
+          // 038: the comparables, for drafting how one compares (their address and agency are read only to scrub them out of the advertisement)
+          const { data: comps } = await dbA.from("appraisal_comps").select("id, status, suburb, price, sold_on, listed_on, method, days_to_sell, bedrooms, bathrooms, floor_m2, land_m2, cv, ring, sold_by_tim, ad_text, address, agency").eq("appraisal_id", aid);
+          if (!a.property_id) return { appraisal: a, answers: [], questions: [], visitNotes: [], facts: [], rooms: [], comps: comps || [] };
           const { data: answers } = await userClient.from("qa_answers").select("question_key, value, by_vendor, source").eq("property_id", a.property_id).neq("question_key", "client_heart");
           const { data: questions } = await userClient.from("qa_questions").select("key, text");
           const { data: visits } = await userClient.from("first_visits").select("notes").eq("property_id", a.property_id);
           const { data: rooms } = await userClient.from("property_rooms").select("base, tim_class, position, archived_at").eq("property_id", a.property_id);
           const prof = await userClient.rpc("agent_property_profile", { p_property: a.property_id });
           return { appraisal: a, answers: answers || [], questions: questions || [], visitNotes: (visits || []).map((v: any) => v.notes).filter(Boolean),
-            facts: (prof.data && prof.data.facts) || [], rooms: (rooms || []).map((r: any) => ({ base: r.base, tim_class: r.tim_class, position: r.position, archived: !!r.archived_at })) };
+            facts: (prof.data && prof.data.facts) || [], rooms: (rooms || []).map((r: any) => ({ base: r.base, tim_class: r.tim_class, position: r.position, archived: !!r.archived_at })), comps: comps || [] };
         },
         aiKey: () => key,
         callModel: (request, ms) => callAnthropic(key, request, ms),

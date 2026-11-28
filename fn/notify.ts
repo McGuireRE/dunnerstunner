@@ -1,5 +1,6 @@
 import { admin, APP_URL, cors, esc, fmtDT, frontPageTable, json, sendMail, TIM_EMAIL, wrap } from "https://raw.githubusercontent.com/McGuireRE/dunnerstunner/517293f7eae8e38728e01d669d09550831af8871/fn/shared.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
+import { contactMail } from "./contact_mail.ts";
 // Phase 2 adds makeFormPdf: repin both imports to the commit that contains it before deploying.
 import { makeAgreementPdf, makeFormPdf, makeNoticePdf, makeVariationPdf } from "https://raw.githubusercontent.com/McGuireRE/dunnerstunner/517293f7eae8e38728e01d669d09550831af8871/fn/pdfload.ts";
 
@@ -10,6 +11,8 @@ Deno.serve(async (req) => {
     const body = await req.json();
     const { type, agreement_id } = body;
     if (String(type || "").startsWith("pl_")) return await prelistingMail(req, body);
+    // 038: a message sent through "Send a message" (contact_send): to Tim only, once per message, and only by the person who sent it
+    if (type === "contact") return await contactNotify(req, body);
     // Check the caller is a party to this agreement, or the agent
     const userClient = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!, { global: { headers: { Authorization: req.headers.get("Authorization") || "" } } });
     const { data: visible } = await userClient.from("agreements").select("id").eq("id", agreement_id).maybeSingle();
@@ -261,4 +264,20 @@ async function prelistingMail(req: Request, body: any) {
     return json({ ok: true });
   }
   return json({ error: "Unknown type" }, 400);
+}
+
+// 038: the caller must be signed in; contact_mark_emailed (service role) hands over the message only once, and only for its own sender,
+// so a second call, or anyone else's, sends nothing. The email goes to TIM_EMAIL and nowhere else.
+async function contactNotify(req: Request, body: any) {
+  const userClient = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!, { global: { headers: { Authorization: req.headers.get("Authorization") || "" } } });
+  const { data: u } = await userClient.auth.getUser();
+  const me = u && u.user && u.user.email; if (!me) return json({ error: "Not allowed" }, 403);
+  if (!/^[0-9a-f-]{36}$/.test(String(body.message_id || ""))) return json({ error: "Bad request" }, 400);
+  const db = admin();
+  const { data: row, error } = await db.rpc("contact_mark_emailed", { p_id: body.message_id, p_from: me });
+  if (error) return json({ error: "Not sent" }, 500);
+  if (!row) return json({ ok: true, note: "nothing to send" });
+  const m = contactMail(row, TIM_EMAIL, APP_URL);
+  await sendMail(db, null, "contact", { to: m.to, subject: m.subject, html: wrap(m.html), replyTo: m.replyTo });
+  return json({ ok: true });
 }

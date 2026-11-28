@@ -63,7 +63,7 @@ collecting comparables, is done for him. D moves earlier if a bespoke reappraisa
   quartile), days to sell, sales per month, and price bands with the vendor's range marked; the latest twelve months of Dunedin (or the
   area in `setup.marketArea`; the heading reads "The {area} market", Dunedin by default). A month with no figures is drawn as a gap.
   The source line follows `market_months.source`. From the shared `market_months` store, imported once a month at `/appraisals/market`. Individual REINZ
-  sales go into `market_sales` (suburb and price public; the address Tim's only). Chart code: `src/market-core.js` (window.MKT), for the
+  sales go into `market_sales` (suburb and price public; the address shown only in the appraisal's suburb table, see the additions below). Chart code: `src/market-core.js` (window.MKT), for the
   Quarterly market update to reuse.
 - **Where it shows**: on an appraisal written from its set-up, the evidence goes in just before "My opinion of price": Price evidence at
   a glance, Recent sales nearby, On the market now, The Dunedin market. With no shown comparables and the report off, the page is
@@ -339,6 +339,53 @@ build time.
   chosen (no header block). Within a section a missing detail or figure is left out, never shown blank or "unknown". The same holds for
   phase C: no priced comparable, no "Price evidence at a glance"; the market report switched on with no figures, no report (both fixed
   in phase B). Tim's own edit view still shows the empty section with a prompt to add something.
+
+## The look, and Tim's additions (28 November 2026, branch lw3-look; migration 038, not applied)
+
+The appraisal now draws like the approved sample of 24 November 2026 (top bar with the logo and jump chips, the title over the header,
+cards, carousels, the opinion card, the plans strip, the panel, the closing line, the sample's paper look in print). Fonts are hosted on
+the site (`onboarding/assets/fonts`, SIL Open Font License); the portal shell skips Google's font link on appraisal addresses.
+
+- **A. The "Yours" column.** Each comparable shows This home and Yours side by side, a row only when both homes have the figure, and
+  tags for the differences ("Yours has 1 more bedroom", "This one has 38 m² more land"). Their figures come from the property profile:
+  bedrooms only from Tim's room calls (FVC), bathrooms, floor, land, garaging or parking, year built; never a value from Relab; the
+  rating valuation only when Tim ticks "Show their rating valuation in the Yours column" (`setup.showCv`). `APPR.subjectOf` and
+  `yoursOf` in `fn/prefill_shared.ts` are the same rule (a test compares them). The words under each card must compare and contrast both
+  homes: "Draft the comparison" and "Draft all" (doc-prefill `appraisal_draft`, part `compare`, Sonnet, `record_compare`) send both
+  homes' figures, the comparable's advertisement (scrubbed of its address, agency, phone, email, links and names) and Tim's first-visit
+  notes, never the client heart. The draft arrives unticked; a weak point of their home goes to Tim's private note on the comparable.
+  When Tim types his own, the screen reminds him to mention both homes.
+- **B. The order.** Price evidence, the comparables, the market report, then **Everything that sold in {suburb} last month**, then the
+  opinion of price. The table lists every sale held in `market_sales` for the appraisal's suburb in the latest full month (not only the
+  comparables), with the month's totals (homes sold, median, lowest to highest, median days to sell), comparables marked. Full street
+  addresses (Tim, 28 November 2026, 3:11pm: "it is important that the prospect is fully informed, and we always show the full street
+  address. REINZ figures are provided to us as members for this very purpose."). `market_sales` addresses show in this table on the
+  appraisal, on the vendor's private page and in print; they stay off every other screen. No sales held: no section, and Tim's copy
+  prompts him to load the month's figures. (`market_sales` holds no sale method, so the method column is left out.)
+- **C. A personal message on YouTube or Vimeo** (Sections screen): only youtube.com, youtu.be and vimeo.com links; the video's id is
+  kept in the section (`pvideo`), and the page builds the player's address itself (youtube-nocookie.com/embed/ID,
+  player.vimeo.com/video/ID). It sits above the letter as a poster; the player loads only when pressed (sandboxed, strict referrer
+  policy), so nothing calls YouTube or Vimeo before then. Print shows nothing for it. With a link, an uploaded introduction is left out.
+- **D. About and contact, one settings page** (`/portal/settings/about`): Tim's picture (made square from the middle, about 512 px),
+  name, licence line, phone, email, About Tim and About McGuire Real Estate (heading, text, an optional image each), and the ways to
+  reach him (Call, Text, Email, Send a message, WhatsApp, Messenger, Discord, Telegram, Signal), each on or off, in his order, each
+  detail checked as its service writes links. Seeded with the phone and email the vendor pages already use. The appraisal's signature
+  line and closing line read these settings.
+- **E. The picture in a circle on every page's header** (the portal, the vendor's pages, the appraisal's own top bar), opposite the
+  logo; the bar is a little taller and the logo larger. Tapping it, or "About Tim and McGuire Real Estate" on the point of difference
+  panel, opens one dialog: picture, name and licence line, the ways to reach him as big buttons, then the two About tabs. "Send a
+  message" is for signed-in people: `contact_send` (their own email from their sign-in, bounded, five a day each) puts it on Tim's
+  Needs you, and notify emails Tim once per message (`contact_mark_emailed`, service role; never to anyone but Tim). People who aren't
+  signed in see Call, Text and Email, not the form. On Tim's own view the form is a preview. Room is kept in the header (`#hdrMe`) for a
+  signed-in person's own picture later (not built). Print: the contact line and both About sections in full under the panel.
+- **Migration 038** (`038_site_profile_contact.sql`): `appraisal_drafts` takes part `compare`; `site_profile` (one row, agent-only, read
+  by anyone through `site_profile_public()`); the `site-public` bucket (public read, 2 MB, photos only, agent-only writes under
+  `profile/` and `about/`); `contact_messages` with `contact_send`, `agent_contact_done` and `contact_mark_emailed`. Rollback test:
+  `tests/site-profile-rollback.sql` (via `site-profile-rollback.js`), run on the local stand-in.
+- **For phase E's frozen copy** (the send branch builds it as a whitelist): the Yours figures (`ev.subject`), the suburb table rows
+  (`ev.suburbSales`: suburb, month, and each sale's date, address, price, bedrooms, bathrooms, floor, land, days to sell), the
+  personal video (the `pvideo` section: provider, id, hash), and the About and contact (`site_profile_public` with the picture's and
+  About images' public links) as they stood when sent.
 
 ## Open questions for Tim (with defaults, asked before the phase that needs them)
 

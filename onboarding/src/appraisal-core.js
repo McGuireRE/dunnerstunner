@@ -71,7 +71,7 @@
       case 'campaign': return '<div class="apv-camp' + ((sec.bars || []).length + (sec.tail ? 1 : 0) > 9 ? ' dense' : '') + '">' + wave(sec) + '</div>';
       case 'methodcards': return methodCards(sec);
       case 'plans': return plans(sec);
-      case 'panel': return '<aside class="apv-panel"><h3 class="apv-panel-h">' + inline(sec.title, f) + '</h3>' + (sec.items || []).map(x => '<p>' + inline(x, f) + '</p>').join('') + '</aside>';
+      case 'panel': return '<aside class="apv-panel"><h3 class="apv-panel-h">' + inline(sec.title, f) + '</h3>' + (sec.items || []).map(x => '<p>' + inline(x, f) + '</p>').join('') + aboutBits() + '</aside>';
       // LW3 phase B (036): each draws its own heading, and nothing at all when it has nothing to show (Tim, 28 November 2026)
       case 'header': return hero(sec, ev);
       case 'intro': return intro(sec, ev);
@@ -79,6 +79,7 @@
       case 'home': return home(sec, ev);
       case 'buyers': return buyers(sec, f);
       case 'reviews': return reviews(sec, ev);
+      case 'pvideo': return pvideo(sec);
       default: return '';
     }
   }
@@ -252,6 +253,7 @@
     // LW3 phase B (036): only what Tim has ticked or uploaded is written; with none of it, the sections are exactly as phase A wrote them
     const b = phaseB(s), at = sections.findIndex(x => x.type === 'heading' && x.text === 'My opinion of price');
     if (b.header) sections.unshift(b.header);
+    if (b.pvideo) sections.splice(sections.findIndex(x => x.type === 'byline') + 1, 0, b.pvideo);
     sections.splice(at + (b.header ? 1 : 0), 0, ...b.before);
     if (b.reviews) sections.push(b.reviews);
     return { title: (c.address ? c.address + ': ' : '') + 'Market Appraisal', sections, fields };
@@ -295,7 +297,7 @@
   const tickedLines = h => ((h && h.lines) || []).filter(l => l && l.ticked && String(l.text || '').trim()).map(l => String(l.text).replace(/\s+/g, ' ').trim());
   // the phase B sections from the set-up: { header, before: [the sections that go before the opinion of price], reviews }
   function phaseB(s) {
-    const o = { header: null, before: [], reviews: null }, ho = s.headerOpt || {};
+    const o = { header: null, before: [], reviews: null, pvideo: null }, ho = s.headerOpt || {};
     const frame = { focus: { x: num0((ho.focus || {}).x, 0, 100, 50), y: num0((ho.focus || {}).y, 0, 100, 50) }, zoom: num0(ho.zoom, 1, 3, 1), bright: num0(ho.bright, 0.5, 1.5, 1) };
     if (s.header === 'own' ? !!ho.asset : httpsUrl(ho.url)) {
       o.header = s.header === 'own'
@@ -304,7 +306,11 @@
       // a video header is a short slow loop (Tim, 28 November 2026, 9:22am): its playback speed, 0.5 to 1.0, 0.6 unless Tim sets it
       if (o.header.kind === 'video') o.header.speed = clipSpeed(ho.speed);
     }
-    if (s.intro && s.intro.asset) o.before.push({ type: 'intro', stage: STAGES.intro, asset: String(s.intro.asset) });
+    // a personal address on YouTube or Vimeo (Tim, 28 November 2026) goes above the letter; when there is one, it wins over an uploaded
+    // introduction, which is then left out
+    const pv = videoEmbed(s.pvideo && s.pvideo.url);
+    if (pv) o.pvideo = { type: 'pvideo', stage: STAGES.intro, provider: pv.provider, id: pv.id, hash: pv.hash || '' };
+    else if (s.intro && s.intro.asset) o.before.push({ type: 'intro', stage: STAGES.intro, asset: String(s.intro.asset) });
     const lines = tickedLines(s.heard);
     if (lines.length) o.before.push({ type: 'heard', stage: STAGES.heard, items: lines });
     const hm = s.home || {}, ad = hm.ad && hm.ad.ticked && (String(hm.ad.title || '').trim() || String(hm.ad.body || '').trim()) ? { title: String(hm.ad.title || '').replace(/\s+/g, ' ').trim(), paras: paras(hm.ad.body) } : null;
@@ -350,6 +356,35 @@
       + (credit ? '<figcaption class="apv-credit">' + esc((sec.src === 'library' ? (sec.kind === 'video' ? 'Video: ' : 'Photo: ') : '') + credit) + '</figcaption>' : '')
       + (sec.kind === 'video' && !preview ? '<button type="button" class="apv-vbtn no-print" data-apv-nav data-apv-vid>Pause</button>' : '')
       + (head ? '<div class="apv-hero-in">' + head + '</div>' : '') + '</figure>';
+  }
+  // A YouTube or Vimeo link, read for its id only: the page builds the player's address itself (youtube-nocookie.com/embed/ID,
+  // player.vimeo.com/video/ID) and never uses the link as pasted. Returns { provider, id, hash } or null.
+  function videoEmbed(u) {
+    let x; try { x = new URL(String(u || '').trim()); } catch (_) { return null; }
+    if (x.protocol !== 'https:' || x.username || x.password || x.port) return null;
+    const h = x.hostname.toLowerCase(), seg = x.pathname.split('/').filter(Boolean), YT = /^[A-Za-z0-9_-]{11}$/;
+    if (['youtube.com', 'www.youtube.com', 'm.youtube.com'].includes(h)) {
+      const id = seg[0] === 'watch' ? x.searchParams.get('v') : ['embed', 'shorts', 'live'].includes(seg[0]) ? seg[1] : null;
+      return id && YT.test(id) ? { provider: 'youtube', id } : null;
+    }
+    if (h === 'youtu.be') return seg[0] && YT.test(seg[0]) ? { provider: 'youtube', id: seg[0] } : null;
+    if (h === 'vimeo.com' || h === 'www.vimeo.com' || h === 'player.vimeo.com') {
+      const i = seg.findIndex(p => /^[0-9]{6,12}$/.test(p)); if (i < 0) return null;
+      if (h === 'player.vimeo.com' && seg[0] !== 'video') return null;
+      const hash = seg[i + 1] && /^[0-9a-f]{6,20}$/.test(seg[i + 1]) ? seg[i + 1] : (x.searchParams.get('h') && /^[0-9a-f]{6,20}$/.test(x.searchParams.get('h')) ? x.searchParams.get('h') : '');
+      return { provider: 'vimeo', id: seg[i], hash };
+    }
+    return null;
+  }
+  const embedSrc = v => v.provider === 'youtube' ? 'https://www.youtube-nocookie.com/embed/' + encodeURIComponent(v.id) + '?rel=0&autoplay=1'
+    : 'https://player.vimeo.com/video/' + encodeURIComponent(v.id) + '?autoplay=1&dnt=1' + (v.hash ? '&h=' + encodeURIComponent(v.hash) : '');
+  // the personal address: a poster with a play button; the player loads only when the vendor presses it, so nothing calls YouTube or
+  // Vimeo until then. Screen only: print shows nothing for it.
+  function pvideo(sec) {
+    if (!sec || !['youtube', 'vimeo'].includes(sec.provider) || !(sec.provider === 'youtube' ? /^[A-Za-z0-9_-]{11}$/ : /^[0-9]{6,12}$/).test(String(sec.id || ''))) return '';
+    const v = { provider: sec.provider, id: String(sec.id), hash: /^[0-9a-f]{6,20}$/.test(String(sec.hash || '')) ? String(sec.hash) : '' };
+    return '<section class="apv-pvideo no-print" data-stage="' + esc(sec.stage) + '"><div class="apv-pv-box"><button type="button" class="apv-pv-play" data-apv-nav data-apv-embed="' + esc(embedSrc(v)) + '" data-apv-embed-title="A personal message from Tim">'
+      + '<span class="apv-pv-icon" aria-hidden="true"></span><span class="apv-pv-t">A personal message from Tim</span><span class="apv-pv-s">' + esc('Press play to watch. It opens from ' + (v.provider === 'youtube' ? 'YouTube' : 'Vimeo') + '.') + '</span></button></div></section>';
   }
   // Tim's video introduction: played by the vendor (not on its own), with its still frame in print
   function intro(sec, ev) {
@@ -409,14 +444,28 @@
   // is one); the sections in their order, each heading with an anchor; the sale methods and the plans inside the campaign, as in the
   // sample; and the closing line. Every style is scoped under .apv-doc, so the rest of the portal is unchanged.
   // APPR.brand: the logo files, set once by the page (none in the node tests, so no logo is drawn there).
-  const brand = { light: '', dark: '', email: '' };   // email: Tim's address as the vendor pages show it, for the letter's signature
+  // site: Tim's About and contact from the site-wide settings (038, site_profile_public, with image links made by the page):
+  // { name, licence, phone, email, photo_url, about: { tim: { heading, body, image_url }, agency: {...} }, channels: [{ key, value }] }.
+  // Nothing in it is written here: no name, phone or email is ever typed into the appraisal's drawing.
+  const brand = { light: '', dark: '', site: null };
+  const site = () => brand.site || {};
+  const aboutTabs = () => [['tim', 'Tim'], ['agency', 'McGuire Real Estate']].map(([k, label]) => { const a = (site().about || {})[k] || {}; return { key: k, label, heading: cleanV(a.heading, 120), body: String(a.body || '').trim(), image: httpsUrl(a.image_url) || /^blob:|^data:image\//.test(String(a.image_url || '')) ? String(a.image_url) : '' }; })
+    .filter(t => t.heading || t.body || t.image);
+  // the About button on the point of difference panel (it opens the overlay the page owns), and, on paper, the contact line and both
+  // About sections in full. Nothing there: no button, nothing printed.
+  function aboutBits() {
+    const S = site(), tabs = aboutTabs(), contact = [S.phone, S.email].filter(x => String(x || '').trim());
+    if (!tabs.length && !contact.length && !S.photo_url) return '';
+    return '<p class="apv-about-row no-print"><button type="button" class="apv-about-btn" data-apv-nav data-about-open>About Tim and McGuire Real Estate</button></p>'
+      + '<div class="apv-print-only apv-about-print">' + (contact.length ? '<p class="apv-about-contact">' + esc([S.name].concat(contact).filter(Boolean).join(' · ')) + '</p>' : '')
+      + tabs.map(t => '<div class="apv-about-p"><h4>' + esc(t.heading || ('About ' + t.label)) + '</h4>' + (t.image ? '<img src="' + esc(t.image) + '" alt="' + esc(t.label) + '">' : '') + paras(t.body).map(x => '<p>' + esc(x) + '</p>').join('') + '</div>').join('') + '</div>';
+  }
   // the mockup's label, as in the sample (the section still stores its longer label, MOCKUP_LABEL, for the record)
   const MOCK_LINE = 'A draft only. Nothing here is advertised or live.';
-  const TIM_PHONE = '027 562 7207';
   // the chips' short names for the headings the appraisal writes; any other heading keeps its own words
   const NAV = [[/^what i heard/i, 'What I heard'], [/^a short video from me$/i, 'Video'], [/^your home, as buyers would see it$/i, 'Your home'], [/^the buyers i have in mind$/i, 'Your buyers'],
     [/^the price evidence at a glance$/i, 'Price evidence'], [/^sales and current listings$/i, 'Sales and listings'], [/^the (.+) market$/i, m => m[1] + ' market'],
-    [/^my opinion of price$/i, 'My opinion'], [/^how i would sell it$/i, 'Campaign'], [/^what my clients say$/i, 'Reviews']];
+    [/^my opinion of price$/i, 'My opinion'], [/^how i would sell it$/i, 'Campaign'], [/^what my clients say$/i, 'Reviews'], [/^everything that sold in (.+) last month$/i, m => m[1] + ' last month']];
   const navLabel = t => { for (const [re, l] of NAV) { const m = re.exec(t); if (m) return typeof l === 'function' ? l(m) : l; } return t; };
   const NOTE_HEADING = 'A note from Tim';
   const METHODS_NOTE = 'A general summary. The Real Estate Authority\'s guides at settled.govt.nz explain each method in full.';
@@ -432,7 +481,8 @@
     const heroSec = secs.find(s => s.type === 'header'), heroHtml = heroSec ? hero(heroSec, ev, head) : '';
     const parts = []; let letter = false;
     // the letter's signature, as in the sample: name, phone and email (the email when the page has given it)
-    const sig = '<p class="apv-sig">' + esc(['Tim McGuire', TIM_PHONE, brand.email].filter(Boolean).join(' · ')) + '</p>';
+    const S = site(), sigLine = [S.name, S.phone, S.email].filter(x => String(x || '').trim());
+    const sig = sigLine.length ? '<p class="apv-sig">' + esc(sigLine.join(' · ')) + '</p>' : '';
     for (let i = 0; i < secs.length; i++) {
       const s = secs[i], nx = secs[i + 1] || {}, nx2 = secs[i + 2] || {};
       if (s.type === 'header') continue;
@@ -459,7 +509,7 @@
       if (at < 0) at = parts.findIndex(p => p.indexOf('class="apv-opinion"') >= 0); if (at < 0) at = parts.length; parts.splice(at, 0, extra);
     }
     // the closing line, on an appraisal written from its set-up (the sample's "When you're ready, I'm ready")
-    if (written) parts.push('<section class="apv-close"><h2 class="apv-close-h">When you\'re ready, I\'m ready</h2><p>Questions at any stage? Call or text Tim on <strong>027 562 7207</strong>.</p></section>');
+    if (written && String(S.phone || '').trim()) parts.push('<section class="apv-close"><h2 class="apv-close-h">When you\'re ready, I\'m ready</h2><p>Questions at any stage? Call or text ' + esc(String(S.name || '').split(' ')[0] || 'me') + ' on <strong>' + esc(S.phone) + '</strong>.</p></section>');
     // a heading with nothing under it is not drawn, so it gets no chip either (Tim, 28 November 2026: no empty headings)
     const bare = p => /^<h2>[\s\S]*<\/h2>$/.test(p) || /^<section class="apv-close">/.test(p);
     const kept = parts.filter(p => p).filter((p, j, a) => !(/^<h2>[\s\S]*<\/h2>$/.test(p) && (j === a.length - 1 || bare(a[j + 1]))));
@@ -469,7 +519,9 @@
     const anchored = body.replace(/<h2>([\s\S]*?)<\/h2>/g, (m, inner) => { const id = 'apv-s' + (++k), label = navLabel(inner.replace(/<[^>]+>/g, '').trim()); nav.push([id, label]); return '<h2 id="' + id + '">' + inner + '</h2>'; });
     const logo = brand.light ? '<span class="apv-logo"><img class="logo-light" src="' + esc(brand.light) + '" alt="McGuire Real Estate">' + (brand.dark ? '<img class="logo-dark" src="' + esc(brand.dark) + '" alt="McGuire Real Estate">' : '') + '</span>' : '';
     const jump = nav.length > 1 ? '<nav class="apv-jump no-print" aria-label="Sections">' + nav.map(([id, l]) => '<a class="apv-chip" href="#' + id + '" data-apv-go="' + id + '">' + l + '</a>').join('') + '</nav>' : '';
-    const top = logo || jump ? '<div class="apv-top"><div class="apv-top-in">' + logo + jump + '</div></div>' : '';
+    // the profile picture in a circle, opposite the logo (it opens the About overlay); no picture, no circle
+    const av = /^(https:\/\/|blob:|data:image\/)/.test(String(S.photo_url || '')) ? '<button type="button" class="apv-avatar" data-apv-nav data-about-open aria-label="' + esc('About and contact' + (S.name ? ': ' + S.name : '')) + '"><img src="' + esc(S.photo_url) + '" alt=""></button>' : '';
+    const top = logo || jump || av ? '<div class="apv-top"><div class="apv-top-in">' + (logo || av ? '<div class="apv-top-row">' + logo + av + '</div>' : '') + jump + '</div></div>' : '';
     return '<article class="apv-doc">' + top + heroHtml + anchored + '</article>';
   }
 
@@ -489,26 +541,82 @@
   const cmpShown = c => !!(c && c.compare_ticked && String(c.compare_text || '').trim());
   // one comparable, laid out as in the sample: the photos on the left (above, on a phone), and beside them its status, the address, the
   // price in large type, how and when it sold, its figures as a table, and how near it is; then the advertisement and how it compares.
-  // The sample's "Yours" column and its difference tags need the vendor's own figures, which the appraisal doesn't hold yet: left out.
-  function compCard(c, i, photos) {
+  // The "Yours" column (Tim, 28 November 2026): with the vendor's own figures (ev.subject, APPR.subjectOf), a row shows only when both
+  // homes have that figure, and the tags say where they differ. With no figures of theirs at all, the card shows this home's alone.
+  function compCard(c, i, photos, subject) {
     const st = STATUS_WORDS[c.status] ? c.status : 'sold';
     const price = c.price > 0 ? (st === 'listed' ? 'Asking ' : '') + dollars(c.price) : (st === 'listed' ? (c.method || 'Price on request') : '');
     const when = st === 'listed' ? (c.listed_on ? 'On the market since ' + longDate(c.listed_on) : '') : (c.sold_on ? 'Sold ' + longDate(c.sold_on) : '');
     const how = [when, st === 'listed' && !(c.price > 0) ? '' : c.method, c.days_to_sell != null && st !== 'listed' ? 'sold in ' + c.days_to_sell + ' days' : '', c.agency].filter(x => String(x || '').trim());
-    const rows = [['Bedrooms', c.bedrooms != null ? String(c.bedrooms) : ''], ['Bathrooms', c.bathrooms != null ? num1(c.bathrooms) : ''], ['Floor area', c.floor_m2 ? num1(c.floor_m2) + ' m²' : ''],
-      ['Land', c.land_m2 ? num1(c.land_m2) + ' m²' : ''], ['Rating valuation', c.cv ? dollars(c.cv) : '']].filter(x => String(x[1] || '').trim());
+    const Y = subject && Object.keys(subject).length ? subject : null;
+    const fmt = { bedrooms: v => String(v), bathrooms: v => num1(v), floor_m2: v => num1(v) + ' m²', land_m2: v => num1(v) + ' m²', cv: v => dollars(v) };
+    const has = v => v != null && v !== '' && isFinite(+v) && (+v > 0 || v === 0);
+    const all = [['Bedrooms', 'bedrooms', 'bedrooms'], ['Bathrooms', 'bathrooms', 'bathrooms'], ['Floor area', 'floor_m2', 'floor_m2'], ['Land', 'land_m2', 'land_m2'], ['Rating valuation', 'cv', 'cv']]
+      .map(([label, ck, yk]) => [label, has(c[ck]) && (ck !== 'floor_m2' && ck !== 'land_m2' && ck !== 'cv' || +c[ck] > 0) ? fmt[ck](c[ck]) : '', Y && has(Y[yk]) && +Y[yk] >= 0 ? fmt[ck](Y[yk]) : '', ck, yk]);
+    const rows = Y ? all.filter(x => x[1] && x[2]) : all.filter(x => x[1]);
+    const tags = Y ? diffTags(c, Y) : [];
     const near = [ringWords(c.ring), c.distance_m != null ? km(c.distance_m) + ' away' : ''].filter(Boolean).join(', ');
     const car = carousel((photos || []).filter(p => p && p.url).map((p, k, a) => ({ url: p.url, alt: 'Photo ' + (k + 1) + ' of ' + a.length + ', ' + c.address })), 'Photos of ' + c.address);
     const body = '<div class="apv-comp-body"><header class="apv-comp-h">'
       + '<p class="apv-comp-tags"><span class="apv-comp-n" aria-hidden="true">' + (i + 1) + '</span><span class="apv-tag st-' + st + '">' + esc(STATUS_WORDS[st]) + '</span>' + (c.sold_by_tim ? '<span class="apv-tag tim">Sold by Tim</span>' : '') + (near ? '<span class="apv-tag near">' + esc(near) + '</span>' : '') + '</p>'
       + '<h3>' + esc(c.address) + '</h3></header>'
       + (price ? '<p class="apv-comp-price">' + esc(price) + '</p>' : '') + (how.length ? '<p class="apv-comp-how">' + esc(how.join(', ')) + '</p>' : '')
-      + (rows.length ? '<table class="apv-cmp-tbl"><thead><tr><th scope="col"><span class="apv-sr">Figure</span></th><th scope="col">This home</th></tr></thead><tbody>' + rows.map(([k, v]) => '<tr><td>' + esc(k) + '</td><td class="d">' + esc(v) + '</td></tr>').join('') + '</tbody></table>' : '')
+      + (rows.length ? '<table class="apv-cmp-tbl' + (Y ? ' yours' : '') + '"><thead><tr><th scope="col"><span class="apv-sr">Figure</span></th><th scope="col">This home</th>' + (Y ? '<th scope="col">Yours</th>' : '') + '</tr></thead><tbody>'
+        + rows.map(r => '<tr><td>' + esc(r[0]) + '</td><td' + (Y ? '' : ' class="d"') + '>' + esc(r[1]) + '</td>' + (Y ? '<td class="d">' + esc(r[2]) + '</td>' : '') + '</tr>').join('') + '</tbody></table>' : '')
+      + (tags.length ? '<p class="apv-dtags">' + tags.map(t => '<span class="apv-dtag' + (t[1] ? ' up' : '') + '">' + esc(t[0]) + '</span>').join('') + '</p>' : '')
       + '</div>';
     return '<article class="apv-comp' + (st === 'context' ? ' ctx' : '') + '" data-comp="' + esc(c.id) + '" data-n="' + (i + 1) + '" data-st="' + (st === 'listed' ? 'listed' : 'sold') + '">'
       + (car ? '<div class="apv-two">' + car + body + '</div>' : body)
       + (adShown(c) ? '<div class="apv-ad"><h4>How it was advertised</h4><blockquote><p>' + quote(c.ad_text) + '</p></blockquote></div>' : '')
       + (cmpShown(c) ? '<div class="apv-cmp"><h4>How it compares with yours</h4><p>' + quote(c.compare_text) + '</p></div>' : '') + '</article>';
+  }
+  // where the two homes differ, from the figures alone: "Yours has 1 more bedroom", "This one has 38 m² more land" (sizes within 8 m² and
+  // values within $10,000 are left alone, as the sample does). [text, true when it is in favour of theirs]
+  function diffTags(c, Y) {
+    const out = [], d = (k, unit, small, one, many) => { if (!(c[k] != null && Y[k] != null && isFinite(+c[k]) && isFinite(+Y[k]))) return; const x = Math.round((+Y[k] - +c[k]) * 10) / 10, a = Math.abs(x);
+      if (a < small || (k !== 'bedrooms' && k !== 'bathrooms' && !(+c[k] > 0))) return; const what = unit ? num1(a) + ' ' + unit + ' more ' + one : a + ' more ' + (a === 1 ? one : many);
+      out.push([(x > 0 ? 'Yours has ' : 'This one has ') + what, x > 0]); };
+    d('bedrooms', '', 1, 'bedroom', 'bedrooms'); d('bathrooms', '', 1, 'bathroom', 'bathrooms'); d('land_m2', 'm²', 8, 'land'); d('floor_m2', 'm²', 8, 'floor area');
+    return out;
+  }
+  // the vendor's own figures for the "Yours" column: bedrooms only from Tim's room calls (FVC.bedrooms), never a value from Relab, the
+  // rating valuation only when Tim has said it may show (setup.showCv). fn/prefill_shared.ts yoursOf, case for case.
+  const YOURS_KEYS = { pBath: 'bathrooms', pFloor: 'floor_m2', pLand: 'land_m2', pYear: 'year_built', garaging: 'garaging', parking_spaces: 'parking', capital_value: 'cv' };
+  const cleanV = (s, max) => String(s == null ? '' : s).replace(/\s*[\u2014\u2013]\s*/g, ', ').replace(/[<>]/g, '').replace(/\s+/g, ' ').trim().slice(0, max);
+  function subjectOf(facts, rooms, showCv) {
+    const out = {};
+    const L = (rooms || []).filter(r => r && !r.archived), n = L.filter(r => r.tim_class === 'bedroom').length;
+    const beds = n > 0 ? n : L.some(r => r.base === 'bedroom' && !r.tim_class) ? null : L.some(r => r.base === 'bedroom' || r.tim_class) ? 0 : null;
+    if (beds != null) out.bedrooms = beds;
+    Object.entries(YOURS_KEYS).forEach(([k, name]) => {
+      if (k === 'capital_value' && !showCv) return;
+      const f = (facts || []).find(x => x && x.key === k && x.value_id && x.source !== 'relab'); if (!f) return;
+      const v = cleanV(f.display || (Array.isArray(f.value) ? f.value.join(', ') : f.value), 120); if (!v || /^(unknown|n\/?a|none|-)$/i.test(v)) return;
+      const num = Number(String(v).replace(/[$,\s]|m²|m2/g, ''));
+      out[name] = ['bathrooms', 'floor_m2', 'land_m2', 'cv', 'year_built', 'parking'].includes(name) && isFinite(num) && num > 0 ? num : v;
+    });
+    return out;
+  }
+  // "Everything that sold in {suburb} last month" (Tim, 28 November 2026): every sale held for the suburb and that month, not only the
+  // comparables, with the month's totals above. Full street addresses (Tim: REINZ figures are provided to members for this purpose).
+  // s: { suburb, month: 'YYYY-MM', rows: market_sales rows }. Comparables that appear in it are marked. No sale held: nothing drawn.
+  function suburbSales(s, comps) {
+    const rows = ((s && s.rows) || []).filter(r => r && +r.price > 0 && r.sold_on).slice().sort((a, b) => (a.sold_on < b.sold_on ? -1 : a.sold_on > b.sold_on ? 1 : 0));
+    if (!rows.length || !String((s && s.suburb) || '').trim()) return '';
+    const pr = rows.map(r => +r.price).sort((a, b) => a - b), med = a => a.length % 2 ? a[(a.length - 1) / 2] : Math.round((a[a.length / 2 - 1] + a[a.length / 2]) / 2);
+    const days = rows.map(r => r.days_to_sell).filter(x => x != null && isFinite(+x)).map(Number).sort((a, b) => a - b);
+    const month = monthYear(s.month + '-01');
+    const same = (a, b) => String(a || '').replace(/\s+/g, ' ').trim().toLowerCase() === String(b || '').replace(/\s+/g, ' ').trim().toLowerCase();
+    const compOf = r => (comps || []).findIndex(c => c && c.address && (same(c.address, r.address) || addrSame(c.address, r.address)));
+    const totals = [['Homes sold', String(rows.length)], ['Median sale price', dollars(med(pr))], ['Lowest to highest', dollars(pr[0]) + ' to ' + dollars(pr[pr.length - 1])]].concat(days.length ? [['Median days to sell', String(med(days))]] : []);
+    const head = ['Sold', 'Address', 'Price', 'Bedrooms', 'Bathrooms', 'Floor', 'Land', 'Days to sell'];
+    return '<section class="apv-suburb"><h2>' + esc('Everything that sold in ' + s.suburb + ' last month') + '</h2>'
+      + '<p class="apv-lede">' + esc('Every home sold in ' + s.suburb + ' in ' + month + ', not only the ones I picked above, so you can see the whole picture.') + '</p>'
+      + '<div class="mk-tiles apv-sub-tiles">' + totals.map(([k, v]) => '<div class="mk-tile"><div class="k">' + esc(k) + '</div><div class="v">' + esc(v) + '</div><div class="s">' + esc(month) + '</div></div>').join('') + '</div>'
+      + '<table class="apv-tbl apv-sub-tbl"><thead><tr>' + head.map(h => '<th scope="col">' + esc(h) + '</th>').join('') + '</tr></thead><tbody>'
+      + rows.map(r => { const ci = compOf(r); return '<tr' + (ci >= 0 ? ' class="apv-sub-comp" data-comp-n="' + (ci + 1) + '"' : '') + '>' + [longDate(r.sold_on), r.address || '', dollars(r.price), r.bedrooms != null ? String(r.bedrooms) : '', r.bathrooms != null ? num1(r.bathrooms) : '',
+        r.floor_m2 ? num1(r.floor_m2) + ' m²' : '', r.land_m2 ? num1(r.land_m2) + ' m²' : '', r.days_to_sell != null ? String(r.days_to_sell) : ''].map((v, j) => '<td data-h="' + esc(head[j]) + '">' + (j === 1 && ci >= 0 ? '<span class="apv-tag near">Comparable ' + (ci + 1) + '</span> ' : '') + esc(v) + '</td>').join('') + '</tr>'; }).join('')
+      + '</tbody></table><p class="apv-note">' + esc('Source: ' + (rows.some(r => r.source === 'other') ? 'published sales figures' : 'REINZ') + ', sales recorded for ' + s.suburb + ' in ' + month + '.') + '</p></section>';
   }
   function evidence(ev, f) {
     const comps = (ev.comps || []).filter(c => c && c.shown !== false).map(vendorComp);
@@ -529,10 +637,14 @@
       const anyPh = comps.some(c => ((ev.photos || {})[c.id] || []).some(x => x && x.url));
       h += '<h2>Sales and current listings</h2>' + (anyPh ? '<p class="apv-lede no-print"><span class="apv-narrow">Swipe through each home\'s photos</span><span class="apv-wide">Use the arrows to see each home\'s photos</span> and see how it measures up, line by line.</p>' : '<p class="apv-lede">See how each home measures up, line by line.</p>')
         + (both ? '<div class="apv-filters no-print" role="group" aria-label="Show"><button type="button" class="apv-chip on" data-apv-nav data-apv-f="all" aria-pressed="true">All</button><button type="button" class="apv-chip" data-apv-nav data-apv-f="sold" aria-pressed="false">Sold</button><button type="button" class="apv-chip" data-apv-nav data-apv-f="listed" aria-pressed="false">On the market</button></div>' : '')
-        + '<div class="apv-comps">' + comps.map(c => compCard(c, num(c), (ev.photos || {})[c.id])).join('') + '</div>';
+        + '<div class="apv-comps">' + comps.map(c => compCard(c, num(c), (ev.photos || {})[c.id], ev.subject)).join('') + '</div>';
     }
+    // the order Tim asked for (28 November 2026): the comparables, the market, then everything that sold in the suburb last month, then
+    // the opinion of price
+    const sub = suburbSales(ev.suburbSales, comps);
     // the heading follows the area charted: "The Dunedin market" by default, or the area Tim chose (setup.marketArea)
     if (market) h += '<h2>' + esc('The ' + (window.MKT.pickArea(ev.months || [], ev.area) || 'Dunedin') + ' market') + '</h2>' + market;
+    h += sub;
     return h ? '<section class="apv-evidence">' + h + '</section>' : '';
   }
   // the line under "The price evidence at a glance": how many sold, between which prices, since when, and how many are on the market.
@@ -690,7 +802,7 @@
     if (!String(f.bedrooms || '').trim()) return 'Bedrooms can\'t be empty.';
     return wordingProblem(f.bedrooms) || wordingProblem((f.method || {}).name) || wordingProblem((f.method || {}).text);
   }
-  window.APPR = { render, brand, heroPreview: (sec, ev) => hero(sec, ev, '', true), MOCK_LINE, navLabel, fmtRange, dollars, inline, methodNames, checkFields, wordingProblem,
+  window.APPR = { render, brand, subjectOf, diffTags, suburbSales, videoEmbed, embedSrc, aboutTabs, YOURS_KEYS, heroPreview: (sec, ev) => hero(sec, ev, '', true), MOCK_LINE, navLabel, fmtRange, dollars, inline, methodNames, checkFields, wordingProblem,
     vendorComp, VENDOR_COMP, STATUS_WORDS, RINGS, ringWords, compsRule, reportPacks, reportLine, matchPhoto, addrParts, addrSame, addrMatch, adShown, cmpShown, evidence,
     METHODS, CAMPAIGNS, MAX_WEEKS, campaignOf, waveFor, stepsFor, methodSentence, isHill, suburbOf, plansFor, checkSetup, writeStandard, sectionsProblem,
     DEFAULT_NOTE, DALMORE_LINE, HEAD_AND_SHOULDERS, VALUATION_LABEL,

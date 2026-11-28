@@ -103,6 +103,7 @@ const NOTHING: Record<string, string> = {
   heard: "There's nothing to draft from yet: no answers from Questions before we meet or the first visit.",
   buyers: "There's nothing to draft from yet: their story and the ideal buyers are noted on the first visit.",
   ad: "Tick some key details first, so the advertisement has facts to work from.",
+  compare: "There's nothing to compare yet: their home's rooms or figures aren't on the property file. Do the first visit, or type it yourself.",
 };
 export async function draftPart(d: AiDeps, body: any, agent: string): Promise<Out> {
   const aid = body.appraisal_id, part = String(body.part || "");
@@ -111,7 +112,8 @@ export async function draftPart(d: AiDeps, body: any, agent: string): Promise<Ou
   if (!raw || !raw.appraisal) return { status: 404, body: { ok: false, error: "Appraisal not found" } };
   if (raw.appraisal.status === "sent") return { status: 409, body: { ok: false, error: "This appraisal has been sent, and a sent copy never changes." } };
   if (!(raw.appraisal.setup && raw.appraisal.setup.v)) return { status: 409, body: { ok: false, error: "This appraisal was loaded by hand, so it has no sections to draft." } };
-  const inp = draftInputs(part, raw, body.facts);
+  const inp = draftInputs(part, raw, body.facts, body.comp_id);
+  if (part === "compare" && !(raw.comps || []).some((c: any) => c && String(c.id) === String(body.comp_id || ""))) return { status: 404, body: { ok: false, error: "That comparable isn't on this appraisal." } };
   if (inp.empty) return { status: 200, body: { ok: false, reason: "nothing", message: NOTHING[part] } };
   const key = d.aiKey();
   if (!key) return { status: 200, body: { ok: false, reason: "off", message: "Drafting isn't switched on yet. Write it yourself for now." } };

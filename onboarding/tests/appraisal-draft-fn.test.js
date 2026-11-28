@@ -103,5 +103,30 @@ const path = require('path'), fs = require('fs'), vm = require('vm');
   cases.forEach((c, i) => { const a = S.roomsWording(c), b = win.FVC.wording(c); expect(a === b, 'room wording case ' + i + ': ' + a + ' vs ' + b); });
   ['Sold as is', 'as-is', 'Our fee', 'commissions', 'fine words', 'Asis'].forEach(t => expect(S.wordingProblem(t) === win.APPR.wordingProblem(t), 'the wording rule matches the portal for "' + t + '"'));
 
+  // ── 038: compare, how one comparable compares with the vendor's home (Tim, 28 November 2026) ──
+  const COMP = { id: 'c1', status: 'sold', suburb: 'Rbvale', price: 560000, sold_on: '2026-10-01', method: 'Deadline sale', days_to_sell: 21, bedrooms: 3, bathrooms: 1, floor_m2: 120, land_m2: 600, cv: 520000, ring: 'suburb',
+    address: 'RB 12 Secret Road, Rbvale', agency: 'RB Secret Realty', ad_text: 'Sun all day. Call Sam on 021 555 1234 or see www.rbsecret.example about RB 12 Secret Road with RB Secret Realty.', private_note: 'TIM-ONLY comp note' };
+  raw = base(); raw.comps = [COMP]; raw.facts = raw.facts.concat([{ key: 'pBath', value: '2', value_id: 'f7', source: 'tim' }, { key: 'capital_value', value: '540000', value_id: 'f8', source: 'council' }, { key: 'pFloor', value: '140', value_id: 'f9', source: 'relab' }]);
+  models = []; logs = []; calls = [];
+  let rc = await go('compare', { comp_id: 'nope' });
+  expect(rc.status === 404 && !models.length, 'compare: a comparable not on this appraisal is refused before the model: ' + JSON.stringify(rc));
+  modelAnswer = tool('record_compare', { text: 'This home sold for a little less than yours may, with three bedrooms to your two and one bathroom to your two. Yours has more land.', private_note: 'Their roof needs work.' });
+  rc = await go('compare', { comp_id: 'c1' });
+  const sentC = models[0] ? models[0][0].messages[0].content[0].text : '';
+  out.compare = { status: rc.status, ok: rc.body.ok, model: models[0] && models[0][0].model, tool: models[0] && models[0][0].tools[0].name, saved: calls.find(c => c[0] === 'appraisal_draft_save') };
+  expect(rc.status === 200 && rc.body.ok && /sonnet/i.test(out.compare.model) && out.compare.tool === 'record_compare' && models[0][0].tool_choice && models[0][0].tool_choice.type === 'auto', 'compare: Sonnet, one tool, auto tool choice: ' + JSON.stringify(out.compare));
+  expect(/this_home/.test(sentC) && /your_home/.test(sentC) && /"bedrooms":2/.test(sentC) && /"bathrooms":2/.test(sentC) && /Sun all day/.test(sentC), 'compare: both homes sent, the vendor\'s bedrooms from Tim\'s room calls, the advertisement as data: ' + sentC.slice(0, 400));
+  expect(!/Secret Road|Secret Realty|021 555|rbsecret|TIM-ONLY|RB-SECRET-HEART|540000|"floor_m2":140/.test(sentC), 'compare: never the address, agency, phone, link, Tim\'s note, the client heart, the rating valuation (not ticked as showable) or a Relab value');
+  expect(out.compare.saved && out.compare.saved[1].p_part === 'compare' && out.compare.saved[1].p_inputs.comp === 'c1' && !JSON.stringify(out.compare.saved[1].p_inputs).includes('540000'), 'compare: saved with the comparable named and the keys sent, never values');
+  expect(rc.body.result.private_note === 'Their roof needs work.' && !rc.body.result.problems.length && logs.some(l => l[0].purpose === 'appraisal compare draft' && l[0].appraisal_id === AID && l[0].ok), 'compare: weak points to the private note, logged in ai_calls');
+  raw.appraisal.setup.showCv = true; models = [];
+  await go('compare', { comp_id: 'c1' }); expect(/"cv":540000/.test(models[0][0].messages[0].content[0].text), 'compare: the rating valuation goes only once Tim has said it may show');
+  modelAnswer = tool('record_compare', { text: 'A lovely sunny home with a big garden.' }); rc = await go('compare', { comp_id: 'c1' });
+  expect(rc.body.result.problems.some(p => /both homes/.test(p)), 'compare: a draft that doesn\'t name both homes is flagged for Tim: ' + JSON.stringify(rc.body.result.problems));
+  // the vendor's figures: the same rule as the portal's
+  const yc = [base().facts.concat([{ key: 'pBath', value: '2', value_id: 'x', source: 'tim' }, { key: 'capital_value', value: '540000', value_id: 'y', source: 'council' }, { key: 'pYear', value: '1962', value_id: 'z', source: 'tim' }]), base().rooms];
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'src', 'market-core.js'), 'utf8'), ctx);
+  [false, true].forEach(cv => expect(JSON.stringify(S.yoursOf(yc[0], yc[1], cv)) === JSON.stringify(win.APPR.subjectOf(yc[0], yc[1], cv)), 'the vendor\'s figures are the same in the function and the portal (cv ' + cv + '): ' + JSON.stringify([S.yoursOf(yc[0], yc[1], cv), win.APPR.subjectOf(yc[0], yc[1], cv)])));
+
   console.log(JSON.stringify({ out, errs }, null, 1));
 })();

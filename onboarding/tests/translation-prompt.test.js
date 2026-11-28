@@ -134,7 +134,7 @@ const invokes = (app.match(/functions\.invoke\('doc-prefill'/g) || []).length;
 // five: document reading, translation, (LW3 phase C2) an appraisal's report reading and its case-by-case buyer check, and (phase B)
 // drafting an appraisal's own words
 const modes = (app.match(/functions\.invoke\('doc-prefill', \{ body: \{ mode: '([a-z_]+)'/g) || []).map(x => x.replace(/.*mode: '/, '').replace(/'$/, ''));
-expect(invokes === 5 && ['appraisal_report', 'buyer_check', 'appraisal_draft'].every(m => modes.includes(m)), 'the screens reach the model only through the doc-prefill function (document reading, translation, an appraisal\'s report, buyer check and drafts): ' + invokes + ' ' + modes);
+expect(invokes === 6 && ['appraisal_report', 'buyer_check', 'appraisal_draft'].every(m => modes.includes(m)), 'the screens reach the model only through the doc-prefill function (document reading, translation, an appraisal\'s report, buyer check, drafts, and the comparison drafts of 038): ' + invokes + ' ' + modes);
 expect(!/ANTHROPIC_API_KEY\s*=|sk-ant-/.test(app + dp + fs.readFileSync(shared, 'utf8')), 'no key in the code');
 const mig = fs.readFileSync(path.join(root, 'onboarding', 'migrations', '008_translation.sql'), 'utf8');
 expect(!/\b(delete\s+from|drop\s+(table|column|function|policy|trigger)|truncate)\b/i.test(mig), 'the migration deletes and drops nothing');
