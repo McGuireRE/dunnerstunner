@@ -42,7 +42,13 @@ Deno.serve(async (req) => {
     try {
       const { data: ok } = await db.rpc("signin_check", { p_email: email });
       if (!ok) return json(same);
-      await db.auth.admin.createUser({ email, email_confirm: true }); // errors if they already have a login, which is fine
+      const pw = () => crypto.randomUUID() + crypto.randomUUID();
+      await db.auth.admin.createUser({ email, email_confirm: true, password: pw() }); // errors if they already have a login, which is fine
+      // Links are the only way in. Wipe any password on the login first, in case someone tried to register this
+      // address with a password of their own before its owner signed in.
+      const first = await db.auth.admin.generateLink({ type: "magiclink", email });
+      if (first.error || !first.data?.user?.id) throw first.error || new Error("no user");
+      await db.auth.admin.updateUserById(first.data.user.id, { password: pw() });
       const { data, error } = await db.auth.admin.generateLink({ type: "magiclink", email });
       if (error || !data?.properties?.hashed_token) throw error || new Error("no token");
       const link = SITE + "?t=" + encodeURIComponent(data.properties.hashed_token);
