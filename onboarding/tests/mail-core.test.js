@@ -323,6 +323,8 @@ const base = () => ({
       n2 = M.appraisalEventNotice({ kind: 'plan_built', who: 'Robin', address: '9 Example Road', total: 2450.5 }), n3 = M.appraisalEventNotice({ kind: 'opened', who: '', address: '' });
     ok(n1.subject === 'Robin would like to proceed: 9 Example Road' && /\(version 2\)/.test(n1.body) && /appraisals\/x/.test(n1.body), 'proceeded notice: ' + n1.body);
     ok(n2.subject === 'Robin built their own marketing plan: 9 Example Road' && /\$2,450\.5/.test(n2.body), 'plan notice: ' + n2.body);
-    ok(n3.subject === 'A vendor opened their appraisal: an appraisal', 'opened notice, nothing known: ' + n3.subject); }
+    ok(n3.subject === 'A vendor opened their appraisal: an appraisal', 'opened notice, nothing known: ' + n3.subject);
+    const n4 = M.appraisalEventNotice({ kind: 'update_asked', who: 'Robin', address: '9 Example Road' });
+    ok(n4.subject === 'Robin asked for an updated appraisal: 9 Example Road' && /more than three months old/.test(n4.body), 'asked for an update: ' + n4.subject); }
   console.log(JSON.stringify(Object.assign(out, { errs }), null, 1));
 })().catch(e => { console.log(JSON.stringify({ errs: ['crashed: ' + (e.stack || e.message)] })); });

@@ -7,7 +7,7 @@
 do $t$
 declare out text := ''; x text; x2 text; x3 text; jh jsonb; n int; j jsonb; j2 jsonb; r record; ok boolean;
   pid uuid; pid2 uuid; aid uuid; aid_bad uuid; hid uuid; c1 uuid; c2 uuid; c3 uuid; c4 uuid; c5 uuid; d1 uuid; d2 uuid; d3 uuid; hd uuid; it uuid; pl0 uuid;
-  sid uuid; sid2 uuid; mid uuid; v2 uuid; plid uuid; ev bigint;
+  sid uuid; sid2 uuid; mid uuid; v2 uuid; v3 uuid; plid uuid; ev bigint;
   views_before text; views_after text; pl_before text; pl_after text;
   agent text := json_build_object('email', (select email from public.agents order by created_at limit 1), 'sub', '22222222-2222-2222-2222-222222222222', 'role', 'authenticated')::text;
   owner text := json_build_object('email', 'rb-owner@example.com', 'sub', '33333333-3333-3333-3333-333333333333', 'role', 'authenticated')::text;
@@ -125,6 +125,8 @@ begin
   select string_agg(p.oid::regprocedure::text, ',' order by 1) into x from pg_proc p where p.pronamespace = 'public'::regnamespace
     and p.proname in ('guard_appraisal_kept', 'guard_appraisal_mail', 'guard_appraisal_event', 'guard_prelisting_appraisal', 'appraisal_contact_problem', 'appraisal_contact_find', 'appraisal_chain_of',
       'appraisal_vendor_ok', 'appraisal_vendor_newest', 'appraisal_snapshot_build', 'agent_appraisal_send', 'agent_appraisal_new_version', 'agent_appraisal_events_seen', 'agent_appraisal_mail_unstick',
+      'appraisal_seal_text', 'appraisal_seal_of', 'vendor_appraisal_ask_update', 'agent_appraisal_seal_check',
+      'ap_s', 'ap_n', 'ap_b', 'ap_lines', 'ap_lines_opt', 'ap_rows', 'appraisal_section_clean',
       'vendor_appraisals_mine', 'vendor_appraisal_read', 'appraisal_vendor_can_read', 'vendor_appraisal_proceed', 'vendor_appraisal_plan_save', 'appraisal_event_mine')
     and (has_function_privilege('anon', p.oid, 'execute') or (p.proname !~ '^(agent_|vendor_)' and p.proname not in ('appraisal_vendor_can_read', 'appraisal_event_mine') and has_function_privilege('authenticated', p.oid, 'execute')));
   if x is not null then out := out || 'CALLABLE WHEN IT SHOULD NOT BE: ' || x || '; '; else out := out || 'functions: none for anon, the helpers for nobody; '; end if;
@@ -325,11 +327,24 @@ begin
   if j->>'version' = '2' and (j->>'chain_id')::uuid = aid then out := out || 'updated version sent as version 2 of the same appraisal; '; else out := out || 'VERSION 2 WRONG: ' || j::text || '; '; end if;
   begin perform public.agent_appraisal_new_version(aid); out := out || 'AN OLD VERSION WAS UPDATED; '; exception when others then out := out || 'only the newest is updated; '; end;
   execute 'reset role';
+  -- the 10-save cap counts per version (re-review of f73d2fb): the owner saved 10 on version 1, and may save on version 2
+  execute 'set local role authenticated'; perform set_config('request.jwt.claims', owner, true);
+  begin j := public.vendor_appraisal_plan_save(sid2, '{"sel":{"lim":1,"signboard":11},"total":1100}'); out := out || 'ten saves on version 1, and version 2 saves again; ';
+  exception when others then out := out || 'VERSION 2 PLAN REFUSED: ' || left(sqlerrm, 100) || '; '; end;
+  execute 'reset role';
   execute 'set local role authenticated'; perform set_config('request.jwt.claims', owner, true);
   j := public.vendor_appraisal_read(aid);
   if (j->>'snapshot_id')::uuid = sid2 and j->'content'->'fields'->'ranges'->0->>'low' = '530000' then out := out || 'owner now reads version 2; '; else out := out || 'OWNER DOESN''T SEE THE NEWEST; '; end if;
-  if (public.vendor_appraisal_read(sid)->>'snapshot_id')::uuid = sid2 then out := out || 'the old link opens the newest too; '; else out := out || 'THE OLD LINK OPENS AN OLD COPY; '; end if;
-  if public.appraisal_vendor_can_read(sid, 'appraisal-media', 'appraisals/' || aid || '/comps/' || c1 || '/rb-a.jpg') then out := out || 'AN OLD COPY''S PHOTO STILL OPENS; '; else out := out || 'old copy''s photos: closed; '; end if;
+  -- each version's permanent link opens that version (Tim, 28 November 2026, 4:22pm), and says which is newest
+  j := public.vendor_appraisal_read(sid);
+  if (j->>'snapshot_id')::uuid = sid and j->>'version' = '1' and (j->'newest'->>'snapshot_id')::uuid = sid2 and j->'newest'->>'version' = '2' then out := out || 'version 1''s own link opens version 1, naming version 2 as newest; ';
+  else out := out || 'THE OLD LINK DOESN''T OPEN ITS OWN VERSION: ' || left(j::text, 120) || '; '; end if;
+  j := public.vendor_appraisal_read(aid, 1);
+  if (j->>'snapshot_id')::uuid = sid then out := out || 'the appraisal with v=1 opens version 1; '; else out := out || 'V=1 OPENS ANOTHER VERSION; '; end if;
+  j := public.vendor_appraisal_read(v2, 2);
+  if (j->>'snapshot_id')::uuid = sid2 then out := out || 'and v=2 version 2; '; else out := out || 'V=2 WRONG; '; end if;
+  begin j := public.vendor_appraisal_read(aid, 9); out := out || 'A VERSION THAT DOESN''T EXIST OPENED; '; exception when others then out := out || 'a version that doesn''t exist: not found; '; end;
+  if public.appraisal_vendor_can_read(sid, 'appraisal-media', 'appraisals/' || aid || '/comps/' || c1 || '/rb-a.jpg') then out := out || 'the old version''s own photos still open from its link; '; else out := out || 'AN OLD VERSION''S PHOTOS ARE CLOSED; '; end if;
   begin perform public.vendor_appraisal_proceed(sid); out := out || 'PROCEEDED FROM AN OLD COPY; '; exception when others then out := out || 'old copy: no proceed; '; end;
   execute 'reset role';
   execute 'set local role authenticated'; perform set_config('request.jwt.claims', plc, true);
@@ -347,14 +362,85 @@ begin
   begin j := public.vendor_appraisal_plan_save(sid2, '{"sel":{"lim":1},"total":1}'); out := out || 'A FORMER OWNER SAVED A PLAN; '; exception when others then null; end;
   out := out || 'former owner: no copy, no links, no listing, no proceed, no plan; ';
   execute 'reset role';
-  -- the questionnaire contact, never set aside, still reads it
+  -- the questionnaire contact, never set aside, still reads it; version 2 wasn't sent to them, so its link isn't theirs
   execute 'set local role authenticated'; perform set_config('request.jwt.claims', plc, true);
   begin j := public.vendor_appraisal_read(aid); out := out || 'the questionnaire contact still reads theirs; '; exception when others then out := out || 'THE QUESTIONNAIRE CONTACT LOST IT; '; end;
+  begin j := public.vendor_appraisal_read(sid2); out := out || 'VERSION 2''S LINK OPENED FOR SOMEONE IT WASN''T SENT TO; '; exception when others then out := out || 'version 2''s link: not theirs, not found; '; end;
   execute 'reset role';
   -- Tim reads everything
   execute 'set local role authenticated'; perform set_config('request.jwt.claims', agent, true);
   select count(*) into n from public.appraisal_snapshots where chain_id = aid; if n <> 2 then out := out || 'TIM SEES ' || n || ' COPIES; '; else out := out || 'Tim sees both copies; '; end if;
+
+  -- ── the seal: stored at sending, worked out again on "Check the seal" ──
+  select to_jsonb(s) into j from public.appraisal_snapshots s where id = sid;
+  if j->>'seal_sha256' ~ '^[0-9a-f]{64}$' and (j->>'sealed_at') is not null and jsonb_array_length(j->'files') = jsonb_array_length(j->'paths')
+     and (select bool_and(f->>'size' is not null) from jsonb_array_elements(j->'files') f) then out := out || 'sealed: time, fingerprint, and every listed file with its size; ';
+  else out := out || 'SEAL NOT STORED: ' || left(coalesce(j->>'seal_sha256', 'none') || ' ' || coalesce((j->'files')::text, ''), 200) || '; '; end if;
+  j := public.agent_appraisal_seal_check(sid);
+  if (j->>'ok')::boolean and j->>'stored' = j->>'computed' then out := out || 'Check the seal: it matches; '; else out := out || 'THE SEAL DOESN''T MATCH A COPY THAT WASN''T TOUCHED; '; end if;
+  if (public.agent_appraisal_seal_check(sid2)->>'ok')::boolean then out := out || 'and version 2''s too; '; else out := out || 'VERSION 2''S SEAL DOESN''T MATCH; '; end if;
   execute 'reset role';
+  begin update public.appraisal_snapshots set seal_sha256 = repeat('0', 64) where id = sid; out := out || 'THE SEAL CHANGED; '; exception when others then out := out || 'the seal never changes; '; end;
+  begin update public.appraisal_snapshots set sealed_at = now() where id = sid; out := out || 'THE SEAL TIME CHANGED; '; exception when others then out := out || 'nor its time; '; end;
+  begin update public.appraisal_snapshots set files = '[]' where id = sid; out := out || 'THE SEALED FILES CHANGED; '; exception when others then out := out || 'nor its files; '; end;
+  execute 'set local role authenticated'; perform set_config('request.jwt.claims', plc, true);
+  begin j := public.agent_appraisal_seal_check(sid); out := out || 'A VENDOR CHECKED A SEAL; '; exception when others then out := out || 'vendor: no seal check; '; end;
+  -- ── three months on: "Ask for an updated appraisal" ──
+  begin j := public.vendor_appraisal_ask_update(sid); out := out || 'AN UPDATE WAS ASKED FOR A CURRENT APPRAISAL; '; exception when others then out := out || 'still current: no asking yet (' || sqlerrm || '); '; end;
+  execute 'reset role';
+  -- a test stand-in only: the guard set aside for a moment to age version 1 by three months and a day, as if that time had passed (this
+  -- also tampers with the sealed copy, which "Check the seal" must then catch)
+  alter table public.appraisal_snapshots disable trigger appraisal_snapshots_kept;
+  update public.appraisal_snapshots set sealed_at = sealed_at - interval '3 months 1 day' where id = sid;
+  alter table public.appraisal_snapshots enable trigger appraisal_snapshots_kept;
+  execute 'set local role authenticated'; perform set_config('request.jwt.claims', plc, true);
+  j := public.vendor_appraisal_read(aid);
+  if (j->>'expires_at')::timestamptz <= now() and not (j->>'asked')::boolean then out := out || 'three months and a day on: expired, not asked yet; '; else out := out || 'EXPIRY WRONG: ' || coalesce(j->>'expires_at', 'none') || '; '; end if;
+  j := public.vendor_appraisal_ask_update(sid);
+  if j->>'event_id' is not null and (public.vendor_appraisal_read(aid)->>'asked')::boolean then out := out || 'asked for an update: recorded; '; else out := out || 'ASK NOT RECORDED; '; end if;
+  ev := (j->>'event_id')::bigint;
+  if public.appraisal_event_mine(ev) then out := out || 'theirs to tell Tim about; '; else out := out || 'THE ASK CAN''T BE TOLD TO TIM; '; end if;
+  j := public.vendor_appraisal_ask_update(sid);
+  if j->>'event_id' is null then out := out || 'asked again: nothing new, Tim not told twice; '; else out := out || 'ASKED TWICE; '; end if;
+  execute 'reset role';
+  begin insert into public.appraisal_events (snapshot_id, chain_id, property_id, kind, actor) values (sid, aid, pid, 'update_asked', 'rb-pl@example.com'); out := out || 'UPDATE ASKED RECORDED TWICE; '; exception when unique_violation then out := out || 'update asked: once, by the index; '; end;
+  execute 'set local role authenticated'; perform set_config('request.jwt.claims', other, true);
+  begin j := public.vendor_appraisal_ask_update(sid); out := out || 'ANOTHER PROPERTY''S OWNER ASKED; '; exception when others then out := out || 'someone else: not found; '; end;
+  execute 'reset role';
+  execute 'set local role authenticated'; perform set_config('request.jwt.claims', owner, true);
+  begin j := public.vendor_appraisal_ask_update(sid); out := out || 'A FORMER OWNER ASKED; '; exception when others then out := out || 'former owner: can''t ask; '; end;
+  execute 'reset role';
+  execute 'set local role authenticated'; perform set_config('request.jwt.claims', agent, true);
+  if (public.agent_appraisal_seal_check(sid)->>'ok')::boolean then out := out || 'A TAMPERED COPY STILL PASSES THE SEAL CHECK; '; else out := out || 'a copy changed behind the guard: the seal check says it doesn''t match; '; end if;
+  -- an appraisal whose wording is over 2 MB: a plain message at Send, not the table's check
+  v3 := (public.agent_appraisal_new_version(v2)->>'appraisal_id')::uuid;
+  update public.appraisal_views set sections = jsonb_build_array(jsonb_build_object('type', 'para', 'text', repeat('Sunny rooms and a big garden. ', 70000))) where id = v3;
+  begin perform public.agent_appraisal_send(v3, array['rb-pl@example.com'], 'RB', body); out := out || 'A 2 MB APPRAISAL WAS SENT; ';
+  exception when others then if sqlerrm like 'This appraisal is too long to send (its wording is over 2 MB)%' then out := out || 'over 2 MB: said plainly; '; else out := out || 'OVER 2 MB: ' || left(sqlerrm, 120) || '; '; end if; end;
+  execute 'reset role';
+
+  -- ── the whitelist keeps what the renderer has a default for missing (re-review of f73d2fb): column headings stay missing when the
+  -- section has none; [] stays []; a non-text table cell is blanked, not dropped; and real section sets from APPR.writeStandard (every
+  -- campaign kind and method, one and two price ranges) clean to exactly what the mock's cleaner gives, which renders byte for byte as
+  -- the uncleaned sections (tests/appraisal-clean.test.js) ──
+  x := '';
+  if public.appraisal_section_clean('{"type":"opinion"}') <> '{"type":"opinion"}'::jsonb then x := x || 'opinion '; end if;
+  if public.appraisal_section_clean('{"type":"opinion","table":true}') <> '{"type":"opinion","table":true}'::jsonb then x := x || 'opinion-table '; end if;
+  if public.appraisal_section_clean('{"type":"ranges"}') <> '{"type":"ranges"}'::jsonb then x := x || 'ranges '; end if;
+  if public.appraisal_section_clean('{"type":"table","rows":[["a"]]}') <> '{"type":"table","rows":[["a"]]}'::jsonb then x := x || 'table '; end if;
+  if public.appraisal_section_clean('{"type":"methods","rows":[]}') <> '{"type":"methods","rows":[]}'::jsonb then x := x || 'methods '; end if;
+  if public.appraisal_section_clean('{"type":"opinion","head":[]}') <> '{"type":"opinion","head":[]}'::jsonb then x := x || 'empty-head '; end if;
+  if public.appraisal_section_clean('{"type":"ranges","head":"Part"}') <> '{"type":"ranges"}'::jsonb then x := x || 'string-head '; end if;
+  if public.appraisal_section_clean('{"type":"opinion","head":["Part",{"text":"Range","ticked":true},{"text":"x","ticked":false}]}') <> '{"type":"opinion","head":["Part","Range"]}'::jsonb then x := x || 'ticked-head '; end if;
+  if public.appraisal_section_clean('{"type":"table","head":["A","B","C","D"],"rows":[["a",null,3,{"x":1}],"bad"]}') <> '{"type":"table","head":["A","B","C","D"],"rows":[["a","","3",""]]}'::jsonb then x := x || 'cells '; end if;
+  if x = '' then out := out || 'missing headings stay missing, [] stays [], other cells blanked; '; else out := out || 'THE WHITELIST CHANGES A DEFAULT: ' || x || '; '; end if;
+  n := 0; x := '';
+  for r in select c->>'name' as nm, c->'sections' as secs, c->'expected' as exp from jsonb_array_elements($cases$__CLEAN_CASES__$cases$::jsonb) c loop
+    n := n + 1;
+    j := (select coalesce(jsonb_agg(public.appraisal_section_clean(s) order by i) filter (where public.appraisal_section_clean(s) is not null), '[]'::jsonb) from jsonb_array_elements(r.secs) with ordinality as e(s, i));
+    if j is distinct from r.exp then x := x || r.nm || ' '; end if;
+  end loop;
+  if n >= 30 and x = '' then out := out || n || ' writeStandard section sets: cleaned exactly as the mock cleans them; '; else out := out || 'CLEANED DIFFERENTLY FROM THE MOCK (' || n || '): ' || left(x, 200) || '; '; end if;
 
   raise exception 'ROLLBACK %', out;
 end $t$;

@@ -7,5 +7,8 @@ const fs = require('fs'), path = require('path');
 // whole-line comments are left out to keep the statement small; nothing else changes. Statements run in order inside the block.
 const mig = fs.readFileSync(path.join(__dirname, '..', 'migrations', '037_appraisal_send.sql'), 'utf8').split('\n').filter(l => !/^\s*--/.test(l)).join('\n')
   .trim().replace(/;\s*$/, '');
-for (const tag of ['$mig$', '$t$']) if (mig.includes(tag)) throw new Error('tag clash ' + tag);
-process.stdout.write(fs.readFileSync(path.join(__dirname, 'appraisal-send-rollback.sql'), 'utf8').replace('$mig$__MIGRATION__$mig$', () => mig));
+// the whitelist's real section sets (tests/appraisal-clean-cases.js): what the mock's cleaner gives, for the database to match exactly
+const cases = JSON.stringify(require('./appraisal-clean-cases.js').cases().map(c => ({ name: c.name, sections: c.rec.sections, expected: c.expected })));
+for (const tag of ['$mig$', '$t$', '$cases$']) if (mig.includes(tag) || cases.includes(tag)) throw new Error('tag clash ' + tag);
+process.stdout.write(fs.readFileSync(path.join(__dirname, 'appraisal-send-rollback.sql'), 'utf8').replace('$mig$__MIGRATION__$mig$', () => mig)
+  .replace('$cases$__CLEAN_CASES__$cases$', () => '$cases$' + cases + '$cases$'));

@@ -16,6 +16,10 @@
 //   a plan built twice keeps one current plan and tells Tim once; a plan that didn't save (no signal, or refused) is said under the
 //   button; #custom without ?ap= is the packages page as before; an updated version whose copying was cut short never names the sent
 //   version's header, warns on its page and before sending, and finishes copying on "Finish copying photos and videos".
+//   Sealed versions (Tim, 28 November 2026, 4:22pm): each version sealed (sealed_at, fingerprint, files); an older version's permanent
+//   link (&v=1) opens it with "There's a newer version..."; the seal line shown and printed; the bar at 3 months and 1 day and not at
+//   2 months 29 days (page.clock); the ask recorded once and Tim told once; "Tim has been asked"; Needs you: the ask and "Appraisal for
+//   ... expires/expired"; Tim's copy: the permanent link, Check the seal (matches; a tampered copy doesn't), the sealed HTML file.
 //   390 px with no sideways scroll, light and dark.
 const { chromium } = require('playwright'); const fs = require('fs'), path = require('path');
 const ROOT = path.join(__dirname, '..', '..');
@@ -106,7 +110,12 @@ const dialogs = []; let dlgNo = false;
   expect(/Tick that you've read/.test(await note(p, 'apSendBtn') || ''), 'nothing goes until Tim ticks that he has read it');
   await p.fill('#apBody', body + '\n\nMy fee is the lowest.'); await tickRead(p); await p.click('#apSendBtn'); await wait(p, 400);
   expect(/Fees and commission/.test(await note(p, 'apSendBtn') || '') && !(await db(p)).appraisal_snapshots, 'fee wording in the email: refused at the button, nothing sent');
-  await p.fill('#apBody', body); await p.click('#apSendBtn'); await wait(p, 1500); await shot(p, '2_sent');
+  // over the 2 MB limit (the mock's limit lowered for the test): a plain message at the button, nothing sent
+  await p.fill('#apBody', body); await p.evaluate(() => localStorage.setItem('mockApMaxContent', '100')); await p.click('#apSendBtn'); await wait(p, 800);
+  out.tooLong = await note(p, 'apSendBtn');
+  expect(/This appraisal is too long to send \(its wording is over 2 MB\)\. Shorten or remove some sections, then send again/.test(out.tooLong || '') && !/check constraint|violates/i.test(out.tooLong) && !((await db(p)).appraisal_snapshots || []).length,'over 2 MB: said plainly at the button, nothing sent: ' + out.tooLong);
+  await p.evaluate(() => localStorage.removeItem('mockApMaxContent'));
+  await p.click('#apSendBtn'); await wait(p, 1500); await shot(p, '2_sent');
   let d = await db(p); const snap = (d.appraisal_snapshots || [])[0]; const mail = await ls(p, 'apMail');
   expect(!!snap && snap.version === 1 && d.appraisal_views.find(v => v.id === AV).status === 'sent', 'sent: a copy, version 1, the appraisal marked sent');
   expect(/Sent: version 1/.test(await p.textContent('#apSentNote')), 'the page says it was sent');
@@ -251,6 +260,80 @@ const dialogs = []; let dlgNo = false;
   expect((await db(p)).prelistings.some(l => l.contact_email === 'rb-owner@example.com' && l.status !== 'closed'), 'their questions are still open');
   await p.goto(OB + '?appraisal=' + AV); await wait(p, 1500);
   expect(!!(await p.$('#apvNone')) && !(await p.$('#apvDoc')), 'set aside by Tim: "This appraisal isn\'t here" at once');
+
+  // ── 8. sealed versions, permanent links and the three-month validity (Tim, 28 November 2026, 4:22pm) ──
+  const S1 = d.appraisal_snapshots.find(s => s.version === 1), S2 = d.appraisal_snapshots.find(s => s.version === 2);
+  expect([S1, S2].every(s => /^[0-9a-f]{64}$/.test(s.seal_sha256) && s.sealed_at && s.files.length === s.paths.length && s.files.every(f => f.bucket && f.path && 'size' in f)), 'each version is sealed: sealed_at, the fingerprint and every file listed');
+  expect(S1.seal_sha256 !== S2.seal_sha256, 'each version has its own fingerprint');
+  const after = (s, m, dd) => { const t = new Date(s.sealed_at); t.setUTCMonth(t.getUTCMonth() + m); t.setUTCDate(t.getUTCDate() + dd); return t; };
+  const ref = s => 'Reference ' + s.seal_sha256.slice(0, 12) + '.';
+  await X.ctx.close(); X = await mk(390, 'light'); p = X.p;
+  await as(p, OWNER, d);
+  // an older version's permanent link opens that version, with the notice and a link to the newest
+  await p.goto(OB + '?appraisal=' + AV + '&v=1'); await wait(p, 1500); await shot(p, '8_old_version');
+  out.olderNotice = (await p.textContent('#apvNewer').catch(() => '')).replace(/\s+/g, ' ').trim();
+  out.sealLine = (await p.textContent('.apv-seal').catch(() => '')).trim();
+  expect(/^There's a newer version of this appraisal, dated \d{1,2} [A-Z][a-z]+ 20\d\d\. Open the newest version$/.test(out.olderNotice), 'version 1\'s link: the newer-version notice: ' + out.olderNotice);
+  expect(/^Sealed \d{1,2} [A-Z][a-z]+ 20\d\d (at )?\d{1,2}:\d\d ?[ap]m NZT\. Version 1\. Reference [0-9a-f]{12}\.$/.test(out.sealLine) && out.sealLine.endsWith(ref(S1)), 'version 1\'s seal line near the top: ' + out.sealLine);
+  expect(!!(await p.$('#apvDoc')) && !/newest version/.test(await p.textContent('#apvSentLine')), 'version 1 itself is drawn, not called the newest');
+  await p.click('#apvNewerLink'); await wait(p, 1500);
+  expect((await p.textContent('.apv-seal')).trim().endsWith(ref(S2)) && /Version 2\./.test(await p.textContent('.apv-seal')) && !(await p.$('#apvNewer')), 'the notice\'s link opens the newest');
+  await p.goto(OB + '?appraisal=' + AV + '&v=2'); await wait(p, 1500);
+  expect(/Version 2\./.test(await p.textContent('.apv-seal')) && !(await p.$('#apvNewer')), 'the newest version\'s own link: no notice');
+  await p.goto(OB + '?appraisal=' + AV + '&v=9'); await wait(p, 1500);
+  expect(!!(await p.$('#apvNone')), 'a version that doesn\'t exist: "This appraisal isn\'t here"');
+  await p.goto(OB + '?appraisal=' + AV); await wait(p, 1500);
+  expect(/Version 2\./.test(await p.textContent('.apv-seal')) && !(await p.$('#apvExpired')), 'the plain link opens the newest; current, so no bar');
+  expect(await p.evaluate(() => { const s = document.querySelector('.apv-seal'); return !!s && !s.closest('.no-print') && !s.classList.contains('no-print'); }), 'the seal line prints');
+  // the bar, worked out at view time: not at 2 months 29 days, then at 3 months and 1 day
+  await p.clock.setFixedTime(after(S2, 2, 29)); await p.goto(OB + '?appraisal=' + AV); await wait(p, 1500);
+  expect(!(await p.$('#apvExpired')) && !(await p.$('#apvAskUpdate')), 'at 2 months 29 days: no bar');
+  await p.clock.setFixedTime(after(S2, 3, 1)); await p.goto(OB + '?appraisal=' + AV); await wait(p, 1500); await shot(p, '9_expired');
+  out.bar = (await p.textContent('#apvExpired').catch(() => '')).replace(/\s+/g, ' ').trim();
+  expect(/^This appraisal was prepared on \d{1,2} [A-Z][a-z]+ 20\d\d\. Its price estimate was for that date and is no longer current, as the market moves\. Ask for an updated appraisal\. ?Ask for an updated appraisal$/.test(out.bar), 'at 3 months and 1 day: the bar and its button: ' + out.bar);
+  expect(!(await side(p)), 'the bar: no sideways scroll at 390 px');
+  expect(!JSON.stringify((await db(p)).appraisal_snapshots.find(s => s.id === S2.id).content).includes('no longer current'), 'the bar is never written into the copy');
+  await p.click('#apvAskUpdate'); await wait(p, 1500);
+  let d8 = await db(p); const askEv = () => (d8.appraisal_events || []).filter(e => e.kind === 'update_asked');
+  const askMail = async () => ((await ls(p, 'apMail')) || []).filter(m => /update/.test(m.kind || ''));
+  expect(askEv().length === 1 && askEv()[0].actor === 'rb-owner@example.com' && askEv()[0].snapshot_id === S2.id, 'the ask is recorded once, for this person and this version');
+  out.askMail = (await askMail()).map(m => m.kind + ':' + m.to + ':' + m.subject);
+  expect(out.askMail.length === 1 && /^appraisal_update_asked:tim:Robin asked for an updated appraisal: RB 9 Send Street, Rbvale$/.test(out.askMail[0]), 'Tim is told once: ' + out.askMail.join(' | '));
+  expect(/Tim has been asked/.test(await p.textContent('#apvAskUpdate')), 'the button then reads "Tim has been asked"');
+  out.askAgain = await p.evaluate(async s => { const c = window.supabase.createClient(); const r = await c.rpc('vendor_appraisal_ask_update', { p_snapshot: s }); return r.data; }, S2.id);
+  await p.goto(OB + '?appraisal=' + AV); await wait(p, 1500); d8 = await db(p);
+  expect(out.askAgain && out.askAgain.event_id == null && askEv().length === 1 && (await askMail()).length === 1, 'asked again: nothing new recorded, Tim not told again');
+  expect(await p.evaluate(() => { const x = document.getElementById('apvAskUpdate'); return !!x && x.disabled && /Tim has been asked/.test(x.textContent); }), 'on their next visit: "Tim has been asked"');
+  // the 10-save cap counts per version: 10 kept on version 1, and version 2 saves again
+  out.planV2 = await p.evaluate(async s => { const c = window.supabase.createClient(); const r = await c.rpc('vendor_appraisal_plan_save', { p_snapshot: s, p_plan: { sel: { lim: 1 }, total: 1 } }); return r.error ? r.error.message : 'saved'; }, S2.id);
+  expect(d8.appraisal_vendor_plans.filter(x => x.snapshot_id === S1.id).length === 10 && out.planV2 === 'saved', 'ten saves on version 1, and version 2 saves again: ' + out.planV2);
+  // Tim's Needs you: the ask, and the appraisal's expiry (from two weeks before, for a property not yet listed)
+  await p.evaluate(w => localStorage.setItem('mocksession', JSON.stringify({ user: w })), TIM);
+  await p.goto(PB); await wait(p, 1800); out.needs8 = (await p.textContent('#pNeeds')).replace(/\s+/g, ' ');
+  expect(out.needs8.includes('Robin asked for an updated appraisal: RB 9 Send Street, Rbvale'), 'Needs you: "{name} asked for an updated appraisal: {address}"');
+  expect(/Appraisal for RB 9 Send Street, Rbvale expired \d{1,2} [A-Z][a-z]+ 20\d\d/.test(out.needs8), 'Needs you: the expired appraisal');
+  await p.clock.setFixedTime(after(S2, 3, -10)); await p.goto(PB); await wait(p, 1800); out.needsSoon = (await p.textContent('#pNeeds')).replace(/\s+/g, ' ');
+  const exp = new Date(after(S2, 3, 0)).toLocaleDateString('en-NZ', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Pacific/Auckland' });
+  expect(out.needsSoon.includes('Appraisal for RB 9 Send Street, Rbvale expires ' + exp) && out.needsSoon.split('Appraisal for RB 9').length === 2, 'Needs you, ten days before: "Appraisal for {address} expires {date}", once: ' + exp);
+  await p.clock.setFixedTime(after(S2, 2, 0)); await p.goto(PB); await wait(p, 1800);
+  expect(!/Appraisal for RB 9/.test(await p.textContent('#pNeeds')), 'a month before: no expiry item yet');
+  await p.evaluate(() => { const x = JSON.parse(localStorage.getItem('mockdb')); x.properties.find(r => r.address === 'RB 9 Send Street, Rbvale').stage = 'live'; localStorage.setItem('mockdb', JSON.stringify(x)); });
+  await p.clock.setFixedTime(after(S2, 3, -10)); await p.goto(PB); await wait(p, 1800);
+  expect(!/Appraisal for RB 9/.test(await p.textContent('#pNeeds')), 'a listed property: no expiry item');
+  // Tim's copy view: the permanent link, the seal, Check the seal, Download the sealed copy; a tampered copy fails the check
+  await X.ctx.close(); X = await mk(390, 'light'); p = X.p; await as(p, TIM, d);
+  await p.goto(PB + 'appraisals/' + S2.appraisal_id + '/copy'); await wait(p, 1500); await shot(p, '10_copy_seal');
+  expect((await p.textContent('#apvPermLink')).includes(OB + '?appraisal=' + AV + '&v=2') && (await p.textContent('.apv-seal')).trim().endsWith(ref(S2)), 'Tim\'s copy: the permanent link and the seal line');
+  await p.click('#apvSealCheck'); await wait(p, 1000); out.sealCheck = await note(p, 'apvSealCheck');
+  expect(/^The seal matches/.test(out.sealCheck || '') && /\|ok$/.test(out.sealCheck), 'Check the seal: it matches: ' + out.sealCheck);
+  const [dlf] = await Promise.all([p.waitForEvent('download'), p.click('#apvSealDown')]); const file = fs.readFileSync(await dlf.path(), 'utf8');
+  const recm = /<script type="application\/json" id="sealed-record">([\s\S]*?)<\/script>/.exec(file); const rec = recm && JSON.parse(recm[1]);
+  expect(/^appraisal-v2-[0-9a-f]{12}\.html$/.test(dlf.suggestedFilename()) && rec && rec.seal_sha256 === S2.seal_sha256 && rec.version === 2 && rec.sealed_at === S2.sealed_at && JSON.stringify(rec.content) === JSON.stringify(S2.content), 'Download the sealed copy: one HTML file with the sealed record: ' + dlf.suggestedFilename());
+  expect(file.includes(ref(S2)) && file.includes('RB-TICKED: smaller than yours.') && !/TIM-PRIVATE|RB-COMP-PRIVATE|apvSealCheck|no longer current/.test(file) && !/<img[^>]+src="(blob:|https?:)/.test(file), 'the file: the seal line and the appraisal, photos embedded, nothing private, no bar');
+  await p.evaluate(id => { const x = JSON.parse(localStorage.getItem('mockdb')); x.appraisal_snapshots.find(s => s.id === id).content.title = 'RB tampered'; localStorage.setItem('mockdb', JSON.stringify(x)); }, S2.id);
+  await p.goto(PB + 'appraisals/' + S2.appraisal_id + '/copy'); await wait(p, 1500);
+  await p.click('#apvSealCheck'); await wait(p, 1000); out.tampered = await note(p, 'apvSealCheck');
+  expect(/^The seal doesn't match/.test(out.tampered || '') && /\|err$/.test(out.tampered), 'a tampered copy fails the check: ' + out.tampered);
   await b.close();
   console.log(JSON.stringify(Object.assign(out, { errs }), null, 1));
 })().catch(e => { console.log(JSON.stringify({ errs: ['crashed: ' + (e.stack || e.message)] })); process.exit(0); });

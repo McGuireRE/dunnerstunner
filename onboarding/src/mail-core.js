@@ -501,6 +501,7 @@
     const who = s_(i.who) || 'A vendor', addr = s_(i.address) || 'an appraisal', v = +i.version > 1 ? ` (version ${+i.version})` : '';
     const t = { opened: [`${who} opened their appraisal: ${addr}`, `${who} has opened the appraisal you sent for ${addr}${v}.`],
       proceeded: [`${who} would like to proceed: ${addr}`, `${who} pressed "I'd like to proceed" on their appraisal for ${addr}${v}. Their Questions before we meet is open, linked to this appraisal, and you'll hear when they send their answers.`],
+      update_asked: [`${who} asked for an updated appraisal: ${addr}`, `${who} asked for an updated appraisal of ${addr}${v}. The one they have is more than three months old, so its price estimate is no longer current.`],
       plan_built: [`${who} built their own marketing plan: ${addr}`, `${who} built their own marketing plan from their appraisal for ${addr}${v}${money(i.total) ? `, coming to ${money(i.total)} including GST` : ''}. It's saved to their appraisal.`] }[i.kind]
       || [`About an appraisal: ${addr}`, `${who} did something on their appraisal for ${addr}.`];
     return { subject: t[0], body: [t[1], i.portalUrl ? `Open the appraisal: ${s_(i.portalUrl)}` : ''].filter(Boolean).join('\n\n') };

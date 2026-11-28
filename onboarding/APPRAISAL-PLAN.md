@@ -260,10 +260,15 @@ Gathered by a monthly scheduled task in Tim's signed-in browser, from his **"Tim
   draft in the same chain; sending it makes version 2, which the people it is sent to see from then on.
 - **The whitelist** (review of 7a1eea5): each section is rebuilt on the server from the keys its type draws (`appraisal_section_clean`):
   lists of lines keep plain lines and lines ticked true (as their text alone); unknown types and keys, nested ones included, never reach a
-  vendor. The market report holds only the area it draws and its latest twelve months.
+  vendor. The market report holds only the area it draws and its latest twelve months. Column headings (opinion, ranges, table, methods)
+  are kept only when the section has a list there, so the renderer's own headings show when it has none (re-review of f73d2fb: with two
+  price ranges the table had lost its headings); a table cell that isn't text or a number is blanked, never dropped. Cleaning never
+  changes the drawing: tests/appraisal-clean.test.js draws 53 real section sets before and after, byte for byte.
+- **Too big**: an appraisal whose wording is over 2 MB is refused at Send with "This appraisal is too long to send (its wording is over
+  2 MB). Shorten or remove some sections, then send again".
 - **Once only**: opening is recorded once per person per copy, proceeding once per person per appraisal, a plan built once per person per
   copy (unique indexes, so two at the same moment can't both count). One current plan per person per appraisal; a newer one supersedes it;
-  at most 10 saves ("Your plan has been saved 10 times, which is as many as can be kept. Call or text Tim on 027 562 7207 to change it.").
+  at most 10 saves per person per version ("Your plan has been saved 10 times, which is as many as can be kept. Call or text Tim on 027 562 7207 to change it.").
   Tim is emailed once; later saves show on his Needs you item as "Plan last changed".
 - **Updated versions**: the draft never names the sent version's header or video. What is still to copy is listed in `setup.copyPending`;
   the appraisal and Send pages show "Not copied yet from the version you sent: ..." with "Finish copying photos and videos" and "Leave them
@@ -272,6 +277,34 @@ Gathered by a monthly scheduled task in Tim's signed-in browser, from his **"Tim
   (`prelistings.contact_email`, checked by `pl_mine`), so a second person can't answer another's; joining them needs a change to the
   questionnaire model, left for later.
 - Not in this phase: sending the hand-loaded appraisal (it has no set-up); a check of what would be left out before sending.
+
+### Sealed versions and validity (Tim, 28 November 2026, 4:22pm)
+
+- **Permanent links**: each sent version has its own link, packages.dunnerstunner.co.nz/onboarding/?appraisal=<id>&v=<n> (a snapshot id
+  also works). The plain link (no &v) opens the newest. An older version's link opens that version, with, at the top:
+  "There's a newer version of this appraisal, dated {date}. Open the newest version" (the link opens the newest). Who may read is
+  unchanged; Tim opens every version from the "Sent to the vendor" card, which lists each version's seal line and permanent link.
+- **The seal**, stored when a version is sent and never changed: sealed_at, the version number, and seal_sha256, the SHA-256 of the
+  canonical seal text {format 'mre.appraisal-seal/1', version, sealed_at, content, files}. Files: Supabase Storage keeps no SHA-256 of a
+  file, so each listed file's bucket, path, size and eTag are sealed instead. Shown near the top, and in print:
+  "Sealed {date and time} NZT. Version {n}. Reference {first 12 of the fingerprint}."
+  (for example "Sealed 28 November 2026 at 4:33 pm NZT. Version 1. Reference e079d6bc45d9.")
+- **Tim's copy view** (`/appraisals/<id>/copy`): "The permanent link to this version: ...", "Check the seal" ("The seal matches: this copy
+  is exactly as it was sealed on {date and time} NZT (reference {12})." or "The seal doesn't match: this copy is not as it was sealed.
+  Sealed reference {12}, now {12}. Keep this page and tell your support person.") and "Download the sealed copy": one self-contained HTML
+  file (not a PDF): the page's styles, the appraisal as they see it with its photos embedded (videos as a note), the seal line, the
+  permanent link, and the sealed record as JSON (script#sealed-record).
+- **Validity**: three months from sealed_at, worked out each time the page is drawn and never written into the copy. After that, a
+  highlighted bar at the top: "This appraisal was prepared on {date}. Its price estimate was for that date and is no longer current, as
+  the market moves. Ask for an updated appraisal." with the button "Ask for an updated appraisal". Pressing it records the ask once per
+  person per version and tells Tim once (email subject and Needs you: "{name} asked for an updated appraisal: {address}"); the button then
+  reads "Tim has been asked" (with "Tim has been asked. He'll be in touch." under it), and stays so on later visits.
+- **Needs you, expiry**: from two weeks before the three months, for a property not yet listed (stage appraisal, questionnaire, plan,
+  accepted or agreement): "Appraisal for {address} expires {date}" (after the date: "expired {date}"), for the newest version.
+- **Agency agreement citation**: the agreement has no field that cites an appraisal, so none was added. What exists: config.appr
+  ('done' or 'pending': whether a written appraisal was given), config.ask (the asking price, or the median of the appraised range) and
+  config.askBasis (its basis), printed on the agreement's front page (fn/shared.ts frontPageTable, fn/pdf.ts). "Use the latest sealed
+  appraisal" waits for Tim to decide whether the agreement should cite one (and where it prints).
 
 ## The packs (for the chat that gathers them in Tim's signed-in browser)
 

@@ -668,7 +668,12 @@ function lw3cRpc(name,a,me){ if(offline()) return bad('Failed to fetch');
 // the vendor reads the newest copy sent to them (vendor_appraisal_read), proceeds, saves a plan; Tim makes an updated version.
 // localStorage mockApCalls: every call, for the tests. Decided (Tim, 28 November 2026, open question 7): someone Tim sets aside (former)
 // loses access at once, even with an open Questions before we meet, as appraisal_vendor_ok does.
-const AP_RPCS=['agent_appraisal_send','agent_appraisal_new_version','agent_appraisal_events_seen','agent_appraisal_mail_unstick','vendor_appraisals_mine','vendor_appraisal_read','appraisal_vendor_can_read','vendor_appraisal_proceed','vendor_appraisal_plan_save','appraisal_event_mine'];
+const AP_RPCS=['agent_appraisal_send','agent_appraisal_new_version','agent_appraisal_events_seen','agent_appraisal_mail_unstick','vendor_appraisals_mine','vendor_appraisal_read','appraisal_vendor_can_read','vendor_appraisal_proceed','vendor_appraisal_plan_save','appraisal_event_mine',
+  'vendor_appraisal_ask_update','agent_appraisal_seal_check'];
+// the seal (appraisal_seal_of): the mock's own canonical text (sorted keys) and its SHA-256; the same idea as the database's jsonb text
+const apCanon=v=>Array.isArray(v)?'['+v.map(apCanon).join(',')+']':v&&typeof v==='object'?'{'+Object.keys(v).sort().map(k=>JSON.stringify(k)+':'+apCanon(v[k])).join(',')+'}':JSON.stringify(v===undefined?null:v);
+const apSealOf=(ver,at,content,files)=>window.SIGN.sha256Hex(apCanon({format:'mre.appraisal-seal/1',version:ver,sealed_at:at,content,files}));
+const apPlus3=t=>{ const e=new Date(t); e.setUTCMonth(e.getUTCMonth()+3); return e; };
 const AP_TABLES=['appraisal_snapshots','appraisal_versions','appraisal_mail','appraisal_events','appraisal_vendor_plans'];
 const APS=()=>(DB.appraisal_snapshots||=[]), APV=()=>(DB.appraisal_versions||=[]), APM=()=>(DB.appraisal_mail||=[]), APE=()=>(DB.appraisal_events||=[]), APP=()=>(DB.appraisal_vendor_plans||=[]);
 // appraisal_contact_problem(): a link, phone number or email, Tim's own phone and email taken out first
@@ -686,12 +691,15 @@ const UUIDX=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // appraisal_section_clean(): each section rebuilt from the keys its type draws; lines kept as strings, or {text, ticked: true}
 const apS=v=>typeof v==='string'?v:undefined, apN=v=>typeof v==='number'?v:undefined, apB=v=>typeof v==='boolean'?v:undefined;
 const apLines=v=>Array.isArray(v)?v.filter(x=>typeof x==='string'||(x&&typeof x==='object'&&!Array.isArray(x)&&x.ticked===true&&typeof x.text==='string')).map(x=>typeof x==='string'?x:x.text):[];
-const apRows=v=>Array.isArray(v)?v.filter(Array.isArray).map(r=>r.filter(c=>typeof c==='string'||typeof c==='number').map(String)):[];
+// ap_lines_opt: a list the renderer has its own default for (column headings) stays missing when the section has none
+const apLinesOpt=v=>Array.isArray(v)?apLines(v):undefined;
+// ap_rows: string cells kept, numbers written out, anything else blanked (the columns stay in line)
+const apRows=v=>Array.isArray(v)?v.filter(Array.isArray).map(r=>r.map(c=>typeof c==='string'?c:typeof c==='number'?String(c):'')):[];
 const apObjs=(v,f)=>Array.isArray(v)?v.filter(x=>x&&typeof x==='object'&&!Array.isArray(x)).map(f):[];
 const apStripU=o=>{ if(Array.isArray(o)) return o.map(apStripU); if(o&&typeof o==='object'){ const r={}; Object.entries(o).forEach(([k,v])=>{ if(v!==undefined&&v!==null) r[k]=apStripU(v); }); return r; } return o; };
 function apSecClean(s){ if(!s||typeof s!=='object'||Array.isArray(s)) return null; const t=s.type; let o;
   if(['heading','note','byline'].includes(t)) o={text:apS(s.text)}; else if(t==='para') o={text:apS(s.text),cls:apS(s.cls)}; else if(t==='list') o={items:apLines(s.items),ordered:apB(s.ordered)};
-  else if(t==='table'||t==='methods') o={head:apLines(s.head),rows:apRows(s.rows)}; else if(t==='ranges') o={head:apLines(s.head)}; else if(t==='method') o={}; else if(t==='opinion') o={head:apLines(s.head),table:apB(s.table)};
+  else if(t==='table'||t==='methods') o={head:apLinesOpt(s.head),rows:apRows(s.rows)}; else if(t==='ranges') o={head:apLinesOpt(s.head)}; else if(t==='method') o={}; else if(t==='opinion') o={head:apLinesOpt(s.head),table:apB(s.table)};
   else if(t==='wave'||t==='campaign') o={title:apS(s.title),subtitle:apS(s.subtitle),marker:apN(s.marker),markerLabel:apS(s.markerLabel),trickle:apS(s.trickle),tail:apS(s.tail),caption:apS(s.caption),bars:apObjs(s.bars,b=>({label:apS(b.label),pct:apN(b.pct)}))};
   else if(t==='methodcards') o={rec:apS(s.rec),items:apObjs(s.items,m=>({key:apS(m.key),name:apS(m.name),how:apS(m.how),suits:apS(m.suits),know:apS(m.know)}))};
   else if(t==='plans') o={included:apS(s.included),items:apObjs(s.items,p=>({key:apS(p.key),name:apS(p.name),price:apN(p.price),tagline:apS(p.tagline),items:apLines(p.items),rec:apB(p.rec)}))};
@@ -747,8 +755,10 @@ function apRpc(name,a,me){ if(offline()) return bad('Failed to fetch');
       if(!String(a.p_body||'').includes('[the appraisal link]')) return bad('Keep [the appraisal link] in the email: it becomes their link when it goes');
       const w=apprWording([a.p_subject,a.p_body]); if(w) return bad('The email: '+w); if(/\[Tim to [^\]]*\]/.test(a.p_body)) return bad('Fill or delete the marked blanks in the email first');
       let b; try{ b=apBuild(r); }catch(e){ return bad(e.message); }
+      if(JSON.stringify(b.content).length>+(localStorage.getItem('mockApMaxContent')||2000000)) return bad('This appraisal is too long to send (its wording is over 2 MB). Shorten or remove some sections, then send again');
       const chain=apChain(r.id), ver=APS().filter(s=>s.chain_id===chain).reduce((m,s)=>Math.max(m,s.version),0)+1;
-      const s={id:uid(),appraisal_id:r.id,chain_id:chain,property_id:r.property_id,version:ver,content:b.content,paths:b.paths,recipients:rec,left_out:b.left_out,sent_by:me.email,sent_at:now()}; APS().push(s);
+      const sealedAt=new Date(Date.now()).toISOString(), files=b.paths.map(p=>({bucket:p.bucket,path:p.path,size:(SO()[p.path]||{}).size??null,etag:null}));
+      const s={id:uid(),appraisal_id:r.id,chain_id:chain,property_id:r.property_id,version:ver,content:b.content,paths:b.paths,recipients:rec,left_out:b.left_out,sent_by:me.email,sent_at:sealedAt,sealed_at:sealedAt,files,seal_sha256:apSealOf(ver,sealedAt,b.content,files)}; APS().push(s);
       const m={id:uid(),snapshot_id:s.id,to_addr:ems,subject:String(a.p_subject).trim(),body:a.p_body,status:'queued',sent_at:null,error:null,made_by:me.email,made_at:now()}; APM().push(m);
       APE().push({id:APE().length+1,snapshot_id:s.id,chain_id:chain,property_id:r.property_id,kind:'sent',actor:me.email,at:now(),detail:{version:ver,to:rec.length},notified_at:now(),seen_at:now(),seen_by:me.email});
       r.status='sent'; r.updated_at=now(); save(); return ok({snapshot_id:s.id,chain_id:chain,version:ver,mail_id:m.id,recipients:rec,left_out:b.left_out}); }
@@ -767,17 +777,24 @@ function apRpc(name,a,me){ if(offline()) return bad('Failed to fetch');
       const assets=(DB.appraisal_assets||[]).filter(x=>x.appraisal_id===r.id&&((x.role==='header'&&hs.asset===x.id)||(x.role==='intro'&&is.asset===x.id))).map(x=>({id:x.id,role:x.role}));
       su.copyPending={media,assets,intro:introWas===undefined?null:introWas};
       save(); return ok({appraisal_id:n.id,existing:false,comps:map,media,assets}); }
+    if(name==='agent_appraisal_seal_check'){ const s=APS().find(x=>x.id===a.p_snapshot); if(!s) return bad('Not found'); const nowSha=apSealOf(s.version,s.sealed_at,s.content,s.files);
+      return ok({ok:nowSha===s.seal_sha256,stored:s.seal_sha256,computed:nowSha,version:s.version,sealed_at:s.sealed_at,files:c(s.files)}); }
     if(name==='agent_appraisal_events_seen'){ let n=0; APE().forEach(e=>{ if((a.p_ids||[]).includes(e.id)&&!e.seen_at){ e.seen_at=now(); e.seen_by=me.email; n++; } }); save(); return ok(n); }
     if(name==='agent_appraisal_mail_unstick'){ const m=APM().find(x=>x.id===a.p_mail&&x.status==='sending'); if(!m) return bad('That email isn\'t waiting on a check'); m.status='failed'; m.error='Checked by Tim: it did not arrive'; save(); return ok(null); }
   }
   if(!S||!S.user) return bad('permission denied for function '+name);
   if(name==='vendor_appraisals_mine'){ const chains=[...new Set(APS().filter(apVendorOk).map(s=>s.chain_id))]; return ok(chains.map(apNewest).filter(Boolean).sort((x,y)=>x.sent_at<y.sent_at?1:-1).map(s=>({chain_id:s.chain_id,snapshot_id:s.id,address:s.content.address,version:s.version,sent_at:s.sent_at}))); }
-  if(name==='vendor_appraisal_read'){ const s=apNewest(apChain(a.p_id)); if(!s) return bad('Not found'); let ev=null;
+  if(name==='vendor_appraisal_read'){ const chain=apChain(a.p_id); let s=APS().find(x=>x.id===a.p_id)||(a.p_version!=null?APS().find(x=>x.chain_id===chain&&x.version===a.p_version):apNewest(chain));
+    if(!s||!apVendorOk(s)) return bad('Not found'); let ev=null; const nw=apNewest(s.chain_id);
     if(!APE().some(e=>e.snapshot_id===s.id&&e.kind==='opened'&&e.actor===em)){ ev=APE().length+1; APE().push({id:ev,snapshot_id:s.id,chain_id:s.chain_id,property_id:s.property_id,kind:'opened',actor:em,at:now(),detail:{version:s.version},notified_at:null,seen_at:null}); }
     const plan=APP().find(p=>p.chain_id===s.chain_id&&p.email===em&&!p.superseded_at);
     const pl=(DB.prelistings||[]).filter(l=>l.property_id===s.property_id&&l.status!=='closed'&&String(l.contact_email||'').toLowerCase()===em&&l.appraisal_id&&apChain(l.appraisal_id)===s.chain_id)[0];
-    save(); return ok({snapshot_id:s.id,chain_id:s.chain_id,version:s.version,sent_at:s.sent_at,content:c(s.content),plan:plan?c(plan.plan):null,prelisting_id:pl?pl.id:null,event_id:ev}); }
-  if(name==='appraisal_vendor_can_read'){ const s=APS().find(x=>x.id===a.p_snapshot); return ok(!!s&&['appraisal-media','appraisal-video','property-files'].includes(a.p_bucket)&&!String(a.p_path||'').includes('..')&&apNewest(s.chain_id)===s&&s.paths.some(p=>p.bucket===a.p_bucket&&p.path===a.p_path)); }
+    save(); return ok({snapshot_id:s.id,chain_id:s.chain_id,version:s.version,sent_at:s.sent_at,sealed_at:s.sealed_at,seal_sha256:s.seal_sha256,expires_at:apPlus3(s.sealed_at).toISOString(),content:c(s.content),plan:plan?c(plan.plan):null,prelisting_id:pl?pl.id:null,event_id:ev,
+      asked:APE().some(e=>e.snapshot_id===s.id&&e.kind==='update_asked'&&e.actor===em),newest:{snapshot_id:nw.id,version:nw.version,sent_at:nw.sent_at}}); }
+  if(name==='appraisal_vendor_can_read'){ const s=APS().find(x=>x.id===a.p_snapshot); return ok(!!s&&['appraisal-media','appraisal-video','property-files'].includes(a.p_bucket)&&!String(a.p_path||'').includes('..')&&apVendorOk(s)&&s.paths.some(p=>p.bucket===a.p_bucket&&p.path===a.p_path)); }
+  if(name==='vendor_appraisal_ask_update'){ const s=APS().find(x=>x.id===a.p_snapshot); if(!s||!apVendorOk(s)) return bad('Not found'); if(Date.now()<apPlus3(s.sealed_at).getTime()) return bad('This appraisal is still current');
+    let ev=null; if(!APE().some(e=>e.snapshot_id===s.id&&e.kind==='update_asked'&&e.actor===em)){ ev=APE().length+1; APE().push({id:ev,snapshot_id:s.id,chain_id:s.chain_id,property_id:s.property_id,kind:'update_asked',actor:em,at:now(),detail:{version:s.version},notified_at:null,seen_at:null}); }
+    save(); return ok({event_id:ev,asked:true}); }
   if(name==='appraisal_event_mine'){ const e=APE().find(x=>x.id===a.p_event); return ok(!!e&&e.kind!=='sent'&&!e.notified_at&&e.actor===em); }
   const s=APS().find(x=>x.id===a.p_snapshot); if(!s||apNewest(s.chain_id)!==s) return bad('Not found');
   if(name==='vendor_appraisal_proceed'){ const p=PT().find(x=>x.id===s.property_id)||{};
@@ -794,8 +811,8 @@ function apRpc(name,a,me){ if(offline()) return bad('Failed to fetch');
     for(const k of ks){ const v=P.sel[k]; if(!/^[a-z0-9_]{1,40}$/.test(k)||typeof v!=='number'||!Number.isInteger(v)||v<1||v>99) return bad('That plan couldn\'t be read. Build it again'); clean[k]=v; }
     if(!ks.length) return bad('Choose at least one item for your plan'); if(typeof P.total!=='number'||P.total<0||P.total>1e6) return bad('That plan couldn\'t be read. Build it again');
     const plan={sel:clean,total:Math.round(P.total*100)/100}; if(/^[a-z0-9_]{1,40}$/.test(P.band||'')) plan.band=P.band; if(typeof P.on_request==='number'&&P.on_request>=0&&P.on_request<=80) plan.on_request=Math.round(P.on_request);
-    // one current plan per person per appraisal, at most 10 saves; Tim told once per person per copy
-    const mine=APP().filter(p=>p.chain_id===s.chain_id&&p.email===em); if(mine.length>=10) return bad('Your plan has been saved 10 times, which is as many as can be kept. Call or text Tim on 027 562 7207 to change it');
+    // one current plan per person per appraisal, at most 10 saves per person per version; Tim told once per person per copy
+    const mine=APP().filter(p=>p.snapshot_id===s.id&&p.email===em); if(mine.length>=10) return bad('Your plan has been saved 10 times, which is as many as can be kept. Call or text Tim on 027 562 7207 to change it');
     mine.forEach(p=>{ if(!p.superseded_at) p.superseded_at=now(); });
     const row={id:uid(),snapshot_id:s.id,chain_id:s.chain_id,property_id:s.property_id,email:em,user_id:S.user.id,plan,created_at:stamp(),superseded_at:null}; APP().push(row);
     let ev=null; if(!APE().some(e=>e.snapshot_id===s.id&&e.kind==='plan_built'&&e.actor===em)){ ev=APE().length+1; APE().push({id:ev,snapshot_id:s.id,chain_id:s.chain_id,property_id:s.property_id,kind:'plan_built',actor:em,at:now(),detail:{plan_id:row.id,total:plan.total},notified_at:null,seen_at:null}); }

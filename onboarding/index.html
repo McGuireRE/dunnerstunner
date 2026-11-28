@@ -6958,6 +6958,7 @@ window.JOURNEY_MEDIA_HINTS = {
     const who = s_(i.who) || 'A vendor', addr = s_(i.address) || 'an appraisal', v = +i.version > 1 ? ` (version ${+i.version})` : '';
     const t = { opened: [`${who} opened their appraisal: ${addr}`, `${who} has opened the appraisal you sent for ${addr}${v}.`],
       proceeded: [`${who} would like to proceed: ${addr}`, `${who} pressed "I'd like to proceed" on their appraisal for ${addr}${v}. Their Questions before we meet is open, linked to this appraisal, and you'll hear when they send their answers.`],
+      update_asked: [`${who} asked for an updated appraisal: ${addr}`, `${who} asked for an updated appraisal of ${addr}${v}. The one they have is more than three months old, so its price estimate is no longer current.`],
       plan_built: [`${who} built their own marketing plan: ${addr}`, `${who} built their own marketing plan from their appraisal for ${addr}${v}${money(i.total) ? `, coming to ${money(i.total)} including GST` : ''}. It's saved to their appraisal.`] }[i.kind]
       || [`About an appraisal: ${addr}`, `${who} did something on their appraisal for ${addr}.`];
     return { subject: t[0], body: [t[1], i.portalUrl ? `Open the appraisal: ${s_(i.portalUrl)}` : ''].filter(Boolean).join('\n\n') };
@@ -8656,7 +8657,7 @@ window.JOURNEY_MEDIA_HINTS = {
     setAgentNav();
     if (PORTAL) return portalBoot();
     // LW3 phase E (037): a vendor's appraisal link (?appraisal=<id>), remembered on this device across the sign-in email
-    { const apo = apOpenTake(); if (apo && !IS_AGENT) return viewVendorAppraisal(apo); }
+    { const apo = apOpenTake(); if (apo && !IS_AGENT) return viewVendorAppraisal(apo.id, { version: apo.v }); }
     if (pitchRoute()) return viewPitch();
     if (IS_AGENT) { const io = inspOpenGet(); if (io) { const [iid, sec] = io.split(':'); if (sec !== 'finish') return viewInspection(iid, +sec || 0); await viewInspection(iid); return INS && INS.id === iid ? viewInspectionFinish() : undefined; } inspSyncAll(); return viewAgentHome(); }
     return viewVendorHome();
@@ -10424,8 +10425,15 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const apOpenPage = aid => () => PORTAL ? portalNav('appraisals/' + aid) : viewAppraisalView(aid, false);
     aevs.forEach(e => { const s = asnaps.find(x => x.id === e.snapshot_id); if (!s) return; const pr = props.find(p => p.id === s.property_id);
       const cur = e.kind === 'plan_built' ? aplans.find(p => p.chain_id === e.chain_id && p.email === e.actor) : null;
-      needs.push({ what: (apWho(s, e.actor) || 'A vendor') + ' ' + (AP_EV[e.kind] || e.kind), where: (pr && pr.address) || 'Appraisal', sub: cur && cur.created_at > e.at ? `Plan last changed ${fmtDT(cur.created_at)}${(cur.plan || {}).total != null ? ', ' + money(+cur.plan.total) + ' incl. GST' : ''}` : 'Their appraisal, ' + fmtDT(e.at), hot: e.kind === 'proceeded', apEvent: e.id,
+      needs.push({ what: (apWho(s, e.actor) || 'A vendor') + ' ' + (AP_EV[e.kind] || e.kind) + (e.kind === 'update_asked' && pr && pr.address ? ': ' + pr.address : ''), where: (pr && pr.address) || 'Appraisal', sub: cur && cur.created_at > e.at ? `Plan last changed ${fmtDT(cur.created_at)}${(cur.plan || {}).total != null ? ', ' + money(+cur.plan.total) + ' incl. GST' : ''}` : 'Their appraisal, ' + fmtDT(e.at), hot: e.kind === 'proceeded', apEvent: e.id,
         go: apOpenPage(s.appraisal_id), done: async () => { await must(sb.rpc('agent_appraisal_events_seen', { p_ids: [e.id] })); } }); });
+    // an appraisal two weeks from its three-month validity, for a property not yet listed: the newest version of each appraisal sent
+    const allSnaps = await quiet(sb.from('appraisal_snapshots').select('id,appraisal_id,chain_id,property_id,version,sealed_at'));
+    const NOT_LISTED = ['appraisal', 'questionnaire', 'plan', 'accepted', 'agreement'];
+    Object.values(allSnaps.reduce((m, s) => { if (!m[s.chain_id] || m[s.chain_id].version < s.version) m[s.chain_id] = s; return m; }, {})).forEach(s => {
+      const pr = props.find(p => p.id === s.property_id); if (!pr || !NOT_LISTED.includes(pr.stage) || !s.sealed_at) return;
+      const ex = apExpiresAt(s.sealed_at); if (AP_NOW() < ex.getTime() - 14 * 864e5) return;
+      needs.push({ what: `Appraisal for ${pr.address || 'a property'} ${AP_NOW() >= ex.getTime() ? 'expired' : 'expires'} ${apDay(ex)}`, where: pr.address || 'Appraisal', sub: 'Its price estimate is three months old then. Send an updated version.', apExpiry: s.id, go: apOpenPage(s.appraisal_id) }); });
     amails.forEach(m => { const s = asnaps.find(x => x.id === m.snapshot_id); if (!s) return; const pr = props.find(p => p.id === s.property_id);
       needs.push({ what: m.status === 'sending' ? 'An appraisal email may have gone: check it' : 'An appraisal email didn\'t go', where: (pr && pr.address) || 'Appraisal', sub: 'The appraisal is sent; the email needs you', hot: true, go: apOpenPage(s.appraisal_id) }); });
     // offers from the form that Tim hasn't opened yet (offers phase 1)
@@ -17708,7 +17716,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   const AP_LINK = '[the appraisal link]';   // MAIL.APPRAISAL_LINK (mail-core.js): it becomes their button when the email goes
   // the appraisal link a vendor opens before signing in, remembered on this device (startup stores it; boot takes it once)
   function apOpenPeek() { try { const v = localStorage.getItem('apOpen'); return v && /^[0-9a-f-]{36}$/.test(v) ? v : null; } catch (_) { return null; } }
-  function apOpenTake() { const v = apOpenPeek(); try { localStorage.removeItem('apOpen'); } catch (_) { } return v; }
+  function apOpenTake() { const v = apOpenPeek(); let n = null; try { n = +localStorage.getItem('apOpenV') || null; localStorage.removeItem('apOpen'); localStorage.removeItem('apOpenV'); } catch (_) { } return v ? { id: v, v: n } : null; }
   const apNotify = id => { if (!id) return; try { const p = sb.functions.invoke('notify', { body: { type: 'ap_event', event_id: id } }); if (p && p.catch) p.catch(() => null); } catch (_) { } };
   async function apChainOf(aid) { try { const { data, error } = await sb.from('appraisal_versions').select('appraisal_id,chain_id').eq('appraisal_id', aid); return !error && data && data[0] ? data[0].chain_id : aid; } catch (_) { return aid; } }
   // the sent copies of an appraisal's chain (newest first), their emails, what the vendors did, the plans they built, the open update
@@ -17716,7 +17724,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const safe = async q => { try { const { data, error } = await q; return error ? [] : (data || []); } catch (_) { return []; } };
     const chain = await apChainOf(aid);
     const [snaps, evs, plans, vers] = await Promise.all([
-      safe(sb.from('appraisal_snapshots').select('id,appraisal_id,chain_id,version,recipients,left_out,sent_at,sent_by').eq('chain_id', chain).order('version', { ascending: false })),
+      safe(sb.from('appraisal_snapshots').select('id,appraisal_id,chain_id,version,recipients,left_out,sent_at,sent_by,sealed_at,seal_sha256').eq('chain_id', chain).order('version', { ascending: false })),
       safe(sb.from('appraisal_events').select('id,snapshot_id,kind,actor,at,detail,seen_at').eq('chain_id', chain).order('at', { ascending: false })),
       safe(sb.from('appraisal_vendor_plans').select('id,snapshot_id,email,plan,created_at,superseded_at').eq('chain_id', chain).is('superseded_at', null).order('created_at', { ascending: false })),
       safe(sb.from('appraisal_versions').select('appraisal_id,previous_id,chain_id,made_at').eq('chain_id', chain))]);
@@ -17726,7 +17734,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     return { chain, snaps, evs, plans, mails, draft };
   }
   const apWho = (snap, email) => { const r = ((snap && snap.recipients) || []).find(x => String(x.email || '').toLowerCase() === String(email || '').toLowerCase()); return (r && r.name) || email; };
-  const AP_EV = { opened: 'opened it', proceeded: 'pressed "I\'d like to proceed"', plan_built: 'built their own marketing plan' };
+  const AP_EV = { opened: 'opened it', proceeded: 'pressed "I\'d like to proceed"', plan_built: 'built their own marketing plan', update_asked: 'asked for an updated appraisal' };
   const AP_MAIL = { queued: 'Waiting to go', sending: 'May have gone: not confirmed', sent: 'Email sent', failed: 'The email didn\'t go' };
   // a plan the vendor built: its items from the shared catalogue (catalogue.js), and its total
   function apPlanLines(plan) {
@@ -17737,9 +17745,10 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   function apSentHTML(rec, sd) {
     if (!sd.snaps.length) return '';
     const newest = sd.snaps[0], mine = sd.snaps.find(s => s.appraisal_id === rec.id) || null;
-    return `<section class="card no-print" id="apSent"><h2>Sent to the vendor</h2>
+    return `${mine ? apExpiryBar(mine.sealed_at, { button: false }) : ''}<section class="card no-print" id="apSent"><h2>Sent to the vendor</h2>
       ${sd.snaps.map(s => { const m = sd.mails.find(x => x.snapshot_id === s.id), who = (s.recipients || []).map(r => r.name ? `${r.name} (${r.email})` : r.email).join(', ');
         return `<div class="ap-sent" data-snap="${esc(s.id)}"><p style="margin:0"><strong>Version ${s.version}</strong>${s.id === newest.id ? ' <span class="apv-tag">What they see now</span>' : ''}<br><span class="small">Sent ${esc(fmtDT(s.sent_at))} to <span translate="no">${esc(who)}</span></span></p>
+          ${apSealLine(s)}<p class="small" style="margin:2px 0 0">Permanent link: <span translate="no" style="overflow-wrap:anywhere" data-aplink="${esc(s.version)}">${esc(apVersionUrl(s.chain_id, s.version))}</span></p>
           ${m ? `<p class="small" data-apmail="${esc(m.id)}" style="margin:4px 0 0">${esc(AP_MAIL[m.status] || m.status)}${m.status === 'sent' && m.sent_at ? ', ' + esc(fmtDT(m.sent_at)) : ''}${m.status === 'failed' && m.error ? ': ' + esc(m.error) : ''}</p>
             ${m.status === 'failed' || m.status === 'queued' ? `<div class="toolbar"><button class="btn ghost" type="button" data-apresend="${esc(m.id)}">Send the email again</button></div>` : ''}
             ${m.status === 'sending' ? `<div class="toolbar"><button class="btn ghost" type="button" data-apunstick="${esc(m.id)}">I've checked: it didn't arrive</button></div>` : ''}` : ''}
@@ -17949,10 +17958,58 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     if (!s) return viewPortalMissing('This appraisal hasn\'t been sent, so there is no copy to show.');
     const ev = await apCopyEv(s.content, apAgentLink);
     if (!$('#main .loading')) return;
+    const link = apVersionUrl(s.chain_id, s.version);
     main().innerHTML = `<div class="view-pad apv" id="apvCopy"><span class="agent-flag no-print">Only you see this</span><p class="small no-print">Version ${esc(s.version)}, sent ${esc(fmtDT(s.sent_at))}. This is exactly what they see, frozen when it was sent.</p>
-      <div class="toolbar no-print">${plink(`appraisals/${id}`, 'Back to the appraisal', 'btn ghost')}</div><div id="apvDoc"></div></div>`;
+      <p class="small no-print" id="apvPermLink">The permanent link to this version: <span translate="no" style="overflow-wrap:anywhere">${esc(link)}</span></p>
+      <div class="toolbar no-print">${plink(`appraisals/${id}`, 'Back to the appraisal', 'btn ghost')}<button class="btn ghost" type="button" id="apvSealCheck">Check the seal</button><button class="btn ghost" type="button" id="apvSealDown">Download the sealed copy</button></div>
+      ${apExpiryBar(s.sealed_at, { button: false })}${apSealLine(s)}<div id="apvDoc"></div></div>`;
     $('#apvDoc').innerHTML = APPR.render(apCopyRec(s.content), ev); abWireVideos($('#apvDoc'));
+    const ck = $('#apvSealCheck');
+    ck.addEventListener('click', async () => { ck.disabled = true; atBtn(ck, 'Checking...', 'busy');
+      const { data, error } = await sb.rpc('agent_appraisal_seal_check', { p_snapshot: s.id }); ck.disabled = false;
+      if (error || !data) { atBtn(ck, netErr(error) ? 'Not checked: no signal. Try again.' : 'Not checked: ' + ((error && error.message) || 'try again.'), 'err'); return; }
+      atBtn(ck, data.ok ? `The seal matches: this copy is exactly as it was sealed on ${apSealTime(data.sealed_at)} (reference ${String(data.stored).slice(0, 12)}).` : `The seal doesn't match: this copy is not as it was sealed. Sealed reference ${String(data.stored).slice(0, 12)}, now ${String(data.computed).slice(0, 12)}. Keep this page and tell your support person.`, data.ok ? 'ok' : 'err'); });
+    const dl = $('#apvSealDown');
+    dl.addEventListener('click', async () => { dl.disabled = true; atBtn(dl, 'Making the file...', 'busy');
+      try { const html = await apSealedFile(s); const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
+        a.download = `appraisal-v${s.version}-${String(s.seal_sha256).slice(0, 12)}.html`; document.body.appendChild(a); a.click(); a.remove();
+        atBtn(dl, 'Downloaded: one file with the appraisal as they see it, its photos, the seal line and the sealed record.', 'ok'); } catch (_) { atBtn(dl, 'Not made. Check you have signal, then try again.', 'err'); }
+      dl.disabled = false; });
     top();
+  }
+  // the sealed copy as one self-contained HTML file, for Tim's records or an auditor: the page's own styles, the appraisal as drawn now
+  // with every photo embedded (videos as their still frame, or a note), the seal line, the permanent link, and the sealed record itself
+  // (the version, sealed_at, the files and the content exactly as stored, with the fingerprint and how it is worked out)
+  async function apSealedFile(s) {
+    const doc = $('#apvDoc').cloneNode(true);
+    const toData = async url => { const b = await (await fetch(url)).blob(); return await new Promise(r => { const f = new FileReader(); f.onload = () => r(f.result); f.readAsDataURL(b); }); };
+    for (const img of $$('img', doc)) { try { if (img.src && !/^data:/.test(img.src)) img.src = await toData(img.src); } catch (_) { img.remove(); } }
+    $$('video', doc).forEach(v => { const p = v.getAttribute('poster'); v.replaceWith(Object.assign(document.createElement('p'), { className: 'small', textContent: p ? '(A video. Its still frame is shown below.)' : '(A video, not included in this file.)' })); });
+    $$('.no-print, button', doc).forEach(x => x.remove());
+    const styles = $$('style').map(x => x.textContent).join('\n');
+    const rec = { format: 'mre.appraisal-seal/1', version: s.version, sealed_at: s.sealed_at, seal_sha256: s.seal_sha256, permanent_link: apVersionUrl(s.chain_id, s.version), files: s.files, content: s.content };
+    return `<!doctype html><html lang="en-NZ"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${esc(s.content.title || 'Appraisal')} (sealed copy, version ${esc(s.version)})</title><style>${styles}</style></head>
+<body><main style="max-width:760px;margin:0 auto;padding:24px 16px"><div class="apv">${apSealLine(s)}<p class="small">Permanent link: ${esc(rec.permanent_link)}</p><p class="small">The price estimate was for the date it was sealed; an appraisal is current for three months from then.</p>${doc.innerHTML}
+<hr><p class="small">The sealed record follows. Its fingerprint is the SHA-256 of the seal text {format, version, sealed_at, content, files} as the database writes it; "Check the seal" in the portal works it out again from the stored copy.</p></div></main>
+<script type="application/json" id="sealed-record">${JSON.stringify(rec).replace(/</g, '\\u003c')}<\/script></body></html>`;   // <\/script>: this code sits inside a script tag on the page
+  }
+
+  /* ── sealed, time-stamped versions and their validity (Tim, 28 November 2026, 4:22pm). The seal is stored when a version is sent
+     (sealed_at, the fingerprint seal_sha256); the three-month validity is worked out from the date at view time and never written into
+     the sealed copy. AP_NOW: the clock (the tests move it). ── */
+  const AP_NOW = () => Date.now();
+  const apDay = t => new Date(t).toLocaleDateString('en-NZ', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Pacific/Auckland' });
+  const apSealTime = t => new Date(t).toLocaleString('en-NZ', { day: 'numeric', month: 'long', year: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: 'Pacific/Auckland' }) + ' NZT';
+  // three calendar months on from sealing, as the database works it out (interval '3 months')
+  const apExpiresAt = t => { const e = new Date(t); e.setUTCMonth(e.getUTCMonth() + 3); return e; };
+  const apExpired = t => !!t && AP_NOW() >= apExpiresAt(t).getTime();
+  // each version's permanent link (the one Tim can cite), and the appraisal's own link (the newest copy sent to them)
+  const apVersionUrl = (chain, v) => ONBOARDING_URL + '?appraisal=' + encodeURIComponent(chain) + (v ? '&v=' + encodeURIComponent(v) : '');
+  const apSealLine = s => s && s.seal_sha256 ? `<p class="small apv-seal">Sealed ${esc(apSealTime(s.sealed_at))}. Version ${esc(s.version)}. Reference ${esc(String(s.seal_sha256).slice(0, 12))}.</p>` : '';
+  const AP_EXPIRED_WORDS = d => `This appraisal was prepared on ${apDay(d)}. Its price estimate was for that date and is no longer current, as the market moves. Ask for an updated appraisal.`;
+  function apExpiryBar(sealedAt, o) {
+    if (!apExpired(sealedAt)) return '';
+    return `<div class="card warnc apv-expired" id="apvExpired" role="status"><p style="margin:0"><strong>${esc(AP_EXPIRED_WORDS(sealedAt))}</strong></p>${o && o.button ? `<div class="toolbar no-print"><button class="btn primary" type="button" id="apvAskUpdate" ${o.asked ? 'disabled' : ''}>${o.asked ? 'Tim has been asked' : 'Ask for an updated appraisal'}</button></div>` : ''}</div>`;
   }
 
   /* ── the vendor page's own extras, all in this one block (the appraisal itself is drawn only by APPR.render): the sent line, the plan
@@ -17962,7 +18019,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     let pend = null; try { pend = JSON.parse(localStorage.getItem('apPlan') || 'null'); } catch (_) { pend = null; }
     if (!(pend && pend.chain === d.chain_id && pend.sel && typeof pend.sel === 'object')) return { saved: false };
     let r = null, e = null;
-    try { const x = await sb.rpc('vendor_appraisal_plan_save', { p_snapshot: d.snapshot_id, p_plan: { sel: pend.sel, band: pend.band || null, total: +pend.total || 0, on_request: +pend.on_request || 0 } }); r = x.data; e = x.error; } catch (err) { e = err; }
+    try { const x = await sb.rpc('vendor_appraisal_plan_save', { p_snapshot: (d.newest && d.newest.snapshot_id) || d.snapshot_id, p_plan: { sel: pend.sel, band: pend.band || null, total: +pend.total || 0, on_request: +pend.on_request || 0 } }); r = x.data; e = x.error; } catch (err) { e = err; }
     if (!e && r) { d.plan = { sel: pend.sel, band: pend.band, total: +pend.total || 0, on_request: +pend.on_request || 0 }; apNotify(r.event_id); try { localStorage.removeItem('apPlan'); } catch (_) { } return { saved: true }; }
     if (netErr(e)) return { saved: false, retry: true, msg: 'Your plan didn\'t save: there\'s no signal. It\'s kept on this device. Try again when you have signal.' };
     try { localStorage.removeItem('apPlan'); } catch (_) { }
@@ -17970,7 +18027,11 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   }
   function apVendorExtras(d, ps, c) {
     const media = Object.keys(c.photos || {}).length + Object.keys(c.assets || {}).length + Object.keys(c.homePhotos || {}).length;
-    return { top: `<p class="small no-print" id="apvSentLine">${d.version > 1 ? `Updated by Tim McGuire on ${esc(fmtDate(d.sent_at))}. This is the newest version.` : `From Tim McGuire, ${esc(fmtDate(d.sent_at))}.`} Private to you.</p>`,
+    const nw = d.newest && d.newest.version > d.version ? d.newest : null;
+    return { top: `${nw ? `<div class="card note tight no-print" id="apvNewer"><p style="margin:0">There's a newer version of this appraisal, dated ${esc(apDay(nw.sent_at))}. <a href="${esc(apVersionUrl(d.chain_id))}" id="apvNewerLink">Open the newest version</a></p></div>` : ''}
+      ${apExpiryBar(d.sealed_at, { asked: !!d.asked, button: true })}
+      <p class="small no-print" id="apvSentLine">${d.version > 1 ? `Updated by Tim McGuire on ${esc(fmtDate(d.sent_at))}.${nw ? '' : ' This is the newest version.'}` : `From Tim McGuire, ${esc(fmtDate(d.sent_at))}.`} Private to you.</p>
+      ${apSealLine(d)}`,
       bottom: `${apPlanCardHTML(d.plan, ps.saved)}
       <section class="card no-print" id="apvNext"><h2>${d.prelisting_id ? 'Your questions' : 'Ready for the next step?'}</h2>
         <p>${d.prelisting_id ? 'Carry on with the few quick questions, so I can shape the plan around what matters most to you.' : 'Press below and answer a few quick questions, so I can shape the plan around what matters most to you. There\'s no obligation, and nothing to sign yet.'}</p>
@@ -17979,6 +18040,14 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <p class="small">Questions at any stage? Call or text Tim on <strong>027 562 7207</strong>.</p>` };
   }
   function apVendorExtrasWire(d, ps, c, id) {
+    // the newest version from an older version's page; asking for an updated appraisal (once per person per version; Tim told once)
+    const nl = $('#apvNewerLink'); if (nl) nl.addEventListener('click', e => { e.preventDefault(); viewVendorAppraisal(d.chain_id); });
+    const ask = $('#apvAskUpdate'); if (ask && !d.asked) ask.addEventListener('click', async () => {
+      ask.disabled = true; atBtn(ask, 'Asking Tim...', 'busy');
+      let r = null, e = null; try { const x = await sb.rpc('vendor_appraisal_ask_update', { p_snapshot: d.snapshot_id }); r = x.data; e = x.error; } catch (err) { e = err; }
+      if (e || !r) { ask.disabled = false; atBtn(ask, netErr(e) ? 'That didn\'t go: no signal. Try again when you have signal.' : 'That didn\'t go. Please try again, or call Tim on 027 562 7207.', 'err'); return; }
+      apNotify(r.event_id); d.asked = true; ask.textContent = 'Tim has been asked'; atBtn(ask, 'Tim has been asked. He\'ll be in touch.', 'ok');
+    });
     // the "Build your own" card opens the campaign builder, starting from the plan Tim recommends, with the way back here
     const rec = ((c.sections || []).find(s => s && s.type === 'plans') || { items: [] }).items.find(p => p && p.rec);
     const cust = $('#apvDoc .apv-plan[data-plan="custom"]'); if (!cust) return;
@@ -17994,7 +18063,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     header('Your appraisal', '', 0); actions(false);
     main().innerHTML = '<div class="loading">Loading...</div>';
     let d = null, err = null;
-    try { const { data, error } = await sb.rpc('vendor_appraisal_read', { p_id: id }); if (error) err = error; else d = data; } catch (e) { err = e; }
+    try { const { data, error } = await sb.rpc('vendor_appraisal_read', Object.assign({ p_id: id }, opt && opt.version ? { p_version: opt.version } : {})); if (error) err = error; else d = data; } catch (e) { err = e; }
     if (!d || !d.content) {
       main().innerHTML = `<div class="login-card" id="apvNone"><h1>This appraisal isn't here</h1><p class="lede">${netErr(err) ? 'Check you have signal, then reload the page.' : `There's no appraisal for <span translate="no">${esc((SESSION && SESSION.user && SESSION.user.email) || 'this email')}</span> at this link. Check you signed in with the email address Tim sent it to.`}</p><p class="small">Questions? Call or text Tim on <strong>027 562 7207</strong>.</p></div>`;
       top(); return;
@@ -18011,7 +18080,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     pb.addEventListener('click', async () => {
       if (d.prelisting_id) return viewPrelisting(d.prelisting_id, true);
       pb.disabled = true; atBtn(pb, 'Opening your questions...', 'busy');
-      const { data: r, error: e } = await sb.rpc('vendor_appraisal_proceed', { p_snapshot: d.snapshot_id });
+      const { data: r, error: e } = await sb.rpc('vendor_appraisal_proceed', { p_snapshot: (d.newest && d.newest.snapshot_id) || d.snapshot_id });   // the appraisal as it stands now
       if (e || !r || !r.prelisting_id) { pb.disabled = false; atBtn(pb, netErr(e) ? 'No signal. Try again when you have signal.' : 'That didn\'t open. Please try again, or call Tim on 027 562 7207.', 'err'); return; }
       apNotify(r.event_id);
       return viewPrelisting(r.prelisting_id, true);
@@ -18837,7 +18906,9 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   if (PORTAL && /[?&](offer|sign|lawyer|appraisal)=/.test(location.search)) { location.replace(ONBOARDING_URL + location.search); return; }
   // LW3 phase E (037): a vendor's appraisal link; kept on this device so it opens again after the sign-in email brings them back
   { const ap = new URLSearchParams(location.search).get('appraisal');
-    if (ap && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(ap)) { try { localStorage.setItem('apOpen', ap.toLowerCase()); } catch (_) { } } }
+    if (ap && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(ap)) { try { localStorage.setItem('apOpen', ap.toLowerCase());
+      // a version's own permanent link (&v=<n>): that version, always
+      const v = new URLSearchParams(location.search).get('v'); if (v && /^[1-9][0-9]{0,3}$/.test(v)) localStorage.setItem('apOpenV', v); else localStorage.removeItem('apOpenV'); } catch (_) { } } }
 
   const offerToken = new URLSearchParams(location.search).get('offer');
   if (offerToken) { const w = $('#langWrap'); if (w) w.hidden = true; viewOfferPublic(offerToken); return; }
