@@ -667,3 +667,29 @@ sections (header, intro, heard, home, buyers, reviews) are JSON in `appraisal_vi
 Tests: tests/appraisal-home-rollback.js/.sql on tests/appraisal-home-standin.sql (after the 035 chain; it checks the stand-in against
 live's function definitions); browser test tests/appraisal-b.test.js; core test tests/appraisal-b-core.test.js (against a frozen copy of
 the d012895 core); function test tests/appraisal-draft-fn.test.js.
+
+## 037 Sending an appraisal to the vendor (LW3 phase E, 28 November 2026; tested in a rollback block on a local PostgreSQL stand-in built to live 036, NOT yet on the live project)
+Builds on 036 (live). Additive only: no existing column, row, policy, function, trigger or signed-record protection changes.
+- `appraisal_snapshots`: the frozen copy a vendor reads (appraisal_id unique, chain_id, property_id, version unique per chain, content,
+  paths (the exact {bucket, path} files a vendor may open), recipients [{email, name}], left_out (another agency's advertisement or a
+  review left out, and why), sent_by, sent_at). Never changes, never removed (`guard_appraisal_kept`).
+- `appraisal_versions` (appraisal_id, previous_id, chain_id): "Make an updated version". `appraisal_mail` (snapshot_id, to_addr, subject,
+  body with [the appraisal link], status queued|sending|sent|failed): the words never change; status only moves on (`guard_appraisal_mail`).
+  `appraisal_events` (sent, opened, proceeded, plan_built; notified_at and seen_at set once each; `guard_appraisal_event`).
+  `appraisal_vendor_plans` (a plan the vendor built on the packages page; kept). RLS on all five: select for is_agent() only; no direct
+  writes for anyone; nothing for anon or vendors.
+- `prelistings.appraisal_id`: the appraisal a Questions before we meet came from ("I'd like to proceed"); kept once set.
+- Who a vendor is: the signed-in email is one of the copy's recipients and still an owner or contact on the property (not former), or
+  the contact of its open Questions before we meet in this round. They read the newest copy sent to them in the chain.
+- Functions (security definer, search_path public). Tim (is_agent, granted to authenticated): `agent_appraisal_send(p_id, p_recipients,
+  p_subject, p_body)` (sets 'sent' with set_config('app.appraisal_send','on',true) and puts it back at once), `agent_appraisal_new_version`,
+  `agent_appraisal_events_seen`, `agent_appraisal_mail_unstick`. Vendors (granted to authenticated, never anon): `vendor_appraisals_mine`,
+  `vendor_appraisal_read(p_id)`, `appraisal_vendor_can_read(p_snapshot, p_bucket, p_path)` (asked by repo-link with the vendor's token),
+  `vendor_appraisal_proceed(p_snapshot)`, `vendor_appraisal_plan_save(p_snapshot, p_plan)`, `appraisal_event_mine(p_event)` (asked by notify).
+  Internal (callable by nobody): `appraisal_snapshot_build` (the whitelist), `appraisal_contact_problem`, `appraisal_contact_find`,
+  `appraisal_chain_of`, `appraisal_vendor_ok`, `appraisal_vendor_newest`, and the guards.
+- Edge functions: `repo-link` gains the appraisal mode ({snapshot, bucket, path}; 600-second links in appraisal-media, appraisal-video or
+  property-files); `notify` gains `ap_send` (Tim's reviewed email, to exactly its people) and `ap_event` (Tim told once).
+Tests: tests/appraisal-send-rollback.js/.sql on tests/appraisal-send-standin.sql (after the 036 chain; checks the stand-in against
+live's function definitions); browser test tests/appraisal-send.test.js; function tests tests/appraisal-notify-fn.test.js and
+tests/repo-link-fn.test.js; tests/mail-core.test.js (the email).

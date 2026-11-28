@@ -37,5 +37,35 @@ const path = require('path');
   // allowed but the file can't be signed (gone from storage)
   const h2 = H.makeHandler({ cors: {}, canRead: async () => true, sign: async () => null });
   r = await h2(new Request('https://x/f', { method: 'POST', headers: { Authorization: 'Bearer vendor' }, body: JSON.stringify({ path: FILE }) })); expect(r.status === 404, 'no file: 404');
+
+  // ── LW3 phase E (037): a file in an appraisal sent to the vendor, asked as appraisal_vendor_can_read with their own token ──
+  const SNAP = 'aaaaaaaa-1111-4111-8111-000000000001', AID = 'bbbbbbbb-2222-4222-8222-000000000002', CID = 'cccccccc-3333-4333-8333-000000000003';
+  const COMP = `appraisals/${AID}/comps/${CID}/rb-a.jpg`, CLIP = `appraisals/${AID}/intro/rb-hello.mp4`, HOME = FILE, NOTLISTED = `appraisals/${AID}/comps/${CID}/rb-hidden.jpg`;
+  const listed = new Set(['appraisal-media|' + COMP, 'appraisal-video|' + CLIP, 'property-files|' + HOME]);
+  const aAsked = [], aSigned = [];
+  const h3 = H.makeHandler({ cors: {}, canRead: async () => { throw new Error('the property file question must not be asked for an appraisal file'); }, sign: async () => null,
+    canReadAppraisal: async (auth, s, b, p) => { aAsked.push([auth, s, b, p]); if (auth === 'Bearer forged') return null; return auth === 'Bearer vendor' && s === SNAP && listed.has(b + '|' + p); },
+    signIn: async (b, p, sec) => { aSigned.push([b, p, sec]); return `https://x.supabase.co/storage/v1/object/sign/${b}/${p}?token=t&s=${sec}`; } });
+  const apost = (body, auth) => h3(new Request('https://x/f', { method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, auth ? { Authorization: auth } : {}), body: JSON.stringify(body) }));
+  r = await apost({ snapshot: SNAP, bucket: 'appraisal-media', path: COMP }); expect(r.status === 401 && !aAsked.length, 'appraisal file, no token: 401, nothing asked');
+  for (const [b, p] of [['appraisal-media', COMP], ['appraisal-video', CLIP], ['property-files', HOME]]) {
+    r = await apost({ snapshot: SNAP, bucket: b, path: p, expires_in: 99999 }, 'Bearer vendor'); const jj = await r.json();
+    expect(r.status === 200 && jj.expires_in === 600 && jj.url.includes('/sign/' + b + '/'), 'a listed ' + b + ' file: a 600-second link in its own bucket');
+  }
+  expect(aSigned.length === 3 && aSigned.every(x => x[2] === 600), 'every appraisal link lasts 600 seconds');
+  expect(aAsked.every(x => x[0] === 'Bearer vendor' || x[0] === 'Bearer someone-else'), 'asked with the caller\'s own token');
+  r = await apost({ snapshot: SNAP, bucket: 'appraisal-media', path: NOTLISTED }, 'Bearer vendor'); expect(r.status === 403, 'a photo outside the copy: 403');
+  r = await apost({ snapshot: SNAP, bucket: 'appraisal-media', path: COMP }, 'Bearer someone-else'); expect(r.status === 403, 'another signed-in person: 403');
+  r = await apost({ snapshot: SNAP, bucket: 'appraisal-media', path: COMP }, 'Bearer forged'); expect(r.status === 401, 'a token the database does not accept: 401');
+  expect(aSigned.length === 3, 'nothing signed for a refusal');
+  const na = aAsked.length;
+  for (const [s, b, p] of [['not-a-uuid', 'appraisal-media', COMP], [SNAP, 'private', COMP], [SNAP, 'appraisal-video', COMP], [SNAP, 'appraisal-media', CLIP.replace('.mp4', '/../x.jpg')],
+      [SNAP, 'appraisal-media', `appraisals/${AID}/elsewhere/x.jpg`], [SNAP, 'property-files', `properties/${AID}/generated/x.pdf`], [SNAP, '__proto__', COMP], [SNAP, 'appraisal-media', '']]) {
+    r = await apost({ snapshot: s, bucket: b, path: p }, 'Bearer vendor'); expect(r.status === 400, 'bad appraisal request refused: ' + [s, b, p].join(' '));
+  }
+  expect(aAsked.length === na, 'bad appraisal requests never reach the database');
+  // a deployment without the appraisal question refuses appraisal requests rather than falling back
+  r = await h(new Request('https://x/f', { method: 'POST', headers: { Authorization: 'Bearer vendor' }, body: JSON.stringify({ snapshot: SNAP, bucket: 'property-files', path: FILE }) }));
+  expect(r.status === 400, 'no appraisal question wired: 400');
   console.log(JSON.stringify(Object.assign(out, { errs }), null, 1));
 })().catch(e => console.log(JSON.stringify({ errs: ['crashed: ' + e.stack] })));

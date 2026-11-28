@@ -1,0 +1,573 @@
+-- 037: sending an appraisal to the vendor (LW3 phase E, APPRAISAL-PLAN.md): a frozen copy, the vendor's private signed-in view,
+-- short-lived photo links, "I'd like to proceed", the vendor's own marketing plan, and what happened, for Tim.
+-- Builds on 036 (apply 032 to 036 first). Additive only: five new tables, one new nullable column on prelistings, new functions.
+-- No existing column, row, policy, function, trigger or signed-record protection is changed. A sent appraisal still never changes
+-- (guard_appraisal_view, 034): 'sent' is set only here, with set_config('app.appraisal_send', 'on', true), for this transaction alone.
+--
+--   appraisal_snapshots    the copy a vendor reads, made by agent_appraisal_send as a whitelist, never changed or removed: the ticked
+--                          wording only, the shown comparables only (never Tim's private note, the source link, an AI note or a buyer
+--                          check), the header, the video introduction, the mockup's photos and Tim's ticked Google reviews frozen as
+--                          they were, and the exact files a vendor may open (paths). Never fee wording; never a link, phone number or
+--                          email in the wording (Tim's own phone and email excepted); another agency's advertisement wording, or a
+--                          review, that fails either is left out and listed for Tim (left_out). Never the Relab owners or values,
+--                          buyers' locations or market_sales addresses: none of them is read here.
+--   appraisal_versions     "Make an updated version": a new draft copied from the newest sent one, in the same chain. Sending it makes
+--                          the next numbered copy; the vendor always reads the newest copy sent to them; older ones stay for Tim.
+--   appraisal_mail         the email Tim reviewed and sent with a copy (sent by the notify function; status only changes after).
+--   appraisal_events       sent, opened (first time per copy and person), proceeded, plan_built; notify tells Tim once each.
+--   appraisal_vendor_plans a marketing plan the vendor built on the packages page, saved to their appraisal.
+--   prelistings.appraisal_id  the appraisal a vendor's Questions before we meet came from, when they pressed "I'd like to proceed".
+--
+-- Who a vendor is: the signed-in email (the email code sign-in) is one Tim sent the copy to, and is still an owner or contact on the
+-- property (property_people, not former) or the contact of its open Questions before we meet in this round of owners. Vendors only
+-- ever go through the security definer functions here; they have no policy on any of the new tables. Anon gets nothing.
+
+-- ═══════════════ tables ═══════════════
+create table public.appraisal_versions (
+  appraisal_id uuid primary key references public.appraisal_views(id) on delete cascade,
+  previous_id uuid not null references public.appraisal_views(id),
+  chain_id uuid not null references public.appraisal_views(id),
+  made_by text not null default coalesce(auth.jwt()->>'email', ''),
+  made_at timestamptz not null default now()
+);
+create index appraisal_versions_chain_idx on public.appraisal_versions (chain_id);
+
+create table public.appraisal_snapshots (
+  id uuid primary key default gen_random_uuid(),
+  appraisal_id uuid not null unique references public.appraisal_views(id),
+  chain_id uuid not null references public.appraisal_views(id),
+  property_id uuid not null references public.properties(id),
+  version integer not null check (version between 1 and 1000),
+  content jsonb not null check (jsonb_typeof(content) = 'object' and length(content::text) <= 2000000),
+  paths jsonb not null default '[]'::jsonb check (jsonb_typeof(paths) = 'array' and jsonb_array_length(paths) <= 600),
+  recipients jsonb not null check (jsonb_typeof(recipients) = 'array' and jsonb_array_length(recipients) between 1 and 10),
+  left_out jsonb not null default '[]'::jsonb check (jsonb_typeof(left_out) = 'array'),
+  sent_by text not null,
+  sent_at timestamptz not null default now(),
+  unique (chain_id, version)
+);
+create index appraisal_snapshots_property_idx on public.appraisal_snapshots (property_id);
+
+create table public.appraisal_mail (
+  id uuid primary key default gen_random_uuid(),
+  snapshot_id uuid not null unique references public.appraisal_snapshots(id),
+  to_addr text[] not null check (array_length(to_addr, 1) between 1 and 10),
+  subject text not null check (length(btrim(subject)) between 1 and 300),
+  body text not null check (length(body) between 1 and 20000 and position('[the appraisal link]' in body) > 0),
+  status text not null default 'queued' check (status in ('queued', 'sending', 'sent', 'failed')),
+  sent_at timestamptz,
+  error text check (length(error) <= 2000),
+  made_by text not null,
+  made_at timestamptz not null default now()
+);
+
+create table public.appraisal_events (
+  id bigint generated always as identity primary key,
+  snapshot_id uuid not null references public.appraisal_snapshots(id),
+  chain_id uuid not null references public.appraisal_views(id),
+  property_id uuid not null references public.properties(id),
+  kind text not null check (kind in ('sent', 'opened', 'proceeded', 'plan_built')),
+  actor text not null check (length(actor) between 1 and 254),
+  at timestamptz not null default now(),
+  detail jsonb not null default '{}'::jsonb check (jsonb_typeof(detail) = 'object' and length(detail::text) <= 4000),
+  notified_at timestamptz,
+  seen_at timestamptz,
+  seen_by text
+);
+create index appraisal_events_chain_idx on public.appraisal_events (chain_id, at);
+create index appraisal_events_open_idx on public.appraisal_events (at) where seen_at is null;
+
+create table public.appraisal_vendor_plans (
+  id uuid primary key default gen_random_uuid(),
+  snapshot_id uuid not null references public.appraisal_snapshots(id),
+  chain_id uuid not null references public.appraisal_views(id),
+  property_id uuid not null references public.properties(id),
+  email text not null check (length(email) between 3 and 254),
+  user_id uuid,
+  plan jsonb not null check (jsonb_typeof(plan) = 'object' and length(plan::text) <= 20000),
+  created_at timestamptz not null default now()
+);
+create index appraisal_vendor_plans_chain_idx on public.appraisal_vendor_plans (chain_id, email, created_at);
+
+alter table public.prelistings add column appraisal_id uuid references public.appraisal_views(id);
+
+-- Row Level Security: Tim reads; nobody writes directly (the functions below do); vendors and anon nothing
+alter table public.appraisal_versions enable row level security;
+alter table public.appraisal_snapshots enable row level security;
+alter table public.appraisal_mail enable row level security;
+alter table public.appraisal_events enable row level security;
+alter table public.appraisal_vendor_plans enable row level security;
+create policy appraisal_versions_agent_read on public.appraisal_versions for select to authenticated using (public.is_agent());
+create policy appraisal_snapshots_agent_read on public.appraisal_snapshots for select to authenticated using (public.is_agent());
+create policy appraisal_mail_agent_read on public.appraisal_mail for select to authenticated using (public.is_agent());
+create policy appraisal_events_agent_read on public.appraisal_events for select to authenticated using (public.is_agent());
+create policy appraisal_vendor_plans_agent_read on public.appraisal_vendor_plans for select to authenticated using (public.is_agent());
+revoke all on public.appraisal_versions, public.appraisal_snapshots, public.appraisal_mail, public.appraisal_events, public.appraisal_vendor_plans from anon;
+revoke insert, update, delete, truncate, trigger, references on public.appraisal_versions, public.appraisal_snapshots, public.appraisal_mail,
+  public.appraisal_events, public.appraisal_vendor_plans from authenticated;
+
+-- ═══════════════ guards: a copy never changes; the records are kept ═══════════════
+create function public.guard_appraisal_kept() returns trigger
+language plpgsql set search_path = public as $$
+begin
+  if tg_op = 'DELETE' then raise exception 'Records in % are kept', tg_table_name; end if;
+  raise exception 'Records in % never change', tg_table_name;
+end $$;
+revoke all on function public.guard_appraisal_kept() from public, anon, authenticated;
+create trigger appraisal_snapshots_kept before update or delete on public.appraisal_snapshots for each row execute function public.guard_appraisal_kept();
+create trigger appraisal_versions_kept before update or delete on public.appraisal_versions for each row execute function public.guard_appraisal_kept();
+create trigger appraisal_vendor_plans_kept before update or delete on public.appraisal_vendor_plans for each row execute function public.guard_appraisal_kept();
+-- the email: what was sent never changes; only its sending moves on (queued or failed to sending, sending to sent or failed)
+create function public.guard_appraisal_mail() returns trigger
+language plpgsql set search_path = public as $$
+begin
+  if tg_op = 'DELETE' then raise exception 'Records in appraisal_mail are kept'; end if;
+  if new.snapshot_id is distinct from old.snapshot_id or new.to_addr is distinct from old.to_addr or new.subject is distinct from old.subject
+     or new.body is distinct from old.body or new.made_by is distinct from old.made_by or new.made_at is distinct from old.made_at then
+    raise exception 'An email that has been written for a sent appraisal never changes';
+  end if;
+  if new.status is distinct from old.status and not ((old.status in ('queued', 'failed') and new.status = 'sending')
+     or (old.status = 'sending' and new.status in ('sent', 'failed'))) then
+    raise exception 'That email can''t go from % to %', old.status, new.status;
+  end if;
+  return new;
+end $$;
+revoke all on function public.guard_appraisal_mail() from public, anon, authenticated;
+create trigger appraisal_mail_guard before update or delete on public.appraisal_mail for each row execute function public.guard_appraisal_mail();
+-- what happened: kept; Tim told once (notified_at) and Tim's "seen" once; nothing else changes
+create function public.guard_appraisal_event() returns trigger
+language plpgsql set search_path = public as $$
+begin
+  if tg_op = 'DELETE' then raise exception 'Records in appraisal_events are kept'; end if;
+  if (to_jsonb(new) - 'notified_at' - 'seen_at' - 'seen_by') is distinct from (to_jsonb(old) - 'notified_at' - 'seen_at' - 'seen_by')
+     or (old.notified_at is not null and new.notified_at is distinct from old.notified_at)
+     or (old.seen_at is not null and (new.seen_at is distinct from old.seen_at or new.seen_by is distinct from old.seen_by)) then
+    raise exception 'Records in appraisal_events never change';
+  end if;
+  return new;
+end $$;
+revoke all on function public.guard_appraisal_event() from public, anon, authenticated;
+create trigger appraisal_events_guard before update or delete on public.appraisal_events for each row execute function public.guard_appraisal_event();
+-- a Questions before we meet keeps the appraisal it came from once it has one
+create function public.guard_prelisting_appraisal() returns trigger
+language plpgsql set search_path = public as $$
+begin
+  if old.appraisal_id is not null and new.appraisal_id is distinct from old.appraisal_id then
+    raise exception 'The appraisal these questions came from can''t change';
+  end if;
+  return new;
+end $$;
+revoke all on function public.guard_prelisting_appraisal() from public, anon, authenticated;
+create trigger prelisting_appraisal_kept before update of appraisal_id on public.prelistings for each row execute function public.guard_prelisting_appraisal();
+
+-- ═══════════════ helpers (not callable by users) ═══════════════
+-- a link, phone number or email in wording a vendor reads (the same test as appraisal-core.js contactProblem); Tim's own phone and
+-- email are his to give, so they are taken out first
+create function public.appraisal_contact_problem(p text) returns boolean
+language sql immutable set search_path = public as $$
+  select x.t ~* '(https?://|www\.)[^[:space:]]+' or x.t ~ '\]\([^)]*\)'
+      or x.t ~ '(\+[[:space:]]?64|\m0)[[:space:]().-]*[0-9]([[:space:]().-]*[0-9]){5,10}\M'
+      or x.t ~ '[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+\.[A-Za-z]'
+  from (select regexp_replace(regexp_replace(coalesce(p, ''), '(\+[[:space:]]?64[[:space:]().-]*|\m0)27[[:space:]().-]*562[[:space:]().-]*7207', ' ', 'g'),
+          '(tim@mcguire\.co\.nz|hello@timmcguire\.co\.nz)', ' ', 'gi') as t) as x
+$$;
+revoke all on function public.appraisal_contact_problem(text) from public, anon, authenticated;
+
+-- the first string in a value that holds a link, phone number or email, or null
+create function public.appraisal_contact_find(p jsonb) returns text
+language sql immutable set search_path = public as $$
+  select v #>> '{}' from jsonb_path_query(coalesce(p, 'null'::jsonb), 'strict $.**') as v
+   where jsonb_typeof(v) = 'string' and public.appraisal_contact_problem(v #>> '{}') limit 1
+$$;
+revoke all on function public.appraisal_contact_find(jsonb) from public, anon, authenticated;
+
+-- the chain an appraisal or a copy belongs to: the first appraisal sent (its own id when it has never been updated)
+create function public.appraisal_chain_of(p_id uuid) returns uuid
+language sql stable security definer set search_path = public as $$
+  select coalesce((select s.chain_id from public.appraisal_snapshots s where s.id = p_id),
+                  (select v.chain_id from public.appraisal_versions v where v.appraisal_id = p_id), p_id)
+$$;
+revoke all on function public.appraisal_chain_of(uuid) from public, anon, authenticated;
+
+-- the signed-in person may read this copy: Tim sent it to their email, and that email is still an owner or contact on the property, or
+-- the contact of its open Questions before we meet in this round of owners
+create function public.appraisal_vendor_ok(p_snapshot uuid) returns boolean
+language sql stable security definer set search_path = public as $$
+  select auth.uid() is not null and coalesce(auth.jwt()->>'email', '') <> '' and exists (
+    select 1 from public.appraisal_snapshots s
+     where s.id = p_snapshot
+       and exists (select 1 from jsonb_array_elements(s.recipients) r where lower(r->>'email') = lower(auth.jwt()->>'email'))
+       and (exists (select 1 from public.property_people pp where pp.property_id = s.property_id and pp.role in ('owner', 'contact')
+                     and pp.email <> '' and lower(pp.email) = lower(auth.jwt()->>'email'))
+         or exists (select 1 from public.prelistings pl join public.properties p on p.id = pl.property_id
+                     where pl.property_id = s.property_id and pl.status <> 'closed' and pl.created_at >= coalesce(p.cycle_at, '-infinity'::timestamptz)
+                       and lower(pl.contact_email) = lower(auth.jwt()->>'email'))))
+$$;
+revoke all on function public.appraisal_vendor_ok(uuid) from public, anon, authenticated;
+
+-- the newest copy in a chain the signed-in person may read (null when none)
+create function public.appraisal_vendor_newest(p_chain uuid) returns uuid
+language sql stable security definer set search_path = public as $$
+  select s.id from public.appraisal_snapshots s where s.chain_id = p_chain and public.appraisal_vendor_ok(s.id) order by s.version desc limit 1
+$$;
+revoke all on function public.appraisal_vendor_newest(uuid) from public, anon, authenticated;
+
+-- the frozen copy, built only from what a vendor may see. Returns {content, paths, left_out}. Raises, naming what to fix, when Tim's own
+-- wording a vendor would read holds fee wording, "as is", a link, a phone number or an email.
+create function public.appraisal_snapshot_build(p_id uuid) returns jsonb
+language plpgsql stable security definer set search_path = public as $$
+declare r public.appraisal_views; secs jsonb; flds jsonb; comps jsonb := '[]'::jsonb; photos jsonb := '{}'::jsonb; months jsonb := '[]'::jsonb;
+  assets jsonb := '{}'::jsonb; home jsonb := '{}'::jsonb; reviews jsonb := '[]'::jsonb; paths jsonb := '[]'::jsonb; left_out jsonb := '[]'::jsonb;
+  c record; m record; a record; d record; rv record; x text; prob text; ad text; cmp text; nmax int; ids uuid[];
+  allowed constant text[] := array['heading', 'para', 'note', 'byline', 'list', 'table', 'ranges', 'method', 'methods', 'wave', 'opinion', 'campaign',
+    'methodcards', 'plans', 'panel', 'header', 'intro', 'heard', 'home', 'buyers', 'reviews'];
+begin
+  select * into r from public.appraisal_views where id = p_id;
+  if not found then raise exception 'Appraisal not found'; end if;
+  -- the sections: only the kinds the page draws, each without any note meant for Tim
+  select coalesce(jsonb_agg(s - 'private_note' - 'private_notes' - 'problem' - 'problems' - 'from' order by i), '[]'::jsonb) into secs
+    from jsonb_array_elements(r.sections) with ordinality as e(s, i)
+   where jsonb_typeof(s) = 'object' and (s->>'type') = any(allowed);
+  -- the figures: each range, the bedrooms wording and the method, nothing else
+  flds := jsonb_strip_nulls(jsonb_build_object(
+    'ranges', (select coalesce(jsonb_agg(jsonb_strip_nulls(jsonb_build_object('key', q->'key', 'option', q->'option', 'involves', q->'involves', 'low', q->'low', 'high', q->'high')) order by i), '[]'::jsonb)
+                 from jsonb_array_elements(case when jsonb_typeof(r.fields->'ranges') = 'array' then r.fields->'ranges' else '[]'::jsonb end) with ordinality as e(q, i) where jsonb_typeof(q) = 'object'),
+    'bedrooms', case when jsonb_typeof(r.fields->'bedrooms') = 'string' then r.fields->'bedrooms' end,
+    'method', case when jsonb_typeof(r.fields->'method') = 'object' then jsonb_strip_nulls(jsonb_build_object('name', r.fields->'method'->'name', 'key', r.fields->'method'->'key', 'text', r.fields->'method'->'text')) end));
+  prob := public.appraisal_wording_problem(jsonb_build_array(secs, flds, r.title, r.prepared_for, r.address));
+  if prob <> '' then raise exception '%', prob; end if;
+  -- no link, phone number or email in the wording (the library header's own link is the photo itself, and the file and photo ids are
+  -- references, not wording: an id such as "...-0123-4567-..." would read as a phone number)
+  x := public.appraisal_contact_find(jsonb_build_array((select coalesce(jsonb_agg(s - 'url' - 'asset' - 'photos'), '[]'::jsonb) from jsonb_array_elements(secs) s), flds - 'ranges',
+    (select coalesce(jsonb_agg(q - 'key' - 'low' - 'high'), '[]'::jsonb) from jsonb_array_elements(coalesce(flds->'ranges', '[]'::jsonb)) q), r.title, r.prepared_for));
+  if x is not null then
+    raise exception 'This wording holds a link, a phone number or an email, which don''t belong on an appraisal: "%". Change it on the set-up or sections screen, then send.', left(x, 80);
+  end if;
+
+  -- the shown comparables, the vendor's fields only (never Tim's private note, the source, its link or reference)
+  for c in select * from public.appraisal_comps where appraisal_id = r.id and shown order by position, created_at, id loop
+    prob := public.appraisal_wording_problem(jsonb_build_array(c.address, c.suburb, c.method, c.agency));
+    if prob <> '' then raise exception 'The comparable at %: %', c.address, prob; end if;
+    x := public.appraisal_contact_find(jsonb_build_array(c.address, c.suburb, c.method, c.agency));
+    if x is not null then raise exception 'The comparable at % holds a link, a phone number or an email: "%". Change it on the Comparables screen, then send.', c.address, left(x, 80); end if;
+    -- how it compares: Tim's ticked wording only, and it must pass both checks
+    cmp := null;
+    if c.compare_ticked and btrim(c.compare_text) <> '' then
+      prob := public.appraisal_wording_problem(to_jsonb(c.compare_text));
+      if prob <> '' then raise exception 'How % compares: %', c.address, prob; end if;
+      if public.appraisal_contact_problem(c.compare_text) then
+        raise exception 'How % compares holds a link, a phone number or an email. Change it on the Comparables screen, then send.', c.address;
+      end if;
+      cmp := c.compare_text;
+    end if;
+    -- another agency's advertisement is a quote: shown only when it passes both checks, otherwise left out and listed for Tim
+    ad := null;
+    if btrim(c.ad_text) <> '' then
+      if public.appraisal_wording_problem(to_jsonb(c.ad_text)) <> '' then
+        left_out := left_out || jsonb_build_object('what', 'advertisement', 'comp', c.address, 'why', public.appraisal_wording_problem(to_jsonb(c.ad_text)));
+      elsif public.appraisal_contact_problem(c.ad_text) then
+        left_out := left_out || jsonb_build_object('what', 'advertisement', 'comp', c.address, 'why', 'It holds a link, a phone number or an email.');
+      else ad := c.ad_text; end if;
+    end if;
+    comps := comps || jsonb_strip_nulls(jsonb_build_object('id', c.id, 'position', c.position, 'status', c.status, 'address', c.address,
+      'suburb', nullif(c.suburb, ''), 'price', c.price, 'sold_on', c.sold_on, 'listed_on', c.listed_on, 'method', nullif(c.method, ''), 'days_to_sell', c.days_to_sell,
+      'bedrooms', c.bedrooms, 'bathrooms', c.bathrooms, 'floor_m2', c.floor_m2, 'land_m2', c.land_m2, 'cv', c.cv, 'agency', nullif(c.agency, ''),
+      'sold_by_tim', c.sold_by_tim, 'ad_text', ad, 'compare_text', cmp, 'compare_ticked', cmp is not null, 'ring', c.ring, 'distance_m', c.distance_m, 'shown', true));
+    -- its photos, the print photo first
+    for m in select * from public.appraisal_media where appraisal_id = r.id and comp_id = c.id order by cover desc, position, created_at, id loop
+      photos := jsonb_set(photos, array[c.id::text], coalesce(photos->(c.id::text), '[]'::jsonb) || jsonb_build_object('path', m.path, 'cover', m.cover));
+      paths := paths || jsonb_build_object('bucket', 'appraisal-media', 'path', m.path);
+    end loop;
+  end loop;
+
+  -- the market report, when Tim switched it on: the public monthly figures of the last two years (never market_sales)
+  if coalesce(r.setup->>'market', '') = 'true' then
+    select coalesce(jsonb_agg(jsonb_strip_nulls(jsonb_build_object('area', mm.area, 'month', mm.month, 'median', mm.median, 'lower_quartile', mm.lower_quartile,
+        'upper_quartile', mm.upper_quartile, 'sales', mm.sales, 'days_to_sell', mm.days_to_sell, 'bands', mm.bands, 'source', mm.source, 'gathered_at', mm.gathered_at)) order by mm.area, mm.month), '[]'::jsonb)
+      into months from public.market_months mm where mm.month >= (date_trunc('month', now() at time zone 'Pacific/Auckland') - interval '24 months')::date;
+  end if;
+
+  -- the header and the video introduction: the files the sections name, frozen by path
+  select coalesce(array_agg((s->>'asset')::uuid), '{}') into ids from jsonb_array_elements(secs) s
+   where ((s->>'type' = 'header' and s->>'src' = 'asset') or s->>'type' = 'intro') and (s->>'asset') ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$';
+  for a in select * from public.appraisal_assets where appraisal_id = r.id and id = any(ids) loop
+    assets := assets || jsonb_build_object(a.id::text, jsonb_strip_nulls(jsonb_build_object('bucket', a.bucket, 'path', a.path, 'still_path', a.still_path, 'mime', a.mime_type, 'kind', a.kind, 'role', a.role)));
+    paths := paths || jsonb_build_object('bucket', a.bucket, 'path', a.path);
+    if a.still_path is not null then paths := paths || jsonb_build_object('bucket', 'appraisal-media', 'path', a.still_path); end if;
+  end loop;
+
+  -- the mockup's photos: photos on this property's file, not removed, as chosen in the sections
+  select coalesce(array_agg((p #>> '{}')::uuid), '{}') into ids from (select jsonb_array_elements(case when jsonb_typeof(s->'photos') = 'array' then s->'photos' else '[]'::jsonb end) p
+      from jsonb_array_elements(secs) s where s->>'type' = 'home') q
+   where jsonb_typeof(p) = 'string' and (p #>> '{}') ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$';
+  for d in select * from public.property_documents where property_id = r.property_id and id = any(ids) and kind = 'Photo' and archived_at is null
+             and bucket = 'property-files' and coalesce(mime_type, '') like 'image/%' loop
+    home := home || jsonb_build_object(d.id::text, jsonb_strip_nulls(jsonb_build_object('path', d.path, 'room', nullif(d.room, ''))));
+    paths := paths || jsonb_build_object('bucket', 'property-files', 'path', d.path);
+  end loop;
+
+  -- Tim's ticked Google reviews, newest first, as they are now: a review that fails either check is left out and listed
+  if exists (select 1 from jsonb_array_elements(secs) s where s->>'type' = 'reviews') then
+    select greatest(1, least(12, coalesce((select (s->>'max')::int from jsonb_array_elements(secs) s where s->>'type' = 'reviews' and (s->>'max') ~ '^[0-9]{1,2}$' limit 1), 6))) into nmax;
+    for rv in select * from public.tim_reviews where ticked and removed_at is null and rating between 1 and 5 order by reviewed_on desc, id loop
+      exit when jsonb_array_length(reviews) >= nmax;
+      if public.appraisal_wording_problem(jsonb_build_array(rv.body, rv.reviewer)) <> '' or public.appraisal_contact_problem(rv.body) then
+        left_out := left_out || jsonb_build_object('what', 'review', 'reviewer', rv.reviewer, 'why', 'It mentions a fee or "as is", or holds a link, a phone number or an email.');
+        continue;
+      end if;
+      reviews := reviews || jsonb_strip_nulls(jsonb_build_object('id', rv.id, 'reviewer', rv.reviewer, 'rating', rv.rating, 'reviewed_on', rv.reviewed_on, 'body', nullif(rv.body, ''),
+        'url', case when rv.url ~ '^https://[^[:space:]"''<>]+$' then rv.url end, 'ticked', true));
+    end loop;
+  end if;
+
+  return jsonb_build_object('content', jsonb_build_object('v', 1, 'title', r.title, 'address', r.address, 'prepared_for', r.prepared_for, 'prepared_on', r.prepared_on,
+      'kind', r.kind, 'sections', secs, 'fields', flds,
+      'setup', jsonb_build_object('v', 1, 'market', coalesce(r.setup->>'market', '') = 'true', 'marketArea', coalesce(r.setup->>'marketArea', '')),
+      'comps', comps, 'photos', photos, 'months', months, 'assets', assets, 'homePhotos', home, 'reviews', reviews),
+    'paths', paths, 'left_out', left_out);
+end $$;
+revoke all on function public.appraisal_snapshot_build(uuid) from public, anon, authenticated;
+
+-- ═══════════════ Tim's functions ═══════════════
+-- send: Tim chooses who it goes to and has read the email; the copy is made, the appraisal marked sent (this transaction alone), the
+-- email queued for the notify function to send. Returns {snapshot_id, chain_id, version, mail_id, recipients, left_out}.
+create function public.agent_appraisal_send(p_id uuid, p_recipients text[], p_subject text, p_body text) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare r public.appraisal_views; built jsonb; chain uuid; ver int; sid uuid; mid uuid; em text; nm text; rec jsonb := '[]'::jsonb; ems text[] := '{}'; prob text;
+begin
+  if not public.is_agent() then raise exception 'Agent only'; end if;
+  select * into r from public.appraisal_views where id = p_id for update;
+  if not found then raise exception 'Appraisal not found'; end if;
+  if r.status = 'sent' then raise exception 'This appraisal has already been sent. To change it, make an updated version'; end if;
+  if not (r.setup ? 'v') then raise exception 'Only an appraisal written from its set-up page can be sent'; end if;
+  if r.property_id is null then raise exception 'This appraisal isn''t on a property file, so there is no one to send it to'; end if;
+  if (case when jsonb_typeof(r.fields->'ranges') = 'array' then jsonb_array_length(r.fields->'ranges') else 0 end) = 0 then raise exception 'Add your price range on the set-up page first'; end if;
+  if coalesce(array_length(p_recipients, 1), 0) = 0 then raise exception 'Choose who it goes to'; end if;
+  if array_length(p_recipients, 1) > 10 then raise exception 'At most 10 people at once'; end if;
+  foreach em in array p_recipients loop
+    em := lower(btrim(coalesce(em, '')));
+    if em = '' or em = any(ems) then continue; end if;
+    select nullif(btrim(coalesce(nullif(pp.pref_name, ''), pp.legal_name)), '') into nm from public.property_people pp
+     where pp.property_id = r.property_id and pp.role in ('owner', 'contact') and pp.email <> '' and lower(pp.email) = em order by pp.position limit 1;
+    if not found then
+      select nullif(btrim(pl.contact_name), '') into nm from public.prelistings pl join public.properties p on p.id = pl.property_id
+       where pl.property_id = r.property_id and pl.status <> 'closed' and pl.created_at >= coalesce(p.cycle_at, '-infinity'::timestamptz)
+         and lower(pl.contact_email) = em order by pl.created_at desc limit 1;
+      if not found then raise exception '% isn''t an owner or contact on this property. Add them to the property file first', em; end if;
+    end if;
+    ems := ems || em; rec := rec || jsonb_strip_nulls(jsonb_build_object('email', em, 'name', nm));
+  end loop;
+  if jsonb_array_length(rec) = 0 then raise exception 'Choose who it goes to'; end if;
+  if length(btrim(coalesce(p_subject, ''))) = 0 then raise exception 'Add a subject'; end if;
+  if position('[the appraisal link]' in coalesce(p_body, '')) = 0 then raise exception 'Keep [the appraisal link] in the email: it becomes their link when it goes'; end if;
+  prob := public.appraisal_wording_problem(jsonb_build_array(p_subject, p_body));
+  if prob <> '' then raise exception 'The email: %', prob; end if;
+  if p_body ~ '\[Tim to [^]]*\]' then raise exception 'Fill or delete the marked blanks in the email first'; end if;
+
+  built := public.appraisal_snapshot_build(r.id);
+  chain := public.appraisal_chain_of(r.id);
+  select coalesce(max(version), 0) + 1 into ver from public.appraisal_snapshots where chain_id = chain;
+  insert into public.appraisal_snapshots (appraisal_id, chain_id, property_id, version, content, paths, recipients, left_out, sent_by)
+    values (r.id, chain, r.property_id, ver, built->'content', built->'paths', rec, built->'left_out', coalesce(auth.jwt()->>'email', 'agent'))
+    returning id into sid;
+  insert into public.appraisal_mail (snapshot_id, to_addr, subject, body, made_by)
+    values (sid, ems, btrim(p_subject), p_body, coalesce(auth.jwt()->>'email', 'agent')) returning id into mid;
+  insert into public.appraisal_events (snapshot_id, chain_id, property_id, kind, actor, detail, notified_at, seen_at, seen_by)
+    values (sid, chain, r.property_id, 'sent', coalesce(auth.jwt()->>'email', 'agent'), jsonb_build_object('version', ver, 'to', jsonb_array_length(rec)), now(), now(), coalesce(auth.jwt()->>'email', 'agent'));
+  -- 'sent' only here, and only for this statement: the setting is put back before anything else in the transaction runs
+  perform set_config('app.appraisal_send', 'on', true);
+  update public.appraisal_views set status = 'sent' where id = r.id;
+  perform set_config('app.appraisal_send', '', true);
+  return jsonb_build_object('snapshot_id', sid, 'chain_id', chain, 'version', ver, 'mail_id', mid, 'recipients', rec, 'left_out', built->'left_out');
+end $$;
+revoke all on function public.agent_appraisal_send(uuid, text[], text, text) from public, anon;
+grant execute on function public.agent_appraisal_send(uuid, text[], text, text) to authenticated;
+
+-- "Make an updated version": a new draft from the newest sent copy in its chain, with its comparables copied. The portal copies the
+-- photos and the header and video files into the new appraisal's own folders (the files of a sent appraisal never move or change).
+-- An unsent update already under way is carried on rather than made twice. Returns {appraisal_id, existing, comps, media, assets}.
+create function public.agent_appraisal_new_version(p_id uuid) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare r public.appraisal_views; chain uuid; newest uuid; nid uuid; ex uuid; c record; cid uuid; cmap jsonb := '[]'::jsonb; media jsonb; assets jsonb;
+begin
+  if not public.is_agent() then raise exception 'Agent only'; end if;
+  select * into r from public.appraisal_views where id = p_id;
+  if not found then raise exception 'Appraisal not found'; end if;
+  if r.status <> 'sent' then raise exception 'Only a sent appraisal is updated this way. This one can still be changed as it is'; end if;
+  chain := public.appraisal_chain_of(r.id);
+  perform 1 from public.appraisal_views where id = chain for update;   -- one update at a time per chain
+  select appraisal_id into newest from public.appraisal_snapshots where chain_id = chain order by version desc limit 1;
+  if newest is distinct from r.id then raise exception 'There is a newer version of this appraisal. Update that one'; end if;
+  select v.appraisal_id into ex from public.appraisal_versions v join public.appraisal_views a on a.id = v.appraisal_id
+   where v.chain_id = chain and a.status <> 'sent' order by v.made_at desc limit 1;
+  if ex is not null then return jsonb_build_object('appraisal_id', ex, 'existing', true, 'comps', '[]'::jsonb, 'media', '[]'::jsonb, 'assets', '[]'::jsonb); end if;
+  insert into public.appraisal_views (property_id, title, address, prepared_for, status, sections, fields, setup, kind, private_notes)
+    values (r.property_id, r.title, r.address, r.prepared_for, 'draft', r.sections, r.fields, r.setup, r.kind, r.private_notes) returning id into nid;
+  insert into public.appraisal_versions (appraisal_id, previous_id, chain_id) values (nid, r.id, chain);
+  for c in select * from public.appraisal_comps where appraisal_id = r.id order by position, created_at, id loop
+    insert into public.appraisal_comps (appraisal_id, position, shown, status, address, suburb, price, sold_on, listed_on, method, days_to_sell, bedrooms, bathrooms,
+        floor_m2, land_m2, cv, agency, sold_by_tim, ad_text, compare_text, compare_ticked, private_note, ring, distance_m, source, source_ref, source_url, gathered_at, photo_hints)
+      values (nid, c.position, c.shown, c.status, c.address, c.suburb, c.price, c.sold_on, c.listed_on, c.method, c.days_to_sell, c.bedrooms, c.bathrooms,
+        c.floor_m2, c.land_m2, c.cv, c.agency, c.sold_by_tim, c.ad_text, c.compare_text, c.compare_ticked, c.private_note, c.ring, c.distance_m, c.source, c.source_ref, c.source_url, c.gathered_at, c.photo_hints)
+      returning id into cid;
+    cmap := cmap || jsonb_build_object('from', c.id, 'to', cid);
+  end loop;
+  select coalesce(jsonb_agg(jsonb_strip_nulls(jsonb_build_object('comp_id', (select x->>'to' from jsonb_array_elements(cmap) x where x->>'from' = m.comp_id::text), 'path', m.path,
+      'file_name', m.file_name, 'width', m.width, 'height', m.height, 'position', m.position, 'cover', m.cover, 'source', m.source, 'source_url', m.source_url, 'page_url', m.page_url)) order by m.position, m.created_at), '[]'::jsonb)
+    into media from public.appraisal_media m where m.appraisal_id = r.id and m.comp_id is not null;
+  select coalesce(jsonb_agg(jsonb_strip_nulls(jsonb_build_object('id', a.id, 'role', a.role, 'kind', a.kind, 'bucket', a.bucket, 'path', a.path, 'still_path', a.still_path,
+      'file_name', a.file_name, 'width', a.width, 'height', a.height, 'duration_s', a.duration_s)) order by a.created_at), '[]'::jsonb)
+    into assets from public.appraisal_assets a where a.appraisal_id = r.id;
+  return jsonb_build_object('appraisal_id', nid, 'existing', false, 'comps', cmap, 'media', media, 'assets', assets);
+end $$;
+revoke all on function public.agent_appraisal_new_version(uuid) from public, anon;
+grant execute on function public.agent_appraisal_new_version(uuid) to authenticated;
+
+-- Tim has seen what happened (the Needs you list)
+create function public.agent_appraisal_events_seen(p_ids bigint[]) returns integer
+language plpgsql security definer set search_path = public as $$
+declare n int;
+begin
+  if not public.is_agent() then raise exception 'Agent only'; end if;
+  update public.appraisal_events set seen_at = now(), seen_by = coalesce(auth.jwt()->>'email', 'agent') where id = any(coalesce(p_ids, '{}')) and seen_at is null;
+  get diagnostics n = row_count; return n;
+end $$;
+revoke all on function public.agent_appraisal_events_seen(bigint[]) from public, anon;
+grant execute on function public.agent_appraisal_events_seen(bigint[]) to authenticated;
+
+-- an email the notify function took but couldn't confirm: once Tim has checked it didn't arrive, it can be sent again
+create function public.agent_appraisal_mail_unstick(p_mail uuid) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  if not public.is_agent() then raise exception 'Agent only'; end if;
+  update public.appraisal_mail set status = 'failed', error = 'Checked by Tim: it did not arrive' where id = p_mail and status = 'sending';
+  if not found then raise exception 'That email isn''t waiting on a check'; end if;
+end $$;
+revoke all on function public.agent_appraisal_mail_unstick(uuid) from public, anon;
+grant execute on function public.agent_appraisal_mail_unstick(uuid) to authenticated;
+
+-- ═══════════════ the vendor's functions ═══════════════
+-- the appraisals sent to the signed-in person: the newest copy of each chain they may read
+create function public.vendor_appraisals_mine() returns jsonb
+language sql stable security definer set search_path = public as $$
+  select coalesce(jsonb_agg(jsonb_build_object('chain_id', s.chain_id, 'snapshot_id', s.id, 'address', s.content->>'address', 'version', s.version, 'sent_at', s.sent_at) order by s.sent_at desc), '[]'::jsonb)
+    from public.appraisal_snapshots s
+   where public.appraisal_vendor_ok(s.id)
+     and s.version = (select max(x.version) from public.appraisal_snapshots x where x.chain_id = s.chain_id and public.appraisal_vendor_ok(x.id))
+$$;
+revoke all on function public.vendor_appraisals_mine() from public, anon;
+grant execute on function public.vendor_appraisals_mine() to authenticated;
+
+-- the vendor's view: p_id is a copy's id or an appraisal's id; the newest copy in that chain the signed-in person may read, or 'Not
+-- found' (the same answer for no such appraisal and not theirs). The first time each person opens a copy is recorded for Tim.
+-- Returns {snapshot_id, chain_id, version, sent_at, content, plan, prelisting_id, event_id}.
+create function public.vendor_appraisal_read(p_id uuid) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare chain uuid; sid uuid; s public.appraisal_snapshots; em text := lower(coalesce(auth.jwt()->>'email', '')); ev bigint; plan jsonb; pl uuid;
+begin
+  if auth.uid() is null or em = '' then raise exception 'Not found'; end if;
+  chain := public.appraisal_chain_of(p_id);
+  sid := public.appraisal_vendor_newest(chain);
+  if sid is null then raise exception 'Not found'; end if;
+  select * into s from public.appraisal_snapshots where id = sid;
+  if not exists (select 1 from public.appraisal_events where snapshot_id = s.id and kind = 'opened' and actor = em) then
+    insert into public.appraisal_events (snapshot_id, chain_id, property_id, kind, actor, detail) values (s.id, s.chain_id, s.property_id, 'opened', em, jsonb_build_object('version', s.version))
+      returning id into ev;
+  end if;
+  select p.plan into plan from public.appraisal_vendor_plans p where p.chain_id = s.chain_id and p.email = em order by p.created_at desc, p.id limit 1;
+  select pl2.id into pl from public.prelistings pl2 join public.properties p on p.id = pl2.property_id
+   where pl2.property_id = s.property_id and pl2.status <> 'closed' and pl2.created_at >= coalesce(p.cycle_at, '-infinity'::timestamptz)
+     and lower(pl2.contact_email) = em and pl2.appraisal_id is not null and public.appraisal_chain_of(pl2.appraisal_id) = s.chain_id order by pl2.created_at desc limit 1;
+  return jsonb_build_object('snapshot_id', s.id, 'chain_id', s.chain_id, 'version', s.version, 'sent_at', s.sent_at, 'content', s.content, 'plan', plan, 'prelisting_id', pl, 'event_id', ev);
+end $$;
+revoke all on function public.vendor_appraisal_read(uuid) from public, anon;
+grant execute on function public.vendor_appraisal_read(uuid) to authenticated;
+
+-- may the signed-in person have a short-lived link to this file? Only a file listed in the newest copy they may read (asked by the
+-- repo-link function with the person's own token)
+create function public.appraisal_vendor_can_read(p_snapshot uuid, p_bucket text, p_path text) returns boolean
+language sql stable security definer set search_path = public as $$
+  select coalesce(p_bucket, '') in ('appraisal-media', 'appraisal-video', 'property-files') and coalesce(p_path, '') <> '' and position('..' in p_path) = 0
+     and exists (select 1 from public.appraisal_snapshots s where s.id = p_snapshot
+                  and s.id = public.appraisal_vendor_newest(s.chain_id)
+                  and s.paths @> jsonb_build_array(jsonb_build_object('bucket', p_bucket, 'path', p_path)))
+$$;
+revoke all on function public.appraisal_vendor_can_read(uuid, text, text) from public, anon;
+grant execute on function public.appraisal_vendor_can_read(uuid, text, text) to authenticated;
+
+-- "I'd like to proceed": the person's own Questions before we meet on this property, linked to this appraisal; made if there isn't one.
+-- Returns {prelisting_id, event_id}.
+create function public.vendor_appraisal_proceed(p_snapshot uuid) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare s public.appraisal_snapshots; em text := lower(coalesce(auth.jwt()->>'email', '')); pl public.prelistings; nm text; ev bigint; rng jsonb;
+  plan_name text; addr text;
+begin
+  if auth.uid() is null or em = '' then raise exception 'Not found'; end if;
+  select * into s from public.appraisal_snapshots where id = p_snapshot;
+  if not found or s.id is distinct from public.appraisal_vendor_newest(s.chain_id) then raise exception 'Not found'; end if;
+  select pl2.* into pl from public.prelistings pl2 join public.properties p on p.id = pl2.property_id
+   where pl2.property_id = s.property_id and pl2.status <> 'closed' and pl2.created_at >= coalesce(p.cycle_at, '-infinity'::timestamptz)
+     and lower(pl2.contact_email) = em order by pl2.created_at desc limit 1;
+  if pl.id is null then
+    select nullif(btrim(pp.legal_name), '') into nm from public.property_people pp where pp.property_id = s.property_id and pp.role in ('owner', 'contact') and lower(pp.email) = em order by pp.position limit 1;
+    rng := (select q from jsonb_array_elements(coalesce(s.content->'fields'->'ranges', '[]'::jsonb)) q limit 1);
+    select x->>'name' into plan_name from jsonb_array_elements(coalesce(s.content->'sections', '[]'::jsonb)) sec, jsonb_array_elements(coalesce(sec->'items', '[]'::jsonb)) x
+     where sec->>'type' = 'plans' and (x->>'rec')::boolean is true limit 1;
+    select address into addr from public.properties where id = s.property_id;
+    insert into public.prelistings (address, contact_name, contact_email, property_id, appraisal_id, status, proceeded_at, appraisal)
+      values (coalesce(nullif(addr, ''), s.content->>'address', ''), nm, em, s.property_id, s.appraisal_id, 'appraisal', now(),
+        jsonb_strip_nulls(jsonb_build_object('price', case when rng is not null and jsonb_typeof(rng->'low') = 'number' and jsonb_typeof(rng->'high') = 'number'
+            then '$' || to_char((rng->>'low')::numeric, 'FM999,999,999') || ' to $' || to_char((rng->>'high')::numeric, 'FM999,999,999') end,
+          'method', s.content->'fields'->'method'->>'name', 'marketing', plan_name, 'from_appraisal', s.chain_id)))
+      returning * into pl;
+  elsif pl.appraisal_id is null then
+    update public.prelistings set appraisal_id = s.appraisal_id where id = pl.id;
+  end if;
+  if not exists (select 1 from public.appraisal_events where chain_id = s.chain_id and kind = 'proceeded' and actor = em) then
+    insert into public.appraisal_events (snapshot_id, chain_id, property_id, kind, actor, detail) values (s.id, s.chain_id, s.property_id, 'proceeded', em, jsonb_build_object('prelisting_id', pl.id))
+      returning id into ev;
+  end if;
+  return jsonb_build_object('prelisting_id', pl.id, 'event_id', ev);
+end $$;
+revoke all on function public.vendor_appraisal_proceed(uuid) from public, anon;
+grant execute on function public.vendor_appraisal_proceed(uuid) to authenticated;
+
+-- a marketing plan the vendor built ("Build your own" on the packages page), saved to their appraisal. The plan is the builder's
+-- choice of catalogue items: {sel: {item: quantity}, band, total, on_request}. Returns {plan_id, event_id}.
+create function public.vendor_appraisal_plan_save(p_snapshot uuid, p_plan jsonb) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare s public.appraisal_snapshots; em text := lower(coalesce(auth.jwt()->>'email', '')); k text; v jsonb; pid uuid; ev bigint; clean jsonb := '{}'::jsonb; n int := 0;
+begin
+  if auth.uid() is null or em = '' then raise exception 'Not found'; end if;
+  select * into s from public.appraisal_snapshots where id = p_snapshot;
+  if not found or s.id is distinct from public.appraisal_vendor_newest(s.chain_id) then raise exception 'Not found'; end if;
+  if p_plan is null or jsonb_typeof(p_plan) <> 'object' or jsonb_typeof(p_plan->'sel') is distinct from 'object' then raise exception 'That plan couldn''t be read. Build it again'; end if;
+  for k, v in select * from jsonb_each(p_plan->'sel') loop
+    n := n + 1;
+    if n > 80 or k !~ '^[a-z0-9_]{1,40}$' or jsonb_typeof(v) <> 'number' or (v #>> '{}')::numeric <> round((v #>> '{}')::numeric) or (v #>> '{}')::numeric not between 1 and 99 then
+      raise exception 'That plan couldn''t be read. Build it again';
+    end if;
+    clean := clean || jsonb_build_object(k, (v #>> '{}')::int);
+  end loop;
+  if n = 0 then raise exception 'Choose at least one item for your plan'; end if;
+  if jsonb_typeof(p_plan->'total') is distinct from 'number' or (p_plan->>'total')::numeric not between 0 and 1000000 then raise exception 'That plan couldn''t be read. Build it again'; end if;
+  insert into public.appraisal_vendor_plans (snapshot_id, chain_id, property_id, email, user_id, plan)
+    values (s.id, s.chain_id, s.property_id, em, auth.uid(), jsonb_strip_nulls(jsonb_build_object('sel', clean,
+      'band', case when coalesce(p_plan->>'band', '') ~ '^[a-z0-9_]{1,40}$' then p_plan->>'band' end, 'total', round((p_plan->>'total')::numeric, 2),
+      'on_request', case when jsonb_typeof(p_plan->'on_request') = 'number' and (p_plan->>'on_request')::numeric between 0 and 80 then (p_plan->>'on_request')::int end)))
+    returning id into pid;
+  insert into public.appraisal_events (snapshot_id, chain_id, property_id, kind, actor, detail) values (s.id, s.chain_id, s.property_id, 'plan_built', em, jsonb_build_object('plan_id', pid, 'total', round((p_plan->>'total')::numeric, 2)))
+    returning id into ev;
+  return jsonb_build_object('plan_id', pid, 'event_id', ev);
+end $$;
+revoke all on function public.vendor_appraisal_plan_save(uuid, jsonb) from public, anon;
+grant execute on function public.vendor_appraisal_plan_save(uuid, jsonb) to authenticated;
+
+-- the notify function asks, with the caller's own token, whether this event is theirs to report (a vendor's own event, not yet told)
+create function public.appraisal_event_mine(p_event bigint) returns boolean
+language sql stable security definer set search_path = public as $$
+  select auth.uid() is not null and exists (select 1 from public.appraisal_events e where e.id = p_event and e.kind <> 'sent' and e.notified_at is null
+    and e.actor = lower(coalesce(auth.jwt()->>'email', '')))
+$$;
+revoke all on function public.appraisal_event_mine(bigint) from public, anon;
+grant execute on function public.appraisal_event_mine(bigint) to authenticated;

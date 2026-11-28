@@ -1852,7 +1852,33 @@ function showPage(id) {
 }
 
 renderBuilder();
-showPage('cover');
+showPage(location.hash === '#custom' ? 'custom' : 'cover');
+
+/* ── From a vendor's appraisal (LW3 phase E): ?ap=<their appraisal>#custom opens the builder with "Back to your appraisal".
+   Starting from the plan Tim recommends (&from=), or the plan they built before; "Save to my appraisal" takes their plan back,
+   where their own signed-in page saves it to their appraisal. Nothing is sent from this page. ── */
+(function () {
+  const q = new URLSearchParams(location.search), ap = q.get('ap');
+  if (!ap || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(ap)) return;
+  const back = 'onboarding/?appraisal=' + encodeURIComponent(ap.toLowerCase());
+  let last = null; try { last = JSON.parse(localStorage.getItem('apPlanLast') || 'null'); } catch (_) { }
+  if (last && last.chain === ap.toLowerCase() && last.sel) { sel = Object.assign({ lim: 1 }, last.sel); renderBuilder(); }
+  else if (PACKAGES[q.get('from')]) loadPackage(q.get('from'));
+  const page = document.getElementById('custom'), bar = document.createElement('div');
+  bar.id = 'ap-back'; bar.style.cssText = 'display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;padding:12px 16px;margin:0 0 12px;border:1px solid currentColor;border-radius:10px';
+  bar.innerHTML = '<span>Building your own plan for your appraisal.</span><a href="' + back + '" id="ap-back-link" style="font-weight:600">Back to your appraisal</a>';
+  page.insertBefore(bar, page.firstChild);
+  const use = document.querySelector('#custom .sum-print[onclick="useForListing()"]'); if (use) use.style.display = 'none';
+  const save = document.createElement('button'); save.type = 'button'; save.className = 'sum-print'; save.id = 'ap-save'; save.style.marginTop = '8px'; save.textContent = 'Save to my appraisal';
+  save.addEventListener('click', () => {
+    const chosen = {}; Object.entries(sel).forEach(([k, n]) => { if (ITEMS[k] && !ITEMS[k].fixed && n > 0) chosen[k] = n; });
+    if (!Object.keys(chosen).length) { document.getElementById('sum-note').textContent = 'Choose at least one item first.'; return; }
+    const { total, poa } = totals(sel), plan = { chain: ap.toLowerCase(), sel: chosen, band: tmBand(), total, on_request: poa.length };
+    try { localStorage.setItem('apPlan', JSON.stringify(plan)); localStorage.setItem('apPlanLast', JSON.stringify(plan)); } catch (_) { }
+    location.href = back + '&plan=1';
+  });
+  if (use) use.insertAdjacentElement('afterend', save); else document.querySelector('#custom .summary').appendChild(save);
+})();
 </script>
 
 </body>

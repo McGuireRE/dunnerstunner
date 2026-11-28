@@ -307,5 +307,22 @@ const base = () => ({
   { const v = M.finishAgainDraft({ first: 'Ula', address: '1 Example Road', side: 'vendor' }), q = M.finishAgainDraft({ first: '', address: '', side: 'purchaser' });
     ok(v.subject === 'Please finish signing again: 1 Example Road' && /^Hello Ula,/.test(v.body) && /open the link I sent you earlier and finish signing again/.test(v.body) && /\nTim$/.test(v.body), 'finish again (vendor): ' + v.body);
     ok(/^Dear there,/.test(q.body) && /the property/.test(q.subject) && !/\u2014/.test(v.body + q.body), 'finish again (purchaser, nothing known): ' + q.subject); }
+  // LW3 phase E (037): the appraisal email, in Tim's voice, and Tim's own note of what a vendor did
+  { const a = M.appraisalDraft({ first: ['Robin', 'Sam'], address: '9 Example Road, Rbvale' }), u = M.appraisalDraft({ first: 'Robin', address: '9 Example Road, Rbvale', update: true }), z = M.appraisalDraft({});
+    out.appraisalDraft = a;
+    ok(a.subject === 'Your appraisal: 9 Example Road, Rbvale' && /^Hello Robin and Sam,/.test(a.body) && a.body.includes(M.APPRAISAL_LINK) && /sign in with this email address/.test(a.body)
+      && /I'd like to proceed/.test(a.body) && /027 562 7207/.test(a.body) && /\n\nTim$/.test(a.body), 'the appraisal email: ' + a.body);
+    ok(u.subject === 'Your updated appraisal: 9 Example Road, Rbvale' && /updated my appraisal/.test(u.body) && u.body.includes(M.APPRAISAL_LINK), 'the updated version: ' + u.subject);
+    ok(/^Hello there,/.test(z.body) && /your property/.test(z.subject), 'nothing known: no blanks, no guesses: ' + z.subject);
+    ok(![a, u, z].some(x => /\u2014|\bfees?\b|commission|\bas is\b|\$\d/i.test(x.subject + x.body)), 'no em dash, no fee, no figure in the appraisal email');
+    ok(!M.BLANK_RE.test(a.body + u.body) && (M.BLANK_RE.lastIndex = 0, true), 'no marked blanks to fill');
+    const h = M.toHtml(a.body, 'https://packages.dunnerstunner.co.nz/onboarding/?appraisal=abc', { token: M.APPRAISAL_LINK, label: 'Open my appraisal' });
+    ok(h.includes('href="https://packages.dunnerstunner.co.nz/onboarding/?appraisal=abc"') && h.includes('>Open my appraisal</a>') && !h.includes('[the appraisal link]'), 'the appraisal link becomes their button');
+    ok(M.toHtml('Open: [the signing link]', 'https://x.example.com/s').includes('>Open it</a>'), 'the signing link reads as before');
+    const n1 = M.appraisalEventNotice({ kind: 'proceeded', who: 'Robin', address: '9 Example Road', version: 2, portalUrl: 'https://portal.dunnerstunner.co.nz/appraisals/x' }),
+      n2 = M.appraisalEventNotice({ kind: 'plan_built', who: 'Robin', address: '9 Example Road', total: 2450.5 }), n3 = M.appraisalEventNotice({ kind: 'opened', who: '', address: '' });
+    ok(n1.subject === 'Robin would like to proceed: 9 Example Road' && /\(version 2\)/.test(n1.body) && /appraisals\/x/.test(n1.body), 'proceeded notice: ' + n1.body);
+    ok(n2.subject === 'Robin built their own marketing plan: 9 Example Road' && /\$2,450\.5/.test(n2.body), 'plan notice: ' + n2.body);
+    ok(n3.subject === 'A vendor opened their appraisal: an appraisal', 'opened notice, nothing known: ' + n3.subject); }
   console.log(JSON.stringify(Object.assign(out, { errs }), null, 1));
 })().catch(e => { console.log(JSON.stringify({ errs: ['crashed: ' + (e.stack || e.message)] })); });

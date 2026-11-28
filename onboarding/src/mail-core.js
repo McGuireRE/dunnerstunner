@@ -467,14 +467,47 @@
   }
 
   // a draft's text as the email's HTML: escaped, paragraphs at blank lines, line breaks kept, **bold**, the link at [the signing link]
-  function toHtml(text, link) {
+  // (or, for an appraisal, at [the appraisal link], with its own button wording: o = { token, label })
+  function toHtml(text, link, o) {
+    const tok = (o && o.token) || LINK, label = (o && o.label) || 'Open it';
     const esc = t => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     const para = p => esc(p).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>').replace(/(https:\/\/[^\s<]+[^\s<.,;:)])/g, '<a href="$1">$1</a>').replace(/\n/g, '<br>')
-      .split(esc(LINK)).join(link ? `<a href="${esc(link)}" style="display:inline-block;background:#1F3B57;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none">Open it</a>` : esc(LINK));
+      .split(esc(tok)).join(link ? `<a href="${esc(link)}" style="display:inline-block;background:#1F3B57;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none">${esc(label)}</a>` : esc(tok));
     return '<div style="font-family:Arial,sans-serif;font-size:15px;line-height:1.5;color:#1F1D1A;max-width:600px">' + String(text).split(/\n{2,}/).map(p => `<p>${para(p)}</p>`).join('') + '</div>';
   }
 
-  const MAIL = { LINK, BLANK_RE, get TIM_PHONE() { return TIM_PHONE; }, setAgent, allChanges, stillNeeded, signLinkDraft, reopenedDraft, finishAgainDraft, roundNotice, agreedDrafts, agreedPrice, agreedDates, agreedNotice, PRICE_BLANK, DEPOSIT_HOLDERS, depositRecommended, withdrawDrafts, requestNotice, firstWorkingDay, parseDate, longDate, toHtml, P_ACTION };
+  /* ───── the appraisal (LW3 phase E, migration 037) ───── */
+  // The email that takes a vendor to their appraisal: a draft in Tim's voice that he reads, changes if he likes and sends from the
+  // appraisal's Send page. [the appraisal link] becomes their own button when it goes (the notify function). It never names a figure,
+  // a fee or a commission: the appraisal itself says all of that, behind their sign-in.
+  // i: { first (their preferred names, one or more), address, update (a newer version of one already sent) }
+  const APPRAISAL_LINK = '[the appraisal link]';
+  function appraisalDraft(i) {
+    const firsts = (Array.isArray(i.first) ? i.first : [i.first]).map(s_).filter(Boolean), addr = s_(i.address) || 'your property', up = !!i.update;
+    const subject = up ? `Your updated appraisal: ${addr}` : `Your appraisal: ${addr}`;
+    const body = [`Hello ${names(firsts) || 'there'},`,
+      up ? `I've updated my appraisal of ${addr}. The new version is ready for you to look at, in the same private place as before:`
+        : `Thank you for having me through ${addr}. As promised, my appraisal is ready: where I think buyers will land, how I would sell it, and the marketing I would suggest. It's private to you:`,
+      APPRAISAL_LINK,
+      'Open the link and sign in with this email address. You\'ll get a sign-in email straight away, with no password needed. The photos open for a short time each visit, so just sign in again whenever you come back.',
+      up ? 'If anything in it raises a question, or you are ready to talk about next steps, press "I\'d like to proceed" at the bottom of the page.'
+        : 'Take your time with it. When you\'re ready, press "I\'d like to proceed" at the bottom of the page and answer a few quick questions, so I can shape the plan around what matters most to you. There\'s no obligation.',
+      `Any questions at all, just call or text me on ${TIM_PHONE}.`, 'Tim'].join('\n\n');
+    return { subject, body };
+  }
+  // Tim's own note when a vendor opens their appraisal, presses "I'd like to proceed" or saves a plan they built (the notify function).
+  // i: { kind: 'opened' | 'proceeded' | 'plan_built', who (their name or email), address, version, total (a built plan's total), portalUrl }
+  function appraisalEventNotice(i) {
+    const who = s_(i.who) || 'A vendor', addr = s_(i.address) || 'an appraisal', v = +i.version > 1 ? ` (version ${+i.version})` : '';
+    const t = { opened: [`${who} opened their appraisal: ${addr}`, `${who} has opened the appraisal you sent for ${addr}${v}.`],
+      proceeded: [`${who} would like to proceed: ${addr}`, `${who} pressed "I'd like to proceed" on their appraisal for ${addr}${v}. Their Questions before we meet is open, linked to this appraisal, and you'll hear when they send their answers.`],
+      plan_built: [`${who} built their own marketing plan: ${addr}`, `${who} built their own marketing plan from their appraisal for ${addr}${v}${money(i.total) ? `, coming to ${money(i.total)} including GST` : ''}. It's saved to their appraisal.`] }[i.kind]
+      || [`About an appraisal: ${addr}`, `${who} did something on their appraisal for ${addr}.`];
+    return { subject: t[0], body: [t[1], i.portalUrl ? `Open the appraisal: ${s_(i.portalUrl)}` : ''].filter(Boolean).join('\n\n') };
+  }
+
+  const MAIL = { LINK, BLANK_RE, get TIM_PHONE() { return TIM_PHONE; }, setAgent, allChanges, stillNeeded, signLinkDraft, reopenedDraft, finishAgainDraft, roundNotice, agreedDrafts, agreedPrice, agreedDates, agreedNotice, PRICE_BLANK, DEPOSIT_HOLDERS, depositRecommended, withdrawDrafts, requestNotice, firstWorkingDay, parseDate, longDate, toHtml, P_ACTION,
+    APPRAISAL_LINK, appraisalDraft, appraisalEventNotice };
   // also on the global object everywhere (a bundler may wrap this file as CommonJS: the offer-sign entry reads the globals; offers hotfix 2)
   if (typeof module !== 'undefined' && module.exports) module.exports = MAIL; root.MAIL = MAIL;
 })(typeof window !== 'undefined' ? window : globalThis);

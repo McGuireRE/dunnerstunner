@@ -22,4 +22,17 @@ Deno.serve(makeHandler({
     const { data, error } = await admin().storage.from("property-files").createSignedUrl(path, seconds);
     return error || !data ? null : data.signedUrl;
   },
+  // 037: a file in an appraisal sent to the vendor, asked with their own token, signed in its own bucket
+  canReadAppraisal: async (authorization, snapshot, bucket, path) => {
+    const uc = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!, { global: { headers: { Authorization: authorization } }, auth: { persistSession: false } });
+    const { data: u, error: ue } = await uc.auth.getUser();
+    if (ue || !u?.user) return null;
+    const { data, error } = await uc.rpc("appraisal_vendor_can_read", { p_snapshot: snapshot, p_bucket: bucket, p_path: path });
+    if (error) return false;
+    return data === true;
+  },
+  signIn: async (bucket, path, seconds) => {
+    const { data, error } = await admin().storage.from(bucket).createSignedUrl(path, seconds);
+    return error || !data ? null : data.signedUrl;
+  },
 }));

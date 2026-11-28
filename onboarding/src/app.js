@@ -788,6 +788,8 @@
     if (IS_AGENT && pend) { try { localStorage.removeItem('pendingCampaign'); } catch (_) { } return viewTable(null, pend); }
     setAgentNav();
     if (PORTAL) return portalBoot();
+    // LW3 phase E (037): a vendor's appraisal link (?appraisal=<id>), remembered on this device across the sign-in email
+    { const apo = apOpenTake(); if (apo && !IS_AGENT) return viewVendorAppraisal(apo); }
     if (pitchRoute()) return viewPitch();
     if (IS_AGENT) { const io = inspOpenGet(); if (io) { const [iid, sec] = io.split(':'); if (sec !== 'finish') return viewInspection(iid, +sec || 0); await viewInspection(iid); return INS && INS.id === iid ? viewInspectionFinish() : undefined; } inspSyncAll(); return viewAgentHome(); }
     return viewVendorHome();
@@ -807,7 +809,8 @@
     header('', '', 0); actions(false);
     main().innerHTML = `
       <div class="login-card">
-        ${PORTAL ? '<h1>Your portal</h1><p class="lede">Sign in with your email address. We\'ll email you a link. No password needed. After signing in you come back to the page you asked for.</p>' : `<h1>Your agency agreement</h1>
+        ${PORTAL ? '<h1>Your portal</h1><p class="lede">Sign in with your email address. We\'ll email you a link. No password needed. After signing in you come back to the page you asked for.</p>' : apOpenPeek() ? `<h1>Your appraisal</h1>
+        <p class="lede">Your appraisal is private to you. Enter the email address Tim sent it to, and we'll email you a link to sign in. No password needed.</p>` : `<h1>Your agency agreement</h1>
         <p class="lede">Enter the email address Tim has for you. We'll email you a link to sign in. No password needed.</p>`}
         ${(() => { try { return localStorage.getItem('pendingCampaign') ? '<div class="card note tight"><p class="small" style="margin:0">Campaign ready. Sign in as Tim to start a listing with it.</p></div>' : ''; } catch (_) { return ''; } })()}
         <label class="f" for="loginEmail">Email</label>
@@ -839,10 +842,14 @@
     header('', '', 0); actions(false);
     const ids = (await must(sb.rpc('claim_my_agreements'))) || [];
     let pls = []; try { pls = (await must(sb.from('prelistings').select('id,address,status,agreement_id').order('created_at', { ascending: false }))).filter(p => p.status !== 'closed' && !(p.status === 'accepted' && ids.includes(p.agreement_id))); } catch (_) { }
-    if (pls.length && !ids.length && pls.length === 1) return viewPrelisting(pls[0].id);
-    if (pls.length && ids.length + pls.length > 1) {
+    // LW3 phase E (037): the appraisals Tim has sent them (the newest version of each); never in the way of anything to sign
+    let aps = []; try { const { data, error } = await sb.rpc('vendor_appraisals_mine'); if (!error && Array.isArray(data)) aps = data.filter(x => x && okId(x.chain_id)); } catch (_) { }
+    if (aps.length === 1 && !ids.length && !pls.length) return viewVendorAppraisal(aps[0].chain_id);
+    if (pls.length && !ids.length && pls.length === 1 && !aps.length) return viewPrelisting(pls[0].id);
+    if ((pls.length || aps.length) && ids.length + pls.length + aps.length > 1) {
       const rows = ids.length ? await must(sb.from('agreements').select('id,ref,address,status').in('id', ids)) : [];
-      main().innerHTML = `<h1>Your properties</h1>${pls.map(r => `<div class="card tight" style="display:flex;justify-content:space-between;align-items:center;gap:12px"><div><div style="font-weight:600">${nt(r.address)}</div><span class="small">Your appraisal and plan</span></div><button class="btn ghost" data-openpl="${r.id}">Open</button></div>`).join('')}${rows.map(r => `<div class="card tight" style="display:flex;justify-content:space-between;align-items:center;gap:12px"><div><div style="font-weight:600">${esc(r.address || r.ref)}</div><span class="small">Agency agreement</span></div><button class="btn ghost" data-open="${r.id}">Open</button></div>`).join('')}`;
+      main().innerHTML = `<h1>Your properties</h1>${aps.map(r => `<div class="card tight" style="display:flex;justify-content:space-between;align-items:center;gap:12px"><div><div style="font-weight:600">${nt(r.address || 'Your property')}</div><span class="small">Your appraisal${r.version > 1 ? ', updated' : ''}</span></div><button class="btn ghost" data-openap="${esc(r.chain_id)}">Open</button></div>`).join('')}${pls.map(r => `<div class="card tight" style="display:flex;justify-content:space-between;align-items:center;gap:12px"><div><div style="font-weight:600">${nt(r.address)}</div><span class="small">Your appraisal and plan</span></div><button class="btn ghost" data-openpl="${r.id}">Open</button></div>`).join('')}${rows.map(r => `<div class="card tight" style="display:flex;justify-content:space-between;align-items:center;gap:12px"><div><div style="font-weight:600">${esc(r.address || r.ref)}</div><span class="small">Agency agreement</span></div><button class="btn ghost" data-open="${r.id}">Open</button></div>`).join('')}`;
+      $$('[data-openap]').forEach(b => b.addEventListener('click', () => viewVendorAppraisal(b.dataset.openap)));
       $$('[data-openpl]').forEach(b => b.addEventListener('click', () => viewPrelisting(b.dataset.openpl)));
       $$('[data-open]').forEach(b => b.addEventListener('click', () => loadVendor(b.dataset.open)));
       return;
@@ -2540,6 +2547,17 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     Object.values(mdGroups).forEach(list => { const m = list[0], pr = props.find(x => x.id === m.property_id), agreed = /^agreed_/.test(m.kind), wd = /^withdraw_/.test(m.kind);
       needs.push({ what: list.some(x => x.status === 'sending') ? 'An email may have gone: check it' : `${list.length} email${list.length === 1 ? '' : 's'} to read and send`, where: (pr && pr.address) || 'Property', sub: agreed ? 'The agreed copy, to both parties' : wd ? 'The withdrawal, to that side and the other side\'s lawyer' : list.some(x => x.kind === 'reopened') ? 'Please initial again, after a change' : 'Signing links',
         go: () => agreed || wd ? viewOfferAgent(m.offer_id) : viewSigning(m.signing_id), mail: true }); });
+    // LW3 phase E (037): what vendors did with an appraisal Tim sent (until he ticks it Done), and an appraisal email that didn't go
+    const quiet = async q => { try { const { data, error } = await q; return error ? [] : (data || []); } catch (_) { return []; } };
+    const aevs = await quiet(sb.from('appraisal_events').select('id,snapshot_id,property_id,kind,actor,at,seen_at').is('seen_at', null).neq('kind', 'sent').order('at', { ascending: false }));
+    const amails = await quiet(sb.from('appraisal_mail').select('id,snapshot_id,status').in('status', ['failed', 'sending', 'queued']));
+    const asnaps = aevs.length || amails.length ? await quiet(sb.from('appraisal_snapshots').select('id,appraisal_id,property_id,recipients').in('id', [...new Set(aevs.map(e => e.snapshot_id).concat(amails.map(m => m.snapshot_id)))])) : [];
+    const apOpenPage = aid => () => PORTAL ? portalNav('appraisals/' + aid) : viewAppraisalView(aid, false);
+    aevs.forEach(e => { const s = asnaps.find(x => x.id === e.snapshot_id); if (!s) return; const pr = props.find(p => p.id === s.property_id);
+      needs.push({ what: (apWho(s, e.actor) || 'A vendor') + ' ' + (AP_EV[e.kind] || e.kind), where: (pr && pr.address) || 'Appraisal', sub: 'Their appraisal, ' + fmtDT(e.at), hot: e.kind === 'proceeded', apEvent: e.id,
+        go: apOpenPage(s.appraisal_id), done: async () => { await must(sb.rpc('agent_appraisal_events_seen', { p_ids: [e.id] })); } }); });
+    amails.forEach(m => { const s = asnaps.find(x => x.id === m.snapshot_id); if (!s) return; const pr = props.find(p => p.id === s.property_id);
+      needs.push({ what: m.status === 'sending' ? 'An appraisal email may have gone: check it' : 'An appraisal email didn\'t go', where: (pr && pr.address) || 'Appraisal', sub: 'The appraisal is sent; the email needs you', hot: true, go: apOpenPage(s.appraisal_id) }); });
     // offers from the form that Tim hasn't opened yet (offers phase 1)
     const fresh = await safe(sb.from('property_offers').select('id,property_id,amount,received_at,related_party,source,suspected_spam').is('read_at', null).order('received_at', { ascending: false }));
     // possible spam: one quiet line per property, opening its fold (no email was sent for these)
@@ -5001,13 +5019,14 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   const plFirst = pl => { const o = ((pl.answers || {}).owners || [])[0]; return (o && (o.pref || (o.name || '').split(/\s+/)[0])) || (pl.contact_name || '').split(/\s+/)[0] || ''; };
   let PL = null, PLA = {};
 
-  async function viewPrelisting(id) {
+  // start: from "I'd like to proceed" on their appraisal (LW3 phase E), straight into the questions
+  async function viewPrelisting(id, start) {
     PL = await must(sb.from('prelistings').select('*').eq('id', id).single()); JCTX.pid = PL.property_id || null; JVIEW = { pl: id };
     PLA = Object.assign({}, PL.answers || {});
     loadContentTr('plan', PL.id);
     PL.knownOwners = [];
     if (PL.property_id && PL.status === 'appraisal') { try { PL.knownOwners = await must(sb.from('property_people').select('legal_name,pref_name,email,phone').eq('property_id', PL.property_id).eq('role', 'owner').order('position')); } catch (_) { } }
-    if (PL.status === 'appraisal') return PLA._step ? plStep(+PLA._step) : plAppraisal();
+    if (PL.status === 'appraisal') return PLA._step ? plStep(+PLA._step) : start ? plStep(1) : plAppraisal();
     if (PL.status === 'submitted') return plThanks();
     if (PL.status === 'plan') return plPlan();
     if (PL.status === 'question') return plQuestionSent();
@@ -5022,9 +5041,11 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <p class="lede">${PL.contact_name ? `Hi ${esc(PL.contact_name.split(/\s+/)[0])}, here's` : 'Here\'s'} my plan for selling ${nt(PL.address)}.</p>
       <div class="card">${plFacts(ap)}${ap.note ? `<p style="margin:14px 0 0">${esc(ap.note).replace(/\n/g, '<br>')}</p>` : ''}</div>
       ${ap.link ? `<div class="toolbar"><a class="btn ghost" href="${esc(ap.link)}" target="_blank" rel="noopener" style="text-decoration:none">Read the full appraisal</a></div>` : ''}
+      ${okId(PL.appraisal_id) ? '<div class="toolbar"><button class="btn ghost" type="button" id="plBackAp">Read your full appraisal</button></div>' : ''}
       <p class="small">Questions at any stage? Call or text Tim on <strong>027 562 7207</strong>.</p></section>`;
     actions(true, '', 'I\'d like to proceed');
     onNext = async () => plStep(1);
+    const ba = $('#plBackAp'); if (ba) ba.addEventListener('click', () => viewVendorAppraisal(PL.appraisal_id));
     top();
   }
 
@@ -9328,6 +9349,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     R('appraisals/:id/setup', 'appraisal', a => viewAppraisalSetup(a)),
     R('appraisals/:id/sections', 'appraisal', a => viewAppraisalSections(a)),
     R('appraisals/:id/comps', 'appraisal', a => viewAppraisalComps(a)),
+    R('appraisals/:id/send', 'appraisal', a => viewAppraisalSend(a)),      // LW3 phase E (037): send it to the vendor
+    R('appraisals/:id/copy', 'appraisal', a => viewAppraisalCopy(a)),      // LW3 phase E (037): the copy they were sent, as they see it
     R('appraisals/:id', 'appraisal', a => viewAppraisalView(a, false)),
     R('appraisals/:id/present', 'appraisal', a => viewAppraisalView(a, true)),
     R('translations', 'viewTranslations', () => APP_TRANSLATION ? RAW.viewTranslations() : viewPortalMissing()),
@@ -9372,7 +9395,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     if ((m = new RegExp(`^appraisals/new/${id}$`).exec(path))) return [`properties/${m[1]}`, 'Property file'];
     if (path === 'appraisals/new') return ['appraisals', 'Appraisals'];
     if (path === 'appraisals/market' || path === 'appraisals/reviews') return ['appraisals', 'Appraisals'];
-    if ((m = new RegExp(`^appraisals/${id}/(present|setup|comps|sections)$`).exec(path))) return [`appraisals/${m[1]}`, 'Appraisal'];
+    if ((m = new RegExp(`^appraisals/${id}/(present|setup|comps|sections|send|copy)$`).exec(path))) return [`appraisals/${m[1]}`, 'Appraisal'];
     if (new RegExp(`^appraisals/${id}$`).test(path)) return ['appraisals', 'Appraisals'];
     if (/^processes\/.+/.test(path)) return ['processes', 'Processes'];
     if (/^people\/.+/.test(path)) return ['people', 'People'];
@@ -9789,17 +9812,283 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   async function apsShow(rec, present) {
     const ev = await apvEvidence(rec);   // LW3 phase C: the comparables, their photos and the market report (none: drawn as phase A)
     if (!$('#main .loading')) return;   // Tim has moved on
-    const tools = present ? '' : `<div class="toolbar no-print" id="apvTools">${plink(`appraisals/${rec.id}/setup`, 'Change the set-up', 'btn primary')}${plink(`appraisals/${rec.id}/sections`, 'Sections', 'btn ghost')}${plink(`appraisals/${rec.id}/comps`, 'Comparables', 'btn ghost')}${plink(`appraisals/${rec.id}/present`, 'Present on screen', 'btn ghost')}<button class="btn ghost" type="button" id="apvPrint">Print</button></div>
+    const sent = rec.status === 'sent', sd = present ? null : await apSentData(rec.id);   // LW3 phase E (037): what was sent, and what they did
+    if (!$('#main .loading')) return;
+    const tools = present ? '' : `<div class="toolbar no-print" id="apvTools">${sent ? '' : plink(`appraisals/${rec.id}/send`, sd && sd.snaps.length ? 'Send updated version' : 'Send to the vendor', 'btn primary')}${plink(`appraisals/${rec.id}/setup`, sent ? 'The set-up' : 'Change the set-up', sent ? 'btn ghost' : 'btn primary')}${plink(`appraisals/${rec.id}/sections`, 'Sections', 'btn ghost')}${plink(`appraisals/${rec.id}/comps`, 'Comparables', 'btn ghost')}${plink(`appraisals/${rec.id}/present`, 'Present on screen', 'btn ghost')}<button class="btn ghost" type="button" id="apvPrint">Print</button></div>
+      ${sd ? apSentHTML(rec, sd) : ''}
       ${String(rec.private_notes || '').trim() ? `<details class="acc no-print" id="apsNotes"><summary>Your private notes</summary><div class="in"><p class="small" style="white-space:pre-wrap;margin:0">${esc(rec.private_notes)}</p></div></details>` : ''}`;
     main().innerHTML = `<div class="view-pad apv${present ? ' apv-show' : ''}" id="apvPage">${present ? '' : '<span class="agent-flag no-print">Only you see this</span>'}${tools}<div id="apvDoc"></div>
       ${present ? `<p class="apv-exit no-print">${plink(`appraisals/${rec.id}`, 'Finish presenting')}</p>` : ''}</div>`;
     $('#apvDoc').innerHTML = APPR.render(rec, ev); abWireVideos($('#apvDoc'));
     const pb = $('#apvPrint'); if (pb) pb.addEventListener('click', () => { apsOpenAll(); window.print(); });
+    if (sd) apSentWire(rec, sd);
     top();
   }
   // in print every sale method is open (a vendor must see them all, whatever Tim recommends)
   function apsOpenAll() { $$('#apvDoc details.apv-mc').forEach(d => { d.open = true; }); }
   window.addEventListener('beforeprint', apsOpenAll);
+
+  /* ───────── LW3 phase E (migration 037, APPRAISAL-PLAN.md): sending to the vendor, their private view, updated versions ─────────
+     Tim chooses who it goes to and reads the email (MAIL.appraisalDraft, in his voice) before it goes. Sending makes a frozen copy on
+     the server (agent_appraisal_send: a whitelist of what a vendor may see) and marks the appraisal sent, so it never changes; the
+     notify function sends the email. The vendor signs in with the email code and reads the newest copy sent to them
+     (vendor_appraisal_read); every photo and video comes through a 600-second link from repo-link, for files listed in that copy only.
+     "I'd like to proceed" opens their Questions before we meet, linked to this appraisal; "Build your own" opens the campaign builder on
+     the packages page and brings their plan back to their appraisal. Opening, proceeding and a plan are recorded and Tim is told. */
+  const AP_LINK = '[the appraisal link]';   // MAIL.APPRAISAL_LINK (mail-core.js): it becomes their button when the email goes
+  // the appraisal link a vendor opens before signing in, remembered on this device (startup stores it; boot takes it once)
+  function apOpenPeek() { try { const v = localStorage.getItem('apOpen'); return v && /^[0-9a-f-]{36}$/.test(v) ? v : null; } catch (_) { return null; } }
+  function apOpenTake() { const v = apOpenPeek(); try { localStorage.removeItem('apOpen'); } catch (_) { } return v; }
+  const apNotify = id => { if (!id) return; try { const p = sb.functions.invoke('notify', { body: { type: 'ap_event', event_id: id } }); if (p && p.catch) p.catch(() => null); } catch (_) { } };
+  async function apChainOf(aid) { try { const { data, error } = await sb.from('appraisal_versions').select('appraisal_id,chain_id').eq('appraisal_id', aid); return !error && data && data[0] ? data[0].chain_id : aid; } catch (_) { return aid; } }
+  // the sent copies of an appraisal's chain (newest first), their emails, what the vendors did, the plans they built, the open update
+  async function apSentData(aid) {
+    const safe = async q => { try { const { data, error } = await q; return error ? [] : (data || []); } catch (_) { return []; } };
+    const chain = await apChainOf(aid);
+    const [snaps, evs, plans, vers] = await Promise.all([
+      safe(sb.from('appraisal_snapshots').select('id,appraisal_id,chain_id,version,recipients,left_out,sent_at,sent_by').eq('chain_id', chain).order('version', { ascending: false })),
+      safe(sb.from('appraisal_events').select('id,snapshot_id,kind,actor,at,detail,seen_at').eq('chain_id', chain).order('at', { ascending: false })),
+      safe(sb.from('appraisal_vendor_plans').select('id,snapshot_id,email,plan,created_at').eq('chain_id', chain).order('created_at', { ascending: false })),
+      safe(sb.from('appraisal_versions').select('appraisal_id,previous_id,chain_id,made_at').eq('chain_id', chain))]);
+    const mails = snaps.length ? await safe(sb.from('appraisal_mail').select('id,snapshot_id,to_addr,subject,status,sent_at,error').in('snapshot_id', snaps.map(s => s.id))) : [];
+    const views = vers.length ? await safe(sb.from('appraisal_views').select('id,status').in('id', vers.map(v => v.appraisal_id))) : [];
+    const draft = vers.map(v => views.find(x => x.id === v.appraisal_id)).find(x => x && x.status !== 'sent') || null;
+    return { chain, snaps, evs, plans, mails, draft };
+  }
+  const apWho = (snap, email) => { const r = ((snap && snap.recipients) || []).find(x => String(x.email || '').toLowerCase() === String(email || '').toLowerCase()); return (r && r.name) || email; };
+  const AP_EV = { opened: 'opened it', proceeded: 'pressed "I\'d like to proceed"', plan_built: 'built their own marketing plan' };
+  const AP_MAIL = { queued: 'Waiting to go', sending: 'May have gone: not confirmed', sent: 'Email sent', failed: 'The email didn\'t go' };
+  // a plan the vendor built: its items from the shared catalogue (catalogue.js), and its total
+  function apPlanLines(plan) {
+    const sel = (plan && plan.sel) || {}, I = typeof ITEMS !== 'undefined' ? ITEMS : {};
+    return Object.entries(sel).map(([k, q]) => { const i = I[k]; return { name: i ? (i.group === 'trademe' && i.desc ? 'Trade Me Platinum (' + String(i.desc).replace('Expected sale price ', '') + ')' : i.name) : k, q: +q || 1, qty: !!(i && i.qty) }; });
+  }
+  const apPlanText = plan => apPlanLines(plan).map(l => l.name + (l.qty && l.q > 1 ? ' × ' + l.q : '')).join(', ');
+  function apSentHTML(rec, sd) {
+    if (!sd.snaps.length) return '';
+    const newest = sd.snaps[0], mine = sd.snaps.find(s => s.appraisal_id === rec.id) || null;
+    return `<section class="card no-print" id="apSent"><h2>Sent to the vendor</h2>
+      ${sd.snaps.map(s => { const m = sd.mails.find(x => x.snapshot_id === s.id), who = (s.recipients || []).map(r => r.name ? `${r.name} (${r.email})` : r.email).join(', ');
+        return `<div class="ap-sent" data-snap="${esc(s.id)}"><p style="margin:0"><strong>Version ${s.version}</strong>${s.id === newest.id ? ' <span class="apv-tag">What they see now</span>' : ''}<br><span class="small">Sent ${esc(fmtDT(s.sent_at))} to <span translate="no">${esc(who)}</span></span></p>
+          ${m ? `<p class="small" data-apmail="${esc(m.id)}" style="margin:4px 0 0">${esc(AP_MAIL[m.status] || m.status)}${m.status === 'sent' && m.sent_at ? ', ' + esc(fmtDT(m.sent_at)) : ''}${m.status === 'failed' && m.error ? ': ' + esc(m.error) : ''}</p>
+            ${m.status === 'failed' || m.status === 'queued' ? `<div class="toolbar"><button class="btn ghost" type="button" data-apresend="${esc(m.id)}">Send the email again</button></div>` : ''}
+            ${m.status === 'sending' ? `<div class="toolbar"><button class="btn ghost" type="button" data-apunstick="${esc(m.id)}">I've checked: it didn't arrive</button></div>` : ''}` : ''}
+          ${(s.left_out || []).length ? `<p class="small" style="margin:6px 0 0">Left out of their copy: ${(s.left_out || []).map(x => esc(x.what === 'review' ? 'a review by ' + (x.reviewer || 'someone') : 'the advertisement wording for ' + (x.comp || 'a comparable')) + ' (' + esc(x.why || '') + ')').join('; ')}.</p>` : ''}</div>`; }).join('<hr class="soft" style="margin:12px 0">')}
+      ${sd.evs.filter(e => e.kind !== 'sent').length ? `<h3 style="margin-top:14px">What they did</h3><ul class="needs" id="apEvents">${sd.evs.filter(e => e.kind !== 'sent').map(e => { const s = sd.snaps.find(x => x.id === e.snapshot_id);
+          return `<li><div class="what"><strong translate="no">${esc(apWho(s, e.actor))}</strong> <span>${esc(AP_EV[e.kind] || e.kind)}</span><span class="small">${esc(fmtDT(e.at))}${s ? ', version ' + s.version : ''}</span></div></li>`; }).join('')}</ul>` : '<p class="small" id="apEvents">Not opened yet.</p>'}
+      ${sd.plans.length ? `<h3 style="margin-top:14px">Plans they built</h3>${sd.plans.map(p => `<p class="small ap-plan" style="margin:4px 0"><strong translate="no">${esc(apWho(newest, p.email))}</strong>, ${esc(fmtDT(p.created_at))}: ${esc(apPlanText(p.plan))}${(p.plan || {}).total != null ? `, ${esc(money(+p.plan.total))} incl. GST` : ''}</p>`).join('')}` : ''}
+      <div class="toolbar">${mine ? plink(`appraisals/${rec.id}/copy`, 'See their copy', 'btn ghost') : ''}${sd.draft ? plink(`appraisals/${sd.draft.id}/setup`, 'Open the updated version', 'btn primary') : rec.status === 'sent' && newest.appraisal_id === rec.id ? '<button class="btn primary" type="button" id="apNewVer">Make an updated version</button>' : ''}</div>
+      ${rec.status === 'sent' && newest.appraisal_id !== rec.id ? '<p class="small">A newer version has been sent. They see that one.</p>' : ''}
+    </section>`;
+  }
+  function apSentWire(rec, sd) {
+    $$('[data-apresend]').forEach(b => b.addEventListener('click', async () => { b.disabled = true; atBtn(b, 'Sending...', 'busy');
+      const r = await apSendMail(b.dataset.apresend); atBtn(b, r.msg, r.ok ? 'ok' : 'err'); if (!r.ok && !r.maybe) b.disabled = false; }));
+    $$('[data-apunstick]').forEach(b => b.addEventListener('click', async () => { if (!confirm('Only do this once you have checked it did not arrive (ask them, or look in your sent mail). Make it ready to send again?')) return;
+      b.disabled = true; const { error } = await sb.rpc('agent_appraisal_mail_unstick', { p_mail: b.dataset.apunstick });
+      if (error) { atBtn(b, error.message || 'Not changed. Try again.', 'err'); b.disabled = false; return; } atBtn(b, 'Ready to send again. Reload to see the button.', 'ok'); }));
+    const nv = $('#apNewVer'); if (nv) nv.addEventListener('click', () => apNewVersion(rec, nv));
+  }
+  // the notify function sends the email Tim reviewed; { ok, maybe, msg } for the note under the button
+  async function apSendMail(mailId) {
+    let data = null, error = null;
+    try { const r = await sb.functions.invoke('notify', { body: { type: 'ap_send', mail_id: mailId } }); data = r.data; error = r.error; } catch (e) { error = e; }
+    const j = await fnJson(data, error);
+    if (j && j.ok) return { ok: true, msg: 'Email sent. They can open their appraisal now.' };
+    if (j && j.maybe_sent) return { ok: false, maybe: true, msg: j.error || 'It may have gone. Check your sent mail before sending again.' };
+    return { ok: false, msg: (j && j.error) || (netErr(error) ? 'The email didn\'t go: no signal. The appraisal is saved as sent. Send the email again when you have signal.' : 'The email didn\'t go. The appraisal is saved as sent. Send the email again.') };
+  }
+  // "Make an updated version": a new draft copied from this sent one (agent_appraisal_new_version), then its photos and the header and
+  // video files copied into the new appraisal's own folders (a sent appraisal's files never move), then its set-up page
+  async function apNewVersion(rec, btn) {
+    btn.disabled = true; atBtn(btn, 'Making the updated version...', 'busy');
+    const { data, error } = await sb.rpc('agent_appraisal_new_version', { p_id: rec.id });
+    if (error || !data) { btn.disabled = false; atBtn(btn, netErr(error) ? 'No signal. Try again when you have signal; nothing was made.' : (error && error.message) || 'Not made. Try again.', 'err'); return; }
+    const nid = data.appraisal_id; let missed = 0;
+    if (!data.existing) {
+      const base = p => String(p).split('/').pop();
+      for (const m of data.media || []) {
+        const to = `appraisals/${nid}/comps/${m.comp_id}/${base(m.path)}`;
+        try { const c = await sb.storage.from(AMB).copy(m.path, to); if (c.error) throw c.error;
+          const ins = await sb.from('appraisal_media').insert({ appraisal_id: nid, comp_id: m.comp_id, path: to, file_name: m.file_name || '', width: m.width || null, height: m.height || null, position: m.position || 0, cover: !!m.cover, source: m.source || 'upload', source_url: m.source_url || null, page_url: m.page_url || null });
+          if (ins.error) throw ins.error; } catch (_) { missed++; }
+      }
+      const idMap = {};
+      for (const a of data.assets || []) {
+        const to = `appraisals/${nid}/${a.role}/${base(a.path)}`, still = a.still_path ? `appraisals/${nid}/${a.role}/${base(a.still_path)}` : null;
+        try { const c = await sb.storage.from(a.bucket).copy(a.path, to); if (c.error) throw c.error;
+          if (still) { const s = await sb.storage.from(AMB).copy(a.still_path, still); if (s.error) throw s.error; }
+          const ins = await sb.from('appraisal_assets').insert({ appraisal_id: nid, role: a.role, kind: a.kind, bucket: a.bucket, path: to, still_path: still, file_name: a.file_name || '', width: a.width || null, height: a.height || null, duration_s: a.duration_s == null ? null : a.duration_s }).select('id');
+          if (ins.error) throw ins.error; const row = Array.isArray(ins.data) ? ins.data[0] : ins.data; if (row && row.id) idMap[a.id] = row.id; } catch (_) { missed++; }
+      }
+      // the new header and video files take the old ones' places in the set-up and the sections
+      if (Object.keys(idMap).length) {
+        try { const r0 = await sb.from('appraisal_views').select('setup,sections').eq('id', nid); const v = (r0.data || [])[0];
+          if (v) { let s = JSON.stringify(v.setup || {}), x = JSON.stringify(v.sections || []); Object.entries(idMap).forEach(([o, n]) => { s = s.split(o).join(n); x = x.split(o).join(n); });
+            const { error: e2 } = await sb.rpc('agent_appraisal_save', { p_id: nid, p_setup: JSON.parse(s), p_fields: null, p_sections: JSON.parse(x), p_title: null, p_prepared_for: null, p_private_notes: null, p_status: null }); if (e2) missed++; } } catch (_) { missed++; }
+      }
+    }
+    atBtn(btn, missed ? `The updated version is made, but ${missed} photo${missed === 1 ? '' : 's'} or video${missed === 1 ? '' : 's'} didn't copy. Add ${missed === 1 ? 'it' : 'them'} again on its Comparables or Sections screen.` : 'The updated version is made. Opening its set-up...', missed ? 'err' : 'ok');
+    setTimeout(() => apsOpenSetup(nid), missed ? 2500 : 600);
+  }
+
+  // the Send page: who it goes to (the property's owners and contacts with an email, and the contact of its open Questions before we
+  // meet), the email in Tim's voice for him to read and change, and Send. Once sent, the appraisal never changes.
+  async function viewAppraisalSend(id) {
+    header('Send to the vendor', '', 0); actions(false); document.body.classList.remove('apv-present');
+    main().innerHTML = '<div class="loading">Loading...</div>';
+    let rec = null; try { const d = await must(sb.from('appraisal_views').select('*').eq('id', id)); rec = Array.isArray(d) ? d[0] : d; } catch (_) { rec = null; }
+    if (!$('#main .loading')) return;
+    if (!rec) return viewPortalMissing();
+    if (rec.status === 'sent') { main().innerHTML = `<div class="view-pad" id="apSendPage"><span class="agent-flag">Only you see this</span><h1>Already sent</h1><p class="lede">This version has been sent, and a sent copy never changes. To change it, make an updated version from the appraisal.</p><div class="toolbar">${plink(`appraisals/${rec.id}`, 'Back to the appraisal', 'btn primary')}</div></div>`; top(); return; }
+    if (!(rec.setup && rec.setup.v)) { main().innerHTML = `<div class="view-pad" id="apSendPage"><span class="agent-flag">Only you see this</span><h1>Not sent from here</h1><p class="lede">This appraisal was loaded by hand, so it isn't sent from the portal. Present it on screen or print it.</p><div class="toolbar">${plink(`appraisals/${rec.id}`, 'Back to the appraisal', 'btn primary')}</div></div>`; top(); return; }
+    const safe = async q => { try { const { data, error } = await q; return error ? [] : (data || []); } catch (_) { return []; } };
+    const [people, pls, sd] = await Promise.all([okId(rec.property_id) ? safe(sb.from('property_people').select('id,legal_name,pref_name,email,role,position').eq('property_id', rec.property_id)) : [],
+      okId(rec.property_id) ? safe(sb.from('prelistings').select('id,contact_name,contact_email,status,created_at').eq('property_id', rec.property_id)) : [], apSentData(rec.id)]);
+    if (!$('#main .loading')) return;
+    const cands = [], seenE = new Set(), add = (email, name, role) => { const e = String(email || '').trim().toLowerCase(); if (!EMAIL_RE.test(e) || seenE.has(e)) return; seenE.add(e); cands.push({ email: e, name: String(name || '').trim(), role }); };
+    people.filter(p => p.role === 'owner').sort((a, b) => a.position - b.position).forEach(p => add(p.email, callName(p) || p.legal_name, 'Owner'));
+    people.filter(p => p.role === 'contact').sort((a, b) => a.position - b.position).forEach(p => add(p.email, callName(p) || p.legal_name, 'Contact'));
+    pls.filter(p => p.status !== 'closed').forEach(p => add(p.contact_email, p.contact_name, 'Questions before we meet'));
+    const last = sd.snaps[0], before = new Set(last ? (last.recipients || []).map(r => String(r.email).toLowerCase()) : []);
+    const isUpdate = !!last, firstOf = c => String(c.name || '').split(/\s+/)[0];
+    const pre = c => isUpdate ? before.has(c.email) : c.role === 'Owner';
+    main().innerHTML = `<div class="view-pad" id="apSendPage"><span class="agent-flag">Only you see this</span>
+      <h1>${isUpdate ? 'Send updated version' : 'Send to the vendor'}</h1>
+      <p class="lede">For <strong translate="no">${esc(rec.address || rec.title)}</strong>. They sign in with their email and see a private copy. Once it's sent, this copy can't change: to change it later, you make an updated version.</p>
+      ${isUpdate ? `<div class="card note tight"><p class="small" style="margin:0">They were sent version ${last.version} on ${esc(fmtDT(last.sent_at))}. Once you send this, everyone you choose sees this version instead.</p></div>` : ''}
+      <h2>Who it goes to</h2>
+      ${cands.length ? `<div id="apTo">${cands.map((c, i) => `<label class="choice cb"><input type="checkbox" data-apto="${i}" ${pre(c) ? 'checked' : ''}><span class="mark"></span><span><span class="ct" translate="no">${esc(c.name || c.email)}</span><span class="cd"><span translate="no">${esc(c.email)}</span> · ${esc(c.role)}</span></span></label>`).join('')}</div>`
+        : '<div class="card warnc tight" id="apTo"><p class="small" style="margin:0">No one on this property has an email address yet. Add the owners on the property file first.</p></div>'}
+      <h2>The email</h2>
+      <p class="small">In your voice. Change anything you like. ${esc(AP_LINK)} becomes their own button when it goes, to their private page on packages.dunnerstunner.co.nz.</p>
+      <label class="f" for="apSub">Subject</label><input type="text" id="apSub" maxlength="300">
+      <label class="f" for="apBody">Email</label><textarea id="apBody" rows="16" style="width:100%;font-size:15px"></textarea>
+      <label class="choice cb" style="margin-top:14px"><input type="checkbox" id="apRead"><span class="mark"></span><span><span class="ct">I've read the appraisal and this email</span><span class="cd">${plink(`appraisals/${rec.id}/present`, 'Read the appraisal as they will see it')}</span></span></label>
+      <div class="toolbar"><button class="btn primary" type="button" id="apSendBtn" data-busy="Sending...">${isUpdate ? 'Send updated version' : 'Send it'}</button>${plink(`appraisals/${rec.id}`, 'Back to the appraisal', 'btn ghost')}</div>
+      <div id="apSendDone"></div></div>`;
+    let edited = false;
+    const chosen = () => $$('[data-apto]').filter(x => x.checked).map(x => cands[+x.dataset.apto]);
+    const draft = () => { if (edited) return; const w = MAIL.appraisalDraft({ first: chosen().map(firstOf).filter(Boolean), address: rec.address, update: isUpdate }); $('#apSub').value = w.subject; $('#apBody').value = w.body; };
+    try { await mlAgentLoad(); } catch (_) { }
+    draft();
+    $$('[data-apto]').forEach(x => x.addEventListener('change', draft));
+    ['#apSub', '#apBody'].forEach(s => $(s).addEventListener('input', () => { edited = true; }));
+    const sb_ = $('#apSendBtn');
+    sb_.addEventListener('click', async () => {
+      const to = chosen().map(c => c.email), sub = $('#apSub').value.trim(), body = $('#apBody').value;
+      if (!to.length) return atBtn(sb_, 'Choose who it goes to.', 'err');
+      if (!sub) return atBtn(sb_, 'Add a subject.', 'err');
+      if (!body.includes(AP_LINK)) return atBtn(sb_, `Keep ${AP_LINK} in the email: it becomes their link when it goes.`, 'err');
+      if ((body.match(MAIL.BLANK_RE) || []).length) return atBtn(sb_, 'Fill or delete the marked blanks first.', 'err');
+      const w = APPR.wordingProblem(sub + '\n' + body); if (w) return atBtn(sb_, 'The email: ' + w, 'err');
+      if (!$('#apRead').checked) return atBtn(sb_, 'Tick that you\'ve read the appraisal and the email first.', 'err');
+      if (!confirm(`Send it to ${to.join(', ')} now? Once it's sent, this copy can't change.`)) return;
+      sb_.disabled = true; atBtn(sb_, 'Sending...', 'busy');
+      const { data, error } = await sb.rpc('agent_appraisal_send', { p_id: rec.id, p_recipients: to, p_subject: sub, p_body: body });
+      if (error || !data) { sb_.disabled = false; atBtn(sb_, netErr(error) ? 'Not sent: no signal. Nothing has changed. Try again when you have signal.' : 'Not sent: ' + ((error && error.message) || 'try again.'), 'err'); return; }
+      JDIRTY = false;
+      const r = await apSendMail(data.mail_id);
+      const lo = (data.left_out || []);
+      $('#apSendDone').innerHTML = `<div class="card ${r.ok ? 'okc' : 'warnc'} tight" id="apSentNote"><p style="margin:0"><strong>${r.ok ? `Sent: version ${esc(data.version)}` : `Saved as sent (version ${esc(data.version)}), but the email didn't go`}</strong></p><p class="small" style="margin:6px 0 0">${esc(r.msg)}</p>
+        ${lo.length ? `<p class="small" style="margin:6px 0 0">Left out of their copy: ${lo.map(x => esc(x.what === 'review' ? 'a review by ' + (x.reviewer || 'someone') : 'the advertisement wording for ' + (x.comp || 'a comparable')) + ' (' + esc(x.why || '') + ')').join('; ')}.</p>` : ''}
+        <div class="toolbar">${r.ok ? '' : `<button class="btn primary" type="button" id="apSendAgain" ${r.maybe ? 'disabled' : ''}>Send the email again</button>`}${plink(`appraisals/${rec.id}`, 'Back to the appraisal', 'btn ghost')}</div></div>`;
+      atBtn(sb_, r.ok ? 'Sent.' : 'Saved as sent. The email didn\'t go: see below.', r.ok ? 'ok' : 'err');
+      const again = $('#apSendAgain'); if (again) again.addEventListener('click', async () => { again.disabled = true; atBtn(again, 'Sending...', 'busy'); const r2 = await apSendMail(data.mail_id); atBtn(again, r2.msg, r2.ok ? 'ok' : 'err'); if (!r2.ok && !r2.maybe) again.disabled = false; });
+    });
+    top();
+  }
+
+  // a sent copy drawn as the vendor sees it: the frozen content, each listed file opened by link(bucket, path)
+  async function apCopyEv(content, link) {
+    const c = content || {}, setup = c.setup || {};
+    const ev = { comps: c.comps || [], photos: {}, months: c.months || [], market: !!setup.market, area: String(setup.marketArea || ''), assets: {}, homePhotos: {}, reviews: c.reviews || [] };
+    const jobs = [];
+    Object.entries(c.photos || {}).forEach(([cid, list]) => (list || []).forEach((p, i) => jobs.push(link('appraisal-media', p.path).then(u => { if (u) (ev.photos[cid] ||= [])[i] = { url: u, cover: !!p.cover }; }))));
+    Object.entries(c.assets || {}).forEach(([aid, a]) => jobs.push(Promise.all([link(a.bucket, a.path), a.still_path ? link('appraisal-media', a.still_path) : Promise.resolve('')])
+      .then(([u, s]) => { if (u) ev.assets[aid] = { url: u, still: s || '', mime: a.mime || '', kind: a.kind, role: a.role }; })));
+    Object.entries(c.homePhotos || {}).forEach(([did, p]) => jobs.push(link('property-files', p.path).then(u => { if (u) ev.homePhotos[did] = { url: u, room: p.room || '' }; })));
+    await Promise.all(jobs.map(j => j.catch(() => null)));
+    Object.keys(ev.photos).forEach(k => { ev.photos[k] = ev.photos[k].filter(Boolean); });
+    return ev;
+  }
+  const apCopyRec = c => ({ title: c.title, sections: c.sections || [], fields: c.fields || {}, setup: Object.assign({}, c.setup || {}, { v: 1 }) });
+  // a vendor's link to one file of their copy: 600 seconds, from repo-link, only for files listed in that copy
+  const apVendorLink = sid => async (bucket, path) => { try { const { data, error } = await sb.functions.invoke('repo-link', { body: { snapshot: sid, bucket, path } }); return !error && data && data.url ? data.url : null; } catch (_) { return null; } };
+  const apAgentLink = async (bucket, path) => { try { const u = await sb.storage.from(bucket).createSignedUrl(path, 600); return u && !u.error && u.data ? u.data.signedUrl : null; } catch (_) { return null; } };
+  // the "Build your own" plan on the packages page (packages.dunnerstunner.co.nz/#custom), with the way back to this appraisal
+  const apBuildUrl = (chain, from) => `${location.origin}/?ap=${encodeURIComponent(chain)}${from ? '&from=' + encodeURIComponent(from) : ''}#custom`;
+  function apPlanCardHTML(plan, saved) {
+    if (!plan || !plan.sel) return '';
+    const lines = apPlanLines(plan);
+    return `<section class="card" id="apvMyPlan"><h2>Your own marketing plan</h2>${saved ? '<p class="small" style="color:var(--ok-text)">Saved to your appraisal. Tim can see it.</p>' : ''}
+      <ul class="apv-list">${lines.map(l => `<li>${esc(l.name)}${l.qty && l.q > 1 ? ' × ' + esc(l.q) : ''}</li>`).join('')}</ul>
+      ${plan.total != null ? `<p><strong>${esc(money(+plan.total))}</strong> <span class="small">incl. GST${plan.on_request ? `, plus ${esc(plan.on_request)} item${plan.on_request === 1 ? '' : 's'} quoted on request` : ''}</span></p>` : ''}</section>`;
+  }
+
+  // Tim's look at the copy a vendor was sent from this appraisal, exactly as they see it
+  async function viewAppraisalCopy(id) {
+    header('Their copy', '', 0); actions(false); document.body.classList.remove('apv-present');
+    main().innerHTML = '<div class="loading">Loading...</div>';
+    let s = null; try { const { data, error } = await sb.from('appraisal_snapshots').select('*').eq('appraisal_id', id); s = !error && data ? data[0] : null; } catch (_) { s = null; }
+    if (!$('#main .loading')) return;
+    if (!s) return viewPortalMissing('This appraisal hasn\'t been sent, so there is no copy to show.');
+    const ev = await apCopyEv(s.content, apAgentLink);
+    if (!$('#main .loading')) return;
+    main().innerHTML = `<div class="view-pad apv" id="apvCopy"><span class="agent-flag no-print">Only you see this</span><p class="small no-print">Version ${esc(s.version)}, sent ${esc(fmtDT(s.sent_at))}. This is exactly what they see, frozen when it was sent.</p>
+      <div class="toolbar no-print">${plink(`appraisals/${id}`, 'Back to the appraisal', 'btn ghost')}</div><div id="apvDoc"></div></div>`;
+    $('#apvDoc').innerHTML = APPR.render(apCopyRec(s.content), ev); abWireVideos($('#apvDoc'));
+    top();
+  }
+
+  // the vendor's own page: the newest copy sent to them, behind their email sign-in
+  async function viewVendorAppraisal(id) {
+    JCTX.pid = null; JVIEW = {};
+    header('Your appraisal', '', 0); actions(false);
+    main().innerHTML = '<div class="loading">Loading...</div>';
+    let d = null, err = null;
+    try { const { data, error } = await sb.rpc('vendor_appraisal_read', { p_id: id }); if (error) err = error; else d = data; } catch (e) { err = e; }
+    if (!d || !d.content) {
+      main().innerHTML = `<div class="login-card" id="apvNone"><h1>This appraisal isn't here</h1><p class="lede">${netErr(err) ? 'Check you have signal, then reload the page.' : `There's no appraisal for <span translate="no">${esc((SESSION && SESSION.user && SESSION.user.email) || 'this email')}</span> at this link. Check you signed in with the email address Tim sent it to.`}</p><p class="small">Questions? Call or text Tim on <strong>027 562 7207</strong>.</p></div>`;
+      top(); return;
+    }
+    apNotify(d.event_id);
+    // a plan they built on the packages page, brought back to this appraisal (saved once; the builder keeps nothing)
+    let saved = false;
+    try { const pend = JSON.parse(localStorage.getItem('apPlan') || 'null');
+      if (pend && pend.chain === d.chain_id && pend.sel && typeof pend.sel === 'object') {
+        const { data: r, error: e } = await sb.rpc('vendor_appraisal_plan_save', { p_snapshot: d.snapshot_id, p_plan: { sel: pend.sel, band: pend.band || null, total: +pend.total || 0, on_request: +pend.on_request || 0 } });
+        if (!e && r) { saved = true; d.plan = { sel: pend.sel, band: pend.band, total: +pend.total || 0, on_request: +pend.on_request || 0 }; apNotify(r.event_id); localStorage.removeItem('apPlan'); }
+        else if (e && !netErr(e)) localStorage.removeItem('apPlan');
+      } } catch (_) { }
+    const c = d.content, ev = await apCopyEv(c, apVendorLink(d.snapshot_id));
+    if (!$('#main .loading')) return;
+    const media = Object.keys(c.photos || {}).length + Object.keys(c.assets || {}).length + Object.keys(c.homePhotos || {}).length;
+    const rec = ((c.sections || []).find(s => s && s.type === 'plans') || { items: [] }).items.find(p => p && p.rec);
+    main().innerHTML = `<div class="view-pad apv apv-vendor" id="apvVendor">
+      <p class="small no-print" id="apvSentLine">${d.version > 1 ? `Updated by Tim McGuire on ${esc(fmtDate(d.sent_at))}. This is the newest version.` : `From Tim McGuire, ${esc(fmtDate(d.sent_at))}.`} Private to you.</p>
+      <div id="apvDoc"></div>
+      ${apPlanCardHTML(d.plan, saved)}
+      <section class="card no-print" id="apvNext"><h2>${d.prelisting_id ? 'Your questions' : 'Ready for the next step?'}</h2>
+        <p>${d.prelisting_id ? 'Carry on with the few quick questions, so I can shape the plan around what matters most to you.' : 'Press below and answer a few quick questions, so I can shape the plan around what matters most to you. There\'s no obligation, and nothing to sign yet.'}</p>
+        <div class="toolbar"><button class="btn primary" type="button" id="apvProceed">${d.prelisting_id ? 'Carry on with my questions' : 'I\'d like to proceed'}</button></div></section>
+      ${media ? '<p class="small no-print" id="apvMediaNote">Photos and videos open for a short time each visit. If one stops showing, reload the page.</p>' : ''}
+      <p class="small">Questions at any stage? Call or text Tim on <strong>027 562 7207</strong>.</p></div>`;
+    $('#apvDoc').innerHTML = APPR.render(apCopyRec(c), ev); abWireVideos($('#apvDoc'));
+    // the "Build your own" card opens the campaign builder, starting from the plan Tim recommends, with the way back here
+    const cust = $('#apvDoc .apv-plan[data-plan="custom"]');
+    if (cust) cust.insertAdjacentHTML('beforeend', `<a class="btn ghost no-print" id="apvBuild" href="${esc(apBuildUrl(d.chain_id, rec && rec.key !== 'custom' ? rec.key : ''))}" style="display:inline-block;margin-top:8px;text-decoration:none">${d.plan ? 'Change my plan' : 'Build your own plan'}</a>`);
+    const pb = $('#apvProceed');
+    pb.addEventListener('click', async () => {
+      if (d.prelisting_id) return viewPrelisting(d.prelisting_id, true);
+      pb.disabled = true; atBtn(pb, 'Opening your questions...', 'busy');
+      const { data: r, error: e } = await sb.rpc('vendor_appraisal_proceed', { p_snapshot: d.snapshot_id });
+      if (e || !r || !r.prelisting_id) { pb.disabled = false; atBtn(pb, netErr(e) ? 'No signal. Try again when you have signal.' : 'That didn\'t open. Please try again, or call Tim on 027 562 7207.', 'err'); return; }
+      apNotify(r.event_id);
+      return viewPrelisting(r.prelisting_id, true);
+    });
+    top();
+  }
 
   /* ───────── LW3 phase C (migration 034, APPRAISAL-PLAN.md): comparables, photos, the comparables rule, the market report ───────── */
   const AMB = 'appraisal-media';
@@ -10616,7 +10905,10 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     viewSignRelease = portalWrap('viewSignRelease', viewSignRelease); viewSigning = portalWrap('viewSigning', viewSigning); viewSignTurn = portalWrap('viewSignTurn', viewSignTurn); viewRoundPresent = portalWrap('viewRoundPresent', viewRoundPresent);
   }
   // the onboarding app's own links (an offer form, a signing link, a lawyer's link) always open there, never in the portal
-  if (PORTAL && /[?&](offer|sign|lawyer)=/.test(location.search)) { location.replace(ONBOARDING_URL + location.search); return; }
+  if (PORTAL && /[?&](offer|sign|lawyer|appraisal)=/.test(location.search)) { location.replace(ONBOARDING_URL + location.search); return; }
+  // LW3 phase E (037): a vendor's appraisal link; kept on this device so it opens again after the sign-in email brings them back
+  { const ap = new URLSearchParams(location.search).get('appraisal');
+    if (ap && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(ap)) { try { localStorage.setItem('apOpen', ap.toLowerCase()); } catch (_) { } } }
 
   const offerToken = new URLSearchParams(location.search).get('offer');
   if (offerToken) { const w = $('#langWrap'); if (w) w.hidden = true; viewOfferPublic(offerToken); return; }

@@ -12,7 +12,7 @@ mock database, a rollback test for any migration, an independent review and Tim'
 | C | Comparables: gathering from REINZ/Relab in Tim's signed-in browser, photos and carousels, the comparables rule, the price dots, the Dunedin market report (shared with the quarterly market update) | 4 to 5 |
 | C2 | When the browser can't be reached: upload a report (PDF) for the AI to read, photos fetched from a listing page, and case-by-case suburbs | 2 |
 | B | Their home as a mockup listing, What I heard from you, ideal buyers, video introduction, Google reviews, header (needs LW1 for rooms and photos). Built 28 Nov, migration 036, not applied | 2 to 3 |
-| E | Send to the vendor: frozen snapshot, private signed-in link, short-lived photo links, "I'd like to proceed" | 2 to 3 |
+| E | Send to the vendor: frozen snapshot, private signed-in link, short-lived photo links, "I'd like to proceed". Built 28 Nov, migration 037, not applied | 2 to 3 |
 | F | Paper and print | 1 |
 | D | Bespoke: several titles and units, options that add up, no comparables, net yield | 3 to 4 |
 
@@ -237,6 +237,29 @@ Gathered by a monthly scheduled task in Tim's signed-in browser, from his **"Tim
 - Matching: by `ref`, else `link`, else the reviewer and date. The same review again changes nothing (Tim's tick stays); a review whose
   words, stars or date changed is updated and unticked, so Tim checks it again. At most 500 reviews a pack.
 
+## Phase E in detail (built 28 November 2026, migration 037, not applied; builds on 036)
+
+- **Send** (`/appraisals/<id>/send`, Tim only): Tim ticks who it goes to (the property's owners, ticked, and contacts, and the contact of
+  its open Questions before we meet; never anyone else), reads and edits the email (MAIL.appraisalDraft, in his voice, with
+  [the appraisal link]) and ticks that he has read both. `agent_appraisal_send` makes the frozen copy (`appraisal_snapshots`) as a
+  whitelist on the server and marks the appraisal sent; the notify function (`ap_send`) sends the email with their link
+  (packages.dunnerstunner.co.nz/onboarding/?appraisal=<id>). A failed email is said plainly and can be sent again.
+- **The copy**: Tim's ticked wording only; the shown comparables (never his private note, the source or its link); the header, the video
+  introduction, the mockup's photos and his ticked reviews frozen as they were, by file path; the market months (never market_sales).
+  The wording guard and the contact check (no link, phone or email, Tim's own excepted) run on every string: Tim's own wording that fails
+  stops the send, naming it; another agency's advertisement or a review that fails is left out and listed for him.
+- **The vendor's page**: they sign in with the email code (the link is remembered on the device through the sign-in), and
+  `vendor_appraisal_read` gives the newest copy sent to them, drawn by the same renderer as the present view. Photos and videos come
+  through 600-second links from repo-link, for files listed in that copy only. Anyone else: "This appraisal isn't here".
+- **"I'd like to proceed"** opens their Questions before we meet, linked to this appraisal (`prelistings.appraisal_id`), straight into the
+  questions. **"Build your own"** opens packages.dunnerstunner.co.nz/?ap=<id>#custom from Tim's recommended plan, with "Back to your
+  appraisal" and "Save to my appraisal"; the plan is saved to their appraisal (`appraisal_vendor_plans`) when they are back.
+- **Tim is told** (notify `ap_event`, once each) when they open it, proceed or build a plan; each sits on his Needs you list until he
+  ticks Done, and on the appraisal's "Sent to the vendor" card, with the email's status and what was left out.
+- **Send updated version**: "Make an updated version" copies the newest sent appraisal, its comparables, photos and files into a new
+  draft in the same chain; sending it makes version 2, which the people it is sent to see from then on.
+- Not in this phase: sending the hand-loaded appraisal (it has no set-up); a check of what would be left out before sending.
+
 ## The packs (for the chat that gathers them in Tim's signed-in browser)
 
 Claude produces these as JSON from REINZ (and Relab where REINZ lacks something), and Tim (or Claude) pastes them into the import box.
@@ -356,4 +379,6 @@ build time.
    Valley has plenty of residential homes too, so it is taken case by case, with AI help on whether each sale would appeal to investors.
    Built in C2: a group can be "Case by case"; the AI suggests a verdict per sale and for the subject; only a mismatch is flagged, Tim
    decides, nothing is hidden. Which suburbs are case by case is Tim's data on the screen, never in code.
-5. Phase E: the vendor keeps the copy they were sent until Tim taps "Send updated version".
+5. Phase E: the vendor keeps the copy they were sent until Tim taps "Send updated version". DEFAULT TAKEN (built in phase E, 28 November
+   2026): an updated version is a new draft copied from the newest sent one; sending it makes the next numbered copy; each person sees
+   the newest copy sent to them; older copies stay for Tim.
