@@ -5,9 +5,9 @@
 -- (invented data only, every name and address marked RB), so it runs the same on a stand-in or on one whose appraisal_views is empty.
 -- The agent is the first row of public.agents, as in 032's to 036's tests.
 do $t$
-declare out text := ''; x text; x2 text; x3 text; jh jsonb; n int; j jsonb; j2 jsonb; r record; ok boolean;
+declare out text := ''; x text; x2 text; x3 text; jh jsonb; n int; j jsonb; j2 jsonb; r record; ok boolean; tz text;
   pid uuid; pid2 uuid; aid uuid; aid_bad uuid; hid uuid; c1 uuid; c2 uuid; c3 uuid; c4 uuid; c5 uuid; d1 uuid; d2 uuid; d3 uuid; hd uuid; it uuid; pl0 uuid;
-  sid uuid; sid2 uuid; mid uuid; v2 uuid; v3 uuid; plid uuid; ev bigint;
+  sid uuid; sid2 uuid; mid uuid; v2 uuid; v3 uuid; plid uuid; ev bigint; jh_ag uuid; jh_ag2 uuid;
   views_before text; views_after text; pl_before text; pl_after text;
   agent text := json_build_object('email', (select email from public.agents order by created_at limit 1), 'sub', '22222222-2222-2222-2222-222222222222', 'role', 'authenticated')::text;
   owner text := json_build_object('email', 'rb-owner@example.com', 'sub', '33333333-3333-3333-3333-333333333333', 'role', 'authenticated')::text;
@@ -377,7 +377,7 @@ begin
      and (select bool_and(f->>'size' is not null) from jsonb_array_elements(j->'files') f) then out := out || 'sealed: time, fingerprint, and every listed file with its size; ';
   else out := out || 'SEAL NOT STORED: ' || left(coalesce(j->>'seal_sha256', 'none') || ' ' || coalesce((j->'files')::text, ''), 200) || '; '; end if;
   j := public.agent_appraisal_seal_check(sid);
-  if (j->>'ok')::boolean and j->>'stored' = j->>'computed' then out := out || 'Check the seal: it matches; '; else out := out || 'THE SEAL DOESN''T MATCH A COPY THAT WASN''T TOUCHED; '; end if;
+  if (j->>'ok')::boolean and j->>'stored' = j->>'computed' and (j->>'files_ok')::boolean and jsonb_array_length(j->'files') = 6 then out := out || 'Check the seal: it matches, and all 6 files are as sealed; '; else out := out || 'THE SEAL DOESN''T MATCH A COPY THAT WASN''T TOUCHED; '; end if;
   if (public.agent_appraisal_seal_check(sid2)->>'ok')::boolean then out := out || 'and version 2''s too; '; else out := out || 'VERSION 2''S SEAL DOESN''T MATCH; '; end if;
   execute 'reset role';
   begin update public.appraisal_snapshots set seal_sha256 = repeat('0', 64) where id = sid; out := out || 'THE SEAL CHANGED; '; exception when others then out := out || 'the seal never changes; '; end;
@@ -417,6 +417,112 @@ begin
   update public.appraisal_views set sections = jsonb_build_array(jsonb_build_object('type', 'para', 'text', repeat('Sunny rooms and a big garden. ', 70000))) where id = v3;
   begin perform public.agent_appraisal_send(v3, array['rb-pl@example.com'], 'RB', body); out := out || 'A 2 MB APPRAISAL WAS SENT; ';
   exception when others then if sqlerrm like 'This appraisal is too long to send (its wording is over 2 MB)%' then out := out || 'over 2 MB: said plainly; '; else out := out || 'OVER 2 MB: ' || left(sqlerrm, 120) || '; '; end if; end;
+  -- the seal text: what the downloaded copy carries; its SHA-256 is the fingerprint, and it names who it went to and who sent it
+  j := public.agent_appraisal_seal_check(sid2);
+  if encode(sha256(convert_to(j->>'seal_text', 'UTF8')), 'hex') = j->>'stored' and (j->>'seal_text')::jsonb->'recipients' = '[{"name":"Robin","email":"rb-owner@example.com"}]'::jsonb
+     and (j->>'seal_text')::jsonb->>'sent_by' = agent::jsonb->>'email' and (j->>'files_ok')::boolean and jsonb_array_length(j->'files_changed') = 0
+  then out := out || 'the seal text hashes to the fingerprint, with the recipients and the sender; files as sealed; ';
+  else out := out || 'SEAL TEXT WRONG: ' || left(coalesce((j->>'seal_text')::jsonb->>'recipients', 'none') || ' ' || coalesce((j->>'seal_text')::jsonb->>'sent_by', 'none') || ' ' || coalesce(j->>'files_changed', ''), 200) || '; '; end if;
+  execute 'reset role';
+  -- a listed file missing from storage: never sealed; the send stops, naming it
+  update public.appraisal_views set sections = (select sections from public.appraisal_views where id = aid) where id = v3;
+  -- as the Storage API removes a file (its own setting, put back at once)
+  perform set_config('storage.allow_delete_query', 'true', true);
+  delete from storage.objects where bucket_id = 'property-files' and name = 'properties/' || pid || '/photos/rb-kitchen.jpg';
+  perform set_config('storage.allow_delete_query', 'false', true);
+  x := (select f->>'path' from public.appraisal_snapshots s, jsonb_array_elements(s.files) f where s.id = sid and f->>'path' not like '%rb-kitchen.jpg' limit 1);
+  update storage.objects set metadata = metadata || '{"size": 1}' where name = x;
+  execute 'set local role authenticated'; perform set_config('request.jwt.claims', agent, true);
+  begin perform public.agent_appraisal_send(v3, array['rb-pl@example.com'], 'RB', body); out := out || 'SENT WITH A FILE MISSING; ';
+  exception when others then if sqlerrm = 'A file in this appraisal is missing: rb-kitchen.jpg. Upload it again or take it out, then send again' then out := out || 'a missing file: not sealed, named; '; else out := out || 'MISSING FILE: ' || left(sqlerrm, 120) || '; '; end if; end;
+  -- "Check the seal" compares each sealed file of version 1 with storage now: the gone one and the changed one named
+  j := public.agent_appraisal_seal_check(sid);
+  if not (j->>'files_ok')::boolean and jsonb_array_length(j->'files_changed') = 2
+     and j->'files_changed' @> jsonb_build_array(jsonb_build_object('path', 'properties/' || pid || '/photos/rb-kitchen.jpg', 'status', 'gone'))
+     and j->'files_changed' @> jsonb_build_array(jsonb_build_object('path', x, 'status', 'changed'))
+  then out := out || 'Check the seal: a gone file and a changed file named; '; else out := out || 'FILES NOT CHECKED: ' || left(coalesce(j->>'files_changed', 'none'), 900) || '; '; end if;
+  execute 'reset role';
+  -- an old version when a newer one sent to them is still current: the newer one is their answer (version 1 is past three months)
+  update public.property_people set role = 'owner' where property_id = pid and email = 'rb-owner@example.com';
+  execute 'set local role authenticated'; perform set_config('request.jwt.claims', owner, true);
+  j := public.vendor_appraisal_read(sid);
+  if (j->>'expires_at')::timestamptz <= now() and (j->'newest'->>'expires_at')::timestamptz > now() and (j->'newest'->>'version')::int = 2 then out := out || 'version 1 expired, version 2 current, both told; '; else out := out || 'NEWEST EXPIRY NOT TOLD: ' || left(j->>'newest', 150) || '; '; end if;
+  begin j := public.vendor_appraisal_ask_update(sid); out := out || 'ASKED ON AN OLD VERSION WITH A CURRENT NEWER ONE; ';
+  exception when others then if sqlerrm like 'There''s a newer version of this appraisal%' then out := out || 'an old version with a current newer one: refused; '; else out := out || 'OLD VERSION ASK: ' || sqlerrm || '; '; end if; end;
+  execute 'reset role';
+  -- three months on the UTC calendar, clamped to the month's end as Postgres does, whatever the session's time zone (the portal's
+  -- apExpiresAt gives the same, tests/appraisal-send.test.js)
+  x := '';
+  foreach tz in array array['UTC', 'Pacific/Auckland', 'America/Los_Angeles'] loop
+    perform set_config('timezone', tz, true);
+    for r in select * from (values ('2026-11-28T12:00:00Z', '2027-02-28T12:00:00Z'), ('2026-11-29T12:00:00Z', '2027-02-28T12:00:00Z'),
+        ('2026-11-30T12:00:00Z', '2027-02-28T12:00:00Z'), ('2026-11-30T23:30:00Z', '2027-02-28T23:30:00Z'), ('2026-12-31T08:00:00Z', '2027-03-31T08:00:00Z'),
+        ('2026-08-31T12:00:00Z', '2026-11-30T12:00:00Z'), ('2027-11-30T12:00:00Z', '2028-02-29T12:00:00Z'), ('2027-11-29T10:15:00.123456Z', '2028-02-29T10:15:00.123456Z')) as t(a, b) loop
+      if public.appraisal_expires_at(r.a::timestamptz) <> r.b::timestamptz then x := x || tz || ':' || r.a || ' '; end if;
+    end loop;
+  end loop;
+  perform set_config('timezone', 'UTC', true);
+  if x = '' then out := out || 'expiry: three months, clamped to the month''s end, in any time zone; '; else out := out || 'EXPIRY DATES WRONG: ' || x || '; '; end if;
+  -- ── the agency agreement's appraisal link (Tim, 28 November 2026, 7:12pm: "Just the permalink"): drafts only, this property's sent
+  --    versions only, and the guard on signed agreements unchanged ──
+  execute 'set local role authenticated'; perform set_config('request.jwt.claims', agent, true);
+  x := 'https://packages.dunnerstunner.co.nz/onboarding/?appraisal=' || aid || '&v=2';
+  insert into public.agreements (property_id, address, status, config) values (pid, 'RB 9 Send Street, Rbvale', 'draft', '{"appr":"done","ask":"550000"}') returning id into jh_ag;
+  update public.agreements set config = config || jsonb_build_object('apprLink', x) where id = jh_ag;
+  if (select config->>'apprLink' from public.agreements where id = jh_ag) = x then out := out || 'a draft takes the latest sealed version''s permanent link; '; else out := out || 'THE DRAFT DIDN''T TAKE THE LINK; '; end if;
+  x2 := '';
+  foreach x3 in array array['https://packages.dunnerstunner.co.nz/onboarding/?appraisal=' || aid || '&v=9', 'http://packages.dunnerstunner.co.nz/onboarding/?appraisal=' || aid || '&v=1',
+      'https://rbelsewhere.example.com/onboarding/?appraisal=' || aid || '&v=1', 'https://packages.dunnerstunner.co.nz/onboarding/?appraisal=' || aid, 'RB not a link',
+      'https://packages.dunnerstunner.co.nz/onboarding/?appraisal=' || aid || '&v=1&x=1'] loop
+    begin update public.agreements set config = config || jsonb_build_object('apprLink', x3) where id = jh_ag; x2 := x2 || x3 || ' ';
+    exception when others then if sqlerrm not like 'That isn''t the permanent link of an appraisal sent for this property%' then x2 := x2 || sqlerrm || ' '; end if; end;
+  end loop;
+  begin update public.agreements set config = config || '{"apprLink": 42}' where id = jh_ag; x2 := x2 || 'a number '; exception when others then null; end;
+  if x2 = '' then out := out || 'not a permanent version link of this property: refused, in plain words; '; else out := out || 'BAD LINKS TAKEN: ' || left(x2, 200) || '; '; end if;
+  insert into public.agreements (property_id, address, status, config) values (pid2, 'RB 11 Other Street, Rbvale', 'draft', '{}') returning id into jh_ag2;
+  begin update public.agreements set config = config || jsonb_build_object('apprLink', x) where id = jh_ag2; out := out || 'ANOTHER PROPERTY''S APPRAISAL LINKED; ';
+  exception when others then out := out || 'another property''s appraisal: refused; '; end;
+  update public.agreements set config = config || '{"apprLink": ""}' where id = jh_ag;
+  update public.agreements set config = config - 'apprLink' where id = jh_ag;
+  update public.agreements set config = config || jsonb_build_object('apprLink', 'https://packages.dunnerstunner.co.nz/onboarding/?appraisal=' || aid || '&v=1') where id = jh_ag;
+  out := out || 'cleared, removed and set to version 1 on a draft; ';
+  -- sent: the link stays as it was; other changes Tim may still make to a sent agreement pass as before
+  update public.agreements set status = 'sent', sent_at = now() where id = jh_ag;
+  begin update public.agreements set config = config || jsonb_build_object('apprLink', x) where id = jh_ag; out := out || 'A SENT AGREEMENT''S LINK CHANGED; ';
+  exception when others then if sqlerrm like 'The appraisal link can only be changed on a draft agreement%' then out := out || 'sent: the link can''t change; '; else out := out || 'SENT: ' || sqlerrm || '; '; end if; end;
+  begin update public.agreements set config = config - 'apprLink' where id = jh_ag; out := out || 'A SENT AGREEMENT''S LINK WAS CLEARED; '; exception when others then out := out || 'nor be cleared; '; end;
+  begin update public.agreements set config = config || '{"agent_notes":"RB note"}' where id = jh_ag; out := out || 'other changes to a sent agreement pass as before; ';
+  exception when others then out := out || 'THE LINK GUARD BLOCKED ANOTHER CHANGE: ' || sqlerrm || '; '; end;
+  begin insert into public.agreements (property_id, address, status, config) values (pid, 'RB 9', 'sent', jsonb_build_object('apprLink', x)); out := out || 'A SENT AGREEMENT WAS MADE WITH A LINK; ';
+  exception when others then out := out || 'a new agreement: only a draft takes a link; '; end;
+  insert into public.agreements (property_id, address, status, config) values (pid, 'RB 9 Send Street, Rbvale', 'draft', jsonb_build_object('appr', 'done', 'apprLink', x)) returning id into jh_ag2;
+  out := out || 'a new draft may start with it; ';
+  -- signed: guard_signed_agreement still refuses every change to the terms, the link included, and a signed agreement without a link
+  -- is untouched by the new guard
+  execute 'reset role';
+  insert into public.agreement_people (agreement_id, position, legal_name, email, signed_at) values (jh_ag2, 1, 'Robin Rbowner', 'rb-owner@example.com', now());
+  update public.agreements set status = 'signed', signed_at = now() where id = jh_ag2;
+  execute 'set local role authenticated'; perform set_config('request.jwt.claims', agent, true);
+  begin update public.agreements set config = config - 'apprLink' where id = jh_ag2; out := out || 'A SIGNED AGREEMENT''S LINK WAS CLEARED; '; exception when others then out := out || 'signed: the link stays; '; end;
+  begin update public.agreements set config = config || '{"ask":"1"}' where id = jh_ag2; out := out || 'A SIGNED AGREEMENT''S TERMS CHANGED; ';
+  exception when others then if sqlerrm = 'This agreement has been signed, so its terms can no longer be changed' then out := out || 'and its terms stay, by the signed-agreement guard as before; '; else out := out || 'SIGNED: ' || sqlerrm || '; '; end if; end;
+  update public.agreements set config = config || '{"agent_notes":"RB note"}' where id = jh_ag2;
+  out := out || 'Tim''s own notes still change; ';
+  execute 'reset role';
+
+  -- Done on the expiry item: once per version, seen and notified at once (never a vendor's event to tell), Tim only
+  execute 'set local role authenticated'; perform set_config('request.jwt.claims', owner, true);
+  begin perform public.agent_appraisal_expiry_done(sid2); out := out || 'A VENDOR TICKED THE EXPIRY DONE; '; exception when others then out := out || 'vendor: no expiry Done; '; end;
+  execute 'reset role';
+  execute 'set local role authenticated'; perform set_config('request.jwt.claims', agent, true);
+  ok := public.agent_appraisal_expiry_done(sid2);
+  if ok and not public.agent_appraisal_expiry_done(sid2) then out := out || 'expiry Done: recorded once; '; else out := out || 'EXPIRY DONE NOT ONCE; '; end if;
+  execute 'reset role';
+  select count(*) into n from public.appraisal_events where snapshot_id = sid2 and kind = 'expiry_done' and seen_at is not null and notified_at is not null;
+  if n = 1 and not exists (select 1 from public.appraisal_events where snapshot_id = sid and kind = 'expiry_done') then out := out || 'for that version only, never told; '; else out := out || 'EXPIRY DONE ROWS: ' || n || '; '; end if;
+  execute 'set local role authenticated'; perform set_config('request.jwt.claims', owner, true);
+  select id into ev from public.appraisal_events where snapshot_id = sid2 and kind = 'expiry_done';
+  if public.appraisal_event_mine(ev) then out := out || 'EXPIRY DONE COULD BE TOLD; '; end if;
   execute 'reset role';
 
   -- ── the whitelist keeps what the renderer has a default for missing (re-review of f73d2fb): column headings stay missing when the

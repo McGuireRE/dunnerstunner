@@ -199,6 +199,44 @@ create trigger prelisting_property_after after insert or update on public.prelis
 create trigger touch_prelisting before update on public.prelistings for each row execute function touch_prelisting();
 -- the agreements the triggers above ask about (key-only in the chain): the two live columns they read
 alter table public.agreements add column property_id uuid, add column status text not null default 'draft';
+-- the agreement's appraisal link (037, Tim 28 November 2026: "Just the permalink"): the rest of the live agreements columns, the live
+-- status check, agreement_people's live columns, and the live guard on signed agreements with its trigger (read live 28 November 2026).
+-- Left out: agreements_ref, agreement_property_before/after, agreement_signed_notices, profile_from_agreement and profile_fv_chattels
+-- (they set the reference, file the property, make notices and file answers; none reads or blocks config->'apprLink'). 037's trigger
+-- agreement_appr_link runs beside guard_signed_agreement and never weakens it.
+alter table public.agreements add column ref text unique, add column address text not null default ''::text,
+  add column agreement_version text not null default 'v3.15-26102026'::text, add column config jsonb not null default '{}'::jsonb,
+  add column answers jsonb not null default '{}'::jsonb, add column legal jsonb not null default '{}'::jsonb, add column sent_at timestamptz,
+  add column signed_at timestamptz, add column copy_sent_at timestamptz, add column cooling_off_until timestamptz, add column countersigned_at timestamptz,
+  add column ended_at timestamptz, add column created_at timestamptz not null default now(), add column updated_at timestamptz not null default now(),
+  add column copy_error text,
+  add constraint agreements_status_check check ((status = any (array['draft'::text, 'sent'::text, 'parked'::text, 'signed'::text, 'countersigned'::text, 'cancelled'::text, 'ended'::text])));
+create table if not exists public.agreement_people (id uuid primary key default gen_random_uuid(), agreement_id uuid not null references public.agreements(id),
+  position integer not null default 1, legal_name text not null default ''::text, pref_name text not null default ''::text, email text not null default ''::text,
+  phone text not null default ''::text, user_id uuid, id_verified_at timestamptz, signed_at timestamptz, created_at timestamptz not null default now(), contact_id uuid);
+CREATE OR REPLACE FUNCTION public.guard_signed_agreement()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SET search_path TO 'public'
+AS $function$
+declare signed boolean;
+begin
+  select exists (select 1 from public.agreement_people where agreement_id = old.id and signed_at is not null) into signed;
+  if not signed then return new; end if;
+  if new.address is distinct from old.address or new.answers is distinct from old.answers
+     or (new.config - 'agent_notes') is distinct from (old.config - 'agent_notes') then
+    raise exception 'This agreement has been signed, so its terms can no longer be changed';
+  end if;
+  return new;
+end $function$
+;
+create trigger guard_signed_agreement before update on public.agreements for each row execute function guard_signed_agreement();
+-- live Row Level Security on both (party_read_agreements and party_read_people are left out: they call is_party, which needs the
+-- signing tables; Tim's agent_all policies are what the agreement editor writes through)
+alter table public.agreements enable row level security; alter table public.agreement_people enable row level security;
+create policy agent_all_agreements on public.agreements for all to authenticated using (is_agent()) with check (is_agent());
+create policy agent_all_people on public.agreement_people for all to authenticated using (is_agent()) with check (is_agent());
+grant all on public.agreement_people to authenticated;
 
 -- every function 037 calls or runs beside, word for word as live (md5 of pg_get_functiondef, read live on 28 November 2026)
 do $chk$
@@ -223,6 +261,7 @@ declare want constant jsonb := '{
   "touch_prelisting()": "3c6b39871eeace95df979cd9c9be6c88",
   "pl_mine(uuid)": "1ebd350dbd1821d71820ea0e6c6838d2",
   "pl_save(uuid,jsonb)": "373d33970229a9e341f4ca249def06c1",
+  "guard_signed_agreement()": "760e3d102c39745128881f89f0bf8534",
   "storage.foldername(text)": "93671af66e1fe108a56068ad4137d001"}';
   k text; got text; bad text := '';
 begin

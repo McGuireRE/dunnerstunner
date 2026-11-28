@@ -32,6 +32,11 @@ ${inner}
 <p style="margin-top:28px">Tim McGuire<br>McGuire Real Estate Ltd · Licensed REAA 2008<br>027 562 7207 · tim@mcguire.co.nz</p></div>`;
 }
 
+// the appraisal's permanent version link on an agreement (config.apprLink, Tim 28 November 2026: "Just the permalink"); the database
+// accepts only this form, for the agreement's own property (037 agreements_appr_link). Anything else prints nothing.
+export const APPR_LINK_RE = /^https:\/\/packages\.dunnerstunner\.co\.nz\/onboarding\/\?appraisal=[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}&v=[1-9][0-9]{0,3}$/;
+export const apprLinkOf = (c: any) => (c && c.appr !== "pending" && typeof c.apprLink === "string" && APPR_LINK_RE.test(c.apprLink)) ? c.apprLink : "";
+
 export function frontPageTable(ag: any, people: any[]) {
   const c = ag.config || {}, a = ag.answers || {};
   const [pk, amt] = String(c.pkg || "Later|0").split("|");
@@ -45,7 +50,8 @@ export function frontPageTable(ag: any, people: any[]) {
     ["Property", esc(ag.address)],
     ["Commission", (c.aboveType === "none") ? `${money(num(c.flat))} flat fee, whatever the sale price, plus GST` : (c.aboveType === "amount") ? `${money(num(c.flat))} for a sale price up to ${money(num(c.thr))}, plus a further ${money(num(c.aboveAmt))} if the sale price is above that, plus GST` : `${money(num(c.flat))} for a sale price up to ${money(num(c.thr))}, plus ${esc(c.pct)}% of the portion above, plus GST`],
     ["Costs (incl GST)", esc(costs)],
-    ["Appraisal", c.appr === "pending" ? "Not yet given. The agreement takes effect on receipt of a written appraisal, and the client may cancel within 2 working days of receiving it, at no cost." : `Given. Asking price or median appraised value ${money(num(c.ask))}`],
+    ["Appraisal", c.appr === "pending" ? "Not yet given. The agreement takes effect on receipt of a written appraisal, and the client may cancel within 2 working days of receiving it, at no cost." : `Given. Asking price or median appraised value ${money(num(c.ask))}`
+      + (apprLinkOf(c) ? `<br>Written appraisal: <a href="${esc(apprLinkOf(c))}" style="color:#2B2A28;word-break:break-all">${esc(apprLinkOf(c))}</a>` : "")],
   ];
   return `<table style="border-collapse:collapse;width:100%">${rows.map(([k, v]) => `<tr><td style="padding:8px 10px 8px 0;border-bottom:1px solid #E4E0DA;color:#6E6A65;vertical-align:top;white-space:nowrap">${k}</td><td style="padding:8px 0;border-bottom:1px solid #E4E0DA">${v}</td></tr>`).join("")}</table>`;
 }

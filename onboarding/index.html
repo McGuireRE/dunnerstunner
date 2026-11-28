@@ -10429,11 +10429,14 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         go: apOpenPage(s.appraisal_id), done: async () => { await must(sb.rpc('agent_appraisal_events_seen', { p_ids: [e.id] })); } }); });
     // an appraisal two weeks from its three-month validity, for a property not yet listed: the newest version of each appraisal sent
     const allSnaps = await quiet(sb.from('appraisal_snapshots').select('id,appraisal_id,chain_id,property_id,version,sealed_at'));
+    // ticked Done (agent_appraisal_expiry_done): that version's item stays away; a newer version brings its own
+    const expDone = allSnaps.length ? new Set((await quiet(sb.from('appraisal_events').select('snapshot_id').eq('kind', 'expiry_done'))).map(e => e.snapshot_id)) : new Set();
     const NOT_LISTED = ['appraisal', 'questionnaire', 'plan', 'accepted', 'agreement'];
     Object.values(allSnaps.reduce((m, s) => { if (!m[s.chain_id] || m[s.chain_id].version < s.version) m[s.chain_id] = s; return m; }, {})).forEach(s => {
-      const pr = props.find(p => p.id === s.property_id); if (!pr || !NOT_LISTED.includes(pr.stage) || !s.sealed_at) return;
+      const pr = props.find(p => p.id === s.property_id); if (!pr || !NOT_LISTED.includes(pr.stage) || !s.sealed_at || expDone.has(s.id)) return;
       const ex = apExpiresAt(s.sealed_at); if (AP_NOW() < ex.getTime() - 14 * 864e5) return;
-      needs.push({ what: `Appraisal for ${pr.address || 'a property'} ${AP_NOW() >= ex.getTime() ? 'expired' : 'expires'} ${apDay(ex)}`, where: pr.address || 'Appraisal', sub: 'Its price estimate is three months old then. Send an updated version.', apExpiry: s.id, go: apOpenPage(s.appraisal_id) }); });
+      needs.push({ what: `Appraisal for ${pr.address || 'a property'} ${AP_NOW() >= ex.getTime() ? 'expired' : 'expires'} ${apDay(ex)}`, where: pr.address || 'Appraisal', sub: 'Its price estimate is three months old then. Send an updated version.', apExpiry: s.id, go: apOpenPage(s.appraisal_id),
+        done: async () => { await must(sb.rpc('agent_appraisal_expiry_done', { p_snapshot: s.id })); } }); });
     amails.forEach(m => { const s = asnaps.find(x => x.id === m.snapshot_id); if (!s) return; const pr = props.find(p => p.id === s.property_id);
       needs.push({ what: m.status === 'sending' ? 'An appraisal email may have gone: check it' : 'An appraisal email didn\'t go', where: (pr && pr.address) || 'Appraisal', sub: 'The appraisal is sent; the email needs you', hot: true, go: apOpenPage(s.appraisal_id) }); });
     // offers from the form that Tim hasn't opened yet (offers phase 1)
@@ -10889,6 +10892,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <div class="choices">${TF.radio('c', 'appr', 'done', 'Written appraisal given', '', 'done')}${TF.radio('c', 'appr', 'pending', 'Not yet', 'The agreement becomes conditional on them receiving your written appraisal', 'done')}</div>
       <div data-treveal="c:appr:done"><div class="row2 stack">${TF.text('c', 'ask', 'Price for the commission example', { im: 'numeric' })}${TF.select('c', 'askBasis', 'Based on', [['asking', 'Client\'s asking price'], ['median', 'Median appraised value']], 'asking')}</div>
         ${TF.text('c', 'apprUrl', 'Appraisal web address <span class="opt">(clause 23.1, optional)</span>', { type: 'url', ph: 'Leave blank if given in writing' })}</div>
+      ${tApprLinkHTML()}
       <h2>Dates and method</h2>
       <div class="row2 stack">${TF.text('c', 'start', 'Commencement date <span class="opt">(blank = on signing)</span>', { type: 'date' })}${TF.select('c', 'method', 'Method of sale', ['', 'Auction', 'Tender', 'Deadline sale', 'Price by negotiation', 'Fixed price', 'Expressions of interest', 'Timed sale', 'Ballot'], '')}</div>
       ${TF.text('c', 'methodDate', 'Auction, tender, deadline or ballot date and time', { opt: true, ph: 'For example: Thu 26 Nov 2026, 4pm' })}
@@ -10914,7 +10918,30 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <h2>Identity checks</h2>
       ${TF.select('c', 'aml', 'How the sellers are verified', [['Manual', 'Manual: I check ID myself'], 'Halo', 'APLYiD', 'First AML', 'Cloudcheck', 'Dwellhub'], 'Manual')}`;
   }
+  // the written appraisal's permanent link on the front page (config.apprLink, Tim 28 November 2026: "Just the permalink"). Offered on a
+  // draft only (not sent, nobody signed); the database refuses it on anything else, and accepts only a sent version of this property.
+  const tApprDraft = () => (T.ag.status || 'draft') === 'draft' && !T.people.some(x => x.signed_at);
+  function tApprLinkHTML() {
+    const link = T.c.apprLink || '';
+    if (!tApprDraft()) return link ? `<p class="small" id="tApprLink">Appraisal link on the front page: <span translate="no" style="overflow-wrap:anywhere">${esc(link)}</span></p>` : '';
+    return `<div class="card tight" id="tApprLinkCard"><div class="f" style="margin-top:0">Appraisal link on the front page <span class="opt">(optional)</span></div>
+      ${link ? `<p class="small" id="tApprLink" translate="no" style="overflow-wrap:anywhere">${esc(link)}</p>` : '<p class="small" id="tApprLink">None. The front page shows only that a written appraisal was given.</p>'}
+      <div class="toolbar"><button class="btn ghost" type="button" id="tApprUse">Use the latest sealed appraisal</button>${link ? '<button class="btn link" type="button" id="tApprClear">Clear</button>' : ''}</div></div>`;
+  }
+  function tApprLinkBind() {
+    const use = $('#tApprUse'); if (use) use.addEventListener('click', async () => {
+      if (!T.ag.property_id) { atBtn(use, 'Save the agreement on its property file first, then try again.', 'err'); return; }
+      use.disabled = true; atBtn(use, 'Finding it...', 'busy');
+      let s = null, bad = null; try { const { data, error } = await sb.from('appraisal_snapshots').select('chain_id,version,sent_at').eq('property_id', T.ag.property_id).order('sent_at', { ascending: false }).limit(1); bad = error; s = !error && data ? data[0] : null; } catch (e) { bad = e; }
+      use.disabled = false;
+      if (!s) { atBtn(use, bad ? 'Not found: check you have signal, then try again.' : 'No appraisal has been sent for this property yet.', 'err'); return; }
+      tCollect(); T.c.apprLink = apVersionUrl(s.chain_id, s.version); T.c.appr = 'done'; tShow(0);
+      const u = $('#tApprUse'); if (u) atBtn(u, `Version ${s.version}, sent ${fmtDate(s.sent_at)}. It's kept when you save the agreement.`, 'ok');
+    });
+    const clr = $('#tApprClear'); if (clr) clr.addEventListener('click', () => { tCollect(); delete T.c.apprLink; tShow(0); });
+  }
   function tBind1() {
+    tApprLinkBind();
     const draw = () => {
       $('#tPeople').innerHTML = T.people.map((p, i) => `<div class="card tight" data-i="${i}">
         <div style="display:flex;justify-content:space-between;align-items:baseline"><h3 style="margin:0">Person ${i + 1}</h3>${p.signed_at ? '<span class="signed-badge">Signed</span>' : `<button class="btn link" type="button" data-rm="${i}">Remove</button>`}</div>
@@ -11188,7 +11215,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <h2>Front page</h2>
       <div class="card"><table class="sum">
         <tr><td>Commission</td><td style="white-space:normal">${esc(commText(cfg))}</td></tr>
-        <tr><td>Appraisal</td><td style="white-space:normal">${cfg.appr === 'pending' ? 'Not yet given: conditional' : 'Given, asking ' + money(num(cfg.ask))}</td></tr>
+        <tr><td>Appraisal</td><td style="white-space:normal">${cfg.appr === 'pending' ? 'Not yet given: conditional' : 'Given, asking ' + money(num(cfg.ask)) + (cfg.apprLink ? `<br><span class="small" translate="no" style="overflow-wrap:anywhere">${esc(cfg.apprLink)}</span>` : '')}</td></tr>
         <tr><td>Costs on signing</td><td style="white-space:normal">${[limAmt(cfg) ? 'LIM ' + money(limAmt(cfg)) : 'No LIM', adminAmt(cfg) ? 'admin fee ' + money(adminAmt(cfg)) : 'no admin fee'].join(', ')}</td></tr>
         <tr><td>Marketing</td><td style="white-space:normal">${an.mkt === 'later' || pkgOf(cfg).name === 'Later' ? 'To be agreed' : esc(pkgOf(cfg).label) + ' ' + money(pkgOf(cfg).amt)}${an.pay ? ' · Paying: ' + esc(an.pay) : ''}</td></tr>
         <tr><td>Legal advice</td><td style="white-space:normal">${esc((ag.legal || {}).choice === 'have' ? 'Received' : (ag.legal || {}).choice === 'waive' ? 'Went ahead without' : (ag.legal || {}).status === 'sent' ? 'With lawyer' : 'Not answered yet')}</td></tr>
@@ -13318,6 +13345,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         ${row('B. Property', esc(ag.address) + (c.owners ? `<br><span class="small">Registered owners: ${esc(c.owners)}${c.title ? ' · ' + esc(c.title) : ''}</span>` : ''))}
         ${row('C. Commencement', c.appr === 'pending' ? 'On receipt of written appraisal' : esc(c.start ? fmtDate(c.start) : 'On signing') + '. Review date 90 days after commencement')}
         ${row('D. Commission', esc(commText(c)) + (c.appr === 'pending' ? '' : `<br><span class="small">At ${money(num(c.ask))}: ${money(r2(commission(c, num(c.ask))))} plus GST</span>`))}
+        ${c.appr !== 'pending' && c.apprLink ? row('Written appraisal', `<span translate="no" style="overflow-wrap:anywhere">${esc(c.apprLink)}</span>`) : ''}
         ${row('E. Costs on signing', [limAmt(c) ? 'LIM ' + money(limAmt(c)) : '', adminAmt(c) ? 'administration fee ' + money(adminAmt(c)) : '', 'marketing ' + (later ? 'to be agreed' : esc(pk.label) + ' ' + money(pk.amt))].filter(Boolean).join(', ') + ' (including GST)')}
         ${c.method ? row('Method of sale', esc(c.method)) : ''}
         ${c.appr === 'pending' ? row('Condition', 'Takes effect on receipt of a written appraisal. The client may cancel within 2 working days of receiving it, at no cost.') : ''}
@@ -17753,7 +17781,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
             ${m.status === 'failed' || m.status === 'queued' ? `<div class="toolbar"><button class="btn ghost" type="button" data-apresend="${esc(m.id)}">Send the email again</button></div>` : ''}
             ${m.status === 'sending' ? `<div class="toolbar"><button class="btn ghost" type="button" data-apunstick="${esc(m.id)}">I've checked: it didn't arrive</button></div>` : ''}` : ''}
           ${(s.left_out || []).length ? `<p class="small" style="margin:6px 0 0">Left out of their copy: ${(s.left_out || []).map(x => esc(x.what === 'review' ? 'a review by ' + (x.reviewer || 'someone') : 'the advertisement wording for ' + (x.comp || 'a comparable')) + ' (' + esc(x.why || '') + ')').join('; ')}.</p>` : ''}</div>`; }).join('<hr class="soft" style="margin:12px 0">')}
-      ${sd.evs.filter(e => e.kind !== 'sent').length ? `<h3 style="margin-top:14px">What they did</h3><ul class="needs" id="apEvents">${sd.evs.filter(e => e.kind !== 'sent').map(e => { const s = sd.snaps.find(x => x.id === e.snapshot_id);
+      ${sd.evs.filter(e => AP_EV[e.kind]).length ? `<h3 style="margin-top:14px">What they did</h3><ul class="needs" id="apEvents">${sd.evs.filter(e => AP_EV[e.kind]).map(e => { const s = sd.snaps.find(x => x.id === e.snapshot_id);
           return `<li><div class="what"><strong translate="no">${esc(apWho(s, e.actor))}</strong> <span>${esc(AP_EV[e.kind] || e.kind)}</span><span class="small">${esc(fmtDT(e.at))}${s ? ', version ' + s.version : ''}</span></div></li>`; }).join('')}</ul>` : '<p class="small" id="apEvents">Not opened yet.</p>'}
       ${sd.plans.length ? `<h3 style="margin-top:14px">Plans they built</h3>${sd.plans.map(p => `<p class="small ap-plan" style="margin:4px 0"><strong translate="no">${esc(apWho(newest, p.email))}</strong>, ${esc(fmtDT(p.created_at))}: ${esc(apPlanText(p.plan))}${(p.plan || {}).total != null ? `, ${esc(money(+p.plan.total))} incl. GST` : ''}</p>`).join('')}` : ''}
       <div class="toolbar">${mine ? plink(`appraisals/${rec.id}/copy`, 'See their copy', 'btn ghost') : ''}${sd.draft ? plink(`appraisals/${sd.draft.id}/setup`, 'Open the updated version', 'btn primary') : rec.status === 'sent' && newest.appraisal_id === rec.id ? '<button class="btn primary" type="button" id="apNewVer">Make an updated version</button>' : ''}</div>
@@ -17968,10 +17996,15 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     ck.addEventListener('click', async () => { ck.disabled = true; atBtn(ck, 'Checking...', 'busy');
       const { data, error } = await sb.rpc('agent_appraisal_seal_check', { p_snapshot: s.id }); ck.disabled = false;
       if (error || !data) { atBtn(ck, netErr(error) ? 'Not checked: no signal. Try again.' : 'Not checked: ' + ((error && error.message) || 'try again.'), 'err'); return; }
-      atBtn(ck, data.ok ? `The seal matches: this copy is exactly as it was sealed on ${apSealTime(data.sealed_at)} (reference ${String(data.stored).slice(0, 12)}).` : `The seal doesn't match: this copy is not as it was sealed. Sealed reference ${String(data.stored).slice(0, 12)}, now ${String(data.computed).slice(0, 12)}. Keep this page and tell your support person.`, data.ok ? 'ok' : 'err'); });
+      // each sealed file against storage now: any that has changed or gone is named
+      const chg = (data.files_changed || []).map(f => `${String(f.path || '').replace(/^.*\//, '')} (${f.status === 'gone' ? 'gone' : 'changed'})`);
+      const files = chg.length ? ` But ${chg.length === 1 ? 'this file has' : 'these files have'} changed or gone since it was sealed: ${chg.join(', ')}.` : ` Every file it lists (${(data.files || []).length}) is as it was sealed.`;
+      atBtn(ck, data.ok ? `The seal matches: this copy is exactly as it was sealed on ${apSealTime(data.sealed_at)} (reference ${String(data.stored).slice(0, 12)}).${files}` : `The seal doesn't match: this copy is not as it was sealed. Sealed reference ${String(data.stored).slice(0, 12)}, now ${String(data.computed).slice(0, 12)}. Keep this page and tell your support person.${chg.length ? files : ''}`, data.ok && !chg.length ? 'ok' : 'err'); });
     const dl = $('#apvSealDown');
     dl.addEventListener('click', async () => { dl.disabled = true; atBtn(dl, 'Making the file...', 'busy');
-      try { const html = await apSealedFile(s); const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
+      let chk = null; try { const { data, error } = await sb.rpc('agent_appraisal_seal_check', { p_snapshot: s.id }); chk = !error && data && data.seal_text ? data : null; } catch (_) { chk = null; }
+      if (!chk) { dl.disabled = false; atBtn(dl, 'Not made: the seal couldn\'t be read. Check you have signal, then try again.', 'err'); return; }
+      try { const html = await apSealedFile(s, chk.seal_text); const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
         a.download = `appraisal-v${s.version}-${String(s.seal_sha256).slice(0, 12)}.html`; document.body.appendChild(a); a.click(); a.remove();
         atBtn(dl, 'Downloaded: one file with the appraisal as they see it, its photos, the seal line and the sealed record.', 'ok'); } catch (_) { atBtn(dl, 'Not made. Check you have signal, then try again.', 'err'); }
       dl.disabled = false; });
@@ -17980,17 +18013,22 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   // the sealed copy as one self-contained HTML file, for Tim's records or an auditor: the page's own styles, the appraisal as drawn now
   // with every photo embedded (videos as their still frame, or a note), the seal line, the permanent link, and the sealed record itself
   // (the version, sealed_at, the files and the content exactly as stored, with the fingerprint and how it is worked out)
-  async function apSealedFile(s) {
+  // sealText: the exact seal text from the database (agent_appraisal_seal_check), so the file can be checked on its own with any SHA-256 tool
+  async function apSealedFile(s, sealText) {
     const doc = $('#apvDoc').cloneNode(true);
-    const toData = async url => { const b = await (await fetch(url)).blob(); return await new Promise(r => { const f = new FileReader(); f.onload = () => r(f.result); f.readAsDataURL(b); }); };
-    for (const img of $$('img', doc)) { try { if (img.src && !/^data:/.test(img.src)) img.src = await toData(img.src); } catch (_) { img.remove(); } }
+    const toData = async url => { const res = await fetch(url); if (!res.ok) throw new Error('not fetched'); const b = await res.blob(); return await new Promise(r => { const f = new FileReader(); f.onload = () => r(f.result); f.readAsDataURL(b); }); };
+    const missed = [];
+    for (const img of $$('img', doc)) { try { if (img.src && !/^data:/.test(img.src)) img.src = await toData(img.src); }
+      catch (_) { const nm = decodeURIComponent(String(img.getAttribute('src') || '').split('?')[0].replace(/^.*\//, '')) || 'a photo'; missed.push(nm);
+        img.replaceWith(Object.assign(document.createElement('p'), { className: 'small apv-missed', textContent: `(A photo that couldn't be included in this file: ${nm}.)` })); } }
     $$('video', doc).forEach(v => { const p = v.getAttribute('poster'); v.replaceWith(Object.assign(document.createElement('p'), { className: 'small', textContent: p ? '(A video. Its still frame is shown below.)' : '(A video, not included in this file.)' })); });
     $$('.no-print, button', doc).forEach(x => x.remove());
     const styles = $$('style').map(x => x.textContent).join('\n');
     const rec = { format: 'mre.appraisal-seal/1', version: s.version, sealed_at: s.sealed_at, seal_sha256: s.seal_sha256, permanent_link: apVersionUrl(s.chain_id, s.version), files: s.files, content: s.content };
     return `<!doctype html><html lang="en-NZ"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${esc(s.content.title || 'Appraisal')} (sealed copy, version ${esc(s.version)})</title><style>${styles}</style></head>
-<body><main style="max-width:760px;margin:0 auto;padding:24px 16px"><div class="apv">${apSealLine(s)}<p class="small">Permanent link: ${esc(rec.permanent_link)}</p><p class="small">The price estimate was for the date it was sealed; an appraisal is current for three months from then.</p>${doc.innerHTML}
-<hr><p class="small">The sealed record follows. Its fingerprint is the SHA-256 of the seal text {format, version, sealed_at, content, files} as the database writes it; "Check the seal" in the portal works it out again from the stored copy.</p></div></main>
+<body><main style="max-width:760px;margin:0 auto;padding:24px 16px"><div class="apv">${apSealLine(s)}<p class="small">Permanent link: ${esc(rec.permanent_link)}</p><p class="small">The price estimate was for the date it was sealed; an appraisal is current for three months from then.</p>${missed.length ? `<p class="small" id="sealed-missed">${missed.length === 1 ? 'One photo' : missed.length + ' photos'} couldn't be fetched for this file, so ${missed.length === 1 ? 'it is' : 'they are'} named where ${missed.length === 1 ? 'it' : 'they'} would be: ${esc(missed.join(', '))}.</p>` : ''}${doc.innerHTML}
+<hr><h2>The seal</h2><p class="small" id="seal-note">To check this copy, compute the SHA-256 of the seal text below; it should equal ${esc(s.seal_sha256)}.</p>
+<textarea readonly id="seal-text" rows="6" style="width:100%;font:12px monospace" aria-label="The seal text">${esc(sealText)}</textarea></div></main>
 <script type="application/json" id="sealed-record">${JSON.stringify(rec).replace(/</g, '\\u003c')}<\/script></body></html>`;   // <\/script>: this code sits inside a script tag on the page
   }
 
@@ -18000,16 +18038,24 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   const AP_NOW = () => Date.now();
   const apDay = t => new Date(t).toLocaleDateString('en-NZ', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Pacific/Auckland' });
   const apSealTime = t => new Date(t).toLocaleString('en-NZ', { day: 'numeric', month: 'long', year: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: 'Pacific/Auckland' }) + ' NZT';
-  // three calendar months on from sealing, as the database works it out (interval '3 months')
-  const apExpiresAt = t => { const e = new Date(t); e.setUTCMonth(e.getUTCMonth() + 3); return e; };
-  const apExpired = t => !!t && AP_NOW() >= apExpiresAt(t).getTime();
+  // three calendar months on from sealing, exactly as the database works it out (appraisal_expires_at: on the UTC calendar, clamped to
+  // the month's end, so 30 November gives 28 February and 31 August gives 30 November; setUTCMonth alone would roll into March or December)
+  const apExpiresAt = t => { const s = new Date(t), y = s.getUTCFullYear(), m = s.getUTCMonth() + 3, last = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+    const e = new Date(s.getTime()); e.setUTCFullYear(y, m, Math.min(s.getUTCDate(), last)); return e; };
+  // o.expiresAt: the database's own expiry when it gave one (the vendor's page)
+  const apExpired = (t, o) => !!t && AP_NOW() >= (o && o.expiresAt ? new Date(o.expiresAt) : apExpiresAt(t)).getTime();
   // each version's permanent link (the one Tim can cite), and the appraisal's own link (the newest copy sent to them)
   const apVersionUrl = (chain, v) => ONBOARDING_URL + '?appraisal=' + encodeURIComponent(chain) + (v ? '&v=' + encodeURIComponent(v) : '');
   const apSealLine = s => s && s.seal_sha256 ? `<p class="small apv-seal">Sealed ${esc(apSealTime(s.sealed_at))}. Version ${esc(s.version)}. Reference ${esc(String(s.seal_sha256).slice(0, 12))}.</p>` : '';
-  const AP_EXPIRED_WORDS = d => `This appraisal was prepared on ${apDay(d)}. Its price estimate was for that date and is no longer current, as the market moves. Ask for an updated appraisal.`;
+  const AP_EXPIRED_WORDS = (d, newer) => `This appraisal was prepared on ${apDay(d)}. Its price estimate was for that date and is no longer current, as the market moves. ${newer ? 'There\'s a newer version, which is current.' : 'Ask for an updated appraisal.'}`;
+  // o: { button, asked, expiresAt, newer }. newer: a newer version sent to them that is still current, so the newer-version notice
+  // stands in for the button (and the database refuses the ask)
   function apExpiryBar(sealedAt, o) {
-    if (!apExpired(sealedAt)) return '';
-    return `<div class="card warnc apv-expired" id="apvExpired" role="status"><p style="margin:0"><strong>${esc(AP_EXPIRED_WORDS(sealedAt))}</strong></p>${o && o.button ? `<div class="toolbar no-print"><button class="btn primary" type="button" id="apvAskUpdate" ${o.asked ? 'disabled' : ''}>${o.asked ? 'Tim has been asked' : 'Ask for an updated appraisal'}</button></div>` : ''}</div>`;
+    o = o || {};
+    if (!apExpired(sealedAt, o)) return '';
+    const btn = o.newer ? `<div class="toolbar no-print"><a class="btn primary" href="${esc(apVersionUrl(o.newer.chain))}" id="apvExpiredNewer" style="text-decoration:none">Open the newest version</a></div>`
+      : o.button ? `<div class="toolbar no-print"><button class="btn primary" type="button" id="apvAskUpdate" ${o.asked ? 'disabled' : ''}>${o.asked ? 'Tim has been asked' : 'Ask for an updated appraisal'}</button></div>` : '';
+    return `<div class="card warnc apv-expired" id="apvExpired" role="status"><p style="margin:0"><strong>${esc(AP_EXPIRED_WORDS(sealedAt, !!o.newer))}</strong></p>${btn}</div>`;
   }
 
   /* ── the vendor page's own extras, all in this one block (the appraisal itself is drawn only by APPR.render): the sent line, the plan
@@ -18029,7 +18075,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const media = Object.keys(c.photos || {}).length + Object.keys(c.assets || {}).length + Object.keys(c.homePhotos || {}).length;
     const nw = d.newest && d.newest.version > d.version ? d.newest : null;
     return { top: `${nw ? `<div class="card note tight no-print" id="apvNewer"><p style="margin:0">There's a newer version of this appraisal, dated ${esc(apDay(nw.sent_at))}. <a href="${esc(apVersionUrl(d.chain_id))}" id="apvNewerLink">Open the newest version</a></p></div>` : ''}
-      ${apExpiryBar(d.sealed_at, { asked: !!d.asked, button: true })}
+      ${apExpiryBar(d.sealed_at, { asked: !!d.asked, button: true, expiresAt: d.expires_at,
+        newer: nw && nw.expires_at && AP_NOW() < new Date(nw.expires_at).getTime() ? { chain: d.chain_id } : null })}
       <p class="small no-print" id="apvSentLine">${d.version > 1 ? `Updated by Tim McGuire on ${esc(fmtDate(d.sent_at))}.${nw ? '' : ' This is the newest version.'}` : `From Tim McGuire, ${esc(fmtDate(d.sent_at))}.`} Private to you.</p>
       ${apSealLine(d)}`,
       bottom: `${apPlanCardHTML(d.plan, ps.saved)}
@@ -18041,7 +18088,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
   }
   function apVendorExtrasWire(d, ps, c, id) {
     // the newest version from an older version's page; asking for an updated appraisal (once per person per version; Tim told once)
-    const nl = $('#apvNewerLink'); if (nl) nl.addEventListener('click', e => { e.preventDefault(); viewVendorAppraisal(d.chain_id); });
+    ['#apvNewerLink', '#apvExpiredNewer'].forEach(q => { const nl = $(q); if (nl) nl.addEventListener('click', e => { e.preventDefault(); viewVendorAppraisal(d.chain_id); }); });
     const ask = $('#apvAskUpdate'); if (ask && !d.asked) ask.addEventListener('click', async () => {
       ask.disabled = true; atBtn(ask, 'Asking Tim...', 'busy');
       let r = null, e = null; try { const x = await sb.rpc('vendor_appraisal_ask_update', { p_snapshot: d.snapshot_id }); r = x.data; e = x.error; } catch (err) { e = err; }

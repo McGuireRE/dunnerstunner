@@ -5,7 +5,7 @@
 //   the REA guide pages unaltered, and the guide receipt with its version in the execution record;
 // - with no guide files, nothing about them is appended, and the app and PDF wording match.
 import { PDFDocument, StandardFonts } from "npm:pdf-lib@1.17.1";
-const [root, out, oldPath, BEFORE_INSP] = Deno.args;
+const [root, out, oldPath, BEFORE_INSP, BEFORE_LINK] = Deno.args;   // BEFORE_LINK: pdf.ts from before the appraisal link (cef272c)
 const NEW = await import("file://" + root + "/fn/pdf.ts");
 const LOAD = await import("file://" + root + "/fn/pdfload.ts");
 const OLD = await import("file://" + oldPath);
@@ -142,6 +142,35 @@ let threw = false; try { await NEW.buildFormPdf({ font, bold, ag, people, form: 
 expect(threw, "an unknown form version is refused, never guessed");
 const hh = (await text(await NEW.buildFormPdf({ font, bold, ag, people, form: { id: "F2", kind: "healthy_homes", form_version: "HH-2026-11", status: "signed", agent_data: { c: { ins3: { a: "N", n: "No underfloor insulation" } }, res: { req: "3.6" } } }, fsigs: fsigs.slice(0, 1), images: {} }), "healthy-homes")).replace(/\s+/g, " ");
 expect(hh.includes("Underfloor insulation ≥R1.3 nationwide Compliant: N. No underfloor insulation") && hh.includes("Required: 3.6") && !hh.includes("Not yet signed by the Licensee"), "Healthy Homes PDF from Tim's stored measurements, no licensee line");
+
+// 4b. The appraisal's permanent link on the front page (Tim, 28 November 2026: "Just the permalink"): printed in full beside the
+// appraisal basis on a draft that has one; nothing new without one, so every agreement without the key prints exactly as before
+const LINK = "https://packages.dunnerstunner.co.nz/onboarding/?appraisal=11111111-aaaa-4aaa-8aaa-000000000001&v=2";
+const draftAg = (cfg: any) => ({ ...ag, status: "draft", signed_at: null, cooling_off_until: null, config: { ...config, ...cfg } });
+const dArgs = (cfg: any) => ({ ...base, ag: draftAg(cfg), sigs: [], appendix: { set: NEW.APPENDIX_SET, reaGuide: null } });
+const withLink = await NEW.buildAgreementPdf(dArgs({ apprLink: LINK }));
+const p1Link = (await text(withLink, "draft-appr-link")).split("\f")[0].replace(/\s+/g, " ");
+expect(p1Link.includes("Written appraisal (permanent link):") && p1Link.includes("https://packages.dunnerstunner.co.nz/onboarding/") && p1Link.includes("?appraisal=11111111-aaaa-4aaa-8aaa-000000000001&v=2"), "the front page prints the appraisal's permanent link in full");
+const noLink = stable(await text(await NEW.buildAgreementPdf(dArgs({})), "draft-no-link"));
+for (const [nm, cfg] of [["blank", { apprLink: "" }], ["not ours", { apprLink: "https://rbelsewhere.example.com/x" }], ["pending", { appr: "pending", apprLink: LINK }]] as [string, any][]) {
+  const t = stable(await text(await NEW.buildAgreementPdf(dArgs(cfg)), "draft-link-" + nm.replace(/ /g, "-")));
+  expect(!t.includes("Written appraisal (permanent link)") && !t.includes("rbelsewhere"), "no link printed (" + nm + ")");
+}
+if (BEFORE_LINK) {
+  const L = await import("file://" + BEFORE_LINK);
+  for (const [nm, args] of [["draft", dArgs({})], ["signed", base], ["signed-phase2", { ...base, sigs: newSigs, appendix: ap2 }]] as [string, any][]) {
+    const nb = await NEW.buildAgreementPdf(args), ob = await L.buildAgreementPdf(args);
+    expect(stable(await text(nb, "nolink-now-" + nm)) === stable(await text(ob, "nolink-before-" + nm)) && (await pages(nb)) === (await pages(ob)), "without a link, the agreement PDF prints exactly as before (" + nm + ")");
+  }
+  expect(noLink === stable(await text(await L.buildAgreementPdf(dArgs({})), "draft-before")), "a draft without a link: the same as before");
+} else expect(false, "the agreement builder from before the appraisal link was not given");
+// the emailed front page (fn/shared.ts frontPageTable, notify): the link in full beside "Given", nothing new without one
+const SH = await import("file://" + root + "/fn/shared.ts");
+expect(String(SH.APPR_LINK_RE) === String(NEW.APPR_LINK_RE), "the email and the PDF accept the same link");
+const fpWith = SH.frontPageTable(draftAg({ apprLink: LINK }), people), fpNone = SH.frontPageTable(draftAg({}), people);
+expect(fpWith.includes(`Given. Asking price or median appraised value $875,000<br>Written appraisal: <a href="${LINK.replace(/&/g, "&amp;")}" style="color:#2B2A28;word-break:break-all">${LINK.replace(/&/g, "&amp;")}</a>`), "the emailed front page shows the link in full");
+expect(fpNone.includes("Given. Asking price or median appraised value $875,000</td>") && !fpNone.includes("Written appraisal"), "without a link, the emailed front page is as before");
+for (const cfg of [{ apprLink: "https://rbelsewhere.example.com/x" }, { appr: "pending", apprLink: LINK }]) expect(!SH.frontPageTable(draftAg(cfg), people).includes("Written appraisal"), "no link in the email: " + JSON.stringify(cfg));
 
 // 5. The app shows the same Complaints procedure the PDF appends, and no em dashes anywhere
 const app = Deno.readTextFileSync(root + "/onboarding/src/app.js");

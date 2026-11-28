@@ -32,7 +32,16 @@ function personGone(r){ const ag=(DB.agreements||[]).find(x=>x.id===r.agreement_
   active(ag.property_id).forEach(x=>{ if(((r.email&&x.email===r.email.toLowerCase())||(!r.email&&norm(x.legal_name)===norm(r.legal_name)))&&!onOther(x)) x.role='former'; }); }
 // the guards on signed records (guard_signed_agreement, guard_signed_person)
 const noNotes=c=>{ const o=Object.assign({},c||{}); delete o.agent_notes; return JSON.stringify(o); };
-function guard(table,r,payload){ if(table==='agreements'&&(DB.agreement_people||[]).some(x=>x.agreement_id===r.id&&x.signed_at)&&(('address' in payload&&payload.address!==r.address)||('answers' in payload&&JSON.stringify(payload.answers)!==JSON.stringify(r.answers))||('config' in payload&&noNotes(payload.config)!==noNotes(r.config)))) throw new Error('This agreement has been signed, so its terms can no longer be changed');
+// 037 agreements_appr_link: config.apprLink is set, changed or cleared only on an unsigned draft, and only to a sent version's permanent
+// link for the agreement's own property (runs before guard_signed_agreement, as the trigger names order them)
+const APPR_LINK_RE=/^https:\/\/packages\.dunnerstunner\.co\.nz\/onboarding\/\?appraisal=([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})&v=([1-9][0-9]{0,3})$/;
+function apprLinkGuard(old,nw){ const ov=old?((old.config||{}).apprLink??null):null, nv=(nw.config||{}).apprLink??null; if(JSON.stringify(ov)===JSON.stringify(nv)) return;
+  if(old&&(old.status!=='draft'||(nw.status||old.status)!=='draft'||(DB.agreement_people||[]).some(x=>x.agreement_id===old.id&&x.signed_at))) throw new Error('The appraisal link can only be changed on a draft agreement that hasn\'t been sent or signed');
+  if(!old&&(nw.status||'draft')!=='draft') throw new Error('The appraisal link can only be set on a draft agreement');
+  if(nv===null||nv==='') return; const m=typeof nv==='string'?APPR_LINK_RE.exec(nv):null, pid=nw.property_id||(old&&old.property_id);
+  if(!m||!(DB.appraisal_snapshots||[]).some(s=>s.chain_id===m[1]&&s.version===+m[2]&&s.property_id===pid)) throw new Error('That isn\'t the permanent link of an appraisal sent for this property. Use "Use the latest sealed appraisal", or clear it'); }
+function guard(table,r,payload){ if(table==='agreements'&&('config' in payload||'status' in payload)) apprLinkGuard(r,Object.assign({},r,payload));
+  if(table==='agreements'&&(DB.agreement_people||[]).some(x=>x.agreement_id===r.id&&x.signed_at)&&(('address' in payload&&payload.address!==r.address)||('answers' in payload&&JSON.stringify(payload.answers)!==JSON.stringify(r.answers))||('config' in payload&&noNotes(payload.config)!==noNotes(r.config)))) throw new Error('This agreement has been signed, so its terms can no longer be changed');
   if(table==='agreement_people'&&r.signed_at&&['legal_name','email','position'].some(k=>k in payload&&payload[k]!==r[k])) throw new Error('This person has signed, so their name and email can no longer be changed');
   if(table==='property_forms'&&(('status' in payload&&(payload.status==='signed')!==(r.status==='signed'))||['signed_at','countersigned_at','document_id','filing_at'].some(k=>k in payload&&(payload[k]??null)!==(r[k]??null)))) throw new Error('A document is only signed or filed by signing it');
   if(table==='property_forms'&&(DB.form_signatures||[]).some(x=>x.form_id===r.id)){ if(['data','agent_data','kind','form_version','agreement_id','property_id'].some(k=>k in payload&&!same(payload[k],r[k]))) throw new Error('This document has been signed, so it can no longer be changed'); if(r.status==='signed'&&'status' in payload&&payload.status!=='signed') throw new Error('This document has been signed by everyone'); }
@@ -386,6 +395,7 @@ function q(table){ logCall('from:'+table);
     if(table==='property_forms'&&op==='delete'&&(DB.property_forms||[]).some(r=>filters.every(f=>f(r))&&r.kind==='vendor_declaration'&&!(DB.form_signatures||[]).some(x=>x.form_id===r.id))) throw new Error("The Vendor Declaration is the vendors' own record, so it can't be removed here");
     if(op==='insert'){ const arr=(Array.isArray(payload)?payload:[payload]).map(p=>{const r=Object.assign({id:uid(),created_at:now(),updated_at:now()},p); if(table==='agreements'){r.ref=r.ref||'MRE-2026-'+(1001+T.length); r.status=r.status||'draft'; r.config=r.config||{}; r.answers=r.answers||{}; r.legal=r.legal||{}; r.agreement_version='v3.15-26102026';} if(table.endsWith('events')) r.at=now(); if(table==='signatures') r.signed_at=now(); if(table==='agreement_variations'){r.status='draft';} if(table==='prelistings'){r.status=r.status||'appraisal';r.answers=r.answers||{};r.plan=r.plan||{}; if(!r.property_id){ const p=newProp(r.address); r.property_id=p.id; } mergePerson(r.property_id,r.contact_name,'',r.contact_email,'',null,'appraisal'); }
       if(table==='agreements'&&!r.property_id){ const p=newProp(r.address); p.title_ref=(r.config||{}).title||null; p.owners_on_title=(r.config||{}).owners||null; r.property_id=p.id; }
+      if(table==='agreements') apprLinkGuard(null,r);
       if(table==='property_forms'&&(r.status==='signed'||r.signed_at||r.countersigned_at||r.document_id||r.filing_at)) throw new Error('A document is only signed or filed by signing it'); if(table==='property_forms'&&r.kind==='vendor_declaration') r.data=inspPrefill(r.property_id,r.data||{}); if(table==='property_people'){ r.role=r.role||'owner'; r.name_from=r.name_from||r.source; } if(table==='properties'){ r.ownership=r.ownership||{}; r.description=r.description||{}; r.disclosures=r.disclosures||{}; r.stage=r.stage||'appraisal'; r.stage_at=now(); } T.push(r); if(table==='agreements') syncAgreement(r); if(table==='prelistings') syncPrelisting(r); if(table==='agreement_people') personSync(r); return r;}); save(); return {data: single?arr[0]:arr, error:null}; }
     let out=T.filter(r=>filters.every(f=>f(r)));
     if(op==='select'&&S&&S.user&&!AGENTS.includes(S.user.email)){ if(table==='properties') out=out.filter(r=>propParty(r.id)); if(table==='property_people') out=out.filter(r=>(r.role||'owner')!=='former'&&propParty(r.property_id));
@@ -669,11 +679,13 @@ function lw3cRpc(name,a,me){ if(offline()) return bad('Failed to fetch');
 // localStorage mockApCalls: every call, for the tests. Decided (Tim, 28 November 2026, open question 7): someone Tim sets aside (former)
 // loses access at once, even with an open Questions before we meet, as appraisal_vendor_ok does.
 const AP_RPCS=['agent_appraisal_send','agent_appraisal_new_version','agent_appraisal_events_seen','agent_appraisal_mail_unstick','vendor_appraisals_mine','vendor_appraisal_read','appraisal_vendor_can_read','vendor_appraisal_proceed','vendor_appraisal_plan_save','appraisal_event_mine',
-  'vendor_appraisal_ask_update','agent_appraisal_seal_check'];
+  'vendor_appraisal_ask_update','agent_appraisal_seal_check','agent_appraisal_expiry_done'];
 // the seal (appraisal_seal_of): the mock's own canonical text (sorted keys) and its SHA-256; the same idea as the database's jsonb text
 const apCanon=v=>Array.isArray(v)?'['+v.map(apCanon).join(',')+']':v&&typeof v==='object'?'{'+Object.keys(v).sort().map(k=>JSON.stringify(k)+':'+apCanon(v[k])).join(',')+'}':JSON.stringify(v===undefined?null:v);
-const apSealOf=(ver,at,content,files)=>window.SIGN.sha256Hex(apCanon({format:'mre.appraisal-seal/1',version:ver,sealed_at:at,content,files}));
-const apPlus3=t=>{ const e=new Date(t); e.setUTCMonth(e.getUTCMonth()+3); return e; };
+const apSealText=(ver,at,content,files,recipients,sent_by)=>apCanon({format:'mre.appraisal-seal/1',version:ver,sealed_at:at,content,files,recipients,sent_by});
+const apSealOf=(...a)=>window.SIGN.sha256Hex(apSealText(...a));
+// appraisal_expires_at: three months on the UTC calendar, clamped to the month's end as Postgres does
+const apPlus3=t=>{ const s=new Date(t), y=s.getUTCFullYear(), m=s.getUTCMonth()+3, last=new Date(Date.UTC(y,m+1,0)).getUTCDate(); const e=new Date(s.getTime()); e.setUTCFullYear(y,m,Math.min(s.getUTCDate(),last)); return e; };
 const AP_TABLES=['appraisal_snapshots','appraisal_versions','appraisal_mail','appraisal_events','appraisal_vendor_plans'];
 const APS=()=>(DB.appraisal_snapshots||=[]), APV=()=>(DB.appraisal_versions||=[]), APM=()=>(DB.appraisal_mail||=[]), APE=()=>(DB.appraisal_events||=[]), APP=()=>(DB.appraisal_vendor_plans||=[]);
 // appraisal_contact_problem(): a link, phone number or email, Tim's own phone and email taken out first
@@ -757,8 +769,11 @@ function apRpc(name,a,me){ if(offline()) return bad('Failed to fetch');
       let b; try{ b=apBuild(r); }catch(e){ return bad(e.message); }
       if(JSON.stringify(b.content).length>+(localStorage.getItem('mockApMaxContent')||2000000)) return bad('This appraisal is too long to send (its wording is over 2 MB). Shorten or remove some sections, then send again');
       const chain=apChain(r.id), ver=APS().filter(s=>s.chain_id===chain).reduce((m,s)=>Math.max(m,s.version),0)+1;
-      const sealedAt=new Date(Date.now()).toISOString(), files=b.paths.map(p=>({bucket:p.bucket,path:p.path,size:(SO()[p.path]||{}).size??null,etag:null}));
-      const s={id:uid(),appraisal_id:r.id,chain_id:chain,property_id:r.property_id,version:ver,content:b.content,paths:b.paths,recipients:rec,left_out:b.left_out,sent_by:me.email,sent_at:sealedAt,sealed_at:sealedAt,files,seal_sha256:apSealOf(ver,sealedAt,b.content,files)}; APS().push(s);
+      // never an empty entry; a listed file missing from storage stops the send, named
+      const pths=b.paths.filter(p=>p&&p.bucket&&p.path), miss=pths.find(p=>!SO()[p.path]);
+      if(miss) return bad('A file in this appraisal is missing: '+String(miss.path).replace(/^.*\//,'')+'. Upload it again or take it out, then send again');
+      const sealedAt=new Date(Date.now()).toISOString(), files=pths.map(p=>({bucket:p.bucket,path:p.path,size:SO()[p.path].size??null,etag:null}));
+      const s={id:uid(),appraisal_id:r.id,chain_id:chain,property_id:r.property_id,version:ver,content:b.content,paths:pths,recipients:rec,left_out:b.left_out,sent_by:me.email,sent_at:sealedAt,sealed_at:sealedAt,files,seal_sha256:apSealOf(ver,sealedAt,b.content,files,rec,me.email)}; APS().push(s);
       const m={id:uid(),snapshot_id:s.id,to_addr:ems,subject:String(a.p_subject).trim(),body:a.p_body,status:'queued',sent_at:null,error:null,made_by:me.email,made_at:now()}; APM().push(m);
       APE().push({id:APE().length+1,snapshot_id:s.id,chain_id:chain,property_id:r.property_id,kind:'sent',actor:me.email,at:now(),detail:{version:ver,to:rec.length},notified_at:now(),seen_at:now(),seen_by:me.email});
       r.status='sent'; r.updated_at=now(); save(); return ok({snapshot_id:s.id,chain_id:chain,version:ver,mail_id:m.id,recipients:rec,left_out:b.left_out}); }
@@ -777,8 +792,12 @@ function apRpc(name,a,me){ if(offline()) return bad('Failed to fetch');
       const assets=(DB.appraisal_assets||[]).filter(x=>x.appraisal_id===r.id&&((x.role==='header'&&hs.asset===x.id)||(x.role==='intro'&&is.asset===x.id))).map(x=>({id:x.id,role:x.role}));
       su.copyPending={media,assets,intro:introWas===undefined?null:introWas};
       save(); return ok({appraisal_id:n.id,existing:false,comps:map,media,assets}); }
-    if(name==='agent_appraisal_seal_check'){ const s=APS().find(x=>x.id===a.p_snapshot); if(!s) return bad('Not found'); const nowSha=apSealOf(s.version,s.sealed_at,s.content,s.files);
-      return ok({ok:nowSha===s.seal_sha256,stored:s.seal_sha256,computed:nowSha,version:s.version,sealed_at:s.sealed_at,files:c(s.files)}); }
+    if(name==='agent_appraisal_seal_check'){ const s=APS().find(x=>x.id===a.p_snapshot); if(!s) return bad('Not found'); const txt=apSealText(s.version,s.sealed_at,s.content,s.files,s.recipients,s.sent_by), nowSha=window.SIGN.sha256Hex(txt);
+      const chg=(s.files||[]).filter(f=>{ const o=SO()[f.path]; return !o||(o.size??null)!==(f.size??null); }).map(f=>({bucket:f.bucket,path:f.path,status:SO()[f.path]?'changed':'gone'}));
+      return ok({ok:nowSha===s.seal_sha256,stored:s.seal_sha256,computed:nowSha,version:s.version,sealed_at:s.sealed_at,expires_at:apPlus3(s.sealed_at).toISOString(),files:c(s.files),files_ok:!chg.length,files_changed:chg,seal_text:txt}); }
+    // Done on the Needs you expiry item: once per version, seen and notified at once
+    if(name==='agent_appraisal_expiry_done'){ const s=APS().find(x=>x.id===a.p_snapshot); if(!s) return bad('Not found'); if(APE().some(e=>e.snapshot_id===s.id&&e.kind==='expiry_done')) return ok(false);
+      APE().push({id:APE().length+1,snapshot_id:s.id,chain_id:s.chain_id,property_id:s.property_id,kind:'expiry_done',actor:me.email,at:now(),detail:{version:s.version},notified_at:now(),seen_at:now(),seen_by:me.email}); save(); return ok(true); }
     if(name==='agent_appraisal_events_seen'){ let n=0; APE().forEach(e=>{ if((a.p_ids||[]).includes(e.id)&&!e.seen_at){ e.seen_at=now(); e.seen_by=me.email; n++; } }); save(); return ok(n); }
     if(name==='agent_appraisal_mail_unstick'){ const m=APM().find(x=>x.id===a.p_mail&&x.status==='sending'); if(!m) return bad('That email isn\'t waiting on a check'); m.status='failed'; m.error='Checked by Tim: it did not arrive'; save(); return ok(null); }
   }
@@ -790,9 +809,10 @@ function apRpc(name,a,me){ if(offline()) return bad('Failed to fetch');
     const plan=APP().find(p=>p.chain_id===s.chain_id&&p.email===em&&!p.superseded_at);
     const pl=(DB.prelistings||[]).filter(l=>l.property_id===s.property_id&&l.status!=='closed'&&String(l.contact_email||'').toLowerCase()===em&&l.appraisal_id&&apChain(l.appraisal_id)===s.chain_id)[0];
     save(); return ok({snapshot_id:s.id,chain_id:s.chain_id,version:s.version,sent_at:s.sent_at,sealed_at:s.sealed_at,seal_sha256:s.seal_sha256,expires_at:apPlus3(s.sealed_at).toISOString(),content:c(s.content),plan:plan?c(plan.plan):null,prelisting_id:pl?pl.id:null,event_id:ev,
-      asked:APE().some(e=>e.snapshot_id===s.id&&e.kind==='update_asked'&&e.actor===em),newest:{snapshot_id:nw.id,version:nw.version,sent_at:nw.sent_at}}); }
+      asked:APE().some(e=>e.snapshot_id===s.id&&e.kind==='update_asked'&&e.actor===em),newest:{snapshot_id:nw.id,version:nw.version,sent_at:nw.sent_at,expires_at:apPlus3(nw.sealed_at).toISOString()}}); }
   if(name==='appraisal_vendor_can_read'){ const s=APS().find(x=>x.id===a.p_snapshot); return ok(!!s&&['appraisal-media','appraisal-video','property-files'].includes(a.p_bucket)&&!String(a.p_path||'').includes('..')&&apVendorOk(s)&&s.paths.some(p=>p.bucket===a.p_bucket&&p.path===a.p_path)); }
   if(name==='vendor_appraisal_ask_update'){ const s=APS().find(x=>x.id===a.p_snapshot); if(!s||!apVendorOk(s)) return bad('Not found'); if(Date.now()<apPlus3(s.sealed_at).getTime()) return bad('This appraisal is still current');
+    const nw=apNewest(s.chain_id); if(nw&&nw.version>s.version&&Date.now()<apPlus3(nw.sealed_at).getTime()) return bad('There\'s a newer version of this appraisal, which is still current');
     let ev=null; if(!APE().some(e=>e.snapshot_id===s.id&&e.kind==='update_asked'&&e.actor===em)){ ev=APE().length+1; APE().push({id:ev,snapshot_id:s.id,chain_id:s.chain_id,property_id:s.property_id,kind:'update_asked',actor:em,at:now(),detail:{version:s.version},notified_at:null,seen_at:null}); }
     save(); return ok({event_id:ev,asked:true}); }
   if(name==='appraisal_event_mine'){ const e=APE().find(x=>x.id===a.p_event); return ok(!!e&&e.kind!=='sent'&&!e.notified_at&&e.actor===em); }

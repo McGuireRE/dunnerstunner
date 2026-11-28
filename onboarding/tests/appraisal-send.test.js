@@ -20,6 +20,11 @@
 //   link (&v=1) opens it with "There's a newer version..."; the seal line shown and printed; the bar at 3 months and 1 day and not at
 //   2 months 29 days (page.clock); the ask recorded once and Tim told once; "Tim has been asked"; Needs you: the ask and "Appraisal for
 //   ... expires/expired"; Tim's copy: the permanent link, Check the seal (matches; a tampered copy doesn't), the sealed HTML file.
+//   Re-review of cef272c: the downloaded file carries the exact seal text (its SHA-256 is the fingerprint) and names a photo it couldn't
+//   fetch; Check the seal names a gone file and a changed one; month-end expiry (29, 30 November, 31 December, 31 August, 30 November
+//   2027) on Needs you and the vendor's bar; an old version with a current newer one: the notice, no ask, refused; Done on the expiry item.
+//   The agreement's appraisal link: "Use the latest sealed appraisal" on a draft, cleared, refused on a sent or signed agreement or for a
+//   link that isn't this property's sent version.
 //   390 px with no sideways scroll, light and dark.
 const { chromium } = require('playwright'); const fs = require('fs'), path = require('path');
 const ROOT = path.join(__dirname, '..', '..');
@@ -334,6 +339,103 @@ const dialogs = []; let dlgNo = false;
   await p.goto(PB + 'appraisals/' + S2.appraisal_id + '/copy'); await wait(p, 1500);
   await p.click('#apvSealCheck'); await wait(p, 1000); out.tampered = await note(p, 'apvSealCheck');
   expect(/^The seal doesn't match/.test(out.tampered || '') && /\|err$/.test(out.tampered), 'a tampered copy fails the check: ' + out.tampered);
+
+  // ── 9. re-review of cef272c: the file checkable on its own, files compared with storage, month-end expiry, the newer current version,
+  //    Done on the expiry item ──
+  await X.ctx.close(); X = await mk(390, 'light'); p = X.p; await as(p, TIM, d);
+  const sha = t => require('crypto').createHash('sha256').update(t, 'utf8').digest('hex');
+  const unent = t => t.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&#x27;/g, "'").replace(/&amp;/g, '&');
+  await p.goto(PB + 'appraisals/' + S2.appraisal_id + '/copy'); await wait(p, 1500);
+  // a photo that can't be fetched is named in the file
+  await p.evaluate(() => { const i = document.querySelector('#apvDoc img'); if (i) i.src = 'https://nowhere.invalid/photos/rb-missing.jpg?token=x'; });
+  const [dl2] = await Promise.all([p.waitForEvent('download'), p.click('#apvSealDown')]); const file2 = fs.readFileSync(await dl2.path(), 'utf8');
+  const st = /<textarea readonly id="seal-text"[^>]*>([\s\S]*?)<\/textarea>/.exec(file2), sealText = st ? unent(st[1]) : '';
+  out.sealNote = (/<p class="small" id="seal-note">([^<]*)<\/p>/.exec(file2) || [])[1] || '';
+  expect(sealText && sha(sealText) === S2.seal_sha256, 'the file carries the exact seal text: its SHA-256 is the fingerprint');
+  expect(out.sealNote === 'To check this copy, compute the SHA-256 of the seal text below; it should equal ' + S2.seal_sha256 + '.', 'the file\'s plain note: ' + out.sealNote);
+  const stj = sealText ? JSON.parse(sealText) : {};
+  expect(stj.sent_by === TIM.email && JSON.stringify(stj.recipients) === JSON.stringify(S2.recipients) && stj.version === 2, 'the seal covers who it went to and who sent it');
+  expect(file2.includes('(A photo that couldn\'t be included in this file: rb-missing.jpg.)') && /id="sealed-missed">One photo couldn't be fetched for this file, so it is named where it would be: rb-missing\.jpg\./.test(file2), 'a photo that couldn\'t be fetched: named in the file');
+  // Check the seal compares each sealed file with storage now: one gone, one changed, named
+  await p.evaluate(fl => { const x = JSON.parse(localStorage.getItem('mockdb')); delete x.storage_objects[fl[0].path]; if (fl[1]) x.storage_objects[fl[1].path].size = 1; localStorage.setItem('mockdb', JSON.stringify(x)); }, S2.files);
+  await p.goto(PB + 'appraisals/' + S2.appraisal_id + '/copy'); await wait(p, 1500);
+  await p.click('#apvSealCheck'); await wait(p, 1000); out.filesCheck = await note(p, 'apvSealCheck');
+  const fn = f => f.path.replace(/^.*\//, '');
+  expect(S2.files.length >= 2 && /^The seal matches/.test(out.filesCheck || '') && out.filesCheck.includes(`But these files have changed or gone since it was sealed: ${fn(S2.files[0])} (gone), ${fn(S2.files[1])} (changed).`) && /\|err$/.test(out.filesCheck), 'Check the seal names a gone file and a changed file: ' + out.filesCheck);
+  // month-end expiry: Needs you (the portal's helper) and the vendor's bar (the database's own expires_at) agree with Postgres
+  const CASES = [['2026-11-28T01:00:00Z', '28 February 2027'], ['2026-11-29T01:00:00Z', '28 February 2027'], ['2026-11-30T01:00:00Z', '28 February 2027'],
+    ['2026-12-31T01:00:00Z', '31 March 2027'], ['2026-08-31T01:00:00Z', '30 November 2026'], ['2027-11-30T01:00:00Z', '29 February 2028']];
+  out.monthEnd = [];
+  for (const [at, want] of CASES) {
+    await p.evaluate(([id, t]) => { const x = JSON.parse(localStorage.getItem('mockdb')); x.appraisal_snapshots.find(s => s.id === id).sealed_at = t; localStorage.setItem('mockdb', JSON.stringify(x)); }, [S2.id, at]);
+    await p.clock.setFixedTime(new Date(Date.parse(at) + 85 * 864e5)); await p.goto(PB); await wait(p, 1500);
+    const m = /Appraisal for RB 9 Send Street, Rbvale expires (\d{1,2} [A-Z][a-z]+ \d{4})/.exec((await p.textContent('#pNeeds')).replace(/\s+/g, ' '));
+    out.monthEnd.push(at.slice(0, 10) + ' -> ' + (m ? m[1] : 'none')); expect(m && m[1] === want, `sealed ${at.slice(0, 10)}: expires ${want} (got ${m ? m[1] : 'none'})`);
+  }
+  // the vendor's bar comes from the database's expiry: sealed 30 November, current until 28 February (not 2 March)
+  await X.ctx.close(); X = await mk(390, 'light'); p = X.p; await as(p, OWNER, d);
+  await p.evaluate(([id, t]) => { const x = JSON.parse(localStorage.getItem('mockdb')); x.appraisal_snapshots.find(s => s.id === id).sealed_at = t; localStorage.setItem('mockdb', JSON.stringify(x)); }, [S2.id, '2026-11-30T01:00:00Z']);
+  await p.clock.setFixedTime(new Date('2027-02-28T00:59:00Z')); await p.goto(OB + '?appraisal=' + AV); await wait(p, 1500);
+  expect(!(await p.$('#apvExpired')), 'sealed 30 November: still current a minute before 28 February at the same time');
+  await p.clock.setFixedTime(new Date('2027-02-28T01:01:00Z')); await p.goto(OB + '?appraisal=' + AV); await wait(p, 1500);
+  expect(!!(await p.$('#apvAskUpdate')), 'sealed 30 November: past three months on 28 February (not 2 March), the bar and its button');
+  // an old version when a newer one is current: the newer-version notice in place of the button, and the server refuses the ask
+  await p.evaluate(([id1, id2]) => { const x = JSON.parse(localStorage.getItem('mockdb')); x.appraisal_snapshots.find(s => s.id === id1).sealed_at = '2026-08-01T01:00:00Z'; x.appraisal_snapshots.find(s => s.id === id2).sealed_at = '2026-12-01T01:00:00Z'; localStorage.setItem('mockdb', JSON.stringify(x)); }, [S1.id, S2.id]);
+  await p.clock.setFixedTime(new Date('2027-01-05T01:00:00Z')); await p.goto(OB + '?appraisal=' + AV + '&v=1'); await wait(p, 1500); await shot(p, '11_old_expired_newer_current');
+  out.oldBar = (await p.textContent('#apvExpired').catch(() => '')).replace(/\s+/g, ' ').trim();
+  expect(!!(await p.$('#apvNewer')) && !(await p.$('#apvAskUpdate')) && /There's a newer version, which is current\. ?Open the newest version$/.test(out.oldBar), 'version 1 expired, version 2 current: the newer-version notice, no ask button: ' + out.oldBar);
+  out.oldAsk = await p.evaluate(async s => { const c = window.supabase.createClient(); const r = await c.rpc('vendor_appraisal_ask_update', { p_snapshot: s }); return r.error ? r.error.message : 'asked'; }, S1.id);
+  expect(/^There's a newer version of this appraisal, which is still current/.test(out.oldAsk), 'the server refuses that ask: ' + out.oldAsk);
+  await p.click('#apvExpiredNewer'); await wait(p, 1500);
+  expect(/Version 2\./.test(await p.textContent('.apv-seal')) && !(await p.$('#apvExpired')), 'the bar\'s link opens the newest, which is current');
+  // Done on the expiry item: it goes, and stays gone for that version
+  await p.evaluate(w => localStorage.setItem('mocksession', JSON.stringify({ user: w })), TIM);
+  await p.clock.setFixedTime(new Date('2027-02-25T01:00:00Z')); await p.goto(PB); await wait(p, 1800);
+  const doneBtn = await p.evaluateHandle(() => [...document.querySelectorAll('#pNeeds li')].find(li => /Appraisal for RB 9 Send Street, Rbvale expires 1 March 2027/.test(li.textContent))?.querySelector('[data-needdone]') || null);
+  expect(!!(await doneBtn.asElement()), 'the expiry item has Done');
+  if (await doneBtn.asElement()) { await doneBtn.asElement().click(); await wait(p, 1500); }
+  const d9 = await db(p);
+  expect(!/Appraisal for RB 9/.test(await p.textContent('#pNeeds')) && (d9.appraisal_events || []).filter(e => e.kind === 'expiry_done' && e.snapshot_id === S2.id && e.seen_at && e.notified_at).length === 1, 'Done: the item goes, recorded once for that version, never told');
+  await p.goto(PB); await wait(p, 1500);
+  expect(!/Appraisal for RB 9/.test(await p.textContent('#pNeeds')), 'and stays gone');
+
+  // ── 10. the agency agreement's appraisal link (Tim, 28 November 2026, 7:12pm: "Just the permalink"): "Use the latest sealed appraisal"
+  //    on a draft only; the mock refuses it on a sent or signed agreement, or a link that isn't this property's ──
+  await X.ctx.close(); X = await mk(390, 'light'); p = X.p;
+  const AGD = '66666666-ffff-4fff-8fff-000000000001', AGS = '66666666-ffff-4fff-8fff-000000000002', AGG = '66666666-ffff-4fff-8fff-000000000003';
+  const agRow = (id, status) => ({ id, ref: 'MRE-2026-90' + id.slice(-1), address: 'RB 9 Send Street, Rbvale', status, agreement_version: 'v3.15-26102026', property_id: P1, config: { appr: 'pending', ask: '', flat: '12000', thr: '250000', pct: '2.95', aml: 'Manual', approach: 'invited' }, answers: {}, legal: {}, created_at: now, updated_at: now });
+  const d10 = JSON.parse(JSON.stringify(d)); d10.agreements = (d10.agreements || []).concat([agRow(AGD, 'draft'), agRow(AGS, 'sent'), agRow(AGG, 'signed')]);
+  d10.agreement_people = (d10.agreement_people || []).concat([{ id: '77777777-0000-4000-8000-000000000001', agreement_id: AGD, position: 1, legal_name: 'Robin Rbowner', pref_name: 'Robin', email: 'rb-owner@example.com', phone: '', user_id: null, signed_at: null, created_at: now },
+    { id: '77777777-0000-4000-8000-000000000003', agreement_id: AGG, position: 1, legal_name: 'Robin Rbowner', pref_name: 'Robin', email: 'rb-owner@example.com', phone: '', user_id: null, signed_at: now, created_at: now }]);
+  await as(p, TIM, d10);
+  await p.goto(PB + `properties/${P1}/agreement/${AGD}/edit`); await wait(p, 2000); await shot(p, '12_agreement_appr_link');
+  expect(!!(await p.$('#tApprUse')) && /None\. The front page shows only that a written appraisal was given\./.test(await p.textContent('#tApprLink')), 'a draft agreement offers "Use the latest sealed appraisal"');
+  await p.click('#tApprUse'); await wait(p, 1200);
+  const want = OB + '?appraisal=' + AV + '&v=2';
+  out.apprLinkShown = (await p.textContent('#tApprLink')).trim(); out.apprUseNote = await note(p, 'tApprUse');
+  expect(out.apprLinkShown === want && /^Version 2, sent .+\. It's kept when you save the agreement\.\|ok$/.test(out.apprUseNote || '') && await p.evaluate(() => document.querySelector('[data-c="appr"][value="done"]').checked), 'it fills the newest sent version\'s permanent link and ticks "Written appraisal given": ' + out.apprUseNote);
+  expect(!(await side(p)), 'the link: no sideways scroll at 390 px');
+  await p.fill('#t_ask', '575000'); await p.click('[data-tp="1"]'); await wait(p, 1500);
+  let d10b = await db(p); let agd = d10b.agreements.find(a => a.id === AGD);
+  expect(agd.config.apprLink === want && agd.config.appr === 'done' && agd.status === 'draft', 'saved on the draft');
+  await p.goto(PB + `properties/${P1}/agreement/${AGD}/edit`); await wait(p, 2000);
+  await p.click('#tApprClear'); await wait(p, 600); await p.click('[data-tp="1"]'); await wait(p, 1500);
+  d10b = await db(p); agd = d10b.agreements.find(a => a.id === AGD);
+  expect(!('apprLink' in agd.config), 'Tim can clear it');
+  // a sent or signed agreement: not offered, and refused
+  for (const [id, nm] of [[AGS, 'sent'], [AGG, 'signed']]) {
+    await p.goto(PB + `properties/${P1}/agreement/${id}/edit`); await wait(p, 2000);
+    expect(!(await p.$('#tApprUse')), `a ${nm} agreement: not offered`);
+    const r = await p.evaluate(async ([id, l]) => { const c = window.supabase.createClient(); const x = (await c.from('agreements').select('config').eq('id', id)).data[0]; const { error } = await c.from('agreements').update({ config: Object.assign({}, x.config, { apprLink: l }) }).eq('id', id); return error ? error.message : 'changed'; }, [id, want]);
+    expect(/^The appraisal link can only be changed on a draft agreement/.test(r), `a ${nm} agreement: the link is refused (${r})`);
+  }
+  // not this property's, or not a permanent version link: refused even on a draft
+  for (const bad of [OB + '?appraisal=' + AV + '&v=9', OB + '?appraisal=' + AV, 'https://rbelsewhere.example.com/x']) {
+    const r = await p.evaluate(async ([id, l]) => { const c = window.supabase.createClient(); const x = (await c.from('agreements').select('config').eq('id', id)).data[0]; const { error } = await c.from('agreements').update({ config: Object.assign({}, x.config, { apprLink: l }) }).eq('id', id); return error ? error.message : 'changed'; }, [AGD, bad]);
+    expect(/^That isn't the permanent link of an appraisal sent for this property/.test(r), 'refused: ' + bad + ' (' + r + ')');
+  }
+  d10b = await db(p);
+  expect(!('apprLink' in d10b.agreements.find(a => a.id === AGS).config) && !('apprLink' in d10b.agreements.find(a => a.id === AGG).config), 'the sent and signed agreements are untouched');
   await b.close();
   console.log(JSON.stringify(Object.assign(out, { errs }), null, 1));
 })().catch(e => { console.log(JSON.stringify({ errs: ['crashed: ' + (e.stack || e.message)] })); process.exit(0); });

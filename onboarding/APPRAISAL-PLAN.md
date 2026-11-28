@@ -285,26 +285,45 @@ Gathered by a monthly scheduled task in Tim's signed-in browser, from his **"Tim
   "There's a newer version of this appraisal, dated {date}. Open the newest version" (the link opens the newest). Who may read is
   unchanged; Tim opens every version from the "Sent to the vendor" card, which lists each version's seal line and permanent link.
 - **The seal**, stored when a version is sent and never changed: sealed_at, the version number, and seal_sha256, the SHA-256 of the
-  canonical seal text {format 'mre.appraisal-seal/1', version, sealed_at, content, files}. Files: Supabase Storage keeps no SHA-256 of a
-  file, so each listed file's bucket, path, size and eTag are sealed instead. Shown near the top, and in print:
+  canonical seal text {format 'mre.appraisal-seal/1', version, sealed_at, content, files, recipients, sent_by} (appraisal_seal_text).
+  Files: Supabase Storage keeps no SHA-256 of a file, so each listed file's bucket, path, size and eTag are sealed instead; an empty entry
+  is never sealed, and a listed file missing from storage stops the send: "A file in this appraisal is missing: {file name}. Upload it
+  again or take it out, then send again". Shown near the top, and in print:
   "Sealed {date and time} NZT. Version {n}. Reference {first 12 of the fingerprint}."
   (for example "Sealed 28 November 2026 at 4:33 pm NZT. Version 1. Reference e079d6bc45d9.")
-- **Tim's copy view** (`/appraisals/<id>/copy`): "The permanent link to this version: ...", "Check the seal" ("The seal matches: this copy
-  is exactly as it was sealed on {date and time} NZT (reference {12})." or "The seal doesn't match: this copy is not as it was sealed.
-  Sealed reference {12}, now {12}. Keep this page and tell your support person.") and "Download the sealed copy": one self-contained HTML
-  file (not a PDF): the page's styles, the appraisal as they see it with its photos embedded (videos as a note), the seal line, the
-  permanent link, and the sealed record as JSON (script#sealed-record).
-- **Validity**: three months from sealed_at, worked out each time the page is drawn and never written into the copy. After that, a
-  highlighted bar at the top: "This appraisal was prepared on {date}. Its price estimate was for that date and is no longer current, as
-  the market moves. Ask for an updated appraisal." with the button "Ask for an updated appraisal". Pressing it records the ask once per
-  person per version and tells Tim once (email subject and Needs you: "{name} asked for an updated appraisal: {address}"); the button then
-  reads "Tim has been asked" (with "Tim has been asked. He'll be in touch." under it), and stays so on later visits.
+- **Tim's copy view** (`/appraisals/<id>/copy`): "The permanent link to this version: ...", "Check the seal" and "Download the sealed copy".
+  Check the seal works the fingerprint out again and compares each sealed file's size and eTag with storage now:
+  "The seal matches: this copy is exactly as it was sealed on {date and time} NZT (reference {12}). Every file it lists ({n}) is as it
+  was sealed." If a file has changed or gone: "... But these files have changed or gone since it was sealed: {name} (gone), {name}
+  (changed)." If the wording doesn't match: "The seal doesn't match: this copy is not as it was sealed. Sealed reference {12}, now {12}.
+  Keep this page and tell your support person."
+  The download is one self-contained HTML file (not a PDF): the page's styles, the appraisal as they see it with its photos embedded
+  (videos as a note; a photo that can't be fetched is named where it would be, with "(A photo that couldn't be included in this file:
+  {name}.)" and a line at the top), the seal line, the permanent link, the sealed record as JSON (script#sealed-record), and under "The
+  seal": "To check this copy, compute the SHA-256 of the seal text below; it should equal {full fingerprint}." with the exact seal text.
+- **Validity**: three months from sealed_at, counted on the UTC calendar and clamped to the month's end exactly as Postgres does
+  (appraisal_expires_at; the portal's apExpiresAt matches): sealed 29 or 30 November 2026 expires 28 February 2027, 31 August expires
+  30 November, 30 November 2027 expires 29 February 2028. The vendor's page uses the database's own expires_at. Worked out each time the
+  page is drawn and never written into the copy. After that, a highlighted bar at the top: "This appraisal was prepared on {date}. Its
+  price estimate was for that date and is no longer current, as the market moves. Ask for an updated appraisal." with the button "Ask for
+  an updated appraisal". Pressing it records the ask once per person per version and tells Tim once (email subject and Needs you: "{name}
+  asked for an updated appraisal: {address}"); the button then reads "Tim has been asked" (with "Tim has been asked. He'll be in touch."
+  under it), and stays so on later visits.
+  On an older version when a newer version sent to them is still current, the bar ends "There's a newer version, which is current." with
+  the button "Open the newest version" in place of the ask, and the database refuses the ask ("There's a newer version of this
+  appraisal, which is still current").
 - **Needs you, expiry**: from two weeks before the three months, for a property not yet listed (stage appraisal, questionnaire, plan,
-  accepted or agreement): "Appraisal for {address} expires {date}" (after the date: "expired {date}"), for the newest version.
-- **Agency agreement citation**: the agreement has no field that cites an appraisal, so none was added. What exists: config.appr
-  ('done' or 'pending': whether a written appraisal was given), config.ask (the asking price, or the median of the appraised range) and
-  config.askBasis (its basis), printed on the agreement's front page (fn/shared.ts frontPageTable, fn/pdf.ts). "Use the latest sealed
-  appraisal" waits for Tim to decide whether the agreement should cite one (and where it prints).
+  accepted or agreement): "Appraisal for {address} expires {date}" (after the date: "expired {date}"), for the newest version, with Done
+  (agent_appraisal_expiry_done: recorded once for that version; a newer version brings its own item).
+- **The agency agreement's appraisal link** (Tim, 28 November 2026, 7:12pm: "Just the permalink"): config.apprLink, the permanent link
+  of a sent version of the same property. On a draft (not sent, nobody signed) the agreement's page 1 offers "Use the latest sealed
+  appraisal", which fills the newest sent version's link and ticks "Written appraisal given"; "Clear" takes it off. The database
+  (agreements_appr_link) accepts only that form, for that property, on an unsigned draft; guard_signed_agreement is unchanged. Printed in
+  full, with no seal reference, beside the appraisal: in the PDF's front page (Appointment of Agency D, right of the asking price and
+  median lines: "Written appraisal (permanent link):" then the link on two lines), in the emailed front page ("Written appraisal: {link}"
+  under "Given. Asking price..."), and in the lawyer's and Tim's summaries. Without a link nothing new prints, so every agreement without
+  one prints exactly as before. Not the same as the older optional field config.apprUrl ("Appraisal web address", clause 23.1, printed on
+  page 7), which stays as it was; an earlier note here wrongly said the agreement had no appraisal field.
 
 ## The packs (for the chat that gathers them in Tim's signed-in browser)
 

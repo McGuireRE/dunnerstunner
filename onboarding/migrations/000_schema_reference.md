@@ -673,12 +673,14 @@ Builds on 036 (live). Additive only: no existing column, row, policy, function, 
 - `appraisal_snapshots`: the frozen copy a vendor reads (appraisal_id unique, chain_id, property_id, version unique per chain, content,
   paths (the exact {bucket, path} files a vendor may open), recipients [{email, name}], left_out (another agency's advertisement or a
   review left out, and why), sent_by, sent_at, and the seal: sealed_at, files [{bucket, path, size, etag}] from storage.objects at sealing,
-  seal_sha256 = sha256 of `appraisal_seal_text(version, sealed_at, content, files)`, the jsonb text of {format 'mre.appraisal-seal/1',
-  version, sealed_at (UTC, to the microsecond), content, files}). Never changes, never removed (`guard_appraisal_kept`). Storage keeps no
-  sha256 of a file, so each file's size and eTag are sealed instead. Valid three months from sealed_at, worked out at view time only.
+  seal_sha256 = sha256 of `appraisal_seal_text(version, sealed_at, content, files, recipients, sent_by)`, the jsonb text of {format
+  'mre.appraisal-seal/1', version, sealed_at (UTC, to the microsecond), content, files, recipients, sent_by}). Never changes, never removed
+  (`guard_appraisal_kept`). Storage keeps no sha256 of a file, so each file's size and eTag are sealed instead; a listed file missing from
+  storage stops the send. Valid until `appraisal_expires_at(sealed_at)` (three months on the UTC calendar, clamped to the month's end),
+  worked out at view time only.
 - `appraisal_versions` (appraisal_id, previous_id, chain_id): "Make an updated version". `appraisal_mail` (snapshot_id, to_addr, subject,
   body with [the appraisal link], status queued|sending|sent|failed): the words never change; status only moves on (`guard_appraisal_mail`).
-  `appraisal_events` (sent, opened, proceeded, plan_built, update_asked (once per person per copy); notified_at and seen_at set once each; `guard_appraisal_event`).
+  `appraisal_events` (sent, opened, proceeded, plan_built, update_asked (once per person per copy), expiry_done (Tim ticked the expiry item Done, once per copy, seen and notified at once); notified_at and seen_at set once each; `guard_appraisal_event`).
   `appraisal_vendor_plans` (a plan the vendor built on the packages page; one current per person per appraisal, older ones superseded
   once, at most 10 saves per person per version; `guard_vendor_plan`). Unique indexes: opened once per person per copy, plan_built once per person per copy,
   proceeded once per person per appraisal. RLS on all five: select for is_agent() only; no direct
@@ -691,11 +693,15 @@ Builds on 036 (live). Additive only: no existing column, row, policy, function, 
   p_subject, p_body)` (sets 'sent' with set_config('app.appraisal_send','on',true) and puts it back at once), `agent_appraisal_new_version` (the draft names none of the sent version's files; `setup.copyPending` lists the photos and files the
   portal still has to copy),
   `agent_appraisal_events_seen`, `agent_appraisal_mail_unstick`, `agent_appraisal_seal_check(p_snapshot)` (works the fingerprint out
-  again from the stored copy). Vendors (granted to authenticated, never anon): `vendor_appraisals_mine`,
+  again from the stored copy, compares each sealed file with storage now, and returns the exact seal text), `agent_appraisal_expiry_done(p_snapshot)`. Vendors (granted to authenticated, never anon): `vendor_appraisals_mine`,
   `vendor_appraisal_read(p_id, p_version default null)`, `appraisal_vendor_can_read(p_snapshot, p_bucket, p_path)` (asked by repo-link with the vendor's token),
   `vendor_appraisal_proceed(p_snapshot)`, `vendor_appraisal_plan_save(p_snapshot, p_plan)`, `vendor_appraisal_ask_update(p_snapshot)`
-  (only once the copy is more than three months old), `appraisal_event_mine(p_event)` (asked by notify). Internal: `appraisal_seal_text`,
-  `appraisal_seal_of`.
+  (only once the copy is more than three months old, and not while a newer version sent to them is current), `appraisal_event_mine(p_event)`
+  (asked by notify). Internal: `appraisal_seal_text`, `appraisal_seal_of`, `appraisal_expires_at`, `agreement_appr_link_ok`.
+- `agreements.config.apprLink` (037): the permanent link of a sent appraisal version of the agreement's own property, printed on the front
+  page. Trigger `agreements_appr_link` (before insert or update of config, status; named to run after agreement_property_before):
+  set, changed or cleared only while the agreement is an unsigned draft, and only to that form for that property. Beside
+  guard_signed_agreement, which is unchanged. Not the older config.apprUrl (clause 23.1).
   Internal (callable by nobody): `appraisal_snapshot_build` (the whitelist: each section rebuilt by `appraisal_section_clean` from the
   keys its type draws, with `ap_s`, `ap_n`, `ap_b`, `ap_lines`, `ap_lines_opt` (column headings kept only when present), `ap_rows` (other cells blanked); market months for the drawn area's latest twelve only), `appraisal_contact_problem`, `appraisal_contact_find`,
   `appraisal_chain_of`, `appraisal_vendor_ok`, `appraisal_vendor_newest`, and the guards.
