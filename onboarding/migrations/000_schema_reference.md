@@ -697,11 +697,12 @@ Builds on 036 (live). Additive only: no existing column, row, policy, function, 
   `vendor_appraisal_read(p_id, p_version default null)`, `appraisal_vendor_can_read(p_snapshot, p_bucket, p_path)` (asked by repo-link with the vendor's token),
   `vendor_appraisal_proceed(p_snapshot)`, `vendor_appraisal_plan_save(p_snapshot, p_plan)`, `vendor_appraisal_ask_update(p_snapshot)`
   (only once the copy is more than three months old, and not while a newer version sent to them is current), `appraisal_event_mine(p_event)`
-  (asked by notify). Internal: `appraisal_seal_text`, `appraisal_seal_of`, `appraisal_expires_at`, `agreement_appr_link_ok`.
-- `agreements.config.apprLink` (037): the permanent link of a sent appraisal version of the agreement's own property, printed on the front
-  page. Trigger `agreements_appr_link` (before insert or update of config, status; named to run after agreement_property_before):
-  set, changed or cleared only while the agreement is an unsigned draft, and only to that form for that property. Beside
-  guard_signed_agreement, which is unchanged. Not the older config.apprUrl (clause 23.1).
+  (asked by notify). Internal: `appraisal_seal_text`, `appraisal_seal_of`, `appraisal_expires_at`, `appraisal_link_like`, `agreement_appr_link_ok`.
+- `agreements.config.apprUrl` (the Appraisal web address, clause 23.1; 037 makes it the one appraisal link): "Use the latest sealed
+  appraisal" fills it with a sent version's permanent link, which then also prints on the front page. Trigger `agreements_appr_link`
+  (before insert or update of config; named to run after agreement_property_before): a value that looks like our appraisal link
+  (`appraisal_link_like`) must pass `agreement_appr_link_ok` (that form, a sent version of this property) and is added only on an
+  unsigned draft; other typed text is left as before. Beside guard_signed_agreement, which is unchanged.
   Internal (callable by nobody): `appraisal_snapshot_build` (the whitelist: each section rebuilt by `appraisal_section_clean` from the
   keys its type draws, with `ap_s`, `ap_n`, `ap_b`, `ap_lines`, `ap_lines_opt` (column headings kept only when present), `ap_rows` (other cells blanked); market months for the drawn area's latest twelve only), `appraisal_contact_problem`, `appraisal_contact_find`,
   `appraisal_chain_of`, `appraisal_vendor_ok`, `appraisal_vendor_newest`, and the guards.

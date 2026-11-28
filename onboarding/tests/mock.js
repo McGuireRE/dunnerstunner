@@ -32,15 +32,18 @@ function personGone(r){ const ag=(DB.agreements||[]).find(x=>x.id===r.agreement_
   active(ag.property_id).forEach(x=>{ if(((r.email&&x.email===r.email.toLowerCase())||(!r.email&&norm(x.legal_name)===norm(r.legal_name)))&&!onOther(x)) x.role='former'; }); }
 // the guards on signed records (guard_signed_agreement, guard_signed_person)
 const noNotes=c=>{ const o=Object.assign({},c||{}); delete o.agent_notes; return JSON.stringify(o); };
-// 037 agreements_appr_link: config.apprLink is set, changed or cleared only on an unsigned draft, and only to a sent version's permanent
-// link for the agreement's own property (runs before guard_signed_agreement, as the trigger names order them)
+// 037 agreements_appr_link (Tim: "Make them one"): config.apprUrl is the one field. A value that looks like our appraisal link
+// (appraisal_link_like) must be a sent version's permanent link for the agreement's own property, added only on an unsigned draft;
+// anything else typed is left as before (runs before guard_signed_agreement, as the trigger names order them)
 const APPR_LINK_RE=/^https:\/\/packages\.dunnerstunner\.co\.nz\/onboarding\/\?appraisal=([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})&v=([1-9][0-9]{0,3})$/;
-function apprLinkGuard(old,nw){ const ov=old?((old.config||{}).apprLink??null):null, nv=(nw.config||{}).apprLink??null; if(JSON.stringify(ov)===JSON.stringify(nv)) return;
-  if(old&&(old.status!=='draft'||(nw.status||old.status)!=='draft'||(DB.agreement_people||[]).some(x=>x.agreement_id===old.id&&x.signed_at))) throw new Error('The appraisal link can only be changed on a draft agreement that hasn\'t been sent or signed');
-  if(!old&&(nw.status||'draft')!=='draft') throw new Error('The appraisal link can only be set on a draft agreement');
-  if(nv===null||nv==='') return; const m=typeof nv==='string'?APPR_LINK_RE.exec(nv):null, pid=nw.property_id||(old&&old.property_id);
-  if(!m||!(DB.appraisal_snapshots||[]).some(s=>s.chain_id===m[1]&&s.version===+m[2]&&s.property_id===pid)) throw new Error('That isn\'t the permanent link of an appraisal sent for this property. Use "Use the latest sealed appraisal", or clear it'); }
-function guard(table,r,payload){ if(table==='agreements'&&('config' in payload||'status' in payload)) apprLinkGuard(r,Object.assign({},r,payload));
+const apprLinkLike=v=>/dunnerstunner\.co\.nz\/+onboarding/i.test(v)&&/[?&]appraisal=/i.test(v);
+function apprLinkGuard(old,nw){ const ov=old?((old.config||{}).apprUrl??null):null, nv=(nw.config||{}).apprUrl??null; if(JSON.stringify(ov)===JSON.stringify(nv)) return;
+  if(typeof nv!=='string'||!apprLinkLike(nv)) return;   // free text, as today
+  if(old&&(old.status!=='draft'||(nw.status||old.status)!=='draft'||(DB.agreement_people||[]).some(x=>x.agreement_id===old.id&&x.signed_at))) throw new Error('An appraisal link can only be added on a draft agreement that hasn\'t been sent or signed');
+  if(!old&&(nw.status||'draft')!=='draft') throw new Error('An appraisal link can only be added on a draft agreement');
+  const m=APPR_LINK_RE.exec(nv), pid=nw.property_id||(old&&old.property_id);
+  if(!m||!(DB.appraisal_snapshots||[]).some(s=>s.chain_id===m[1]&&s.version===+m[2]&&s.property_id===pid)) throw new Error('That isn\'t the permanent link of an appraisal sent for this property. Use "Use the latest sealed appraisal", or type a different address'); }
+function guard(table,r,payload){ if(table==='agreements'&&'config' in payload) apprLinkGuard(r,Object.assign({},r,payload));
   if(table==='agreements'&&(DB.agreement_people||[]).some(x=>x.agreement_id===r.id&&x.signed_at)&&(('address' in payload&&payload.address!==r.address)||('answers' in payload&&JSON.stringify(payload.answers)!==JSON.stringify(r.answers))||('config' in payload&&noNotes(payload.config)!==noNotes(r.config)))) throw new Error('This agreement has been signed, so its terms can no longer be changed');
   if(table==='agreement_people'&&r.signed_at&&['legal_name','email','position'].some(k=>k in payload&&payload[k]!==r[k])) throw new Error('This person has signed, so their name and email can no longer be changed');
   if(table==='property_forms'&&(('status' in payload&&(payload.status==='signed')!==(r.status==='signed'))||['signed_at','countersigned_at','document_id','filing_at'].some(k=>k in payload&&(payload[k]??null)!==(r[k]??null)))) throw new Error('A document is only signed or filed by signing it');

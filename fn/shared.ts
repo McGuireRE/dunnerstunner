@@ -32,10 +32,11 @@ ${inner}
 <p style="margin-top:28px">Tim McGuire<br>McGuire Real Estate Ltd · Licensed REAA 2008<br>027 562 7207 · tim@mcguire.co.nz</p></div>`;
 }
 
-// the appraisal's permanent version link on an agreement (config.apprLink, Tim 28 November 2026: "Just the permalink"); the database
-// accepts only this form, for the agreement's own property (037 agreements_appr_link). Anything else prints nothing.
+// the appraisal's permanent version link on an agreement (config.apprUrl, the clause 23.1 field, when it is one of ours: Tim 28 November
+// 2026, "Just the permalink", "Make them one"). On the front page only when it is our permanent link (the form the database checks for
+// the agreement's own property, 037 agreements_appr_link); other typed text prints in clause 23.1 only, as before.
 export const APPR_LINK_RE = /^https:\/\/packages\.dunnerstunner\.co\.nz\/onboarding\/\?appraisal=[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}&v=[1-9][0-9]{0,3}$/;
-export const apprLinkOf = (c: any) => (c && c.appr !== "pending" && typeof c.apprLink === "string" && APPR_LINK_RE.test(c.apprLink)) ? c.apprLink : "";
+export const apprLinkOf = (c: any) => (c && c.appr !== "pending" && typeof c.apprUrl === "string" && APPR_LINK_RE.test(c.apprUrl)) ? c.apprUrl : "";
 
 export function frontPageTable(ag: any, people: any[]) {
   const c = ag.config || {}, a = ag.answers || {};

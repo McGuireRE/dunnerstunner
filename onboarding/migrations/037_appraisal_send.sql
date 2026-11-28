@@ -21,8 +21,10 @@
 --                          per copy). The seal text also names the recipients and the sender; a listed file missing from storage stops
 --                          the send; the expiry is appraisal_expires_at (UTC calendar, clamped to the month's end); Tim ticks the
 --                          Needs you expiry item Done (expiry_done).
---   the agreement link     agreements.config.apprLink: a sent version's permanent link for the agreement's own property, set only on an
---                          unsigned draft (trigger agreements_appr_link, beside guard_signed_agreement, which is unchanged).
+--   the agreement link     agreements.config.apprUrl (the existing clause 23.1 field, the only one): "Use the latest sealed appraisal"
+--                          fills it with a sent version's permanent link, printed on the front page and in clause 23.1. A value that
+--                          looks like our appraisal link must be one for this property, on an unsigned draft (trigger
+--                          agreements_appr_link); other typed text is left as today. guard_signed_agreement is unchanged.
 --   appraisal_mail         the email Tim reviewed and sent with a copy (sent by the notify function; status only changes after).
 --   appraisal_events       sent, opened (once per copy and person), proceeded (once per appraisal and person), plan_built (once per
 --                          copy and person), each made unique by an index; notify tells Tim once each.
@@ -603,10 +605,16 @@ end $$;
 revoke all on function public.agent_appraisal_events_seen(bigint[]) from public, anon;
 grant execute on function public.agent_appraisal_events_seen(bigint[]) to authenticated;
 
--- the agency agreement's appraisal link (Tim, 28 November 2026, 7:12pm: "Just the permalink"): config.apprLink, printed on the front
--- page beside "written appraisal given". Only a permanent version link to this site, of a version sent for the agreement's own
--- property; set, changed or cleared only while the agreement is an unsigned draft. Beside guard_signed_agreement, never in place of it:
--- an agreement without the key, or whose key doesn't change, passes untouched.
+-- the agency agreement's appraisal link (Tim, 28 November 2026: "Just the permalink", then "Make them one"): the one field is the existing
+-- config.apprUrl ("Appraisal web address", clause 23.1). "Use the latest sealed appraisal" fills it with a sent version's permanent link,
+-- which then prints on the front page as well as in clause 23.1. Tim may still type anything by hand, as before: a value that doesn't look
+-- like one of our appraisal links is left exactly as today. A value that does (dunnerstunner.co.nz/onboarding with appraisal=) must be the
+-- permanent link of a version sent for this agreement's own property, and may be set only while the agreement is an unsigned draft.
+-- Beside guard_signed_agreement, never in place of it: a config whose apprUrl doesn't change passes untouched.
+create function public.appraisal_link_like(p_link text) returns boolean
+language sql immutable set search_path = public as $$
+  select coalesce(p_link, '') ~* 'dunnerstunner\.co\.nz/+onboarding' and coalesce(p_link, '') ~* '[?&]appraisal='
+$$;
 create function public.agreement_appr_link_ok(p_link text, p_property uuid) returns boolean
 language sql stable security definer set search_path = public as $$
   select coalesce(p_link, '') ~ '^https://packages\.dunnerstunner\.co\.nz/onboarding/\?appraisal=[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}&v=[1-9][0-9]{0,3}$'
@@ -614,26 +622,26 @@ language sql stable security definer set search_path = public as $$
                   where s.chain_id = (substring(p_link from 'appraisal=([0-9a-f-]{36})'))::uuid
                     and s.version = (substring(p_link from '&v=([0-9]+)$'))::int and s.property_id = p_property)
 $$;
-revoke all on function public.agreement_appr_link_ok(text, uuid) from public, anon, authenticated;
+revoke all on function public.appraisal_link_like(text), public.agreement_appr_link_ok(text, uuid) from public, anon, authenticated;
 -- (guard_agreement_appr_link below is a trigger function: never called directly)
 create function public.guard_agreement_appr_link() returns trigger
 language plpgsql security definer set search_path = public as $$
-declare nv jsonb := coalesce(new.config, '{}'::jsonb)->'apprLink'; ov jsonb := case when tg_op = 'UPDATE' then coalesce(old.config, '{}'::jsonb)->'apprLink' end;
+declare nv jsonb := coalesce(new.config, '{}'::jsonb)->'apprUrl'; ov jsonb := case when tg_op = 'UPDATE' then coalesce(old.config, '{}'::jsonb)->'apprUrl' end;
 begin
   if nv is not distinct from ov then return new; end if;
+  if jsonb_typeof(nv) is distinct from 'string' or not public.appraisal_link_like(nv #>> '{}') then return new; end if;   -- free text, as today
   if tg_op = 'UPDATE' and (old.status <> 'draft' or new.status <> 'draft'
       or exists (select 1 from public.agreement_people where agreement_id = old.id and signed_at is not null)) then
-    raise exception 'The appraisal link can only be changed on a draft agreement that hasn''t been sent or signed';
+    raise exception 'An appraisal link can only be added on a draft agreement that hasn''t been sent or signed';
   end if;
-  if tg_op = 'INSERT' and new.status <> 'draft' then raise exception 'The appraisal link can only be set on a draft agreement'; end if;
-  if nv is null or nv = '""'::jsonb then return new; end if;   -- cleared
-  if jsonb_typeof(nv) <> 'string' or not public.agreement_appr_link_ok(nv #>> '{}', new.property_id) then
-    raise exception 'That isn''t the permanent link of an appraisal sent for this property. Use "Use the latest sealed appraisal", or clear it';
+  if tg_op = 'INSERT' and new.status <> 'draft' then raise exception 'An appraisal link can only be added on a draft agreement'; end if;
+  if not public.agreement_appr_link_ok(nv #>> '{}', new.property_id) then
+    raise exception 'That isn''t the permanent link of an appraisal sent for this property. Use "Use the latest sealed appraisal", or type a different address';
   end if;
   return new;
 end $$;
 -- named to run after agreement_property_before, which fills property_id on a new agreement
-create trigger agreements_appr_link before insert or update of config, status on public.agreements for each row execute function public.guard_agreement_appr_link();
+create trigger agreements_appr_link before insert or update of config on public.agreements for each row execute function public.guard_agreement_appr_link();
 
 -- Tim ticks Done on "Appraisal for {address} expires {date}": recorded once for that version (seen and notified at once, so it never
 -- shows as something a vendor did and no one is told). A newer version brings its own item when its time comes. Returns true when

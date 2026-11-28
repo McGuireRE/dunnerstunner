@@ -154,9 +154,10 @@ export async function buildAgreementPdf(inp: PdfInput): Promise<Uint8Array> {
     txt(p1, Number(ask).toLocaleString("en-NZ"), 188, 476.5, 8.5, F, INK, 44);
     txt(p1, Number(Math.round(est * 100) / 100).toLocaleString("en-NZ", { minimumFractionDigits: 2 }), 394, 476.5, 8.5, F, INK, 54);
   } else if (pending) txt(p1, "Example to follow with the written appraisal", 300, 440, 7.5, F, GREY);
-  // the written appraisal's permanent link (config.apprLink, Tim 28 November 2026: "Just the permalink"), in full so it reads on paper,
+  // the written appraisal's permanent link (config.apprUrl when it is one of ours, Tim 28 November 2026: "Just the permalink", "Make
+  // them one"), in full so it reads on paper. Clause 23.1 on page 7 prints the same field, as it always has.
   // on the right of the appraisal basis lines. Only the form the database accepts; without one nothing new prints.
-  const apprLink = !pending && typeof c.apprLink === "string" && APPR_LINK_RE.test(c.apprLink) ? c.apprLink : "";
+  const apprLink = !pending && typeof c.apprUrl === "string" && APPR_LINK_RE.test(c.apprUrl) ? c.apprUrl : "";
   if (apprLink) {
     const q = apprLink.indexOf("?");
     txt(p1, "Written appraisal (permanent link):", 318, 421, 7.5, B, INK);

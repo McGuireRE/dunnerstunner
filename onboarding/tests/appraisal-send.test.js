@@ -23,8 +23,8 @@
 //   Re-review of cef272c: the downloaded file carries the exact seal text (its SHA-256 is the fingerprint) and names a photo it couldn't
 //   fetch; Check the seal names a gone file and a changed one; month-end expiry (29, 30 November, 31 December, 31 August, 30 November
 //   2027) on Needs you and the vendor's bar; an old version with a current newer one: the notice, no ask, refused; Done on the expiry item.
-//   The agreement's appraisal link: "Use the latest sealed appraisal" on a draft, cleared, refused on a sent or signed agreement or for a
-//   link that isn't this property's sent version.
+//   The agreement's appraisal link (one field, apprUrl): "Use the latest sealed appraisal" on a draft, a typed address kept, cleared, our
+//   link refused on a sent or signed agreement or when it isn't this property's sent version.
 //   390 px with no sideways scroll, light and dark.
 const { chromium } = require('playwright'); const fs = require('fs'), path = require('path');
 const ROOT = path.join(__dirname, '..', '..');
@@ -399,43 +399,54 @@ const dialogs = []; let dlgNo = false;
   await p.goto(PB); await wait(p, 1500);
   expect(!/Appraisal for RB 9/.test(await p.textContent('#pNeeds')), 'and stays gone');
 
-  // ── 10. the agency agreement's appraisal link (Tim, 28 November 2026, 7:12pm: "Just the permalink"): "Use the latest sealed appraisal"
-  //    on a draft only; the mock refuses it on a sent or signed agreement, or a link that isn't this property's ──
+  // ── 10. the agency agreement's appraisal link (Tim, 28 November 2026: "Just the permalink", then "Make them one"): one field,
+  //    config.apprUrl (clause 23.1). "Use the latest sealed appraisal" fills it on a draft only; a typed address is kept as before; the
+  //    mock refuses one of our appraisal links on a sent or signed agreement, or one that isn't this property's sent version ──
   await X.ctx.close(); X = await mk(390, 'light'); p = X.p;
   const AGD = '66666666-ffff-4fff-8fff-000000000001', AGS = '66666666-ffff-4fff-8fff-000000000002', AGG = '66666666-ffff-4fff-8fff-000000000003';
-  const agRow = (id, status) => ({ id, ref: 'MRE-2026-90' + id.slice(-1), address: 'RB 9 Send Street, Rbvale', status, agreement_version: 'v3.15-26102026', property_id: P1, config: { appr: 'pending', ask: '', flat: '12000', thr: '250000', pct: '2.95', aml: 'Manual', approach: 'invited' }, answers: {}, legal: {}, created_at: now, updated_at: now });
-  const d10 = JSON.parse(JSON.stringify(d)); d10.agreements = (d10.agreements || []).concat([agRow(AGD, 'draft'), agRow(AGS, 'sent'), agRow(AGG, 'signed')]);
+  const TYPED = 'https://rbappraisals.example.com/robin';
+  const agRow = (id, status, extra) => ({ id, ref: 'MRE-2026-90' + id.slice(-1), address: 'RB 9 Send Street, Rbvale', status, agreement_version: 'v3.15-26102026', property_id: P1, config: Object.assign({ appr: 'pending', ask: '', flat: '12000', thr: '250000', pct: '2.95', aml: 'Manual', approach: 'invited' }, extra || {}), answers: {}, legal: {}, created_at: now, updated_at: now });
+  const d10 = JSON.parse(JSON.stringify(d)); d10.agreements = (d10.agreements || []).concat([agRow(AGD, 'draft'), agRow(AGS, 'sent', { appr: 'done', ask: '550000', apprUrl: TYPED }), agRow(AGG, 'signed', { appr: 'done', ask: '550000', apprUrl: TYPED })]);
   d10.agreement_people = (d10.agreement_people || []).concat([{ id: '77777777-0000-4000-8000-000000000001', agreement_id: AGD, position: 1, legal_name: 'Robin Rbowner', pref_name: 'Robin', email: 'rb-owner@example.com', phone: '', user_id: null, signed_at: null, created_at: now },
     { id: '77777777-0000-4000-8000-000000000003', agreement_id: AGG, position: 1, legal_name: 'Robin Rbowner', pref_name: 'Robin', email: 'rb-owner@example.com', phone: '', user_id: null, signed_at: now, created_at: now }]);
   await as(p, TIM, d10);
   await p.goto(PB + `properties/${P1}/agreement/${AGD}/edit`); await wait(p, 2000); await shot(p, '12_agreement_appr_link');
-  expect(!!(await p.$('#tApprUse')) && /None\. The front page shows only that a written appraisal was given\./.test(await p.textContent('#tApprLink')), 'a draft agreement offers "Use the latest sealed appraisal"');
+  expect(!!(await p.$('#tApprUse')) && !(await p.$('#tApprLink')) && !(await p.$('#tApprClear')), 'a draft agreement offers "Use the latest sealed appraisal", with no second link field');
   await p.click('#tApprUse'); await wait(p, 1200);
   const want = OB + '?appraisal=' + AV + '&v=2';
-  out.apprLinkShown = (await p.textContent('#tApprLink')).trim(); out.apprUseNote = await note(p, 'tApprUse');
-  expect(out.apprLinkShown === want && /^Version 2, sent .+\. It's kept when you save the agreement\.\|ok$/.test(out.apprUseNote || '') && await p.evaluate(() => document.querySelector('[data-c="appr"][value="done"]').checked), 'it fills the newest sent version\'s permanent link and ticks "Written appraisal given": ' + out.apprUseNote);
+  out.apprUrlShown = await p.inputValue('#t_apprUrl'); out.apprUseNote = await note(p, 'tApprUse');
+  expect(out.apprUrlShown === want && /^Version 2, sent .+\. It's kept when you save the agreement\.\|ok$/.test(out.apprUseNote || '') && await p.evaluate(() => document.querySelector('[data-c="appr"][value="done"]').checked), 'it fills the appraisal web address with the newest sent version\'s permanent link and ticks "Written appraisal given": ' + out.apprUseNote);
+  expect((await p.textContent('#main')).split(want).length === 1, 'the link is entered once, in the appraisal web address, and not shown twice on the page');
   expect(!(await side(p)), 'the link: no sideways scroll at 390 px');
   await p.fill('#t_ask', '575000'); await p.click('[data-tp="1"]'); await wait(p, 1500);
   let d10b = await db(p); let agd = d10b.agreements.find(a => a.id === AGD);
-  expect(agd.config.apprLink === want && agd.config.appr === 'done' && agd.status === 'draft', 'saved on the draft');
+  expect(agd.config.apprUrl === want && !('apprLink' in agd.config) && agd.config.appr === 'done' && agd.status === 'draft', 'saved on the draft, in apprUrl only');
+  // typed by hand, as before: kept; then cleared by emptying the field
   await p.goto(PB + `properties/${P1}/agreement/${AGD}/edit`); await wait(p, 2000);
-  await p.click('#tApprClear'); await wait(p, 600); await p.click('[data-tp="1"]'); await wait(p, 1500);
+  await p.fill('#t_apprUrl', TYPED); await p.click('[data-tp="1"]'); await wait(p, 1500);
   d10b = await db(p); agd = d10b.agreements.find(a => a.id === AGD);
-  expect(!('apprLink' in agd.config), 'Tim can clear it');
-  // a sent or signed agreement: not offered, and refused
+  expect(agd.config.apprUrl === TYPED, 'a typed address is kept as before');
+  await p.goto(PB + `properties/${P1}/agreement/${AGD}/edit`); await wait(p, 2000);
+  await p.fill('#t_apprUrl', ''); await p.click('[data-tp="1"]'); await wait(p, 1500);
+  d10b = await db(p); agd = d10b.agreements.find(a => a.id === AGD);
+  expect(!agd.config.apprUrl, 'Tim can clear it');
+  // a sent or signed agreement: not offered; our link refused; the sent one still takes typed text as before
+  const setUrl = (id, l) => p.evaluate(async ([id, l]) => { const c = window.supabase.createClient(); const x = (await c.from('agreements').select('config').eq('id', id)).data[0]; const { error } = await c.from('agreements').update({ config: Object.assign({}, x.config, { apprUrl: l }) }).eq('id', id); return error ? error.message : 'changed'; }, [id, l]);
   for (const [id, nm] of [[AGS, 'sent'], [AGG, 'signed']]) {
     await p.goto(PB + `properties/${P1}/agreement/${id}/edit`); await wait(p, 2000);
     expect(!(await p.$('#tApprUse')), `a ${nm} agreement: not offered`);
-    const r = await p.evaluate(async ([id, l]) => { const c = window.supabase.createClient(); const x = (await c.from('agreements').select('config').eq('id', id)).data[0]; const { error } = await c.from('agreements').update({ config: Object.assign({}, x.config, { apprLink: l }) }).eq('id', id); return error ? error.message : 'changed'; }, [id, want]);
-    expect(/^The appraisal link can only be changed on a draft agreement/.test(r), `a ${nm} agreement: the link is refused (${r})`);
+    const r = await setUrl(id, want);
+    expect(/^An appraisal link can only be added on a draft agreement/.test(r), `a ${nm} agreement: our link is refused (${r})`);
   }
-  // not this property's, or not a permanent version link: refused even on a draft
-  for (const bad of [OB + '?appraisal=' + AV + '&v=9', OB + '?appraisal=' + AV, 'https://rbelsewhere.example.com/x']) {
-    const r = await p.evaluate(async ([id, l]) => { const c = window.supabase.createClient(); const x = (await c.from('agreements').select('config').eq('id', id)).data[0]; const { error } = await c.from('agreements').update({ config: Object.assign({}, x.config, { apprLink: l }) }).eq('id', id); return error ? error.message : 'changed'; }, [AGD, bad]);
+  expect(await setUrl(AGS, TYPED + '/2') === 'changed', 'a sent agreement still takes a typed address, as before');
+  expect(/^This agreement has been signed/.test(await setUrl(AGG, TYPED + '/2')), 'a signed agreement takes nothing, as before');
+  // looks like ours but isn't this property's sent version: refused even on a draft
+  for (const bad of [OB + '?appraisal=' + AV + '&v=9', OB + '?appraisal=' + AV, 'http://packages.dunnerstunner.co.nz/onboarding/?appraisal=' + AV + '&v=1']) {
+    const r = await setUrl(AGD, bad);
     expect(/^That isn't the permanent link of an appraisal sent for this property/.test(r), 'refused: ' + bad + ' (' + r + ')');
   }
   d10b = await db(p);
-  expect(!('apprLink' in d10b.agreements.find(a => a.id === AGS).config) && !('apprLink' in d10b.agreements.find(a => a.id === AGG).config), 'the sent and signed agreements are untouched');
+  expect(d10b.agreements.find(a => a.id === AGG).config.apprUrl === TYPED && !('apprLink' in d10b.agreements.find(a => a.id === AGG).config), 'the signed agreement is untouched');
   await b.close();
   console.log(JSON.stringify(Object.assign(out, { errs }), null, 1));
 })().catch(e => { console.log(JSON.stringify({ errs: ['crashed: ' + (e.stack || e.message)] })); process.exit(0); });

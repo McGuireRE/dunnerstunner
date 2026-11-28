@@ -10918,15 +10918,18 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <h2>Identity checks</h2>
       ${TF.select('c', 'aml', 'How the sellers are verified', [['Manual', 'Manual: I check ID myself'], 'Halo', 'APLYiD', 'First AML', 'Cloudcheck', 'Dwellhub'], 'Manual')}`;
   }
-  // the written appraisal's permanent link on the front page (config.apprLink, Tim 28 November 2026: "Just the permalink"). Offered on a
-  // draft only (not sent, nobody signed); the database refuses it on anything else, and accepts only a sent version of this property.
+  // "Use the latest sealed appraisal" (Tim, 28 November 2026: "Just the permalink", then "Make them one"): fills the one field,
+  // config.apprUrl (the Appraisal web address, clause 23.1), with the newest sent version's permanent link; that link then prints on the
+  // front page as well as in clause 23.1. Offered on a draft only (not sent, nobody signed): the database refuses one of our appraisal
+  // links on anything else, or one that isn't a sent version of this property. Anything else typed in the field is kept as before.
   const tApprDraft = () => (T.ag.status || 'draft') === 'draft' && !T.people.some(x => x.signed_at);
+  // the front page shows apprUrl only when it is our permanent link (fn/shared.ts and fn/pdf.ts APPR_LINK_RE)
+  const AP_PERMA_RE = /^https:\/\/packages\.dunnerstunner\.co\.nz\/onboarding\/\?appraisal=[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}&v=[1-9][0-9]{0,3}$/;
+  const apPerma = c => c && c.appr !== 'pending' && typeof c.apprUrl === 'string' && AP_PERMA_RE.test(c.apprUrl) ? c.apprUrl : '';
   function tApprLinkHTML() {
-    const link = T.c.apprLink || '';
-    if (!tApprDraft()) return link ? `<p class="small" id="tApprLink">Appraisal link on the front page: <span translate="no" style="overflow-wrap:anywhere">${esc(link)}</span></p>` : '';
-    return `<div class="card tight" id="tApprLinkCard"><div class="f" style="margin-top:0">Appraisal link on the front page <span class="opt">(optional)</span></div>
-      ${link ? `<p class="small" id="tApprLink" translate="no" style="overflow-wrap:anywhere">${esc(link)}</p>` : '<p class="small" id="tApprLink">None. The front page shows only that a written appraisal was given.</p>'}
-      <div class="toolbar"><button class="btn ghost" type="button" id="tApprUse">Use the latest sealed appraisal</button>${link ? '<button class="btn link" type="button" id="tApprClear">Clear</button>' : ''}</div></div>`;
+    if (!tApprDraft()) return '';
+    return `<div class="toolbar" id="tApprTools" style="margin-top:6px"><button class="btn ghost" type="button" id="tApprUse">Use the latest sealed appraisal</button></div>
+      <p class="small" style="margin-top:2px">Puts the permanent link of the newest appraisal you sent for this property in the appraisal web address. It prints on the front page and in clause 23.1.</p>`;
   }
   function tApprLinkBind() {
     const use = $('#tApprUse'); if (use) use.addEventListener('click', async () => {
@@ -10935,10 +10938,9 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       let s = null, bad = null; try { const { data, error } = await sb.from('appraisal_snapshots').select('chain_id,version,sent_at').eq('property_id', T.ag.property_id).order('sent_at', { ascending: false }).limit(1); bad = error; s = !error && data ? data[0] : null; } catch (e) { bad = e; }
       use.disabled = false;
       if (!s) { atBtn(use, bad ? 'Not found: check you have signal, then try again.' : 'No appraisal has been sent for this property yet.', 'err'); return; }
-      tCollect(); T.c.apprLink = apVersionUrl(s.chain_id, s.version); T.c.appr = 'done'; tShow(0);
+      tCollect(); T.c.apprUrl = apVersionUrl(s.chain_id, s.version); T.c.appr = 'done'; tShow(0);
       const u = $('#tApprUse'); if (u) atBtn(u, `Version ${s.version}, sent ${fmtDate(s.sent_at)}. It's kept when you save the agreement.`, 'ok');
     });
-    const clr = $('#tApprClear'); if (clr) clr.addEventListener('click', () => { tCollect(); delete T.c.apprLink; tShow(0); });
   }
   function tBind1() {
     tApprLinkBind();
@@ -11215,7 +11217,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <h2>Front page</h2>
       <div class="card"><table class="sum">
         <tr><td>Commission</td><td style="white-space:normal">${esc(commText(cfg))}</td></tr>
-        <tr><td>Appraisal</td><td style="white-space:normal">${cfg.appr === 'pending' ? 'Not yet given: conditional' : 'Given, asking ' + money(num(cfg.ask)) + (cfg.apprLink ? `<br><span class="small" translate="no" style="overflow-wrap:anywhere">${esc(cfg.apprLink)}</span>` : '')}</td></tr>
+        <tr><td>Appraisal</td><td style="white-space:normal">${cfg.appr === 'pending' ? 'Not yet given: conditional' : 'Given, asking ' + money(num(cfg.ask)) + (apPerma(cfg) ? `<br><span class="small" translate="no" style="overflow-wrap:anywhere">${esc(apPerma(cfg))}</span>` : '')}</td></tr>
         <tr><td>Costs on signing</td><td style="white-space:normal">${[limAmt(cfg) ? 'LIM ' + money(limAmt(cfg)) : 'No LIM', adminAmt(cfg) ? 'admin fee ' + money(adminAmt(cfg)) : 'no admin fee'].join(', ')}</td></tr>
         <tr><td>Marketing</td><td style="white-space:normal">${an.mkt === 'later' || pkgOf(cfg).name === 'Later' ? 'To be agreed' : esc(pkgOf(cfg).label) + ' ' + money(pkgOf(cfg).amt)}${an.pay ? ' · Paying: ' + esc(an.pay) : ''}</td></tr>
         <tr><td>Legal advice</td><td style="white-space:normal">${esc((ag.legal || {}).choice === 'have' ? 'Received' : (ag.legal || {}).choice === 'waive' ? 'Went ahead without' : (ag.legal || {}).status === 'sent' ? 'With lawyer' : 'Not answered yet')}</td></tr>
@@ -13345,7 +13347,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         ${row('B. Property', esc(ag.address) + (c.owners ? `<br><span class="small">Registered owners: ${esc(c.owners)}${c.title ? ' · ' + esc(c.title) : ''}</span>` : ''))}
         ${row('C. Commencement', c.appr === 'pending' ? 'On receipt of written appraisal' : esc(c.start ? fmtDate(c.start) : 'On signing') + '. Review date 90 days after commencement')}
         ${row('D. Commission', esc(commText(c)) + (c.appr === 'pending' ? '' : `<br><span class="small">At ${money(num(c.ask))}: ${money(r2(commission(c, num(c.ask))))} plus GST</span>`))}
-        ${c.appr !== 'pending' && c.apprLink ? row('Written appraisal', `<span translate="no" style="overflow-wrap:anywhere">${esc(c.apprLink)}</span>`) : ''}
+        ${apPerma(c) ? row('Written appraisal', `<span translate="no" style="overflow-wrap:anywhere">${esc(apPerma(c))}</span>`) : ''}
         ${row('E. Costs on signing', [limAmt(c) ? 'LIM ' + money(limAmt(c)) : '', adminAmt(c) ? 'administration fee ' + money(adminAmt(c)) : '', 'marketing ' + (later ? 'to be agreed' : esc(pk.label) + ' ' + money(pk.amt))].filter(Boolean).join(', ') + ' (including GST)')}
         ${c.method ? row('Method of sale', esc(c.method)) : ''}
         ${c.appr === 'pending' ? row('Condition', 'Takes effect on receipt of a written appraisal. The client may cancel within 2 working days of receiving it, at no cost.') : ''}

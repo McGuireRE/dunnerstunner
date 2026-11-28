@@ -463,49 +463,59 @@ begin
   end loop;
   perform set_config('timezone', 'UTC', true);
   if x = '' then out := out || 'expiry: three months, clamped to the month''s end, in any time zone; '; else out := out || 'EXPIRY DATES WRONG: ' || x || '; '; end if;
-  -- ── the agency agreement's appraisal link (Tim, 28 November 2026, 7:12pm: "Just the permalink"): drafts only, this property's sent
-  --    versions only, and the guard on signed agreements unchanged ──
+  -- ── the agency agreement's appraisal link (Tim, 28 November 2026: "Just the permalink", then "Make them one"): the one field is
+  --    config.apprUrl (clause 23.1). Our appraisal links: drafts only, this property's sent versions only. Anything else typed by hand:
+  --    exactly as today. guard_signed_agreement unchanged ──
   execute 'set local role authenticated'; perform set_config('request.jwt.claims', agent, true);
   x := 'https://packages.dunnerstunner.co.nz/onboarding/?appraisal=' || aid || '&v=2';
   insert into public.agreements (property_id, address, status, config) values (pid, 'RB 9 Send Street, Rbvale', 'draft', '{"appr":"done","ask":"550000"}') returning id into jh_ag;
-  update public.agreements set config = config || jsonb_build_object('apprLink', x) where id = jh_ag;
-  if (select config->>'apprLink' from public.agreements where id = jh_ag) = x then out := out || 'a draft takes the latest sealed version''s permanent link; '; else out := out || 'THE DRAFT DIDN''T TAKE THE LINK; '; end if;
+  update public.agreements set config = config || jsonb_build_object('apprUrl', x) where id = jh_ag;
+  if (select config->>'apprUrl' from public.agreements where id = jh_ag) = x and not ((select config from public.agreements where id = jh_ag) ? 'apprLink')
+  then out := out || 'a draft takes the latest sealed version''s permanent link, in apprUrl only; '; else out := out || 'THE DRAFT DIDN''T TAKE THE LINK; '; end if;
   x2 := '';
   foreach x3 in array array['https://packages.dunnerstunner.co.nz/onboarding/?appraisal=' || aid || '&v=9', 'http://packages.dunnerstunner.co.nz/onboarding/?appraisal=' || aid || '&v=1',
-      'https://rbelsewhere.example.com/onboarding/?appraisal=' || aid || '&v=1', 'https://packages.dunnerstunner.co.nz/onboarding/?appraisal=' || aid, 'RB not a link',
-      'https://packages.dunnerstunner.co.nz/onboarding/?appraisal=' || aid || '&v=1&x=1'] loop
-    begin update public.agreements set config = config || jsonb_build_object('apprLink', x3) where id = jh_ag; x2 := x2 || x3 || ' ';
+      'https://packages.dunnerstunner.co.nz/onboarding/?appraisal=' || aid, 'https://packages.dunnerstunner.co.nz/onboarding/?appraisal=' || aid || '&v=1&x=1',
+      'packages.dunnerstunner.co.nz/onboarding/?appraisal=' || aid || '&v=1', 'HTTPS://PACKAGES.DUNNERSTUNNER.CO.NZ/ONBOARDING/?APPRAISAL=' || upper(aid::text) || '&V=1'] loop
+    begin update public.agreements set config = config || jsonb_build_object('apprUrl', x3) where id = jh_ag; x2 := x2 || x3 || ' ';
     exception when others then if sqlerrm not like 'That isn''t the permanent link of an appraisal sent for this property%' then x2 := x2 || sqlerrm || ' '; end if; end;
   end loop;
-  begin update public.agreements set config = config || '{"apprLink": 42}' where id = jh_ag; x2 := x2 || 'a number '; exception when others then null; end;
-  if x2 = '' then out := out || 'not a permanent version link of this property: refused, in plain words; '; else out := out || 'BAD LINKS TAKEN: ' || left(x2, 200) || '; '; end if;
+  if x2 = '' then out := out || 'anything that looks like our appraisal link but isn''t a sent version of it: refused, in plain words; '; else out := out || 'BAD LINKS TAKEN: ' || left(x2, 200) || '; '; end if;
+  -- typed by hand, as before: any other address or words, on a draft or a sent agreement
+  x2 := '';
+  foreach x3 in array array['https://rbappraisals.example.com/robin', 'Given in writing on 20 November', '', 'https://packages.dunnerstunner.co.nz/quiet/'] loop
+    begin update public.agreements set config = config || jsonb_build_object('apprUrl', x3) where id = jh_ag; exception when others then x2 := x2 || x3 || ': ' || sqlerrm || ' '; end;
+  end loop;
+  begin update public.agreements set config = config || '{"apprUrl": 42}' where id = jh_ag; exception when others then x2 := x2 || 'a number '; end;
+  if x2 = '' then out := out || 'other typed text: as before; '; else out := out || 'TYPED TEXT REFUSED: ' || left(x2, 200) || '; '; end if;
   insert into public.agreements (property_id, address, status, config) values (pid2, 'RB 11 Other Street, Rbvale', 'draft', '{}') returning id into jh_ag2;
-  begin update public.agreements set config = config || jsonb_build_object('apprLink', x) where id = jh_ag2; out := out || 'ANOTHER PROPERTY''S APPRAISAL LINKED; ';
+  begin update public.agreements set config = config || jsonb_build_object('apprUrl', x) where id = jh_ag2; out := out || 'ANOTHER PROPERTY''S APPRAISAL LINKED; ';
   exception when others then out := out || 'another property''s appraisal: refused; '; end;
-  update public.agreements set config = config || '{"apprLink": ""}' where id = jh_ag;
-  update public.agreements set config = config - 'apprLink' where id = jh_ag;
-  update public.agreements set config = config || jsonb_build_object('apprLink', 'https://packages.dunnerstunner.co.nz/onboarding/?appraisal=' || aid || '&v=1') where id = jh_ag;
-  out := out || 'cleared, removed and set to version 1 on a draft; ';
-  -- sent: the link stays as it was; other changes Tim may still make to a sent agreement pass as before
+  update public.agreements set config = config - 'apprUrl' where id = jh_ag;
+  update public.agreements set config = config || jsonb_build_object('apprUrl', 'https://packages.dunnerstunner.co.nz/onboarding/?appraisal=' || aid || '&v=1') where id = jh_ag;
+  out := out || 'removed and set to version 1 on a draft; ';
+  -- sent: no appraisal link can be added; typed text and Tim's other changes pass as before
   update public.agreements set status = 'sent', sent_at = now() where id = jh_ag;
-  begin update public.agreements set config = config || jsonb_build_object('apprLink', x) where id = jh_ag; out := out || 'A SENT AGREEMENT''S LINK CHANGED; ';
-  exception when others then if sqlerrm like 'The appraisal link can only be changed on a draft agreement%' then out := out || 'sent: the link can''t change; '; else out := out || 'SENT: ' || sqlerrm || '; '; end if; end;
-  begin update public.agreements set config = config - 'apprLink' where id = jh_ag; out := out || 'A SENT AGREEMENT''S LINK WAS CLEARED; '; exception when others then out := out || 'nor be cleared; '; end;
-  begin update public.agreements set config = config || '{"agent_notes":"RB note"}' where id = jh_ag; out := out || 'other changes to a sent agreement pass as before; ';
+  begin update public.agreements set config = config || jsonb_build_object('apprUrl', x) where id = jh_ag; out := out || 'A SENT AGREEMENT TOOK A NEW APPRAISAL LINK; ';
+  exception when others then if sqlerrm like 'An appraisal link can only be added on a draft agreement%' then out := out || 'sent: no new appraisal link; '; else out := out || 'SENT: ' || sqlerrm || '; '; end if; end;
+  begin update public.agreements set config = config || '{"agent_notes":"RB note","ask":"560000"}' where id = jh_ag; out := out || 'other changes to a sent agreement pass as before; ';
   exception when others then out := out || 'THE LINK GUARD BLOCKED ANOTHER CHANGE: ' || sqlerrm || '; '; end;
-  begin insert into public.agreements (property_id, address, status, config) values (pid, 'RB 9', 'sent', jsonb_build_object('apprLink', x)); out := out || 'A SENT AGREEMENT WAS MADE WITH A LINK; ';
-  exception when others then out := out || 'a new agreement: only a draft takes a link; '; end;
-  insert into public.agreements (property_id, address, status, config) values (pid, 'RB 9 Send Street, Rbvale', 'draft', jsonb_build_object('appr', 'done', 'apprLink', x)) returning id into jh_ag2;
+  begin update public.agreements set config = config || '{"apprUrl":"https://rbappraisals.example.com/robin"}' where id = jh_ag; out := out || 'and typed text on a sent agreement, as before; ';
+  exception when others then out := out || 'TYPED TEXT ON A SENT AGREEMENT REFUSED: ' || sqlerrm || '; '; end;
+  begin insert into public.agreements (property_id, address, status, config) values (pid, 'RB 9', 'sent', jsonb_build_object('apprUrl', x)); out := out || 'A SENT AGREEMENT WAS MADE WITH A LINK; ';
+  exception when others then out := out || 'a new agreement: only a draft takes an appraisal link; '; end;
+  insert into public.agreements (property_id, address, status, config) values (pid, 'RB 9 Send Street, Rbvale', 'draft', jsonb_build_object('appr', 'done', 'apprUrl', x)) returning id into jh_ag2;
   out := out || 'a new draft may start with it; ';
-  -- signed: guard_signed_agreement still refuses every change to the terms, the link included, and a signed agreement without a link
-  -- is untouched by the new guard
+  -- signed: guard_signed_agreement still refuses every change to the terms, the link included
   execute 'reset role';
   insert into public.agreement_people (agreement_id, position, legal_name, email, signed_at) values (jh_ag2, 1, 'Robin Rbowner', 'rb-owner@example.com', now());
   update public.agreements set status = 'signed', signed_at = now() where id = jh_ag2;
   execute 'set local role authenticated'; perform set_config('request.jwt.claims', agent, true);
-  begin update public.agreements set config = config - 'apprLink' where id = jh_ag2; out := out || 'A SIGNED AGREEMENT''S LINK WAS CLEARED; '; exception when others then out := out || 'signed: the link stays; '; end;
+  begin update public.agreements set config = config - 'apprUrl' where id = jh_ag2; out := out || 'A SIGNED AGREEMENT''S LINK WAS CLEARED; ';
+  exception when others then if sqlerrm = 'This agreement has been signed, so its terms can no longer be changed' then out := out || 'signed: the link stays, by the signed-agreement guard; '; else out := out || 'SIGNED CLEAR: ' || sqlerrm || '; '; end if; end;
+  begin update public.agreements set config = config || '{"apprUrl":"https://rbappraisals.example.com/robin"}' where id = jh_ag2; out := out || 'A SIGNED AGREEMENT TOOK TYPED TEXT; ';
+  exception when others then if sqlerrm = 'This agreement has been signed, so its terms can no longer be changed' then out := out || 'nor typed over; '; else out := out || 'SIGNED TYPED: ' || sqlerrm || '; '; end if; end;
   begin update public.agreements set config = config || '{"ask":"1"}' where id = jh_ag2; out := out || 'A SIGNED AGREEMENT''S TERMS CHANGED; ';
-  exception when others then if sqlerrm = 'This agreement has been signed, so its terms can no longer be changed' then out := out || 'and its terms stay, by the signed-agreement guard as before; '; else out := out || 'SIGNED: ' || sqlerrm || '; '; end if; end;
+  exception when others then if sqlerrm = 'This agreement has been signed, so its terms can no longer be changed' then out := out || 'and its terms stay, as before; '; else out := out || 'SIGNED: ' || sqlerrm || '; '; end if; end;
   update public.agreements set config = config || '{"agent_notes":"RB note"}' where id = jh_ag2;
   out := out || 'Tim''s own notes still change; ';
   execute 'reset role';

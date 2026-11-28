@@ -315,15 +315,21 @@ Gathered by a monthly scheduled task in Tim's signed-in browser, from his **"Tim
 - **Needs you, expiry**: from two weeks before the three months, for a property not yet listed (stage appraisal, questionnaire, plan,
   accepted or agreement): "Appraisal for {address} expires {date}" (after the date: "expired {date}"), for the newest version, with Done
   (agent_appraisal_expiry_done: recorded once for that version; a newer version brings its own item).
-- **The agency agreement's appraisal link** (Tim, 28 November 2026, 7:12pm: "Just the permalink"): config.apprLink, the permanent link
-  of a sent version of the same property. On a draft (not sent, nobody signed) the agreement's page 1 offers "Use the latest sealed
-  appraisal", which fills the newest sent version's link and ticks "Written appraisal given"; "Clear" takes it off. The database
-  (agreements_appr_link) accepts only that form, for that property, on an unsigned draft; guard_signed_agreement is unchanged. Printed in
-  full, with no seal reference, beside the appraisal: in the PDF's front page (Appointment of Agency D, right of the asking price and
-  median lines: "Written appraisal (permanent link):" then the link on two lines), in the emailed front page ("Written appraisal: {link}"
-  under "Given. Asking price..."), and in the lawyer's and Tim's summaries. Without a link nothing new prints, so every agreement without
-  one prints exactly as before. Not the same as the older optional field config.apprUrl ("Appraisal web address", clause 23.1, printed on
-  page 7), which stays as it was; an earlier note here wrongly said the agreement had no appraisal field.
+- **The agency agreement's appraisal link** (Tim, 28 November 2026: "Just the permalink", then "Make them one"): one field, the existing
+  config.apprUrl ("Appraisal web address", clause 23.1). On a draft (not sent, nobody signed) the agreement's page 1 offers "Use the
+  latest sealed appraisal" under that field: it fills the field with the newest sent version's permanent link and ticks "Written
+  appraisal given" ("Version {n}, sent {date}. It's kept when you save the agreement."). Tim can still type anything there, or empty it,
+  as before. The link is entered once and prints in two places: in clause 23.1 (page 7, as the field always has) and on the front page
+  (Appointment of Agency D, right of the asking price and median lines: "Written appraisal (permanent link):" then the link on two
+  lines), in full, with no seal reference. The emailed front page shows "Written appraisal: {link}" under "Given. Asking price...", and
+  the lawyer's and Tim's summaries show it once. The front page shows it only when the field holds one of our permanent links; a typed
+  address prints in clause 23.1 only, as before, so every agreement without our link prints byte for byte as before.
+  The database (agreements_appr_link) checks only values that look like one of our appraisal links (dunnerstunner.co.nz/onboarding
+  with appraisal=): such a value must be a sent version's permanent link for the agreement's own property, added on an unsigned draft
+  ("An appraisal link can only be added on a draft agreement that hasn't been sent or signed"; "That isn't the permanent link of an
+  appraisal sent for this property. Use "Use the latest sealed appraisal", or type a different address"). Other typed text is left
+  exactly as today, on drafts and sent agreements; guard_signed_agreement is unchanged. Live had no apprLink anywhere (037 was never
+  applied) and no apprUrl that looks like ours (checked read-only, 28 November 2026), so nothing needed converting.
 
 ## The packs (for the chat that gathers them in Tim's signed-in browser)
 
