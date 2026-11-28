@@ -38,7 +38,8 @@ function renderWith(src, rec) { const vm = require('vm'); const ctx = { window: 
 { const { execFileSync } = require('child_process');
   let old = ''; try { old = execFileSync('git', ['-C', ROOT, 'show', '49e4528:onboarding/src/appraisal-core.js'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }); } catch (_) { old = ''; }
   const now_ = fs.readFileSync(path.join(__dirname, '..', 'src', 'appraisal-core.js'), 'utf8');
-  if (old) { out.render032 = renderWith(old, ALL032) === renderWith(now_, ALL032) && renderWith(old, HAND) === renderWith(now_, HAND); if (!out.render032) errs.push('the 032 section types draw differently from how 032 drew them'); }
+  // the look changed on 28 November 2026 (the approved sample): "exactly as 032 drew it" is now "nothing lost" (tests/apv-nothing-lost.js)
+  if (old) { const { lost } = require('./apv-nothing-lost.js'); out.render032 = lost(renderWith(old, ALL032), renderWith(now_, ALL032)).concat(lost(renderWith(old, HAND), renderWith(now_, HAND))); if (out.render032.length) errs.push('the 032 section types lose something in the new look: ' + JSON.stringify(out.render032)); }
   else out.render032 = 'the 032 renderer is not in this checkout, so the comparison was skipped'; }
 (async () => {
   const core = await import(path.join(ROOT, 'fn', 'property_lookup_core.ts'));
@@ -80,7 +81,7 @@ function renderWith(src, rec) { const vm = require('vm'); const ctx = { window: 
     if (o.suburb != null) await p.fill('#apsSuburb', o.suburb);
     await p.click('#apsSave'); await wait(p, 500); return note(p, 'apsSave'); };
   const docInfo = p => p.evaluate(() => { const d = document.querySelector('#apvDoc'); if (!d) return null; const w = d.querySelector('.apv-camp'); return {
-    h2: Array.from(d.querySelectorAll('h2')).map(x => x.textContent), by: (d.querySelector('.apv-by') || {}).textContent || '', lede: (d.querySelector('.apv-lede') || {}).textContent || '',
+    h2: Array.from(d.querySelectorAll('h2')).map(x => x.textContent), order: Array.from(d.querySelectorAll('h2, .apv-note-k, h3.apv-h3, .apv-panel-h')).map(x => x.textContent), by: (d.querySelector('.apv-by') || {}).textContent || '', lede: (d.querySelector('.apv-lede') || {}).textContent || '',
     fig: Array.from(d.querySelectorAll('.apv-opinion .apv-fig, .apv-opinion .apv-ranges td:last-child')).map(x => x.textContent), valn: (d.querySelector('.apv-valn') || {}).textContent || '',
     method: (d.querySelector('.apv-method') || {}).textContent || '', bars: w ? Array.from(w.querySelectorAll('.apv-wlab')).map(x => x.textContent) : [], pcts: w ? Array.from(w.querySelectorAll('.apv-wpct')).map(x => +x.textContent.replace('%', '')) : [],
     mark: w && w.querySelector('.apv-wmark') ? w.querySelector('.apv-wmark').textContent : '', on: w ? w.querySelectorAll('.apv-wcol.on').length : 0, sub: w ? w.querySelector('figcaption span').textContent : '',
@@ -161,7 +162,9 @@ function renderWith(src, rec) { const vm = require('vm'); const ctx = { window: 
   // ── 3. The written appraisal: the agreed order and what each section says ──
   await p.click('#apsAfter a[data-plink$="' + fromProp.id + '"]'); await wait(p, 800);
   let s = await docInfo(p); out.written = s;
-  expect(s.h2.join('|') === 'A note from Tim|My opinion of price|How I would sell it|Every way to sell, explained|Marketing plans|Tim is not like other agents', 'the standard sections in the agreed order: ' + s.h2.join('|'));
+  // in the sample's look the note's heading is a small line over the letter, the methods and plans sit under smaller headings inside the
+  // campaign, the panel has its own heading, and the closing line ends the page: the agreed order holds across all of them
+  expect(s.order.join('|') === 'A note from Tim|My opinion of price|How I would sell it|Every way to sell, explained|Marketing plans|Tim is not like other agents|When you\'re ready, I\'m ready' && s.h2.join('|') === 'My opinion of price|How I would sell it|When you\'re ready, I\'m ready', 'the standard sections in the agreed order: ' + s.order.join('|'));
   expect(/^Prepared for Robin and Sam by Tim McGuire, McGuire Real Estate, \d{1,2} [A-Z][a-z]+ 20\d\d$/.test(s.by), 'byline: ' + s.by);
   expect(s.lede === 'Thank you for having me through.', 'Tim\'s note, first paragraph as the lede: ' + s.lede);
   expect(s.fig.join('|') === '$520,000 to $575,000|$150,000 to $180,000', 'the opinion shows each part\'s range: ' + s.fig);
@@ -219,9 +222,10 @@ function renderWith(src, rec) { const vm = require('vm'); const ctx = { window: 
 
   // ── 6. Present and print ──
   await p.goto(PB + 'appraisals/' + fromProp.id + '/present'); await wait(p, 900);
-  out.present = await p.evaluate(() => ({ controls: document.querySelectorAll('#main input, #main select, #main textarea, #main button').length, flag: !!document.querySelector('#main .agent-flag'), tools: !!document.querySelector('#apvTools'),
+  out.present = await p.evaluate(() => ({ controls: document.querySelectorAll('#main input, #main select, #main textarea, #main button:not([data-apv-nav])').length, navs: document.querySelectorAll('#main button[data-apv-nav]').length, flag: !!document.querySelector('#main .agent-flag'), tools: !!document.querySelector('#apvTools'),
     notes: document.querySelector('#main').innerText.includes('Weak point'), nav: (() => { const n = document.getElementById('pNav'); return !!n && getComputedStyle(n).display !== 'none' && !n.hidden; })(), body: parseFloat(getComputedStyle(document.querySelector('.apv-doc')).fontSize), exit: !!document.querySelector('.apv-exit a') }));
   expect(out.present.controls === 0 && !out.present.flag && !out.present.tools && !out.present.notes && !out.present.nav && out.present.body >= 19 && out.present.exit, 'presentation: no editing, no private notes, no menu, large type: ' + JSON.stringify(out.present));
+  expect(out.present.navs >= 3, 'presentation: the only buttons are the sample\'s plan arrows and dots (they move the strip, nothing is saved): ' + out.present.navs);
   expect(!banned(await docText(p)), 'presentation: no "as is", fee or commission');
   expect(!(await side(p)), 'presentation: no sideways scroll at 390 light'); await shot(p, 'present_390_light');
   await p.evaluate(() => window.dispatchEvent(new Event('beforeprint'))); await wait(p, 100);

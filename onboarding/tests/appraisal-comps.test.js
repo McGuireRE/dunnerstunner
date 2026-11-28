@@ -63,15 +63,17 @@ const A = ctx0.window.APPR, M = ctx0.window.MKT;
     && r.items.some(x => x.text === 'The advertisement wording for 4 Rbcomp Road isn\'t shown to the vendor: Please write "current condition" rather than "as is".'), 'rule: the checks on each comparable: ' + JSON.stringify(r.items));
   // the dots: one per priced comparable, numbered, with the range shaded
   const svg = M.dots([{ n: 1, price: 500000, status: 'sold', label: 'One' }, { n: 2, price: 505000, status: 'listed', label: 'Two' }, { n: 3, price: 600000, status: 'context', label: 'Three' }, { n: 4, price: 0, label: 'None' }], [{ key: 'A', option: 'Your home', low: 520000, high: 575000 }]);
-  out.dotsNode = { dots: (svg.match(/class="mk-dot /g) || []).length, range: (svg.match(/class="mk-range"/g) || []).length, legend: /My range, shaded/.test(svg), table: /See the figures/.test(svg), ctx: /For context only, not comparable/.test(svg) };
-  expect(out.dotsNode.dots === 3 && out.dotsNode.range === 1 && out.dotsNode.legend && out.dotsNode.table && out.dotsNode.ctx, 'dots in node: ' + JSON.stringify(out.dotsNode));
+  // the dots are drawn twice (a narrow drawing for a phone, a wide one for a bigger screen and paper, as the sample draws to its box): count one
+  const svgN = svg.slice(svg.indexOf('class="mk-v n"'), svg.indexOf('class="mk-v w"'));
+  out.dotsNode = { both: /class="mk-v n"/.test(svg) && /class="mk-v w"/.test(svg) && (svg.match(/class="mk-dot /g) || []).length === 6, dots: (svgN.match(/class="mk-dot /g) || []).length, range: (svgN.match(/class="mk-range"/g) || []).length, legend: /My range, shaded/.test(svg), table: /See the figures/.test(svg), ctx: /For context only, not comparable/.test(svg) };
+  expect(out.dotsNode.both && out.dotsNode.dots === 3 && out.dotsNode.range === 1 && out.dotsNode.legend && out.dotsNode.table && out.dotsNode.ctx, 'dots in node: ' + JSON.stringify(out.dotsNode));
   // the market report: a missing month is a gap (two line pieces), "All prices" not "Under $0", the source and the area from the figures
   const gm = [['2026-01', 500000], ['2026-02', 510000], ['2026-04', 520000], ['2026-05', 530000]].map(([m, v]) => ({ area: 'Rbtown', month: m + '-01', median: v, lower_quartile: v - 100000, upper_quartile: v + 100000, sales: 100, days_to_sell: 30, source: 'other', bands: m === '2026-05' ? [{ from: 0, count: 5 }, { from: 0, to: 500000, count: 3 }] : [] }));
   const rep = M.report(gm, [{ low: 450000, high: 550000 }], {});
   out.gaps = { lines: (rep.match(/class="mk-line"/g) || []).length, spreads: (rep.match(/class="mk-spread"/g) || []).length, months: M.lastYear(gm, 'Rbtown').map(x => x.month.slice(0, 7) + (x.missing ? ' gap' : '')).join(), all: /All prices/.test(rep), under0: /Under \$0/.test(rep), src: /Source: other published figures, figures to May 2026/.test(rep), ends: /Lower end/.test(rep) && /Upper end/.test(rep) && !/quartile/i.test(rep.replace(/<title>[^<]*<\/title>/g, '')), area: /data-area="Rbtown"/.test(rep) && /in Rbtown was/.test(rep) };
   expect(out.gaps.lines === 2 && out.gaps.spreads === 2 && out.gaps.months === '2026-01,2026-02,2026-03 gap,2026-04,2026-05' && out.gaps.all && !out.gaps.under0 && out.gaps.src && out.gaps.ends && out.gaps.area, 'market report: gaps, band labels, source, plain headings, the area: ' + JSON.stringify(out.gaps));
   const evA = A.render(PHASEA, { comps: [], photos: {}, months: gm, market: true, area: '' });
-  expect(/<h2>The Rbtown market<\/h2>/.test(evA) && /<h2>The Dunedin market<\/h2>/.test(A.render(PHASEA, { comps: [], months: gm.map(m => Object.assign({}, m, { area: 'Dunedin' })), market: true })), 'the heading follows the area charted');
+  expect(/<h2[^>]*>The Rbtown market<\/h2>/.test(evA) && /<h2[^>]*>The Dunedin market<\/h2>/.test(A.render(PHASEA, { comps: [], months: gm.map(m => Object.assign({}, m, { area: 'Dunedin' })), market: true })), 'the heading follows the area charted');
   expect(A.matchPhoto('C:\\Downloads\\RB-R1_2.JPG', [{ id: 'a', photo_hints: [{ file: 'rb-r1_2.jpg' }] }]) === 'a' && A.matchPhoto('RB-R12_1.jpg', [{ id: 'a', source_ref: 'RB-R1' }, { id: 'b', source_ref: 'RB-R12' }]) === 'b' && A.matchPhoto('RB-R1x.jpg', [{ id: 'a', source_ref: 'RB-R1' }]) === '', 'photo matching by file name and reference');
   // without evidence, or with none to show, a phase A appraisal draws exactly as it did
   expect(A.render(PHASEA) === A.render(PHASEA, { comps: [], photos: {}, months: [], market: false }) && A.render(HAND, { comps: [{ id: 'x', address: '1 X Road', price: 1, shown: true }] }) === A.render(HAND), 'no evidence: the page is as phase A and 032 drew it'); }
@@ -254,20 +256,20 @@ const A = ctx0.window.APPR, M = ctx0.window.MKT;
   await p.goto(PB + 'appraisals/AVA'); await wait(p, 1200);
   const docInfo = () => p.evaluate(() => { const d = document.querySelector('#apvDoc'); return {
     h2: Array.from(d.querySelectorAll('h2')).map(x => x.textContent), text: d.innerText,
-    dots: Array.from(d.querySelectorAll('.mk-dot')).map(x => [x.dataset.n, x.classList.contains('sold') ? 'sold' : x.classList.contains('listed') ? 'listed' : 'context', +x.dataset.price]),
-    range: (() => { const r = d.querySelector('.mk-range rect'); return r ? { x: +r.getAttribute('x'), w: +r.getAttribute('width'), lab: d.querySelector('.mk-range-lab').textContent } : null; })(),
+    dots: Array.from(d.querySelectorAll('.mk-v.n .mk-dot')).map(x => [x.dataset.n, x.classList.contains('sold') ? 'sold' : x.classList.contains('listed') ? 'listed' : 'context', +x.dataset.price]),
+    range: (() => { const r = d.querySelector('.mk-v.n .mk-range rect'); return r ? { x: +r.getAttribute('x'), w: +r.getAttribute('width'), lab: d.querySelector('.mk-v.n .mk-range-lab').textContent } : null; })(),
     legend: (d.querySelector('.mk-legend') || {}).textContent || '',
     cards: Array.from(d.querySelectorAll('.apv-comp')).map(x => ({ n: x.querySelector('.apv-comp-n').textContent, a: x.querySelector('h3').textContent, tags: Array.from(x.querySelectorAll('.apv-tag')).map(t => t.textContent), ad: !!x.querySelector('.apv-ad'), cmp: (x.querySelector('.apv-cmp p') || {}).textContent || '', photos: x.querySelectorAll('.apv-car img').length })),
     charts: Array.from(d.querySelectorAll('[data-chart]')).map(x => x.dataset.chart), bandOn: Array.from(d.querySelectorAll('.mk-band.on .mk-band-lab')).map(x => x.textContent),
     script: !!d.querySelector('script') }; });
   let s = await docInfo(); out.doc = { h2: s.h2, dots: s.dots, range: s.range, cards: s.cards, charts: s.charts, bandOn: s.bandOn };
-  expect(s.h2.join('|') === 'Price evidence at a glance|Recent sales nearby|On the market now|The Dunedin market|My opinion of price|How I would sell it', 'the evidence in the agreed place, before the opinion: ' + s.h2.join('|'));
+  expect(s.h2.join('|') === 'The price evidence at a glance|Sales and current listings|The Dunedin market|My opinion of price|How I would sell it|When you\'re ready, I\'m ready', 'the evidence in the agreed place, before the opinion: ' + s.h2.join('|'));
   expect(s.dots.length === 6 && s.dots.map(x => x[0]).sort().join() === '1,2,3,4,5,6' && s.dots.find(x => x[0] === '4')[1] === 'context' && s.dots.find(x => x[0] === '5')[1] === 'listed' && s.dots.find(x => x[0] === '2')[2] === 545000, 'a numbered dot for every shown comparable: ' + JSON.stringify(s.dots));
   // the shading sits where the range is on the dots' scale: between the dots priced below and above it
-  out.rangeOk = await p.evaluate(() => { const d = document.querySelector('#apvDoc'), r = d.querySelector('.mk-range rect'), x0 = +r.getAttribute('x'), x1 = x0 + +r.getAttribute('width');
-    const at = Array.from(d.querySelectorAll('.mk-dot')).map(g => [+g.dataset.price, +g.querySelector('circle').getAttribute('cx')]);
+  out.rangeOk = await p.evaluate(() => { const d = document.querySelector('#apvDoc'), r = d.querySelector('.mk-v.n .mk-range rect'), x0 = +r.getAttribute('x'), x1 = x0 + +r.getAttribute('width');
+    const at = Array.from(d.querySelectorAll('.mk-v.n .mk-dot')).map(g => [+g.dataset.price, +g.querySelector('circle').getAttribute('cx')]);
     return at.every(([pr, cx]) => (pr < 520000 ? cx < x0 : pr > 575000 ? cx > x1 : cx >= x0 && cx <= x1)); });
-  expect(s.range && s.range.lab === 'My range' && out.rangeOk && /My range, shaded/.test(s.legend) && /Sold/.test(s.legend) && /On the market/.test(s.legend) && /For context only, not comparable/.test(s.legend), 'the range shaded at its place on the scale, with a legend: ' + JSON.stringify([s.range, out.rangeOk, s.legend]));
+  expect(s.range && s.range.lab === 'Your home: $520K to $575K' && out.rangeOk && /My range, shaded/.test(s.legend) && /Sold/.test(s.legend) && /On the market/.test(s.legend) && /For context only, not comparable/.test(s.legend), 'the range shaded at its place on the scale, with a legend: ' + JSON.stringify([s.range, out.rangeOk, s.legend]));
   const card = a => s.cards.find(c => c.a === a);
   expect(s.cards.length === 6 && card('30 Rbcomp Road, Testville').n === '2' && card('38 Rbcomp Road, Testville').tags.includes('On the market') && card('36 Rbcomp Road, Testville').tags.includes('For context only, not comparable'), 'the cards: numbered in Tim\'s order, with their status: ' + JSON.stringify(s.cards.map(c => [c.n, c.a, c.tags])));
   expect(card('32 Rbcomp Road, Testville').cmp === 'A slightly smaller home on a smaller section.' && card('34 Rbcomp Road, Testville').cmp === '' && card('30 Rbcomp Road, Testville').cmp === 'A similar home with a smaller garden than yours.', 'only ticked comparisons show');
@@ -289,7 +291,7 @@ const A = ctx0.window.APPR, M = ctx0.window.MKT;
   // present and print
   await p.goto(PB + 'appraisals/AVA/present'); await wait(p, 1200);
   out.present = await p.evaluate(() => ({ text: document.querySelector('#main').innerText, tools: !!document.querySelector('#apvTools'), h2: Array.from(document.querySelectorAll('#apvDoc h2')).map(x => x.textContent).slice(0, 4).join('|') }));
-  expect(!/Tim only|Weak point|in a hurry/.test(out.present.text) && !out.present.tools && out.present.h2 === 'Price evidence at a glance|Recent sales nearby|On the market now|The Dunedin market', 'presentation: the evidence, and no private notes: ' + out.present.h2);
+  expect(!/Tim only|Weak point|in a hurry/.test(out.present.text) && !out.present.tools && out.present.h2 === 'The price evidence at a glance|Sales and current listings|The Dunedin market|My opinion of price', 'presentation: the evidence, and no private notes: ' + out.present.h2);
   expect(!(await side(p)), 'presentation: no sideways scroll at 390 light'); await shot(p, 'present_390_light');
   await p.emulateMedia({ media: 'print' });
   out.print = await p.evaluate(id => { const imgs = Array.from(document.querySelectorAll('.apv-comp[data-comp="' + id + '"] .apv-car img')); const ctl = document.querySelector('.apv-comp[data-comp="' + id + '"] .apv-car-ctl');
@@ -311,7 +313,7 @@ const A = ctx0.window.APPR, M = ctx0.window.MKT;
   }
   await p.goto(PB + 'appraisals/AVA'); await wait(p, 1100);
   out.darkMarks = await p.evaluate(() => { const c = document.querySelector('.mk-dot.sold circle'), l = document.querySelector('.mk-line'); return { dot: getComputedStyle(c).fill, line: getComputedStyle(l).stroke, bars: document.querySelectorAll('.mk-bar').length }; });
-  expect(out.darkMarks.dot === 'rgb(240, 100, 76)' && out.darkMarks.line === 'rgb(240, 100, 76)' && out.darkMarks.bars === 24, 'dark: the marks take the dark accent: ' + JSON.stringify(out.darkMarks));
+  expect(out.darkMarks.dot === 'rgb(242, 238, 233)' && out.darkMarks.line === 'rgb(240, 100, 76)' && out.darkMarks.bars === 24, 'dark: the marks take the dark colours (a sale is an ink dot, as in the sample; the line the dark accent): ' + JSON.stringify(out.darkMarks));
   await X.ctx.close();
 
   // ── 10. The sent-row freeze and the wording guard on a direct update; a sent appraisal's comparables are read only ──

@@ -9563,6 +9563,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     if (!$('#main .loading')) return;
     if (!rec) return viewPortalMissing();
     document.body.classList.toggle('apv-present', !!present);
+    apvBrand();   // the logo in the appraisal's own top bar
     if (rec.setup && rec.setup.v) return apsShow(rec, present);   // LW3 phase A: an appraisal written from its set-up page
     const f = rec.fields || {};
     const draw = () => { const d = $('#apvDoc'); if (d) d.innerHTML = APPR.render(rec); };
@@ -9919,9 +9920,43 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     s.scrollTo({ left: at * w, behavior: 'smooth' }); const t = car.querySelector('.apv-car-at'); if (t) t.textContent = (at + 1) + ' of ' + n;
   });
   document.addEventListener('scroll', e => {
-    const s = e.target; if (!s || !s.classList || !s.classList.contains('apv-car-strip')) return;
+    const s = e.target; if (!s || !s.classList) return;
+    // the plans strip: the dot under it follows the plan in view
+    if (s.classList.contains('apv-plans')) { const i = apvPlanAt(s); $$('.apv-pdot', s.parentNode).forEach((d, k) => d.classList.toggle('on', k === i)); return; }
+    if (!s.classList.contains('apv-car-strip')) return;
     const car = s.closest('.apv-car'), t = car && car.querySelector('.apv-car-at'); if (t) t.textContent = (Math.round(s.scrollLeft / Math.max(1, s.clientWidth)) + 1) + ' of ' + car.dataset.n;
   }, true);
+  // the appraisal's look (the approved sample of 24 November 2026): the logo files for its top bar, set once from the page's own logos
+  function apvBrand() { if (!APPR.brand.light) { APPR.brand.light = ($('.logo-light') || {}).src || ''; APPR.brand.dark = ($('.logo-dark') || {}).src || ''; } }
+  // which plan card is in view in its strip
+  function apvPlanAt(s) { const cards = $$('.apv-plan', s); let b = 0, d = 1e9; cards.forEach((c, i) => { const x = Math.abs(c.offsetLeft - s.offsetLeft - s.scrollLeft); if (x < d) { d = x; b = i; } }); return b; }
+  // the appraisal's own controls: the jump chips, All / Sold / On the market, the plans' arrows and dots, a tap on a price dot, and the
+  // header video's Pause and Play. None of them changes anything saved.
+  document.addEventListener('click', e => {
+    const t = e.target && e.target.closest ? e.target.closest('[data-apv-go],[data-apv-f],[data-apv-plan],[data-apv-plan-i],[data-apv-vid],.apv-doc .mk-dot') : null; if (!t) return;
+    const doc = t.closest('.apv-doc'); if (!doc) return;
+    const smooth = !(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) ? 'smooth' : 'auto';
+    if (t.dataset.apvGo) { e.preventDefault(); const h = document.getElementById(t.dataset.apvGo); if (h) h.scrollIntoView({ behavior: smooth, block: 'start' }); return; }
+    if (t.dataset.apvF) {
+      const f = t.dataset.apvF; $$('[data-apv-f]', doc).forEach(b => { const on = b === t; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on ? 'true' : 'false'); });
+      $$('.apv-comp', doc).forEach(c => { c.hidden = f !== 'all' && c.dataset.st !== f; }); return;
+    }
+    if (t.dataset.apvPlan || t.dataset.apvPlanI) {
+      const s = $('.apv-plans', t.closest('.apv-plans-wrap')), cards = $$('.apv-plan', s); if (!s || !cards.length) return;
+      const i = Math.max(0, Math.min(cards.length - 1, t.dataset.apvPlanI != null ? +t.dataset.apvPlanI : apvPlanAt(s) + (+t.dataset.apvPlan)));
+      s.scrollTo({ left: cards[i].offsetLeft - s.offsetLeft, behavior: smooth }); return;
+    }
+    if (t.dataset.apvVid != null && t.hasAttribute('data-apv-vid')) {
+      const v = $('video', t.closest('.apv-hero')); if (!v) return;
+      if (v.paused) { v.play().catch(() => { }); t.textContent = 'Pause'; } else { v.pause(); t.textContent = 'Play'; } return;
+    }
+    if (t.classList.contains('mk-dot')) {
+      // a dot opens its home: the list shows everything again, then scrolls to that card
+      $$('[data-apv-f]', doc).forEach(b => { const on = b.dataset.apvF === 'all'; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on ? 'true' : 'false'); });
+      $$('.apv-comp', doc).forEach(c => { c.hidden = false; });
+      const c = $('.apv-comp[data-n="' + t.dataset.n + '"]', doc); if (c) c.scrollIntoView({ behavior: smooth, block: 'center' });
+    }
+  });
 
   // the comparables screen: Tim adds, edits, hides, reorders and removes comparables; imports a gathered pack; adds photos (his own
   // uploads, or a drop from his bulk-download folder matched by file name); checks the comparables rule; switches the market report on;

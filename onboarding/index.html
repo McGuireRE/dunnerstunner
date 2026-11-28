@@ -1144,6 +1144,229 @@ body.apv-present main { max-width: 760px; padding-bottom: 48px; }
   .apv-intro-still { display: block; width: 100%; max-height: 8cm; object-fit: cover; }
   .apv-home-card, .apv-rev { break-inside: avoid; }
 }
+/* ───────── The appraisal's look (Tim, 28 November 2026): the approved sample of 24 November 2026, faithfully. Every rule here is
+   scoped under .apv-doc (the appraisal itself) or the appraisal page, so Tim's other screens and vendor onboarding are unchanged.
+   Same tokens as the sample (they are the portal's own), Cormorant Garamond for display and Barlow for body, light and dark,
+   phone first with nothing wider than the screen at 390 px, and the sample's paper look in print. ───────── */
+main:has(> #apvPage) { max-width: 920px; }
+body.apv-present main { max-width: 920px; padding-top: 0; }
+body.apv-present header.top { display: none !important; }   /* presenting: the appraisal's own top bar (logo and jump chips) takes its place */
+.apv-doc { font-size: 17px; line-height: 1.55; }
+.apv-doc p { margin: 0 0 12px; }
+.apv-doc h1 { font-family: var(--display); font-weight: 400; font-size: clamp(34px, 7vw, 48px); line-height: 1.08; margin: 0 0 10px; text-wrap: balance; }
+.apv-doc h2 { font-family: var(--display); font-weight: 500; font-size: 30px; line-height: 1.15; margin: 48px 0 6px; text-wrap: balance; scroll-margin-top: 110px; }
+.apv-doc h3 { font-size: 17px; font-weight: 600; margin: 0 0 4px; }
+.apv-doc .apv-lede, .apv-doc .apv-method, .apv-doc .mk-lede { font-size: 18.5px; color: var(--muted); max-width: 36em; }
+.apv-doc .apv-note, .apv-doc .apv-by, .apv-doc .apv-valn { font-size: 14.5px; color: var(--muted); }
+.apv-doc .apv-kick { font-size: 12.5px; letter-spacing: .09em; text-transform: uppercase; color: var(--muted); font-weight: 600; margin: 0 0 6px; }
+.apv-doc .apv-note-k { margin-top: 22px; }
+.apv-doc .apv-card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 18px; margin: 14px 0; min-width: 0; }
+.apv-doc .apv-two { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: 20px; align-items: start; }
+.apv-doc .apv-two > * { min-width: 0; }
+.apv-doc .apv-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+/* the top bar: the logo, then the chips that jump to each section (sticky while presenting, as in the sample) */
+.apv-doc .apv-top { background: var(--surface); border-bottom: 1px solid var(--line); margin: 0 0 22px; box-shadow: 0 0 0 100vmax var(--surface); clip-path: inset(0 -100vmax); }
+body.apv-present .apv-doc .apv-top { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; }
+.apv-doc .apv-top-in { padding: 10px 0; }
+.apv-doc .apv-logo img { height: 30px; width: auto; display: block; }
+.apv-doc .apv-jump { display: flex; gap: 6px; overflow-x: auto; padding-top: 8px; scrollbar-width: none; }
+.apv-doc .apv-jump::-webkit-scrollbar { display: none; }
+.apv-doc .apv-logo + .apv-jump { margin-top: 0; }
+.apv-doc .apv-top-in > .apv-jump:first-child { padding-top: 0; }
+.apv-doc .apv-chip { font: inherit; font-size: 13.5px; font-weight: 500; border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 999px; padding: 5px 12px; cursor: pointer; white-space: nowrap; text-decoration: none; display: inline-block; }
+.apv-doc .apv-chip.on { background: var(--ink); color: var(--surface); border-color: var(--ink); }
+.apv-doc .apv-chip:focus-visible, .apv-doc .apv-car-btn:focus-visible, .apv-doc .apv-pbtn:focus-visible, .apv-doc .apv-pdot:focus-visible, .apv-doc .apv-vbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* the kicker and title; over the header photo or video when there is one, with the sample's darkening at its foot */
+.apv-doc .apv-head { margin: 0 0 4px; }
+/* the header runs the full width of the screen, as in the sample; the page clips anything past the edge, so nothing scrolls sideways */
+body:has(#apvPage .apv-doc) { overflow-x: clip; }
+.apv-doc .apv-hero { aspect-ratio: auto; min-height: min(62vh, 520px); display: flex; align-items: flex-end; background: #1d2a33; color: #fff; margin: -22px calc(50% - 50vw) 28px; border-radius: 0; }
+.apv-doc .apv-hero::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(0,0,0,.05) 35%, rgba(0,0,0,.62)); pointer-events: none; }
+.apv-doc .apv-hero-in { position: relative; z-index: 1; width: 100%; max-width: 920px; margin: 0 auto; padding: 28px 16px 26px; }
+.apv-doc .apv-hero-in h1 { color: #fff; margin: 0; }
+.apv-doc .apv-hero-in .apv-kick { color: rgba(255,255,255,.85); }
+.apv-doc .apv-credit { z-index: 1; top: 8px; right: 10px; bottom: auto; background: none; padding: 0; font-size: 11.5px; color: rgba(255,255,255,.8); }
+.apv-doc .apv-vbtn { position: absolute; z-index: 2; right: 10px; bottom: 10px; font: inherit; font-size: 12.5px; background: rgba(0,0,0,.45); color: #fff; border: 1px solid rgba(255,255,255,.4); border-radius: 999px; padding: 4px 10px; cursor: pointer; }
+.apv-doc .apv-hero.has-head .apv-vbtn { bottom: auto; top: 30px; }
+@media (prefers-reduced-motion: reduce) { .apv-doc .apv-vbtn { display: none; } }
+/* pills and tags, as the sample's */
+.apv-doc .apv-tag, .apv-doc .apv-pill { display: inline-block; font-size: 13px; font-weight: 600; letter-spacing: 0; text-transform: none; border: 0; border-radius: 999px; padding: 3px 10px; margin: 0 6px 4px 0; background: var(--line); color: var(--ink); }
+.apv-doc .apv-tag.st-sold { background: var(--ok-soft); color: var(--ok-text); }
+.apv-doc .apv-tag.st-listed { background: var(--warn-soft); color: var(--warn); }
+.apv-doc .apv-tag.st-context { background: var(--line); color: var(--muted); }
+.apv-doc .apv-tag.tim, .apv-doc .apv-tag.mock, .apv-doc .apv-mc .apv-tag, .apv-doc .apv-plan .apv-tag, .apv-doc .apv-methods .apv-tag { background: var(--accent-fill); color: var(--on-accent); }
+.apv-doc .apv-tag.near { background: var(--accent-soft); color: var(--accent); }
+.apv-doc .apv-tags .apv-tag { font-size: 13.5px; font-weight: 400; border-radius: 6px; padding: 3px 9px; background: var(--bg); border: 1px solid var(--line); }
+/* tables keep the portal's phone behaviour (rows become cards); the sample's quieter heading row */
+.apv-doc .apv-tbl { font-size: 15px; }
+.apv-doc .apv-tbl th { font-size: 12.5px; text-transform: uppercase; letter-spacing: .06em; background: var(--surface); }
+.apv-doc .apv-tbl tr.apv-rec td { background: var(--accent-soft); }
+/* What I heard from you: the sample's cards, each with an accent edge */
+.apv-doc .apv-heard-list { list-style: none; padding: 0; margin: 14px 0; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.apv-doc .apv-heard-list li { background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 10px; padding: 18px; min-width: 0; }
+/* the mockup listing */
+.apv-doc .apv-mock { font-size: 14.5px; color: var(--muted); }
+.apv-doc .apv-home-card { border-radius: 10px; padding: 18px; margin: 14px 0; }
+.apv-doc .apv-adraft h3 { font-family: var(--display); font-size: 28px; font-weight: 500; line-height: 1.15; margin: 0 0 8px; }
+.apv-doc .apv-adraft .apv-kick { margin-top: 0; }
+.apv-doc .apv-facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0 16px; margin: 14px 0 0; }
+.apv-doc .apv-facts > div { padding: 10px 0; border-bottom: 1px solid var(--line); min-width: 0; }
+.apv-doc .apv-facts dt { font-size: 13.5px; font-weight: 400; color: var(--muted); }
+.apv-doc .apv-facts dd { margin: 0; font-weight: 500; }
+/* the carousel: the photo at 3:2, round arrows over it and the count in its corner */
+.apv-doc .apv-car { position: relative; margin: 0; border-radius: 8px; overflow: hidden; background: var(--bg); min-width: 0; }
+.apv-doc .apv-car-strip { border-radius: 0; scrollbar-width: none; }
+.apv-doc .apv-car-strip::-webkit-scrollbar { display: none; }
+.apv-doc .apv-car-ctl { margin: 0; }
+.apv-doc .apv-car-btn { position: absolute; top: 50%; transform: translateY(-50%); width: 38px; height: 38px; border-radius: 50%; border: none; background: rgba(255,255,255,.92); color: #2B2A28; font-size: 20px; line-height: 1; box-shadow: 0 1px 4px rgba(0,0,0,.25); padding: 0; }
+.apv-doc .apv-car-btn.prev { left: 8px; } .apv-doc .apv-car-btn.next { right: 8px; }
+.apv-doc .apv-car-at { position: absolute; right: 8px; bottom: 8px; min-width: 0; background: rgba(0,0,0,.62); color: #fff; font-size: 12.5px; border-radius: 999px; padding: 2px 9px; }
+/* the price evidence and the comparables */
+.apv-doc .apv-evidence { margin: 0; }
+.apv-doc .apv-filters { display: flex; gap: 6px; flex-wrap: wrap; margin: 14px 0 4px; }
+.apv-doc .apv-comps { gap: 0; margin: 0; }
+.apv-doc .apv-comp { border-radius: 10px; padding: 18px; margin: 14px 0; }
+.apv-doc .apv-comp.ctx { border-style: dashed; }
+.apv-doc .apv-comp[hidden] { display: none; }
+.apv-doc .apv-comp-h { display: block; }
+.apv-doc .apv-comp-h h3 { margin: 4px 0 0; font-size: 17px; font-weight: 600; }
+.apv-doc .apv-comp-n { width: 24px; height: 24px; font-size: 12.5px; background: var(--ink); color: var(--surface); margin: 0 6px 4px 0; vertical-align: top; }
+.apv-doc .apv-comp.ctx .apv-comp-n { background: var(--line); color: var(--ink); }
+.apv-doc .apv-comp-tags { margin: 0; }
+.apv-doc .apv-comp-price { font-family: var(--display); font-size: 34px; line-height: 1.1; margin: 6px 0 0; }
+.apv-doc .apv-comp-how { font-size: 14.5px; color: var(--muted); margin: 2px 0 0; }
+.apv-doc .apv-cmp-tbl { width: 100%; border-collapse: collapse; font-size: 15px; margin-top: 10px; }
+.apv-doc .apv-cmp-tbl th, .apv-doc .apv-cmp-tbl td { text-align: left; padding: 6px 8px 6px 0; border-bottom: 1px solid var(--line); font-weight: 400; }
+.apv-doc .apv-cmp-tbl th { font-size: 12.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+.apv-doc .apv-cmp-tbl td:first-child { color: var(--muted); }
+.apv-doc .apv-cmp-tbl td.d { font-weight: 600; }
+.apv-doc .apv-ad h4, .apv-doc .apv-cmp h4 { font-size: 12.5px; letter-spacing: .09em; text-transform: uppercase; color: var(--muted); font-weight: 600; margin: 14px 0 4px; }
+.apv-doc .apv-ad blockquote { margin: 12px 0 0; padding: 10px 14px; border-left: 3px solid var(--line); color: var(--muted); font-style: italic; font-size: 15.5px; }
+/* the charts: each its own card, the sample's colours (sales in ink, the asking price an open dot, the range a soft band) */
+.apv-doc .mk-fig { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 18px; margin: 14px 0; }
+.apv-doc .apv-card .mk-fig { border: 0; padding: 0; margin: 0; background: none; }
+.apv-doc .mk-fig figcaption strong { font-size: 17px; font-weight: 600; margin-bottom: 4px; }
+.apv-doc .mk-fig figcaption span { font-size: 14.5px; margin-bottom: 8px; }
+.mk-dots .mk-v.w { display: none; }
+@media (min-width: 700px) { .mk-dots .mk-v.n { display: none; } .mk-dots .mk-v.w { display: block; } }
+@media print { .mk-dots .mk-v.n { display: none !important; } .mk-dots .mk-v.w { display: block !important; } }
+.apv-doc .mk-range rect { fill: var(--accent-soft); stroke: none; }
+.apv-doc .mk-range-lab { font-size: 10.5px; }
+.apv-doc .mk-dot.sold circle { fill: var(--ink); stroke: var(--surface); }
+.apv-doc .mk-dot.sold text { fill: var(--surface); }
+.apv-doc .mk-dot.listed circle { fill: var(--surface); stroke: var(--warn); stroke-width: 2.5; }
+.apv-doc .mk-dot { cursor: pointer; }
+.apv-doc .mk-key.sold { background: var(--ink); }
+.apv-doc .mk-key.listed { border-color: var(--warn); }
+.apv-doc .mk-key.range { background: var(--accent-soft); border: 0; }
+.apv-doc .mk-key.line { height: 3px; border-radius: 2px; background: var(--accent); }
+.apv-doc .mk-key.spread { border-radius: 2px; background: var(--accent); opacity: .28; }
+.apv-doc .mk-key.ref { height: 0; border-radius: 0; border-top: 2px dashed var(--ink); opacity: .6; }
+.apv-doc .mk-spread { opacity: .28; }
+.apv-doc .mk-line { stroke-width: 2.5; }
+.apv-doc .mk-ref { stroke: var(--ink); stroke-opacity: .55; stroke-dasharray: 5 4; stroke-width: 1.5; }
+.apv-doc .mk-ref-lab { font-size: 11px; fill: var(--ink); font-family: var(--body); }
+.apv-doc .mk-bar { fill: var(--accent); opacity: .8; }
+.apv-doc .mk-bar.last { opacity: 1; }
+.apv-doc .mk-band-bar i { background: var(--ink); opacity: .22; }
+.apv-doc .mk-band.on .mk-band-bar i { background: var(--accent); opacity: .9; }
+.apv-doc .mk-band.on .mk-band-lab { color: var(--ink); font-weight: 600; }
+.apv-doc .mk-tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 14px 0; }
+.apv-doc .mk-tile { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px; min-width: 0; }
+.apv-doc .mk-tile .k, .apv-doc .mk-tile .s { font-size: 13.5px; color: var(--muted); }
+.apv-doc .mk-tile .v { font-family: var(--display); font-size: 32px; line-height: 1.1; margin: 2px 0; overflow-wrap: anywhere; }
+.apv-doc .mk-grid { gap: 0 14px; }
+.apv-doc .mk-table summary { font-size: 14px; margin-top: 8px; }
+/* my opinion of price: the sample's soft accent card with the range in large display type */
+.apv-doc .apv-opinion { margin: 14px 0 0; }
+.apv-doc .apv-opin-card { background: var(--accent-soft); border-radius: 10px; padding: 18px; margin: 0 0 10px; }
+.apv-doc .apv-opin { display: block; background: none; border: 0; padding: 0; margin: 0; }
+.apv-doc .apv-opin-part { display: block; font-size: 15px; color: var(--muted); }
+.apv-doc .apv-opin-fig { display: block; font-family: var(--display); font-weight: 400; font-size: clamp(34px, 7vw, 52px); line-height: 1.1; margin: 6px 0; color: var(--ink); }
+.apv-doc .apv-opin-card .apv-tbl { background: transparent; border-color: transparent; margin: 6px 0 0; }
+.apv-doc .apv-opin-card .apv-ranges td:last-child { font-family: var(--display); font-size: 24px; font-weight: 400; color: var(--ink); }
+/* how I would sell it: the sample's buyer-wave card, steps, the ways to sell, the plans and the panel */
+.apv-doc .apv-wave { padding: 18px; margin: 14px 0; }
+.apv-doc .apv-wave figcaption strong { font-size: 17px; font-weight: 600; margin-bottom: 4px; }
+.apv-doc .apv-wgrid { row-gap: 4px; margin-top: 14px; }
+.apv-doc .apv-wcol { grid-row: 2; }
+.apv-doc .apv-wbrack { grid-row: 1; border-top: 2px solid var(--accent); padding-top: 4px; font-size: 12.5px; font-weight: 600; color: var(--accent); }
+.apv-doc .apv-wbar { background: var(--accent); opacity: .85; border-radius: 4px 4px 0 0; }
+.apv-doc .apv-wcol.on .apv-wbar { background: var(--accent); }
+.apv-doc .apv-wpct { font-size: 12.5px; }
+.apv-doc .apv-wlab { font-size: 12px; }
+.apv-doc .apv-wcol.after-mark { border-left: 2px solid var(--ink); }
+.apv-doc .apv-wmark { font-size: 12.5px; }
+.apv-doc .apv-wmark::before { border-top: 0; border-left: 2px solid var(--ink); width: 0; height: 14px; vertical-align: -2px; margin-right: 8px; }
+.apv-doc .apv-wdots { border-top: 6px solid var(--ink); opacity: .3; border-radius: 3px; }
+.apv-doc .apv-method { margin: 0 0 12px; }
+.apv-doc ol.apv-steps { list-style: none; padding: 0; margin: 14px 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; counter-reset: apvstep; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 18px; }
+.apv-doc ol.apv-steps li { border-top: 3px solid var(--accent); padding-top: 8px; font-size: 15px; margin: 0; counter-increment: apvstep; min-width: 0; }
+.apv-doc ol.apv-steps li::before { content: "Step " counter(apvstep); display: block; font-weight: 600; font-size: 15px; }
+.apv-doc .apv-mcard { margin: 14px 0; }
+.apv-doc .apv-mcard .apv-h3 { font-size: 17px; }
+.apv-doc .apv-mcs { display: block; margin: 8px 0 10px; }
+.apv-doc .apv-mc, .apv-doc .apv-mc.apv-rec { background: none; border: 0; border-top: 1px solid var(--line); border-radius: 0; padding: 10px 0; }
+.apv-doc .apv-mc summary { font-weight: 600; }
+.apv-doc .apv-mc summary strong { font-weight: 600; }
+.apv-doc .apv-mc dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-rows: auto auto; grid-auto-flow: column; gap: 0 14px; margin: 8px 0 0; font-size: 15px; }
+.apv-doc .apv-mc dt { font-size: 12.5px; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); margin: 0 0 4px; font-weight: 600; }
+.apv-doc .apv-mc dd { margin: 0; }
+.apv-doc .apv-h3 { margin: 28px 0 4px; }
+.apv-doc .apv-plans-h + .apv-note { margin: 0 0 6px; }
+.apv-doc .apv-plans { align-items: flex-start; gap: 14px; padding: 4px 2px 8px; margin: 0; scrollbar-width: none; }
+.apv-doc .apv-plans::-webkit-scrollbar { display: none; }
+.apv-doc .apv-plan { flex: 0 0 min(86%, 520px); border-radius: 12px; padding: 18px; }
+.apv-doc .apv-plan.apv-rec { border: 2px solid var(--accent); box-shadow: none; }
+.apv-doc .apv-plan h3 { font-size: 20px; margin: 10px 0 0; }
+.apv-doc .apv-plan-price { font-family: var(--display); font-weight: 400; font-size: 34px; line-height: 1.1; margin: 4px 0; }
+.apv-doc .apv-plan-price span { font: inherit; color: inherit; }   /* the page wraps each dollar figure so translation never changes it */
+.apv-doc .apv-plan-gst { font-size: 14.5px; color: var(--muted); margin: 0 0 10px; }
+.apv-doc .apv-tick { list-style: none; padding: 0; margin: 0; font-size: 15.5px; }
+.apv-doc .apv-tick li { padding: 3px 0 3px 22px; position: relative; margin: 0; }
+.apv-doc .apv-tick li::before { content: ""; position: absolute; left: 2px; top: 11px; width: 10px; height: 5px; border-left: 2px solid var(--ok); border-bottom: 2px solid var(--ok); transform: rotate(-45deg); }
+.apv-doc .apv-pnav { display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 6px; }
+.apv-doc .apv-pbtn { font: inherit; width: 36px; height: 36px; border-radius: 50%; border: 1px solid var(--line); background: var(--surface); color: var(--ink); cursor: pointer; font-size: 18px; padding: 0; }
+.apv-doc .apv-pdot { width: 9px; height: 9px; border-radius: 50%; background: var(--line); border: none; padding: 0; cursor: pointer; }
+.apv-doc .apv-pdot.on { background: var(--accent); }
+.apv-doc .apv-panel { background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 10px; padding: 18px; margin: 24px 0 14px; }
+.apv-doc .apv-panel-h { font-family: var(--display); font-size: 26px; font-weight: 500; line-height: 1.15; margin: 0 0 6px; }
+.apv-doc .apv-panel p { margin: 0 0 10px; }
+.apv-doc .apv-panel p:last-child { margin: 0; }
+.apv-doc .apv-close p { font-size: 14.5px; color: var(--muted); }
+.apv-doc .apv-buyers p { max-width: 40em; }
+.apv-doc .apv-rev { border-radius: 10px; padding: 18px; }
+.apv-doc .apv-rev blockquote { color: var(--muted); font-size: 15.5px; }
+/* presenting on a tablet or TV: the sample's sizes, a little larger */
+.apv-show .apv-doc { font-size: 19.5px; }
+.apv-show .apv-doc h2 { font-size: clamp(28px, 6vw, 34px); }
+@media (max-width: 700px) {
+  .apv-doc .apv-two { grid-template-columns: minmax(0, 1fr); }
+  .apv-doc .apv-facts { grid-template-columns: 1fr 1fr; }
+  .apv-doc ol.apv-steps { grid-template-columns: 1fr 1fr; }
+  .apv-doc .apv-heard-list { grid-template-columns: 1fr; }
+  .apv-doc .mk-tiles { grid-template-columns: 1fr 1fr; }
+  .apv-doc .mk-tile .v { font-size: 26px; }
+  .apv-doc .apv-mc dl { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; grid-auto-flow: row; }
+  .apv-doc .apv-mc dd { margin-bottom: 8px; }
+  .apv-doc h2 { font-size: 26px; }
+}
+/* paper: the sample's printed look. White, smaller type, no chips or buttons, one photo per home, cards kept whole */
+@media print {
+  .apv-doc { font-size: 14px; }
+  .apv-doc .apv-top { position: static !important; border: 0; box-shadow: none; clip-path: none; margin-bottom: 10px; }
+  .apv-doc .apv-jump, .apv-doc .apv-filters, .apv-doc .apv-pnav, .apv-doc .apv-vbtn { display: none !important; }
+  .apv-doc .apv-hero { min-height: 220px; height: auto; margin: 0 0 14px; }
+  .apv-doc .apv-hero-in { padding: 18px 16px; }
+  .apv-doc .apv-hero::after { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .apv-doc h2 { margin-top: 26px; font-size: 24px; break-after: avoid; }
+  .apv-doc .apv-card, .apv-doc .apv-comp, .apv-doc .mk-fig, .apv-doc .apv-panel, .apv-doc .apv-opin-card, .apv-doc ol.apv-steps, .apv-doc .apv-heard-list li { break-inside: avoid; }
+  .apv-doc .apv-comp { padding: 12px; }
+  .apv-doc .apv-comp .apv-two { grid-template-columns: 200px 1fr; gap: 14px; }
+  .apv-doc .apv-home-card .apv-two { grid-template-columns: 1fr 1fr; }
+  .apv-doc .apv-comp[hidden] { display: block !important; }
+  .apv-doc .apv-car-strip img:first-child { max-height: none; aspect-ratio: 3 / 2; }
+}
 /* the sections screen (Tim only) */
 .abs .abs-ph { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 140px), 1fr)); gap: 10px; }
 .abs .abs-ph figure { margin: 0; border: 1px solid var(--line); border-radius: 10px; padding: 6px; min-width: 0; }
@@ -6980,22 +7203,30 @@ window.JOURNEY_MEDIA_HINTS = {
     if (!pts.length) return '';
     const vals = pts.map(p => +p.price).concat(...rs.map(r => [+r.low, +r.high]));
     let lo = Math.min(...vals), hi = Math.max(...vals); const pad = Math.max((hi - lo) * 0.08, hi * 0.02); lo = Math.max(0, lo - pad); hi += pad;
-    const L = 14, R = W - 14, x = v => L + (v - lo) / (hi - lo) * (R - L), rad = 10;
+    // drawn twice, as the sample draws to its box: a narrow drawing for a phone and a wide one for a bigger screen and paper, so the
+    // labels keep their size (CSS shows one). The dots, the shading and the figures are the same in both.
+    const draw = (Wd, cls) => {
+    const L = 14, R = Wd - 14, x = v => L + (v - lo) / (hi - lo) * (R - L), rad = 10;
     // stack dots that would overlap: each goes on the lowest level where it clears the dots already there
     const levels = [], placed = pts.slice().sort((a, b) => a.price - b.price).map(p => { const cx = x(p.price); let k = 0;
       while ((levels[k] || []).some(o => Math.abs(o - cx) < rad * 2 + 2)) k++; (levels[k] = levels[k] || []).push(cx); return { p, cx, k }; });
     const nl = Math.max(1, levels.length), top = rs.length ? 30 : 12, base = top + nl * (rad * 2 + 4), H = base + 30;
+    // the label over the shading, as in the sample: "Your home: $520K to $575K" (kept inside the drawing, however near the edge it sits)
+    const labOf = (r, i) => rs.length > 1 ? (r.option || 'Range ' + (i + 1)) : (/^\s*your (home|property)\s*$/i.test(String(r.option || '')) ? 'Your home' : 'My range') + ': ' + short(r.low) + ' to ' + short(r.high);
+    const labX = (r, i) => { const half = labOf(r, i).length * 3.1, mid = (x(r.low) + x(r.high)) / 2; return Math.max(L + half, Math.min(R - half, mid)); };
     const bands = rs.map((r, i) => '<g class="mk-range" data-range="' + esc(r.key || i) + '"><rect x="' + x(r.low).toFixed(1) + '" y="' + (top - 4) + '" width="' + Math.max(2, x(r.high) - x(r.low)).toFixed(1) + '" height="' + (base - top + 8) + '" rx="4"><title>' + esc((r.option || 'My range') + ': ' + dollars(r.low) + ' to ' + dollars(r.high)) + '</title></rect>'
-      + '<text class="mk-range-lab" x="' + ((x(r.low) + x(r.high)) / 2).toFixed(1) + '" y="' + (top - 10) + '" text-anchor="middle">' + esc(rs.length > 1 ? (r.option || 'Range ' + (i + 1)) : 'My range') + '</text></g>').join('');
-    const tk = ticks(lo, hi, 4).filter(v => v >= lo && v <= hi);
+      + '<text class="mk-range-lab" x="' + labX(r, i).toFixed(1) + '" y="' + (top - 10) + '" text-anchor="middle">' + esc(labOf(r, i)) + '</text></g>').join('');
+    const tk = ticks(lo, hi, Wd > 500 ? 8 : 4).filter(v => v >= lo && v <= hi);
     const axis = '<line class="mk-axis" x1="' + L + '" x2="' + R + '" y1="' + (base + 4) + '" y2="' + (base + 4) + '"/>' + tk.map(v => '<text class="mk-tick" x="' + x(v).toFixed(1) + '" y="' + (base + 20) + '" text-anchor="middle">' + esc(short(v)) + '</text>').join('');
     const marks = placed.map(({ p, cx, k }) => { const cy = base - rad - 2 - k * (rad * 2 + 4), st = STATUS[p.status] ? p.status : 'sold';
       return '<g class="mk-dot ' + st + '" data-n="' + esc(p.n) + '" data-price="' + esc(p.price) + '"><circle cx="' + cx.toFixed(1) + '" cy="' + cy + '" r="' + rad + '"/><text x="' + cx.toFixed(1) + '" y="' + (cy + 3.5) + '" text-anchor="middle">' + esc(p.n) + '</text>'
         + '<title>' + esc(p.n + '. ' + (p.label || '') + ': ' + dollars(p.price) + ', ' + STATUS[st].toLowerCase() + (p.when ? ' (' + p.when + ')' : '')) + '</title></g>'; }).join('');
+    return '<svg class="mk-v ' + cls + '" viewBox="0 0 ' + Wd + ' ' + H + '" width="100%" preserveAspectRatio="xMidYMid meet">' + bands + axis + marks + '</svg>';
+    };
     const used = ['sold', 'listed', 'context'].filter(s => pts.some(p => (STATUS[p.status] ? p.status : 'sold') === s));
     const legend = '<p class="mk-legend">' + used.map(s => '<span><i class="mk-key ' + s + '"></i>' + esc(STATUS[s]) + '</span>').join('') + (rs.length ? '<span><i class="mk-key range"></i>' + (rs.length > 1 ? 'My ranges, shaded' : 'My range, shaded') + '</span>' : '') + '</p>';
     return '<figure class="mk-fig mk-dots" role="img" aria-label="Each comparable\'s price as a numbered dot' + (rs.length ? ', with my range shaded' : '') + '">'
-      + '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" preserveAspectRatio="xMidYMid meet">' + bands + axis + marks + '</svg>' + legend
+      + draw(W, 'n') + draw(760, 'w') + legend
       + table(['No.', 'Comparable', 'Price', 'Status'], pts.map(p => [String(p.n), p.label || '', dollars(p.price), STATUS[STATUS[p.status] ? p.status : 'sold']])) + '</figure>';
   }
 
@@ -7024,10 +7255,12 @@ window.JOURNEY_MEDIA_HINTS = {
   const every = n => n > 8 ? 3 : n > 5 ? 2 : 1;
   function yAxis(lo, hi, y, fmt) { return ticks(lo, hi, 3).filter(v => v >= lo && v <= hi).map(v => '<line class="mk-grid" x1="44" x2="' + (W - 8) + '" y1="' + y(v).toFixed(1) + '" y2="' + y(v).toFixed(1) + '"/><text class="mk-tick" x="40" y="' + (y(v) + 4).toFixed(1) + '" text-anchor="end">' + esc(fmt(v)) + '</text>').join(''); }
   function xLabels(ms, X, yb) { const k = every(ms.length); return ms.map((m, i) => (i % k === (ms.length - 1) % k) ? '<text class="mk-tick" x="' + X(i).toFixed(1) + '" y="' + yb + '" text-anchor="middle">' + esc(monthShort(m.month)) + '</text>' : '').join(''); }
-  function medianChart(ms) {
+  function medianChart(ms, ranges) {
     const pts = ms.map((m, i) => ({ i, m })).filter(o => +o.m.median > 0); if (pts.length < 2) return '';
     const H = 190, T = 14, B = H - 30, X = xs(ms.length);
-    const vals = pts.flatMap(o => [+o.m.median, +o.m.lower_quartile || +o.m.median, +o.m.upper_quartile || +o.m.median]);
+    // the vendor's range as two dashed lines, as in the sample (one range only: with several parts the chart would say nothing clear)
+    const rg = (ranges || []).filter(r => r && +r.low > 0 && +r.high > +r.low), ref = rg.length === 1 ? rg[0] : null;
+    const vals = pts.flatMap(o => [+o.m.median, +o.m.lower_quartile || +o.m.median, +o.m.upper_quartile || +o.m.median]).concat(ref ? [+ref.low, +ref.high] : []);
     let lo = Math.min(...vals), hi = Math.max(...vals); const pad = (hi - lo) * 0.12 || hi * 0.05; lo = Math.max(0, lo - pad); hi += pad;
     const y = v => B - (v - lo) / (hi - lo) * (B - T);
     const spread = pts.filter(o => +o.m.lower_quartile > 0 && +o.m.upper_quartile > 0);
@@ -7036,8 +7269,11 @@ window.JOURNEY_MEDIA_HINTS = {
     const marks = pts.map(o => '<circle class="mk-pt" cx="' + X(o.i).toFixed(1) + '" cy="' + y(+o.m.median).toFixed(1) + '" r="4"><title>' + esc(monthName(o.m.month) + ': median ' + dollars(o.m.median) + (spread.includes(o) ? ', middle half ' + dollars(o.m.lower_quartile) + ' to ' + dollars(o.m.upper_quartile) : '')) + '</title></circle>').join('');
     const last = pts[pts.length - 1];
     const lab = '<text class="mk-val" x="' + Math.min(W - 12, X(last.i)).toFixed(1) + '" y="' + (y(+last.m.median) - 10).toFixed(1) + '" text-anchor="end">' + esc(short(last.m.median)) + '</text>';
-    return '<figure class="mk-fig" data-chart="median"><figcaption><strong>Median sale price</strong><span>The line is the median each month; the shading is the middle half of sales (the spread).</span></figcaption>'
-      + '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" role="img" aria-label="Median sale price by month, with the spread shaded">' + yAxis(lo, hi, y, short) + band + line + marks + lab + xLabels(ms, X, H - 10) + '</svg>'
+    const refs = ref ? [+ref.low, +ref.high].map(v => '<line class="mk-ref" x1="44" x2="' + (W - 8) + '" y1="' + y(v).toFixed(1) + '" y2="' + y(v).toFixed(1) + '"><title>' + esc('My range for your home: ' + dollars(ref.low) + ' to ' + dollars(ref.high)) + '</title></line>').join('')
+      + '<text class="mk-ref-lab" x="' + (W - 8) + '" y="' + (y(+ref.high) - 5).toFixed(1) + '" text-anchor="end">Your range</text>' : '';
+    const legend = '<p class="mk-legend"><span><i class="mk-key line"></i>Median</span><span><i class="mk-key spread"></i>Middle half of sales</span>' + (ref ? '<span><i class="mk-key ref"></i>My range for your home</span>' : '') + '</p>';
+    return '<figure class="mk-fig" data-chart="median"><figcaption><strong>Median sale price, and the spread around it</strong><span>The line is the median each month; the shading is the middle half of sales (the spread).</span></figcaption>'
+      + '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" role="img" aria-label="Median sale price by month, with the spread shaded">' + yAxis(lo, hi, y, short) + band + refs + line + marks + lab + xLabels(ms, X, H - 10) + '</svg>' + legend
       + table(['Month', 'Median', 'Lower end', 'Upper end'], ms.map(m => m.missing ? [monthName(m.month), 'No figures', '', ''] : [monthName(m.month), m.median ? dollars(m.median) : '', m.lower_quartile ? dollars(m.lower_quartile) : '', m.upper_quartile ? dollars(m.upper_quartile) : ''])) + '</figure>';
   }
   function barChart(ms, key, o) {
@@ -7072,12 +7308,20 @@ window.JOURNEY_MEDIA_HINTS = {
     const srcs = Array.from(new Set(ms.filter(m => !m.missing).map(m => SOURCES[m.source] || SOURCES.other)));
     const lede = latest.median ? 'In ' + monthName(latest.month) + ' the median sale price in ' + area + ' was ' + dollars(latest.median)
       + (latest.sales != null ? ', from ' + latest.sales + ' sales' : '') + (latest.days_to_sell != null ? ', and homes took ' + latest.days_to_sell + ' days to sell at the median' : '') + '.' : '';
-    const charts = medianChart(ms)
+    const charts = medianChart(ms, ranges)
       + barChart(ms, 'days_to_sell', { title: 'Days to sell', sub: 'The median number of days from listing to sale.', fmt: v => Math.round(v) + ' days' })
       + barChart(ms, 'sales', { title: 'Homes sold each month', sub: 'How many homes sold in ' + area + '.', fmt: v => Math.round(v) + ' sold' })
       + (withBands ? bandsChart(withBands, ranges) : '');
     if (!lede && !charts) return '';   // no figure to show: no report at all, not an empty one (Tim, 28 November 2026)
-    return '<div class="mk-report" data-area="' + esc(area) + '">' + (lede ? '<p class="mk-lede">' + esc(lede) + '</p>' : '')
+    // the sample's row of tiles: the latest month's figures, each only when it is there (the sample's year-on-year lines need two
+    // years of months, which the report doesn't chart yet, so they are left out)
+    const lastWith = k => ms.slice().reverse().find(m => !m.missing && m[k] != null && isFinite(+m[k]) && +m[k] > 0);
+    const tl = [['median', 'Median sale price', m => dollars(m.median)], ['days_to_sell', 'Median days to sell', m => String(Math.round(m.days_to_sell))], ['sales', 'Homes sold', m => Math.round(m.sales).toLocaleString('en-NZ')]]
+      .map(([k, label, fmt]) => { const m = lastWith(k); return m ? [label, fmt(m), monthName(m.month)] : null; }).filter(Boolean);
+    const q = ms.slice().reverse().find(m => !m.missing && +m.lower_quartile > 0 && +m.upper_quartile > +m.lower_quartile);
+    if (q) tl.push(['Middle half of sales', short(q.lower_quartile) + ' to ' + short(q.upper_quartile), monthName(q.month)]);
+    const tiles = tl.length ? '<div class="mk-tiles">' + tl.map(([k, v, s]) => '<div class="mk-tile"><div class="k">' + esc(k) + '</div><div class="v">' + esc(v) + '</div><div class="s">' + esc(s) + '</div></div>').join('') + '</div>' : '';
+    return '<div class="mk-report" data-area="' + esc(area) + '">' + (lede ? '<p class="mk-lede">' + esc(lede) + '</p>' : '') + tiles
       + '<div class="mk-grid">' + charts + '</div>'
       + '<p class="apv-note mk-src">Source: ' + esc(srcs.join(' and ')) + ', figures to ' + esc(monthName(latest.month)) + (got ? ', gathered ' + esc(longDate(got)) : '') + '.</p></div>';
   }
@@ -7129,9 +7373,12 @@ window.JOURNEY_MEDIA_HINTS = {
     const sub = String(sec.subtitle || '').replace(/\{\{early\}\}/g, String(early));
     const cols = bars.map((b, i) => '<div class="apv-wcol' + (i < mk ? ' on' : '') + (mk && i === mk ? ' after-mark' : '') + '"><div class="apv-wbar-wrap"><span class="apv-wpct">' + esc(b.pct) + '%</span><div class="apv-wbar" style="height:' + Math.round(+b.pct / peak * 100) + '%" title="' + esc((b.label || '') + ': about ' + b.pct + '% of interested buyers') + '"></div></div><span class="apv-wlab">' + esc(b.label) + '</span></div>').join('')
       + (sec.tail ? '<div class="apv-wcol tail"><div class="apv-wbar-wrap"><span class="apv-wtrickle">' + esc(sec.trickle || '') + '</span><div class="apv-wdots"></div></div><span class="apv-wlab">' + esc(sec.tail) + '</span></div>' : '');
+    // the sample's bracket over the first wave: the share of buyers the bars add up to (a figure from the bars, never invented)
+    const total = bars.reduce((s, b) => s + (+b.pct), 0);
+    const brack = bars.length ? '<div class="apv-wbrack" style="grid-column:1 / span ' + bars.length + '"><span>' + esc(Math.round(total) + '% of buyers') + '</span></div>' : '';
     return '<figure class="apv-wave" role="img" aria-label="' + esc(sec.title || '') + '"><figcaption><strong>' + esc(sec.title || '') + '</strong><span>' + esc(sub) + '</span></figcaption>'
       + (mk ? '<p class="apv-wmark">' + esc(sec.markerLabel || '') + '</p>' : '')
-      + '<div class="apv-wgrid" style="--mk:' + mk + ';--n:' + (bars.length + (sec.tail ? 1 : 0)) + '">' + cols + '</div>'
+      + '<div class="apv-wgrid" style="--mk:' + mk + ';--n:' + (bars.length + (sec.tail ? 1 : 0)) + '">' + brack + cols + '</div>'
       + (sec.caption ? '<p class="apv-wcap">' + inline(sec.caption) + '</p>' : '') + '</figure>';
   }
   const methodMatch = (name, rowName) => !!name && String(rowName || '').toLowerCase().indexOf(String(name).toLowerCase()) === 0;
@@ -7142,7 +7389,8 @@ window.JOURNEY_MEDIA_HINTS = {
       case 'para': return '<p' + (sec.cls === 'lede' ? ' class="apv-lede"' : '') + '>' + inline(sec.text, f) + '</p>';
       case 'note': return '<p class="apv-note">' + inline(sec.text, f) + '</p>';
       case 'byline': return '<p class="apv-by">' + inline(sec.text, f) + '</p>';
-      case 'list': { const t = sec.ordered ? 'ol' : 'ul'; return '<' + t + ' class="apv-list">' + (sec.items || []).map(x => '<li>' + inline(x, f) + '</li>').join('') + '</' + t + '>'; }
+      // an ordered list reads as the sample's steps: numbered cards in a row (two to a row on a phone)
+      case 'list': { const t = sec.ordered ? 'ol' : 'ul'; return '<' + t + ' class="apv-list' + (sec.ordered ? ' apv-steps' : '') + '">' + (sec.items || []).map(x => '<li>' + inline(x, f) + '</li>').join('') + '</' + t + '>'; }
       case 'table': return table(sec.head || [], sec.rows || [], { f });
       case 'ranges': return table(sec.head || ['Option', 'What it involves', 'Range'], ((f && f.ranges) || []).map(r => [r.option || '', r.involves || '', fmtRange(r)]),
         { f, cls: 'apv-ranges', rowAttr: (r, i) => ' data-range-row="' + esc(((f.ranges || [])[i] || {}).key || '') + '"' });
@@ -7155,7 +7403,7 @@ window.JOURNEY_MEDIA_HINTS = {
       case 'campaign': return '<div class="apv-camp' + ((sec.bars || []).length + (sec.tail ? 1 : 0) > 9 ? ' dense' : '') + '">' + wave(sec) + '</div>';
       case 'methodcards': return methodCards(sec);
       case 'plans': return plans(sec);
-      case 'panel': return '<aside class="apv-panel"><h2>' + inline(sec.title, f) + '</h2>' + (sec.items || []).map(x => '<p>' + inline(x, f) + '</p>').join('') + '</aside>';
+      case 'panel': return '<aside class="apv-panel"><h3 class="apv-panel-h">' + inline(sec.title, f) + '</h3>' + (sec.items || []).map(x => '<p>' + inline(x, f) + '</p>').join('') + '</aside>';
       // LW3 phase B (036): each draws its own heading, and nothing at all when it has nothing to show (Tim, 28 November 2026)
       case 'header': return hero(sec, ev);
       case 'intro': return intro(sec, ev);
@@ -7170,23 +7418,30 @@ window.JOURNEY_MEDIA_HINTS = {
   const VALUATION_LABEL = 'This is an appraisal, not a registered valuation: my opinion of the range buyers are likely to pay, from recent sales and the market today.';
   function opinion(sec, f) {
     const rs = ((f && f.ranges) || []).filter(r => r && r.low > 0 && r.high > 0);
+    // the sample's note card: a line in small capitals, then the range in large display type; a part not named "Your home" keeps its name
+    const yours = rs.length === 1 && /^\s*your (home|property)\s*$/i.test(String(rs[0].option || ''));
     const body = rs.length === 1 && !sec.table
-      ? '<p class="apv-opin"><span class="apv-opin-part">' + inline(rs[0].option || '', f) + '</span><span class="apv-fig apv-opin-fig" data-range="' + esc(rs[0].key) + '">' + esc(fmtRange(rs[0])) + '</span></p>'
-      : table(sec.head || ['Part', 'Where I would expect buyers to land'], rs.map(r => [r.option || '', fmtRange(r)]), { f, cls: 'apv-ranges', rowAttr: (r, i) => ' data-range-row="' + esc((rs[i] || {}).key || '') + '"' });
-    return '<div class="apv-opinion">' + body + '<p class="apv-valn">' + esc(VALUATION_LABEL) + '</p></div>';
+      ? '<p class="apv-kick">' + esc('In today\'s market I would expect ' + (yours ? 'your home' : 'it') + ' to sell between') + '</p><p class="apv-opin">' + (yours ? '' : '<span class="apv-opin-part">' + inline(rs[0].option || '', f) + '</span>') + '<span class="apv-fig apv-opin-fig" data-range="' + esc(rs[0].key) + '">' + esc(fmtRange(rs[0])) + '</span></p>'
+      : (rs.length ? '<p class="apv-kick">In today\'s market I would expect buyers to land between</p>' : '') + table(sec.head || ['Part', 'Where I would expect buyers to land'], rs.map(r => [r.option || '', fmtRange(r)]), { f, cls: 'apv-ranges', rowAttr: (r, i) => ' data-range-row="' + esc((rs[i] || {}).key || '') + '"' });
+    return '<div class="apv-opinion"><div class="apv-opin-card">' + body + '</div><p class="apv-valn">' + esc(VALUATION_LABEL) + '</p></div>';
   }
   // every sale method explained, as points that open; the recommended one marked and open (in print, every one is open)
   function methodCards(sec) {
     return '<div class="apv-mcs">' + (sec.items || []).map(m => { const rec = m.key === sec.rec;
-      return '<details class="apv-mc' + (rec ? ' apv-rec' : '') + '" data-method="' + esc(m.key) + '"' + (rec ? ' open' : '') + '><summary>' + (rec ? '<span class="apv-tag">Recommended</span> ' : '') + '<strong>' + esc(m.name) + '</strong></summary>'
+      return '<details class="apv-mc' + (rec ? ' apv-rec' : '') + '" data-method="' + esc(m.key) + '"' + (rec ? ' open' : '') + '><summary><strong>' + esc(m.name) + '</strong>' + (rec ? ' <span class="apv-tag">Recommended</span>' : '') + '</summary>'
         + '<dl><dt>How it works</dt><dd>' + inline(m.how) + '</dd><dt>What it suits</dt><dd>' + inline(m.suits) + '</dd><dt>Worth knowing</dt><dd>' + inline(m.know) + '</dd></dl></details>'; }).join('') + '</div>';
   }
-  // the marketing plans as cards that swipe sideways inside their own strip (the page itself never scrolls sideways); Tim's pick first
+  // the marketing plans as cards that swipe sideways inside their own strip (the page itself never scrolls sideways); Tim's pick first.
+  // As in the sample: arrows and a dot for each plan under the strip (screen only; in print every plan is on the page).
   function plans(sec) {
-    const cards = (sec.items || []).map(p => '<div class="apv-plan' + (p.rec ? ' apv-rec' : '') + '" data-plan="' + esc(p.key) + '">' + (p.rec ? '<span class="apv-tag">Recommended</span>' : '')
-      + '<h3>' + esc(p.name) + '</h3>' + (p.price ? '<p class="apv-plan-price">' + esc(dollars(p.price)) + ' <span>incl. GST</span></p>' : '') + (p.tagline ? '<p>' + inline(p.tagline) + '</p>' : '')
-      + ((p.items || []).length ? '<ul>' + p.items.map(x => '<li>' + esc(x) + '</li>').join('') + '</ul>' : '') + '</div>').join('');
-    return '<div class="apv-plans" role="list">' + cards + '</div>' + (sec.included ? '<p class="apv-note">' + inline(sec.included) + '</p>' : '');
+    const items = sec.items || [];
+    const cards = items.map(p => '<div class="apv-plan' + (p.rec ? ' apv-rec' : '') + '" data-plan="' + esc(p.key) + '" role="listitem">' + (p.rec ? '<span class="apv-tag">Recommended for your home</span>' : '<span class="apv-pill">Also available</span>')
+      + '<h3>' + esc(p.name) + '</h3>' + (p.price ? '<p class="apv-plan-price">' + esc(dollars(p.price)) + '</p><p class="apv-plan-gst">Including GST.' + (p.tagline ? ' ' + inline(p.tagline) : '') + '</p>' : (p.tagline ? '<p class="apv-plan-gst">' + inline(p.tagline) + '</p>' : ''))
+      + ((p.items || []).length ? '<ul class="apv-tick">' + p.items.map(x => '<li>' + esc(x) + '</li>').join('') + '</ul>' : '') + '</div>').join('');
+    const nav = items.length > 1 ? '<div class="apv-pnav no-print"><button type="button" class="apv-pbtn" data-apv-nav data-apv-plan="-1" aria-label="Previous plan">‹</button>'
+      + items.map((p, i) => '<button type="button" class="apv-pdot' + (i ? '' : ' on') + '" data-apv-nav data-apv-plan-i="' + i + '" aria-label="' + esc(p.name + ' plan') + '"></button>').join('')
+      + '<button type="button" class="apv-pbtn" data-apv-nav data-apv-plan="1" aria-label="Next plan">›</button></div>' : '';
+    return '<div class="apv-plans-wrap"><div class="apv-plans" role="list" tabindex="0" aria-label="Marketing plans">' + cards + '</div>' + nav + '</div>' + (sec.included ? '<p class="apv-note">' + inline(sec.included) + '</p>' : '');
   }
 
   /* ───────── LW3 phase A: writing the standard sections from Tim's set-up ───────── */
@@ -7409,7 +7664,8 @@ window.JOURNEY_MEDIA_HINTS = {
   const styleOf = sec => 'object-position:' + num0((sec.focus || {}).x, 0, 100, 50) + '% ' + num0((sec.focus || {}).y, 0, 100, 50) + '%;transform-origin:' + num0((sec.focus || {}).x, 0, 100, 50) + '% ' + num0((sec.focus || {}).y, 0, 100, 50) + '%;transform:scale(' + num0(sec.zoom, 1, 3, 1) + ');filter:brightness(' + num0(sec.bright, 0.5, 1.5, 1) + ')';
   // the header: a photo, or a video that plays muted and looped, with its still frame for paper and for reduced motion. A library
   // photo is credited "DunedinNZ"; Tim's own carries his credit line if he wrote one. Nothing to show: no header at all.
-  function hero(sec, ev) {
+  // head: the kicker and the title, laid over the foot of the header as in the sample (none in the Sections screen's preview)
+  function hero(sec, ev, head) {
     let url = '', still = '', mime = '';
     if (sec.src === 'library') { if (!httpsUrl(sec.url)) return ''; url = sec.url; }
     else { const a = ((ev && ev.assets) || {})[sec.asset]; if (!a || !a.url) return ''; url = a.url; still = a.still || ''; mime = a.mime || ''; }
@@ -7418,8 +7674,11 @@ window.JOURNEY_MEDIA_HINTS = {
       ? '<video class="apv-hero-m" autoplay muted loop playsinline preload="metadata" data-speed="' + esc(clipSpeed(sec.speed)) + '"' + (still ? ' poster="' + esc(still) + '"' : '') + ' style="' + st + '" aria-hidden="true"><source src="' + esc(url) + '"' + (mime ? ' type="' + esc(mime) + '"' : '') + '></video>'
         + (still ? '<img class="apv-hero-still" src="' + esc(still) + '" alt="" style="' + st + '">' : '')
       : '<img class="apv-hero-m" src="' + esc(url) + '" alt="" style="' + st + '">';
-    return '<figure class="apv-hero' + (sec.kind === 'video' ? ' vid' : '') + (sec.kind === 'video' && !still ? ' nostill' : '') + '" data-stage="' + esc(sec.stage) + '">' + media
-      + (credit ? '<figcaption class="apv-credit">' + esc((sec.src === 'library' ? 'Photo: ' : '') + credit) + '</figcaption>' : '') + '</figure>';
+    // a video header has the sample's Pause and Play button (screen only; it stays still for reduced motion)
+    return '<figure class="apv-hero' + (sec.kind === 'video' ? ' vid' : '') + (sec.kind === 'video' && !still ? ' nostill' : '') + (head ? ' has-head' : '') + '" data-stage="' + esc(sec.stage) + '">' + media
+      + (credit ? '<figcaption class="apv-credit">' + esc((sec.src === 'library' ? (sec.kind === 'video' ? 'Video: ' : 'Photo: ') : '') + credit) + '</figcaption>' : '')
+      + (sec.kind === 'video' ? '<button type="button" class="apv-vbtn no-print" data-apv-nav data-apv-vid>Pause</button>' : '')
+      + (head ? '<div class="apv-hero-in">' + head + '</div>' : '') + '</figure>';
   }
   // Tim's video introduction: played by the vendor (not on its own), with its still frame in print
   function intro(sec, ev) {
@@ -7430,7 +7689,8 @@ window.JOURNEY_MEDIA_HINTS = {
   function heard(sec, f) {
     const items = (sec.items || []).filter(x => String(x || '').trim()); if (!items.length) return '';
     // plain text only: escaped, never a link or markup (the review of 5b248b9)
-    return '<section class="apv-heard" data-stage="' + esc(sec.stage) + '"><h2>What I heard from you</h2><ul class="apv-list">' + items.map(x => '<li>' + quote(x) + '</li>').join('') + '</ul></section>';
+    // the sample's cards, two to a row on a wide screen; each line is Tim's own, ticked (the sample's card titles have no field yet)
+    return '<section class="apv-heard" data-stage="' + esc(sec.stage) + '"><h2>What I heard from you</h2><p class="apv-lede">Before any numbers, here is what you told me matters. Everything on this page is built around it.</p><ul class="apv-heard-list">' + items.map(x => '<li>' + quote(x) + '</li>').join('') + '</ul></section>';
   }
   // their home as a listing could show it, clearly a mockup: Tim's photos in his order, the key details he ticked, his advertisement.
   // With no photo to show and no advertisement ticked, nothing is drawn.
@@ -7438,11 +7698,18 @@ window.JOURNEY_MEDIA_HINTS = {
     const ph = (sec.photos || []).map(id => ((ev && ev.homePhotos) || {})[id]).filter(p => p && p.url), ad = sec.ad && (sec.ad.title || (sec.ad.paras || []).length) ? sec.ad : null;
     if (!ph.length && !ad) return '';
     const figs = (sec.details || []).filter(d => d && String(d[0] || '').trim() && String(d[1] || '').trim());
-    const car = ph.length ? '<div class="apv-car" data-n="' + ph.length + '"><div class="apv-car-strip" tabindex="0" aria-label="Photos of your home">' + ph.map((p, k) => '<img src="' + esc(p.url) + '" alt="' + esc('Photo ' + (k + 1) + ' of ' + ph.length + (p.room ? ', ' + p.room : '')) + '"' + (k ? ' loading="lazy"' : '') + ' decoding="async">').join('') + '</div>'
-      + (ph.length > 1 ? '<div class="apv-car-ctl no-print"><button type="button" class="apv-car-btn" data-car="-1" aria-label="Previous photo">‹</button><span class="apv-car-at" aria-live="polite">1 of ' + ph.length + '</span><button type="button" class="apv-car-btn" data-car="1" aria-label="Next photo">›</button></div>' : '') + '</div>' : '';
-    return '<section class="apv-home" data-stage="' + esc(sec.stage) + '"><h2>Your home as a listing</h2><p class="apv-mock"><span class="apv-tag mock">Mockup, not live</span> ' + esc(sec.label || MOCKUP_LABEL) + '</p>'
-      + '<div class="apv-home-card">' + car + (figs.length ? '<dl class="apv-figs">' + figs.map(([k, v]) => '<div><dt>' + esc(k) + '</dt><dd>' + esc(v) + '</dd></div>').join('') + '</dl>' : '')
-      + (ad ? '<div class="apv-adraft">' + (ad.title ? '<h3>' + esc(ad.title) + '</h3>' : '') + (ad.paras || []).map(p => '<p>' + quote(p) + '</p>').join('') + '</div>' : '') + '</div></section>';
+    const car = carousel(ph.map((p, k) => ({ url: p.url, alt: 'Photo ' + (k + 1) + ' of ' + ph.length + (p.room ? ', ' + p.room : '') })), 'Photos of your home');
+    // the sample's layout: the photos beside the draft advertisement, then the key details as a grid of facts
+    const adH = ad ? '<div class="apv-adraft"><p class="apv-kick">Draft advertisement</p>' + (ad.title ? '<h3>' + esc(ad.title) + '</h3>' : '') + (ad.paras || []).map(p => '<p>' + quote(p) + '</p>').join('') + '</div>' : '';
+    return '<section class="apv-home" data-stage="' + esc(sec.stage) + '"><h2>Your home, as buyers would see it</h2><p class="apv-mock"><span class="apv-tag mock">Mockup, not live</span> ' + esc(sec.label || MOCKUP_LABEL) + '</p>'
+      + '<div class="apv-home-card">' + (car && adH ? '<div class="apv-two">' + car + adH + '</div>' : car + adH) + (figs.length ? '<dl class="apv-figs apv-facts">' + figs.map(([k, v]) => '<div><dt>' + esc(k) + '</dt><dd>' + esc(v) + '</dd></div>').join('') + '</dl>' : '')
+      + '</div></section>';
+  }
+  // a swipeable photo strip (the sample's carousel): the arrows and the count sit over the photo; in print only the first photo shows
+  function carousel(ph, label) {
+    const list = (ph || []).filter(p => p && p.url); if (!list.length) return '';
+    return '<div class="apv-car" data-n="' + list.length + '"><div class="apv-car-strip" tabindex="0" aria-label="' + esc(label) + '">' + list.map((p, k) => '<img src="' + esc(p.url) + '" alt="' + esc(p.alt || '') + '"' + (k ? ' loading="lazy"' : '') + ' decoding="async">').join('') + '</div>'
+      + (list.length > 1 ? '<div class="apv-car-ctl no-print"><button type="button" class="apv-car-btn prev" data-car="-1" aria-label="Previous photo">‹</button><span class="apv-car-at" aria-live="polite">1 of ' + list.length + '</span><button type="button" class="apv-car-btn next" data-car="1" aria-label="Next photo">›</button></div>' : '') + '</div>';
   }
   function buyers(sec, f) {
     const tags = (sec.tags || []).filter(t => String(t || '').trim());
@@ -7466,15 +7733,58 @@ window.JOURNEY_MEDIA_HINTS = {
   // { comps: the shown comparables in order (vendor fields only), photos: { compId: [{ url, alt }] }, months: market_months rows,
   //   market: show the Dunedin market report }. It goes in before the opinion of price. With no ev, or nothing in it, the page is
   //   exactly as phase A (and 032) drew it.
+  // The look (Tim, 28 November 2026: "not looking like the original example"): the approved sample of 24 November 2026. A top bar
+  // with the logo and a row of chips that jump to each section; the kicker and the title (over the header photo or video when there
+  // is one); the sections in their order, each heading with an anchor; the sale methods and the plans inside the campaign, as in the
+  // sample; and the closing line. Every style is scoped under .apv-doc, so the rest of the portal is unchanged.
+  // APPR.brand: the logo files, set once by the page (none in the node tests, so no logo is drawn there).
+  const brand = { light: '', dark: '' };
+  // the chips' short names for the headings the appraisal writes; any other heading keeps its own words
+  const NAV = [[/^what i heard/i, 'What I heard'], [/^a short video from me$/i, 'Video'], [/^your home, as buyers would see it$/i, 'Your home'], [/^the buyers i have in mind$/i, 'Your buyers'],
+    [/^the price evidence at a glance$/i, 'Price evidence'], [/^sales and current listings$/i, 'Sales and listings'], [/^the (.+) market$/i, m => m[1] + ' market'],
+    [/^my opinion of price$/i, 'My opinion'], [/^how i would sell it$/i, 'Campaign'], [/^what my clients say$/i, 'Reviews']];
+  const navLabel = t => { for (const [re, l] of NAV) { const m = re.exec(t); if (m) return typeof l === 'function' ? l(m) : l; } return t; };
+  const NOTE_HEADING = 'A note from Tim';
+  const METHODS_NOTE = 'A general summary. The Real Estate Authority\'s guides at settled.govt.nz explain each method in full.';
   function render(rec, ev) {
     const f = (rec && rec.fields) || {};
-    // phase B: the header (a photo or video across the top) goes above the title; every other section in its place
-    const secs = (rec && rec.sections) || [], top = secs.filter(s => s && s.type === 'header').map(s => section(s, f, ev)).join('');
-    const parts = secs.map(s => s && s.type === 'header' ? '' : section(s, f, ev));
-    const extra = rec && rec.setup && rec.setup.v && ev ? evidence(ev, f) : '';
-    if (extra) { let at = secs.findIndex(s => s && s.type === 'heading' && /^my opinion of price$/i.test(String(s.text || '').trim()));
-      if (at < 0) at = secs.findIndex(s => s && s.type === 'opinion'); if (at < 0) at = parts.length; parts.splice(at, 0, extra); }
-    return '<article class="apv-doc">' + top + '<h1>' + esc((rec && rec.title) || 'Market appraisal') + '</h1>' + parts.join('') + '</article>';
+    const secs = ((rec && rec.sections) || []).filter(s => s && typeof s === 'object');
+    const written = !!(rec && rec.setup && rec.setup.v);
+    // the kicker and the title: an appraisal written from its set-up is headed by its address, as in the sample
+    const title = written && String(rec.address || '').trim() ? rec.address : (rec && rec.title) || 'Market appraisal';
+    const date = rec && rec.prepared_on ? longDate(rec.prepared_on) : '';
+    const head = (written || date ? '<p class="apv-kick apv-kick-top">Market appraisal' + (date ? ' · ' + esc(date) : '') + '</p>' : '') + '<h1>' + esc(title) + '</h1>';
+    // phase B: the header (a photo or video across the top) carries the title over its foot; with no header, the title on its own
+    const heroSec = secs.find(s => s.type === 'header'), heroHtml = heroSec ? hero(heroSec, ev, head) : '';
+    const parts = [];
+    for (let i = 0; i < secs.length; i++) {
+      const s = secs[i], nx = secs[i + 1] || {}, nx2 = secs[i + 2] || {};
+      if (s.type === 'header') continue;
+      // the note's heading reads as the sample's letter: a small line over the opening paragraph
+      if (s.type === 'heading' && String(s.text || '').trim() === NOTE_HEADING) { parts.push('<p class="apv-kick apv-note-k">' + inline(s.text, f) + '</p>'); continue; }
+      // every way to sell: one card with its heading, its line, each method, and the general note (the sample's "ways a home can be sold")
+      const mAt = nx.type === 'methodcards' ? 1 : nx.type === 'para' && nx2.type === 'methodcards' ? 2 : 0;
+      if (s.type === 'heading' && mAt) { parts.push('<div class="apv-card apv-mcard"><h3 class="apv-h3">' + inline(s.text, f) + '</h3>' + (mAt === 2 ? '<p class="apv-note">' + inline(nx.text, f) + '</p>' : '') + section(mAt === 2 ? nx2 : nx, f, ev) + '<p class="apv-note">' + esc(METHODS_NOTE) + '</p></div>'); i += mAt; continue; }
+      // the marketing plans sit inside the campaign under a smaller heading, as in the sample's "Choose your marketing"
+      if (s.type === 'heading' && nx.type === 'plans') { parts.push('<h3 class="apv-h3 apv-plans-h">' + inline(s.text, f) + '</h3><p class="apv-note">Swipe to compare the plans. The one I recommend for your home is shown first.</p>' + section(nx, f, ev)); i++; continue; }
+      parts.push(section(s, f, ev));
+    }
+    const extra = written && ev ? evidence(ev, f) : '';
+    if (extra) {
+      // the evidence goes in before the opinion of price: find where that heading landed among the parts
+      let at = parts.findIndex(p => /^<h2>my opinion of price<\/h2>$/i.test(p));
+      if (at < 0) at = parts.findIndex(p => p.indexOf('class="apv-opinion"') >= 0); if (at < 0) at = parts.length; parts.splice(at, 0, extra);
+    }
+    // the closing line, on an appraisal written from its set-up (the sample's "When you're ready, I'm ready")
+    if (written) parts.push('<section class="apv-close"><h2 class="apv-close-h">When you\'re ready, I\'m ready</h2><p>Questions at any stage? Call or text Tim on <strong>027 562 7207</strong>.</p></section>');
+    // each section heading gets an anchor, and a chip in the jump bar
+    const nav = []; let k = 0;
+    const body = (heroHtml ? '' : '<div class="apv-head">' + head + '</div>') + parts.join('');
+    const anchored = body.replace(/<h2>([\s\S]*?)<\/h2>/g, (m, inner) => { const id = 'apv-s' + (++k), label = navLabel(inner.replace(/<[^>]+>/g, '').trim()); nav.push([id, label]); return '<h2 id="' + id + '">' + inner + '</h2>'; });
+    const logo = brand.light ? '<span class="apv-logo"><img class="logo-light" src="' + esc(brand.light) + '" alt="McGuire Real Estate">' + (brand.dark ? '<img class="logo-dark" src="' + esc(brand.dark) + '" alt="McGuire Real Estate">' : '') + '</span>' : '';
+    const jump = nav.length > 1 ? '<nav class="apv-jump no-print" aria-label="Sections">' + nav.map(([id, l]) => '<a class="apv-chip" href="#' + id + '" data-apv-go="' + id + '">' + l + '</a>').join('') + '</nav>' : '';
+    const top = logo || jump ? '<div class="apv-top"><div class="apv-top-in">' + logo + jump + '</div></div>' : '';
+    return '<article class="apv-doc">' + top + heroHtml + anchored + '</article>';
   }
 
   /* ───────── LW3 phase C (034): comparables, the price dots and the Dunedin market report ───────── */
@@ -7491,22 +7801,28 @@ window.JOURNEY_MEDIA_HINTS = {
   // what a vendor reads of the advertisement wording: only if it passes the wording rules (another agency's "as is" is never shown)
   const adShown = c => !!String((c && c.ad_text) || '').trim() && !wordingProblem(c.ad_text);
   const cmpShown = c => !!(c && c.compare_ticked && String(c.compare_text || '').trim());
+  // one comparable, laid out as in the sample: the photos on the left (above, on a phone), and beside them its status, the address, the
+  // price in large type, how and when it sold, its figures as a table, and how near it is; then the advertisement and how it compares.
+  // The sample's "Yours" column and its difference tags need the vendor's own figures, which the appraisal doesn't hold yet: left out.
   function compCard(c, i, photos) {
     const st = STATUS_WORDS[c.status] ? c.status : 'sold';
-    const price = c.price > 0 ? (st === 'listed' ? 'Asking ' : st === 'sold' ? 'Sold for ' : '') + dollars(c.price) : (st === 'listed' ? (c.method || 'Price on request') : '');
-    const when = st === 'listed' ? (c.listed_on ? 'Listed ' + longDate(c.listed_on) : '') : (c.sold_on ? 'Sold ' + longDate(c.sold_on) : '');
-    const figs = [['Price', price], ['Date', when], ['Method', st === 'listed' && !(c.price > 0) ? '' : c.method], ['Days to sell', c.days_to_sell != null && st !== 'listed' ? c.days_to_sell + ' days' : ''],
-      ['Bedrooms', c.bedrooms != null ? String(c.bedrooms) : ''], ['Bathrooms', c.bathrooms != null ? num1(c.bathrooms) : ''], ['Floor area', c.floor_m2 ? num1(c.floor_m2) + ' m²' : ''],
-      ['Land', c.land_m2 ? num1(c.land_m2) + ' m²' : ''], ['Capital value', c.cv ? dollars(c.cv) : ''], ['Agency', c.agency],
-      ['How near', [ringWords(c.ring), c.distance_m != null ? km(c.distance_m) + ' away' : ''].filter(Boolean).join(', ')]].filter(x => String(x[1] || '').trim());
-    const ph = (photos || []).filter(p => p && p.url);
-    const car = ph.length ? '<div class="apv-car" data-n="' + ph.length + '"><div class="apv-car-strip" tabindex="0" aria-label="Photos of ' + esc(c.address) + '">' + ph.map((p, k) => '<img src="' + esc(p.url) + '" alt="' + esc('Photo ' + (k + 1) + ' of ' + ph.length + ', ' + c.address) + '"' + (k ? ' loading="lazy"' : '') + ' decoding="async">').join('') + '</div>'
-      + (ph.length > 1 ? '<div class="apv-car-ctl no-print"><button type="button" class="apv-car-btn" data-car="-1" aria-label="Previous photo">‹</button><span class="apv-car-at" aria-live="polite">1 of ' + ph.length + '</span><button type="button" class="apv-car-btn" data-car="1" aria-label="Next photo">›</button></div>' : '') + '</div>' : '';
-    return '<article class="apv-comp' + (st === 'context' ? ' ctx' : '') + '" data-comp="' + esc(c.id) + '"><header class="apv-comp-h"><span class="apv-comp-n" aria-hidden="true">' + (i + 1) + '</span><div><h3>' + esc(c.address) + '</h3>'
-      + '<p class="apv-comp-tags"><span class="apv-tag st-' + st + '">' + esc(STATUS_WORDS[st]) + '</span>' + (c.sold_by_tim ? '<span class="apv-tag tim">Sold by Tim</span>' : '') + '</p></div></header>' + car
-      + (figs.length ? '<dl class="apv-figs">' + figs.map(([k, v]) => '<div><dt>' + esc(k) + '</dt><dd>' + esc(v) + '</dd></div>').join('') + '</dl>' : '')
+    const price = c.price > 0 ? (st === 'listed' ? 'Asking ' : '') + dollars(c.price) : (st === 'listed' ? (c.method || 'Price on request') : '');
+    const when = st === 'listed' ? (c.listed_on ? 'On the market since ' + longDate(c.listed_on) : '') : (c.sold_on ? 'Sold ' + longDate(c.sold_on) : '');
+    const how = [when, st === 'listed' && !(c.price > 0) ? '' : c.method, c.days_to_sell != null && st !== 'listed' ? 'sold in ' + c.days_to_sell + ' days' : '', c.agency].filter(x => String(x || '').trim());
+    const rows = [['Bedrooms', c.bedrooms != null ? String(c.bedrooms) : ''], ['Bathrooms', c.bathrooms != null ? num1(c.bathrooms) : ''], ['Floor area', c.floor_m2 ? num1(c.floor_m2) + ' m²' : ''],
+      ['Land', c.land_m2 ? num1(c.land_m2) + ' m²' : ''], ['Rating valuation', c.cv ? dollars(c.cv) : '']].filter(x => String(x[1] || '').trim());
+    const near = [ringWords(c.ring), c.distance_m != null ? km(c.distance_m) + ' away' : ''].filter(Boolean).join(', ');
+    const car = carousel((photos || []).filter(p => p && p.url).map((p, k, a) => ({ url: p.url, alt: 'Photo ' + (k + 1) + ' of ' + a.length + ', ' + c.address })), 'Photos of ' + c.address);
+    const body = '<div class="apv-comp-body"><header class="apv-comp-h">'
+      + '<p class="apv-comp-tags"><span class="apv-comp-n" aria-hidden="true">' + (i + 1) + '</span><span class="apv-tag st-' + st + '">' + esc(STATUS_WORDS[st]) + '</span>' + (c.sold_by_tim ? '<span class="apv-tag tim">Sold by Tim</span>' : '') + (near ? '<span class="apv-tag near">' + esc(near) + '</span>' : '') + '</p>'
+      + '<h3>' + esc(c.address) + '</h3></header>'
+      + (price ? '<p class="apv-comp-price">' + esc(price) + '</p>' : '') + (how.length ? '<p class="apv-comp-how">' + esc(how.join(', ')) + '</p>' : '')
+      + (rows.length ? '<table class="apv-cmp-tbl"><thead><tr><th scope="col"><span class="apv-sr">Figure</span></th><th scope="col">This home</th></tr></thead><tbody>' + rows.map(([k, v]) => '<tr><td>' + esc(k) + '</td><td class="d">' + esc(v) + '</td></tr>').join('') + '</tbody></table>' : '')
+      + '</div>';
+    return '<article class="apv-comp' + (st === 'context' ? ' ctx' : '') + '" data-comp="' + esc(c.id) + '" data-n="' + (i + 1) + '" data-st="' + (st === 'listed' ? 'listed' : 'sold') + '">'
+      + (car ? '<div class="apv-two">' + car + body + '</div>' : body)
       + (adShown(c) ? '<div class="apv-ad"><h4>How it was advertised</h4><blockquote><p>' + quote(c.ad_text) + '</p></blockquote></div>' : '')
-      + (cmpShown(c) ? '<div class="apv-cmp"><h4>How it compares with your home</h4><p>' + quote(c.compare_text) + '</p></div>' : '') + '</article>';
+      + (cmpShown(c) ? '<div class="apv-cmp"><h4>How it compares with yours</h4><p>' + quote(c.compare_text) + '</p></div>' : '') + '</article>';
   }
   function evidence(ev, f) {
     const comps = (ev.comps || []).filter(c => c && c.shown !== false).map(vendorComp);
@@ -7518,13 +7834,28 @@ window.JOURNEY_MEDIA_HINTS = {
     let h = '';
     if (comps.length) {
       // the price dots only when at least one comparable has a price to plot (Tim, 28 November 2026: nothing to show, no section)
-      if (dots) h += '<h2>Price evidence at a glance</h2>' + dots + (nPrice ?'<p class="apv-note">' + (nPrice === 1 ? 'One comparable has' : nPrice + ' comparables have') + ' no price to show, so ' + (nPrice === 1 ? 'it isn\'t' : 'they aren\'t') + ' on the chart.</p>' : '');
-      if (sold.length) h += '<h2>Recent sales nearby</h2><div class="apv-comps">' + sold.map(c => compCard(c, num(c), (ev.photos || {})[c.id])).join('') + '</div>';
-      if (listed.length) h += '<h2>On the market now</h2><div class="apv-comps">' + listed.map(c => compCard(c, num(c), (ev.photos || {})[c.id])).join('') + '</div>';
+      if (dots) h += '<h2>The price evidence at a glance</h2>' + evLede(sold, listed) + '<div class="apv-card">' + dots
+        + (nPrice ? '<p class="apv-note">' + (nPrice === 1 ? 'One comparable has' : nPrice + ' comparables have') + ' no price to show, so ' + (nPrice === 1 ? 'it isn\'t' : 'they aren\'t') + ' on the chart.</p>' : '')
+        + '<p class="apv-note no-print">Tap a dot to see the home.</p></div>';
+      // the sample's one list of sales and listings, in Tim's order, with All, Sold and On the market to narrow it when there are both
+      const both = sold.length && listed.length;
+      h += '<h2>Sales and current listings</h2><p class="apv-lede">Swipe through each home\'s photos and see how it measures up, line by line.</p>'
+        + (both ? '<div class="apv-filters no-print" role="group" aria-label="Show"><button type="button" class="apv-chip on" data-apv-nav data-apv-f="all" aria-pressed="true">All</button><button type="button" class="apv-chip" data-apv-nav data-apv-f="sold" aria-pressed="false">Sold</button><button type="button" class="apv-chip" data-apv-nav data-apv-f="listed" aria-pressed="false">On the market</button></div>' : '')
+        + '<div class="apv-comps">' + comps.map(c => compCard(c, num(c), (ev.photos || {})[c.id])).join('') + '</div>';
     }
     // the heading follows the area charted: "The Dunedin market" by default, or the area Tim chose (setup.marketArea)
     if (market) h += '<h2>' + esc('The ' + (window.MKT.pickArea(ev.months || [], ev.area) || 'Dunedin') + ' market') + '</h2>' + market;
     return h ? '<section class="apv-evidence">' + h + '</section>' : '';
+  }
+  // the line under "The price evidence at a glance": how many sold, between which prices, since when, and how many are on the market.
+  // Only figures the comparables hold; a sale with no price or date is simply not counted in that part.
+  function evLede(sold, listed) {
+    const s = sold.filter(c => c.status === 'sold'), pr = s.map(c => +c.price).filter(x => x > 0), dates = s.map(c => c.sold_on).filter(Boolean).sort();
+    const parts = [];
+    if (pr.length) parts.push((pr.length === 1 ? 'One comparable home sold for ' + dollars(pr[0]) : pr.length + ' comparable homes sold between ' + dollars(Math.min(...pr)) + ' and ' + dollars(Math.max(...pr))) + (dates.length ? ' since ' + monthYear(dates[0]) : ''));
+    if (listed.length) parts.push((listed.length === 1 ? 'one is' : listed.length + ' are') + ' on the market now');
+    if (!parts.length) return '';
+    const t = parts.join(', and '); return '<p class="apv-lede">' + esc(t.charAt(0).toUpperCase() + t.slice(1)) + '.</p>';
   }
 
   // the comparables rule (Tim, 25 November 2026): at least five nearby sales, ideally from the last three months, going back as far as
@@ -7671,7 +8002,7 @@ window.JOURNEY_MEDIA_HINTS = {
     if (!String(f.bedrooms || '').trim()) return 'Bedrooms can\'t be empty.';
     return wordingProblem(f.bedrooms) || wordingProblem((f.method || {}).name) || wordingProblem((f.method || {}).text);
   }
-  window.APPR = { render, fmtRange, dollars, inline, methodNames, checkFields, wordingProblem,
+  window.APPR = { render, brand, navLabel, fmtRange, dollars, inline, methodNames, checkFields, wordingProblem,
     vendorComp, VENDOR_COMP, STATUS_WORDS, RINGS, ringWords, compsRule, reportPacks, reportLine, matchPhoto, addrParts, addrSame, addrMatch, adShown, cmpShown, evidence,
     METHODS, CAMPAIGNS, MAX_WEEKS, campaignOf, waveFor, stepsFor, methodSentence, isHill, suburbOf, plansFor, checkSetup, writeStandard, sectionsProblem,
     DEFAULT_NOTE, DALMORE_LINE, HEAD_AND_SHOULDERS, VALUATION_LABEL,
@@ -17397,6 +17728,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     if (!$('#main .loading')) return;
     if (!rec) return viewPortalMissing();
     document.body.classList.toggle('apv-present', !!present);
+    apvBrand();   // the logo in the appraisal's own top bar
     if (rec.setup && rec.setup.v) return apsShow(rec, present);   // LW3 phase A: an appraisal written from its set-up page
     const f = rec.fields || {};
     const draw = () => { const d = $('#apvDoc'); if (d) d.innerHTML = APPR.render(rec); };
@@ -17753,9 +18085,43 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     s.scrollTo({ left: at * w, behavior: 'smooth' }); const t = car.querySelector('.apv-car-at'); if (t) t.textContent = (at + 1) + ' of ' + n;
   });
   document.addEventListener('scroll', e => {
-    const s = e.target; if (!s || !s.classList || !s.classList.contains('apv-car-strip')) return;
+    const s = e.target; if (!s || !s.classList) return;
+    // the plans strip: the dot under it follows the plan in view
+    if (s.classList.contains('apv-plans')) { const i = apvPlanAt(s); $$('.apv-pdot', s.parentNode).forEach((d, k) => d.classList.toggle('on', k === i)); return; }
+    if (!s.classList.contains('apv-car-strip')) return;
     const car = s.closest('.apv-car'), t = car && car.querySelector('.apv-car-at'); if (t) t.textContent = (Math.round(s.scrollLeft / Math.max(1, s.clientWidth)) + 1) + ' of ' + car.dataset.n;
   }, true);
+  // the appraisal's look (the approved sample of 24 November 2026): the logo files for its top bar, set once from the page's own logos
+  function apvBrand() { if (!APPR.brand.light) { APPR.brand.light = ($('.logo-light') || {}).src || ''; APPR.brand.dark = ($('.logo-dark') || {}).src || ''; } }
+  // which plan card is in view in its strip
+  function apvPlanAt(s) { const cards = $$('.apv-plan', s); let b = 0, d = 1e9; cards.forEach((c, i) => { const x = Math.abs(c.offsetLeft - s.offsetLeft - s.scrollLeft); if (x < d) { d = x; b = i; } }); return b; }
+  // the appraisal's own controls: the jump chips, All / Sold / On the market, the plans' arrows and dots, a tap on a price dot, and the
+  // header video's Pause and Play. None of them changes anything saved.
+  document.addEventListener('click', e => {
+    const t = e.target && e.target.closest ? e.target.closest('[data-apv-go],[data-apv-f],[data-apv-plan],[data-apv-plan-i],[data-apv-vid],.apv-doc .mk-dot') : null; if (!t) return;
+    const doc = t.closest('.apv-doc'); if (!doc) return;
+    const smooth = !(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) ? 'smooth' : 'auto';
+    if (t.dataset.apvGo) { e.preventDefault(); const h = document.getElementById(t.dataset.apvGo); if (h) h.scrollIntoView({ behavior: smooth, block: 'start' }); return; }
+    if (t.dataset.apvF) {
+      const f = t.dataset.apvF; $$('[data-apv-f]', doc).forEach(b => { const on = b === t; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on ? 'true' : 'false'); });
+      $$('.apv-comp', doc).forEach(c => { c.hidden = f !== 'all' && c.dataset.st !== f; }); return;
+    }
+    if (t.dataset.apvPlan || t.dataset.apvPlanI) {
+      const s = $('.apv-plans', t.closest('.apv-plans-wrap')), cards = $$('.apv-plan', s); if (!s || !cards.length) return;
+      const i = Math.max(0, Math.min(cards.length - 1, t.dataset.apvPlanI != null ? +t.dataset.apvPlanI : apvPlanAt(s) + (+t.dataset.apvPlan)));
+      s.scrollTo({ left: cards[i].offsetLeft - s.offsetLeft, behavior: smooth }); return;
+    }
+    if (t.dataset.apvVid != null && t.hasAttribute('data-apv-vid')) {
+      const v = $('video', t.closest('.apv-hero')); if (!v) return;
+      if (v.paused) { v.play().catch(() => { }); t.textContent = 'Pause'; } else { v.pause(); t.textContent = 'Play'; } return;
+    }
+    if (t.classList.contains('mk-dot')) {
+      // a dot opens its home: the list shows everything again, then scrolls to that card
+      $$('[data-apv-f]', doc).forEach(b => { const on = b.dataset.apvF === 'all'; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on ? 'true' : 'false'); });
+      $$('.apv-comp', doc).forEach(c => { c.hidden = false; });
+      const c = $('.apv-comp[data-n="' + t.dataset.n + '"]', doc); if (c) c.scrollIntoView({ behavior: smooth, block: 'center' });
+    }
+  });
 
   // the comparables screen: Tim adds, edits, hides, reorders and removes comparables; imports a gathered pack; adds photos (his own
   // uploads, or a drop from his bulk-download folder matched by file name); checks the comparables rule; switches the market report on;

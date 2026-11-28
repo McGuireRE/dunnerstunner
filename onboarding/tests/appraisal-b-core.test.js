@@ -32,21 +32,29 @@ expect(JSON.stringify(NEW.writeStandard(own, ranges, ctx)) === JSON.stringify(OL
 const HAND = { title: 'RB 1 Hand Road: Market Appraisal', setup: {}, fields: { ranges: [{ key: 'A', option: 'Current condition', involves: 'As it stands', low: 400000, high: 450000 }], bedrooms: '3', method: { name: 'Deadline sale', text: 'A deadline sale.' } },
   sections: [{ type: 'heading', text: 'What I heard' }, { type: 'para', cls: 'lede', text: 'You told me **lots**. {{range:A}} with {{bedrooms}} bedrooms by {{method}}.' }, { type: 'list', items: ['One', 'Two'] }, { type: 'table', head: ['A', 'B'], rows: [['1', '2']] },
     { type: 'ranges' }, { type: 'method' }, { type: 'wave', title: 'Wave', bars: [{ label: 'Week 1', pct: 35 }, { label: 'Week 2', pct: 25 }], marker: 1, markerLabel: 'Offers due' }, { type: 'methods', head: ['Method'], rows: [['Deadline sale, by a date']] }, { type: 'note', text: 'Small print.' }] };
-expect(NEW.render(HAND) === OLD.render(HAND), 'the hand-loaded kind of record draws exactly as before');
+// the look changed on 28 November 2026 (the approved sample), so "exactly as before" is now "nothing lost": every text, photo and link
+// the d012895 core drew is still drawn (tests/apv-nothing-lost.js lists the labels the new look words differently)
+const { lost } = require('./apv-nothing-lost.js');
+out.lostHand = lost(OLD.render(HAND), NEW.render(HAND));
+expect(!out.lostHand.length, 'the hand-loaded kind of record: nothing lost in the new look: ' + JSON.stringify(out.lostHand));
 const recA = { title: wNew.title, setup: SETUP_A, fields: wNew.fields, sections: wNew.sections };
-expect(NEW.render(recA, { comps: [], photos: {}, months: [], market: false }) === OLD.render(recA, { comps: [], photos: {}, months: [], market: false }), 'a phase A row draws exactly as before');
+out.lostA = lost(OLD.render(recA, { comps: [], photos: {}, months: [], market: false }), NEW.render(recA, { comps: [], photos: {}, months: [], market: false }));
+expect(!out.lostA.length, 'a phase A row: nothing lost in the new look: ' + JSON.stringify(out.lostA));
 const comps = [{ id: 'c1', status: 'sold', address: 'RB 5 Core Road', suburb: 'Rbvale', price: 520000, sold_on: '2026-10-01', ring: 'suburb', compare_text: 'Similar.', compare_ticked: true, private_note: 'TIM-ONLY-NOTE' },
   { id: 'c2', status: 'listed', address: 'RB 7 Core Road', suburb: 'Rbvale', price: 590000, listed_on: '2026-11-01', ring: '750m' }];
 const months = Array.from({ length: 12 }, (_, i) => ({ area: 'Dunedin', month: `2026-${String(i + 1).padStart(2, '0')}-01`, median: 500000 + i * 1000, lower_quartile: 400000, upper_quartile: 600000, sales: 100, days_to_sell: 30, bands: [], source: 'reinz', gathered_at: '2026-11-05T09:00:00+13:00' }));
 const evC = { comps, photos: { c1: [{ url: 'https://img.example.test/c1.jpg' }] }, months, market: true };
 const recC = Object.assign({}, recA, { setup: Object.assign({}, SETUP_A, { market: true }) });
-expect(NEW.render(recC, evC) === OLD.render(recC, evC), 'a phase C row with priced comparables and the market report draws exactly as before');
+out.lostC = lost(OLD.render(recC, evC), NEW.render(recC, evC));
+expect(!out.lostC.length, 'a phase C row with priced comparables and the market report: nothing lost in the new look: ' + JSON.stringify(out.lostC));
+// and the lost() check itself notices a missing sentence, photo or link
+expect(lost('<p>Keep me.</p><img src="a.jpg">', '<p>Other.</p>').length === 2 && !lost('<p>Sold for $1</p>', '<p>$1</p>').length, 'the nothing-lost check catches a missing sentence and photo');
 expect(!/TIM-ONLY-NOTE/.test(NEW.render(recC, evC)), 'a comparable\'s private note never reaches the page');
 
 // ── 8. the C fix: nothing to plot, nothing drawn ──
 const noPrice = { comps: [{ id: 'c3', status: 'sold', address: 'RB 9 Core Road', suburb: 'Rbvale', sold_on: '2026-10-01', ring: 'suburb' }], photos: {}, months: [], market: true };
 const hNo = NEW.render(recC, noPrice);
-expect(!/Price evidence at a glance/.test(hNo) && /Recent sales nearby/.test(hNo), 'no priced comparable: no price dots heading, the sale itself still shown');
+expect(!/Price evidence at a glance/.test(hNo) && /Sales and current listings/.test(hNo), 'no priced comparable: no price dots heading, the sale itself still shown');
 expect(!/The Dunedin market/.test(hNo), 'the market report switched on with no figures: no heading, no empty report');
 const gapMonths = [{ area: 'Dunedin', month: '2026-10-01', bands: [], source: 'reinz' }];
 expect(!/The Dunedin market/.test(NEW.render(recC, { comps: [], photos: {}, months: gapMonths, market: true })), 'a market month with no figures at all: no report');
@@ -56,7 +64,7 @@ const draw = (s, ev) => { const w = NEW.writeStandard(s, ranges, ctx); return { 
 const EMPTY = Object.assign({}, SETUP_A, { headerOpt: { url: '', focus: { x: 50, y: 50 }, zoom: 1, bright: 1 }, heard: { lines: [{ id: 'l1', text: 'You want to move by March.', ticked: false }] },
   home: { on: true, photos: [], details: [['Rooms', '3 bedrooms']], ad: { title: 'To wake up to the sun', body: 'Draft.', ticked: false } }, buyers: { text: 'Families.', tags: ['Gardeners'], ticked: false }, intro: {}, reviews: { on: true } });
 let r = draw(EMPTY, { reviews: [{ ticked: false, rating: 5, body: 'Great', reviewer: 'Sam', reviewed_on: '2026-10-01' }] });
-['apv-hero', 'apv-intro', 'apv-heard', 'apv-home', 'apv-buyers', 'apv-reviews', 'What I heard from you', 'Your home as a listing', 'The buyers I have in mind', 'What my clients say', 'A short video from me', 'Mockup'].forEach(t => expect(!r.h.includes(t), 'nothing uploaded or ticked: no ' + t + ' on the page'));
+['apv-hero', 'apv-intro', 'apv-heard', 'apv-home', 'apv-buyers', 'apv-reviews', 'What I heard from you', 'Your home, as buyers would see it', 'The buyers I have in mind', 'What my clients say', 'A short video from me', 'Mockup'].forEach(t => expect(!r.h.includes(t), 'nothing uploaded or ticked: no ' + t + ' on the page'));
 expect(!r.w.sections.some(x => ['header', 'intro', 'heard', 'home', 'buyers'].includes(x.type)), 'nothing ticked or uploaded is written as a section');
 expect(r.w.sections.some(x => x.type === 'reviews'), 'reviews switched on is written (drawn only when a ticked review exists)');
 // each one appears once it has content
@@ -71,11 +79,11 @@ const ev = { homePhotos: { d1: { url: 'https://img.example.test/d1.jpg', room: '
   reviews: [{ ticked: true, rating: 5, body: 'Tim was <b>wonderful</b>.', reviewer: 'Sam', reviewed_on: '2026-10-01', url: 'https://g.example.test/r1' }, { ticked: true, rating: 4, body: 'No fees to worry about.', reviewer: 'J.', reviewed_on: '2026-11-01' },
     { ticked: false, rating: 1, body: 'UNTICKED REVIEW', reviewer: 'K', reviewed_on: '2026-11-02' }, { ticked: true, removed_at: '2026-11-10', rating: 5, body: 'GONE REVIEW', reviewer: 'L', reviewed_on: '2026-11-03' }] };
 r = draw(FULL, ev); out.full = r.w.sections.map(x => x.type + (x.stage ? ':' + x.stage : '')).join(',');
-expect(/class="apv-hero"/.test(r.h) && /Photo: DunedinNZ/.test(r.h) && /object-position:30% 70%/.test(r.h) && /scale\(1\.4\)/.test(r.h) && /brightness\(1\.2\)/.test(r.h), 'a library photo: drawn with the framing, credited DunedinNZ');
+expect(/class="apv-hero[ "]/.test(r.h) && /Photo: DunedinNZ/.test(r.h) && /object-position:30% 70%/.test(r.h) && /scale\(1\.4\)/.test(r.h) && /brightness\(1\.2\)/.test(r.h), 'a library photo: drawn with the framing, credited DunedinNZ');
 expect(r.h.indexOf('apv-hero') < r.h.indexOf('<h1>'), 'the header sits above the title');
 expect(/A short video from me/.test(r.h) && /<video controls/.test(r.h) && /intro\.jpg/.test(r.h) && !/<video controls[^>]*autoplay/.test(r.h), 'the video introduction: the vendor plays it, its still frame for print');
 expect(/What I heard from you/.test(r.h) && /quiet/.test(r.h) && !/move by March/.test(r.h), 'What I heard: the ticked line only');
-expect(/Your home as a listing/.test(r.h) && /Mockup, not live/.test(r.h) && r.h.includes(NEW.MOCKUP_LABEL), 'the mockup is labelled as a mockup, not live');
+expect(/Your home, as buyers would see it/.test(r.h) && /Mockup, not live/.test(r.h) && r.h.includes(NEW.MOCKUP_LABEL), 'the mockup is labelled as a mockup, not live');
 expect(r.h.indexOf('d2.jpg') < r.h.indexOf('d1.jpg') && !/dGone/.test(r.h), 'photos in Tim\'s order; one that can\'t be shown is left out');
 expect(/3 bedrooms plus study/.test(r.h) && /Heat pump/.test(r.h) && !/<dt>Land area<\/dt>/.test(r.h), 'a blank key detail is left out, never shown empty');
 expect(/To wake up to the sun/.test(r.h) && /call me, Tim/.test(r.h), 'the ticked advertisement is shown');
@@ -88,10 +96,10 @@ const st = Object.fromEntries(r.w.sections.filter(x => ['header', 'intro', 'hear
 expect(JSON.stringify(st) === JSON.stringify({ header: 1, intro: 1, heard: 1, home: 2, buyers: 2, reviews: 3 }), 'every new section carries its stage: ' + JSON.stringify(st));
 // the mockup with only photos, or only the advertisement, still shows; with neither it doesn't
 const onlyPh = JSON.parse(JSON.stringify(FULL)); onlyPh.home.ad.ticked = false;
-expect(/Your home as a listing/.test(draw(onlyPh, ev).h) && !/To wake up/.test(draw(onlyPh, ev).h), 'photos and no ticked advertisement: the mockup shows its photos only');
-expect(!/Your home as a listing/.test(draw(onlyPh, {}).h), 'photos chosen but none can be shown, and no advertisement: no mockup');
+expect(/Your home, as buyers would see it/.test(draw(onlyPh, ev).h) && !/To wake up/.test(draw(onlyPh, ev).h), 'photos and no ticked advertisement: the mockup shows its photos only');
+expect(!/Your home, as buyers would see it/.test(draw(onlyPh, {}).h), 'photos chosen but none can be shown, and no advertisement: no mockup');
 const homeOff = JSON.parse(JSON.stringify(FULL)); homeOff.home.on = false;
-expect(!/Your home as a listing/.test(draw(homeOff, ev).h), 'the mockup switched off: not shown');
+expect(!/Your home, as buyers would see it/.test(draw(homeOff, ev).h), 'the mockup switched off: not shown');
 // the intro's asset missing (removed): nothing
 expect(!/A short video from me/.test(draw(FULL, Object.assign({}, ev, { assets: {} })).h), 'the video introduction missing from storage: not shown');
 // Tim's own header: a video, muted and looped, with its still; and a photo with his credit

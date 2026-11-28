@@ -1135,6 +1135,229 @@ body.apv-present main { max-width: 760px; padding-bottom: 48px; }
   .apv-intro-still { display: block; width: 100%; max-height: 8cm; object-fit: cover; }
   .apv-home-card, .apv-rev { break-inside: avoid; }
 }
+/* ───────── The appraisal's look (Tim, 28 November 2026): the approved sample of 24 November 2026, faithfully. Every rule here is
+   scoped under .apv-doc (the appraisal itself) or the appraisal page, so Tim's other screens and vendor onboarding are unchanged.
+   Same tokens as the sample (they are the portal's own), Cormorant Garamond for display and Barlow for body, light and dark,
+   phone first with nothing wider than the screen at 390 px, and the sample's paper look in print. ───────── */
+main:has(> #apvPage) { max-width: 920px; }
+body.apv-present main { max-width: 920px; padding-top: 0; }
+body.apv-present header.top { display: none !important; }   /* presenting: the appraisal's own top bar (logo and jump chips) takes its place */
+.apv-doc { font-size: 17px; line-height: 1.55; }
+.apv-doc p { margin: 0 0 12px; }
+.apv-doc h1 { font-family: var(--display); font-weight: 400; font-size: clamp(34px, 7vw, 48px); line-height: 1.08; margin: 0 0 10px; text-wrap: balance; }
+.apv-doc h2 { font-family: var(--display); font-weight: 500; font-size: 30px; line-height: 1.15; margin: 48px 0 6px; text-wrap: balance; scroll-margin-top: 110px; }
+.apv-doc h3 { font-size: 17px; font-weight: 600; margin: 0 0 4px; }
+.apv-doc .apv-lede, .apv-doc .apv-method, .apv-doc .mk-lede { font-size: 18.5px; color: var(--muted); max-width: 36em; }
+.apv-doc .apv-note, .apv-doc .apv-by, .apv-doc .apv-valn { font-size: 14.5px; color: var(--muted); }
+.apv-doc .apv-kick { font-size: 12.5px; letter-spacing: .09em; text-transform: uppercase; color: var(--muted); font-weight: 600; margin: 0 0 6px; }
+.apv-doc .apv-note-k { margin-top: 22px; }
+.apv-doc .apv-card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 18px; margin: 14px 0; min-width: 0; }
+.apv-doc .apv-two { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: 20px; align-items: start; }
+.apv-doc .apv-two > * { min-width: 0; }
+.apv-doc .apv-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+/* the top bar: the logo, then the chips that jump to each section (sticky while presenting, as in the sample) */
+.apv-doc .apv-top { background: var(--surface); border-bottom: 1px solid var(--line); margin: 0 0 22px; box-shadow: 0 0 0 100vmax var(--surface); clip-path: inset(0 -100vmax); }
+body.apv-present .apv-doc .apv-top { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; }
+.apv-doc .apv-top-in { padding: 10px 0; }
+.apv-doc .apv-logo img { height: 30px; width: auto; display: block; }
+.apv-doc .apv-jump { display: flex; gap: 6px; overflow-x: auto; padding-top: 8px; scrollbar-width: none; }
+.apv-doc .apv-jump::-webkit-scrollbar { display: none; }
+.apv-doc .apv-logo + .apv-jump { margin-top: 0; }
+.apv-doc .apv-top-in > .apv-jump:first-child { padding-top: 0; }
+.apv-doc .apv-chip { font: inherit; font-size: 13.5px; font-weight: 500; border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 999px; padding: 5px 12px; cursor: pointer; white-space: nowrap; text-decoration: none; display: inline-block; }
+.apv-doc .apv-chip.on { background: var(--ink); color: var(--surface); border-color: var(--ink); }
+.apv-doc .apv-chip:focus-visible, .apv-doc .apv-car-btn:focus-visible, .apv-doc .apv-pbtn:focus-visible, .apv-doc .apv-pdot:focus-visible, .apv-doc .apv-vbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* the kicker and title; over the header photo or video when there is one, with the sample's darkening at its foot */
+.apv-doc .apv-head { margin: 0 0 4px; }
+/* the header runs the full width of the screen, as in the sample; the page clips anything past the edge, so nothing scrolls sideways */
+body:has(#apvPage .apv-doc) { overflow-x: clip; }
+.apv-doc .apv-hero { aspect-ratio: auto; min-height: min(62vh, 520px); display: flex; align-items: flex-end; background: #1d2a33; color: #fff; margin: -22px calc(50% - 50vw) 28px; border-radius: 0; }
+.apv-doc .apv-hero::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(0,0,0,.05) 35%, rgba(0,0,0,.62)); pointer-events: none; }
+.apv-doc .apv-hero-in { position: relative; z-index: 1; width: 100%; max-width: 920px; margin: 0 auto; padding: 28px 16px 26px; }
+.apv-doc .apv-hero-in h1 { color: #fff; margin: 0; }
+.apv-doc .apv-hero-in .apv-kick { color: rgba(255,255,255,.85); }
+.apv-doc .apv-credit { z-index: 1; top: 8px; right: 10px; bottom: auto; background: none; padding: 0; font-size: 11.5px; color: rgba(255,255,255,.8); }
+.apv-doc .apv-vbtn { position: absolute; z-index: 2; right: 10px; bottom: 10px; font: inherit; font-size: 12.5px; background: rgba(0,0,0,.45); color: #fff; border: 1px solid rgba(255,255,255,.4); border-radius: 999px; padding: 4px 10px; cursor: pointer; }
+.apv-doc .apv-hero.has-head .apv-vbtn { bottom: auto; top: 30px; }
+@media (prefers-reduced-motion: reduce) { .apv-doc .apv-vbtn { display: none; } }
+/* pills and tags, as the sample's */
+.apv-doc .apv-tag, .apv-doc .apv-pill { display: inline-block; font-size: 13px; font-weight: 600; letter-spacing: 0; text-transform: none; border: 0; border-radius: 999px; padding: 3px 10px; margin: 0 6px 4px 0; background: var(--line); color: var(--ink); }
+.apv-doc .apv-tag.st-sold { background: var(--ok-soft); color: var(--ok-text); }
+.apv-doc .apv-tag.st-listed { background: var(--warn-soft); color: var(--warn); }
+.apv-doc .apv-tag.st-context { background: var(--line); color: var(--muted); }
+.apv-doc .apv-tag.tim, .apv-doc .apv-tag.mock, .apv-doc .apv-mc .apv-tag, .apv-doc .apv-plan .apv-tag, .apv-doc .apv-methods .apv-tag { background: var(--accent-fill); color: var(--on-accent); }
+.apv-doc .apv-tag.near { background: var(--accent-soft); color: var(--accent); }
+.apv-doc .apv-tags .apv-tag { font-size: 13.5px; font-weight: 400; border-radius: 6px; padding: 3px 9px; background: var(--bg); border: 1px solid var(--line); }
+/* tables keep the portal's phone behaviour (rows become cards); the sample's quieter heading row */
+.apv-doc .apv-tbl { font-size: 15px; }
+.apv-doc .apv-tbl th { font-size: 12.5px; text-transform: uppercase; letter-spacing: .06em; background: var(--surface); }
+.apv-doc .apv-tbl tr.apv-rec td { background: var(--accent-soft); }
+/* What I heard from you: the sample's cards, each with an accent edge */
+.apv-doc .apv-heard-list { list-style: none; padding: 0; margin: 14px 0; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.apv-doc .apv-heard-list li { background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 10px; padding: 18px; min-width: 0; }
+/* the mockup listing */
+.apv-doc .apv-mock { font-size: 14.5px; color: var(--muted); }
+.apv-doc .apv-home-card { border-radius: 10px; padding: 18px; margin: 14px 0; }
+.apv-doc .apv-adraft h3 { font-family: var(--display); font-size: 28px; font-weight: 500; line-height: 1.15; margin: 0 0 8px; }
+.apv-doc .apv-adraft .apv-kick { margin-top: 0; }
+.apv-doc .apv-facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0 16px; margin: 14px 0 0; }
+.apv-doc .apv-facts > div { padding: 10px 0; border-bottom: 1px solid var(--line); min-width: 0; }
+.apv-doc .apv-facts dt { font-size: 13.5px; font-weight: 400; color: var(--muted); }
+.apv-doc .apv-facts dd { margin: 0; font-weight: 500; }
+/* the carousel: the photo at 3:2, round arrows over it and the count in its corner */
+.apv-doc .apv-car { position: relative; margin: 0; border-radius: 8px; overflow: hidden; background: var(--bg); min-width: 0; }
+.apv-doc .apv-car-strip { border-radius: 0; scrollbar-width: none; }
+.apv-doc .apv-car-strip::-webkit-scrollbar { display: none; }
+.apv-doc .apv-car-ctl { margin: 0; }
+.apv-doc .apv-car-btn { position: absolute; top: 50%; transform: translateY(-50%); width: 38px; height: 38px; border-radius: 50%; border: none; background: rgba(255,255,255,.92); color: #2B2A28; font-size: 20px; line-height: 1; box-shadow: 0 1px 4px rgba(0,0,0,.25); padding: 0; }
+.apv-doc .apv-car-btn.prev { left: 8px; } .apv-doc .apv-car-btn.next { right: 8px; }
+.apv-doc .apv-car-at { position: absolute; right: 8px; bottom: 8px; min-width: 0; background: rgba(0,0,0,.62); color: #fff; font-size: 12.5px; border-radius: 999px; padding: 2px 9px; }
+/* the price evidence and the comparables */
+.apv-doc .apv-evidence { margin: 0; }
+.apv-doc .apv-filters { display: flex; gap: 6px; flex-wrap: wrap; margin: 14px 0 4px; }
+.apv-doc .apv-comps { gap: 0; margin: 0; }
+.apv-doc .apv-comp { border-radius: 10px; padding: 18px; margin: 14px 0; }
+.apv-doc .apv-comp.ctx { border-style: dashed; }
+.apv-doc .apv-comp[hidden] { display: none; }
+.apv-doc .apv-comp-h { display: block; }
+.apv-doc .apv-comp-h h3 { margin: 4px 0 0; font-size: 17px; font-weight: 600; }
+.apv-doc .apv-comp-n { width: 24px; height: 24px; font-size: 12.5px; background: var(--ink); color: var(--surface); margin: 0 6px 4px 0; vertical-align: top; }
+.apv-doc .apv-comp.ctx .apv-comp-n { background: var(--line); color: var(--ink); }
+.apv-doc .apv-comp-tags { margin: 0; }
+.apv-doc .apv-comp-price { font-family: var(--display); font-size: 34px; line-height: 1.1; margin: 6px 0 0; }
+.apv-doc .apv-comp-how { font-size: 14.5px; color: var(--muted); margin: 2px 0 0; }
+.apv-doc .apv-cmp-tbl { width: 100%; border-collapse: collapse; font-size: 15px; margin-top: 10px; }
+.apv-doc .apv-cmp-tbl th, .apv-doc .apv-cmp-tbl td { text-align: left; padding: 6px 8px 6px 0; border-bottom: 1px solid var(--line); font-weight: 400; }
+.apv-doc .apv-cmp-tbl th { font-size: 12.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+.apv-doc .apv-cmp-tbl td:first-child { color: var(--muted); }
+.apv-doc .apv-cmp-tbl td.d { font-weight: 600; }
+.apv-doc .apv-ad h4, .apv-doc .apv-cmp h4 { font-size: 12.5px; letter-spacing: .09em; text-transform: uppercase; color: var(--muted); font-weight: 600; margin: 14px 0 4px; }
+.apv-doc .apv-ad blockquote { margin: 12px 0 0; padding: 10px 14px; border-left: 3px solid var(--line); color: var(--muted); font-style: italic; font-size: 15.5px; }
+/* the charts: each its own card, the sample's colours (sales in ink, the asking price an open dot, the range a soft band) */
+.apv-doc .mk-fig { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 18px; margin: 14px 0; }
+.apv-doc .apv-card .mk-fig { border: 0; padding: 0; margin: 0; background: none; }
+.apv-doc .mk-fig figcaption strong { font-size: 17px; font-weight: 600; margin-bottom: 4px; }
+.apv-doc .mk-fig figcaption span { font-size: 14.5px; margin-bottom: 8px; }
+.mk-dots .mk-v.w { display: none; }
+@media (min-width: 700px) { .mk-dots .mk-v.n { display: none; } .mk-dots .mk-v.w { display: block; } }
+@media print { .mk-dots .mk-v.n { display: none !important; } .mk-dots .mk-v.w { display: block !important; } }
+.apv-doc .mk-range rect { fill: var(--accent-soft); stroke: none; }
+.apv-doc .mk-range-lab { font-size: 10.5px; }
+.apv-doc .mk-dot.sold circle { fill: var(--ink); stroke: var(--surface); }
+.apv-doc .mk-dot.sold text { fill: var(--surface); }
+.apv-doc .mk-dot.listed circle { fill: var(--surface); stroke: var(--warn); stroke-width: 2.5; }
+.apv-doc .mk-dot { cursor: pointer; }
+.apv-doc .mk-key.sold { background: var(--ink); }
+.apv-doc .mk-key.listed { border-color: var(--warn); }
+.apv-doc .mk-key.range { background: var(--accent-soft); border: 0; }
+.apv-doc .mk-key.line { height: 3px; border-radius: 2px; background: var(--accent); }
+.apv-doc .mk-key.spread { border-radius: 2px; background: var(--accent); opacity: .28; }
+.apv-doc .mk-key.ref { height: 0; border-radius: 0; border-top: 2px dashed var(--ink); opacity: .6; }
+.apv-doc .mk-spread { opacity: .28; }
+.apv-doc .mk-line { stroke-width: 2.5; }
+.apv-doc .mk-ref { stroke: var(--ink); stroke-opacity: .55; stroke-dasharray: 5 4; stroke-width: 1.5; }
+.apv-doc .mk-ref-lab { font-size: 11px; fill: var(--ink); font-family: var(--body); }
+.apv-doc .mk-bar { fill: var(--accent); opacity: .8; }
+.apv-doc .mk-bar.last { opacity: 1; }
+.apv-doc .mk-band-bar i { background: var(--ink); opacity: .22; }
+.apv-doc .mk-band.on .mk-band-bar i { background: var(--accent); opacity: .9; }
+.apv-doc .mk-band.on .mk-band-lab { color: var(--ink); font-weight: 600; }
+.apv-doc .mk-tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 14px 0; }
+.apv-doc .mk-tile { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px; min-width: 0; }
+.apv-doc .mk-tile .k, .apv-doc .mk-tile .s { font-size: 13.5px; color: var(--muted); }
+.apv-doc .mk-tile .v { font-family: var(--display); font-size: 32px; line-height: 1.1; margin: 2px 0; overflow-wrap: anywhere; }
+.apv-doc .mk-grid { gap: 0 14px; }
+.apv-doc .mk-table summary { font-size: 14px; margin-top: 8px; }
+/* my opinion of price: the sample's soft accent card with the range in large display type */
+.apv-doc .apv-opinion { margin: 14px 0 0; }
+.apv-doc .apv-opin-card { background: var(--accent-soft); border-radius: 10px; padding: 18px; margin: 0 0 10px; }
+.apv-doc .apv-opin { display: block; background: none; border: 0; padding: 0; margin: 0; }
+.apv-doc .apv-opin-part { display: block; font-size: 15px; color: var(--muted); }
+.apv-doc .apv-opin-fig { display: block; font-family: var(--display); font-weight: 400; font-size: clamp(34px, 7vw, 52px); line-height: 1.1; margin: 6px 0; color: var(--ink); }
+.apv-doc .apv-opin-card .apv-tbl { background: transparent; border-color: transparent; margin: 6px 0 0; }
+.apv-doc .apv-opin-card .apv-ranges td:last-child { font-family: var(--display); font-size: 24px; font-weight: 400; color: var(--ink); }
+/* how I would sell it: the sample's buyer-wave card, steps, the ways to sell, the plans and the panel */
+.apv-doc .apv-wave { padding: 18px; margin: 14px 0; }
+.apv-doc .apv-wave figcaption strong { font-size: 17px; font-weight: 600; margin-bottom: 4px; }
+.apv-doc .apv-wgrid { row-gap: 4px; margin-top: 14px; }
+.apv-doc .apv-wcol { grid-row: 2; }
+.apv-doc .apv-wbrack { grid-row: 1; border-top: 2px solid var(--accent); padding-top: 4px; font-size: 12.5px; font-weight: 600; color: var(--accent); }
+.apv-doc .apv-wbar { background: var(--accent); opacity: .85; border-radius: 4px 4px 0 0; }
+.apv-doc .apv-wcol.on .apv-wbar { background: var(--accent); }
+.apv-doc .apv-wpct { font-size: 12.5px; }
+.apv-doc .apv-wlab { font-size: 12px; }
+.apv-doc .apv-wcol.after-mark { border-left: 2px solid var(--ink); }
+.apv-doc .apv-wmark { font-size: 12.5px; }
+.apv-doc .apv-wmark::before { border-top: 0; border-left: 2px solid var(--ink); width: 0; height: 14px; vertical-align: -2px; margin-right: 8px; }
+.apv-doc .apv-wdots { border-top: 6px solid var(--ink); opacity: .3; border-radius: 3px; }
+.apv-doc .apv-method { margin: 0 0 12px; }
+.apv-doc ol.apv-steps { list-style: none; padding: 0; margin: 14px 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; counter-reset: apvstep; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 18px; }
+.apv-doc ol.apv-steps li { border-top: 3px solid var(--accent); padding-top: 8px; font-size: 15px; margin: 0; counter-increment: apvstep; min-width: 0; }
+.apv-doc ol.apv-steps li::before { content: "Step " counter(apvstep); display: block; font-weight: 600; font-size: 15px; }
+.apv-doc .apv-mcard { margin: 14px 0; }
+.apv-doc .apv-mcard .apv-h3 { font-size: 17px; }
+.apv-doc .apv-mcs { display: block; margin: 8px 0 10px; }
+.apv-doc .apv-mc, .apv-doc .apv-mc.apv-rec { background: none; border: 0; border-top: 1px solid var(--line); border-radius: 0; padding: 10px 0; }
+.apv-doc .apv-mc summary { font-weight: 600; }
+.apv-doc .apv-mc summary strong { font-weight: 600; }
+.apv-doc .apv-mc dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-rows: auto auto; grid-auto-flow: column; gap: 0 14px; margin: 8px 0 0; font-size: 15px; }
+.apv-doc .apv-mc dt { font-size: 12.5px; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); margin: 0 0 4px; font-weight: 600; }
+.apv-doc .apv-mc dd { margin: 0; }
+.apv-doc .apv-h3 { margin: 28px 0 4px; }
+.apv-doc .apv-plans-h + .apv-note { margin: 0 0 6px; }
+.apv-doc .apv-plans { align-items: flex-start; gap: 14px; padding: 4px 2px 8px; margin: 0; scrollbar-width: none; }
+.apv-doc .apv-plans::-webkit-scrollbar { display: none; }
+.apv-doc .apv-plan { flex: 0 0 min(86%, 520px); border-radius: 12px; padding: 18px; }
+.apv-doc .apv-plan.apv-rec { border: 2px solid var(--accent); box-shadow: none; }
+.apv-doc .apv-plan h3 { font-size: 20px; margin: 10px 0 0; }
+.apv-doc .apv-plan-price { font-family: var(--display); font-weight: 400; font-size: 34px; line-height: 1.1; margin: 4px 0; }
+.apv-doc .apv-plan-price span { font: inherit; color: inherit; }   /* the page wraps each dollar figure so translation never changes it */
+.apv-doc .apv-plan-gst { font-size: 14.5px; color: var(--muted); margin: 0 0 10px; }
+.apv-doc .apv-tick { list-style: none; padding: 0; margin: 0; font-size: 15.5px; }
+.apv-doc .apv-tick li { padding: 3px 0 3px 22px; position: relative; margin: 0; }
+.apv-doc .apv-tick li::before { content: ""; position: absolute; left: 2px; top: 11px; width: 10px; height: 5px; border-left: 2px solid var(--ok); border-bottom: 2px solid var(--ok); transform: rotate(-45deg); }
+.apv-doc .apv-pnav { display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 6px; }
+.apv-doc .apv-pbtn { font: inherit; width: 36px; height: 36px; border-radius: 50%; border: 1px solid var(--line); background: var(--surface); color: var(--ink); cursor: pointer; font-size: 18px; padding: 0; }
+.apv-doc .apv-pdot { width: 9px; height: 9px; border-radius: 50%; background: var(--line); border: none; padding: 0; cursor: pointer; }
+.apv-doc .apv-pdot.on { background: var(--accent); }
+.apv-doc .apv-panel { background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 10px; padding: 18px; margin: 24px 0 14px; }
+.apv-doc .apv-panel-h { font-family: var(--display); font-size: 26px; font-weight: 500; line-height: 1.15; margin: 0 0 6px; }
+.apv-doc .apv-panel p { margin: 0 0 10px; }
+.apv-doc .apv-panel p:last-child { margin: 0; }
+.apv-doc .apv-close p { font-size: 14.5px; color: var(--muted); }
+.apv-doc .apv-buyers p { max-width: 40em; }
+.apv-doc .apv-rev { border-radius: 10px; padding: 18px; }
+.apv-doc .apv-rev blockquote { color: var(--muted); font-size: 15.5px; }
+/* presenting on a tablet or TV: the sample's sizes, a little larger */
+.apv-show .apv-doc { font-size: 19.5px; }
+.apv-show .apv-doc h2 { font-size: clamp(28px, 6vw, 34px); }
+@media (max-width: 700px) {
+  .apv-doc .apv-two { grid-template-columns: minmax(0, 1fr); }
+  .apv-doc .apv-facts { grid-template-columns: 1fr 1fr; }
+  .apv-doc ol.apv-steps { grid-template-columns: 1fr 1fr; }
+  .apv-doc .apv-heard-list { grid-template-columns: 1fr; }
+  .apv-doc .mk-tiles { grid-template-columns: 1fr 1fr; }
+  .apv-doc .mk-tile .v { font-size: 26px; }
+  .apv-doc .apv-mc dl { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; grid-auto-flow: row; }
+  .apv-doc .apv-mc dd { margin-bottom: 8px; }
+  .apv-doc h2 { font-size: 26px; }
+}
+/* paper: the sample's printed look. White, smaller type, no chips or buttons, one photo per home, cards kept whole */
+@media print {
+  .apv-doc { font-size: 14px; }
+  .apv-doc .apv-top { position: static !important; border: 0; box-shadow: none; clip-path: none; margin-bottom: 10px; }
+  .apv-doc .apv-jump, .apv-doc .apv-filters, .apv-doc .apv-pnav, .apv-doc .apv-vbtn { display: none !important; }
+  .apv-doc .apv-hero { min-height: 220px; height: auto; margin: 0 0 14px; }
+  .apv-doc .apv-hero-in { padding: 18px 16px; }
+  .apv-doc .apv-hero::after { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .apv-doc h2 { margin-top: 26px; font-size: 24px; break-after: avoid; }
+  .apv-doc .apv-card, .apv-doc .apv-comp, .apv-doc .mk-fig, .apv-doc .apv-panel, .apv-doc .apv-opin-card, .apv-doc ol.apv-steps, .apv-doc .apv-heard-list li { break-inside: avoid; }
+  .apv-doc .apv-comp { padding: 12px; }
+  .apv-doc .apv-comp .apv-two { grid-template-columns: 200px 1fr; gap: 14px; }
+  .apv-doc .apv-home-card .apv-two { grid-template-columns: 1fr 1fr; }
+  .apv-doc .apv-comp[hidden] { display: block !important; }
+  .apv-doc .apv-car-strip img:first-child { max-height: none; aspect-ratio: 3 / 2; }
+}
 /* the sections screen (Tim only) */
 .abs .abs-ph { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 140px), 1fr)); gap: 10px; }
 .abs .abs-ph figure { margin: 0; border: 1px solid var(--line); border-radius: 10px; padding: 6px; min-width: 0; }

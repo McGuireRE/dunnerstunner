@@ -40,22 +40,30 @@
     if (!pts.length) return '';
     const vals = pts.map(p => +p.price).concat(...rs.map(r => [+r.low, +r.high]));
     let lo = Math.min(...vals), hi = Math.max(...vals); const pad = Math.max((hi - lo) * 0.08, hi * 0.02); lo = Math.max(0, lo - pad); hi += pad;
-    const L = 14, R = W - 14, x = v => L + (v - lo) / (hi - lo) * (R - L), rad = 10;
+    // drawn twice, as the sample draws to its box: a narrow drawing for a phone and a wide one for a bigger screen and paper, so the
+    // labels keep their size (CSS shows one). The dots, the shading and the figures are the same in both.
+    const draw = (Wd, cls) => {
+    const L = 14, R = Wd - 14, x = v => L + (v - lo) / (hi - lo) * (R - L), rad = 10;
     // stack dots that would overlap: each goes on the lowest level where it clears the dots already there
     const levels = [], placed = pts.slice().sort((a, b) => a.price - b.price).map(p => { const cx = x(p.price); let k = 0;
       while ((levels[k] || []).some(o => Math.abs(o - cx) < rad * 2 + 2)) k++; (levels[k] = levels[k] || []).push(cx); return { p, cx, k }; });
     const nl = Math.max(1, levels.length), top = rs.length ? 30 : 12, base = top + nl * (rad * 2 + 4), H = base + 30;
+    // the label over the shading, as in the sample: "Your home: $520K to $575K" (kept inside the drawing, however near the edge it sits)
+    const labOf = (r, i) => rs.length > 1 ? (r.option || 'Range ' + (i + 1)) : (/^\s*your (home|property)\s*$/i.test(String(r.option || '')) ? 'Your home' : 'My range') + ': ' + short(r.low) + ' to ' + short(r.high);
+    const labX = (r, i) => { const half = labOf(r, i).length * 3.1, mid = (x(r.low) + x(r.high)) / 2; return Math.max(L + half, Math.min(R - half, mid)); };
     const bands = rs.map((r, i) => '<g class="mk-range" data-range="' + esc(r.key || i) + '"><rect x="' + x(r.low).toFixed(1) + '" y="' + (top - 4) + '" width="' + Math.max(2, x(r.high) - x(r.low)).toFixed(1) + '" height="' + (base - top + 8) + '" rx="4"><title>' + esc((r.option || 'My range') + ': ' + dollars(r.low) + ' to ' + dollars(r.high)) + '</title></rect>'
-      + '<text class="mk-range-lab" x="' + ((x(r.low) + x(r.high)) / 2).toFixed(1) + '" y="' + (top - 10) + '" text-anchor="middle">' + esc(rs.length > 1 ? (r.option || 'Range ' + (i + 1)) : 'My range') + '</text></g>').join('');
-    const tk = ticks(lo, hi, 4).filter(v => v >= lo && v <= hi);
+      + '<text class="mk-range-lab" x="' + labX(r, i).toFixed(1) + '" y="' + (top - 10) + '" text-anchor="middle">' + esc(labOf(r, i)) + '</text></g>').join('');
+    const tk = ticks(lo, hi, Wd > 500 ? 8 : 4).filter(v => v >= lo && v <= hi);
     const axis = '<line class="mk-axis" x1="' + L + '" x2="' + R + '" y1="' + (base + 4) + '" y2="' + (base + 4) + '"/>' + tk.map(v => '<text class="mk-tick" x="' + x(v).toFixed(1) + '" y="' + (base + 20) + '" text-anchor="middle">' + esc(short(v)) + '</text>').join('');
     const marks = placed.map(({ p, cx, k }) => { const cy = base - rad - 2 - k * (rad * 2 + 4), st = STATUS[p.status] ? p.status : 'sold';
       return '<g class="mk-dot ' + st + '" data-n="' + esc(p.n) + '" data-price="' + esc(p.price) + '"><circle cx="' + cx.toFixed(1) + '" cy="' + cy + '" r="' + rad + '"/><text x="' + cx.toFixed(1) + '" y="' + (cy + 3.5) + '" text-anchor="middle">' + esc(p.n) + '</text>'
         + '<title>' + esc(p.n + '. ' + (p.label || '') + ': ' + dollars(p.price) + ', ' + STATUS[st].toLowerCase() + (p.when ? ' (' + p.when + ')' : '')) + '</title></g>'; }).join('');
+    return '<svg class="mk-v ' + cls + '" viewBox="0 0 ' + Wd + ' ' + H + '" width="100%" preserveAspectRatio="xMidYMid meet">' + bands + axis + marks + '</svg>';
+    };
     const used = ['sold', 'listed', 'context'].filter(s => pts.some(p => (STATUS[p.status] ? p.status : 'sold') === s));
     const legend = '<p class="mk-legend">' + used.map(s => '<span><i class="mk-key ' + s + '"></i>' + esc(STATUS[s]) + '</span>').join('') + (rs.length ? '<span><i class="mk-key range"></i>' + (rs.length > 1 ? 'My ranges, shaded' : 'My range, shaded') + '</span>' : '') + '</p>';
     return '<figure class="mk-fig mk-dots" role="img" aria-label="Each comparable\'s price as a numbered dot' + (rs.length ? ', with my range shaded' : '') + '">'
-      + '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" preserveAspectRatio="xMidYMid meet">' + bands + axis + marks + '</svg>' + legend
+      + draw(W, 'n') + draw(760, 'w') + legend
       + table(['No.', 'Comparable', 'Price', 'Status'], pts.map(p => [String(p.n), p.label || '', dollars(p.price), STATUS[STATUS[p.status] ? p.status : 'sold']])) + '</figure>';
   }
 
@@ -84,10 +92,12 @@
   const every = n => n > 8 ? 3 : n > 5 ? 2 : 1;
   function yAxis(lo, hi, y, fmt) { return ticks(lo, hi, 3).filter(v => v >= lo && v <= hi).map(v => '<line class="mk-grid" x1="44" x2="' + (W - 8) + '" y1="' + y(v).toFixed(1) + '" y2="' + y(v).toFixed(1) + '"/><text class="mk-tick" x="40" y="' + (y(v) + 4).toFixed(1) + '" text-anchor="end">' + esc(fmt(v)) + '</text>').join(''); }
   function xLabels(ms, X, yb) { const k = every(ms.length); return ms.map((m, i) => (i % k === (ms.length - 1) % k) ? '<text class="mk-tick" x="' + X(i).toFixed(1) + '" y="' + yb + '" text-anchor="middle">' + esc(monthShort(m.month)) + '</text>' : '').join(''); }
-  function medianChart(ms) {
+  function medianChart(ms, ranges) {
     const pts = ms.map((m, i) => ({ i, m })).filter(o => +o.m.median > 0); if (pts.length < 2) return '';
     const H = 190, T = 14, B = H - 30, X = xs(ms.length);
-    const vals = pts.flatMap(o => [+o.m.median, +o.m.lower_quartile || +o.m.median, +o.m.upper_quartile || +o.m.median]);
+    // the vendor's range as two dashed lines, as in the sample (one range only: with several parts the chart would say nothing clear)
+    const rg = (ranges || []).filter(r => r && +r.low > 0 && +r.high > +r.low), ref = rg.length === 1 ? rg[0] : null;
+    const vals = pts.flatMap(o => [+o.m.median, +o.m.lower_quartile || +o.m.median, +o.m.upper_quartile || +o.m.median]).concat(ref ? [+ref.low, +ref.high] : []);
     let lo = Math.min(...vals), hi = Math.max(...vals); const pad = (hi - lo) * 0.12 || hi * 0.05; lo = Math.max(0, lo - pad); hi += pad;
     const y = v => B - (v - lo) / (hi - lo) * (B - T);
     const spread = pts.filter(o => +o.m.lower_quartile > 0 && +o.m.upper_quartile > 0);
@@ -96,8 +106,11 @@
     const marks = pts.map(o => '<circle class="mk-pt" cx="' + X(o.i).toFixed(1) + '" cy="' + y(+o.m.median).toFixed(1) + '" r="4"><title>' + esc(monthName(o.m.month) + ': median ' + dollars(o.m.median) + (spread.includes(o) ? ', middle half ' + dollars(o.m.lower_quartile) + ' to ' + dollars(o.m.upper_quartile) : '')) + '</title></circle>').join('');
     const last = pts[pts.length - 1];
     const lab = '<text class="mk-val" x="' + Math.min(W - 12, X(last.i)).toFixed(1) + '" y="' + (y(+last.m.median) - 10).toFixed(1) + '" text-anchor="end">' + esc(short(last.m.median)) + '</text>';
-    return '<figure class="mk-fig" data-chart="median"><figcaption><strong>Median sale price</strong><span>The line is the median each month; the shading is the middle half of sales (the spread).</span></figcaption>'
-      + '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" role="img" aria-label="Median sale price by month, with the spread shaded">' + yAxis(lo, hi, y, short) + band + line + marks + lab + xLabels(ms, X, H - 10) + '</svg>'
+    const refs = ref ? [+ref.low, +ref.high].map(v => '<line class="mk-ref" x1="44" x2="' + (W - 8) + '" y1="' + y(v).toFixed(1) + '" y2="' + y(v).toFixed(1) + '"><title>' + esc('My range for your home: ' + dollars(ref.low) + ' to ' + dollars(ref.high)) + '</title></line>').join('')
+      + '<text class="mk-ref-lab" x="' + (W - 8) + '" y="' + (y(+ref.high) - 5).toFixed(1) + '" text-anchor="end">Your range</text>' : '';
+    const legend = '<p class="mk-legend"><span><i class="mk-key line"></i>Median</span><span><i class="mk-key spread"></i>Middle half of sales</span>' + (ref ? '<span><i class="mk-key ref"></i>My range for your home</span>' : '') + '</p>';
+    return '<figure class="mk-fig" data-chart="median"><figcaption><strong>Median sale price, and the spread around it</strong><span>The line is the median each month; the shading is the middle half of sales (the spread).</span></figcaption>'
+      + '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" role="img" aria-label="Median sale price by month, with the spread shaded">' + yAxis(lo, hi, y, short) + band + refs + line + marks + lab + xLabels(ms, X, H - 10) + '</svg>' + legend
       + table(['Month', 'Median', 'Lower end', 'Upper end'], ms.map(m => m.missing ? [monthName(m.month), 'No figures', '', ''] : [monthName(m.month), m.median ? dollars(m.median) : '', m.lower_quartile ? dollars(m.lower_quartile) : '', m.upper_quartile ? dollars(m.upper_quartile) : ''])) + '</figure>';
   }
   function barChart(ms, key, o) {
@@ -132,12 +145,20 @@
     const srcs = Array.from(new Set(ms.filter(m => !m.missing).map(m => SOURCES[m.source] || SOURCES.other)));
     const lede = latest.median ? 'In ' + monthName(latest.month) + ' the median sale price in ' + area + ' was ' + dollars(latest.median)
       + (latest.sales != null ? ', from ' + latest.sales + ' sales' : '') + (latest.days_to_sell != null ? ', and homes took ' + latest.days_to_sell + ' days to sell at the median' : '') + '.' : '';
-    const charts = medianChart(ms)
+    const charts = medianChart(ms, ranges)
       + barChart(ms, 'days_to_sell', { title: 'Days to sell', sub: 'The median number of days from listing to sale.', fmt: v => Math.round(v) + ' days' })
       + barChart(ms, 'sales', { title: 'Homes sold each month', sub: 'How many homes sold in ' + area + '.', fmt: v => Math.round(v) + ' sold' })
       + (withBands ? bandsChart(withBands, ranges) : '');
     if (!lede && !charts) return '';   // no figure to show: no report at all, not an empty one (Tim, 28 November 2026)
-    return '<div class="mk-report" data-area="' + esc(area) + '">' + (lede ? '<p class="mk-lede">' + esc(lede) + '</p>' : '')
+    // the sample's row of tiles: the latest month's figures, each only when it is there (the sample's year-on-year lines need two
+    // years of months, which the report doesn't chart yet, so they are left out)
+    const lastWith = k => ms.slice().reverse().find(m => !m.missing && m[k] != null && isFinite(+m[k]) && +m[k] > 0);
+    const tl = [['median', 'Median sale price', m => dollars(m.median)], ['days_to_sell', 'Median days to sell', m => String(Math.round(m.days_to_sell))], ['sales', 'Homes sold', m => Math.round(m.sales).toLocaleString('en-NZ')]]
+      .map(([k, label, fmt]) => { const m = lastWith(k); return m ? [label, fmt(m), monthName(m.month)] : null; }).filter(Boolean);
+    const q = ms.slice().reverse().find(m => !m.missing && +m.lower_quartile > 0 && +m.upper_quartile > +m.lower_quartile);
+    if (q) tl.push(['Middle half of sales', short(q.lower_quartile) + ' to ' + short(q.upper_quartile), monthName(q.month)]);
+    const tiles = tl.length ? '<div class="mk-tiles">' + tl.map(([k, v, s]) => '<div class="mk-tile"><div class="k">' + esc(k) + '</div><div class="v">' + esc(v) + '</div><div class="s">' + esc(s) + '</div></div>').join('') + '</div>' : '';
+    return '<div class="mk-report" data-area="' + esc(area) + '">' + (lede ? '<p class="mk-lede">' + esc(lede) + '</p>' : '') + tiles
       + '<div class="mk-grid">' + charts + '</div>'
       + '<p class="apv-note mk-src">Source: ' + esc(srcs.join(' and ')) + ', figures to ' + esc(monthName(latest.month)) + (got ? ', gathered ' + esc(longDate(got)) : '') + '.</p></div>';
   }
