@@ -12,7 +12,7 @@ mock database, a rollback test for any migration, an independent review and Tim'
 | C | Comparables: gathering from REINZ/Relab in Tim's signed-in browser, photos and carousels, the comparables rule, the price dots, the Dunedin market report (shared with the quarterly market update) | 4 to 5 |
 | C2 | When the browser can't be reached: upload a report (PDF) for the AI to read, photos fetched from a listing page, and case-by-case suburbs | 2 |
 | B | Their home as a mockup listing, What I heard from you, ideal buyers, video introduction, Google reviews, header (needs LW1 for rooms and photos). Built 28 Nov, migration 036, not applied | 2 to 3 |
-| E | Send to the vendor: frozen snapshot, private signed-in link, short-lived photo links, "I'd like to proceed" | 2 to 3 |
+| E | Send to the vendor: frozen snapshot, private signed-in link, short-lived photo links, "I'd like to proceed". Built 28 Nov, migration 037, not applied | 2 to 3 |
 | F | Paper and print | 1 |
 | D | Bespoke: several titles and units, options that add up, no comparables, net yield | 3 to 4 |
 
@@ -237,6 +237,113 @@ Gathered by a monthly scheduled task in Tim's signed-in browser, from his **"Tim
 - Matching: by `ref`, else `link`, else the reviewer and date. The same review again changes nothing (Tim's tick stays); a review whose
   words, stars or date changed is updated and unticked, so Tim checks it again. At most 500 reviews a pack.
 
+## Phase E in detail (built 28 November 2026, migration 037, not applied; builds on 036)
+
+- **Send** (`/appraisals/<id>/send`, Tim only): Tim ticks who it goes to (the property's owners, ticked, and contacts, and the contact of
+  its open Questions before we meet; never anyone else), reads and edits the email (MAIL.appraisalDraft, in his voice, with
+  [the appraisal link]) and ticks that he has read both. `agent_appraisal_send` makes the frozen copy (`appraisal_snapshots`) as a
+  whitelist on the server and marks the appraisal sent; the notify function (`ap_send`) sends the email with their link
+  (packages.dunnerstunner.co.nz/onboarding/?appraisal=<id>). A failed email is said plainly and can be sent again.
+- **The copy**: Tim's ticked wording only; the shown comparables (never his private note, the source or its link); the header, the video
+  introduction, the mockup's photos and his ticked reviews frozen as they were, by file path; the market months (never market_sales).
+  The wording guard and the contact check (no link, phone or email, Tim's own excepted) run on every string: Tim's own wording that fails
+  stops the send, naming it; another agency's advertisement or a review that fails is left out and listed for him.
+- **The vendor's page**: they sign in with the email code (the link is remembered on the device through the sign-in), and
+  `vendor_appraisal_read` gives the newest copy sent to them, drawn by the same renderer as the present view. Photos and videos come
+  through 600-second links from repo-link, for files listed in that copy only. Anyone else: "This appraisal isn't here".
+- **"I'd like to proceed"** opens their Questions before we meet, linked to this appraisal (`prelistings.appraisal_id`), straight into the
+  questions. **"Build your own"** opens packages.dunnerstunner.co.nz/?ap=<id>#custom from Tim's recommended plan, with "Back to your
+  appraisal" and "Save to my appraisal"; the plan is saved to their appraisal (`appraisal_vendor_plans`) when they are back.
+- **Tim is told** (notify `ap_event`, once each) when they open it, proceed or build a plan; each sits on his Needs you list until he
+  ticks Done, and on the appraisal's "Sent to the vendor" card, with the email's status and what was left out.
+- **Send updated version**: "Make an updated version" copies the newest sent appraisal, its comparables, photos and files into a new
+  draft in the same chain; sending it makes version 2, which the people it is sent to see from then on.
+- **The whitelist** (review of 7a1eea5): each section is rebuilt on the server from the keys its type draws (`appraisal_section_clean`):
+  lists of lines keep plain lines and lines ticked true (as their text alone); unknown types and keys, nested ones included, never reach a
+  vendor. The market report holds only the area it draws and its latest twelve months. Column headings (opinion, ranges, table, methods)
+  are kept only when the section has a list there, so the renderer's own headings show when it has none (re-review of f73d2fb: with two
+  price ranges the table had lost its headings); a table cell that isn't text or a number is blanked, never dropped. Cleaning never
+  changes the drawing: tests/appraisal-clean.test.js draws 53 real section sets before and after, byte for byte.
+- **Too big**: an appraisal whose wording is over 2 MB is refused at Send with "This appraisal is too long to send (its wording is over
+  2 MB). Shorten or remove some sections, then send again".
+- **Once only**: opening is recorded once per person per copy, proceeding once per person per appraisal, a plan built once per person per
+  copy (unique indexes, so two at the same moment can't both count). One current plan per person per appraisal; a newer one supersedes it;
+  at most 10 saves per person per version ("Your plan has been saved 10 times, which is as many as can be kept. Call or text Tim on 027 562 7207 to change it.").
+  Tim is emailed once; later saves show on his Needs you item as "Plan last changed".
+- **Updated versions**: the draft never names the sent version's header or video. What is still to copy is listed in `setup.copyPending`;
+  the appraisal and Send pages show "Not copied yet from the version you sent: ..." with "Finish copying photos and videos" and "Leave them
+  out", and Send asks before sending a version with anything missing.
+- **Two co-owners who both proceed**: each gets their own Questions before we meet. The questionnaire belongs to one contact
+  (`prelistings.contact_email`, checked by `pl_mine`), so a second person can't answer another's; joining them needs a change to the
+  questionnaire model, left for later.
+- Not in this phase: sending the hand-loaded appraisal (it has no set-up); a check of what would be left out before sending.
+
+### The sealed copy carries the look (lw3e on lw3-look, 28 November 2026)
+
+- What a vendor is sent draws exactly as Tim's live page did when he pressed Send (tests/appraisal-sealed-look.test.js compares the
+  two drawings, and the vendor's own page): the "Yours" figures on each comparable, everything that sold in the suburb last month with
+  full street addresses, the personal video (YouTube or Vimeo id only), the ticked comparison only, the price wording and pyramid, and
+  Tim's About and contact (name, licence line, phone and email only while their switches were on, the ways to reach him that were on,
+  the About tabs) with the About overlay on that page using the same.
+- His picture and About images are copied into the appraisal's own folder when he presses Send, so changing or removing them later
+  never changes a sent copy. A picture that couldn't be copied is left out and listed for him ("Left out of their copy: your profile
+  picture (It couldn't be copied into the appraisal.)").
+- Later changes to his profile, switches, video, the suburb's sales or the property's figures never reach a sealed copy, and its seal
+  still matches. The seal covers all of it.
+
+### Sealed versions and validity (Tim, 28 November 2026, 4:22pm)
+
+- **Permanent links**: each sent version has its own link, packages.dunnerstunner.co.nz/onboarding/?appraisal=<id>&v=<n> (a snapshot id
+  also works). The plain link (no &v) opens the newest. An older version's link opens that version, with, at the top:
+  "There's a newer version of this appraisal, dated {date}. Open the newest version" (the link opens the newest). Who may read is
+  unchanged; Tim opens every version from the "Sent to the vendor" card, which lists each version's seal line and permanent link.
+- **The seal**, stored when a version is sent and never changed: sealed_at, the version number, and seal_sha256, the SHA-256 of the
+  canonical seal text {format 'mre.appraisal-seal/1', version, sealed_at, content, files, recipients, sent_by} (appraisal_seal_text).
+  Files: Supabase Storage keeps no SHA-256 of a file, so each listed file's bucket, path, size and eTag are sealed instead; an empty entry
+  is never sealed, and a listed file missing from storage stops the send: "A file in this appraisal is missing: {file name}. Upload it
+  again or take it out, then send again". Shown near the top, and in print:
+  "Sealed {date and time} NZT. Version {n}. Reference {first 12 of the fingerprint}."
+  (for example "Sealed 28 November 2026 at 4:33 pm NZT. Version 1. Reference e079d6bc45d9.")
+- **Tim's copy view** (`/appraisals/<id>/copy`): "The permanent link to this version: ...", "Check the seal" and "Download the sealed copy".
+  Check the seal works the fingerprint out again and compares each sealed file's size and eTag with storage now:
+  "The seal matches: this copy is exactly as it was sealed on {date and time} NZT (reference {12}). Every file it lists ({n}) is as it
+  was sealed." If a file has changed or gone: "... But these files have changed or gone since it was sealed: {name} (gone), {name}
+  (changed)." If the wording doesn't match: "The seal doesn't match: this copy is not as it was sealed. Sealed reference {12}, now {12}.
+  Keep this page and tell your support person."
+  The download is one self-contained HTML file (not a PDF): the page's styles, the appraisal as they see it with its photos embedded
+  (videos as a note; a photo that can't be fetched is named where it would be, with "(A photo that couldn't be included in this file:
+  {name}.)" and a line at the top), the seal line, the permanent link, the sealed record as JSON (script#sealed-record), and under "The
+  seal": "To check this copy, compute the SHA-256 of the seal text below; it should equal {full fingerprint}." with the exact seal text.
+- **Validity**: three months from sealed_at, counted on the UTC calendar and clamped to the month's end exactly as Postgres does
+  (appraisal_expires_at; the portal's apExpiresAt matches): sealed 29 or 30 November 2026 expires 28 February 2027, 31 August expires
+  30 November, 30 November 2027 expires 29 February 2028. The vendor's page uses the database's own expires_at. Worked out each time the
+  page is drawn and never written into the copy. After that, a highlighted bar at the top: "This appraisal was prepared on {date}. Its
+  price estimate was for that date and is no longer current, as the market moves. Ask for an updated appraisal." with the button "Ask for
+  an updated appraisal". Pressing it records the ask once per person per version and tells Tim once (email subject and Needs you: "{name}
+  asked for an updated appraisal: {address}"); the button then reads "Tim has been asked" (with "Tim has been asked. He'll be in touch."
+  under it), and stays so on later visits.
+  On an older version when a newer version sent to them is still current, the bar ends "There's a newer version, which is current." with
+  the button "Open the newest version" in place of the ask, and the database refuses the ask ("There's a newer version of this
+  appraisal, which is still current").
+- **Needs you, expiry**: from two weeks before the three months, for a property not yet listed (stage appraisal, questionnaire, plan,
+  accepted or agreement): "Appraisal for {address} expires {date}" (after the date: "expired {date}"), for the newest version, with Done
+  (agent_appraisal_expiry_done: recorded once for that version; a newer version brings its own item).
+- **The agency agreement's appraisal link** (Tim, 28 November 2026: "Just the permalink", then "Make them one"): one field, the existing
+  config.apprUrl ("Appraisal web address", clause 23.1). On a draft (not sent, nobody signed) the agreement's page 1 offers "Use the
+  latest sealed appraisal" under that field: it fills the field with the newest sent version's permanent link and ticks "Written
+  appraisal given" ("Version {n}, sent {date}. It's kept when you save the agreement."). Tim can still type anything there, or empty it,
+  as before. The link is entered once and prints in two places: in clause 23.1 (page 7, as the field always has) and on the front page
+  (Appointment of Agency D, right of the asking price and median lines: "Written appraisal (permanent link):" then the link on two
+  lines), in full, with no seal reference. The emailed front page shows "Written appraisal: {link}" under "Given. Asking price...", and
+  the lawyer's and Tim's summaries show it once. The front page shows it only when the field holds one of our permanent links; a typed
+  address prints in clause 23.1 only, as before, so every agreement without our link prints byte for byte as before.
+  The database (agreements_appr_link, also when an agreement's property moves) checks only values that look like one of our appraisal links (dunnerstunner.co.nz/onboarding
+  with appraisal=): such a value must be a sent version's permanent link for the agreement's own property, added on an unsigned draft
+  ("An appraisal link can only be added on a draft agreement that hasn't been sent or signed"; "That isn't the permanent link of an
+  appraisal sent for this property. Use "Use the latest sealed appraisal", or type a different address"). Other typed text is left
+  exactly as today, on drafts and sent agreements; guard_signed_agreement is unchanged. Live had no apprLink anywhere (037 was never
+  applied) and no apprUrl that looks like ours (checked read-only, 28 November 2026), so nothing needed converting.
+
 ## The packs (for the chat that gathers them in Tim's signed-in browser)
 
 Claude produces these as JSON from REINZ (and Relab where REINZ lacks something), and Tim (or Claude) pastes them into the import box.
@@ -440,4 +547,10 @@ range figures and the pyramid, so "above" is true.) The pyramid keeps its "Cherr
    Valley has plenty of residential homes too, so it is taken case by case, with AI help on whether each sale would appeal to investors.
    Built in C2: a group can be "Case by case"; the AI suggests a verdict per sale and for the subject; only a mismatch is flagged, Tim
    decides, nothing is hidden. Which suburbs are case by case is Tim's data on the screen, never in code.
-5. Phase E: the vendor keeps the copy they were sent until Tim taps "Send updated version".
+7. Phase E: may an owner Tim has set aside (former) keep reading their appraisal while their own Questions before we meet is still open?
+   DECIDED (Tim, 28 November 2026, 3:11pm: "yes, remove access"): no. Anyone Tim marks as former loses access at once: the copy, its photo
+   links, the listing on their home page, "I'd like to proceed" and saving a plan. One condition in `appraisal_vendor_ok` (migration 037),
+   which every vendor function asks, and its mirror in the mock.
+5. Phase E: the vendor keeps the copy they were sent until Tim taps "Send updated version". DEFAULT TAKEN (built in phase E, 28 November
+   2026): an updated version is a new draft copied from the newest sent one; sending it makes the next numbered copy; each person sees
+   the newest copy sent to them; older copies stay for Tim.

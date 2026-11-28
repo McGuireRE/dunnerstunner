@@ -4,12 +4,36 @@ import { contactMail, timTo } from "./contact_mail.ts";
 // Phase 2 adds makeFormPdf: repin both imports to the commit that contains it before deploying.
 import { makeAgreementPdf, makeFormPdf, makeNoticePdf, makeVariationPdf } from "https://raw.githubusercontent.com/McGuireRE/dunnerstunner/517293f7eae8e38728e01d669d09550831af8871/fn/pdfload.ts";
 
+// LW3 phase E (037): the appraisal email Tim sends, and a vendor's opening, "I'd like to proceed" and own plan, told to Tim.
+// Relative imports: notify.ts is loaded from its raw GitHub URL pinned to a commit, so these come from the same commit.
+import "../onboarding/src/mail-core.js";
+import { makeAppraisalNotify } from "./appraisal_notify_handler.ts";
+
+const appraisalNotify = makeAppraisalNotify({
+  json, appUrl: APP_URL, portalUrl: "https://portal.dunnerstunner.co.nz/", timEmail: TIM_EMAIL, MAIL: (globalThis as any).MAIL,
+  isAgent: async (authorization) => {
+    const uc = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!, { global: { headers: { Authorization: authorization } } });
+    return !!(await uc.rpc("is_agent")).data;
+  },
+  eventMine: async (authorization, id) => {
+    const uc = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!, { global: { headers: { Authorization: authorization } } });
+    const { data, error } = await uc.rpc("appraisal_event_mine", { p_event: id });
+    return !error && data === true;
+  },
+  takeMail: async (id) => ((await admin().from("appraisal_mail").update({ status: "sending" }).eq("id", id).in("status", ["queued", "failed"]).select("*")).data || [])[0] || null,
+  finishMail: async (id, ok, error) => { const r = await admin().from("appraisal_mail").update(ok ? { status: "sent", sent_at: new Date().toISOString(), error: null } : { status: "failed", error }).eq("id", id).eq("status", "sending").select("id"); return !r.error && (r.data || []).length === 1; },
+  snapshot: async (id) => (await admin().from("appraisal_snapshots").select("id,appraisal_id,chain_id,version,recipients,content").eq("id", id).maybeSingle()).data || null,
+  takeEvent: async (id) => ((await admin().from("appraisal_events").update({ notified_at: new Date().toISOString() }).eq("id", id).is("notified_at", null).select("*")).data || [])[0] || null,
+  send: async (kind, msg) => { await sendMail(admin(), null, kind, msg); },
+});
+
 // Called by the app after a vendor sends to their lawyer, or after signing.
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   try {
     const body = await req.json();
     const { type, agreement_id } = body;
+    if (String(type || "").startsWith("ap_")) return await appraisalNotify(req, body);
     if (String(type || "").startsWith("pl_")) return await prelistingMail(req, body);
     // 038: a message sent through "Send a message" (contact_send): to Tim only, once per message, and only by the person who sent it
     if (type === "contact") return await contactNotify(req, body);

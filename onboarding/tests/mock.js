@@ -32,7 +32,19 @@ function personGone(r){ const ag=(DB.agreements||[]).find(x=>x.id===r.agreement_
   active(ag.property_id).forEach(x=>{ if(((r.email&&x.email===r.email.toLowerCase())||(!r.email&&norm(x.legal_name)===norm(r.legal_name)))&&!onOther(x)) x.role='former'; }); }
 // the guards on signed records (guard_signed_agreement, guard_signed_person)
 const noNotes=c=>{ const o=Object.assign({},c||{}); delete o.agent_notes; return JSON.stringify(o); };
-function guard(table,r,payload){ if(table==='agreements'&&(DB.agreement_people||[]).some(x=>x.agreement_id===r.id&&x.signed_at)&&(('address' in payload&&payload.address!==r.address)||('answers' in payload&&JSON.stringify(payload.answers)!==JSON.stringify(r.answers))||('config' in payload&&noNotes(payload.config)!==noNotes(r.config)))) throw new Error('This agreement has been signed, so its terms can no longer be changed');
+// 037 agreements_appr_link (Tim: "Make them one"): config.apprUrl is the one field. A value that looks like our appraisal link
+// (appraisal_link_like) must be a sent version's permanent link for the agreement's own property, added only on an unsigned draft;
+// anything else typed is left as before (runs before guard_signed_agreement, as the trigger names order them)
+const APPR_LINK_RE=/^https:\/\/packages\.dunnerstunner\.co\.nz\/onboarding\/\?appraisal=([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})&v=([1-9][0-9]{0,3})$/;
+const apprLinkLike=v=>/dunnerstunner\.co\.nz\/+onboarding/i.test(v)&&/[?&]appraisal=/i.test(v);
+function apprLinkGuard(old,nw){ const ov=old?((old.config||{}).apprUrl??null):null, nv=(nw.config||{}).apprUrl??null; if(JSON.stringify(ov)===JSON.stringify(nv)) return;
+  if(typeof nv!=='string'||!apprLinkLike(nv)) return;   // free text, as today
+  if(old&&(old.status!=='draft'||(nw.status||old.status)!=='draft'||(DB.agreement_people||[]).some(x=>x.agreement_id===old.id&&x.signed_at))) throw new Error('An appraisal link can only be added on a draft agreement that hasn\'t been sent or signed');
+  if(!old&&(nw.status||'draft')!=='draft') throw new Error('An appraisal link can only be added on a draft agreement');
+  const m=APPR_LINK_RE.exec(nv), pid=nw.property_id||(old&&old.property_id);
+  if(!m||!(DB.appraisal_snapshots||[]).some(s=>s.chain_id===m[1]&&s.version===+m[2]&&s.property_id===pid)) throw new Error('That isn\'t the permanent link of an appraisal sent for this property. Use "Use the latest sealed appraisal", or type a different address'); }
+function guard(table,r,payload){ if(table==='agreements'&&'config' in payload) apprLinkGuard(r,Object.assign({},r,payload));
+  if(table==='agreements'&&(DB.agreement_people||[]).some(x=>x.agreement_id===r.id&&x.signed_at)&&(('address' in payload&&payload.address!==r.address)||('answers' in payload&&JSON.stringify(payload.answers)!==JSON.stringify(r.answers))||('config' in payload&&noNotes(payload.config)!==noNotes(r.config)))) throw new Error('This agreement has been signed, so its terms can no longer be changed');
   if(table==='agreement_people'&&r.signed_at&&['legal_name','email','position'].some(k=>k in payload&&payload[k]!==r[k])) throw new Error('This person has signed, so their name and email can no longer be changed');
   if(table==='property_forms'&&(('status' in payload&&(payload.status==='signed')!==(r.status==='signed'))||['signed_at','countersigned_at','document_id','filing_at'].some(k=>k in payload&&(payload[k]??null)!==(r[k]??null)))) throw new Error('A document is only signed or filed by signing it');
   if(table==='property_forms'&&(DB.form_signatures||[]).some(x=>x.form_id===r.id)){ if(['data','agent_data','kind','form_version','agreement_id','property_id'].some(k=>k in payload&&!same(payload[k],r[k]))) throw new Error('This document has been signed, so it can no longer be changed'); if(r.status==='signed'&&'status' in payload&&payload.status!=='signed') throw new Error('This document has been signed by everyone'); }
@@ -387,6 +399,7 @@ function q(table){ logCall('from:'+table);
     if(table==='property_forms'&&op==='delete'&&(DB.property_forms||[]).some(r=>filters.every(f=>f(r))&&r.kind==='vendor_declaration'&&!(DB.form_signatures||[]).some(x=>x.form_id===r.id))) throw new Error("The Vendor Declaration is the vendors' own record, so it can't be removed here");
     if(op==='insert'){ const arr=(Array.isArray(payload)?payload:[payload]).map(p=>{const r=Object.assign({id:uid(),created_at:now(),updated_at:now()},p); if(table==='agreements'){r.ref=r.ref||'MRE-2026-'+(1001+T.length); r.status=r.status||'draft'; r.config=r.config||{}; r.answers=r.answers||{}; r.legal=r.legal||{}; r.agreement_version='v3.15-26102026';} if(table.endsWith('events')) r.at=now(); if(table==='signatures') r.signed_at=now(); if(table==='agreement_variations'){r.status='draft';} if(table==='prelistings'){r.status=r.status||'appraisal';r.answers=r.answers||{};r.plan=r.plan||{}; if(!r.property_id){ const p=newProp(r.address); r.property_id=p.id; } mergePerson(r.property_id,r.contact_name,'',r.contact_email,'',null,'appraisal'); }
       if(table==='agreements'&&!r.property_id){ const p=newProp(r.address); p.title_ref=(r.config||{}).title||null; p.owners_on_title=(r.config||{}).owners||null; r.property_id=p.id; }
+      if(table==='agreements') apprLinkGuard(null,r);
       if(table==='property_forms'&&(r.status==='signed'||r.signed_at||r.countersigned_at||r.document_id||r.filing_at)) throw new Error('A document is only signed or filed by signing it'); if(table==='property_forms'&&r.kind==='vendor_declaration') r.data=inspPrefill(r.property_id,r.data||{}); if(table==='property_people'){ r.role=r.role||'owner'; r.name_from=r.name_from||r.source; } if(table==='properties'){ r.ownership=r.ownership||{}; r.description=r.description||{}; r.disclosures=r.disclosures||{}; r.stage=r.stage||'appraisal'; r.stage_at=now(); } T.push(r); if(table==='agreements') syncAgreement(r); if(table==='prelistings') syncPrelisting(r); if(table==='agreement_people') personSync(r); return r;}); save(); return {data: single?arr[0]:arr, error:null}; }
     let out=T.filter(r=>filters.every(f=>f(r)));
     if(op==='select'&&S&&S.user&&!AGENTS.includes(S.user.email)){ if(table==='properties') out=out.filter(r=>propParty(r.id)); if(table==='property_people') out=out.filter(r=>(r.role||'owner')!=='former'&&propParty(r.property_id));
@@ -499,7 +512,8 @@ function appraisalRpc(name,a,me){ if(offline()) return bad('Failed to fetch');
 // ── migration 034 (LW3 phase C): comparables, photos, the never-mix list and the market store, mirroring the database ──
 // localStorage mockLw3cCalls: every 034 function call, for the tests. mockSendFlag = '1' stands for phase E's send function (it
 // alone may set 'sent'). Photos: bucket 'appraisal-media', kept in DB.storage_objects with the bucket named, as storage.objects.
-const LW3C_TABLES=['appraisal_comps','appraisal_media','suburb_groups','market_months','market_sales','appraisal_reports','appraisal_buyer_checks','appraisal_assets','appraisal_drafts','tim_reviews'];   // 035: reports and buyer checks (Tim reads; only the functions write); 036: assets (Tim adds, reads, removes; never updates), drafts and reviews (Tim reads; only the functions write)
+const LW3C_TABLES=['appraisal_comps','appraisal_media','suburb_groups','market_months','market_sales','appraisal_reports','appraisal_buyer_checks','appraisal_assets','appraisal_drafts','tim_reviews',
+  'appraisal_snapshots','appraisal_versions','appraisal_mail','appraisal_events','appraisal_vendor_plans'];   // 037: Tim reads; only the functions write; vendors none   // 035: reports and buyer checks (Tim reads; only the functions write); 036: assets (Tim adds, reads, removes; never updates), drafts and reviews (Tim reads; only the functions write)
 const AVB='appraisal-video', AV_MIME=['video/mp4','video/webm','video/quicktime'];
 const AMB='appraisal-media', AM_MIME=['image/jpeg','image/png','image/webp'];
 const SENT_MSG='This appraisal has been sent, and a sent copy never changes';
@@ -513,7 +527,7 @@ function lw3cTable(table,op,payload,rows,single){
   if(offline()) throw new Error('Failed to fetch');
   if(!isAgentMe()){ if(op==='select') return {data:single?undefined:[],error:single?{message:'not found'}:null}; if(!(S&&S.user)) throw new Error('permission denied for table '+table); if(op==='insert') throw new Error('new row violates row-level security policy for table "'+table+'"'); return {data:[],error:null}; }
   const list=Array.isArray(payload)?payload:[payload];
-  if(['appraisal_reports','appraisal_buyer_checks','appraisal_drafts','tim_reviews'].includes(table)&&op!=='select') throw new Error('permission denied for table '+table);   // 035, 036: written only by doc-prefill or the agent functions
+  if(['appraisal_reports','appraisal_buyer_checks','appraisal_drafts','tim_reviews','appraisal_snapshots','appraisal_versions','appraisal_mail','appraisal_events','appraisal_vendor_plans'].includes(table)&&op!=='select') throw new Error('permission denied for table '+table);   // 035, 036: written only by doc-prefill or the agent functions
   // 036 guard_appraisal_asset: in its own appraisal's folder for its role, in storage in the right bucket (type and size from storage),
   // a photo or a video up to 150 MB, a video's still frame a photo in the same folder; never updated; nothing once sent
   if(table==='appraisal_assets'){
@@ -557,13 +571,20 @@ function compCheck(n){ const ck=c=>{ throw new Error('new row for relation "appr
   const w=apprWording([n.compare_text||'',n.method||'']); if(w) throw new Error(w); }
 function apprBucket(){ return {
   upload:(p,blob,o)=>{ logCall('up:'+AMB+':'+p); if(offline()) return netFail(); if(!isAgentMe()) return bad('new row violates row-level security policy');
-    const f=String(p).split('/'); if(f[0]!=='appraisals'||!((f[2]==='comps'&&f.length>=5)||(['header','intro'].includes(f[2])&&f.length>=4&&(DB.appraisal_views||[]).some(v=>v.id===f[1]&&v.status!=='sent')))) return bad('new row violates row-level security policy');   // 036: header/ and intro/ too, of an appraisal that exists and isn't sent
+    const f=String(p).split('/'); if(f[0]!=='appraisals'||!((f[2]==='comps'&&f.length>=5)||(['header','intro','site'].includes(f[2])&&f.length>=4&&(DB.appraisal_views||[]).some(v=>v.id===f[1]&&v.status!=='sent')))) return bad('new row violates row-level security policy');   // 036: header/ and intro/ too, of an appraisal that exists and isn't sent; 037: site/ (Tim's picture as it was at Send)
     if(SO()[p]) return Promise.resolve({data:null,error:{message:'The resource already exists',statusCode:'409'}});
     const mime=(o&&o.contentType)||blob.type; if(!AM_MIME.includes(mime)) return bad('mime type '+mime+' is not supported'); if(blob.size>15728640) return bad('The object exceeded the maximum allowed size');
     SO()[p]={size:blob.size,mime,bucket:AMB}; (window.__repoBlobs||={})[p]=blob; save(); return ok({path:p}); },
   createSignedUrl:p=>{ if(offline()) return netFail(); if(!isAgentMe()||!SO()[p]) return bad('Object not found'); const bl=(window.__repoBlobs||{})[p]; return ok({signedUrl:bl?URL.createObjectURL(bl):PNG1}); },
   createSignedUrls:(ps)=>{ if(offline()) return netFail(); if(!isAgentMe()) return ok((ps||[]).map(p=>({path:p,signedUrl:null,error:'Object not found'}))); return ok((ps||[]).map(p=>{ const bl=(window.__repoBlobs||{})[p]; return SO()[p]?{path:p,signedUrl:bl?URL.createObjectURL(bl):PNG1,error:null}:{path:p,signedUrl:null,error:'Object not found'}; })); },
-  remove:(ps)=>{ if(offline()) return netFail(); if(!isAgentMe()) return ok([]); const gone=(ps||[]).filter(p=>{ const f=String(p).split('/'); return SO()[p]&&SO()[p].bucket===AMB&&!avSent(f[1]); }); gone.forEach(p=>{ delete SO()[p]; }); save(); return ok(gone.map(name=>({name}))); } }; }
+  remove:(ps)=>{ if(offline()) return netFail(); if(!isAgentMe()) return ok([]); const gone=(ps||[]).filter(p=>{ const f=String(p).split('/'); return SO()[p]&&SO()[p].bucket===AMB&&!avSent(f[1]); }); gone.forEach(p=>{ delete SO()[p]; }); save(); return ok(gone.map(name=>({name}))); },
+  // 037: Storage's copy (read the source, add the destination, under the same policies as an upload)
+  copy:(from,to)=>apCopy(AMB,from,to) }; }
+function apCopy(bucket,from,to){ logCall('copy:'+bucket+':'+to); if(offline()||localStorage.getItem('mockCopyFail')==='1') return netFail();   // mockCopyFail = '1': the copy fails, as with the signal dropping if(!isAgentMe()) return bad('new row violates row-level security policy');
+  const o=SO()[from]; if(!o||(o.bucket||'property-files')!==bucket) return bad('Object not found'); const f=String(to).split('/');
+  if(f[0]!=='appraisals'||!(DB.appraisal_views||[]).some(v=>v.id===f[1]&&v.status!=='sent')||!['comps','header','intro'].includes(f[2])||(bucket===AVB&&f[2]==='comps')) return bad('new row violates row-level security policy');
+  if(SO()[to]) return Promise.resolve({data:null,error:{message:'The resource already exists',statusCode:'409'}});
+  SO()[to]=Object.assign({},o); const bl=(window.__repoBlobs||{})[from]; if(bl) window.__repoBlobs[to]=bl; save(); return ok({path:to}); }
 // the pack readers (appraisal_pack_text, _num, _date, _url, _ts)
 const pkText=(v,max)=>{ if(v==null) return null; if(!['string','number','boolean'].includes(typeof v)) return null; const s=String(v).replace(/\r\n/g,'\n').replace(/[\x01-\x08\x0b\x0c\x0e-\x1f\x7f]/g,'').trim().slice(0,max); return s||null; };
 const pkNum=(v,lo,hi,what)=>{ if(v==null) return null; let x; if(typeof v==='number') x=v; else if(typeof v==='string'){ const s=v.replace(/[$,\s]/g,''); if(!s) return null; if(!/^-?[0-9]+(\.[0-9]+)?$/.test(s)) throw new Error(what+' must be a number'); x=+s; } else throw new Error(what+' must be a number'); if(x<lo||x>hi) throw new Error(what+' is out of range'); return x; };
@@ -656,6 +677,209 @@ function lw3cRpc(name,a,me){ if(offline()) return bad('Failed to fetch');
     }catch(e){ skipped.push({n:ix+1,what:'sale',why:e.message}); } });
     save(); return ok({months_added:ma,months_updated:mu,sales_added:sa,sales_updated:su,skipped}); }
   return bad('unknown rpc '+name); }
+// ── migration 037 (LW3 phase E): sending an appraisal to the vendor, mirroring the database functions ──
+// agent_appraisal_send builds the frozen copy as a whitelist (appraisal_snapshot_build), marks the appraisal sent and queues the email;
+// the vendor reads the newest copy sent to them (vendor_appraisal_read), proceeds, saves a plan; Tim makes an updated version.
+// localStorage mockApCalls: every call, for the tests. Decided (Tim, 28 November 2026, open question 7): someone Tim sets aside (former)
+// loses access at once, even with an open Questions before we meet, as appraisal_vendor_ok does.
+const AP_RPCS=['agent_appraisal_send','agent_appraisal_new_version','agent_appraisal_events_seen','agent_appraisal_mail_unstick','vendor_appraisals_mine','vendor_appraisal_read','appraisal_vendor_can_read','vendor_appraisal_proceed','vendor_appraisal_plan_save','appraisal_event_mine',
+  'vendor_appraisal_ask_update','agent_appraisal_seal_check','agent_appraisal_expiry_done'];
+// the seal (appraisal_seal_of): the mock's own canonical text (sorted keys) and its SHA-256; the same idea as the database's jsonb text
+const apCanon=v=>Array.isArray(v)?'['+v.map(apCanon).join(',')+']':v&&typeof v==='object'?'{'+Object.keys(v).sort().map(k=>JSON.stringify(k)+':'+apCanon(v[k])).join(',')+'}':JSON.stringify(v===undefined?null:v);
+const apSealText=(ver,at,content,files,recipients,sent_by)=>apCanon({format:'mre.appraisal-seal/1',version:ver,sealed_at:at,content,files,recipients,sent_by});
+const apSealOf=(...a)=>window.SIGN.sha256Hex(apSealText(...a));
+// appraisal_expires_at: three months on the UTC calendar, clamped to the month's end as Postgres does
+const apPlus3=t=>{ const s=new Date(t), y=s.getUTCFullYear(), m=s.getUTCMonth()+3, last=new Date(Date.UTC(y,m+1,0)).getUTCDate(); const e=new Date(s.getTime()); e.setUTCFullYear(y,m,Math.min(s.getUTCDate(),last)); return e; };
+const AP_TABLES=['appraisal_snapshots','appraisal_versions','appraisal_mail','appraisal_events','appraisal_vendor_plans'];
+const APS=()=>(DB.appraisal_snapshots||=[]), APV=()=>(DB.appraisal_versions||=[]), APM=()=>(DB.appraisal_mail||=[]), APE=()=>(DB.appraisal_events||=[]), APP=()=>(DB.appraisal_vendor_plans||=[]);
+// appraisal_contact_problem(): a link, phone number or email, Tim's own phone and email taken out first
+function apContact(t){ const s=String(t||'').replace(/(\+\s?64[\s().-]*|\b0)27[\s().-]*562[\s().-]*7207/g,' ').replace(/tim@mcguire\.co\.nz|hello@timmcguire\.co\.nz/gi,' ');
+  return /(https?:\/\/|www\.)\S+/i.test(s)||/\]\([^)]*\)/.test(s)||/(\+\s?64|\b0)[\s().-]*\d([\s().-]*\d){5,10}\b/.test(s)||/[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+\.[A-Za-z]/.test(s); }
+const apStrings=v=>{ const out=[]; const w=x=>{ if(typeof x==='string') out.push(x); else if(x&&typeof x==='object') Object.values(x).forEach(w); }; w(v); return out; };
+const apChain=id=>{ const s=APS().find(x=>x.id===id); if(s) return s.chain_id; const v=APV().find(x=>x.appraisal_id===id); return v?v.chain_id:id; };
+const apEmail=()=>String((S&&S.user&&S.user.email)||'').toLowerCase();
+function apVendorOk(s){ const em=apEmail(); if(!S||!S.user||!em) return false; if(!(s.recipients||[]).some(r=>String(r.email).toLowerCase()===em)) return false; const p=PT().find(x=>x.id===s.property_id)||{};
+  return PP().some(x=>x.property_id===s.property_id&&['owner','contact'].includes(x.role||'owner')&&x.email&&x.email.toLowerCase()===em)
+    ||((DB.prelistings||[]).some(l=>l.property_id===s.property_id&&l.status!=='closed'&&(!p.cycle_at||l.created_at>=p.cycle_at)&&String(l.contact_email||'').toLowerCase()===em)
+      &&!PP().some(x=>x.property_id===s.property_id&&x.role==='former'&&x.email&&x.email.toLowerCase()===em)); }   // Tim, 28 Nov: someone set aside loses access at once
+const apNewest=chain=>APS().filter(s=>s.chain_id===chain&&apVendorOk(s)).sort((x,y)=>y.version-x.version)[0]||null;
+const UUIDX=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+// appraisal_section_clean(): each section rebuilt from the keys its type draws; lines kept as strings, or {text, ticked: true}
+const apS=v=>typeof v==='string'?v:undefined, apN=v=>typeof v==='number'?v:undefined, apB=v=>typeof v==='boolean'?v:undefined;
+const apLines=v=>Array.isArray(v)?v.filter(x=>typeof x==='string'||(x&&typeof x==='object'&&!Array.isArray(x)&&x.ticked===true&&typeof x.text==='string')).map(x=>typeof x==='string'?x:x.text):[];
+// ap_lines_opt: a list the renderer has its own default for (column headings) stays missing when the section has none
+const apLinesOpt=v=>Array.isArray(v)?apLines(v):undefined;
+// ap_rows: string cells kept, numbers written out, anything else blanked (the columns stay in line)
+const apRows=v=>Array.isArray(v)?v.filter(Array.isArray).map(r=>r.map(c=>typeof c==='string'?c:typeof c==='number'?String(c):'')):[];
+const apObjs=(v,f)=>Array.isArray(v)?v.filter(x=>x&&typeof x==='object'&&!Array.isArray(x)).map(f):[];
+const apStripU=o=>{ if(Array.isArray(o)) return o.map(apStripU); if(o&&typeof o==='object'){ const r={}; Object.entries(o).forEach(([k,v])=>{ if(v!==undefined&&v!==null) r[k]=apStripU(v); }); return r; } return o; };
+function apSecClean(s){ if(!s||typeof s!=='object'||Array.isArray(s)) return null; const t=s.type; let o;
+  if(['heading','note','byline'].includes(t)) o={text:apS(s.text)}; else if(t==='para') o={text:apS(s.text),cls:apS(s.cls)}; else if(t==='list') o={items:apLines(s.items),ordered:apB(s.ordered)};
+  else if(t==='table'||t==='methods') o={head:apLinesOpt(s.head),rows:apRows(s.rows)}; else if(t==='ranges') o={head:apLinesOpt(s.head)}; else if(t==='method') o={}; else if(t==='opinion') o={head:apLinesOpt(s.head),table:apB(s.table),wording:apS(s.wording)};
+  else if(t==='pvideo'){ const id=typeof s.id==='string'?s.id:s.id!=null?String(s.id):'';
+    if(s.provider==='youtube'&&/^[A-Za-z0-9_-]{11}$/.test(id)) o={stage:apN(s.stage),provider:'youtube',id}; else if(s.provider==='vimeo'&&/^[0-9]{6,12}$/.test(id)) o={stage:apN(s.stage),provider:'vimeo',id,hash:/^[0-9a-f]{6,20}$/.test(String(s.hash||''))?String(s.hash):undefined}; else return null; }
+  else if(t==='wave'||t==='campaign') o={title:apS(s.title),subtitle:apS(s.subtitle),marker:apN(s.marker),markerLabel:apS(s.markerLabel),trickle:apS(s.trickle),tail:apS(s.tail),caption:apS(s.caption),bars:apObjs(s.bars,b=>({label:apS(b.label),pct:apN(b.pct)}))};
+  else if(t==='methodcards') o={rec:apS(s.rec),items:apObjs(s.items,m=>({key:apS(m.key),name:apS(m.name),how:apS(m.how),suits:apS(m.suits),know:apS(m.know)}))};
+  else if(t==='plans') o={included:apS(s.included),items:apObjs(s.items,p=>({key:apS(p.key),name:apS(p.name),price:apN(p.price),tagline:apS(p.tagline),items:apLines(p.items),rec:apB(p.rec)}))};
+  else if(t==='panel') o={title:apS(s.title),items:apLines(s.items)};
+  else if(t==='header') o={stage:apN(s.stage),src:apS(s.src),asset:apS(s.asset),url:/^https:\/\/[^\s"'<>]+$/.test(s.url||'')?s.url:undefined,kind:apS(s.kind),credit:apS(s.credit),focus:s.focus&&typeof s.focus==='object'?{x:apN(s.focus.x),y:apN(s.focus.y)}:undefined,zoom:apN(s.zoom),bright:apN(s.bright),speed:apN(s.speed)};
+  else if(t==='intro') o={stage:apN(s.stage),asset:apS(s.asset)}; else if(t==='heard') o={stage:apN(s.stage),items:apLines(s.items)};
+  else if(t==='home') o={stage:apN(s.stage),label:apS(s.label),photos:apLines(s.photos),details:(Array.isArray(s.details)?s.details:[]).filter(d=>Array.isArray(d)&&typeof d[0]==='string'&&typeof d[1]==='string').map(d=>[d[0],d[1]]),
+    ad:s.ad&&typeof s.ad==='object'&&!Array.isArray(s.ad)&&(s.ad.ticked===undefined||s.ad.ticked===true)?{title:apS(s.ad.title),paras:apLines(s.ad.paras)}:undefined};
+  else if(t==='buyers') o={stage:apN(s.stage),text:apS(s.text),tags:apLines(s.tags)}; else if(t==='reviews') o={stage:apN(s.stage),max:apN(s.max)}; else return null;
+  return apStripU(Object.assign({type:t},o)); }
+// ap_subject: the "Yours" figures passed at Send, only these keys, a number or a short plain value; the rating valuation only with showCv
+const AP_SUBJ=['bedrooms','bathrooms','floor_m2','land_m2','year_built','garaging','parking','cv'];
+const apSubject=(p,cv)=>{ const o={}; if(p&&typeof p==='object'&&!Array.isArray(p)) Object.entries(p).forEach(([k,v])=>{ if(!AP_SUBJ.includes(k)||(k==='cv'&&!cv)) return;
+  if((typeof v==='number'&&isFinite(v)&&v>=0&&v<1e10)||(typeof v==='string'&&v.length>=1&&v.length<=120&&!apContact(v))) o[k]=v; }); return o; };
+// ap_site_copy: the copy of Tim's picture made at Send in the appraisal's own folder (appraisals/<id>/site/<folder>-<file>); none: null
+const apSiteCopy=(aid,p)=>{ if(!/^(profile|about)\/[A-Za-z0-9._-]{1,80}$/.test(String(p||''))) return null; const n='appraisals/'+aid+'/site/'+String(p).replace(/\//g,'-'); return SO()[n]?n:null; };
+// the latest full month in New Zealand, as the database works it out
+const apLastMonth=()=>{ const t=new Date(Date.now()).toLocaleDateString('en-CA',{timeZone:'Pacific/Auckland'}), y=+t.slice(0,4), m=+t.slice(5,7); return m===1?(y-1)+'-12':y+'-'+String(m-1).padStart(2,'0'); };
+function apBuildExtras(r,b,extras){ const out={}, sid=r.id;
+  if(b.content.comps.length&&extras&&typeof extras==='object'&&'subject' in extras) out.subject=apSubject(extras.subject,!!(r.setup&&r.setup.showCv===true));
+  const sub=String((r.setup||{}).suburb||'').trim();
+  if(sub){ const lm=apLastMonth(); out.suburbSales={suburb:sub,month:lm,rows:(DB.market_sales||[]).filter(x=>String(x.sold_on||'').slice(0,7)===lm&&String(x.suburb||'').trim().toLowerCase()===sub.toLowerCase())
+    .slice().sort((a,c)=>a.sold_on<c.sold_on?-1:a.sold_on>c.sold_on?1:String(a.id)<String(c.id)?-1:1).map(x=>{ const o={}; ['suburb','sold_on','price','address','bedrooms','bathrooms','floor_m2','land_m2','days_to_sell','source'].forEach(k=>{ if(x[k]!=null) o[k]=x[k]; }); return o; })}; }
+  const sp=sitePublic(siteRow());
+  if(sp){ const about={}; Object.entries(sp.about||{}).forEach(([k,v])=>{ if(!['tim','agency'].includes(k)||!v||typeof v!=='object') return; const img=apSiteCopy(sid,v.image_path);
+      if(img) b.paths.push({bucket:AMB,path:img}); else if(v.image_path) b.left_out.push({what:'picture',which:'your About image',why:'It couldn\'t be copied into the appraisal.'});
+      const a={}; if(typeof v.heading==='string') a.heading=v.heading; if(typeof v.body==='string') a.body=v.body; if(img) a.image=img; about[k]=a; });
+    const img=apSiteCopy(sid,sp.photo_path); if(img) b.paths.push({bucket:AMB,path:img}); else if(sp.photo_path) b.left_out.push({what:'picture',which:'your profile picture',why:'It couldn\'t be copied into the appraisal.'});
+    const s={}; ['name','licence','phone','email'].forEach(k=>{ if(typeof sp[k]==='string') s[k]=sp[k]; }); if(img) s.photo=img; s.about=about;
+    s.channels=(sp.channels||[]).filter(c=>c&&['call','text','email','form','whatsapp','messenger','discord','telegram','signal'].includes(c.key)).map(c=>({key:c.key,value:c.value||''})); out.site=s; }
+  Object.assign(b.content,out); return b; }
+function apBuild(r){
+  const secs=(r.sections||[]).map(apSecClean).filter(Boolean), f=r.fields||{};
+  const flds={}; if(Array.isArray(f.ranges)) flds.ranges=f.ranges.filter(q=>q&&typeof q==='object').map(q=>{ const o={}; ['key','option','involves','low','high'].forEach(k=>{ if(q[k]!=null) o[k]=q[k]; }); return o; }); if(typeof f.bedrooms==='string') flds.bedrooms=f.bedrooms; if(f.method&&typeof f.method==='object'){ flds.method={}; ['name','key','text'].forEach(k=>{ if(f.method[k]!=null) flds.method[k]=f.method[k]; }); }
+  let w=apprWording([secs,flds,r.title,r.prepared_for,r.address]); if(w) throw new Error(w);
+  const chk=apStrings([secs.map(s=>{ const o=Object.assign({},s); delete o.url; delete o.asset; delete o.photos; return o; }),Object.assign({},flds,{ranges:(flds.ranges||[]).map(q=>({option:q.option,involves:q.involves}))}),r.title,r.prepared_for]).find(apContact);
+  if(chk) throw new Error('This wording holds a link, a phone number or an email, which don\'t belong on an appraisal: "'+chk.slice(0,80)+'". Change it on the set-up or sections screen, then send.');
+  const comps=[], photos={}, paths=[], left_out=[];
+  (DB.appraisal_comps||[]).filter(c=>c.appraisal_id===r.id&&c.shown!==false).sort((a,b)=>(a.position||0)-(b.position||0)).forEach(c=>{
+    w=apprWording([c.address,c.suburb||'',c.method||'',c.agency||'']); if(w) throw new Error('The comparable at '+c.address+': '+w);
+    let cmp=null; if(c.compare_ticked&&String(c.compare_text||'').trim()){ w=apprWording(c.compare_text); if(w) throw new Error('How '+c.address+' compares: '+w); if(apContact(c.compare_text)) throw new Error('How '+c.address+' compares holds a link, a phone number or an email. Change it on the Comparables screen, then send.'); cmp=c.compare_text; }
+    let ad=null; if(String(c.ad_text||'').trim()){ if(apprWording(c.ad_text)) left_out.push({what:'advertisement',comp:c.address,why:apprWording(c.ad_text)}); else if(apContact(c.ad_text)) left_out.push({what:'advertisement',comp:c.address,why:'It holds a link, a phone number or an email.'}); else ad=c.ad_text; }
+    const o={id:c.id,position:c.position,status:c.status,address:c.address,suburb:c.suburb||undefined,price:c.price,sold_on:c.sold_on,listed_on:c.listed_on,method:c.method||undefined,days_to_sell:c.days_to_sell,bedrooms:c.bedrooms,bathrooms:c.bathrooms,floor_m2:c.floor_m2,land_m2:c.land_m2,cv:c.cv,agency:c.agency||undefined,sold_by_tim:!!c.sold_by_tim,ad_text:ad,compare_text:cmp,compare_ticked:cmp!=null,ring:c.ring,distance_m:c.distance_m,shown:true};
+    Object.keys(o).forEach(k=>{ if(o[k]==null) delete o[k]; }); comps.push(o);
+    (DB.appraisal_media||[]).filter(m=>m.comp_id===c.id).sort((a,b)=>(+!!b.cover-+!!a.cover)||((a.position||0)-(b.position||0))).forEach(m=>{ (photos[c.id]||=[]).push({path:m.path,cover:!!m.cover}); paths.push({bucket:AMB,path:m.path}); }); });
+  // the market report: only the area and the twelve months it draws (market-core.js pickArea and lastYear)
+  let months=[]; if(r.setup&&r.setup.market===true){ const MM=DB.market_months||[], area=window.MKT?window.MKT.pickArea(MM,(r.setup||{}).marketArea||''):'';
+    if(area){ const ix=d=>{ const x=/^(\d{4})-(\d{2})/.exec(String(d)); return x?+x[1]*12+(+x[2]-1):null; }, rows=MM.filter(m=>m.area===area), hi=Math.max(...rows.map(m=>ix(m.month)));
+      months=rows.filter(m=>ix(m.month)>=hi-11).sort((a,b)=>ix(a.month)-ix(b.month)).map(m=>{ const o=Object.assign({},m); delete o.id; delete o.source_url; delete o.updated_at; return o; }); } }
+  const assets={}, aids=secs.filter(s=>(s.type==='header'&&s.src==='asset')||s.type==='intro').map(s=>s.asset);
+  (DB.appraisal_assets||[]).filter(x=>x.appraisal_id===r.id&&aids.includes(x.id)).forEach(x=>{ assets[x.id]={bucket:x.bucket,path:x.path,mime:x.mime_type,kind:x.kind,role:x.role}; if(x.still_path) assets[x.id].still_path=x.still_path; paths.push({bucket:x.bucket,path:x.path}); if(x.still_path) paths.push({bucket:AMB,path:x.still_path}); });
+  const home={}, hids=[].concat(...secs.filter(s=>s.type==='home').map(s=>s.photos||[]));
+  (DB.property_documents||[]).filter(d=>d.property_id===r.property_id&&hids.includes(d.id)&&d.kind==='Photo'&&!d.archived_at&&d.bucket==='property-files'&&/^image\//.test(d.mime_type||'')).forEach(d=>{ home[d.id]={path:d.path}; if(d.room) home[d.id].room=d.room; paths.push({bucket:'property-files',path:d.path}); });
+  const reviews=[]; const rs=secs.find(s=>s.type==='reviews'); if(rs){ const max=Math.max(1,Math.min(12,+rs.max||6));
+    (DB.tim_reviews||[]).filter(v=>v.ticked&&!v.removed_at&&v.rating>=1&&v.rating<=5).sort((a,b)=>a.reviewed_on<b.reviewed_on?1:-1).forEach(v=>{ if(reviews.length>=max) return; if(apprWording([v.body||'',v.reviewer])||apContact(v.body)){ left_out.push({what:'review',reviewer:v.reviewer,why:'It mentions a fee or "as is", or holds a link, a phone number or an email.'}); return; }
+      const o={id:v.id,reviewer:v.reviewer,rating:v.rating,reviewed_on:v.reviewed_on,ticked:true}; if(v.body) o.body=v.body; if(/^https:\/\/\S+$/.test(v.url||'')) o.url=v.url; reviews.push(o); }); }
+  return {content:{v:1,title:r.title,address:r.address,prepared_for:r.prepared_for,prepared_on:r.prepared_on,kind:r.kind,sections:secs,fields:flds,setup:{v:1,market:!!(r.setup&&r.setup.market===true),marketArea:String((r.setup||{}).marketArea||'')},comps,photos,months,assets,homePhotos:home,reviews},paths,left_out}; }
+function apRpc(name,a,me){ if(offline()) return bad('Failed to fetch');
+  try{ const l=JSON.parse(localStorage.getItem('mockApCalls')||'[]'); l.push({name,a}); localStorage.setItem('mockApCalls',JSON.stringify(l)); }catch(_){}
+  const c=v=>JSON.parse(JSON.stringify(v)), em=apEmail();
+  try{
+  if(name.startsWith('agent_')){ if(!isAgentMe()) return bad('Agent only');
+    if(name==='agent_appraisal_send'){ const r=(DB.appraisal_views||[]).find(v=>v.id===a.p_id); if(!r) return bad('Appraisal not found');
+      if(r.status==='sent') return bad('This appraisal has already been sent. To change it, make an updated version'); if(!(r.setup&&r.setup.v)) return bad('Only an appraisal written from its set-up page can be sent');
+      if(!r.property_id) return bad('This appraisal isn\'t on a property file, so there is no one to send it to'); if(!Array.isArray((r.fields||{}).ranges)||!r.fields.ranges.length) return bad('Add your price range on the set-up page first');
+      const list=(a.p_recipients||[]); if(!list.length) return bad('Choose who it goes to'); if(list.length>10) return bad('At most 10 people at once');
+      const rec=[], ems=[], p=PT().find(x=>x.id===r.property_id)||{};
+      for(const e0 of list){ const e=String(e0||'').trim().toLowerCase(); if(!e||ems.includes(e)) continue;
+        const pp=PP().filter(x=>x.property_id===r.property_id&&['owner','contact'].includes(x.role||'owner')&&x.email&&x.email.toLowerCase()===e).sort((x,y)=>x.position-y.position)[0];
+        const pl=pp?null:(DB.prelistings||[]).filter(l=>l.property_id===r.property_id&&l.status!=='closed'&&(!p.cycle_at||l.created_at>=p.cycle_at)&&String(l.contact_email||'').toLowerCase()===e)[0];
+        if(!pp&&!pl) return bad(e+' isn\'t an owner or contact on this property. Add them to the property file first');
+        const nm=pp?((pp.pref_name||'').trim()||(pp.legal_name||'').trim()):(pl.contact_name||'').trim(); ems.push(e); rec.push(nm?{email:e,name:nm}:{email:e}); }
+      if(!rec.length) return bad('Choose who it goes to'); if(!String(a.p_subject||'').trim()) return bad('Add a subject');
+      if(!String(a.p_body||'').includes('[the appraisal link]')) return bad('Keep [the appraisal link] in the email: it becomes their link when it goes');
+      const w=apprWording([a.p_subject,a.p_body]); if(w) return bad('The email: '+w); if(/\[Tim to [^\]]*\]/.test(a.p_body)) return bad('Fill or delete the marked blanks in the email first');
+      let b; try{ b=apBuildExtras(r,apBuild(r),a.p_extras); }catch(e){ return bad(e.message); }
+      if(JSON.stringify(b.content).length>+(localStorage.getItem('mockApMaxContent')||2000000)) return bad('This appraisal is too long to send (its wording is over 2 MB). Shorten or remove some sections, then send again');
+      const chain=apChain(r.id), ver=APS().filter(s=>s.chain_id===chain).reduce((m,s)=>Math.max(m,s.version),0)+1;
+      // never an empty entry; a listed file missing from storage stops the send, named
+      const pths=b.paths.filter(p=>p&&p.bucket&&p.path), miss=pths.find(p=>!SO()[p.path]);
+      if(miss) return bad('A file in this appraisal is missing: '+String(miss.path).replace(/^.*\//,'')+'. Upload it again or take it out, then send again');
+      const sealedAt=new Date(Date.now()).toISOString(), files=pths.map(p=>({bucket:p.bucket,path:p.path,size:SO()[p.path].size??null,etag:null}));
+      const s={id:uid(),appraisal_id:r.id,chain_id:chain,property_id:r.property_id,version:ver,content:b.content,paths:pths,recipients:rec,left_out:b.left_out,sent_by:me.email,sent_at:sealedAt,sealed_at:sealedAt,files,seal_sha256:apSealOf(ver,sealedAt,b.content,files,rec,me.email)}; APS().push(s);
+      const m={id:uid(),snapshot_id:s.id,to_addr:ems,subject:String(a.p_subject).trim(),body:a.p_body,status:'queued',sent_at:null,error:null,made_by:me.email,made_at:now()}; APM().push(m);
+      APE().push({id:APE().length+1,snapshot_id:s.id,chain_id:chain,property_id:r.property_id,kind:'sent',actor:me.email,at:now(),detail:{version:ver,to:rec.length},notified_at:now(),seen_at:now(),seen_by:me.email});
+      r.status='sent'; r.updated_at=now(); save(); return ok({snapshot_id:s.id,chain_id:chain,version:ver,mail_id:m.id,recipients:rec,left_out:b.left_out}); }
+    if(name==='agent_appraisal_new_version'){ const r=(DB.appraisal_views||[]).find(v=>v.id===a.p_id); if(!r) return bad('Appraisal not found');
+      if(r.status!=='sent') return bad('Only a sent appraisal is updated this way. This one can still be changed as it is'); const chain=apChain(r.id);
+      const newest=APS().filter(s=>s.chain_id===chain).sort((x,y)=>y.version-x.version)[0]; if(!newest||newest.appraisal_id!==r.id) return bad('There is a newer version of this appraisal. Update that one');
+      const ex=APV().filter(v=>v.chain_id===chain).map(v=>(DB.appraisal_views||[]).find(x=>x.id===v.appraisal_id)).find(x=>x&&x.status!=='sent');
+      if(ex) return ok({appraisal_id:ex.id,existing:true,comps:[],media:[],assets:[]});
+      // the draft never names the sent version's header or video; setup.copyPending lists what is still to copy
+      const su=c(r.setup||{}); if(su.headerOpt&&typeof su.headerOpt==='object') delete su.headerOpt.asset; const introWas=su.intro; delete su.intro; delete su.copyPending;
+      const n={id:uid(),property_id:r.property_id,title:r.title,address:r.address,prepared_for:r.prepared_for,prepared_on:null,status:'draft',sections:c(r.sections||[]).filter(s=>!(s&&(s.type==='intro'||(s.type==='header'&&s.src==='asset')))),fields:c(r.fields),setup:su,kind:r.kind,private_notes:r.private_notes,created_by:me.email,created_at:now(),updated_at:now()};
+      DB.appraisal_views.push(n); APV().push({appraisal_id:n.id,previous_id:r.id,chain_id:chain,made_by:me.email,made_at:now()});
+      const map=[]; (DB.appraisal_comps||[]).filter(x=>x.appraisal_id===r.id).sort((a,b)=>(a.position||0)-(b.position||0)).forEach(x=>{ const y=Object.assign(c(x),{id:uid(),appraisal_id:n.id,created_at:now(),updated_at:now(),created_by:me.email}); DB.appraisal_comps.push(y); map.push({from:x.id,to:y.id}); });
+      const media=(DB.appraisal_media||[]).filter(m=>m.appraisal_id===r.id&&m.comp_id).sort((a,b)=>(a.position||0)-(b.position||0)).map(m=>({from:m.path,comp:(map.find(z=>z.from===m.comp_id)||{}).to}));
+      const hs=(r.setup||{}).headerOpt||{}, is=(r.setup||{}).intro||{};
+      const assets=(DB.appraisal_assets||[]).filter(x=>x.appraisal_id===r.id&&((x.role==='header'&&hs.asset===x.id)||(x.role==='intro'&&is.asset===x.id))).map(x=>({id:x.id,role:x.role}));
+      su.copyPending={media,assets,intro:introWas===undefined?null:introWas};
+      save(); return ok({appraisal_id:n.id,existing:false,comps:map,media,assets}); }
+    if(name==='agent_appraisal_seal_check'){ const s=APS().find(x=>x.id===a.p_snapshot); if(!s) return bad('Not found'); const txt=apSealText(s.version,s.sealed_at,s.content,s.files,s.recipients,s.sent_by), nowSha=window.SIGN.sha256Hex(txt);
+      const chg=(s.files||[]).filter(f=>{ const o=SO()[f.path]; return !o||(o.size??null)!==(f.size??null); }).map(f=>({bucket:f.bucket,path:f.path,status:SO()[f.path]?'changed':'gone'}));
+      return ok({ok:nowSha===s.seal_sha256,stored:s.seal_sha256,computed:nowSha,version:s.version,sealed_at:s.sealed_at,expires_at:apPlus3(s.sealed_at).toISOString(),files:c(s.files),files_ok:!chg.length,files_changed:chg,seal_text:txt}); }
+    // Done on the Needs you expiry item: once per version, seen and notified at once
+    if(name==='agent_appraisal_expiry_done'){ const s=APS().find(x=>x.id===a.p_snapshot); if(!s) return bad('Not found'); if(APE().some(e=>e.snapshot_id===s.id&&e.kind==='expiry_done')) return ok(false);
+      APE().push({id:APE().length+1,snapshot_id:s.id,chain_id:s.chain_id,property_id:s.property_id,kind:'expiry_done',actor:me.email,at:now(),detail:{version:s.version},notified_at:now(),seen_at:now(),seen_by:me.email}); save(); return ok(true); }
+    if(name==='agent_appraisal_events_seen'){ let n=0; APE().forEach(e=>{ if((a.p_ids||[]).includes(e.id)&&!e.seen_at){ e.seen_at=now(); e.seen_by=me.email; n++; } }); save(); return ok(n); }
+    if(name==='agent_appraisal_mail_unstick'){ const m=APM().find(x=>x.id===a.p_mail&&x.status==='sending'); if(!m) return bad('That email isn\'t waiting on a check'); m.status='failed'; m.error='Checked by Tim: it did not arrive'; save(); return ok(null); }
+  }
+  if(!S||!S.user) return bad('permission denied for function '+name);
+  if(name==='vendor_appraisals_mine'){ const chains=[...new Set(APS().filter(apVendorOk).map(s=>s.chain_id))]; return ok(chains.map(apNewest).filter(Boolean).sort((x,y)=>x.sent_at<y.sent_at?1:-1).map(s=>({chain_id:s.chain_id,snapshot_id:s.id,address:s.content.address,version:s.version,sent_at:s.sent_at}))); }
+  if(name==='vendor_appraisal_read'){ const chain=apChain(a.p_id); let s=APS().find(x=>x.id===a.p_id)||(a.p_version!=null?APS().find(x=>x.chain_id===chain&&x.version===a.p_version):apNewest(chain));
+    if(!s||!apVendorOk(s)) return bad('Not found'); let ev=null; const nw=apNewest(s.chain_id);
+    if(!APE().some(e=>e.snapshot_id===s.id&&e.kind==='opened'&&e.actor===em)){ ev=APE().length+1; APE().push({id:ev,snapshot_id:s.id,chain_id:s.chain_id,property_id:s.property_id,kind:'opened',actor:em,at:now(),detail:{version:s.version},notified_at:null,seen_at:null}); }
+    const plan=APP().find(p=>p.chain_id===s.chain_id&&p.email===em&&!p.superseded_at);
+    const pl=(DB.prelistings||[]).filter(l=>l.property_id===s.property_id&&l.status!=='closed'&&String(l.contact_email||'').toLowerCase()===em&&l.appraisal_id&&apChain(l.appraisal_id)===s.chain_id)[0];
+    save(); return ok({snapshot_id:s.id,chain_id:s.chain_id,version:s.version,sent_at:s.sent_at,sealed_at:s.sealed_at,seal_sha256:s.seal_sha256,expires_at:apPlus3(s.sealed_at).toISOString(),content:c(s.content),plan:plan?c(plan.plan):null,prelisting_id:pl?pl.id:null,event_id:ev,
+      asked:APE().some(e=>e.snapshot_id===s.id&&e.kind==='update_asked'&&e.actor===em),newest:{snapshot_id:nw.id,version:nw.version,sent_at:nw.sent_at,expires_at:apPlus3(nw.sealed_at).toISOString()}}); }
+  if(name==='appraisal_vendor_can_read'){ const s=APS().find(x=>x.id===a.p_snapshot); return ok(!!s&&['appraisal-media','appraisal-video','property-files'].includes(a.p_bucket)&&!String(a.p_path||'').includes('..')&&apVendorOk(s)&&s.paths.some(p=>p.bucket===a.p_bucket&&p.path===a.p_path)); }
+  if(name==='vendor_appraisal_ask_update'){ const s=APS().find(x=>x.id===a.p_snapshot); if(!s||!apVendorOk(s)) return bad('Not found'); if(Date.now()<apPlus3(s.sealed_at).getTime()) return bad('This appraisal is still current');
+    const nw=apNewest(s.chain_id); if(nw&&nw.version>s.version&&Date.now()<apPlus3(nw.sealed_at).getTime()) return bad('There\'s a newer version of this appraisal, which is still current');
+    let ev=null; if(!APE().some(e=>e.snapshot_id===s.id&&e.kind==='update_asked'&&e.actor===em)){ ev=APE().length+1; APE().push({id:ev,snapshot_id:s.id,chain_id:s.chain_id,property_id:s.property_id,kind:'update_asked',actor:em,at:now(),detail:{version:s.version},notified_at:null,seen_at:null}); }
+    save(); return ok({event_id:ev,asked:true}); }
+  if(name==='appraisal_event_mine'){ const e=APE().find(x=>x.id===a.p_event); return ok(!!e&&e.kind!=='sent'&&!e.notified_at&&e.actor===em); }
+  const s=APS().find(x=>x.id===a.p_snapshot); if(!s||apNewest(s.chain_id)!==s) return bad('Not found');
+  if(name==='vendor_appraisal_proceed'){ const p=PT().find(x=>x.id===s.property_id)||{};
+    let pl=(DB.prelistings||[]).filter(l=>l.property_id===s.property_id&&l.status!=='closed'&&(!p.cycle_at||l.created_at>=p.cycle_at)&&String(l.contact_email||'').toLowerCase()===em).sort((x,y)=>x.created_at<y.created_at?1:-1)[0];
+    if(!pl){ const pp=PP().find(x=>x.property_id===s.property_id&&['owner','contact'].includes(x.role||'owner')&&String(x.email||'').toLowerCase()===em), rg=((s.content.fields||{}).ranges||[])[0], pr=((s.content.sections||[]).find(x=>x.type==='plans')||{items:[]}).items.find(x=>x.rec);
+      const fm=n=>Number(n).toLocaleString('en-NZ'); const ap={}; if(rg&&typeof rg.low==='number'&&typeof rg.high==='number') ap.price='$'+fm(rg.low)+' to $'+fm(rg.high); if(((s.content.fields||{}).method||{}).name) ap.method=s.content.fields.method.name; if(pr) ap.marketing=pr.name; ap.from_appraisal=s.chain_id;
+      pl={id:uid(),address:p.address||s.content.address,contact_name:pp?pp.legal_name:null,contact_email:em,property_id:s.property_id,appraisal_id:s.appraisal_id,status:'appraisal',proceeded_at:now(),appraisal:ap,answers:{},plan:{},user_id:null,created_at:now(),updated_at:now()};
+      (DB.prelistings||=[]).push(pl); mergePerson(s.property_id,pl.contact_name,'',em,'',null,'appraisal'); syncPrelisting(pl); }
+    else if(!pl.appraisal_id) pl.appraisal_id=s.appraisal_id;
+    let ev=null; if(!APE().some(e=>e.chain_id===s.chain_id&&e.kind==='proceeded'&&e.actor===em)){ ev=APE().length+1; APE().push({id:ev,snapshot_id:s.id,chain_id:s.chain_id,property_id:s.property_id,kind:'proceeded',actor:em,at:now(),detail:{prelisting_id:pl.id},notified_at:null,seen_at:null}); }
+    save(); return ok({prelisting_id:pl.id,event_id:ev}); }
+  if(name==='vendor_appraisal_plan_save'){ const P=a.p_plan; if(!P||typeof P!=='object'||!P.sel||typeof P.sel!=='object'||Array.isArray(P.sel)) return bad('That plan couldn\'t be read. Build it again');
+    const clean={}; const ks=Object.keys(P.sel); if(ks.length>80) return bad('That plan couldn\'t be read. Build it again');
+    for(const k of ks){ const v=P.sel[k]; if(!/^[a-z0-9_]{1,40}$/.test(k)||typeof v!=='number'||!Number.isInteger(v)||v<1||v>99) return bad('That plan couldn\'t be read. Build it again'); clean[k]=v; }
+    if(!ks.length) return bad('Choose at least one item for your plan'); if(typeof P.total!=='number'||P.total<0||P.total>1e6) return bad('That plan couldn\'t be read. Build it again');
+    const plan={sel:clean,total:Math.round(P.total*100)/100}; if(/^[a-z0-9_]{1,40}$/.test(P.band||'')) plan.band=P.band; if(typeof P.on_request==='number'&&P.on_request>=0&&P.on_request<=80) plan.on_request=Math.round(P.on_request);
+    // one current plan per person per appraisal, at most 10 saves per person per version; Tim told once per person per copy
+    const mine=APP().filter(p=>p.snapshot_id===s.id&&p.email===em); if(mine.length>=10) return bad('Your plan has been saved 10 times, which is as many as can be kept. Call or text Tim on 027 562 7207 to change it');
+    mine.forEach(p=>{ if(!p.superseded_at) p.superseded_at=now(); });
+    const row={id:uid(),snapshot_id:s.id,chain_id:s.chain_id,property_id:s.property_id,email:em,user_id:S.user.id,plan,created_at:stamp(),superseded_at:null}; APP().push(row);
+    let ev=null; if(!APE().some(e=>e.snapshot_id===s.id&&e.kind==='plan_built'&&e.actor===em)){ ev=APE().length+1; APE().push({id:ev,snapshot_id:s.id,chain_id:s.chain_id,property_id:s.property_id,kind:'plan_built',actor:em,at:now(),detail:{plan_id:row.id,total:plan.total},notified_at:null,seen_at:null}); }
+    save(); return ok({plan_id:row.id,event_id:ev}); }
+  }catch(e){ return bad(e.message); }
+  return bad('unknown rpc '+name); }
+// the notify function's appraisal emails (mirrors fn/appraisal_notify_handler.ts): nothing is sent; each would-be email is in
+// localStorage apMail. mockApMailFail = '1': the mail server refuses.
+function apNotifyInvoke(b){ const me=S&&S.user, res=(d,st)=>st&&st>=400?Promise.resolve({data:null,error:{message:String(st),context:{json:async()=>d}}}):ok(d);
+  const log=x=>{ const l=JSON.parse(localStorage.getItem('apMail')||'[]'); l.push(x); localStorage.setItem('apMail',JSON.stringify(l)); };
+  if(offline()) return Promise.resolve({data:null,error:{message:'Failed to fetch'}});
+  if(b.type==='ap_send'){ if(!isAgentMe()) return res({error:'Not allowed'},403); const m=APM().find(x=>x.id===b.mail_id&&['queued','failed'].includes(x.status)); if(!m) return res({ok:false,error:'This email is already being sent, or has gone.'},409);
+    const s=APS().find(x=>x.id===m.snapshot_id); m.status='sending';
+    if(localStorage.getItem('mockApMailFail')==='1'){ m.status='failed'; m.error='smtp down'; save(); return ok({ok:false,error:'It didn\'t send: smtp down. Nothing went. Try again.'}); }
+    const link='https://packages.dunnerstunner.co.nz/onboarding/?appraisal='+s.chain_id; log({kind:'appraisal_sent',to:m.to_addr,subject:m.subject,link,html:window.MAIL.toHtml(m.body,link,{token:window.MAIL.APPRAISAL_LINK,label:'Open my appraisal'})});
+    m.status='sent'; m.sent_at=now(); m.error=null; save(); return ok({ok:true}); }
+  if(b.type==='ap_event'){ const e=APE().find(x=>x.id===b.event_id); if(!me||!e||e.kind==='sent'||e.notified_at||e.actor!==apEmail()) return res({error:'Not allowed'},403);
+    e.notified_at=now(); const s=APS().find(x=>x.id===e.snapshot_id); const n=window.MAIL.appraisalEventNotice({kind:e.kind,who:((s.recipients||[]).find(r=>r.email===e.actor)||{}).name||e.actor,address:s.content.address,version:s.version,total:(e.detail||{}).total});
+    log({kind:'appraisal_'+e.kind,to:'tim',subject:n.subject}); save(); return ok({ok:true}); }
+  return res({error:'Unknown type'},400); }
 function rpcInner(name,a){
   const me=S&&S.user; const ag=a&&a.a?DB.agreements.find(x=>x.id===a.a):null;
   const mine=()=>DB.agreement_people.find(p=>p.agreement_id===a.a&&p.user_id===me.id);
@@ -665,6 +889,7 @@ function rpcInner(name,a){
   if(name==='agent_appraisal_create'||name==='agent_appraisal_save') return appraisalRpc(name,a,me);
   if(['site_profile_public','agent_site_profile_save','contact_send','agent_contact_done'].includes(name)) return siteRpc(name,a,me);
   if(['agent_comps_import','agent_comps_order','agent_market_import','agent_report_imported','agent_reviews_import','agent_review_tick'].includes(name)) return lw3cRpc(name,a,me);
+  if(AP_RPCS.includes(name)) return apRpc(name,a,me);
   if(SIGN_RPCS.includes(name)) return signRpc(name,a,me);
   if(DRAFT_RPCS.includes(name)) return draftRpc(name,a,me);
   if(name.startsWith('offer_sign_')||name.startsWith('offer_round_')) return bad('permission denied for function '+name);
@@ -1075,7 +1300,15 @@ const repoCanRead=path=>PD().some(d=>(d.path===path||d.thumb_path===path)&&repoS
 // the repo-link edge function (fn/repo_link.ts): a signed-in caller, a file they may read, a link for 600 seconds
 function repoLinkInvoke(o){ if(offline()) return Promise.resolve({data:null,error:{name:'FunctionsFetchError',message:'Failed to send a request to the Edge Function'}});
   if(!(S&&S.user)) return Promise.resolve({data:null,error:{name:'FunctionsHttpError',message:'Edge Function returned a non-2xx status code',status:401}});
-  const path=String(((o&&o.body)||{}).path||''); if(!repoCanRead(path)) return Promise.resolve({data:null,error:{name:'FunctionsHttpError',message:'Edge Function returned a non-2xx status code',status:403}});
+  const b_=(o&&o.body)||{};
+  // 037: a file in an appraisal sent to the vendor (appraisal_vendor_can_read, asked as the caller); the path checks of fn/repo_link_handler.ts
+  if(b_.snapshot!==undefined){ const U='[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}', RE={'appraisal-media':new RegExp('^appraisals/'+U+'/(comps/'+U+'|header|intro|site)/[A-Za-z0-9._-]{1,200}$'),'appraisal-video':new RegExp('^appraisals/'+U+'/(header|intro)/[A-Za-z0-9._-]{1,200}$'),'property-files':/^properties\/[0-9a-f-]{36}\/(docs|photos)\/[A-Za-z0-9._-]{1,200}$/};
+    const fail=st=>Promise.resolve({data:null,error:{name:'FunctionsHttpError',message:'Edge Function returned a non-2xx status code',status:st}});
+    if(!UUIDX.test(String(b_.snapshot||''))||!Object.prototype.hasOwnProperty.call(RE,b_.bucket)||!RE[b_.bucket].test(String(b_.path||''))) return fail(400);
+    const s=APS().find(x=>x.id===b_.snapshot); if(!(s&&apNewest(s.chain_id)===s&&s.paths.some(p=>p.bucket===b_.bucket&&p.path===b_.path))) return fail(403);
+    try{ const l=JSON.parse(localStorage.getItem('apLinks')||'[]'); l.push(b_.bucket+':'+b_.path); localStorage.setItem('apLinks',JSON.stringify(l)); }catch(_){}
+    const bl=(window.__repoBlobs||{})[b_.path]; return ok({url:bl?URL.createObjectURL(bl):PNG1,expires_in:600}); }
+  const path=String(b_.path||''); if(!repoCanRead(path)) return Promise.resolve({data:null,error:{name:'FunctionsHttpError',message:'Edge Function returned a non-2xx status code',status:403}});
   const bl=(window.__repoBlobs||{})[path]; return ok({url:bl?URL.createObjectURL(bl):PNG1,expires_in:600}); }
 function repoBucket(){ return {
   upload:(p,blob,o)=>{ logCall('up:'+p); if(offline()) return netFail(); if(!isAgentMe()) return bad('new row violates row-level security policy');
@@ -1941,7 +2174,8 @@ function videoBucket(){ return {
     const lim=Math.min(52428800,+localStorage.getItem('mockVideoLimit')||52428800); if(blob.size>lim) return bad('The object exceeded the maximum allowed size');
     SO()[p]={size:blob.size,mime,bucket:AVB}; (window.__repoBlobs||={})[p]=blob; save(); return ok({path:p}); },
   createSignedUrl:p=>{ if(offline()) return netFail(); if(!isAgentMe()||!SO()[p]||SO()[p].bucket!==AVB) return bad('Object not found'); const bl=(window.__repoBlobs||{})[p]; return ok({signedUrl:bl?URL.createObjectURL(bl):'data:video/webm;base64,'}); },
-  remove:(ps)=>{ if(offline()) return netFail(); if(!isAgentMe()) return ok([]); const gone=(ps||[]).filter(p=>{ const f=String(p).split('/'); return SO()[p]&&SO()[p].bucket===AVB&&!avSent(f[1]); }); gone.forEach(p=>{ delete SO()[p]; }); save(); return ok(gone.map(name=>({name}))); } }; }
+  remove:(ps)=>{ if(offline()) return netFail(); if(!isAgentMe()) return ok([]); const gone=(ps||[]).filter(p=>{ const f=String(p).split('/'); return SO()[p]&&SO()[p].bucket===AVB&&!avSent(f[1]); }); gone.forEach(p=>{ delete SO()[p]; }); save(); return ok(gone.map(name=>({name}))); },
+  copy:(from,to)=>apCopy(AVB,from,to) }; }
 // ── migration 035 and phase C2's functions (mirrors fn/appraisal_fetch_handler.ts and fn/appraisal_ai_handler.ts; no network, no model) ──
 // appraisal-fetch: localStorage fetchMode = 'blocked' | 'none' | 'offline' changes the answer; fetchCount = how many photos a page gives
 // (default 4). Staged photos go into storage under fetch-<SHA-256 of the image link>, as the function names them; keep files them.
@@ -1981,11 +2215,13 @@ function siteTable(table,op,single){ if(offline()) throw new Error('Failed to fe
   if(op!=='select') throw new Error('permission denied for table '+table);
   if(!isAgentMe()) return {data:single?null:[],error:null};
   if(table==='site_profile') siteRow(); return null; }
+// site_profile_public(): what anyone may read (also what 037 seals into a sent appraisal, as it is at that moment)
+function sitePublic(r){ const chans=(r.channels||[]).filter(c=>c.on&&(c.key==='call'||c.key==='text'?!!r.phone:c.key==='email'?!!r.email:c.key==='form'?true:!!c.value&&SITE_VAL[c.key]&&SITE_VAL[c.key].test(c.value))).map(c=>({key:c.key,value:c.value||''}));
+  const onK=k=>(r.channels||[]).some(c=>c.key===k&&c.on);   // off means off: no phone unless Call or Text is on, no email unless Email is on
+  return JSON.parse(JSON.stringify({name:r.name,licence:r.licence,phone:onK('call')||onK('text')?r.phone:'',email:onK('email')?r.email:'',photo_path:r.photo_path,about:r.about||{},channels:chans})); }
 function siteRpc(name,a,me){ if(offline()) return netFail();
   const r=siteRow(), c=v=>JSON.parse(JSON.stringify(v));
-  if(name==='site_profile_public'){ const chans=(r.channels||[]).filter(c=>c.on&&(c.key==='call'||c.key==='text'?!!r.phone:c.key==='email'?!!r.email:c.key==='form'?true:!!c.value&&SITE_VAL[c.key]&&SITE_VAL[c.key].test(c.value))).map(c=>({key:c.key,value:c.value||''}));
-    const onK=k=>(r.channels||[]).some(c=>c.key===k&&c.on);   // off means off: no phone unless Call or Text is on, no email unless Email is on
-    return ok({name:r.name,licence:r.licence,phone:onK('call')||onK('text')?r.phone:'',email:onK('email')?r.email:'',photo_path:r.photo_path,about:r.about||{},channels:chans}); }
+  if(name==='site_profile_public') return ok(sitePublic(r));
   if(name==='agent_site_profile_save'){ if(!isAgentMe()) return bad('Agent only'); const p=a.p||{};
     if(p.email&&!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(p.email)) return bad('That email address does not look right'); if(p.phone&&!/^\+?[0-9 ()-]{6,30}$/.test(p.phone)) return bad('That phone number does not look right');
     const seen=[]; for(const c of (p.channels||[])){ if(!SITE_CH.includes(c.key)) return bad('Not a way to reach you: '+c.key); if(seen.includes(c.key)) return bad('Each way to reach you once'); seen.push(c.key); if(SITE_VAL[c.key]&&c.value&&!SITE_VAL[c.key].test(String(c.value).trim())) return bad('That '+c.key+' detail does not look right'); }
@@ -2071,6 +2307,7 @@ function apprAiInvoke(o){ const b=(o&&o.body)||{}; c2Log(Object.assign({fn:'doc-
   return fnErr(400,{error:'Bad request'}); }
 window.supabase={createClient(){ return {
   from:q, rpc, functions:{invoke:(n,o)=>{ logCall('fn:'+n+(o&&o.body&&o.body.mode?':'+o.body.mode:'')); if(n==='property-lookup') return councilInvoke(o); if(n==='appraisal-fetch') return fetchInvoke(o); if(n==='doc-prefill'&&o&&o.body&&['appraisal_report','buyer_check','appraisal_draft'].includes(o.body.mode)) return apprAiInvoke(o); if(n==='offer-public') return offerInvoke(o); if(n==='offer-draft') return draftInvoke(o); if(n==='offer-sign') return signInvoke(o); if(n==='repo-link') return repoLinkInvoke(o); if(n==='doc-prefill'&&o.body&&o.body.mode==='translate'){ const reqs=JSON.parse(localStorage.getItem('trReqs')||'[]'); reqs.push(o.body); localStorage.setItem('trReqs',JSON.stringify(reqs)); const m=localStorage.getItem('translateMode'); if(m==='off') return Promise.resolve({data:null,error:{message:'503',context:{json:async()=>({error:'not_set_up'})}}}); if(m==='noTool') return ok({ok:false,reason:'no_tool',message:"The AI didn't give a usable answer. Try again."}); const src=o.body.sources; const rej=m==='rejectFirst'?[src[0]]:[]; let cutL=[]; let use=src.filter(x=>!rej.includes(x)); if(m==='cutOff'){ const h=src.length>1?Math.floor(src.length/2):0; cutL=src.slice(h); use=src.slice(0,h); } const resp={ok:true,model:o.body.kind==='screens'||o.body.kind==='guide'?'claude-sonnet-5-5':'claude-haiku-5-5',cut_off:m==='cutOff',translations:use.map(x=>({source:x,text:'<'+o.body.lang+'> '+x})),rejected:rej.map(x=>({source:x,reason:'number changed'})).concat(cutL.map(x=>({source:x,reason:'cut off'}))),usage:{input:10,output:10}}; const D=+localStorage.getItem('translateDelay')||0; return D?new Promise(r=>setTimeout(()=>r({data:resp,error:null}),D)):ok(resp); }
+    if(n==='notify'&&o&&o.body&&/^ap_/.test(String(o.body.type||''))){ const a=JSON.parse(localStorage.getItem('inv')||'[]');a.push(n+':'+o.body.type);localStorage.setItem('inv',JSON.stringify(a)); return apNotifyInvoke(o.body); }
     if(n==='doc-prefill'){ const mode=localStorage.getItem('prefillMode'); if(mode==='off') return Promise.resolve({data:null,error:{message:'503',context:{json:async()=>({error:'not_set_up'})}}}); return ok({ok:true,skipped:[],result:JSON.parse(localStorage.getItem('prefillResult'))}); }const a=JSON.parse(localStorage.getItem('inv')||'[]');a.push(n+':'+o.body.type);localStorage.setItem('inv',JSON.stringify(a));
     if(n==='notify'&&o.body.type==='form_signed'){ const fm=(DB.property_forms||[]).find(x=>x.id===o.body.form_id); if(fm&&fm.status==='signed'&&(fm.kind==='healthy_homes'||fm.countersigned_at)&&!fm.document_id&&fm.agreement_id===o.body.agreement_id){ const d={id:uid(),property_id:fm.property_id,kind:fm.kind==='healthy_homes'?'Healthy Homes checklist and statement':'Vendor Declaration',name:(fm.kind==='healthy_homes'?'Healthy-Homes-Checklist-and-Statement':'Vendor-Declaration')+'.pdf',path:'properties/'+fm.property_id+'/generated/'+fm.id+'.pdf',source:'generated',created_by:'system',created_at:now(),bucket:'private',folder:'agency'}; (DB.property_documents||=[]).push(d); fm.document_id=d.id; save(); } }
     if(n==='notify'&&o.body.type==='contact') return contactNotify(o.body);

@@ -8,6 +8,8 @@ const INK = rgb(0.05, 0.1, 0.35), GREY = rgb(0.42, 0.42, 0.42), BLACK = rgb(0.1,
 const num = (s: unknown) => parseFloat(String(s ?? "").replace(/[^0-9.]/g, "")) || 0;
 const money = (n: number) => "$" + Number(n || 0).toLocaleString("en-NZ", { minimumFractionDigits: n % 1 ? 2 : 0, maximumFractionDigits: 2 });
 const nzDate = (d: string | Date) => new Date(d).toLocaleDateString("en-NZ", { day: "numeric", month: "short", year: "numeric", timeZone: "Pacific/Auckland" });
+// the appraisal link the database accepts on an agreement (037 agreements_appr_link; the same as fn/shared.ts APPR_LINK_RE)
+export const APPR_LINK_RE = /^https:\/\/packages\.dunnerstunner\.co\.nz\/onboarding\/\?appraisal=[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}&v=[1-9][0-9]{0,3}$/;
 const nzDT = (d: string | Date) => new Date(d).toLocaleString("en-NZ", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit", timeZone: "Pacific/Auckland" });
 
 export interface PdfInput {
@@ -152,6 +154,16 @@ export async function buildAgreementPdf(inp: PdfInput): Promise<Uint8Array> {
     txt(p1, Number(ask).toLocaleString("en-NZ"), 188, 476.5, 8.5, F, INK, 44);
     txt(p1, Number(Math.round(est * 100) / 100).toLocaleString("en-NZ", { minimumFractionDigits: 2 }), 394, 476.5, 8.5, F, INK, 54);
   } else if (pending) txt(p1, "Example to follow with the written appraisal", 300, 440, 7.5, F, GREY);
+  // the written appraisal's permanent link (config.apprUrl when it is one of ours, Tim 28 November 2026: "Just the permalink", "Make
+  // them one"), in full so it reads on paper. Clause 23.1 on page 7 prints the same field, as it always has.
+  // on the right of the appraisal basis lines. Only the form the database accepts; without one nothing new prints.
+  const apprLink = !pending && typeof c.apprUrl === "string" && APPR_LINK_RE.test(c.apprUrl) ? c.apprUrl : "";
+  if (apprLink) {
+    const q = apprLink.indexOf("?");
+    txt(p1, "Written appraisal (permanent link):", 318, 421, 7.5, B, INK);
+    txt(p1, apprLink.slice(0, q), 318, 440, 7.5, F, INK);
+    txt(p1, apprLink.slice(q), 318, 459, 7.5, F, INK);
+  }
   // E. costs
   const limOn = c.limOn !== false, lim = c.lim === undefined || c.lim === "" ? 425 : num(c.lim);
   const admOn = c.adminOn !== false, adm = c.admin === undefined || c.admin === "" ? 575 : num(c.admin);
