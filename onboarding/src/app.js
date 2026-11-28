@@ -2549,12 +2549,15 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
         go: () => agreed || wd ? viewOfferAgent(m.offer_id) : viewSigning(m.signing_id), mail: true }); });
     // LW3 phase E (037): what vendors did with an appraisal Tim sent (until he ticks it Done), and an appraisal email that didn't go
     const quiet = async q => { try { const { data, error } = await q; return error ? [] : (data || []); } catch (_) { return []; } };
-    const aevs = await quiet(sb.from('appraisal_events').select('id,snapshot_id,property_id,kind,actor,at,seen_at').is('seen_at', null).neq('kind', 'sent').order('at', { ascending: false }));
+    const aevs = await quiet(sb.from('appraisal_events').select('id,snapshot_id,chain_id,property_id,kind,actor,at,seen_at').is('seen_at', null).neq('kind', 'sent').order('at', { ascending: false }));
+    // a plan built: Tim is emailed once; later saves show here as the plan's newest save
+    const aplans = aevs.some(e => e.kind === 'plan_built') ? await quiet(sb.from('appraisal_vendor_plans').select('chain_id,email,created_at,plan').is('superseded_at', null)) : [];
     const amails = await quiet(sb.from('appraisal_mail').select('id,snapshot_id,status').in('status', ['failed', 'sending', 'queued']));
     const asnaps = aevs.length || amails.length ? await quiet(sb.from('appraisal_snapshots').select('id,appraisal_id,property_id,recipients').in('id', [...new Set(aevs.map(e => e.snapshot_id).concat(amails.map(m => m.snapshot_id)))])) : [];
     const apOpenPage = aid => () => PORTAL ? portalNav('appraisals/' + aid) : viewAppraisalView(aid, false);
     aevs.forEach(e => { const s = asnaps.find(x => x.id === e.snapshot_id); if (!s) return; const pr = props.find(p => p.id === s.property_id);
-      needs.push({ what: (apWho(s, e.actor) || 'A vendor') + ' ' + (AP_EV[e.kind] || e.kind), where: (pr && pr.address) || 'Appraisal', sub: 'Their appraisal, ' + fmtDT(e.at), hot: e.kind === 'proceeded', apEvent: e.id,
+      const cur = e.kind === 'plan_built' ? aplans.find(p => p.chain_id === e.chain_id && p.email === e.actor) : null;
+      needs.push({ what: (apWho(s, e.actor) || 'A vendor') + ' ' + (AP_EV[e.kind] || e.kind), where: (pr && pr.address) || 'Appraisal', sub: cur && cur.created_at > e.at ? `Plan last changed ${fmtDT(cur.created_at)}${(cur.plan || {}).total != null ? ', ' + money(+cur.plan.total) + ' incl. GST' : ''}` : 'Their appraisal, ' + fmtDT(e.at), hot: e.kind === 'proceeded', apEvent: e.id,
         go: apOpenPage(s.appraisal_id), done: async () => { await must(sb.rpc('agent_appraisal_events_seen', { p_ids: [e.id] })); } }); });
     amails.forEach(m => { const s = asnaps.find(x => x.id === m.snapshot_id); if (!s) return; const pr = props.find(p => p.id === s.property_id);
       needs.push({ what: m.status === 'sending' ? 'An appraisal email may have gone: check it' : 'An appraisal email didn\'t go', where: (pr && pr.address) || 'Appraisal', sub: 'The appraisal is sent; the email needs you', hot: true, go: apOpenPage(s.appraisal_id) }); });
@@ -9815,13 +9818,13 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const sent = rec.status === 'sent', sd = present ? null : await apSentData(rec.id);   // LW3 phase E (037): what was sent, and what they did
     if (!$('#main .loading')) return;
     const tools = present ? '' : `<div class="toolbar no-print" id="apvTools">${sent ? '' : plink(`appraisals/${rec.id}/send`, sd && sd.snaps.length ? 'Send updated version' : 'Send to the vendor', 'btn primary')}${plink(`appraisals/${rec.id}/setup`, sent ? 'The set-up' : 'Change the set-up', sent ? 'btn ghost' : 'btn primary')}${plink(`appraisals/${rec.id}/sections`, 'Sections', 'btn ghost')}${plink(`appraisals/${rec.id}/comps`, 'Comparables', 'btn ghost')}${plink(`appraisals/${rec.id}/present`, 'Present on screen', 'btn ghost')}<button class="btn ghost" type="button" id="apvPrint">Print</button></div>
-      ${sd ? apSentHTML(rec, sd) : ''}
+      ${sd ? apPendingHTML(rec) + apSentHTML(rec, sd) : ''}
       ${String(rec.private_notes || '').trim() ? `<details class="acc no-print" id="apsNotes"><summary>Your private notes</summary><div class="in"><p class="small" style="white-space:pre-wrap;margin:0">${esc(rec.private_notes)}</p></div></details>` : ''}`;
     main().innerHTML = `<div class="view-pad apv${present ? ' apv-show' : ''}" id="apvPage">${present ? '' : '<span class="agent-flag no-print">Only you see this</span>'}${tools}<div id="apvDoc"></div>
       ${present ? `<p class="apv-exit no-print">${plink(`appraisals/${rec.id}`, 'Finish presenting')}</p>` : ''}</div>`;
     $('#apvDoc').innerHTML = APPR.render(rec, ev); abWireVideos($('#apvDoc'));
     const pb = $('#apvPrint'); if (pb) pb.addEventListener('click', () => { apsOpenAll(); window.print(); });
-    if (sd) apSentWire(rec, sd);
+    if (sd) { apSentWire(rec, sd); apPendingWire(rec, () => viewAppraisalView(rec.id, false)); }
     top();
   }
   // in print every sale method is open (a vendor must see them all, whatever Tim recommends)
@@ -9848,7 +9851,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const [snaps, evs, plans, vers] = await Promise.all([
       safe(sb.from('appraisal_snapshots').select('id,appraisal_id,chain_id,version,recipients,left_out,sent_at,sent_by').eq('chain_id', chain).order('version', { ascending: false })),
       safe(sb.from('appraisal_events').select('id,snapshot_id,kind,actor,at,detail,seen_at').eq('chain_id', chain).order('at', { ascending: false })),
-      safe(sb.from('appraisal_vendor_plans').select('id,snapshot_id,email,plan,created_at').eq('chain_id', chain).order('created_at', { ascending: false })),
+      safe(sb.from('appraisal_vendor_plans').select('id,snapshot_id,email,plan,created_at,superseded_at').eq('chain_id', chain).is('superseded_at', null).order('created_at', { ascending: false })),
       safe(sb.from('appraisal_versions').select('appraisal_id,previous_id,chain_id,made_at').eq('chain_id', chain))]);
     const mails = snaps.length ? await safe(sb.from('appraisal_mail').select('id,snapshot_id,to_addr,subject,status,sent_at,error').in('snapshot_id', snaps.map(s => s.id))) : [];
     const views = vers.length ? await safe(sb.from('appraisal_views').select('id,status').in('id', vers.map(v => v.appraisal_id))) : [];
@@ -9881,6 +9884,68 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       ${rec.status === 'sent' && newest.appraisal_id !== rec.id ? '<p class="small">A newer version has been sent. They see that one.</p>' : ''}
     </section>`;
   }
+  // an updated version's photos and files still to copy from the version sent (setup.copyPending, written by agent_appraisal_new_version)
+  const apPending = rec => { const p = (rec && rec.setup && rec.setup.copyPending) || null; if (!p) return null;
+    const media = (p.media || []).length, roles = (p.assets || []).map(a => a.role); return media || roles.length ? { media, header: roles.includes('header'), intro: roles.includes('intro') } : null; };
+  const apPendingWords = q => [q.header ? 'the header' : '', q.intro ? 'the video introduction' : '', q.media ? `${q.media} photo${q.media === 1 ? '' : 's'}` : ''].filter(Boolean).join(', ').replace(/, ([^,]*)$/, ' and $1');
+  function apPendingHTML(rec) {
+    const q = apPending(rec); if (!q || rec.status === 'sent') return '';
+    return `<section class="card warnc no-print" id="apPending"><p style="margin:0"><strong>Not copied yet from the version you sent: ${esc(apPendingWords(q))}.</strong></p>
+      <p class="small" style="margin:6px 0 0">They won't be in this version until they are copied.</p>
+      <div class="toolbar"><button class="btn primary" type="button" id="apFinishCopy">Finish copying photos and videos</button><button class="btn ghost" type="button" id="apLeaveOut">Leave them out</button></div></section>`;
+  }
+  function apPendingWire(rec, after) {
+    const f = $('#apFinishCopy'); if (f) f.addEventListener('click', async () => { f.disabled = true; atBtn(f, 'Copying...', 'busy'); const r = await apFinishCopy(rec.id);
+      if (r.left) { f.disabled = false; atBtn(f, `Copied ${r.done}. ${apPendingWords(r.q)} still didn't copy. Check you have signal, then try again.`, 'err'); } else { atBtn(f, 'All copied.', 'ok'); setTimeout(after, 600); } });
+    const l = $('#apLeaveOut'); if (l) l.addEventListener('click', async () => { if (!confirm('Leave them out of this version? You can add a header, a video or photos again on the Sections and Comparables screens.')) return;
+      l.disabled = true; const s = Object.assign({}, rec.setup); delete s.copyPending;
+      const { error } = await sb.rpc('agent_appraisal_save', { p_id: rec.id, p_setup: s, p_fields: null, p_sections: null, p_title: null, p_prepared_for: null, p_private_notes: null, p_status: null });
+      if (error) { l.disabled = false; atBtn(l, netErr(error) ? 'Not saved: no signal. Try again.' : error.message, 'err'); return; } atBtn(l, 'Left out.', 'ok'); setTimeout(after, 600); });
+  }
+  // copies what is still listed in setup.copyPending into this draft's own folders, then files it and takes it off the list. Safe to run
+  // again: a file already copied (or already filed) is not copied twice. Returns { done, left, q }.
+  async function apFinishCopy(nid) {
+    const one = async q => { const { data, error } = await q; if (error) throw error; return Array.isArray(data) ? data : data ? [data] : []; };
+    let rec, prevId, done = 0;
+    try { rec = (await one(sb.from('appraisal_views').select('*').eq('id', nid)))[0]; prevId = ((await one(sb.from('appraisal_versions').select('previous_id').eq('appraisal_id', nid)))[0] || {}).previous_id; } catch (_) { return { done: 0, left: 1, q: apPending(rec) || { media: 1 } }; }
+    const pend = JSON.parse(JSON.stringify((rec && rec.setup && rec.setup.copyPending) || { media: [], assets: [] }));
+    if (!okId(prevId)) return { done: 0, left: 1, q: apPending(rec) || { media: 1 } };
+    const base = p => String(p).split('/').pop(), stillMedia = [], stillAssets = [];
+    let prevMedia = [], prevAssets = [], mine = [], mineA = [];
+    try { [prevMedia, prevAssets, mine, mineA] = await Promise.all([one(sb.from('appraisal_media').select('*').eq('appraisal_id', prevId)), one(sb.from('appraisal_assets').select('*').eq('appraisal_id', prevId)),
+      one(sb.from('appraisal_media').select('path').eq('appraisal_id', nid)), one(sb.from('appraisal_assets').select('id,role').eq('appraisal_id', nid))]); } catch (_) { return { done: 0, left: 1, q: apPending(rec) }; }
+    const copy = async (bucket, from, to) => { const c = await sb.storage.from(bucket).copy(from, to); if (c.error && !/exist/i.test(c.error.message || '')) throw c.error; };
+    for (const p of pend.media || []) {
+      const m = prevMedia.find(x => x.path === p.from), to = `appraisals/${nid}/comps/${p.comp}/${base(p.from)}`;
+      if (!m || !okId(p.comp)) { stillMedia.push(p); continue; }
+      if (mine.some(x => x.path === to)) { done++; continue; }
+      try { await copy(AMB, m.path, to);
+        const ins = await sb.from('appraisal_media').insert({ appraisal_id: nid, comp_id: p.comp, path: to, file_name: m.file_name || '', width: m.width || null, height: m.height || null, position: m.position || 0, cover: !!m.cover, source: m.source || 'upload', source_url: m.source_url || null, page_url: m.page_url || null });
+        if (ins.error) throw ins.error; done++; } catch (_) { stillMedia.push(p); }
+    }
+    const setup = Object.assign({}, rec.setup); let assetsDone = false;
+    for (const p of pend.assets || []) {
+      const a = prevAssets.find(x => x.id === p.id); if (!a) { stillAssets.push(p); continue; }
+      const to = `appraisals/${nid}/${a.role}/${base(a.path)}`, still = a.still_path ? `appraisals/${nid}/${a.role}/${base(a.still_path)}` : null;
+      try { let row = null; const had = mineA.find(x => x.role === a.role);
+        if (had) row = had; else { await copy(a.bucket, a.path, to); if (still) await copy(AMB, a.still_path, still);
+          const ins = await sb.from('appraisal_assets').insert({ appraisal_id: nid, role: a.role, kind: a.kind, bucket: a.bucket, path: to, still_path: still, file_name: a.file_name || '', width: a.width || null, height: a.height || null, duration_s: a.duration_s == null ? null : a.duration_s }).select('id');
+          if (ins.error) throw ins.error; row = (Array.isArray(ins.data) ? ins.data[0] : ins.data) || null; }
+        if (!row || !okId(row.id)) throw new Error('not filed');
+        if (a.role === 'header') setup.headerOpt = Object.assign({}, setup.headerOpt || {}, { asset: row.id, kind: a.kind });
+        else setup.intro = Object.assign({}, pend.intro || {}, { asset: row.id });
+        assetsDone = true; done++; } catch (_) { stillAssets.push(p); }
+    }
+    if (stillMedia.length || stillAssets.length) setup.copyPending = Object.assign({}, pend, { media: stillMedia, assets: stillAssets }); else delete setup.copyPending;
+    // the header and video introduction go back into the sections, written from the set-up as the set-up page writes them
+    let sections = null, fields = null;
+    if (assetsDone) { const w = APPR.writeStandard(setup, (rec.fields || {}).ranges || [], { address: rec.address, preparedOn: rec.prepared_on, cat: { PACKAGES: typeof PACKAGES !== 'undefined' ? PACKAGES : {}, ITEMS: typeof ITEMS !== 'undefined' ? ITEMS : {}, CATALOGUE: typeof CATALOGUE !== 'undefined' ? CATALOGUE : [] } });
+      sections = w.sections; }
+    const { error } = await sb.rpc('agent_appraisal_save', { p_id: nid, p_setup: setup, p_fields: fields, p_sections: sections, p_title: null, p_prepared_for: null, p_private_notes: null, p_status: null });
+    const q = { media: stillMedia.length, header: stillAssets.some(x => x.role === 'header'), intro: stillAssets.some(x => x.role === 'intro') };
+    if (error) return { done, left: 1, q: apPending(rec) };
+    return { done, left: stillMedia.length + stillAssets.length, q };
+  }
   function apSentWire(rec, sd) {
     $$('[data-apresend]').forEach(b => b.addEventListener('click', async () => { b.disabled = true; atBtn(b, 'Sending...', 'busy');
       const r = await apSendMail(b.dataset.apresend); atBtn(b, r.msg, r.ok ? 'ok' : 'err'); if (!r.ok && !r.maybe) b.disabled = false; }));
@@ -9904,32 +9969,10 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     btn.disabled = true; atBtn(btn, 'Making the updated version...', 'busy');
     const { data, error } = await sb.rpc('agent_appraisal_new_version', { p_id: rec.id });
     if (error || !data) { btn.disabled = false; atBtn(btn, netErr(error) ? 'No signal. Try again when you have signal; nothing was made.' : (error && error.message) || 'Not made. Try again.', 'err'); return; }
-    const nid = data.appraisal_id; let missed = 0;
-    if (!data.existing) {
-      const base = p => String(p).split('/').pop();
-      for (const m of data.media || []) {
-        const to = `appraisals/${nid}/comps/${m.comp_id}/${base(m.path)}`;
-        try { const c = await sb.storage.from(AMB).copy(m.path, to); if (c.error) throw c.error;
-          const ins = await sb.from('appraisal_media').insert({ appraisal_id: nid, comp_id: m.comp_id, path: to, file_name: m.file_name || '', width: m.width || null, height: m.height || null, position: m.position || 0, cover: !!m.cover, source: m.source || 'upload', source_url: m.source_url || null, page_url: m.page_url || null });
-          if (ins.error) throw ins.error; } catch (_) { missed++; }
-      }
-      const idMap = {};
-      for (const a of data.assets || []) {
-        const to = `appraisals/${nid}/${a.role}/${base(a.path)}`, still = a.still_path ? `appraisals/${nid}/${a.role}/${base(a.still_path)}` : null;
-        try { const c = await sb.storage.from(a.bucket).copy(a.path, to); if (c.error) throw c.error;
-          if (still) { const s = await sb.storage.from(AMB).copy(a.still_path, still); if (s.error) throw s.error; }
-          const ins = await sb.from('appraisal_assets').insert({ appraisal_id: nid, role: a.role, kind: a.kind, bucket: a.bucket, path: to, still_path: still, file_name: a.file_name || '', width: a.width || null, height: a.height || null, duration_s: a.duration_s == null ? null : a.duration_s }).select('id');
-          if (ins.error) throw ins.error; const row = Array.isArray(ins.data) ? ins.data[0] : ins.data; if (row && row.id) idMap[a.id] = row.id; } catch (_) { missed++; }
-      }
-      // the new header and video files take the old ones' places in the set-up and the sections
-      if (Object.keys(idMap).length) {
-        try { const r0 = await sb.from('appraisal_views').select('setup,sections').eq('id', nid); const v = (r0.data || [])[0];
-          if (v) { let s = JSON.stringify(v.setup || {}), x = JSON.stringify(v.sections || []); Object.entries(idMap).forEach(([o, n]) => { s = s.split(o).join(n); x = x.split(o).join(n); });
-            const { error: e2 } = await sb.rpc('agent_appraisal_save', { p_id: nid, p_setup: JSON.parse(s), p_fields: null, p_sections: JSON.parse(x), p_title: null, p_prepared_for: null, p_private_notes: null, p_status: null }); if (e2) missed++; } } catch (_) { missed++; }
-      }
-    }
-    atBtn(btn, missed ? `The updated version is made, but ${missed} photo${missed === 1 ? '' : 's'} or video${missed === 1 ? '' : 's'} didn't copy. Add ${missed === 1 ? 'it' : 'them'} again on its Comparables or Sections screen.` : 'The updated version is made. Opening its set-up...', missed ? 'err' : 'ok');
-    setTimeout(() => apsOpenSetup(nid), missed ? 2500 : 600);
+    // the copying is the same step "Finish copying photos and videos" runs, so a copy cut short carries on from where it stopped
+    const nid = data.appraisal_id, r = await apFinishCopy(nid);
+    atBtn(btn, r.left ? `The updated version is made, but ${apPendingWords(r.q)} didn't copy yet. Its page offers "Finish copying photos and videos".` : 'The updated version is made. Opening its set-up...', r.left ? 'err' : 'ok');
+    setTimeout(() => apsOpenSetup(nid), r.left ? 2500 : 600);
   }
 
   // the Send page: who it goes to (the property's owners and contacts with an email, and the contact of its open Questions before we
@@ -9957,6 +10000,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <h1>${isUpdate ? 'Send updated version' : 'Send to the vendor'}</h1>
       <p class="lede">For <strong translate="no">${esc(rec.address || rec.title)}</strong>. They sign in with their email and see a private copy. Once it's sent, this copy can't change: to change it later, you make an updated version.</p>
       ${isUpdate ? `<div class="card note tight"><p class="small" style="margin:0">They were sent version ${last.version} on ${esc(fmtDT(last.sent_at))}. Once you send this, everyone you choose sees this version instead.</p></div>` : ''}
+      ${apPendingHTML(rec)}
       <h2>Who it goes to</h2>
       ${cands.length ? `<div id="apTo">${cands.map((c, i) => `<label class="choice cb"><input type="checkbox" data-apto="${i}" ${pre(c) ? 'checked' : ''}><span class="mark"></span><span><span class="ct" translate="no">${esc(c.name || c.email)}</span><span class="cd"><span translate="no">${esc(c.email)}</span> · ${esc(c.role)}</span></span></label>`).join('')}</div>`
         : '<div class="card warnc tight" id="apTo"><p class="small" style="margin:0">No one on this property has an email address yet. Add the owners on the property file first.</p></div>'}
@@ -9967,6 +10011,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       <label class="choice cb" style="margin-top:14px"><input type="checkbox" id="apRead"><span class="mark"></span><span><span class="ct">I've read the appraisal and this email</span><span class="cd">${plink(`appraisals/${rec.id}/present`, 'Read the appraisal as they will see it')}</span></span></label>
       <div class="toolbar"><button class="btn primary" type="button" id="apSendBtn" data-busy="Sending...">${isUpdate ? 'Send updated version' : 'Send it'}</button>${plink(`appraisals/${rec.id}`, 'Back to the appraisal', 'btn ghost')}</div>
       <div id="apSendDone"></div></div>`;
+    apPendingWire(rec, () => viewAppraisalSend(rec.id));
     let edited = false;
     const chosen = () => $$('[data-apto]').filter(x => x.checked).map(x => cands[+x.dataset.apto]);
     const draft = () => { if (edited) return; const w = MAIL.appraisalDraft({ first: chosen().map(firstOf).filter(Boolean), address: rec.address, update: isUpdate }); $('#apSub').value = w.subject; $('#apBody').value = w.body; };
@@ -9983,6 +10028,8 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       if ((body.match(MAIL.BLANK_RE) || []).length) return atBtn(sb_, 'Fill or delete the marked blanks first.', 'err');
       const w = APPR.wordingProblem(sub + '\n' + body); if (w) return atBtn(sb_, 'The email: ' + w, 'err');
       if (!$('#apRead').checked) return atBtn(sb_, 'Tick that you\'ve read the appraisal and the email first.', 'err');
+      const pq = apPending(rec);
+      if (pq && !confirm(`${apPendingWords(pq).replace(/^./, c => c.toUpperCase())} from the version you sent didn't copy to this one, so ${pq.media + (pq.header ? 1 : 0) + (pq.intro ? 1 : 0) === 1 ? 'it isn\'t' : 'they aren\'t'} in what you are about to send. Send without ${pq.media + (pq.header ? 1 : 0) + (pq.intro ? 1 : 0) === 1 ? 'it' : 'them'}?`)) return;
       if (!confirm(`Send it to ${to.join(', ')} now? Once it's sent, this copy can't change.`)) return;
       sb_.disabled = true; atBtn(sb_, 'Sending...', 'busy');
       const { data, error } = await sb.rpc('agent_appraisal_send', { p_id: rec.id, p_recipients: to, p_subject: sub, p_body: body });
@@ -10041,8 +10088,41 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     top();
   }
 
+  /* ── the vendor page's own extras, all in this one block (the appraisal itself is drawn only by APPR.render): the sent line, the plan
+     they built, the proceed card and the media note, the "Build your own" link added to the plans' custom card, and the plan's save ── */
+  // a plan they built on the packages page, brought back to this appraisal. { saved, msg, retry }: retry when it was the signal
+  async function apSavePendingPlan(d) {
+    let pend = null; try { pend = JSON.parse(localStorage.getItem('apPlan') || 'null'); } catch (_) { pend = null; }
+    if (!(pend && pend.chain === d.chain_id && pend.sel && typeof pend.sel === 'object')) return { saved: false };
+    let r = null, e = null;
+    try { const x = await sb.rpc('vendor_appraisal_plan_save', { p_snapshot: d.snapshot_id, p_plan: { sel: pend.sel, band: pend.band || null, total: +pend.total || 0, on_request: +pend.on_request || 0 } }); r = x.data; e = x.error; } catch (err) { e = err; }
+    if (!e && r) { d.plan = { sel: pend.sel, band: pend.band, total: +pend.total || 0, on_request: +pend.on_request || 0 }; apNotify(r.event_id); try { localStorage.removeItem('apPlan'); } catch (_) { } return { saved: true }; }
+    if (netErr(e)) return { saved: false, retry: true, msg: 'Your plan didn\'t save: there\'s no signal. It\'s kept on this device. Try again when you have signal.' };
+    try { localStorage.removeItem('apPlan'); } catch (_) { }
+    return { saved: false, msg: 'Your plan didn\'t save: ' + String((e && e.message) || 'please build it again.').replace(/\.?$/, '.') };
+  }
+  function apVendorExtras(d, ps, c) {
+    const media = Object.keys(c.photos || {}).length + Object.keys(c.assets || {}).length + Object.keys(c.homePhotos || {}).length;
+    return { top: `<p class="small no-print" id="apvSentLine">${d.version > 1 ? `Updated by Tim McGuire on ${esc(fmtDate(d.sent_at))}. This is the newest version.` : `From Tim McGuire, ${esc(fmtDate(d.sent_at))}.`} Private to you.</p>`,
+      bottom: `${apPlanCardHTML(d.plan, ps.saved)}
+      <section class="card no-print" id="apvNext"><h2>${d.prelisting_id ? 'Your questions' : 'Ready for the next step?'}</h2>
+        <p>${d.prelisting_id ? 'Carry on with the few quick questions, so I can shape the plan around what matters most to you.' : 'Press below and answer a few quick questions, so I can shape the plan around what matters most to you. There\'s no obligation, and nothing to sign yet.'}</p>
+        <div class="toolbar"><button class="btn primary" type="button" id="apvProceed">${d.prelisting_id ? 'Carry on with my questions' : 'I\'d like to proceed'}</button></div></section>
+      ${media ? '<p class="small no-print" id="apvMediaNote">Photos and videos open for a short time each visit. If one stops showing, reload the page.</p>' : ''}
+      <p class="small">Questions at any stage? Call or text Tim on <strong>027 562 7207</strong>.</p>` };
+  }
+  function apVendorExtrasWire(d, ps, c, id) {
+    // the "Build your own" card opens the campaign builder, starting from the plan Tim recommends, with the way back here
+    const rec = ((c.sections || []).find(s => s && s.type === 'plans') || { items: [] }).items.find(p => p && p.rec);
+    const cust = $('#apvDoc .apv-plan[data-plan="custom"]'); if (!cust) return;
+    cust.insertAdjacentHTML('beforeend', `<a class="btn ghost no-print" id="apvBuild" href="${esc(apBuildUrl(d.chain_id, rec && rec.key !== 'custom' ? rec.key : ''))}" style="display:inline-block;margin-top:8px;text-decoration:none">${d.plan ? 'Change my plan' : 'Build your own plan'}</a>`
+      + (ps.msg ? `<p class="btn-note no-print" id="bn-apvBuild" data-kind="err" role="status">${esc(ps.msg)}</p>${ps.retry ? '<div class="toolbar no-print"><button class="btn primary" type="button" id="apvPlanRetry">Try saving my plan again</button></div>' : ''}` : ''));
+    const rt = $('#apvPlanRetry'); if (rt) rt.addEventListener('click', async () => { rt.disabled = true; atBtn(rt, 'Saving...', 'busy');
+      const r = await apSavePendingPlan(d); if (r.saved) return viewVendorAppraisal(id, { justSaved: true }); rt.disabled = !r.retry; atBtn(rt, r.msg, 'err'); });
+  }
+
   // the vendor's own page: the newest copy sent to them, behind their email sign-in
-  async function viewVendorAppraisal(id) {
+  async function viewVendorAppraisal(id, opt) {
     JCTX.pid = null; JVIEW = {};
     header('Your appraisal', '', 0); actions(false);
     main().innerHTML = '<div class="loading">Loading...</div>';
@@ -10053,31 +10133,13 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
       top(); return;
     }
     apNotify(d.event_id);
-    // a plan they built on the packages page, brought back to this appraisal (saved once; the builder keeps nothing)
-    let saved = false;
-    try { const pend = JSON.parse(localStorage.getItem('apPlan') || 'null');
-      if (pend && pend.chain === d.chain_id && pend.sel && typeof pend.sel === 'object') {
-        const { data: r, error: e } = await sb.rpc('vendor_appraisal_plan_save', { p_snapshot: d.snapshot_id, p_plan: { sel: pend.sel, band: pend.band || null, total: +pend.total || 0, on_request: +pend.on_request || 0 } });
-        if (!e && r) { saved = true; d.plan = { sel: pend.sel, band: pend.band, total: +pend.total || 0, on_request: +pend.on_request || 0 }; apNotify(r.event_id); localStorage.removeItem('apPlan'); }
-        else if (e && !netErr(e)) localStorage.removeItem('apPlan');
-      } } catch (_) { }
+    const ps = opt && opt.justSaved ? { saved: true } : await apSavePendingPlan(d);
     const c = d.content, ev = await apCopyEv(c, apVendorLink(d.snapshot_id));
     if (!$('#main .loading')) return;
-    const media = Object.keys(c.photos || {}).length + Object.keys(c.assets || {}).length + Object.keys(c.homePhotos || {}).length;
-    const rec = ((c.sections || []).find(s => s && s.type === 'plans') || { items: [] }).items.find(p => p && p.rec);
-    main().innerHTML = `<div class="view-pad apv apv-vendor" id="apvVendor">
-      <p class="small no-print" id="apvSentLine">${d.version > 1 ? `Updated by Tim McGuire on ${esc(fmtDate(d.sent_at))}. This is the newest version.` : `From Tim McGuire, ${esc(fmtDate(d.sent_at))}.`} Private to you.</p>
-      <div id="apvDoc"></div>
-      ${apPlanCardHTML(d.plan, saved)}
-      <section class="card no-print" id="apvNext"><h2>${d.prelisting_id ? 'Your questions' : 'Ready for the next step?'}</h2>
-        <p>${d.prelisting_id ? 'Carry on with the few quick questions, so I can shape the plan around what matters most to you.' : 'Press below and answer a few quick questions, so I can shape the plan around what matters most to you. There\'s no obligation, and nothing to sign yet.'}</p>
-        <div class="toolbar"><button class="btn primary" type="button" id="apvProceed">${d.prelisting_id ? 'Carry on with my questions' : 'I\'d like to proceed'}</button></div></section>
-      ${media ? '<p class="small no-print" id="apvMediaNote">Photos and videos open for a short time each visit. If one stops showing, reload the page.</p>' : ''}
-      <p class="small">Questions at any stage? Call or text Tim on <strong>027 562 7207</strong>.</p></div>`;
+    const x = apVendorExtras(d, ps, c);
+    main().innerHTML = `<div class="view-pad apv apv-vendor" id="apvVendor">${x.top}<div id="apvDoc"></div>${x.bottom}</div>`;
     $('#apvDoc').innerHTML = APPR.render(apCopyRec(c), ev); abWireVideos($('#apvDoc'));
-    // the "Build your own" card opens the campaign builder, starting from the plan Tim recommends, with the way back here
-    const cust = $('#apvDoc .apv-plan[data-plan="custom"]');
-    if (cust) cust.insertAdjacentHTML('beforeend', `<a class="btn ghost no-print" id="apvBuild" href="${esc(apBuildUrl(d.chain_id, rec && rec.key !== 'custom' ? rec.key : ''))}" style="display:inline-block;margin-top:8px;text-decoration:none">${d.plan ? 'Change my plan' : 'Build your own plan'}</a>`);
+    apVendorExtrasWire(d, ps, c, id);
     const pb = $('#apvProceed');
     pb.addEventListener('click', async () => {
       if (d.prelisting_id) return viewPrelisting(d.prelisting_id, true);

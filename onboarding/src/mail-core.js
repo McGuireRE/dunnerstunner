@@ -489,7 +489,7 @@
       up ? `I've updated my appraisal of ${addr}. The new version is ready for you to look at, in the same private place as before:`
         : `Thank you for having me through ${addr}. As promised, my appraisal is ready: where I think buyers will land, how I would sell it, and the marketing I would suggest. It's private to you:`,
       APPRAISAL_LINK,
-      'Open the link and sign in with this email address. You\'ll get a sign-in email straight away, with no password needed. The photos open for a short time each visit, so just sign in again whenever you come back.',
+      'Open the link and sign in with this email address. You\'ll get a sign-in email straight away, with no password needed. You can come back to it any time with the same link.',
       up ? 'If anything in it raises a question, or you are ready to talk about next steps, press "I\'d like to proceed" at the bottom of the page.'
         : 'Take your time with it. When you\'re ready, press "I\'d like to proceed" at the bottom of the page and answer a few quick questions, so I can shape the plan around what matters most to you. There\'s no obligation.',
       `Any questions at all, just call or text me on ${TIM_PHONE}.`, 'Tim'].join('\n\n');

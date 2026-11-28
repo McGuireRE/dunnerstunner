@@ -676,17 +676,21 @@ Builds on 036 (live). Additive only: no existing column, row, policy, function, 
 - `appraisal_versions` (appraisal_id, previous_id, chain_id): "Make an updated version". `appraisal_mail` (snapshot_id, to_addr, subject,
   body with [the appraisal link], status queued|sending|sent|failed): the words never change; status only moves on (`guard_appraisal_mail`).
   `appraisal_events` (sent, opened, proceeded, plan_built; notified_at and seen_at set once each; `guard_appraisal_event`).
-  `appraisal_vendor_plans` (a plan the vendor built on the packages page; kept). RLS on all five: select for is_agent() only; no direct
+  `appraisal_vendor_plans` (a plan the vendor built on the packages page; one current per person per appraisal, older ones superseded
+  once, at most 10 saves; `guard_vendor_plan`). Unique indexes: opened once per person per copy, plan_built once per person per copy,
+  proceeded once per person per appraisal. RLS on all five: select for is_agent() only; no direct
   writes for anyone; nothing for anon or vendors.
 - `prelistings.appraisal_id`: the appraisal a Questions before we meet came from ("I'd like to proceed"); kept once set.
 - Who a vendor is: the signed-in email is one of the copy's recipients and still an owner or contact on the property (not former), or
   the contact of its open Questions before we meet in this round. They read the newest copy sent to them in the chain.
 - Functions (security definer, search_path public). Tim (is_agent, granted to authenticated): `agent_appraisal_send(p_id, p_recipients,
-  p_subject, p_body)` (sets 'sent' with set_config('app.appraisal_send','on',true) and puts it back at once), `agent_appraisal_new_version`,
+  p_subject, p_body)` (sets 'sent' with set_config('app.appraisal_send','on',true) and puts it back at once), `agent_appraisal_new_version` (the draft names none of the sent version's files; `setup.copyPending` lists the photos and files the
+  portal still has to copy),
   `agent_appraisal_events_seen`, `agent_appraisal_mail_unstick`. Vendors (granted to authenticated, never anon): `vendor_appraisals_mine`,
   `vendor_appraisal_read(p_id)`, `appraisal_vendor_can_read(p_snapshot, p_bucket, p_path)` (asked by repo-link with the vendor's token),
   `vendor_appraisal_proceed(p_snapshot)`, `vendor_appraisal_plan_save(p_snapshot, p_plan)`, `appraisal_event_mine(p_event)` (asked by notify).
-  Internal (callable by nobody): `appraisal_snapshot_build` (the whitelist), `appraisal_contact_problem`, `appraisal_contact_find`,
+  Internal (callable by nobody): `appraisal_snapshot_build` (the whitelist: each section rebuilt by `appraisal_section_clean` from the
+  keys its type draws, with `ap_s`, `ap_n`, `ap_b`, `ap_lines`, `ap_rows`; market months for the drawn area's latest twelve only), `appraisal_contact_problem`, `appraisal_contact_find`,
   `appraisal_chain_of`, `appraisal_vendor_ok`, `appraisal_vendor_newest`, and the guards.
 - Edge functions: `repo-link` gains the appraisal mode ({snapshot, bucket, path}; 600-second links in appraisal-media, appraisal-video or
   property-files); `notify` gains `ap_send` (Tim's reviewed email, to exactly its people) and `ap_event` (Tim told once).

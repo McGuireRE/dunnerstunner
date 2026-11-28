@@ -566,7 +566,7 @@ function apprBucket(){ return {
   remove:(ps)=>{ if(offline()) return netFail(); if(!isAgentMe()) return ok([]); const gone=(ps||[]).filter(p=>{ const f=String(p).split('/'); return SO()[p]&&SO()[p].bucket===AMB&&!avSent(f[1]); }); gone.forEach(p=>{ delete SO()[p]; }); save(); return ok(gone.map(name=>({name}))); },
   // 037: Storage's copy (read the source, add the destination, under the same policies as an upload)
   copy:(from,to)=>apCopy(AMB,from,to) }; }
-function apCopy(bucket,from,to){ logCall('copy:'+bucket+':'+to); if(offline()) return netFail(); if(!isAgentMe()) return bad('new row violates row-level security policy');
+function apCopy(bucket,from,to){ logCall('copy:'+bucket+':'+to); if(offline()||localStorage.getItem('mockCopyFail')==='1') return netFail();   // mockCopyFail = '1': the copy fails, as with the signal dropping if(!isAgentMe()) return bad('new row violates row-level security policy');
   const o=SO()[from]; if(!o||(o.bucket||'property-files')!==bucket) return bad('Object not found'); const f=String(to).split('/');
   if(f[0]!=='appraisals'||!(DB.appraisal_views||[]).some(v=>v.id===f[1]&&v.status!=='sent')||!['comps','header','intro'].includes(f[2])||(bucket===AVB&&f[2]==='comps')) return bad('new row violates row-level security policy');
   if(SO()[to]) return Promise.resolve({data:null,error:{message:'The resource already exists',statusCode:'409'}});
@@ -666,7 +666,8 @@ function lw3cRpc(name,a,me){ if(offline()) return bad('Failed to fetch');
 // ── migration 037 (LW3 phase E): sending an appraisal to the vendor, mirroring the database functions ──
 // agent_appraisal_send builds the frozen copy as a whitelist (appraisal_snapshot_build), marks the appraisal sent and queues the email;
 // the vendor reads the newest copy sent to them (vendor_appraisal_read), proceeds, saves a plan; Tim makes an updated version.
-// localStorage mockApCalls: every call, for the tests.
+// localStorage mockApCalls: every call, for the tests. Decided (Tim, 28 November 2026, open question 7): someone Tim sets aside (former)
+// loses access at once, even with an open Questions before we meet, as appraisal_vendor_ok does.
 const AP_RPCS=['agent_appraisal_send','agent_appraisal_new_version','agent_appraisal_events_seen','agent_appraisal_mail_unstick','vendor_appraisals_mine','vendor_appraisal_read','appraisal_vendor_can_read','vendor_appraisal_proceed','vendor_appraisal_plan_save','appraisal_event_mine'];
 const AP_TABLES=['appraisal_snapshots','appraisal_versions','appraisal_mail','appraisal_events','appraisal_vendor_plans'];
 const APS=()=>(DB.appraisal_snapshots||=[]), APV=()=>(DB.appraisal_versions||=[]), APM=()=>(DB.appraisal_mail||=[]), APE=()=>(DB.appraisal_events||=[]), APP=()=>(DB.appraisal_vendor_plans||=[]);
@@ -678,12 +679,31 @@ const apChain=id=>{ const s=APS().find(x=>x.id===id); if(s) return s.chain_id; c
 const apEmail=()=>String((S&&S.user&&S.user.email)||'').toLowerCase();
 function apVendorOk(s){ const em=apEmail(); if(!S||!S.user||!em) return false; if(!(s.recipients||[]).some(r=>String(r.email).toLowerCase()===em)) return false; const p=PT().find(x=>x.id===s.property_id)||{};
   return PP().some(x=>x.property_id===s.property_id&&['owner','contact'].includes(x.role||'owner')&&x.email&&x.email.toLowerCase()===em)
-    ||(DB.prelistings||[]).some(l=>l.property_id===s.property_id&&l.status!=='closed'&&(!p.cycle_at||l.created_at>=p.cycle_at)&&String(l.contact_email||'').toLowerCase()===em); }
+    ||((DB.prelistings||[]).some(l=>l.property_id===s.property_id&&l.status!=='closed'&&(!p.cycle_at||l.created_at>=p.cycle_at)&&String(l.contact_email||'').toLowerCase()===em)
+      &&!PP().some(x=>x.property_id===s.property_id&&x.role==='former'&&x.email&&x.email.toLowerCase()===em)); }   // Tim, 28 Nov: someone set aside loses access at once
 const apNewest=chain=>APS().filter(s=>s.chain_id===chain&&apVendorOk(s)).sort((x,y)=>y.version-x.version)[0]||null;
 const UUIDX=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-function apBuild(r){ const ALLOWED=['heading','para','note','byline','list','table','ranges','method','methods','wave','opinion','campaign','methodcards','plans','panel','header','intro','heard','home','buyers','reviews'];
-  const strip=s=>{ const o=Object.assign({},s); ['private_note','private_notes','problem','problems','from'].forEach(k=>delete o[k]); return o; };
-  const secs=(r.sections||[]).filter(s=>s&&typeof s==='object'&&ALLOWED.includes(s.type)).map(strip), f=r.fields||{};
+// appraisal_section_clean(): each section rebuilt from the keys its type draws; lines kept as strings, or {text, ticked: true}
+const apS=v=>typeof v==='string'?v:undefined, apN=v=>typeof v==='number'?v:undefined, apB=v=>typeof v==='boolean'?v:undefined;
+const apLines=v=>Array.isArray(v)?v.filter(x=>typeof x==='string'||(x&&typeof x==='object'&&!Array.isArray(x)&&x.ticked===true&&typeof x.text==='string')).map(x=>typeof x==='string'?x:x.text):[];
+const apRows=v=>Array.isArray(v)?v.filter(Array.isArray).map(r=>r.filter(c=>typeof c==='string'||typeof c==='number').map(String)):[];
+const apObjs=(v,f)=>Array.isArray(v)?v.filter(x=>x&&typeof x==='object'&&!Array.isArray(x)).map(f):[];
+const apStripU=o=>{ if(Array.isArray(o)) return o.map(apStripU); if(o&&typeof o==='object'){ const r={}; Object.entries(o).forEach(([k,v])=>{ if(v!==undefined&&v!==null) r[k]=apStripU(v); }); return r; } return o; };
+function apSecClean(s){ if(!s||typeof s!=='object'||Array.isArray(s)) return null; const t=s.type; let o;
+  if(['heading','note','byline'].includes(t)) o={text:apS(s.text)}; else if(t==='para') o={text:apS(s.text),cls:apS(s.cls)}; else if(t==='list') o={items:apLines(s.items),ordered:apB(s.ordered)};
+  else if(t==='table'||t==='methods') o={head:apLines(s.head),rows:apRows(s.rows)}; else if(t==='ranges') o={head:apLines(s.head)}; else if(t==='method') o={}; else if(t==='opinion') o={head:apLines(s.head),table:apB(s.table)};
+  else if(t==='wave'||t==='campaign') o={title:apS(s.title),subtitle:apS(s.subtitle),marker:apN(s.marker),markerLabel:apS(s.markerLabel),trickle:apS(s.trickle),tail:apS(s.tail),caption:apS(s.caption),bars:apObjs(s.bars,b=>({label:apS(b.label),pct:apN(b.pct)}))};
+  else if(t==='methodcards') o={rec:apS(s.rec),items:apObjs(s.items,m=>({key:apS(m.key),name:apS(m.name),how:apS(m.how),suits:apS(m.suits),know:apS(m.know)}))};
+  else if(t==='plans') o={included:apS(s.included),items:apObjs(s.items,p=>({key:apS(p.key),name:apS(p.name),price:apN(p.price),tagline:apS(p.tagline),items:apLines(p.items),rec:apB(p.rec)}))};
+  else if(t==='panel') o={title:apS(s.title),items:apLines(s.items)};
+  else if(t==='header') o={stage:apN(s.stage),src:apS(s.src),asset:apS(s.asset),url:/^https:\/\/[^\s"'<>]+$/.test(s.url||'')?s.url:undefined,kind:apS(s.kind),credit:apS(s.credit),focus:s.focus&&typeof s.focus==='object'?{x:apN(s.focus.x),y:apN(s.focus.y)}:undefined,zoom:apN(s.zoom),bright:apN(s.bright),speed:apN(s.speed)};
+  else if(t==='intro') o={stage:apN(s.stage),asset:apS(s.asset)}; else if(t==='heard') o={stage:apN(s.stage),items:apLines(s.items)};
+  else if(t==='home') o={stage:apN(s.stage),label:apS(s.label),photos:apLines(s.photos),details:(Array.isArray(s.details)?s.details:[]).filter(d=>Array.isArray(d)&&typeof d[0]==='string'&&typeof d[1]==='string').map(d=>[d[0],d[1]]),
+    ad:s.ad&&typeof s.ad==='object'&&!Array.isArray(s.ad)&&(s.ad.ticked===undefined||s.ad.ticked===true)?{title:apS(s.ad.title),paras:apLines(s.ad.paras)}:undefined};
+  else if(t==='buyers') o={stage:apN(s.stage),text:apS(s.text),tags:apLines(s.tags)}; else if(t==='reviews') o={stage:apN(s.stage),max:apN(s.max)}; else return null;
+  return apStripU(Object.assign({type:t},o)); }
+function apBuild(r){
+  const secs=(r.sections||[]).map(apSecClean).filter(Boolean), f=r.fields||{};
   const flds={}; if(Array.isArray(f.ranges)) flds.ranges=f.ranges.filter(q=>q&&typeof q==='object').map(q=>{ const o={}; ['key','option','involves','low','high'].forEach(k=>{ if(q[k]!=null) o[k]=q[k]; }); return o; }); if(typeof f.bedrooms==='string') flds.bedrooms=f.bedrooms; if(f.method&&typeof f.method==='object'){ flds.method={}; ['name','key','text'].forEach(k=>{ if(f.method[k]!=null) flds.method[k]=f.method[k]; }); }
   let w=apprWording([secs,flds,r.title,r.prepared_for,r.address]); if(w) throw new Error(w);
   const chk=apStrings([secs.map(s=>{ const o=Object.assign({},s); delete o.url; delete o.asset; delete o.photos; return o; }),Object.assign({},flds,{ranges:(flds.ranges||[]).map(q=>({option:q.option,involves:q.involves}))}),r.title,r.prepared_for]).find(apContact);
@@ -696,7 +716,10 @@ function apBuild(r){ const ALLOWED=['heading','para','note','byline','list','tab
     const o={id:c.id,position:c.position,status:c.status,address:c.address,suburb:c.suburb||undefined,price:c.price,sold_on:c.sold_on,listed_on:c.listed_on,method:c.method||undefined,days_to_sell:c.days_to_sell,bedrooms:c.bedrooms,bathrooms:c.bathrooms,floor_m2:c.floor_m2,land_m2:c.land_m2,cv:c.cv,agency:c.agency||undefined,sold_by_tim:!!c.sold_by_tim,ad_text:ad,compare_text:cmp,compare_ticked:cmp!=null,ring:c.ring,distance_m:c.distance_m,shown:true};
     Object.keys(o).forEach(k=>{ if(o[k]==null) delete o[k]; }); comps.push(o);
     (DB.appraisal_media||[]).filter(m=>m.comp_id===c.id).sort((a,b)=>(+!!b.cover-+!!a.cover)||((a.position||0)-(b.position||0))).forEach(m=>{ (photos[c.id]||=[]).push({path:m.path,cover:!!m.cover}); paths.push({bucket:AMB,path:m.path}); }); });
-  const months=r.setup&&r.setup.market===true?(DB.market_months||[]).map(m=>{ const o=Object.assign({},m); delete o.id; delete o.source_url; delete o.updated_at; return o; }):[];
+  // the market report: only the area and the twelve months it draws (market-core.js pickArea and lastYear)
+  let months=[]; if(r.setup&&r.setup.market===true){ const MM=DB.market_months||[], area=window.MKT?window.MKT.pickArea(MM,(r.setup||{}).marketArea||''):'';
+    if(area){ const ix=d=>{ const x=/^(\d{4})-(\d{2})/.exec(String(d)); return x?+x[1]*12+(+x[2]-1):null; }, rows=MM.filter(m=>m.area===area), hi=Math.max(...rows.map(m=>ix(m.month)));
+      months=rows.filter(m=>ix(m.month)>=hi-11).sort((a,b)=>ix(a.month)-ix(b.month)).map(m=>{ const o=Object.assign({},m); delete o.id; delete o.source_url; delete o.updated_at; return o; }); } }
   const assets={}, aids=secs.filter(s=>(s.type==='header'&&s.src==='asset')||s.type==='intro').map(s=>s.asset);
   (DB.appraisal_assets||[]).filter(x=>x.appraisal_id===r.id&&aids.includes(x.id)).forEach(x=>{ assets[x.id]={bucket:x.bucket,path:x.path,mime:x.mime_type,kind:x.kind,role:x.role}; if(x.still_path) assets[x.id].still_path=x.still_path; paths.push({bucket:x.bucket,path:x.path}); if(x.still_path) paths.push({bucket:AMB,path:x.still_path}); });
   const home={}, hids=[].concat(...secs.filter(s=>s.type==='home').map(s=>s.photos||[]));
@@ -734,11 +757,15 @@ function apRpc(name,a,me){ if(offline()) return bad('Failed to fetch');
       const newest=APS().filter(s=>s.chain_id===chain).sort((x,y)=>y.version-x.version)[0]; if(!newest||newest.appraisal_id!==r.id) return bad('There is a newer version of this appraisal. Update that one');
       const ex=APV().filter(v=>v.chain_id===chain).map(v=>(DB.appraisal_views||[]).find(x=>x.id===v.appraisal_id)).find(x=>x&&x.status!=='sent');
       if(ex) return ok({appraisal_id:ex.id,existing:true,comps:[],media:[],assets:[]});
-      const n={id:uid(),property_id:r.property_id,title:r.title,address:r.address,prepared_for:r.prepared_for,prepared_on:null,status:'draft',sections:c(r.sections),fields:c(r.fields),setup:c(r.setup),kind:r.kind,private_notes:r.private_notes,created_by:me.email,created_at:now(),updated_at:now()};
+      // the draft never names the sent version's header or video; setup.copyPending lists what is still to copy
+      const su=c(r.setup||{}); if(su.headerOpt&&typeof su.headerOpt==='object') delete su.headerOpt.asset; const introWas=su.intro; delete su.intro; delete su.copyPending;
+      const n={id:uid(),property_id:r.property_id,title:r.title,address:r.address,prepared_for:r.prepared_for,prepared_on:null,status:'draft',sections:c(r.sections||[]).filter(s=>!(s&&(s.type==='intro'||(s.type==='header'&&s.src==='asset')))),fields:c(r.fields),setup:su,kind:r.kind,private_notes:r.private_notes,created_by:me.email,created_at:now(),updated_at:now()};
       DB.appraisal_views.push(n); APV().push({appraisal_id:n.id,previous_id:r.id,chain_id:chain,made_by:me.email,made_at:now()});
-      const map=[]; (DB.appraisal_comps||[]).filter(x=>x.appraisal_id===r.id).forEach(x=>{ const y=Object.assign(c(x),{id:uid(),appraisal_id:n.id,created_at:now(),updated_at:now(),created_by:me.email}); DB.appraisal_comps.push(y); map.push({from:x.id,to:y.id}); });
-      const media=(DB.appraisal_media||[]).filter(m=>m.appraisal_id===r.id&&m.comp_id).map(m=>({comp_id:(map.find(z=>z.from===m.comp_id)||{}).to,path:m.path,file_name:m.file_name,width:m.width,height:m.height,position:m.position,cover:m.cover,source:m.source,source_url:m.source_url,page_url:m.page_url}));
-      const assets=(DB.appraisal_assets||[]).filter(x=>x.appraisal_id===r.id).map(x=>({id:x.id,role:x.role,kind:x.kind,bucket:x.bucket,path:x.path,still_path:x.still_path,file_name:x.file_name,width:x.width,height:x.height,duration_s:x.duration_s}));
+      const map=[]; (DB.appraisal_comps||[]).filter(x=>x.appraisal_id===r.id).sort((a,b)=>(a.position||0)-(b.position||0)).forEach(x=>{ const y=Object.assign(c(x),{id:uid(),appraisal_id:n.id,created_at:now(),updated_at:now(),created_by:me.email}); DB.appraisal_comps.push(y); map.push({from:x.id,to:y.id}); });
+      const media=(DB.appraisal_media||[]).filter(m=>m.appraisal_id===r.id&&m.comp_id).sort((a,b)=>(a.position||0)-(b.position||0)).map(m=>({from:m.path,comp:(map.find(z=>z.from===m.comp_id)||{}).to}));
+      const hs=(r.setup||{}).headerOpt||{}, is=(r.setup||{}).intro||{};
+      const assets=(DB.appraisal_assets||[]).filter(x=>x.appraisal_id===r.id&&((x.role==='header'&&hs.asset===x.id)||(x.role==='intro'&&is.asset===x.id))).map(x=>({id:x.id,role:x.role}));
+      su.copyPending={media,assets,intro:introWas===undefined?null:introWas};
       save(); return ok({appraisal_id:n.id,existing:false,comps:map,media,assets}); }
     if(name==='agent_appraisal_events_seen'){ let n=0; APE().forEach(e=>{ if((a.p_ids||[]).includes(e.id)&&!e.seen_at){ e.seen_at=now(); e.seen_by=me.email; n++; } }); save(); return ok(n); }
     if(name==='agent_appraisal_mail_unstick'){ const m=APM().find(x=>x.id===a.p_mail&&x.status==='sending'); if(!m) return bad('That email isn\'t waiting on a check'); m.status='failed'; m.error='Checked by Tim: it did not arrive'; save(); return ok(null); }
@@ -747,7 +774,7 @@ function apRpc(name,a,me){ if(offline()) return bad('Failed to fetch');
   if(name==='vendor_appraisals_mine'){ const chains=[...new Set(APS().filter(apVendorOk).map(s=>s.chain_id))]; return ok(chains.map(apNewest).filter(Boolean).sort((x,y)=>x.sent_at<y.sent_at?1:-1).map(s=>({chain_id:s.chain_id,snapshot_id:s.id,address:s.content.address,version:s.version,sent_at:s.sent_at}))); }
   if(name==='vendor_appraisal_read'){ const s=apNewest(apChain(a.p_id)); if(!s) return bad('Not found'); let ev=null;
     if(!APE().some(e=>e.snapshot_id===s.id&&e.kind==='opened'&&e.actor===em)){ ev=APE().length+1; APE().push({id:ev,snapshot_id:s.id,chain_id:s.chain_id,property_id:s.property_id,kind:'opened',actor:em,at:now(),detail:{version:s.version},notified_at:null,seen_at:null}); }
-    const plan=APP().filter(p=>p.chain_id===s.chain_id&&p.email===em).sort((x,y)=>x.created_at<y.created_at?1:-1)[0];
+    const plan=APP().find(p=>p.chain_id===s.chain_id&&p.email===em&&!p.superseded_at);
     const pl=(DB.prelistings||[]).filter(l=>l.property_id===s.property_id&&l.status!=='closed'&&String(l.contact_email||'').toLowerCase()===em&&l.appraisal_id&&apChain(l.appraisal_id)===s.chain_id)[0];
     save(); return ok({snapshot_id:s.id,chain_id:s.chain_id,version:s.version,sent_at:s.sent_at,content:c(s.content),plan:plan?c(plan.plan):null,prelisting_id:pl?pl.id:null,event_id:ev}); }
   if(name==='appraisal_vendor_can_read'){ const s=APS().find(x=>x.id===a.p_snapshot); return ok(!!s&&['appraisal-media','appraisal-video','property-files'].includes(a.p_bucket)&&!String(a.p_path||'').includes('..')&&apNewest(s.chain_id)===s&&s.paths.some(p=>p.bucket===a.p_bucket&&p.path===a.p_path)); }
@@ -767,8 +794,11 @@ function apRpc(name,a,me){ if(offline()) return bad('Failed to fetch');
     for(const k of ks){ const v=P.sel[k]; if(!/^[a-z0-9_]{1,40}$/.test(k)||typeof v!=='number'||!Number.isInteger(v)||v<1||v>99) return bad('That plan couldn\'t be read. Build it again'); clean[k]=v; }
     if(!ks.length) return bad('Choose at least one item for your plan'); if(typeof P.total!=='number'||P.total<0||P.total>1e6) return bad('That plan couldn\'t be read. Build it again');
     const plan={sel:clean,total:Math.round(P.total*100)/100}; if(/^[a-z0-9_]{1,40}$/.test(P.band||'')) plan.band=P.band; if(typeof P.on_request==='number'&&P.on_request>=0&&P.on_request<=80) plan.on_request=Math.round(P.on_request);
-    const row={id:uid(),snapshot_id:s.id,chain_id:s.chain_id,property_id:s.property_id,email:em,user_id:S.user.id,plan,created_at:stamp()}; APP().push(row);
-    const ev=APE().length+1; APE().push({id:ev,snapshot_id:s.id,chain_id:s.chain_id,property_id:s.property_id,kind:'plan_built',actor:em,at:now(),detail:{plan_id:row.id,total:plan.total},notified_at:null,seen_at:null});
+    // one current plan per person per appraisal, at most 10 saves; Tim told once per person per copy
+    const mine=APP().filter(p=>p.chain_id===s.chain_id&&p.email===em); if(mine.length>=10) return bad('Your plan has been saved 10 times, which is as many as can be kept. Call or text Tim on 027 562 7207 to change it');
+    mine.forEach(p=>{ if(!p.superseded_at) p.superseded_at=now(); });
+    const row={id:uid(),snapshot_id:s.id,chain_id:s.chain_id,property_id:s.property_id,email:em,user_id:S.user.id,plan,created_at:stamp(),superseded_at:null}; APP().push(row);
+    let ev=null; if(!APE().some(e=>e.snapshot_id===s.id&&e.kind==='plan_built'&&e.actor===em)){ ev=APE().length+1; APE().push({id:ev,snapshot_id:s.id,chain_id:s.chain_id,property_id:s.property_id,kind:'plan_built',actor:em,at:now(),detail:{plan_id:row.id,total:plan.total},notified_at:null,seen_at:null}); }
     save(); return ok({plan_id:row.id,event_id:ev}); }
   }catch(e){ return bad(e.message); }
   return bad('unknown rpc '+name); }

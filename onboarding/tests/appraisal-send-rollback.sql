@@ -5,7 +5,7 @@
 -- (invented data only, every name and address marked RB), so it runs the same on a stand-in or on one whose appraisal_views is empty.
 -- The agent is the first row of public.agents, as in 032's to 036's tests.
 do $t$
-declare out text := ''; x text; n int; j jsonb; j2 jsonb; r record; ok boolean;
+declare out text := ''; x text; x2 text; x3 text; jh jsonb; n int; j jsonb; j2 jsonb; r record; ok boolean;
   pid uuid; pid2 uuid; aid uuid; aid_bad uuid; hid uuid; c1 uuid; c2 uuid; c3 uuid; c4 uuid; c5 uuid; d1 uuid; d2 uuid; d3 uuid; hd uuid; it uuid; pl0 uuid;
   sid uuid; sid2 uuid; mid uuid; v2 uuid; plid uuid; ev bigint;
   views_before text; views_after text; pl_before text; pl_after text;
@@ -51,15 +51,18 @@ begin
     ('appraisal-media', 'appraisals/' || aid || '/intro/rb-hello-still.jpg', '{"mimetype":"image/jpeg","size":30000}');
   insert into public.appraisal_assets (appraisal_id, role, kind, bucket, path) values (aid, 'header', 'image', 'appraisal-media', 'appraisals/' || aid || '/header/rb-hero.jpg') returning id into hd;
   insert into public.appraisal_assets (appraisal_id, role, kind, bucket, path, still_path) values (aid, 'intro', 'video', 'appraisal-video', 'appraisals/' || aid || '/intro/rb-hello.mp4', 'appraisals/' || aid || '/intro/rb-hello-still.jpg') returning id into it;
-  update public.appraisal_views set sections = jsonb_build_array(
-      jsonb_build_object('type', 'header', 'stage', 1, 'src', 'asset', 'asset', hd, 'kind', 'image', 'credit', 'RB credit'),
-      jsonb_build_object('type', 'byline', 'text', 'Prepared for Robin by Tim McGuire, McGuire Real Estate'),
+  update public.appraisal_views set setup = setup || jsonb_build_object('headerOpt', jsonb_build_object('asset', hd, 'zoom', 1), 'intro', jsonb_build_object('asset', it)),
+    sections = jsonb_build_array(
+      jsonb_build_object('type', 'header', 'stage', 1, 'src', 'asset', 'asset', hd, 'kind', 'image', 'credit', 'RB credit', 'ai_note', 'RB-AI-NOTE-HEADER', 'focus', jsonb_build_object('x', 40, 'y', 50, 'rb_secret', 'RB-NESTED-SECRET')),
+      jsonb_build_object('type', 'byline', 'text', 'Prepared for Robin by Tim McGuire, McGuire Real Estate', 'tim_only', 'RB-TIM-ONLY-KEY'),
       jsonb_build_object('type', 'para', 'cls', 'lede', 'text', 'Any questions at all, call or text me on 027 562 7207.'),
       jsonb_build_object('type', 'intro', 'stage', 1, 'asset', it),
-      jsonb_build_object('type', 'heard', 'stage', 1, 'items', jsonb_build_array('You would like to be settled by March.')),
-      jsonb_build_object('type', 'home', 'stage', 2, 'label', 'A mockup.', 'photos', jsonb_build_array(d1, d2, d3), 'details', jsonb_build_array(jsonb_build_array('Heating', 'Heat pump'))),
+      jsonb_build_object('type', 'heard', 'stage', 1, 'ai_note', 'RB-AI-NOTE-HEARD', 'items', jsonb_build_array('You would like to be settled by March.',
+        jsonb_build_object('text', 'RB-TICKED-LINE', 'ticked', true, 'from', jsonb_build_array('timing'), 'private_note', 'RB-LINE-PRIVATE'), jsonb_build_object('text', 'RB-UNTICKED-LINE', 'ticked', false), 42)),
+      jsonb_build_object('type', 'home', 'stage', 2, 'label', 'A mockup.', 'photos', jsonb_build_array(d1, d2, d3), 'details', jsonb_build_array(jsonb_build_array('Heating', 'Heat pump'), jsonb_build_array('RB-BAD-DETAIL', 7)),
+        'ad', jsonb_build_object('title', 'RB ad title', 'paras', jsonb_build_array('RB ad para'), 'private_note', 'RB-AD-PRIVATE')),
       jsonb_build_object('type', 'heading', 'text', 'My opinion of price'), jsonb_build_object('type', 'opinion'),
-      jsonb_build_object('type', 'plans', 'items', jsonb_build_array(jsonb_build_object('key', 'premium', 'name', 'Premium', 'price', 4000, 'rec', true), jsonb_build_object('key', 'custom', 'name', 'Build your own', 'price', 0))),
+      jsonb_build_object('type', 'plans', 'items', jsonb_build_array(jsonb_build_object('key', 'premium', 'name', 'Premium', 'price', 4000, 'rec', true, 'private_note', 'RB-PLAN-PRIVATE'), jsonb_build_object('key', 'custom', 'name', 'Build your own', 'price', 0))),
       jsonb_build_object('type', 'rb_unknown', 'text', 'RB-UNKNOWN-SECTION'),
       jsonb_build_object('type', 'reviews', 'stage', 3, 'max', 6))
     where id = aid;
@@ -81,8 +84,11 @@ begin
   insert into public.appraisal_media (appraisal_id, comp_id, path, position, cover) values
     (aid, c1, 'appraisals/' || aid || '/comps/' || c1 || '/rb-a.jpg', 1, false), (aid, c1, 'appraisals/' || aid || '/comps/' || c1 || '/rb-b.jpg', 2, true),
     (aid, c4, 'appraisals/' || aid || '/comps/' || c4 || '/rb-hidden.jpg', 1, false);
+  -- the market store: Rbtown (another area, not drawn) and fourteen months of Dunedin (the report draws its latest twelve)
   insert into public.market_months (area, month, median, lower_quartile, upper_quartile, sales, days_to_sell, source_url)
     values ('Rbtown', date_trunc('month', today)::date - interval '1 month', 600000, 500000, 700000, 120, 30, 'https://rbmarket.example.com/x');
+  insert into public.market_months (area, month, median, lower_quartile, upper_quartile, sales, days_to_sell)
+    select 'Dunedin', (date_trunc('month', today)::date - make_interval(months => g))::date, 600000 + g, 500000, 700000, 100 + g, 30 from generate_series(1, 14) g;
   insert into public.market_sales (suburb, sold_on, price, address, source, source_ref) values ('Rbvale', today - 10, 555000, 'RB-SALE-ADDRESS 7 Hidden Road', 'reinz', 'RB-SALE-1');
   insert into public.tim_reviews (profile, ref, reviewer, rating, reviewed_on, body, url, ticked, gathered_at) values
     ('Tim McGuire', 'rb-r1', 'Sam', 5, today - 5, 'Tim was brilliant from start to finish.', 'https://g.rbtest.example.com/r1', true, now()),
@@ -173,13 +179,19 @@ begin
   -- ── the copy: the whitelist ──
   select content::text, paths, left_out into x, j, j2 from public.appraisal_snapshots where id = sid;
   for r in select t from unnest(array['RB-PRIVATE-NOTE', 'RB-COMP-PRIVATE', 'RB-UNTICKED-COMPARE', 'RB-HIDDEN', 'RB-UNTICKED-REVIEW', 'RB-REMOVED-REVIEW', 'RB-BUYER-VERDICT', 'RB-AI-PRIVATE-NOTE',
-      'RB-SALE-ADDRESS', 'RB-UNTICKED-HEARD', 'RB-UNKNOWN-SECTION', 'RB-FIELD-EXTRA', 'rbsource.example.com', 'RB-REF-1', 'rbmarket.example.com', '021 555', 'as is', 'rb-elsewhere', 'rb-old', 'private_note', 'source_url', 'RB-PL-PRICE']) t loop
+      'RB-SALE-ADDRESS', 'RB-UNTICKED-HEARD', 'RB-UNKNOWN-SECTION', 'RB-FIELD-EXTRA', 'rbsource.example.com', 'RB-REF-1', 'rbmarket.example.com', '021 555', 'as is', 'rb-elsewhere', 'rb-old', 'private_note', 'source_url', 'RB-PL-PRICE',
+      'ai_note', 'RB-AI-NOTE', 'RB-NESTED-SECRET', 'rb_secret', 'RB-TIM-ONLY-KEY', 'tim_only', 'RB-LINE-PRIVATE', 'RB-UNTICKED-LINE', '"ticked": false', 'RB-AD-PRIVATE', 'RB-PLAN-PRIVATE', 'RB-BAD-DETAIL', '"from"', 'Rbtown']) t loop
     if position(r.t in x) > 0 then out := out || 'THE COPY HOLDS ' || upper(r.t) || '; '; end if;
   end loop;
-  for r in select t from unnest(array['Smaller than yours, on a flatter section.', 'A sunny family home', '027 562 7207', 'You would like to be settled by March.', 'Tim was brilliant', 'RB credit', 'Heat pump', 'Rbtown']) t loop
+  for r in select t from unnest(array['Smaller than yours, on a flatter section.', 'A sunny family home', '027 562 7207', 'You would like to be settled by March.', 'RB-TICKED-LINE', 'Tim was brilliant', 'RB credit', 'Heat pump', 'RB ad para', '"x": 40']) t loop
     if position(r.t in x) = 0 then out := out || 'THE COPY LACKS ' || upper(r.t) || '; '; end if;
   end loop;
-  out := out || 'copy: ticked wording, shown comparables, reviews and files only; no private notes, AI notes, verdicts, sales addresses or sources; ';
+  out := out || 'copy: each section rebuilt from its own keys (no AI notes, nested private notes, unticked lines or unknown keys), shown comparables, reviews and files only; no private notes, verdicts, sales addresses or sources; ';
+  select jsonb_agg(e->'items') into jh from public.appraisal_snapshots s, jsonb_array_elements(s.content->'sections') e where s.id = sid and e->>'type' = 'heard';
+  if jh is distinct from '[["You would like to be settled by March.", "RB-TICKED-LINE"]]'::jsonb then out := out || 'HEARD LINES WRONG: ' || coalesce(jh::text, 'none') || '; '; else out := out || 'What I heard: ticked lines only, as plain text; '; end if;
+  select count(*), min(m->>'area'), max(m->>'area'), min(m->>'month') into n, x, x2, x3 from (select jsonb_array_elements(content->'months') m from public.appraisal_snapshots where id = sid) q;
+  if n <> 12 or x <> 'Dunedin' or x2 <> 'Dunedin' or x3 <> to_char(date_trunc('month', today)::date - interval '12 months', 'YYYY-MM-DD') then out := out || 'MARKET MONTHS WRONG: ' || n || ' ' || coalesce(x, '') || ' ' || coalesce(x3, '') || '; ';
+  else out := out || 'market: the drawn area''s latest twelve months only; '; end if;
   select string_agg(e->>'bucket' || ':' || regexp_replace(e->>'path', '^.*/', ''), ',' order by e->>'bucket', regexp_replace(e->>'path', '^.*/', '')) into x from jsonb_array_elements(j) e;
   if x is distinct from 'appraisal-media:rb-a.jpg,appraisal-media:rb-b.jpg,appraisal-media:rb-hello-still.jpg,appraisal-media:rb-hero.jpg,appraisal-video:rb-hello.mp4,property-files:rb-kitchen.jpg' then
     out := out || 'THE FILES LISTED ARE WRONG: ' || coalesce(x, 'none') || '; '; else out := out || 'files: the shown photos, the header, the video and its still, the mockup photo; '; end if;
@@ -244,7 +256,23 @@ begin
   j := public.vendor_appraisal_plan_save(sid, '{"sel":{"lim":1,"photos_pro":1,"signboard":2},"band":"tm_mid","total":2450.5,"on_request":1,"extra":"dropped"}');
   if (public.vendor_appraisal_read(aid)->'plan') = '{"sel":{"lim":1,"photos_pro":1,"signboard":2},"band":"tm_mid","total":2450.5,"on_request":1}'::jsonb and j->>'event_id' is not null then out := out || 'their plan saved to their appraisal; ';
   else out := out || 'PLAN WRONG: ' || coalesce((public.vendor_appraisal_read(aid)->'plan')::text, 'none') || '; '; end if;
+  -- saved again and again: one current plan, at most 10 kept, Tim told once
+  for n in 2..10 loop j := public.vendor_appraisal_plan_save(sid, jsonb_build_object('sel', jsonb_build_object('lim', 1, 'signboard', n), 'total', 100 * n));
+    if j->>'event_id' is not null then out := out || 'A LATER SAVE TOLD TIM AGAIN; '; end if; end loop;
+  begin perform public.vendor_appraisal_plan_save(sid, '{"sel":{"lim":1},"total":1}'); out := out || 'AN 11TH SAVE WAS KEPT; '; exception when others then out := out || 'an 11th save: refused (' || left(sqlerrm, 45) || '); '; end;
+  if (public.vendor_appraisal_read(aid)->'plan'->'sel'->>'signboard') = '10' then out := out || 'the newest plan is the one they see; '; else out := out || 'THE CURRENT PLAN ISN''T THE NEWEST; '; end if;
   execute 'reset role';
+  select count(*) filter (where superseded_at is null), count(*) into n, ev from public.appraisal_vendor_plans where chain_id = aid and email = 'rb-owner@example.com';
+  if n = 1 and ev = 10 then out := out || 'plans: one current, nine superseded, ten kept; '; else out := out || 'PLANS WRONG: ' || n || ' current of ' || ev || '; '; end if;
+  select count(*) into n from public.appraisal_events where snapshot_id = sid and kind = 'plan_built' and actor = 'rb-owner@example.com';
+  if n <> 1 then out := out || 'PLAN EVENTS: ' || n || '; '; else out := out || 'plan built: recorded once; '; end if;
+  begin update public.appraisal_vendor_plans set plan = '{}' where chain_id = aid and superseded_at is null; out := out || 'A PLAN CHANGED; '; exception when others then out := out || 'a plan never changes; '; end;
+  begin update public.appraisal_vendor_plans set superseded_at = now() where chain_id = aid and superseded_at is not null; out := out || 'SUPERSEDED TWICE; '; exception when others then out := out || 'superseded once only; '; end;
+  begin delete from public.appraisal_vendor_plans where chain_id = aid; out := out || 'A PLAN WAS REMOVED; '; exception when others then out := out || 'plans kept; '; end;
+  -- two reads or two presses at the same moment can't record twice: the database itself refuses the second
+  begin insert into public.appraisal_events (snapshot_id, chain_id, property_id, kind, actor) values (sid, aid, pid, 'opened', 'rb-owner@example.com'); out := out || 'OPENED RECORDED TWICE; '; exception when unique_violation then out := out || 'opened: once, by the index; '; end;
+  begin insert into public.appraisal_events (snapshot_id, chain_id, property_id, kind, actor) values (sid, aid, pid, 'proceeded', 'rb-owner@example.com'); out := out || 'PROCEEDED RECORDED TWICE; '; exception when unique_violation then out := out || 'proceeded: once, by the index; '; end;
+  begin insert into public.appraisal_events (snapshot_id, chain_id, property_id, kind, actor) values (sid, aid, pid, 'plan_built', 'rb-owner@example.com'); out := out || 'PLAN BUILT RECORDED TWICE; '; exception when unique_violation then out := out || 'plan built: once, by the index; '; end;
   -- the questionnaire contact Tim also sent it to: their existing questions are linked, not doubled
   execute 'set local role authenticated'; perform set_config('request.jwt.claims', plc, true);
   j := public.vendor_appraisal_read(aid);
@@ -284,9 +312,13 @@ begin
   begin perform public.agent_appraisal_new_version(aid_bad); out := out || 'AN UNSENT APPRAISAL WAS VERSIONED; '; exception when others then out := out || 'unsent: no update needed; '; end;
   j := public.agent_appraisal_new_version(aid); v2 := (j->>'appraisal_id')::uuid;
   select count(*) into n from public.appraisal_comps where appraisal_id = v2;
-  if j->>'existing' = 'false' and n = 4 and jsonb_array_length(j->'media') = 3 and jsonb_array_length(j->'assets') = 2 and (select chain_id from public.appraisal_versions where appraisal_id = v2) = aid
-     and (select status from public.appraisal_views where id = v2) = 'draft' and (select private_notes from public.appraisal_views where id = v2) like 'RB-PRIVATE-NOTE%' then out := out || 'updated version: a draft with its comparables, photos and files to copy; ';
-  else out := out || 'NEW VERSION WRONG: ' || left(j::text, 200) || ' comps ' || n || '; '; end if;
+  select setup into j2 from public.appraisal_views where id = v2;
+  if j->>'existing' = 'false' and n = 4 and jsonb_array_length(j2->'copyPending'->'media') = 3 and jsonb_array_length(j2->'copyPending'->'assets') = 2 and (select chain_id from public.appraisal_versions where appraisal_id = v2) = aid
+     and (j2->'copyPending'->'media'->0->>'comp')::uuid in (select id from public.appraisal_comps where appraisal_id = v2)
+     and (select status from public.appraisal_views where id = v2) = 'draft' and (select private_notes from public.appraisal_views where id = v2) like 'RB-PRIVATE-NOTE%' then out := out || 'updated version: a draft with its comparables, and the photos and files still to copy listed; ';
+  else out := out || 'NEW VERSION WRONG: ' || left(j2::text, 300) || ' comps ' || n || '; '; end if;
+  select (sections::text || (setup - 'copyPending')::text) into x from public.appraisal_views where id = v2;
+  if position(hd::text in x) > 0 or position(it::text in x) > 0 then out := out || 'THE DRAFT STILL NAMES THE SENT VERSION''S FILES; '; else out := out || 'the draft never names the sent version''s header or video; '; end if;
   if (public.agent_appraisal_new_version(aid)->>'appraisal_id')::uuid = v2 then out := out || 'asked again: the same draft; '; else out := out || 'A SECOND DRAFT WAS MADE; '; end if;
   perform public.agent_appraisal_save(v2, null, '{"ranges":[{"key":"A","option":"Your home","involves":"","low":530000,"high":585000}],"method":{"name":"Deadline sale","key":"deadline","text":"Updated."}}', '[{"type":"heading","text":"My opinion of price"},{"type":"opinion"}]', null, null, null, null);
   j := public.agent_appraisal_send(v2, array['rb-owner@example.com'], 'Your updated appraisal', body); sid2 := (j->>'snapshot_id')::uuid;
@@ -303,16 +335,21 @@ begin
   execute 'set local role authenticated'; perform set_config('request.jwt.claims', plc, true);
   if (public.vendor_appraisal_read(aid)->>'snapshot_id')::uuid = sid then out := out || 'the contact not sent version 2 keeps version 1; '; else out := out || 'VERSION 2 REACHED SOMEONE IT WASN''T SENT TO; '; end if;
   execute 'reset role';
-  -- an owner set aside keeps the view while their own Questions before we meet is open (as is_property_party, 002), and loses it
-  -- once that is closed too
+  -- an owner Tim sets aside loses access at once, even with their own Questions before we meet still open (Tim, 28 November 2026)
   update public.property_people set role = 'former' where property_id = pid and email = 'rb-owner@example.com';
+  if (select status from public.prelistings where id = plid) = 'closed' then out := out || 'THE TEST''S QUESTIONS AREN''T OPEN; '; end if;
   execute 'set local role authenticated'; perform set_config('request.jwt.claims', owner, true);
-  begin j := public.vendor_appraisal_read(aid); out := out || 'owner set aside, questions still open: still reads it; '; exception when others then out := out || 'OWNER WITH OPEN QUESTIONS LOST IT; '; end;
+  begin j := public.vendor_appraisal_read(aid); out := out || 'A FORMER OWNER WITH OPEN QUESTIONS STILL READS IT; '; exception when others then out := out || 'owner set aside, questions still open: refused at once; '; end;
+  begin j := public.vendor_appraisal_read(sid2); out := out || 'A FORMER OWNER READ THE COPY; '; exception when others then null; end;
+  if public.appraisal_vendor_can_read(sid2, 'appraisal-media', 'appraisals/' || aid || '/header/rb-hero.jpg') or public.appraisal_vendor_can_read(sid, 'appraisal-media', 'appraisals/' || aid || '/comps/' || c1 || '/rb-a.jpg') then out := out || 'A FORMER OWNER STILL GETS PHOTO LINKS; '; end if;
+  if jsonb_array_length(public.vendor_appraisals_mine()) > 0 then out := out || 'A FORMER OWNER STILL HAS IT LISTED; '; end if;
+  begin j := public.vendor_appraisal_proceed(sid2); out := out || 'A FORMER OWNER PROCEEDED; '; exception when others then null; end;
+  begin j := public.vendor_appraisal_plan_save(sid2, '{"sel":{"lim":1},"total":1}'); out := out || 'A FORMER OWNER SAVED A PLAN; '; exception when others then null; end;
+  out := out || 'former owner: no copy, no links, no listing, no proceed, no plan; ';
   execute 'reset role';
-  update public.prelistings set status = 'closed' where id = plid;
-  execute 'set local role authenticated'; perform set_config('request.jwt.claims', owner, true);
-  begin j := public.vendor_appraisal_read(aid); out := out || 'A FORMER OWNER STILL READS IT; '; exception when others then out := out || 'and once those are closed: no longer reads it; '; end;
-  if public.appraisal_vendor_can_read(sid2, 'appraisal-media', 'appraisals/' || aid || '/header/rb-hero.jpg') or jsonb_array_length(public.vendor_appraisals_mine()) > 0 then out := out || 'A FORMER OWNER STILL GETS LINKS; '; end if;
+  -- the questionnaire contact, never set aside, still reads it
+  execute 'set local role authenticated'; perform set_config('request.jwt.claims', plc, true);
+  begin j := public.vendor_appraisal_read(aid); out := out || 'the questionnaire contact still reads theirs; '; exception when others then out := out || 'THE QUESTIONNAIRE CONTACT LOST IT; '; end;
   execute 'reset role';
   -- Tim reads everything
   execute 'set local role authenticated'; perform set_config('request.jwt.claims', agent, true);

@@ -310,7 +310,7 @@ const base = () => ({
   // LW3 phase E (037): the appraisal email, in Tim's voice, and Tim's own note of what a vendor did
   { const a = M.appraisalDraft({ first: ['Robin', 'Sam'], address: '9 Example Road, Rbvale' }), u = M.appraisalDraft({ first: 'Robin', address: '9 Example Road, Rbvale', update: true }), z = M.appraisalDraft({});
     out.appraisalDraft = a;
-    ok(a.subject === 'Your appraisal: 9 Example Road, Rbvale' && /^Hello Robin and Sam,/.test(a.body) && a.body.includes(M.APPRAISAL_LINK) && /sign in with this email address/.test(a.body)
+    ok(a.subject === 'Your appraisal: 9 Example Road, Rbvale' && /^Hello Robin and Sam,/.test(a.body) && a.body.includes(M.APPRAISAL_LINK) && /sign in with this email address/.test(a.body) && /You can come back to it any time with the same link\./.test(a.body) && !/short time/.test(a.body)
       && /I'd like to proceed/.test(a.body) && /027 562 7207/.test(a.body) && /\n\nTim$/.test(a.body), 'the appraisal email: ' + a.body);
     ok(u.subject === 'Your updated appraisal: 9 Example Road, Rbvale' && /updated my appraisal/.test(u.body) && u.body.includes(M.APPRAISAL_LINK), 'the updated version: ' + u.subject);
     ok(/^Hello there,/.test(z.body) && /your property/.test(z.subject), 'nothing known: no blanks, no guesses: ' + z.subject);

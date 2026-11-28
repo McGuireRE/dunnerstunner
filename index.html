@@ -1852,14 +1852,15 @@ function showPage(id) {
 }
 
 renderBuilder();
-showPage(location.hash === '#custom' ? 'custom' : 'cover');
+showPage('cover');
 
 /* ── From a vendor's appraisal (LW3 phase E): ?ap=<their appraisal>#custom opens the builder with "Back to your appraisal".
    Starting from the plan Tim recommends (&from=), or the plan they built before; "Save to my appraisal" takes their plan back,
    where their own signed-in page saves it to their appraisal. Nothing is sent from this page. ── */
 (function () {
   const q = new URLSearchParams(location.search), ap = q.get('ap');
-  if (!ap || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(ap)) return;
+  if (!ap || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(ap)) return;   // everyone else: the page as it always was
+  if (location.hash === '#custom') showPage('custom');
   const back = 'onboarding/?appraisal=' + encodeURIComponent(ap.toLowerCase());
   let last = null; try { last = JSON.parse(localStorage.getItem('apPlanLast') || 'null'); } catch (_) { }
   if (last && last.chain === ap.toLowerCase() && last.sel) { sel = Object.assign({ lim: 1 }, last.sel); renderBuilder(); }

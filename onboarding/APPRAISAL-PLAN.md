@@ -258,6 +258,19 @@ Gathered by a monthly scheduled task in Tim's signed-in browser, from his **"Tim
   ticks Done, and on the appraisal's "Sent to the vendor" card, with the email's status and what was left out.
 - **Send updated version**: "Make an updated version" copies the newest sent appraisal, its comparables, photos and files into a new
   draft in the same chain; sending it makes version 2, which the people it is sent to see from then on.
+- **The whitelist** (review of 7a1eea5): each section is rebuilt on the server from the keys its type draws (`appraisal_section_clean`):
+  lists of lines keep plain lines and lines ticked true (as their text alone); unknown types and keys, nested ones included, never reach a
+  vendor. The market report holds only the area it draws and its latest twelve months.
+- **Once only**: opening is recorded once per person per copy, proceeding once per person per appraisal, a plan built once per person per
+  copy (unique indexes, so two at the same moment can't both count). One current plan per person per appraisal; a newer one supersedes it;
+  at most 10 saves ("Your plan has been saved 10 times, which is as many as can be kept. Call or text Tim on 027 562 7207 to change it.").
+  Tim is emailed once; later saves show on his Needs you item as "Plan last changed".
+- **Updated versions**: the draft never names the sent version's header or video. What is still to copy is listed in `setup.copyPending`;
+  the appraisal and Send pages show "Not copied yet from the version you sent: ..." with "Finish copying photos and videos" and "Leave them
+  out", and Send asks before sending a version with anything missing.
+- **Two co-owners who both proceed**: each gets their own Questions before we meet. The questionnaire belongs to one contact
+  (`prelistings.contact_email`, checked by `pl_mine`), so a second person can't answer another's; joining them needs a change to the
+  questionnaire model, left for later.
 - Not in this phase: sending the hand-loaded appraisal (it has no set-up); a check of what would be left out before sending.
 
 ## The packs (for the chat that gathers them in Tim's signed-in browser)
@@ -379,6 +392,10 @@ build time.
    Valley has plenty of residential homes too, so it is taken case by case, with AI help on whether each sale would appeal to investors.
    Built in C2: a group can be "Case by case"; the AI suggests a verdict per sale and for the subject; only a mismatch is flagged, Tim
    decides, nothing is hidden. Which suburbs are case by case is Tim's data on the screen, never in code.
+7. Phase E: may an owner Tim has set aside (former) keep reading their appraisal while their own Questions before we meet is still open?
+   DECIDED (Tim, 28 November 2026, 3:11pm: "yes, remove access"): no. Anyone Tim marks as former loses access at once: the copy, its photo
+   links, the listing on their home page, "I'd like to proceed" and saving a plan. One condition in `appraisal_vendor_ok` (migration 037),
+   which every vendor function asks, and its mirror in the mock.
 5. Phase E: the vendor keeps the copy they were sent until Tim taps "Send updated version". DEFAULT TAKEN (built in phase E, 28 November
    2026): an updated version is a new draft copied from the newest sent one; sending it makes the next numbered copy; each person sees
    the newest copy sent to them; older copies stay for Tim.
