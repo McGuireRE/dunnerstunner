@@ -95,6 +95,7 @@
   }
   // every sale method explained, as points that open; the recommended one marked and open (in print, every one is open)
   function methodCards(sec) {
+    if (!(sec.items || []).length) return '';   // nothing to explain, nothing drawn (Tim, 28 November 2026)
     return '<div class="apv-mcs">' + (sec.items || []).map(m => { const rec = m.key === sec.rec;
       return '<details class="apv-mc' + (rec ? ' apv-rec' : '') + '" data-method="' + esc(m.key) + '"' + (rec ? ' open' : '') + '><summary><strong>' + esc(m.name) + '</strong>' + (rec ? ' <span class="apv-tag">Recommended</span>' : '') + '</summary>'
         + '<dl><dt>How it works</dt><dd>' + inline(m.how) + '</dd><dt>What it suits</dt><dd>' + inline(m.suits) + '</dd><dt>Worth knowing</dt><dd>' + inline(m.know) + '</dd></dl></details>'; }).join('') + '</div>';
@@ -103,11 +104,12 @@
   // As in the sample: arrows and a dot for each plan under the strip (screen only; in print every plan is on the page).
   function plans(sec) {
     const items = sec.items || [];
+    if (!items.length) return '';   // no plan, no strip, no note (Tim, 28 November 2026)
     const cards = items.map(p => '<div class="apv-plan' + (p.rec ? ' apv-rec' : '') + '" data-plan="' + esc(p.key) + '" role="listitem">' + (p.rec ? '<span class="apv-tag">Recommended for your home</span>' : '<span class="apv-pill">Also available</span>')
       + '<h3>' + esc(p.name) + '</h3>' + (p.price ? '<p class="apv-plan-price">' + esc(dollars(p.price)) + '</p><p class="apv-plan-gst">Including GST.' + (p.tagline ? ' ' + inline(p.tagline) : '') + '</p>' : (p.tagline ? '<p class="apv-plan-gst">' + inline(p.tagline) + '</p>' : ''))
       + ((p.items || []).length ? '<ul class="apv-tick">' + p.items.map(x => '<li>' + esc(x) + '</li>').join('') + '</ul>' : '') + '</div>').join('');
     const nav = items.length > 1 ? '<div class="apv-pnav no-print"><button type="button" class="apv-pbtn" data-apv-nav data-apv-plan="-1" aria-label="Previous plan">‹</button>'
-      + items.map((p, i) => '<button type="button" class="apv-pdot' + (i ? '' : ' on') + '" data-apv-nav data-apv-plan-i="' + i + '" aria-label="' + esc(p.name + ' plan') + '"></button>').join('')
+      + items.map((p, i) => '<button type="button" class="apv-pdot' + (i ? '' : ' on') + '" data-apv-nav data-apv-plan-i="' + i + '" aria-label="' + esc(p.name + ' plan') + '"' + (i ? '' : ' aria-current="true"') + '></button>').join('')
       + '<button type="button" class="apv-pbtn" data-apv-nav data-apv-plan="1" aria-label="Next plan">›</button></div>' : '';
     return '<div class="apv-plans-wrap"><div class="apv-plans" role="list" tabindex="0" aria-label="Marketing plans">' + cards + '</div>' + nav + '</div>' + (sec.included ? '<p class="apv-note">' + inline(sec.included) + '</p>' : '');
   }
@@ -333,7 +335,8 @@
   // the header: a photo, or a video that plays muted and looped, with its still frame for paper and for reduced motion. A library
   // photo is credited "DunedinNZ"; Tim's own carries his credit line if he wrote one. Nothing to show: no header at all.
   // head: the kicker and the title, laid over the foot of the header as in the sample (none in the Sections screen's preview)
-  function hero(sec, ev, head) {
+  // preview: the Sections screen's small preview, with no title and no Pause button (it has nothing to pause there)
+  function hero(sec, ev, head, preview) {
     let url = '', still = '', mime = '';
     if (sec.src === 'library') { if (!httpsUrl(sec.url)) return ''; url = sec.url; }
     else { const a = ((ev && ev.assets) || {})[sec.asset]; if (!a || !a.url) return ''; url = a.url; still = a.still || ''; mime = a.mime || ''; }
@@ -345,7 +348,7 @@
     // a video header has the sample's Pause and Play button (screen only; it stays still for reduced motion)
     return '<figure class="apv-hero' + (sec.kind === 'video' ? ' vid' : '') + (sec.kind === 'video' && !still ? ' nostill' : '') + (head ? ' has-head' : '') + '" data-stage="' + esc(sec.stage) + '">' + media
       + (credit ? '<figcaption class="apv-credit">' + esc((sec.src === 'library' ? (sec.kind === 'video' ? 'Video: ' : 'Photo: ') : '') + credit) + '</figcaption>' : '')
-      + (sec.kind === 'video' ? '<button type="button" class="apv-vbtn no-print" data-apv-nav data-apv-vid>Pause</button>' : '')
+      + (sec.kind === 'video' && !preview ? '<button type="button" class="apv-vbtn no-print" data-apv-nav data-apv-vid>Pause</button>' : '')
       + (head ? '<div class="apv-hero-in">' + head + '</div>' : '') + '</figure>';
   }
   // Tim's video introduction: played by the vendor (not on its own), with its still frame in print
@@ -369,7 +372,7 @@
     const car = carousel(ph.map((p, k) => ({ url: p.url, alt: 'Photo ' + (k + 1) + ' of ' + ph.length + (p.room ? ', ' + p.room : '') })), 'Photos of your home');
     // the sample's layout: the photos beside the draft advertisement, then the key details as a grid of facts
     const adH = ad ? '<div class="apv-adraft"><p class="apv-kick">Draft advertisement</p>' + (ad.title ? '<h3>' + esc(ad.title) + '</h3>' : '') + (ad.paras || []).map(p => '<p>' + quote(p) + '</p>').join('') + '</div>' : '';
-    return '<section class="apv-home" data-stage="' + esc(sec.stage) + '"><h2>Your home, as buyers would see it</h2><p class="apv-mock"><span class="apv-tag mock">Mockup, not live</span> ' + esc(sec.label || MOCKUP_LABEL) + '</p>'
+    return '<section class="apv-home" data-stage="' + esc(sec.stage) + '"><h2>Your home, as buyers would see it</h2><p class="apv-mock"><span class="apv-tag mock">Mockup</span> ' + esc(MOCK_LINE) + '</p>'
       + '<div class="apv-home-card">' + (car && adH ? '<div class="apv-two">' + car + adH + '</div>' : car + adH) + (figs.length ? '<dl class="apv-figs apv-facts">' + figs.map(([k, v]) => '<div><dt>' + esc(k) + '</dt><dd>' + esc(v) + '</dd></div>').join('') + '</dl>' : '')
       + '</div></section>';
   }
@@ -406,7 +409,10 @@
   // is one); the sections in their order, each heading with an anchor; the sale methods and the plans inside the campaign, as in the
   // sample; and the closing line. Every style is scoped under .apv-doc, so the rest of the portal is unchanged.
   // APPR.brand: the logo files, set once by the page (none in the node tests, so no logo is drawn there).
-  const brand = { light: '', dark: '' };
+  const brand = { light: '', dark: '', email: '' };   // email: Tim's address as the vendor pages show it, for the letter's signature
+  // the mockup's label, as in the sample (the section still stores its longer label, MOCKUP_LABEL, for the record)
+  const MOCK_LINE = 'A draft only. Nothing here is advertised or live.';
+  const TIM_PHONE = '027 562 7207';
   // the chips' short names for the headings the appraisal writes; any other heading keeps its own words
   const NAV = [[/^what i heard/i, 'What I heard'], [/^a short video from me$/i, 'Video'], [/^your home, as buyers would see it$/i, 'Your home'], [/^the buyers i have in mind$/i, 'Your buyers'],
     [/^the price evidence at a glance$/i, 'Price evidence'], [/^sales and current listings$/i, 'Sales and listings'], [/^the (.+) market$/i, m => m[1] + ' market'],
@@ -421,20 +427,29 @@
     // the kicker and the title: an appraisal written from its set-up is headed by its address, as in the sample
     const title = written && String(rec.address || '').trim() ? rec.address : (rec && rec.title) || 'Market appraisal';
     const date = rec && rec.prepared_on ? longDate(rec.prepared_on) : '';
-    const head = (written || date ? '<p class="apv-kick apv-kick-top">Market appraisal' + (date ? ' · ' + esc(date) : '') + '</p>' : '') + '<h1>' + esc(title) + '</h1>';
+    const head = (written || date ? '<p class="apv-kick apv-kick-top">Appraisal' + (date ? ' · ' + esc(date) : '') + '</p>' : '') + '<h1>' + esc(title) + '</h1>';
     // phase B: the header (a photo or video across the top) carries the title over its foot; with no header, the title on its own
     const heroSec = secs.find(s => s.type === 'header'), heroHtml = heroSec ? hero(heroSec, ev, head) : '';
-    const parts = [];
+    const parts = []; let letter = false;
+    // the letter's signature, as in the sample: name, phone and email (the email when the page has given it)
+    const sig = '<p class="apv-sig">' + esc(['Tim McGuire', TIM_PHONE, brand.email].filter(Boolean).join(' · ')) + '</p>';
     for (let i = 0; i < secs.length; i++) {
       const s = secs[i], nx = secs[i + 1] || {}, nx2 = secs[i + 2] || {};
       if (s.type === 'header') continue;
-      // the note's heading reads as the sample's letter: a small line over the opening paragraph
-      if (s.type === 'heading' && String(s.text || '').trim() === NOTE_HEADING) { parts.push('<p class="apv-kick apv-note-k">' + inline(s.text, f) + '</p>'); continue; }
+      // the note reads as the sample's letter: no heading over it, and the signature line after its last paragraph
+      if (s.type === 'heading' && String(s.text || '').trim() === NOTE_HEADING) { letter = written; continue; }
+      if (letter && s.type === 'para') { parts.push(section(s, f, ev)); if (nx.type !== 'para') { parts.push(sig); letter = false; } continue; }
+      letter = false;
+      // the "Prepared for" line has no place on the sample's screen: it is kept for print only
+      if (s.type === 'byline') { parts.push('<p class="apv-by apv-print-only">' + inline(s.text, f) + '</p>'); continue; }
       // every way to sell: one card with its heading, its line, each method, and the general note (the sample's "ways a home can be sold")
       const mAt = nx.type === 'methodcards' ? 1 : nx.type === 'para' && nx2.type === 'methodcards' ? 2 : 0;
+      // no method to explain or no plan to show: no heading, no line, no strip (Tim, 28 November 2026: nothing there, nothing shown)
+      if (s.type === 'heading' && mAt && !((mAt === 2 ? nx2 : nx).items || []).length) { i += mAt; continue; }
+      if (s.type === 'heading' && nx.type === 'plans' && !(nx.items || []).length) { i++; continue; }
       if (s.type === 'heading' && mAt) { parts.push('<div class="apv-card apv-mcard"><h3 class="apv-h3">' + inline(s.text, f) + '</h3>' + (mAt === 2 ? '<p class="apv-note">' + inline(nx.text, f) + '</p>' : '') + section(mAt === 2 ? nx2 : nx, f, ev) + '<p class="apv-note">' + esc(METHODS_NOTE) + '</p></div>'); i += mAt; continue; }
       // the marketing plans sit inside the campaign under a smaller heading, as in the sample's "Choose your marketing"
-      if (s.type === 'heading' && nx.type === 'plans') { parts.push('<h3 class="apv-h3 apv-plans-h">' + inline(s.text, f) + '</h3><p class="apv-note">Swipe to compare the plans. The one I recommend for your home is shown first.</p>' + section(nx, f, ev)); i++; continue; }
+      if (s.type === 'heading' && nx.type === 'plans') { parts.push('<h3 class="apv-h3 apv-plans-h">' + inline(s.text, f) + '</h3><p class="apv-note no-print"><span class="apv-narrow">Swipe to compare the plans.</span><span class="apv-wide">Use the arrows to compare the plans.</span> The one I recommend for your home is shown first.</p>' + section(nx, f, ev)); i++; continue; }
       parts.push(section(s, f, ev));
     }
     const extra = written && ev ? evidence(ev, f) : '';
@@ -445,9 +460,12 @@
     }
     // the closing line, on an appraisal written from its set-up (the sample's "When you're ready, I'm ready")
     if (written) parts.push('<section class="apv-close"><h2 class="apv-close-h">When you\'re ready, I\'m ready</h2><p>Questions at any stage? Call or text Tim on <strong>027 562 7207</strong>.</p></section>');
+    // a heading with nothing under it is not drawn, so it gets no chip either (Tim, 28 November 2026: no empty headings)
+    const bare = p => /^<h2>[\s\S]*<\/h2>$/.test(p) || /^<section class="apv-close">/.test(p);
+    const kept = parts.filter(p => p).filter((p, j, a) => !(/^<h2>[\s\S]*<\/h2>$/.test(p) && (j === a.length - 1 || bare(a[j + 1]))));
     // each section heading gets an anchor, and a chip in the jump bar
     const nav = []; let k = 0;
-    const body = (heroHtml ? '' : '<div class="apv-head">' + head + '</div>') + parts.join('');
+    const body = (heroHtml ? '' : '<div class="apv-head">' + head + '</div>') + kept.join('');
     const anchored = body.replace(/<h2>([\s\S]*?)<\/h2>/g, (m, inner) => { const id = 'apv-s' + (++k), label = navLabel(inner.replace(/<[^>]+>/g, '').trim()); nav.push([id, label]); return '<h2 id="' + id + '">' + inner + '</h2>'; });
     const logo = brand.light ? '<span class="apv-logo"><img class="logo-light" src="' + esc(brand.light) + '" alt="McGuire Real Estate">' + (brand.dark ? '<img class="logo-dark" src="' + esc(brand.dark) + '" alt="McGuire Real Estate">' : '') + '</span>' : '';
     const jump = nav.length > 1 ? '<nav class="apv-jump no-print" aria-label="Sections">' + nav.map(([id, l]) => '<a class="apv-chip" href="#' + id + '" data-apv-go="' + id + '">' + l + '</a>').join('') + '</nav>' : '';
@@ -507,7 +525,9 @@
         + '<p class="apv-note no-print">Tap a dot to see the home.</p></div>';
       // the sample's one list of sales and listings, in Tim's order, with All, Sold and On the market to narrow it when there are both
       const both = sold.length && listed.length;
-      h += '<h2>Sales and current listings</h2><p class="apv-lede">Swipe through each home\'s photos and see how it measures up, line by line.</p>'
+      // the sample's line: on a phone you swipe, on a bigger screen you use the arrows; with no photos at all, nothing about photos
+      const anyPh = comps.some(c => ((ev.photos || {})[c.id] || []).some(x => x && x.url));
+      h += '<h2>Sales and current listings</h2>' + (anyPh ? '<p class="apv-lede no-print"><span class="apv-narrow">Swipe through each home\'s photos</span><span class="apv-wide">Use the arrows to see each home\'s photos</span> and see how it measures up, line by line.</p>' : '<p class="apv-lede">See how each home measures up, line by line.</p>')
         + (both ? '<div class="apv-filters no-print" role="group" aria-label="Show"><button type="button" class="apv-chip on" data-apv-nav data-apv-f="all" aria-pressed="true">All</button><button type="button" class="apv-chip" data-apv-nav data-apv-f="sold" aria-pressed="false">Sold</button><button type="button" class="apv-chip" data-apv-nav data-apv-f="listed" aria-pressed="false">On the market</button></div>' : '')
         + '<div class="apv-comps">' + comps.map(c => compCard(c, num(c), (ev.photos || {})[c.id])).join('') + '</div>';
     }
@@ -670,7 +690,7 @@
     if (!String(f.bedrooms || '').trim()) return 'Bedrooms can\'t be empty.';
     return wordingProblem(f.bedrooms) || wordingProblem((f.method || {}).name) || wordingProblem((f.method || {}).text);
   }
-  window.APPR = { render, brand, navLabel, fmtRange, dollars, inline, methodNames, checkFields, wordingProblem,
+  window.APPR = { render, brand, heroPreview: (sec, ev) => hero(sec, ev, '', true), MOCK_LINE, navLabel, fmtRange, dollars, inline, methodNames, checkFields, wordingProblem,
     vendorComp, VENDOR_COMP, STATUS_WORDS, RINGS, ringWords, compsRule, reportPacks, reportLine, matchPhoto, addrParts, addrSame, addrMatch, adShown, cmpShown, evidence,
     METHODS, CAMPAIGNS, MAX_WEEKS, campaignOf, waveFor, stepsFor, methodSentence, isHill, suburbOf, plansFor, checkSetup, writeStandard, sectionsProblem,
     DEFAULT_NOTE, DALMORE_LINE, HEAD_AND_SHOULDERS, VALUATION_LABEL,

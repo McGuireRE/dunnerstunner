@@ -64,17 +64,23 @@ const SEED = () => ({ properties: [{ id: 'P1', address: 'RB 7 Look Road, Rbvale'
     setup: SETUP, kind: 'standard', private_notes: 'TIM-ONLY-LOOK private: the hallway carpet is worn.', fields: {}, sections: [] }],
   appraisal_comps: COMPS.map(comp), appraisal_media: MEDIA, storage_objects: OBJECTS, suburb_groups: [], market_months: MONTHS, market_sales: [], appraisal_reports: [], appraisal_buyer_checks: [], appraisal_assets: [], appraisal_drafts: [], ai_calls: [],
   tim_reviews: [['Sam', 5, 12, 'Tim was brilliant from start to finish, and kept us in the loop every week.'], ['J.', 5, 40, 'Honest, calm and a strong negotiator.'], ['Ari T.', 4, 70, 'Great communication throughout.']].map(([reviewer, rating, ago, body], i) => ({ id: 'RV' + i, ref: 'g' + i, reviewer, rating, reviewed_on: day(ago), body, url: 'https://g.rbtest.invalid/r' + i, ticked: true, removed_at: null, created_at: now, updated_at: now })) });
+SEED();   // fills BLOBS with the mockup's photos too, before the first browser is made, so every view draws them
+const FONTS = path.join(__dirname, '..', 'assets', 'fonts');
+const GREQ = [], FREQ = [];   // requests to Google's fonts, and to the site's own font files
 
 (async () => {
   const b = await chromium.launch();
-  const mk = async (w, scheme) => {
-    const ctx = await b.newContext({ viewport: { width: w, height: 900 }, colorScheme: scheme, hasTouch: w < 500, isMobile: w < 500 }); ctx.setDefaultTimeout(10000);
+  const mk = async (w, scheme, reduced) => {
+    const ctx = await b.newContext({ viewport: { width: w, height: 900 }, colorScheme: scheme, hasTouch: w < 500, isMobile: w < 500, reducedMotion: reduced ? 'reduce' : 'no-preference' }); ctx.setDefaultTimeout(10000);
+    ctx.on('request', r => { if (/fonts\.(googleapis|gstatic)\.com/.test(r.url())) GREQ.push(r.url()); if (/\/onboarding\/assets\/fonts\//.test(r.url())) FREQ.push(r.url()); });
     await ctx.route('https://cdn.jsdelivr.net/**', r => r.fulfill({ contentType: 'application/javascript', body: mock }));
     if (!process.env.LOOK_FONTS) await ctx.route('https://fonts.googleapis.com/**', r => r.fulfill({ contentType: 'text/css', body: '' }));
     await ctx.route(PK + '/**', r => r.fulfill({ status: 404, contentType: 'text/html', body: shell }));
     await ctx.route(PK + '/portal**', r => r.fulfill({ status: 200, contentType: 'text/html', body: shell }));
     await ctx.route(PK + '/onboarding/portal.js', r => r.fulfill({ contentType: 'application/javascript', headers: { 'Access-Control-Allow-Origin': '*' }, body: bundle }));
     await ctx.route(PK + '/catalogue.js', r => r.fulfill({ contentType: 'application/javascript', body: cat }));
+    // the appraisal's own font files, as the site serves them (registered after the catch-all, so this one answers)
+    await ctx.route(PK + '/onboarding/assets/fonts/**', r => { const f = path.join(FONTS, path.basename(new URL(r.request().url()).pathname)); return fs.existsSync(f) ? r.fulfill({ contentType: 'font/woff2', headers: { 'Access-Control-Allow-Origin': '*' }, body: fs.readFileSync(f) }) : r.fulfill({ status: 404, body: '' }); });
     await ctx.route('https://library.rbtest.invalid/**', r => r.fulfill({ contentType: 'image/svg+xml', body: HERO }));
     await ctx.route('https://g.rbtest.invalid/**', r => r.fulfill({ status: 404, body: '' }));
     // the invented photos, as the mock's storage hands them out
@@ -107,6 +113,11 @@ const SEED = () => ({ properties: [{ id: 'P1', address: 'RB 7 Look Road, Rbvale'
       brack: (d.querySelector('.apv-wbrack') || {}).textContent || '', steps: d.querySelectorAll('ol.apv-steps li').length, methods: d.querySelectorAll('.apv-mcard details.apv-mc').length,
       plans: Array.from(d.querySelectorAll('.apv-plan')).map(x => [x.dataset.plan, x.classList.contains('apv-rec')]), pdots: d.querySelectorAll('.apv-pdot').length, planPrice: (() => { const e = d.querySelector('.apv-plan-price'); const t = e && (e.querySelector('span') || e); return t ? parseFloat(getComputedStyle(t).fontSize) : 0; })(), panel: !!d.querySelector('.apv-panel .apv-panel-h'),
       close: (d.querySelector('.apv-close h2') || {}).textContent || '', reviews: d.querySelectorAll('.apv-rev').length, buyers: d.querySelectorAll('.apv-buyers .apv-tag').length,
+      homeImgs: Array.from(d.querySelectorAll('.apv-home .apv-car img')).map(i => ({ blob: /^blob:/.test(i.src), ok: i.complete && i.naturalWidth > 100, w: Math.round(i.getBoundingClientRect().width) })),
+      swipe: (d.querySelector('.apv-evidence .apv-lede.no-print') || {}).innerText || '', planNote: (d.querySelector('.apv-plans-h + .apv-note') || {}).innerText || '',
+      rangeLab: Array.from(d.querySelectorAll('.mk-dots .mk-range-lab')).map(x => x.textContent), sig: (d.querySelector('.apv-sig') || {}).textContent || '',
+      by: (() => { const e = d.querySelector('.apv-by'); return e ? getComputedStyle(e).display : 'none'; })(), noteK: /note from Tim/i.test(d.innerText),
+      jump: (() => { const j = d.querySelector('.apv-jump'); return { wrap: getComputedStyle(j).flexWrap, ox: getComputedStyle(j).overflowX, allIn: Array.from(j.children).every(c => { const r = c.getBoundingClientRect(); return r.width > 0 && r.left >= 0 && r.right <= innerWidth; }) }; })(),
       fontH1: cs(d.querySelector('h1')).fontFamily || '', fontBody: cs(d).fontFamily || '', mainW: cs(document.querySelector('main')).maxWidth, text: d.innerText };
   });
 
@@ -115,11 +126,16 @@ const SEED = () => ({ properties: [{ id: 'P1', address: 'RB 7 Look Road, Rbvale'
   await signIn(p);
   // the rest of the portal keeps its own width: the Appraisals list is not the appraisal page
   out.listW = await p.evaluate(() => getComputedStyle(document.querySelector('main')).maxWidth);
+  GREQ.length = 0; FREQ.length = 0;
   await p.goto(PB + 'appraisals/AVL'); await wait(p, 1400);
+  await p.evaluate(() => document.fonts.ready);
+  out.fonts = await p.evaluate(() => ({ barlow: document.fonts.check('16px "MRE Barlow"'), cormorant: document.fonts.check('30px "MRE Cormorant Garamond"') }));
+  out.fontReq = { google: GREQ.slice(), own: FREQ.length };
+  expect(!out.fontReq.google.length && out.fontReq.own >= 2 && out.fonts.barlow && out.fonts.cormorant, 'the appraisal\'s fonts come from the site itself, never from Google: ' + JSON.stringify([out.fontReq, out.fonts]));
   let s = await info(p); out.phone = Object.assign({}, s, { text: undefined });
   expect(s && s.top && s.chips.join('|') === 'What I heard|Your home|Your buyers|Price evidence|Sales and listings|Dunedin market|My opinion|Campaign|Reviews', 'the top bar: the logo and a jump chip for each section: ' + JSON.stringify(s && s.chips));
-  expect(/^Market appraisal · /.test(s.kick) && s.h1 === 'RB 7 Look Road, Rbvale', 'the kicker and the address over the header: ' + JSON.stringify([s.kick, s.h1]));
-  expect(s.heard === 4 && s.facts === 8 && s.homeCar === 3 && s.adTitle === 'To wake up to the hills' && s.mockPill === 'Mockup, not live', 'What I heard as cards; the mockup with its carousel, advertisement and facts grid: ' + JSON.stringify([s.heard, s.facts, s.homeCar, s.adTitle, s.mockPill]));
+  expect(/^Appraisal · /.test(s.kick) && s.h1 === 'RB 7 Look Road, Rbvale', 'the kicker and the address over the header: ' + JSON.stringify([s.kick, s.h1]));
+  expect(s.heard === 4 && s.facts === 8 && s.homeCar === 3 && s.adTitle === 'To wake up to the hills' && s.mockPill === 'Mockup', 'What I heard as cards; the mockup with its carousel, advertisement and facts grid: ' + JSON.stringify([s.heard, s.facts, s.homeCar, s.adTitle, s.mockPill]));
   expect(s.dots === 6 && s.dotsShown === 'mk-v n' && s.cards.length === 6 && s.cards.filter(c => c.car).length === 5 && s.cards.every(c => c.rows === 5 && c.pills.length >= 2 && c.price) && s.cards.find(c => c.n === '2').pills.includes('Sold by Tim') && s.cards.find(c => c.n === '3').price === 'Asking $579,000',
     'the comparables: a card each, with carousel, pills, price in large type and the figures table: ' + JSON.stringify(s.cards));
   expect(s.filters.join('|') === 'All|Sold|On the market', 'All, Sold and On the market, as in the sample: ' + s.filters);
@@ -129,12 +145,21 @@ const SEED = () => ({ properties: [{ id: 'P1', address: 'RB 7 Look Road, Rbvale'
   expect(s.plans.length >= 3 && s.plans[0][0] === 'premium' && s.plans[0][1] && s.pdots === s.plans.length && s.panel && s.close === 'When you\'re ready, I\'m ready', 'the plans (recommended first, a dot each), the panel and the closing line: ' + JSON.stringify([s.plans, s.pdots, s.close]));
   expect(s.planPrice >= 30, 'each plan\'s price in large display type, as in the sample: ' + s.planPrice);
   expect(s.reviews === 3 && s.buyers === 3, 'reviews and the ideal buyers drawn: ' + JSON.stringify([s.reviews, s.buyers]));
-  expect(/Cormorant Garamond/.test(s.fontH1) && /Barlow/.test(s.fontBody), 'the sample\'s fonts (with fallbacks): ' + JSON.stringify([s.fontH1, s.fontBody]));
+  expect(s.homeImgs.length === 3 && s.homeImgs.every(x => x.blob) && s.homeImgs[0].ok && s.homeImgs[0].w > 200, 'phone: the mockup\'s own photos have loaded, with real size: ' + JSON.stringify(s.homeImgs));
+  expect(/^Swipe through each home's photos/.test(s.swipe) && /^Swipe to compare the plans/.test(s.planNote), 'phone: the sample\'s swipe wording: ' + JSON.stringify([s.swipe, s.planNote]));
+  expect(s.rangeLab.every(x => x === 'My range: $555,000 to $595,000') && s.rangeLab.length === 2, 'the range over the dots in full dollars, in Tim\'s voice: ' + JSON.stringify(s.rangeLab));
+  expect(s.sig === 'Tim McGuire · 027 562 7207 · tim@mcguire.co.nz' && s.by === 'none' && !s.noteK, 'the letter ends with the signature line; no heading over it; "Prepared for" on paper only: ' + JSON.stringify([s.sig, s.by, s.noteK]));
+  expect(s.jump.ox === 'auto' && s.jump.wrap === 'nowrap', 'phone: the chips stay one sideways strip: ' + JSON.stringify(s.jump));
+  expect(/MRE Cormorant Garamond/.test(s.fontH1) && /MRE Barlow/.test(s.fontBody), 'the sample\'s fonts (with fallbacks): ' + JSON.stringify([s.fontH1, s.fontBody]));
   expect(!/TIM-ONLY-LOOK/.test(s.text) && !banned(s.text.replace(/Fees/g, '')), 'no private note, no "as is", fee or commission');
   expect(!(await side(p)), 'phone, light: no sideways scroll'); await shot(p, '390_light');
   // the controls: a jump chip, the filters, a price dot, the plans' arrows and dots
   out.jump = await p.evaluate(async () => { const c = Array.from(document.querySelectorAll('.apv-jump .apv-chip')).find(x => x.textContent === 'My opinion'); c.click(); await new Promise(r => setTimeout(r, 1800)); const h = document.getElementById(c.dataset.apvGo).getBoundingClientRect().top; return { top: Math.round(h), path: location.pathname }; });
   expect(out.jump.top >= -2 && out.jump.top < 200 && out.jump.path === '/portal/appraisals/AVL', 'a jump chip scrolls to its section and stays on the page: ' + JSON.stringify(out.jump));
+  // from the keyboard: Enter on a chip moves focus to its section
+  await p.evaluate(() => Array.from(document.querySelectorAll('.apv-jump .apv-chip')).find(x => x.textContent === 'Campaign').focus()); await p.keyboard.press('Enter'); await wait(p, 1200);
+  out.keyJump = await p.evaluate(() => { const c = Array.from(document.querySelectorAll('.apv-jump .apv-chip')).find(x => x.textContent === 'Campaign'); return { focus: document.activeElement && document.activeElement.id, want: c.dataset.apvGo }; });
+  expect(out.keyJump.focus === out.keyJump.want, 'Enter on a chip moves focus to its section: ' + JSON.stringify(out.keyJump));
   await p.click('[data-apv-f="listed"]'); await wait(p, 200);
   out.filt = await p.evaluate(() => Array.from(document.querySelectorAll('.apv-comp')).filter(c => !c.hidden).map(c => c.dataset.n).join());
   await p.click('[data-apv-f="all"]'); await wait(p, 200);
@@ -145,7 +170,8 @@ const SEED = () => ({ properties: [{ id: 'P1', address: 'RB 7 Look Road, Rbvale'
   out.dot = await p.evaluate(() => { const c = document.querySelector('.apv-comp[data-n="3"]'), r = c.getBoundingClientRect(); return { shown: !c.hidden, inView: r.top < innerHeight && r.bottom > 0, all: document.querySelectorAll('.apv-comp:not([hidden])').length }; });
   expect(out.dot.shown && out.dot.inView && out.dot.all === 6, 'a price dot opens its home (the list shows everything again): ' + JSON.stringify(out.dot));
   await p.evaluate(() => document.querySelector('.apv-plans').scrollIntoView()); await p.click('.apv-pbtn[data-apv-plan="1"]'); await wait(p, 900);
-  out.plan = await p.evaluate(() => ({ left: document.querySelector('.apv-plans').scrollLeft, on: Array.from(document.querySelectorAll('.apv-pdot')).findIndex(d => d.classList.contains('on')) }));
+  out.plan = await p.evaluate(() => ({ left: document.querySelector('.apv-plans').scrollLeft, on: Array.from(document.querySelectorAll('.apv-pdot')).findIndex(d => d.classList.contains('on')), cur: Array.from(document.querySelectorAll('.apv-pdot')).map(d => d.getAttribute('aria-current')).join() }));
+  expect(out.plan.cur === ',true,,', 'the plan in view is marked aria-current on its dot: ' + out.plan.cur);
   await p.click('.apv-pdot[data-apv-plan-i="0"]'); await wait(p, 900);
   out.plan0 = await p.evaluate(() => ({ left: document.querySelector('.apv-plans').scrollLeft, on: Array.from(document.querySelectorAll('.apv-pdot')).findIndex(d => d.classList.contains('on')) }));
   expect(out.plan.left > 100 && out.plan.on === 1 && out.plan0.left < 5 && out.plan0.on === 0, 'the plan arrows and dots move the strip, the dot follows: ' + JSON.stringify([out.plan, out.plan0]));
@@ -178,6 +204,10 @@ const SEED = () => ({ properties: [{ id: 'P1', address: 'RB 7 Look Road, Rbvale'
     const w = await p.evaluate(() => { const c = document.querySelector('.apv-comp .apv-two'), car = c.children[0].getBoundingClientRect(), body = c.children[1].getBoundingClientRect(), hero = document.querySelector('.apv-hero').getBoundingClientRect();
       return { dots: Array.from(document.querySelectorAll('.mk-dots svg.mk-v')).filter(v => getComputedStyle(v).display !== 'none').map(v => v.getAttribute('class')).join(), side: car.right <= body.left && Math.abs(car.top - body.top) < 4, facts: getComputedStyle(document.querySelector('.apv-facts')).gridTemplateColumns.split(' ').length, tiles: getComputedStyle(document.querySelector('.mk-tiles')).gridTemplateColumns.split(' ').length, heroW: Math.round(hero.width), heroL: Math.round(hero.left), vw: innerWidth }; });
     out['wide_' + scheme] = w;
+    const iw = await info(p); out['wideInfo_' + scheme] = { homeImgs: iw.homeImgs, swipe: iw.swipe, jump: iw.jump };
+    expect(iw.homeImgs.length === 3 && iw.homeImgs.every(x => x.blob) && iw.homeImgs[0].ok && iw.homeImgs[0].w > 300, 'wide ' + scheme + ': the mockup\'s own photos have loaded, with real size: ' + JSON.stringify(iw.homeImgs));
+    expect(/^Use the arrows to see each home's photos/.test(iw.swipe) && /^Use the arrows to compare the plans/.test(iw.planNote), 'wide: "Use the arrows", not "Swipe": ' + JSON.stringify([iw.swipe, iw.planNote]));
+    expect(iw.jump.wrap === 'wrap' && iw.jump.allIn, 'wide: the chips wrap, every one on the screen and reachable with a mouse: ' + JSON.stringify(iw.jump));
     expect(w.dots === 'mk-v w' && w.side && w.facts === 4 && w.tiles === 4 && w.heroL <= 0 && w.heroW >= w.vw - 20, 'wide ' + scheme + ': photos beside the figures, four across, the header the full width: ' + JSON.stringify(w));
     expect(!(await side(p)), 'wide ' + scheme + ': no sideways scroll'); await shot(p, '1280_' + scheme);
     await p.goto(PB + 'appraisals/AVL/present'); await wait(p, 1400); expect(!(await side(p)), 'presenting, wide ' + scheme + ': no sideways scroll'); await shot(p, 'present_1280_' + scheme);
@@ -188,7 +218,9 @@ const SEED = () => ({ properties: [{ id: 'P1', address: 'RB 7 Look Road, Rbvale'
       await p.emulateMedia({ media: 'print' }); await wait(p, 300);
       out.print = await p.evaluate(() => { const vis = e => !!e && getComputedStyle(e).display !== 'none' && e.getClientRects().length > 0;
         return { logo: vis(document.querySelector('.apv-logo img.logo-light')), chips: vis(document.querySelector('.apv-jump')), filters: vis(document.querySelector('.apv-filters')), pnav: vis(document.querySelector('.apv-pnav')), carBtn: Array.from(document.querySelectorAll('.apv-car-btn')).some(vis),
+          by: vis(document.querySelector('.apv-by')), swipe: vis(document.querySelector('.apv-evidence .apv-lede.no-print')), hero: (() => { const r = document.querySelector('.apv-hero').getBoundingClientRect(); return { l: Math.round(r.left), w: Math.round(r.width), vw: innerWidth }; })(),
           photos: Array.from(document.querySelectorAll('.apv-comp')).map(c => Array.from(c.querySelectorAll('.apv-car img')).filter(vis).length), plans: Array.from(document.querySelectorAll('.apv-plan')).filter(vis).length, open: Array.from(document.querySelectorAll('details.apv-mc')).every(d => d.open), portalBar: vis(document.querySelector('header.top')) }; });
+      expect(out.print.by && !out.print.swipe && out.print.hero.l <= 0 && out.print.hero.w >= out.print.hero.vw - 2, 'print: "Prepared for" shown, no swipe wording, the header to the paper\'s edge: ' + JSON.stringify([out.print.by, out.print.swipe, out.print.hero]));
       expect(out.print.logo && !out.print.chips && !out.print.filters && !out.print.pnav && !out.print.carBtn && !out.print.portalBar && out.print.photos.every(n => n <= 1) && out.print.photos.filter(n => n === 1).length === 5 && out.print.plans >= 3 && out.print.open,
         'print: the logo, no chips or buttons, one photo per home, every plan and method: ' + JSON.stringify(out.print));
       await shot(p, 'print'); await p.pdf({ path: path.join(__dirname, 'out', 'appraisal_look_print.pdf'), format: 'A4', printBackground: true });
@@ -196,6 +228,13 @@ const SEED = () => ({ properties: [{ id: 'P1', address: 'RB 7 Look Road, Rbvale'
     }
     await X.ctx.close();
   }
+
+  // ── 4b. Reduced motion: a carousel arrow moves at once, with no sliding ──
+  X = await mk(390, 'light', true); p = X.p; await signIn(p);
+  await p.goto(PB + 'appraisals/AVL'); await wait(p, 1400);
+  out.reduced = await p.evaluate(() => { const c = document.querySelector('.apv-comp .apv-car'), s = c.querySelector('.apv-car-strip'); c.querySelector('.apv-car-btn.next').click(); return { left: Math.round(s.scrollLeft), w: s.clientWidth }; });
+  expect(out.reduced.left === out.reduced.w && out.reduced.w > 100, 'reduced motion: the carousel moves at once: ' + JSON.stringify(out.reduced));
+  await X.ctx.close();
 
   // ── 5. Another screen keeps its own look: vendor onboarding's appraisal list and Tim's Home are not restyled ──
   X = await mk(390, 'light'); p = X.p; await signIn(p);

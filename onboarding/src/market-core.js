@@ -48,8 +48,8 @@
     const levels = [], placed = pts.slice().sort((a, b) => a.price - b.price).map(p => { const cx = x(p.price); let k = 0;
       while ((levels[k] || []).some(o => Math.abs(o - cx) < rad * 2 + 2)) k++; (levels[k] = levels[k] || []).push(cx); return { p, cx, k }; });
     const nl = Math.max(1, levels.length), top = rs.length ? 30 : 12, base = top + nl * (rad * 2 + 4), H = base + 30;
-    // the label over the shading, as in the sample: "Your home: $520K to $575K" (kept inside the drawing, however near the edge it sits)
-    const labOf = (r, i) => rs.length > 1 ? (r.option || 'Range ' + (i + 1)) : (/^\s*your (home|property)\s*$/i.test(String(r.option || '')) ? 'Your home' : 'My range') + ': ' + short(r.low) + ' to ' + short(r.high);
+    // the label over the shading, as in the sample: "My range: $520,000 to $575,000", in full dollars (kept inside the drawing, however near the edge it sits)
+    const labOf = (r, i) => rs.length > 1 ? (r.option || 'Range ' + (i + 1)) : 'My range: ' + dollars(r.low) + ' to ' + dollars(r.high);
     const labX = (r, i) => { const half = labOf(r, i).length * 3.1, mid = (x(r.low) + x(r.high)) / 2; return Math.max(L + half, Math.min(R - half, mid)); };
     const bands = rs.map((r, i) => '<g class="mk-range" data-range="' + esc(r.key || i) + '"><rect x="' + x(r.low).toFixed(1) + '" y="' + (top - 4) + '" width="' + Math.max(2, x(r.high) - x(r.low)).toFixed(1) + '" height="' + (base - top + 8) + '" rx="4"><title>' + esc((r.option || 'My range') + ': ' + dollars(r.low) + ' to ' + dollars(r.high)) + '</title></rect>'
       + '<text class="mk-range-lab" x="' + labX(r, i).toFixed(1) + '" y="' + (top - 10) + '" text-anchor="middle">' + esc(labOf(r, i)) + '</text></g>').join('');
@@ -106,9 +106,9 @@
     const marks = pts.map(o => '<circle class="mk-pt" cx="' + X(o.i).toFixed(1) + '" cy="' + y(+o.m.median).toFixed(1) + '" r="4"><title>' + esc(monthName(o.m.month) + ': median ' + dollars(o.m.median) + (spread.includes(o) ? ', middle half ' + dollars(o.m.lower_quartile) + ' to ' + dollars(o.m.upper_quartile) : '')) + '</title></circle>').join('');
     const last = pts[pts.length - 1];
     const lab = '<text class="mk-val" x="' + Math.min(W - 12, X(last.i)).toFixed(1) + '" y="' + (y(+last.m.median) - 10).toFixed(1) + '" text-anchor="end">' + esc(short(last.m.median)) + '</text>';
-    const refs = ref ? [+ref.low, +ref.high].map(v => '<line class="mk-ref" x1="44" x2="' + (W - 8) + '" y1="' + y(v).toFixed(1) + '" y2="' + y(v).toFixed(1) + '"><title>' + esc('My range for your home: ' + dollars(ref.low) + ' to ' + dollars(ref.high)) + '</title></line>').join('')
-      + '<text class="mk-ref-lab" x="' + (W - 8) + '" y="' + (y(+ref.high) - 5).toFixed(1) + '" text-anchor="end">Your range</text>' : '';
-    const legend = '<p class="mk-legend"><span><i class="mk-key line"></i>Median</span><span><i class="mk-key spread"></i>Middle half of sales</span>' + (ref ? '<span><i class="mk-key ref"></i>My range for your home</span>' : '') + '</p>';
+    const refs = ref ? [+ref.low, +ref.high].map(v => '<line class="mk-ref" x1="44" x2="' + (W - 8) + '" y1="' + y(v).toFixed(1) + '" y2="' + y(v).toFixed(1) + '"><title>' + esc('My range: ' + dollars(ref.low) + ' to ' + dollars(ref.high)) + '</title></line>').join('')
+      + '<text class="mk-ref-lab" x="' + (W - 8) + '" y="' + (y(+ref.high) - 5).toFixed(1) + '" text-anchor="end">My range</text>' : '';
+    const legend = '<p class="mk-legend"><span><i class="mk-key line"></i>Median</span><span><i class="mk-key spread"></i>Middle half of sales</span>' + (ref ? '<span><i class="mk-key ref"></i>My range</span>' : '') + '</p>';
     return '<figure class="mk-fig" data-chart="median"><figcaption><strong>Median sale price, and the spread around it</strong><span>The line is the median each month; the shading is the middle half of sales (the spread).</span></figcaption>'
       + '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" role="img" aria-label="Median sale price by month, with the spread shaded">' + yAxis(lo, hi, y, short) + band + refs + line + marks + lab + xLabels(ms, X, H - 10) + '</svg>' + legend
       + table(['Month', 'Median', 'Lower end', 'Upper end'], ms.map(m => m.missing ? [monthName(m.month), 'No figures', '', ''] : [monthName(m.month), m.median ? dollars(m.median) : '', m.lower_quartile ? dollars(m.lower_quartile) : '', m.upper_quartile ? dollars(m.upper_quartile) : ''])) + '</figure>';
@@ -131,9 +131,9 @@
     const lo = b => +b.from > 0, hi = b => b.to != null && +b.to > 0;
     const label = b => lo(b) && hi(b) ? short(b.from) + ' to ' + short(b.to) : hi(b) ? 'Under ' + short(b.to) : lo(b) ? short(b.from) + ' and over' : 'All prices';
     const touches = b => rs.some(r => (!hi(b) || +r.low < +b.to) && (!lo(b) || +r.high > +b.from));
-    return '<figure class="mk-fig" data-chart="bands"><figcaption><strong>Where sales landed</strong><span>Homes sold in each price band, ' + esc(monthName(m.month)) + '.' + (rs.length ? ' Your range is marked.' : '') + '</span></figcaption>'
-      + '<div class="mk-bands">' + bs.map(b => { const on = touches(b); return '<div class="mk-band' + (on ? ' on' : '') + '" title="' + esc(label(b) + ': ' + b.count + ' sold') + '"><span class="mk-band-lab">' + esc(label(b)) + '</span><span class="mk-band-bar"><i style="width:' + Math.max(2, Math.round(+b.count / peak * 100)) + '%"></i></span><span class="mk-band-n">' + esc(b.count) + (on ? ' <em>Your range</em>' : '') + '</span></div>'; }).join('') + '</div>'
-      + table(['Price band', 'Homes sold', 'Your range'], bs.map(b => [label(b), String(b.count), touches(b) ? 'Yes' : ''])) + '</figure>';
+    return '<figure class="mk-fig" data-chart="bands"><figcaption><strong>Where sales landed</strong><span>Homes sold in each price band, ' + esc(monthName(m.month)) + '.' + (rs.length ? ' My range is marked.' : '') + '</span></figcaption>'
+      + '<div class="mk-bands">' + bs.map(b => { const on = touches(b); return '<div class="mk-band' + (on ? ' on' : '') + '" title="' + esc(label(b) + ': ' + b.count + ' sold') + '"><span class="mk-band-lab">' + esc(label(b)) + '</span><span class="mk-band-bar"><i style="width:' + Math.max(2, Math.round(+b.count / peak * 100)) + '%"></i></span><span class="mk-band-n">' + esc(b.count) + (on ? ' <em>My range</em>' : '') + '</span></div>'; }).join('') + '</div>'
+      + table(['Price band', 'Homes sold', 'My range'], bs.map(b => [label(b), String(b.count), touches(b) ? 'Yes' : ''])) + '</figure>';
   }
   // months: rows of market_months; ranges: the appraisal's fields.ranges; o: { area, title }
   const SOURCES = { reinz: 'REINZ', other: 'other published figures' };

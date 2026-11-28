@@ -29,7 +29,7 @@ const wNew = NEW.writeStandard(SETUP_A, ranges, ctx), wOld = OLD.writeStandard(S
 expect(JSON.stringify(wNew) === JSON.stringify(wOld), 'a phase A set-up is written exactly as before');
 const own = Object.assign({}, SETUP_A, { header: 'own' });
 expect(JSON.stringify(NEW.writeStandard(own, ranges, ctx)) === JSON.stringify(OLD.writeStandard(own, ranges, ctx)), '"Use my own" with nothing uploaded is written exactly as before');
-const HAND = { title: 'RB 1 Hand Road: Market Appraisal', setup: {}, fields: { ranges: [{ key: 'A', option: 'Current condition', involves: 'As it stands', low: 400000, high: 450000 }], bedrooms: '3', method: { name: 'Deadline sale', text: 'A deadline sale.' } },
+const HAND = { title: 'RB 1 Hand Road: Market Appraisal', address: 'RB 1 Hand Road, Rbvale', setup: {}, fields: { ranges: [{ key: 'A', option: 'Current condition', involves: 'As it stands', low: 400000, high: 450000 }], bedrooms: '3', method: { name: 'Deadline sale', text: 'A deadline sale.' } },
   sections: [{ type: 'heading', text: 'What I heard' }, { type: 'para', cls: 'lede', text: 'You told me **lots**. {{range:A}} with {{bedrooms}} bedrooms by {{method}}.' }, { type: 'list', items: ['One', 'Two'] }, { type: 'table', head: ['A', 'B'], rows: [['1', '2']] },
     { type: 'ranges' }, { type: 'method' }, { type: 'wave', title: 'Wave', bars: [{ label: 'Week 1', pct: 35 }, { label: 'Week 2', pct: 25 }], marker: 1, markerLabel: 'Offers due' }, { type: 'methods', head: ['Method'], rows: [['Deadline sale, by a date']] }, { type: 'note', text: 'Small print.' }] };
 // the look changed on 28 November 2026 (the approved sample), so "exactly as before" is now "nothing lost": every text, photo and link
@@ -37,7 +37,8 @@ const HAND = { title: 'RB 1 Hand Road: Market Appraisal', setup: {}, fields: { r
 const { lost } = require('./apv-nothing-lost.js');
 out.lostHand = lost(OLD.render(HAND), NEW.render(HAND));
 expect(!out.lostHand.length, 'the hand-loaded kind of record: nothing lost in the new look: ' + JSON.stringify(out.lostHand));
-const recA = { title: wNew.title, setup: SETUP_A, fields: wNew.fields, sections: wNew.sections };
+// with its address and date, so the new heading is covered: the address as the title, "Appraisal · date" over it
+const recA = { title: wNew.title, address: ctx.address, prepared_on: ctx.preparedOn, setup: SETUP_A, fields: wNew.fields, sections: wNew.sections };
 out.lostA = lost(OLD.render(recA, { comps: [], photos: {}, months: [], market: false }), NEW.render(recA, { comps: [], photos: {}, months: [], market: false }));
 expect(!out.lostA.length, 'a phase A row: nothing lost in the new look: ' + JSON.stringify(out.lostA));
 const comps = [{ id: 'c1', status: 'sold', address: 'RB 5 Core Road', suburb: 'Rbvale', price: 520000, sold_on: '2026-10-01', ring: 'suburb', compare_text: 'Similar.', compare_ticked: true, private_note: 'TIM-ONLY-NOTE' },
@@ -48,7 +49,25 @@ const recC = Object.assign({}, recA, { setup: Object.assign({}, SETUP_A, { marke
 out.lostC = lost(OLD.render(recC, evC), NEW.render(recC, evC));
 expect(!out.lostC.length, 'a phase C row with priced comparables and the market report: nothing lost in the new look: ' + JSON.stringify(out.lostC));
 // and the lost() check itself notices a missing sentence, photo or link
-expect(lost('<p>Keep me.</p><img src="a.jpg">', '<p>Other.</p>').length === 2 && !lost('<p>Sold for $1</p>', '<p>$1</p>').length, 'the nothing-lost check catches a missing sentence and photo');
+expect(lost('<p>Keep me.</p><img src="a.jpg">', '<p>Other.</p>').length === 2, 'the nothing-lost check catches a missing sentence and photo');
+// and the four the review found it let through: a dropped table heading, a dropped short value, a dropped repeat of a paragraph, changed alt text
+const T1 = '<table><thead><tr><th>Option</th><th>Range</th></tr></thead><tbody><tr><td>A</td><td>3</td></tr></tbody></table>';
+out.selfCheck = { header: lost(T1, T1.replace('<th>Option</th>', '<th></th>')), short: lost(T1, T1.replace('<td>3</td>', '<td></td>')),
+  dup: lost('<p>Again.</p><p>Again.</p>', '<p>Again.</p>'), alt: lost('<img src="a.jpg" alt="Photo 1 of 2, Kitchen">', '<img src="a.jpg" alt="Photo">'),
+  scoped: lost('<p>Price</p>', '<p>$1</p>'), inComp: lost('<article class="apv-comp" data-comp="c1"><dt>Price</dt><dd>Sold for $1</dd></article>', '<article class="apv-comp" data-comp="c1"><p>$1</p></article>') };
+expect(out.selfCheck.header.length === 1 && out.selfCheck.short.length === 1 && out.selfCheck.dup.length === 1 && out.selfCheck.alt.length === 1 && out.selfCheck.scoped.length === 1 && !out.selfCheck.inComp.length,
+  'the nothing-lost check catches a dropped heading, a dropped short value, a dropped repeat and changed alt text; a reworded label is excused only inside a comparable: ' + JSON.stringify(out.selfCheck));
+// nothing there, nothing shown (Tim, 28 November 2026): no plan, no method, or a heading with nothing under it draws nothing, and gets no chip
+const EMPTY_SECS = [{ type: 'heading', text: 'Lonely heading' }, { type: 'heading', text: 'My opinion of price' }, { type: 'opinion' }, { type: 'heading', text: 'How I would sell it' }, { type: 'method' },
+  { type: 'heading', text: 'Every way to sell, explained' }, { type: 'para', text: 'Whichever way you choose.' }, { type: 'methodcards', rec: 'deadline', items: [] }, { type: 'heading', text: 'Marketing plans' }, { type: 'plans', items: [], included: 'Every plan includes: photos.' }, { type: 'heading', text: 'Last and empty' }];
+const he = NEW.render({ title: 'RB 9 Empty Road: Market Appraisal', address: 'RB 9 Empty Road', prepared_on: '2026-11-28', setup: SETUP_A, fields: wNew.fields, sections: EMPTY_SECS }, {});
+out.empty = { chips: (he.match(/class="apv-chip"/g) || []).map(() => 1).length, h2: (he.match(/<h2[^>]*>[^<]*/g) || []).map(x => x.replace(/<h2[^>]*>/, '')) };
+expect(!/Lonely heading|Last and empty|Every way to sell|Whichever way|settled\.govt\.nz|Marketing plans|apv-plans|Every plan includes|Swipe|Use the arrows/.test(he) && out.empty.chips === 2,
+  'no plans, no methods, or a heading alone: no heading, no line, no strip, and no chip: ' + JSON.stringify(out.empty));
+// the Sections screen's preview of the header: the header alone, no title over it and no Pause button
+const vidSec = NEW.phaseB(Object.assign({}, SETUP_A, { header: 'own', headerOpt: { asset: 'h1', kind: 'video' } })).header, vidEv = { assets: { h1: { url: 'https://img.example.test/h.webm', still: 'https://img.example.test/h.jpg', mime: 'video/webm' } } };
+const pv = NEW.heroPreview(vidSec, vidEv), full = NEW.render({ title: 't', address: 'RB 9 Empty Road', setup: SETUP_A, fields: {}, sections: [vidSec] }, vidEv);
+expect(/class="apv-hero vid/.test(pv) && !/<h1|apv-kick|apv-vbtn|has-head/.test(pv) && /apv-vbtn/.test(full) && /<h1>RB 9 Empty Road<\/h1>/.test(full), 'the header preview has no title and no Pause button; the appraisal itself has both');
 expect(!/TIM-ONLY-NOTE/.test(NEW.render(recC, evC)), 'a comparable\'s private note never reaches the page');
 
 // ── 8. the C fix: nothing to plot, nothing drawn ──
@@ -83,7 +102,7 @@ expect(/class="apv-hero[ "]/.test(r.h) && /Photo: DunedinNZ/.test(r.h) && /objec
 expect(r.h.indexOf('apv-hero') < r.h.indexOf('<h1>'), 'the header sits above the title');
 expect(/A short video from me/.test(r.h) && /<video controls/.test(r.h) && /intro\.jpg/.test(r.h) && !/<video controls[^>]*autoplay/.test(r.h), 'the video introduction: the vendor plays it, its still frame for print');
 expect(/What I heard from you/.test(r.h) && /quiet/.test(r.h) && !/move by March/.test(r.h), 'What I heard: the ticked line only');
-expect(/Your home, as buyers would see it/.test(r.h) && /Mockup, not live/.test(r.h) && r.h.includes(NEW.MOCKUP_LABEL), 'the mockup is labelled as a mockup, not live');
+expect(/Your home, as buyers would see it/.test(r.h) && /<span class="apv-tag mock">Mockup<\/span>/.test(r.h) && r.h.includes(NEW.MOCK_LINE) && /Nothing here is advertised or live/.test(r.h), 'the mockup is labelled as the sample labels it: Mockup, a draft only, nothing advertised or live');
 expect(r.h.indexOf('d2.jpg') < r.h.indexOf('d1.jpg') && !/dGone/.test(r.h), 'photos in Tim\'s order; one that can\'t be shown is left out');
 expect(/3 bedrooms plus study/.test(r.h) && /Heat pump/.test(r.h) && !/<dt>Land area<\/dt>/.test(r.h), 'a blank key detail is left out, never shown empty');
 expect(/To wake up to the sun/.test(r.h) && /call me, Tim/.test(r.h), 'the ticked advertisement is shown');

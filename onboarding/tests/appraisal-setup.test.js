@@ -81,7 +81,7 @@ function renderWith(src, rec) { const vm = require('vm'); const ctx = { window: 
     if (o.suburb != null) await p.fill('#apsSuburb', o.suburb);
     await p.click('#apsSave'); await wait(p, 500); return note(p, 'apsSave'); };
   const docInfo = p => p.evaluate(() => { const d = document.querySelector('#apvDoc'); if (!d) return null; const w = d.querySelector('.apv-camp'); return {
-    h2: Array.from(d.querySelectorAll('h2')).map(x => x.textContent), order: Array.from(d.querySelectorAll('h2, .apv-note-k, h3.apv-h3, .apv-panel-h')).map(x => x.textContent), by: (d.querySelector('.apv-by') || {}).textContent || '', lede: (d.querySelector('.apv-lede') || {}).textContent || '',
+    h2: Array.from(d.querySelectorAll('h2')).map(x => x.textContent), order: Array.from(d.querySelectorAll('h2, .apv-sig, h3.apv-h3, .apv-panel-h')).map(x => x.textContent), noteK: Array.from(d.querySelectorAll('h2, .apv-kick')).some(x => /note from Tim/i.test(x.textContent)), by: (d.querySelector('.apv-by') || {}).textContent || '', lede: (d.querySelector('.apv-lede') || {}).textContent || '',
     fig: Array.from(d.querySelectorAll('.apv-opinion .apv-fig, .apv-opinion .apv-ranges td:last-child')).map(x => x.textContent), valn: (d.querySelector('.apv-valn') || {}).textContent || '',
     method: (d.querySelector('.apv-method') || {}).textContent || '', bars: w ? Array.from(w.querySelectorAll('.apv-wlab')).map(x => x.textContent) : [], pcts: w ? Array.from(w.querySelectorAll('.apv-wpct')).map(x => +x.textContent.replace('%', '')) : [],
     mark: w && w.querySelector('.apv-wmark') ? w.querySelector('.apv-wmark').textContent : '', on: w ? w.querySelectorAll('.apv-wcol.on').length : 0, sub: w ? w.querySelector('figcaption span').textContent : '',
@@ -162,9 +162,9 @@ function renderWith(src, rec) { const vm = require('vm'); const ctx = { window: 
   // ── 3. The written appraisal: the agreed order and what each section says ──
   await p.click('#apsAfter a[data-plink$="' + fromProp.id + '"]'); await wait(p, 800);
   let s = await docInfo(p); out.written = s;
-  // in the sample's look the note's heading is a small line over the letter, the methods and plans sit under smaller headings inside the
+  // in the sample's look the letter has no heading and ends with the signature line, the methods and plans sit under smaller headings inside the
   // campaign, the panel has its own heading, and the closing line ends the page: the agreed order holds across all of them
-  expect(s.order.join('|') === 'A note from Tim|My opinion of price|How I would sell it|Every way to sell, explained|Marketing plans|Tim is not like other agents|When you\'re ready, I\'m ready' && s.h2.join('|') === 'My opinion of price|How I would sell it|When you\'re ready, I\'m ready', 'the standard sections in the agreed order: ' + s.order.join('|'));
+  expect(s.order.join('|') === 'Tim McGuire · 027 562 7207 · tim@mcguire.co.nz|My opinion of price|How I would sell it|Every way to sell, explained|Marketing plans|Tim is not like other agents|When you\'re ready, I\'m ready' && !s.noteK && s.h2.join('|') === 'My opinion of price|How I would sell it|When you\'re ready, I\'m ready', 'the standard sections in the agreed order, the letter ending with the sample\'s signature line and no heading over it: ' + s.order.join('|'));
   expect(/^Prepared for Robin and Sam by Tim McGuire, McGuire Real Estate, \d{1,2} [A-Z][a-z]+ 20\d\d$/.test(s.by), 'byline: ' + s.by);
   expect(s.lede === 'Thank you for having me through.', 'Tim\'s note, first paragraph as the lede: ' + s.lede);
   expect(s.fig.join('|') === '$520,000 to $575,000|$150,000 to $180,000', 'the opinion shows each part\'s range: ' + s.fig);

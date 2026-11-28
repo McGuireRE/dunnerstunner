@@ -1139,6 +1139,20 @@ body.apv-present main { max-width: 760px; padding-bottom: 48px; }
    scoped under .apv-doc (the appraisal itself) or the appraisal page, so Tim's other screens and vendor onboarding are unchanged.
    Same tokens as the sample (they are the portal's own), Cormorant Garamond for display and Barlow for body, light and dark,
    phone first with nothing wider than the screen at 390 px, and the sample's paper look in print. ───────── */
+/* The appraisal's fonts, hosted on the site itself (onboarding/assets/fonts, SIL Open Font License, the licences beside them), so a
+   vendor reading an appraisal never calls Google. The names are the site's own, so no other page changes. Each file loads only
+   when the appraisal uses it. */
+@font-face { font-family: 'MRE Cormorant Garamond'; font-style: normal; font-weight: 400; font-display: swap; src: url('https://packages.dunnerstunner.co.nz/onboarding/assets/fonts/cormorant-garamond-latin-400-normal.woff2') format('woff2'); unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD; }
+@font-face { font-family: 'MRE Cormorant Garamond'; font-style: normal; font-weight: 400; font-display: swap; src: url('https://packages.dunnerstunner.co.nz/onboarding/assets/fonts/cormorant-garamond-latin-ext-400-normal.woff2') format('woff2'); unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF; }
+@font-face { font-family: 'MRE Cormorant Garamond'; font-style: normal; font-weight: 500; font-display: swap; src: url('https://packages.dunnerstunner.co.nz/onboarding/assets/fonts/cormorant-garamond-latin-500-normal.woff2') format('woff2'); unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD; }
+@font-face { font-family: 'MRE Cormorant Garamond'; font-style: normal; font-weight: 500; font-display: swap; src: url('https://packages.dunnerstunner.co.nz/onboarding/assets/fonts/cormorant-garamond-latin-ext-500-normal.woff2') format('woff2'); unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF; }
+@font-face { font-family: 'MRE Barlow'; font-style: normal; font-weight: 400; font-display: swap; src: url('https://packages.dunnerstunner.co.nz/onboarding/assets/fonts/barlow-latin-400-normal.woff2') format('woff2'); unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD; }
+@font-face { font-family: 'MRE Barlow'; font-style: normal; font-weight: 400; font-display: swap; src: url('https://packages.dunnerstunner.co.nz/onboarding/assets/fonts/barlow-latin-ext-400-normal.woff2') format('woff2'); unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF; }
+@font-face { font-family: 'MRE Barlow'; font-style: normal; font-weight: 500; font-display: swap; src: url('https://packages.dunnerstunner.co.nz/onboarding/assets/fonts/barlow-latin-500-normal.woff2') format('woff2'); unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD; }
+@font-face { font-family: 'MRE Barlow'; font-style: normal; font-weight: 500; font-display: swap; src: url('https://packages.dunnerstunner.co.nz/onboarding/assets/fonts/barlow-latin-ext-500-normal.woff2') format('woff2'); unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF; }
+@font-face { font-family: 'MRE Barlow'; font-style: normal; font-weight: 600; font-display: swap; src: url('https://packages.dunnerstunner.co.nz/onboarding/assets/fonts/barlow-latin-600-normal.woff2') format('woff2'); unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD; }
+@font-face { font-family: 'MRE Barlow'; font-style: normal; font-weight: 600; font-display: swap; src: url('https://packages.dunnerstunner.co.nz/onboarding/assets/fonts/barlow-latin-ext-600-normal.woff2') format('woff2'); unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF; }
+body:has(#apvPage) { --display: 'MRE Cormorant Garamond', 'Cormorant Garamond', Georgia, 'Times New Roman', serif; --body: 'MRE Barlow', 'Barlow', 'Helvetica Neue', Arial, sans-serif; font-family: var(--body); }
 main:has(> #apvPage) { max-width: 920px; }
 body.apv-present main { max-width: 920px; padding-top: 0; }
 body.apv-present header.top { display: none !important; }   /* presenting: the appraisal's own top bar (logo and jump chips) takes its place */
@@ -1161,6 +1175,16 @@ body.apv-present .apv-doc .apv-top { position: sticky; top: env(safe-area-inset-
 .apv-doc .apv-top-in { padding: 10px 0; }
 .apv-doc .apv-logo img { height: 30px; width: auto; display: block; }
 .apv-doc .apv-jump { display: flex; gap: 6px; overflow-x: auto; padding-top: 8px; scrollbar-width: none; }
+/* on a bigger screen the chips wrap onto more rows, so every one can be reached with a mouse; a phone keeps the sideways strip */
+@media (min-width: 700px) { .apv-doc .apv-jump { flex-wrap: wrap; overflow: visible; } }
+.apv-doc h2:focus { outline: none; }
+.apv-doc h2:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+/* words for a phone or a bigger screen ("Swipe" or "Use the arrows") */
+.apv-doc .apv-wide { display: none; }
+@media (min-width: 700px) { .apv-doc .apv-narrow { display: none; } .apv-doc .apv-wide { display: inline; } }
+/* the letter's signature line, as in the sample; the "Prepared for" line is on paper only */
+.apv-doc .apv-sig { font-size: 14.5px; color: var(--muted); }
+.apv-doc .apv-print-only { display: none; }
 .apv-doc .apv-jump::-webkit-scrollbar { display: none; }
 .apv-doc .apv-logo + .apv-jump { margin-top: 0; }
 .apv-doc .apv-top-in > .apv-jump:first-child { padding-top: 0; }
@@ -1347,7 +1371,9 @@ body:has(#apvPage .apv-doc) { overflow-x: clip; }
   .apv-doc { font-size: 14px; }
   .apv-doc .apv-top { position: static !important; border: 0; box-shadow: none; clip-path: none; margin-bottom: 10px; }
   .apv-doc .apv-jump, .apv-doc .apv-filters, .apv-doc .apv-pnav, .apv-doc .apv-vbtn { display: none !important; }
-  .apv-doc .apv-hero { min-height: 220px; height: auto; margin: 0 0 14px; }
+  .apv-doc .apv-print-only { display: block; }
+  /* the header runs to the paper's edge, as in the sample */
+  .apv-doc .apv-hero { min-height: 220px; height: auto; margin-top: 0; margin-bottom: 14px; }
   .apv-doc .apv-hero-in { padding: 18px 16px; }
   .apv-doc .apv-hero::after { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .apv-doc h2 { margin-top: 26px; font-size: 24px; break-after: avoid; }

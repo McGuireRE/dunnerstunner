@@ -9917,17 +9917,17 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const b = e.target && e.target.closest ? e.target.closest('.apv-car-btn') : null; if (!b) return;
     const car = b.closest('.apv-car'), s = car.querySelector('.apv-car-strip'), n = +car.dataset.n || 1, w = Math.max(1, s.clientWidth);
     const at = Math.max(0, Math.min(n - 1, Math.round(s.scrollLeft / w) + (+b.dataset.car)));
-    s.scrollTo({ left: at * w, behavior: 'smooth' }); const t = car.querySelector('.apv-car-at'); if (t) t.textContent = (at + 1) + ' of ' + n;
+    s.scrollTo({ left: at * w, behavior: window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }); const t = car.querySelector('.apv-car-at'); if (t) t.textContent = (at + 1) + ' of ' + n;
   });
   document.addEventListener('scroll', e => {
     const s = e.target; if (!s || !s.classList) return;
     // the plans strip: the dot under it follows the plan in view
-    if (s.classList.contains('apv-plans')) { const i = apvPlanAt(s); $$('.apv-pdot', s.parentNode).forEach((d, k) => d.classList.toggle('on', k === i)); return; }
+    if (s.classList.contains('apv-plans')) { const i = apvPlanAt(s); $$('.apv-pdot', s.parentNode).forEach((d, k) => { d.classList.toggle('on', k === i); if (k === i) d.setAttribute('aria-current', 'true'); else d.removeAttribute('aria-current'); }); return; }
     if (!s.classList.contains('apv-car-strip')) return;
     const car = s.closest('.apv-car'), t = car && car.querySelector('.apv-car-at'); if (t) t.textContent = (Math.round(s.scrollLeft / Math.max(1, s.clientWidth)) + 1) + ' of ' + car.dataset.n;
   }, true);
   // the appraisal's look (the approved sample of 24 November 2026): the logo files for its top bar, set once from the page's own logos
-  function apvBrand() { if (!APPR.brand.light) { APPR.brand.light = ($('.logo-light') || {}).src || ''; APPR.brand.dark = ($('.logo-dark') || {}).src || ''; } }
+  function apvBrand() { if (!APPR.brand.light) { APPR.brand.light = ($('.logo-light') || {}).src || ''; APPR.brand.dark = ($('.logo-dark') || {}).src || ''; } APPR.brand.email = T_EMAIL; }
   // which plan card is in view in its strip
   function apvPlanAt(s) { const cards = $$('.apv-plan', s); let b = 0, d = 1e9; cards.forEach((c, i) => { const x = Math.abs(c.offsetLeft - s.offsetLeft - s.scrollLeft); if (x < d) { d = x; b = i; } }); return b; }
   // the appraisal's own controls: the jump chips, All / Sold / On the market, the plans' arrows and dots, a tap on a price dot, and the
@@ -9936,7 +9936,11 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const t = e.target && e.target.closest ? e.target.closest('[data-apv-go],[data-apv-f],[data-apv-plan],[data-apv-plan-i],[data-apv-vid],.apv-doc .mk-dot') : null; if (!t) return;
     const doc = t.closest('.apv-doc'); if (!doc) return;
     const smooth = !(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) ? 'smooth' : 'auto';
-    if (t.dataset.apvGo) { e.preventDefault(); const h = document.getElementById(t.dataset.apvGo); if (h) h.scrollIntoView({ behavior: smooth, block: 'start' }); return; }
+    if (t.dataset.apvGo) { e.preventDefault(); const h = document.getElementById(t.dataset.apvGo); if (!h) return;
+      h.scrollIntoView({ behavior: smooth, block: 'start' });
+      // from the keyboard (Enter), focus moves to the section, so Tab carries on from there
+      if (e.detail === 0) { h.setAttribute('tabindex', '-1'); h.focus({ preventScroll: true }); }
+      return; }
     if (t.dataset.apvF) {
       const f = t.dataset.apvF; $$('[data-apv-f]', doc).forEach(b => { const on = b === t; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on ? 'true' : 'false'); });
       $$('.apv-comp', doc).forEach(c => { c.hidden = f !== 'all' && c.dataset.st !== f; }); return;
@@ -10365,7 +10369,7 @@ const TR_ALL = { running: false, stop: false, text: '' };   // "Translate everyt
     const pending = {};   // what the AI flagged on its last draft for each part (problems and a private note), until the page is left
     const dis = sent ? ' disabled' : '';
     const header_ = asset => { const s = APPR.phaseB(Object.assign({}, S, { home: {}, heard: {}, buyers: {}, intro: {}, reviews: {} })).header; if (!s) return '';
-      const t = document.createElement('div'); t.innerHTML = APPR.render({ title: '', sections: [s] }, { assets: urls }); const h = t.querySelector('.apv-hero'); return h ? h.outerHTML : ''; };
+      return APPR.heroPreview(s, { assets: urls }); };   // the header alone: no title over it, no Pause button
     const assetOf = role => assets.find(a => a.role === role && a.id === (role === 'header' ? S.headerOpt.asset : S.intro.asset)) || null;
     const privBox = part => { const p = pending[part]; return p && p.private_note ? `<div class="abs-private" data-abpriv="${part}"><p class="small" style="margin:6px 0 0"><strong>For your private notes only</strong> (never on their page): ${esc(p.private_note)}</p><button class="btn link" type="button" data-abnote="${part}"${dis}>Add to my private notes</button></div>` : ''; };
     const probs = part => { const p = pending[part]; return p && (p.problems || []).length ? `<p class="small" data-abprob="${part}" style="margin:6px 0 0">${(p.problems || []).map(esc).join(' ')}</p>` : ''; };

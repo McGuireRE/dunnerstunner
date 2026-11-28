@@ -119,6 +119,7 @@ const PACK = o => Object.assign({ format: 'mre.reviews/1', profile: 'Tim McGuire
   expect(/https:\/\//.test(await saveSections(p) || ''), 'a link that isn\'t https is refused at the button');
   await p.fill('#absLibUrl', 'https://library.rbtest.invalid/rb-hill.jpg'); await p.dispatchEvent('#absLibUrl', 'change'); await wait(p, 400);
   expect(!!(await p.$('#absFrame .apv-hero')) && /DunedinNZ/.test(await p.textContent('#absFrame')), 'the library photo previews, credited DunedinNZ');
+  expect(!(await p.$('#absFrame h1, #absFrame .apv-kick, #absFrame .apv-vbtn')), 'the preview is the header alone: no hidden title, no Pause button');
   expect(!(await p.$('#absCredit')), 'a library photo\'s credit is always DunedinNZ (no credit box)');
   expect(/Saved/.test(await saveSections(p) || ''), 'saved');
   await p.goto(PB + 'appraisals/AVB/present'); await wait(p, 900); h = await doc(p); out.libHero = h.slice(0, 600); out.libSetup = (await av(p)).setup.headerOpt;
@@ -242,7 +243,7 @@ const PACK = o => Object.assign({ format: 'mre.reviews/1', profile: 'Tim McGuire
   expect(await p.inputValue('#absAdTitle') === AD.title && !(await p.isChecked('#absAdTick')), 'the draft arrives unticked');
   expect(/Saved/.test(await saveSections(p) || ''), 'saved with the photos and no ticked advertisement');
   await p.goto(PB + 'appraisals/AVB/present'); await wait(p, 900); h = await doc(p);
-  expect(/Your home, as buyers would see it/.test(h) && /Mockup, not live/.test(h) && !/To wake up/.test(h), 'photos only: the mockup shows, without the unticked advertisement');
+  expect(/Your home, as buyers would see it/.test(h) && />Mockup</.test(h) && /Nothing here is advertised or live/.test(h) && !/To wake up/.test(h), 'photos only: the mockup shows, without the unticked advertisement');
   await p.goto(sections()); await wait(p, 900); await tick(p, '#absAdTick'); expect(/Saved/.test(await saveSections(p) || ''), 'advertisement ticked');
   await p.goto(PB + 'appraisals/AVB/present'); await wait(p, 900); h = await doc(p);
   expect(/To wake up to the morning sun/.test(h) && /call me, Tim/.test(h) && /2 bedrooms plus study/.test(h) && /650 m²/.test(h) && !/RB-OWNER-NAME|RB-AI-AD-PRIVATE/.test(h), 'presenting: the advertisement, the key details, never the owners or the private note');
